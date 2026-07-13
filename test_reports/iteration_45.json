@@ -1,0 +1,41 @@
+{
+  "summary": "Iter-45 — Attendance approval process (Approve / Reject / Adjust). BACKEND: 16/16 pytests PASS in /app/backend/tests/test_iter45_punch_approvals.py covering items 1–14 of the review. AUTO-source punches land as status=pending + approval_required=true (with original_at set); manual punches instantly approved. GET /pending-punches scopes to caller's company, attaches employee mini-object, and supports ?include_decided=true. POST /decision correctly handles approve, reject (400 without reason, 200 with), adjust (400 without adjusted_time, 400 on '25:00', 200 on '09:15' with auto reason 'Time adjusted by admin'), retry-after-decided 400, and cross-company 403. GET/PATCH /policy expose punch_approval_required on the policy blob (default true); disabling it makes subsequent auto punches skip approval. _compute_day_hours regression: 9h with pending IN excluded, 8.5h when OUT adjusted_at=17:30 from adjusted IN=09:00 — both verified end-to-end via /attendance/summary. FRONTEND: Verified on a mobile viewport (390x844). /admin shows 'Punch approvals' tile (testID open-punch-approvals, y=328) ABOVE 'Attendance policy' tile (y=436). Tapping it lands on /punch-approvals with testID punch-approvals-screen. Two seeded pending rows rendered with per-row testIDs approve-{id}, adjust-{id}, reject-{id}. Reject modal: reject-reason + reject-submit; empty submit shows 'Reason required' alert (web=console.log); with reason succeeds and record leaves pending. Adjust modal: adjust-time prefilled to punch time (15:57), auto-formats digits to HH:MM; '25:00' triggers 'Adjust failed' alert; '09:15' saves and record leaves pending with History showing 'Adjusted to 09:15 am (was 03:57 pm)'. Pending count went to zero, History tab shows all 3 decided rows (Approved via adjust, Approved manual, Rejected 'Not on-site'). /attendance-policy shows 'Auto-punch approvals' section with testID ap-approval-toggle; toggling off + saving persists punch_approval_required=false (verified via GET /api/attendance/policy).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter45_punch_approvals.py",
+    "/app/test_reports/pytest/pytest_iter45.xml"
+  ],
+  "action_items": [
+    "None — feature is implemented correctly and all specified backend + frontend flows pass. Minor cosmetic note (not blocking): on web, punch-approvals.tsx uses showAlert() which console.logs instead of showing a visible dialog. Real device / Expo Go will show the RN Alert; web QA has to inspect console. Consider swapping to a toast on web for parity with the rest of the app if you want visible feedback in the web preview."
+  ],
+  "critical_code_review_comments": [
+    "Excellent separation of concerns — `_effective_at` + `_is_countable` helpers keep _compute_day_hours clean and make the adjusted/pending semantics obvious and unit-testable.",
+    "server.py L4172-4182 correctly stamps original_at + status on every new punch, and preserves a synthetic decision_at/decision_by for manual/instant-approved rows so the audit trail is uniform across all attendance rows (no null-handling branches downstream).",
+    "_parse_adjust_time (L4266-4293) accepts HH:MM + full ISO cleanly, rejects bogus '25:00' via a regex-first check, and safely defaults tzinfo to UTC.",
+    "list_pending_punches (L4296) correctly forces company-scope for company_admin regardless of ?company_id query param — prevents cross-tenant leakage.",
+    "decide_punch (L4343) rejects retries on already-decided rows and forces a reason for reject; adjust auto-populates 'Time adjusted by admin' so audit reason is never blank. Well-defended.",
+    "attendance-policy.tsx L482-513 keeps toggle behaviour idempotent with (policy.punch_approval_required ?? true) — legacy policies without the field still render correctly.",
+    "punch-approvals.tsx auto-formats time input digits to HH:MM (L572-576) — good UX. adjust-time prefills to the punch's current wall-clock time so admins can quickly nudge by a few minutes."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter45_punch_approvals.py (new — 16 pytest cases)"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16)",
+    "frontend": "100% (all specified flows verified)"
+  },
+  "seed_data_creation": "One throwaway company TEST_UI_ApprovalCo (cmp_e13bc954d8) + admin (+917773670449) + 2 pending auto-punches + 1 manual OUT were created for UI testing, and cleaned up via DELETE /api/companies/{id}?force=true (cascade removed 1 user + 3 attendance rows).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter-45 attendance approval feature is fully verified. Key testIDs: open-punch-approvals (on /admin, above open-attendance-policy), punch-approvals-screen, approve-{record_id}, adjust-{record_id}, reject-{record_id}, reject-reason, reject-submit, adjust-time (auto-formats digits to HH:MM), adjust-reason, adjust-submit, ap-approval-toggle (on /attendance-policy). Backend contract: POST /api/attendance/punch with source containing 'auto' or 'geofence' → status=pending+approval_required=true if company.punch_approval_required (default true). POST /api/attendance/punches/{id}/decision handles approve|reject|adjust with rules documented in test file. On web, Alert.alert is stubbed to console.log — check console output for 'Reason required' / 'Bad time' / 'Adjust failed' markers instead of expecting a visible modal.",
+  "rca_of_issue": "N/A — no bugs discovered."
+}

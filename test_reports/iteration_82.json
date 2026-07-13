@@ -1,0 +1,40 @@
+{
+  "summary": "Iter 82 backend-only testing — Iter 77v self-register orphan auto-heal VERIFIED end-to-end. Public endpoint POST /api/auth/company-register (server.py:5180-5246) now inspects the existing user's company_id and, when the linked firm no longer exists AND role ∈ {company_admin, sub_admin, employee}, deletes the stale user + user_sessions and proceeds with the pending company_request. Live firms and super_admins still block with 409. All 5/5 new Iter82 tests PASS: (1) orphan phone → self-register 200 + stale user gone + company_request row persisted; (2) super_admin phone (sksharmaconsultancy@gmail.com, +919680273960) → 409, super_admin never auto-healed; (3) live firm phone → 409, live user untouched; (4) Iter 77r regression /companies (create-firm) orphan auto-heal — still works; (5) pending duplicate self-register on same phone → 409 (unchanged safeguard). Regression: Iter80's TestBug2OrphanAdminAutoHeal (4 tests) still fully green. Note the orphan precondition was reproduced via direct pymongo delete of the companies row (not force=true DELETE) because the API's force=true cascade also wipes users — the fix targets orphans left by partial cascades / historic bugs, which pymongo simulation reproduces exactly. All temp data prefixed Iter82-/TEST_Iter82_ — 32 artifacts cleaned via scripts/cleanup_test_data.py --apply.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter82_self_register_orphan_heal.py",
+    "/app/test_reports/pytest/pytest_iter82.xml",
+    "/app/test_reports/pytest/pytest_iter82_regression.xml"
+  ],
+  "action_items": [
+    "OPTIONAL — Iter 80 regression exposed one flaky test: TestBug1KankaniThreshold::test_monthly_grid_14h_shows_2h_ot (14h day showed ot_hours=0 in one run). Both other Iter80 KANK tests pass (10h → 0 OT and OT-report count==1) so the underlying OT-threshold fix is intact — this looks like an isolated fixture ordering / stale-state flake unrelated to Iter 77v. Consider adding module-level DB cleanup between the KANK tests or investigating why ot_allowed=True override may not have propagated for that specific run.",
+    "OPTIONAL — Refactor: the orphan auto-heal block at server.py:5220-5246 (self-register) and server.py:5816-5830 (create-company) are near-identical. Extract into a shared helper `_auto_heal_orphan_admin(field='phone', value=phone) -> Optional[dict]` returning either the surviving live user (caller then raises 409) or None (caller proceeds). Keeps the safety invariant (never delete super_admin) in one place."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 16,029 lines — well past the 700-line guideline. Iter 77v adds ~30 more lines duplicating existing Iter 77r logic without extracting a helper (see refactor action item).",
+    "The super_admin safety invariant is enforced implicitly by the role tuple `('company_admin','sub_admin','employee')` at server.py:5231-5233. Correct but subtle — a one-line comment 'super_admin excluded on purpose — never auto-heal' would document intent.",
+    "The self-register endpoint only checks db.users by PHONE (not email). If an orphan admin's email is shared with a live user across the system, that overlap is silently ignored here. Not a regression from Iter 77v — pre-existing behaviour — but worth documenting since the /companies endpoint DOES check both phone and email. Consider aligning the two surfaces for parity.",
+    "Duplicate pending company_request check (server.py:5249-5256) is separate from the user check — good, but the error message could hint at auto-heal (e.g., 'A pending request … contact the super admin to approve or reject before resubmitting'). Non-blocking."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter82_self_register_orphan_heal.py (new — 5 tests, ~280 lines)"
+  ],
+  "success_rate": {
+    "backend": "100% for Iter 82 (5/5); Iter 80 orphan-heal regression 4/4 pass; Iter 80 OT threshold 3/4 pass (1 flake unrelated to Iter 82)",
+    "frontend": "N/A - backend-only review"
+  },
+  "seed_data_creation": "Test fixtures created 8 temp firms (Iter82-CSR-A/Live/Reg1/Reg2/Pend prefixes) + 4 admin users + 4 pending company_requests. Orphan precondition seeded by direct pymongo delete of the companies row (leaving users row with dangling company_id). ALL removed via `python3 /app/scripts/cleanup_test_data.py --apply` — 32 artifacts total (28 in first pass across attendance/user_sessions/companies/users; 4 remaining company_admin users cleaned in second pass).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 77v verified stable via /app/backend/tests/test_iter82_self_register_orphan_heal.py. Run via `EXPO_PUBLIC_BACKEND_URL=<url> MONGO_URL=mongodb://localhost:27017 DB_NAME=test_database pytest backend/tests/test_iter82_self_register_orphan_heal.py -v`. The seeded super_admin is `sksharmaconsultancy@gmail.com` with phone `+919680273960` — DO NOT modify their PIN or user record. Orphan preconditions must be reproduced via direct pymongo delete of the `companies` row (NOT the API force=true DELETE which cascade-wipes users). Prefix any new temp data with `Iter82-` / `TEST_Iter82_`. Self-register public endpoint = POST /api/auth/company-register; error string = 'An account with this mobile number already exists. Please sign in instead.' (server.py:5245).",
+  "rca_of_issue": "Bug (Iter 77v) RCA — POST /api/auth/company-register previously did `db.users.find_one({'phone': phone})` and blanket-raised 409 if any user existed. This blocked legitimate re-registrations when the previous firm's admin was left orphaned (users.company_id points to a firm that no longer exists in db.companies — a common state after historic /companies force=true deletes that cascaded incompletely OR pre-cascade bugs). Applied fix (verified): before raising 409, look up companies by existing_user.company_id; if firm is gone AND role ∈ {company_admin, sub_admin, employee}, delete the stale user + user_sessions and continue. Live firms still block (409). super_admins never auto-healed (role tuple deliberately excludes 'super_admin'). Verified end-to-end: orphan phone → 200 + company_request created + stale user removed; super_admin phone → 409; live firm phone → 409, live user preserved; existing pending duplicate → 409 (separate safeguard); Iter 77r /companies auto-heal → still 200 (regression). All temp data prefixed Iter82- / TEST_Iter82_ and cleaned."
+}

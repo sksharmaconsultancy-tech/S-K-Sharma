@@ -1,0 +1,40 @@
+{
+  "summary": "Backend-only testing for the new in-app messaging feature (iter41). Wrote pytest suite covering all 14 test scenarios from the review request, seeded 2 IT41_ companies + 2 company_admins + 4 employees + 1 super_admin + 1 extra-admin (in-company negative case) directly via pymongo, and cleaned up on teardown. 21/21 tests PASSED. All scope, RBAC, broadcast, read-idempotency, and recipient-list contracts behave as specified.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/messages", "issue": "For super_admin with broadcast=true and empty string company_id, code correctly normalises to None (line 4348). Just documenting behaviour — not a bug."},
+      {"endpoint": "GET /api/messages/sent", "issue": "Response includes full recipient_user_ids array of every employee id who received the message. Spec requires recipient_count + read_count (both present). Consider whether leaking recipient_user_ids from admin outbox is intentional — currently exposed."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_messaging_iter41.py",
+    "/app/test_reports/pytest/pytest_iter41.xml"
+  ],
+  "action_items": [
+    "None — messaging backend passes 100% of specified contract tests. Main agent can proceed with frontend work.",
+    "Optional: consider whether GET /api/messages/sent should redact recipient_user_ids (only leaving recipient_count/read_count) if admins don't need the raw list. Currently exposed but not covered by the spec."
+  ],
+  "critical_code_review_comments": [
+    "server.py lines 4323-4397 (send_message): logic is clean; scope filtering via mongo $in query correctly enforces company boundaries for company_admin and honours super_admin cross-company or scoped broadcast.",
+    "server.py line 4425: /inbox strips read_by per-item — confirmed no leakage.",
+    "server.py line 4470: $addToSet ensures idempotent mark-read — confirmed via assertion that read_by contains user exactly once after 2 calls.",
+    "server.py line 4488: /recipients ignores ?company_id when caller is company_admin — confirmed.",
+    "server.py file size is 5780 lines — well above the 700-line guideline; recommend splitting into routers (auth/messages/leaves/etc.) in a follow-up refactor (not blocking)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_messaging_iter41.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "not_tested"},
+  "seed_data_creation": "Seeded via pymongo inside module-scoped fixture: 2 companies (IT41_COMP_A, IT41_COMP_B) with unique company_code; 4 employees (IT41_user_empA1/A2/B1/B2), 2 company_admins (IT41_user_adminA/B), 1 extra company_admin in company A (IT41_user_adminA2 — used to prove non-employee admins never receive broadcasts), 1 throwaway super_admin (IT41_user_super_*). Direct session inserts (IT41_tok_*) avoid touching real super_admin PIN. Full teardown deletes every IT41_ prefixed doc across companies/users/user_sessions/messages.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Suite is idempotent and self-cleaning. Uses EXPO_PUBLIC_BACKEND_URL (Expo convention) not EXPO_BACKEND_URL. Reuse test_messaging_iter41.py as regression when new admin-messaging endpoints (attachments, DM replies, per-user read receipts) are added. Skip touching db.users doc for sksharmaconsultancy@gmail.com — this suite already avoids it.",
+  "rca_of_issue": "N/A — no bugs. Only setup wrinkle encountered: db.companies has a unique index on company_code (null), which required seeding both test companies with distinct company_code values. Fixed in seed fixture."
+}

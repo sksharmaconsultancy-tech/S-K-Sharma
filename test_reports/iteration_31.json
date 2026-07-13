@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 31 — Employee Profile Edit + Company-admin Approval Workflow VERIFIED end-to-end. Backend pytest 18/18 PASS covering POST/GET /me/profile-edit, GET/PATCH /admin/profile-edits (scoping, employee annotation, diff-only, replace-pending, cross-company 403, second-review 400, approve applies to user, reject leaves user untouched). Frontend Playwright walk (mobile 390x844) covered employee flow (row-profile-edit → prefilled DD-MM-YYYY dates → Nothing-to-update 400 rendered inside pedit-error → valid submit → pending-card + CTA 'Waiting for approval…'), admin flow (row-profile-edit-reviews visible only for admins, pending item listed with pedit-approve-/pedit-reject- buttons, no CompanyPicker for company_admin, approve removes item from list), super_admin flow (pedit-review-company CompanyPicker present, row-profile-edit-reviews visible), reject flow with prompt note (item disappears), post-approval regression (employee sees updated Name reflected + pending banner gone), and regression on Employee ID display (visible for employee, absent for company_admin and super_admin). Super_admin PIN untouched (pin_hash present, pin_must_change=true unchanged). KYC row-kyc still visible for employee (self-serve unchanged). All ephemeral rows cleaned up.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter31_profile_edit_approval.py",
+    "/app/backend/tests/seed_iter31_ui.py",
+    "/app/test_reports/pytest/pytest_iter31.xml",
+    "/app/test_reports/screens/iter31_admin_reviews.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py L868/L873: error messages for bad DOB/DOJ say 'DD-MM-YYYY' but the endpoint actually validates YYYY-MM-DD via strptime. Message is confusing — frontend sends ISO YYYY-MM-DD; if a raw API caller sends DD-MM-YYYY thinking the message reflects the format, they'll be misled. Consider 'YYYY-MM-DD'.",
+    "profile-edit.tsx: after a successful submit the code re-loads via loadCurrent() but does not immediately clear okMsg — small UX polish, non-blocking.",
+    "profile-edit-reviews.tsx uses window.prompt for the reject note on web (spec-compliant). On iOS Alert.prompt is used; Android has no Alert.prompt equivalent — reviewers on Android might get a plain confirm without a note field. Consider a lightweight modal for Android reject-note capture. Non-blocking (spec silent)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter31_profile_edit_approval.py (new)",
+    "/app/backend/tests/seed_iter31_ui.py (new)",
+    "/app/test_reports/pytest/pytest_iter31.xml (new)",
+    "/app/test_reports/iteration_31.json (new)"
+  ],
+  "success_rate": {"backend": "100% (18/18)", "frontend": "100% (all flows PASS)"},
+  "seed_data_creation": "1 company (UI898B), 1 employee (via signup, approved via mongo), 1 company_admin (mongo-seeded session), 1 super_admin (mongo-seeded session — separate from real super_admin). Also ephemeral rows from pytest fixture. All rows cleaned up post-run; super_admin PIN fields untouched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend endpoints POST/GET /me/profile-edit and GET/PATCH /admin/profile-edits work as specced. Employee signup body doesn't accept father_name/dob/doj — main-agent stamps these post-signup via mongo in the pytest fixture. Frontend testIDs used: row-profile-edit, row-profile-edit-reviews, pedit-name/father/dob/doj/note/submit/error/ok/back/withdraw/refresh, pending-card, pedit-item-<id>, pedit-approve-<id>, pedit-reject-<id>, pedit-review-company, pedit-review-empty, pedit-review-back/refresh. DO NOT touch super_admin PIN — seed a fresh super_admin user in mongo instead.",
+  "rca_of_issue": "N/A — no bugs found in this iteration."
+}

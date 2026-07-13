@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 51 verified end-to-end. Added /app/backend/tests/test_iter51_roster_and_auto_punch.py (13 tests, all PASS) covering roster IN/OUT/absent, absent idempotency, absent-retract-on-IN, punch lat/lng required (422), company auto_punch_enabled toggle, effective_auto_punch resolution across (a) company-level, (b) per-employee override false/null-reset, and (c) live-in forced false. Regression: 34/34 iter49 + iter50 tests still PASS. Frontend smoke on /(tabs)/attendance: when effective_auto_punch=true the testID='auto-punch-info' banner renders and testID='punch-cta' is hidden; after PATCH /api/companies auto_punch_enabled=false, /auth/me returns effective_auto_punch=false and reloading the tab hides the banner and reveals testID='punch-cta'.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter51_roster_and_auto_punch.py",
+    "/app/test_reports/pytest/pytest_iter51.xml",
+    "/app/test_reports/pytest/pytest_iter51_regression.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Problem statement mentions PATCH /api/admin/users for per-employee auto_punch_enabled override. Actual endpoint is PATCH /api/admin/user-role (server.py:7891). Not a bug — just a doc mismatch. Confirmed the endpoint accepts explicit null via Pydantic model_fields_set and correctly clears the override.",
+    "server.py:6465-6505 batch_roster_mark handles 'absent' idempotently via find_one → update_one on kind='absent' — good, no duplicates. Retract at server.py:6522-6525 uses delete_many which safely flips absent→present when IN is marked.",
+    "server.py:1174 correctly forces effective_auto_punch=false whenever is_live_in is truthy, regardless of company/user setting — matches spec."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter51_roster_and_auto_punch.py"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 new + 34/34 regression)",
+    "frontend": "100% smoke (2/2 auto-punch UI cases)"
+  },
+  "seed_data_creation": "Test creates & cleans up its own throwaway company + 2 employees per test session. No persistent seed data left behind.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter51 pytest module reuses the throwaway-company fixture pattern from iter49/50 (session scope). If new tests need the same pattern, factor a shared conftest.py fixture across iter49/50/51. When testing Pydantic 'tri-state' fields like auto_punch_enabled (None|True|False), send explicit `null` in JSON — the server relies on payload.model_fields_set to distinguish 'omitted' from 'explicitly cleared'.",
+  "rca_of_issue": "N/A — this iteration confirmed both bug fixes work as designed. (1) Daily Roster 'absent' now persists an attendance row (source=roster, status=approved, kind=absent) so /api/attendance/today returns it for the employee. IN retracts a prior absent via delete_many. (2) Punch lat/lng are non-optional floats on AttendancePunch → FastAPI 422 when missing. Location must always be sent regardless of auto/manual. UI hides manual punch-cta when effective_auto_punch=true; both testIDs verified on the live web preview."
+}

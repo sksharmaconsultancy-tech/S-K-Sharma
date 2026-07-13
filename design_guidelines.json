@@ -1,0 +1,201 @@
+{
+  "project_identity": {
+    "name": "S.K. Sharma & Co.",
+    "tagline": "Compliance · Payroll · Manpower",
+    "domain": "Labour Law Compliance & Biometric Attendance System",
+    "theme": "Light Theme",
+    "archetype": "Enterprise Trusted & Tactile Swiss",
+    "emotion": "Professional, Authoritative, Clear, Tactile",
+    "target_users": ["Blue-collar employees", "HR Admins", "Super Admins"]
+  },
+  "colors": {
+    "brand": {
+      "primary_navy": "#1B3A6E",
+      "deep_navy": "#12294F",
+      "accent_amber": "#E39A2A"
+    },
+    "surface": {
+      "background_cream": "#FBFBF9",
+      "card_white": "#FFFFFF",
+      "tab_bar": "#FFFFFF"
+    },
+    "text": {
+      "primary": "#12294F",
+      "secondary": "#4B5A76",
+      "inverse": "#FFFFFF",
+      "accent": "#E39A2A"
+    },
+    "status": {
+      "success": "#2D7A4F",
+      "error": "#D32F2F",
+      "warning": "#E39A2A"
+    }
+  },
+  "typography": {
+    "font_family_primary": "System-UI, 'Inter', sans-serif",
+    "font_family_heading": "System-UI, 'IBM Plex Sans', sans-serif",
+    "scale": {
+      "h1": { "fontSize": 32, "fontWeight": "800", "letterSpacing": -1 },
+      "h2": { "fontSize": 24, "fontWeight": "700", "letterSpacing": -0.5 },
+      "h3": { "fontSize": 20, "fontWeight": "600", "letterSpacing": 0 },
+      "body_large": { "fontSize": 16, "fontWeight": "500", "lineHeight": 24 },
+      "body_regular": { "fontSize": 14, "fontWeight": "400", "lineHeight": 20 },
+      "caption": { "fontSize": 12, "fontWeight": "600", "letterSpacing": 0.5, "textTransform": "uppercase" }
+    }
+  },
+  "spacing": {
+    "xs": 4,
+    "sm": 8,
+    "md": 16,
+    "lg": 24,
+    "xl": 32,
+    "2xl": 48
+  },
+  "layout_and_surfaces": {
+    "border_radius": {
+      "sm": 8,
+      "md": 12,
+      "lg": 16,
+      "pill": 100
+    },
+    "shadows": {
+      "card": {
+        "ios": { "shadowColor": "#12294F", "shadowOffset": { "width": 0, "height": 4 }, "shadowOpacity": 0.08, "shadowRadius": 12 },
+        "android": { "elevation": 4 }
+      },
+      "cta_button": {
+        "ios": { "shadowColor": "#E39A2A", "shadowOffset": { "width": 0, "height": 4 }, "shadowOpacity": 0.2, "shadowRadius": 8 },
+        "android": { "elevation": 6 }
+      }
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": {
+        "backgroundColor": "#E39A2A",
+        "borderRadius": 100,
+        "paddingVertical": 16,
+        "paddingHorizontal": 32,
+        "alignItems": "center",
+        "justifyContent": "center",
+        "minHeight": 56
+      },
+      "secondary": {
+        "backgroundColor": "#1B3A6E",
+        "borderRadius": 100,
+        "paddingVertical": 16,
+        "paddingHorizontal": 32,
+        "alignItems": "center",
+        "justifyContent": "center",
+        "minHeight": 56
+      }
+    },
+    "cards": {
+      "base": {
+        "backgroundColor": "#FFFFFF",
+        "borderRadius": 16,
+        "padding": 24,
+        "borderWidth": 1,
+        "borderColor": "rgba(27,58,110,0.05)"
+      }
+    }
+  },
+  "media": {
+    "logos": [
+      {
+        "category": "brand_mark",
+        "url": "/app/frontend/assets/images/logo-mark.png",
+        "description": "S.K. Sharma & Co. sun-mark SK monogram."
+      }
+    ],
+    "images": [
+      {
+        "category": "factory_worker_profile",
+        "url": "https://images.pexels.com/photos/31336004/pexels-photo-31336004.jpeg",
+        "description": "Female factory worker operating machinery. Use for employee profile placeholders or onboarding background."
+      },
+      {
+        "category": "corporate_admin",
+        "url": "https://images.pexels.com/photos/12903168/pexels-photo-12903168.jpeg",
+        "description": "Professional team collaborating in office. Use for Super Admin or HR dashboard headers."
+      },
+      {
+        "category": "biometric_fingerprint",
+        "url": "https://images.unsplash.com/photo-1585079374502-415f8516dcc3",
+        "description": "Close up of biometric fingerprint scanning technology. Use for Smart Punch screen visualization."
+      }
+    ]
+  },
+  "screen_blueprints": {
+    "google_sign_in": {
+      "layout": "Centered vertical stack",
+      "elements": [
+        "Massive brand logo (logo-mark.png) centered.",
+        "H1 'S.K. Sharma & Co.' in Deep Navy.",
+        "Caption tagline 'Compliance · Payroll · Manpower' in Accent Amber.",
+        "Large Google Sign-In Button at the bottom (min 56px height)."
+      ]
+    },
+    "onboarding_wizard": {
+      "layout": "Step-by-step wizard with persistent bottom CTA.",
+      "elements": [
+        "Top segmented progress bar (3 steps).",
+        "Step 1: 'Enter Company Code' with massive centered text input.",
+        "Step 2: 'Personal Details' form (Name, Role).",
+        "Step 3: 'Employment Terms' document review.",
+        "Bottom sticky Action bar with Primary Amber button."
+      ]
+    },
+    "home_dashboard": {
+      "layout": "Scrollable dashboard with Bento Grid layout.",
+      "elements": [
+        "Header: Greeting with User Name and Company Code badge.",
+        "Hero Card: 'Today's Shift' (Navy background, White text). Shows current status (Punched In/Out) and a quick punch CTA.",
+        "Grid: 2x2 Bento grid for quick stats (Leaves, Tickets, Attendance %, Alerts).",
+        "Recent Notifications list below the grid."
+      ]
+    },
+    "smart_punch": {
+      "layout": "Immersive single-action screen.",
+      "elements": [
+        "Header: Current Date and Time (Massive typography).",
+        "Center: Circular biometric graphic (using biometric_fingerprint image in a masked circle) surrounded by a Geofence radius indicator.",
+        "Status Text: 'You are within office premises.'",
+        "Footer: Sticky massive Amber 'PUNCH IN' / 'PUNCH OUT' button (minHeight: 64px, pill shape)."
+      ]
+    },
+    "super_admin_companies": {
+      "layout": "List view with search.",
+      "elements": [
+        "Header: 'Client Companies' with a Search Bar.",
+        "List Item Card: Company Name (H3), Active Employees (Badge), and a 'Shareable 6-char Code' block highlighted in Amber.",
+        "Floating Action Button (FAB) in Navy to 'Add New Company'."
+      ]
+    }
+  },
+  "navigation": {
+    "type": "bottom_tabs",
+    "tabs": [
+      { "name": "Home", "icon": "home" },
+      { "name": "Punch", "icon": "fingerprint", "highlight": true },
+      { "name": "Docs", "icon": "document" },
+      { "name": "Profile", "icon": "person" }
+    ],
+    "style": {
+      "backgroundColor": "#FFFFFF",
+      "activeColor": "#E39A2A",
+      "inactiveColor": "#4B5A76",
+      "borderTopColor": "rgba(27,58,110,0.1)",
+      "height": 72
+    }
+  },
+  "instructions_to_main_agent": [
+    "TRANSLATE TO REACT NATIVE: Use React Native `StyleSheet.create` for all styling. Do NOT use Tailwind CSS classes.",
+    "TEST IDS: Add `testID` prop to all interactive elements (buttons, inputs, tabs). Example: `testID='punch-in-button'`.",
+    "COLORS: Strictly use the defined colors (Primary Navy: #1B3A6E, Deep Navy: #12294F, Accent Amber: #E39A2A, Cream: #FBFBF9).",
+    "LAYOUT: Use `SafeAreaView` heavily for screens. The main background color for screens should be `#FBFBF9`.",
+    "TOUCH TARGETS: Ensure all buttons and touchable icons have a minimum height and width of 48px to accommodate blue-collar workers.",
+    "ASSETS: Use the exact URL `/app/frontend/assets/images/logo-mark.png` for the logo. Use provided remote image URLs for other visual placeholders.",
+    "TAB BAR: Implement a custom bottom tab bar where the 'Punch' tab is visually distinct (e.g., elevated or colored Amber)."
+  ]
+}

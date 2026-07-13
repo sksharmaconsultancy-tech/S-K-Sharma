@@ -1,0 +1,33 @@
+{
+  "summary": "Iter-48 verification for two fixes: (a) 20-minute auto-punch debounce, (b) super-admin retroactive edit on decided punches. 7/7 backend pytest cases PASS (test_iter48_debounce_and_super_override.py). Frontend punch-approvals screen verified on desktop (1280x800): as super_admin the History tab shows Approve / Edit time / Reject buttons per row along with the superHint bar 'Super-admin override — you can change this decided punch.'; Approve is disabled (aria-disabled=true, pointer-events:none) on already-approved rows and Reject is disabled on already-rejected rows; Adjust button label reads 'Edit time' on History (super-override) and 'Adjust' on Pending. As company_admin the History tab shows NO action buttons and NO superHint bar, preserving the previous behaviour. Both fixes are working end-to-end.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter48_debounce_and_super_override.py",
+    "/app/backend/tests/seed_iter48_ui.py",
+    "/app/test_reports/pytest/pytest_iter48.xml",
+    "/app/test_reports/screens/iter48_super_history.png",
+    "/app/test_reports/screens/iter48_ca_history.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:4683 — debounce constant _AUTO_PUNCH_DEBOUNCE_MIN is defined inside the request handler; consider hoisting to module scope for clarity/testability, but non-blocking.",
+    "punch-approvals.tsx:263 — superHint hint is rendered above the actionRow only when isSuperOverride is true (i.e. status !== 'pending' and role is super_admin) — matches the spec exactly."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter48_debounce_and_super_override.py (new)",
+    "/app/backend/tests/seed_iter48_ui.py (new)",
+    "/app/test_reports/iter48_ui_seed.json (new)"
+  ],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% (12/12 assertions across super_admin + company_admin flows)"},
+  "seed_data_creation": "Created TEST_Iter48UI companies (via /api/companies) with one approved and one rejected punch, used only for UI verification. Companies remain in DB but are prefixed TEST_ for easy cleanup.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter-48 verified both server.py debounce logic (lines 4675-4711) and decide_punch super-admin override branch (server.py:4968-4976), plus punch-approvals.tsx UI role gating (showActions & isSuperOverride at lines 259-263, adjust label at 457, superHint at 431-437). Backend tests use motor to age the previous punch's `at` so the >20min case can be exercised. Frontend tests seed a fresh company via /api/companies + /api/auth/admin-pin-login, then inject the super_admin OR company_admin session_token directly into localStorage under the key 'llc_session_token' before navigating to /punch-approvals.",
+  "rca_of_issue": "N/A — verification-only run. Both fixes behave as specified. Note: on react-native-web, Pressable's `disabled` prop maps to `aria-disabled='true'` + `pointer-events:none` rather than the native HTML `disabled` attribute — tests must inspect aria-disabled to assert disabled state."
+}

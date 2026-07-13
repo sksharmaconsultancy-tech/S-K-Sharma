@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 24 — Phase B (Duty hours summary + Present-today drilldown) — ALL GREEN.\n\nBACKEND (pytest 11/11 pass, /app/backend/tests/test_iter24_duty_hours.py):\n  GET /api/attendance/summary?days=7\n    • Requires auth (401/403 without token).\n    • Returns 7 days oldest→newest with keys {date, hours, first_in, last_out, still_in, punches}.\n    • Missing days show hours=0, first_in=null, last_out=null, still_in=false, punches=0.\n    • Today with IN 09:00 OUT 12:00 IN 13:00 OUT 18:00 → hours=8.0 exactly.\n    • Day with an unmatched final IN → still_in=true and hours=0 (only closed sessions counted).\n    • window_total_hours == sum(days[].hours) ± 0.1, and total_hours_till_today = window + old records outside window (8 + 4 = 12 in window; +2 outside = 14 all-time; verified).\n  GET /api/admin/attendance/today\n    • Regular employee → 401/403.\n    • Unauth → 401/403.\n    • company_admin scope: returns ONLY punchers in own company, ordered by first_in asc; per-row fields user_id, name, employee_code, company_id, company_name, first_in, last_out, still_in, hours, punches all populated correctly.\n    • Employee who did NOT punch today is NOT in the list.\n    • company_admin cannot escape scope by passing ?company_id=cmp_bogus — server still returns own-company punches.\n\nFRONTEND (Playwright mobile 390x844, ephemeral tokens seeded via pymongo, no super_admin PIN touched):\n  Home /(tabs)/index.tsx\n    • data-testid=duty-hours-section renders for employee AND for company_admin.\n    • duty-total-till-today text: 'TOTAL DUTY HOURS · 13h · till today' (matches API total_hours_till_today=13).\n    • duty-week-total text: 'LAST 7 DAYS · 13h · avg 1h 51m / day' (formatting Xh Ym as spec).\n    • 7 bars rendered with testIDs duty-day-<YYYY-MM-DD>. Verified today bar height reflects 8h (tallest), yesterday 5h (mid), other days 0 (flat).\n    • 'See history →' link routes to /history ✓.\n  Bento tile bento-present-today (Home)\n    • Tappable for company_admin — navigated to /present-today.\n  /present-today\n    • Header: back arrow testID=present-back (works — returns Home), title 'Present today', subtitle 7/2/2026, refresh button testID=present-refresh present.\n    • present-company-picker correctly hidden for company_admin (super-admin only).\n    • Summary cards: present-count=1, still-in-count=0, total-hours-today=8h.\n    • Row testID=present-row-<user_id> shows name, employee_code · company_name, Done pill (since Alice punched out), IN 09:00 AM, OUT 06:00 PM, DUTY 8h — all correct.\n    • present-empty not rendered when list non-empty.\n\nREGRESSION\n  • Profile → 'Sign out' at y=595, height=16, bottom=611 vs tab-bar-top=766 → NOT occluded, clickable. After click → redirected to / and localStorage['llc_session_token'] cleared.\n  • row-admin-badge correctly NOT rendered when no pending approvals (seeded employee is approved).\n\nCLEANUP\n  • Deleted 7 attendance docs, 1 residual session, 2 users, 1 company. Super_admin doc untouched (verified role=super_admin, has_pin=True, pin_must_change=True — matched pre-existing state).\n\nMinor: RN-web console warnings persist for shadow* & props.pointerEvents deprecations — pre-existing, non-blocking, reported previously in iter23.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "RN-web (multiple screens)", "issue": "'shadow*' style props deprecated — should migrate to boxShadow. Reference: numerous StyleSheet.create blocks across screens. Pre-existing; already flagged iter23."},
+      {"component": "RN-web (multiple screens)", "issue": "props.pointerEvents deprecated — should migrate to style.pointerEvents. Pre-existing; already flagged iter23."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter24_duty_hours.py",
+    "/app/test_reports/pytest/pytest_iter24.xml",
+    "/app/test_reports/screens/iter24_home_duty.png",
+    "/app/test_reports/screens/iter24_home_admin.png",
+    "/app/test_reports/screens/iter24_present.png",
+    "/app/test_reports/screens/iter24_profile.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:2262-2265 — company_admin scope correctly force-set to user.company_id ignoring query param; verified by escape-scope test.",
+    "server.py:2181-2192 — _compute_day_hours correctly ignores an unmatched trailing IN (still_in=true, no time added). Consecutive IN with no OUT keeps first as open, resets on OUT — sane behaviour.",
+    "server.py:2206-2207 — since_dt uses days-1 giving inclusive N-day window. Consistent with days_out loop range(days-1,-1,-1).",
+    "present-today.tsx:56-64 — companyFilter defaults to params.company_id if super_admin passed it via bento tile. Good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter24_duty_hours.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Ephemeral seed (company + 4 users + attendance) inserted via pymongo and fully cleaned up in both backend fixture teardown and post-UI-run script. Super_admin doc never touched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 24 fully verified end-to-end. Backend tests live at /app/backend/tests/test_iter24_duty_hours.py — reusable for regression. UI testIDs verified live: duty-hours-section, duty-total-till-today, duty-week-total, duty-day-<date>, bento-present-today, present-back, present-refresh, present-count, still-in-count, total-hours-today, present-row-<uid>, present-empty. super_admin PIN gate still blocks live super_admin UI testing (per user request, do NOT reset PIN) — but company_admin covers everything for /present-today except the CompanyPicker, which is code-gated behind isSuper and verified via source inspection only.",
+  "rca_of_issue": "N/A — no bugs found."
+}

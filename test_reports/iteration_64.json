@@ -1,0 +1,44 @@
+{
+  "summary": "Iter 64 verified end-to-end — Location Tracking & Audit. Backend: created /app/backend/tests/test_iter64_location_audit.py with 17 pytest cases covering (a) no-gps manual punching when firm.location_punching_enabled=False OR user.gps_punch_enabled=False (record source='manual-nogps', location_status='no-gps', gps_verified=False, lat/lng ignored server-side, selfie mandatory), (b) inside-fence punch (location_status='inside', gps_verified=true), (c) outside-fence IN newly ALLOWED with status='pending' + outside_note (default policy), (d) strict mode via companies.reject_outside_geofence=True still rejects outside-IN with 400. Verified GET /api/admin/attendance/location-audit filters (company_id, company_ids[] multi, user_id, date_from/to, location_status inside|outside|no-gps), response shape (records + count + summary), enrichment (user_name/employee_code/company_name), NO selfie_base64 in list payload, legacy-row backfill via _compute_location_status for records lacking location_status, and RBAC (employee role → 403). XLSX endpoint returns status=200 with content-type application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, Content-Disposition attachment; filename=\"LocationAudit.xlsx\", 8142-byte payload starting with PK zip signature. PATCH /api/companies/{cid} accepts reject_outside_geofence toggle (both True and False persist). /attendance/today and /attendance/history each return location_status per row (backfilled for legacy rows). ALL 17/17 BACKEND TESTS PASS. Frontend (super_admin, desktop 1440x900): /location-audit renders header, 3 summary cards (Inside 41 / Outside 0 / Biometric-only 0), filter card with FIRMS/DATE FROM/DATE TO/EMPLOYEE SEARCH, status chips (All / Inside / Outside / No-GPS), and 41-row list with LocationPill (green 'Inside office'), IN/OUT pill, source, biometric icon. la-download, la-cross-toggle, la-multi-picker testIDs present and interactive (multi-firm toggle swaps single-firm hint for MultiCompanyPicker). Sidebar shows 'Location audit' immediately below 'Punch approvals' as required. XLSX download endpoint hit via same-origin fetch returned correct bytes & headers. LocationPill import verified in punch-approvals.tsx, history.tsx, (tabs)/attendance.tsx (empty punch-approvals list had no rows during test, but code path confirmed).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter64_location_audit.py",
+    "/app/test_reports/pytest/pytest_iter64.xml"
+  ],
+  "action_items": [
+    "None blocking. Optional: consider adding testID to each punch-approvals row for future automated pill assertion (currently the LocationPill import + render code is verified but the page had 0 pending rows during the run so pill was not visually confirmed on that screen)."
+  ],
+  "critical_code_review_comments": [
+    "server.py POST /attendance/punch (line ~5720-5951): the location_status computation correctly sets 'no-gps' when either firm.location_punching_enabled=False or user.gps_punch_enabled=False; it forces payload.latitude=payload.longitude=None (line 5734) to prevent a mis-configured client from bypassing the firm rule. ✓",
+   "server.py: outside_needs_approval is set for BOTH kind=='in' and kind=='out' (lines 5860, 5872), and record['status']='pending' + record['outside_note'] applied uniformly. Even when firm.punch_approval_required=False the outside branch still forces pending — safe by design. ✓",
+    "server.py: /admin/attendance/location-audit strips selfie_base64 and device_info at query time via projection {\"_id\":0, \"selfie_base64\":0, \"device_info\":0}. ✓",
+    "server.py: _compute_location_status derives legacy status correctly (gps_verified is False → 'no-gps'; outside_geofence True → 'outside'; else 'inside') AND the filter branch uses $or with {'location_status':{'$exists':False}, ...} so backfill happens at the query layer for old rows. Verified by test_filter_inside_includes_legacy_backfilled. ✓",
+    "server.py: XLSX endpoint reuses list_location_audit(limit=1000) which enforces role guards through require_role — no privilege bypass. Response headers include Content-Disposition attachment; filename=\"LocationAudit.xlsx\". ✓",
+    "location-audit.tsx: cross-firm queryString branch correctly encodes company_ids= repeated params, and downloadBinary reuses the same query string for XLSX. ✓",
+    "LocationPill.tsx: falls back to 'no-gps' config when status is null/undefined/unknown — prevents blank pill on legacy data pre-backfill on the client side. ✓",
+    "AdminWebShell.tsx nav entry at line 37 places /location-audit right after /punch-approvals as spec'd, with punch_approvals:read/write permission gates. ✓"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter64_location_audit.py (new — 17 tests)",
+    "/app/test_reports/pytest/pytest_iter64.xml (new)",
+    "/app/test_reports/iteration_64.json (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (17/17)",
+    "frontend": "100% for /location-audit screen (header, 3 summary cards, filters, status chips, list with LocationPill, XLSX download, nav order). LocationPill on /punch-approvals not visually observed because list was empty (no pending rows); code path is confirmed."
+  },
+  "seed_data_creation": "Ephemeral only. All companies/users/attendance rows seeded directly in MongoDB via test fixtures are torn down in the mongo fixture teardown (companies, users, user_sessions, attendance collections filtered by IDs prefixed co_it64_ / user_it64_ / att_it64_ / tk_it64_). Super_admin PIN untouched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter 64: attendance records now carry `location_status` ∈ {inside, outside, no-gps} plus optional `outside_note`. Punch endpoint gating logic depends on TWO flags: firm-level companies.location_punching_enabled (default False) AND user-level users.gps_punch_enabled (default False). When either is False the punch runs in 'no-gps manual' mode: server ignores client-sent lat/lng, requires selfie_base64 + biometric_method (fingerprint/face), and stamps source='manual-nogps'. Outside-IN punches are now allowed and land as status='pending' with outside_note; firm can restore strict mode via companies.reject_outside_geofence=True. Location Audit list endpoint /api/admin/attendance/location-audit accepts company_id, company_ids[] (repeated param), user_id, date_from, date_to, location_status, limit; returns {records, count, summary:{inside,outside,'no-gps'}}. Selfie is never returned in the list. Legacy rows without location_status are backfilled at query time via $or with {location_status:{$exists:False}, gps_verified/outside_geofence...}. XLSX variant is /api/admin/attendance/location-audit.xlsx and reuses list_location_audit(limit=1000) — same query params. AdminWebShell nav puts /location-audit right after /punch-approvals gated by punch_approvals:read|write. LocationPill component: import LocationPill from '@/src/components/LocationPill'; used in punch-approvals.tsx, history.tsx, (tabs)/attendance.tsx.",
+  "rca_of_issue": "N/A — no functional bugs found in iter 64 diff."
+}

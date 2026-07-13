@@ -1,0 +1,39 @@
+{
+  "summary": "Iter 71 backend testing — POST /api/admin/employees (new salary-structure arrays) + POST /api/admin/employees/bulk-import + GET /api/admin/employees/bulk-import-template.csv. Created /app/backend/tests/test_iter71_salary_structure_and_bulk.py with 11 tests covering ALL 9 acceptance cases from the review request; ALL 11 PASSED. Regression on iter68/iter69/iter70 (64 collected) → 62 passed, 2 pre-existing env-data skips (no salary run with non-empty rows scoped to SKSCO1 in the preview DB — unchanged from iter70 report). ZERO regressions. Coverage summary: (1a) POST with all 4 salary arrays populated → arrays persist verbatim (head+amount preserved in order) and readable via GET /admin/employees; (1b) POST omitting the 4 arrays → each stored as []; (2a) 3 unique bulk rows → all created with auto SKSCO1#### employee_code + 6-digit temp_pin, visible in GET; (2b) re-post same 3 rows → all skipped_duplicates with existing_user_id populated; (2c) row without name → error reason mentions 'name', other row still created; (2d) row missing BOTH phone & email → error reason mentions phone AND email; (2e) super-admin without company_id → HTTP 400; (2f) company-admin sending a foreign company_id → import correctly forced to admin's OWN firm (verified created user's company_id equals admin.company_id, NOT the target); (2g) empty rows [] → HTTP 400 with detail containing 'rows' + 'non-empty'; (3) template CSV — text/csv content-type, Content-Disposition contains .csv filename, header row contains ALL 15 required columns (name,phone,email,designation,department,salary_monthly,compliance_gross,uan_no,pf_no,esi_ip_no,pan_no,aadhaar_no,bank_name,bank_account,bank_ifsc) — verified for both super_admin AND company_admin. All 5 TEST_iter71_* users created during the run were DELETEd via DELETE /admin/employees/{user_id} in the session-wide teardown fixture; MongoDB post-run confirms 0 TEST_iter71_ users remain.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter71_salary_structure_and_bulk.py",
+    "/app/test_reports/pytest/pytest_iter71.xml",
+    "/app/test_reports/pytest/pytest_iter71_regression.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:5817-5820 — POST /admin/employees correctly stores the 4 new salary arrays with `payload.get(key) or []`, so absent/null/empty arrays all coerce to []. Good defensive default. Verified persisted verbatim through GET.",
+    "server.py:5898-5910 — bulk-import auth+resolution logic is clean: company_admin's company_id is force-overridden (payload company_id ignored), super/sub-admin must pass explicit company_id or 400; empty/non-list rows correctly rejected with 400 'rows must be a non-empty list' (test_g verified the exact wording).",
+    "server.py:5929-5943 — duplicate detection uses $or over phone AND email (both when both provided). This is correct — a bulk row that reuses either identifier will be flagged. Skipped rows preserve existing_user_id which lets the admin UI show a helpful message.",
+    "server.py:5918-6005 — per-row try/except means one bad row never blocks the rest; the caller gets granular {row, reason} errors. Row numbering starts at 1 (matches CSV UI convention). Good UX.",
+    "server.py:5945-5988 — bulk-imported doc has the SAME approval/PIN policy as the single POST (pin_must_change=true, approval_status=approved, has_pin=true, bulk_imported=true tag). NOTE: The bulk-import doc set does NOT include the 4 new salary-structure arrays (actual/compliance allowances+deductions) — if the main agent wants CSV rows to carry these too, they must be added explicitly. For iter71 the review request only demanded persistence via the single POST, so this is not a defect; flagging for iter72+ consideration.",
+    "server.py:6021-6051 — bulk-import-template CSV is generated with a static column list and one sample row. All 15 required columns are present. Content-Type is text/csv (via media_type) and Content-Disposition is a proper attachment header with .csv filename. Auth guard covers all 3 admin roles."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter71_salary_structure_and_bulk.py (NEW — 11 tests: 2 salary-structure + 7 bulk-import + 2 template)"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11 iter71 tests PASS; 62/62 iter68+69+70 regression PASS with 2 pre-existing env-data skips unchanged from iter70)",
+    "frontend": "N/A (backend only)"
+  },
+  "seed_data_creation": "During the run 5 TEST_iter71_* employees were created (2 in TestSalaryStructureArrays + 3 in bulk test_a; plus 1 valid-along-bad in test_c and 1 forced-firm in test_f are also cleaned). All deleted via DELETE /admin/employees/{user_id} in the session-scoped autouse `_cleanup` fixture. Post-run MongoDB check confirms 0 TEST_iter71_ users remain. Super_admin's pin_hash / pin_must_change were NEVER touched — session obtained exclusively via OTP dev_code flow.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 71 (salary-structure arrays on POST /admin/employees + bulk-import + CSV template) fully green — 11/11 tests PASS, no regressions in iter68/69/70 (62 passed, 2 skips = same pre-existing env-data limitation flagged in iter70 report re: no non-empty SKSCO1 salary run in the preview DB). To re-run everything for iter68+69+70+71: `pytest backend/tests/test_iter68_admin_employee_and_pdfs.py backend/tests/test_iter69_bulk_payslips_and_annual.py backend/tests/test_iter69_salary_register_empty_rows.py backend/tests/test_iter70_geofence_and_statutory.py backend/tests/test_iter71_salary_structure_and_bulk.py -v` (75 total tests, expect 73 pass / 2 skip). Note for future iterations: the bulk-import doc-set in server.py:5945-5988 does NOT currently persist the 4 new salary-structure arrays; if the main agent adds CSV columns for them, extend TestBulkImport with a variant that supplies allowance/deduction arrays and asserts they round-trip through GET.",
+  "rca_of_issue": "N/A — no bugs found in iter71 code paths."
+}

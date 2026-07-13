@@ -1,0 +1,50 @@
+{
+  "summary": "Iteration 32 — Backend 18/18 PASS (admin-pin-login clarity, /me/location-ping, /admin/attendance/present-not-punched, /admin/attendance/approve-punch, AttendancePunch source enum). Frontend 4/5 tasks PASS (Company Admin 'Present but not punched' link, /company-requests optimistic refresh, Employee /history calendar view all work). Frontend Task 6 (Super Admin punch data hidden) FAILS with a red-screen crash: (tabs)/_layout.tsx sets BOTH href: null AND tabBarButton: () => null on the attendance Tabs.Screen for super_admin, triggering Expo Router error 'Cannot use `href` and `tabBarButton` together.' Because of this crash super_admin can never render (tabs), so bento-present-today can't be verified and the /attendance + /history component-level Redirects never take effect. bento-present-today is technically wired (line 390 of (tabs)/index.tsx) but blocked by the crash.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "(tabs)/_layout.tsx — Tabs.Screen name='attendance'",
+        "issue": "For super_admin, both `href: null` (line 56) AND `tabBarButton: () => null` (line 57-58) are passed to the same Tabs.Screen. Expo Router throws 'Cannot use `href` and `tabBarButton` together.' → uncaught red-screen error whenever a super_admin lands on (tabs). Reference: /app/frontend/app/(tabs)/_layout.tsx:41-71",
+        "testID": "tab-punch",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Super Admin lands on Home / navigates to /attendance or /history",
+        "issue": "Because (tabs)/_layout.tsx crashes on `href` + `tabBarButton` conflict, the Home dashboard cannot mount for super_admin — bento-present-today never renders and the component-level Redirects inside (tabs)/attendance.tsx & history.tsx cannot execute. Users see the RN-web LogBox red overlay instead of the dashboard.",
+        "affected_testIDs": ["hero-shift", "tab-punch", "bento-present-today"]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter32_attendance_approvals.py",
+    "/app/test_reports/pytest/pytest_iter32.xml",
+    "/app/test_reports/screens/iter32_history_calendar.png",
+    "/app/test_reports/screens/iter32_company_requests.png",
+    "/app/test_reports/screens/iter32_sa_home.png"
+  ],
+  "action_items": [
+    "Fix (tabs)/_layout.tsx line 41-71: choose EITHER `href: isSuperAdmin ? null : undefined` OR `tabBarButton: isSuperAdmin ? () => null : ...` — never both simultaneously. Recommendation: keep `href: isSuperAdmin ? null : undefined` (which is the idiomatic Expo Router way to remove a tab from routing) and change the `tabBarButton` to `!isSuperAdmin ? (props) => (<Pressable ...>...</Pressable>) : undefined`. After the fix, re-verify Task 6 (bento-present-today count=1, /attendance and /history redirect to /(tabs)/ for super_admin).",
+    "After fix, re-run the Iteration 32 frontend suite to confirm super_admin dashboard shows only aggregate KPIs (bento-present-today) and does not surface personal punch UI."
+  ],
+  "critical_code_review_comments": [
+    "The `href` vs `tabBarButton` conflict in (tabs)/_layout.tsx is a critical Expo Router API misuse — see https://docs.expo.dev/router/reference/hidden-tabs/ — should be caught by manual QA. Recommend a unit test that mounts the layout as each role.",
+    "Component-level `<Redirect href='/(tabs)' />` inside (tabs)/attendance.tsx:247 and /history.tsx:239 is redundant once the tabs layout hides the tab correctly; either strategy works but keeping both offers defense-in-depth."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter32_attendance_approvals.py (new)"
+  ],
+  "success_rate": {"backend": "100% (18/18)", "frontend": "75% (3/4 tasks fully validated; Task 6 blocked by red-screen crash)"},
+  "seed_data_creation": "Backend pytest seeded ~8 companies + 10 users + sessions + attendance rows scoped to IT32_<hex>. Frontend test seeded 3 users (super_admin/company_admin/employee) + 1 company + 1 pending company_request + 1 attendance row. ALL ephemeral rows deleted at teardown. Super_admin doc (sksharmaconsultancy@gmail.com) pin_hash + pin_must_change verified untouched post-cleanup.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "After Tabs.Screen fix lands, re-run only Task 6: log in as a mongo-seeded super_admin, verify (1) app renders without red screen, (2) hero-shift=0, tab-punch=0, bento-present-today=1, and (3) navigating to /attendance or /history triggers <Redirect href='/(tabs)'/> so page.url ends up back at the tabs root (or the requested route re-mounts inside the tabs). Other iter-32 tasks were verified working — full re-run only needed if the fix touches shared layout code.",
+  "rca_of_issue": "Root cause: In /app/frontend/app/(tabs)/_layout.tsx, the middle 'attendance' Tabs.Screen conditionally sets `href: isSuperAdmin ? null : undefined` (line 56) AND `tabBarButton: isSuperAdmin ? () => null : (props) => ...` (lines 57-58). Expo Router v3+ explicitly forbids passing BOTH props on the same screen because they represent two different strategies for removing the screen from the tab strip. On mount for a super_admin, TabsClient.js:22 throws `Error: Cannot use \\`href\\` and \\`tabBarButton\\` together.` — an uncaught error that surfaces as an RN-web LogBox red screen and prevents any child of (tabs) from mounting.\\n\\nReproduction: (a) sign in as super_admin (mongo-seeded session works), (b) navigate to any /(tabs)/* route, (c) app renders the red LogBox 'Cannot use `href` and `tabBarButton` together'.\\n\\nMitigation: keep exactly ONE of the two props for the super_admin branch. Simplest fix: `href: isSuperAdmin ? null : undefined,` and change tabBarButton to `tabBarButton: isSuperAdmin ? undefined : (props) => (...)` (or omit the whole prop for super_admin). Employee/company_admin path is unaffected."
+}

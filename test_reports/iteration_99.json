@@ -1,0 +1,28 @@
+{
+  "summary": "Iter 99 punch-policy + notifications + leave-balance fully verified end-to-end. Backend: 13/13 pytest cases pass covering the entire punch matrix (a-e), personal notification creation & isolation, first-punch-status, CL/PL balance and regression (double-IN + geofence-auto). Frontend: Leaves screen renders the new 'My Leave Balance' card (testID leave-balance-card) with correct CL/PL values from GET /api/leaves/balance. No bugs found; nothing needed to be fixed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter99_punch_policy.py",
+    "/app/test_reports/pytest/iter99_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py punch endpoint is ~430 lines long inside a single function — file already 17k+ lines. Consider extracting the punch endpoint (and identity/notification/broadcast sub-sections) into a routes module for maintainability (non-blocking).",
+    "AttendancePunch.biometric_method is a required Literal — the docstring above still says 'lat/lng optional' but nothing in the model calls out that biometric_method has no default; harmless but slightly stale."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter99_punch_policy.py (new)"
+  ],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "100% (leave-balance-card renders with correct data)"},
+  "seed_data_creation": "Test-only firm 'cmp_iter99test' + TEST_ users/attendance/leaves/notifications + TEST_/UITEST_ session tokens seeded then fully cleaned up. python3 /app/scripts/cleanup_test_data.py --apply reported nothing left.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Punch endpoint (server.py ~7735) now enforces mandatory GPS/geofence for every punch; only is_live_in bypasses coords. Manual mode (firm location_punching_enabled=false OR user.gps_punch_enabled=false) requires selfie_base64 + biometric_method plus GPS. Personal notifications with audience='user' + target_user_id + title 'Punch IN/OUT — <Firm>' inserted after successful punch (~line 8109). GET /api/leaves/balance returns cl/pl allowed/taken/balance from firm_masters.leave_policy + approved leaves in current year. Test file test_iter99_punch_policy.py is reusable; it seeds & cleans its own data and reads BASE_URL from EXPO_PUBLIC_BACKEND_URL.",
+  "rca_of_issue": "N/A — implementation matched the spec; all matrix cases returned expected status codes and payload semantics."
+}

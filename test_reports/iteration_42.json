@@ -1,0 +1,37 @@
+{
+  "summary": "iter42 - Backend-only verification of /api/admin/stats new badge fields open_shifts and missed_ins. Seeded 2 throwaway companies (IT42_co_a, IT42_co_b) with 9 employees covering all inclusion/exclusion criteria, plus a company_admin session and an employee session. All 7 pytest cases pass with strict equality on new fields (open_shifts=1, missed_ins=2 for CO_A; open_shifts=1, missed_ins=1 for CO_B). Backward-compat fields (total_employees, present_today, pending_leaves, open_tickets, pending_profile_edits, total_companies) still returned and additive-only. Scoping verified for super_admin (unscoped cross-company sum >= per-company sums), super_admin?company_id=X (scoped to X), company_admin (auto-scoped to own company, ignores company_id query param), and employee (403). Defaults verified: brand-new company with no data returns open_shifts=0 and missed_ins=0.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter42_admin_stats_badges.py",
+    "/app/test_reports/pytest/pytest_iter42.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:5731-5735 correctly enforces scope: company_admin -> forced own company_id; super_admin with company_id query -> scoped; super_admin unscoped -> empty filter (cross-company). Verified in test_company_admin_auto_scoped and test_super_admin_cross_company_sums.",
+    "server.py:5793-5832 missed_ins aggregation correctly excludes: (a) users already in by_user (any punch today, incl. IN-only), (b) not onboarded, (c) approval_status not in {approved, missing}, (d) exit_date<=today, (e) stale last_location_at (>60min), (f) distance>radius. Each exclusion is covered by a dedicated seeded case (A2/A3/A4/A5/A6/A7/A8).",
+    "server.py:5833-5835 wraps missed-punch aggregation in try/except so a bad payload never blocks /admin/stats. Good defensive posture.",
+    "server.py:5844-5845 emits both new fields as top-level integers - matches spec (additive, not nested).",
+    "Minor observation (NOT a bug): server.py 1894-1895 has an unreachable duplicate `user = await db.users.find_one(...); return {...}` block after the successful return in /auth/otp/verify. Harmless dead code but worth removing on next pass."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter42_admin_stats_badges.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7)",
+    "frontend": "not tested (backend-only request)"
+  },
+  "seed_data_creation": "Created and torn down: 2 companies (IT42_co_a, IT42_co_b) + 9 employees + 1 company_admin + 3 attendance rows + 2 seeded user_sessions, all tagged with _seed_tag='IT42'. Fresh-slate teardown runs both at fixture start and end. Super_admin PIN fields (pin_hash / pin_must_change / pin_fail_count / pin_locked_until) NOT touched - auth uses OTP dev mode only.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reusable test lives at /app/backend/tests/test_iter42_admin_stats_badges.py. It self-cleans on module teardown so it is safe to re-run. Uses EXPO_PUBLIC_BACKEND_URL env (fallback to preview URL). Auth via OTP dev mode against sksharmaconsultancy@gmail.com super_admin (no PIN touched). Seed tag = 'IT42_'.",
+  "rca_of_issue": "N/A - feature verification, no bug found. All spec criteria for open_shifts / missed_ins / scoping / role gating / defaults hold true against the deployed backend."
+}

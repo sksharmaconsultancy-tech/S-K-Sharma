@@ -1,0 +1,38 @@
+{
+  "summary": "Iter 80 backend-only testing — both bug fixes verified end-to-end. Bug 1 (Iter 77q OT threshold): monthly-grid AND _build_ot_report_rows now correctly prefer `full_day_hours` over `standard_working_hours`. KANKANI-style firm (full_day_hours=12, standard_working_hours=8, ot_allowed=True): 10h day → ot_hours=0, duty=10, hours=10 (no spurious OT); 14h day → ot_hours=2, duty=12, hours=14, ot_in/ot_out populated; OT report count=1 (only 14h day). Regression firm (full_day_hours=8, no override): 10h day still triggers 2h OT (both grid and OT report). Bug 2 (Iter 77r orphan admin auto-heal): Firm A created with admin_phone/admin_email → force-deleted → Firm B with SAME phone+email succeeds (200, auto-heal). Login endpoint /auth/admin-pin-login accepts the new temp PIN. Regression: (i) Firm C alive → phone reuse on firm D → 409 blocked. (ii) Email reuse against live firm E → 409 blocked. (iii) Reusing super_admin email (sksharmaconsultancy@gmail.com) → 409 (never auto-healed). All 9/9 new Iter80 tests PASS. 216 test artifacts cleaned up (all Iter77/78/79/80 prefixed).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter80_ot_threshold_and_orphan_admin.py",
+    "/app/test_reports/pytest/pytest_iter80.xml",
+    "/app/test_reports/pytest/pytest_iter80_regression.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Two pre-existing regression tests fail against current server behaviour (post-77q). They are NOT bugs in the Iter 80 fix — they are stale test expectations from before the OT-threshold priority swap. Consider updating: (1) /app/backend/tests/test_iter78_weekoff_and_grid.py::test_monthly_grid_returns_raw_and_policy_adjusted_hours — asserts wcell['hours']==8.0 for a 12h ot_allowed=False Policy 1 day, but current grid always adds OT (raw_excess=4) → hrs=12. (2) /app/backend/tests/test_iter79_ot_report_and_offroll.py::TestOTReportPolicy1::test_policy1_returns_zero_ot — asserts count==0 for a 10h Policy 1 day, but _build_ot_report_rows now uses raw_excess and surfaces it as 1 OT row. Both changes are DESIRED per Iter 77m/77p/77q design (surface OT from raw excess) — the tests should be updated to match, not the code."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 15,931 lines — still well beyond the 700-line guideline. The OT-threshold priority (`full_day_hours` → `standard_working_hours` → 8.0) is duplicated verbatim at server.py:14473-14477 and 14709-14713. Extracting a shared `_resolve_standard_hours(eff_policy)` helper would prevent future drift between monthly-grid and OT-report surfaces.",
+    "create_company auto-heal (server.py:5745-5782) duplicates the phone-vs-email orphan detection almost line-for-line. Consider extracting into a helper `_auto_heal_orphan_admin(field, value)` that returns (existing_still_blocks: bool, existing_user: Optional[dict]) — keeps intent + logs consistent.",
+    "The super_admin block is enforced implicitly by the role tuple `('company_admin', 'sub_admin', 'employee')`. This is correct but subtle — a comment stating explicitly 'super_admin excluded on purpose — never auto-heal' would document the safety invariant."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter80_ot_threshold_and_orphan_admin.py (new — 9 tests, 480 lines)"
+  ],
+  "success_rate": {
+    "backend": "100% for Iter 80 (9/9); Iter 78/79 regression 32/34 pass (2 stale test expectations from before 77q — NOT bugs in the fix)",
+    "frontend": "N/A - backend-only review"
+  },
+  "seed_data_creation": "Test fixtures created 2 attendance firms (Iter80-KANK-*, Iter80-Policy1-*) + 5 admin firms (Iter80-A/B/C/E, plus one rejected SA request) + ~4 employees + ~20 manual punches in 2026-06. ALL removed via `python3 /app/scripts/cleanup_test_data.py --apply` — 216 artifacts total across attendance (164), companies (26), users (22), salary_runs (3), user_sessions (1).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Both Iter 77q (OT threshold prefers full_day_hours) and Iter 77r (orphan admin auto-heal) are verified stable. The test suite at /app/backend/tests/test_iter80_ot_threshold_and_orphan_admin.py can be run as regression via `EXPO_PUBLIC_BACKEND_URL=<url> pytest backend/tests/test_iter80_ot_threshold_and_orphan_admin.py -v`. Prefix any new temp data with Iter80- / TEST_Iter80_. Note: /auth/admin-pin-login uses `identifier` (not `phone`) as the field name.",
+  "rca_of_issue": "Bug 1 (Iter 77q) RCA — Firm KANKANI ENTERPRISES has attendance_policy.full_day_hours=12 (its actual daily shift) and standard_working_hours=8 (kept for legacy 8h reference). The pre-fix OT logic in monthly-grid + _build_ot_report_rows used `standard_working_hours` as the OT threshold — so any 10h shift triggered 2h of spurious OT even though the daily quota was actually 12h. Applied fix (verified in this iter): both surfaces now use `eff_policy.get('full_day_hours') or eff_policy.get('standard_working_hours') or 8.0`. Verified via KANK firm: 10h day → 0 OT (correct), 14h day → 2h OT (correct). Regression firm with only full_day_hours=8 (no standard_working_hours override) → 10h day still triggers 2h OT (correct backward compat).\n\nBug 2 (Iter 77r) RCA — When a firm is force-deleted the users.company_id references become orphaned. Before fix, /companies POST rejected any admin_phone / admin_email that matched an existing users record — even if that user's firm was gone. Applied fix: on each existence check, look up the linked firm; if firm is missing AND role ∈ {company_admin, sub_admin, employee}, delete the stale user + sessions and proceed. Live firms still block with 409. Super_admins are never auto-healed (role tuple deliberately excludes 'super_admin'). Verified end-to-end: orphan phone+email → reuse succeeds; live firm phone → 409; live firm email → 409; super_admin email → 409."
+}

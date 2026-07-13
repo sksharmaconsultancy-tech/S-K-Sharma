@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 29 — VERIFIED bug fix: super_admin no longer sees Daily Duty Hours section or any 'history' entry point on the Home dashboard. Frontend Playwright + code inspection + network-log evidence: (a) SUPER_ADMIN: [data-testid='duty-hours-section']=0, [data-testid='bento-history']=0, ActionRow 'Attendance history'=0 (verified at top and after scrollToBottom); regressions intact — hero-shift=1, notif-bell=1, bento-leaves=1, bento-tickets=1, bento-support=1, dashboard-company-picker=1, Admin overview (1 company / 7 employees) renders correctly. Crucially, /api/attendance/summary?days=7 fires 0 times for super_admin (skipped in load()). (b) EMPLOYEE: duty-hours-section=1, bento-history=1, 'Attendance history' row=1, /api/attendance/summary?days=7 called 2×. (c) COMPANY_ADMIN: not exercised in the browser (would require ephemeral admin_phone + temp_pin activation flow) but the exact same conditional user?.role !== 'super_admin' guards all three elements in index.tsx L227/L244/L398, so company_admin follows the same branch as employee and is covered by code inspection. Backend regression 3/3 pytest PASS — super_admin OTP still works, /api/attendance/summary?days=7 endpoint still responds 200 for both super_admin and a fresh employee. Super_admin PIN untouched (pin_must_change was already true on server; intercepted client-side via page.route on /auth/me to bypass the pin-change redirect — DB not modified). Deprecated packages detected: none new (only pre-existing RN-Web 'shadow*' style-props warnings, carried over from iter-27/iter-28).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "shadow* style props", "issue": "'shadow*' style props still deprecated on RN Web (pre-existing, unchanged this iteration). Reference: multiple StyleSheet.create blocks including /app/frontend/app/(tabs)/index.tsx shadow.card usages."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter29_super_admin_home.py",
+    "/app/test_reports/pytest/pytest_iter29.xml",
+    "/tmp/iter29_super_home.png",
+    "/tmp/iter29_super_home_bottom.png",
+    "/tmp/iter29_emp_home.png"
+  ],
+  "action_items": [
+    "Optional: consider centralising the isSuperAdmin flag (const isSuper = user?.role === 'super_admin') at the top of Dashboard() in /app/frontend/app/(tabs)/index.tsx so the four checks (load-skip, DutyHoursSection render, bento-history render, ActionRow render) all use the same derived boolean instead of re-computing user?.role !== 'super_admin' three times. Non-blocking style suggestion.",
+    "Follow-up (unchanged from iter-27/28): migrate shadow* style props → boxShadow, and props.pointerEvents → style.pointerEvents across /app/frontend/app/*.tsx to silence RN-Web deprecation warnings."
+  ],
+  "critical_code_review_comments": [
+    "index.tsx L61-63 correctly short-circuits the /attendance/summary fetch with Promise.resolve(null) for super_admin — cleaner than fetching + discarding; verified 0 network calls in Playwright.",
+    "index.tsx L227 gate ' user?.role !== \"super_admin\" && attSummary ' means the DutyHoursSection is also hidden if attSummary is null even for employees (transient API failure). This is defensive but silently hides content — consider showing a small placeholder card instead of nothing on API error for employees. Minor UX polish, not a bug.",
+    "The three super_admin exclusions are correctly symmetric (all use user?.role !== 'super_admin'); company_admin therefore always sees duty-hours-section + bento-history + 'Attendance history' row, matching the requirement."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter29_super_admin_home.py",
+    "/app/test_reports/iteration_29.json",
+    "/app/test_reports/pytest/pytest_iter29.xml"
+  ],
+  "success_rate": {"backend": "100% (3/3)", "frontend": "100% — super_admin hides all 3 targets and fires 0 summary calls; employee shows all 3 and fires 2 summary calls"},
+  "seed_data_creation": "Ephemeral employee OTP session (qa.iter29.<hex6>@test.com) created via OTP; no writes beyond user-record auto-creation. Super_admin pin_hash / pin_must_change / pin_fail_count / pin_locked_until UNTOUCHED (bypassed only in browser via page.route intercept on /api/auth/me — server state unchanged, confirmed pin_must_change=true still on server).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Super_admin's pin_must_change is currently true on the server (from prior iterations); this blocks the frontend Landing/(tabs)/_layout redirect from letting super_admin into /(tabs) without first navigating through /pin-change. Per /app/memory/test_credentials.md we MUST NOT reset it. To exercise super_admin Home in the browser: use await page.route('**/api/auth/me', ...) to intercept and override user.pin_must_change=false client-side — this leaves the DB unchanged but lets the router permit /(tabs). All API assertions can still use the real OTP session token; only the /auth/me RESPONSE is patched. For employees, patch onboarded=true + approval_status='approved' similarly. Company_admin activation requires the admin_phone+temp_pin flow (see /app/backend/tests/test_iter22_company_filter.py L67-80) and was not exercised this iteration.",
+  "rca_of_issue": "USER REPORT: 'Please Don't Show Daily Duty HRS and History to super admin login'. FIX IMPLEMENTED IN /app/frontend/app/(tabs)/index.tsx: (1) L61-63 — inside load(), branch on isSuper=user?.role==='super_admin'; when true, replace the attendance/summary fetch with Promise.resolve(null) so no attSummary is stored. (2) L227 — DutyHoursSection wrapped in ' user?.role !== \"super_admin\" && attSummary && ...' so the ' TOTAL DUTY HOURS / LAST 7 DAYS / Daily duty hours ' card is never rendered for super_admin. (3) L244-253 — bento-history tile ('Today activity' → /history) wrapped in same guard. (4) L398-404 — 'Attendance history' ActionRow wrapped in same guard. VERIFICATION: Playwright with mobile viewport 390×844 loaded /(tabs) as super_admin (with /auth/me client-intercept to satisfy pin_must_change gate — server untouched) and confirmed count()=0 for all three testIDs/text targets, plus 0 network calls to /api/attendance/summary. Re-ran as fresh employee (patched to onboarded/approved) and confirmed count()=1 for all three and 2 calls to /api/attendance/summary. Screenshot evidence in /tmp/iter29_*.png shows the super_admin dashboard cleanly stops at hero-shift → Pending leaves / Notifications bento → Raise support ticket → Admin overview → Quick actions (Payslips, Request a leave, Raise a ticket), with NO duty-hours card between hero and bento and NO 'Attendance history' row in Quick actions."
+}

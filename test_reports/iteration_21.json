@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 21 — Biometric Unlock (FaceID / Fingerprint) frontend verification + backend smoke. Landing page renders cleanly at the public URL, Metro bundled 1338 modules with no red errors, no unhandled console errors related to biometric wiring or the AppState listener. BiometricLockOverlay is imported globally in app/_layout.tsx and is NOT rendered pre-login (verified via DOM query). Code review of app/(tabs)/profile.tsx confirms the new 'Security' section with row-biometric row and biometric-switch Switch, disabled + subtitle 'Not available on this device' path present for web (getBiometricCapability returns supported=false on Platform.OS === 'web'). AuthContext exposes biometricEnabled / biometricSupported / biometricLabel / biometricLocked / enableBiometric / disableBiometric / unlockWithBiometric without breaking existing auth flow. Both new files (src/utils/biometric.ts, src/components/BiometricLockOverlay.tsx) exist, compile, and lint clean. Backend light smoke: /api/ health 200, ephemeral OTP request+verify+/auth/me works, /api/auth/pin-login with bad creds returns 401. super_admin pin_hash was NOT touched.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/auth/otp/request", "issue": "Real email delivery to non-verified recipients fails via Resend (http_403 'validation_error'). Backend correctly falls back to returning dev_code so QA can still sign in — expected in dev mode but worth noting for staging/prod."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter21_biometric_smoke.py",
+    "/app/test_reports/pytest/pytest_iter21.xml",
+    "/app/test_reports/screens/iter21_landing.png",
+    "/app/test_reports/screens/iter21_otp_page.png",
+    "/app/test_reports/screens/iter21_otp_sent.png",
+    "/app/test_reports/screens/iter21_after_verify.png"
+  ],
+  "action_items": [
+    "Real device (iOS/Android) validation still needed: enable biometric from Profile → Security, background the app > 30s, foreground and confirm BiometricLockOverlay engages with FaceID/Fingerprint prompt and 'Use PIN instead' fallback works. Web preview cannot exercise LocalAuthentication.authenticateAsync — this is called out in the review request itself.",
+    "Optional: add a subtle inline hint next to the disabled Switch on web pointing users to the mobile app (currently the subtitle 'Not available on this device' is accurate but a bit generic on desktop preview)."
+  ],
+  "critical_code_review_comments": [
+    "AuthContext.tsx L275-300: AppState listener bails out on web (Platform.OS === 'web' early return) — good, prevents infinite loops in the preview.",
+    "AuthContext.tsx L246-256: biometricLocked is set to true on boot ONLY when cap.supported && enabled — safe. But note: it is set without checking whether refresh() actually returned a user; if a user has biometric persisted from a previous install but their token expired, the overlay could briefly appear over the landing screen. Consider gating with `if (user && cap.supported && enabled)` inside the same effect (would need to move it after setUser stabilizes). Non-blocking for this iteration.",
+    "BiometricLockOverlay.tsx L120-133: uses position: 'fixed' on web via a cast — works but eslint may flag the `as any as any` double-cast; currently clean. zIndex 9999 correctly returns null when !biometricLocked so it does not intercept touches — verified via DOM query on landing.",
+    "biometric.ts L21-29: returns supported=false on web unconditionally — correct, prevents any expo-local-authentication native call from firing in the web preview.",
+    "profile.tsx L149-181: row-biometric + biometric-switch have proper testIDs. Switch trackColor / thumbColor set, disabled state respected. Row height ~60px so touch target is comfortably >44pt.",
+    "No expo-av / expo-barcode-scanner / expo-background-fetch usage detected. expo-local-authentication ~17.0.8 is the current stable version for the project's Expo SDK. No deprecated packages introduced by this iteration."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter21_biometric_smoke.py (new)"
+  ],
+  "success_rate": {"backend": "100% (3/3)", "frontend": "web-verifiable checks 100% — hardware biometric flow cannot be exercised in web preview by design"},
+  "seed_data_creation": "None. Created only one ephemeral OTP user (iter21qa*@test.local) which is idempotent test data and does not affect super_admin.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 21 delivered a mobile-only feature (biometric unlock via expo-local-authentication). The web preview will NEVER show biometricSupported=true or the BiometricLockOverlay because getBiometricCapability short-circuits on Platform.OS==='web'. Any future testing agent should focus on: (1) confirming the Security row still renders on Profile with testIDs `row-biometric` + `biometric-switch`, (2) confirming BiometricLockOverlay is NOT visible pre-login on web, (3) leaving hardware-dependent verification to real-device QA. Backend was NOT changed in this iteration; run only the existing pytest_iter21 smoke to confirm no regression on OTP + pin-login error path. DO NOT reset super_admin PIN (see /app/memory/test_credentials.md).",
+  "rca_of_issue": "N/A — no bugs found. One minor Resend delivery limitation surfaced (test-domain restriction) which is expected in dev and already handled gracefully via `dev_code` fallback in POST /api/auth/otp/request."
+}

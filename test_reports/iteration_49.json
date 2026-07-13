@@ -1,0 +1,50 @@
+{
+  "summary": "Backend + limited UI smoke test for iteration 49 (temp-credential display/auto-wipe + Resort/Hotel live-in roster). Wrote pytest suite /app/backend/tests/test_iter49_temp_creds_and_roster.py with 11 tests. Result: 9 PASS, 2 FAIL. Both failures are legitimate SECURITY LEAKS discovered on the backend where the plaintext temp PIN/password fields leak through /api/auth/me and /api/admin/employees. Roster endpoints work correctly (get + mark IN, bypasses geofence). Frontend landing + OTP screen render; full UI flow requires interactive OTP so was not exercised end-to-end but the temp-credentials rendering path in company-details.tsx / companies.tsx is directly wired to the (verified) API contract.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/auth/me",
+        "issue": "SECURITY LEAK: response.user contains `temp_pin_plaintext` and `temp_password_plaintext` for any admin that still owes a change. These plaintext credentials should never leave the /companies/{id}/details super-admin flow. Any admin (or any XSS-scoped script running on their session) can read the temp PIN/password via /auth/me. RCA: get_user_from_token() returns the full user doc, and /auth/me passes it through unchanged.",
+        "priority": "CRITICAL"
+      },
+      {
+        "endpoint": "GET /api/admin/employees",
+        "issue": "SECURITY LEAK: /admin/employees returns full user docs including `temp_pin_plaintext` and `temp_password_plaintext` for every user in the company. Any company_admin (which includes the freshly-created admin who still owes a change) can enumerate everyone else's temp credentials if they were provisioned via reset flows. RCA: line ~7377 uses find(q, {\"_id\": 0}) with no projection to strip the plaintext fields.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter49_temp_creds_and_roster.py",
+    "/app/test_reports/pytest/pytest_iter49.xml"
+  ],
+  "action_items": [
+    "Add a projection (or a `_public_user()` sanitiser) that strips `temp_pin_plaintext`, `temp_password_plaintext`, `pin_hash`, `password_hash`, `face_reference_base64`, etc. from every place that returns a user object EXCEPT /companies/{id}/details for super_admin. Concretely: fix /auth/me (server.py ~1183) and /admin/employees (~7365) to drop these fields before returning. Suggested single-source-of-truth: extend _enrich_user_with_company() (~1124) to unconditionally delete the plaintext fields, and add the same three keys to the projection in list_employees().",
+    "After the fix, re-run tests/test_iter49_temp_creds_and_roster.py — the two failing security tests are exactly the regression guards for this bug.",
+    "(Optional) Consider a background job that purges `temp_pin_plaintext` after N days even if the admin never logs in — currently the plaintext lingers indefinitely in Mongo until the admin actually changes their PIN."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 8006 lines — well past the 700-line threshold. Consider splitting auth/company/attendance/roster into separate router modules.",
+    "get_user_from_token() returns the raw Mongo user doc; several endpoints (/auth/me, /admin/employees, /admin/user-role response) rely on manual projections to redact sensitive fields. This is fragile and directly caused the leaks above. A single _redact_user() helper called at every return site would harden this.",
+    "employee-signup accepts 'pin' but does not enforce that the caller is authenticated — this is intentional per the design comment but worth documenting that anyone with a valid company_code can create a pending employee record."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter49_temp_creds_and_roster.py (new)"
+  ],
+  "success_rate": {
+    "backend": "82% (9/11)",
+    "frontend": "smoke only — landing + OTP screen render, deeper flow gated by OTP delivery"
+  },
+  "seed_data_creation": "Each pytest run creates ONE throwaway company `TEST_TempCreds_<hex>` with its own company_admin (both phone + email + temp creds) and cleans it up via DELETE /companies/{id} on teardown. TestCreateCompanyPhoneOnly and TestRoster additionally create + immediately delete their own throwaway companies / a housekeeping employee. Nothing touches sksharmaconsultancy@gmail.com's PIN/password.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The two failing tests (TestSecurityNoLeaks::test_no_leak_on_auth_me and ::test_no_leak_on_admin_employees) are the guardrails for the leak fix. After main-agent patches, simply run: `cd /app/backend && python -m pytest tests/test_iter49_temp_creds_and_roster.py -v` — all 11 tests should pass. NOTE: super-admin OTP now returns the code under the key `dev_code` (not `code`) — this shape is handled in the test file for future reuse. NOTE: /admin/employees currently has no route with PATCH /{user_id} — updates go through /admin/user-role and /admin/approve-employee; the test file uses those.",
+  "rca_of_issue": "Reproduction of the temp-credential leak: (1) super-admin creates a company with admin_phone + admin_email; temp_pin + temp_password are set on the new company_admin doc under keys `temp_pin_plaintext` and `temp_password_plaintext`. (2) The new company_admin logs in via /auth/admin-pin-login using the temp_pin. (3) The company_admin (or a script on their session) calls GET /api/auth/me → the response includes `user.temp_pin_plaintext` and `user.temp_password_plaintext` verbatim. (4) The same admin calls GET /api/admin/employees → every user doc in their scope is returned including any other admin/employee's `temp_*_plaintext` fields. Root cause: get_user_from_token (line ~848) returns the whole user doc; /auth/me (line ~1183) passes it through _enrich_user_with_company() which does not strip these fields; list_employees (line ~7365) uses only `{_id: 0}` as its projection. Mitigation: add `temp_pin_plaintext`, `temp_password_plaintext`, `pin_hash`, `password_hash` to both the projection in list_employees AND to a final del-step in _enrich_user_with_company (or a new _redact_user helper called from every user-returning endpoint)."
+}

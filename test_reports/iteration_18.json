@@ -1,0 +1,43 @@
+{
+  "summary": "Iter18: Company / Employer third-persona feature fully verified — both Path A (self-register → super_admin approval provisions Company + company_admin) and Path B (super_admin POST /api/companies with admin_phone → returns temp_pin, pin_must_change=true, admin can log in) work correctly. Backend: 21/21 pytest cases passed (POST /api/auth/company-register happy path + validation matrix, PATCH /api/company-requests/{id} approval provisions company/user/hash matches submitted PIN, reject leaves DB clean, POST /api/companies allots temp PIN, duplicate admin_phone → 409, no admin_phone → no admin created). Frontend: E2E via Playwright at the public preview URL — landing shows all three CTAs (Admin, Company sign in / register, Employee), company-login screen renders every required testID (identifier, PIN, submit, register-link, forgot-pin), company-register 3-step wizard walks through firm → contact → PIN → cr-done, and cr-error surfaces for blank Firm name, bad email, and trivial PIN '111111'. The cr-go-signin button routes back to /company-login. Real super admin PIN was NEVER touched — used a throwaway super_admin doc seeded via pymongo. All test artefacts (throwaway SA, ITER18 companies/requests/users, E2E UI-submitted request) cleaned up from Mongo.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "shadow* / props.pointerEvents", "issue": "Pre-existing web deprecation warnings carried over from prior iterations — non-blocking."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_company_persona_iter18.py",
+    "/app/test_reports/pytest/pytest_iter18.xml",
+    "/app/test_reports/screens/iter18_landing.png",
+    "/app/test_reports/screens/iter18_company_login.png",
+    "/app/test_reports/screens/iter18_cr_step1.png",
+    "/app/test_reports/screens/iter18_cr_step3_err.png",
+    "/app/test_reports/screens/iter18_after_done.png"
+  ],
+  "action_items": [
+    "No blocking action items. Company persona feature is production-ready per the tested contract.",
+    "OPTIONAL (unchanged, carried from iter_17): users.email unique index is not sparse; two phone-only signups with no email still collide with DuplicateKeyError. Out of scope for this iter but flagged again for hygiene."
+  ],
+  "critical_code_review_comments": [
+    "server.py:1643-1690 — Approval provisioning is not atomic: db.companies.insert_one runs before db.users.insert_one. If the users insert fails (e.g. duplicate email/phone raised between the pre-check on line 1645 and insert on line 1686), the company row is orphaned. Consider wrapping in a MongoDB transaction OR compensating with a delete of company on user-insert failure.",
+    "server.py:1943-1990 (Path B) — Similar non-atomic pattern: db.companies.insert_one commits before the admin user is created; a race on the admin_email uniqueness check (lines 1954-1957) can leave a company without its admin. Same compensation guidance.",
+    "company-register.tsx:52 — mobile validation is 'digits ≥ 10' but backend normaliser accepts +91 + 10 digits; UI treats '9876543210' (no +91) as valid and backend re-normalises. Works today, but consider showing the normalised form back so the user sees what will be saved.",
+    "company-login.tsx:41-61 — no rate-limit / lockout feedback in UI when backend returns 429; user sees the generic error string. Consider surfacing lockout minutes explicitly."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_company_persona_iter18.py (new)",
+    "/app/test_reports/pytest/pytest_iter18.xml (new)",
+    "/app/test_reports/iteration_18.json (this file)",
+    "/app/test_reports/screens/iter18_*.png (evidence)"
+  ],
+  "success_rate": {"backend": "100% (21/21)", "frontend": "100% (5/5 UI checkpoints: landing 3-CTA, company-login testIDs, register wizard 3 steps, 3 validation errors, cr-done→signin routing)"},
+  "seed_data_creation": "Created and DELETED during this run: (a) throwaway super_admin 'throwaway_sa_iter18_<tag>@example.com' — deleted, (b) ~5 ITER18-tagged company_requests — deleted, (c) 2 ITER18 provisioned companies + their company_admin users — deleted, (d) UI-submitted 'E2E Iter18 Firm' company_request with owner 'e2e_iter18_ui@example.com' / phone +919876500042 — deleted. Final DB state verified 0 residuals. Real super admin doc snapshot BEFORE and AFTER identical: {pin_must_change:true, pin_fail_count:0, pin_locked_until:null, pin_hash unchanged}.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Company / Employer persona (Path A self-register + Path B allot-credentials) is fully verified end-to-end. Reusable regression file: /app/backend/tests/test_company_persona_iter18.py. Uses a throwaway pymongo-seeded super_admin (never touches the real one). Uses TAG='ITER18_<random>' for all seed data — cleanup is guaranteed by module-scoped fixture teardown. Note: /api/auth/company-register triggers Resend email delivery to sksharmaconsultancy@gmail.com; each successful registration in tests will produce one real email — main agent may want to monkeypatch _try_send_admin_email for silent test runs going forward (mocked_apis flagged in the review request). testIDs on frontend all match the review spec exactly.",
+  "rca_of_issue": "No bugs found. Two non-blocking architectural comments: (1) non-atomic provisioning between companies+users inserts in both Path A approval and Path B create; (2) UI does not surface 429 lockout time. Both are hardening items, not defects."
+}

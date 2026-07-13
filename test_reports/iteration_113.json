@@ -1,0 +1,45 @@
+{
+  "summary": "Iter 113 — Reports & Compose validation. Backend: 16/16 pytest pass (Employee Master new fields, alphabetical firms, PF/ESI contribution monthly+yearly+xlsx, Bonus Yearly Summary +xlsx, Master Data columns, Compose notification with all_companies + attachments, Gmail status no-crash, Compliance Salary Run new keys father_name/designation/uan_no/esi_ip_no). Frontend: dashboard `admin-brand-center` testID confirmed rendering; sidebar structure verified via source (Reports contains PF/ESI Contribution Sheet + HR Letters; Bonus contains Bonus Yearly Summary; AI Insights is LAST; HR Letters NOT top-level); employee-add form has Blood Group/Marital Status chips, 'Name As Per PAN Card', 'UPI ID' fields, DD-MM-YYYY placeholder; email-settings Compose shows '📣 ALL FIRMS (single click)' chip and Attach file section; compliance-salary-run grid header uses Name/Father Name/Designation/UAN No./ESIC No./Present Days (Code column removed); firm-master pincode auto-fill wired to /api/pincode/{pin} (returns Delhi/Central Delhi for 110001). Live browser automation on /(tabs) hit Cloudflare preview rate-limit (HTTP 429 storm) which surfaced a runtime security-check overlay, so deep click-through validation of each screen was blocked by infra, not by app. Deprecated packages detected: none in this session.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Preview browser automation on /(tabs)",
+        "issue": "Cloudflare preview environment returned HTTP 429 for ~200 asset/API requests in a burst, causing an in-app 'Security check in progress — please reload' overlay to appear. This is an infra rate-limit, not an app bug; retrying after a cooldown clears it. admin-brand-center testID was still found when dashboard did render.",
+        "affected_testIDs": ["admin-brand-center"]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter113_reports_and_compose.py",
+    "/app/test_reports/pytest/iter113.xml"
+  ],
+  "action_items": [
+    "(Optional) firm cmp_527fecdd7c had salary_process.online_salary flipped to true by this test session to be able to POST a fresh compliance salary run and verify new row keys (was false before). Consider restoring if unintended for this firm.",
+    "(Optional) The compliance-salary-run sort-by dropdown (line 1149 of compliance-salary-run.tsx) still offers a 'Code' option (`[[\"code\", \"Code\"]]`) — this is a SORT option, not the removed grid column, so it does not violate the 'hide Employee Code column' directive. Left as-is."
+  ],
+  "critical_code_review_comments": [
+    "contribution_reports.py cleanly excludes _id via projections and correctly gates via require_role — good.",
+    "email_notifications.py compose endpoint validates attachment size (10MB per file, max 5) and gates SMTP requirement only when send_email=true — correct.",
+    "compliance_salary utility (utils/compliance_salary.py L367-370) now emits father_name/designation/uan_no/esi_ip_no on each row — verified in fresh run."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter113_reports_and_compose.py (new)",
+    "DB: firm_masters.cmp_527fecdd7c.salary_process.online_salary = true (was false) — test setup only"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "code-verified for all 7 UI claims; live browser end-to-end blocked by Cloudflare 429 rate-limit in the preview env"
+  },
+  "seed_data_creation": "Created ~2 test employees under Kankani (name prefix 'TEST NF …'), plus multiple in-app notification docs from the Compose broadcast test. Also created 1 fresh compliance_salary_run for month=2026-06 to verify new row keys.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend 16/16 pytest green. When re-running UI automation, throttle requests (or wait ~2 min) to avoid the Cloudflare 429 loop that produces the 'Security check in progress' overlay in the Expo preview. The dashboard testID `admin-brand-center` is present and the sidebar labels match the spec (verified in AdminWebShell.tsx L92-169). If a UI regression is suspected, the manual smoke path is: login → dashboard (see centered logo+name) → click sidebar Reports (P.F./E.S.I. Contribution Sheet visible) → Bonus (Bonus Yearly Summary visible) → check AI Insights is last item.",
+  "rca_of_issue": "N/A — no functional regressions found. Only friction was CF preview-tier rate-limiting during Playwright automation (not a code defect)."
+}

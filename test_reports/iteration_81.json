@@ -1,0 +1,44 @@
+{
+  "summary": "Iter 81 backend-only testing — all three fixes verified. Fix 1 (Iter 77s same-machine dedup): dedupe_same_machine_punches(15 min) helper at server.py:1153 correctly drops (kind, source)-signature duplicates within 15 min. 6-punch seed collapses to 4 kept punches on the grid (2 duplicates dropped). 16-min-apart INs are both kept (regression). Cross-source INs at 09:00/09:05 are both kept (different signatures). Same dedup applied inside _build_ot_report_rows (server.py:14751) — OT report row for a 10h day with 4 punches (2 duplicates) reports the correct ot_hours=2 / total_hours=10 (no inflation). Fix 2 (Iter 77t): totals.duty_hours now includes OT — a 10h Policy 1 day yields totals.hours=10, totals.ot_hours=2, totals.duty_hours=10 (== totals.hours). Fix 3 (Iter 77s schema): every row in the monthly-grid response carries a numeric totals.duty_hours field. Regression: Iter 77q OT-threshold-from-full_day_hours and Iter 77r orphan-admin auto-heal both still PASS (all 9 tests of test_iter80_ot_threshold_and_orphan_admin.py green). All 9/9 new Iter81 tests PASS + 9/9 Iter80 regression PASS. 110 test artifacts cleaned up.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/admin/attendance/monthly-grid/{cid}/{month}",
+        "issue": "Nuance (NOT a bug in dedup): with the 6-punch seed (09:00 IN, 09:20 IN kept, 13:00 OUT bio, 13:00 OUT mobile — two OUTs at identical time, different sources), the policy_2 compute_textile_day yields duty_hours=3.5 (not 4.0). raw_hours is correctly 4.0 and in/out show 09:00/13:00. The 0.5h shortfall comes from the compute engine's pairing when it sees a redundant IN followed by two OUTs at the same timestamp — it appears to pair 09:20→13:00 (3.67h) then round down to 3.5h under half_day threshold. This is unrelated to the dedup fix (which correctly kept 4 punches). Consider tightening pair-punches to ignore redundant in-sequence INs when a matching OUT already closed a pair. Non-blocking."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter81_dedup_and_duty_totals.py",
+    "/app/test_reports/pytest/pytest_iter81.xml",
+    "/app/test_reports/pytest/pytest_iter81_regression.xml"
+  ],
+  "action_items": [
+    "OPTIONAL — Extract the (kind, source) dedup call into a small utility and reuse in any FUTURE punch-aggregation surface (Excel exports, salary compute) so downstream pipelines don't recompute a subset. Currently only the two grid/OT-report surfaces call it.",
+    "OPTIONAL — Investigate pair_punches behaviour with two OUTs at identical timestamp from different sources — the second OUT with source='mobile' at 13:00 causes compute_textile_day to report duty_hours=3.5 instead of 4.0. Not a bug in the Iter 81 fixes but a visible pairing edge case now exposed."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 15,992 lines — well past the 700-line guideline. The 15-min dedup call is duplicated at server.py:14490 and server.py:14751; both spots correctly use the shared helper (good) — future surfaces (e.g., attendance XLSX, salary compute) should also invoke dedupe_same_machine_punches for consistency.",
+    "totals.duty_hours + totals.hours are now identical on every response (Iter 77t). Frontend keeps both columns for backward-compat but they now hold the same figure — consider a note in the API docs (or deprecating one field after a release) so downstream consumers don't drift.",
+    "dedupe_same_machine_punches uses (kind, source) as the signature and threshold 15 min — the 'source' string is compared case-insensitively (.lower()). Fine for controlled sources but if the same physical machine emits both 'bio_dev01' and 'BIO_DEV01' the dedup will still catch it. Consider documenting that source strings should be normalized upstream too."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter81_dedup_and_duty_totals.py (new — 9 tests, 421 lines)"
+  ],
+  "success_rate": {
+    "backend": "100% for Iter 81 (9/9) and Iter 80 regression (9/9)",
+    "frontend": "N/A - backend-only review"
+  },
+  "seed_data_creation": "Test fixtures created 8 attendance firms (Iter81-Dedup-*) + 2 admin firms (Iter81-A/B) + ~8 employees + 20 manual punches inserted directly via pymongo (custom source values 'bio_dev01' / 'mobile' / 'manual_admin'). ALL removed via `python3 /app/scripts/cleanup_test_data.py --apply` — 110 artifacts total across attendance (58), companies (27), users (24), user_sessions (1).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 81 verified stable. Test suite lives at /app/backend/tests/test_iter81_dedup_and_duty_totals.py and can be re-run via `EXPO_PUBLIC_BACKEND_URL=<url> MONGO_URL=<url> DB_NAME=test_database pytest backend/tests/test_iter81_dedup_and_duty_totals.py -v`. This suite is UNUSUAL — it seeds raw attendance docs via pymongo directly (needed because /api/admin/attendance/manual-punch hard-codes source='manual_admin' and Iter 77s dedup requires per-punch custom sources like 'bio_dev01' / 'mobile'). Prefix any new temp data with Iter81- / TEST_Iter81_. The dedup helper signature = (kind, source) lower-cased; threshold = 15 minutes; applied in monthly_attendance_grid_json (server.py:14490) AND _build_ot_report_rows (server.py:14751).",
+  "rca_of_issue": "N/A — no bugs found. All three fixes (Iter 77s dedup, Iter 77t duty_hours=hours, Iter 77s schema field) work as specified. The one nuance flagged in backend_issues.minor is a pre-existing pair-punches edge case exposed by the new test data (two OUTs at identical timestamp from different sources) — the dedup itself is correct."
+}
