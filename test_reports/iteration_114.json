@@ -1,0 +1,31 @@
+{
+  "summary": "Iter 114 review — Employee Full Report + Sub Admin Performance chart + QR-scoped landing. Backend: 7/7 pytest passes (JSON aggregate, XLSX PK magic, PDF %PDF magic, 400 on missing dates, 404 on unknown user, 401 without auth, users-log Jun-Jul 2026 returns events). Frontend: (1) /employee-report loads at correct URL (not /admin), Kankani firm picker, employee search 'SURENDRA' returns 3 matches, This FY chip pre-fills 2026-04-01→2026-07-13, Generate Full Report renders Profile / Attendance / Leaves / Actual Salary / Compliance Salary / Documents / Tickets sections, Export Excel & Export PDF buttons visible. (2) /users-log-report renders 'Sub Admin Performance' card with Punch/Salary/Compliance/Other legend, Last 7/30/90 days quick chips work, per-admin stacked horizontal bars render (super_admin: 24 actions = Salary 15 + Compliance 9; blank admin row: 68 Punch actions), 92 total log entries in Last 90 days. (3) Mobile viewport 390x844: /get-app?type=employee sets localStorage qr_entry_type=employee then / shows ONLY 'Employee sign in' (Admin & Company hidden) + 'Show all sign-in options' link which restores all three; /get-app?type=employer hides only 'Employee sign in' — Admin & Company remain. All acceptance criteria met.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": ["Console noise: 'shadow*' style props deprecated (use boxShadow); 'outline' and 'background' shorthand style property warnings — pre-existing across the app, not caused by this iteration"]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_employee_full_report.py",
+    "/app/test_reports/pytest/iter114.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "employee_full_report.py cleanly strips pin_hash / password_hash / face_descriptor / face_base64 / selfie_base64 / base64 / file_base64 / attachments before returning — good PII hygiene",
+    "_gather scopes via _load_scoped_employee_any_role so sub_admin/company_admin can only pull employees they own — correct RBAC via 404 on cross-scope",
+    "XLSX & PDF exports reuse _gather so exports match the JSON exactly — no duplication"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_employee_full_report.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% (all 3 flows)"},
+  "seed_data_creation": "none",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter114 features (Employee Full Report at /employee-report incl. XLSX/PDF export, Sub Admin Performance stacked-bar card on /users-log-report, QR-scoped landing via /get-app?type=employee|employer + localStorage qr_entry_type) fully validated. Kankani super admin login: password 'sharma123' via [data-testid=mode-password] then [data-testid=admin-identifier-input]/[data-testid=admin-password-input]/[data-testid=admin-pin-submit]. Sample employee for report tests: emp code 50 SURENDRA SINGH under Kankani cmp_527fecdd7c. users-log has 92 events in Last 90 days (data timestamps July 2026).",
+  "rca_of_issue": "n/a — no bugs found"
+}

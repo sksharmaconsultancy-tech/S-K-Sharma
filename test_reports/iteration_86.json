@@ -1,0 +1,41 @@
+{
+  "summary": "Verified the P Days & P Hours edit-unlock on Actual Salary Process. Backend PATCH /api/admin/actual-salary-process/{run_id}/row now accepts p_days & p_hours regardless of attendance_source. Wrote 5 targeted pytest cases — all PASS: (1) p_days=15 saved on biometric run, (2) p_hours=120 saved on biometric run, (3) p_days=99 capped to row.max_p_days, (4) downstream basic_salary/EPF recompute after edit, (5) manual-source regression edit still works. Frontend code review confirms ResultGrid removed the `biometricLocked` variable and now passes `disabled={readOnly}` (readOnly = run.finalized) to EditCell for both p_days and p_hours, and the '🔒 P Days & P Hours locked' hint below the grid was removed. Frontend landing loaded without red-screen errors. One MINOR UX leftover found: the chipHint text in the config card at salary-run.tsx:546-548 still reads 'P Days & P Hours are pulled from the attendance grid and locked.' when Biometric source is selected — this contradicts the new behavior and should be reworded.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "salary-run.tsx config card chipHint",
+        "issue": "Line 546-548: When attendance_source='biometric' the hint still says '...pulled from the attendance grid and locked.' The fields are no longer locked. Suggested rewording: 'P Days & P Hours are pre-filled from the attendance grid — you can still edit any row inline before finalizing.'",
+        "testID": "n/a",
+        "priority": "MINOR"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_pdays_phours_unlock.py",
+    "/app/test_reports/pytest/pytest_pdays_phours_unlock.xml"
+  ],
+  "action_items": [
+    "Update the chipHint at /app/frontend/app/salary-run.tsx:546-548 so the Biometric branch no longer says 'locked' (contradicts new editable behavior)."
+  ],
+  "critical_code_review_comments": [
+    "Backend patch endpoint correctly caps p_days to row.max_p_days (line 17074-17075). p_hours has no cap which matches expected behavior (admin can enter any number of hours).",
+    "Frontend ResultGrid EditCell disabled prop is only wired to `readOnly = run.finalized` — correct.",
+    "Docstring on patch_actual_salary_row (server.py:17032-17034) is stale — it still says 'When attendance_source = biometric the P Days & P Hours fields are LOCKED and any client patch attempting to change them is silently ignored on the server.' — this is now false. Consider updating the docstring."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_pdays_phours_unlock.py (new)"
+  ],
+  "success_rate": {"backend": "100% (5/5)", "frontend": "code-review verified; live grid edit not executed end-to-end (requires admin login + firm with employees + generating a run) — backend contract test covers the underlying save path"},
+  "seed_data_creation": "None. Used existing firm-with-employees discovered dynamically via /api/companies + /api/admin/employees.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Test cases live at /app/backend/tests/test_pdays_phours_unlock.py. Run with: pytest backend/tests/test_pdays_phours_unlock.py -v. Auth uses OTP dev mode (/api/auth/otp/request returns dev_code in body; verify at /api/auth/otp/verify). The critical assertion is that a PATCH with p_days on a biometric run is NO LONGER silently ignored — the response row.p_days must equal min(sent, row.max_p_days).",
+  "rca_of_issue": "Not applicable — feature verification, not a bug RCA."
+}

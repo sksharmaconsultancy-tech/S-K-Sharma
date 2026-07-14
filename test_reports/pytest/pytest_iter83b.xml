@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="4" skipped="0" tests="9" time="3.842" timestamp="2026-07-07T04:58:17.664339+00:00" hostname="agent-env-e4e7ee8d-8a9b-4acb-8b08-f878545854bb"><testcase classname="test_iter83b_ot_split_and_selfregister.TestA_CrossDayOT" name="test_grid_cell_shows_explicit_ot_pair" time="1.131"><failure message="AssertionError: out expected 19:58, got 07:58 — cell={'in': '08:00', 'out': '07:58', 'ot_in': '20:08', 'ot_out': '07:58', 'hours': 24.0, 'duty_hours': 8.0, 'raw_hours': 23.8, 'ot_hours': 16.0, 'punches': 4, 'sources': ['app'], 'present': 1.0, 'weekly_off': False}&#10;assert '07:58' == '19:58'&#10;  &#10;  - 19:58&#10;  + 07:58">backend/tests/test_iter83b_ot_split_and_selfregister.py:190: in test_grid_cell_shows_explicit_ot_pair
+    assert cell.get("out") == "19:58", f"out expected 19:58, got {cell.get('out')} — cell={cell!r}"
+E   AssertionError: out expected 19:58, got 07:58 — cell={'in': '08:00', 'out': '07:58', 'ot_in': '20:08', 'ot_out': '07:58', 'hours': 24.0, 'duty_hours': 8.0, 'raw_hours': 23.8, 'ot_hours': 16.0, 'punches': 4, 'sources': ['app'], 'present': 1.0, 'weekly_off': False}
+E   assert '07:58' == '19:58'
+E     
+E     - 19:58
+E     + 07:58</failure></testcase><testcase classname="test_iter83b_ot_split_and_selfregister.TestA_CrossDayOT" name="test_ot_report_row_cross_day" time="0.034"><failure message="AssertionError: ot_hours ~11.83 expected, got 15.8&#10;assert 15.8 &lt;= 12.2">backend/tests/test_iter83b_ot_split_and_selfregister.py:215: in test_ot_report_row_cross_day
+    assert 11.5 &lt;= ot_hrs &lt;= 12.2, f"ot_hours ~11.83 expected, got {ot_hrs}"
+E   AssertionError: ot_hours ~11.83 expected, got 15.8
+E   assert 15.8 &lt;= 12.2</failure></testcase><testcase classname="test_iter83b_ot_split_and_selfregister.TestB_UnpairedAnomaly" name="test_grid_cell_marked_anomaly" time="0.496" /><testcase classname="test_iter83b_ot_split_and_selfregister.TestB_UnpairedAnomaly" name="test_ot_report_skips_anomaly_day" time="0.073" /><testcase classname="test_iter83b_ot_split_and_selfregister.TestC_HappyPath2Pair" name="test_grid_cell_regular_and_ot" time="0.707"><failure message="AssertionError: {'in': '08:00', 'out': '20:00', 'ot_in': '16:30', 'ot_out': '20:00', ...}&#10;assert '20:00' == '16:00'&#10;  &#10;  - 16:00&#10;  + 20:00">backend/tests/test_iter83b_ot_split_and_selfregister.py:298: in test_grid_cell_regular_and_ot
+    assert cell.get("out") == "16:00", cell
+E   AssertionError: {'in': '08:00', 'out': '20:00', 'ot_in': '16:30', 'ot_out': '20:00', ...}
+E   assert '20:00' == '16:00'
+E     
+E     - 16:00
+E     + 20:00</failure></testcase><testcase classname="test_iter83b_ot_split_and_selfregister.TestD_SinglePairFallback" name="test_grid_arithmetic_split" time="0.393"><failure message="AssertionError: {'in': '08:00', 'out': '22:00', 'ot_in': None, 'ot_out': None, ...}&#10;assert None == '22:00'&#10; +  where None = &lt;built-in method get of dict object at 0xfc2639dbb380&gt;('ot_out')&#10; +    where &lt;built-in method get of dict object at 0xfc2639dbb380&gt; = {'in': '08:00', 'out': '22:00', 'ot_in': None, 'ot_out': None, ...}.get">backend/tests/test_iter83b_ot_split_and_selfregister.py:337: in test_grid_arithmetic_split
+    assert cell.get("ot_out") == "22:00", cell
+E   AssertionError: {'in': '08:00', 'out': '22:00', 'ot_in': None, 'ot_out': None, ...}
+E   assert None == '22:00'
+E    +  where None = &lt;built-in method get of dict object at 0xfc2639dbb380&gt;('ot_out')
+E    +    where &lt;built-in method get of dict object at 0xfc2639dbb380&gt; = {'in': '08:00', 'out': '22:00', 'ot_in': None, 'ot_out': None, ...}.get</failure></testcase><testcase classname="test_iter83b_ot_split_and_selfregister.TestE_SelfRegisterSuperAdminGuard" name="test_self_register_with_super_admin_phone_returns_409" time="0.032" /><testcase classname="test_iter83b_ot_split_and_selfregister.TestE_SelfRegisterSuperAdminGuard" name="test_super_admin_user_not_deleted" time="0.141" /><testcase classname="test_iter83b_ot_split_and_selfregister.TestF_SelfRegisterHappyPath" name="test_fresh_phone_registers_then_duplicate_409_pending" time="0.703" /></testsuite></testsuites>

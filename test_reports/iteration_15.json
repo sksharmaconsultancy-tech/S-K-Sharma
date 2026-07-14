@@ -1,0 +1,42 @@
+{
+  "summary": "Iter_15: Both fixes verified end-to-end. (1) New public GET /api/companies/lookup/{code} works: valid code returns {company_id, name, company_code}, unknown code returns 404 with 'not recognised' message, case-insensitive normalisation OK, no sensitive fields (office_lat/lng/_id) leak. Regression: /api/companies/by-code/{code} still requires auth (401 without token). (2) Employee signup happy path is now UNBLOCKED: filled Step 1 (phone=+919999778866, PIN=234567, company_code=A41C85 seeded via super admin), signup-next advanced to Step 2 with NO 'Not Found' error, submitted Step 2 with name='Test Signup' -> signup-done shown -> signup-goto-login navigated back to /pin-login, then pin-login with new phone/PIN succeeded and correctly routed pending employee to /pin-change (pin_must_change=true). No red-screen, no crash. (3) Logout residue fix VERIFIED: signed in as super admin, changed PIN, went to /profile, tapped logout -> landing (URL='/') rendered with testID=landing-screen; 'Maximum update depth exceeded' count = 0; 'REPLACE not handled' count = 0. Cleanup: test employee (+919999778866) deleted, test company (TEST_Iter15_Company) deleted, super admin PIN reset to 246810 with pin_must_change=true, pin_fail_count=0, pin_locked_until=null; final POST /api/auth/admin-pin-login with 246810 -> 200.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "shadow* style props", "issue": "Pre-existing deprecation warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' Not blocking."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_lookup_iter15.py",
+    "/app/backend/tests/cleanup_iter15.py",
+    "/app/test_reports/pytest/pytest_iter15.xml"
+  ],
+  "action_items": [
+    "Both critical issues from iter_14 are RESOLVED. No pending action items from this iteration.",
+    "OPTIONAL (carried over from iter_14): Consider blocking pin-login when approval_status='pending' (currently a pending employee still gets a session_token and is routed to /pin-change).",
+    "OPTIONAL (carried over from iter_14): server.py is ~2311 lines; consider splitting into modules (auth.py, companies.py, attendance.py, etc.) — well above the 700-line guideline."
+  ],
+  "critical_code_review_comments": [
+    "GET /api/companies/lookup/{code} correctly projects only {company_id, name, company_code} — no sensitive fields leaked. Good.",
+    "AuthContext.logout: hard-navigate to '/' via window.location.assign BEFORE any state setter on web is the right ordering; verified no 'Maximum update depth' warning fires now.",
+    "Employee signup allows creation of an approval_status='pending' user and /auth/pin-login still returns 200 + session_token for that user. This is functional (they hit /pin-change first) but if the intent is to fully block pending employees at login, add explicit approval gate."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_lookup_iter15.py (new)",
+    "/app/backend/tests/cleanup_iter15.py (new)",
+    "/app/test_reports/pytest/pytest_iter15.xml (new)",
+    "/app/test_reports/iteration_15.json (this file)"
+  ],
+  "success_rate": {"backend": "100% (4/4 lookup tests + all iter_14 pytest still pass)", "frontend": "100% (signup happy path Step1->Step2->Done->pin-login->pin-change all pass; logout returns to landing with no console errors)"},
+  "seed_data_creation": "Created test company TEST_Iter15_Company (code=A41C85) and test employee (+919999778866, PIN=234567, name='Test Signup') during E2E signup. BOTH deleted at end. Super admin PIN reset to 246810, pin_must_change=true, pin_fail_count=0, pin_locked_until=null. Verified via POST /api/auth/admin-pin-login -> 200.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "iter_14 blockers are fully closed. Public /api/companies/lookup/{code} contract is exercised in /app/backend/tests/test_lookup_iter15.py and is stable. If future signup/login flows are added, reuse test_employee_signup_iter14.py + test_lookup_iter15.py + cleanup_iter15.py as regression baselines. Super admin credentials remain: sksharmaconsultancy@gmail.com / 246810 (with pin_must_change=true, so first login will land on /pin-change).",
+  "rca_of_issue": "No new bugs. Both bugs identified in iter_14 are RESOLVED and verified: (a) missing public lookup endpoint is now present at server.py:1303 returning {company_id, name, company_code} or 404 'not recognised'; (b) AuthContext.logout web branch now calls window.location.assign('/') FIRST and returns, avoiding the transient setUser(null) render loop that caused the 'Maximum update depth exceeded' warning in iter_14."
+}

@@ -1,0 +1,69 @@
+{
+  "summary": "Backend contract for employee self-signup + phone-based PIN login is SOLID (10/10 pytest passes). New /pin-login screen correctly shows ONLY mobile+PIN (no legacy company/employee code fields) and /employee-signup screen renders all Step 1 testIDs and surfaces validation errors via signup-error. CRITICAL FRONTEND BUG: the signup Step 1 -> Step 2 transition calls GET /api/companies/lookup/{code} which returns 404 (endpoint does not exist). Only /api/companies/by-code/{code} exists and requires auth. Result: NO ONE CAN COMPLETE SIGNUP even with a valid company code -- users see a red 'Not Found' banner and are stuck on Step 1. Logout bug from iter_13 is IMPROVED but not fully clean: window.location.assign('/') successfully returns the user to the landing screen (URL == '/', landing-screen testID visible) and eliminates the 'REPLACE not handled by any navigator' error, however a single 'Maximum update depth exceeded' React error still fires briefly between setUser(null) and the hard reload. Cleanup DONE: super admin PIN reset to 246810 (pin_must_change=true, pin_fail_count=0), verified via /auth/admin-pin-login -> 200; test employee (+919999888877) removed; seeded test company (TEST_Iter14_Company) removed.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/companies/lookup/{code}",
+        "issue": "Endpoint DOES NOT EXIST in server.py but frontend employee-signup.tsx calls it (line 75) to verify company code before Step 2. Backend only has /api/companies/by-code/{code} which requires authentication. Add a public alias, e.g.:\n\n@api.get('/companies/lookup/{code}')\nasync def lookup_company_by_code(code: str):\n    company = await db.companies.find_one({'company_code': code.strip().upper()}, {'_id': 0, 'company_id': 1, 'name': 1})\n    if not company:\n        raise HTTPException(status_code=404, detail='Company code not recognised')\n    return company\n\nWithout this, ALL new employee signups are blocked at Step 1.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "AuthContext.logout",
+        "issue": "The Platform.OS === 'web' branch now calls window.location.assign('/') which DOES successfully return the user to the landing screen (URL='/', landing-screen visible, no 'REPLACE ... was not handled' error). HOWEVER a 'Maximum update depth exceeded' React error still fires exactly once between setUser(null) and the hard reload -- because (tabs)/_layout.tsx or profile.tsx contains a <Redirect> guard that reacts to user===null while the browser is still on /profile. Suggest either (a) call window.location.assign('/') BEFORE setUser(null) so the hard reload happens first, OR (b) also do router.replace('/') on web before setUser(null) so no guard re-render loop is possible. Not a blocker anymore (user does land), but the console error is loud.",
+        "testID": "logout-button",
+        "priority": "MEDIUM"
+      },
+      {
+        "component": "employee-signup screen (Step 1 -> Step 2)",
+        "issue": "goToDetails() calls api('/companies/lookup/${code}', {auth:false}) which returns HTTP 404 because that route is not defined in the backend. The user sees a red 'Not Found' error via signup-error testID and CANNOT advance to Step 2, even with a valid company code. See backend_issues.critical above for the fix.",
+        "testID": "signup-next",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Employee signup Step 1 verification",
+        "issue": "Frontend/backend contract mismatch: frontend calls /api/companies/lookup/{code}, backend exposes /api/companies/by-code/{code} (authed only). Signup flow is fully broken end-to-end.",
+        "affected_testIDs": ["signup-next", "signup-error", "signup-name", "signup-submit", "signup-done"]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "shadow* style props", "issue": "Deprecation warning: 'shadow*' style props are deprecated. Use 'boxShadow'. Pre-existing, not blocking."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_employee_signup_iter14.py",
+    "/app/test_reports/pytest/pytest_iter14.xml",
+    "/app/backend/tests/reset_super_admin_pin.py"
+  ],
+  "action_items": [
+    "HIGHEST PRIORITY -- Add public GET /api/companies/lookup/{code} endpoint (no auth) to server.py so employee-signup Step 1 -> Step 2 works. Alternatively update employee-signup.tsx to call GET /api/companies/by-code/{code} but that endpoint currently requires auth which the unauthenticated signup flow cannot provide. The lookup alias is the cleaner fix.",
+    "OPTIONAL -- In AuthContext.logout on web, call window.location.assign('/') BEFORE setUser(null) so the 'Maximum update depth exceeded' React warning during the transient (tabs)/profile guard evaluation goes away.",
+    "OPTIONAL -- Consider hardening _validate_pin_format to also reject simple sequences like '234567' and '765432'. Currently only '123456' and '654321' are on the blocklist.",
+    "OPTIONAL -- Frontend signup 'PIN cannot be all the same digit' and 'less obvious PIN' validation should surface the BACKEND error message when it comes back, not the generic 'Sign-up failed'. Current client-side validation covers common cases so this is minor.",
+    "Consider blocking pin-login for employees where approval_status='pending' (backend currently issues a session_token even for pending employees; pin_must_change flag is the only gate)."
+  ],
+  "critical_code_review_comments": [
+    "Frontend/backend endpoint mismatch is a classic contract bug. Suggest adding a dedicated public alias endpoint (or lifting the auth requirement on /companies/by-code for public preview) with a narrow response projection (company_id + name only) to avoid leaking sensitive fields like office_lat/office_lng.",
+    "employee-signup allows creation of a pending user, and /auth/pin-login on that user returns 200 + session_token WITHOUT blocking on approval_status. If the intent is to block pending users at login, add: if user.get('approval_status') == 'pending' -> 403 'Awaiting approval'.",
+    "AuthContext.logout: setUser(null) happens BEFORE window.location.assign('/'), so between the two calls React re-renders any guard components dependent on user, causing a transient render loop. The hard reload wins so nothing is functionally broken, but the console error is noisy.",
+    "server.py is now ~2300 lines. Consider splitting into modules (auth.py, companies.py, attendance.py etc.) — well above the 700-line guideline."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_employee_signup_iter14.py (new)",
+    "/app/test_reports/iteration_14.json (this file)",
+    "/app/test_reports/pytest/pytest_iter14.xml (new)"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "70% (login screen OK, signup Step 1 OK, signup Step 2+ BLOCKED by missing /companies/lookup endpoint, logout returns to landing with a transient React warning)"},
+  "seed_data_creation": "During test run: one test company (TEST_Iter14_Company, code randomly generated) and one test employee (+919999888877). BOTH removed at end. Super admin PIN reset to 246810 with pin_must_change=true, pin_fail_count=0, pin_locked_until=null. Verified via POST /api/auth/admin-pin-login -> HTTP 200.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "After main agent adds GET /api/companies/lookup/{code}, re-run: (1) full employee-signup Playwright flow with a seeded company (super admin must first create a company via POST /api/companies with name+address+office_lat+office_lng+geofence_radius_m), then step 1 -> step 2 -> submit -> signup-done -> signup-goto-login should route back to /pin-login; (2) sign in on /pin-login with the newly created employee's phone + PIN, expect pin_must_change=true -> auto-redirect to /pin-change; (3) verify same logout flow shows NO 'Maximum update depth exceeded' if the ordering fix is applied. IMPORTANT: reset super admin PIN via /app/backend/tests/reset_super_admin_pin.py BEFORE and AFTER the run, and delete any seed companies + test employee (+919999888877) at end.",
+  "rca_of_issue": "PRIMARY BUG (signup blocked): Frontend /app/frontend/app/employee-signup.tsx:74-77 issues an unauthenticated GET to `/companies/lookup/${company_code}` to preview the company name before advancing to Step 2. That route is NEVER registered on the backend (see /app/backend/server.py:1289 which only defines `/companies/by-code/{code}` and REQUIRES a valid Authorization header). Result: every signup attempt receives HTTP 404 'Not Found' at Step 1 and the user cannot proceed. REPRO: (1) Seed a company by POSTing to /api/companies as super admin, (2) open /employee-signup on the web preview, (3) fill valid phone/PIN/confirm-PIN and the just-created company_code, (4) tap Continue -- observe the red 'Not Found' banner. FIX: add a public @api.get('/companies/lookup/{code}') that returns {company_id, name} for a matching company or 404 with the friendlier message the frontend expects. SECONDARY BUG (logout warning): AuthContext.logout on web now calls window.location.assign('/') AFTER setUser(null). Between those two lines, guarded components inside the (tabs) group re-render because user is now null, triggering the <Redirect /> guard which itself re-renders as router state churns. The hard reload eventually wins so the user DOES land on '/', but React logs 'Maximum update depth exceeded' one time. Swapping the order (assign first, then setUser(null)) — or skipping setUser(null) altogether on web since the reload nukes state — removes the warning."
+}

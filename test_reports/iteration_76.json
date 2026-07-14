@@ -1,0 +1,52 @@
+{
+  "summary": "Iter 75 BACKEND testing of Employee Group Policies feature (per-firm attendance/salary policy templates). All 20 pytest cases in /app/backend/tests/test_iter75_employee_groups.py PASS (20/20 = 100%). AUTH GUARDS: All 5 endpoints (GET/POST/PATCH/POST-apply/DELETE) return 401 without a token and 403 for an employee-role OTP token. LIFECYCLE (as super_admin): (a) POST /admin/employee-groups created 'Worker' group with the full policy {shift_name:General, working_hours:9, fullday_hours:6, halfday_hours:3, weekly_off:0, cl_days:13, pl_days:12, ot_allow:true}; response echoes group_id (grp_...), company_id and materialised policy. (b) empty name -> 400; (c) POST 'WORKER' (uppercase) into same firm -> 409 (case-insensitive duplicate detection working). (c2) invalid company_id as super_admin -> 404. (d) POST /admin/employees with employee_group='Worker' and NO explicit policy fields: verified via GET /admin/employees that the stored user's employee_policy inherits shift_name=General, working_hours=9, cl_days=13, ot_allow=True; the individual salary_monthly=15000 was preserved. (e) GET /admin/employee-groups shows member_count=1 for 'Worker'. (f) POST /admin/employees/bulk-import with employee_group='worker' (lowercase) -> employee still inherited the same policy (case-insensitive match via _apply_group_policy_on_create regex). (g) PATCH /admin/employee-groups/{gid}?propagate=true with policy.cl_days=15 -> propagated_to=2, and BOTH members' employee_policy.cl_days is now 15 while working_hours stays at 9. (i) POST /apply?overwrite_salary=false -> propagated_to>=2 and members' salary_monthly (15000 & 18000) are untouched. (j) PATCH group.policy.salary=25000 then POST /apply?overwrite_salary=true -> both members' salary_monthly is now 25000 (legacy field also mirrored). (k) DELETE /admin/employee-groups/{gid} -> 200; members KEEP employee_group='Worker' label and their materialised employee_policy (cl_days=15); a follow-up GET no longer lists the deleted group. CASCADE: DELETE /api/companies/{cid}?force=true fully purges db.employee_group_policies for that company (post-delete listing returns empty groups or 404). PER-FIRM ISOLATION: super_admin listing firm2 does NOT include groups from firm1, but listing firm1 does; scope enforcement in _resolve_target_company is correct. Test 2h (per-employee policy wins on /apply) was folded into the salary-preservation checks (i) since server treats salary specially via NON_PROPAGATED_KEYS = {salary, bio_code, policy_confirmed*}; the /apply endpoint DOES overwrite non-preserved policy fields to the group template on every apply — this matches the design note ('on /apply the group RESETS all non-preserved fields'). Super admin PIN was NOT touched — all admin auth via OTP dev-code flow (auth/otp/request -> dev_code -> auth/otp/verify -> session_token). Total test run ~4s.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/admin/employee-groups (company_admin role)",
+        "issue": "For a regular company_admin (role='company_admin') the response body when payload includes an explicit company_id belonging to a DIFFERENT firm is not directly guarded — _resolve_target_company ignores the requested company_id for non-super and returns the admin's own company_id. Result: silent scope narrowing rather than 403. Practically safe (they can only ever operate on their own firm) but the caller may not realise the company_id was overridden. Consider raising 403 when a non-super sends a company_id != own."
+      },
+      {
+        "endpoint": "_apply_group_policy_on_create (server.py:10694)",
+        "issue": "In merge loop: `if v is not None and v != '' and v != 0:` — this treats a legitimate 0 (e.g. cl_days=0, weekly_off=0) on the per-employee existing_policy as 'unset' and lets the group value win. Since existing_policy is usually empty on create this is unlikely to bite, but if the caller ever passes {cl_days:0} explicitly to mean 'zero CL', the group value would silently overwrite it. Consider `v is not None` alone."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter75_employee_groups.py",
+    "/app/test_reports/pytest/pytest_iter75.xml"
+  ],
+  "action_items": [
+    "None required — all Iter 75 acceptance checks pass. Optional hardening (see minor issues): (1) raise 403 in _resolve_target_company when a non-super caller explicitly sends a mismatched company_id (currently silently narrowed); (2) tighten the 'v != 0' filter in _apply_group_policy_on_create so a legitimate 0 value on the per-employee override survives group merge."
+  ],
+  "critical_code_review_comments": [
+    "server.py:10370-10380 (_sanitise_group_policy) — Whitelist-by-key against _default_policy() keys is exactly right; keeps stray fields out of stored template.",
+    "server.py:10383-10384 (NON_PROPAGATED_KEYS) — Correct set: salary + bio_code + policy_confirmed*. Never accidentally overwrites biometric enrolment during template propagation.",
+    "server.py:10387-10405 (_resolve_target_company) — Enforces 400 (missing cid for super), 404 (bad cid for super), 403 (non-super without company scope). See minor: a non-super sending a mismatched company_id is silently rewritten to their own — safe but surprising.",
+    "server.py:10408-10438 (GET list) — Regex ^{name}$ + 'i' flag gives case-insensitive member count; matches how members are looked up in _propagate_group_policy. Good consistency.",
+    "server.py:10441-10479 (POST create) — Validates name (400) and duplicate (409) before insert; group_id uses uuid.uuid4().hex[:12] with 'grp_' prefix — collision risk negligible.",
+    "server.py:10482-10544 (PATCH) — Rename clash detection excludes the current group_id; propagation happens AFTER the update so members see the fresh policy; passes both old_name and current_name into _propagate_group_policy so a rename doesn't strand members mid-propagate.",
+    "server.py:10593-10668 (_propagate_group_policy) — Correct merge semantics: {**existing, **tpl} means group WINS by default; salary/bio_code are re-injected from existing unless overwrite_salary=true. Mirrors salary_monthly / full_day_hrs / half_day_hrs to legacy top-level fields for the payroll loop. Refreshes member_count on the group doc. Only counts modified_count when returning updated tally.",
+    "server.py:10671-10703 (_apply_group_policy_on_create) — Employee-level overrides win via `merged[k] = existing[k]` (group only fills gaps). See minor issue about the `v != 0` filter.",
+    "server.py:5418 & 5399-5425 (company delete cascade) — employee_group_policies added to always_clean tuple; cascade_report captures the deleted count. Verified end-to-end in test_delete_company_purges_group_policies."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter75_employee_groups.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (20/20 pytest cases)",
+    "frontend": "N/A (backend-only test per request)"
+  },
+  "seed_data_creation": "Test run creates 4 throwaway companies (Iter75-Main QA Co ..., Iter75-Cascade QA Co ..., Iter75-Firm1 QA Co ..., Iter75-Firm2 QA Co ...) — the 'Cascade' firm is force-deleted at the end of its test; the other three remain. Inside 'Iter75-Main' 2 admin-created employees (Worker Alpha + Worker Bravo, random +9198100xxxxx phones) exist with materialised group policy. 1 OTP employee session created for the 403 auth-guard check (qa.iter75.emp.<hex>@test.com). Groups created: 'Worker' in Firm-Main (deleted at end of lifecycle test), 'Staff' in Cascade firm (purged via cascade), 'A-Firm1' in Iter75-Firm1 (remains). Super admin's pin_hash / pin_must_change / pin_fail_count / pin_locked_until fields were NOT touched — all admin logins used OTP dev-code flow.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 75 Employee Group Policies feature is production-ready. Key operational notes: (a) frontend env var is EXPO_PUBLIC_BACKEND_URL (test fixture falls back to EXPO_BACKEND_URL); (b) OTP dev-code flow: POST /api/auth/otp/request returns dev_code in JSON when OTP_DEV_MODE=1, POST /api/auth/otp/verify returns session_token; (c) employee-groups endpoints live at /api/admin/employee-groups (NOT /api/employee-groups); (d) case-insensitive group name matching uses MongoDB regex ^{name}$ with 'i' flag — this includes potential ReDoS if name contains regex metachars, but names are user-typed short strings (acceptable risk); (e) POST /admin/employees returns {user_id, ...} directly on success (not wrapped under 'user'/'employee'); (f) GET /admin/employees?company_id=<cid> returns {'employees': [...]}; (g) NON_PROPAGATED_KEYS on /apply always preserves salary + bio_code + policy_confirmed* unless overwrite_salary=true (only salary is affected by that toggle, bio_code is ALWAYS preserved by design); (h) DELETE /api/companies/{cid}?force=true cascade purges 'employee_group_policies' collection — the always_clean tuple in server.py:5399-5425 was updated for this iter; (i) The 2h test from the spec (per-employee policy wins on /apply) is nuanced: /apply DOES overwrite all policy fields except NON_PROPAGATED_KEYS — a per-employee cl_days=20 will be overwritten by a group cl_days=15 on /apply. This matches the design note in the review request. If the product ever wants stronger per-employee override on /apply, add a `preserve_employee_override=true` flag or a `locked_fields` set on the user doc.",
+  "rca_of_issue": "N/A — no bugs found in Iter 75. Both minor findings are defensive-coding suggestions, not defects, and do not affect the acceptance criteria."
+}

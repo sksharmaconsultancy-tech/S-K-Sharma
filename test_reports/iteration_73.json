@@ -1,0 +1,54 @@
+{
+  "summary": "Iter 71 FRONTEND testing of /employee-add and /employee-bulk-import via the desktop web portal (AdminWebShell). Logged in as super_admin (sksharmaconsultancy@gmail.com) using OTP dev-code flow — super_admin's pin_hash was NOT touched. ALL 12 acceptance checks PASS. (1) Sidebar in AdminWebShell shows both new items — 'Add employee' → /employee-add and 'Bulk import (CSV)' → /employee-bulk-import; nav-* testIDs render for both. (2) /employee-add: header 'Add employee' visible, inline 'ADD UNDER FIRM' picker is a functional <select> with 6 firms for super_admin (no /firm-select navigation needed); picking S.K. Sharma & Co. updates the on-page 'Company code: SKSCO1' text; sections render in the requested order — Identity → Employment → Salary → Statutory / Bank; salary mode chips MONTHLY/DAILY/HOURLY all render; two side-by-side cards 'Actual salary structure' and 'Compliance salary structure' each with an Allowances <select> and Deductions <select>; empty-state hint 'No allowance / deduction masters defined for this firm' shown when firm has no masters (correct behaviour — SKSCO1 has none in the preview DB). Happy-path submit: filled Name=TEST_iter73_Single_* + Phone=+919111000099, clicked 'Create employee' → success card returned employee_code=SKSCO10001 + temp_pin=928865. (3) /employee-bulk-import: web-only guard passed on 1440x900 desktop viewport; sections 1·Download the template, 2·Upload your filled CSV, 4·Import all render immediately, section 3·Preview correctly appears only after CSV upload (by design — the card is conditional on rows.length>0); firm picker at top works; 'Download template CSV' triggered a real browser download of employee_bulk_import_template.csv; uploaded the 3-row test CSV → 'Loaded bulk.csv — 3 rows detected' hint + preview table populated; clicked 'Import 3 employees' → success card 'Created: 3 · Skipped: 0 · Errors: 0' + 'Download log CSV' button visible. Cleanup: 4/4 TEST_iter73_* employees (3 bulk + 1 single) DELETED via DELETE /api/admin/employees/{user_id} — MongoDB clean.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "/employee-add",
+        "issues": [
+          "React Native for Web deprecation warning: props.pointerEvents is deprecated — use style.pointerEvents. Source: /app/frontend/app/employee-add.tsx line 420 uses pointerEvents={selectedCompanyId ? 'auto' : 'none'} as a prop. Cosmetic console warning only, form still disables correctly.",
+          "'shadow*' style props are deprecated — use 'boxShadow' (RN Web). Comes from the shared shadow.card style used in styles.card. Non-blocking cosmetic warning."
+        ]
+      },
+      {
+        "screen": "global",
+        "issues": [
+          "React key-collision warning 'Encountered two children with the same key' fires during navigation/rendering — did not affect functionality on the two screens tested but indicates a list somewhere in the shell has duplicate keys; worth locating in a future pass."
+        ]
+      }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/tmp/iter72_test/01_add_success.png",
+    "/tmp/iter72_test/02_bulk_success.png",
+    "/tmp/iter72_test/bulk.csv"
+  ],
+  "action_items": [
+    "Optional (non-blocking cosmetic): migrate pointerEvents={...} prop to style.pointerEvents in /app/frontend/app/employee-add.tsx (line 420) to silence the RN Web deprecation warning.",
+    "Optional: track down the 'Encountered two children with the same key' warning that fires during navigation — appears globally, not specific to these two new screens."
+  ],
+  "critical_code_review_comments": [
+    "employee-add.tsx:326-365 — Inline firm picker is well done: super/sub-admins get a native <select>; company-admins see a read-only banner. Verified the super_admin flow — no navigation to /firm-select required.",
+    "employee-add.tsx:414-421 — form container correctly gated via pointerEvents when no firm selected; only quibble is the deprecated prop-form of pointerEvents (see design_issues).",
+    "employee-add.tsx:670-676 — Empty-state hint for missing allowance/deduction masters is helpful and directs the operator to the Masters screen. Verified visible for SKSCO1 in preview DB.",
+    "employee-bulk-import.tsx:256-267 — Web-only guard renders a friendly nudge on native; on web the full 4-step flow renders correctly.",
+    "employee-bulk-import.tsx:359-388 — Preview section is conditional (rows.length > 0) — this is why the '3 · Preview' heading only shows after upload. Correct UX.",
+    "AdminWebShell.tsx:35-36 & 71-72 — Both nav entries ('Add employee' and 'Bulk import (CSV)') are wired for super_admin AND company_admin nav lists. Verified rendering on desktop viewport for super_admin."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend-only test)",
+    "frontend": "100% — 12/12 checks pass (login, sidebar x2, header, firm picker + code echo, 4 sections, salary chips x3, salary-structure cards, empty-state hint, single-add happy path returned employee_code+temp_pin, bulk web-only guard, template download, CSV parsed with 3 rows, import created 3, log button, cleanup 4/4)"
+  },
+  "seed_data_creation": "During the run 4 employees were created (1 single + 3 bulk), all named TEST_iter73_*, all DELETED via DELETE /api/admin/employees/{user_id} using the super_admin bearer token from localStorage (llc_session_token). MongoDB post-run: 0 TEST_iter73_ users remain. Super_admin's pin_hash was never touched — login was OTP dev-code only.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 71 frontend (single Add-Employee + CSV Bulk Import) is production-ready from a UI/integration standpoint. Both pages are accessible from the AdminWebShell sidebar for super_admin (verified) and are wired for company_admin too (see NAV_COMPANY_ADMIN in AdminWebShell.tsx:68-82 — not verified end-to-end due to pin_must_change=true on company-admin accounts, per test_credentials.md guidance to prefer OTP flow). The only follow-ups are cosmetic RN Web deprecation warnings — not user-facing. When adding follow-up features, note: (a) the '3 · Preview' section correctly hides until a CSV is uploaded (this is not a bug); (b) super_admin token key is 'llc_session_token' in localStorage — useful for API cleanup scripts; (c) the API base URL is process.env.EXPO_PUBLIC_BACKEND_URL (frontend/.env), NOT EXPO_BACKEND_URL — different from the doc convention, worth noting for future test scripts.",
+  "rca_of_issue": "N/A — no bugs found. All Iter 71 frontend acceptance criteria met."
+}

@@ -1,0 +1,32 @@
+{
+  "summary": "Iter 108 fully verified end-to-end. Backend 8/8 pytest cases pass: POST /api/admin/masters as company_admin (Kankani, session injected into db.user_sessions for user_0a38839e3568) creates a department master for own firm cmp_527fecdd7c (200 with master_id/type/name/company_id echoed), rejects company_id='__global__' with 403, rejects a cross-firm cmp_987f0d7da5 with 403, returns 409 on duplicate same-name, 400 on empty name / bad type; created master shows up in GET /api/admin/masters?type=department&company_id=cmp_527fecdd7c. Super admin regression: can still POST global masters. Frontend UI verified on web 1920px: /employee-add gender chips (Male/Female/Transgender via data-testid gender-{value}) render and toggle (Female selects, second click clears); UAN field caps to 12 digits and strips non-digits (typing '12ab34cd56ef78gh901' -> '12345678901'); PF No. auto-uppercases and truncates at 24 chars ('mh/bnd/1234567/pf/xyz/abc/def/ghi' -> 'MH/BND/1234567/PF/XYZ/AB'); Enter-key navigation on /employee-add advances focus through 6 consecutive text inputs (Emp Code -> Bio -> Full name -> Mobile -> Email -> Father) without submitting the page; MasterSelect Department auto-registers a custom value via POST /api/admin/masters (verified 'TESTDEPT108' returned in subsequent GET AND appears as data-testid=emp-add-department-opt-TESTDEPT108 in re-opened dropdown, cleanup via DELETE 200). /firm-master Enter-nav advances focus monotonically across 5 consecutive fields without leaving /firm-master. Regression: full employee-add create flow still works — filled Full name + unique +919000XXXX999 mobile, clicked Create employee, DB confirmed user_14eef1d93936 IT108_TEST_3052 persisted; cleaned up.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter108_features.py",
+    "/app/test_reports/pytest/iter108_results.xml"
+  ],
+  "action_items": [
+    "Documentation nit: review request references MasterSelect testID 'master-select-department', but the actual DOM data-testid on /employee-add is 'emp-add-department' (with '-custom' / '-opt-{NAME}' suffixes) because employee-add.tsx passes testID='emp-add-department' as a prop override (MasterSelect.tsx line 103 defaults to 'master-select-<type>' ONLY when no testID prop is given). Behaviour is correct; only the docs/prompt selector name is stale."
+  ],
+  "critical_code_review_comments": [
+    "MasterSelect.tsx pickCustom fires POST /admin/masters with .catch(()=>{}) — silent failure. On success the option list already includes the new value via optimistic setOptions; on 403/409 the user will see the value locally but the NEXT employee-add page load will NOT show it (because the server didn't persist). Consider surfacing a toast on non-2xx (403 mainly for company_admin trying to hit '__global__' when companyId is falsy).",
+    "MasterSelect.tsx pickCustom sends company_id: companyId || '__global__' — when a company_admin uses the form with no locked firm (companyId=null), the fallback to '__global__' will always be 403 per the new Iter 108 rules. Consider defaulting to admin.company_id or blocking the checkmark when companyId is falsy for company_admin.",
+    "useEnterNav.ts globally attaches a document-level keydown handler on every screen using it — currently only /employee-add and /firm-master, but if two screens using it were ever mounted at once (unlikely with Expo Router), both handlers would fire. Non-blocking.",
+    "server.py continues to be >17.6k lines (create_master at ~16031). Modularisation still warranted — prior iterations already flagged."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter108_features.py (new)"
+  ],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "100% (5/5 flows: gender chips, UAN/PF caps, employee-add Enter-nav, MasterSelect auto-register + reopen visibility, firm-master Enter-nav, employee-add create regression)"},
+  "seed_data_creation": "None persisted. Injected a temporary session for user_0a38839e3568 during pytest run and cleaned it up in the module teardown. All test masters (TEST DEPT 108, TESTDEPT108, TEST GLOBAL 108 *) and test employee (IT108_TEST_* user_14eef1d93936) were deleted.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 108 endpoints & behaviour: (1) POST /api/admin/masters at server.py:16031 — company_admin can now POST but is 403'd unless payload.company_id == admin.company_id AND company_id not in ('','__global__'). Duplicate name for (type,company_id,name) tuple -> 409. Empty name -> 400. Bad type -> 400. (2) useEnterNav hook at /app/frontend/src/hooks/useEnterNav.ts — web-only document keydown handler that advances focus across visible <input>/<select> and calls the passed onLast() when Enter hits the last field. Currently used on /employee-add (calls submit) and /firm-master (calls save). Textareas keep newline. (3) MasterSelect on /employee-add uses testID prop override: data-testid values are 'emp-add-designation', 'emp-add-department', 'emp-add-type-group', each with '-custom' TextInput and '-opt-{NAME}' options (NAME with non-word chars replaced by _). (4) Gender chips: data-testid gender-male, gender-female, gender-transgender; toggling off is same-value click. (5) UAN input: /\\D/ stripped and slice(0,12); PF input: uppercased, /[^A-Z0-9/]/g stripped and slice(0,24). Test creds unchanged from Iter 107 (see /app/memory/test_credentials.md). Backend test file /app/backend/tests/test_iter108_features.py needs EXPO_PUBLIC_BACKEND_URL from /app/frontend/.env plus MONGO_URL/DB_NAME from /app/backend/.env before running.",
+  "rca_of_issue": "N/A — every Iter 108 feature worked on first execution. Two brief detours: (a) initial Playwright DOM probe for '[data-testid=\"master-select-department\"]' returned null because employee-add.tsx overrides the default testID with 'emp-add-department' (documentation mismatch, functionality correct); (b) GET /api/admin/users to verify employee-add regression returned 404 (endpoint doesn't exist by that name), so we verified persistence via direct Mongo query (db.users) instead — user was found, then cleaned up."
+}

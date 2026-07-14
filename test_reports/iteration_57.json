@@ -1,0 +1,55 @@
+{
+  "summary": "Iter-58 backend: 12/14 core tests pass (2 skipped due to seed data limits, 4 legitimately skipped after SKSCO1 fixture had 0 employees). One CRITICAL backend bug found in PATCH /api/admin/companies/{cid}/portal-credentials that returns 404 'Company not found' for any company that has never stored portal creds — this makes the entire portal-credentials feature unusable end-to-end. All other Iter-58 features (payslip DOJ / month-complete / processed-only, employer access rights + /auth/me propagation, master-sheet generate/upload/apply, ECR/ESIC downloads, sub_admin salary_process:write gate) work correctly. Frontend routes /employer-access-rights and /portal-credentials load and enforce super-admin correctly (light validation pass — no interactive session).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "PATCH /api/admin/companies/{company_id}/portal-credentials",
+        "issue": "Returns 404 'Company not found' whenever the target company has never had portal_credentials set. RCA: server.py:10698 does `find_one({...}, {'_id':0,'portal_credentials':1})` and then `if not company:` — when the field is absent, MongoDB returns an EMPTY DICT which is falsy, so the guard falsely trips. Fix: change to `if company is None:` (also verify same anti-pattern in any other endpoints projecting a single optional field). Verified on both real SKSCO1 (cmp_5a46bfa20b) and TEST_Iter53 companies — GET works fine (which uses `{'_id':0,'name':1,'portal_credentials':1}` — the `name` field is always present so dict is truthy).",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Portal Credentials save",
+        "issue": "Because PATCH /admin/companies/{cid}/portal-credentials returns 404 for any company without pre-existing creds, the frontend save button will always error on first use for every company in the DB. This blocks the entire feature.",
+        "affected_testIDs": ["portal-credentials-save"]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter58_features.py",
+    "/app/test_reports/pytest/pytest_iter58.xml"
+  ],
+  "action_items": [
+    "FIX server.py:10698 (update_portal_credentials): change `if not company:` to `if company is None:`. Same-projection guard is safe in GET because that projection includes 'name'. Please audit other endpoints for the same 'projection returns empty dict when field missing' foot-gun.",
+    "Seed a handful of employees into the SKSCO1 company (cmp_5a46bfa20b) — several DOJ / month-complete / apply-mapping tests currently skip because that company has only the company_admin user and zero role='employee' docs.",
+    "Consider exposing an admin PATCH /admin/employees/{user_id} (canonical field update). Current path is via PATCH /admin/user-role, which is discoverable but not named intuitively.",
+    "Frontend for /employer-access-rights and /portal-credentials render fine but I was not able to run an authenticated flow via Playwright due to Google-OAuth style login (only OTP dev-code works via API). Please self-verify by logging in as super_admin via UI and toggling permissions once."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 11056 lines — split into modules (auth, payslips, salary_runs, master_sheet, admin_users) is overdue.",
+    "The `_company_scope_check` returns implicitly for sub_admin with 'companies:write' but the flow is fragile (multiple raise paths intermixed with return). Consider a single return with all checks flattened.",
+    "utils/portal_creds.py falls back to a key file in /tmp on missing PORTAL_CRED_KEY — /tmp is ephemeral in most container/Kube setups; a supervised restart won't lose data but a pod restart will invalidate all stored ciphertexts. Please move to /app or persistent PV and add a startup log noting which mode is active.",
+    "In generate_payslips (server.py:9955-9998) the re-fetch of each employee's doj inside the loop is one DB call per row — for large companies (500+ emps) this will be slow. Batch via $in or embed doj into run.rows at creation time.",
+    "MasterSheet endpoints do not enforce a per-request row cap (only body size 15MB). Very wide XLSX files with 10k rows will succeed but hammer /apply-mapping. Suggest max 5k rows.",
+    "TestPortalCredentials.test_cross_company_admin_denied passed (403 for cross-company) — good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter58_features.py (new)"
+  ],
+  "success_rate": {
+    "backend": "12/14 executed tests passed (85.7%); 1 real CRITICAL bug found; 4 tests skipped due to insufficient seed data (not test failures)",
+    "frontend": "light pass — both routes /employer-access-rights and /portal-credentials render and enforce auth guards correctly"
+  },
+  "seed_data_creation": "None. Existing sub-admins created by class fixtures are auto-cleaned via DELETE /admin/sub-admins/{user_id}. Portal creds were left in whatever state they were before the test (each test wipes then re-sets).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Fixture uses `company_code` field (not `code`) to find SKSCO1. If /companies response changes shape, update the sksco_company_id fixture. Also SKSCO1 has zero employees — 4 tests will skip until you seed some. Use PATCH /admin/user-role with body {user_id, doj} to update DOJ (not PATCH /admin/employees/{uid}, which is 405).",
+  "rca_of_issue": "PORTAL-CREDENTIALS PATCH 404 BUG — server.py line 10698-10700 uses a MongoDB projection that omits '_id' and includes only 'portal_credentials'. When the document exists but has never had portal_credentials set, MongoDB returns `{}`. The subsequent `if not company:` treats the empty dict as falsy and raises 404. GET path at line 10668 dodges this by also projecting 'name' (always present). Reproduction: `curl -X PATCH /api/admin/companies/cmp_5a46bfa20b/portal-credentials -d '{\"portal\":\"epfo\",\"username\":\"u\",\"password\":\"p\"}'` returns 404 even though GET on the same path returns 200. Fix: change guard to `if company is None:` OR project 'name' into the same find_one call."
+}

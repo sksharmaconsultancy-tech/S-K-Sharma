@@ -1,0 +1,42 @@
+{
+  "summary": "Iter-43 backend+frontend testing. Feature 1 (Firm Master Business Type dropdown) and Feature 2 (per-firm Attendance Policy): 16/16 backend pytests PASS (test_iter43_business_type_and_policy.py). Frontend happy-paths verified: /company-register bottom-sheet picker (Industry → Textile) works, /companies 'Add company' with Hotel / Resort creates a card with the correct badge, /attendance-policy renders all sections, weekday toggle + save + Presets sheet all work when a valid company_id is passed. ONE frontend bug: super-admin's 'Attendance policy' tile on /admin sends '?company_id=all' when the filter is on the default 'All companies', causing the AP screen to spin forever (backend responds 404).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "/app/frontend/app/admin.tsx (line 200-209, open-attendance-policy tile)",
+        "issue": "When super_admin has the company filter set to 'All companies' (default), tapping the 'Attendance policy' tile navigates to /attendance-policy?company_id=all. Backend responds 404 (no company matches 'all'), and the AP screen shows an endless spinner. Fix: change the condition on line 205 to `isSuper && companyFilter && companyFilter !== 'all'` (or omit the param entirely when 'all') AND update /attendance-policy.tsx to prompt the super admin to pick a company when no company_id is passed instead of hanging on a spinner.",
+        "testID": "open-attendance-policy",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter43_business_type_and_policy.py",
+    "/app/test_reports/pytest/pytest_iter43.xml"
+  ],
+  "action_items": [
+    "Fix admin.tsx 'open-attendance-policy' onPress: only pass company_id when it is a real company id (not the sentinel 'all'). Also add a graceful 'Please pick a company first' UI in attendance-policy.tsx when super_admin lands without company_id (currently loads forever on 404)."
+  ],
+  "critical_code_review_comments": [
+    "server.py L2980 — is_default_preset = company.get('attendance_policy') is None. Since POST /companies always auto-attaches a preset via _policy_for_category, is_default_preset will be false for every newly-created company even if the admin has never customized. Consider distinguishing 'auto-preset attached' from 'user-customized' by checking attendance_policy_updated_at instead (spec says 'If the company has no override yet, is_default_preset = true')."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter43_business_type_and_policy.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "~90%"
+  },
+  "seed_data_creation": "Test companies prefixed TEST_ are created and cleaned up by pytest teardown. One UI-created 'TEST_HotelUI_<hex>' Hotel/Resort company remains in the DB from the manual frontend flow — safe to leave or delete via /companies.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend uses OTP dev-mode; /api/auth/otp/request returns dev_code so no email round-trip. Public preview URL is EXPO_PUBLIC_BACKEND_URL in /app/frontend/.env. To provision a company_admin session without touching super_admin PIN, POST /api/companies with admin_phone and admin_name — response returns temp_pin, then hit /api/auth/admin-pin-login with {identifier: phone, pin: temp_pin}. When adding UI tests for /attendance-policy as super_admin, ALWAYS pass a real company_id (do not rely on the admin tile until the 'all' bug is fixed).",
+  "rca_of_issue": "Bug: super_admin /admin → 'Attendance policy' tile → 404 loop. Root cause: admin.tsx defaults companyFilter to the string 'all' (line 27) but the tile's condition (line 205) is `isSuper && companyFilter`, which is truthy for 'all'. It pushes /attendance-policy?company_id=all. The backend GET /api/attendance/policy then runs `db.companies.find_one({company_id: 'all'})`, gets no match, and returns 404. The frontend AP screen stays in the loading state because its fetch fails and there is no error UI branch for that path. Repro: login as super_admin sksharmaconsultancy@gmail.com → /admin → without changing the 'All companies' filter, tap Attendance policy tile → observe endless spinner and console 404. Fix (small): (a) admin.tsx onPress → use `companyFilter && companyFilter !== 'all' ? params : no params`; (b) attendance-policy.tsx → if role==super_admin and no company_id, show inline picker or friendly 'Select a company from Admin → Filter first' message and stop the spinner."
+}

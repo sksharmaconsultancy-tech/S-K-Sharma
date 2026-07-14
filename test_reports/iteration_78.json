@@ -1,0 +1,45 @@
+{
+  "summary": "Iter 78 backend testing — Iter 77d + 77e changes. Created test_iter78_weekoff_and_grid.py with 12 tests: 6 direct compute_textile_day unit tests (Iter 77d weekly-off rules), 5 _validate_policy boundary tests for week_off_min_working_hours (0-16), and 1 HTTP integration test on /admin/attendance/monthly-grid. Result: 11/12 PASS; 1 FAIL uncovers a real spec-violation bug — on Policy 1 week-off days the standard-hours cap (ot_allowed=False → 8h) fires BEFORE the week-off branch, so a 10h week-off punch is capped to 8h instead of the spec-mandated 'uncapped, no OT restriction on week-off'. All 13 pre-existing iter77 regression tests still PASS. Cleanup script ran; 2 test firms + 2 test users + 12 attendance records removed.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "compute_textile_day / /api/admin/attendance/monthly-grid/{cid}/{month}",
+        "issue": "Policy 1 week-off day gets duty capped at standard_working_hours (8h) when attendance_policy_override.ot_allowed=False, even though the review spec (item B.2) explicitly requires 'hours=10 (uncapped, no OT restriction on week-off)'. Root cause: in server.py:1261-1267 the `max_hours = 24.0 if ot_applicable_user else standard_hrs` cap is applied unconditionally BEFORE the `is_weekly_off` branch (line 1284+), so a 10h week-off shift with ot_allowed=False is capped to 8h. Observed cell: {'raw_hours':10.0,'hours':8.0,'present':1.0,'weekly_off':True}. Fix: skip / bypass the OT cap when `is_weekly_off is True` in the Policy 1 branch (or use 24h cap on week-off regardless of ot_allowed).",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter78_weekoff_and_grid.py",
+    "/app/test_reports/pytest/pytest_iter78.xml",
+    "/app/test_reports/pytest/pytest_iter78_regression.xml"
+  ],
+  "action_items": [
+    "In server.py compute_textile_day (Policy 1 branch, ~line 1261), skip the OT cap (`max_hours = standard_hrs when ot_allowed=False`) when `is_weekly_off is True`. On week-off days there is no OT restriction per the spec — duty should carry the full worked hours (still bounded by 24h absolute maximum). After fix, the week-off cell for the integration test should return hours=10.0 (matching raw_hours) instead of 8.0.",
+    "Consider adding a dedicated regression unit test covering: Policy 1 + weekly_off + ot_allowed=False + duty=10h → duty_hours should be 10.0 (not 8.0), present=1.0, full_day_pay_weekoff=True."
+  ],
+  "critical_code_review_comments": [
+    "compute_textile_day (server.py ~L1261): the OT cap runs before the week-off branch. This inverts priority — on a week-off day the employee is by definition working beyond the standard schedule; capping to standard_hrs there defeats the point of `full_day_pay_weekoff`. Recommend `max_hours = 24.0 if (ot_applicable_user or is_weekly_off) else standard_hrs`.",
+    "server.py is 15,141 lines — well beyond the 700-line guideline. Splitting the attendance/policy/salary sections into dedicated modules would materially improve maintainability.",
+    "Field naming inconsistency: the docstring for the Iter 77d rules uses `week_off_full_day_user` (line 1183) which reads user['week_off_full_day']. Consider consolidating naming to reduce cognitive load."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter78_weekoff_and_grid.py (new)"
+  ],
+  "success_rate": {
+    "backend": "91.7% (11/12 new tests + 13/13 iter77 regression = 24/25 = 96%)",
+    "frontend": "N/A - backend-only review"
+  },
+  "seed_data_creation": "Test fixture created 1 firm (Iter78-WeekOff-*) + 1 employee (TEST_Iter78_*) + 4 manual punches (2 workday, 2 weekly-off). All removed by cleanup_test_data.py --apply (2 firms + 2 users + 12 attendance docs deleted; the 2 iter77 leftovers from prior runs were also cleaned).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "After the main agent fixes the week-off cap bug, re-run only the failing test: `EXPO_PUBLIC_BACKEND_URL=https://emplo-connect-1.preview.emergentagent.com pytest /app/backend/tests/test_iter78_weekoff_and_grid.py::test_monthly_grid_returns_raw_and_policy_adjusted_hours -v`. Also re-run the full iter77 suite to confirm no regression: `pytest /app/backend/tests/test_iter77_policy1_cap.py -v`. Prefix any new temp data with Iter78-/TEST_Iter78_.",
+  "rca_of_issue": "RCA for FAIL — `test_monthly_grid_returns_raw_and_policy_adjusted_hours`:\n\nReproduction:\n  1. Create Policy 1 firm with attendance_policy.week_off_min_working_hours=8, weekly_off_days=[6] (Sunday).\n  2. Create employee, set attendance_policy_override.ot_allowed=False.\n  3. Post 12h of punches on a Saturday (workday) and 10h of punches on a Sunday (week-off).\n  4. GET /api/admin/attendance/monthly-grid/{cid}/2026-01?from_date=SAT&to_date=SUN.\n  5. Inspect the Sunday cell.\n\nExpected (per review spec B.2 & scenario 3): hours=10.0 (uncapped, no OT restriction on week-off), raw_hours=10.0, present=1.0, weekly_off=True.\nActual: hours=8.0, raw_hours=10.0, present=1.0, weekly_off=True — duty capped at standard_working_hours.\n\nRoot cause: In server.py compute_textile_day, lines 1261-1267 compute `max_hours = 24.0 if ot_applicable_user else standard_hrs` and cap duty_hrs to that value BEFORE the `is_weekly_off` branch at line 1284. Because the employee's override sets ot_allowed=False, standard_hrs=8.0 is chosen and 10h is trimmed to 8h. The week-off branch then correctly assigns present_days=1.0 and full_day_pay_weekoff=True — but the hours field has already been mutilated.\n\nMitigation: change line 1261 to `max_hours = 24.0 if (ot_applicable_user or is_weekly_off) else standard_hrs`. This preserves the 24h absolute cap on all days, honours OT-off on regular workdays, and lets week-off duty flow through uncapped (still bounded by 24h). No other test scenarios are impacted (the iter77 suite exercises the workday path only for ot_allowed=False; the week-off scenarios in iter77 use the default ot_allowed=True where max_hours=24 already)."
+}

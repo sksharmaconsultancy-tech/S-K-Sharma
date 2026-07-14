@@ -1,0 +1,35 @@
+{
+  "summary": "Backend testing for iteration 36 — /api/admin/attendance/today per-employee timeline drill-down. Wrote 9 pytest cases covering timeline shape/allow-list, PII stripping (selfie_base64, device_info), aggregate fields unchanged, chronological ordering (IN→OUT→IN→OUT), super_admin cross-company + ?company_id filter, company_admin scope isolation (including refusing to honor a spoofed company_id query param), and employee 403. All 9 tests passed against public preview URL.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter36_present_today_timeline.py",
+    "/app/test_reports/pytest/pytest_iter36.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Response contract for /api/admin/attendance/today now correctly uses an explicit allow-list when trimming each punch — safe against future schema drift (new fields with sensitive data won't leak automatically).",
+    "The mongo projection at line 3289 also excludes selfie_base64 and device_info as a second layer of defense — good defense-in-depth.",
+    "company_admin scoping cannot be overridden by a spoofed ?company_id query param (server force-sets scope_company from token). Verified via TestCompanyAdminScoping.test_company_admin_ignores_company_id_query_param."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter36_present_today_timeline.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "not tested (backend-only request)"
+  },
+  "seed_data_creation": "All ephemeral: IT36_* companies, users, sessions, branches, and attendance rows. All are cleaned up via session-scoped mongo fixture teardown. The real super_admin (sksharmaconsultancy@gmail.com) doc is NEVER touched — tests seed their own ephemeral super_admin users.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 36 backend implementation is fully validated. Timeline field returns allow-listed keys only {at, kind, source, latitude, longitude, outside_note, branch_id, branch_name, approved_by}, strips selfie_base64/device_info, preserves chronological order, respects role scoping, and 403s employees. If frontend testing is later requested, verify /app/frontend/app/present-today.tsx renders the timeline inline on row tap.",
+  "rca_of_issue": "N/A — no bugs found."
+}

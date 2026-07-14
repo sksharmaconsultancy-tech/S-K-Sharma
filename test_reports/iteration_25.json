@@ -1,0 +1,63 @@
+{
+  "summary": "Iteration 25 — Phase C (Employee code + KYC). 8/9 pytest pass. ONE CRITICAL BACKEND BUG confirmed: POST /api/companies does NOT accept or persist `company_code`. CompanyCreate Pydantic model is missing the `company_code` field, and create_company() never passes it to Company(...). PATCH /api/companies/{id} does persist company_code correctly. Sequential employee-code generation (SKS0001/0002/0003, legacy SKS-1234 skipped, PATCH-then-new-prefix fresh sequence at NEW0001, existing codes preserved) all VERIFIED. KYC endpoints — GET returns nulls initially; PATCH happy-path with aadhaar (12 digits stored), name-as-per-aadhar, PAN uppercased (abcde1234f→ABCDE1234F), DL trimmed/uppercased, blank string clears; validation errors on aadhaar<12, invalid PAN, DL<5 all return 400 with expected messages; no-auth returns 401 — ALL PASS. Frontend testIDs (company-code-input, row-kyc, kyc-save, kyc-back, kyc-error, kyc-ok) present in code. FE UI end-to-end for admin company create with `SKS` not exercised because backend bug would silently swallow the value regardless of what the UI sends.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/companies",
+        "issue": "Model CompanyCreate has no `company_code` field, and create_company() calls Company(name=..., address=..., office_lat=..., office_lng=..., geofence_radius_m=..., compliance_enabled=...) without passing company_code. As a result the server silently assigns a random 6-hex code (via Company.company_code default_factory) even when the client sent 'SKS'. Repro: `curl -X POST /api/companies -d '{\"name\":\"X\",\"office_lat\":1,\"office_lng\":1,\"company_code\":\"SKS\"}'` → response has company_code='XXXXXX' (random hex). Fix: add `company_code: Optional[str] = None` to CompanyCreate (server.py L221-233), then in create_company() (L2103) do `Company(..., company_code=(payload.company_code or None))` or set it explicitly on the resulting dict, uppercasing/validating 2–8 alphanum like PATCH already does. This blocks the entire iter-25 UX (admin creates a company with prefix 'SKS' but new employees get e.g. '3F821A0001' instead of 'SKS0001').",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "PATCH /api/companies/{id}",
+        "issue": "Does not validate company_code shape/uppercase server-side (frontend uppercases, but a rogue client could set e.g. 'sks!' or '' - only unique index would catch dup). Consider mirroring the 2–8 alphanum uppercase normalisation used by the generator regex `^{prefix}\\d{4}$`."
+      },
+      {
+        "endpoint": "PATCH /api/companies/{id}",
+        "issue": "Does not roll `pin_must_change` or generate any user-side migration. Employees created with the OLD prefix keep their old code (correct — verified). Consider logging when prefix changes so support can trace future audit."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Admin /companies → Create Company with company_code=SKS",
+        "issue": "The `company-code-input` field renders and uppercases correctly, but because POST /api/companies discards the value, saving the form yields a company with a random 6-hex code. The next employee's code becomes e.g. `4F82A10001` instead of `SKS0001`. This is a downstream symptom of the backend bug above — no FE change needed.",
+        "affected_testIDs": ["company-code-input"]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter25_phase_c.py",
+    "/app/test_reports/pytest/pytest_iter25.xml"
+  ],
+  "action_items": [
+    "BACKEND (must-fix): In /app/backend/server.py add `company_code: Optional[str] = None` to CompanyCreate (~L221) AND update create_company() (~L2103) to pass it into Company(...) (uppercase + strip). Also handle empty string → fall back to default. After the fix, re-run test_iter25_phase_c.py — the sole failing test `test_post_company_persists_company_code` will flip green.",
+    "BACKEND (optional): Add server-side validation for company_code shape (2–8 [A-Z0-9]) on both POST and PATCH, and enforce uppercase normalisation.",
+    "FRONTEND (once backend fix lands): Manually verify /companies Create modal → typing 'sks' shows helper 'e.g. SKS0001', Save creates company with company_code='SKS', Edit modal pre-fills 'SKS'. Verify /kyc as employee: aadhaar mask 1234 5678 9012, PAN uppercase, save → green kyc-ok banner + Last updated stamp, reload persists.",
+    "REGRESSION: Verify existing companies (pre-iter-25) with 6-hex company_codes still have their employees' codes intact after any PATCH."
+  ],
+  "critical_code_review_comments": [
+    "server.py L221 CompanyCreate missing company_code — the SINGLE root cause of iter-25 backend failure.",
+    "server.py L2177 CompanyUpdate.edit_company uses `if v is not None` filter, so passing `company_code=''` (empty string) is treated as an explicit set to empty, potentially breaking the unique index (empty string counts). Should treat '' as unchanged or reject.",
+    "server.py L604 exposes `has_pin` and `pin_must_change` but strips pin_hash — good pattern.",
+    "server.py: `_next_employee_code` correctly walks up to +30 for a free slot but caps at 9999 — a company hitting >9999 employees would fail silently (returns None → user gets no code). Add a warning log.",
+    "server.py L2177 PATCH silently swallows all unknown fields (Pydantic BaseModel with all-Optional). Consider `model_config = ConfigDict(extra='forbid')` for CompanyUpdate."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter25_phase_c.py (new)"
+  ],
+  "success_rate": {
+    "backend": "89% (8/9 pytest — 1 CRITICAL bug blocks POST /companies + company_code round-trip)",
+    "frontend": "Not fully exercised in browser; testIDs verified via code inspection; landing page loads clean (no red screen)."
+  },
+  "seed_data_creation": "Test file creates ephemeral companies (name prefix `IT25<hex>` and company_codes SKS, AC<hex>, XZ<hex>, KY<hex>) plus employees (phone +919<stamp>...) and one legacy user with code 'SKS-1234'. All are removed by the module-scope `cleanup` fixture. Super_admin PIN/hash NOT touched — a throwaway session token (auth_method='test_seed') is inserted then deleted.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "After main agent fixes CompanyCreate.company_code: re-run `pytest /app/backend/tests/test_iter25_phase_c.py -v` — expect 9/9 pass. Then run FE UI flow: OTP-login as super_admin (PIN protected; use seeded session token via pymongo like this test does), open /companies → Add → set company_code='sks' → verify auto-uppercase → Save → GET /api/companies and confirm response.company_code === 'SKS'. Then create an employee under that company via /auth/employee-signup and verify employee_code === 'SKS0001'. Also verify the Edit modal pre-fills the code. Frontend /kyc screen: login as an employee, navigate Profile → row-kyc → verify aadhaar mask '1234 5678 9012', PAN uppercase, DL live upper, Save shows confirm dialog then kyc-ok banner + Last-updated timestamp; reload persists; short aadhaar/invalid PAN show kyc-error red box.",
+  "rca_of_issue": "CompanyCreate Pydantic model (server.py L221-233) omits `company_code` — because it was only added to CompanyUpdate (L243). Additionally, create_company() (L2103-2110) constructs `Company(...)` with fixed fields only, so even if the field were added to the payload model it wouldn't propagate. When Company() runs, its `default_factory=lambda: uuid.uuid4().hex[:6].upper()` fires, producing the random hex code we see (60C934, 6B8DAC, ...). PATCH is unaffected because it builds `updates = payload.model_dump()` then `update_one($set=updates)`, and CompanyUpdate.company_code IS defined. Fix: (a) add `company_code: Optional[str] = None` to CompanyCreate; (b) in create_company, `code = (payload.company_code or '').strip().upper() or None`; then `Company(..., **({'company_code': code} if code else {}))`. Add regex validation 2–8 [A-Z0-9]."
+}

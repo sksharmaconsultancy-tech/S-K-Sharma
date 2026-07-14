@@ -1,0 +1,31 @@
+{
+  "summary": "Iter 124 backend + frontend regression for (1) Remember-Last-Firm (/api/me/last-company GET/PATCH) and (2) Sub-Admin 'Not your firm' fix. Backend: 15/15 pytest tests PASS (super admin + sub admin PATCH/GET persistence, employee token 401/403 gate, sub-admin 200 on challans/firm-master/employee-kyc/employee-salary/leave-report for cmp_527fecdd7c, super-admin regression on the same endpoints). Frontend: sub-admin login lands cleanly on dashboard with 'Active Firm: Kankani Enterprises' auto-restored in both header and left rail — proves last-company restore works on web. NO 'Not your firm' text on dashboard or Companies/Firm Master page; both City Care + Kankani firms render for sub-admin. Super-admin second-login remember-firm UI verification was blocked by Cloudflare 429 rate-limits from rapid automation (preview-env quirk flagged in the review request); the underlying PATCH+GET is covered by backend tests.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter124_remember_firm_and_subadmin_scope.py",
+    "/app/test_reports/pytest/iter124.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: manually verify the super-admin 're-login restores City Care in header' flow in a fresh browser session (Cloudflare 429s made automation flaky). The backend contract is already green.",
+    "OPTIONAL: expose a stable testID on the header firm picker (e.g. testID=\"global-company-picker\") and on each firm option (e.g. testID=\"firm-option-{company_id}\") so future automation can drive the picker deterministically without relying on visible text."
+  ],
+  "critical_code_review_comments": [
+    "routes/user_prefs.py is clean: role-gated with require_role, no _id leak (uses {\"_id\": 0}), correct 401/403 propagation via get_user_from_token.",
+    "SelectedCompanyContext.tsx correctly gates the server-side restore to super_admin + sub_admin, guards with restoredForUser ref so an explicit 'All firms' pick isn't overridden, and persists via best-effort PATCH — LGTM.",
+    "All sub-admin fixes consistently import sub_admin_can_touch_company from server and check against sub_admin_company_scope instead of the (nonexistent) company_id on the sub-admin user doc — this is the correct pattern and matches the review-request description."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter124_remember_firm_and_subadmin_scope.py (new)"
+  ],
+  "success_rate": {"backend": "100% (15/15)", "frontend": "sub-admin flow verified; super-admin re-login step blocked by Cloudflare 429 (not a product bug)"},
+  "seed_data_creation": "No new seed data. Existing accounts used: sksharmaconsultancy@gmail.com (super), testsub@sksharma.co (sub), user_94e190f2843e (employee uid), cmp_527fecdd7c (Kankani).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend contract for /api/me/last-company and sub-admin fixes on challans, firm-master, employee kyc/salary, leave-report is locked in by test_iter124_*. Frontend UI test for super-admin cross-login persistence is fragile in automation because rapid re-navigation triggers Cloudflare 429; add long (10s+) waits between logout->login or drive the flow via API cookies to avoid rate-limit challenges."
+}

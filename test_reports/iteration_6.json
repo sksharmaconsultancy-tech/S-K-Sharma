@@ -1,0 +1,44 @@
+{
+  "summary": "Backend-only testing of the new Resend integration on POST /api/company-requests. All 6 new in-process tests + all 54 pre-existing regression tests PASS (60/60, 100%). Verified: (a) SUCCESS — with a fake OK Resend response, endpoint returns email_delivered=true, email_id=<id from Resend>, admin_emails=['sksharmaconsultancy@gmail.com'], persisted doc has email_delivered=true, email_provider='resend', email_id=<id>, email_error=null; the outbound POST was made to https://api.resend.com/emails with Authorization: Bearer <key>, Content-Type: application/json, and the payload carries from='SK Sharma Consultancy <onboarding@resend.dev>', to=['sksharmaconsultancy@gmail.com'], subject='New company request: TEST_ResendCo', text=<plain>, html=<HTML from _format_company_request_email_html>. (b) 4xx FROM RESEND — endpoint still 200, email_delivered=false, persisted email_error starts with 'http_401'. (c) NETWORK EXCEPTION (httpx.ConnectError) — endpoint still 200, email_delivered=false, persisted email_error starts with 'network:'. (d) MISSING RESEND_API_KEY (empty env var) — endpoint still 200, no outbound HTTP call attempted, persisted email_error='missing_api_key_or_recipients'. (e) HTML formatter unit tested — HTML-escapes <, >, & and includes all key fields. (f) Regression: super_admin still blocked (400 'Super admins add companies directly, not via requests'). NO real Resend API calls were made — `httpx.AsyncClient` was monkeypatched inside the server module. Regression: all 54 pre-existing pytest tests (approval workflow 14, offboarding, OTP, admin, payroll, bug-fix bundle) still pass — the internal signature change of _try_send_admin_email from bool → dict is fully backwards compatible at the HTTP response layer (email_delivered stays a bool via bool(mail.get('delivered'))).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/company-requests", "issue": "email_provider is hard-coded to 'resend' in _try_send_admin_email even in the missing-api-key/no-recipients branch. Cosmetic — audit log will show provider='resend' for a request that never touched Resend. Consider setting provider=None (or 'none') on the short-circuit path."},
+      {"endpoint": "POST /api/company-requests", "issue": "Persisted email_error captures raw response snippet up to 300 chars (`http_401: {...}`). Fine for internal debugging but be aware of accidental key/PII leakage if Resend ever echoes them back."},
+      {"endpoint": "POST /api/company-requests", "issue": "Response includes admin_emails (list of super_admin allow-listed emails). This is technically an info leak to any authenticated employee. Acceptable given the single hard-coded address, but consider dropping from response if the allow-list ever grows."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_resend_integration.py",
+    "/app/backend/tests/pytest.ini",
+    "/app/test_reports/pytest/pytest_resend.xml"
+  ],
+  "action_items": [
+    "(Optional) Set email_provider=null (or 'none') on the missing_api_key_or_recipients branch of _try_send_admin_email so the audit doc doesn't falsely attribute the un-sent mail to Resend.",
+    "(Optional) Consider redacting admin_emails from the POST /api/company-requests response — currently any authenticated employee can enumerate super_admin allow-list.",
+    "(Optional) Deprecation carryover from earlier iterations: FastAPI @app.on_event('startup'/'shutdown') should migrate to lifespan handlers (5 DeprecationWarnings, non-blocking)."
+  ],
+  "critical_code_review_comments": [
+    "server.py:672-732 _try_send_admin_email correctly wraps ALL failure paths in try/except (httpx.RequestError, Exception) and returns a dict; the endpoint never fails on email issues. Timeout is 10s as required.",
+    "server.py:735-772 create_company_request uses model_dump() → strips validators, adds request_id/status/created_at BEFORE the DB insert, then triggers mail send, then updates the doc with delivery outcome inside its own try/except so audit-write failures also cannot break the endpoint. Correct ordering.",
+    "server.py:766-771 endpoint response exposes email_delivered as bool via bool(mail.get('delivered')) — no risk of returning None from a dict miss. Backwards compatible with iteration_5 tests.",
+    "_format_company_request_email_html escapes <, >, &, and \" — sufficient for the closed set of fields it renders. attr context is only used inside style values controlled by us.",
+    "Env var reading happens INSIDE _try_send_admin_email (not at import time), so monkeypatch.setenv works cleanly and hot-reloading a key does not require a restart."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_resend_integration.py (new)",
+    "/app/backend/tests/pytest.ini (new — session-scoped asyncio loop for Motor)"
+  ],
+  "success_rate": {"backend": "100% (60/60 — 6 new Resend + 54 regression)", "frontend": "N/A — backend-only per review request"},
+  "seed_data_creation": "Each Resend test seeds a fresh employee user + session directly into MongoDB with a UUID-based token, then cleans up (users, user_sessions, company_requests) in fixture teardown. One super_admin test user is created and torn down in test_super_admin_forbidden. Existing regression tests reuse their own seeded data via OTP dev-mode.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run: `cd /app/backend && EXPO_BACKEND_URL=<url> EXPO_PUBLIC_BACKEND_URL=<url> python -m pytest tests/ -v`. The new Resend tests run IN-PROCESS via httpx.ASGITransport and DO NOT need the live server — they need MongoDB up. Motor requires a single event loop across tests, so pytest.ini pins asyncio_default_fixture_loop_scope=session and asyncio_default_test_loop_scope=session. To simulate Resend responses, monkeypatch `server.httpx.AsyncClient` (not the global `httpx.AsyncClient`) — the module holds its own imported reference. Real RESEND_API_KEY in .env was NEVER used by tests (monkeypatched away). If you want to smoke-test the real Resend call once, do it manually with curl + a real session token, not from pytest.",
+  "rca_of_issue": "N/A — feature works end-to-end. Design summary: _try_send_admin_email is a fire-and-forget helper that returns a dict {delivered, provider, email_id, error}; the endpoint keeps returning 200 regardless of email outcome and persists the outcome to the company_requests doc for auditing. All 4 failure modes (missing key, 4xx, network error, unexpected exception) are covered and logged with distinct error prefixes (missing_api_key_or_recipients / http_<code> / network: / unexpected:)."
+}

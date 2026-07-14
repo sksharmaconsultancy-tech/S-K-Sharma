@@ -1,0 +1,91 @@
+{
+  "expo": {
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#FAFAF9",
+        "foregroundImage": "./assets/images/adaptive-icon.png"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "app.emergent.emploconnect1d35e8531",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "READ_MEDIA_IMAGES",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "POST_NOTIFICATIONS",
+        "SCHEDULE_EXACT_ALARM"
+      ]
+    },
+    "experiments": {
+      "typedRoutes": true
+    },
+    "icon": "./assets/images/icon.png",
+    "ios": {
+      "bundleIdentifier": "app.emergent.emploconnect1d35e8531",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Take a selfie for attendance \u0026 profile",
+        "NSFaceIDUsageDescription": "Unlock the app and confirm attendance with Face ID",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Auto punch you in and out at the office",
+        "NSLocationAlwaysUsageDescription": "Auto punch you in and out at the office",
+        "NSLocationWhenInUseUsageDescription": "Verify you're at the office to punch attendance",
+        "NSPhotoLibraryAddUsageDescription": "Save reports to your photo library",
+        "NSPhotoLibraryUsageDescription": "Pick a photo for your profile",
+        "UIBackgroundModes": [
+          "location",
+          "fetch"
+        ]
+      },
+      "supportsTablet": true
+    },
+    "name": "S.K. Sharma \u0026 Co.",
+    "newArchEnabled": true,
+    "orientation": "portrait",
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-local-authentication",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Verify you're at the office to punch attendance"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Take a selfie for biometric attendance"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#FAFAF9",
+          "image": "./assets/images/splash-image.png",
+          "imageWidth": 200,
+          "resizeMode": "contain"
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#0F3D3E"
+        }
+      ]
+    ],
+    "scheme": "labourlawconnect",
+    "slug": "sk-sharma-consultancy",
+    "userInterfaceStyle": "automatic",
+    "version": "1.0.0",
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/images/favicon.png",
+      "output": "single"
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "summary": "Iter-44 retest of two Iter-43 fixes on S.K. Sharma & Co. app. BACKEND: All 16 prior pytests in test_iter43_business_type_and_policy.py PASS (rerun). Added new /app/backend/tests/test_iter44_is_default_preset.py (3 targeted cases) — all PASS. is_default_preset semantics now correct: fresh company → true, after PATCH → false, after POST /reset → false (intended, reset writes the timestamp). FRONTEND: Verified super_admin flow on /admin. (1) With filter on default 'All companies', tapping the 'Attendance policy' tile navigates to /attendance-policy (no company_id query param) and renders the ap-pick-company empty-state; ap-pick-company-back button returns to /admin. (2) After picking a specific company from the top filter chips, the tile passes ?company_id=<id> and the AP screen loads normally with policy sections (shifts, presets, etc.). Both P0 admin-tile bug and LOW is_default_preset bug are fixed and verified.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter43_business_type_and_policy.py",
+    "/app/backend/tests/test_iter44_is_default_preset.py",
+    "/app/test_reports/pytest/pytest_iter44.xml",
+    "/app/test_reports/pytest/pytest_iter44_default_preset.xml"
+  ],
+  "action_items": [
+    "Housekeeping (optional, not blocking): The DB has several leftover TEST_DefPresetCo / TEST_PolicyCo companies visible in the /admin picker from prior test runs where pytest cleanup was interrupted. Consider running a one-off cleanup: DELETE /api/companies/{company_id} for any name starting with 'TEST_'."
+  ],
+  "critical_code_review_comments": [
+    "Fix is minimal and targeted (admin.tsx L206-211 + attendance-policy.tsx L226-251 + server.py L2978). Iter-43's critical review comment about is_default_preset being tied to `attendance_policy` presence is now resolved — server now keys off `attendance_policy_updated_at`.",
+    "Note: The super admin OTP-login flow on the preview environment currently redirects to /pin-change on first sign-in (pin_must_change likely true). Testing navigated to /admin directly without touching PIN fields, so the hard-coded super-admin PIN was NOT modified (per /app/memory/test_credentials.md guard). Main agent may want to confirm pin_must_change state for the primary super admin if this redirect is unexpected."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter44_is_default_preset.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (19/19 combined)",
+    "frontend": "100% (both super_admin flows verified)"
+  },
+  "seed_data_creation": "Session-scoped pytest fixtures created and cleaned up TEST_DefPresetCo and TEST_PolicyCo companies. A few TEST_-prefixed companies from earlier interrupted runs remain in the DB but are cosmetically visible only.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter-43 bugs (admin tile passing ?company_id=all, is_default_preset semantics) are fully fixed and verified. For future policy tests: use company_admin fixture pattern in test_iter44_is_default_preset.py (POST /api/companies with admin_phone + admin_name, then /api/auth/admin-pin-login with temp_pin). Never touch the hard-coded super-admin PIN. Frontend OTP dev-mode returns dev_code in the response body and is displayed under [data-testid=otp-dev-code].",
+  "rca_of_issue": "Both Iter-43 bugs verified fixed. (1) admin.tsx L206-211 now gates the company_id param on `isSuper && companyFilter && companyFilter !== 'all'` — sentinel 'all' no longer forwarded. (2) attendance-policy.tsx L226-251 renders a friendly empty-state (testID=ap-pick-company + ap-pick-company-back button) when super_admin arrives without company_id. (3) server.py L2978 sets `is_default_preset = company.get('attendance_policy_updated_at') is None`, correctly distinguishing an auto-attached preset from admin-customised policy."
+}

@@ -1,0 +1,279 @@
+"""Iter 86 - Route module: Leaves.
+
+Endpoints:
+  * POST  /leaves               - Employee creates a leave request.
+  * GET   /leaves?scope=mine|all - Employee sees own; admin sees firm.
+  * PATCH /leaves/{leave_id}    - Admin approves/rejects a leave.
+"""
+import uuid
+from typing import Optional
+
+from fastapi import APIRouter, Header, HTTPException, Query
+
+from server import (  # noqa: E402
+    db,
+    get_user_from_token,
+    require_role,
+    now_iso,
+    LeaveCreate,
+    LeaveDecision,
+)
+
+router = APIRouter(prefix="/api", tags=["leaves"])
+
+
+@router.post("/leaves")
+async def create_leave(payload: LeaveCreate, authorization: Optional[str] = Header(None)):
+    user = await get_user_from_token(authorization)
+    leave = {
+        "leave_id": f"lv_{uuid.uuid4().hex[:12]}",
+        "user_id": user["user_id"],
+        "company_id": user.get("company_id"),
+        "user_name": user["name"],
+        "user_email": user["email"],
+        "leave_type": payload.leave_type,
+        "from_date": payload.from_date,
+        "to_date": payload.to_date,
+        "reason": payload.reason,
+        "status": "pending",
+        "admin_comment": None,
+        "decided_by": None,
+        "created_at": now_iso(),
+    }
+    await db.leaves.insert_one(leave)
+    # Iter 103 — automated email trigger
+    try:
+        from routes.email_notifications import fire_email_event
+        await fire_email_event(
+            "leave_applied", company_id=user.get("company_id"),
+            employee_user_id=user["user_id"],
+            details=f"{payload.leave_type} leave from {payload.from_date} to {payload.to_date}")
+    except Exception:
+        pass
+    return {k: v for k, v in leave.items() if k != "_id"}
+
+
+@router.get("/leaves")
+async def list_leaves(
+    scope: str = Query("mine", pattern="^(mine|all)$"),
+    authorization: Optional[str] = Header(None),
+):
+    user = await get_user_from_token(authorization)
+    q = {}
+    if scope == "mine":
+        q = {"user_id": user["user_id"]}
+    else:
+        require_role(user, ["company_admin", "super_admin"])
+        # Company admin sees only their company. Super admin sees all.
+        if user["role"] == "company_admin" and user.get("company_id"):
+            q = {"company_id": user["company_id"]}
+    leaves = await db.leaves.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return {"leaves": leaves}
+
+
+@router.patch("/leaves/{leave_id}")
+async def decide_leave(leave_id: str, payload: LeaveDecision,
+                       authorization: Optional[str] = Header(None)):
+    user = await get_user_from_token(authorization)
+    require_role(user, ["company_admin", "super_admin"])
+    r = await db.leaves.update_one(
+        {"leave_id": leave_id},
+        {"$set": {"status": payload.status,
+                  "admin_comment": payload.comment,
+                  "decided_by": user["name"],
+                  "decided_at": now_iso()}},
+    )
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Leave not found")
+    leave = await db.leaves.find_one({"leave_id": leave_id}, {"_id": 0})
+    # Iter 77n - broadcast leave decision to admins + the employee.
+    try:
+        from utils.ws_broker import broker as _ws
+        _ev = {
+            "type": f"leave.{payload.status}",
+            "leave_id": leave_id,
+            "user_id": leave.get("user_id"),
+            "status": payload.status,
+            "leave_type": leave.get("leave_type"),
+            "from_date": leave.get("from_date"),
+            "to_date": leave.get("to_date"),
+            "decided_by": user["name"],
+        }
+        await _ws.broadcast_firm(leave.get("company_id") or "", _ev)
+        await _ws.broadcast_user(leave.get("user_id") or "", _ev)
+    except Exception:
+        pass
+    # Iter 103 — automated email trigger
+    try:
+        from routes.email_notifications import fire_email_event
+        _evk = "leave_approved" if payload.status == "approved" else "leave_rejected"
+        await fire_email_event(
+            _evk, company_id=leave.get("company_id"),
+            employee_user_id=leave.get("user_id"),
+            details=f"{leave.get('leave_type')} leave {leave.get('from_date')} → {leave.get('to_date')}")
+    except Exception:
+        pass
+    return leave
+
+
+@router.get("/admin/leave-report")
+async def leave_report(
+    company_id: Optional[str] = Query(None),
+    year: int = Query(...),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 98 — Leave Report (Reports section).
+
+    Per employee for the given calendar year:
+      * CL / PL allowed  — from Firm Master → Leave Policy limits.
+      * CL / PL taken    — approved leaves (casual → CL, earned → PL),
+        clipped to the year window.
+      * Balance          — allowed − taken (floored at 0).
+    """
+    from datetime import date
+
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    if admin["role"] == "company_admin":
+        company_id = admin.get("company_id")
+    if admin["role"] == "sub_admin" and company_id:
+        from server import sub_admin_can_touch_company
+        if not sub_admin_can_touch_company(admin, company_id):
+            raise HTTPException(status_code=403, detail="Firm is outside your assigned scope")
+    if not company_id:
+        raise HTTPException(status_code=400, detail="company_id is required")
+
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "leave_policy": 1},
+    )
+    lp = (fm or {}).get("leave_policy") or {}
+    cl_allowed = float(lp.get("cl_day_limit") or 0)
+    pl_allowed = float(lp.get("pl_day_limit") or 0)
+
+    emps = await db.users.find(
+        {"role": "employee", "company_id": company_id},
+        {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1, "designation": 1},
+    ).to_list(10000)
+
+    y_start = date(year, 1, 1)
+    y_end = date(year, 12, 31)
+    taken: dict = {}
+    async for lv in db.leaves.find(
+        {
+            "company_id": company_id,
+            "status": "approved",
+            "from_date": {"$lte": y_end.isoformat()},
+            "to_date": {"$gte": y_start.isoformat()},
+        },
+        {"_id": 0, "user_id": 1, "leave_type": 1, "from_date": 1, "to_date": 1},
+    ):
+        try:
+            f = max(date.fromisoformat(str(lv["from_date"])[:10]), y_start)
+            t = min(date.fromisoformat(str(lv["to_date"])[:10]), y_end)
+        except (ValueError, TypeError):
+            continue
+        d = (t - f).days + 1
+        if d <= 0:
+            continue
+        b = taken.setdefault(lv["user_id"], {"cl": 0.0, "pl": 0.0, "other": 0.0})
+        lt = lv.get("leave_type")
+        if lt == "casual":
+            b["cl"] += d
+        elif lt == "earned":
+            b["pl"] += d
+        else:
+            b["other"] += d
+
+    rows = []
+    for e in emps:
+        t = taken.get(e["user_id"]) or {"cl": 0.0, "pl": 0.0, "other": 0.0}
+        rows.append({
+            "user_id": e["user_id"],
+            "employee_code": e.get("employee_code"),
+            "name": e.get("name"),
+            "designation": e.get("designation"),
+            "cl_allowed": cl_allowed,
+            "cl_taken": t["cl"],
+            "cl_balance": max(0.0, cl_allowed - t["cl"]),
+            "pl_allowed": pl_allowed,
+            "pl_taken": t["pl"],
+            "pl_balance": max(0.0, pl_allowed - t["pl"]),
+            "other_taken": t["other"],
+            "total_taken": t["cl"] + t["pl"] + t["other"],
+        })
+
+    def _code_key(r):
+        c = str(r.get("employee_code") or "").strip()
+        try:
+            return (0, float(c), "")
+        except ValueError:
+            return (1, 0.0, c.lower())
+
+    rows.sort(key=_code_key)
+    return {
+        "company_id": company_id,
+        "year": year,
+        "cl_pl_applicable": bool(lp.get("cl_pl_applicable")),
+        "cl_allowed": cl_allowed,
+        "pl_allowed": pl_allowed,
+        "rows": rows,
+        "employees_count": len(rows),
+    }
+
+
+@router.get("/leaves/balance")
+async def my_leave_balance(authorization: Optional[str] = Header(None)):
+    """Iter 99 — employee self-service CL/PL balance (current year).
+    Allowed limits come from Firm Master → Leave Policy; taken = own
+    approved leaves (casual → CL, earned → PL)."""
+    from datetime import date
+
+    user = await get_user_from_token(authorization)
+    company_id = user.get("company_id")
+    year = date.today().year
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "leave_policy": 1},
+    ) if company_id else None
+    lp = (fm or {}).get("leave_policy") or {}
+    cl_allowed = float(lp.get("cl_day_limit") or 0)
+    pl_allowed = float(lp.get("pl_day_limit") or 0)
+
+    y_start = date(year, 1, 1)
+    y_end = date(year, 12, 31)
+    cl_taken = pl_taken = other_taken = 0.0
+    async for lv in db.leaves.find(
+        {
+            "user_id": user["user_id"],
+            "status": "approved",
+            "from_date": {"$lte": y_end.isoformat()},
+            "to_date": {"$gte": y_start.isoformat()},
+        },
+        {"_id": 0, "leave_type": 1, "from_date": 1, "to_date": 1},
+    ):
+        try:
+            f = max(date.fromisoformat(str(lv["from_date"])[:10]), y_start)
+            t = min(date.fromisoformat(str(lv["to_date"])[:10]), y_end)
+        except (ValueError, TypeError):
+            continue
+        d = (t - f).days + 1
+        if d <= 0:
+            continue
+        lt = lv.get("leave_type")
+        if lt == "casual":
+            cl_taken += d
+        elif lt == "earned":
+            pl_taken += d
+        else:
+            other_taken += d
+
+    return {
+        "year": year,
+        "cl_pl_applicable": bool(lp.get("cl_pl_applicable")),
+        "cl_allowed": cl_allowed,
+        "cl_taken": cl_taken,
+        "cl_balance": max(0.0, cl_allowed - cl_taken),
+        "pl_allowed": pl_allowed,
+        "pl_taken": pl_taken,
+        "pl_balance": max(0.0, pl_allowed - pl_taken),
+        "other_taken": other_taken,
+    }

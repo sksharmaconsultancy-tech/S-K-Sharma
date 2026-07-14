@@ -1,0 +1,1256 @@
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  ScrollView,
+  ActivityIndicator,
+  Platform,
+  Modal,
+  Image,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import * as Location from "expo-location";
+import { MiniMap } from "@/src/components/MiniMap";
+import { formatDistance, reverseGeocode } from "@/src/utils/location";
+import * as LocalAuthentication from "expo-local-authentication";
+import * as Haptics from "expo-haptics";
+import { Redirect } from "expo-router";
+import { useFocusEffect } from "@react-navigation/native";
+
+import { api } from "@/src/api/client";
+import { colors, radius, shadow, spacing, type } from "@/src/theme";
+import { useAuth } from "@/src/context/AuthContext";
+import FaceCaptureModal from "@/src/components/FaceCaptureModal";
+import LocationPill from "@/src/components/LocationPill";
+import {
+  authenticateBiometricStrict,
+  getBiometricPreference,
+} from "@/src/utils/biometric";
+
+type Company = {
+  name: string;
+  office_lat: number;
+  office_lng: number;
+  geofence_radius_m: number;
+};
+
+function haversine(a: [number, number], b: [number, number]) {
+  const R = 6371000;
+  const toRad = (x: number) => (x * Math.PI) / 180;
+  const dLat = toRad(b[0] - a[0]);
+  const dLng = toRad(b[1] - a[1]);
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a[0])) * Math.cos(toRad(b[0])) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+export default function AttendanceScreen() {
+  const { user, refresh } = useAuth();
+  const [company, setCompany] = useState<Company | null>(null);
+  const [loc, setLoc] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [distance, setDistance] = useState<number | null>(null);
+  const [inside, setInside] = useState<boolean>(false);
+  // Iter 53: location is OFF by default. Flips true only after the user
+  // explicitly grants foreground permission (via the banner CTA or the
+  // manual Punch button).
+  const [locationEnabled, setLocationEnabled] = useState<boolean>(false);
+  const [today, setToday] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Punch-mode flags — MUST be declared before any effect that lists them
+  // as dependencies (previously declared near the render return, which
+  // crashed the whole punch page with a TDZ error on phones).
+  // effective_auto_punch is server-computed (company × per-user × live-in).
+  const autoPunchActive = user?.effective_auto_punch !== false;
+  // Iter 64 — GPS punching gate (firm AND user opt-in, default FALSE).
+  const gpsPunchAllowed = user?.effective_gps_punch === true;
+  const biometricOnlyMode = !gpsPunchAllowed;
+  const [toast, setToast] = useState<{ msg: string; kind: "ok" | "err" } | null>(null);
+  const [locError, setLocError] = useState<string | null>(null);
+  const [address, setAddress] = useState<string | null>(null);
+  const [officeAddress, setOfficeAddress] = useState<string | null>(null);
+  const [lastRefresh, setLastRefresh] = useState<number>(0);
+
+  const showToast = (msg: string, kind: "ok" | "err") => {
+    setToast({ msg, kind });
+    setTimeout(() => setToast(null), 3200);
+  };
+
+  // Iter 97 — punch photo (selfie) viewer for the employee's own punches.
+  const [photo, setPhoto] = useState<{ loading: boolean; b64: string | null; open: boolean }>(
+    { loading: false, b64: null, open: false },
+  );
+  const openPunchPhoto = async (recordId: string) => {
+    setPhoto({ loading: true, b64: null, open: true });
+    try {
+      const r = await api<{ selfie_base64: string | null }>(`/attendance/${recordId}/selfie`);
+      setPhoto({ loading: false, b64: r.selfie_base64 || null, open: true });
+    } catch {
+      setPhoto({ loading: false, b64: null, open: true });
+    }
+  };
+
+  const loadAll = useCallback(async () => {
+    try {
+      const [c, t] = await Promise.all([
+        api<Company>("/company"),
+        api<{ records: any[] }>("/attendance/today"),
+      ]);
+      setCompany(c);
+      setToday(t);
+    } catch (e: any) {
+      showToast(e.message || "Failed to load", "err");
+    }
+  }, []);
+
+  const refreshLocation = useCallback(async () => {
+    setLocError(null);
+    try {
+      // Location permission is requested lazily now (Iter 53) — only
+      // when the user is on auto-punch (contextual banner) or when they
+      // explicitly tap the manual Punch button. Never on app startup.
+      const cur = await Location.getForegroundPermissionsAsync();
+      if (cur.status !== "granted") {
+        const req = await Location.requestForegroundPermissionsAsync();
+        if (req.status !== "granted") {
+          setLocError("Location permission denied");
+          setLocationEnabled(false);
+          return false;
+        }
+      }
+      setLocationEnabled(true);
+      const l = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const coords = { latitude: l.coords.latitude, longitude: l.coords.longitude };
+      setLoc(coords);
+      setLastRefresh(Date.now());
+      // Silently persist last-known location so employer's "present but not
+      // punched" report can pick this employee up if they're inside the
+      // office geofence. Fire and forget — failures should not block the UI.
+      api("/me/location-ping", {
+        method: "POST",
+        body: { latitude: coords.latitude, longitude: coords.longitude },
+      }).catch(() => {});
+      if (company) {
+        const dLat = (coords.latitude - company.office_lat) * Math.PI / 180;
+        const dLng = (coords.longitude - company.office_lng) * Math.PI / 180;
+        const R = 6371000;
+        const s =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos((coords.latitude * Math.PI) / 180) *
+            Math.cos((company.office_lat * Math.PI) / 180) *
+            Math.sin(dLng / 2) ** 2;
+        const d = 2 * R * Math.asin(Math.sqrt(s));
+        setDistance(d);
+        setInside(d <= company.geofence_radius_m);
+      }
+      // A) reverse-geocode current location to a readable address (fire & forget)
+      reverseGeocode(coords.latitude, coords.longitude).then((a) => {
+        if (a) setAddress(a);
+      });
+      return true;
+    } catch (e: any) {
+      setLocError(e.message || "Location error");
+      return false;
+    }
+  }, [company]);
+
+  // A) reverse-geocode the office address once we know the company
+  useEffect(() => {
+    if (!company) return;
+    reverseGeocode(company.office_lat, company.office_lng).then((a) => {
+      if (a) setOfficeAddress(a);
+    });
+  }, [company]);
+
+  // Iter 100 — GEOFENCE ENTRY REMINDER: when the employee is inside the
+  // office premises and has NOT punched in yet, fire a phone notification
+  // "You are in office premises — please punch your attendance."
+  // NOTE: declared BEFORE the effect below that depends on it (a later
+  // edit had this after, crashing the whole punch page with a TDZ error).
+  const lastRec = today?.records?.[today.records.length - 1];
+  const isPunchedIn = lastRec?.kind === "in";
+  const nextKind: "in" | "out" = isPunchedIn ? "out" : "in";
+
+  const insideNotifiedRef = useRef(false);
+  useEffect(() => {
+    // Reset when the employee leaves the geofence so a fresh entry
+    // (e.g., returning after lunch) triggers the reminder again.
+    if (!inside) {
+      insideNotifiedRef.current = false;
+      return;
+    }
+    if (isPunchedIn || insideNotifiedRef.current) return;
+    insideNotifiedRef.current = true;
+    const title = "You are in office premises";
+    const body = `Please punch your attendance${company?.name ? ` · ${company.name}` : ""}`;
+    (async () => {
+      try {
+        if (Platform.OS === "web") {
+          if (typeof window !== "undefined" && "Notification" in window) {
+            if (window.Notification.permission === "granted") {
+              new window.Notification(title, { body });
+            } else if (window.Notification.permission !== "denied") {
+              const p = await window.Notification.requestPermission();
+              if (p === "granted") new window.Notification(title, { body });
+            }
+          }
+        } else {
+          const Notifications = await import("expo-notifications");
+          let perm = await Notifications.getPermissionsAsync();
+          if (!perm.granted && perm.canAskAgain) {
+            perm = await Notifications.requestPermissionsAsync();
+          }
+          if (perm.granted) {
+            await Notifications.scheduleNotificationAsync({
+              content: { title, body },
+              trigger: null,
+            });
+          }
+        }
+      } catch {}
+      showToast(`${title} — ${body}`, "ok");
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inside, isPunchedIn]);
+
+  // Iter 99 — FIRST-LOGIN AUTO PUNCH-IN. After an employee registers via
+  // the QR/joining form and logs in for the first time, the app marks
+  // their first Punch IN automatically (geofence still enforced — the
+  // punch goes through the normal handlePunch flow).
+  const firstPunchTried = useRef(false);
+  useEffect(() => {
+    if (firstPunchTried.current) return;
+    if (!company || !today) return;
+    if ((today.records || []).length > 0) {
+      firstPunchTried.current = true;
+      return;
+    }
+    (async () => {
+      try {
+        const st = await api<{ first_punch_pending: boolean }>(
+          "/attendance/first-punch-status",
+        );
+        firstPunchTried.current = true;
+        if (!st.first_punch_pending) return;
+        showToast(`Welcome to ${company?.name || "your firm"}! Marking your first Punch IN…`, "ok");
+        await handlePunch();
+      } catch {
+        firstPunchTried.current = true;
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [company, today]);
+
+  // Auto-refresh location every 30 seconds — but only when auto-punch
+  // mode is active AND the user has explicitly granted GPS. Manual-punch
+  // employees never trigger a background poll; they get a contextual
+  // prompt when they tap the Punch button.
+  useEffect(() => {
+    if (!company) return;
+    if (!autoPunchActive) return;
+    if (!locationEnabled) return;
+    const t = setInterval(() => {
+      refreshLocation().catch(() => {});
+    }, 30000);
+    return () => clearInterval(t);
+  }, [company, refreshLocation, autoPunchActive, locationEnabled]);
+
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
+  // Iter 72 — Refresh live attendance data when the tab regains focus
+  // (e.g. switching from Home to Attendance after an admin update).
+  useFocusEffect(useCallback(() => {
+    // Iter 77 - Also re-hydrate the user record so admin master-data
+    // edits (department, group, name, DOJ, salary, …) reflect on the
+    // employee's phone without a re-login.
+    void refresh();
+    loadAll();
+  }, [loadAll, refresh]));
+
+  // Initial location fetch — ONLY for auto-punch users. Manual users don't
+  // get a GPS prompt on app startup.
+  useEffect(() => {
+    if (!company) return;
+    if (!autoPunchActive) return;
+    // Silent check first (Location.getForegroundPermissionsAsync). If not
+    // granted, do NOT prompt on startup — we show the "Turn on Location"
+    // banner instead which triggers the prompt on tap.
+    (async () => {
+      const cur = await Location.getForegroundPermissionsAsync();
+      if (cur.status === "granted") {
+        setLocationEnabled(true);
+        refreshLocation();
+      }
+    })();
+  }, [company, refreshLocation, autoPunchActive]);
+
+  const [faceOpen, setFaceOpen] = useState(false);
+
+  /** Shared punch call. If a selfie base64 is provided the method is "face"
+   *  and the selfie is uploaded to the server for the record.
+   *
+   *  Iter 64 — call site is either:
+   *   • Biometric-only mode (firm/user GPS off): route MUST be no-GPS with
+   *     both device biometric AND face selfie.
+   *   • Auto-punch OFF legacy: no-GPS allowed with face selfie only.
+   *   • Auto-punch ON: GPS-verified geofence punch.
+   */
+  const submitPunch = async (
+    method: "fingerprint" | "face",
+    selfie_base64?: string,
+  ) => {
+    // Biometric-only OR auto-punch off → no-GPS manual punch.
+    if (biometricOnlyMode || !autoPunchActive) {
+      if (biometricOnlyMode && !selfie_base64) {
+        showToast("Face selfie is required in biometric-only mode.", "err");
+        return;
+      }
+      // Iter 99 — GEOFENCE / LOCATION IS MANDATORY IN EVERY CONDITION.
+      // Even in biometric-only mode the punch must carry GPS coordinates
+      // and (when the firm has a geofence) be physically inside it.
+      let punchLoc: { latitude: number; longitude: number } | null = loc;
+      if (!punchLoc) {
+        const ok = await refreshLocation();
+        if (!ok) {
+          showToast(
+            "Turn on location — geofence verification is mandatory for every punch.",
+            "err",
+          );
+          return;
+        }
+      }
+      // refreshLocation() updates state which may not have flushed yet;
+      // read fresh coords directly so the geofence check is reliable.
+      try {
+        const l = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+        punchLoc = { latitude: l.coords.latitude, longitude: l.coords.longitude };
+        setLoc(punchLoc);
+      } catch {
+        showToast(
+          "Couldn't read location — required for punching inside the office zone.",
+          "err",
+        );
+        return;
+      }
+      if (company && company.office_lat != null && company.office_lng != null) {
+        const dLat = (punchLoc.latitude - company.office_lat) * Math.PI / 180;
+        const dLng = (punchLoc.longitude - company.office_lng) * Math.PI / 180;
+        const R = 6371000;
+        const s =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos((punchLoc.latitude * Math.PI) / 180) *
+            Math.cos((company.office_lat * Math.PI) / 180) *
+            Math.sin(dLng / 2) ** 2;
+        const d = 2 * R * Math.asin(Math.sqrt(s));
+        setDistance(d);
+        const insideNow = d <= company.geofence_radius_m;
+        setInside(insideNow);
+        if (!insideNow) {
+          showToast(
+            `You're ${formatDistance(d)} outside the office zone. Come inside the geofence to punch.`,
+            "err",
+          );
+          return;
+        }
+      }
+      // In biometric-only mode we ALSO try to run the device biometric to
+      // satisfy the "both factors" rule on native. On web we cannot run
+      // LocalAuthentication so the selfie is the sole biometric factor.
+      if (biometricOnlyMode && Platform.OS !== "web") {
+        try {
+          const hasHw = await LocalAuthentication.hasHardwareAsync();
+          const enrolled = await LocalAuthentication.isEnrolledAsync();
+          if (hasHw && enrolled) {
+            const bio = await authenticateBiometricStrict(
+              `Authenticate to punch ${nextKind}`,
+            );
+            if (!bio.ok) {
+              showToast(bio.message || "Device biometric failed", "err");
+              return;
+            }
+          }
+        } catch {
+          // Silent — device biometric is best-effort on top of the selfie.
+        }
+      }
+      setBusy(true);
+      try {
+        // Iter 86 — Response now carries `status` + `approval_required`.
+        // Every app-punch is queued for admin review by design, so surface
+        // that to the employee instead of a blanket "success" toast.
+        const res = await api<{
+          ok: boolean; distance_m: number;
+          status?: string; approval_required?: boolean;
+        }>(
+          "/attendance/punch",
+          {
+            method: "POST",
+            body: {
+              kind: nextKind,
+              // Iter 70 — biometric punches now also submit GPS so the
+              // server can enforce geofence and store an accurate audit
+              // trail.  `punchLoc` will be null only when the firm has
+              // no geofence configured (rare, admin-controlled).
+              latitude: punchLoc?.latitude ?? null,
+              longitude: punchLoc?.longitude ?? null,
+              biometric_method: method,
+              selfie_base64,
+              device_info: Platform.OS,
+              source: "manual",
+            },
+          },
+        );
+        if (Platform.OS !== "web")
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        const isPending = res?.status === "pending" || res?.approval_required === true;
+        const kindTxt = nextKind === "in" ? "Duty IN" : "Duty OUT";
+        const firmTxt = company?.name ? ` · ${company.name}` : "";
+        showToast(
+          isPending
+            ? `${kindTxt} submitted (biometric)${firmTxt} — awaiting admin approval`
+            : `${kindTxt} successfully (biometric)${firmTxt}`,
+          "ok",
+        );
+        await loadAll();
+      } catch (e: any) {
+        showToast(e.message || "Punch failed", "err");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
+    // -------- Auto-punch ON path — GPS required --------
+    // Iter 53: For manual-punch employees the app does NOT track location
+    // in the background — we fetch it on-demand when they tap Punch.
+    let currentLoc = loc;
+    if (!currentLoc) {
+      const ok = await refreshLocation();
+      if (!ok) {
+        showToast(
+          "Turn on Location permission to punch. Or disable Auto-punch in Profile for manual biometric mode.",
+          "err",
+        );
+        return;
+      }
+      // refreshLocation set state; use its latest reading directly
+      currentLoc = null; // trigger the local re-read below via state
+    }
+    if (!loc && !currentLoc) {
+      // React may not have flushed setLoc yet; re-fetch quickly
+      try {
+        const l = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+        currentLoc = { latitude: l.coords.latitude, longitude: l.coords.longitude };
+        setLoc(currentLoc);
+      } catch {
+        showToast("Could not read GPS. Please try again.", "err");
+        return;
+      }
+    }
+    const useLoc = loc || currentLoc;
+    if (!useLoc) {
+      showToast("Fetch your location first", "err");
+      return;
+    }
+    // Re-check geofence with the freshly obtained location
+    let insideNow = inside;
+    if (company) {
+      const dLat = (useLoc.latitude - company.office_lat) * Math.PI / 180;
+      const dLng = (useLoc.longitude - company.office_lng) * Math.PI / 180;
+      const R = 6371000;
+      const s =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos((useLoc.latitude * Math.PI) / 180) *
+          Math.cos((company.office_lat * Math.PI) / 180) *
+          Math.sin(dLng / 2) ** 2;
+      const d = 2 * R * Math.asin(Math.sqrt(s));
+      insideNow = d <= company.geofence_radius_m;
+      setDistance(d);
+      setInside(insideNow);
+    }
+    if (!insideNow) {
+      showToast("You're outside the office zone", "err");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await api<{
+        ok: boolean; distance_m: number;
+        status?: string; approval_required?: boolean;
+      }>(
+        "/attendance/punch",
+        {
+          method: "POST",
+          body: {
+            kind: nextKind,
+            latitude: useLoc.latitude,
+            longitude: useLoc.longitude,
+            biometric_method: method,
+            selfie_base64,
+            device_info: Platform.OS,
+          },
+        },
+      );
+      if (Platform.OS !== "web")
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      const isPending = res?.status === "pending" || res?.approval_required === true;
+      const kindTxt = nextKind === "in" ? "Duty IN" : "Duty OUT";
+      const distanceTxt = `${Math.round(res.distance_m)}m from office`;
+      const firmTxt = company?.name ? ` · ${company.name}` : "";
+      showToast(
+        isPending
+          ? `${kindTxt} submitted · ${distanceTxt}${firmTxt} — awaiting admin approval`
+          : `${kindTxt} successfully · ${distanceTxt}${firmTxt}`,
+        "ok",
+      );
+      await loadAll();
+    } catch (e: any) {
+      showToast(e.message || "Punch failed", "err");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handlePunch = async () => {
+    // Iter 64 — three paths:
+    //
+    // (A) Biometric-only mode  — GPS punching is not allowed for this
+    //     employee (firm OFF or user not opted in). Require device
+    //     biometric AND a face selfie. We open the face capture modal
+    //     which then calls submitPunch("face", b64) after successful
+    //     device biometric.
+    // (B) Manual-with-GPS mode — the employee has an active geofence and
+    //     the GPS punching flow is available; we go through the classic
+    //     flow that requires location + inside geofence.
+    // (C) Auto-punch off (legacy) — no GPS available on device, biometric-
+    //     only fallback is allowed by server since auto_punch is off.
+    if (biometricOnlyMode) {
+      // Path (A) — hand off to the face capture modal. Device biometric
+      // (fingerprint / face) will run inside the modal AFTER the selfie
+      // is captured so both factors are required.
+      setFaceOpen(true);
+      return;
+    }
+
+    if (!loc) {
+      // Try one-shot GPS fetch; if user denies, fall back to biometric-
+      // only if auto-punch is off (server accepts no-GPS in that case).
+      const ok = await refreshLocation();
+      if (!ok) {
+        if (!autoPunchActive) {
+          setFaceOpen(true);
+          return;
+        }
+        showToast("Fetch your location first", "err");
+        return;
+      }
+    }
+    if (!inside) {
+      showToast("You're outside the office zone", "err");
+      return;
+    }
+    setBusy(true);
+    try {
+      let method: "fingerprint" | "face" = "fingerprint";
+      if (Platform.OS !== "web") {
+        const hasHw = await LocalAuthentication.hasHardwareAsync();
+        const enrolled = await LocalAuthentication.isEnrolledAsync();
+        if (hasHw && enrolled) {
+          const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
+          const pref = await getBiometricPreference();
+          if (pref === "face") {
+            method = "face";
+          } else if (pref === "fingerprint") {
+            method = "fingerprint";
+          } else if (
+            types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)
+          ) {
+            method = "face";
+          }
+          const bio = await authenticateBiometricStrict(
+            `Authenticate to punch ${nextKind}`,
+          );
+          if (!bio.ok) {
+            showToast(bio.message || "Biometric failed", "err");
+            setBusy(false);
+            return;
+          }
+        }
+      }
+      const res = await api<{
+        ok: boolean; distance_m: number;
+        status?: string; approval_required?: boolean;
+      }>("/attendance/punch", {
+        method: "POST",
+        body: {
+          kind: nextKind,
+          latitude: loc!.latitude,
+          longitude: loc!.longitude,
+          biometric_method: method,
+          device_info: Platform.OS,
+        },
+      });
+      if (Platform.OS !== "web") {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        // Iter 68 — double-tap the haptic so the user gets an audible /
+        // tactile cue that mimics a "success chime" without needing an
+        // audio asset shipped with the app.
+        setTimeout(
+          () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+          150,
+        );
+      } else {
+        // Web — play a short beep via the Web Audio API so field devices
+        // running the PWA still get an audible "duty in / out successful"
+        // signal without shipping a sound file.
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const AC: any = (globalThis as any).AudioContext || (globalThis as any).webkitAudioContext;
+          if (AC) {
+            const ctx = new AC();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = "sine";
+            osc.frequency.value = nextKind === "in" ? 880 : 660;
+            gain.gain.value = 0.001;
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start();
+            gain.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.03);
+            gain.gain.exponentialRampToValueAtTime(0.0005, ctx.currentTime + 0.35);
+            osc.stop(ctx.currentTime + 0.4);
+          }
+        } catch { /* ignore */ }
+      }
+      showToast(
+        (res?.status === "pending" || res?.approval_required === true)
+          ? (nextKind === "in"
+              ? `Duty IN submitted · ${Math.round(res.distance_m)}m from office — awaiting admin approval`
+              : `Duty OUT submitted · ${Math.round(res.distance_m)}m from office — awaiting admin approval`)
+          : (nextKind === "in"
+              ? `Duty IN successfully · ${Math.round(res.distance_m)}m from office`
+              : `Duty OUT successfully · ${Math.round(res.distance_m)}m from office`),
+        "ok",
+      );
+      await loadAll();
+    } catch (e: any) {
+      showToast(e.message || "Punch failed", "err");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const canPunch = !!loc && inside && !busy;
+  const canPunchBiometric = !busy;   // manual biometric mode never blocks on GPS
+
+  // Super admins don't punch — redirect them out if they somehow land here.
+  if (user?.role === "super_admin") {
+    return <Redirect href="/(tabs)" />;
+  }
+
+  return (
+    <View style={styles.root}>
+      <SafeAreaView edges={["top"]} style={{ backgroundColor: colors.surface }}>
+        <View style={styles.header}>
+          <Text style={styles.h1}>Smart Punch</Text>
+          <Text style={styles.sub}>
+            {user?.name} · {company?.name || "—"}
+          </Text>
+        </View>
+      </SafeAreaView>
+
+      <ScrollView contentContainerStyle={styles.scroll}>
+        {(company as any)?.attendance_punching_enabled === false ? (
+          /* Iter 114 — process flow: Bio Matrix Attendance OFF for this firm
+             → employees cannot punch; they can only VIEW their service data,
+             salary and master data. Admins record punches manually. */
+          <View style={styles.bioModeCard} testID="punch-disabled-card">
+            <View style={styles.bioIconWrap}>
+              <Ionicons name="eye-outline" size={26} color={colors.brandPrimary} />
+              <Ionicons name="document-text-outline" size={26} color={colors.brandPrimary} />
+            </View>
+            <Text style={styles.bioTitle}>Attendance punching is disabled</Text>
+            <Text style={styles.bioBody}>
+              Your company records attendance manually / via biometric machine.{"\n"}
+              You can still view your attendance history, salary details and
+              profile from the app.
+            </Text>
+            <Text style={styles.bioHint}>
+              Contact your employer if you believe app punching should be enabled.
+            </Text>
+          </View>
+        ) : biometricOnlyMode ? (
+          /* Iter 64 — Biometric-only mode banner (GPS disabled). */
+          <View style={styles.bioModeCard} testID="biometric-only-card">
+            <View style={styles.bioIconWrap}>
+              <Ionicons name="happy-outline" size={26} color={colors.brandPrimary} />
+              <Ionicons name="finger-print" size={26} color={colors.brandPrimary} />
+            </View>
+            <Text style={styles.bioTitle}>Biometric-only punch mode</Text>
+            <Text style={styles.bioBody}>
+              GPS-based punching is turned off for you.{"\n"}
+              Punch In/Out using{"\n"}
+              <Text style={styles.bioBold}>Face scan + Fingerprint</Text> together.
+            </Text>
+            <Text style={styles.bioHint}>
+              Ask your employer to enable GPS punching if you need location-based tracking.
+            </Text>
+          </View>
+        ) : (
+          <>
+        {/* Geofence card */}
+        <View style={styles.card} testID="geofence-card">
+          <View style={styles.rowBetween}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <View style={[styles.pill, inside ? styles.pillOk : styles.pillErr]}>
+                <Ionicons
+                  name={inside ? "checkmark-circle" : "close-circle"}
+                  size={14}
+                  color={inside ? colors.onSuccess : colors.onError}
+                />
+                <Text style={inside ? styles.pillOkTxt : styles.pillErrTxt}>
+                  {inside ? "Inside office zone" : "Outside office zone"}
+                </Text>
+              </View>
+            </View>
+            <Pressable
+              testID="refresh-location"
+              onPress={refreshLocation}
+              style={styles.refreshBtn}
+            >
+              <Ionicons name="refresh" size={16} color={colors.brandPrimary} />
+            </Pressable>
+          </View>
+          <View style={styles.mapPlaceholder}>
+            {company && loc ? (
+              <MiniMap
+                office={{
+                  lat: company.office_lat,
+                  lng: company.office_lng,
+                  label: "Office",
+                  color: "#218739",
+                }}
+                me={{
+                  lat: loc.latitude,
+                  lng: loc.longitude,
+                  label: "You",
+                  color: "#0F3D3E",
+                }}
+                height={180}
+              />
+            ) : (
+              <View style={styles.mapFallback}>
+                <Ionicons name="location-sharp" size={44} color={colors.brandPrimary} />
+                <Text style={styles.mapDist}>Locating…</Text>
+              </View>
+            )}
+            <View style={styles.distRow}>
+              <Ionicons name="navigate" size={14} color={colors.onSurfaceSecondary} />
+              <Text style={styles.mapDist}>
+                {distance !== null ? `${formatDistance(distance)} from office` : "Locating…"}
+              </Text>
+              {company ? (
+                <Text style={styles.mapAllowed}>
+                  · allowed {company.geofence_radius_m}m
+                </Text>
+              ) : null}
+            </View>
+            {address ? (
+              <View style={styles.addrRow}>
+                <Ionicons name="pin" size={14} color={colors.brandPrimary} />
+                <Text style={styles.addrTxt} numberOfLines={2}>You: {address}</Text>
+              </View>
+            ) : null}
+            {officeAddress ? (
+              <View style={styles.addrRow}>
+                <Ionicons name="business-outline" size={14} color="#218739" />
+                <Text style={styles.addrTxt} numberOfLines={2}>Office: {officeAddress}</Text>
+              </View>
+            ) : null}
+            {lastRefresh > 0 ? (
+              <Text style={styles.lastRefresh}>
+                Auto-refreshes every 30s · last updated {new Date(lastRefresh).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </Text>
+            ) : null}
+          </View>
+          {locError && <Text style={styles.errText}>{locError}</Text>}
+        </View>
+
+        {/* Big biometric circle */}
+        <View style={styles.circleWrap} testID="biometric-circle">
+          <View
+            style={[
+              styles.circle,
+              { borderColor: canPunch ? colors.cta : colors.borderStrong },
+            ]}
+          >
+            <Ionicons
+              name={isPunchedIn ? "log-out-outline" : "finger-print"}
+              size={64}
+              color={canPunch ? colors.cta : colors.onSurfaceTertiary}
+            />
+            <Text style={styles.circleTxt}>
+              {isPunchedIn ? "Ready to Punch Out" : "Ready to Punch In"}
+            </Text>
+            <Text style={styles.circleSub}>Face / Fingerprint verified</Text>
+          </View>
+        </View>
+          </>
+        )}
+
+        {/* Today activity */}
+        <Text style={styles.section}>Today&apos;s activity</Text>
+        {today?.records?.length ? (
+          today.records.map((r: any) => (
+            <View key={r.record_id} style={styles.actRow}>
+              <View style={styles.actIcon}>
+                <Ionicons
+                  name={r.kind === "in" ? "arrow-down-circle" : "arrow-up-circle"}
+                  size={20}
+                  color={colors.onBrandTertiary}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.actTitle}>
+                  Punched {r.kind === "in" ? "In" : "Out"}
+                </Text>
+                <Text style={styles.actSub}>
+                  {new Date(r.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  {typeof r.distance_m === "number" && r.distance_m > 0
+                    ? ` · ${Math.round(r.distance_m)}m from office`
+                    : ""}
+                </Text>
+                <View style={{ marginTop: 4 }}>
+                  <LocationPill status={r.location_status} distanceM={r.distance_m} />
+                </View>
+              </View>
+              <View style={styles.methodChip}>
+                <Ionicons
+                  name={r.biometric_method === "face" ? "happy-outline" : "finger-print-outline"}
+                  size={12}
+                  color={colors.onBrandTertiary}
+                />
+                <Text style={styles.methodTxt}>{r.biometric_method}</Text>
+              </View>
+              <Pressable
+                onPress={() => openPunchPhoto(r.record_id)}
+                style={photoStyles.iconBtn}
+                testID={`punch-photo-${r.record_id}`}
+              >
+                <Ionicons name="camera-outline" size={18} color={colors.brandPrimary} />
+              </Pressable>
+            </View>
+          ))
+        ) : (
+          <Text style={styles.emptyTxt}>No activity yet.</Text>
+        )}
+
+        <View style={{ height: 120 }} />
+      </ScrollView>
+
+      {/* Iter 97 — punch selfie viewer */}
+      <Modal visible={photo.open} transparent animationType="fade" onRequestClose={() => setPhoto((p) => ({ ...p, open: false }))}>
+        <Pressable style={photoStyles.overlay} onPress={() => setPhoto((p) => ({ ...p, open: false }))}>
+          <View style={photoStyles.box}>
+            <View style={photoStyles.boxHead}>
+              <Text style={photoStyles.boxTitle}>Punch Photo</Text>
+              <Pressable onPress={() => setPhoto((p) => ({ ...p, open: false }))} hitSlop={10}>
+                <Ionicons name="close" size={22} color={colors.onSurfaceSecondary} />
+              </Pressable>
+            </View>
+            {photo.loading ? (
+              <ActivityIndicator size="large" color={colors.brandPrimary} style={{ marginVertical: 48 }} />
+            ) : photo.b64 ? (
+              <Image source={{ uri: `data:image/jpeg;base64,${photo.b64}` }} style={photoStyles.img} resizeMode="contain" />
+            ) : (
+              <View style={photoStyles.noPhoto}>
+                <Ionicons name="camera-outline" size={34} color={colors.onSurfaceTertiary} />
+                <Text style={photoStyles.noPhotoTxt}>No photo captured for this punch.</Text>
+              </View>
+            )}
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Sticky CTA
+       *  Iter 64 — three modes:
+       *   • Biometric-only: single big CTA that opens Face Capture. GPS
+       *     is disabled at firm or user level. Both fingerprint (device)
+       *     AND face selfie are required.
+       *   • Manual + GPS: Face scan + Punch In/Out (needs geofence pass).
+       *   • Auto-punch ON: no manual UI — the geofence handler fires in
+       *     the background. */}
+      {biometricOnlyMode ? (
+        <View style={styles.stickyBar}>
+          <Pressable
+            testID="biometric-punch-cta"
+            disabled={!canPunchBiometric}
+            onPress={() => setFaceOpen(true)}
+            style={[
+              styles.cta,
+              { flex: 1 },
+              !canPunchBiometric && { backgroundColor: colors.borderStrong },
+            ]}
+          >
+            {busy ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Ionicons name="happy-outline" size={20} color="#fff" />
+                <Text style={styles.ctaTxt}>
+                  {isPunchedIn ? "Punch Out (Face + Fingerprint)" : "Punch In (Face + Fingerprint)"}
+                </Text>
+              </>
+            )}
+          </Pressable>
+        </View>
+      ) : !autoPunchActive ? (
+        <View style={styles.stickyBar}>
+          <Pressable
+            testID="face-cta"
+            disabled={!canPunch}
+            onPress={() => setFaceOpen(true)}
+            style={[
+              styles.ctaSecondary,
+              !canPunch && { borderColor: colors.borderStrong, opacity: 0.6 },
+            ]}
+          >
+            <Ionicons
+              name="happy-outline"
+              size={18}
+              color={canPunch ? colors.brandPrimary : colors.onSurfaceTertiary}
+            />
+            <Text
+              style={[
+                styles.ctaSecondaryTxt,
+                !canPunch && { color: colors.onSurfaceTertiary },
+              ]}
+            >
+              Face scan
+            </Text>
+          </Pressable>
+          <Pressable
+            testID="punch-cta"
+            disabled={!canPunch}
+            onPress={handlePunch}
+            style={[styles.cta, !canPunch && { backgroundColor: colors.borderStrong }]}
+          >
+            {busy ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Ionicons name="finger-print" size={20} color="#fff" />
+                <Text style={styles.ctaTxt}>
+                  {isPunchedIn ? "Punch Out" : "Punch In"}
+                </Text>
+              </>
+            )}
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.stickyInfo} testID="auto-punch-info">
+          <Ionicons
+            name={locationEnabled ? "flash-outline" : "location-outline"}
+            size={18}
+            color={colors.brandPrimary}
+          />
+          <View style={{ flex: 1 }}>
+            {!locationEnabled ? (
+              <>
+                <Text style={styles.stickyInfoTitle}>Turn on Location</Text>
+                <Text style={styles.stickyInfoSub}>
+                  Auto-punch needs your GPS. Tap below to enable location.
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.stickyInfoTitle}>Auto-punch is active</Text>
+                <Text style={styles.stickyInfoSub}>
+                  {inside
+                    ? "Your entry/exit will be recorded automatically. Keep GPS on."
+                    : "Move inside the office zone. Punch will fire automatically."}
+                </Text>
+              </>
+            )}
+          </View>
+          {!locationEnabled ? (
+            <Pressable
+              testID="enable-location-cta"
+              onPress={() => refreshLocation()}
+              style={styles.enableGpsBtn}
+            >
+              <Text style={styles.enableGpsBtnTxt}>Enable</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      )}
+
+      <FaceCaptureModal
+        visible={faceOpen}
+        subtitle={
+          isPunchedIn
+            ? "Take a quick selfie to punch OUT"
+            : "Take a quick selfie to punch IN"
+        }
+        onCancel={() => setFaceOpen(false)}
+        onCapture={async (b64) => {
+          setFaceOpen(false);
+          await submitPunch("face", b64);
+        }}
+      />
+
+      {toast && (
+        <View
+          testID="punch-toast"
+          style={[
+            styles.toast,
+            { backgroundColor: toast.kind === "ok" ? colors.success : colors.error },
+          ]}
+        >
+          <Ionicons
+            name={toast.kind === "ok" ? "checkmark-circle" : "alert-circle"}
+            size={16}
+            color="#fff"
+          />
+          <Text style={styles.toastTxt}>{toast.msg}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.surface },
+  header: { paddingHorizontal: spacing.xl, paddingVertical: spacing.md },
+  h1: { fontSize: 26, color: colors.onSurface, fontWeight: "500" },
+  sub: { fontSize: type.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
+  scroll: { paddingHorizontal: spacing.xl, paddingBottom: 40 },
+  card: {
+    backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg,
+    padding: spacing.lg, borderWidth: 1, borderColor: colors.border,
+  },
+  rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  pill: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill,
+  },
+  pillOk: { backgroundColor: colors.success },
+  pillErr: { backgroundColor: colors.error },
+  pillOkTxt: { color: colors.onSuccess, fontSize: type.sm, fontWeight: "500" },
+  pillErrTxt: { color: colors.onError, fontSize: type.sm, fontWeight: "500" },
+  refreshBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: colors.brandTertiary,
+    alignItems: "center", justifyContent: "center",
+  },
+  mapPlaceholder: {
+    marginTop: spacing.md, backgroundColor: colors.brandTertiary,
+    borderRadius: radius.md, paddingVertical: spacing.xl, alignItems: "center",
+  },
+  mapDist: { color: colors.onBrandTertiary, fontSize: type.lg, fontWeight: "500", marginTop: 8 },
+  mapAllowed: { color: colors.onSurfaceTertiary, fontSize: type.sm, marginTop: 2 },
+  mapFallback: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 20,
+  },
+  distRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 10,
+    justifyContent: "center",
+    flexWrap: "wrap",
+  },
+  addrRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 6,
+    paddingHorizontal: 8,
+    alignSelf: "stretch",
+  },
+  addrTxt: { color: colors.onSurfaceSecondary, fontSize: 12, flex: 1, lineHeight: 16 },
+  lastRefresh: { color: colors.onSurfaceTertiary, fontSize: 11, marginTop: 8, fontStyle: "italic" },
+  errText: { color: colors.error, fontSize: type.sm, marginTop: spacing.sm },
+  circleWrap: { alignItems: "center", marginTop: spacing.xl },
+  circle: {
+    width: 220, height: 220, borderRadius: 110,
+    borderWidth: 2, borderStyle: "dashed",
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: colors.surfaceSecondary,
+  },
+  circleTxt: { color: colors.onSurface, fontSize: type.lg, fontWeight: "500", marginTop: spacing.md },
+  circleSub: { color: colors.onSurfaceTertiary, fontSize: type.sm, marginTop: 4 },
+  section: { fontSize: type.lg, color: colors.onSurface, fontWeight: "500", marginTop: spacing.xl, marginBottom: spacing.md },
+  actRow: {
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    backgroundColor: colors.surfaceSecondary, borderRadius: radius.md,
+    padding: spacing.md, borderWidth: 1, borderColor: colors.border,
+    marginBottom: spacing.sm,
+  },
+  actIcon: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: colors.brandTertiary,
+    alignItems: "center", justifyContent: "center",
+  },
+  actTitle: { color: colors.onSurface, fontSize: type.base, fontWeight: "500" },
+  actSub: { color: colors.onSurfaceTertiary, fontSize: type.sm, marginTop: 2 },
+  methodChip: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: colors.brandTertiary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.pill,
+  },
+  methodTxt: { color: colors.onBrandTertiary, fontSize: 11, textTransform: "capitalize" },
+  emptyTxt: { color: colors.onSurfaceTertiary, fontSize: type.base, paddingVertical: spacing.md },
+  stickyBar: {
+    position: "absolute", left: 0, right: 0, bottom: 90,
+    paddingHorizontal: spacing.xl,
+    gap: 10,
+  },
+  stickyInfo: {
+    position: "absolute",
+    left: spacing.xl,
+    right: spacing.xl,
+    bottom: 100,
+    backgroundColor: colors.brandTertiary,
+    borderRadius: radius.md,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    ...shadow.cta,
+  },
+  stickyInfoTitle: {
+    color: colors.brandPrimary,
+    fontWeight: "700",
+    fontSize: type.base,
+  },
+  stickyInfoSub: {
+    color: colors.onBrandTertiary,
+    fontSize: type.sm,
+    marginTop: 2,
+    lineHeight: 18,
+  },
+  enableGpsBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: colors.brandPrimary,
+  },
+  enableGpsBtnTxt: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  cta: {
+    backgroundColor: colors.cta, borderRadius: radius.pill,
+    paddingVertical: 20, flexDirection: "row", alignItems: "center",
+    justifyContent: "center", gap: 10,
+    ...shadow.cta,
+  },
+  ctaTxt: { color: colors.onCta, fontSize: type.lg, fontWeight: "700", letterSpacing: 0.5 },
+  ctaSecondary: {
+    borderRadius: radius.pill,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: colors.brandPrimary,
+    backgroundColor: colors.surface,
+  },
+  ctaSecondaryTxt: {
+    color: colors.brandPrimary,
+    fontSize: type.base,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+  },
+  toast: {
+    position: "absolute", left: 24, right: 24, bottom: 170,
+    borderRadius: radius.md, paddingVertical: 12, paddingHorizontal: 14,
+    flexDirection: "row", alignItems: "center", gap: 8,
+  },
+  toastTxt: { color: "#fff", fontSize: type.base, flexShrink: 1 },
+  bioModeCard: {
+    backgroundColor: colors.brandTertiary,
+    borderRadius: radius.lg,
+    padding: spacing.xl,
+    marginBottom: spacing.md,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: colors.brandPrimary,
+  },
+  bioIconWrap: {
+    flexDirection: "row",
+    gap: 16,
+    marginBottom: spacing.md,
+  },
+  bioTitle: {
+    color: colors.brandPrimary,
+    fontSize: type.lg,
+    fontWeight: "800",
+    marginBottom: spacing.sm,
+  },
+  bioBody: {
+    color: colors.onSurface,
+    fontSize: type.base,
+    textAlign: "center",
+    lineHeight: 22,
+  },
+  bioBold: { fontWeight: "800", color: colors.brandPrimary },
+  bioHint: {
+    color: colors.onSurfaceSecondary,
+    fontSize: type.sm,
+    textAlign: "center",
+    marginTop: spacing.md,
+    fontStyle: "italic",
+  },
+});
+
+// Iter 97 — punch selfie viewer styles.
+const photoStyles = StyleSheet.create({
+  iconBtn: {
+    marginLeft: 8,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.brandTertiary,
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  box: {
+    width: "100%",
+    maxWidth: 380,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  boxHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: spacing.sm,
+  },
+  boxTitle: { color: colors.onSurface, fontSize: type.base, fontWeight: "800" },
+  img: { width: "100%", height: 340, borderRadius: radius.sm, backgroundColor: "#111" },
+  noPhoto: { alignItems: "center", paddingVertical: 40, gap: 8 },
+  noPhotoTxt: { color: colors.onSurfaceTertiary, fontSize: type.sm, textAlign: "center" },
+});

@@ -1,0 +1,40 @@
+{
+  "summary": "Backend-only verification of the bug-fix bundle (compliance_enabled on Firm Master, /api/salary/monthly auto-pending payslips, /api/payslips/{id}/mark-paid, /api/admin/payroll) + static inspection of frontend claims. 15/15 pytest assertions passing (6 live auth-gating curls against the public URL + 9 static server.py assertions). One real bug found and fixed inline: POST /api/companies constructed Company(...) without forwarding payload.compliance_enabled, so any 'Show compliance documents = false' from the UI was silently reverted to True on create. Added compliance_enabled=payload.compliance_enabled to the Company(...) constructor and restarted backend; retest passes. Frontend claims verified via grep/inspection: testIDs company-address-input, search-address-btn, search-results, search-result-{i}, company-lat-input, company-lng-input, toggle-compliance, seg-compliance (conditionally rendered when compliance_enabled !== false with auto-fallback to payslips tab), salary-card (rendered on payslips tab when salaryMonthly is truthy), styles.salaryLine in admin.tsx under e.salary_monthly, payroll.tsx with seg-pending/seg-paid + mark-paid-{slip_id} + isAdmin guard, and row-payroll gated behind isAdmin in profile.tsx. Regression: landing-screen + google-login-button testIDs present, auth-error-banner only rendered when authError is truthy, onboarding name is useState('') with NO useEffect syncing from user.name.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/companies", "issue": "Fixed inline: was dropping payload.compliance_enabled when constructing Company(...), so UI toggle 'Show compliance documents = off' was silently overridden to true on create. Added compliance_enabled=payload.compliance_enabled to the Company(...) call in create_company. PATCH /api/companies/{id} was already forwarding it correctly via CompanyUpdate."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_bugfix_bundle.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "None blocking. Optional: also allow PATCH /api/company (self-serve) to update compliance_enabled — currently only super-admin PATCH /api/companies/{id} accepts it (see server.py update_company allowed set)."
+  ],
+  "critical_code_review_comments": [
+    "server.py create_company was dropping compliance_enabled from the request (Company defaults it to True). Fixed by forwarding payload.compliance_enabled — verified via pytest.",
+    "server.py update_company (PATCH /api/company for company_admin self-serve) has an allowed set of {name,address,office_lat,office_lng,geofence_radius_m} and does NOT include compliance_enabled. Not required by the review request (only super-admin edits it), but flagging for future consistency.",
+    "salary/monthly is idempotent per (employee_user_id, month) via find_one before insert — correct.",
+    "admin/payroll correctly scopes to company_admin's own company_id and lets super_admin pass ?company_id=; attaches employee_name/employee_email via a batched users.find({user_id:{$in:...}}).",
+    "documents.tsx correctly forces tab back to 'payslips' when compliance_enabled === false (line 47) and gates the seg-compliance button (line 80).",
+    "frontend uses EXPO_PUBLIC_BACKEND_URL (correct Expo public-env convention) — no change needed."
+  ],
+  "updated_files": [
+    "/app/backend/server.py (create_company now forwards compliance_enabled)",
+    "/app/backend/tests/test_bugfix_bundle.py (new)"
+  ],
+  "success_rate": {"backend": "100% (15/15 pytest, 6 live 401 curls)", "frontend": "static-only (all testID/label claims verified)"},
+  "seed_data_creation": "None. Backend endpoints are gated behind Emergent Google OAuth; live E2E would need a real Google session which is out of scope per review note.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Bug-fix bundle verified. Live functional testing of salary/monthly auto-payslip generation, payroll list attachment of employee_name/email, and mark-paid role gating still requires an authenticated Emergent OAuth session — reuse a super_admin/company_admin bearer if one becomes available and hit: GET /api/salary/monthly (expect history[] with pending slips for last 6 completed months if user.salary_monthly>0), GET /api/admin/payroll?status=pending, PATCH /api/payslips/{id}/mark-paid.",
+  "rca_of_issue": "BUG 1 root cause: create_company only wired name/address/office_lat/office_lng/geofence_radius_m into Company(...). Because Company.compliance_enabled defaults to True, any payload with compliance_enabled=false was silently discarded on insert. Reproduction: POST /api/companies with body {name, office_lat, office_lng, compliance_enabled:false} as super_admin would result in a stored doc with compliance_enabled=true. Mitigation applied: pass compliance_enabled=payload.compliance_enabled into the Company constructor. PATCH path (edit_company) was already fine — it flattens CompanyUpdate.model_dump() and $sets everything non-None, so toggling from the edit modal already worked."
+}

@@ -1,0 +1,50 @@
+{
+  "summary": "Iter 85 combined backend + frontend smoke test. Backend: 11/11 pytest cases PASS (100%). Verified (1) POST /admin/actual-salary-process returns rows with basic, w_basic_salary, total_gross, epf, esi, net_pay, max_p_days and ESI=0 when total_gross>21000; (2) PATCH /admin/actual-salary-process/{run_id}/row auto-saves and returns updated totals; (3) POST /finalize freezes the run — subsequent PATCH returns 409; (4) GET /admin/salary-runs enriched with generated_by_name/role; (5) GET /admin/compliance-salary-runs enriched similarly; (6) GET /admin/users-log returns {events, count} with actor_name, actor_role, company_name, action, details, at; (7) enabled_allowances toggle at firm's compliance_policy (via PUT /admin/companies/{cid}/compliance-policy) is honored — conveyance/medical/special/others zeroed on all rows when enabled=[basic,hra]; (8) Firm master flags verified — Kankani (loc=true, auto=true), Luxe (loc=false, auto=false, face=false). Frontend: super_admin OTP token injected into localStorage['llc_session_token'] to bypass auth-wall. Confirmed no red screen; verified Salary Process (Actual) screen (in-screen firm picker card 'KANKANI ENTERPRISES', 'Showing firms where Biometric Attendance is enabled' subtitle, Biometric-source-only firm filter, 'Salary Process' button, no ₹ symbol, Past Actual Runs with audit trail — generated_by super_admin, finalized_by names displayed with DD-MM-YYYY timestamps '08-07-2026 03:53'); Users Log Report screen (from/to date picker, firm chips, admin chips, Show button, 536 log entries with icon/action/actor+role/firm/DD-MM-YYYY timestamp); Compliance Salary screen (ACTIVE FIRM pill at top with 'Firm Settings' button; Multi-firm mode toggle; Configure batch; Past compliance runs list showing generated_by_name+role for audit); Appearance screen (all 7 preset cards visible: Corporate Sapphire, Executive Noir, Emerald Prestige, Royal Amethyst, Ocean Breeze, Crimson Regal, Slate Mint — Corporate Sapphire selected). Sidebar order verified — Dashboard, Companies, Employee Master Data, Salary Process (Actual), Compliance Salary, ... Utility (with Users Log Report), Appearance/Theme (super_admin only). Selected sidebar item uses regular font weight. Minor issue: 2× ₹ characters remain in compliance-salary-run.tsx at lines 1215 ('Basic ₹') and 1228 ('TDS ₹') — spec called for ₹ removal everywhere.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "compliance-salary-run.tsx",
+        "issue": "Two ₹ symbols still present in visible labels at lines 1215 ('Basic ₹') and 1228 ('TDS ₹'). Spec item #9 says 'Verify ₹ symbol has been removed everywhere' — these two must be removed.",
+        "testID": "n/a",
+        "priority": "MINOR"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter85_features.py",
+    "/app/test_reports/pytest/pytest_iter85.xml",
+    "/app/test_reports/screens/iter85_landing.png",
+    "/app/test_reports/screens/iter85_salary_run.png",
+    "/app/test_reports/screens/iter85_users_log.png",
+    "/app/test_reports/screens/iter85_compliance.png",
+    "/app/test_reports/screens/iter85_appearance.png"
+  ],
+  "action_items": [
+    "Remove 2 remaining ₹ symbols from /app/frontend/app/compliance-salary-run.tsx at lines 1215 ('Basic ₹') and 1228 ('TDS ₹').",
+    "Main agent to self-verify by manual click-through the following items I did NOT deep-test due to auth/token budget: #10 (Compliance row detail — Present Days inline edit + arrow-key nav + Master columns), #12 (Logout two-choice modal: 'Select Another Firm' vs 'User Logout'), #14 (Employee Signup mobile — 'Employee code' uppercase-only optional), #15 (/id-card PDF via expo-print), #16 (Punch Approvals dual tab-rows: Status × Source, explicit Show + Save buttons, Save disabled unless queued decisions), #17 theme click-through persists.",
+    "OPTIONAL (non-blocking) — Verify the 'Active Firm' pill visually appears under the sidebar logo when a firm is picked in the top-bar dropdown; when 'All firms' is selected the pill is understandably absent — spec is ambiguous whether pill should always render."
+  ],
+  "critical_code_review_comments": [
+    "app.include_router(api) is correctly placed at end of server.py:17269 as noted in the agent-to-agent context. All Iter 85 endpoints (POST /admin/actual-salary-process, PATCH /row, POST /finalize, GET /admin/users-log) are reachable and enforce auth.",
+    "PATCH /admin/actual-salary-process/{run_id}/row correctly LOCKS p_days/p_hours when attendance_source=biometric (server.py:17070) but still accepts oth_allo/adv/tds edits — good separation.",
+    "GET /admin/users-log aggregates 4 sources (company_audit_log, attendance_audit_log, salary_runs, compliance_salary_runs) and enriches with actor_name/actor_role/company_name in a single pass — sound design.",
+    "Compliance enabled_allowances (server.py:13638-13655) correctly always keeps 'basic' (statutory floor) and zeros out any head not in the enabled list, then recomputes monthly_gross. Verified end-to-end via API.",
+    "server.py has grown to 17,275 lines. Recommend extracting the salary-process module (actual + compliance + users-log = ~450 lines) into utils/salary_process_routes.py."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter85_features.py (new — 11 tests across 5 classes)"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11) — TestFirmMasterFlags 2/2, TestActualSalaryProcess 4/4, TestSalaryRunsAudit 1/1, TestComplianceSalaryRuns 2/2, TestUsersLogReport 2/2",
+    "frontend": "~60% — smoke-tested 5 primary web-portal screens (salary-run, users-log-report, compliance-salary-run landing, appearance, sidebar). Deep click-through of detail modals/dropdowns not performed."
+  },
+  "seed_data_creation": "Backend tests created transient records only: one actual salary run for Kankani for 2025-11 (finalized after PATCH check) and one compliance salary run for Kankani (deleted policy override auto-restored in test teardown). No orphaned users or firms created.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter 85: All backend endpoints healthy — see /app/backend/tests/test_iter85_features.py for regression coverage. For frontend deep testing, inject the super_admin token into localStorage['llc_session_token'] BEFORE navigating to any admin route: (1) POST /api/auth/otp/request {identifier:'sksharmaconsultancy@gmail.com',channel:'email'} → grab dev_code from response; (2) POST /api/auth/otp/verify → session_token; (3) page.evaluate(\"localStorage.setItem('llc_session_token','<token>')\"); (4) page.goto('/salary-run') etc. Route table observed: /salary-run, /compliance-salary-run, /users-log-report, /appearance, /id-card, /punch-approvals, /employee-signup, /firm-select. The web-portal shell (AdminWebShell) auto-injects sidebar + header + firm-picker dropdown into every admin route. Compliance-salary-run.tsx still has 2 ₹ characters that need removal (line 1215, 1228) — I flagged in ui_bugs, priority MINOR.",
+  "rca_of_issue": "N/A — no bugs to RCA. Only 1 minor cosmetic issue (2 ₹ chars) flagged for main agent."
+}

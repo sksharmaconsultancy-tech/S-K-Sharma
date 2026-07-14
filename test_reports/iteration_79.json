@@ -1,0 +1,37 @@
+{
+  "summary": "Iter 79 backend testing — three areas verified: (A) Week-off cap bug FIX confirmed. compute_textile_day now uses `max_hours = 24.0 if (ot_applicable_user or is_weekly_off) else standard_hrs` (server.py:1355). Direct unit test: Policy 1 + ot_allowed=False + weekly_off + 10h → duty_hours=10.0, present_days=1.0 (PASS). All 12 pre-existing iter78 tests + 13 iter77 tests + 7 iter54 tests continue to PASS (32/32 regression). (B) Iter 77i OT Report endpoints (/admin/attendance/ot-report/{cid}/{month} + /xlsx) verified: only-OT filter works, Policy 2 shows OT rows with all required fields, XLSX returns correct MIME + Content-Disposition attachment + ZIP magic bytes 'PK', custom date-range filter narrows results correctly, missing-auth → 403/401, Policy 1 returns count=0 (OT merged into duty). (C) Iter 77j Off-Roll Salary Run verified: POST /admin/salary-runs with run_type='off_roll' correctly filters to is_onroll=False employees only (Emp1 excluded), tier bonuses stripped (Emp3 bonus=0 despite salary_1/day_1 set), Emp2 base_pay = ₹800×20 = 16000 exactly, response echoes run_type='off_roll'. Compliance default includes all employees (on-roll AND off-roll) when is_onroll filter omitted. Total: 9/9 new iter79 tests + 32/32 regression tests PASS. Cleanup ran — 318 artifacts (Iter77/78/79 prefixed) removed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter79_ot_report_and_offroll.py",
+    "/app/test_reports/pytest/pytest_iter79.xml",
+    "/app/test_reports/pytest/pytest_iter79_regression.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 15,511 lines — well beyond the 700-line guideline. Extracting the OT-report + salary-run + attendance-grid modules into dedicated files would materially improve maintainability. Iter 77i alone added ~200 lines to server.py.",
+    "POST /api/admin/salary-runs response shape is `{ok: true, run: {...}}` — nested. Some other endpoints (payslips list etc.) return flat objects. Consistent envelope conventions would help API consumers. Not a bug.",
+    "In _build_ot_report_rows (server.py:14413) the docstring says 'we don't want to duplicate 150 lines from monthly_attendance_grid_json' — but a lot of the punch-loading + policy-resolving pipeline IS duplicated. Consider extracting a shared `_load_month_attendance_context(company_id, month, group_id)` helper used by both the grid endpoint and the OT report to reduce drift.",
+    "SalaryRunCreate.run_type is a Literal['compliance', 'off_roll'] on the Pydantic model (server.py:12084) but the code re-lowercases via `(getattr(payload, 'run_type', None) or 'compliance').lower()` (line 12140). Pydantic already normalises to the Literal value — the fallback getattr + or 'compliance' is defensive but the `.lower()` is a no-op. Minor cleanup opportunity."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter79_ot_report_and_offroll.py (new — 9 tests, 400 lines)"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9 new iter79 tests + 32/32 regression = 41/41)",
+    "frontend": "N/A - backend-only review"
+  },
+  "seed_data_creation": "Test fixtures created 3 firms (Iter79-OT-*, Iter79-OTP1-*, Iter79-OffRoll-*) + 6 employees (TEST_Iter79_OTA/OTB/P1OT/Emp1/Emp2/Emp3) + 200+ manual punches spread across 2026-06. All removed by cleanup_test_data.py --apply — 318 total artifacts deleted (also swept 2 stray Iter77/78 leftovers).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 77i (OT Report), 77j (Off-Roll Salary Run) and Iter 78 week-off cap bug are all verified and stable. Test suite at /app/backend/tests/test_iter79_ot_report_and_offroll.py can be reused for regression on any future changes to compute_textile_day, /admin/attendance/ot-report, or /admin/salary-runs. Run with: `EXPO_PUBLIC_BACKEND_URL=https://emplo-connect-1.preview.emergentagent.com pytest /app/backend/tests/test_iter79_ot_report_and_offroll.py -v`. Prefix any new temp data with Iter79-/TEST_Iter79_.",
+  "rca_of_issue": "Week-off cap fix RCA (from Iter 78, now verified fixed):\n\nOriginal bug (Iter 78): server.py line 1261 computed `max_hours = 24.0 if ot_applicable_user else standard_hrs` and capped duty BEFORE the is_weekly_off branch. When attendance_policy_override.ot_allowed=False on a week-off day, standard_hrs=8.0 was chosen and 10h shifts were trimmed to 8h.\n\nApplied fix (Iter 79): server.py line 1355 now reads `max_hours = 24.0 if (ot_applicable_user or is_weekly_off) else standard_hrs`. On week-off days the 24h absolute cap now applies regardless of the ot_allowed override.\n\nVerification: unit test TestWeekOffCapRegression::test_weekoff_uncapped_when_ot_disallowed calls compute_textile_day directly with Policy 1 + weekly_off_days=[6] + attendance_policy_override.ot_allowed=False + 10h Sunday punch → asserts duty_hours=10.0 (not 8.0) and present_days=1.0. Result: PASS. All 12 pre-existing iter78 tests also PASS (including the previously failing test_monthly_grid_returns_raw_and_policy_adjusted_hours integration test)."
+}

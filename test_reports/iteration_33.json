@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 33 — Payroll run + Employee policy + Payroll email + Profile photo + Payroll gross formula VERIFIED end-to-end. Backend pytest 14/14 PASS. Frontend Playwright (390x844) — Tasks 6-10 all PASS. Real super_admin (sksharmaconsultancy@gmail.com) pin_hash/pin_must_change/pin_fail_count verified untouched post-test.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/admin/payroll/email-report",
+        "issue": "When admin (self recipient) has no email on file, the send-to-self block silently skips instead of appending a delivered=false stub. Spec expected 'returns sends[].delivered=false for that admin'. Current behaviour: sends[] omits the admin entry entirely. Consider adding a stub like { to: null, role: 'admin', delivered: false, error: 'no_email_on_file' } to make failures observable to the UI."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter33_payroll_policy_photo.py",
+    "/app/test_reports/pytest/pytest_iter33.xml"
+  ],
+  "action_items": [
+    "(Minor / optional) Backend: append a delivered=false stub in POST /api/admin/payroll/email-report when the admin has no email and recipients ∈ {self, both}, so the UI can surface 'no email on file for admin' instead of an empty sends[] with delivered=0/failed=0."
+  ],
+  "critical_code_review_comments": [
+    "server.py L4164-4171: `if to:` silently drops the admin from `sends[]`. Minor observability gap for the frontend."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter33_payroll_policy_photo.py",
+    "/app/test_reports/iteration_33.json"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14 pytest)",
+    "frontend": "100% (Tasks 6-10)"
+  },
+  "seed_data_creation": "Ephemeral: 8 companies + 12 users + ~5 sessions + attendance for gross-formula test (22 punches on Nov 2025). Frontend seeded 2 companies + 4 users + 3 sessions. ALL cleaned up post-run. Real super_admin doc untouched (verified role=super_admin, pin_must_change=true, pin_fail_count=2 — unchanged).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend endpoints verified: GET /api/admin/payroll/run (scoping + row shape), GET/PATCH /api/admin/employees/{id}/policy (defaults, 400 validations, cross-company 403, GET-after-PATCH), POST /api/admin/payroll/email-report (empty scope 400, admin-no-email edge, employees recipient), POST/DELETE /api/me/profile-photo (set, overwrite, delete, 413). Gross formula verified: policy.salary=30000, salary_1=2000, day_1=20, 22 punches on Nov 2025 Mon-Sat → present_days=22, off_days=5 (Sundays), working_days=25, base_gross=30000*22/25=26400, tier_bonus=2000, gross=28400. RESEND_API_KEY is populated in .env so email-report actually attempts Resend HTTP; response shape asserted rather than delivery success.",
+  "rca_of_issue": "Minor: POST /api/admin/payroll/email-report — server.py L4164-4171 wraps the self-send in `if to:` so no stub is appended when the admin's email is empty; suggested fix is to always append a send entry with delivered=false + error='no_email_on_file' analogous to the employees branch."
+}

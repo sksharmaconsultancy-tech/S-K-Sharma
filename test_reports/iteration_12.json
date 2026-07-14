@@ -1,0 +1,42 @@
+{
+  "summary": "Verified fresh super_admin temp PIN 246810 works end-to-end via BOTH backend contract and frontend E2E. Backend pytest (3/3 pass): POST /api/auth/admin-pin-login → 200 for email sksharmaconsultancy@gmail.com + PIN 246810 (session_token starts with 'pin_', pin_must_change=true, role=super_admin); → 200 for phone +919680273960 + PIN 246810; → 401 for wrong PIN 000000. Frontend E2E on real preview URL (mobile 390x844): (1) tap 'Admin sign in' from landing → admin-pin-login screen visible, admin-forgot-pin link visible; (2) EMAIL flow — fill sksharmaconsultancy@gmail.com + 246810 → tap admin-pin-submit → redirected to /pin-change and pin-change-screen visible; (3) PHONE flow — same but with +919680273960 → also redirected to /pin-change and pin-change-screen visible. Neither happy-path submitted a new PIN via /auth/change-pin, so the temp PIN 246810 was never consumed by the tests. Final defensive DB reset applied via /app/backend/tests/reset_super_admin_pin.py (pin_hash=bcrypt('246810'), pin_must_change=true, pin_fail_count=0, pin_locked_until=null, has_pin=true, pin_forgot_at=null) and verified end-of-run by two direct curls to /api/auth/admin-pin-login — both email and phone return 200 with pin_must_change=true. User can sign in immediately with 246810 on either identifier.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "StyleSheet shadow* props", "issue": "Console warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' — carried over from prior iterations, non-blocking. Reference: /app/frontend/src/theme.ts shadow.card / shadow.cta"}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_admin_pin_login_iter12.py",
+    "/app/backend/tests/reset_super_admin_pin.py",
+    "/app/test_reports/pytest/pytest_iter12.xml",
+    "/app/test_reports/screens/iter12_email_prefill.png",
+    "/app/test_reports/screens/iter12_email_pin_change.png",
+    "/app/test_reports/screens/iter12_phone_pin_change.png"
+  ],
+  "action_items": [
+    "No code fix required — the fresh PIN 246810 works for both email and phone identifiers via UI and API. DB is left in a state where the user's next login attempt with 246810 will succeed.",
+    "Please inform the user that they MUST complete the /pin-change step in their real login session so the temp PIN gets replaced with a memorable long-term PIN. As soon as they save a new PIN, 246810 stops working — this is by design (pin_must_change=true means the PIN is single-use for setup)."
+  ],
+  "critical_code_review_comments": [
+    "admin-pin-login endpoint correctly does NOT consume/rotate the temp PIN on a successful login — the PIN is only replaced when POST /api/auth/change-pin runs. This is why the E2E test can safely traverse to /pin-change and back without invalidating the temp PIN.",
+    "Frontend admin-pin-login.tsx correctly calls saveToken → refresh() → router.replace('/pin-change') when pin_must_change=true (line 52-54). Redirect verified in both email + phone E2E runs.",
+    "The frontend admin-pin-login screen has all required testIDs: admin-pin-login-screen, admin-identifier-input, admin-pin-input, admin-pin-submit, admin-forgot-pin. pin-change screen exposes pin-change-screen testID."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_admin_pin_login_iter12.py (new — 3 contract tests, all pass)",
+    "/app/backend/tests/reset_super_admin_pin.py (new — idempotent utility to reset super_admin PIN back to 246810 in temp state)",
+    "/app/test_reports/pytest/pytest_iter12.xml (new)",
+    "/app/test_reports/screens/iter12_*.png (new)",
+    "MongoDB users.{email: sksharmaconsultancy@gmail.com} left in reset state: pin_hash=bcrypt('246810'), pin_must_change=true, pin_fail_count=0, pin_locked_until=null, has_pin=true, pin_forgot_at=null — verified end-of-run by curl 200 on both identifiers."
+  ],
+  "success_rate": {"backend": "100% (3/3)", "frontend": "100% (email + phone → /pin-change, admin-forgot-pin visible)"},
+  "seed_data_creation": "No new seed data. Only the pre-existing super_admin doc was updated (PIN reset to bcrypt('246810') as required by the review request).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "End of iteration 12: Super-admin sksharmaconsultancy@gmail.com / +919680273960 is in fresh temp-PIN state pin_hash=bcrypt('246810'), pin_must_change=true. User CAN log in with 246810 right now via either email or phone identifier — verified via curl 200 AND via UI E2E (both identifiers reach /pin-change). If future retests need to preserve the PIN, DO NOT submit the /pin-change form (or run /app/backend/tests/reset_super_admin_pin.py immediately after). Note: memory/superadmin_pin.txt already reflects 246810.",
+  "rca_of_issue": "N/A — this iteration is a verification-only run for a fresh PIN reset performed by the main agent."
+}

@@ -1,0 +1,34 @@
+{
+  "summary": "Backend-only test iteration. Verified BUG A (Google OAuth mobile redirect points to app root '/') statically in AuthContext.tsx line 166 using Linking.createURL('/'). Verified OTP request/verify endpoints, session lifecycle, and regression endpoints via 16 pytest cases against the public preview URL - ALL PASSING. Verified frontend static claims (testIDs on /app/frontend/app/otp-login.tsx and otp-login-button on /app/frontend/app/index.tsx after google-login-button, under OR divider).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_otp_and_regression.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 1159 lines; consider splitting into modules (auth, otp, attendance, leaves, payroll, admin) - exceeds 700 lines guideline.",
+    "OTP verify (server.py:453) increments 'attempts' on wrong code but the >=5 check happens BEFORE the hash compare on the NEXT request. Effectively the user gets 5 wrong tries and the 6th attempt is rejected with 'Too many attempts' and the record is deleted. This matches the spec ('5 wrong attempts delete the record on 6th attempt'), so behaviour is correct, just noting it's slightly non-obvious.",
+    "frontend/.env uses EXPO_PUBLIC_BACKEND_URL (not EXPO_BACKEND_URL). Frontend client presumably reads process.env.EXPO_PUBLIC_BACKEND_URL. Consistent with Expo public env-var conventions; flagged only because the system-prompt template names it EXPO_BACKEND_URL.",
+    "Late 'import random as _random' and 'import hashlib as _hashlib' inside server.py (line 374-375). Should be moved to top-of-file imports."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_otp_and_regression.py (new)",
+    "/app/test_reports/pytest/pytest_results.xml (regenerated)"
+  ],
+  "success_rate": {"backend": "100% (16/16)", "frontend": "N/A (static review only)"},
+  "seed_data_creation": "None - each test uses a fresh random phone identifier to avoid collisions.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "OTP dev mode returns dev_code in the response body from POST /api/auth/otp/request. Use EXPO_PUBLIC_BACKEND_URL from /app/frontend/.env as the base URL (there is no EXPO_BACKEND_URL key). Run: EXPO_BACKEND_URL=<public-url> pytest /app/backend/tests/test_otp_and_regression.py -v",
+  "rca_of_issue": "BUG A root cause: AuthContext.login built the mobile redirect as Linking.createURL('auth'), which resolves to labourlawconnect://auth on Expo Go. No app/auth.tsx route exists in /app/frontend/app, so Expo Router rendered its default 'Unmatched Route' error page after Google login. Fix (verified in AuthContext.tsx:158-181): use Linking.createURL('/') for mobile and window.location.origin + '/' for web, both landing on app/index.tsx where AuthContext already extracts session_id from the incoming URL via Linking.getInitialURL + Linking.addEventListener('url', ...). Reproduction requires a real Expo Go client, so only static verification is performed here."
+}

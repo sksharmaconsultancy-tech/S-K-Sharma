@@ -1,0 +1,48 @@
+{
+  "summary": "Iter 68 backend testing — 15/16 tests passed. NEW POST /api/admin/employees works correctly (happy-path, validation errors, duplicate detection, company_admin scoping). Salary Certificate PDF endpoint works (returns valid PDF, 404 for bogus IDs, 403 cross-firm). Regression on GET /api/admin/employees confirms role='employee' filter is applied. CRITICAL BUG in Salary Register PDF endpoint: reads run.get('lines') but the persisted field is 'rows', causing empty-table crash (500) even for runs with data.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/admin/salary-runs/{run_id}/register-form27.pdf",
+        "issue": "Endpoint reads run.get('lines') on the salary_runs doc, but /app/backend/server.py:_compute_salary_run persists rows under the key 'rows' (see server.py line 10576). Result: build_salary_register_pdf always receives an empty rows list, which triggers ReportLab ValueError('must have at least a row and column') → HTTP 500 for every salary run — even those with employees. Fix: change 'lines' to 'rows' at /app/backend/server.py line 10679. Reproduced against a fresh run created via POST /admin/salary-runs (employees_count=1, rows_len=1 in Mongo, PDF still 500).",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "GET /api/admin/salary-runs/{run_id}/register-form27.pdf",
+        "issue": "Even after the 'lines'→'rows' fix, build_salary_register_pdf (utils/salary_register_pdf.py:277) crashes with ReportLab 'must have at least a row and column' when the run has zero employees. Should render an empty table with just headers instead of raising. Priority MEDIUM — user can hit this on brand-new / empty firms."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter68_admin_employee_and_pdfs.py",
+    "/app/test_reports/pytest/pytest_iter68.xml"
+  ],
+  "action_items": [
+    "Fix /app/backend/server.py line 10679: change `run.get('lines') or []` to `run.get('rows') or []` in download_salary_register_pdf. This unblocks ALL Salary Register PDF downloads.",
+    "In utils/salary_register_pdf.py:build_salary_register_pdf, guard against `rows==[]` — currently raises ReportLab 'must have at least a row and column' → 500. Return a placeholder PDF (or add a single empty row) so downloads succeed for zero-employee runs.",
+    "Once fixed, re-run test_iter68_admin_employee_and_pdfs.py::TestSalaryRegisterPdf::test_download_register_pdf. Consider adding a helper that seeds a temp employee + salary run for regression coverage."
+  ],
+  "critical_code_review_comments": [
+    "server.py:10679 — Field-name drift between the writer (`_compute_salary_run` returns 'rows') and the reader (`download_salary_register_pdf` reads 'lines'). This wouldn't have been caught by import smoke tests because the utility itself is fine — the bug is in the endpoint wiring.",
+    "server.py:10692 salary-certificate.pdf endpoint uses `emp.get('role')=='employee'` in its find query — good, consistent with the iter-68 role restriction on GET /admin/employees.",
+    "server.py:5788 — temp_pin generated with `secrets.randbelow(1_000_000)` then formatted to 6 digits — good. Consider ensuring first digit is non-zero for shareability (currently PINs like '000123' are possible). Low priority."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter68_admin_employee_and_pdfs.py (new)",
+    "/app/test_reports/pytest/pytest_iter68.xml (new)"
+  ],
+  "success_rate": {"backend": "93.75% (15/16)", "frontend": "N/A (backend only)"},
+  "seed_data_creation": "Test creates temporary employees in SKSCO1 (and one in another firm for the cross-firm 403 assertion), all prefixed with 'TEST Iter68'. All are DELETEd via DELETE /api/admin/employees/{user_id} at session teardown. No persistent seed data left in DB.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "After the field-name fix (`lines`→`rows`) and the empty-rows guard in salary_register_pdf, re-run `pytest backend/tests/test_iter68_admin_employee_and_pdfs.py -v`. Only TestSalaryRegisterPdf::test_download_register_pdf is currently failing; everything else is green. Session-scoped fixtures use OTP dev flow for super_admin (sksharmaconsultancy@gmail.com) and admin-pin-login for SKSCO1 (+919810000001/387908) — neither mutates pin_hash. Cleanup uses DELETE /api/admin/employees/{user_id} in an autouse teardown.",
+  "rca_of_issue": "Salary Register PDF 500 — RCA: /app/backend/server.py:10679 passes `rows=run.get('lines') or []` to build_salary_register_pdf. But `_compute_salary_run` (server.py:10576) returns `{'rows': rows, ...}` which is what gets stored in db.salary_runs. So `run['lines']` is always missing → default [] → ReportLab raises ValueError('must have at least a row and column') → 500. Reproduction: (1) POST /admin/salary-runs with a company that has ≥1 employee, (2) confirm run.rows has entries via Mongo, (3) GET /admin/salary-runs/{run_id}/register-form27.pdf → 500. Mitigation: one-line change from 'lines' to 'rows'; also add an empty-rows guard in utils/salary_register_pdf.py so a zero-employee run renders a header-only PDF instead of crashing."
+}

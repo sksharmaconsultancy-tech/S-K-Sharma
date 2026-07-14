@@ -1,0 +1,29 @@
+{
+  "summary": "Iter 107 fully verified. Backend 12/12 pytest cases pass: admin-password-login now works with mobile number in all 4 formats (email, +91..., 10-digit, 0-prefixed) for the sub_admin and with email for super_admin (regression); wrong-password returns 401; GET /api/pincode/311001 returns {ok:true, state:'Rajasthan', district:'Bhilwara'} both fresh and from Mongo cache; GET /api/pincode/12345 returns 400; GET /api/admin/firm-master/cmp_987f0d7da5 fills master.header.category='Hospital' from business_category, and PATCH persists start_date='2024-04-01' across a subsequent GET; POST /api/auth/pin-login for employee +919000000101 still returns role=employee. Frontend UI verified on web 1920px: /admin-pin-login Password-mode label reads exactly 'Email / Mobile no. / User ID' and login with 9000000555 + subadmin123 lands on the dashboard as 'Test SubAdmin'. /firm-master with lock on cmp_987f0d7da5 shows Firm Category='Hospital', input[type=date] editable (filled 2024-04-01, Saved, reloaded, still 2024-04-01), and typing 311001 into the section-2 Pin Code input auto-fills State Name='Rajasthan' and City Name='Bhilwara' within ~3s. /database-viewer and /join-qr load; join-qr shows 2 QR SVG cards (Employee QR + Employer QR).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter107_features.py",
+    "/app/test_reports/pytest/iter107_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "firm-master.tsx `Field` component does not forward testID / accessibility props — passing testID to Field would make automated tests more robust than the current DOM label-traversal used in tests. Non-blocking.",
+    "server.py `pincode_lookup` is registered on `api` (@api.get) at line 17503 which is BEFORE app.include_router(api) at 17539, so it works, but it lives after the CORS middleware block in an otherwise dead zone of the file — worth moving next to the other Iter 107 auth code for discoverability.",
+    "server.py is >17.6k lines. Continues to warrant modularisation (already flagged in prior iterations)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter107_features.py (new)"
+  ],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100% (5/5 flows: sub-admin mobile login, category auto-fill, start_date persistence, pin-code auto-fill, DB viewer + Join QR regression)"},
+  "seed_data_creation": "No new seed data. Left cmp_987f0d7da5 (City Care Hospital) firm-master header.start_date='2024-04-01' saved, as allowed by the review request.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend endpoints: POST /api/auth/admin-password-login accepts email OR mobile (any of +91XXXXXXXXXX / 10-digit / 09-prefix / spaces) OR login_id (case-insensitive) — implementation at server.py:4420-4515. Sub-admin fixture: testsub@sksharma.co / +919000000555 / subadmin123 / user_id=sub_623b8a106846. GET /api/pincode/{6-digit} at server.py:17503 proxies api.postalpincode.in with pincode_cache in Mongo — returns {ok, pin, state, district, post_offices}. GET /api/admin/firm-master/{id} wraps payload as {master:{...}} with master.header.category auto-filled from company.business_category.title() when empty (routes/firm_master.py:269-276). Frontend /firm-master (Field component <View><Text>Label</Text><TextInput/></View>) has NO testID plumbing — tests target by label text. There are 3 'Pin Code' labels; the first is the section-2 registered_address one used by lookupPin. Test file /app/backend/tests/test_iter107_features.py is reusable and reads EXPO_PUBLIC_BACKEND_URL.",
+  "rca_of_issue": "N/A — all Iter 107 fixes/features passed on first execution. Two firm-master tests initially failed only because the response envelope is {master:{...}} not the master dict directly; test was corrected and both then passed."
+}

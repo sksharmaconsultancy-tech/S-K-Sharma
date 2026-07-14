@@ -1,0 +1,52 @@
+{
+  "summary": "Iter 74 BACKEND testing of THREE new features. All 16 pytest cases in /app/backend/tests/test_iter74_features.py PASS (16/16 = 100%). FEATURE 1 — CSV Bulk-Import allowance/deduction columns: verified that pipe-separated `HRA:2000|Convey:500` strings in the 4 new columns (actual_allowances, actual_deductions, compliance_allowances, compliance_deductions) parse into the [{head, amount}] list shape on the created user document; Row B (no allowance columns) has empty arrays; malformed 'HRA:abc' silently dropped while sibling 'Convey:500' kept; bulk-import-template.csv now has exactly 27 columns and all 4 new headers are present. FEATURE 2 — Employee self-service: GET /api/me/id-card → 200 with correct `SKSCO|<code>|<emp>|<uid>` QR payload, employee/company blocks, generated_at; GET /api/me/payslips/year-summary → 200 with 12 window_months (YYYY-MM), totals {gross,deductions,net,count,paid_count}, history list; GET /api/me/payslips/{slip_id}.pdf returns 401 without auth, 404 for missing slip, and 403 when an unrelated employee tries to fetch another employee's paid payslip (verified by creating a real paid payslip on a bulk-imported employee via POST /api/payslips as super_admin, then fetching as an unrelated OTP employee). FEATURE 3 — In-app message attachments: 1x1 PNG attachment on POST /api/messages returns 200 with attachment_count=1 and attachments[] WITHOUT the base64 payload; recipient's /api/messages/inbox shows the same metadata (still no base64); GET /api/messages/{id}/attachments/{aid} as recipient returns 200 with content-type=image/png and the bytes round-trip identically; the same fetch as an unrelated employee returns 403; the 400 branches for >3 attachments, unsupported mime (text/plain), and >5 MB base64 (~5.5 MB decoded) all fire correctly; `data:image/png;base64,` prefix is silently stripped and the message stored successfully. Super admin PIN was NOT touched — all auth via OTP dev-code flow (auth/otp/request returns dev_code, auth/otp/verify returns session_token). Test run time ~4s.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/messages (attachments)",
+        "issue": "Cap phrased as 'At most 3 attachments per message' but the ticket-attachment endpoint uses 5. Not a bug — spec explicitly says 3 for messages — but consider aligning the two limits in a shared constant to reduce future drift."
+      },
+      {
+        "endpoint": "POST /api/admin/employees/bulk-import (allowance parser)",
+        "issue": "`_parse_salary_lines` drops any entry where the parsed amount is falsy (== 0), so a legitimate row like `HRA:0` is silently thrown away rather than kept as a zero-line. Low-severity — real payroll never has a 0 amount — but worth noting if the accountant ever wants to record a stub."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter74_features.py",
+    "/app/test_reports/pytest/pytest_iter74.xml"
+  ],
+  "action_items": [
+    "None required — all Iter 74 acceptance checks pass. Optional: (a) fold the 3-attachment cap and the 5-MB size limit into module-level constants for readability; (b) consider raising 400 for a bulk-import row that supplies allowance columns but every parsed entry is malformed (currently silent — matches spec but the caller has no feedback)."
+  ],
+  "critical_code_review_comments": [
+    "server.py:5955-5994 (_parse_salary_lines) — Clean helper. Handles list-form (JSON) and pipe/semicolon string forms; strips whitespace; try/except swallows non-numeric amounts as intended. Nit: drops amount==0 entries (see minor issues).",
+    "server.py:6057-6063 — Applies the parser to all 4 columns AND falls back to legacy `allowances` / `deductions` key names for the two `actual_*` fields. Good backward-compat.",
+    "server.py:6118-6129 — Column list has exactly 27 entries; all 4 new headers appended at the end so existing CSVs (23-col) will still parse correctly since Python-CSV zips by header order, not position.",
+    "server.py:8353-8394 (message attachment validation) — Correct order: mime-check FIRST (400 short-circuit for text/plain etc.), data-URI strip, empty-check, size-check. The `(len(b64_raw)*3)//4` size estimate is a slight over-approximation (rough padding), which is the SAFE side of the 5-MB cap. Length-check on the 4-attachment case triggers BEFORE per-item validation — good.",
+    "server.py:8482-8528 (attachment download) — Access model is correct: recipient OR sender OR super_admin. base64.b64decode with validate=False is tolerant of stored padding, and any decode error surfaces as a 500 with 'Corrupted attachment' (defensive).",
+    "server.py:8828-8895 (me payslip PDF) — 404-then-403-then-400 order is exactly per spec; rebuild-on-the-fly means stale pdf_base64 rows never leak; falls back to a synthetic row when the salary run is missing so a directly-created payslip via POST /payslips (no run_id) still renders.",
+    "server.py:8898-8945 (year-summary) — Builds the trailing 12-month window off `now`, not off DOJ or FY — which is fine per spec ('window_months: [...12 YYYY-MM strings]'). Only counts _payslip_is_processed slips, so pending auto-created slips don't inflate totals. Correct.",
+    "server.py:8948-8987 (id-card) — QR payload prefix hard-coded to 'SKSCO|' (business decision — S.K. Sharma & Co. brand). Handles missing company_id and missing employee_code by using empty strings — the QR is still shape-stable (4 parts) so scanners won't choke.",
+    "server.py:8411-8478 (inbox / sent) — Strip base64 from attachments list on BOTH inbox and sent endpoints — matches spec; keeps message list payload light."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter74_features.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16 pytest cases)",
+    "frontend": "N/A (backend-only test per request)"
+  },
+  "seed_data_creation": "Test run creates several throwaway records: 2 companies (Iter74 QA Co ..., Iter74 Msg Co ...) with random company_codes; ~5 bulk-imported employees inside them; 1 paid payslip (2025-06, 30000 gross) attached to a bulk employee; 2-3 OTP employee sessions (qa.iter74.<hex>@test.com and qa.iter74.other.<hex>@test.com) plus 1 SMS OTP user (+91977xxxxxx) for the recipient role. Total ~4 messages inserted (1 successful with PNG, 1 with data-URI prefix; the 3 failed-400 attempts do NOT persist). Super admin's pin_hash / pin_must_change / pin_fail_count / pin_locked_until fields were NOT touched — all admin logins used OTP dev-code flow.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 74 backend features are production-ready. Key operational notes carried forward from iter 73/74: (a) frontend env var is EXPO_PUBLIC_BACKEND_URL (NOT EXPO_BACKEND_URL — differs from doc convention, but tests fall back to either); (b) OTP verify returns `session_token` (NOT `token` or `access_token`) — this is what /api/auth/me and every bearer-guarded endpoint expects; (c) POST /api/companies wraps the created company under `body['company']` in some code paths and returns the doc directly in others — my fixture tolerates both; (d) create_payslip in /api/payslips always sets status='paid' and deletes any pending row for the same (user,month) — so it's a reliable one-liner to get a PROCESSED payslip for testing the /me/payslips/{slip_id}.pdf endpoint; (e) `_payslip_is_processed` returns True when EITHER salary_run_id is set OR status=='paid' — so status=='paid' alone is enough; (f) The 5-MB size check uses `(len(b64)*3)//4` as an approximation — 7*1024*1024 chars decodes to ~5.5 MB, safely over cap; a slightly-more-precise attacker payload of ~5.05 MB (=len 7,067,733) would still trip it.",
+  "rca_of_issue": "N/A — no bugs found in Iter 74. Both minor findings are style / defensive-coding suggestions, not defects."
+}

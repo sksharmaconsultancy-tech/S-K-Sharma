@@ -1,0 +1,59 @@
+{
+  "summary": "Iter 98 review — Backend 21/21 (100%) via new pytest test_iter98_payroll_rules.py covering salary-process gates (online/offline 403+200 with TEST firm), compute_compliance_row PF/ESI firm gates, CL/PL 400 validation, /admin/leave-report shape, salary+compliance export.csv sort_by (name|code|net|gross), Textile Policy 2 <8h→all-OT, and _actual_salary_row_compute ot_basis basic vs gross. Frontend: Firm Master (Kankani) — fm-ot-basis-basic AND fm-ot-basis-gross radios PRESENT; '15. Report Order' section removed VERIFIED; leave-report screen renders (Kankani chip + 2024/2025/2026 year chips + lr-csv download + populated table). /reports?tab=salary shows rep-sort-name/code/net/gross + rep-finalized-only chips VERIFIED. Salary-run + compliance-salary-run sort chips (asal-sort-*/comp-sort-*) exist in source (salary-run.tsx:732, compliance-salary-run.tsx:945) but only render once a run/grid is loaded — could not visually confirm without generating a new run. Missing testIDs on 3 critical Firm-Master toggles (Online Salary / Offline Salary / Bio Matrix Attendance) — cannot automate the 'Offline Salary ON auto-flips Bio Matrix ON' rule without them.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "firm-master.tsx §10 Salary Process Settings — Toggle rows",
+        "issue": "The Online Salary / Offline Salary / Bio Matrix Attendance Toggle components (firm-master.tsx:714, 716, 724) do NOT pass a testID prop. Consequently the review-request testIDs fm-online-salary, fm-offline-salary and fm-bio-matrix are absent from the DOM and the Iter-98 rule ‘enabling Offline Salary auto-flips Bio Matrix Attendance ON’ cannot be exercised in Playwright.",
+        "testID": "fm-online-salary / fm-offline-salary / fm-bio-matrix (MISSING)",
+        "priority": "MEDIUM"
+      },
+      {
+        "component": "salary-run.tsx & compliance-salary-run.tsx sort chips",
+        "issue": "asal-sort-* / comp-sort-* chips exist in the source (lines 732 & 945 respectively) but only render once a run grid has been generated or an existing run opened. Manual verification with a generated run for Kankani is recommended (backend export.csv?sort_by already covered by pytest).",
+        "testID": "asal-sort-* / comp-sort-*",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "leave-report",
+        "issues": ["Table 'Other' column has no header hint that it also counts as leave taken — cosmetic, low priority."]
+      }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter98_payroll_rules.py",
+    "/app/test_reports/pytest/pytest_iter98.xml",
+    "/app/test_reports/screens/iter98_fm_ot_basis.png",
+    "/app/test_reports/screens/iter98_leave_report.png",
+    "/app/test_reports/screens/iter98_reports_sort.png",
+    "/app/test_reports/screens/iter98_salary_run.png",
+    "/app/test_reports/screens/iter98_comp_run.png"
+  ],
+  "action_items": [
+    "Add testID props to the 3 Toggle rows in firm-master.tsx §10 Salary Process Settings — testID=\"fm-online-salary\", \"fm-offline-salary\", \"fm-bio-matrix\". After that, the Iter 98 auto-flip rule (Offline ON → Bio Matrix ON) can be automated. Optional: also expose disabled state so testers can verify gate behaviour on the toggle itself.",
+    "OPTIONAL — Retest asal-sort-* and comp-sort-* by generating a small salary+compliance run for Kankani (month 2026-05, employee_type=Staff). Backend export sorting is already covered by test_iter98_payroll_rules.py::TestExportSort. Then delete both runs from db.salary_runs / db.compliance_salary_runs."
+  ],
+  "critical_code_review_comments": [
+    "server.py continues to grow past 17,300 lines — recommend extracting the salary/compliance domain (currently ~4k lines around ln 12500–17300) into /routes and /services modules over the next iterations. Not blocking.",
+    "_require_firm_salary_permission (server.py:13546) skips the gate when company_id is None (super-admin cross-firm scope). This is intentional but should be documented in the endpoint spec — otherwise a super_admin can bypass the firm gate by omitting company_id.",
+    "routes/leaves.py leave_report: 'other_taken' is bucketed but the response body does not communicate that 'other' leave types (sick, unpaid, etc.) do not consume CL/PL allowance. Frontend already shows an 'Other' column — worth a small tooltip / help text.",
+    "utils/compliance_salary.py compute_compliance_row keyword-only firm_pf_enabled/firm_esic_enabled default True → safe fallback if a caller upgrades incrementally. Good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter98_payroll_rules.py (NEW — 21 test cases covering all Iter 98 backend rules)"
+  ],
+  "success_rate": {
+    "backend": "100% (21/21)",
+    "frontend": "~90% — Firm Master OT basis radios ✓, Report Order removed ✓, Leave Report page ✓, /reports sort+finalized chips ✓; run-grid sort chips (asal-sort-*/comp-sort-*) not visually verified because no run was open; fm-*-salary and fm-bio-matrix toggles have no testID (MEDIUM bug)"
+  },
+  "seed_data_creation": "Created 1 throwaway TEST_ITER98_* firm per class-scoped fixture (used to flip salary_process flags) — auto-deleted in teardown_module. Kankani firm's salary_process (online/offline), epf.applicable, esi.applicable and leave_policy were touched by CL/PL test but restored via curl script (all True + cl_pl_applicable=False, verified with GET). No residual _test_temp or TEST_ITER98 documents remain (verified via /api/companies).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Reliable Playwright auth for this preview: (1) POST /api/auth/admin-password-login {email, password} → response key is 'session_token' (NOT 'token'); (2) page.add_init_script(`localStorage.setItem('llc_session_token', '<tok>')`) BEFORE first goto — this bypasses the Cloudflare/expo redirect loop. Company selection for firm-master uses CompanyPicker component: click [data-testid='company-picker-trigger'] then [data-testid='company-picker-option-<company_id>']. Backend test file test_iter98_payroll_rules.py is a good regression base — includes leaf tests + module-level teardown for TEST_ firms. Note: creating a company requires office_lat/office_lng (non-optional Pydantic fields) and company_code max 8 chars.",
+  "rca_of_issue": "Only issue found: 3 Toggle rows in firm-master.tsx §10 lack testID. Root cause — the Toggle component supports a testID prop (declared in its signature at line 73) but the 3 salary_process invocations were added without passing one. Fix is a 3-line prop addition: <Toggle label='Online Salary' testID='fm-online-salary' ... />, <Toggle label='Offline Salary' testID='fm-offline-salary' ... />, <Toggle label='Bio Matrix Attendance' testID='fm-bio-matrix' ... />."
+}

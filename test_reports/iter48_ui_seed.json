@@ -1,0 +1,11 @@
+{
+  "company_id": "cmp_3024a7f855",
+  "admin_phone": "+917779178545",
+  "admin_pin": "246810",
+  "sa_token": "otp_fabb88fe31b445c78ecd63f6c203074af192ed93167044a18f7c513618767d15",
+  "ca_token": "pin_929418e68f6945cf8c13c2327676bed1f8d80f9fd9754300b81b362086c6b9b6",
+  "rid_approved": "att_201089f8bb2e",
+  "rid_rejected": "att_554dcd6df11e",
+  "rid_pending": null,
+  "base_url": "https://emplo-connect-1.preview.emergentagent.com"
+}

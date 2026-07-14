@@ -1,0 +1,30 @@
+{
+  "summary": "Iter 110/111 verified. Backend 13/13 pytest cases PASS (extra-duty accepts extra_hours=-0.5, rejects extra_amount<0, zero-hours+zero-amount deletes; PATCH /admin/attendance/{id} still requires reason, and follow-up day-status cell exposes edit_reason='Due to Mismatch', edited_by_name='S.K. Sharma & Co. Admin', original_hhmm='09:00'; daily xlsx has expected 14-column header S.No/Bio Code/Emp Code/Name/Father Name/Designation/In/Out/OT In/OT Out/Duty HRS/OT HRS/Total HRS/Status; daily pdf 200 %PDF; invalid daily date -> 400; monthly-inout xlsx & monthly-hours xlsx both contain Bio Code column; monthly-inout.pdf & monthly-hours.pdf return 200 %PDF). Frontend verified on web desktop 1920x800: Kankani firm locked via skc:selected_company; Punch Approvals > Updated tab renders new 'Update Details (Punch · Reason · By)' column with 'IN 09:00 → 09:30 · Due to Mismatch · by S.K. Sharma & Co. Admin' AND per-row 'Update Reason' dropdown defaulted to 'Due to Mismatch' (screenshot captured); Additional Duty tab header shows 'Extra Duty ± (HRS/MIN)' column; Attendance Report grid exposes daily-date-input (default 12-07-2026, today), daily-export-xlsx and daily-export-pdf — clicking each triggered network requests returning 200 with correct content-type. Sidebar gating: Kankani firm_master salary_process is empty {} in DB, so neither online_salary nor offline_salary is ON → gating code (AdminWebShell.tsx:521) short-circuits and all three Salary Process submenu items remain visible (verified by grep + confirmed by rendered sidebar screenshot showing 'Salary Process' expandable menu still present). No React Native / Expo issues detected.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter110_daily_and_extra_duty.py",
+    "/app/test_reports/pytest/iter110_results.xml"
+  ],
+  "action_items": [
+    "Optional: DELETE /api/admin/attendance/{record_id} returned 422 during test cleanup — the endpoint may require a body (reason). Not a regression for Iter 110; noted for future cleanup hooks. Test-created manual punch att_57a4731d3700 (user code 50 SURENDRA SINGH, 2026-07-09 09:30 IN) is still in DB. Recommend main agent expose a clean DELETE (or add reason-body support) if not already available."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now >17.7k lines — Iter 111 daily/extra-duty logic further inflates it. Modularisation continues to be warranted (already flagged in prior iters).",
+    "day-status _cell() adds edit_reason / edited_by_name / original_hhmm keys unconditionally on every cell (even non-edited) — payload size grows for large ranges. Consider omitting when edited=False."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter110_daily_and_extra_duty.py (new, 13 tests)"
+  ],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "100% of testable flows (Updated tab audit column, Additional Duty column header, Daily basis input + Daily Excel/PDF network 200, sidebar shows all 3 Salary Process items when both toggles OFF as expected)"},
+  "seed_data_creation": "Created one manual IN punch for Kankani employee code 50 (SURENDRA SINGH) on 2026-07-09 09:00 then PATCHed it to 09:30 with reason='Due to Mismatch' to exercise the audit trio; attempted DELETE returned 422 so record remains (att_57a4731d3700). Extra-duty entries created during tests were cleaned up (0 residuals confirmed via GET /admin/attendance/extra-duty).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 110/111 endpoints & UI: (1) POST /api/admin/attendance/extra-duty accepts NEGATIVE extra_hours (extra_amount still must be >= 0; 0+0 deletes). (2) GET /api/admin/attendance/day-status/{cid} cells now carry edit_reason, edited_by_name, original_hhmm (keys always present, values None for non-edited). (3) GET /api/admin/attendance/daily/{cid}/{YYYY-MM-DD}.{xlsx,pdf} — 14-column layout, invalid date -> 400. (4) Frontend testIDs to reuse: pa-date-input, pa-show, tab-updated/tab-auto/tab-extra, ds-reason-{key}, ds-save-{key}, reason-opt-0/1/2, reason-opt-custom, xd-sign-{key}, xd-hrs-{key}, xd-unit-{key}, xd-save-{key}, daily-date-input, daily-export-xlsx, daily-export-pdf, global-company-picker-trigger. (5) Web-login helper: POST /api/auth/admin-password-login -> session_token -> localStorage keys 'llc_session_token', 'auth:token', AND 'skc:selected_company'='cmp_527fecdd7c' before navigating to inner routes. (6) Auto/Extra tab rows only render when there ARE pending punches / eligible employees for that specific date+status filter; the code paths use the same testIDs as the visible Updated tab dropdown (confirmed via source grep punch-approvals.tsx lines 865-933, 1165). (7) Sidebar salary-process gating (AdminWebShell.tsx:520-538) short-circuits when BOTH online_salary and offline_salary are false — Kankani firm_master.salary_process is currently {} so gating is inert; to test hiding, PATCH /api/admin/firm-master/cmp_527fecdd7c body {salary_process:{online_salary:true, offline_salary:false}} and revert after.",
+  "rca_of_issue": "N/A — no regressions. Two initial test-script issues self-fixed: (a) xlsx sharedStrings.xml is empty because openpyxl uses inline strings by default — swapped to openpyxl load_workbook + row iteration; (b) day-status response is one row per user-date pair with 'in'/'out' keys directly on the row (not nested under cells map), fixed lookup."
+}

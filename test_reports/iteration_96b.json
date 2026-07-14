@@ -1,0 +1,27 @@
+{
+  "summary": "Verified new /employee and /employer install-entry routes plus employer-managed employee credentials flow. Backend: 5/5 pytest cases passed (super admin login, /companies/lookup public, admin/employee-credentials sets login_id+pin+password, employee logs in via /auth/pin-login and /auth/employee-password-login, duplicate username rejected 409). Frontend UI (mobile viewport 390x844) on preview: /employee -> install-entry-employee visible, Continue navigates to /pin-login which shows ONLY Mobile + Username tabs (UAN/ESI/PF absent), no 'Admin sign in' link; Username tab reveals PIN/Password toggle. /employer -> install-entry-employer visible, Continue navigates to /admin-pin-login which defaults to PIN mode (placeholder '6-digit PIN') and has NO 'Employee sign in instead' footer link. /employee-signup?company=KEPS pre-fills 'KEPS', field is non-editable, and shows 'You're joining Kankani Enterprises.'. No redirect loop observed on /employee or /employer. Console still shows benign expo-notifications + shadow*/outline/background RN-web deprecation warnings (pre-existing).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter96_installentry_and_credentials.py",
+    "/app/test_reports/pytest/pytest_iter96_installentry.xml"
+  ],
+  "action_items": [
+    "CLEANUP: The credential test set login_id='TESTIter96<timestamp>', pin='912837', password='TestPass!96' on user_44cd6f561da0 (SURENDRA SINGH, employee_code 50, Kankani cmp_527fecdd7c). Please clear login_id/pin_hash/password_hash for that employee or restore original PIN 1234."
+  ],
+  "critical_code_review_comments": [
+    "InstallEntry uses window.alert on iOS fallback (line 74) — fine on web, but window is guarded by isWeb block so OK.",
+    "AdminPinLoginScreen still contains the unused altLink/altLinkTxt styles (lines 459-466) after removing the 'Employee sign in instead' link — minor dead code."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Modified real employee user_44cd6f561da0 (SURENDRA SINGH, code 50) with test login_id/pin/password. See action_items for cleanup.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Preview URL https://emplo-connect-1.preview.emergentagent.com is up-to-date and serves /employee & /employer without redirect loop (AuthContext PUBLIC_PREFIXES allowlist working). User's 'cannot open link' report is likely about the LIVE emergent.host site which has not been re-published; on preview the flow works end-to-end. If retesting, use super admin sksharma/sharma123 for admin-password-login and Kankani KEPS cmp_527fecdd7c."
+}
