@@ -824,7 +824,7 @@ export default function AttendanceScreen() {
                   Punched {r.kind === "in" ? "In" : "Out"}
                 </Text>
                 <Text style={styles.actSub}>
-                  {new Date(r.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  {(/T(\d{2}:\d{2})/.exec(r.at) || [])[1] || "—"}
                   {typeof r.distance_m === "number" && r.distance_m > 0
                     ? ` · ${Math.round(r.distance_m)}m from office`
                     : ""}

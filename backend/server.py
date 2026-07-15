@@ -1898,6 +1898,23 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# Iter 144 — project-wide PUNCH TIME convention: attendance `at` timestamps
+# store IST WALL-CLOCK time labelled as UTC ("+00:00"). Machine punches
+# (ADMS live + .dat/.TXT imports) and admin manual entries already follow
+# this; app self-punches now do too, and every display (backend strftime,
+# frontend verbatim slice) shows the stored clock without tz conversion.
+IST_TZ = timezone(timedelta(hours=5, minutes=30))
+
+
+def ist_wallclock_now() -> datetime:
+    """Current IST wall-clock, labelled UTC (punch storage convention)."""
+    return datetime.now(IST_TZ).replace(tzinfo=timezone.utc)
+
+
+def ist_wallclock_iso() -> str:
+    return ist_wallclock_now().isoformat()
+
+
 def haversine_m(lat1, lng1, lat2, lng2) -> float:
     R = 6371000.0
     p1, p2 = math.radians(lat1), math.radians(lat2)
@@ -8284,7 +8301,8 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
     # per day (each entry/exit is logged as a separate record), while still
     # rejecting double-IN or double-OUT which would corrupt the log.
     # Rejected punches are ignored for the last-kind check.
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Iter 144 — "today" follows IST wall-clock (punch storage convention).
+    today = ist_wallclock_now().strftime("%Y-%m-%d")
     today_recs = await db.attendance.find(
         {"user_id": user["user_id"], "date": today,
          "status": {"$ne": "rejected"}},
@@ -8311,7 +8329,9 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
         except Exception:
             last_at = None
         if last_at is not None:
-            elapsed = (datetime.now(timezone.utc) - last_at).total_seconds() / 60.0
+            # Iter 144 — compare in wall-clock space (punches are stored as
+            # IST wall-clock labelled UTC).
+            elapsed = (ist_wallclock_now() - last_at).total_seconds() / 60.0
             if elapsed < _AUTO_PUNCH_DEBOUNCE_MIN:
                 logger.info(
                     "[punch] Debouncing auto punch for user=%s (%.1f min since last %s at %s)",
@@ -8465,7 +8485,7 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
         "branch_name": (closest or {}).get("name"),
         "date": today,
         "kind": payload.kind,
-        "at": now_iso(),
+        "at": ist_wallclock_iso(),
         "latitude": payload.latitude,
         "longitude": payload.longitude,
         "distance_m": round(dist, 1),
@@ -9443,7 +9463,7 @@ async def admin_approve_punch(
 
     # Idempotency (toggle style): allow multiple IN→OUT cycles per day, but
     # never a double-IN or double-OUT (would corrupt shift pairing).
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = ist_wallclock_now().strftime("%Y-%m-%d")  # Iter 144 — wall-clock
     recs = await db.attendance.find(
         {"user_id": emp["user_id"], "date": today},
         {"_id": 0, "kind": 1, "at": 1},
@@ -9461,7 +9481,7 @@ async def admin_approve_punch(
         "company_id": emp["company_id"],
         "date": today,
         "kind": payload.kind,
-        "at": now_iso(),
+        "at": ist_wallclock_iso(),
         "latitude": lat,
         "longitude": lng,
         "distance_m": round(dist, 1),

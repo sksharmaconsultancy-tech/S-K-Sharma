@@ -143,14 +143,9 @@ type RosterRow = {
 
 function fmtTime(iso?: string | null) {
   if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
+  // Punch times are stored as wall-clock (machine/IST time) — show verbatim.
+  const m = /T(\d{2}):(\d{2})/.exec(iso);
+  return m ? `${m[1]}:${m[2]}` : iso;
 }
 
 function RosterPanel({ companyId, isSuper }: { companyId: string | "all"; isSuper: boolean }) {
@@ -402,16 +397,11 @@ type OpenShift = {
 
 function fmtWhen(iso?: string | null) {
   if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-      day: "2-digit",
-      month: "short",
-    });
-  } catch {
-    return iso;
-  }
+  // Wall-clock timestamps — show verbatim (dd Mon HH:MM), no tz shift.
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(iso);
+  if (!m) return iso;
+  const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return `${m[3]} ${MON[Number(m[2]) - 1]}, ${m[4]}:${m[5]}`;
 }
 
 function fmtElapsed(hours: number): string {

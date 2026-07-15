@@ -1734,16 +1734,14 @@ function fmtHoursHM(hoursDec: number | null | undefined): string {
 }
 
 function fmtTime(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleTimeString("en-IN", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true,
-    });
-  } catch {
-    return iso;
-  }
+  // Punch times are stored as wall-clock (machine/IST time) — show verbatim
+  // in 12-hour format, no timezone conversion.
+  const m = /T(\d{2}):(\d{2})/.exec(iso);
+  if (!m) return iso;
+  let h = Number(m[1]);
+  const ap = h >= 12 ? "pm" : "am";
+  h = h % 12 || 12;
+  return `${String(h).padStart(2, "0")}:${m[2]} ${ap}`;
 }
 
 function fmtDate(ymd: string): string {
