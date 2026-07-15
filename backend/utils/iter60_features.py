@@ -177,6 +177,17 @@ class BulkEmployeeCorrection(BaseModel):
     pf_basic: Optional[float] = None
     allowances: Optional[Dict[str, float]] = None
     bio_code: Optional[str] = None   # Iter 139 — offline-salary firms only
+    # Iter 141 — Actual Salary correction mode (offline-salary firms).
+    father_name: Optional[str] = None
+    actual_basic: Optional[float] = None
+    pay_basis: Optional[str] = None          # "daily" | "monthly"
+    shift_id: Optional[str] = None           # Shift Master id; "" clears
+    salary_1: Optional[float] = None
+    day_1: Optional[float] = None
+    salary_2: Optional[float] = None
+    day_2: Optional[float] = None
+    salary_3: Optional[float] = None
+    day_3: Optional[float] = None
     uan_no: Optional[str] = None
     esi_ip_no: Optional[str] = None
     pf_no: Optional[str] = None
@@ -658,6 +669,7 @@ def register_iter60_features(
     @api.get("/admin/employees/bulk-correction-fields")
     async def bulk_correction_fields(
         company_id: Optional[str] = None,
+        mode: Optional[str] = None,
         authorization: Optional[str] = Header(None),
     ):
         """Return the canonical list of fields for the correction grid.
@@ -669,6 +681,13 @@ def register_iter60_features(
             every additional allowance head ENABLED in the Firm Master,
             UAN, ESI IP, PF No., Aadhaar (+name), PAN (+name), Bank A/c, IFSC.
           * Active column removed (use the Active/Resigned filter instead).
+
+        Iter 141 (user spec) — ``mode=actual`` returns the Actual Salary
+        correction column set (Name / Father Name / Designation / Actual
+        Basic / Pay Basis / Shift / Bio Code / Salary 1-3 + Day 1-3).
+        Only available when the firm has Offline Salary enabled in the
+        Firm Master; the response's ``actual_salary_enabled`` flag drives
+        the mode toggle in the UI.
         """
         admin = await get_user_from_token(authorization)
         require_role(admin, ["super_admin", "sub_admin"])
@@ -700,13 +719,30 @@ def register_iter60_features(
                 allow_fields.append(
                     {"key": f"allow:{head}", "label": head, "type": "allowance"})
 
-        # Iter 139 (user spec) — firms with Offline Salary enabled in the
-        # Firm Master also get the biometric enrolment code as an editable
-        # column (synced with the Employee Master `bio_code`).
-        bio_fields = ([{"key": "bio_code", "label": "Bio Code", "type": "text"}]
-                      if offline_salary_on else [])
+        # Iter 141 (user spec) — Actual Salary correction mode. Bio Code
+        # now lives HERE (removed from the compliance column set).
+        if (mode or "").strip().lower() == "actual":
+            return {
+                "actual_salary_enabled": offline_salary_on,
+                "fields": [
+                    {"key": "employee_code", "label": "Emp Code", "type": "text"},
+                    {"key": "name", "label": "Employee Name", "type": "text"},
+                    {"key": "father_name", "label": "Father Name", "type": "text"},
+                    {"key": "designation", "label": "Designation", "type": "master:designation"},
+                    {"key": "actual_basic", "label": "Actual Salary Basic", "type": "number"},
+                    {"key": "pay_basis", "label": "Pay Basis", "type": "select:paybasis"},
+                    {"key": "shift_id", "label": "Shift", "type": "select:shift"},
+                    {"key": "bio_code", "label": "Bio Code", "type": "text"},
+                    {"key": "salary_1", "label": "Salary 1", "type": "number"},
+                    {"key": "day_1", "label": "Day 1", "type": "number"},
+                    {"key": "salary_2", "label": "Salary 2", "type": "number"},
+                    {"key": "day_2", "label": "Day 2", "type": "number"},
+                    {"key": "salary_3", "label": "Salary 3", "type": "number"},
+                    {"key": "day_3", "label": "Day 3", "type": "number"},
+                ],
+            }
 
-        return {"fields": [
+        return {"actual_salary_enabled": offline_salary_on, "fields": [
             {"key": "employee_code", "label": "Emp Code", "type": "text"},
             {"key": "name", "label": "Name", "type": "text"},
             {"key": "father_name", "label": "Father Name", "type": "text"},
@@ -719,7 +755,6 @@ def register_iter60_features(
             {"key": "compliance_basic", "label": "Basic Salary (Compliance)", "type": "number"},
             {"key": "pf_basic", "label": "PF Basic", "type": "number"},
             *allow_fields,
-            *bio_fields,
             {"key": "uan_no", "label": "UAN No.", "type": "text"},
             {"key": "esi_ip_no", "label": "ESI IP No.", "type": "text"},
             {"key": "pf_no", "label": "PF No.", "type": "text"},
@@ -774,6 +809,12 @@ def register_iter60_features(
         applied: List[Dict[str, Any]] = []
         skipped: List[Dict[str, Any]] = []
 
+        # Iter 141 — Actual Salary correction keys are merged into the
+        # employee's `salary_structure_actual` rows, not set as flat fields.
+        ACTUAL_KEYS = {"actual_basic", "pay_basis",
+                       "salary_1", "day_1", "salary_2", "day_2",
+                       "salary_3", "day_3"}
+
         for row in payload.corrections:
             existing = await db.users.find_one(
                 {
@@ -792,10 +833,18 @@ def register_iter60_features(
             row_dict = row.dict()
             group_change_to: Optional[str] = None
             allowance_changes: Optional[Dict[str, float]] = None
+            actual_changes: Dict[str, Any] = {}
+            shift_change_to: Optional[str] = None
             for k, v in row_dict.items():
                 if k == "user_id":
                     continue
                 if v is None:
+                    continue
+                if k in ACTUAL_KEYS:
+                    actual_changes[k] = v
+                    continue
+                if k == "shift_id":
+                    shift_change_to = v  # "" clears the shift override
                     continue
                 if k == "employee_group_id":
                     group_change_to = v  # "" clears the group
@@ -854,6 +903,60 @@ def register_iter60_features(
                     elif nh in ("other", "others"):
                         updates["other"] = amount
                 updates["compliance_salary_allowances"] = lines
+
+            # Iter 141 — merge Actual Salary edits into the structured
+            # `salary_structure_actual` rows (Basic Salary + Salary 1/2/3).
+            if actual_changes:
+                struct = [dict(r) for r in (existing.get("salary_structure_actual") or [])
+                          if isinstance(r, dict)]
+
+                def _srow(head: str) -> dict:
+                    hl = head.strip().lower()
+                    hit = next((r for r in struct
+                                if str(r.get("head") or "").strip().lower() == hl), None)
+                    if hit is None:
+                        hit = {"head": head}
+                        struct.append(hit)
+                    return hit
+
+                if "actual_basic" in actual_changes or "pay_basis" in actual_changes:
+                    basic = _srow("Basic Salary")
+                    if "actual_basic" in actual_changes:
+                        basic["amount"] = float(actual_changes["actual_basic"])
+                    if "pay_basis" in actual_changes:
+                        pb = str(actual_changes["pay_basis"] or "").strip().lower()
+                        if pb in ("daily", "monthly"):
+                            basic["rate_type"] = pb
+                            updates["pay_basis"] = pb
+                for n in (1, 2, 3):
+                    sk, dk = f"salary_{n}", f"day_{n}"
+                    if sk in actual_changes or dk in actual_changes:
+                        tier = _srow(f"Salary {n}")
+                        if sk in actual_changes:
+                            tier["amount"] = float(actual_changes[sk])
+                        if dk in actual_changes:
+                            tier["working_days"] = float(actual_changes[dk])
+                updates["salary_structure_actual"] = struct
+
+            # Iter 141 — Shift assignment from the Shift Master ("" clears).
+            if shift_change_to is not None:
+                sid = str(shift_change_to).strip()
+                apo = dict(existing.get("attendance_policy_override") or {})
+                if sid:
+                    sm = await db.shift_masters.find_one(
+                        {"shift_id": sid}, {"_id": 0, "start": 1, "end": 1})
+                    if not sm:
+                        skipped.append({"user_id": row.user_id, "reason": "unknown_shift"})
+                        continue
+                    apo["shift_id"] = sid
+                    updates["attendance_policy_override"] = apo
+                    updates["shift_start"] = sm.get("start")
+                    updates["shift_end"] = sm.get("end")
+                else:
+                    apo.pop("shift_id", None)
+                    updates["attendance_policy_override"] = apo or None
+                    updates["shift_start"] = None
+                    updates["shift_end"] = None
 
             # Iter 137 — keep the interlinked compliance structure + linked
             # Compliance Gross in sync whenever Basic / allowances change.

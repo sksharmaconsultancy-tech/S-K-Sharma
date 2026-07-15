@@ -68,6 +68,11 @@ type EmployeeRow = {
   employee_group_id?: string;
   company_id?: string;
   company_name?: string;
+  // Iter 141 — Actual Salary correction mode
+  bio_code?: string;
+  pay_basis?: string;
+  salary_structure_actual?: { head?: string; amount?: number; rate_type?: string; working_days?: number }[];
+  attendance_policy_override?: { shift_id?: string } | null;
 };
 
 // Fields we want visible in the grid header order.
@@ -94,6 +99,15 @@ const COL_WIDTHS: Record<string, number> = {
   bank_account: 140,
   bank_ifsc: 110,
   bio_code: 100,
+  actual_basic: 140,
+  pay_basis: 120,
+  shift_id: 150,
+  salary_1: 110,
+  day_1: 90,
+  salary_2: 110,
+  day_2: 90,
+  salary_3: 110,
+  day_3: 90,
 };
 
 // Iter 134 (user spec) — Only identity columns are locked. Statutory IDs,
@@ -137,6 +151,42 @@ function showMsg(msg: string, title = "Bulk Correction") {
   else Alert.alert(title, msg);
 }
 
+/** Iter 141 — saved (base) value for the Actual Salary derived columns,
+ *  read from `salary_structure_actual` rows / the shift override. */
+function actualBase(row: EmployeeRow, key: string): string {
+  const srow = (head: string) =>
+    (row.salary_structure_actual || []).find(
+      (r) => String(r?.head || "").trim().toLowerCase() === head.toLowerCase(),
+    );
+  switch (key) {
+    case "actual_basic": {
+      const b = srow("Basic Salary");
+      return b?.amount != null ? String(b.amount) : "";
+    }
+    case "pay_basis": {
+      const b = srow("Basic Salary");
+      return String(b?.rate_type || row.pay_basis || "");
+    }
+    case "shift_id":
+      return String(row.attendance_policy_override?.shift_id || "");
+    case "salary_1": case "salary_2": case "salary_3": {
+      const t = srow(`Salary ${key.slice(-1)}`);
+      return t?.amount != null ? String(t.amount) : "";
+    }
+    case "day_1": case "day_2": case "day_3": {
+      const t = srow(`Salary ${key.slice(-1)}`);
+      return t?.working_days != null ? String(t.working_days) : "";
+    }
+    default:
+      return "";
+  }
+}
+
+const ACTUAL_DERIVED_KEYS = new Set([
+  "actual_basic", "pay_basis", "shift_id",
+  "salary_1", "day_1", "salary_2", "day_2", "salary_3", "day_3",
+]);
+
 export default function BulkEmployeeCorrectionScreen() {
   const router = useRouter();
   const { user } = useAuth();
@@ -158,6 +208,10 @@ export default function BulkEmployeeCorrectionScreen() {
   const crossFirmSet = useMemo(() => new Set<string>(), []);
 
   const [fields, setFields] = useState<FieldDef[]>([]);
+  // Iter 141 (user spec) — Compliance vs Actual Salary correction mode.
+  const [mode, setMode] = useState<"compliance" | "actual">("compliance");
+  const [actualEnabled, setActualEnabled] = useState(false);
+  const [shiftOptions, setShiftOptions] = useState<{ shift_id: string; name: string }[]>([]);
   // Cross-firm groups: keyed by company_id -> options
   const [groupsByCid, setGroupsByCid] = useState<Record<string, GroupOption[]>>({});
   // Iter 68 — Same master-driven UX for Departments + Designations.
@@ -172,7 +226,7 @@ export default function BulkEmployeeCorrectionScreen() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { setGroupFilter(""); }, [companyId]);
+  useEffect(() => { setGroupFilter(""); setMode("compliance"); }, [companyId]);
 
   const isResigned = (e: EmployeeRow) =>
     e.active === false || !!(e.resign_date && String(e.resign_date).trim());
@@ -229,6 +283,7 @@ export default function BulkEmployeeCorrectionScreen() {
 
   // Iter 134 — the column set depends on the firm (its enabled allowance
   // heads become editable columns), so refetch fields per firm.
+  // Iter 141 — and per correction mode (compliance vs actual salary).
   useEffect(() => {
     if (!isSuper || !companyId) {
       setFields([]);
@@ -236,15 +291,29 @@ export default function BulkEmployeeCorrectionScreen() {
     }
     (async () => {
       try {
-        const fs = await api<{ fields: FieldDef[] }>(
-          `/admin/employees/bulk-correction-fields?company_id=${encodeURIComponent(companyId)}`,
+        const fs = await api<{ fields: FieldDef[]; actual_salary_enabled?: boolean }>(
+          `/admin/employees/bulk-correction-fields?company_id=${encodeURIComponent(companyId)}&mode=${mode}`,
         );
         setFields(fs.fields || []);
+        setActualEnabled(!!fs.actual_salary_enabled);
       } catch (e: any) {
         showMsg(e?.message || "Could not load field list");
       }
     })();
-  }, [isSuper, companyId]);
+  }, [isSuper, companyId, mode]);
+
+  // Iter 141 — Shift Master catalogue for the Shift dropdown (actual mode).
+  useEffect(() => {
+    if (!isSuper || mode !== "actual") return;
+    (async () => {
+      try {
+        const r = await api<{ shifts: { shift_id: string; name: string }[] }>("/shift-masters");
+        setShiftOptions(r.shifts || []);
+      } catch {
+        setShiftOptions([]);
+      }
+    })();
+  }, [isSuper, mode]);
 
   const loadEmployees = useCallback(async () => {
     // Determine target firms.
@@ -414,9 +483,17 @@ export default function BulkEmployeeCorrectionScreen() {
     if (dirty[row.user_id] && key in dirty[row.user_id]) {
       return String(dirty[row.user_id][key] ?? "");
     }
+    if (ACTUAL_DERIVED_KEYS.has(key)) return actualBase(row, key);
     const raw = (row as any)[key];
     if (raw === null || raw === undefined) return "";
     return String(raw);
+  };
+
+  /** Saved value used for "did the user actually change it?" checks. */
+  const baseValue = (row: EmployeeRow, key: string): string => {
+    if (ACTUAL_DERIVED_KEYS.has(key)) return actualBase(row, key);
+    const raw = (row as any)[key];
+    return raw === null || raw === undefined ? "" : String(raw);
   };
 
   const submit = async (dryRun: boolean) => {
@@ -503,7 +580,10 @@ export default function BulkEmployeeCorrectionScreen() {
     // Name, Father Name, DOB, DOJ, Phone, Email, UAN, PF number, ESI IP
     // etc.) must be corrected on the Employee Master screen where the
     // audit trail lives — NOT via bulk edit.
-    if (LOCKED_FIELDS.has(f.key)) {
+    // Iter 141 — In ACTUAL mode Name / Father Name ARE editable (user
+    // spec); only the Emp Code stays locked.
+    const lockedNow = mode === "actual" ? f.key === "employee_code" : LOCKED_FIELDS.has(f.key);
+    if (lockedNow) {
       const raw = (row as any)[f.key];
       const display = raw === null || raw === undefined || raw === "" ? "—" : String(raw);
       return (
@@ -594,6 +674,49 @@ export default function BulkEmployeeCorrectionScreen() {
       );
     }
 
+    // Iter 141 — Pay Basis (daily / monthly) + Shift dropdowns.
+    if (f.type === "select:paybasis" || f.type === "select:shift") {
+      const base = baseValue(row, f.key);
+      const cur =
+        dirty[row.user_id] && f.key in dirty[row.user_id]
+          ? String(dirty[row.user_id][f.key] ?? "")
+          : base;
+      return (
+        <View style={[styles.cellWrap, { width: w }, isDirty && styles.cellDirty]}>
+          {Platform.OS === "web" ? (
+            <select
+              value={cur}
+              onChange={(e) => {
+                const v = (e.target as HTMLSelectElement).value;
+                if (v === base) clearCell(row.user_id, f.key);
+                else setCell(row.user_id, f.key, v);
+              }}
+              style={styles.cellSelect as any}
+            >
+              {f.type === "select:paybasis" ? (
+                <>
+                  <option value="">—</option>
+                  <option value="daily">Daily</option>
+                  <option value="monthly">Monthly</option>
+                </>
+              ) : (
+                <>
+                  <option value="">— (no shift)</option>
+                  {shiftOptions.map((s) => (
+                    <option key={s.shift_id} value={s.shift_id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </>
+              )}
+            </select>
+          ) : (
+            <Text style={styles.cellReadOnly}>Web only</Text>
+          )}
+        </View>
+      );
+    }
+
     // Iter 68 — Departments + Designations sourced from Masters.  Value
     // stored on the employee is the *name* (backward compatible with
     // legacy free-text values), not the master_id.  A blank "—" entry
@@ -640,8 +763,7 @@ export default function BulkEmployeeCorrectionScreen() {
         <TextInput
           value={val}
           onChangeText={(v) => {
-            const original = (row as any)[f.key];
-            const orig = original === null || original === undefined ? "" : String(original);
+            const orig = baseValue(row, f.key);
             if (v === orig) clearCell(row.user_id, f.key);
             else if (f.type === "number") {
               const n = Number(v);
@@ -722,6 +844,46 @@ export default function BulkEmployeeCorrectionScreen() {
               Employee master · {rows.length}{" "}
               {empFilter === "resigned" ? "resigned" : "active"} employee{rows.length === 1 ? "" : "s"}
             </Text>
+          </View>
+        ) : null}
+
+        {/* Iter 141 (user spec) — Compliance vs Actual Salary correction
+            mode toggle. Actual mode only for offline-salary firms. */}
+        {companyId && actualEnabled ? (
+          <View style={styles.filterRow}>
+            {([
+              ["compliance", "Compliance Salary Correction"],
+              ["actual", "Actual Salary Correction"],
+            ] as const).map(([k, lbl]) => (
+              <Pressable
+                key={k}
+                onPress={() => {
+                  if (mode === k) return;
+                  if (dirtyCount > 0) {
+                    const ok =
+                      Platform.OS === "web"
+                        ? globalThis.confirm(
+                            `Switch mode? ${dirtyCount} unsaved change${dirtyCount === 1 ? "" : "s"} will be discarded.`,
+                          )
+                        : true;
+                    if (!ok) return;
+                  }
+                  setDirty({});
+                  setMode(k);
+                }}
+                style={[styles.filterChip, mode === k && styles.filterChipOn]}
+                testID={`bc-mode-${k}`}
+              >
+                <Ionicons
+                  name={k === "compliance" ? "shield-checkmark-outline" : "cash-outline"}
+                  size={13}
+                  color={mode === k ? "#fff" : colors.onSurfaceSecondary}
+                />
+                <Text style={[styles.filterChipTxt, mode === k && styles.filterChipTxtOn]}>
+                  {lbl}
+                </Text>
+              </Pressable>
+            ))}
           </View>
         ) : null}
 
