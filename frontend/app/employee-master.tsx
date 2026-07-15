@@ -134,6 +134,8 @@ export default function EmployeeMasterScreen() {
   const [err, setErr] = useState<string | null>(null);
   const [emp, setEmp] = useState<EmpDetail | null>(null);
   const [docs, setDocs] = useState<EmpDoc[]>([]);
+  // Iter 142 — Firm Master OT gate (defaults to allowed).
+  const [firmOtAllowed, setFirmOtAllowed] = useState(true);
   const [downloading, setDownloading] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -224,6 +226,14 @@ export default function EmployeeMasterScreen() {
           e.available_shifts = p.policy?.shifts || [];
           e.policy_variant = p.policy?.policy_variant || null;
         } catch {}
+        // Iter 142 — Firm Master OT gate drives whether the per-employee
+        // OT option is shown at all.
+        try {
+          const fm = await api<any>(`/admin/firm-master/${e.company_id}`);
+          setFirmOtAllowed((fm?.master?.salary_process?.ot_allowed) !== false);
+        } catch {
+          setFirmOtAllowed(true);
+        }
       }
       setEmp(e);
       setDocs(dl.documents || []);
@@ -695,7 +705,12 @@ export default function EmployeeMasterScreen() {
               <TextileMasterCard
                 emp={emp}
                 onSaved={load}
+                firmOtAllowed={firmOtAllowed}
               />
+            ) : firmOtAllowed ? (
+              /* Iter 142 — non-textile firms with OT allowed in the Firm
+                 Master get a dedicated per-employee OT card. */
+              <OtCard emp={emp} onSaved={load} />
             ) : null}
 
             {/* Master PDF actions */}
@@ -1192,9 +1207,11 @@ function EmployeeGroupingCard({
 function TextileMasterCard({
   emp,
   onSaved,
+  firmOtAllowed = true,
 }: {
   emp: EmpDetail;
   onSaved: () => Promise<void> | void;
+  firmOtAllowed?: boolean;
 }) {
   const [shift, setShift] = useState<string | null>(emp.shift_preset_name || null);
   const [ot, setOt] = useState<boolean | null>(
@@ -1279,14 +1296,19 @@ function TextileMasterCard({
         <Ionicons name="chevron-down" size={16} color={colors.onSurfaceTertiary} />
       </Pressable>
 
-      {/* OT Applicable tri-state */}
-      <Text style={styles.fieldLabel}>Overtime applicable</Text>
-      <TriState
-        value={ot}
-        onChange={setOt}
-        labels={["Inherit", "Yes", "No"]}
-        testID="textile-ot"
-      />
+      {/* OT Applicable tri-state — hidden when the Firm Master disables
+          OT firm-wide (Iter 142: no OT is calculated at all then). */}
+      {firmOtAllowed ? (
+        <>
+          <Text style={styles.fieldLabel}>Overtime applicable</Text>
+          <TriState
+            value={ot}
+            onChange={setOt}
+            labels={["Inherit", "Yes", "No"]}
+            testID="textile-ot"
+          />
+        </>
+      ) : null}
 
       {/* Week-off Full Day — Policy 1 */}
       {variant !== "policy_2" ? (
@@ -1409,6 +1431,68 @@ function TextileMasterCard({
           <View style={{ height: 20 }} />
         </View>
       </Modal>
+    </View>
+  );
+}
+
+/** Iter 142 — per-employee Overtime flag for NON-textile firms (textile
+ *  firms manage it inside the Textile master flags card). Shown only when
+ *  the Firm Master allows OT. */
+function OtCard({
+  emp,
+  onSaved,
+}: {
+  emp: EmpDetail;
+  onSaved: () => Promise<void> | void;
+}) {
+  const [ot, setOt] = useState<boolean | null>(
+    emp.ot_applicable === undefined ? null : emp.ot_applicable ?? null,
+  );
+  const [saving, setSaving] = useState(false);
+  const doSave = async () => {
+    setSaving(true);
+    try {
+      await api(`/admin/user-role`, {
+        method: "PATCH",
+        body: { user_id: emp.user_id, ot_applicable: ot },
+      });
+      await onSaved();
+      if (Platform.OS === "web") globalThis.alert("OT setting saved ✓");
+      else Alert.alert("Saved", "OT setting updated.");
+    } catch (e: any) {
+      const msg = e?.message || "Save failed";
+      if (Platform.OS === "web") globalThis.alert(msg);
+      else Alert.alert("Save", msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <View style={styles.card} testID="ot-card">
+      <Text style={styles.cardTitle}>Overtime (OT)</Text>
+      <Text style={styles.cardHint}>
+        When set to &quot;No&quot;, NO overtime is calculated for this
+        employee. &quot;Inherit&quot; follows the default (allowed).
+      </Text>
+      <Text style={styles.fieldLabel}>Overtime applicable</Text>
+      <TriState
+        value={ot}
+        onChange={setOt}
+        labels={["Inherit", "Yes", "No"]}
+        testID="emp-ot"
+      />
+      <Pressable
+        testID="ot-save"
+        onPress={doSave}
+        style={[styles.primaryBtn, saving && styles.btnDisabled]}
+        disabled={saving}
+      >
+        {saving ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.primaryBtnTxt}>Save OT Setting</Text>
+        )}
+      </Pressable>
     </View>
   );
 }

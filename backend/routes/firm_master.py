@@ -142,6 +142,9 @@ def _empty_master(company_id: str, company_name: str = "") -> Dict[str, Any]:
             "offline_salary": False,
             "bio_matrix_attendance": False,
             "gratuity_applicable": False,
+            # Iter 142 — firm-wide OT gate. False = NO overtime is
+            # calculated for ANY employee of this firm.
+            "ot_allowed": True,
             "online_process_days": 0,
             "offline_process_days": 0,
         },

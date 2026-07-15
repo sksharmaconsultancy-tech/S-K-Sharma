@@ -62,6 +62,7 @@ type EmpForm = {
   employee_group: string;
   is_onroll: boolean;
   shift_id: string;
+  ot_applicable: boolean;
   salary_mode: string;
   salary_monthly: string;
   compliance_gross: string;
@@ -122,6 +123,7 @@ const EMPTY_FORM: EmpForm = {
   employee_group: "",
   is_onroll: true,
   shift_id: "",
+  ot_applicable: true,
   salary_mode: "monthly",
   salary_monthly: "",
   compliance_gross: "",
@@ -323,11 +325,12 @@ export default function EmployeeAddScreen() {
     online: boolean;
     offline: boolean;
     loaded: boolean;
-  }>({ allowances: [], deductions: [], online: false, offline: false, loaded: false });
+    otAllowed: boolean;
+  }>({ allowances: [], deductions: [], online: false, offline: false, loaded: false, otAllowed: true });
   useEffect(() => {
     let alive = true;
     if (!selectedCompanyId) {
-      setFirmHeads({ allowances: [], deductions: [], online: false, offline: false, loaded: false });
+      setFirmHeads({ allowances: [], deductions: [], online: false, offline: false, loaded: false, otAllowed: true });
       return;
     }
     (async () => {
@@ -346,10 +349,11 @@ export default function EmployeeAddScreen() {
             online: !!sp.online_salary,
             offline: !!sp.offline_salary,
             loaded: true,
+            otAllowed: sp.ot_allowed !== false,
           });
         }
       } catch {
-        if (alive) setFirmHeads({ allowances: [], deductions: [], online: false, offline: false, loaded: false });
+        if (alive) setFirmHeads({ allowances: [], deductions: [], online: false, offline: false, loaded: false, otAllowed: true });
       }
     })();
     return () => { alive = false; };
@@ -501,6 +505,8 @@ export default function EmployeeAddScreen() {
         employee_group: form.employee_group.trim() || undefined,
         is_onroll: form.is_onroll,
         shift_id: form.shift_id,
+        // Iter 142 — per-employee OT flag (only meaningful when the firm allows OT).
+        ot_applicable: firmHeads.otAllowed ? form.ot_applicable : undefined,
         salary_mode: form.salary_mode || undefined,
         salary_monthly: form.salary_monthly ? Number(form.salary_monthly) : undefined,
         compliance_gross: form.compliance_gross ? Number(form.compliance_gross) : undefined,
@@ -1012,6 +1018,28 @@ export default function EmployeeAddScreen() {
               </View>
             )}
           </View>
+
+          {/* Iter 142 (user spec) — per-employee OT flag, shown ONLY when
+              the Firm Master allows overtime for this firm. */}
+          {firmHeads.otAllowed ? (
+            <Pressable
+              onPress={() => setField("ot_applicable", !form.ot_applicable)}
+              style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 }}
+              testID="ot-toggle"
+            >
+              <Ionicons
+                name={form.ot_applicable ? "checkbox" : "square-outline"}
+                size={20}
+                color={form.ot_applicable ? colors.brandPrimary : colors.onSurfaceSecondary}
+              />
+              <Text style={{ fontSize: 13, fontWeight: "700", color: colors.onSurface }}>
+                Overtime (OT) Allowed
+              </Text>
+              <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary }}>
+                {form.ot_applicable ? "OT will be calculated" : "No OT for this employee"}
+              </Text>
+            </Pressable>
+          ) : null}
 
           {/* Iter 126g — Bio Code lives with the Actual Salary section
               (user request) but stays visible for online-only firms since

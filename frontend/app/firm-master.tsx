@@ -802,6 +802,10 @@ export default function FirmMasterScreen() {
                         }} />
                 <Toggle label="Gratuity Applicable" value={!!sp.gratuity_applicable}
                         onChange={(v) => updateSection("salary_process", { gratuity_applicable: v })} />
+                {/* Iter 142 — firm-wide OT gate. OFF = NO overtime is
+                    calculated for ANY employee of this firm. */}
+                <Toggle label="Overtime (OT) Allowed" value={sp.ot_allowed !== false} testID="fm-ot-allowed"
+                        onChange={(v) => updateSection("salary_process", { ot_allowed: v })} />
               </View>
               {/* Iter 110 — Online Process Days is LINKED to the Compliance
                   Salary Process; Offline Process Days is LINKED to the Actual

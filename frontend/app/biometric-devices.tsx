@@ -26,7 +26,7 @@ type Device = {
   device_id: string;
   serial_number: string;
   name: string;
-  kind: "in" | "out";
+  kind: "in" | "out" | "both";
   company_id: string;
   location?: string | null;
   enabled: boolean;
@@ -43,7 +43,7 @@ type Company = { company_id: string; name: string };
 const emptyDraft = {
   serial_number: "",
   name: "",
-  kind: "in" as "in" | "out",
+  kind: "in" as "in" | "out" | "both",
   company_id: "",
   location: "",
   enabled: true,
@@ -387,7 +387,8 @@ export default function BiometricDevicesScreen() {
             </Text>
             <Text style={styles.sheetSub}>
               Every ZKTeco device pushes attendance to the app under its serial number. Set
-              this device to either Entry (IN) or Exit (OUT) — punches are auto-approved.
+              this device to Entry (IN), Exit (OUT), or Both (single machine — punches
+              alternate IN/OUT automatically). Punches are auto-approved.
             </Text>
 
             <Text style={styles.lbl}>Serial number (from device menu)</Text>
@@ -415,7 +416,7 @@ export default function BiometricDevicesScreen() {
               style={styles.input}
             />
 
-            <Text style={styles.lbl}>Direction (IN or OUT)</Text>
+            <Text style={styles.lbl}>Direction (IN / OUT / Both)</Text>
             <View style={styles.segRow}>
               <Pressable
                 testID="d-kind-in"
@@ -428,7 +429,7 @@ export default function BiometricDevicesScreen() {
                   color={draft.kind === "in" ? colors.onCta : colors.brandPrimary}
                 />
                 <Text style={[styles.segTxt, draft.kind === "in" && styles.segTxtOn]}>
-                  IN · Entry gate
+                  IN · Entry
                 </Text>
               </Pressable>
               <Pressable
@@ -442,10 +443,30 @@ export default function BiometricDevicesScreen() {
                   color={draft.kind === "out" ? colors.onCta : colors.brandPrimary}
                 />
                 <Text style={[styles.segTxt, draft.kind === "out" && styles.segTxtOn]}>
-                  OUT · Exit gate
+                  OUT · Exit
+                </Text>
+              </Pressable>
+              <Pressable
+                testID="d-kind-both"
+                onPress={() => setDraft({ ...draft, kind: "both" })}
+                style={[styles.seg, draft.kind === "both" && styles.segOn]}
+              >
+                <Ionicons
+                  name="swap-horizontal-outline"
+                  size={16}
+                  color={draft.kind === "both" ? colors.onCta : colors.brandPrimary}
+                />
+                <Text style={[styles.segTxt, draft.kind === "both" && styles.segTxtOn]}>
+                  BOTH · Single
                 </Text>
               </Pressable>
             </View>
+            {draft.kind === "both" ? (
+              <Text style={styles.help}>
+                Single machine for entry + exit: each employee&apos;s punches alternate
+                automatically (1st punch of the day = IN, 2nd = OUT, 3rd = IN …).
+              </Text>
+            ) : null}
 
             {isSuper ? (
               <>
@@ -703,42 +724,43 @@ function Fact({ label, value, accent }: { label: string; value: string; accent?:
 }
 
 function SetupGuide({ devices }: { devices: Device[] }) {
-  const sn1 = devices.find((d) => d.kind === "in")?.serial_number || "<Entry-device-SN>";
+  const sn1 = devices.find((d) => d.kind === "in" || d.kind === "both")?.serial_number || "<Entry-device-SN>";
   const sn2 = devices.find((d) => d.kind === "out")?.serial_number || "<Exit-device-SN>";
   return (
     <View style={{ paddingTop: 8 }}>
-      <GuideStep n={1} title="Deploy the app backend">
-        Tap the <Text style={styles.b}>Publish</Text> button on the top-right of Emergent to
-        publish this app. Once deployed you will get a public URL like{" "}
-        <Text style={styles.mono}>https://api.esi-pf.com</Text>. The two devices will point at
-        that URL.
+      <GuideStep n={1} title="Your server domain">
+        This portal runs at{" "}
+        <Text style={styles.mono}>https://www.smartpayrolling.com</Text>. All ZKTeco devices
+        must point at this domain.
       </GuideStep>
-      <GuideStep n={2} title="Register both devices in the app">
-        On this screen, tap <Text style={styles.b}>Register new device</Text> twice — once for
-        the Entry (IN) gate and once for the Exit (OUT) gate. Enter each machine&apos;s{" "}
-        <Text style={styles.b}>Serial Number</Text> (visible on the device sticker or under{" "}
-        <Text style={styles.mono}>Menu → System → About</Text>).
+      <GuideStep n={2} title="Register the device(s) in the app">
+        On this screen, tap <Text style={styles.b}>Register new device</Text>. For a single
+        machine handling entry + exit, pick <Text style={styles.b}>BOTH · Single</Text>{" "}
+        (punches auto-alternate IN/OUT). For two machines, register one as IN and one as OUT.
+        Enter each machine&apos;s <Text style={styles.b}>Serial Number</Text> (on the device
+        sticker or under <Text style={styles.mono}>Menu → System → About</Text>).
       </GuideStep>
-      <GuideStep n={3} title="Configure the Entry device">
+      <GuideStep n={3} title="Configure the device">
         On the ZKTeco AC Mini Plus keypad go to:
         {"\n\n"}
         <Text style={styles.mono}>
-          Menu → Comm → ADMS
+          Menu → Comm → ADMS (Cloud Server Setting)
+          {"\n"}Server Mode: ADMS
           {"\n"}Enable Domain Name: ON
-          {"\n"}Server Address: your-deployed-domain
-          {"\n"}Server Port: 443 (HTTPS) or 80 (HTTP)
-          {"\n"}HTTPS: ON (if using 443)
-          {"\n"}Proxy: OFF
-          {"\n"}URL: /api/iclock
+          {"\n"}Server Address: http://www.smartpayrolling.com
+          {"\n"}   (if http:// is not accepted, enter: www.smartpayrolling.com)
+          {"\n"}Enable Proxy Server: OFF
+          {"\n"}Proxy Server IP: (leave blank)
+          {"\n"}Proxy Server Port: (leave blank)
         </Text>
         {"\n\n"}
-        Then <Text style={styles.b}>Comm → Cloud Service Settings → Save</Text>. The device will
-        reboot and connect within 30–60 seconds. This device pushes punches as{" "}
-        <Text style={styles.b}>IN</Text> (Serial: <Text style={styles.mono}>{sn1}</Text>).
+        Then <Text style={styles.b}>Save</Text> and restart the device. It will connect within
+        30–60 seconds. (Entry/Both device Serial:{" "}
+        <Text style={styles.mono}>{sn1}</Text>).
       </GuideStep>
-      <GuideStep n={4} title="Configure the Exit device">
-        Repeat the same steps on the second machine — same server settings but tag it as{" "}
-        <Text style={styles.b}>OUT</Text> in this app (Serial:{" "}
+      <GuideStep n={4} title="Second device (only for IN + OUT pairs)">
+        If you use two machines, repeat the same steps on the second machine — same server
+        settings but tag it as <Text style={styles.b}>OUT</Text> in this app (Serial:{" "}
         <Text style={styles.mono}>{sn2}</Text>). Every punch from this device becomes a
         Punch-OUT.
       </GuideStep>
@@ -805,26 +827,30 @@ function alertUser(title: string, msg: string) {
 }
 
 function buildSetupGuideText(devices: Device[]): string {
-  const inD = devices.find((d) => d.kind === "in");
+  const inD = devices.find((d) => d.kind === "in" || d.kind === "both");
   const outD = devices.find((d) => d.kind === "out");
   return [
     "ZKTeco AC Mini Plus — Real-time integration with S.K. Sharma & Co. workforce app",
     "",
-    "1. Publish this app from Emergent → copy the backend URL (e.g. https://api.esi-pf.com).",
-    "2. Register both devices from the app (Biometric Devices screen) — one as IN, one as OUT.",
-    "3. On each device, go to Menu → Comm → ADMS:",
-    "     Enable Domain Name: ON",
-    "     Server Address: <your-domain>",
-    "     Server Port: 443 (HTTPS) or 80",
-    "     HTTPS: ON if using 443",
-    "     Proxy: OFF",
-    "     URL / Path: /api/iclock",
-    "4. Save & reboot. The device connects within 30–60 seconds.",
-    "5. Enrol employees — set each app user's `bio_code` to the number they punch on the device.",
-    "6. Punch on the device — it appears in the app within 3–5 seconds.",
+    "Server domain: https://www.smartpayrolling.com",
     "",
-    `Entry (IN) device: SN ${inD?.serial_number || "(register first)"}`,
-    `Exit  (OUT) device: SN ${outD?.serial_number || "(register first)"}`,
+    "1. Register the device(s) from the app (Biometric Devices screen):",
+    "     • Single machine for entry + exit → register as BOTH (punches auto-alternate IN/OUT)",
+    "     • Two machines → register one as IN and one as OUT",
+    "2. On each device, go to Menu → Comm → ADMS (Cloud Server Setting):",
+    "     Server Mode: ADMS",
+    "     Enable Domain Name: ON",
+    "     Server Address: http://www.smartpayrolling.com",
+    "       (if http:// is not accepted, enter: www.smartpayrolling.com)",
+    "     Enable Proxy Server: OFF",
+    "     Proxy Server IP: (leave blank)",
+    "     Proxy Server Port: (leave blank)",
+    "3. Save & restart the device. It connects within 30–60 seconds.",
+    "4. Enrol employees — set each app user's `bio_code` to the number they punch on the device.",
+    "5. Punch on the device — it appears in the app within 3–5 seconds.",
+    "",
+    `Entry / Both device: SN ${inD?.serial_number || "(register first)"}`,
+    `Exit (OUT) device:  SN ${outD?.serial_number || "(only for IN+OUT pairs)"}`,
     "",
     "Machine punches are auto-approved. Unmapped device users are logged for follow-up.",
   ].join("\n");

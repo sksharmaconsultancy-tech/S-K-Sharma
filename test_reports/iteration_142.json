@@ -1,0 +1,25 @@
+{
+  "summary": "Frontend UI regression for Iter 142 (firm/employee OT gate, BOTH biometric device, Setup guide, bulk correction mode). All 6 UI scenarios verified on live preview via Playwright (viewport 1920x800, super-admin session). Firm Master 'Overtime (OT) Allowed' toggle present and functional; toggled OFF then back ON; verified via GET /api/admin/firm-master → ot_allowed=true at end. Biometric Devices register modal shows 3 direction segments (IN/OUT/BOTH); testID d-kind-both selectable; helper text 'punches alternate automatically (1st punch of the day = IN, 2nd = OUT, 3rd = IN …)' rendered. Setup guide modal contains all required strings: 'Server Mode: ADMS', 'Enable Domain Name: ON', 'Server Address: http://www.smartpayrolling.com', 'Enable Proxy Server: OFF', 'BOTH · Single'. Add New Employee page (firm Kankani) shows testID ot-toggle checkbox visible (firm OT allowed). Employee Master detail for emp code 50 (SURENDRA SINGH, user_44cd6f561da0): 'Textile master flags' card renders with 'Overtime applicable' Inherit/Yes/No TriState (firm textile + firm OT ON) — confirmed visually in screenshot. Bulk Employee Correction with Kankani: mode toggle bc-mode-compliance / bc-mode-actual NOT rendered (offline_salary=false) and no 'Bio Code' column visible in default compliance mode — matches spec. Firm OT toggle final state: ON (restored). No employees or devices created; no firm saves performed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global (web)", "issues": ["Console noise (non-blocking): repeated warnings 'shadow* deprecated', 'Invalid style property outline/background', 'props.pointerEvents deprecated'. Pre-existing across screens — not introduced by Iter 142."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/tmp/firm_ot.png", "/tmp/bio_both.png", "/tmp/setup_guide.png", "/tmp/emp_add_ot.png", "/tmp/textile_card.png", "/tmp/bulk_corr.png"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "employee-master.tsx line 1303 uses fieldLabel style with text-transform:uppercase; testers must compare innerText case-insensitively when asserting 'Overtime applicable' — cosmetic only.",
+    "biometric-devices.tsx SetupGuide (line 726) hardcodes 'https://www.smartpayrolling.com' — matches spec but consider centralising this constant if the domain ever changes."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "100% (6/6)"},
+  "seed_data_creation": "None — no employees, devices, or firm mutations persisted. Firm OT toggle was flipped OFF then back ON and left in original ON state; verified via GET /api/admin/firm-master/cmp_527fecdd7c → salary_process.ot_allowed=true, offline_salary=false.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Super-admin login: POST /api/auth/admin-password-login {email:'sksharmaconsultancy@gmail.com', password:'sharma123'}. Session token stored under localStorage key 'llc_session_token'. Employee code 50 SURENDRA SINGH user_id = user_44cd6f561da0. Firm master endpoint: GET /api/admin/firm-master/{company_id} returns wrapper {master:{...}}. Company list: GET /api/companies returns array with salary_process nested. For UI text assertions, be aware that fieldLabel style in employee-master.tsx applies uppercase via CSS — innerText in Chromium returns transformed uppercase text.",
+  "rca_of_issue": "N/A — all scenarios pass."
+}

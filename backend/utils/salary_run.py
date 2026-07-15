@@ -95,6 +95,10 @@ def compute_present_days_and_ot(
     # Half days DON'T generate OT (partial-day rule).
     threshold_hours = present_days * full_day_hours
     ot_hours = round(max(0.0, duty_hours - threshold_hours), 2)
+    # Iter 142 — per-employee `ot_allowed` / Firm Master `firm_ot_allowed`
+    # gates: when either is explicitly OFF, NO overtime is credited.
+    if policy.get("ot_allowed") is False or policy.get("firm_ot_allowed") is False:
+        ot_hours = 0.0
     # Effective "present" for pro-ration = full days + 0.5 * half days
     effective_present = present_days + 0.5 * half_days
     return {

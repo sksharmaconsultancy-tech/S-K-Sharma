@@ -919,6 +919,25 @@ ATTENDANCE_POLICY_PRESETS: dict = {
 }
 
 
+async def inject_firm_ot_flag(policy: dict, company_id: Optional[str]) -> dict:
+    """Iter 142 — Read the Firm Master's ``salary_process.ot_allowed`` gate
+    and stamp it onto the attendance-policy dict as ``firm_ot_allowed``.
+    Missing Firm Master / unset flag = allowed (legacy behaviour)."""
+    if not company_id or not isinstance(policy, dict):
+        return policy
+    try:
+        fm = await db.firm_masters.find_one(
+            {"company_id": company_id},
+            {"_id": 0, "salary_process.ot_allowed": 1},
+        ) or {}
+        v = (fm.get("salary_process") or {}).get("ot_allowed")
+        if v is not None:
+            policy["firm_ot_allowed"] = bool(v)
+    except Exception:
+        pass
+    return policy
+
+
 def _policy_for_category(
     category: Optional[str], subcategory: Optional[str] = None
 ) -> dict:
@@ -1274,8 +1293,16 @@ def apply_employee_policy_override(policy: dict, user: Optional[dict]) -> dict:
     the override key is unset. Returns a NEW dict (shallow copy).
     """
     ov = (user or {}).get("attendance_policy_override") or {}
+    # Iter 142 — legacy per-employee ``ot_applicable`` flag (set from the
+    # Employee Master OT option) also gates OT when no explicit
+    # attendance_policy_override.ot_allowed exists.
+    _legacy_ot = (user or {}).get("ot_applicable")
     if not ov:
-        return policy
+        if _legacy_ot is None:
+            return policy
+        patched = dict(policy or {})
+        patched["ot_allowed"] = bool(_legacy_ot)
+        return patched
     patched = dict(policy or {})
     for key in (
         "full_day_hours",
@@ -1294,6 +1321,8 @@ def apply_employee_policy_override(policy: dict, user: Optional[dict]) -> dict:
                 pass
     if "ot_allowed" in ov and ov.get("ot_allowed") is not None:
         patched["ot_allowed"] = bool(ov.get("ot_allowed"))
+    elif _legacy_ot is not None:
+        patched["ot_allowed"] = bool(_legacy_ot)
     if "week_off_paid_when_absent" in ov and ov.get("week_off_paid_when_absent") is not None:
         patched["week_off_paid_when_absent"] = bool(ov.get("week_off_paid_when_absent"))
     return patched
@@ -1628,6 +1657,10 @@ def compute_textile_day(
     _ov = user.get("attendance_policy_override") or {}
     if _ov.get("ot_allowed") is not None:
         ot_applicable_user = bool(_ov.get("ot_allowed"))
+    # Iter 142 — Firm Master gate: when the firm's salary_process.ot_allowed
+    # is OFF, NO employee of the firm accrues OT (per-employee flag ignored).
+    if policy.get("firm_ot_allowed") is False:
+        ot_applicable_user = False
 
     week_off_full_day_user = bool(user.get("week_off_full_day"))
     week_off_govt_holiday_user = bool(user.get("week_off_govt_holiday_enabled"))
@@ -7473,6 +7506,9 @@ async def admin_create_employee(
         # Iter 94 — Bio Code (device enrolment no.) settable at creation
         # so Add form matches the master-sheet columns.
         "bio_code": (str(payload.get("bio_code") or "").strip() or None),
+        # Iter 142 — per-employee OT flag (None = default allowed).
+        "ot_applicable": (bool(payload.get("ot_applicable"))
+                          if payload.get("ot_applicable") is not None else None),
         "father_name": payload.get("father_name") or None,
         "mother_name": payload.get("mother_name") or None,
         "gender": payload.get("gender") or None,
@@ -13216,6 +13252,19 @@ async def _compute_salary_run(
         ):
             company_policies[c["company_id"]] = c
 
+    # Iter 142 — Firm Master OT gate → stamp firm_ot_allowed on each
+    # company's attendance policy so per-day OT math can honor it.
+    if company_ids:
+        async for _fm in db.firm_masters.find(
+            {"company_id": {"$in": company_ids}},
+            {"_id": 0, "company_id": 1, "salary_process.ot_allowed": 1},
+        ):
+            _v = (_fm.get("salary_process") or {}).get("ot_allowed")
+            if _v is not None and _fm["company_id"] in company_policies:
+                _ap = dict(company_policies[_fm["company_id"]].get("attendance_policy") or {})
+                _ap["firm_ot_allowed"] = bool(_v)
+                company_policies[_fm["company_id"]]["attendance_policy"] = _ap
+
     rows = []
     for emp in employees:
         emp = dict(emp)
@@ -13229,6 +13278,11 @@ async def _compute_salary_run(
         # math is consistent across textile / non-textile firms.
         att_pol = company_doc.get("attendance_policy") or {}
         merged_pol = {**att_pol, **pol}  # user policy fields win
+        # Iter 142 — per-employee OT flag (override wins over legacy flag).
+        _ov = emp.get("attendance_policy_override") or {}
+        _emp_ot = _ov.get("ot_allowed", emp.get("ot_applicable"))
+        if _emp_ot is not None:
+            merged_pol["ot_allowed"] = bool(_emp_ot)
         att_rows = attendance_by_user.get(emp["user_id"], [])
         stats = compute_present_days_and_ot(att_rows, merged_pol)
         # Iter 77j — Off-roll simplified compute: force salary_mode=daily
@@ -14241,12 +14295,19 @@ async def _compute_compliance_run(
     if company_ids:
         async for fm in db.firm_masters.find(
             {"company_id": {"$in": company_ids}},
-            {"_id": 0, "company_id": 1, "epf": 1, "esi": 1},
+            {"_id": 0, "company_id": 1, "epf": 1, "esi": 1,
+             "salary_process.ot_allowed": 1},
         ):
             firm_stat_flags[fm["company_id"]] = {
                 "pf": bool((fm.get("epf") or {}).get("applicable")),
                 "esic": bool((fm.get("esi") or {}).get("applicable")),
             }
+            # Iter 142 — Firm Master OT gate for compliance-salary rows.
+            _v = (fm.get("salary_process") or {}).get("ot_allowed")
+            if _v is not None and fm["company_id"] in company_policies:
+                _ap = dict(company_policies[fm["company_id"]].get("attendance_policy") or {})
+                _ap["firm_ot_allowed"] = bool(_v)
+                company_policies[fm["company_id"]]["attendance_policy"] = _ap
 
     rows = []
     for emp in employees:
@@ -14259,6 +14320,11 @@ async def _compute_compliance_run(
         company_doc = company_policies.get(emp.get("company_id")) or {}
         att_pol = company_doc.get("attendance_policy") or {}
         merged_pol = {**att_pol, **pol}
+        # Iter 142 — per-employee OT flag (override wins over legacy flag).
+        _emp_ot = (emp.get("attendance_policy_override") or {}).get(
+            "ot_allowed", emp.get("ot_applicable"))
+        if _emp_ot is not None:
+            merged_pol["ot_allowed"] = bool(_emp_ot)
         att_rows = attendance_by_user.get(emp["user_id"], [])
         if (att_pol.get("policy_variant") or "").strip() == "policy_2":
             # Iter 129c — Textile Policy 2: Present Days auto-synced from
@@ -16161,6 +16227,7 @@ async def _compute_monthly_grid_data(
 
     # ----- Working-hour thresholds for OT calculation --------------------
     pol = company.get("attendance_policy") or {}
+    pol = await inject_firm_ot_flag(dict(pol), company.get("company_id"))
     full_day_hours = float(pol.get("full_day_hours") or 8.0)
     # Iter 77e — Load the GLOBAL Shift Master catalogue once so we can
     # resolve per-employee shift overrides for every day compute.
@@ -16374,8 +16441,8 @@ async def _compute_monthly_grid_data(
                 _spill = round(duty_only_hrs - standard_h, 2)
                 ot_hrs = round(ot_hrs + _spill, 2)
                 duty_only_hrs = standard_h
-            # If OT is disabled for this employee, don't surface OT.
-            if not eff_policy.get("ot_allowed", True):
+            # If OT is disabled for this employee OR firm-wide, don't surface OT.
+            if not eff_policy.get("ot_allowed", True) or eff_policy.get("firm_ot_allowed") is False:
                 ot_hrs = 0.0
             # Minimum-OT grace: < 1 hour rounds to 0.
             if ot_hrs > 0 and ot_hrs < 1.0:
@@ -16608,6 +16675,7 @@ async def _build_ot_report_rows(
         )
 
     pol = company.get("attendance_policy") or {}
+    pol = await inject_firm_ot_flag(dict(pol), company.get("company_id"))
     shifts_by_id, shifts_list = await load_shift_masters_map()
     full_emp_docs = await db.users.find(
         {"user_id": {"$in": user_ids}},
@@ -16668,8 +16736,8 @@ async def _build_ot_report_rows(
             if duty_only > standard_h:
                 ot = round(ot + (duty_only - standard_h), 2)
                 duty_only = standard_h
-            # Honor per-employee OT-allowed flag.
-            if not eff_policy.get("ot_allowed", True):
+            # Honor per-employee AND firm-wide OT-allowed flags.
+            if not eff_policy.get("ot_allowed", True) or eff_policy.get("firm_ot_allowed") is False:
                 ot = 0.0
             # Minimum OT grace (< 1h ignored).
             if 0 < ot < 1.0:

@@ -37,7 +37,7 @@ logger = logging.getLogger("biometric-devices")
 class BiometricDeviceCreate(BaseModel):
     serial_number: str
     name: str
-    kind: Literal["in", "out"]
+    kind: Literal["in", "out", "both"]
     company_id: Optional[str] = None
     location: Optional[str] = None
     enabled: bool = True
@@ -45,7 +45,7 @@ class BiometricDeviceCreate(BaseModel):
 
 class BiometricDeviceUpdate(BaseModel):
     name: Optional[str] = None
-    kind: Optional[Literal["in", "out"]] = None
+    kind: Optional[Literal["in", "out", "both"]] = None
     company_id: Optional[str] = None
     location: Optional[str] = None
     enabled: Optional[bool] = None
@@ -139,6 +139,22 @@ async def _ingest_attlog_line(
         })
         return False, f"unmapped_user:{device_user_id}"
     record_id = f"zk_{uuid.uuid4().hex[:12]}"
+    # Iter 143 (user spec) — single-machine "Both IN/OUT" mode: the punch
+    # direction alternates per employee per day (first punch = IN, next =
+    # OUT, then IN again …), based on the latest earlier punch that day.
+    punch_kind = device.get("kind", "in")
+    if punch_kind == "both":
+        last = await db.attendance.find_one(
+            {
+                "user_id": user["user_id"],
+                "date": dt.strftime("%Y-%m-%d"),
+                "kind": {"$in": ["in", "out"]},
+                "at": {"$lt": dt.isoformat()},
+            },
+            {"_id": 0, "kind": 1},
+            sort=[("at", -1)],
+        )
+        punch_kind = "out" if (last and last.get("kind") == "in") else "in"
     record = {
         "record_id": record_id,
         "user_id": user["user_id"],
@@ -146,7 +162,7 @@ async def _ingest_attlog_line(
         "branch_id": None,
         "branch_name": device.get("location") or device.get("name"),
         "date": dt.strftime("%Y-%m-%d"),
-        "kind": device.get("kind", "in"),
+        "kind": punch_kind,
         "at": dt.isoformat(),
         "original_at": dt.isoformat(),
         "latitude": None,
