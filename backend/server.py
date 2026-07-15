@@ -7346,7 +7346,7 @@ async def _dup_employee_with_orphan_heal(
     blocker: Optional[Dict[str, Any]] = None
     async for u in db.users.find(
         {"$or": or_q, "role": "employee"},
-        {"_id": 0, "user_id": 1, "name": 1, "company_id": 1},
+        {"_id": 0, "user_id": 1, "name": 1, "company_id": 1, "employee_code": 1},
     ):
         live = None
         if u.get("company_id"):
@@ -7756,10 +7756,19 @@ async def admin_employees_bulk_import(
             # so re-importing the same people succeeds.
             dup = await _dup_employee_with_orphan_heal(phone, email)
             if dup:
+                # Tell the admin WHICH firm already holds this phone/email so
+                # duplicate skips are self-explanatory in the import log.
+                _dup_firm = await db.companies.find_one(
+                    {"company_id": dup.get("company_id")}, {"_id": 0, "name": 1})
+                _firm_label = (_dup_firm or {}).get("name") or dup.get("company_id") or "?"
                 skipped_duplicates.append({
                     "row": idx,
                     "name": name,
-                    "reason": "phone / email already registered",
+                    "reason": (
+                        f"phone / email already registered — {dup.get('name') or 'employee'}"
+                        + (f" (code {dup.get('employee_code')})" if dup.get("employee_code") else "")
+                        + f" in firm '{_firm_label}'"
+                    ),
                     "existing_user_id": dup["user_id"],
                 })
                 continue
