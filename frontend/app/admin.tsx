@@ -34,6 +34,9 @@ export default function AdminScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ section?: string }>();
   const isSuper = user?.role === "super_admin";
+  // Iter 133 (user bug) — sub-admins must get the same firm scoping as
+  // super admins (their /companies list is already restricted server-side).
+  const isScopedAdmin = isSuper || user?.role === "sub_admin";
   // Iter 77 - Session lock. When the operator has already picked a firm
   // during this session, restrict all firm selectors on this page to that
   // single firm; force logout to switch.
@@ -89,21 +92,21 @@ export default function AdminScreen() {
     setLoading(true);
     try {
       const companyParam =
-        isSuper && companyFilter !== "all" ? `?company_id=${companyFilter}` : "";
+        isScopedAdmin && companyFilter !== "all" ? `?company_id=${companyFilter}` : "";
       const [e, s, c, p] = await Promise.all([
         api<{ employees: any[] }>(`/admin/employees${companyParam}`),
         api(`/admin/stats${companyParam}`).catch(() => null),
-        isSuper
+        isScopedAdmin
           ? api<{ companies: Company[] }>("/companies").catch(() => ({ companies: [] }))
           : Promise.resolve({ companies: [] as Company[] }),
         api<{ pending: any[] }>(`/admin/pending-approvals${companyParam}`).catch(() => ({ pending: [] })),
       ]);
       setEmployees(e.employees || []);
       setStats(s);
-      if (isSuper) setCompanies(c.companies || []);
+      if (isScopedAdmin) setCompanies(c.companies || []);
       setPending(p.pending || []);
     } finally { setLoading(false); }
-  }, [companyFilter, isSuper]);
+  }, [companyFilter, isScopedAdmin]);
 
   useEffect(() => { load(); }, [load]);
   // Iter 72 — Refresh on tab focus + on top-bar Refresh click.
@@ -168,7 +171,7 @@ export default function AdminScreen() {
     setBulkDl(true);
     try {
       const qs =
-        isSuper && companyFilter !== "all"
+        isScopedAdmin && companyFilter !== "all"
           ? `?company_id=${companyFilter}`
           : "";
       const res = await apiBinary(`/admin/employees/master-pdf/bulk${qs}`);
@@ -257,7 +260,7 @@ export default function AdminScreen() {
       </SafeAreaView>
 
       <KeyboardAwareScrollView bottomOffset={62} contentContainerStyle={styles.scroll}>
-        {isSuper && (
+        {isScopedAdmin && (
           <View style={styles.firmHero}>
             <View style={styles.firmHeroLabelRow}>
               <Ionicons name="business" size={16} color={colors.onCta} />

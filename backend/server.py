@@ -10477,6 +10477,10 @@ async def list_employees(
             q["company_id"] = {"$in": cleaned}
     elif company_id:
         q["company_id"] = company_id
+    # Iter 133 (user bug) — sub-admins with a restricted company scope must
+    # NEVER see other firms' employees, regardless of query params.
+    if user["role"] == "sub_admin":
+        q = apply_sub_admin_company_scope(user, q)
     # Employee grouping filters
     if employee_type is not None:
         et = employee_type.strip()
