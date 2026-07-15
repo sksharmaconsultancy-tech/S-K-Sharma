@@ -18876,6 +18876,8 @@ app.include_router(user_prefs_router)
 app.include_router(challan_summary_router)
 from routes.ot_salary import router as ot_salary_router  # noqa: E402
 app.include_router(ot_salary_router)
+from routes.punch_logs import router as punch_logs_router  # noqa: E402
+app.include_router(punch_logs_router)
 app.include_router(compliance_settings_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC

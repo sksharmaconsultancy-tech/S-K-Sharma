@@ -155,6 +155,8 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/zk-dat-import", label: "Import Biometric .dat", icon: "finger-print-outline" },
       { route: "/join-qr", label: "QR Codes (Join / App)", icon: "qr-code-outline" },
       { route: "/users-log-report", label: "Users Log Report", icon: "document-text-outline" },
+      // Iter 145 (user spec) — full punch audit trail with Excel download.
+      { route: "/punch-log-report", label: "Punch Log Report", icon: "finger-print-outline" },
       { route: "/messages", label: "Messages", icon: "chatbubbles-outline" },
       { route: "/tickets", label: "Tickets", icon: "ticket-outline" },
       { route: "/mailbox", label: "Mailbox (Email)", icon: "mail-outline" },
