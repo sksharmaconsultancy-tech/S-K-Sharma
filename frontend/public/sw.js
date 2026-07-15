@@ -5,7 +5,7 @@
  *   • navigations (HTML)           → network first, cached copy only when offline.
  *   • static assets (js/css/img)   → stale-while-revalidate.
  */
-const CACHE = "sks-pwa-v1";
+const CACHE = "sks-pwa-v2";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -34,10 +34,12 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Navigations: network first so new deploys are picked up immediately.
+  // Navigations: network first (BYPASSING the HTTP cache — mobile PWAs
+  // otherwise resurrect a stale index.html pointing at an old JS bundle)
+  // so new deploys are picked up immediately.
   if (req.mode === "navigate") {
     event.respondWith(
-      fetch(req)
+      fetch(req, { cache: "no-store" })
         .then((res) => {
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});

@@ -67,7 +67,22 @@ const head = `
         });
         if ("serviceWorker" in navigator) {
           window.addEventListener("load", function () {
-            navigator.serviceWorker.register("/sw.js").catch(function () {});
+            navigator.serviceWorker.register("/sw.js").then(function (reg) {
+              // Auto-update flow for installed PWAs: check for a new
+              // service worker every time the app is opened/resumed,
+              // and reload ONCE when the new version takes control.
+              function check() { try { reg.update(); } catch (e) {} }
+              document.addEventListener("visibilitychange", function () {
+                if (document.visibilityState === "visible") check();
+              });
+              setInterval(check, 15 * 60 * 1000);
+              var reloaded = false;
+              navigator.serviceWorker.addEventListener("controllerchange", function () {
+                if (reloaded) return;
+                reloaded = true;
+                window.location.reload();
+              });
+            }).catch(function () {});
           });
         }
       })();
@@ -77,3 +92,13 @@ const head = `
 html = html.replace("</head>", head);
 fs.writeFileSync(file, html);
 console.log("inject-pwa-html: PWA tags + install hook injected into dist/index.html");
+
+// Stamp the exported service worker with a unique build id so EVERY deploy
+// produces a byte-different sw.js → browsers install the new SW → the
+// controllerchange hook above reloads open/installed PWAs automatically.
+const swFile = path.join(__dirname, "..", "dist", "sw.js");
+if (fs.existsSync(swFile)) {
+  const sw = fs.readFileSync(swFile, "utf8");
+  fs.writeFileSync(swFile, "/* build:" + Date.now() + " */\n" + sw);
+  console.log("inject-pwa-html: build id stamped into dist/sw.js");
+}
