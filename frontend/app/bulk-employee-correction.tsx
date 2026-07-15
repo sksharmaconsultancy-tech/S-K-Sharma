@@ -34,11 +34,12 @@ import { colors, radius, spacing, type } from "@/src/theme";
 
 type Company = { company_id: string; name: string };
 type FieldDef = { key: string; label: string; type: string };
-type GroupOption = { master_id: string; name: string };
+type GroupOption = { master_id: string; name: string; member_user_ids?: string[] };
 type EmployeeRow = {
   user_id: string;
   employee_code?: string;
   name?: string;
+  father_name?: string;
   phone?: string;
   email?: string;
   doj?: string;
@@ -46,14 +47,23 @@ type EmployeeRow = {
   designation?: string;
   salary_monthly?: number;
   basic_salary?: number;
+  compliance_basic?: number | null;
+  compliance_salary_allowances?: { head?: string; amount?: number }[];
+  hra?: number;
+  conveyance?: number;
+  over_time?: number;
+  other?: number;
   uan_no?: string;
   esi_ip_no?: string;
   pf_no?: string;
   aadhaar_no?: string;
+  name_as_per_aadhar?: string;
   pan_no?: string;
-  bank_account_no?: string;
+  name_as_per_pan?: string;
+  bank_account?: string;
   bank_ifsc?: string;
   active?: boolean;
+  resign_date?: string;
   employee_group_id?: string;
   company_id?: string;
   company_name?: string;
@@ -64,28 +74,27 @@ const COL_WIDTHS: Record<string, number> = {
   company_name: 160,
   employee_code: 100,
   name: 180,
+  father_name: 160,
   phone: 130,
   email: 180,
   doj: 110,
   department: 130,
   designation: 150,
   employee_group_id: 160,
-  salary_monthly: 110,
-  basic_salary: 100,
+  compliance_basic: 140,
   uan_no: 130,
   esi_ip_no: 130,
   pf_no: 130,
   aadhaar_no: 130,
+  name_as_per_aadhar: 160,
   pan_no: 110,
-  bank_account_no: 140,
+  name_as_per_pan: 160,
+  bank_account: 140,
   bank_ifsc: 110,
-  active: 70,
 };
 
-// Iter 85 — Fields that must NEVER be editable via bulk correction.
-// Identity/PII fields require an audit trail on the Employee Master
-// screen. Bulk edits are intentionally restricted to Salary Data +
-// Designation + Department + Group assignments.
+// Iter 134 (user spec) — Only identity columns are locked. Statutory IDs,
+// bank details, salary heads, department/designation/group are editable.
 const LOCKED_FIELDS: Set<string> = new Set([
   "employee_code",
   "name",
@@ -94,14 +103,31 @@ const LOCKED_FIELDS: Set<string> = new Set([
   "doj",
   "phone",
   "email",
-  "uan_no",
-  "esi_ip_no",
-  "pf_no",
-  "aadhaar_no",
-  "pan_no",
-  "bank_account_no",
-  "bank_ifsc",
 ]);
+
+const normHead = (h: any): string =>
+  String(h || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/** Base (saved) value for an allowance column — reads the employee's
+ *  compliance allowance lines first, then the flat XLSX-imported fields. */
+function allowanceBase(row: EmployeeRow, head: string): string {
+  const nh = normHead(head);
+  const lines = row.compliance_salary_allowances || [];
+  const hit = lines.find((l) => {
+    const n = normHead(l?.head);
+    return (
+      n === nh ||
+      (nh === "conv" && n.startsWith("conv")) ||
+      (nh.startsWith("conv") && n === "conv")
+    );
+  });
+  if (hit && hit.amount != null) return String(hit.amount);
+  if (nh === "hra" && row.hra != null) return String(row.hra);
+  if (nh.startsWith("conv") && row.conveyance != null) return String(row.conveyance);
+  if ((nh === "overtime" || nh === "ot") && row.over_time != null) return String(row.over_time);
+  if ((nh === "other" || nh === "others") && row.other != null) return String(row.other);
+  return "";
+}
 
 function showMsg(msg: string, title = "Bulk Correction") {
   if (Platform.OS === "web") globalThis.alert(msg);
@@ -134,10 +160,27 @@ export default function BulkEmployeeCorrectionScreen() {
   // Iter 68 — Same master-driven UX for Departments + Designations.
   const [deptsByCid, setDeptsByCid] = useState<Record<string, GroupOption[]>>({});
   const [designationsByCid, setDesignationsByCid] = useState<Record<string, GroupOption[]>>({});
-  const [rows, setRows] = useState<EmployeeRow[]>([]);
+  const [allRows, setAllRows] = useState<EmployeeRow[]>([]);
+  // Iter 134 (user spec) — top filter: Active/Present vs Resigned.
+  const [empFilter, setEmpFilter] = useState<"active" | "resigned">("active");
   const [dirty, setDirty] = useState<Record<string, Record<string, any>>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const isResigned = (e: EmployeeRow) =>
+    e.active === false || !!(e.resign_date && String(e.resign_date).trim());
+  const rows = useMemo(
+    () => allRows.filter((e) => (empFilter === "resigned" ? isResigned(e) : !isResigned(e))),
+    [allRows, empFilter],
+  );
+  const filterCounts = useMemo(() => {
+    let a = 0, r = 0;
+    for (const e of allRows) {
+      if (isResigned(e)) r++;
+      else a++;
+    }
+    return { active: a, resigned: r };
+  }, [allRows]);
 
   // Legacy field kept for the single-firm group picker.
   const groups: GroupOption[] = useMemo(() => {
@@ -157,15 +200,11 @@ export default function BulkEmployeeCorrectionScreen() {
     if (!isSuper) return;
     (async () => {
       try {
-        const [cs, fs] = await Promise.all([
-          api<{ companies: Company[] }>("/companies"),
-          api<{ fields: FieldDef[] }>("/admin/employees/bulk-correction-fields"),
-        ]);
+        const cs = await api<{ companies: Company[] }>("/companies");
         // Iter 68 — Alphabetical sorting for company + master lists.
         const cmp = (a: { name: string }, b: { name: string }) =>
           (a.name || "").localeCompare(b.name || "", "en", { sensitivity: "base" });
         setCompanies((cs.companies || []).slice().sort(cmp));
-        setFields(fs.fields || []);
         if (cs.companies?.length && !companyId) setCompanyId(cs.companies[0].company_id);
       } catch (e: any) {
         showMsg(e?.message || "Could not load initial data");
@@ -173,6 +212,25 @@ export default function BulkEmployeeCorrectionScreen() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSuper]);
+
+  // Iter 134 — the column set depends on the firm (its enabled allowance
+  // heads become editable columns), so refetch fields per firm.
+  useEffect(() => {
+    if (!isSuper || !companyId) {
+      setFields([]);
+      return;
+    }
+    (async () => {
+      try {
+        const fs = await api<{ fields: FieldDef[] }>(
+          `/admin/employees/bulk-correction-fields?company_id=${encodeURIComponent(companyId)}`,
+        );
+        setFields(fs.fields || []);
+      } catch (e: any) {
+        showMsg(e?.message || "Could not load field list");
+      }
+    })();
+  }, [isSuper, companyId]);
 
   const loadEmployees = useCallback(async () => {
     // Determine target firms.
@@ -182,7 +240,7 @@ export default function BulkEmployeeCorrectionScreen() {
         ? [companyId]
         : [];
     if (targetCids.length === 0) {
-      setRows([]);
+      setAllRows([]);
       setGroupsByCid({});
       return;
     }
@@ -235,10 +293,33 @@ export default function BulkEmployeeCorrectionScreen() {
       // Attach company_name to each row for display in cross-firm view.
       const cName = (cid?: string) =>
         companies.find((c) => c.company_id === cid)?.name || "—";
-      const active = (emps.employees || [])
-        .filter((e) => e.active !== false)
-        .map((e) => ({ ...e, company_name: cName(e.company_id) }));
-      setRows(active);
+      // Iter 134 — derive each employee's CURRENT group from the group
+      // masters' member lists (user: "please show who already exists"),
+      // and fall back to the imported flat Basic when Compliance Basic
+      // hasn't been set yet.
+      const gidByUser: Record<string, string> = {};
+      const gidByName: Record<string, Record<string, string>> = {};
+      Object.entries(gm).forEach(([cid, list]) => {
+        gidByName[cid] = gidByName[cid] || {};
+        (list || []).forEach((g) => {
+          gidByName[cid][String(g.name || "").trim().toUpperCase()] = g.master_id;
+          (g.member_user_ids || []).forEach((uid) => {
+            gidByUser[uid] = g.master_id;
+          });
+        });
+      });
+      const mapped = (emps.employees || []).map((e) => {
+        const names = gidByName[e.company_id || companyId] || {};
+        const byName =
+          names[String((e as any).employee_group || (e as any).employee_type || "").trim().toUpperCase()] || "";
+        return {
+          ...e,
+          company_name: cName(e.company_id),
+          employee_group_id: e.employee_group_id || gidByUser[e.user_id] || byName,
+          compliance_basic: e.compliance_basic ?? e.basic_salary ?? null,
+        };
+      });
+      setAllRows(mapped);
     } catch (e: any) {
       showMsg(e?.message || "Could not load employees");
     } finally {
@@ -304,10 +385,22 @@ export default function BulkEmployeeCorrectionScreen() {
   };
 
   const submit = async (dryRun: boolean) => {
-    const corrections = Object.entries(dirty).map(([uid, patch]) => ({
-      user_id: uid,
-      ...patch,
-    }));
+    // Iter 134 — fold "allow:<HEAD>" cell edits into an `allowances`
+    // {head: amount} map for the backend.
+    const corrections = Object.entries(dirty).map(([uid, patch]) => {
+      const out: any = { user_id: uid };
+      const allowances: Record<string, number> = {};
+      for (const [k, v] of Object.entries(patch)) {
+        if (k.startsWith("allow:")) {
+          const n = Number(v);
+          if (Number.isFinite(n)) allowances[k.slice(6)] = n;
+        } else {
+          out[k] = v;
+        }
+      }
+      if (Object.keys(allowances).length) out.allowances = allowances;
+      return out;
+    });
     if (corrections.length === 0) return showMsg("Nothing to save.");
     setSaving(true);
     try {
@@ -355,9 +448,9 @@ export default function BulkEmployeeCorrectionScreen() {
   }
 
   const renderCell = (row: EmployeeRow, f: FieldDef) => {
-    const w = COL_WIDTHS[f.key] || 120;
+    const w = COL_WIDTHS[f.key] || (f.type === "allowance" ? 110 : 120);
     const val = displayValue(row, f.key);
-    const isDirty = !!dirty[row.user_id]?.[f.key];
+    const isDirty = dirty[row.user_id] ? f.key in dirty[row.user_id] : false;
 
     // Iter 85 — Bulk Employee Correction is intentionally limited to
     // Salary Data + Designation edits. Identity fields (Employee Code,
@@ -388,10 +481,9 @@ export default function BulkEmployeeCorrectionScreen() {
     }
 
     if (f.type === "master:group") {
-      // Iter 86 — Real <select> dropdown (previously was an <input list>
-      // datalist which looked like a text field to admins). Shows the
-      // full list of Employee Groups configured for the firm plus a
-      // "— (clear)" option to unassign.
+      // Iter 134 (user spec) — Employee Group is EDITABLE again: a real
+      // dropdown listing the groups that already exist for the firm; the
+      // employee's current group is pre-selected.
       const scopedGroups = crossFirmMode
         ? groupsByCid[row.company_id || ""] || []
         : groups;
@@ -399,15 +491,59 @@ export default function BulkEmployeeCorrectionScreen() {
         (dirty[row.user_id]?.employee_group_id as string | undefined) ??
         (row.employee_group_id as string | undefined) ??
         "";
-      // Iter 129m (user directive) — the Employee Group can ONLY be changed
-      // from the full Employee Master edit form. Read-only here.
-      const gName =
-        scopedGroups.find((g) => g.master_id === currentGid)?.name || "— (no group)";
       return (
-        <View style={[styles.cellWrap, { width: w }]}>
-          <Text style={styles.cellReadOnly} numberOfLines={1}>
-            {gName}
-          </Text>
+        <View style={[styles.cellWrap, { width: w }, isDirty && styles.cellDirty]}>
+          {Platform.OS === "web" ? (
+            <select
+              value={currentGid}
+              onChange={(e) => {
+                const v = (e.target as HTMLSelectElement).value;
+                if (v === (row.employee_group_id || "")) clearCell(row.user_id, "employee_group_id");
+                else setCell(row.user_id, "employee_group_id", v);
+              }}
+              style={styles.cellSelect as any}
+            >
+              <option value="">— (no group)</option>
+              {scopedGroups.map((g) => (
+                <option key={g.master_id} value={g.master_id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <Text style={styles.cellReadOnly} numberOfLines={1}>
+              {scopedGroups.find((g) => g.master_id === currentGid)?.name || "— (no group)"}
+            </Text>
+          )}
+        </View>
+      );
+    }
+
+    // Iter 134 — per-head compliance allowance amount cells (HRA / Conv. /
+    // Other / Overtime + every head enabled in the Firm Master).
+    if (f.type === "allowance") {
+      const head = f.key.slice(6);
+      const base = allowanceBase(row, head);
+      const cur =
+        dirty[row.user_id] && f.key in dirty[row.user_id]
+          ? String(dirty[row.user_id][f.key] ?? "")
+          : base;
+      return (
+        <View style={[styles.cellWrap, { width: w }, isDirty && styles.cellDirty]}>
+          <TextInput
+            value={cur}
+            onChangeText={(v) => {
+              if (v === base) clearCell(row.user_id, f.key);
+              else {
+                const n = Number(v);
+                setCell(row.user_id, f.key, Number.isFinite(n) ? n : v);
+              }
+            }}
+            keyboardType="decimal-pad"
+            style={styles.cellInput}
+            placeholder="0"
+            placeholderTextColor={colors.onSurfaceTertiary}
+          />
         </View>
       );
     }
@@ -449,28 +585,6 @@ export default function BulkEmployeeCorrectionScreen() {
           ) : (
             <Text style={styles.cellReadOnly}>Web only</Text>
           )}
-        </View>
-      );
-    }
-
-    if (f.type === "bool") {
-      const on = dirty[row.user_id]?.active !== undefined ? dirty[row.user_id].active : row.active !== false;
-      return (
-        <View style={[styles.cellWrap, { width: w, alignItems: "center" }, isDirty && styles.cellDirty]}>
-          <Pressable
-            onPress={() => {
-              const cur = dirty[row.user_id]?.active !== undefined ? dirty[row.user_id].active : row.active !== false;
-              const next = !cur;
-              if (next === (row.active !== false)) clearCell(row.user_id, f.key);
-              else setCell(row.user_id, "active", next);
-            }}
-          >
-            <Ionicons
-              name={on ? "checkbox" : "square-outline"}
-              size={20}
-              color={on ? colors.brandPrimary : colors.onSurfaceTertiary}
-            />
-          </Pressable>
         </View>
       );
     }
@@ -559,19 +673,42 @@ export default function BulkEmployeeCorrectionScreen() {
               {companies.find((c) => c.company_id === companyId)?.name || "Selected firm"}
             </Text>
             <Text style={styles.firmBannerSub}>
-              Employee master · {rows.length} active employee{rows.length === 1 ? "" : "s"}
+              Employee master · {rows.length}{" "}
+              {empFilter === "resigned" ? "resigned" : "active"} employee{rows.length === 1 ? "" : "s"}
             </Text>
           </View>
         ) : null}
+
+        {/* Iter 134 (user spec) — Active/Present vs Resigned filter */}
+        <View style={styles.filterRow}>
+          {([
+            ["active", `Active / Present (${filterCounts.active})`],
+            ["resigned", `Resigned (${filterCounts.resigned})`],
+          ] as const).map(([k, lbl]) => (
+            <Pressable
+              key={k}
+              onPress={() => setEmpFilter(k)}
+              style={[styles.filterChip, empFilter === k && styles.filterChipOn]}
+              testID={`bc-filter-${k}`}
+            >
+              <Ionicons
+                name={k === "active" ? "person-outline" : "exit-outline"}
+                size={13}
+                color={empFilter === k ? "#fff" : colors.onSurfaceSecondary}
+              />
+              <Text style={[styles.filterChipTxt, empFilter === k && styles.filterChipTxtOn]}>
+                {lbl}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
 
         <View style={styles.actionsBar}>
           <View style={{ flex: 1 }}>
             <Text style={styles.stepTitle}>
               {loading
                 ? "Loading…"
-                : crossFirmMode
-                  ? `${rows.length} active employees · ${crossFirmSet.size} firm${crossFirmSet.size === 1 ? "" : "s"}`
-                  : `${rows.length} active employees`}
+                : `${rows.length} ${empFilter === "resigned" ? "resigned" : "active"} employees`}
             </Text>
             <Text style={styles.smallHint}>
               {dirtyCount === 0
@@ -632,7 +769,9 @@ export default function BulkEmployeeCorrectionScreen() {
           <ActivityIndicator style={{ marginTop: 20 }} />
         ) : rows.length === 0 ? (
           <View style={styles.card}>
-            <Text style={styles.smallHint}>No active employees found for this firm.</Text>
+            <Text style={styles.smallHint}>
+              No {empFilter === "resigned" ? "resigned" : "active"} employees found for this firm.
+            </Text>
           </View>
         ) : (
           <View style={styles.card}>
@@ -663,6 +802,47 @@ export default function BulkEmployeeCorrectionScreen() {
             </ScrollView>
           </View>
         )}
+
+        {/* Iter 134 (user request) — bottom Save bar so admins can save
+            right after finishing corrections without scrolling back up. */}
+        {!loading && rows.length > 0 ? (
+          <View style={styles.actionsBar}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.stepTitle}>
+                {dirtyCount === 0
+                  ? "No pending changes"
+                  : `${dirtyCount} pending change${dirtyCount === 1 ? "" : "s"}`}
+              </Text>
+              <Text style={styles.smallHint}>Save your corrections when done.</Text>
+            </View>
+            <Pressable
+              onPress={() => submit(true)}
+              disabled={saving || dirtyCount === 0}
+              style={[styles.secondaryBtn, (saving || dirtyCount === 0) && { opacity: 0.5 }]}
+              testID="bc-preview-bottom"
+            >
+              <Ionicons name="eye-outline" size={14} color={colors.brandPrimary} />
+              <Text style={styles.secondaryBtnTxt}>Preview</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => submit(false)}
+              disabled={saving || dirtyCount === 0}
+              style={[styles.primaryBtn, (saving || dirtyCount === 0) && { opacity: 0.5 }]}
+              testID="bc-save-bottom"
+            >
+              {saving ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="save-outline" size={16} color="#fff" />
+                  <Text style={styles.primaryBtnTxt}>
+                    Save {dirtyCount > 0 ? `(${dirtyCount})` : ""}
+                  </Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+        ) : null}
 
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -789,6 +969,29 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   cellReadOnly: { fontSize: 12, color: colors.onSurfaceSecondary },
+  // Iter 134 — Active/Resigned filter chips.
+  filterRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: spacing.md,
+  },
+  filterChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.surface,
+  },
+  filterChipOn: {
+    backgroundColor: colors.brandPrimary,
+    borderColor: colors.brandPrimary,
+  },
+  filterChipTxt: { fontSize: 12, fontWeight: "700", color: colors.onSurfaceSecondary },
+  filterChipTxtOn: { color: "#fff" },
   crossToggleRow: {
     flexDirection: "row",
     marginBottom: 8,

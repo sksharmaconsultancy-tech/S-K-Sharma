@@ -170,12 +170,20 @@ class BulkEmployeeCorrection(BaseModel):
     doj: Optional[str] = None
     salary_monthly: Optional[float] = None
     basic_salary: Optional[float] = None
+    # Iter 134 (user spec) — Compliance Basic + per-head compliance
+    # allowance amounts (head -> amount). Editing these keeps the flat
+    # master fields (hra / conveyance / over_time / other) in sync.
+    compliance_basic: Optional[float] = None
+    allowances: Optional[Dict[str, float]] = None
     uan_no: Optional[str] = None
     esi_ip_no: Optional[str] = None
     pf_no: Optional[str] = None
     aadhaar_no: Optional[str] = None
+    name_as_per_aadhar: Optional[str] = None
     pan_no: Optional[str] = None
-    bank_account_no: Optional[str] = None
+    name_as_per_pan: Optional[str] = None
+    bank_account: Optional[str] = None
+    bank_account_no: Optional[str] = None   # legacy — mapped to bank_account
     bank_ifsc: Optional[str] = None
     employee_group_id: Optional[str] = None   # master_id (of type=group)
     active: Optional[bool] = None
@@ -646,30 +654,67 @@ def register_iter60_features(
 
     # ---------------- Bulk Employee Correction --------------------------
     @api.get("/admin/employees/bulk-correction-fields")
-    async def bulk_correction_fields(authorization: Optional[str] = Header(None)):
-        """Return the canonical list of editable fields with labels — used
-        by the frontend to render the correction grid header."""
+    async def bulk_correction_fields(
+        company_id: Optional[str] = None,
+        authorization: Optional[str] = Header(None),
+    ):
+        """Return the canonical list of fields for the correction grid.
+
+        Iter 134 (user spec) — column set:
+          * Locked identity: Emp Code, Name, Father Name, Phone, Email, DOJ
+          * Editable: Department, Designation, Employee Group,
+            Basic Salary (Compliance), HRA / Conv. / Other / Overtime +
+            every additional allowance head ENABLED in the Firm Master,
+            UAN, ESI IP, PF No., Aadhaar (+name), PAN (+name), Bank A/c, IFSC.
+          * Active column removed (use the Active/Resigned filter instead).
+        """
         admin = await get_user_from_token(authorization)
         require_role(admin, ["super_admin", "sub_admin"])
+
+        # Fixed allowance columns per the user's spec; firm-master heads
+        # that normalise to one of these are folded in (no duplicates).
+        def _norm_head(h: str) -> str:
+            return "".join(ch for ch in str(h or "").lower() if ch.isalnum())
+
+        fixed_allow = [("HRA", "hra"), ("Conv.", "conv"), ("Other", "other"),
+                       ("Overtime", "overtime")]
+        fixed_norms = {n for _, n in fixed_allow} | {"conveyance", "overtime", "overtime", "othersallowance", "others"}
+        allow_fields = [
+            {"key": f"allow:{lbl}", "label": lbl, "type": "allowance"}
+            for lbl, _ in fixed_allow
+        ]
+        if company_id:
+            fm = await db.firm_masters.find_one(
+                {"company_id": company_id}, {"_id": 0, "allowances": 1}) or {}
+            for head, on in (fm.get("allowances") or {}).items():
+                if not on:
+                    continue
+                if _norm_head(head) in fixed_norms:
+                    continue
+                allow_fields.append(
+                    {"key": f"allow:{head}", "label": head, "type": "allowance"})
+
         return {"fields": [
             {"key": "employee_code", "label": "Emp Code", "type": "text"},
             {"key": "name", "label": "Name", "type": "text"},
+            {"key": "father_name", "label": "Father Name", "type": "text"},
+            {"key": "department", "label": "Department", "type": "master:department"},
+            {"key": "designation", "label": "Designation", "type": "master:designation"},
             {"key": "phone", "label": "Phone", "type": "text"},
             {"key": "email", "label": "Email", "type": "email"},
             {"key": "doj", "label": "DOJ (YYYY-MM-DD)", "type": "text"},
-            {"key": "department", "label": "Department", "type": "master:department"},
-            {"key": "designation", "label": "Designation", "type": "master:designation"},
             {"key": "employee_group_id", "label": "Employee Group", "type": "master:group"},
-            {"key": "salary_monthly", "label": "Salary (Gross)", "type": "number"},
-            {"key": "basic_salary", "label": "Basic", "type": "number"},
+            {"key": "compliance_basic", "label": "Basic Salary (Compliance)", "type": "number"},
+            *allow_fields,
             {"key": "uan_no", "label": "UAN No.", "type": "text"},
             {"key": "esi_ip_no", "label": "ESI IP No.", "type": "text"},
             {"key": "pf_no", "label": "PF No.", "type": "text"},
             {"key": "aadhaar_no", "label": "Aadhaar", "type": "text"},
+            {"key": "name_as_per_aadhar", "label": "Name as per Aadhaar", "type": "text"},
             {"key": "pan_no", "label": "PAN", "type": "text"},
-            {"key": "bank_account_no", "label": "Bank A/c", "type": "text"},
+            {"key": "name_as_per_pan", "label": "Name as per PAN", "type": "text"},
+            {"key": "bank_account", "label": "Bank A/c", "type": "text"},
             {"key": "bank_ifsc", "label": "IFSC", "type": "text"},
-            {"key": "active", "label": "Active", "type": "bool"},
         ]}
 
     @api.post("/admin/employees/bulk-correction")
@@ -732,16 +777,30 @@ def register_iter60_features(
             updates: Dict[str, Any] = {}
             row_dict = row.dict()
             group_change_to: Optional[str] = None
+            allowance_changes: Optional[Dict[str, float]] = None
             for k, v in row_dict.items():
                 if k == "user_id":
                     continue
                 if v is None:
                     continue
                 if k == "employee_group_id":
-                    group_change_to = v or None
+                    group_change_to = v  # "" clears the group
+                    continue
+                if k == "allowances":
+                    if isinstance(v, dict) and v:
+                        allowance_changes = {str(h): float(a) for h, a in v.items()
+                                             if h and a is not None}
                     continue
                 if k in ("salary_monthly", "basic_salary") and isinstance(v, (int, float)):
                     updates[k] = float(v)
+                elif k == "compliance_basic" and isinstance(v, (int, float)):
+                    # Iter 134 — Basic Salary column edits Compliance Basic
+                    # and keeps the flat master basic in sync.
+                    updates["compliance_basic"] = float(v)
+                    updates["basic_salary"] = float(v)
+                elif k == "bank_account_no":
+                    # Legacy key — the employee master stores bank_account.
+                    updates["bank_account"] = (v or "").strip()
                 elif k == "active":
                     updates["active"] = bool(v)
                     if not v:
@@ -750,6 +809,34 @@ def register_iter60_features(
                     updates["email"] = (v or "").strip().lower() or None
                 else:
                     updates[k] = (v or "").strip() if isinstance(v, str) else v
+
+            # Iter 134 — merge per-head compliance allowance edits into
+            # ``compliance_salary_allowances`` (upsert by normalised head)
+            # and mirror the classic heads onto the flat master fields.
+            if allowance_changes:
+                def _norm(h: str) -> str:
+                    return "".join(ch for ch in str(h or "").lower() if ch.isalnum())
+                lines = [dict(x) for x in (existing.get("compliance_salary_allowances") or [])
+                         if isinstance(x, dict)]
+                for head, amount in allowance_changes.items():
+                    nh = _norm(head)
+                    hit = next((ln for ln in lines if _norm(ln.get("head")) == nh
+                                or (nh == "conv" and _norm(ln.get("head")).startswith("conv"))
+                                or (nh.startswith("conv") and _norm(ln.get("head")) == "conv")), None)
+                    if hit is not None:
+                        hit["amount"] = amount
+                    else:
+                        lines.append({"head": head, "amount": amount})
+                    # Flat master-field mirrors (imported XLSX columns).
+                    if nh == "hra":
+                        updates["hra"] = amount
+                    elif nh.startswith("conv"):
+                        updates["conveyance"] = amount
+                    elif nh in ("overtime", "ot"):
+                        updates["over_time"] = amount
+                    elif nh in ("other", "others"):
+                        updates["other"] = amount
+                updates["compliance_salary_allowances"] = lines
 
             if not updates and group_change_to is None:
                 skipped.append({"user_id": row.user_id, "reason": "no_changes"})
@@ -771,26 +858,39 @@ def register_iter60_features(
 
             # Group membership change
             if group_change_to is not None:
-                # Remove from any other groups first (scoped to the row's firm)
+                # Remove from any other groups first (firm-scoped + global)
                 await db.masters.update_many(
-                    {"type": "group", "company_id": row_company_id,
+                    {"type": "group",
+                     "company_id": {"$in": [row_company_id, "__global__", None]},
                      "member_user_ids": row.user_id},
                     {"$pull": {"member_user_ids": row.user_id}},
                 )
                 if group_change_to:
                     target = await db.masters.find_one(
                         {"master_id": group_change_to, "type": "group",
-                         "company_id": row_company_id},
-                        {"_id": 0, "master_id": 1},
+                         "company_id": {"$in": [row_company_id, "__global__", None]}},
+                        {"_id": 0, "master_id": 1, "name": 1},
                     )
                     if target:
                         await db.masters.update_one(
                             {"master_id": group_change_to},
                             {"$addToSet": {"member_user_ids": row.user_id}},
                         )
+                        # Keep the name-based mirrors on the user doc in
+                        # sync (Employee Group == Employee Type).
+                        await db.users.update_one(
+                            {"user_id": row.user_id},
+                            {"$set": {"employee_group": target.get("name"),
+                                      "employee_type": target.get("name")}},
+                        )
                     else:
                         skipped.append({"user_id": row.user_id, "reason": "group_not_found"})
                         continue
+                else:
+                    await db.users.update_one(
+                        {"user_id": row.user_id},
+                        {"$set": {"employee_group": None, "employee_type": None}},
+                    )
 
             applied.append({
                 "user_id": row.user_id,
