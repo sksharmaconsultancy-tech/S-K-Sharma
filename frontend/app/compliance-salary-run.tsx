@@ -42,6 +42,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
   
 import MonthPicker from "@/src/components/MonthPicker";
+import { GridScroller, stickyCol, stickyHeader } from "@/src/components/GridFreeze";
 import { colors, radius, spacing, type } from "@/src/theme";
 import { sortEmployeeTypes } from "@/src/utils/employeeTypes";
 
@@ -1376,26 +1377,30 @@ export default function ComplianceSalaryRunScreen() {
               ))}
             </View>
 
-            <ScrollView horizontal style={{ marginTop: 8 }}>
-              <View>
+            <GridScroller>
                 {/* Iter 85 pt 1 — Column-hide by firm's enabled_allowances.
                     Both header and data cells honor the same mask so
                     columns stay aligned. `basic` is always kept.
                     Iter 86 — Section group header row (Master / Calculated
                     / Deductions) added above the column headers so admins
                     can visually parse the 3 zones of the grid at a glance. */}
+                {/* Iter 140 — both header rows frozen on top while
+                    scrolling down (web). */}
+                <View style={stickyHeader(colors.surface)}>
                 {(() => {
                   const en = (run.rows[0] as any)?.enabled_allowances as string[] | undefined;
                   const has = (k: string) => !en || en.includes(k) || k === "basic";
                   const CELL_W = colW.num;
                   const INFO_W = colW.name + colW.father + colW.desg + colW.uan + colW.esi + colW.pd;
+                  const FROZEN_W = colW.name + colW.father + colW.desg;
                   const optKeys = ["basic","hra","conveyance","medical","special","others"].filter((k) => has(k));
                   const masterCount = optKeys.length + 1; // +M.Gross
                   const calcCount = optKeys.length + 1;   // +Gross
                   const dedCount = 10;                    // WageBase,PF(E),PF(Er),ESI(E),ESI(Er),PT,TDS,Other,TotalDed,Net
                   return (
                     <View style={[styles.tblRow, styles.groupHdrRow]}>
-                      <View style={{ width: INFO_W }} />
+                      <View style={[{ width: FROZEN_W }, stickyCol(0, colors.surface)]} />
+                      <View style={{ width: INFO_W - FROZEN_W }} />
                       <View style={[styles.groupHdrCell, styles.groupHdrMaster, { width: masterCount * CELL_W }]}>
                         <Text style={styles.groupHdrTxt}>MASTER SALARY (Full Month)</Text>
                       </View>
@@ -1453,6 +1458,10 @@ export default function ComplianceSalaryRunScreen() {
                             h.group === "master" && styles.groupHdrCellHeaderMaster,
                             h.group === "calc" && styles.groupHdrCellHeaderCalc,
                             h.group === "ded" && styles.groupHdrCellHeaderDed,
+                            i < 3 && stickyCol(
+                              [0, colW.name, colW.name + colW.father][i],
+                              colors.brandPrimary,
+                            ),
                           ]}
                         >
                           {h.label}
@@ -1461,6 +1470,7 @@ export default function ComplianceSalaryRunScreen() {
                     </View>
                   );
                 })()}
+                </View>
                 {sortRows(run.rows).map((r, idx) => (
                   <View
                     key={r.user_id}
@@ -1469,9 +1479,9 @@ export default function ComplianceSalaryRunScreen() {
                       idx % 2 === 0 && { backgroundColor: colors.surfaceSecondary },
                     ]}
                   >
-                    <Text style={[styles.tblCell, { width: colW.name }]} numberOfLines={1}>{r.name || "—"}</Text>
-                    <Text style={[styles.tblCell, { width: colW.father }]} numberOfLines={1}>{(r as any).father_name || "—"}</Text>
-                    <Text style={[styles.tblCell, { width: colW.desg }]} numberOfLines={1}>{(r as any).designation || "—"}</Text>
+                    <Text style={[styles.tblCell, { width: colW.name }, stickyCol(0, idx % 2 === 0 ? colors.surfaceSecondary : colors.surface)]} numberOfLines={1}>{r.name || "—"}</Text>
+                    <Text style={[styles.tblCell, { width: colW.father }, stickyCol(colW.name, idx % 2 === 0 ? colors.surfaceSecondary : colors.surface)]} numberOfLines={1}>{(r as any).father_name || "—"}</Text>
+                    <Text style={[styles.tblCell, { width: colW.desg }, stickyCol(colW.name + colW.father, idx % 2 === 0 ? colors.surfaceSecondary : colors.surface)]} numberOfLines={1}>{(r as any).designation || "—"}</Text>
                     <Text style={[styles.tblCell, { width: colW.uan }]} numberOfLines={1}>{(r as any).uan_no || "—"}</Text>
                     <Text style={[styles.tblCell, { width: colW.esi }]} numberOfLines={1}>{(r as any).esi_ip_no || "—"}</Text>
                     {/* Iter 85 — Editable Present Days. Admin can override
@@ -1550,9 +1560,9 @@ export default function ComplianceSalaryRunScreen() {
                   </View>
                 ))}
                 <View style={[styles.tblRow, { backgroundColor: colors.brandTertiary }]}>
-                  <Text style={[styles.tblCell, { width: colW.name, fontWeight: "700" }]}>TOTAL</Text>
-                  <Text style={[styles.tblCell, { width: colW.father }]}>—</Text>
-                  <Text style={[styles.tblCell, { width: colW.desg }]}>—</Text>
+                  <Text style={[styles.tblCell, { width: colW.name, fontWeight: "700" }, stickyCol(0, colors.brandTertiary)]}>TOTAL</Text>
+                  <Text style={[styles.tblCell, { width: colW.father }, stickyCol(colW.name, colors.brandTertiary)]}>—</Text>
+                  <Text style={[styles.tblCell, { width: colW.desg }, stickyCol(colW.name + colW.father, colors.brandTertiary)]}>—</Text>
                   <Text style={[styles.tblCell, { width: colW.uan }]}>—</Text>
                   <Text style={[styles.tblCell, { width: colW.esi }]}>—</Text>
                   <Text style={[styles.tblCell, { width: colW.pd }]}>—</Text>
@@ -1574,8 +1584,7 @@ export default function ComplianceSalaryRunScreen() {
                   <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.total_deduction)}</Text>
                   <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.net)}</Text>
                 </View>
-              </View>
-            </ScrollView>
+            </GridScroller>
           </View>
         ) : null}
 

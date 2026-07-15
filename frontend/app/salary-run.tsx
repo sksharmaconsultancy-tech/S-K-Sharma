@@ -44,6 +44,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { useOnRefresh } from "@/src/context/RefreshBusContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import MonthPicker from "@/src/components/MonthPicker";
+import { GridScroller, stickyCol, stickyHeader } from "@/src/components/GridFreeze";
 import { colors, radius, spacing, type } from "@/src/theme";
 import MasterSelect from "@/src/components/MasterSelect";
 
@@ -817,13 +818,13 @@ function ResultGrid({
         ))}
       </View>
 
-      <ScrollView horizontal style={{ marginTop: 8 }}>
-        <View style={{ minWidth: totalMinWidth }}>
-          {/* header */}
-          <View style={[styles.tblRow, styles.tblHeader]}>
-            <HdrCell w={COL_WIDTHS.sn}>SN</HdrCell>
-            <HdrCell w={COL_WIDTHS.code}>Code</HdrCell>
-            <HdrCell w={COL_WIDTHS.name} align="left">Name</HdrCell>
+      <GridScroller>
+        <View style={Platform.OS === "web" ? undefined : { minWidth: totalMinWidth }}>
+          {/* header — Iter 140: frozen on top + SN/Code/Name frozen left */}
+          <View style={[styles.tblRow, styles.tblHeader, stickyHeader(colors.brandPrimary)]}>
+            <HdrCell w={COL_WIDTHS.sn} frozen={stickyCol(0, colors.brandPrimary)}>SN</HdrCell>
+            <HdrCell w={COL_WIDTHS.code} frozen={stickyCol(COL_WIDTHS.sn, colors.brandPrimary)}>Code</HdrCell>
+            <HdrCell w={COL_WIDTHS.name} align="left" frozen={stickyCol(COL_WIDTHS.sn + COL_WIDTHS.code, colors.brandPrimary)}>Name</HdrCell>
             <HdrCell w={COL_WIDTHS.type}>Type</HdrCell>
             <HdrCell w={COL_WIDTHS.roll}>Roll</HdrCell>
             <HdrCell w={COL_WIDTHS.duty} bg={GRP.master}>Duty HRS</HdrCell>
@@ -867,13 +868,13 @@ function ResultGrid({
                 { borderLeftWidth: 4, borderLeftColor: accent },
               ]}
             >
-              <ReadCell w={COL_WIDTHS.sn}>{idx + 1}</ReadCell>
-              <View style={{ width: COL_WIDTHS.code, paddingHorizontal: 6, paddingVertical: 4, justifyContent: "center" }}>
+              <ReadCell w={COL_WIDTHS.sn} frozen={stickyCol(0, isOdd ? colors.surfaceSecondary : colors.surface)}>{idx + 1}</ReadCell>
+              <View style={[{ width: COL_WIDTHS.code, paddingHorizontal: 6, paddingVertical: 4, justifyContent: "center" }, stickyCol(COL_WIDTHS.sn, isOdd ? colors.surfaceSecondary : colors.surface)]}>
                 <Text style={[styles.readTxt, styles.empIdent, { textAlign: "center" }]} numberOfLines={1}>
                   {r.employee_code || "—"}
                 </Text>
               </View>
-              <View style={{ width: COL_WIDTHS.name, paddingHorizontal: 6, paddingVertical: 4, justifyContent: "center" }}>
+              <View style={[{ width: COL_WIDTHS.name, paddingHorizontal: 6, paddingVertical: 4, justifyContent: "center" }, stickyCol(COL_WIDTHS.sn + COL_WIDTHS.code, isOdd ? colors.surfaceSecondary : colors.surface)]}>
                 <Text style={[styles.readTxt, styles.empIdent, { textAlign: "left" }]} numberOfLines={1}>
                   {r.name || "—"}
                 </Text>
@@ -981,7 +982,7 @@ function ResultGrid({
             <View style={{ width: COL_WIDTHS.actions }} />
           </View>
         </View>
-      </ScrollView>
+      </GridScroller>
 
       {/* Iter 85 — Biometric-lock hint removed per user request.  P Days
           and P Hours are now ALWAYS editable regardless of attendance
@@ -1003,9 +1004,9 @@ const GRP = {
   ded: "#FEF2F2",
 };
 
-function HdrCell({ w, children, align = "right" as "left" | "right", bg }: any) {
+function HdrCell({ w, children, align = "right" as "left" | "right", bg, frozen }: any) {
   return (
-    <View style={{ width: w, paddingHorizontal: 6, paddingVertical: 6, backgroundColor: bg || "transparent" }}>
+    <View style={[{ width: w, paddingHorizontal: 6, paddingVertical: 6, backgroundColor: bg || "transparent" }, frozen]}>
       <Text
         style={[
           styles.tblHeaderTxt,
@@ -1021,9 +1022,9 @@ function HdrCell({ w, children, align = "right" as "left" | "right", bg }: any) 
   );
 }
 
-function ReadCell({ w, children, align = "right" as "left" | "right", bg }: any) {
+function ReadCell({ w, children, align = "right" as "left" | "right", bg, frozen }: any) {
   return (
-    <View style={{ width: w, paddingHorizontal: 6, paddingVertical: 6, justifyContent: "center", backgroundColor: bg || "transparent" }}>
+    <View style={[{ width: w, paddingHorizontal: 6, paddingVertical: 6, justifyContent: "center", backgroundColor: bg || "transparent" }, frozen]}>
       <Text
         style={[styles.readTxt, align === "left" ? styles.alignLeft : styles.alignRight]}
         numberOfLines={1}
