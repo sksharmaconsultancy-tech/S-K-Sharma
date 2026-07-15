@@ -277,10 +277,31 @@ export default function BulkEmployeeCorrectionScreen() {
         targetCids.flatMap((cid) =>
           masterKinds.map(async (kind) => {
             try {
-              const r = await api<{ items: GroupOption[] }>(
-                `/admin/masters?type=${kind}&company_id=${encodeURIComponent(cid)}`,
+              // Iter 139 (user report) — GROUPS are used across the WHOLE
+              // master, so fetch them WITHOUT a firm filter (all firms +
+              // globals) and dedupe by name preferring: this firm's own >
+              // global > any other firm. Departments / Designations stay
+              // firm-scoped.
+              const qs =
+                kind === "group"
+                  ? `?type=${kind}`
+                  : `?type=${kind}&company_id=${encodeURIComponent(cid)}`;
+              const r = await api<{ items: (GroupOption & { company_id?: string })[] }>(
+                `/admin/masters${qs}`,
               );
-              return [cid, kind, r.items || []] as const;
+              let items = r.items || [];
+              if (kind === "group") {
+                const byName: Record<string, GroupOption & { company_id?: string }> = {};
+                const rank = (g: { company_id?: string }) =>
+                  g.company_id === cid ? 0 : g.company_id === "__global__" || !g.company_id ? 1 : 2;
+                for (const g of items) {
+                  const key = String(g.name || "").trim().toUpperCase();
+                  if (!key) continue;
+                  if (!(key in byName) || rank(g) < rank(byName[key])) byName[key] = g;
+                }
+                items = Object.values(byName);
+              }
+              return [cid, kind, items] as const;
             } catch {
               return [cid, kind, [] as GroupOption[]] as const;
             }

@@ -17040,14 +17040,18 @@ async def create_master(
         if not company:
             raise HTTPException(status_code=404, detail="Company not found")
         target_cid = payload.company_id
-    dup = await db.masters.find_one(
-        {"type": payload.type,
-         # Case-insensitive duplicate guard (Iter 129g) — firm-scoped
-         # entries may not duplicate GLOBAL ones either.
-         "company_id": {"$in": [target_cid, "__global__", None]},
-         "name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}},
-        {"_id": 0, "master_id": 1},
-    )
+    # Iter 139 (user request) — HARD duplicate stop:
+    #  • GROUPS are used across the whole master → same name may not exist
+    #    in ANY scope (any firm or global).
+    #  • Other types: a firm entry may not duplicate its own firm's or a
+    #    global one; a GLOBAL entry may not duplicate ANY existing scope.
+    dup_q: Dict[str, Any] = {
+        "type": payload.type,
+        "name": {"$regex": f"^{re.escape(name)}$", "$options": "i"},
+    }
+    if payload.type != "group" and not is_global:
+        dup_q["company_id"] = {"$in": [target_cid, "__global__", None]}
+    dup = await db.masters.find_one(dup_q, {"_id": 0, "master_id": 1})
     if dup:
         raise HTTPException(status_code=409, detail=f"A {payload.type} named '{name}' already exists")
     master_id = f"mst_{uuid.uuid4().hex[:12]}"
@@ -17080,9 +17084,22 @@ async def update_master(
         raise HTTPException(status_code=404, detail="Master not found")
     updates: Dict[str, Any] = {"updated_at": now_iso()}
     if payload.name is not None:
-        name = payload.name.strip()
+        name = payload.name.strip().upper()
         if not name:
             raise HTTPException(status_code=400, detail="Name cannot be empty")
+        # Iter 139 (user request) — renames must not create duplicates
+        # either (same rules as create; excludes this master itself).
+        dup_q: Dict[str, Any] = {
+            "type": existing.get("type"),
+            "master_id": {"$ne": master_id},
+            "name": {"$regex": f"^{re.escape(name)}$", "$options": "i"},
+        }
+        if existing.get("type") != "group" and existing.get("company_id") not in ("__global__", None):
+            dup_q["company_id"] = {"$in": [existing.get("company_id"), "__global__", None]}
+        if await db.masters.find_one(dup_q, {"_id": 0, "master_id": 1}):
+            raise HTTPException(
+                status_code=409,
+                detail=f"A {existing.get('type')} named '{name}' already exists")
         updates["name"] = name
     if payload.type == "group" and payload.member_user_ids is not None:
         updates["member_user_ids"] = list(payload.member_user_ids or [])

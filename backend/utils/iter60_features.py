@@ -874,17 +874,16 @@ def register_iter60_features(
 
             # Group membership change
             if group_change_to is not None:
-                # Remove from any other groups first (firm-scoped + global)
+                # Iter 139 — groups are used across the WHOLE master, so the
+                # target group may be firm-scoped, global, or belong to
+                # another firm. Remove membership everywhere, then add.
                 await db.masters.update_many(
-                    {"type": "group",
-                     "company_id": {"$in": [row_company_id, "__global__", None]},
-                     "member_user_ids": row.user_id},
+                    {"type": "group", "member_user_ids": row.user_id},
                     {"$pull": {"member_user_ids": row.user_id}},
                 )
                 if group_change_to:
                     target = await db.masters.find_one(
-                        {"master_id": group_change_to, "type": "group",
-                         "company_id": {"$in": [row_company_id, "__global__", None]}},
+                        {"master_id": group_change_to, "type": "group"},
                         {"_id": 0, "master_id": 1, "name": 1},
                     )
                     if target:
