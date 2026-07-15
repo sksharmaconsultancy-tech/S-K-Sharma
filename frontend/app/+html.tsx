@@ -63,11 +63,19 @@ export default function Root({ children }: PropsWithChildren) {
             __html: `
               // Capture the PWA install prompt EARLY — Chrome fires
               // 'beforeinstallprompt' before React mounts, so we stash it
-              // globally for the /get-app screen to use later.
+              // globally on __pwaInstallEvent (the SAME name promptInstall()
+              // in src/utils/pwa.ts reads — a mismatch here silently breaks
+              // the Install button). __pwaInstallHooked stops setupPWA()
+              // from adding duplicate listeners later.
+              window.__pwaInstallHooked = true;
               window.addEventListener('beforeinstallprompt', function (e) {
                 e.preventDefault();
-                window.__pwaInstallEvt = e;
-                window.dispatchEvent(new Event('pwa-install-ready'));
+                window.__pwaInstallEvent = e;
+                window.dispatchEvent(new Event('pwa-installable'));
+              });
+              window.addEventListener('appinstalled', function () {
+                window.__pwaInstallEvent = null;
+                window.dispatchEvent(new Event('pwa-installed'));
               });
               // User directive — no pinch/double-tap zoom in the mobile PWA;
               // the app always renders at screen size. (iOS ignores

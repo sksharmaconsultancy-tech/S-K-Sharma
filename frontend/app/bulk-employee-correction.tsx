@@ -399,32 +399,15 @@ export default function BulkEmployeeCorrectionScreen() {
         (dirty[row.user_id]?.employee_group_id as string | undefined) ??
         (row.employee_group_id as string | undefined) ??
         "";
+      // Iter 129m (user directive) — the Employee Group can ONLY be changed
+      // from the full Employee Master edit form. Read-only here.
+      const gName =
+        scopedGroups.find((g) => g.master_id === currentGid)?.name || "— (no group)";
       return (
-        <View style={[styles.cellWrap, { width: w }, isDirty && styles.cellDirty]}>
-          {Platform.OS === "web" ? (
-            <select
-              value={currentGid}
-              onChange={(e) => {
-                const gid = (e.target as HTMLSelectElement).value;
-                const original = (row.employee_group_id ?? "") as string;
-                if (gid === original) {
-                  clearCell(row.user_id, "employee_group_id");
-                } else {
-                  setCell(row.user_id, "employee_group_id", gid);
-                }
-              }}
-              style={styles.cellSelect as any}
-            >
-              <option value="">— (no group)</option>
-              {scopedGroups.map((g) => (
-                <option key={g.master_id} value={g.master_id}>
-                  {g.name}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <Text style={styles.cellReadOnly}>Web only</Text>
-          )}
+        <View style={[styles.cellWrap, { width: w }]}>
+          <Text style={styles.cellReadOnly} numberOfLines={1}>
+            {gName}
+          </Text>
         </View>
       );
     }

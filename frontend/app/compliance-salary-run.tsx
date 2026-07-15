@@ -37,12 +37,12 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
 
 import { api, apiBinary } from "@/src/api/client";
+import { confirmYesNo } from "@/src/utils/confirm";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
   
 import MonthPicker from "@/src/components/MonthPicker";
 import { colors, radius, spacing, type } from "@/src/theme";
-import { formatDateTime } from "@/src/utils/date";
 import { sortEmployeeTypes } from "@/src/utils/employeeTypes";
 
 const PT_STATES = [
@@ -154,7 +154,8 @@ function calendarDaysInMonth(monthStr: string): number {
 }
 function fmtInr(n?: number | null): string {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";
-  return Math.round(n).toLocaleString("en-IN");
+  // User directive — plain numbers, NO thousands separators (commas).
+  return String(Math.round(n));
 }
 function showMsg(msg: string, title = "Compliance salary") {
   if (Platform.OS === "web") globalThis.alert(msg);
@@ -236,6 +237,34 @@ export default function ComplianceSalaryRunScreen() {
   const [mailLoading, setMailLoading] = useState(false);
   // Iter 98 — display sorting for the compliance grid.
   const [sortBy, setSortBy] = useState<string>("");
+  // Iter 127e — AUTO-ADJUST every column to its widest content so nothing
+  // is cut off (user request; replaces the wrap-text experiment).
+  const colW = useMemo(() => {
+    const rows = run?.rows || [];
+    const px = (v: any) => String(v ?? "").length * 6.6 + 18;
+    const fit = (label: string, vals: any[], base = 72, maxW = 240) => {
+      let m = Math.max(base, px(label));
+      for (const v of vals) {
+        const p = px(v);
+        if (p > m) m = p;
+      }
+      return Math.round(Math.min(maxW, m));
+    };
+    const nums: any[] = [];
+    for (const r of rows as any[]) {
+      nums.push(fmtInr(r.gross_master), fmtInr(r.gross_paid), fmtInr(r.net),
+                fmtInr(r.stat_wage_base), fmtInr(r.total_deduction));
+    }
+    return {
+      name: fit("Name", rows.map((r: any) => r.name), 110),
+      father: fit("Father Name", rows.map((r: any) => r.father_name), 100),
+      desg: fit("Designation", rows.map((r: any) => r.designation), 90),
+      uan: fit("UAN No.", rows.map((r: any) => r.uan_no), 80),
+      esi: fit("ESIC No.", rows.map((r: any) => r.esi_ip_no), 80),
+      pd: 72, // PresentDaysCell input is fixed-width
+      num: fit("Wage Base", nums, 72, 130),
+    };
+  }, [run?.rows]);
   const sortRows = (rows: CompRow[]) => {
     if (!sortBy) return rows;
     const num = (v: any) => Number(v ?? 0);
@@ -296,16 +325,25 @@ export default function ComplianceSalaryRunScreen() {
   useEffect(() => {
     (async () => {
       try {
+        // Iter 129l (user directive) — counts are for the SELECTED firm
+        // only, never the whole portal. Iter 130 — reacts to the local
+        // firm chips too, not just the global picker.
+        const cid = localCid || globalCid;
+        const qs = cid ? `?company_id=${encodeURIComponent(cid)}` : "";
         const r = await api<{ types: { name: string; count: number }[] }>(
-          "/admin/employee-types",
+          `/admin/employee-types${qs}`,
         );
         // Iter 85 — Compliance Salary Process shows only active types.
         const filtered = sortEmployeeTypes(r.types || [], { activeOnly: true });
         setTypes(filtered);
-        if (filtered.length > 0 && empType === "all") setEmpType(filtered[0].name);
+        if (filtered.length > 0) {
+          setEmpType((cur) =>
+            cur !== "all" && filtered.some((t) => t.name === cur) ? cur : filtered[0].name,
+          );
+        }
       } catch { /* ignore */ }
     })();
-  }, []);
+  }, [globalCid, localCid]);
 
   // Iter 68 — Compliance Salary should NEVER be a place where allowances /
   // statutory config are edited.  Load the firm's compliance policy on
@@ -314,6 +352,19 @@ export default function ComplianceSalaryRunScreen() {
   // (/compliance-policy) where the change persists and applies to every
   // subsequent run.
   const activeCompanyId = localCid || globalCid || user?.company_id || null;
+
+  // User directive — changing the FIRM must fully reset the form so the
+  // previous company's run/employees never linger on screen.
+  const prevCidRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevCidRef.current && prevCidRef.current !== activeCompanyId) {
+      setRun(null);
+      setActiveBatch(null);
+      setEmpType("all");
+    }
+    prevCidRef.current = activeCompanyId;
+  }, [activeCompanyId]);
+
   useEffect(() => {
     if (!activeCompanyId) return;
     (async () => {
@@ -482,6 +533,27 @@ export default function ComplianceSalaryRunScreen() {
 
   const generate = async () => {
     if (busy) return;
+    // Iter 129e (user directive) — if a run for this firm + month already
+    // exists, ask before reprocessing. "No" reloads the page unchanged.
+    const q: any = buildBody();
+    const existing = runs.find(
+      (r: any) => r.month === q.month && (!q.company_id || r.company_id === q.company_id),
+    );
+    if (existing) {
+      if ((existing as any).finalized) {
+        showMsg(
+          "This month's salary is already FINALIZED for this firm — it cannot be processed again. Use Unlock Request to de-finalize first.",
+        );
+        return;
+      }
+      const ok = await confirmYesNo(
+        "This salary was already processed for this firm & month.\nDo you want to REPROCESS this salary again?",
+      );
+      if (!ok) {
+        if (Platform.OS === "web") window.location.reload();
+        return;
+      }
+    }
     setBusy(true);
     try {
       const r = await api<{ run: CompRun }>("/admin/compliance-salary-runs", {
@@ -502,6 +574,13 @@ export default function ComplianceSalaryRunScreen() {
     if (!run || reprocessing) return;
     if ((run as any).finalized) {
       showMsg("This run is finalized (read-only). It cannot be reprocessed.");
+      return;
+    }
+    const ok = await confirmYesNo(
+      "Do you want to REPROCESS this salary again?\nThe sheet will be recomputed with the current parameters.",
+    );
+    if (!ok) {
+      if (Platform.OS === "web") window.location.reload();
       return;
     }
     setReprocessing(true);
@@ -541,6 +620,10 @@ export default function ComplianceSalaryRunScreen() {
   // Iter 126h — Draft / lock workflow.
   const saveAsDraft = async () => {
     if (!run) return;
+    if ((run as any).finalized) {
+      showMsg("This run is FINALIZED — Save as Draft is not allowed. Use Unlock Request to de-finalize first.");
+      return;
+    }
     await loadRuns();
     showMsg("Saved as draft ✓ — you can reprocess or edit anytime until it is finalized.");
   };
@@ -742,13 +825,14 @@ export default function ComplianceSalaryRunScreen() {
     if (!run) return;
     const monthDays = Math.max(1, run.month_days || 30);
     const stat = (run.statutory_cfg || {}) as any;
-    const pfEmpRate = Number(stat.pf_employee_rate ?? 12) / 100;
-    const pfErEpfRate = 0.0367;  // 3.67% employer EPF
-    const pfErEpsRate = 0.0833;  // 8.33% employer EPS (of PF wages, capped by wage floor above)
-    const pfErAdmin = Number(stat.pf_admin_rate ?? 0.5) / 100;
-    const esiEmpRate = Number(stat.esic_employee_rate ?? 0.75) / 100;
-    const esiErRate  = Number(stat.esic_employer_rate ?? 3.25) / 100;
-    const esiThresh  = Number(stat.esic_wage_threshold ?? 21000);
+    const pfEmpRate = Number(stat.pf_percent_employee ?? stat.pf_employee_rate ?? 12) / 100;
+    const pfErEpfRate = Number(stat.pf_percent_employer_epf ?? 3.67) / 100;
+    const pfErEpsRate = Number(stat.pf_percent_employer_eps ?? 8.33) / 100;
+    const pfCap = Number(stat.pf_wage_cap ?? 15000);
+    const floorPct = Number(stat.stat_wage_floor_pct ?? 50) / 100;
+    const esiEmpRate = Number(stat.esic_percent_employee ?? stat.esic_employee_rate ?? 0.75) / 100;
+    const esiErRate  = Number(stat.esic_percent_employer ?? stat.esic_employer_rate ?? 3.25) / 100;
+    const esiThresh  = Number(stat.esic_gross_threshold ?? stat.esic_wage_threshold ?? 21000);
 
     setRun((prev) => {
       if (!prev) return prev;
@@ -758,19 +842,23 @@ export default function ComplianceSalaryRunScreen() {
         const pd = Math.max(0, Math.min(monthDays, Number(newPd) || 0));
         const ratio = pd / monthDays;
 
-        // Full monthly heads (already stored) → pro-rated actuals.
+        // FULL monthly heads. The MASTER columns (basic_master, …) are the
+        // authoritative full-month values — using them fixes rows that start
+        // at 0 Present Days (no biometric attendance), where the old
+        // "re-hydrate from paid ÷ oldRatio" approach yielded 0 forever.
         const heads: (keyof CompRow)[] = [
           "basic", "hra", "conveyance", "medical", "special", "others",
         ];
+        const oldRatio = r.present_days / monthDays;
         const fullByHead: Record<string, number> = {};
-        // Re-hydrate full heads by dividing the previously-paid amounts
-        // by the OLD ratio when possible. For robustness we clamp to
-        // the full monthly value if it's already stored as such.
         for (const h of heads) {
+          const master = Number((r as any)[`${h as string}_master`] || 0);
+          if (master > 0) {
+            fullByHead[h as string] = master;
+            continue;
+          }
           const paid = Number((r as any)[h] || 0);
-          const oldRatio = r.present_days / monthDays;
-          const full = oldRatio > 0.001 ? paid / oldRatio : paid;
-          fullByHead[h as string] = full;
+          fullByHead[h as string] = oldRatio > 0.001 ? paid / oldRatio : paid;
         }
 
         const paidBasic = fullByHead.basic * ratio;
@@ -781,23 +869,36 @@ export default function ComplianceSalaryRunScreen() {
         const paidOth = fullByHead.others * ratio;
         const grossPaid = paidBasic + paidHra + paidConv + paidMed + paidSpl + paidOth;
 
-        // PF: pro-rate wages, apply rates
-        const fullPfWages = r.present_days > 0 ? (r.pf_wages / (r.present_days / monthDays)) : r.pf_wages;
-        const pfWagesNew = fullPfWages * ratio;
-        const pfEmp = r.pf_applicable ? pfWagesNew * pfEmpRate : 0;
-        const pfErEpf = r.pf_applicable ? pfWagesNew * pfErEpfRate : 0;
-        const pfErEps = r.pf_applicable ? pfWagesNew * pfErEpsRate : 0;
-        const pfErAdminAmt = r.pf_applicable ? pfWagesNew * pfErAdmin : 0;
-        const pfErTot = pfErEpf + pfErEps + pfErAdminAmt;
+        // Statutory wage base — mirrors utils/compliance_salary.py:
+        // max(Basic, floor% of Gross Earning) (used by ESIC below).
+        const statWageBase = Math.max(paidBasic, grossPaid * floorPct);
+        // Iter 129 (user directive) — PF ONLY when the Employee Master's
+        // "PF Basic Salary" (pf_basic) is filled. Wages = max(PF Basic,
+        // floor% of Gross), capped at the EPF ceiling unless the explicit
+        // PF Basic exceeds it.
+        const pfBasicFull = Number((r as any).pf_basic || 0);
+        const pfOn = r.pf_applicable !== false && pfBasicFull > 0;
+        const pfBasicPro = (r as any).salary_mode === "monthly" ? pfBasicFull * ratio : pfBasicFull;
+        const pfWagesNew = pfOn
+          ? Math.min(Math.max(pfBasicPro, grossPaid * floorPct), Math.max(pfCap, pfBasicPro))
+          : 0;
+        const pfEmp = pfWagesNew * pfEmpRate;
+        const pfErEpf = pfWagesNew * pfErEpfRate;
+        const pfErEps = pfWagesNew * pfErEpsRate;
+        const pfErTot = pfErEpf + pfErEps;
 
-        // ESIC: gross-paid based; applicable only when gross ≤ threshold
-        const esiApplicable = r.esic_applicable && grossPaid > 0 && grossPaid <= esiThresh;
-        const esiEmp = esiApplicable ? grossPaid * esiEmpRate : 0;
-        const esiEr  = esiApplicable ? grossPaid * esiErRate  : 0;
+        // ESIC (Iter 130 user directive): calculated ON BASIC salary (earned
+        // basic). Eligibility is by FULL-MONTH Basic ≤ the Compliance
+        // Settings limit (not gross).
+        const esiApplicable = r.esic_applicable !== false && grossPaid > 0 && fullByHead.basic <= esiThresh;
+        const esiBase = esiApplicable ? paidBasic : 0;
+        const esiEmp = esiApplicable ? Math.ceil(esiBase * esiEmpRate) : 0;
+        const esiEr  = esiApplicable ? Math.ceil(esiBase * esiErRate)  : 0;
 
         const pt = Number(r.pt || 0);   // keep PT slab as-is
         const tds = Number(r.tds || 0); // keep TDS as-is
-        const totalDed = pfEmp + esiEmp + pt + tds;
+        const otherDed = Number((r as any).other_deduction || 0);
+        const totalDed = Math.round(pfEmp) + esiEmp + pt + tds + otherDed;
         const net = grossPaid - totalDed;
 
         return {
@@ -809,15 +910,18 @@ export default function ComplianceSalaryRunScreen() {
           medical: Math.round(paidMed),
           special: Math.round(paidSpl),
           others: Math.round(paidOth),
+          monthly_gross: Math.round(grossPaid),
           gross_paid: Math.round(grossPaid),
+          pf_applicable: pfOn,
           pf_wages: Math.round(pfWagesNew),
           pf_employee: Math.round(pfEmp),
           pf_employer_epf: Math.round(pfErEpf),
           pf_employer_eps: Math.round(pfErEps),
           pf_employer_total: Math.round(pfErTot),
           esic_applicable: esiApplicable,
-          esic_employee: Math.round(esiEmp),
-          esic_employer: Math.round(esiEr),
+          esic_wage_base: Math.round(esiBase),
+          esic_employee: esiEmp,
+          esic_employer: esiEr,
           total_deduction: Math.round(totalDed),
           net: Math.round(net),
         } as CompRow;
@@ -989,7 +1093,7 @@ export default function ComplianceSalaryRunScreen() {
 
           <View style={styles.gridRow}>
             <View style={styles.gridCol}>
-              <Text style={styles.label}>Employee type</Text>
+              <Text style={styles.label}>Employee group</Text>
               <View style={styles.chipStrip}>
                 {/* Iter 85 pt 2 — "All" chip removed from Compliance Salary
                     Process. Reports keep an "All" filter but processing
@@ -1278,14 +1382,15 @@ export default function ComplianceSalaryRunScreen() {
                 {(() => {
                   const en = (run.rows[0] as any)?.enabled_allowances as string[] | undefined;
                   const has = (k: string) => !en || en.includes(k) || k === "basic";
-                  const CELL_W = 72;
+                  const CELL_W = colW.num;
+                  const INFO_W = colW.name + colW.father + colW.desg + colW.uan + colW.esi + colW.pd;
                   const optKeys = ["basic","hra","conveyance","medical","special","others"].filter((k) => has(k));
                   const masterCount = optKeys.length + 1; // +M.Gross
                   const calcCount = optKeys.length + 1;   // +Gross
                   const dedCount = 9;                     // WageBase,PF(E),PF(Er),ESI(E),ESI(Er),PT,TDS,Other,Net
                   return (
                     <View style={[styles.tblRow, styles.groupHdrRow]}>
-                      <View style={{ width: 6 * CELL_W }} />
+                      <View style={{ width: INFO_W }} />
                       <View style={[styles.groupHdrCell, styles.groupHdrMaster, { width: masterCount * CELL_W }]}>
                         <Text style={styles.groupHdrTxt}>MASTER SALARY (Full Month)</Text>
                       </View>
@@ -1332,8 +1437,12 @@ export default function ComplianceSalaryRunScreen() {
                       {headers.map((h, i) => (
                         <Text
                           key={i}
+                          numberOfLines={1}
                           style={[
                             styles.tblCell,
+                            { width: i < 6
+                                ? [colW.name, colW.father, colW.desg, colW.uan, colW.esi, colW.pd][i]
+                                : colW.num },
                             styles.tblHeaderTxt,
                             i >= 5 && { textAlign: "right" },
                             h.group === "master" && styles.groupHdrCellHeaderMaster,
@@ -1355,11 +1464,11 @@ export default function ComplianceSalaryRunScreen() {
                       idx % 2 === 0 && { backgroundColor: colors.surfaceSecondary },
                     ]}
                   >
-                    <Text style={styles.tblCell} numberOfLines={1}>{r.name || "—"}</Text>
-                    <Text style={styles.tblCell} numberOfLines={1}>{(r as any).father_name || "—"}</Text>
-                    <Text style={styles.tblCell} numberOfLines={1}>{(r as any).designation || "—"}</Text>
-                    <Text style={styles.tblCell} numberOfLines={1}>{(r as any).uan_no || "—"}</Text>
-                    <Text style={styles.tblCell} numberOfLines={1}>{(r as any).esi_ip_no || "—"}</Text>
+                    <Text style={[styles.tblCell, { width: colW.name }]} numberOfLines={1}>{r.name || "—"}</Text>
+                    <Text style={[styles.tblCell, { width: colW.father }]} numberOfLines={1}>{(r as any).father_name || "—"}</Text>
+                    <Text style={[styles.tblCell, { width: colW.desg }]} numberOfLines={1}>{(r as any).designation || "—"}</Text>
+                    <Text style={[styles.tblCell, { width: colW.uan }]} numberOfLines={1}>{(r as any).uan_no || "—"}</Text>
+                    <Text style={[styles.tblCell, { width: colW.esi }]} numberOfLines={1}>{(r as any).esi_ip_no || "—"}</Text>
                     {/* Iter 85 — Editable Present Days. Admin can override
                         the biometric-derived value; the row is recomputed
                         client-side via ``updatePresentDays()`` so PF /
@@ -1383,19 +1492,19 @@ export default function ComplianceSalaryRunScreen() {
                       const has = (k: string) => !en || en.includes(k) || k === "basic";
                       return (
                         <>
-                          {has("basic") ? <Text style={[styles.tblCell, styles.rightCell]}>{fmtInr((r as any).basic_master)}</Text> : null}
-                          {has("hra") ? <Text style={[styles.tblCell, styles.rightCell]}>{fmtInr((r as any).hra_master)}</Text> : null}
-                          {has("conveyance") ? <Text style={[styles.tblCell, styles.rightCell]}>{fmtInr((r as any).conveyance_master)}</Text> : null}
-                          {has("medical") ? <Text style={[styles.tblCell, styles.rightCell]}>{fmtInr((r as any).medical_master)}</Text> : null}
-                          {has("special") ? <Text style={[styles.tblCell, styles.rightCell]}>{fmtInr((r as any).special_master)}</Text> : null}
-                          {has("others") ? <Text style={[styles.tblCell, styles.rightCell]}>{fmtInr((r as any).others_master)}</Text> : null}
-                          <Text style={[styles.tblCell, styles.rightCell]}>{fmtInr((r as any).gross_master)}</Text>
+                          {has("basic") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr((r as any).basic_master)}</Text> : null}
+                          {has("hra") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr((r as any).hra_master)}</Text> : null}
+                          {has("conveyance") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr((r as any).conveyance_master)}</Text> : null}
+                          {has("medical") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr((r as any).medical_master)}</Text> : null}
+                          {has("special") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr((r as any).special_master)}</Text> : null}
+                          {has("others") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr((r as any).others_master)}</Text> : null}
+                          <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr((r as any).gross_master)}</Text>
                           {/* Calculated (pro-rated by Present Days). */}
-                          {has("basic") ? <Text style={[styles.tblCell, styles.rightCell]}>{fmtInr(r.basic)}</Text> : null}
-                          {has("hra") ? <Text style={[styles.tblCell, styles.rightCell]}>{fmtInr(r.hra)}</Text> : null}
-                          {has("conveyance") ? <Text style={[styles.tblCell, styles.rightCell]}>{fmtInr(r.conveyance)}</Text> : null}
-                          {has("medical") ? <Text style={[styles.tblCell, styles.rightCell]}>{fmtInr(r.medical)}</Text> : null}
-                          {has("special") ? <Text style={[styles.tblCell, styles.rightCell]}>{fmtInr(r.special)}</Text> : null}
+                          {has("basic") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.basic)}</Text> : null}
+                          {has("hra") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.hra)}</Text> : null}
+                          {has("conveyance") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.conveyance)}</Text> : null}
+                          {has("medical") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.medical)}</Text> : null}
+                          {has("special") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.special)}</Text> : null}
                           {has("others") ? (
                             <TextInput
                               value={String(Math.round(r.others || 0))}
@@ -1405,20 +1514,20 @@ export default function ComplianceSalaryRunScreen() {
                               }}
                               keyboardType="decimal-pad"
                               selectTextOnFocus
-                              style={[styles.tblCell, styles.rightCell, styles.editableCell]}
+                              style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
                             />
                           ) : null}
                         </>
                       );
                     })()}
-                    <Text style={[styles.tblCell, styles.rightCell]}>{fmtInr(r.gross_paid)}</Text>
-                    <Text style={[styles.tblCell, styles.rightCell]}>{fmtInr(r.stat_wage_base)}</Text>
-                    <Text style={[styles.tblCell, styles.rightCell]}>{r.pf_applicable ? fmtInr(r.pf_employee) : "—"}</Text>
-                    <Text style={[styles.tblCell, styles.rightCell]}>{r.pf_applicable ? fmtInr(r.pf_employer_total) : "—"}</Text>
-                    <Text style={[styles.tblCell, styles.rightCell]}>{r.esic_applicable ? fmtInr(r.esic_employee) : "—"}</Text>
-                    <Text style={[styles.tblCell, styles.rightCell]}>{r.esic_applicable ? fmtInr(r.esic_employer) : "—"}</Text>
-                    <Text style={[styles.tblCell, styles.rightCell]}>{fmtInr(r.pt)}</Text>
-                    <Text style={[styles.tblCell, styles.rightCell]}>{fmtInr(r.tds)}</Text>
+                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.gross_paid)}</Text>
+                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.stat_wage_base)}</Text>
+                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{r.pf_applicable ? fmtInr(r.pf_employee) : "—"}</Text>
+                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{r.pf_applicable ? fmtInr(r.pf_employer_total) : "—"}</Text>
+                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{r.esic_applicable ? fmtInr(r.esic_employee) : "—"}</Text>
+                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{r.esic_applicable ? fmtInr(r.esic_employer) : "—"}</Text>
+                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.pt)}</Text>
+                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.tds)}</Text>
                     {/* Iter 85 — Editable "Other" deduction. */}
                     <TextInput
                       value={String(Math.round((r as any).other_deduction || 0))}
@@ -1428,79 +1537,58 @@ export default function ComplianceSalaryRunScreen() {
                       }}
                       keyboardType="decimal-pad"
                       selectTextOnFocus
-                      style={[styles.tblCell, styles.rightCell, styles.editableCell]}
+                      style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
                     />
-                    <Text style={[styles.tblCell, styles.rightCell, { fontWeight: "700" }]}>{fmtInr(r.net)}</Text>
+                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(r.net)}</Text>
                   </View>
                 ))}
                 <View style={[styles.tblRow, { backgroundColor: colors.brandTertiary }]}>
-                  <Text style={[styles.tblCell, { fontWeight: "700" }]}>TOTAL</Text>
-                  <Text style={styles.tblCell}>—</Text>
-                  <Text style={styles.tblCell}>—</Text>
-                  <Text style={styles.tblCell}>—</Text>
-                  <Text style={styles.tblCell}>—</Text>
-                  <Text style={styles.tblCell}>—</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { fontWeight: "700" }]}>{fmtInr(run.totals?.basic)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { fontWeight: "700" }]}>{fmtInr(run.totals?.hra)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { fontWeight: "700" }]}>{fmtInr(run.totals?.conveyance)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { fontWeight: "700" }]}>{fmtInr(run.totals?.medical)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { fontWeight: "700" }]}>{fmtInr(run.totals?.special)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { fontWeight: "700" }]}>{fmtInr(run.totals?.others)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { fontWeight: "700" }]}>{fmtInr(run.totals?.gross_paid)}</Text>
-                  <Text style={styles.tblCell}>—</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { fontWeight: "700" }]}>{fmtInr(run.totals?.pf_employee)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { fontWeight: "700" }]}>{fmtInr(run.totals?.pf_employer_total)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { fontWeight: "700" }]}>{fmtInr(run.totals?.esic_employee)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { fontWeight: "700" }]}>{fmtInr(run.totals?.esic_employer)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { fontWeight: "700" }]}>{fmtInr(run.totals?.pt)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { fontWeight: "700" }]}>{fmtInr(run.totals?.tds)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { fontWeight: "700" }]}>{fmtInr(run.totals?.total_deduction)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { fontWeight: "700" }]}>{fmtInr(run.totals?.net)}</Text>
+                  <Text style={[styles.tblCell, { width: colW.name, fontWeight: "700" }]}>TOTAL</Text>
+                  <Text style={[styles.tblCell, { width: colW.father }]}>—</Text>
+                  <Text style={[styles.tblCell, { width: colW.desg }]}>—</Text>
+                  <Text style={[styles.tblCell, { width: colW.uan }]}>—</Text>
+                  <Text style={[styles.tblCell, { width: colW.esi }]}>—</Text>
+                  <Text style={[styles.tblCell, { width: colW.pd }]}>—</Text>
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.basic)}</Text>
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.hra)}</Text>
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.conveyance)}</Text>
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.medical)}</Text>
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.special)}</Text>
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.others)}</Text>
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.gross_paid)}</Text>
+                  <Text style={[styles.tblCell, { width: colW.num }]}>—</Text>
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.pf_employee)}</Text>
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.pf_employer_total)}</Text>
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.esic_employee)}</Text>
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.esic_employer)}</Text>
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.pt)}</Text>
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.tds)}</Text>
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.total_deduction)}</Text>
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.net)}</Text>
                 </View>
               </View>
             </ScrollView>
           </View>
         ) : null}
 
-        {/* Past runs */}
-        {runs.length > 0 ? (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Past compliance runs</Text>
-            {runs.map((r) => (
-              <Pressable
-                key={r.run_id}
-                onPress={() => openPastRun(r)}
-                style={styles.pastRow}
-              >
-                <View style={styles.pastIcon}>
-                  <Ionicons name="shield-checkmark-outline" size={16} color={colors.brandPrimary} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.pastTitle}>{r.month}</Text>
-                  <Text style={styles.pastMeta}>
-                    {r.employees_count || 0} employees · net {fmtInr(r.totals?.net)}
-                    {r.payslips_generated_at ? ` · ${r.payslips_count} pushed` : ""}
-                  </Text>
-                  {/* Iter 85 — Audit line: DD-MM-YYYY HH:MM · Admin Name */}
-                  {(r.generated_at || r.generated_by_name) ? (
-                    <Text style={styles.pastMeta}>
-                      {formatDateTime(r.generated_at)}
-                      {r.generated_by_name ? ` · ${r.generated_by_name}` : ""}
-                      {r.generated_by_role ? ` (${r.generated_by_role})` : ""}
-                    </Text>
-                  ) : null}
-                  {r.finalized_at ? (
-                    <Text style={styles.pastMeta}>
-                      Finalized {formatDateTime(r.finalized_at)}
-                      {r.finalized_by_name ? ` · ${r.finalized_by_name}` : ""}
-                    </Text>
-                  ) : null}
-                </View>
-                <Ionicons name="chevron-forward" size={16} color={colors.onSurfaceTertiary} />
-              </Pressable>
-            ))}
+        {/* Past runs — hidden from the front page (user directive).
+            Open earlier runs from Utilities → Past Salary Runs. */}
+        <Pressable
+          onPress={() => router.push("/past-salary-runs")}
+          style={styles.pastRow}
+          testID="csr-open-past-runs"
+        >
+          <View style={styles.pastIcon}>
+            <Ionicons name="albums-outline" size={18} color={colors.brandPrimary} />
           </View>
-        ) : null}
+          <View style={{ flex: 1 }}>
+            <Text style={styles.pastTitle}>Past runs</Text>
+            <Text style={styles.pastMeta}>
+              Open earlier compliance runs from Utilities → Past Salary Runs
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={colors.onSurfaceTertiary} />
+        </Pressable>
       </ScrollView>
 
       {/* Employee config modal */}

@@ -46,7 +46,7 @@ type Master = {
 type EmployeeLite = { user_id: string; name: string; employee_code?: string };
 
 const TABS: { key: MasterType; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { key: "group", label: "Groups", icon: "people-outline" },
+  { key: "group", label: "Employee Type", icon: "people-outline" },
   { key: "department", label: "Departments", icon: "business-outline" },
   { key: "designation", label: "Designations", icon: "ribbon-outline" },
   { key: "allowance", label: "Allowances", icon: "cash-outline" },
@@ -247,7 +247,7 @@ export default function MastersScreen() {
           <View style={{ flex: 1 }}>
             <Text style={styles.h1}>Employee Masters</Text>
             <Text style={styles.hsub}>
-              Groups · Departments · Designations — used across attendance sheets & reports.
+              Employee Type · Departments · Designations — used across attendance sheets & reports.
             </Text>
           </View>
         </View>

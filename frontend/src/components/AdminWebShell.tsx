@@ -18,6 +18,7 @@ import GlobalCompanyPicker from "@/src/components/GlobalCompanyPicker";
 import { useRefreshBus } from "@/src/context/RefreshBusContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { useUnreadNotifications } from "@/src/hooks/useUnreadNotifications";
+import { usePrimaryInbox } from "@/src/hooks/usePrimaryInbox";
 import { colors, radius, spacing, type } from "@/src/theme";
 
 /**
@@ -65,6 +66,7 @@ export const NAV_SUPER: NavItem[] = [
     children: [
       { route: "/salary-run", label: "Salary Process (Actual)", icon: "cash-outline" },
       { route: "/compliance-salary-run", label: "Salary Process (Compliance)", icon: "briefcase-outline" },
+      { route: "/ot-salary-run", label: "Salary Process (OT)", icon: "flash-outline" },
       { route: "/arrear-salary-run", label: "Salary Process (Arrear)", icon: "time-outline" },
     ],
   },
@@ -106,6 +108,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/leave-report", label: "Leave Report", icon: "calendar-number-outline" },
       { route: "/hr-letters", label: "HR Letters", icon: "document-text-outline" },
       { route: "/employee-report", label: "Employee Report", icon: "people-outline" },
+      { route: "/challan-summary", label: "Monthly Challan Summary", icon: "documents-outline" },
     ],
   },
   {
@@ -132,8 +135,8 @@ export const NAV_SUPER: NavItem[] = [
     icon: "list-outline",
     children: [
       { route: "/masters", label: "General Masters", icon: "layers-outline" },
+      { route: "/compliance-settings", label: "Standard Compliance Settings", icon: "shield-checkmark-outline" },
       { route: "/attendance-master", label: "Attendance Master", icon: "calendar-outline" },
-      { route: "/employee-groups", label: "Employee Type", icon: "people-outline" },
       { route: "/masters?tab=shifts", label: "Shifts", icon: "time-outline" },
     ],
   },
@@ -177,6 +180,7 @@ const NAV_PERMISSION_MAP: Record<string, string[]> = {
   "/attendance-review": ["attendance_review:read", "attendance_review:write"],
   "/salary-run": ["salary_process:read", "salary_process:write"],
   "/arrear-salary-run": ["salary_process:read", "salary_process:write"],
+  "/ot-salary-run": ["salary_process:read", "salary_process:write"],
   "/compliance-salary-run": ["compliance_salary:read", "compliance_salary:write"],
   "/messages": ["messages:read", "messages:write"],
   "/tickets": ["tickets:read", "tickets:write"],
@@ -308,6 +312,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
     children: [
       { route: "/salary-run", label: "Salary Process (Actual)", icon: "cash-outline" },
       { route: "/compliance-salary-run", label: "Salary Process (Compliance)", icon: "briefcase-outline" },
+      { route: "/ot-salary-run", label: "Salary Process (OT)", icon: "flash-outline" },
       { route: "/arrear-salary-run", label: "Salary Process (Arrear)", icon: "time-outline" },
     ],
   },
@@ -343,6 +348,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
       { route: "/leave-report", label: "Leave Report", icon: "calendar-number-outline" },
       { route: "/hr-letters", label: "HR Letters", icon: "document-text-outline" },
       { route: "/employee-report", label: "Employee Report", icon: "people-outline" },
+      { route: "/challan-summary", label: "Monthly Challan Summary", icon: "documents-outline" },
     ],
   },
   { route: "/attendance-grid", label: "Attendance Grid / Sheet", icon: "grid-outline" },
@@ -351,7 +357,6 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
     icon: "list-outline",
     children: [
       { route: "/masters", label: "General Masters", icon: "layers-outline" },
-      { route: "/employee-groups", label: "Employee Type", icon: "people-outline" },
     ],
   },
   { route: "/employee-bulk-import", label: "Bulk Import (Excel)", icon: "cloud-upload-outline" },
@@ -399,6 +404,10 @@ export default function AdminWebShell({ children }: Props) {
   const isWebDesktop = Platform.OS === "web" && width >= DESKTOP_MIN;
   const role = user?.role;
   const isSubAdmin = (user?.role as string) === "sub_admin";
+  // Iter 127 — Primary-inbox mail badge (Super/Sub Admin only).
+  const { count: primaryUnread } = usePrimaryInbox(
+    role === "super_admin" || role === "sub_admin",
+  );
 
   // Iter 67 — Sub-Admin gate: /firm-select renders full-bleed without the
   // sidebar / top-bar chrome so the picker is the only thing on screen.
@@ -494,6 +503,7 @@ export default function AdminWebShell({ children }: Props) {
       const SALARY_ROUTES = new Set([
         "/salary-run",
         "/arrear-salary-run",
+        "/ot-salary-run",
       ]);
       const empPerms: string[] = (user as any)?.employer_permissions || [];
       const permSet = new Set(empPerms);
@@ -540,6 +550,9 @@ export default function AdminWebShell({ children }: Props) {
     if (!salaryFlags || (!salaryFlags.online && !salaryFlags.offline)) return nav;
     const HIDE = new Set<string>();
     if (!salaryFlags.offline) HIDE.add("/salary-run");
+    // Iter 129h (user directive) — Attendance Policy is only relevant for
+    // firms running Off-roll (Offline/Actual) salary from biometrics.
+    if (!salaryFlags.offline) HIDE.add("/attendance-policy");
     if (HIDE.size === 0) return nav;
     const prune = (items: NavItem[]): NavItem[] => {
       const out: NavItem[] = [];
@@ -731,6 +744,31 @@ export default function AdminWebShell({ children }: Props) {
               <Text style={styles.refreshedAtTxt} testID="web-refreshed-at">
                 {formatSinceRefresh(refreshedAt)}
               </Text>
+            ) : null}
+            {/* Iter 127 — Primary Inbox mail badge (Super/Sub Admin). */}
+            {role === "super_admin" || role === "sub_admin" ? (
+              <Pressable
+                onPress={() => router.push("/mailbox" as any)}
+                style={({ pressed }) => [
+                  styles.notifBellBtn,
+                  pressed && { opacity: 0.85 },
+                ]}
+                testID="web-mail-bell"
+                hitSlop={6}
+              >
+                <Ionicons
+                  name={primaryUnread > 0 ? "mail-unread" : "mail-outline"}
+                  size={18}
+                  color={primaryUnread > 0 ? colors.accent : colors.brandPrimary}
+                />
+                {primaryUnread > 0 ? (
+                  <View style={styles.notifBadge}>
+                    <Text style={styles.notifBadgeTxt} numberOfLines={1}>
+                      {primaryUnread > 99 ? "99+" : String(primaryUnread)}
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
             ) : null}
             {/* Iter 89 — Notifications bell with unread badge. */}
             <Pressable

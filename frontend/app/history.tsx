@@ -40,8 +40,29 @@ type DaySummary = {
   firstIn?: string | null;
   lastOut?: string | null;
   totalMinutes: number;
+  otMinutes: number;
   punches: number;
-  status: "present" | "half" | "absent" | "weekend" | "future";
+  status: "present" | "half" | "absent" | "weekend" | "future" | "anomaly";
+};
+
+// Policy-computed day cell from GET /attendance/my-month (same pipeline as
+// the admin Attendance Grid — honours the Firm Master attendance policy).
+type PolicyDayCell = {
+  in?: string | null;
+  out?: string | null;
+  hours?: number;       // duty + OT combined
+  duty_hours?: number;
+  ot_hours?: number;
+  punches?: number;
+  present?: number;     // 0 / 0.5 / 1 per policy
+  weekly_off?: boolean;
+  anomaly?: boolean;
+};
+type PolicyMonth = {
+  month: string;
+  days: { [k: string]: PolicyDayCell };
+  totals?: { present_days?: number; hours?: number; ot_hours?: number; duty_hours?: number };
+  weekly_off_days?: number[];  // 0=Mon..6=Sun (python convention)
 };
 
 const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
@@ -76,16 +97,19 @@ function fmtTime(iso?: string | null): string {
 }
 
 /**
- * Aggregate raw punch records into per-day summaries for a given month.
- * A "day" is a calendar day in the user's local timezone. Duty minutes are
- * the sum of contiguous (in → out) pairs; a lone "in" without a matching
- * "out" is treated as still-open (contributes 0 to totals but marks present).
+ * Aggregate per-day summaries for a given month.
+ *
+ * When ``policy`` data is available (from /attendance/my-month) the day
+ * status + hours come straight from the Firm Master attendance-policy
+ * pipeline (same numbers the admin grid & payroll use). Raw punch records
+ * are still used for the drill-down list + IN/OUT display fallback.
  */
 function buildMonth(
   records: Record[],
   year: number,
   month: number,   // 0..11
   todayStr: string,
+  policy: PolicyMonth | null,
 ): DaySummary[] {
   // Bucket records by date string
   const byDate: { [k: string]: Record[] } = {};
@@ -93,6 +117,7 @@ function buildMonth(
     if (!byDate[r.date]) byDate[r.date] = [];
     byDate[r.date].push(r);
   }
+  const weeklyOffPy = policy?.weekly_off_days ?? [6]; // 0=Mon..6=Sun
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const out: DaySummary[] = [];
@@ -100,7 +125,9 @@ function buildMonth(
     const dt = new Date(year, month, d);
     const key = ymd(dt);
     const wk = dt.getDay();
-    const isWeekend = wk === 0; // Sunday only counted as weekend by default
+    // JS getDay(): 0=Sun..6=Sat → python weekday(): 0=Mon..6=Sun
+    const pyWeekday = (wk + 6) % 7;
+    const isWeekend = weeklyOffPy.includes(pyWeekday);
     const dayRecs = (byDate[key] || []).slice().sort((a, b) => a.at.localeCompare(b.at));
     let firstIn: string | null = null;
     let lastOut: string | null = null;
@@ -118,15 +145,36 @@ function buildMonth(
         }
       }
     }
-    const totalMinutes = Math.max(0, Math.round(totalMs / 60000));
-    const present = dayRecs.length > 0;
     const isFuture = key > todayStr;
     const isToday = key === todayStr;
+    const cell = policy?.days?.[String(d).padStart(2, "0")] || null;
+
+    let totalMinutes: number;
+    let otMinutes = 0;
+    let present: boolean;
     let status: DaySummary["status"];
-    if (isFuture) status = "future";
-    else if (present) status = totalMinutes >= 240 ? "present" : "half";
-    else if (isWeekend) status = "weekend";
-    else status = "absent";
+    if (cell) {
+      // ---- Policy-computed day (source of truth) ----------------------
+      totalMinutes = Math.round((cell.hours || 0) * 60);
+      otMinutes = Math.round((cell.ot_hours || 0) * 60);
+      const p = cell.present ?? 0;
+      present = (cell.punches || 0) > 0;
+      if (isFuture) status = "future";
+      else if (cell.anomaly) status = "anomaly";
+      else if (p >= 1) status = "present";
+      else if (p > 0) status = "half";
+      else if (cell.weekly_off || isWeekend) status = "weekend";
+      else if (present) status = "half";
+      else status = "absent";
+    } else {
+      // ---- Fallback (no policy data) — legacy raw pairing --------------
+      totalMinutes = Math.max(0, Math.round(totalMs / 60000));
+      present = dayRecs.length > 0;
+      if (isFuture) status = "future";
+      else if (present) status = totalMinutes >= 240 ? "present" : "half";
+      else if (isWeekend) status = "weekend";
+      else status = "absent";
+    }
     out.push({
       date: key,
       day: d,
@@ -138,6 +186,7 @@ function buildMonth(
       firstIn,
       lastOut,
       totalMinutes,
+      otMinutes,
       punches: dayRecs.length,
       status,
     });
@@ -149,6 +198,7 @@ export default function HistoryScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const [records, setRecords] = useState<Record[]>([]);
+  const [policyMonth, setPolicyMonth] = useState<PolicyMonth | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const now = new Date();
@@ -188,10 +238,15 @@ export default function HistoryScreen() {
           (Date.now() - new Date(cursor.y, cursor.m, 1).getTime()) / 86_400_000,
         ) + 5,
       );
-      const r = await api<{ records: Record[] }>(
-        `/attendance/history?days=${daysBack}`,
-      );
+      const monthStr = `${cursor.y}-${String(cursor.m + 1).padStart(2, "0")}`;
+      const [r, pm] = await Promise.all([
+        api<{ records: Record[] }>(`/attendance/history?days=${daysBack}`),
+        // Policy-computed month (Firm Master attendance policy) — same
+        // pipeline as the admin grid. Falls back to raw pairing on error.
+        api<PolicyMonth>(`/attendance/my-month?month=${monthStr}`).catch(() => null),
+      ]);
       setRecords(r.records || []);
+      setPolicyMonth(pm);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -201,23 +256,27 @@ export default function HistoryScreen() {
 
   const todayStr = ymd(now);
   const days = useMemo(
-    () => buildMonth(records, cursor.y, cursor.m, todayStr),
-    [records, cursor.y, cursor.m, todayStr],
+    () => buildMonth(records, cursor.y, cursor.m, todayStr, policyMonth),
+    [records, cursor.y, cursor.m, todayStr, policyMonth],
   );
 
   const stats = useMemo(() => {
     let present = 0;
     let half = 0;
     let absent = 0;
+    let anomalies = 0;
     let totalMinutes = 0;
+    let otMinutes = 0;
     for (const d of days) {
       if (d.isFuture) continue;
       if (d.status === "present") present++;
       else if (d.status === "half") half++;
       else if (d.status === "absent") absent++;
+      else if (d.status === "anomaly") anomalies++;
       totalMinutes += d.totalMinutes;
+      otMinutes += d.otMinutes;
     }
-    return { present, half, absent, totalMinutes };
+    return { present, half, absent, anomalies, totalMinutes, otMinutes };
   }, [days]);
 
   const selectedDay = useMemo(
@@ -335,6 +394,12 @@ export default function HistoryScreen() {
           <Text style={styles.totalTxt}>
             Total duty this month:{" "}
             <Text style={styles.totalStrong}>{fmtHM(stats.totalMinutes)}</Text>
+            {stats.otMinutes > 0 ? (
+              <Text style={styles.totalTxt}>
+                {"  ·  OT: "}
+                <Text style={styles.totalStrong}>{fmtHM(stats.otMinutes)}</Text>
+              </Text>
+            ) : null}
           </Text>
         </View>
 
@@ -396,6 +461,8 @@ export default function HistoryScreen() {
                         </Text>
                       ) : cell.status === "half" ? (
                         <Text style={[styles.dayMeta, { color: fg }]}>½</Text>
+                      ) : cell.status === "anomaly" ? (
+                        <Text style={[styles.dayMeta, { color: fg }]}>!</Text>
                       ) : (
                         <View style={styles.dayMetaSpacer} />
                       )}
@@ -412,6 +479,7 @@ export default function HistoryScreen() {
           <LegendDot color={colors.success} label="Present" />
           <LegendDot color="#F59E0B" label="Half day" />
           <LegendDot color={colors.error} label="Absent" />
+          <LegendDot color="#FB923C" label="Missing punch" />
           <LegendDot color={colors.border} label="Off / future" />
         </View>
 
@@ -439,7 +507,19 @@ export default function HistoryScreen() {
                 <Ionicons name="time-outline" size={14} color={colors.brandPrimary} />
                 <Text style={styles.detailPillTxt}>{fmtHM(selectedDay.totalMinutes)}</Text>
               </View>
+              {selectedDay.otMinutes > 0 ? (
+                <View style={styles.detailPill}>
+                  <Ionicons name="flash-outline" size={14} color="#B45309" />
+                  <Text style={styles.detailPillTxt}>OT: {fmtHM(selectedDay.otMinutes)}</Text>
+                </View>
+              ) : null}
             </View>
+            {selectedDay.status === "anomaly" ? (
+              <Text style={[styles.detailEmpty, { color: "#9A3412" }]}>
+                Missing punch on this day — duty hours are not counted as per
+                your firm&apos;s attendance policy. Contact your admin to fix it.
+              </Text>
+            ) : null}
             {selectedRecords.length === 0 ? (
               <Text style={styles.detailEmpty}>No punches on this day.</Text>
             ) : (
@@ -536,6 +616,7 @@ function statusBg(s: DaySummary["status"]): string {
     case "present": return "#DCFCE7";
     case "half":    return "#FEF3C7";
     case "absent":  return "#FEE2E2";
+    case "anomaly": return "#FFEDD5";
     case "weekend": return colors.surfaceSecondary;
     case "future":  return "transparent";
   }
@@ -545,6 +626,7 @@ function statusFg(s: DaySummary["status"]): string {
     case "present": return "#166534";
     case "half":    return "#B45309";
     case "absent":  return "#B91C1C";
+    case "anomaly": return "#9A3412";
     case "weekend": return colors.onSurfaceTertiary;
     case "future":  return colors.onSurfaceTertiary;
   }

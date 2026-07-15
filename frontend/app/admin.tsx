@@ -419,6 +419,21 @@ export default function AdminScreen() {
         </Pressable>
 
         <Pressable
+          testID="admin-ot-salary-tile"
+          style={styles.actionTile}
+          onPress={() => router.push("/ot-salary-run")}
+        >
+          <View style={styles.actionIcon}>
+            <Ionicons name="time-outline" size={20} color={colors.brandPrimary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.actionTitle}>OT salary process</Text>
+            <Text style={styles.actionSub}>Separate overtime payout — Textile Policy 2 firms</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.onSurface60} />
+        </Pressable>
+
+        <Pressable
           testID="admin-compliance-salary-tile"
           style={styles.actionTile}
           onPress={() => router.push("/compliance-salary-run")}
@@ -1051,11 +1066,9 @@ export default function AdminScreen() {
   );
 }
 
-/** Small filter chip strip for Employee Type + On-roll / Off-roll.
- * Rendered above the employees list. Types are derived from the loaded
- * employees so the vocabulary grows organically as Employer adds new
- * labels. "__unset__" is a special key for employees with no type.
- */
+/** Small filter chip strip for Employee GROUP + On-roll / Off-roll.
+ * Rendered above the employees list. Groups come from the employees'
+ * assigned General Master Group (employee_type field). */
 function EmployeeFilterChips({
   employees,
   typeFilter,
@@ -1071,16 +1084,14 @@ function EmployeeFilterChips({
 }) {
   const types = React.useMemo(() => {
     const counts: Record<string, number> = {};
-    let unset = 0;
     for (const e of employees) {
       const t = (e.employee_type || "").trim();
-      if (!t) unset += 1;
-      else counts[t] = (counts[t] || 0) + 1;
+      if (t) counts[t] = (counts[t] || 0) + 1;
     }
     const arr = Object.entries(counts)
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-    return { arr, unset };
+    return { arr };
   }, [employees]);
 
   if (employees.length === 0) return null;
@@ -1088,7 +1099,7 @@ function EmployeeFilterChips({
   return (
     <View style={filterStyles.wrap} testID="employee-filters">
       <View style={filterStyles.row}>
-        <Text style={filterStyles.label}>Type</Text>
+        <Text style={filterStyles.label}>Group</Text>
         <View style={filterStyles.chipStrip}>
           <FilterChip
             label="All"
@@ -1106,15 +1117,6 @@ function EmployeeFilterChips({
               testID={`type-chip-${t.name.replace(/\W+/g, "_")}`}
             />
           ))}
-          {types.unset > 0 ? (
-            <FilterChip
-              label="Unset"
-              count={types.unset}
-              active={typeFilter === "__unset__"}
-              onPress={() => onTypeChange("__unset__")}
-              testID="type-chip-unset"
-            />
-          ) : null}
         </View>
       </View>
       <View style={filterStyles.row}>

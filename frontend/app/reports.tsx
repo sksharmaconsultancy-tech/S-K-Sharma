@@ -166,15 +166,27 @@ export default function ReportsHubScreen() {
   }, [params.tab]);
   const [salaryRuns, setSalaryRuns] = useState<SalaryRun[]>([]);
   const [complianceRuns, setComplianceRuns] = useState<ComplianceRun[]>([]);
-  // Iter 98 — finalized-only view filter.
+  // Iter 98 — finalized-only view filter (month now filtered client-side so we
+  // can detect draft runs across all months).
   const visSalaryRuns = useMemo(
-    () => (finalizedOnly ? salaryRuns.filter((r) => r.finalized) : salaryRuns),
-    [salaryRuns, finalizedOnly],
+    () => salaryRuns.filter((r) => (!finalizedOnly || r.finalized) && (!month || r.month === month)),
+    [salaryRuns, finalizedOnly, month],
   );
   const visComplianceRuns = useMemo(
-    () => (finalizedOnly ? complianceRuns.filter((r) => r.finalized) : complianceRuns),
-    [complianceRuns, finalizedOnly],
+    () => complianceRuns.filter((r) => (!finalizedOnly || r.finalized) && (!month || r.month === month)),
+    [complianceRuns, finalizedOnly, month],
   );
+  // User directive — "All months" option only appears when every run is
+  // finalized, so aggregate data never includes unfinalized (draft) months.
+  const activeRuns = tab === "compliance" ? complianceRuns : salaryRuns;
+  const allowAllMonths = activeRuns.length > 0 && activeRuns.every((r) => !!r.finalized);
+  useEffect(() => {
+    if (tab === "bonus") return;
+    if (!allowAllMonths && !month && activeRuns.length > 0) {
+      const latest = [...activeRuns].map((r) => r.month).sort().reverse()[0];
+      if (latest) setMonth(latest);
+    }
+  }, [allowAllMonths, activeRuns, tab]); // eslint-disable-line react-hooks/exhaustive-deps
   const [bonusRuns, setBonusRuns] = useState<BonusRun[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -207,7 +219,6 @@ export default function ReportsHubScreen() {
       } else if (companyId) {
         qs.push(`company_id=${encodeURIComponent(companyId)}`);
       }
-      if (month) qs.push(`month=${encodeURIComponent(month)}`);
       if (fyStart) qs.push(`fy_start_year=${fyStart}`);
       const q = qs.length ? `?${qs.join("&")}` : "";
 
@@ -242,7 +253,7 @@ export default function ReportsHubScreen() {
     } finally {
       setLoading(false);
     }
-  }, [companyId, month, fyStart, tab, isAdminish, crossFirmMode, crossFirmSet]);
+  }, [companyId, fyStart, tab, isAdminish, crossFirmMode, crossFirmSet]);
 
   useEffect(() => {
     void load();
@@ -370,7 +381,7 @@ export default function ReportsHubScreen() {
             {crossFirmMode && crossFirmSet.size > 1 && (tab === "salary" || tab === "compliance") ? (
               <Pressable
                 onPress={async () => {
-                  const runs: any[] = tab === "salary" ? salaryRuns : complianceRuns;
+                  const runs: any[] = tab === "salary" ? visSalaryRuns : visComplianceRuns;
                   if (runs.length === 0) return;
                   setBulkDownloading(true);
                   try {
@@ -402,7 +413,7 @@ export default function ReportsHubScreen() {
                   <Ionicons name="cloud-download-outline" size={14} color="#fff" />
                 )}
                 <Text style={styles.bulkBtnTxt}>
-                  {bulkDownloading ? "Downloading…" : `Download all Excel (${(tab === "salary" ? salaryRuns : complianceRuns).length})`}
+                  {bulkDownloading ? "Downloading…" : `Download all Excel (${(tab === "salary" ? visSalaryRuns : visComplianceRuns).length})`}
                 </Text>
               </Pressable>
             ) : null}
@@ -439,7 +450,7 @@ export default function ReportsHubScreen() {
               <MonthPicker
                 value={month}
                 onChange={setMonth}
-                allowEmpty
+                allowEmpty={allowAllMonths}
                 emptyLabel="All months"
                 testID="rep-month-picker"
               />

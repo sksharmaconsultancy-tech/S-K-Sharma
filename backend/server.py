@@ -3,7 +3,7 @@ Employee attendance, leaves, payroll, compliance, tickets, notifications.
 Auth: Emergent-managed Google OAuth (session tokens).
 """
 from fastapi import FastAPI, APIRouter, HTTPException, Header, Query, Body, Request, UploadFile, File, Form
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -1085,6 +1085,16 @@ def _validate_policy(raw: dict) -> dict:
     weekoff_full_default = bool(raw.get("week_off_full_day_payment_default", False))
     # Iter 77d - Firm-level min working hours on week-off day (0 disables).
     weekoff_min_hrs = _num("week_off_min_working_hours", 0.0, 16.0, 0.0)
+    # Iter 131 (user directive) — OT Calculation config for Textile
+    # Policy 2 firms. Iter 131b: EITHER % of Basic OR % of Gross — never
+    # both. 0 = unused.
+    ot_pct_basic = _num("ot_pct_basic", 0.0, 500.0, 0.0)
+    ot_pct_gross = _num("ot_pct_gross", 0.0, 500.0, 0.0)
+    if ot_pct_basic > 0 and ot_pct_gross > 0:
+        raise HTTPException(
+            status_code=400,
+            detail="OT Calculation: choose EITHER % of Basic OR % of Gross — not both.",
+        )
 
     return {
         "shifts": shifts,
@@ -1107,6 +1117,9 @@ def _validate_policy(raw: dict) -> dict:
         # When > 0 an employee working >= this many hours on a week-off
         # day earns a full-day attendance credit.
         "week_off_min_working_hours": weekoff_min_hrs,
+        # Iter 131 — OT Calculation config (Textile Policy 2).
+        "ot_pct_basic": ot_pct_basic,
+        "ot_pct_gross": ot_pct_gross,
     }
 
 
@@ -5320,10 +5333,12 @@ async def get_attendance_policy(
     no policy on file yet, the preset for its business type is returned so
     the UI always has something to display."""
     user = await get_user_from_token(authorization)
-    require_role(user, ["super_admin", "company_admin"])
-    if user["role"] == "super_admin":
+    require_role(user, ["super_admin", "sub_admin", "company_admin"])
+    if user["role"] in ("super_admin", "sub_admin"):
         if not company_id:
             raise HTTPException(status_code=400, detail="Please pass ?company_id=")
+        if user["role"] == "sub_admin" and not sub_admin_can_touch_company(user, company_id):
+            raise HTTPException(status_code=403, detail="Firm not in your scope")
         company = await db.companies.find_one({"company_id": company_id}, {"_id": 0})
         if not company:
             raise HTTPException(status_code=404, detail="Company not found")
@@ -5375,10 +5390,12 @@ async def update_attendance_policy(
     """Update the attendance policy for the caller's company (or a specified
     `company_id` when called by a super admin)."""
     user = await get_user_from_token(authorization)
-    require_role(user, ["super_admin", "company_admin"])
-    if user["role"] == "super_admin":
+    require_role(user, ["super_admin", "sub_admin", "company_admin"])
+    if user["role"] in ("super_admin", "sub_admin"):
         if not company_id:
             raise HTTPException(status_code=400, detail="Please pass ?company_id=")
+        if user["role"] == "sub_admin" and not sub_admin_can_touch_company(user, company_id):
+            raise HTTPException(status_code=403, detail="Firm not in your scope")
     else:
         company_id = user.get("company_id")
         if not company_id:
@@ -5441,10 +5458,12 @@ async def reset_attendance_policy(
     is passed in the body, that preset is used; otherwise falls back to the
     company's own business_category preset."""
     user = await get_user_from_token(authorization)
-    require_role(user, ["super_admin", "company_admin"])
-    if user["role"] == "super_admin":
+    require_role(user, ["super_admin", "sub_admin", "company_admin"])
+    if user["role"] in ("super_admin", "sub_admin"):
         if not company_id:
             raise HTTPException(status_code=400, detail="Please pass ?company_id=")
+        if user["role"] == "sub_admin" and not sub_admin_can_touch_company(user, company_id):
+            raise HTTPException(status_code=403, detail="Firm not in your scope")
     else:
         company_id = user.get("company_id")
         if not company_id:
@@ -7950,7 +7969,6 @@ async def admin_bulk_import_parse(
     for r_idx, row in enumerate(ws.iter_rows(values_only=True)):
         if r_idx == 0:
             headers = [cell_str(v) for v in row]
-            # trim trailing empty header columns
             while headers and not headers[-1]:
                 headers.pop()
             continue
@@ -8762,6 +8780,74 @@ async def get_my_punch_selfie(
     return {"selfie_base64": rec.get("selfie_base64")}
 
 
+@api.get("/attendance/my-month")
+async def my_month_attendance(
+    month: str = Query(..., description="YYYY-MM"),
+    authorization: Optional[str] = Header(None),
+):
+    """Employee self-service month view. Computed with the SAME policy
+    pipeline as the admin Attendance Grid (bounce-merge, dedup, OT cap,
+    weekly-off rules, shift/policy overrides) so the attendance data an
+    employee sees always matches their assigned attendance policy."""
+    user = await get_user_from_token(authorization)
+    company_id = user.get("company_id")
+    if not company_id:
+        raise HTTPException(status_code=400, detail="No firm linked to your account")
+    if not re.match(r"^\d{4}-\d{2}$", month or ""):
+        raise HTTPException(status_code=400, detail="month must be YYYY-MM")
+    data = await _compute_monthly_grid_data(
+        company_id=company_id, month=month, only_user_id=user["user_id"],
+    )
+    row = next(
+        (r for r in (data.get("employees") or []) if r.get("user_id") == user["user_id"]),
+        None,
+    )
+    # Effective weekly-off days (firm policy + per-employee override) so the
+    # client can mark week-offs even on days without punches.
+    comp = await db.companies.find_one(
+        {"company_id": company_id}, {"_id": 0, "attendance_policy": 1},
+    )
+    pol = (comp or {}).get("attendance_policy") or {}
+    emp_doc = await db.users.find_one(
+        {"user_id": user["user_id"]}, {"_id": 0, "attendance_policy_override": 1},
+    )
+    eff = apply_employee_policy_override(dict(pol), emp_doc or {})
+    weekly_off_days = list(eff.get("weekly_off_days") or [])
+    weekly_set = set(weekly_off_days)
+
+    labels = data.get("day_labels") or []
+    full_dates = data.get("day_full_dates") or []
+    days: Dict[str, Any] = {}
+    totals: Dict[str, Any] = {}
+    if row:
+        for idx, lbl in enumerate(labels):
+            c = dict((row.get("days") or {}).get(lbl) or {})
+            c.pop("salary", None)  # attendance-only view (no pay data here)
+            # Grid cells only carry present/weekly_off on cleanly-paired
+            # punch days — normalise so EVERY cell has both fields.
+            if "present" not in c:
+                c["present"] = 0.0
+            if "weekly_off" not in c:
+                try:
+                    wd = datetime.strptime(full_dates[idx], "%Y-%m-%d").weekday()
+                except (ValueError, IndexError):
+                    wd = -1
+                c["weekly_off"] = wd in weekly_set
+            days[lbl] = c
+        totals = dict(row.get("totals") or {})
+        totals.pop("salary_total", None)
+    return {
+        "month": data.get("month"),
+        "day_labels": labels,
+        "day_full_dates": full_dates,
+        "weekday_labels": data.get("weekday_labels"),
+        "full_day_hours": data.get("full_day_hours"),
+        "weekly_off_days": weekly_off_days,
+        "days": days,
+        "totals": totals,
+    }
+
+
 def _effective_at(rec: dict) -> Optional[str]:
     """Effective punch timestamp for hour computations. Prefers admin-adjusted
     time (set via the approvals flow) and falls back to the original."""
@@ -8845,6 +8931,41 @@ async def attendance_summary(
             "still_in": still,
             "punches": len(by_date.get(d) or []),
         })
+
+    # User directive — the employee-facing duty widget must follow the Firm
+    # Master attendance policy. Overlay per-day HOURS from the same grid
+    # pipeline the admin Grid View / payroll uses (bounce-merge, dedup, OT
+    # cap, shift overrides, missing-punch = 0). first_in/last_out/still_in
+    # stay raw so the "currently punched-in" indicator keeps working.
+    if user.get("company_id"):
+        try:
+            to_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            pdata = await _compute_monthly_grid_data(
+                company_id=user["company_id"],
+                month=since_str[:7],
+                from_date=since_str,
+                to_date=to_str,
+                only_user_id=user["user_id"],
+            )
+            prow = next(
+                (r for r in (pdata.get("employees") or [])
+                 if r.get("user_id") == user["user_id"]),
+                None,
+            )
+            if prow:
+                cells = prow.get("days") or {}
+                labels = pdata.get("day_labels") or []
+                dates = pdata.get("day_full_dates") or []
+                by_full_date = {
+                    dates[i]: cells.get(labels[i]) or {}
+                    for i in range(min(len(labels), len(dates)))
+                }
+                for row in days_out:
+                    cell = by_full_date.get(row["date"])
+                    if cell is not None and not row.get("still_in"):
+                        row["hours"] = float(cell.get("hours") or 0.0)
+        except Exception:
+            logger.exception("policy overlay failed for /attendance/summary")
     window_total = round(sum(d["hours"] for d in days_out), 2)
 
     # All-time total — compute across ALL of the user's attendance in one pass
@@ -10397,7 +10518,7 @@ async def list_employee_types(
     usage counts so the UI can rank suggestions.
     """
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "sub_admin", "super_admin"])
     match: dict = {"employee_type": {"$exists": True, "$nin": [None, ""]}}
     if user["role"] == "company_admin":
         match["company_id"] = user.get("company_id")
@@ -10405,13 +10526,30 @@ async def list_employee_types(
         match["company_id"] = company_id
     pipeline = [
         {"$match": match},
-        {"$group": {"_id": "$employee_type", "count": {"$sum": 1}}},
+        {"$group": {"_id": {"$toUpper": {"$trim": {"input": "$employee_type"}}},
+                    "count": {"$sum": 1}}},
         {"$sort": {"count": -1, "_id": 1}},
         {"$limit": 100},
     ]
-    types = []
+    counts: dict = {}
     async for row in db.users.aggregate(pipeline):
-        types.append({"name": row["_id"], "count": int(row["count"])})
+        counts[row["_id"]] = int(row["count"])
+    # Iter 129k (user directive) — the Employee Type options come from the
+    # General Masters "group" list (global + firm scope), merged with live
+    # usage counts. Case-insensitive so STAFF/Staff can never split.
+    m_q: dict = {"type": "group"}
+    scope_cid = match.get("company_id")
+    if scope_cid:
+        m_q["company_id"] = {"$in": [scope_cid, "__global__", None]}
+    names: dict = {}
+    async for m in db.masters.find(m_q, {"_id": 0, "name": 1}):
+        nm = (m.get("name") or "").strip().upper()
+        if nm:
+            names[nm] = counts.get(nm, 0)
+    for nm, c in counts.items():
+        names.setdefault(nm, c)
+    types = [{"name": n, "count": c} for n, c in names.items()]
+    types.sort(key=lambda t: (-t["count"], t["name"]))
     return {"types": types}
 
 
@@ -11650,6 +11788,25 @@ async def list_employee_groups(
         else:
             g["member_count"] = 0
 
+    # Iter 129k (user directive) — every group-wise report/filter offers the
+    # General Masters "group" (Employee Type) options too, merged in
+    # case-insensitively.
+    have = {(g.get("name") or "").strip().upper() for g in groups}
+    async for m in db.masters.find(
+        {"type": "group", "company_id": {"$in": [target_cid, "__global__", None]}},
+        {"_id": 0, "name": 1},
+    ):
+        nm = (m.get("name") or "").strip().upper()
+        if nm and nm not in have:
+            cnt = await db.users.count_documents({
+                "company_id": target_cid,
+                "role": "employee",
+                "employee_group": {"$regex": f"^{re.escape(nm)}$", "$options": "i"},
+            })
+            groups.append({"name": nm, "member_count": cnt, "company_id": target_cid})
+            have.add(nm)
+    groups.sort(key=lambda g: str(g.get("name") or ""))
+
     return {"groups": groups, "company_id": target_cid}
 
 
@@ -12049,10 +12206,10 @@ async def update_user_role(payload: RoleUpdate, authorization: Optional[str] = H
     if "employee_type" in fset or "employee_group" in fset:
         raw = payload.employee_type if "employee_type" in fset else payload.employee_group
         v = (raw or "").strip() if raw is not None else None
-        # Cap length + normalise casing (Title Case) so "staff" and "STAFF"
-        # collapse into the same distinct suggestion later. Empty → None.
+        # Cap length + normalise casing (CAPITALS — Iter 129j) so "staff"
+        # and "STAFF" collapse into the same distinct suggestion later.
         if v:
-            unified = v[:60].strip().title()
+            unified = v[:60].strip().upper()
             updates["employee_type"] = unified
             updates["employee_group"] = unified
         else:
@@ -13021,7 +13178,7 @@ async def create_salary_run(
     configured deductions.
     """
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
     require_permission(admin, "salary_process:write")
     await require_employer_permission(admin, "salary_process:write", db)
     run = await _compute_salary_run(admin, payload)
@@ -13771,6 +13928,49 @@ async def healthz():
 # Dedicated statutory-side payroll (PF / ESIC / PT / TDS). Runs beside
 # the base salary process — completely separate persistence + payslips.
 # ---------------------------------------------------------------------------
+def _policy2_biometric_stats(att_rows: List[dict], policy: dict, emp_full: dict) -> dict:
+    """Iter 129c — Textile *Policy 2* firms: auto-sync Present Days for the
+    Compliance Salary run from the SAME biometric pipeline as the
+    attendance grid (``compute_textile_day``: 8 hrs = 1 day, under-hours
+    and week-off work → OT). Only APPROVED punches count, with the grid's
+    dedupe / bounce-merge / cross-day stitching applied so numbers match.
+
+    OT hours are intentionally returned as 0 — OT is paid via the separate
+    OT Salary Process (user directive), keeping it OUT of the compliance
+    gross to avoid double payment.
+    """
+    by_day: Dict[str, List[dict]] = {}
+    for r in att_rows or []:
+        st = r.get("status")
+        if st and st != "approved":
+            continue
+        d = r.get("date")
+        if d:
+            by_day.setdefault(d, []).append(r)
+    by_day = stitch_cross_day_ot(by_day)
+    present = 0.0
+    duty_min = 0.0
+    for date_key, punches in by_day.items():
+        try:
+            wd = datetime.strptime(date_key, "%Y-%m-%d").weekday()
+        except (ValueError, TypeError):
+            continue
+        punches = dedupe_same_machine_punches(punches, 15)
+        punches = merge_out_in_bounces(punches, 60)
+        if has_unpaired_punches(punches):
+            continue
+        s = compute_textile_day(punches, policy, emp_full, wd)
+        present += float(s.get("present_days") or 0)
+        duty_min += float(s.get("duty_minutes") or 0)
+    return {
+        "present_days": int(present),
+        "half_days": 0,
+        "effective_present": round(present, 2),
+        "duty_hours": round(duty_min / 60.0, 2),
+        "ot_hours": 0.0,
+    }
+
+
 class ComplianceSalaryRunCreate(BaseModel):
     """Body for POST /api/admin/compliance-salary-runs.
 
@@ -13871,6 +14071,17 @@ async def _compute_compliance_run(
     # month end. Payslips must never be generated for pre-DOJ months.
     employees = [e for e in employees if not _month_is_before_doj(e, payload.month)]
 
+    # Iter 127f/g — statutory config precedence: global Standard Compliance
+    # Settings < firm-specific overrides (Firm Master) < per-run cfg.
+    from routes.compliance_settings import (
+        get_standard_compliance_cfg,
+        get_firm_statutory_overrides,
+    )
+    _std_cfg = await get_standard_compliance_cfg()
+    _firm_over = await get_firm_statutory_overrides(payload.company_id)
+    effective_statutory = {**_std_cfg, **_firm_over, **(payload.statutory_cfg or {})}
+
+
     # ---- Load attendance for the month once (indexed by user_id) ----
     date_from = f"{year:04d}-{mon:02d}-01"
     date_to = f"{year:04d}-{mon:02d}-{default_days:02d}"
@@ -13882,7 +14093,8 @@ async def _compute_compliance_run(
                 "user_id": {"$in": user_ids},
                 "date": {"$gte": date_from, "$lte": date_to},
             },
-            {"_id": 0, "user_id": 1, "kind": 1, "at": 1, "date": 1},
+            {"_id": 0, "user_id": 1, "kind": 1, "at": 1, "date": 1,
+             "status": 1, "source": 1},
         ):
             attendance_by_user.setdefault(r["user_id"], []).append(r)
 
@@ -13939,7 +14151,12 @@ async def _compute_compliance_run(
         att_pol = company_doc.get("attendance_policy") or {}
         merged_pol = {**att_pol, **pol}
         att_rows = attendance_by_user.get(emp["user_id"], [])
-        stats = compute_present_days_and_ot(att_rows, merged_pol)
+        if (att_pol.get("policy_variant") or "").strip() == "policy_2":
+            # Iter 129c — Textile Policy 2: Present Days auto-synced from
+            # biometrics via the grid's textile pipeline (8 hrs = 1 day).
+            stats = _policy2_biometric_stats(att_rows, merged_pol, emp)
+        else:
+            stats = compute_present_days_and_ot(att_rows, merged_pol)
         _am = am_entries.get(emp["user_id"]) if payload.use_imported_sheet else None
         if payload.use_imported_sheet:
             # Imported sheet wins: present days from the uploaded/email
@@ -13957,7 +14174,7 @@ async def _compute_compliance_run(
         row = compute_compliance_row(
             emp, merged_pol, int(month_days), stats,
             company_structure_pct=payload.structure_pct,
-            statutory_cfg=payload.statutory_cfg,
+            statutory_cfg=effective_statutory,
             firm_pf_enabled=_ff["pf"],
             firm_esic_enabled=_ff["esic"],
         )
@@ -14096,6 +14313,17 @@ async def create_compliance_salary_run(
         else payload.company_id
     )
     await _require_firm_salary_permission(_gate_cid, "online")
+    # Iter 129f (user directive) — a FINALIZED month can never be processed
+    # again. Unlock (de-finalize) the run first.
+    _fin_q: Dict[str, Any] = {"month": payload.month, "finalized": True}
+    if payload.company_id:
+        _fin_q["company_id"] = payload.company_id
+    if await db.compliance_salary_runs.find_one(_fin_q, {"_id": 1}):
+        raise HTTPException(
+            status_code=409,
+            detail="This month's Compliance salary is already FINALIZED for this firm — "
+                   "it cannot be processed again. Use Unlock Request to de-finalize first.",
+        )
     run = await _compute_compliance_run(admin, payload)
     run["run_id"] = f"csrun_{uuid.uuid4().hex[:12]}"
     await db.compliance_salary_runs.insert_one(run)
@@ -14339,7 +14567,7 @@ async def reprocess_compliance_salary_run(
     authorization: Optional[str] = Header(None),
 ):
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
     await require_employer_permission(admin, "compliance_salary:write", db)
     existing = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
     if not existing:
@@ -14456,11 +14684,20 @@ async def export_compliance_salary_register_pdf(
         raise HTTPException(status_code=403, detail="Not authorised for this run")
 
     company_name = "S.K. Sharma & Co."
+    firm_info: Dict[str, Any] = {}
     if run.get("company_id"):
-        c = await db.companies.find_one({"company_id": run["company_id"]}, {"_id": 0, "name": 1})
+        c = await db.companies.find_one(
+            {"company_id": run["company_id"]}, {"_id": 0, "name": 1, "address": 1},
+        )
         if c and c.get("name"):
             company_name = c["name"]
-    pdf_bytes = build_compliance_register_pdf(run, company_name=company_name)
+        firm_info["address"] = (c or {}).get("address") or ""
+        fm = await db.firm_masters.find_one(
+            {"company_id": run["company_id"]}, {"_id": 0, "epf": 1, "esi": 1},
+        )
+        firm_info["pf_code"] = ((fm or {}).get("epf") or {}).get("epf_no") or ""
+        firm_info["esi_code"] = ((fm or {}).get("esi") or {}).get("esi_no") or ""
+    pdf_bytes = build_compliance_register_pdf(run, company_name=company_name, firm=firm_info)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -15272,9 +15509,6 @@ async def _monthly_report_impl(
     user_id + date and hands off to the correct XLSX builder.
     """
     from fastapi.responses import Response
-    from utils.monthly_attendance import (
-        build_monthly_inout_xlsx,  # noqa: F401 (kept for callers/tests)
-    )
     # Super Admin, Sub-Admin (with scope) or Company Admin of the firm.
     if admin.get("role") not in ("super_admin", "sub_admin", "company_admin"):
         raise HTTPException(status_code=403, detail="Not authorised")
@@ -15294,38 +15528,9 @@ async def _monthly_report_impl(
     except ValueError:
         raise HTTPException(status_code=400, detail="month must be YYYY-MM")
 
-    query: Dict[str, Any] = {"role": "employee", "company_id": company_id}
-    grp_uids = await _resolve_group_employee_ids(company_id, group_id)
-    if grp_uids is not None:
-        query["user_id"] = {"$in": grp_uids}
-    employees = await db.users.find(
-        query,
-        {
-            "_id": 0, "user_id": 1, "employee_code": 1, "name": 1,
-            "father_name": 1, "department": 1, "position": 1, "doj": 1,
-            "bio_code": 1,
-        },
-    ).sort([("employee_code", 1), ("name", 1)]).to_list(4000)
-    # Skip employees whose DOJ is after the reporting month
-    employees = [e for e in employees if not _month_is_before_doj(e, month)]
-
-    # Load all punches for the target month for these users
-    import calendar as _cal
-    days_in_month = _cal.monthrange(y, m)[1]
-    date_from = f"{y:04d}-{m:02d}-01"
-    date_to = f"{y:04d}-{m:02d}-{days_in_month:02d}"
-    punches_by_user_day: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
-    if employees:
-        user_ids = [e["user_id"] for e in employees]
-        cursor = db.attendance.find(
-            {"user_id": {"$in": user_ids}, "date": {"$gte": date_from, "$lte": date_to}},
-            {"_id": 0, "user_id": 1, "date": 1, "kind": 1, "at": 1},
-        ).sort([("user_id", 1), ("at", 1)])
-        async for r in cursor:
-            uid = r["user_id"]
-            d = r["date"]
-            punches_by_user_day.setdefault(uid, {}).setdefault(d, []).append(r)
-
+    # All four variants (XLSX + PDF twins) are grid-based now, so the
+    # employee/punch loading happens inside ``_compute_monthly_grid_data``
+    # with the full Firm Master policy pipeline applied.
     if variant == "inout":
         # Iter 77x — Grid View XLSX (multi-row per employee).
         # Reuses the exact grid-compute pipeline the Grid View screen uses
@@ -15343,13 +15548,18 @@ async def _monthly_report_impl(
         xlsx_bytes = build_grid_view_xlsx(grid)
         variant_slug = "GridView"
     elif variant == "inout_pdf":
+        # Policy-aligned (user directive): PDF twins now consume the SAME
+        # grid pipeline as the XLSX/Grid View so all attendance reports
+        # follow the Firm Master attendance policy.
         from utils.monthly_attendance_pdf import build_monthly_inout_pdf
-        pdf_bytes = build_monthly_inout_pdf(
-            company_name=company.get("name") or "S.K. Sharma & Co.",
+        grid = await _compute_monthly_grid_data(
+            company_id=company_id,
             month=month,
-            employees=employees,
-            punches_by_user_day=punches_by_user_day,
+            group_id=group_id,
+            from_date=None,
+            to_date=None,
         )
+        pdf_bytes = build_monthly_inout_pdf(grid)
         company_slug = (company.get("name") or "company").replace(" ", "_")
         filename = f"MonthlyAttendance_InOut_{company_slug}_{month}.pdf"
         return Response(
@@ -15359,12 +15569,14 @@ async def _monthly_report_impl(
         )
     elif variant == "hours_pdf":
         from utils.monthly_attendance_pdf import build_monthly_hours_pdf
-        pdf_bytes = build_monthly_hours_pdf(
-            company_name=company.get("name") or "S.K. Sharma & Co.",
+        grid = await _compute_monthly_grid_data(
+            company_id=company_id,
             month=month,
-            employees=employees,
-            punches_by_user_day=punches_by_user_day,
+            group_id=group_id,
+            from_date=None,
+            to_date=None,
         )
+        pdf_bytes = build_monthly_hours_pdf(grid)
         company_slug = (company.get("name") or "company").replace(" ", "_")
         filename = f"MonthlyAttendance_Hours_{company_slug}_{month}.pdf"
         return Response(
@@ -15706,6 +15918,7 @@ async def _compute_monthly_grid_data(
     group_id: Optional[str] = None,
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
+    only_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Iter 77x — Extracted compute pipeline used by BOTH the JSON grid
     endpoint and the Grid-View XLSX endpoint. Caller is expected to have
@@ -15766,6 +15979,9 @@ async def _compute_monthly_grid_data(
 
     # ----- Employees in scope --------------------------------------------
     query: Dict[str, Any] = {"role": "employee", "company_id": company_id}
+    if only_user_id:
+        # Employee self-view (/attendance/my-month) — compute for ONE user.
+        query["user_id"] = only_user_id
     grp_uids = await _resolve_group_employee_ids(company_id, group_id)
     if grp_uids is not None:
         query["user_id"] = {"$in": grp_uids}
@@ -16657,6 +16873,10 @@ async def create_master(
     name = (payload.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="Name is required")
+    # Iter 129j (user directive) — ALL master names (Departments,
+    # Designations, Employee Types/Groups, Allowances, Deductions) are
+    # stored in CAPITAL LETTERS, so duplicates can never differ by case.
+    name = name.upper()
     # Iter 77 - Support GLOBAL masters (available across every firm).
     is_global = (payload.company_id or "").strip() in ("", "__global__")
     # Iter 113 — company admins may add entries ONLY to their own firm
@@ -16675,7 +16895,11 @@ async def create_master(
             raise HTTPException(status_code=404, detail="Company not found")
         target_cid = payload.company_id
     dup = await db.masters.find_one(
-        {"type": payload.type, "company_id": target_cid, "name": name},
+        {"type": payload.type,
+         # Case-insensitive duplicate guard (Iter 129g) — firm-scoped
+         # entries may not duplicate GLOBAL ones either.
+         "company_id": {"$in": [target_cid, "__global__", None]},
+         "name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}},
         {"_id": 0, "master_id": 1},
     )
     if dup:
@@ -17754,6 +17978,17 @@ async def create_actual_salary_process(
         company_id = payload.company_id
     # Iter 98 — Firm Master gate: Offline Salary must be enabled for the firm.
     await _require_firm_salary_permission(company_id, "offline")
+    # Iter 129f (user directive) — a FINALIZED month can never be processed
+    # again. Unlock (de-finalize) the run first.
+    _fin_q: Dict[str, Any] = {"month": payload.month, "finalized": True}
+    if company_id:
+        _fin_q["company_id"] = company_id
+    if await db.salary_runs.find_one(_fin_q, {"_id": 1}):
+        raise HTTPException(
+            status_code=409,
+            detail="This month's Actual salary is already FINALIZED for this firm — "
+                   "it cannot be processed again. Unlock (de-finalize) it first.",
+        )
 
     # Iter 98 — OT calculation basis (basic | gross) from Firm Master →
     # Salary Process Settings. Stored on the run so row edits re-compute
@@ -18224,6 +18459,92 @@ async def delete_employee_draft(
     return {"ok": True}
 
 
+# ---------------------------------------------------------------------------
+# Iter 127 — GLOBAL AUDIT LOCK (Monthly Challan Summary).
+# When a firm's Challan Summary remark contains "audit", every data-entry
+# request (POST/PUT/PATCH/DELETE) that targets that firm is rejected with
+# HTTP 423 until the Super Admin clears the remark. Employees keep punching
+# attendance — the lock applies to admin / sub-admin / company-admin entry.
+# ---------------------------------------------------------------------------
+_audit_lock_cache: Dict[str, Any] = {"ids": frozenset(), "exp": 0.0}
+
+
+def bust_audit_lock_cache() -> None:
+    """Called by routes/challan_summary.py right after a remark changes."""
+    _audit_lock_cache["exp"] = 0.0
+
+
+async def _audit_locked_company_ids() -> frozenset:
+    import time as _time
+    if _time.time() >= _audit_lock_cache["exp"]:
+        try:
+            docs = await db.challan_summaries.find(
+                {"is_audit": True}, {"_id": 0, "company_id": 1}).to_list(1000)
+            _audit_lock_cache["ids"] = frozenset(
+                d["company_id"] for d in docs if d.get("company_id"))
+        except Exception:
+            logger.exception("[audit-lock] failed to refresh locked-firm cache")
+        _audit_lock_cache["exp"] = _time.time() + 20
+    return _audit_lock_cache["ids"]
+
+
+@app.middleware("http")
+async def _audit_lock_guard(request: Request, call_next):
+    if request.method in ("POST", "PUT", "PATCH", "DELETE") and \
+            request.url.path.startswith("/api"):
+        try:
+            locked = await _audit_locked_company_ids()
+        except Exception:
+            locked = frozenset()
+        if locked:
+            path = request.url.path
+            # Sending a summary email is not data entry — always allowed.
+            if path.endswith("/send-email"):
+                return await call_next(request)
+            target = None
+            for cid in locked:
+                if cid and cid in path:
+                    target = cid
+                    break
+            if not target:
+                qcid = request.query_params.get("company_id")
+                if qcid and qcid in locked:
+                    target = qcid
+            if not target:
+                try:
+                    # Starlette's BaseHTTPMiddleware (_CachedRequest) caches
+                    # the body read here and replays it downstream — safe.
+                    body_bytes = await request.body()
+                except Exception:
+                    body_bytes = b""
+                if body_bytes:
+                    try:
+                        data = json.loads(body_bytes)
+                        if isinstance(data, dict) and data.get("company_id") in locked:
+                            target = data.get("company_id")
+                    except (ValueError, UnicodeDecodeError):
+                        pass
+            if target:
+                actor = None
+                try:
+                    actor = await get_user_from_token(
+                        request.headers.get("authorization"))
+                except Exception:
+                    actor = None
+                role = (actor or {}).get("role")
+                # Super Admin manages the lock; employees keep punching.
+                if role not in ("super_admin", "employee"):
+                    return JSONResponse(
+                        status_code=423,
+                        content={"detail": (
+                            "This firm is under AUDIT lock — data entry is "
+                            "disabled until the Super Admin removes the "
+                            "Audit remark in the Monthly Challan Summary."
+                        )},
+                    )
+    return await call_next(request)
+
+
 # Iter 85 (fix) — register the API router LAST so every @api.* decorator
 # defined anywhere in this module gets attached to the FastAPI app.
 app.include_router(api)
@@ -18269,6 +18590,8 @@ from routes.deletion_approvals import router as deletion_approvals_router  # noq
 from routes.employee_full_report import router as employee_full_report_router  # noqa: E402
 from routes.temp_bundle import router as temp_bundle_router  # noqa: E402
 from routes.user_prefs import router as user_prefs_router  # noqa: E402
+from routes.challan_summary import router as challan_summary_router  # noqa: E402
+from routes.compliance_settings import router as compliance_settings_router  # noqa: E402
 
 
 from utils.rpa_worker import maybe_start as maybe_start_rpa_worker  # noqa: E402
@@ -18308,6 +18631,10 @@ app.include_router(deletion_approvals_router)
 app.include_router(employee_full_report_router)
 app.include_router(temp_bundle_router)
 app.include_router(user_prefs_router)
+app.include_router(challan_summary_router)
+from routes.ot_salary import router as ot_salary_router  # noqa: E402
+app.include_router(ot_salary_router)
+app.include_router(compliance_settings_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.

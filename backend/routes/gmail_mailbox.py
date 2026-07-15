@@ -336,7 +336,9 @@ async def _access_token(user_id: str) -> str:
 @router.get("/gmail/status")
 async def gmail_status(authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
-    require_role(user, ["super_admin"])
+    # Iter 127 — Sub Admins may READ the shared mailbox (primary-inbox
+    # notifications on their home screen link here).
+    require_role(user, ["super_admin", "sub_admin"])
     acct = await db.gmail_accounts.find_one({"user_id": user["user_id"]}, {"_id": 0, "refresh_token": 0})
     if acct:
         return {"connected": True, "email": acct.get("email"),
@@ -347,6 +349,74 @@ async def gmail_status(authorization: Optional[str] = Header(None)):
         return {"connected": True, "email": smtp.get("username"),
                 "connected_at": None, "via": "smtp"}
     return {"connected": False, "email": None, "connected_at": None}
+
+
+# ---------------------------------------------------------------------------
+# Iter 127 — Primary-inbox alert feed for admin home screens.
+# Super Admins AND Sub Admins poll this endpoint (60s) so a bell badge +
+# dashboard banner can "ping" whenever a new email lands in the Gmail
+# PRIMARY category. The result is cached server-side for 45s so many
+# concurrent admins don't hammer Gmail / IMAP.
+# ---------------------------------------------------------------------------
+_primary_unread_cache: dict = {"exp": 0.0, "data": None}
+
+
+@router.get("/gmail/primary-unread")
+async def gmail_primary_unread(authorization: Optional[str] = Header(None)):
+    user = await get_user_from_token(authorization)
+    require_role(user, ["super_admin", "sub_admin"])
+    if _primary_unread_cache["data"] is not None and time.time() < _primary_unread_cache["exp"]:
+        return _primary_unread_cache["data"]
+
+    result: dict = {"connected": False, "count": 0, "messages": []}
+    try:
+        acct = await db.gmail_accounts.find_one(
+            {"user_id": user["user_id"]}, {"_id": 0, "user_id": 1})
+        if acct:
+            token = await _access_token(user["user_id"])
+            params = [("maxResults", 5), ("labelIds", "INBOX"),
+                      ("labelIds", "CATEGORY_PERSONAL"), ("q", "is:unread")]
+            async with httpx.AsyncClient(timeout=30) as cx:
+                r = await cx.get(f"{GMAIL_API}/messages", params=params,
+                                 headers={"Authorization": f"Bearer {token}"})
+                if r.status_code == 200:
+                    data = r.json()
+                    ids = [m["id"] for m in data.get("messages", [])]
+                    out = []
+                    for mid in ids:
+                        mr = await cx.get(
+                            f"{GMAIL_API}/messages/{mid}",
+                            params={"format": "metadata",
+                                    "metadataHeaders": ["Subject", "From", "Date"]},
+                            headers={"Authorization": f"Bearer {token}"},
+                        )
+                        if mr.status_code != 200:
+                            continue
+                        m = mr.json()
+                        hs = (m.get("payload") or {}).get("headers") or []
+                        out.append({"id": m["id"], "subject": _hdr(hs, "Subject"),
+                                    "from": _hdr(hs, "From"), "date": _hdr(hs, "Date")})
+                    result = {"connected": True,
+                              "count": int(data.get("resultSizeEstimate") or len(out)),
+                              "messages": out}
+        else:
+            smtp = await _smtp_settings()
+            if smtp:
+                import asyncio as _asyncio
+                msgs = await _asyncio.to_thread(
+                    _imap_list_sync, smtp, "CATEGORY_PRIMARY", "is:unread", 10)
+                unread = [m for m in msgs if m.get("unread")]
+                result = {"connected": True, "count": len(unread),
+                          "messages": [{"id": m["id"], "subject": m["subject"],
+                                        "from": m["from"], "date": m["date"]}
+                                       for m in unread[:5]]}
+    except Exception as e:  # network/IMAP hiccups must never break dashboards
+        result = {"connected": False, "count": 0, "messages": [],
+                  "error": str(e)[:160]}
+
+    _primary_unread_cache["data"] = result
+    _primary_unread_cache["exp"] = time.time() + 45
+    return result
 
 
 @router.post("/gmail/disconnect")
@@ -373,7 +443,7 @@ async def gmail_messages(
     authorization: Optional[str] = Header(None),
 ):
     user = await get_user_from_token(authorization)
-    require_role(user, ["super_admin"])
+    require_role(user, ["super_admin", "sub_admin"])
     # SMTP/IMAP fallback when Gmail OAuth is not connected.
     acct = await db.gmail_accounts.find_one({"user_id": user["user_id"]}, {"_id": 0, "user_id": 1})
     if not acct:
@@ -458,7 +528,7 @@ def _extract_body(payload: dict) -> dict:
 @router.get("/gmail/messages/{msg_id}")
 async def gmail_message_detail(msg_id: str, authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
-    require_role(user, ["super_admin"])
+    require_role(user, ["super_admin", "sub_admin"])
     # SMTP/IMAP fallback when Gmail OAuth is not connected.
     acct = await db.gmail_accounts.find_one({"user_id": user["user_id"]}, {"_id": 0, "user_id": 1})
     if not acct:

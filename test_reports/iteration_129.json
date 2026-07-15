@@ -1,0 +1,48 @@
+{
+  "summary": "Iter 129 — Firm Master attendance policy pipeline propagation. Backend pytest 11/13 PASSED (~85%). PASSED: my-month no-auth 401, bad-month 400, grid alignment (emp 50 day-by-day duty_hours matches admin monthly-grid), monthly-inout PDF+xlsx (200/valid), monthly-hours PDF+xlsx (200/valid, MADAN row present), MADAN KEER grid totals exactly 24.00/6.50/30.50/3/6.50, daily PDF+xlsx, ot-report JSON, summary?days=7 policy overlay (anomaly days=0 hrs, window_total_hours == sum(days.hours)). FAILED: (a) my-month day cells are MISSING the `present` and `weekly_off` fields that E1 explicitly listed in the review spec and that /app/frontend/app/history.tsx consumes at lines 160,166; (b) weekly-off Sundays (12/19/26) come back with weekly_off=undefined on the cell — the top-level weekly_off_days=[6] is emitted correctly, so calendar can still infer via isWeekend, but the cell-level flag is missing. FRONTEND (mobile viewport 375x667): /pin-login TEST50/123456 lands on employee dashboard; /history calendar renders correctly — 'July 2026' header, KPI row (0 Full / 0 Half / 5 Absent), legend includes 'Missing punch', early July days show missing-punch orange state with '!' markers (because emp 50's punches ARE anomalies — pipeline is applied), Sundays 12/19/26 rendered grey. FRONTEND ADMIN (desktop): /reports shows rep-month-picker with NO 'All months' option and auto-selects July 2026 (runs list shows only 2026-07 entries); /challans portal-month-select is a native <select> with value='2026-07' and options=['2026-07','2026-06'] — no 'all' option; /attendance-grid loads Kankani Enterprises 2026-07 grid and shows anomaly annotations ('— missing IN — 08:54 ⚠ rectify') proving pipeline is being applied. Dashboard 7-day widget currently shows 0h across all 7 days for emp 50 (correct because all their punches are anomalies → policy hours=0). No regressions observed on xlsx/daily/ot-report endpoints.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/attendance/my-month", "issue": "day cells are missing `present` and `weekly_off` fields that E1's review spec explicitly required and that /app/frontend/app/history.tsx lines 160,166 consume. Cell today has {in,out,ot_in,ot_out,hours,duty_hours,raw_hours,ot_hours,sources,punches,anomaly,anomaly_reason} — should also include boolean `present` (from policy — 1.0 full / 0.5 half / 0 absent-or-weekly-off) and `weekly_off`. Impact is masked for TEST50 because all their days happen to be anomalies (status branches to 'anomaly' before the p>=1/p>0 checks), so calendar visually looks right; but ANY employee with clean paired punches would render as 'half day' (yellow) instead of 'present' (green) because line 160 defaults `p = cell.present ?? 0`."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "HistoryScreen (/history)", "issue": "History calendar depends on cell.present being emitted by /attendance/my-month. Today it's undefined so `p = cell.present ?? 0` → no day can ever reach the 'present' status branch. Any employee with clean paired punches will be shown as 'half day' (yellow) even though the policy computed a full duty day. Bug is latent for TEST50 because all their days are anomalies. Reference: /app/frontend/app/history.tsx:160,164.", "testID": "hist-kpi-present", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter129_policy_attendance.py",
+    "/app/test_reports/pytest/iter129.xml",
+    "/tmp/hist_01.png",
+    "/tmp/adm_reports2.png",
+    "/tmp/adm_challans2.png",
+    "/tmp/adm_grid2.png"
+  ],
+  "action_items": [
+    "Add `present` and `weekly_off` boolean/float fields to each day-cell emitted by GET /api/attendance/my-month (server.py ~line 8677). `present` should mirror the same value the grid pipeline computes (1.0 / 0.5 / 0.0). `weekly_off` should be True on days whose weekday is in weekly_off_days AND that don't have overriding shift/OT rows. This is the same pipeline output the admin grid uses.",
+    "(Optional) Since frontend already reads cell.present, consider also emitting a `status` string ('present'|'half'|'absent'|'weekly_off'|'anomaly'|'future') so the frontend doesn't have to re-derive it from 4 fields — reduces divergence between admin grid and PWA."
+  ],
+  "critical_code_review_comments": [
+    "server.py my-month endpoint: cells omit two fields explicitly listed in E1's review spec (`present`, `weekly_off`). Frontend history.tsx already reads them (lines 160,166) — this is a real contract mismatch, not just a spec-drift.",
+    "history.tsx line 160 uses `cell.present ?? 0` — safe fallback, but combined with the missing field it silently downgrades every clean 8h punch day to 'half'. Recommend the server-side fix rather than a client-side heuristic (e.g. treating duty_hours>=policy.full_hours as present would drift from admin grid).",
+    "history.tsx line 166 checks `cell.weekly_off || isWeekend` — the OR falls back to weekday-based `isWeekend`, so Sundays still render correctly today. But any policy that has a non-Sunday weekly-off day (or day-specific shift override marking weekly-off) will be missed until backend emits the flag.",
+    "reports.tsx / challans.tsx month gating verified working: allowAllMonths=false when any draft run exists → 'All months' option hidden and month select auto-picks the latest month. Good implementation.",
+    "monthly PDF/xlsx refactor is clean — no regressions. MADAN KEER (code 212) totals from grid: 24.00 / 6.50 / 30.50 / 3 / 6.50 (Duty/OT/Total/Days/Extra) match exactly."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter129_policy_attendance.py (new — 13 tests: 11 passed / 2 failed documenting missing my-month cell fields)"
+  ],
+  "success_rate": {
+    "backend": "11/13 = 84.6% (2 failures both document the same real bug: missing `present`/`weekly_off` cell fields on my-month)",
+    "frontend": "5/5 verified — /pin-login → dashboard, /history KPI+legend+missing-punch markers+weekly-off greys, /reports no-All-months + auto-select July 2026, /challans no-'all' + default 2026-07, /attendance-grid Kankani July 2026 renders with policy annotations"
+  },
+  "seed_data_creation": "None. Only read-only calls + existing seeded emp TEST50 login. No test data written.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Base URL: https://emplo-connect-1.preview.emergentagent.com. Employee token via POST /api/auth/pin-login {login_id:'TEST50', pin:'123456'} (user_44cd6f561da0, emp_code 50). Super admin token via POST /api/auth/admin-password-login {email:'sksharmaconsultancy@gmail.com', password:'sharma123'}. Note the admin-pin-login UI's Sign-in button is not a plain <button> — use inputs[1].press('Enter') or click via `text=Sign in` selector to submit. rep-month-picker is a custom DIV (not a native <select>) so evaluate .innerText for verification; portal-month-select IS a native <select>. Verified totals for MADAN KEER (code 212) in July 2026 grid: 24.00/6.50/30.50/3/6.50.",
+  "rca_of_issue": "Bug: my-month day cells lack `present` and `weekly_off` fields. Root cause: the new /api/attendance/my-month endpoint (server.py ~line 8677) transforms grid rows into cells but only serializes {in,out,ot_in,ot_out,hours,duty_hours,raw_hours,ot_hours,sources,punches,anomaly,anomaly_reason}. The underlying policy computation already produces present-day scoring and weekly-off marking (visible in the admin grid annotations), but those two fields aren't copied into the my-month payload. Fix: extend the cell serializer to include `present: float` (1.0/0.5/0.0) and `weekly_off: bool` from the same source the admin grid uses. Reproduction: GET /api/attendance/my-month?month=2026-07 with TEST50 token → inspect days['01'] → observe absent `present`/`weekly_off` keys. Mitigation: the frontend `cell.present ?? 0` fallback prevents crash, but produces incorrect status labels for any employee with clean full-duty days."
+}

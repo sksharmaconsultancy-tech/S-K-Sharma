@@ -1,40 +1,29 @@
-"""Monthly Attendance PDF builders (Iter 77).
+"""Monthly Attendance PDF builders (Iter 77, policy-aligned rewrite).
 
-Mirrors the XLSX exports in ``utils/monthly_attendance.py`` so admins have
-a paper-friendly landscape A4 report identical in numbers to the Grid View
-and the Excel export.
+Both builders now consume the SAME policy-computed ``grid`` payload as the
+on-screen Grid View and the XLSX exports (``_compute_monthly_grid_data`` in
+``server.py``) so every number honours the Firm Master attendance policy:
+approved-only punches, bounce-merge, dedup, OT cap, cross-day OT pairing,
+shift/per-employee overrides, weekly-off rules and missing-punch anomalies.
 
 Two variants:
-  * ``build_monthly_inout_pdf``  - one cell per day with IN / OUT / hours.
-  * ``build_monthly_hours_pdf``  - one cell per day showing total hours.
-
-Both reuse the exact same ``_pair_punches`` pairing logic to compute
-hours so the numbers stay identical across Grid + Excel + PDF.
+  * ``build_monthly_inout_pdf(grid)``  - one cell per day with IN / OUT / hours.
+  * ``build_monthly_hours_pdf(grid)``  - one cell per day showing total hours.
 """
 from __future__ import annotations
 
 import io
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, List
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
 from reportlab.platypus import (
-    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak,
+    SimpleDocTemplate, Table, TableStyle, Paragraph, PageBreak,
 )
 from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
-
-from utils.monthly_attendance import (
-    _month_bounds,
-    _pair_punches,
-    _fmt_time_ist,
-    _fmt_hours_sample,
-    _weekday_short,
-    _summary_columns_hours,
-    WEEKDAY_SHORT,
-)
+from reportlab.lib.enums import TA_CENTER
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -67,64 +56,44 @@ def _iter_pages_by_days(days: int, chunk: int) -> List[List[int]]:
     return pages
 
 
-def _emp_present_and_hours(
-    emp: Dict[str, Any],
-    y: int, m: int, days: int,
-    punches_by_user_day: Dict[str, Dict[str, List[Dict[str, Any]]]],
-    weekly_off: Iterable[int] = (6,),
-):
-    """Return (present_days, tot_min, working_min, weekoff_min, ot_min, day_min_list)."""
-    uid = emp.get("user_id") or emp.get("_id")
-    by_day = punches_by_user_day.get(uid, {})
-    tot = working = weekoff = ot = 0
-    present = 0
-    day_mins: List[int] = []
-    weekly_off_set = set(weekly_off)
-    for d in range(1, days + 1):
-        key = f"{y:04d}-{m:02d}-{d:02d}"
-        day_min, _in, _out = _pair_punches(by_day.get(key, []))
-        day_mins.append(day_min)
-        tot += day_min
-        if day_min > 0:
-            present += 1
-            if datetime(y, m, d).weekday() in weekly_off_set:
-                weekoff += day_min
-            else:
-                working += day_min
-            if day_min > 8 * 60:
-                ot += day_min - 8 * 60
-    return present, tot, working, weekoff, ot, day_mins
+_TRAIL_LABELS = ["Duty HRS", "OT HRS", "Total Duty HRS", "Days", "Extra HRS"]
 
 
-def _summary_totals_row(
-    present_days: int,
-    tot_min: int,
-    working_min: int,
-    weekoff_min: int,
-    ot_min: int,
-) -> List[str]:
-    """Build the same trailing summary column values used by the XLSX."""
+def _fmt_hhmm(hrs: float) -> str:
+    """8.53 → \"08:32\"."""
+    if not hrs or hrs <= 0:
+        return "00:00"
+    h = int(hrs)
+    m = int(round((hrs - h) * 60))
+    if m >= 60:
+        h += 1
+        m -= 60
+    return f"{h:02d}:{m:02d}"
+
+
+def _emp_trailing_row(totals: Dict[str, Any]) -> List[str]:
+    """Trailing summary values — mirrors the Grid-View XLSX columns."""
+    combined = float(totals.get("hours") or 0.0)
+    ot = float(totals.get("ot_hours") or 0.0)
+    duty_only = round(max(0.0, combined - ot), 2)
+    days_int = int(totals.get("total_days_int") or 0)
+    extra = float(totals.get("total_extra_hrs") or 0.0)
     return [
-        "0:00",                              # Extra Hrs (reserved)
-        _fmt_hours_sample(working_min),      # Work Hrs
-        _fmt_hours_sample(weekoff_min),      # Week Off Hrs
-        "0:00",                              # GP Hrs (reserved)
-        "0:00",                              # MOT Hrs (reserved)
-        _fmt_hours_sample(ot_min),           # OT Hrs
-        "0:00",                              # Lost Hrs (reserved)
-        "0",                                 # PL Days
-        "0",                                 # CL Days
-        _fmt_hours_sample(tot_min % 60 if tot_min else 0),  # Remaining
-        str(present_days),                   # Tot. Days
-        _fmt_hours_sample(tot_min),          # Tot. Hrs
+        f"{duty_only:.2f}", f"{ot:.2f}", f"{combined:.2f}",
+        str(days_int), f"{extra:.2f}",
     ]
 
 
-def _header_top_row(day_cols: List[int], y: int, m: int) -> List[str]:
+def _header_top_row(
+    day_labels: List[str], weekday_labels: List[str], idxs: List[int],
+) -> List[str]:
     """Header cells: identity columns + selected day columns."""
     return (
         ["Name", "Code", "Bio", "Father", "Dept", "Design."]
-        + [f"{d}\n{_weekday_short(y, m, d)}" for d in day_cols]
+        + [
+            f"{day_labels[i]}\n{weekday_labels[i] if i < len(weekday_labels) else ''}"
+            for i in idxs
+        ]
     )
 
 
@@ -157,16 +126,20 @@ def _table_style(rows_count: int, day_cols_count: int) -> TableStyle:
 # IN / OUT + Hours PDF
 # ---------------------------------------------------------------------------
 
-def build_monthly_inout_pdf(
-    *,
-    company_name: str,
-    month: str,
-    employees: List[Dict[str, Any]],
-    punches_by_user_day: Dict[str, Dict[str, List[Dict[str, Any]]]],
-    weekly_off: Iterable[int] = (6,),
-) -> bytes:
-    """Landscape A4 PDF - IN / OUT + working hours per day."""
-    y, m, days = _month_bounds(month)
+def build_monthly_inout_pdf(grid: Dict[str, Any]) -> bytes:
+    """Landscape A4 PDF - IN / OUT + working hours per day.
+
+    ``grid`` is the policy-computed payload from
+    ``_compute_monthly_grid_data`` — identical numbers to the Grid View
+    screen and the IN/OUT XLSX export.
+    """
+    company_name = ((grid or {}).get("company") or {}).get("name") or ""
+    month = grid.get("month") or ""
+    day_labels: List[str] = list(grid.get("day_labels") or [])
+    weekday_labels: List[str] = list(grid.get("weekday_labels") or [])
+    employees: List[Dict[str, Any]] = list(grid.get("employees") or [])
+    days_n = len(day_labels)
+
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=landscape(A4),
@@ -180,60 +153,57 @@ def build_monthly_inout_pdf(
     ))
     now_ist = datetime.now(timezone(timedelta(hours=5, minutes=30)))
     story.append(Paragraph(
-        f"Month: {month} ({days} days) &middot; Generated: "
-        f"{now_ist.strftime('%d-%b-%Y %H:%M IST')}",
+        f"Month: {month} ({days_n} days) &middot; As per Firm Master attendance "
+        f"policy &middot; Generated: {now_ist.strftime('%d-%b-%Y %H:%M IST')}",
         _SUB,
     ))
 
     # Split day columns into pages that fit landscape A4
-    day_pages = _iter_pages_by_days(days, chunk=11)
+    idx_pages = _iter_pages_by_days(days_n, chunk=11)
 
-    for page_idx, day_cols in enumerate(day_pages):
-        # Header row
-        header = _header_top_row(day_cols, y, m)
+    for page_idx, day_idx_1based in enumerate(idx_pages):
+        idxs = [i - 1 for i in day_idx_1based]
+        header = _header_top_row(day_labels, weekday_labels, idxs)
         # Also append summary columns ONLY on the last page
-        is_last_page = (page_idx == len(day_pages) - 1)
+        is_last_page = (page_idx == len(idx_pages) - 1)
         if is_last_page:
-            header += _summary_columns_hours()
+            header += _TRAIL_LABELS
         rows: List[List[str]] = [header]
 
         for emp in employees:
-            uid = emp.get("user_id") or emp.get("_id")
-            by_day = punches_by_user_day.get(uid, {})
+            days_cell = emp.get("days") or {}
             row: List[str] = [
                 (emp.get("name") or "")[:24],
                 (emp.get("employee_code") or "")[:10],
                 ("" if emp.get("bio_code") in (None, "") else str(emp.get("bio_code")))[:8],
                 (emp.get("father_name") or "")[:18],
                 (emp.get("department") or "")[:14],
-                (emp.get("position") or "")[:14],
+                ((emp.get("designation") or emp.get("position") or ""))[:14],
             ]
-            for d in day_cols:
-                key = f"{y:04d}-{m:02d}-{d:02d}"
-                day_punches = by_day.get(key, [])
-                day_min, in_dt, out_dt = _pair_punches(day_punches)
-                if in_dt or out_dt:
-                    in_txt = _fmt_time_ist(in_dt) if in_dt else "-"
-                    out_txt = _fmt_time_ist(out_dt) if out_dt else "-"
-                    hrs_txt = _fmt_hours_sample(day_min)
-                    row.append(f"{in_txt}\n{out_txt}\n{hrs_txt}")
+            for i in idxs:
+                d = days_cell.get(day_labels[i]) or {}
+                if d.get("anomaly"):
+                    # Missing-punch day — no duty counted (firm policy rule).
+                    row.append(f"{d.get('in') or '-'}\n{d.get('out') or '-'}\nMISS")
+                elif d.get("in") or d.get("out"):
+                    row.append(
+                        f"{d.get('in') or '-'}\n{d.get('out') or '-'}\n"
+                        f"{_fmt_hhmm(float(d.get('hours') or 0.0))}"
+                    )
                 else:
                     row.append("-")
             if is_last_page:
-                present, tot, working, weekoff, ot, _ = _emp_present_and_hours(
-                    emp, y, m, days, punches_by_user_day, weekly_off,
-                )
-                row += _summary_totals_row(present, tot, working, weekoff, ot)
+                row += _emp_trailing_row(emp.get("totals") or {})
             rows.append(row)
 
         # Column widths (landscape A4 usable ~ 285mm)
         identity_w = [28 * mm, 11 * mm, 9 * mm, 20 * mm, 16 * mm, 16 * mm]
-        day_w = [14 * mm] * len(day_cols)
-        summary_w = [12 * mm] * len(_summary_columns_hours()) if is_last_page else []
+        day_w = [14 * mm] * len(idxs)
+        summary_w = [13 * mm] * len(_TRAIL_LABELS) if is_last_page else []
         col_widths = identity_w + day_w + summary_w
 
         table = Table(rows, colWidths=col_widths, repeatRows=1)
-        table.setStyle(_table_style(len(employees), len(day_cols)))
+        table.setStyle(_table_style(len(employees), len(idxs)))
         story.append(table)
         if not is_last_page:
             story.append(PageBreak())
@@ -246,16 +216,17 @@ def build_monthly_inout_pdf(
 # Hours-only PDF
 # ---------------------------------------------------------------------------
 
-def build_monthly_hours_pdf(
-    *,
-    company_name: str,
-    month: str,
-    employees: List[Dict[str, Any]],
-    punches_by_user_day: Dict[str, Dict[str, List[Dict[str, Any]]]],
-    weekly_off: Iterable[int] = (6,),
-) -> bytes:
-    """Landscape A4 PDF - one cell per day, working hours in HH:MM."""
-    y, m, days = _month_bounds(month)
+def build_monthly_hours_pdf(grid: Dict[str, Any]) -> bytes:
+    """Landscape A4 PDF - one cell per day, working hours (duty + OT) in
+    HH:MM. Consumes the policy-computed grid so numbers match the Grid View
+    screen and the Hours XLSX export."""
+    company_name = ((grid or {}).get("company") or {}).get("name") or ""
+    month = grid.get("month") or ""
+    day_labels: List[str] = list(grid.get("day_labels") or [])
+    weekday_labels: List[str] = list(grid.get("weekday_labels") or [])
+    employees: List[Dict[str, Any]] = list(grid.get("employees") or [])
+    days_n = len(day_labels)
+
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=landscape(A4),
@@ -269,51 +240,49 @@ def build_monthly_hours_pdf(
     ))
     now_ist = datetime.now(timezone(timedelta(hours=5, minutes=30)))
     story.append(Paragraph(
-        f"Month: {month} ({days} days) &middot; Generated: "
-        f"{now_ist.strftime('%d-%b-%Y %H:%M IST')}",
+        f"Month: {month} ({days_n} days) &middot; As per Firm Master attendance "
+        f"policy &middot; Generated: {now_ist.strftime('%d-%b-%Y %H:%M IST')}",
         _SUB,
     ))
 
     # Days-per-page - can fit more when each cell is 1 line
-    day_pages = _iter_pages_by_days(days, chunk=18)
+    idx_pages = _iter_pages_by_days(days_n, chunk=18)
 
-    for page_idx, day_cols in enumerate(day_pages):
-        header = _header_top_row(day_cols, y, m)
-        is_last_page = (page_idx == len(day_pages) - 1)
+    for page_idx, day_idx_1based in enumerate(idx_pages):
+        idxs = [i - 1 for i in day_idx_1based]
+        header = _header_top_row(day_labels, weekday_labels, idxs)
+        is_last_page = (page_idx == len(idx_pages) - 1)
         if is_last_page:
-            header += _summary_columns_hours()
+            header += _TRAIL_LABELS
         rows: List[List[str]] = [header]
 
         for emp in employees:
-            uid = emp.get("user_id") or emp.get("_id")
-            by_day = punches_by_user_day.get(uid, {})
+            days_cell = emp.get("days") or {}
             row: List[str] = [
                 (emp.get("name") or "")[:24],
                 (emp.get("employee_code") or "")[:10],
                 ("" if emp.get("bio_code") in (None, "") else str(emp.get("bio_code")))[:8],
                 (emp.get("father_name") or "")[:18],
                 (emp.get("department") or "")[:14],
-                (emp.get("position") or "")[:14],
+                ((emp.get("designation") or emp.get("position") or ""))[:14],
             ]
-            for d in day_cols:
-                key = f"{y:04d}-{m:02d}-{d:02d}"
-                day_punches = by_day.get(key, [])
-                day_min, _in, _out = _pair_punches(day_punches)
-                row.append(_fmt_hours_sample(day_min))
+            for i in idxs:
+                d = days_cell.get(day_labels[i]) or {}
+                if d.get("anomaly"):
+                    row.append("MISS")
+                else:
+                    row.append(_fmt_hhmm(float(d.get("hours") or 0.0)))
             if is_last_page:
-                present, tot, working, weekoff, ot, _ = _emp_present_and_hours(
-                    emp, y, m, days, punches_by_user_day, weekly_off,
-                )
-                row += _summary_totals_row(present, tot, working, weekoff, ot)
+                row += _emp_trailing_row(emp.get("totals") or {})
             rows.append(row)
 
         identity_w = [28 * mm, 11 * mm, 9 * mm, 20 * mm, 16 * mm, 16 * mm]
-        day_w = [10 * mm] * len(day_cols)
-        summary_w = [12 * mm] * len(_summary_columns_hours()) if is_last_page else []
+        day_w = [10 * mm] * len(idxs)
+        summary_w = [13 * mm] * len(_TRAIL_LABELS) if is_last_page else []
         col_widths = identity_w + day_w + summary_w
 
         table = Table(rows, colWidths=col_widths, repeatRows=1)
-        table.setStyle(_table_style(len(employees), len(day_cols)))
+        table.setStyle(_table_style(len(employees), len(idxs)))
         story.append(table)
         if not is_last_page:
             story.append(PageBreak())

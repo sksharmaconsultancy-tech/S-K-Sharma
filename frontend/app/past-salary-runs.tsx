@@ -16,6 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { api } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
+import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors, radius, spacing } from "@/src/theme";
 
 type RunSummary = {
@@ -51,18 +52,24 @@ export default function PastSalaryRunsScreen() {
   const [loading, setLoading] = useState(false);
   const [actualRuns, setActualRuns] = useState<RunSummary[]>([]);
   const [compRuns, setCompRuns] = useState<RunSummary[]>([]);
+  // User directive — show ONLY the selected firm's runs, never global.
+  const { selectedCompanyId, companies } = useSelectedCompany();
+  const companyName =
+    (companies || []).find((c: any) => c.company_id === selectedCompanyId)?.name || null;
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      const cid = selectedCompanyId || user?.company_id || null;
+      const qs = cid ? `?company_id=${encodeURIComponent(cid)}` : "";
       const [a, c] = await Promise.all([
-        api<{ runs: RunSummary[] }>("/admin/salary-runs").catch(() => ({ runs: [] })),
-        api<{ runs: RunSummary[] }>("/admin/compliance-salary-runs").catch(() => ({ runs: [] })),
+        api<{ runs: RunSummary[] }>(`/admin/salary-runs${qs}`).catch(() => ({ runs: [] })),
+        api<{ runs: RunSummary[] }>(`/admin/compliance-salary-runs${qs}`).catch(() => ({ runs: [] })),
       ]);
       setActualRuns(a.runs || []);
       setCompRuns(c.runs || []);
     } finally { setLoading(false); }
-  }, []);
+  }, [selectedCompanyId, user?.company_id]);
 
   useEffect(() => { if (isAdmin) load(); }, [isAdmin, load]);
 
@@ -110,7 +117,9 @@ export default function PastSalaryRunsScreen() {
           </Pressable>
           <View style={{ flex: 1, alignItems: "center" }}>
             <Text style={styles.h1}>Past Salary Runs</Text>
-            <Text style={styles.hsub}>Utilities · Open, review or reprocess earlier runs</Text>
+            <Text style={styles.hsub}>
+              {companyName ? `Firm: ${companyName} — its runs only` : "Utilities · Open, review or reprocess earlier runs"}
+            </Text>
           </View>
           <Pressable onPress={load} hitSlop={8}>
             <Ionicons name="refresh" size={20} color={colors.brandPrimary} />

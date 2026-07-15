@@ -191,6 +191,14 @@ export default function ChallansScreen() {
   );
   const runMonths = Array.from(new Set(runs.map((r) => r.month))).sort().reverse();
   const runGroups = Array.from(new Set(runs.map((r) => r.employee_type || "All")));
+  // User directive — "All months" is only offered when every run is finalized,
+  // so aggregate views never mix in unfinalized (draft) months.
+  const allRunsFinalized = runs.length > 0 && runs.every((r) => !!r.finalized_at);
+  useEffect(() => {
+    if (!allRunsFinalized && runMonth === "all" && runMonths[0]) {
+      setRunMonth(runMonths[0]);
+    }
+  }, [runs, allRunsFinalized]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     // keep selection valid within the current month/group filter
@@ -384,7 +392,7 @@ export default function ChallansScreen() {
                   style={{ padding: 8, borderRadius: 8, border: "1px solid #D6DEE4", fontSize: 12.5, width: "100%", background: "#fff" }}
                   data-testid="portal-month-select"
                 >
-                  <option value="all">All months</option>
+                  {allRunsFinalized ? <option value="all">All months</option> : null}
                   {runMonths.map((m) => <option key={m} value={m}>{m}</option>)}
                 </select>
               ) : null}

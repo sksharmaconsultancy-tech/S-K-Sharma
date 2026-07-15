@@ -38,6 +38,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { api } from "@/src/api/client";
+import { confirmYesNo } from "@/src/utils/confirm";
 import { useLiveSync } from "@/src/api/live-sync";
 import { useAuth } from "@/src/context/AuthContext";
 import { useOnRefresh } from "@/src/context/RefreshBusContext";
@@ -121,7 +122,8 @@ function currentMonth(): string {
 
 function fmtInr(n: number | null | undefined): string {
   if (n === null || n === undefined || Number.isNaN(n)) return "0";
-  return Math.round(n).toLocaleString("en-IN");
+  // User directive — plain numbers, NO thousands separators (commas).
+  return String(Math.round(n));
 }
 
 function fmtNum(n: number | null | undefined, digits = 2): string {
@@ -206,6 +208,17 @@ export default function ActualSalaryProcessScreen() {
   const [attendanceSource, setAttendanceSource] = useState<AttendanceSource>("biometric");
   const [busy, setBusy] = useState(false);
   const [run, setRun] = useState<ActualRun | null>(null);
+
+  // User directive — changing the FIRM must fully reset the form so the
+  // previous company's run/employees never linger on screen.
+  const prevCidRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevCidRef.current && prevCidRef.current !== selectedCompanyId) {
+      setRun(null);
+      setEmpType("all");
+    }
+    prevCidRef.current = selectedCompanyId;
+  }, [selectedCompanyId]);
   const [finalizing, setFinalizing] = useState(false);
   const [savingRow, setSavingRow] = useState<string | null>(null);
 
@@ -252,6 +265,34 @@ export default function ActualSalaryProcessScreen() {
       if (monthDaysOverride.trim()) body.month_days = Number(monthDaysOverride);
       if (empType !== "all") body.employee_type = empType;
       if (rollFilter !== "all") body.is_onroll = rollFilter === "on";
+
+      // Iter 129e (user directive) — if a run for this firm + month already
+      // exists, ask before reprocessing. "No" reloads the page unchanged.
+      try {
+        const prev = await api<{ runs: any[] }>("/admin/salary-runs");
+        const existing = (prev.runs || []).find(
+          (r) => r.month === month && (!selectedCompanyId || r.company_id === selectedCompanyId),
+        );
+        if (existing) {
+          if (existing.finalized) {
+            showMsg(
+              "This month's salary is already FINALIZED for this firm — it cannot be processed again. Unlock (de-finalize) it first.",
+            );
+            setBusy(false);
+            return;
+          }
+          const ok = await confirmYesNo(
+            "This salary was already processed for this firm & month.\nDo you want to REPROCESS this salary again?",
+          );
+          if (!ok) {
+            setBusy(false);
+            if (Platform.OS === "web") window.location.reload();
+            return;
+          }
+        }
+      } catch {
+        // list unavailable — proceed without the guard
+      }
 
       const r = await api<{ run: ActualRun }>("/admin/actual-salary-process", {
         method: "POST",
@@ -642,7 +683,7 @@ export default function ActualSalaryProcessScreen() {
 /*  Result grid component                                              */
 /* ------------------------------------------------------------------- */
 
-const COL_WIDTHS = {
+const BASE_COL_WIDTHS = {
   sn: 40, code: 80, name: 150, type: 80, roll: 50,
   duty: 70, md: 70, pdays: 70, phours: 80,
   basic: 90, bsalary: 100, wbasic: 100, othallo: 90,
@@ -663,6 +704,41 @@ function ResultGrid({
   const readOnly = !!run.finalized;
   // Iter 85 — Biometric lock removed; P Days & P Hours always editable.
 
+  // Iter 127e — AUTO-ADJUST every column to its widest content so nothing
+  // is cut off (user request; replaces the wrap-text experiment). Shadows
+  // the BASE_COL_WIDTHS minimums.
+  const COL_WIDTHS = useMemo(() => {
+    const rows = run.rows || [];
+    const px = (v: any) => String(v ?? "").length * 7.2 + 20;
+    const fit = (base: number, label: string, vals: any[], maxW = 280) => {
+      let m = Math.max(base, px(label));
+      for (const v of vals) {
+        const p = px(v);
+        if (p > m) m = p;
+      }
+      return Math.round(Math.min(maxW, m));
+    };
+    return {
+      ...BASE_COL_WIDTHS,
+      code: fit(56, "Code", rows.map((r) => r.employee_code)),
+      name: fit(110, "Name", rows.map((r) => r.name)),
+      type: fit(56, "Type", rows.map((r) => r.employee_type)),
+      duty: fit(56, "Duty HRS", rows.map((r) => fmtNum(r.duty_hrs, 2))),
+      pdays: fit(60, "P Days", rows.map((r) => fmtNum(r.p_days, 2))),
+      phours: fit(60, "P Hours", rows.map((r) => fmtNum(r.p_hours, 2))),
+      basic: fit(72, "Basic", rows.map((r) => fmtInr(r.basic))),
+      bsalary: fit(80, "B.Salary", rows.map((r) => fmtInr(r.basic_salary))),
+      wbasic: fit(80, "W.Basic", rows.map((r) => fmtInr(r.w_basic_salary))),
+      othallo: fit(72, "Oth Allo", rows.map((r) => fmtInr(r.oth_allo))),
+      gross: fit(80, "Gross", rows.map((r) => fmtInr(r.total_gross))),
+      epf: fit(64, "EPF", rows.map((r) => fmtInr(r.epf))),
+      esi: fit(64, "ESI", rows.map((r) => fmtInr(r.esi))),
+      adv: fit(64, "Advance", rows.map((r) => fmtInr(r.adv))),
+      tds: fit(64, "TDS", rows.map((r) => fmtInr(r.tds))),
+      net: fit(80, "Net Pay", rows.map((r) => fmtInr(r.net_pay))),
+    };
+  }, [run.rows]);
+
   // Iter 91 — grid keyboard navigation (↑ ↓ ← → / Enter) between cells.
   const cellRefs = useRef<Map<string, any>>(new Map());
   const gridNav = (row: number, col: number, key: string) => {
@@ -677,7 +753,7 @@ function ResultGrid({
 
   const totalMinWidth = useMemo(
     () => Object.values(COL_WIDTHS).reduce((a, b) => a + b, 0),
-    [],
+    [COL_WIDTHS],
   );
 
   // Iter 98 — display sorting for the process grid.

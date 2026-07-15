@@ -34,7 +34,9 @@ separate payslip artefacts.
 from __future__ import annotations
 
 import csv
+from datetime import datetime
 import io
+import math
 import re
 from typing import Any, Dict, List, Optional
 
@@ -72,7 +74,25 @@ DEFAULT_STATUTORY_CFG: Dict[str, float] = {
     # Shared statutory wage-base rule (new labour code, per client policy):
     # PF & ESIC apply on max(Basic, floor_pct% of Gross Earning).
     "stat_wage_floor_pct": 50.0,
+
+    # Iter 127f — whole-rupee rounding (statutory practice: PF nearest
+    # rupee, ESIC rounded UP to the next rupee).
+    "pf_rounding": "nearest",     # nearest | ceil | floor | none
+    "esic_rounding": "ceil",      # ceil | nearest | floor | none
 }
+
+_ROUNDING_KEYS = ("pf_rounding", "esic_rounding")
+
+
+def _round_stat(v: float, mode: str) -> float:
+    """Whole-rupee statutory rounding."""
+    if mode == "ceil":
+        return float(math.ceil(v - 1e-9))
+    if mode == "floor":
+        return float(math.floor(v + 1e-9))
+    if mode == "nearest":
+        return float(round(v))
+    return round(v, 2)
 
 # --------------------------------------------------------------------------- 
 # Professional Tax — monthly ₹ per state. Simplified flat monthly amounts.
@@ -244,7 +264,10 @@ def compute_compliance_row(
     """
     cfg = dict(DEFAULT_STATUTORY_CFG)
     if statutory_cfg:
-        cfg.update({k: _num(v) for k, v in statutory_cfg.items() if v is not None})
+        for k, v in statutory_cfg.items():
+            if v is None:
+                continue
+            cfg[k] = str(v) if k in _ROUNDING_KEYS else _num(v)
 
     salary_mode = (policy.get("salary_mode") or "monthly").lower()
     # Iter 68 — Two salary structures on the employee master:
@@ -295,13 +318,70 @@ def compute_compliance_row(
     # Master: feeds the structure split as the highest-precedence basic
     # (pro-rated by attendance for monthly-rated staff) unless the master
     # already carries an explicit basic override / structure rows.
+    # Iter 127c — the Firm-Master-linked allowance heads saved on the
+    # Employee Master (``compliance_salary_allowances``) are now part of
+    # the compliance gross: when present, gross = Basic + Σ allowances
+    # (pro-rated) and each head maps into its structure column.
+    allow_rows = [
+        r for r in (user.get("compliance_salary_allowances") or [])
+        if isinstance(r, dict) and _num(r.get("amount"), 0.0) > 0
+    ]
+    allowances_master = sum(_num(r.get("amount"), 0.0) for r in allow_rows)
     comp_basic = _num(user.get("compliance_basic"), 0.0)
+    master_user = user           # for the full-month "Master" columns
+    master_gross_override: Optional[float] = None
     if comp_basic > 0 and not user.get("basic_amount") and not (user.get("salary_structure_compliance") or []):
         if salary_mode == "monthly":
-            prorated_basic = _safe_div(comp_basic * effective_present, max(1, month_days))
+            factor = _safe_div(effective_present, max(1, month_days))
         else:
-            prorated_basic = comp_basic
-        user = {**user, "basic_amount": round(min(prorated_basic, monthly_gross), 2)}
+            factor = 1.0
+        prorated_basic = comp_basic * factor
+        if allowances_master > 0:
+            # Master structure is authoritative — rebuild the gross
+            # bottom-up (also fixes gross=0 when compliance_gross/salary
+            # was left blank on the master).
+            agg = {"hra": 0.0, "conveyance": 0.0, "medical": 0.0,
+                   "special": 0.0, "others": 0.0}
+            for r in allow_rows:
+                s = str(r.get("head") or "").strip().lower()
+                amt = _num(r.get("amount"), 0.0)
+                if "hra" in s or "house" in s:
+                    agg["hra"] += amt
+                elif s.startswith("conv") or "travel" in s:
+                    agg["conveyance"] += amt
+                elif "medic" in s:
+                    agg["medical"] += amt
+                elif "special" in s:
+                    agg["special"] += amt
+                else:
+                    agg["others"] += amt
+            monthly_gross = (comp_basic + allowances_master) * factor
+            user = {
+                **user,
+                "basic_amount": round(prorated_basic, 2),
+                "hra_amount": round(agg["hra"] * factor, 2),
+                "conv_amount": round(agg["conveyance"] * factor, 2),
+                "medical_amount": round(agg["medical"] * factor, 2),
+                "special_amount": round(agg["special"] * factor, 2),
+                "others_amount": round(agg["others"] * factor, 2),
+            }
+            master_user = {
+                **master_user,
+                "basic_amount": round(comp_basic, 2),
+                "hra_amount": round(agg["hra"], 2),
+                "conv_amount": round(agg["conveyance"], 2),
+                "medical_amount": round(agg["medical"], 2),
+                "special_amount": round(agg["special"], 2),
+                "others_amount": round(agg["others"], 2),
+            }
+            master_gross_override = comp_basic + allowances_master
+        else:
+            user = {**user, "basic_amount": round(min(prorated_basic, monthly_gross) if monthly_gross > 0 else prorated_basic, 2)}
+            master_user = {**master_user, "basic_amount": round(comp_basic, 2)}
+            if monthly_gross <= 0:
+                # No compliance_gross/salary on the master — Basic IS the gross.
+                monthly_gross = prorated_basic
+                master_gross_override = comp_basic
     structure = resolve_structure(user, monthly_gross, company_structure_pct)
     basic = structure["basic"]
     hra = structure["hra"]
@@ -319,27 +399,48 @@ def compute_compliance_row(
     floor_pct = _num(cfg.get("stat_wage_floor_pct"), 50.0)
     stat_wage_base = max(basic, gross_paid * (floor_pct / 100.0))
 
+    # Iter 85 — Master (full-month) values.
+    # These are the FULL monthly figures ignoring present days — used
+    # to populate the "Master Salary" columns in the Compliance grid so
+    # admins can compare full vs pro-rated amounts at a glance.
+    # (Computed BEFORE statutory so ESIC eligibility can use the
+    # full-month Basic — Iter 129 user directive.)
+    if salary_mode == "daily":
+        monthly_gross_master = rate * int(month_days)
+    elif salary_mode == "hourly":
+        monthly_gross_master = rate * (int(month_days) * full_day_hours)
+    else:
+        monthly_gross_master = rate  # monthly cadence => rate is the full monthly gross
+    if master_gross_override is not None:
+        monthly_gross_master = master_gross_override
+    master_structure = resolve_structure(master_user, monthly_gross_master, company_structure_pct)
+
     # ---- PF ----
     # Iter 98 — firm-level EPF gate (Firm Master → EPF "Applicable") ANDed
     # with the per-employee flag.
-    pf_applicable = firm_pf_enabled and user.get("pf_applicable") is not False
+    # Iter 129 (user directive) — PF is calculated ONLY from the Employee
+    # Master's "PF Basic Salary" (pf_basic). When it is 0 / blank, NO PF is
+    # deducted for that employee, and when filled ALL PF amounts derive
+    # from it (pro-rated by attendance for monthly-rated staff).
+    pf_basic_override = _num(user.get("pf_basic"), 0.0)
+    pf_applicable = (
+        firm_pf_enabled
+        and user.get("pf_applicable") is not False
+        and pf_basic_override > 0
+    )
     if pf_applicable:
-        # Iter 126g — explicit "PF Basic Salary" from the Employee Master.
-        # EPF ceiling rule: Basic < ₹15,000 → PF Basic mirrors the Basic
-        # (auto-copied by the form); Basic ≥ ₹15,000 → optional, and when
-        # filled PF is calculated on the filled amount (no ₹15k cap since
-        # the employer chose it explicitly). Pro-rated by attendance for
-        # monthly-rated staff.
-        pf_basic_override = _num(user.get("pf_basic"), 0.0)
-        if pf_basic_override > 0:
-            if salary_mode == "monthly":
-                capped_pf_wages = _safe_div(
-                    pf_basic_override * effective_present, max(1, month_days)
-                )
-            else:
-                capped_pf_wages = pf_basic_override
+        if salary_mode == "monthly":
+            pf_basic_prorated = _safe_div(
+                pf_basic_override * effective_present, max(1, month_days)
+            )
         else:
-            capped_pf_wages = min(stat_wage_base, cfg["pf_wage_cap"])
+            pf_basic_prorated = pf_basic_override
+        # Iter 129b (user directive) — EPF wages = max(PF Basic, floor% of
+        # Gross Earning), same "whichever is higher" rule as ESIC. Capped
+        # at the EPF ceiling — unless the explicitly-set PF Basic itself
+        # exceeds the ceiling (the employer's explicit choice wins).
+        pf_base = max(pf_basic_prorated, gross_paid * (floor_pct / 100.0))
+        capped_pf_wages = min(pf_base, max(cfg["pf_wage_cap"], pf_basic_prorated))
         pf_employee = capped_pf_wages * (cfg["pf_percent_employee"] / 100.0)
         pf_employer_epf = capped_pf_wages * (cfg["pf_percent_employer_epf"] / 100.0)
         pf_employer_eps = capped_pf_wages * (cfg["pf_percent_employer_eps"] / 100.0)
@@ -356,6 +457,12 @@ def compute_compliance_row(
                 else:
                     vpf = vpf_amt
         pf_employee += vpf
+        # Iter 127f — whole-rupee statutory rounding (Standard Settings).
+        pf_mode = str(cfg.get("pf_rounding") or "nearest")
+        pf_employee = _round_stat(pf_employee, pf_mode)
+        pf_employer_epf = _round_stat(pf_employer_epf, pf_mode)
+        pf_employer_eps = _round_stat(pf_employer_eps, pf_mode)
+        pf_employer_total = pf_employer_epf + pf_employer_eps
     else:
         capped_pf_wages = 0.0
         vpf = 0.0
@@ -364,11 +471,26 @@ def compute_compliance_row(
     # ---- ESIC ----
     # Iter 98 — firm-level ESIC gate (Firm Master → ESI "Applicable") ANDed
     # with the per-employee flag.
-    esic_applicable = firm_esic_enabled and user.get("esic_applicable") is not False
-    if esic_applicable and gross_paid <= cfg["esic_gross_threshold"]:
-        esic_wage_base = stat_wage_base   # SAME base as PF, no ₹15k cap on ESIC
+    # Iter 129 (user directive) — ESIC eligibility is now checked against
+    # the FULL-MONTH Basic Salary (≤ the limit in Standard Compliance
+    # Settings), NOT the gross earning. Rates & rounding still come from
+    # the Compliance Settings; the wage base rule is unchanged.
+    esic_applicable = (
+        firm_esic_enabled
+        and user.get("esic_applicable") is not False
+        and master_structure["basic"] <= cfg["esic_gross_threshold"]
+    )
+    if esic_applicable:
+        # Iter 130 (user directive) — ESIC is calculated ON BASIC SALARY
+        # (earned basic for the month), exactly per the Standard Compliance
+        # Settings. No gross-based wage floor is applied to ESIC.
+        esic_wage_base = basic
         esic_employee = esic_wage_base * (cfg["esic_percent_employee"] / 100.0)
         esic_employer = esic_wage_base * (cfg["esic_percent_employer"] / 100.0)
+        # Iter 127f — ESIC statutory rounding (default: UP to next rupee).
+        esic_mode = str(cfg.get("esic_rounding") or "ceil")
+        esic_employee = _round_stat(esic_employee, esic_mode)
+        esic_employer = _round_stat(esic_employer, esic_mode)
     else:
         esic_wage_base = 0.0
         esic_employee = esic_employer = 0.0
@@ -384,20 +506,20 @@ def compute_compliance_row(
     # ---- TDS (manual ₹ per employee) ----
     tds = _num(user.get("tds_amount"), 0.0)
 
-    total_deduction = pf_employee + esic_employee + pt + tds
-    net = gross_paid - total_deduction
+    # ---- Iter 127c — Firm-linked deduction heads from the Employee Master
+    # (compliance section). PF / ESI heads are skipped — those are computed
+    # statutorily above and must not double-count.
+    master_deduction = 0.0
+    for r in (user.get("compliance_salary_deductions") or []):
+        if not isinstance(r, dict):
+            continue
+        s = str(r.get("head") or "").strip().lower()
+        if "pf" in s or "esi" in s or "provident" in s:
+            continue
+        master_deduction += _num(r.get("amount"), 0.0)
 
-    # Iter 85 — Master (full-month) values.
-    # These are the FULL monthly figures ignoring present days — used
-    # to populate the "Master Salary" columns in the Compliance grid so
-    # admins can compare full vs pro-rated amounts at a glance.
-    if salary_mode == "daily":
-        monthly_gross_master = rate * int(month_days)
-    elif salary_mode == "hourly":
-        monthly_gross_master = rate * (int(month_days) * full_day_hours)
-    else:
-        monthly_gross_master = rate  # monthly cadence => rate is the full monthly gross
-    master_structure = resolve_structure(user, monthly_gross_master, company_structure_pct)
+    total_deduction = pf_employee + esic_employee + pt + tds + master_deduction
+    net = gross_paid - total_deduction
 
     return {
         "user_id": user.get("user_id"),
@@ -441,6 +563,9 @@ def compute_compliance_row(
         "gross_paid": round(gross_paid, 2),
         # PF
         "pf_applicable": pf_applicable,
+        # Iter 129 — full-month PF Basic Salary from the Employee Master
+        # (0 → no PF). Used by the grid's client-side recompute.
+        "pf_basic": round(pf_basic_override, 2),
         "stat_wage_base": round(stat_wage_base, 2),
         "pf_wages": round(capped_pf_wages, 2),
         "pf_employee": round(pf_employee, 2),
@@ -457,6 +582,8 @@ def compute_compliance_row(
         "pt_state": pt_state,
         "pt": round(pt, 2),
         "tds": round(tds, 2),
+        # Iter 127c — firm-linked deduction heads from the Employee Master
+        "master_deduction": round(master_deduction, 2),
         # Totals
         "total_deduction": round(total_deduction, 2),
         "net": round(net, 2),
@@ -497,169 +624,276 @@ def to_csv(rows: List[Dict[str, Any]]) -> str:
 def build_compliance_register_pdf(
     run: Dict[str, Any],
     company_name: str = "S.K. Sharma & Co.",
+    firm: Optional[Dict[str, Any]] = None,
 ) -> bytes:
-    """Printable landscape PDF of the compliance salary register."""
-    from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4, landscape
-    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    """Statutory SALARY REGISTER — exact replica of the user's reference
+    format (Form No. 27(1) / rule 78(1)(a)(i)): portrait A4, grouped
+    EARNINGS / DEDUCTIONS columns, GRAND TOTAL row and a final summary
+    page with amounts in words + signature block."""
+    from reportlab.lib import colors as rl_colors
+    from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.pdfgen import canvas as rl_canvas
     from reportlab.platypus import (
-        BaseDocTemplate, Frame, PageTemplate,
+        BaseDocTemplate, Frame, PageTemplate, PageBreak,
         Paragraph, Spacer, Table, TableStyle,
     )
+    from utils.salary_register_pdf import _num_to_words_inr
 
-    BRAND = colors.HexColor("#1F4E4E")
-    ACCENT = colors.HexColor("#C89B3C")
-    INK = colors.HexColor("#1E2A2A")
-    BG_SOFT = colors.HexColor("#F7F9F9")
-    LINE = colors.HexColor("#D6DEDE")
+    firm = firm or {}
+    rows: List[Dict[str, Any]] = list(run.get("rows") or [])
+    month = str(run.get("month") or "")
+    try:
+        _y, _m = int(month[:4]), int(month[5:7])
+        month_label = datetime(_y, _m, 1).strftime("%b %Y").upper()
+    except Exception:
+        month_label = month
+    month_days = run.get("month_days") or run.get("default_month_days") or ""
+    group = (run.get("employee_type") or "ALL").upper()
 
-    buf = io.BytesIO()
-    base = getSampleStyleSheet()
-    heading = ParagraphStyle(
-        "Heading", parent=base["Normal"],
-        fontName="Helvetica-Bold", fontSize=13, textColor=INK,
-    )
-    small = ParagraphStyle(
-        "Small", parent=base["Normal"],
-        fontName="Helvetica", fontSize=7, textColor=INK,
-    )
+    def A(v: Any) -> str:
+        try:
+            return f"{float(v or 0):.2f}"
+        except Exception:
+            return "0.00"
 
-    doc = BaseDocTemplate(
-        buf, pagesize=landscape(A4),
-        leftMargin=6 * mm, rightMargin=6 * mm,
-        topMargin=28 * mm, bottomMargin=14 * mm,
-        title=f"Compliance Salary Register — {run.get('month')}",
-    )
+    # ---- per-row derived values -----------------------------------------
+    def other_earn(r: Dict[str, Any]) -> float:
+        return (float(r.get("medical") or 0) + float(r.get("special") or 0)
+                + float(r.get("others") or 0) + float(r.get("ot_pay") or 0))
 
-    def _header(canvas, d):
-        W, H = landscape(A4)
-        c = canvas
+    def pf_ded(r: Dict[str, Any]) -> float:
+        return float(r.get("pf_employee") or 0) + float(r.get("vpf_amount") or 0)
+
+    def other_ded(r: Dict[str, Any]) -> float:
+        return (float(r.get("other_deduction") or 0)
+                + float(r.get("master_deduction") or 0)
+                + float(r.get("pt") or 0))
+
+    # ---- header (drawn on every page) ------------------------------------
+    W, H = A4
+    pf_code = str(firm.get("pf_code") or "")
+    esi_code = str(firm.get("esi_code") or "")
+    address = str(firm.get("address") or "")
+
+    class _NumberedCanvas(rl_canvas.Canvas):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self._saved = []
+
+        def showPage(self):
+            self._saved.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            total = len(self._saved)
+            for st in self._saved:
+                self.__dict__.update(st)
+                self.setFont("Helvetica", 7)
+                self.setFillColor(rl_colors.black)
+                self.drawRightString(W - 6 * mm, H - 6 * mm, f"Page {self._pageNumber} of {total}")
+                super().showPage()
+            super().save()
+
+    def _header(c, d):
         c.saveState()
-        c.setFillColor(BRAND)
-        c.rect(0, H - 22 * mm, W, 22 * mm, stroke=0, fill=1)
-        c.setFillColor(ACCENT)
-        c.rect(0, H - 24 * mm, W, 2 * mm, stroke=0, fill=1)
-        c.setFillColor(colors.white)
-        c.setFont("Helvetica-Bold", 14)
-        c.drawString(8 * mm, H - 12 * mm, company_name)
-        c.setFont("Helvetica", 9)
-        c.setFillColor(colors.HexColor("#DDEDED"))
-        c.drawString(
-            8 * mm, H - 18 * mm,
-            f"Compliance Salary Register  —  {run.get('month')}  ·  "
-            f"{len(run.get('rows') or [])} employees",
-        )
-        c.drawRightString(W - 8 * mm, H - 12 * mm, f"Run: {run.get('run_id')}")
-        c.setFillColor(INK)
+        c.setFillColor(rl_colors.black)
         c.setFont("Helvetica", 6.5)
-        c.drawString(8 * mm, 8 * mm, "System-generated compliance salary register (new labour code).")
-        c.drawRightString(W - 8 * mm, 8 * mm, f"Page {d.page}")
+        c.drawString(6 * mm, H - 8 * mm, "[rule 78 (1) (a) (i)]")
+        c.setFont("Helvetica-Bold", 7)
+        c.drawString(6 * mm, H - 12 * mm, f"P.F.Code: {pf_code}")
+        c.drawString(6 * mm, H - 16 * mm, f"ESI Code: {esi_code}")
+        c.setFont("Helvetica-Bold", 9)
+        c.drawCentredString(W / 2, H - 8 * mm, f"SALARY REGISTER ({group})")
+        c.setFont("Helvetica-Bold", 9.5)
+        c.drawCentredString(W / 2, H - 12.5 * mm, f"M/S. {company_name.upper()}")
+        c.setFont("Helvetica", 6.5)
+        c.drawCentredString(W / 2, H - 16.5 * mm, address)
+        c.setFont("Helvetica", 7)
+        c.drawRightString(W - 6 * mm, H - 9.5 * mm, "Register of Wages Form No. 27 (1)")
+        c.setFont("Helvetica-Bold", 7)
+        c.drawRightString(W - 6 * mm, H - 13 * mm, f"Month Days {month_days}")
+        c.drawRightString(W - 6 * mm, H - 16.5 * mm, f"FOR THE MONTH {month_label}")
         c.restoreState()
 
-    frame = Frame(
-        doc.leftMargin, doc.bottomMargin,
-        doc.width, doc.height, id="body", showBoundary=0,
+    buf = io.BytesIO()
+    doc = BaseDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=5 * mm, rightMargin=5 * mm,
+        topMargin=20 * mm, bottomMargin=8 * mm,
+        title=f"Salary Register — {month}",
     )
-    doc.addPageTemplates([PageTemplate(id="main", frames=[frame], onPage=_header)])
+    frame = Frame(doc.leftMargin, doc.bottomMargin, W - 10 * mm,
+                  H - doc.topMargin - doc.bottomMargin, id="f")
+    doc.addPageTemplates([PageTemplate(id="pg", frames=[frame], onPage=_header)])
 
-    story = []
-    header = [
-        "Name", "Father Name", "Designation", "UAN No.", "ESIC No.", "PD",
-        "Basic", "HRA", "Conv", "Med", "Spl",
-        "Gross",
-        "PF (E)", "ESI (E)", "PT", "TDS",
-        "Ded", "Net",
-        "PF (Er)", "ESI (Er)",
+    # ---- table ------------------------------------------------------------
+    hdr_top = [
+        "S.No", "NAME /\nFATHER NAME", "P.F.NO. /\nESI NO.", "DESIG.",
+        "DAYS\n/HRS",
+        "----------------- EARNINGS -----------------", "", "", "", "",
+        "------------------- DEDUCTIONS -------------------", "", "", "", "", "",
+        "NET\nPAYABLE", "SIGN. /\nBANK",
     ]
-    data = [header]
-    totals = {
-        k: 0.0
-        for k in (
-            "basic", "hra", "conveyance", "medical", "special",
-            "gross_paid", "pf_employee", "esic_employee", "pt", "tds",
-            "total_deduction", "net", "pf_employer_total", "esic_employer",
-        )
-    }
-    for r in (run.get("rows") or []):
-        data.append([
-            (r.get("name") or "")[:22],
-            (r.get("father_name") or "—")[:20],
-            (r.get("designation") or "—")[:16],
-            r.get("uan_no") or "—",
-            r.get("esi_ip_no") or "—",
-            r.get("present_days") or 0,
-            f"{_num(r.get('basic')):.0f}",
-            f"{_num(r.get('hra')):.0f}",
-            f"{_num(r.get('conveyance')):.0f}",
-            f"{_num(r.get('medical')):.0f}",
-            f"{_num(r.get('special')):.0f}",
-            f"{_num(r.get('gross_paid')):.0f}",
-            f"{_num(r.get('pf_employee')):.0f}",
-            f"{_num(r.get('esic_employee')):.0f}",
-            f"{_num(r.get('pt')):.0f}",
-            f"{_num(r.get('tds')):.0f}",
-            f"{_num(r.get('total_deduction')):.0f}",
-            f"{_num(r.get('net')):.0f}",
-            f"{_num(r.get('pf_employer_total')):.0f}",
-            f"{_num(r.get('esic_employer')):.0f}",
-        ])
-        for k in totals:
-            totals[k] += _num(r.get(k))
+    hdr_sub = [
+        "", "", "", "", "",
+        "SALARY", "H.R.A", "CONV.", "OTHER", "TOTAL",
+        "P.F.", "E.S.I.", "ADVANCE", "OTHER", "TDS", "TOTAL",
+        "AMOUNT", "DATE OF\nPAYMENT",
+    ]
+    data: List[List[Any]] = [hdr_top, hdr_sub]
 
+    cell = ParagraphStyle("cell", fontName="Helvetica", fontSize=5.5, leading=6.5)
+    tot = {k: 0.0 for k in (
+        "days", "hrs", "sal", "hra", "conv", "oth", "gross",
+        "pf", "esi", "adv", "othd", "tds", "ded", "net",
+        "pf_wages", "gross_pf", "gross_nonpf", "esi_base", "nonesi_base",
+    )}
+    for i, r in enumerate(rows, start=1):
+        days = float(r.get("present_days") or 0)
+        hrs = float(r.get("ot_hours") or 0)
+        oth_e = other_earn(r)
+        pf_v = pf_ded(r)
+        oth_d = other_ded(r)
+        gross = float(r.get("gross_paid") or 0)
+        tot["days"] += days; tot["hrs"] += hrs
+        tot["sal"] += float(r.get("basic") or 0); tot["hra"] += float(r.get("hra") or 0)
+        tot["conv"] += float(r.get("conveyance") or 0); tot["oth"] += oth_e
+        tot["gross"] += gross
+        tot["pf"] += pf_v; tot["esi"] += float(r.get("esic_employee") or 0)
+        tot["othd"] += oth_d; tot["tds"] += float(r.get("tds") or 0)
+        tot["ded"] += float(r.get("total_deduction") or 0)
+        tot["net"] += float(r.get("net") or 0)
+        if r.get("pf_applicable"):
+            tot["pf_wages"] += float(r.get("pf_wages") or 0)
+            tot["gross_pf"] += gross
+        else:
+            tot["gross_nonpf"] += gross
+        if r.get("esic_applicable"):
+            tot["esi_base"] += float(r.get("esic_wage_base") or gross)
+        else:
+            tot["nonesi_base"] += gross
+        name_p = Paragraph(
+            f"{(r.get('name') or '').upper()}<br/>S/O {(r.get('father_name') or '').upper()}", cell)
+        ids_p = Paragraph(
+            f"UAN No. {r.get('uan_no') or '-'}<br/>ESI: {r.get('esi_ip_no') or '-'}", cell)
+        data.append([
+            str(i), name_p, ids_p,
+            Paragraph((r.get("designation") or "").upper(), cell),
+            f"{days:g}/{('%g' % hrs) if hrs else ''}",
+            A(r.get("basic")), A(r.get("hra")), A(r.get("conveyance")),
+            A(oth_e), A(gross),
+            A(pf_v), A(r.get("esic_employee")), "0.00", A(oth_d),
+            A(r.get("tds")), A(r.get("total_deduction")),
+            A(r.get("net")), "",
+        ])
     data.append([
-        Paragraph("<b>TOTAL</b>", small), "", "", "", "", "",
-        f"{totals['basic']:.0f}", f"{totals['hra']:.0f}",
-        f"{totals['conveyance']:.0f}", f"{totals['medical']:.0f}", f"{totals['special']:.0f}",
-        f"{totals['gross_paid']:.0f}",
-        f"{totals['pf_employee']:.0f}", f"{totals['esic_employee']:.0f}",
-        f"{totals['pt']:.0f}", f"{totals['tds']:.0f}",
-        f"{totals['total_deduction']:.0f}", f"{totals['net']:.0f}",
-        f"{totals['pf_employer_total']:.0f}", f"{totals['esic_employer']:.0f}",
+        "", "GRAND TOTAL", "", "", f"{tot['days']:g}/{tot['hrs']:g}",
+        A(tot["sal"]), A(tot["hra"]), A(tot["conv"]), A(tot["oth"]), A(tot["gross"]),
+        A(tot["pf"]), A(tot["esi"]), "0.00", A(tot["othd"]), A(tot["tds"]), A(tot["ded"]),
+        A(tot["net"]), "",
     ])
 
-    col_widths = [
-        14 * mm,        # code
-        44 * mm,        # name
-        9 * mm,         # PD
-        16 * mm, 16 * mm, 14 * mm, 14 * mm, 16 * mm,   # basic hra conv med spl
-        18 * mm,        # gross
-        15 * mm, 15 * mm, 12 * mm, 15 * mm,            # pf(e) esi(e) pt tds
-        16 * mm, 20 * mm,                              # ded, net
-        16 * mm, 16 * mm,                              # pf(er) esi(er)
-    ]
-
-    t = Table(data, colWidths=col_widths, repeatRows=1)
-    t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), BRAND),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 7),
-        ("LINEBELOW", (0, 0), (-1, -1), 0.25, LINE),
+    widths = [6, 26, 23, 13, 8, 11, 9, 9, 9, 11, 9, 8, 8, 9, 8, 11, 12, 10]
+    tbl = Table(data, colWidths=[wmm * mm for wmm in widths], repeatRows=2)
+    last = len(data) - 1
+    tbl.setStyle(TableStyle([
+        ("SPAN", (5, 0), (9, 0)), ("SPAN", (10, 0), (15, 0)),
+        ("SPAN", (0, 0), (0, 1)), ("SPAN", (1, 0), (1, 1)), ("SPAN", (2, 0), (2, 1)),
+        ("SPAN", (3, 0), (3, 1)), ("SPAN", (4, 0), (4, 1)),
+        ("SPAN", (16, 0), (16, 1)), ("SPAN", (17, 0), (17, 1)),
+        ("FONTNAME", (0, 0), (-1, 1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 1), 5.5),
+        ("FONTNAME", (0, 2), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 2), (-1, -1), 5.5),
+        ("FONTNAME", (0, last), (-1, last), "Helvetica-Bold"),
+        ("ALIGN", (0, 0), (-1, 1), "CENTER"),
+        ("ALIGN", (4, 2), (-1, -1), "RIGHT"),
+        ("ALIGN", (0, 2), (0, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("BACKGROUND", (0, -1), (-1, -1), BG_SOFT),
-        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, BG_SOFT]),
-        ("ALIGN", (5, 0), (-1, -1), "RIGHT"),
+        ("GRID", (0, 0), (-1, -1), 0.4, rl_colors.black),
+        ("LEFTPADDING", (0, 0), (-1, -1), 1.5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 1.5),
+        ("TOPPADDING", (0, 0), (-1, -1), 1),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
     ]))
+
+    # ---- summary page -----------------------------------------------------
+    lbl = ParagraphStyle("lbl", fontName="Helvetica", fontSize=8, leading=11)
+    lblb = ParagraphStyle("lblb", fontName="Helvetica-Bold", fontSize=8, leading=11)
+
+    def sec(pairs, bold_last=True):
+        d = [[Paragraph(k, lblb if (bold_last and i == len(pairs) - 1) else lbl),
+              Paragraph(v, lblb if (bold_last and i == len(pairs) - 1) else lbl)]
+             for i, (k, v) in enumerate(pairs)]
+        t = Table(d, colWidths=[62 * mm, 32 * mm])
+        t.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.5, rl_colors.black),
+            ("INNERGRID", (0, 0), (-1, -1), 0.25, rl_colors.HexColor("#999999")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3), ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ]))
+        return t
+
+    story: List[Any] = [tbl, PageBreak()]
+    story.append(sec([
+        ("No. Of Emp", str(len(rows))),
+        ("Total Salary Amount", A(tot["sal"])),
+        ("Total H.R.A Amount", A(tot["hra"])),
+        ("Total Conveyance Amount", A(tot["conv"])),
+        ("Total Other Amount", A(tot["oth"])),
+        ("Total Bonus Amount", "0.00"),
+        ("Total Gross Amount", A(tot["gross"])),
+    ]))
+    story.append(Spacer(1, 4 * mm))
+    story.append(sec([
+        ("P.F. Deduction Amount", A(tot["pf"])),
+        ("ABRY P.F. Benifit", "0.00"),
+        ("E.S.I. Deduction Amount", A(tot["esi"])),
+        ("Advance Deduction Amount", "0.00"),
+        ("Other Deduction Amount", A(tot["othd"])),
+        ("TDS Deduction Amount", A(tot["tds"])),
+        ("Total Deduction Amount", A(tot["ded"])),
+    ]))
+    story.append(Spacer(1, 4 * mm))
+    story.append(sec([
+        ("Total Salary of P.F.", A(tot["pf_wages"])),
+        ("Total Less Salary on PF", A(max(0.0, tot["gross_pf"] - tot["pf_wages"]))),
+        ("Total Salary of non-P.F", A(tot["gross_nonpf"])),
+        ("Total Salary+HRA+CONV(ESI)", A(tot["esi_base"])),
+        ("Total Salary+HRA+CONV(NON-ESI)", A(tot["nonesi_base"])),
+    ], bold_last=False))
+    story.append(Spacer(1, 4 * mm))
+    story.append(sec([
+        ("Total Days ->", f"{tot['days']:g}"),
+        ("Total Hours ->", f"{tot['hrs']:g}"),
+        ("Net Payable Amount", A(tot["net"])),
+    ]))
+    story.append(Spacer(1, 5 * mm))
     story.append(Paragraph(
-        f"<b>Compliance salary summary</b> — {run.get('month')}  ·  "
-        f"employees: {len(run.get('rows') or [])}  ·  "
-        f"net payout: ₹{totals['net']:,.0f}  ·  "
-        f"total statutory: ₹{totals['total_deduction']:,.0f}",
-        heading,
-    ))
-    story.append(Spacer(1, 6))
-    story.append(t)
-    doc.build(story)
+        f"RUPEES: {_num_to_words_inr(int(round(tot['gross'])))} (GROSS)", lblb))
+    story.append(Paragraph(
+        f"RUPEES: {_num_to_words_inr(int(round(tot['net'])))} (NET PAYABLE)", lblb))
+    story.append(Spacer(1, 14 * mm))
+    foot = Table([
+        [Paragraph("Checked by", lblb), Paragraph(f"For {company_name.upper()}", lblb)],
+        [Paragraph("Payment Date ______________", lbl),
+         Paragraph("AUTHORISED SIGNATORY/MANAGER", lblb)],
+    ], colWidths=[95 * mm, 95 * mm])
+    foot.setStyle(TableStyle([
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("TOPPADDING", (0, 1), (-1, 1), 12),
+    ]))
+    story.append(foot)
+
+    doc.build(story, canvasmaker=_NumberedCanvas)
     return buf.getvalue()
 
 
-_MONTH_RE = re.compile(r"^(\d{4})-(\d{2})$")
-
-
 def parse_month(month_str: str) -> tuple[int, int]:
-    m = _MONTH_RE.match((month_str or "").strip())
+    m = re.match(r"^(\d{4})-(\d{2})$", (month_str or "").strip())
     if not m:
         raise ValueError("month must be in YYYY-MM format")
     y = int(m.group(1))

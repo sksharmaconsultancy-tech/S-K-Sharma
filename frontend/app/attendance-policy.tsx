@@ -153,6 +153,10 @@ type Policy = {
   // Iter 77d — Minimum working hours on a week-off day for full-day
   // attendance credit. 0 disables the rule.
   week_off_min_working_hours?: number;
+  // Iter 131 — OT Calculation config (Textile Policy 2 only):
+  // OT hourly rate = (%Basic per-day + %Gross per-day) ÷ full-day hours.
+  ot_pct_basic?: number;
+  ot_pct_gross?: number;
 };
 
 type PolicyResponse = {
@@ -202,6 +206,8 @@ function normalisePolicy(p: Policy): Policy {
     duty_hours_rounding_minutes: Number(p.duty_hours_rounding_minutes ?? 0),
     standard_working_hours: Number(p.standard_working_hours ?? anyp.workday_hours ?? 8),
     week_off_min_working_hours: Number(p.week_off_min_working_hours ?? 0),
+    ot_pct_basic: Number(p.ot_pct_basic ?? 0),
+    ot_pct_gross: Number(p.ot_pct_gross ?? 0),
     punch_approval_required: p.punch_approval_required ?? true,
   };
 }
@@ -210,7 +216,7 @@ export default function AttendancePolicyScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const params = useLocalSearchParams<{ company_id?: string }>();
-  const isSuper = user?.role === "super_admin";
+  const isSuper = user?.role === "super_admin" || user?.role === "sub_admin";
   // Iter 68 — Fall back to the global picker for super/sub admins when no
   // explicit ?company_id= is in the URL, so firm impersonation works here
   // too.  Company Admin uses their own firm implicitly.
@@ -1157,6 +1163,65 @@ function TextilePolicySection({
         placeholderTextColor={colors.onSurfaceTertiary}
         style={styles.input}
       />
+
+      {/* Iter 131 (user directive) — OT Calculation config, Policy 2 only.
+          Iter 131b — EITHER Basic OR Gross: filling one disables the other. */}
+      {variant === "policy_2" ? (
+        <>
+          <SectionTitle
+            title="OT Calculation"
+            hint="Choose ONE base — enter the % in either Basic or Gross. The other option is disabled automatically. OT hourly rate = per-day base × % ÷ full-day hours. Used by Salary Process (OT)."
+          />
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <View style={{ flex: 1, opacity: (policy.ot_pct_gross || 0) > 0 ? 0.4 : 1 }}>
+              <Text style={styles.label}>
+                % of Basic{(policy.ot_pct_gross || 0) > 0 ? "  (disabled — Gross selected)" : ""}
+              </Text>
+              <TextInput
+                testID="ot-pct-basic"
+                editable={!((policy.ot_pct_gross || 0) > 0)}
+                value={policy.ot_pct_basic ? String(policy.ot_pct_basic) : ""}
+                onChangeText={(t) => {
+                  if (t === "") { onChange({ ot_pct_basic: 0 }); return; }
+                  const n = Number(t);
+                  if (!Number.isNaN(n) && n >= 0 && n <= 500) {
+                    onChange({ ot_pct_basic: n, ot_pct_gross: 0 });
+                  }
+                }}
+                keyboardType="decimal-pad"
+                placeholder="e.g. 100"
+                placeholderTextColor={colors.onSurfaceTertiary}
+                style={styles.input}
+              />
+            </View>
+            <View style={{ flex: 1, opacity: (policy.ot_pct_basic || 0) > 0 ? 0.4 : 1 }}>
+              <Text style={styles.label}>
+                % of Gross{(policy.ot_pct_basic || 0) > 0 ? "  (disabled — Basic selected)" : ""}
+              </Text>
+              <TextInput
+                testID="ot-pct-gross"
+                editable={!((policy.ot_pct_basic || 0) > 0)}
+                value={policy.ot_pct_gross ? String(policy.ot_pct_gross) : ""}
+                onChangeText={(t) => {
+                  if (t === "") { onChange({ ot_pct_gross: 0 }); return; }
+                  const n = Number(t);
+                  if (!Number.isNaN(n) && n >= 0 && n <= 500) {
+                    onChange({ ot_pct_gross: n, ot_pct_basic: 0 });
+                  }
+                }}
+                keyboardType="decimal-pad"
+                placeholder="e.g. 50"
+                placeholderTextColor={colors.onSurfaceTertiary}
+                style={styles.input}
+              />
+            </View>
+          </View>
+          <Text style={styles.smallHint}>
+            Only ONE can be active. To switch, clear the filled field first (set
+            it to 0 / empty) — the other unlocks instantly.
+          </Text>
+        </>
+      ) : null}
     </>
   );
 }
