@@ -626,12 +626,12 @@ def build_compliance_register_pdf(
     company_name: str = "S.K. Sharma & Co.",
     firm: Optional[Dict[str, Any]] = None,
 ) -> bytes:
-    """Statutory SALARY REGISTER — exact replica of the user's reference
-    format (Form No. 27(1) / rule 78(1)(a)(i)): portrait A4, grouped
-    EARNINGS / DEDUCTIONS columns, GRAND TOTAL row and a final summary
-    page with amounts in words + signature block."""
+    """Statutory SALARY REGISTER — replica of the user's reference format
+    (Form No. 27(1) / rule 78(1)(a)(i)) in LANDSCAPE A4 (Iter 137 user
+    request), grouped EARNINGS / DEDUCTIONS columns, GRAND TOTAL row and a
+    final summary page with amounts in words + signature block."""
     from reportlab.lib import colors as rl_colors
-    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.units import mm
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.pdfgen import canvas as rl_canvas
@@ -719,7 +719,7 @@ def build_compliance_register_pdf(
 
     buf = io.BytesIO()
     doc = BaseDocTemplate(
-        buf, pagesize=A4,
+        buf, pagesize=landscape(A4),
         leftMargin=5 * mm, rightMargin=5 * mm,
         topMargin=20 * mm, bottomMargin=8 * mm,
         title=f"Salary Register — {month}",
@@ -796,7 +796,9 @@ def build_compliance_register_pdf(
     ])
 
     widths = [6, 26, 23, 13, 8, 11, 9, 9, 9, 11, 9, 8, 8, 9, 8, 11, 12, 10]
-    tbl = Table(data, colWidths=[wmm * mm for wmm in widths], repeatRows=2)
+    # Landscape — stretch the reference column ratios to the full width.
+    _scale = (W - 12 * mm) / (sum(widths) * mm)
+    tbl = Table(data, colWidths=[wmm * mm * _scale for wmm in widths], repeatRows=2)
     last = len(data) - 1
     tbl.setStyle(TableStyle([
         ("SPAN", (5, 0), (9, 0)), ("SPAN", (10, 0), (15, 0)),
@@ -804,9 +806,9 @@ def build_compliance_register_pdf(
         ("SPAN", (3, 0), (3, 1)), ("SPAN", (4, 0), (4, 1)),
         ("SPAN", (16, 0), (16, 1)), ("SPAN", (17, 0), (17, 1)),
         ("FONTNAME", (0, 0), (-1, 1), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 1), 5.5),
+        ("FONTSIZE", (0, 0), (-1, 1), 6.5),
         ("FONTNAME", (0, 2), (-1, -1), "Helvetica"),
-        ("FONTSIZE", (0, 2), (-1, -1), 5.5),
+        ("FONTSIZE", (0, 2), (-1, -1), 6.5),
         ("FONTNAME", (0, last), (-1, last), "Helvetica-Bold"),
         ("ALIGN", (0, 0), (-1, 1), "CENTER"),
         ("ALIGN", (4, 2), (-1, -1), "RIGHT"),
@@ -888,6 +890,233 @@ def build_compliance_register_pdf(
     ]))
     story.append(foot)
 
+    doc.build(story, canvasmaker=_NumberedCanvas)
+    return buf.getvalue()
+
+
+def build_compliance_register_pdf_v2(
+    run: Dict[str, Any],
+    company_name: str = "S.K. Sharma & Co.",
+    firm: Optional[Dict[str, Any]] = None,
+) -> bytes:
+    """Iter 137 — OPTION 2 (recommended modern format).
+
+    Landscape A4 register: colour title band, zebra-striped rows, clear
+    per-employee columns (Code / Name / UAN / ESI / Days / earnings /
+    deductions / NET), repeating header, page numbers and a compact
+    summary + signature strip on the final page."""
+    from reportlab.lib import colors as rl_colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import mm
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.pdfgen import canvas as rl_canvas
+    from reportlab.platypus import (
+        BaseDocTemplate, Frame, PageTemplate,
+        Paragraph, Spacer, Table, TableStyle,
+    )
+    from utils.salary_register_pdf import _num_to_words_inr
+
+    firm = firm or {}
+    rows: List[Dict[str, Any]] = list(run.get("rows") or [])
+    month = str(run.get("month") or "")
+    try:
+        _y, _m = int(month[:4]), int(month[5:7])
+        month_label = datetime(_y, _m, 1).strftime("%B %Y")
+    except Exception:
+        month_label = month
+    group = (run.get("employee_type") or "All Employees").upper()
+    pf_code = str(firm.get("pf_code") or "")
+    esi_code = str(firm.get("esi_code") or "")
+    address = str(firm.get("address") or "")
+
+    BRAND = rl_colors.HexColor("#0F3B5C")
+    BAND = rl_colors.HexColor("#EAF1F7")
+    ZEBRA = rl_colors.HexColor("#F6F8FA")
+
+    W, H = landscape(A4)
+
+    def A(v: Any) -> str:
+        try:
+            return f"{float(v or 0):,.2f}"
+        except Exception:
+            return "0.00"
+
+    class _NumberedCanvas(rl_canvas.Canvas):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self._saved = []
+
+        def showPage(self):
+            self._saved.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            total = len(self._saved)
+            for st in self._saved:
+                self.__dict__.update(st)
+                self.setFont("Helvetica", 7)
+                self.setFillColor(rl_colors.HexColor("#666666"))
+                self.drawRightString(W - 8 * mm, 5 * mm,
+                                     f"Page {self._pageNumber} of {total}")
+                super().showPage()
+            super().save()
+
+    def _header(c, d):
+        c.saveState()
+        c.setFillColor(BRAND)
+        c.rect(0, H - 20 * mm, W, 20 * mm, stroke=0, fill=1)
+        c.setFillColor(rl_colors.white)
+        c.setFont("Helvetica-Bold", 13)
+        c.drawString(8 * mm, H - 9 * mm, company_name.upper())
+        c.setFont("Helvetica", 7.5)
+        if address:
+            c.drawString(8 * mm, H - 13.5 * mm, address[:140])
+        c.setFont("Helvetica", 7.5)
+        codes = "   ·   ".join(x for x in [
+            f"PF Code: {pf_code}" if pf_code else "",
+            f"ESI Code: {esi_code}" if esi_code else "",
+            f"Group: {group}",
+        ] if x)
+        c.drawString(8 * mm, H - 17.5 * mm, codes)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawRightString(W - 8 * mm, H - 9 * mm, "SALARY REGISTER (COMPLIANCE)")
+        c.setFont("Helvetica-Bold", 9)
+        c.drawRightString(W - 8 * mm, H - 14.5 * mm, month_label)
+        c.restoreState()
+
+    buf = io.BytesIO()
+    doc = BaseDocTemplate(
+        buf, pagesize=landscape(A4),
+        leftMargin=6 * mm, rightMargin=6 * mm,
+        topMargin=24 * mm, bottomMargin=10 * mm,
+        title=f"Salary Register (Option 2) — {month}",
+    )
+    frame = Frame(doc.leftMargin, doc.bottomMargin, W - 12 * mm,
+                  H - doc.topMargin - doc.bottomMargin, id="f")
+    doc.addPageTemplates([PageTemplate(id="pg", frames=[frame], onPage=_header)])
+
+    cell = ParagraphStyle("cell", fontName="Helvetica", fontSize=6.8, leading=8)
+    header = [
+        "S.No", "Code", "Employee / Father Name", "UAN / ESI No.", "Desig.",
+        "Days", "Basic", "HRA", "Conv.", "Other", "GROSS",
+        "PF", "ESI", "Other Ded.", "TDS", "TOTAL DED.", "NET PAY",
+    ]
+    data: List[List[Any]] = [header]
+
+    def other_earn(r):
+        return (float(r.get("medical") or 0) + float(r.get("special") or 0)
+                + float(r.get("others") or 0) + float(r.get("ot_pay") or 0))
+
+    def other_ded(r):
+        return (float(r.get("other_deduction") or 0)
+                + float(r.get("master_deduction") or 0)
+                + float(r.get("pt") or 0))
+
+    tot = {k: 0.0 for k in ("days", "basic", "hra", "conv", "oth", "gross",
+                            "pf", "esi", "othd", "tds", "ded", "net")}
+    for i, r in enumerate(rows, start=1):
+        days = float(r.get("present_days") or 0)
+        oth_e = other_earn(r)
+        pf_v = float(r.get("pf_employee") or 0) + float(r.get("vpf_amount") or 0)
+        oth_d = other_ded(r)
+        tot["days"] += days
+        tot["basic"] += float(r.get("basic") or 0)
+        tot["hra"] += float(r.get("hra") or 0)
+        tot["conv"] += float(r.get("conveyance") or 0)
+        tot["oth"] += oth_e
+        tot["gross"] += float(r.get("gross_paid") or 0)
+        tot["pf"] += pf_v
+        tot["esi"] += float(r.get("esic_employee") or 0)
+        tot["othd"] += oth_d
+        tot["tds"] += float(r.get("tds") or 0)
+        tot["ded"] += float(r.get("total_deduction") or 0)
+        tot["net"] += float(r.get("net") or 0)
+        data.append([
+            str(i),
+            str(r.get("employee_code") or ""),
+            Paragraph(
+                f"<b>{(r.get('name') or '').upper()}</b><br/>{(r.get('father_name') or '').upper()}",
+                cell),
+            Paragraph(
+                f"{r.get('uan_no') or '-'}<br/>{r.get('esi_ip_no') or '-'}", cell),
+            Paragraph((r.get("designation") or "").upper(), cell),
+            f"{days:g}",
+            A(r.get("basic")), A(r.get("hra")), A(r.get("conveyance")),
+            A(oth_e), A(r.get("gross_paid")),
+            A(pf_v), A(r.get("esic_employee")), A(oth_d), A(r.get("tds")),
+            A(r.get("total_deduction")), A(r.get("net")),
+        ])
+    data.append([
+        "", "", "GRAND TOTAL", "", "", f"{tot['days']:g}",
+        A(tot["basic"]), A(tot["hra"]), A(tot["conv"]), A(tot["oth"]), A(tot["gross"]),
+        A(tot["pf"]), A(tot["esi"]), A(tot["othd"]), A(tot["tds"]),
+        A(tot["ded"]), A(tot["net"]),
+    ])
+
+    widths = [7, 12, 40, 24, 18, 8, 13, 12, 12, 12, 15, 12, 11, 12, 11, 15, 15]
+    _scale = (W - 12 * mm) / (sum(widths) * mm)
+    tbl = Table(data, colWidths=[wmm * mm * _scale for wmm in widths], repeatRows=1)
+    last = len(data) - 1
+    style = [
+        ("BACKGROUND", (0, 0), (-1, 0), BRAND),
+        ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 7),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 1), (-1, -1), 6.8),
+        ("FONTNAME", (0, last), (-1, last), "Helvetica-Bold"),
+        ("BACKGROUND", (0, last), (-1, last), BAND),
+        ("ALIGN", (5, 0), (-1, -1), "RIGHT"),
+        ("ALIGN", (0, 0), (1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("GRID", (0, 0), (-1, -1), 0.35, rl_colors.HexColor("#B9C4CE")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2.5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2.5),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]
+    for ri in range(1, last):
+        if ri % 2 == 0:
+            style.append(("BACKGROUND", (0, ri), (-1, ri), ZEBRA))
+    tbl.setStyle(TableStyle(style))
+
+    lbl = ParagraphStyle("lbl", fontName="Helvetica", fontSize=8.5, leading=12)
+    lblb = ParagraphStyle("lblb", fontName="Helvetica-Bold", fontSize=8.5, leading=12)
+
+    summary = Table([[
+        Paragraph(f"Employees: <b>{len(rows)}</b>", lbl),
+        Paragraph(f"Gross: <b>₹{tot['gross']:,.2f}</b>", lbl),
+        Paragraph(f"Total Deductions: <b>₹{tot['ded']:,.2f}</b>", lbl),
+        Paragraph(f"Net Payable: <b>₹{tot['net']:,.2f}</b>", lbl),
+    ]], colWidths=[(W - 12 * mm) / 4.0] * 4)
+    summary.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), BAND),
+        ("BOX", (0, 0), (-1, -1), 0.5, BRAND),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+
+    foot = Table([
+        [Paragraph("Checked by ____________________", lbl),
+         Paragraph(f"For {company_name.upper()}", lblb)],
+        [Paragraph("Payment Date ____________________", lbl),
+         Paragraph("AUTHORISED SIGNATORY / MANAGER", lblb)],
+    ], colWidths=[(W - 12 * mm) / 2.0] * 2)
+    foot.setStyle(TableStyle([
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("TOPPADDING", (0, 1), (-1, 1), 14),
+    ]))
+
+    story: List[Any] = [
+        tbl,
+        Spacer(1, 4 * mm),
+        summary,
+        Spacer(1, 3 * mm),
+        Paragraph(f"RUPEES: {_num_to_words_inr(int(round(tot['net'])))} (NET PAYABLE)", lblb),
+        Spacer(1, 8 * mm),
+        foot,
+    ]
     doc.build(story, canvasmaker=_NumberedCanvas)
     return buf.getvalue()
 

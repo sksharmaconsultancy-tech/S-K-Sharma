@@ -137,6 +137,22 @@ async def patch_employee_profile(
         updates["employee_type"] = unified
         updates["employee_group"] = unified
 
+    # Iter 137 (user directive) — Compliance salary is ONE interlinked
+    # source of truth: whenever Compliance Basic / allowance lines change,
+    # rebuild salary_structure_compliance and the linked Compliance Gross
+    # (= Basic + Σ allowances) so ESIC/PF read the same heads everywhere.
+    if ("compliance_basic" in updates or "compliance_salary_allowances" in updates
+            or "compliance_salary_mode" in updates):
+        from server import build_compliance_structure, compliance_gross_total
+        _basic = updates.get("compliance_basic", emp.get("compliance_basic")) or 0
+        _allow = updates.get("compliance_salary_allowances",
+                             emp.get("compliance_salary_allowances") or [])
+        _rate = updates.get("compliance_salary_mode", emp.get("compliance_salary_mode"))
+        updates["salary_structure_compliance"] = build_compliance_structure(_basic, _allow, _rate)
+        _total = compliance_gross_total(_basic, _allow)
+        if _total > 0:
+            updates["compliance_gross"] = _total
+
     # Iter 95e — Shift assignment via Shift Master. ``shift_id`` maps onto
     # attendance_policy_override.shift_id (preserving other override keys)
     # and mirrors the master's start/end for display.

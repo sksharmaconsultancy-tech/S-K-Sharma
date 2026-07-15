@@ -631,6 +631,18 @@ export default function ReportsHubScreen() {
                   <Pressable
                     onPress={() =>
                       downloadBinary(
+                        `/admin/compliance-salary-runs/${r.run_id}/register.pdf?variant=2`,
+                        `ComplianceRegister_Option2_${r.month}.pdf`,
+                      )
+                    }
+                    style={styles.linkBtn}
+                  >
+                    <Ionicons name="document-outline" size={14} color={colors.brandPrimary} />
+                    <Text style={styles.linkBtnTxt}>PDF 2</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() =>
+                      downloadBinary(
                         `/admin/compliance-salary-runs/${r.run_id}/ecr.txt`,
                         `ECR_${r.month}.txt`,
                       )

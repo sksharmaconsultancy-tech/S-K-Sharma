@@ -692,7 +692,7 @@ export default function ComplianceSalaryRunScreen() {
     } finally { setUnlockBusy(false); }
   };
 
-  const downloadFile = async (kind: "csv" | "pdf" | "xlsx" | "ecr" | "esic-mc" | "esic-reg") => {
+  const downloadFile = async (kind: "csv" | "pdf" | "pdf2" | "xlsx" | "ecr" | "esic-mc" | "esic-reg") => {
     if (!run || downloading) return;
     setDownloading(true);
     try {
@@ -703,11 +703,13 @@ export default function ComplianceSalaryRunScreen() {
             ? `/admin/compliance-salary-runs/${run.run_id}/export.xlsx`
             : kind === "pdf"
               ? `/admin/compliance-salary-runs/${run.run_id}/register.pdf`
-              : kind === "ecr"
-                ? `/admin/compliance-salary-runs/${run.run_id}/pf-ecr.txt`
-                : kind === "esic-mc"
-                  ? `/admin/compliance-salary-runs/${run.run_id}/esic-mc.csv`
-                  : `/admin/compliance-salary-runs/${run.run_id}/esic-ip-reg.csv`;
+              : kind === "pdf2"
+                ? `/admin/compliance-salary-runs/${run.run_id}/register.pdf?variant=2`
+                : kind === "ecr"
+                  ? `/admin/compliance-salary-runs/${run.run_id}/pf-ecr.txt`
+                  : kind === "esic-mc"
+                    ? `/admin/compliance-salary-runs/${run.run_id}/esic-mc.csv`
+                    : `/admin/compliance-salary-runs/${run.run_id}/esic-ip-reg.csv`;
       const res = await apiBinary(url);
       if (Platform.OS === "web" && res.webBlobUrl) {
         const a = document.createElement("a");
@@ -719,11 +721,13 @@ export default function ComplianceSalaryRunScreen() {
               ? `ComplianceSalary_${run.month}.xlsx`
               : kind === "pdf"
                 ? `ComplianceSalaryRegister_${run.month}.pdf`
-                : kind === "ecr"
-                  ? `PF_ECR_${run.month}.txt`
-                  : kind === "esic-mc"
-                    ? `ESIC_MC_${run.month}.csv`
-                    : `ESIC_IP_Registration_${run.month}.csv`;
+                : kind === "pdf2"
+                  ? `ComplianceSalaryRegister_Option2_${run.month}.pdf`
+                  : kind === "ecr"
+                    ? `PF_ECR_${run.month}.txt`
+                    : kind === "esic-mc"
+                      ? `ESIC_MC_${run.month}.csv`
+                      : `ESIC_IP_Registration_${run.month}.csv`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 30000);
       }
@@ -1347,6 +1351,7 @@ export default function ComplianceSalaryRunScreen() {
                 <ActionBtn icon="refresh" label="Reprocess" busy={reprocessing} onPress={reprocess} />
                 <ActionBtn icon="grid-outline" label="Excel" busy={downloading} onPress={() => downloadFile("xlsx")} />
                 <ActionBtn icon="document-text-outline" label="PDF" busy={downloading} onPress={() => downloadFile("pdf")} />
+                <ActionBtn icon="document-outline" label="PDF (Option 2)" busy={downloading} onPress={() => downloadFile("pdf2")} />
                 <ActionBtn icon="download-outline" label="CSV" busy={downloading} onPress={() => downloadFile("csv")} />
                 <ActionBtn icon="paper-plane-outline" label="Push payslips" busy={pushing} onPress={pushToPayslips} primary />
               </View>

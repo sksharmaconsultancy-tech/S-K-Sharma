@@ -838,6 +838,20 @@ def register_iter60_features(
                         updates["other"] = amount
                 updates["compliance_salary_allowances"] = lines
 
+            # Iter 137 — keep the interlinked compliance structure + linked
+            # Compliance Gross in sync whenever Basic / allowances change.
+            if "compliance_basic" in updates or "compliance_salary_allowances" in updates:
+                from server import build_compliance_structure, compliance_gross_total
+                _basic = updates.get("compliance_basic",
+                                     existing.get("compliance_basic")) or 0
+                _allow = updates.get("compliance_salary_allowances",
+                                     existing.get("compliance_salary_allowances") or [])
+                updates["salary_structure_compliance"] = build_compliance_structure(
+                    _basic, _allow, existing.get("compliance_salary_mode"))
+                _total = compliance_gross_total(_basic, _allow)
+                if _total > 0:
+                    updates["compliance_gross"] = _total
+
             if not updates and group_change_to is None:
                 skipped.append({"user_id": row.user_id, "reason": "no_changes"})
                 continue

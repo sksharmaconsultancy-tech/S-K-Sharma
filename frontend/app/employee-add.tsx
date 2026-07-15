@@ -393,6 +393,20 @@ export default function EmployeeAddScreen() {
   const setField = (k: keyof EmpForm, v: any) =>
     setForm((prev) => ({ ...prev, [k]: v }));
 
+  // Iter 137 (user directive) — allowance totals + LINKED Compliance Gross
+  // (= Compliance Basic + Σ compliance allowances).
+  const sumLines = (lines: SalaryLine[]) =>
+    lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  const actualAllowTotal = sumLines(form.actual_allowances);
+  const complAllowTotal = sumLines(form.compliance_allowances);
+  const complGrossComputed = (Number(form.compliance_basic) || 0) + complAllowTotal;
+  useEffect(() => {
+    if (complGrossComputed > 0 && String(complGrossComputed) !== form.compliance_gross) {
+      setForm((prev) => ({ ...prev, compliance_gross: String(complGrossComputed) }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [complGrossComputed]);
+
   // Iter 108 — Enter moves to the next field; Enter on the last field saves.
   useEnterNav(() => { void submit(); });
   // Iter 110 — Ctrl+S: edit mode saves directly; create mode saves a draft.
@@ -1058,20 +1072,7 @@ export default function EmployeeAddScreen() {
               placeholder="e.g. 15000"
               keyboardType="numeric"
             />
-            <Field
-              label="Off-Line gross / month (₹)"
-              value={form.salary_monthly}
-              onChange={(v) => setField("salary_monthly", v.replace(/[^0-9.]/g, ""))}
-              onBlur={() => {
-                // Iter 97 — salary ≤ ₹1500 is a DAILY wage. Auto-switch.
-                const amt = Number(form.salary_monthly) || 0;
-                if (amt > 0 && amt <= 1500 && form.salary_mode !== "daily") {
-                  setField("salary_mode", "daily");
-                }
-              }}
-              placeholder="e.g. 25000"
-              keyboardType="numeric"
-            />
+            <View style={{ flex: 1 }} />
           </TwoCol>
           {([1, 2, 3] as const).map((n) => (
             <TwoCol key={n}>
@@ -1132,6 +1133,30 @@ export default function EmployeeAddScreen() {
               </View>
             </>
           ) : null}
+          {/* Iter 137 (user directive) — Total of allowances + gross moved
+              AFTER the Allowances section. */}
+          {firmHeads.allowances.length > 0 ? (
+            <Text style={[styles.smallNote, { fontWeight: "800" }]}>
+              Total Allowances (Actual): ₹{actualAllowTotal.toLocaleString()}
+            </Text>
+          ) : null}
+          <TwoCol>
+            <Field
+              label="Off-Line gross / month (₹)"
+              value={form.salary_monthly}
+              onChange={(v) => setField("salary_monthly", v.replace(/[^0-9.]/g, ""))}
+              onBlur={() => {
+                // Iter 97 — salary ≤ ₹1500 is a DAILY wage. Auto-switch.
+                const amt = Number(form.salary_monthly) || 0;
+                if (amt > 0 && amt <= 1500 && form.salary_mode !== "daily") {
+                  setField("salary_mode", "daily");
+                }
+              }}
+              placeholder="e.g. 25000"
+              keyboardType="numeric"
+            />
+            <View style={{ flex: 1 }} />
+          </TwoCol>
           </>) : null}
 
           {/* Iter 94 — COMPLIANCE salary: separate section, own rate basis */}
@@ -1149,16 +1174,6 @@ export default function EmployeeAddScreen() {
               />
             ))}
           </View>
-          <TwoCol>
-            <Field
-              label="Compliance gross / month (₹)"
-              value={form.compliance_gross}
-              onChange={(v) => setField("compliance_gross", v.replace(/[^0-9.]/g, ""))}
-              placeholder="For PF / ESIC / TDS"
-              keyboardType="numeric"
-            />
-            <View style={{ flex: 1 }} />
-          </TwoCol>
           {/* Iter 126g — Compliance Basic + PF Basic (user request).
               EPF ceiling rule: Basic < ₹15,000 → PF Basic auto-copies the
               Basic; Basic ≥ ₹15,000 → PF Basic is optional (if filled,
@@ -1270,6 +1285,30 @@ export default function EmployeeAddScreen() {
               </View>
             </>
           ) : null}
+
+          {/* Iter 137 (user directive) — Total Allowances + LINKED
+              Compliance Gross shown AFTER the Allowances section.
+              Gross = Compliance Basic + Σ allowances (auto). */}
+          {firmHeads.allowances.length > 0 ? (
+            <Text style={[styles.smallNote, { fontWeight: "800", color: "#B45309" }]}>
+              Total Allowances (Compliance): ₹{complAllowTotal.toLocaleString()}
+            </Text>
+          ) : null}
+          <TwoCol>
+            <Field
+              label={
+                complGrossComputed > 0
+                  ? "Compliance Gross (auto = Basic + Allowances)"
+                  : "Compliance gross / month (₹)"
+              }
+              value={form.compliance_gross}
+              onChange={(v) => setField("compliance_gross", v.replace(/[^0-9.]/g, ""))}
+              editable={!(complGrossComputed > 0)}
+              placeholder="For PF / ESIC / TDS"
+              keyboardType="numeric"
+            />
+            <View style={{ flex: 1 }} />
+          </TwoCol>
 
           {/* Iter 126g — Pay Mode moved into the Compliance Salary section */}
           <Text style={[styles.lbl, { marginTop: 4 }]}>Pay Mode</Text>

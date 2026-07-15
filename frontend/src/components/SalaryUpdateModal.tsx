@@ -33,6 +33,10 @@ type Payload = {
   salary_structure_compliance: Row[];
   actual_salary_allowances?: Row[];
   actual_salary_deductions?: Row[];
+  compliance_basic?: number;
+  compliance_gross?: number;
+  compliance_salary_allowances?: Row[];
+  compliance_salary_mode?: string | null;
   firm_allowance_heads?: string[];
   firm_deduction_heads?: string[];
   salary_updated_at?: string | null;
@@ -43,10 +47,6 @@ type Payload = {
 const RATE_OPTIONS = ["Monthly", "Daily", "Hourly"] as const;
 type RateType = "monthly" | "daily" | "hourly";
 
-const DEFAULT_HEADS_COMPLIANCE = [
-  "Basic", "HRA", "CONV.", "MEDICAL", "PF Employer", "ESI Employer",
-];
-
 // Statutory employer-contribution policy (matches payroll engine):
 //   PF  Employer = 12%   × Basic (compliance)
 //   ESI Employer = 3.25% × Gross (compliance, only when gross ≤ ₹21,000)
@@ -54,8 +54,6 @@ const PF_EMPLOYER_RATE = 0.12;
 const ESI_EMPLOYER_RATE = 0.0325;
 const ESI_GROSS_CEILING = 21000;
 
-const isPfEmployer = (h: string) => /pf/i.test(h || "") && /employer/i.test(h || "");
-const isEsiEmployer = (h: string) => /esi/i.test(h || "") && /employer/i.test(h || "");
 const round2 = (v: number) => Math.round(v * 100) / 100;
 // Keep only digits and a single decimal point while typing.
 const cleanNum = (v: string) => {
@@ -94,7 +92,11 @@ export default function SalaryUpdateModal({
   // Allowances / Deductions — heads linked from Firm Master (amounts only)
   const [allowances, setAllowances] = useState<ERow[]>([]);
   const [deductions, setDeductions] = useState<ERow[]>([]);
-  const [compliance, setCompliance] = useState<ERow[]>([]);
+  // Iter 137 (user directive) — Compliance salary LINKED to the Employee
+  // Master fields: Basic (compliance_basic) + firm-head allowance lines
+  // (compliance_salary_allowances). Same heads as the Add/Edit form.
+  const [complBasic, setComplBasic] = useState("0");
+  const [complAllow, setComplAllow] = useState<ERow[]>([]);
   const [notes, setNotes] = useState("");
 
   const load = useCallback(async () => {
@@ -135,16 +137,26 @@ export default function SalaryUpdateModal({
         ),
       })));
 
-      const complRows = (r.salary_structure_compliance || []).length
-        ? r.salary_structure_compliance
-        : DEFAULT_HEADS_COMPLIANCE.map((h) => ({ head: h, amount: 0 }));
-      // "Basic" is the DEFAULT head for every employee — guarantee it is
-      // always present (prepend if a legacy structure lost it).
-      const hasBasic = complRows.some((x) => /^basic/i.test((x.head || "").trim()));
-      const withBasic = hasBasic ? complRows : [{ head: "Basic", amount: 0 }, ...complRows];
-      setCompliance(withBasic.map((x) => ({ head: x.head, amount: String(x.amount || 0) })));
-      const complBasicRow: any = withBasic.find((x) => /^basic/i.test((x.head || "").trim()));
-      setComplRate(((complBasicRow?.rate_type as RateType) || "monthly"));
+      // Iter 137 — Compliance values come from the Employee Master fields;
+      // legacy salary_structure_compliance rows are used as a fallback so
+      // older records still pre-fill correctly.
+      const structRows = r.salary_structure_compliance || [];
+      const structBasic = structRows.find((x) => /^basic/i.test((x.head || "").trim()));
+      setComplBasic(String(r.compliance_basic || structBasic?.amount || 0));
+      const savedCompl = r.compliance_salary_allowances || [];
+      setComplAllow((r.firm_allowance_heads || []).map((h) => ({
+        head: h,
+        amount: String(
+          savedCompl.find((a) => (a.head || "").toLowerCase() === h.toLowerCase())?.amount
+          ?? structRows.find((a) => (a.head || "").toLowerCase() === h.toLowerCase())?.amount
+          ?? 0,
+        ),
+      })));
+      setComplRate(
+        ((r.compliance_salary_mode as RateType)
+          || (structBasic as any)?.rate_type
+          || "monthly") as RateType,
+      );
     } catch (e: any) {
       if (Platform.OS === "web") window.alert(e?.message || "Failed to load salary");
     } finally { setLoading(false); }
@@ -158,37 +170,21 @@ export default function SalaryUpdateModal({
   const totalAllow = allowances.reduce((s, r) => s + Number(r.amount || 0), 0);
   const totalDed = deductions.reduce((s, r) => s + Number(r.amount || 0), 0);
 
-  // ── Compliance auto-calc: PF / ESI Employer per statutory policy ──
-  const complBasic = Number(
-    compliance.find((x) => /basic/i.test(x.head || ""))?.amount || 0,
-  );
-  const complGross = compliance
-    .filter((x) => !isPfEmployer(x.head) && !isEsiEmployer(x.head))
-    .reduce((s, x) => s + Number(x.amount || 0), 0);
-  const pfEmployerAuto = round2(PF_EMPLOYER_RATE * complBasic);
+  // ── Compliance (Iter 137 — linked to Employee Master fields) ──
+  // Gross = Basic + Σ allowance lines; PF/ESI employer auto per policy.
+  const complBasicNum = Number(complBasic || 0);
+  const complAllowTotal = complAllow.reduce((s, x) => s + Number(x.amount || 0), 0);
+  const complGross = complBasicNum + complAllowTotal;
+  const pfEmployerAuto = round2(PF_EMPLOYER_RATE * complBasicNum);
   const esiEmployerAuto =
     complGross > 0 && complGross <= ESI_GROSS_CEILING
       ? round2(ESI_EMPLOYER_RATE * complGross)
       : 0;
-  const complianceFinal: Row[] = compliance.map((x) =>
-    isPfEmployer(x.head)
-      ? { head: x.head, amount: pfEmployerAuto }
-      : isEsiEmployer(x.head)
-        ? { head: x.head, amount: esiEmployerAuto }
-        : /^basic/i.test((x.head || "").trim())
-          ? { head: x.head, amount: Number(x.amount) || 0, rate_type: complRate }
-          : { head: x.head, amount: Number(x.amount) || 0 },
-  );
-  const totalCompl = complianceFinal.reduce((s, r) => s + Number(r.amount || 0), 0);
 
   const editRow = (set: any, arr: ERow[], idx: number, patch: Partial<ERow>) => {
     const next = [...arr];
     next[idx] = { ...next[idx], ...patch };
     set(next);
-  };
-  const addRow = (set: any, arr: ERow[]) => set([...arr, { head: "", amount: "0" }]);
-  const delRow = (set: any, arr: ERow[], idx: number) => {
-    const next = [...arr]; next.splice(idx, 1); set(next);
   };
   const editSal = (idx: number, patch: Partial<{ amount: string; days: string }>) => {
     setSal((prev) => {
@@ -222,7 +218,14 @@ export default function SalaryUpdateModal({
             actual_salary_deductions: deductions.map(({ head, amount }) => ({
               head, amount: Number(amount) || 0,
             })),
-            salary_structure_compliance: complianceFinal.filter((r) => (r.head || "").trim()),
+            // Iter 137 — Compliance saved via the LINKED Employee-Master
+            // fields; the backend rebuilds salary_structure_compliance +
+            // Compliance Gross (= Basic + allowances) from these.
+            compliance_basic: complBasicNum,
+            compliance_salary_allowances: complAllow.map(({ head, amount }) => ({
+              head, amount: Number(amount) || 0,
+            })),
+            compliance_salary_mode: complRate,
             notes: notes.trim() || undefined,
           },
         },
@@ -472,12 +475,10 @@ export default function SalaryUpdateModal({
               <View style={[styles.structBlock, styles.complBlock, { zIndex: 20 }]}>
                 <View style={styles.structHead}>
                   <Ionicons name="shield-checkmark-outline" size={16} color={colors.brandPrimary} />
-                  <Text style={styles.structTitle}>Compliance Salary Structure (PF / ESI / TDS)</Text>
+                  <Text style={styles.structTitle}>Compliance Salary — linked to Employee Master</Text>
                   <View style={{ flex: 1 }} />
-                  <Text style={[styles.totalTxt,
-                    Math.abs(totalCompl - monthlyNum) < 1 && monthlyNum > 0
-                      ? { color: colors.success } : { color: colors.warning }]}>
-                    Total ₹{totalCompl.toLocaleString()}
+                  <Text style={[styles.totalTxt, { color: colors.brandPrimary }]}>
+                    Gross ₹{complGross.toLocaleString()}
                   </Text>
                 </View>
 
@@ -524,52 +525,80 @@ export default function SalaryUpdateModal({
                   </View>
                   <View style={{ width: 16 }} />
                 </View>
-                {compliance.map((r, idx) => {
-                  const isAuto = isPfEmployer(r.head) || isEsiEmployer(r.head);
-                  const isBasic = /^basic/i.test((r.head || "").trim());
-                  const autoVal = isPfEmployer(r.head) ? pfEmployerAuto : esiEmployerAuto;
-                  return (
-                    <View key={idx} style={styles.rowInline}>
-                      <TextInput
-                        value={r.head}
-                        onChangeText={(v) => editRow(setCompliance, compliance, idx, { head: v })}
-                        placeholder="Head"
-                        editable={!isBasic}
-                        style={[styles.input, { flex: 1.4 }, isBasic && { backgroundColor: colors.surfaceTertiary }]}
-                      />
-                      {isAuto ? (
-                        <View style={[styles.input, styles.autoAmount, { flex: 1 }]}>
-                          <Text style={styles.autoAmountTxt}>{autoVal.toFixed(2)}</Text>
-                          <View style={styles.autoBadge}>
-                            <Text style={styles.autoBadgeTxt}>AUTO</Text>
-                          </View>
-                        </View>
-                      ) : (
-                        <TextInput
-                          value={r.amount}
-                          onChangeText={(v) => editRow(setCompliance, compliance, idx, { amount: cleanNum(v) })}
-                          keyboardType="numeric"
-                          placeholder="0.00"
-                          style={[styles.input, { flex: 1 }]}
-                        />
-                      )}
-                      {isAuto || isBasic ? (
-                        <View style={{ width: 16 }} />
-                      ) : (
-                        <Pressable onPress={() => delRow(setCompliance, compliance, idx)} hitSlop={6}>
-                          <Ionicons name="trash-outline" size={16} color={colors.error} />
-                        </Pressable>
-                      )}
-                    </View>
-                  );
-                })}
+                {/* Iter 137 — Employee Basic (Compliance) — same field as
+                    the Employee Master form (compliance_basic). */}
+                <View style={styles.rowInline}>
+                  <Text style={[styles.fixedHead, { flex: 1.4 }]}>Employee Basic (Compliance)</Text>
+                  <TextInput
+                    value={complBasic}
+                    onChangeText={(v) => setComplBasic(cleanNum(v))}
+                    keyboardType="numeric"
+                    placeholder="0"
+                    style={[styles.input, { flex: 1 }]}
+                    testID="compliance-basic-amount"
+                  />
+                  <View style={{ width: 16 }} />
+                </View>
+
+                {/* Allowance heads — SAME heads as Firm Master / Employee
+                    Master (HRA, CONV., etc.). */}
+                {complAllow.length === 0 ? (
+                  <Text style={styles.emptyHint}>
+                    No allowances enabled for this firm — enable heads in Firm Master → Allowances.
+                  </Text>
+                ) : complAllow.map((r, idx) => (
+                  <View key={r.head} style={styles.rowInline}>
+                    <Text style={[styles.fixedHead, { flex: 1.4 }]}>{r.head}</Text>
+                    <TextInput
+                      value={r.amount}
+                      onChangeText={(v) => editRow(setComplAllow, complAllow, idx, { amount: cleanNum(v) })}
+                      keyboardType="numeric"
+                      placeholder="0"
+                      style={[styles.input, { flex: 1 }]}
+                      testID={`compliance-allowance-${idx}`}
+                    />
+                    <View style={{ width: 16 }} />
+                  </View>
+                ))}
+
+                {/* Totals + auto employer contributions */}
+                <View style={styles.rowInline}>
+                  <Text style={[styles.fixedHead, { flex: 1.4 }]}>Total Allowances</Text>
+                  <View style={[styles.input, styles.autoAmount, { flex: 1 }]}>
+                    <Text style={styles.autoAmountTxt}>{complAllowTotal.toLocaleString()}</Text>
+                    <View style={styles.autoBadge}><Text style={styles.autoBadgeTxt}>AUTO</Text></View>
+                  </View>
+                  <View style={{ width: 16 }} />
+                </View>
+                <View style={styles.rowInline}>
+                  <Text style={[styles.fixedHead, { flex: 1.4 }]}>Compliance Gross (Basic + Allowances)</Text>
+                  <View style={[styles.input, styles.autoAmount, { flex: 1 }]}>
+                    <Text style={styles.autoAmountTxt}>{complGross.toLocaleString()}</Text>
+                    <View style={styles.autoBadge}><Text style={styles.autoBadgeTxt}>AUTO</Text></View>
+                  </View>
+                  <View style={{ width: 16 }} />
+                </View>
+                <View style={styles.rowInline}>
+                  <Text style={[styles.fixedHead, { flex: 1.4 }]}>PF Employer (12% × Basic)</Text>
+                  <View style={[styles.input, styles.autoAmount, { flex: 1 }]}>
+                    <Text style={styles.autoAmountTxt}>{pfEmployerAuto.toFixed(2)}</Text>
+                    <View style={styles.autoBadge}><Text style={styles.autoBadgeTxt}>AUTO</Text></View>
+                  </View>
+                  <View style={{ width: 16 }} />
+                </View>
+                <View style={styles.rowInline}>
+                  <Text style={[styles.fixedHead, { flex: 1.4 }]}>ESI Employer (3.25% × Gross)</Text>
+                  <View style={[styles.input, styles.autoAmount, { flex: 1 }]}>
+                    <Text style={styles.autoAmountTxt}>{esiEmployerAuto.toFixed(2)}</Text>
+                    <View style={styles.autoBadge}><Text style={styles.autoBadgeTxt}>AUTO</Text></View>
+                  </View>
+                  <View style={{ width: 16 }} />
+                </View>
                 <Text style={styles.autoHint}>
-                  PF Employer = 12% × Basic · ESI Employer = 3.25% × Gross (only when gross ≤ ₹21,000) — calculated automatically.
+                  Heads are linked from Firm Master → Allowances and saved on the Employee Master —
+                  the Add/Edit form, this modal and Bulk Correction all edit the SAME values.
+                  ESI Employer applies only when gross ≤ ₹21,000.
                 </Text>
-                <Pressable onPress={() => addRow(setCompliance, compliance)} style={styles.addBtn}>
-                  <Ionicons name="add-circle-outline" size={14} color={colors.brandPrimary} />
-                  <Text style={styles.addBtnTxt}>Add compliance head</Text>
-                </Pressable>
               </View>
 
               {/* Audit notes */}

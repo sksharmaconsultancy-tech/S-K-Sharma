@@ -113,6 +113,11 @@ async def get_employee_salary(
         "salary_structure_compliance": emp.get("salary_structure_compliance") or [],
         "actual_salary_allowances": emp.get("actual_salary_allowances") or [],
         "actual_salary_deductions": emp.get("actual_salary_deductions") or [],
+        # Iter 137 — Employee-Master compliance fields (interlinked source)
+        "compliance_basic": emp.get("compliance_basic") or 0,
+        "compliance_gross": emp.get("compliance_gross") or 0,
+        "compliance_salary_allowances": emp.get("compliance_salary_allowances") or [],
+        "compliance_salary_mode": emp.get("compliance_salary_mode"),
         "firm_allowance_heads": firm_allowance_heads,
         "firm_deduction_heads": firm_deduction_heads,
         "salary_updated_at": emp.get("salary_updated_at"),
@@ -161,6 +166,29 @@ async def update_employee_salary(
         to_set["actual_salary_allowances"] = _sanitise_structure(payload["actual_salary_allowances"])
     if "actual_salary_deductions" in payload:
         to_set["actual_salary_deductions"] = _sanitise_structure(payload["actual_salary_deductions"])
+    # Iter 137 (user directive) — Compliance salary comes from the Employee
+    # Master fields (Basic + firm-head allowance lines). When any of them
+    # change, salary_structure_compliance and the linked Compliance Gross
+    # are rebuilt so ALL editors + the ESIC/PF engine read the same heads.
+    if "compliance_basic" in payload:
+        to_set["compliance_basic"] = _round_amount(payload["compliance_basic"])
+    if "compliance_salary_allowances" in payload:
+        to_set["compliance_salary_allowances"] = _sanitise_structure(
+            payload["compliance_salary_allowances"])
+    if "compliance_salary_mode" in payload:
+        rate = str(payload.get("compliance_salary_mode") or "").strip().lower()
+        to_set["compliance_salary_mode"] = rate if rate in _RATE_TYPES else None
+    if ("compliance_basic" in to_set or "compliance_salary_allowances" in to_set
+            or "compliance_salary_mode" in to_set):
+        from server import build_compliance_structure, compliance_gross_total
+        _basic = to_set.get("compliance_basic", emp.get("compliance_basic")) or 0
+        _allow = to_set.get("compliance_salary_allowances",
+                            emp.get("compliance_salary_allowances") or [])
+        _rate = to_set.get("compliance_salary_mode", emp.get("compliance_salary_mode"))
+        to_set["salary_structure_compliance"] = build_compliance_structure(_basic, _allow, _rate)
+        _total = compliance_gross_total(_basic, _allow)
+        if _total > 0:
+            to_set["compliance_gross"] = _total
     if not to_set:
         raise HTTPException(status_code=400, detail="Nothing to update")
     to_set["salary_updated_at"] = now_iso()

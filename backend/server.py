@@ -7323,6 +7323,52 @@ async def super_admin_toggle_user(
     return {"ok": True, "user_id": user_id, "disabled": bool(payload.disabled)}
 
 
+def build_compliance_structure(basic: Any, allowances: Any, rate_type: Any = None) -> List[Dict[str, Any]]:
+    """Iter 137 (user directive) — ONE interlinked source of truth for the
+    Compliance salary. Rebuilds ``salary_structure_compliance`` from the
+    Employee-Master Compliance Basic + firm-head allowance lines so every
+    editor (Add/Edit form, Salary Update modal, Bulk Correction) stays in
+    sync — ESIC eligibility & PF always read the SAME Basic head."""
+    try:
+        b = round(float(basic or 0), 2)
+    except (TypeError, ValueError):
+        b = 0.0
+    rows: List[Dict[str, Any]] = []
+    if b > 0:
+        row: Dict[str, Any] = {"head": "Basic", "amount": b}
+        rt = str(rate_type or "").strip().lower()
+        if rt in ("monthly", "daily", "hourly"):
+            row["rate_type"] = rt
+        rows.append(row)
+    for ln in (allowances if isinstance(allowances, list) else []):
+        if not isinstance(ln, dict):
+            continue
+        h = str(ln.get("head") or "").strip()
+        if not h:
+            continue
+        try:
+            amt = round(float(ln.get("amount") or 0), 2)
+        except (TypeError, ValueError):
+            amt = 0.0
+        rows.append({"head": h, "amount": amt})
+    return rows
+
+
+def compliance_gross_total(basic: Any, allowances: Any) -> float:
+    """Linked Compliance Gross = Compliance Basic + Σ allowance lines."""
+    try:
+        total = float(basic or 0)
+    except (TypeError, ValueError):
+        total = 0.0
+    for ln in (allowances if isinstance(allowances, list) else []):
+        if isinstance(ln, dict):
+            try:
+                total += float(ln.get("amount") or 0)
+            except (TypeError, ValueError):
+                pass
+    return round(total, 2)
+
+
 async def _dup_employee_with_orphan_heal(
     phone: Optional[str], email: Optional[str]
 ) -> Optional[Dict[str, Any]]:
@@ -7479,6 +7525,12 @@ async def admin_create_employee(
         "salary_structure_actual": payload.get("salary_structure_actual") or [],
         "compliance_salary_allowances": payload.get("compliance_salary_allowances") or [],
         "compliance_salary_deductions": payload.get("compliance_salary_deductions") or [],
+        # Iter 137 — interlinked compliance structure (single source of truth)
+        "salary_structure_compliance": build_compliance_structure(
+            payload.get("compliance_basic"),
+            payload.get("compliance_salary_allowances") or [],
+            payload.get("compliance_salary_mode"),
+        ),
         "half_day_hrs": payload.get("half_day_hrs"),
         "full_day_hrs": payload.get("full_day_hrs"),
         # Statutory identifiers
@@ -7803,6 +7855,11 @@ async def admin_employees_bulk_import(
                 # bulk-import format.
                 "marital_status": r.get("marital_status") or None,
                 "basic_salary": _num(r.get("basic_salary")),
+                # Iter 137 (user directive) — the import columns ARE the
+                # Compliance salary: EMPLOYEE BASIC → Compliance Basic,
+                # HRA/CONV → Compliance allowance heads, Gross Pay →
+                # Compliance Gross (Basic + Allowances).
+                "compliance_basic": _num(r.get("basic_salary")),
                 "pf_basic": _num(r.get("pf_basic")),
                 "hra": _num(r.get("hra")),
                 "conveyance": _num(r.get("conveyance")),
@@ -7836,7 +7893,14 @@ async def admin_employees_bulk_import(
                 "actual_salary_deductions": (
                     _parse_salary_lines(r.get("actual_deductions") or r.get("deductions"))
                     or [dict(x) for x in policy_ded_lines]),
-                "compliance_salary_allowances": _parse_salary_lines(r.get("compliance_allowances")),
+                "compliance_salary_allowances": (
+                    _parse_salary_lines(r.get("compliance_allowances"))
+                    # Iter 137 (user directive) — HRA / CONV import columns
+                    # are Compliance-salary allowance heads.
+                    or [ln for ln in [
+                        {"head": "HRA", "amount": _num(r.get("hra")) or 0},
+                        {"head": "CONV.", "amount": _num(r.get("conveyance")) or 0},
+                    ] if ln["amount"] > 0]),
                 "compliance_salary_deductions": _parse_salary_lines(r.get("compliance_deductions")),
                 "onboarded": True,
                 "onboarded_at": now_iso(),
@@ -7859,6 +7923,17 @@ async def admin_employees_bulk_import(
                         doc["employee_code"] = code
                 except Exception:
                     pass
+            # Iter 137 — interlinked compliance structure + linked Gross
+            # (= Compliance Basic + Σ allowance lines).
+            doc["salary_structure_compliance"] = build_compliance_structure(
+                doc.get("compliance_basic"),
+                doc.get("compliance_salary_allowances"),
+                doc.get("salary_mode"),
+            )
+            _cg = compliance_gross_total(
+                doc.get("compliance_basic"), doc.get("compliance_salary_allowances"))
+            if _cg > 0:
+                doc["compliance_gross"] = _cg
             # Iter 75 — Inherit group policy when the CSV row provides
             # an `employee_group` matching an existing template.
             if doc.get("employee_group"):
@@ -14726,9 +14801,13 @@ async def export_compliance_salary_run_xlsx(
 @api.get("/admin/compliance-salary-runs/{run_id}/register.pdf")
 async def export_compliance_salary_register_pdf(
     run_id: str,
+    variant: int = 1,
     authorization: Optional[str] = Header(None),
 ):
-    from utils.compliance_salary import build_compliance_register_pdf
+    from utils.compliance_salary import (
+        build_compliance_register_pdf,
+        build_compliance_register_pdf_v2,
+    )
     from fastapi.responses import Response
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "sub_admin", "company_admin"])
@@ -14747,13 +14826,24 @@ async def export_compliance_salary_register_pdf(
         )
         if c and c.get("name"):
             company_name = c["name"]
-        firm_info["address"] = (c or {}).get("address") or ""
         fm = await db.firm_masters.find_one(
-            {"company_id": run["company_id"]}, {"_id": 0, "epf": 1, "esi": 1},
+            {"company_id": run["company_id"]},
+            {"_id": 0, "epf": 1, "esi": 1, "registered_address": 1},
         )
+        # Iter 137 (user directive) — the register shows the firm's
+        # REGISTERED address from the Firm Master, NOT the geofence
+        # office address. Falls back to the company address only when
+        # no registered address has been filled in.
+        ra = (fm or {}).get("registered_address") or {}
+        reg_addr = ", ".join(str(x).strip() for x in [
+            ra.get("address1"), ra.get("address2"), ra.get("city"),
+            ra.get("state"), ra.get("pin_code"),
+        ] if x and str(x).strip())
+        firm_info["address"] = reg_addr or ((c or {}).get("address") or "")
         firm_info["pf_code"] = ((fm or {}).get("epf") or {}).get("epf_no") or ""
         firm_info["esi_code"] = ((fm or {}).get("esi") or {}).get("esi_no") or ""
-    pdf_bytes = build_compliance_register_pdf(run, company_name=company_name, firm=firm_info)
+    builder = build_compliance_register_pdf_v2 if int(variant or 1) == 2 else build_compliance_register_pdf
+    pdf_bytes = builder(run, company_name=company_name, firm=firm_info)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
