@@ -6940,12 +6940,15 @@ async def delete_company(company_id: str,
     attendance records, leaves, tickets, payslips, notifications and OTP
     codes tied to that company. Otherwise reject when users are still linked.
 
-    User directive — a SUB ADMIN's force-delete never deletes directly: it
-    creates a deletion request that the Super Admin must approve. If the
-    Super Admin rejects it, the firm's data stays exactly the same.
+    User directive (Iter 139) — ONLY the Super Admin may delete or
+    force-delete a firm. Sub Admins are fully blocked (previously they
+    could file a deletion request; that path is now disabled too).
     """
     user = await get_user_from_token(authorization)
-    require_role(user, ["super_admin", "sub_admin"])
+    # Iter 139 (user directive) — STRICT super-admin only. NOTE:
+    # require_role() auto-admits sub_admins wherever super_admin is
+    # allowed, so the strict guard is required here.
+    require_super_admin_strict(user)
     company = await db.companies.find_one({"company_id": company_id}, {"_id": 0, "name": 1})
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
@@ -6959,31 +6962,6 @@ async def delete_company(company_id: str,
                 "Confirm again to cascade-delete them along with the company."
             ),
         )
-
-    if user["role"] == "sub_admin":
-        existing = await db.deletion_requests.find_one(
-            {"kind": "firm", "target_id": company_id, "status": "pending"}, {"_id": 0, "request_id": 1})
-        if existing:
-            return {"ok": True, "approval_required": True, "request_id": existing["request_id"],
-                    "message": "A deletion request for this firm is already pending Super Admin approval."}
-        req_id = f"delreq_{uuid.uuid4().hex[:12]}"
-        await db.deletion_requests.insert_one({
-            "request_id": req_id,
-            "kind": "firm",
-            "target_id": company_id,
-            "target_label": company.get("name") or company_id,
-            "company_id": company_id,
-            "force": bool(force),
-            "requested_by": user["user_id"],
-            "requested_by_name": user.get("name") or user.get("email"),
-            "requested_by_role": user["role"],
-            "status": "pending",
-            "requested_at": now_iso(),
-        })
-        logger.info("[deletion-request] firm %s queued by sub_admin %s", company_id, user["user_id"])
-        return {"ok": True, "approval_required": True, "request_id": req_id,
-                "message": ("Deletion sent to the Super Admin for approval — nothing is "
-                            "deleted until it is approved. If rejected, the data stays unchanged.")}
 
     cascade_report = await delete_company_cascade(company_id, force)
     logger.info(f"[DELETE company] {company_id} ({company.get('name')}) by {user.get('email')} force={force} cascade={cascade_report}")

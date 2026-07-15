@@ -476,13 +476,17 @@ export default function CompaniesScreen() {
                     <Ionicons name="clipboard-outline" size={18} color={colors.accent} />
                   </Pressable>
                 ) : null}
-                <Pressable
-                  testID={`delete-company-${c.company_id}`}
-                  onPress={(e) => { e.stopPropagation(); doDelete(c); }}
-                  hitSlop={8}
-                >
-                  <Ionicons name="trash-outline" size={18} color={colors.error} />
-                </Pressable>
+                {/* Iter 139 (user directive) — ONLY the Super Admin may
+                    delete / force-delete a firm. Hidden for sub-admins. */}
+                {user?.role === "super_admin" ? (
+                  <Pressable
+                    testID={`delete-company-${c.company_id}`}
+                    onPress={(e) => { e.stopPropagation(); doDelete(c); }}
+                    hitSlop={8}
+                  >
+                    <Ionicons name="trash-outline" size={18} color={colors.error} />
+                  </Pressable>
+                ) : null}
               </View>
 
               {(c as any).enabled === false ? (
