@@ -48,6 +48,7 @@ type EmployeeRow = {
   salary_monthly?: number;
   basic_salary?: number;
   compliance_basic?: number | null;
+  pf_basic?: number;
   compliance_salary_allowances?: { head?: string; amount?: number }[];
   hra?: number;
   conveyance?: number;
@@ -82,6 +83,7 @@ const COL_WIDTHS: Record<string, number> = {
   designation: 150,
   employee_group_id: 160,
   compliance_basic: 140,
+  pf_basic: 120,
   uan_no: 130,
   esi_ip_no: 130,
   pf_no: 130,
@@ -163,15 +165,26 @@ export default function BulkEmployeeCorrectionScreen() {
   const [allRows, setAllRows] = useState<EmployeeRow[]>([]);
   // Iter 134 (user spec) — top filter: Active/Present vs Resigned.
   const [empFilter, setEmpFilter] = useState<"active" | "resigned">("active");
+  // Iter 138 (user request) — filter the grid by Employee Group.
+  const [groupFilter, setGroupFilter] = useState<string>("");
   const [dirty, setDirty] = useState<Record<string, Record<string, any>>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => { setGroupFilter(""); }, [companyId]);
+
   const isResigned = (e: EmployeeRow) =>
     e.active === false || !!(e.resign_date && String(e.resign_date).trim());
   const rows = useMemo(
-    () => allRows.filter((e) => (empFilter === "resigned" ? isResigned(e) : !isResigned(e))),
-    [allRows, empFilter],
+    () =>
+      allRows
+        .filter((e) => (empFilter === "resigned" ? isResigned(e) : !isResigned(e)))
+        .filter((e) => {
+          if (!groupFilter) return true;
+          if (groupFilter === "__none__") return !e.employee_group_id;
+          return e.employee_group_id === groupFilter;
+        }),
+    [allRows, empFilter, groupFilter],
   );
   const filterCounts = useMemo(() => {
     let a = 0, r = 0;
@@ -447,6 +460,17 @@ export default function BulkEmployeeCorrectionScreen() {
     );
   }
 
+  // Iter 138 (user request) — freeze Emp Code + Name on the left while
+  // scrolling horizontally (web position:sticky).
+  const FROZEN_LEFT: Record<string, number> = {
+    employee_code: 0,
+    name: COL_WIDTHS.employee_code || 100,
+  };
+  const frozenStyle = (key: string): any =>
+    Platform.OS === "web" && key in FROZEN_LEFT
+      ? ({ position: "sticky", left: FROZEN_LEFT[key], zIndex: 3 } as any)
+      : null;
+
   const renderCell = (row: EmployeeRow, f: FieldDef) => {
     const w = COL_WIDTHS[f.key] || (f.type === "allowance" ? 110 : 120);
     const val = displayValue(row, f.key);
@@ -461,7 +485,7 @@ export default function BulkEmployeeCorrectionScreen() {
       const raw = (row as any)[f.key];
       const display = raw === null || raw === undefined || raw === "" ? "—" : String(raw);
       return (
-        <View style={[styles.cellWrap, { width: w }, styles.cellLocked]}>
+        <View style={[styles.cellWrap, { width: w }, styles.cellLocked, frozenStyle(f.key)]}>
           <Text style={styles.cellReadOnly} numberOfLines={1}>
             {display}
           </Text>
@@ -701,6 +725,31 @@ export default function BulkEmployeeCorrectionScreen() {
               </Text>
             </Pressable>
           ))}
+          {/* Iter 138 (user request) — Employee Group filter */}
+          {Platform.OS === "web" && groups.length > 0 ? (
+            <select
+              value={groupFilter}
+              onChange={(e) => setGroupFilter((e.target as HTMLSelectElement).value)}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 999,
+                border: `1px solid ${colors.borderStrong}`,
+                background: colors.surface,
+                color: colors.onSurface,
+                fontSize: 12,
+                fontWeight: 700,
+              } as any}
+              data-testid="bc-filter-group"
+            >
+              <option value="">All groups</option>
+              <option value="__none__">— No group</option>
+              {groups.map((g) => (
+                <option key={g.master_id} value={g.master_id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+          ) : null}
         </View>
 
         <View style={styles.actionsBar}>
@@ -775,31 +824,71 @@ export default function BulkEmployeeCorrectionScreen() {
           </View>
         ) : (
           <View style={styles.card}>
-            <ScrollView horizontal>
-              <View>
-                <View style={styles.gridHead}>
-                  {displayFields.map((f) => (
-                    <View
-                      key={f.key}
-                      style={[styles.headCell, { width: COL_WIDTHS[f.key] || 120 }]}
-                    >
-                      <Text style={styles.headTxt} numberOfLines={1}>
-                        {f.label}
-                      </Text>
+            {/* Iter 138 (user request) — ONE both-axis scroll container on
+                web so the header can freeze on top (sticky top) AND the
+                Emp Code / Name columns freeze on the left (sticky left). */}
+            {Platform.OS === "web" ? (
+              <View style={{ overflow: "auto", maxHeight: 620 } as any}>
+                <View style={{ minWidth: "max-content" } as any}>
+                  <View
+                    style={[
+                      styles.gridHead,
+                      { position: "sticky", top: 0, zIndex: 10 } as any,
+                    ]}
+                  >
+                    {displayFields.map((f) => (
+                      <View
+                        key={f.key}
+                        style={[
+                          styles.headCell,
+                          { width: COL_WIDTHS[f.key] || 120, backgroundColor: colors.surfaceTertiary },
+                          frozenStyle(f.key),
+                        ]}
+                      >
+                        <Text style={styles.headTxt} numberOfLines={1}>
+                          {f.label}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                  {rows.map((r) => (
+                    <View key={r.user_id} style={styles.gridRow}>
+                      {displayFields.map((f) => (
+                        <React.Fragment key={f.key}>
+                          {renderCell(r, f)}
+                        </React.Fragment>
+                      ))}
                     </View>
                   ))}
                 </View>
-                {rows.map((r) => (
-                  <View key={r.user_id} style={styles.gridRow}>
+              </View>
+            ) : (
+              <ScrollView horizontal>
+                <View>
+                  <View style={styles.gridHead}>
                     {displayFields.map((f) => (
-                      <React.Fragment key={f.key}>
-                        {renderCell(r, f)}
-                      </React.Fragment>
+                      <View
+                        key={f.key}
+                        style={[styles.headCell, { width: COL_WIDTHS[f.key] || 120 }]}
+                      >
+                        <Text style={styles.headTxt} numberOfLines={1}>
+                          {f.label}
+                        </Text>
+                      </View>
                     ))}
                   </View>
-                ))}
-              </View>
-            </ScrollView>
+                  {rows.map((r) => (
+                    <View key={r.user_id} style={styles.gridRow}>
+                      {displayFields.map((f) => (
+                        <React.Fragment key={f.key}>
+                          {renderCell(r, f)}
+                        </React.Fragment>
+                      ))}
+                    </View>
+                  ))}
+                </View>
+              </ScrollView>
+            )}
           </View>
         )}
 
@@ -851,7 +940,7 @@ export default function BulkEmployeeCorrectionScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.background },
+  root: { flex: 1, backgroundColor: colors.surfaceSecondary },
   header: {
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
@@ -929,7 +1018,7 @@ const styles = StyleSheet.create({
   secondaryBtnTxt: { color: colors.brandPrimary, fontWeight: "800" },
   gridHead: {
     flexDirection: "row",
-    backgroundColor: colors.background,
+    backgroundColor: colors.surfaceTertiary,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderStrong,
   },
@@ -955,7 +1044,7 @@ const styles = StyleSheet.create({
   cellDirty: { backgroundColor: "#FFF7E0" },
   // Iter 85 — Locked cells (identity fields) get a subtle grey wash so
   // admins immediately see they're read-only in bulk correction mode.
-  cellLocked: { backgroundColor: colors.surfaceTertiary, opacity: 0.85 },
+  cellLocked: { backgroundColor: colors.surfaceTertiary },
   cellInput: {
     fontSize: 12,
     color: colors.onSurface,

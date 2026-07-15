@@ -239,9 +239,9 @@ export default function SalaryUpdateModal({
             method: "PATCH",
             body: { user_id: userId, employee_type: empType.trim() || null },
           });
-          msg += "\nEmployee Type / Group updated ✓";
+          msg += "\nGroup updated ✓";
         } catch (e: any) {
-          msg += `\nEmployee Type update failed: ${e?.message || "error"}`;
+          msg += `\nGroup update failed: ${e?.message || "error"}`;
         }
       }
       if (Platform.OS === "web") window.alert(msg);
@@ -297,7 +297,7 @@ export default function SalaryUpdateModal({
 
               {/* Iter 91 — Employee Type / Group editable here too */}
               <MasterSelect
-                label="Employee Type / Group"
+                label="Group"
                 masterType="group"
                 companyId={data.company_id}
                 value={empType}

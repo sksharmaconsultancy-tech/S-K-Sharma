@@ -252,7 +252,7 @@ export default function ActualSalaryProcessScreen() {
     // Iter 91 — Employee Type / Group is REQUIRED after choosing
     // On-roll / Off-roll. Processing always targets one type.
     if (!empType || empType === "all") {
-      showMsg("Please select an Employee Type / Group (after choosing On-roll / Off-roll) before generating.");
+      showMsg("Please select a Group (after choosing On-roll / Off-roll) before generating.");
       return;
     }
     setBusy(true);
@@ -305,7 +305,7 @@ export default function ActualSalaryProcessScreen() {
           "No employees matched the current filter.\n\n" +
           "• Check that the selected firm has active employees for this month\n" +
           "• Verify their date-of-joining is on/before the run month\n" +
-          "• Try clearing the Employee Type filter",
+          "• Try clearing the Group filter",
         );
       } else {
         showMsg(
@@ -597,7 +597,7 @@ export default function ActualSalaryProcessScreen() {
               {/* Iter 91 — Dropdown (not chips): the Group master can hold
                   lots of entries, a collapsed dropdown keeps it manageable. */}
               <MasterSelect
-                label="Employee Type / Group (required)"
+                label="Group (required)"
                 masterType="group"
                 companyId={selectedCompanyId}
                 value={empType === "all" ? "" : empType}

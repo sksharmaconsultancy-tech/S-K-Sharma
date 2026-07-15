@@ -46,7 +46,7 @@ type Master = {
 type EmployeeLite = { user_id: string; name: string; employee_code?: string };
 
 const TABS: { key: MasterType; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { key: "group", label: "Employee Type", icon: "people-outline" },
+  { key: "group", label: "Group", icon: "people-outline" },
   { key: "department", label: "Departments", icon: "business-outline" },
   { key: "designation", label: "Designations", icon: "ribbon-outline" },
   { key: "allowance", label: "Allowances", icon: "cash-outline" },

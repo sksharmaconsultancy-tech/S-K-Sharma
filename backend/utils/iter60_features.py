@@ -174,6 +174,7 @@ class BulkEmployeeCorrection(BaseModel):
     # allowance amounts (head -> amount). Editing these keeps the flat
     # master fields (hra / conveyance / over_time / other) in sync.
     compliance_basic: Optional[float] = None
+    pf_basic: Optional[float] = None
     allowances: Optional[Dict[str, float]] = None
     uan_no: Optional[str] = None
     esi_ip_no: Optional[str] = None
@@ -705,6 +706,7 @@ def register_iter60_features(
             {"key": "doj", "label": "DOJ (YYYY-MM-DD)", "type": "text"},
             {"key": "employee_group_id", "label": "Employee Group", "type": "master:group"},
             {"key": "compliance_basic", "label": "Basic Salary (Compliance)", "type": "number"},
+            {"key": "pf_basic", "label": "PF Basic", "type": "number"},
             *allow_fields,
             {"key": "uan_no", "label": "UAN No.", "type": "text"},
             {"key": "esi_ip_no", "label": "ESI IP No.", "type": "text"},
@@ -791,7 +793,7 @@ def register_iter60_features(
                         allowance_changes = {str(h): float(a) for h, a in v.items()
                                              if h and a is not None}
                     continue
-                if k in ("salary_monthly", "basic_salary") and isinstance(v, (int, float)):
+                if k in ("salary_monthly", "basic_salary", "pf_basic") and isinstance(v, (int, float)):
                     updates[k] = float(v)
                 elif k == "compliance_basic" and isinstance(v, (int, float)):
                     # Iter 134 — Basic Salary column edits Compliance Basic

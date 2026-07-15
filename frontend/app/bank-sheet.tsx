@@ -141,7 +141,7 @@ export default function BankSheetScreen() {
             render={(v) => fyList.find((f) => String(f.startYear) === v)?.label || v} />
           <Chips label="Month" options={monthOpts.map((m) => m.value)} value={month}
             onChange={setMonth} render={(v) => monthOpts.find((m) => m.value === v)?.label || v} />
-          <Chips label="Employee Type" options={EMP_TYPES} value={empType} onChange={setEmpType} />
+          <Chips label="Group" options={EMP_TYPES} value={empType} onChange={setEmpType} />
           <Chips label="Pay Mode" options={PAY_MODES} value={payMode} onChange={setPayMode} />
           <Chips label="Bank Name" options={["all", ...(data?.banks || [])]} value={bank} onChange={setBank} />
         </View>

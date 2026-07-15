@@ -1129,7 +1129,7 @@ function EmployeeGroupingCard({
       </Text>
 
       <MasterSelect
-        label="Employee Type / Group"
+        label="Group"
         masterType="group"
         companyId={emp.company_id}
         value={typeVal}

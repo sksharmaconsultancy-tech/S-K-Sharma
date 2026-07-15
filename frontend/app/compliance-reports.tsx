@@ -230,7 +230,7 @@ export default function ComplianceReportsScreen() {
         {/* Group filter */}
         <View style={[styles.card, { zIndex: 40 }]}>
           <MasterSelect
-            label="Employee Type / Group (optional filter)"
+            label="Group (optional filter)"
             masterType="group"
             companyId={activeCid}
             value={empType}

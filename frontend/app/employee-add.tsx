@@ -949,7 +949,7 @@ export default function EmployeeAddScreen() {
               {/* Iter 91 — Employee Type and Group are the SAME field per
                   user direction: one dropdown (Group master) writes both. */}
               <MasterSelect
-                label="Employee Type / Group"
+                label="Group"
                 masterType="group"
                 companyId={selectedCompanyId}
                 value={form.employee_type}

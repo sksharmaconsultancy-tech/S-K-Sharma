@@ -183,7 +183,7 @@ export default function EmployeeGroupsScreen() {
         {/* Header */}
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.title}>Employee Type</Text>
+            <Text style={styles.title}>Group</Text>
             <Text style={styles.subtitle}>
               Reusable attendance & salary policy templates per firm. New employees
               tagged with a group name automatically inherit the template. Editing a

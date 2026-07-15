@@ -165,7 +165,7 @@ export default function MasterDataReportScreen() {
             companyId={selectedCompanyId}
             value={empType}
             onChange={setEmpType}
-            placeholder="Employee Type / Group"
+            placeholder="Group"
             testID="mdr-type"
           />
         </View>
