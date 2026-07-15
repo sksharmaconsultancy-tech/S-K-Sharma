@@ -87,19 +87,19 @@ async def _match_employee_for_bio(
 
 
 def _parse_zk_timestamp(raw: str) -> Optional[datetime]:
-    """ZKTeco ATTLOG timestamps arrive as 'YYYY-MM-DD HH:MM:SS' in the device's
-    local time. Devices don't ship the timezone, so we treat the value as UTC
-    when the site is running on IST-configured devices (most common in India).
-    Callers can override by shifting the returned datetime if they wish."""
+    """ZKTeco ATTLOG timestamps arrive as 'YYYY-MM-DD HH:MM:SS' in the
+    device's LOCAL clock (IST on-site). The whole attendance pipeline —
+    .dat/.TXT imports, the monthly grid and reports — stores and displays
+    device-local wall-clock time (labelled UTC, no conversion). Iter 143:
+    stop shifting live ADMS pushes by -5:30 so the punch time shown in
+    Attendance matches the machine display exactly."""
     raw = (raw or "").strip()
     if not raw:
         return None
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y/%m/%d %H:%M:%S"):
         try:
             dt = datetime.strptime(raw, fmt)
-            # ZKTeco AC Mini Plus in India reports IST (UTC+5:30). Convert to UTC.
-            dt = dt.replace(tzinfo=timezone(timedelta(hours=5, minutes=30)))
-            return dt.astimezone(timezone.utc)
+            return dt.replace(tzinfo=timezone.utc)
         except ValueError:
             continue
     return None
