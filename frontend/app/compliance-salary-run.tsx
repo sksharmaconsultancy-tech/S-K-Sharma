@@ -1387,7 +1387,7 @@ export default function ComplianceSalaryRunScreen() {
                   const optKeys = ["basic","hra","conveyance","medical","special","others"].filter((k) => has(k));
                   const masterCount = optKeys.length + 1; // +M.Gross
                   const calcCount = optKeys.length + 1;   // +Gross
-                  const dedCount = 9;                     // WageBase,PF(E),PF(Er),ESI(E),ESI(Er),PT,TDS,Other,Net
+                  const dedCount = 10;                    // WageBase,PF(E),PF(Er),ESI(E),ESI(Er),PT,TDS,Other,TotalDed,Net
                   return (
                     <View style={[styles.tblRow, styles.groupHdrRow]}>
                       <View style={{ width: INFO_W }} />
@@ -1430,7 +1430,7 @@ export default function ComplianceSalaryRunScreen() {
                   if (has("special")) headers.push({ label: "Spl", group: "calc" });
                   if (has("others")) headers.push({ label: "Others*", group: "calc" });
                   headers.push({ label: "Gross", group: "calc" });
-                  const dedLabels = ["Wage Base", "PF (E)", "PF (Er)", "ESI (E)", "ESI (Er)", "PT", "TDS", "Other*", "Net"];
+                  const dedLabels = ["Wage Base", "PF (E)", "PF (Er)", "ESI (E)", "ESI (Er)", "PT", "TDS", "Other*", "Total Ded.", "Net"];
                   for (const d of dedLabels) headers.push({ label: d, group: "ded" });
                   return (
                     <View style={[styles.tblRow, styles.tblHeader]}>
@@ -1539,6 +1539,8 @@ export default function ComplianceSalaryRunScreen() {
                       selectTextOnFocus
                       style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
                     />
+                    {/* Iter 136 (user request) — Total Deduction before Net Pay */}
+                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(r.total_deduction)}</Text>
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(r.net)}</Text>
                   </View>
                 ))}
@@ -1563,6 +1565,7 @@ export default function ComplianceSalaryRunScreen() {
                   <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.esic_employer)}</Text>
                   <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.pt)}</Text>
                   <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.tds)}</Text>
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr((run.rows || []).reduce((s, r) => s + (Number((r as any).other_deduction) || 0), 0))}</Text>
                   <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.total_deduction)}</Text>
                   <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.net)}</Text>
                 </View>

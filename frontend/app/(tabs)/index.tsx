@@ -16,6 +16,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import * as Location from "expo-location";
 
 import { useAuth } from "@/src/context/AuthContext";
+import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { api } from "@/src/api/client";
 import { useLiveSync } from "@/src/api/live-sync";
 import CompanyPicker from "@/src/components/CompanyPicker";
@@ -37,7 +38,21 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [company, setCompany] = useState<any>(null);
   const [companies, setCompanies] = useState<any[]>([]);
-  const [companyFilter, setCompanyFilter] = useState<string | "all">("all");
+  // Iter 136 (user directive) — the dashboard follows the GLOBAL firm
+  // selection: all tiles/stats are per-company, never combined.
+  const { selectedCompanyId, setSelectedCompanyId } = useSelectedCompany();
+  const companyFilter: string | "all" = selectedCompanyId || "all";
+  // Super/Sub-admins manage multiple firms — the dashboard must always be
+  // scoped to ONE selected firm (never combined).
+  const isMultiFirmAdmin =
+    user?.role === "super_admin" || (user?.role as string) === "sub_admin";
+
+  // Auto-select the first firm when none is selected yet so the dashboard
+  // is never in combined ("all companies") mode.
+  useEffect(() => {
+    if (!isMultiFirmAdmin || selectedCompanyId) return;
+    if (companies.length > 0) setSelectedCompanyId(companies[0].company_id);
+  }, [isMultiFirmAdmin, selectedCompanyId, companies, setSelectedCompanyId]);
   const [pendingEmpCount, setPendingEmpCount] = useState<number>(0);
   const [pendingReqCount, setPendingReqCount] = useState<number>(0);
   const [unreadMessages, setUnreadMessages] = useState<number>(0);
@@ -89,24 +104,34 @@ export default function Dashboard() {
       if (user && user.role !== "employee") {
         try {
           const scopeParam =
-            user.role === "super_admin" && companyFilter !== "all"
+            (user.role === "super_admin" || user.role === "sub_admin") &&
+            companyFilter !== "all"
               ? `?company_id=${companyFilter}`
               : "";
           const s = await api(`/admin/stats${scopeParam}`);
           setStats(s);
         } catch {}
       }
-      if (user?.role === "super_admin" && companies.length === 0) {
+      if (
+        (user?.role === "super_admin" || user?.role === "sub_admin") &&
+        companies.length === 0
+      ) {
         try {
           const r = await api<{ companies: any[] }>("/companies");
           setCompanies(r.companies || []);
         } catch {}
       }
-      // Pending approval counts (super/company admins)
+      // Pending approval counts (super/company admins) — scoped to the
+      // selected firm (user directive: no combined data on the dashboard).
       if (user && user.role !== "employee") {
         try {
+          const apprQ =
+            (user.role === "super_admin" || user.role === "sub_admin") &&
+            companyFilter !== "all"
+              ? `?company_id=${companyFilter}`
+              : "";
           const emp = await api<{ pending: any[] }>(
-            "/admin/pending-approvals",
+            `/admin/pending-approvals${apprQ}`,
           ).catch(() => ({ pending: [] as any[] }));
           setPendingEmpCount((emp.pending || []).length);
         } catch {}
@@ -389,18 +414,21 @@ export default function Dashboard() {
                 />
                 {/* Iter 96b — biometric last-sync health badge */}
                 <SystemHealthBadge
-                  companyId={user?.role === "super_admin" ? companyFilter : undefined}
+                  companyId={isMultiFirmAdmin ? companyFilter : undefined}
                   onPress={() => router.push("/zk-dat-import")}
                 />
-                {user?.role === "super_admin" && (
+                {isMultiFirmAdmin && (
                   <View style={{ marginBottom: spacing.md }}>
                     <CompanyPicker
                       testID="dashboard-company-picker"
                       value={companyFilter}
-                      onChange={setCompanyFilter}
+                      onChange={(v) =>
+                        setSelectedCompanyId(v === "all" ? null : String(v))
+                      }
                       companies={companies}
                       label=""
                       compact={false}
+                      allowAll={false}
                     />
                   </View>
                 )}
@@ -456,53 +484,52 @@ export default function Dashboard() {
                       onPress={() => router.push("/companies")}
                     />
                   )}
-                  {/* Super_admin sees Employees / Present today ONLY when
-                      a specific company is picked. When "All companies"
-                      is selected we show a dash so the tile reads as an
-                      intentional empty state rather than a real "0". */}
+                  {/* Multi-firm admins see Employees / Present today ONLY
+                      for the selected company — combined data is never
+                      shown (user directive). */}
                   <BentoTile
                     testID="bento-employees"
                     icon="people-outline"
                     value={
-                      user?.role === "super_admin" && companyFilter === "all"
+                      isMultiFirmAdmin && companyFilter === "all"
                         ? "—"
                         : stats.total_employees
                     }
                     label="Employees"
                     variant="dark"
                     onPress={
-                      user?.role === "super_admin" && companyFilter === "all"
+                      isMultiFirmAdmin && companyFilter === "all"
                         ? undefined
                         : () => router.push("/admin")
                     }
-                    dim={user?.role === "super_admin" && companyFilter === "all"}
+                    dim={isMultiFirmAdmin && companyFilter === "all"}
                   />
                   <BentoTile
                     testID="bento-present-today"
                     icon="checkmark-done-outline"
                     value={
-                      user?.role === "super_admin" && companyFilter === "all"
+                      isMultiFirmAdmin && companyFilter === "all"
                         ? "—"
                         : stats.present_today
                     }
                     label="Present today"
                     variant="dark"
                     onPress={
-                      user?.role === "super_admin" && companyFilter === "all"
+                      isMultiFirmAdmin && companyFilter === "all"
                         ? undefined
                         : () =>
                             router.push({
                               pathname: "/present-today",
                               params:
-                                user?.role === "super_admin" &&
+                                isMultiFirmAdmin &&
                                 companyFilter !== "all"
                                   ? { company_id: companyFilter }
                                   : {},
                             })
                     }
-                    dim={user?.role === "super_admin" && companyFilter === "all"}
+                    dim={isMultiFirmAdmin && companyFilter === "all"}
                   />
-                  {user?.role !== "super_admin" && (
+                  {!isMultiFirmAdmin && (
                     <BentoTile
                       testID="bento-leave-approvals"
                       icon="hourglass-outline"
@@ -517,20 +544,12 @@ export default function Dashboard() {
                       }
                     />
                   )}
-                  {user?.role === "super_admin" && (
+                  {isMultiFirmAdmin && (
                     <BentoTile
                       testID="bento-leave-approvals-super"
                       icon="hourglass-outline"
-                      value={
-                        companyFilter === "all"
-                          ? stats.pending_leaves
-                          : stats.pending_leaves
-                      }
-                      label={
-                        companyFilter === "all"
-                          ? "Leave approvals (all)"
-                          : "Leave approvals"
-                      }
+                      value={stats.pending_leaves}
+                      label="Leave approvals"
                       variant="dark"
                       onPress={() =>
                         router.push({
@@ -544,16 +563,12 @@ export default function Dashboard() {
                     testID="bento-profile-edit-approvals"
                     icon="clipboard-outline"
                     value={stats.pending_profile_edits ?? 0}
-                    label={
-                      user?.role === "super_admin" && companyFilter === "all"
-                        ? "Profile edits (all)"
-                        : "Profile edits"
-                    }
+                    label="Profile edits"
                     variant="accent"
                     onPress={() => router.push("/profile-edit-reviews")}
                   />
                 </View>
-                {user?.role === "super_admin" && companyFilter === "all" && (
+                {isMultiFirmAdmin && companyFilter === "all" && (
                   <View style={styles.pickerHint} testID="pick-company-hint">
                     <Ionicons name="filter-outline" size={14} color={colors.brandPrimary} />
                     <Text style={styles.pickerHintTxt}>

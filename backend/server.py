@@ -12382,7 +12382,7 @@ async def admin_stats(
     authorization: Optional[str] = Header(None),
 ):
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     scope_filter: dict = {}
@@ -12390,6 +12390,10 @@ async def admin_stats(
         scope_filter["company_id"] = user.get("company_id")
     elif company_id:
         scope_filter["company_id"] = company_id
+    # Iter 136 — sub-admins are stat-scoped to their assigned firms even
+    # when no explicit company_id is passed.
+    if user["role"] == "sub_admin":
+        scope_filter = apply_sub_admin_company_scope(user, scope_filter)
 
     total_employees = await db.users.count_documents({**scope_filter, "role": "employee"})
     present_today = len(
