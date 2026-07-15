@@ -176,6 +176,7 @@ class BulkEmployeeCorrection(BaseModel):
     compliance_basic: Optional[float] = None
     pf_basic: Optional[float] = None
     allowances: Optional[Dict[str, float]] = None
+    bio_code: Optional[str] = None   # Iter 139 — offline-salary firms only
     uan_no: Optional[str] = None
     esi_ip_no: Optional[str] = None
     pf_no: Optional[str] = None
@@ -684,9 +685,13 @@ def register_iter60_features(
             {"key": f"allow:{lbl}", "label": lbl, "type": "allowance"}
             for lbl, _ in fixed_allow
         ]
+        offline_salary_on = False
         if company_id:
             fm = await db.firm_masters.find_one(
-                {"company_id": company_id}, {"_id": 0, "allowances": 1}) or {}
+                {"company_id": company_id},
+                {"_id": 0, "allowances": 1, "salary_process": 1}) or {}
+            offline_salary_on = bool(
+                (fm.get("salary_process") or {}).get("offline_salary"))
             for head, on in (fm.get("allowances") or {}).items():
                 if not on:
                     continue
@@ -694,6 +699,12 @@ def register_iter60_features(
                     continue
                 allow_fields.append(
                     {"key": f"allow:{head}", "label": head, "type": "allowance"})
+
+        # Iter 139 (user spec) — firms with Offline Salary enabled in the
+        # Firm Master also get the biometric enrolment code as an editable
+        # column (synced with the Employee Master `bio_code`).
+        bio_fields = ([{"key": "bio_code", "label": "Bio Code", "type": "text"}]
+                      if offline_salary_on else [])
 
         return {"fields": [
             {"key": "employee_code", "label": "Emp Code", "type": "text"},
@@ -708,6 +719,7 @@ def register_iter60_features(
             {"key": "compliance_basic", "label": "Basic Salary (Compliance)", "type": "number"},
             {"key": "pf_basic", "label": "PF Basic", "type": "number"},
             *allow_fields,
+            *bio_fields,
             {"key": "uan_no", "label": "UAN No.", "type": "text"},
             {"key": "esi_ip_no", "label": "ESI IP No.", "type": "text"},
             {"key": "pf_no", "label": "PF No.", "type": "text"},
@@ -809,6 +821,9 @@ def register_iter60_features(
                         updates["exit_date"] = now_iso_fn()[:10]
                 elif k == "email":
                     updates["email"] = (v or "").strip().lower() or None
+                elif k == "bio_code":
+                    # Iter 139 — empty string clears the enrolment code.
+                    updates["bio_code"] = (v or "").strip() or None
                 else:
                     updates[k] = (v or "").strip() if isinstance(v, str) else v
 

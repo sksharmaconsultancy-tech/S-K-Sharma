@@ -1302,8 +1302,19 @@ type ShiftMaster = {
   name: string;
   start: string;
   end: string;
+  duty_hours?: number;
   description?: string | null;
 };
+
+/** Iter 139 — decimal Duty HRS from In/Out time; overnight wraps. */
+function dutyHoursOf(start: string, end: string): number | null {
+  const [sh, sm] = (start || "").split(":").map(Number);
+  const [eh, em] = (end || "").split(":").map(Number);
+  if ([sh, sm, eh, em].some((n) => Number.isNaN(n))) return null;
+  let mins = eh * 60 + em - (sh * 60 + sm);
+  if (mins <= 0) mins += 24 * 60;
+  return Math.round((mins / 60) * 100) / 100;
+}
 
 function ShiftMasterSection({ isSuper }: { isSuper: boolean }) {
   const [shifts, setShifts] = useState<ShiftMaster[]>([]);
@@ -1371,7 +1382,8 @@ function ShiftMasterSection({ isSuper }: { isSuper: boolean }) {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.masterRowName}>{s.name}</Text>
                     <Text style={styles.masterRowSub}>
-                      {s.start} – {s.end}
+                      {s.start} – {s.end} · Duty HRS{" "}
+                      {s.duty_hours ?? dutyHoursOf(s.start, s.end) ?? "—"}
                       {s.description ? ` · ${s.description}` : ""}
                     </Text>
                   </View>
@@ -1488,13 +1500,17 @@ function ShiftMasterEditor({
           />
           <View style={styles.rowSplit}>
             <View style={{ flex: 1 }}>
-              <TimeInput label="Start" value={start} onChange={setStart} />
+              <TimeInput label="In Time" value={start} onChange={setStart} />
             </View>
             <View style={{ width: 12 }} />
             <View style={{ flex: 1 }}>
-              <TimeInput label="End" value={end} onChange={setEnd} />
+              <TimeInput label="Out Time" value={end} onChange={setEnd} />
             </View>
           </View>
+          {/* Iter 139 — Duty HRS auto-calculated live from In/Out time. */}
+          <Text style={styles.shiftDur}>
+            Duty HRS: {dutyHoursOf(start, end) ?? "—"}
+          </Text>
           <Text style={styles.fieldLabel}>Description (optional)</Text>
           <TextInput
             value={desc}

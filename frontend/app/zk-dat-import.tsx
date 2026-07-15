@@ -157,7 +157,10 @@ export default function ZkDatImportScreen() {
             <Text style={styles.title}>Import ZKTeco Biometric .dat</Text>
             <Text style={styles.subtitle}>
               Upload IN.dat + OUT.dat (or a single combined file) exported from
-              the biometric terminal. Idempotent - safe to re-upload.
+              the biometric terminal. Device attendance-record exports are also
+              supported: tab-separated .TXT (No / TMNo / EnNo / Name / Mode /
+              INOUT / DateTime) and binary .DAT backups. Idempotent - safe to
+              re-upload.
             </Text>
           </View>
         </View>
@@ -207,7 +210,7 @@ export default function ZkDatImportScreen() {
           </Text>
 
           <Text style={[styles.sectionTitle, { marginTop: spacing.md }]}>
-            3. Upload .dat file(s)
+            3. Upload device file(s) — .dat / .TXT / binary .DAT backup
           </Text>
           <FilePickerRow
             label="IN.dat (entry punches)"

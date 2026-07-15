@@ -15908,10 +15908,23 @@ async def upload_zk_dat(
     if to_date and not re.match(r"^\d{4}-\d{2}-\d{2}$", to_date):
         raise HTTPException(status_code=400, detail="to_date must be YYYY-MM-DD")
 
-    from utils.zk_dat_import import import_zk_dat_bytes, excel_punches_to_dat_text
+    from utils.zk_dat_import import (
+        import_zk_dat_bytes, excel_punches_to_dat_text,
+        is_genlog_dat, genlog_to_txt_text,
+    )
     in_b = await in_file.read() if in_file else None
     out_b = await out_file.read() if out_file else None
     combo_b = await combined_file.read() if combined_file else None
+
+    # Iter 139 — Binary GENLOG .DAT device backups are converted to the
+    # tab-separated device .TXT shape up-front so the SAME text is both
+    # imported and persisted (the "Refresh Bio" re-read needs re-parsable
+    # text, not raw binary).
+    def _bin2txt(b: Optional[bytes]) -> Optional[bytes]:
+        if b and is_genlog_dat(b):
+            return genlog_to_txt_text(b).encode("utf-8")
+        return b
+    in_b, out_b, combo_b = _bin2txt(in_b), _bin2txt(out_b), _bin2txt(combo_b)
 
     # Iter 106 — Excel IN/OUT sheets: converted into .dat-shaped text and
     # merged into the same pipeline (mapping, dedupe, range filter).

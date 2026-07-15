@@ -23,6 +23,17 @@ from server import (  # noqa: E402
 router = APIRouter(prefix="/api", tags=["shift-masters"])
 
 
+def _duty_hours(start: str, end: str) -> float:
+    """Iter 139 — auto-calculated duty hours from In/Out time (overnight
+    shifts wrap past midnight)."""
+    sh, sm = (int(x) for x in start.split(":"))
+    eh, em = (int(x) for x in end.split(":"))
+    mins = eh * 60 + em - (sh * 60 + sm)
+    if mins <= 0:
+        mins += 24 * 60
+    return round(mins / 60, 2)
+
+
 @router.get("/shift-masters")
 async def list_shift_masters(authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
@@ -59,6 +70,7 @@ async def create_shift_master(
         "name": name,
         "start": start,
         "end": end,
+        "duty_hours": _duty_hours(start, end),
         "description": (payload.description or "").strip() or None,
         "created_at": now_iso(),
         "created_by": user["user_id"],
@@ -102,6 +114,11 @@ async def update_shift_master(
         updates["end"] = _validate_hhmm(payload.end, "End time")
     if payload.description is not None:
         updates["description"] = payload.description.strip() or None
+    if "start" in updates or "end" in updates:
+        updates["duty_hours"] = _duty_hours(
+            updates.get("start", shift.get("start") or "09:00"),
+            updates.get("end", shift.get("end") or "18:00"),
+        )
     if updates:
         updates["updated_at"] = now_iso()
         updates["updated_by"] = user["user_id"]

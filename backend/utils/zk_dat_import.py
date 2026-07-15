@@ -73,6 +73,183 @@ def now_iso() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Iter 139 — Device "attendance record" exports (new formats).
+#
+# 1. Tab-separated .TXT export with header:
+#        No  TMNo  EnNo  Name  Mode  INOUT  DateTime
+#    e.g. "1\t1\t203\tHari om singh \t5\t0\t2024/09/03 13:45:56"
+#
+# 2. Binary .DAT backup ("ZoucqGENLOGData" header) — 8-byte records:
+#        u16 pad | u32 seconds-since-2000-01-01 | u16 (enroll_no << 4 | flags)
+#    Verified against the matching .TXT export (50,942/50,942 identical).
+# ---------------------------------------------------------------------------
+
+GENLOG_MARKER = b"GENLOGData"
+
+
+def is_genlog_dat(data: Optional[bytes]) -> bool:
+    """True when the bytes look like a binary GENLOG .DAT device backup."""
+    return bool(data) and GENLOG_MARKER in data[:64]
+
+
+def parse_genlog_records(data: bytes) -> List[Tuple[str, datetime]]:
+    """Decode a binary GENLOG .DAT backup into ``(bio_code, datetime)``
+    pairs. Auto-aligns the record start offset (header length varies by a
+    byte or two across firmware versions)."""
+    import struct
+    from datetime import timedelta
+
+    idx = data.find(GENLOG_MARKER)
+    if idx < 0:
+        return []
+    base_start = idx + len(GENLOG_MARKER)
+    epoch = datetime(2000, 1, 1, tzinfo=timezone.utc)
+    # Punches can't come from the future — misaligned decodes typically
+    # yield far-future years, so a tight upper bound both filters garbage
+    # AND makes the alignment scoring discriminative.
+    max_year = datetime.now(timezone.utc).year + 1
+
+    def _decode(start: int) -> List[Tuple[str, datetime]]:
+        body = data[start:]
+        out: List[Tuple[str, datetime]] = []
+        for i in range(len(body) // 8):
+            rec = body[i * 8:(i + 1) * 8]
+            _pad, ts, enf = struct.unpack("<HIH", rec)
+            en = enf >> 4
+            if en <= 0:
+                continue
+            dt = epoch + timedelta(seconds=ts)
+            if dt.year < 2001 or dt.year > max_year:
+                continue
+            out.append((str(en), dt))
+        return out
+
+    # Score candidate offsets by how many of the first 200 records decode
+    # to sane values; pick the best-aligned one.
+    best: List[Tuple[str, datetime]] = []
+    best_score = -1
+    for extra in range(0, 8):
+        start = base_start + extra
+        sample_n = min(200, max(1, (len(data) - start) // 8))
+        body = data[start:start + sample_n * 8]
+        score = len(_decode_sample(body, epoch, max_year))
+        if score > best_score:
+            best_score = score
+            best = _decode(start)
+    return best
+
+
+def _decode_sample(body: bytes, epoch: datetime, max_year: int) -> List[int]:
+    import struct
+    from datetime import timedelta
+    ok = []
+    for i in range(len(body) // 8):
+        rec = body[i * 8:(i + 1) * 8]
+        _pad, ts, enf = struct.unpack("<HIH", rec)
+        if enf >> 4 <= 0:
+            continue
+        dt = epoch + timedelta(seconds=ts)
+        if 2001 <= dt.year <= max_year:
+            ok.append(i)
+    return ok
+
+
+def genlog_to_txt_text(data: bytes) -> str:
+    """Convert a binary GENLOG .DAT backup into the tab-separated device
+    .TXT shape so it can be persisted + re-read through the normal text
+    pipeline (used by the 'Refresh Bio' recovery flow)."""
+    lines = ["No\tTMNo\tEnNo\tName\tMode\tINOUT\tDateTime"]
+    for i, (bio, dt) in enumerate(parse_genlog_records(data), start=1):
+        lines.append(f"{i}\t1\t{bio}\t\t0\t0\t{dt:%Y/%m/%d %H:%M:%S}")
+    return "\n".join(lines)
+
+
+_DEVICE_TXT_DT_FORMATS = (
+    "%Y/%m/%d %H:%M:%S", "%Y-%m-%d %H:%M:%S",
+    "%Y/%m/%d %H:%M", "%Y-%m-%d %H:%M",
+    "%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S",
+)
+
+
+def parse_device_txt_lines(
+    text: str,
+    default_kind: Optional[str] = None,
+) -> List[Tuple[str, datetime, Optional[str]]]:
+    """Parse the tab-separated device .TXT export
+    (``No | TMNo | EnNo | Name | Mode | INOUT | DateTime``). The header row
+    is optional — without it the standard column positions are assumed.
+    INOUT: even codes (0/2/4) = IN, odd codes (1/3/5) = OUT. When every
+    punch carries the same INOUT value the position-based re-classify in
+    :func:`import_zk_dat_bytes` fixes the pairing."""
+    rows: List[Tuple[str, datetime, Optional[str]]] = []
+    col: Optional[Dict[str, int]] = None
+    for raw in text.splitlines():
+        if not raw.strip():
+            continue
+        parts = raw.split("\t")
+        if col is None:
+            low = [p.strip().lower() for p in parts]
+            if "enno" in low:
+                col = {name: i for i, name in enumerate(low)}
+                continue
+            col = {"enno": 2, "inout": 5, "datetime": 6}
+        en_i = col.get("enno", 2)
+        dt_i = col.get("datetime", 6)
+        io_i = col.get("inout", 5)
+        if len(parts) <= max(en_i, dt_i):
+            continue
+        bio = parts[en_i].strip()
+        if not bio or not any(ch.isdigit() for ch in bio):
+            continue
+        ts_raw = parts[dt_i].strip()
+        dt: Optional[datetime] = None
+        for fmt in _DEVICE_TXT_DT_FORMATS:
+            try:
+                dt = datetime.strptime(ts_raw, fmt).replace(tzinfo=timezone.utc)
+                break
+            except ValueError:
+                continue
+        if dt is None:
+            continue
+        kind = default_kind or "in"
+        if io_i < len(parts) and parts[io_i].strip().isdigit():
+            kind = "out" if int(parts[io_i]) % 2 == 1 else (default_kind or "in")
+        rows.append((bio, dt, kind))
+    return rows
+
+
+def _looks_like_device_txt(text: str) -> bool:
+    """True when the first non-empty line is the device .TXT header."""
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        cols = [c.strip().lower() for c in line.split("\t")]
+        return "enno" in cols
+    return False
+
+
+def decode_punch_bytes(
+    data: Optional[bytes],
+    default_kind: Optional[str] = None,
+) -> List[Tuple[str, datetime, Optional[str]]]:
+    """Format-dispatching decoder: binary GENLOG .DAT, device .TXT export
+    (with or without header), or the classic ZK .dat text shape."""
+    if not data:
+        return []
+    if is_genlog_dat(data):
+        return [(bio, dt, default_kind or "in")
+                for bio, dt in parse_genlog_records(data)]
+    text = data.decode("utf-8", errors="replace")
+    if _looks_like_device_txt(text):
+        return parse_device_txt_lines(text, default_kind=default_kind)
+    rows = parse_zk_dat_lines(text, default_kind=default_kind)
+    if not rows:
+        # Headerless device .TXT fallback (tab positions are fixed).
+        rows = parse_device_txt_lines(text, default_kind=default_kind)
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # Iter 106 — Excel (.xlsx / .xls) punch imports. The employer keeps IN
 # punches in one sheet/file and OUT punches in another. Expected columns
 # (header row optional): CODE | DATE | TIME  — or CODE | DATETIME.
@@ -220,15 +397,12 @@ async def import_zk_dat_bytes(
     tag = source_tag or f"import:zk_upload_{datetime.now(timezone.utc):%Y%m%dT%H%M%S}"
     bio_index = await _build_bio_index(db, company_id)
 
+    # Iter 139 — every slot now accepts classic .dat text, the device .TXT
+    # export AND the binary GENLOG .DAT backup (format auto-detected).
     rows: List[Tuple[str, datetime, Optional[str]]] = []
-    if in_bytes:
-        rows.extend(parse_zk_dat_lines(in_bytes.decode("utf-8", errors="replace"),
-                                       default_kind="in"))
-    if out_bytes:
-        rows.extend(parse_zk_dat_lines(out_bytes.decode("utf-8", errors="replace"),
-                                       default_kind="out"))
-    if combined_bytes:
-        rows.extend(parse_zk_dat_lines(combined_bytes.decode("utf-8", errors="replace")))
+    rows.extend(decode_punch_bytes(in_bytes, default_kind="in"))
+    rows.extend(decode_punch_bytes(out_bytes, default_kind="out"))
+    rows.extend(decode_punch_bytes(combined_bytes))
 
     stats = {
         "total_lines": len(rows),

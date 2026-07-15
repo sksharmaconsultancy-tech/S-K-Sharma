@@ -32,6 +32,7 @@ type Shift = {
   name: string;
   start: string;
   end: string;
+  duty_hours?: number;
   description?: string | null;
   updated_at?: string;
 };
@@ -54,6 +55,16 @@ function computeDuration(start: string, end: string): string {
   } catch {
     return "";
   }
+}
+
+/** Decimal duty hours (e.g. 8.5) from In/Out time; overnight wraps. */
+function computeDutyHours(start: string, end: string): number | null {
+  const [sh, sm] = start.split(":").map(Number);
+  const [eh, em] = end.split(":").map(Number);
+  if ([sh, sm, eh, em].some((n) => Number.isNaN(n))) return null;
+  let mins = eh * 60 + em - (sh * 60 + sm);
+  if (mins <= 0) mins += 24 * 60;
+  return Math.round((mins / 60) * 100) / 100;
 }
 
 export default function ShiftMasterScreen() {
@@ -171,7 +182,9 @@ export default function ShiftMasterScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.cardTitle}>{s.name}</Text>
                 <Text style={styles.cardSub}>
-                  {s.start} – {s.end} · Duration {computeDuration(s.start, s.end)}
+                  {s.start} – {s.end} · Duty HRS{" "}
+                  {s.duty_hours ?? computeDutyHours(s.start, s.end) ?? "—"}
+                  {" "}({computeDuration(s.start, s.end)})
                 </Text>
                 {s.description ? (
                   <Text style={styles.cardDesc}>{s.description}</Text>
@@ -287,7 +300,7 @@ function ShiftEditor({
           />
           <View style={styles.rowSplit}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.fieldLabel}>Start (HH:MM)</Text>
+              <Text style={styles.fieldLabel}>In Time (HH:MM)</Text>
               <TextInput
                 value={start}
                 onChangeText={setStart}
@@ -298,7 +311,7 @@ function ShiftEditor({
             </View>
             <View style={{ width: 12 }} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.fieldLabel}>End (HH:MM)</Text>
+              <Text style={styles.fieldLabel}>Out Time (HH:MM)</Text>
               <TextInput
                 value={end}
                 onChangeText={setEnd}
@@ -308,6 +321,19 @@ function ShiftEditor({
               />
             </View>
           </View>
+          {/* Iter 139 — Duty HRS auto-calculated live from In/Out time. */}
+          <View style={styles.dutyBox} testID="shm-duty-hrs">
+            <Ionicons name="time-outline" size={16} color={colors.brand} />
+            <Text style={styles.dutyTxt}>
+              Duty HRS:{" "}
+              <Text style={styles.dutyVal}>
+                {computeDutyHours(start, end) ?? "—"}
+              </Text>
+              {computeDuration(start, end)
+                ? `  (${computeDuration(start, end)})`
+                : ""}
+            </Text>
+          </View>
           <Text style={styles.fieldLabel}>Description (optional)</Text>
           <TextInput
             value={desc}
@@ -316,9 +342,6 @@ function ShiftEditor({
             placeholderTextColor={colors.onSurfaceTertiary}
             style={styles.input}
           />
-          <Text style={styles.durTxt}>
-            Duration: {computeDuration(start, end) || "—"}
-          </Text>
           <Pressable
             onPress={save}
             disabled={saving}
@@ -465,6 +488,20 @@ const styles = StyleSheet.create({
     ...Platform.select({ web: { outlineWidth: 0 as any } }),
   },
   rowSplit: { flexDirection: "row", alignItems: "flex-start" },
+  dutyBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingVertical: 10,
+    paddingHorizontal: spacing.sm,
+    marginTop: 6,
+  },
+  dutyTxt: { color: colors.onSurfaceSecondary, fontSize: type.sm },
+  dutyVal: { color: colors.brand, fontWeight: "800", fontSize: type.base },
   durTxt: {
     color: colors.onSurfaceTertiary,
     fontSize: type.sm,

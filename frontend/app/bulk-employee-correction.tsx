@@ -93,6 +93,7 @@ const COL_WIDTHS: Record<string, number> = {
   name_as_per_pan: 160,
   bank_account: 140,
   bank_ifsc: 110,
+  bio_code: 100,
 };
 
 // Iter 134 (user spec) — Only identity columns are locked. Statutory IDs,
