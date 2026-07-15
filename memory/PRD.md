@@ -700,3 +700,7 @@ Verified: /admin/actual-salary-process for 2026-03 (no compliance) → epf/esi 0
 - Verified: app punch stored 19:05 when IST=19:05.
 - PRODUCTION migration (given in chat, run once): shift +5:30 all attendance where source NOT ^zkteco:|^import:|manual_admin|roster and not marked tz_fixed_app (historical app self-punches + admin_approved records).
 - NOTE: partial parallel-edit batch failures observed twice this session (edits reported success but not persisted) — ALWAYS grep-verify critical edits.
+
+## Iter 145 — Punch Log Report (Utility) — DONE, verified via curl + screenshot
+- New Utility sidebar item "Punch Log Report" (/punch-log-report). Filters: From/To date, Firm (all/one), Machine/Source dropdown (Device <SN> | Import (.dat/.TXT) | Mobile App | Manual (Admin)). Grid: Date, Time, IN/OUT (colored), Emp Code, Name, Bio, Machine, Firm, Status. "Download Excel" exports full filtered log (openpyxl, frozen header, up to 100k rows; JSON view capped 2000 with truncation note).
+- Backend: routes/punch_logs.py (GET /admin/punch-logs + /admin/punch-logs.xlsx), sub-admin firm scoping honored; import punches carry the import tag in device_serial → labelled "Import (.dat/.TXT)".
