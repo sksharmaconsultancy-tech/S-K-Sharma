@@ -6614,15 +6614,19 @@ async def list_companies(authorization: Optional[str] = Header(None)):
     Access:
       • super_admin — sees every firm.
       • sub_admin   — sees only firms in their `sub_admin_company_scope`.
-                      A scope of "all" returns every firm; a scope of "limited"
-                      returns only `sub_admin_company_ids`.
+                      A scope of "all" returns every firm; any other scope
+                      ("restricted") returns only `sub_admin_company_ids`.
     """
     user = await get_user_from_token(authorization)
     require_role(user, ["super_admin", "sub_admin"])
     query: dict = {}
     if user.get("role") == "sub_admin":
         scope = user.get("sub_admin_company_scope") or "all"
-        if scope == "limited":
+        # Iter 132 (user bug) — User Rights saves the scope as "restricted",
+        # but this check previously looked for "limited", so restricted
+        # sub-admins saw EVERY firm. Treat anything other than "all" as
+        # restricted.
+        if scope != "all":
             allowed = user.get("sub_admin_company_ids") or []
             if not allowed:
                 return {"companies": []}
