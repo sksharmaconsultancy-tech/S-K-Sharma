@@ -22,6 +22,7 @@ import { useLiveSync } from "@/src/api/live-sync";
 import CompanyPicker from "@/src/components/CompanyPicker";
 import SelectedCompanyBadge from "@/src/components/SelectedCompanyBadge";
 import PrimaryInboxBanner from "@/src/components/PrimaryInboxBanner";
+import PushBanner from "@/src/components/PushBanner";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
 
 const LOGO = require("../../assets/images/logo-mark.png");
@@ -301,6 +302,7 @@ export default function Dashboard() {
 
         {/* Iter 127 — "New email in Primary Inbox" ping (Super/Sub Admin) */}
         <PrimaryInboxBanner />
+        <PushBanner />
 
         {loading ? (
           <ActivityIndicator style={{ marginTop: 80 }} color={colors.brandPrimary} />

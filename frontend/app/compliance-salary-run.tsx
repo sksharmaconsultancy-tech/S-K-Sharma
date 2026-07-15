@@ -619,15 +619,52 @@ export default function ComplianceSalaryRunScreen() {
   };
 
   // Iter 126h — Draft / lock workflow.
+  // Iter 145 (P0 fix) — "Save as Draft" now actually PERSISTS the edited
+  // grid (Present Days / Others / Other Deduction) to the backend. It used
+  // to be a no-op, so every edit vanished when the run was reopened.
+  const [savingDraft, setSavingDraft] = useState(false);
   const saveAsDraft = async () => {
-    if (!run) return;
+    if (!run || savingDraft) return;
     if ((run as any).finalized) {
       showMsg("This run is FINALIZED — Save as Draft is not allowed. Use Unlock Request to de-finalize first.");
       return;
     }
-    await loadRuns();
-    showMsg("Saved as draft ✓ — you can reprocess or edit anytime until it is finalized.");
+    setSavingDraft(true);
+    try {
+      await api(`/admin/compliance-salary-runs/${run.run_id}/save-rows`, {
+        method: "POST",
+        body: { rows: run.rows, totals: run.totals },
+      });
+      await loadRuns();
+      showMsg("Saved as draft ✓ — your edits are stored and will be there when you reopen this run.");
+    } catch (e: any) {
+      showMsg(e?.message || "Draft save failed");
+    } finally { setSavingDraft(false); }
   };
+
+  // Iter 145 — safety net: auto-save the edited grid (debounced 2.5s) so
+  // edits survive even if the admin forgets to press "Save as Draft".
+  const runRef = useRef<CompRun | null>(null);
+  useEffect(() => { runRef.current = run; }, [run]);
+  const autoSaveTimer = useRef<any>(null);
+  const scheduleDraftAutoSave = useCallback(() => {
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(async () => {
+      const r = runRef.current;
+      if (!r || (r as any).finalized) return;
+      try {
+        await api(`/admin/compliance-salary-runs/${r.run_id}/save-rows`, {
+          method: "POST",
+          body: { rows: r.rows, totals: r.totals },
+        });
+      } catch {
+        // silent — the explicit "Save as Draft" button surfaces errors
+      }
+    }, 2500);
+  }, []);
+  useEffect(() => () => {
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+  }, []);
 
   const [unlockBusy, setUnlockBusy] = useState(false);
   const [pendingUnlockReq, setPendingUnlockReq] = useState<any | null>(null);
@@ -824,6 +861,7 @@ export default function ComplianceSalaryRunScreen() {
       });
       return { ...prev, rows };
     });
+    scheduleDraftAutoSave(); // Iter 145 — persist edits automatically
   };
 
   const updatePresentDays = (userId: string, newPd: number) => {
@@ -946,6 +984,7 @@ export default function ComplianceSalaryRunScreen() {
       }
       return { ...prev, rows, totals };
     });
+    scheduleDraftAutoSave(); // Iter 145 — persist edits automatically
   };
 
   if (!isAdmin) {

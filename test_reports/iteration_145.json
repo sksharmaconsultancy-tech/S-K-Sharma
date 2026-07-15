@@ -1,0 +1,38 @@
+{
+  "summary": "Iter 145 — Web Push (PWA) + Compliance Save-Rows P0 fix regression. Backend: 10/10 pytest cases PASSED (test_iter145_push_and_saverows.py). Frontend: end-to-end Save-as-Draft persistence confirmed via Playwright on live preview — edited an Other Deduction cell 0→777 in run csrun_be5f1dd4daef, clicked 'Save as Draft', navigated away and re-opened the run, and the edited value 777 was still there (P0 REGRESSION FIXED, previously would revert to client-side). Original value restored after test. PushBanner code review confirms correct wiring (import in app/(tabs)/index.tsx line 25, render line 305); visually not rendered in this headless preview because Notification.permission=='denied' — the component's line 31 `if (perm === 'denied') return;` correctly suppresses render (intended behaviour). No red-screen errors. Push hook safety: leave PATCH, admin approve-employee and manual-punch endpoints still return normal 400/404 responses (no 500s from push hooks) — try/except guards work.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global (web)", "issues": ["Non-blocking console noise: shadow*/outline/background/padding style warnings + 'props.pointerEvents deprecated' — pre-existing across screens, not introduced by Iter 145."]},
+      {"screen": "compliance-salary-run.tsx", "issues": ["'Save as Draft' ActionBtn (line 1387) has no testID; 'Other Ded.' TextInput (line 1586) has no testID. Test had to fall back to text-content + input[inputmode='decimal'] selectors. Consider adding testID='csr-save-draft' and testID={`csr-other-ded-${r.user_id}`} for stable future automation."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter145_push_and_saverows.py",
+    "/app/test_reports/pytest/iter145.xml",
+    "/tmp/dash_banner.png",
+    "/tmp/csr_opened.png",
+    "/tmp/csr_after_reload.png"
+  ],
+  "action_items": [
+    "(Optional, non-blocking) Add testID='csr-save-draft' to 'Save as Draft' ActionBtn and testID='csr-other-ded-<user_id>' on the Other Deduction TextInput for more stable E2E selectors. Everything works today.",
+    "(Info only) PushBanner cannot be visually tested in the headless browser used here because Notification.permission comes back 'denied' — main agent may want to manually smoke-test the banner from a real Chrome profile where permission='default'. Code path is correct."
+  ],
+  "critical_code_review_comments": [
+    "routes/web_push.py: subscribe upserts on endpoint (correct dedup), unsubscribe deletes by endpoint — good. push_to_user & push_to_company_admins run pywebpush in thread executor and prune 404/410 subscriptions — solid.",
+    "server.py save_compliance_run_rows (line 14651): validates finalized state, matches user_id set, persists rows+totals+draft_saved_at — matches P0 fix spec exactly.",
+    "compliance-salary-run.tsx: 2.5s debounced auto-save (scheduleDraftAutoSave) fires on every grid edit, silent on failure, and both grid update helpers (updateRowField line 845, updateGridRow at 987) call it — belt-and-braces safety net beyond the explicit button."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter145_push_and_saverows.py (NEW — 10 pytest cases)"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "100% (P0 persistence verified end-to-end; PushBanner visually not testable due to permission=denied in headless — code path verified)"},
+  "seed_data_creation": "None persistent. Test used existing run csrun_be5f1dd4daef; every mutated row was restored to its original values (both via pytest fixture teardown and via UI 'Save as Draft' with original value). Run left in draft (non-finalized) state, exactly as found. Push subscription test created + deleted its own dummy endpoint.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Super-admin login: POST /api/auth/admin-password-login {email:'sksharmaconsultancy@gmail.com', password:'sharma123'} → session_token in response, store as localStorage.llc_session_token. Existing compliance draft run csrun_be5f1dd4daef (Kankani, 2026-06, 55 rows) is safe to reuse; the save-rows endpoint enforces exact user_id set match. To E2E-test PushBanner rendering, need a browser context where Notification.permission=='default' (headless Chromium here reports 'denied'). test_iter145_push_and_saverows.py is idempotent — can be re-run.",
+  "rca_of_issue": "N/A — no failures. The Iter 145 P0 fix (persist grid edits on Save as Draft) works both at the API layer (test_persist_edits_and_restore) and the UI layer (Playwright reload-and-check confirmed 777 persisted after full page reload)."
+}

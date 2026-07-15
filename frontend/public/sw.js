@@ -5,7 +5,7 @@
  *   • navigations (HTML)           → network first, cached copy only when offline.
  *   • static assets (js/css/img)   → stale-while-revalidate.
  */
-const CACHE = "sks-pwa-v2";
+const CACHE = "sks-pwa-v3";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -68,4 +68,44 @@ self.addEventListener("fetch", (event) => {
       }),
     );
   }
+});
+
+/* ------------------------------------------------------------------ */
+/* Web Push — punch approvals, leave decisions, joining requests.      */
+/* ------------------------------------------------------------------ */
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (e) {
+    data = { body: event.data ? event.data.text() : "" };
+  }
+  const title = data.title || "S.K. Sharma & Co.";
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: data.body || "",
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-192.png",
+      tag: data.tag || undefined,
+      data: { url: data.url || "/" },
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || "/";
+  event.waitUntil(
+    clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((list) => {
+        for (const c of list) {
+          if ("focus" in c) {
+            if ("navigate" in c) c.navigate(url).catch(() => {});
+            return c.focus();
+          }
+        }
+        return clients.openWindow(url);
+      }),
+  );
 });

@@ -113,6 +113,19 @@ async def decide_leave(leave_id: str, payload: LeaveDecision,
             details=f"{leave.get('leave_type')} leave {leave.get('from_date')} → {leave.get('to_date')}")
     except Exception:
         pass
+    # Iter 145 — web-push the leave decision to the employee's devices.
+    try:
+        from routes.web_push import push_to_user
+        _st = payload.status
+        _emoji = "✅" if _st == "approved" else "❌"
+        await push_to_user(
+            leave.get("user_id") or "",
+            f"Leave {_st} {_emoji}",
+            f"Your {leave.get('leave_type')} leave ({leave.get('from_date')} → "
+            f"{leave.get('to_date')}) was {_st} by {user['name']}.",
+            url="/leaves", tag=f"leave_{leave_id}")
+    except Exception:
+        pass
     return leave
 
 

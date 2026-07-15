@@ -6404,6 +6404,16 @@ async def submit_onboarding(payload: OnboardingSubmit,
         }},
     )
     updated = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    # Iter 145 — web-push alert to the firm's admins: new joining request.
+    try:
+        from routes.web_push import push_to_company_admins
+        await push_to_company_admins(
+            company["company_id"],
+            "New joining request",
+            f"{payload.name} has requested to join {company.get('name') or code}. Tap to review.",
+            url="/admin", tag=f"join_{user['user_id']}")
+    except Exception:
+        pass
     return {"ok": True, "user": updated, "company": company}
 
 
@@ -6505,6 +6515,21 @@ async def decide_employee_approval(
 
     await db.users.update_one({"user_id": payload.user_id}, {"$set": updates})
     resp = await db.users.find_one({"user_id": payload.user_id}, {"_id": 0})
+    # Iter 145 — web-push the joining decision to the employee.
+    try:
+        from routes.web_push import push_to_user
+        if payload.action == "approve":
+            await push_to_user(
+                payload.user_id, "Joining approved 🎉",
+                "Your joining request has been approved. You can now log in and punch attendance.",
+                url="/", tag="join_decision")
+        else:
+            await push_to_user(
+                payload.user_id, "Joining request rejected",
+                (payload.note or "Your joining request was rejected. Contact your employer for details."),
+                url="/", tag="join_decision")
+    except Exception:
+        pass
     if temp_pin:
         # Return plaintext temp PIN once so admin can share it with the employee
         resp = {**resp, "temp_pin": temp_pin}
@@ -9498,6 +9523,17 @@ async def admin_approve_punch(
         f"[ADMIN PUNCH] {admin_user.get('email')} → punched {payload.kind} for "
         f"{emp.get('name')} ({emp.get('employee_code')}) — {int(dist)}m from office",
     )
+    # Iter 145 — web-push the punch confirmation to the employee.
+    try:
+        from routes.web_push import push_to_user
+        _k = "IN" if payload.kind == "in" else "OUT"
+        await push_to_user(
+            emp["user_id"], f"Punch {_k} approved",
+            f"Your employer recorded a Punch {_k} for you at "
+            f"{ist_wallclock_now().strftime('%I:%M %p')}.",
+            url="/attendance", tag=f"punch_{record_id}")
+    except Exception:
+        pass
     return {"ok": True, "record_id": record_id, "distance_m": round(dist, 1)}
 
 
@@ -11106,6 +11142,16 @@ async def create_manual_punch(
     }
     await db.attendance.insert_one(record)
     await _log_punch_audit("create", admin, record_id, None, record, reason)
+    # Iter 145 — web-push the manual punch approval to the employee.
+    try:
+        from routes.web_push import push_to_user
+        _k = "IN" if payload.kind == "in" else "OUT"
+        await push_to_user(
+            payload.user_id, f"Punch {_k} added by employer",
+            f"A Punch {_k} was recorded for you on {record['date']} ({reason}).",
+            url="/attendance", tag=f"punch_{record_id}")
+    except Exception:
+        pass
     return {"ok": True, "record": {k: v for k, v in record.items() if k != "_id"}}
 
 
@@ -14600,6 +14646,49 @@ async def get_compliance_salary_run(
     if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
         raise HTTPException(status_code=403, detail="Not authorised for this run")
     return {"run": run}
+
+
+@api.post("/admin/compliance-salary-runs/{run_id}/save-rows")
+async def save_compliance_run_rows(
+    run_id: str,
+    payload: Dict[str, Any] = Body(default={}),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 145 — P0 fix: persist grid edits (Present Days, Others, Other
+    Deduction and their recomputed row values) made in the Compliance
+    Salary sheet. Previously "Save as Draft" saved NOTHING — every edit
+    was client-side only and vanished when the run was reopened."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin"])
+    await require_employer_permission(admin, "compliance_salary:write", db)
+    run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Compliance salary run not found")
+    if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised for this run")
+    if run.get("finalized"):
+        raise HTTPException(status_code=400, detail="Run is finalized (read-only). Unlock it first.")
+
+    rows = payload.get("rows")
+    if not isinstance(rows, list) or not rows:
+        raise HTTPException(status_code=400, detail="rows list is required")
+    # Sanity: the incoming rows must match the run's employees (no adding /
+    # dropping rows through this endpoint).
+    existing_ids = {r.get("user_id") for r in (run.get("rows") or [])}
+    incoming_ids = {r.get("user_id") for r in rows}
+    if incoming_ids != existing_ids:
+        raise HTTPException(status_code=400, detail="Row set does not match this run — reload and retry.")
+
+    updates: Dict[str, Any] = {
+        "rows": rows,
+        "draft_saved_at": now_iso(),
+        "draft_saved_by": admin["user_id"],
+    }
+    totals = payload.get("totals")
+    if isinstance(totals, dict) and totals:
+        updates["totals"] = totals
+    await db.compliance_salary_runs.update_one({"run_id": run_id}, {"$set": updates})
+    return {"ok": True, "draft_saved_at": updates["draft_saved_at"]}
 
 
 @api.post("/admin/compliance-salary-runs/{run_id}/finalize")
@@ -18878,6 +18967,8 @@ from routes.ot_salary import router as ot_salary_router  # noqa: E402
 app.include_router(ot_salary_router)
 from routes.punch_logs import router as punch_logs_router  # noqa: E402
 app.include_router(punch_logs_router)
+from routes.web_push import router as web_push_router  # noqa: E402
+app.include_router(web_push_router)
 app.include_router(compliance_settings_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
