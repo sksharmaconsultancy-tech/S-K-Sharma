@@ -173,42 +173,74 @@ export default function EmployeeBulkImportScreen() {
   );
 
   const downloadTemplate = async () => {
-    const res = await apiBinary("/admin/employees/bulk-import-template.csv");
+    const res = await apiBinary("/admin/employees/bulk-import-template.xlsx");
     if (Platform.OS === "web" && res.webBlobUrl) {
       const a = document.createElement("a");
       a.href = res.webBlobUrl;
-      a.download = "employee_bulk_import_template.csv";
+      a.download = "employee_bulk_import_template.xlsx";
       a.click();
       setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 30000);
     }
   };
 
+  const validateAndSet = (h: string[], r: ParsedRow[], name: string) => {
+    if (h.length === 0 || r.length === 0) {
+      setParseError("Empty file — no rows detected.");
+      setHeaders([]);
+      setRows([]);
+      return;
+    }
+    if (
+      !h.some((x) => {
+        const n = x.trim().toLowerCase().replace(/\s+/g, " ");
+        return n === "name" || n === "employee name";
+      })
+    ) {
+      setParseError('Missing "EMPLOYEE NAME" (or "name") column in the header row.');
+      return;
+    }
+    setHeaders(h);
+    setRows(r);
+    setFileName(name);
+  };
+
   const onPickFile = (file: File) => {
     setParseError(null);
     setResult(null);
+    const lower = (file.name || "").toLowerCase();
+    // Iter 132 (user directive) — Excel is the primary format: CSV editors
+    // mangle numeric fields (leading zeros / long UAN & account numbers).
+    if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const buf = reader.result as ArrayBuffer;
+          const bytes = new Uint8Array(buf);
+          let bin = "";
+          const CHUNK = 0x8000;
+          for (let i = 0; i < bytes.length; i += CHUNK) {
+            bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+          }
+          const b64 = btoa(bin);
+          const parsed = await api<{ headers: string[]; rows: ParsedRow[] }>(
+            "/admin/employees/bulk-import-parse",
+            { method: "POST", body: { file_base64: b64, filename: file.name } },
+          );
+          validateAndSet(parsed.headers || [], parsed.rows || [], file.name);
+        } catch (e: any) {
+          setParseError(e?.message || "Failed to read the Excel file.");
+        }
+      };
+      reader.readAsArrayBuffer(file);
+      return;
+    }
+    // Legacy CSV still accepted.
     const reader = new FileReader();
     reader.onload = () => {
       try {
         const text = String(reader.result || "");
         const { headers: h, rows: r } = parseCsv(text);
-        if (h.length === 0 || r.length === 0) {
-          setParseError("Empty CSV — no rows detected.");
-          setHeaders([]);
-          setRows([]);
-          return;
-        }
-        if (
-          !h.some((x) => {
-            const n = x.trim().toLowerCase().replace(/\s+/g, " ");
-            return n === "name" || n === "employee name";
-          })
-        ) {
-          setParseError('Missing "EMPLOYEE NAME" (or "name") column in the CSV header.');
-          return;
-        }
-        setHeaders(h);
-        setRows(r);
-        setFileName(file.name);
+        validateAndSet(h, r, file.name);
       } catch (e: any) {
         setParseError(e?.message || "Failed to parse the CSV.");
       }
@@ -273,8 +305,8 @@ export default function EmployeeBulkImportScreen() {
         <Ionicons name="cloud-upload-outline" size={40} color={colors.onSurfaceTertiary} />
         <Text style={styles.forbidT}>Web-only feature</Text>
         <Text style={styles.forbidHint}>
-          Open the web portal on a laptop to bulk-import employees from a
-          CSV. Adding one-by-one is available on mobile.
+          Open the web portal on a laptop to bulk-import employees from an
+          Excel file. Adding one-by-one is available on mobile.
         </Text>
       </View>
     );
@@ -331,9 +363,9 @@ export default function EmployeeBulkImportScreen() {
         <View style={styles.card}>
           <Text style={styles.section}>1 · Download the template</Text>
           <Text style={styles.hint}>
-            The CSV has 26 columns — <Text style={{ fontWeight: "700" }}>name</Text> is
-            mandatory, plus either <Text style={{ fontWeight: "700" }}>phone</Text> or{" "}
-            <Text style={{ fontWeight: "700" }}>email</Text>.
+            Excel (.xlsx) template — <Text style={{ fontWeight: "700" }}>EMPLOYEE NAME</Text> is
+            mandatory. All cells are TEXT-formatted so UAN / ESI / account
+            numbers and dates are never changed by Excel.
           </Text>
           <Text style={styles.hint}>
             <Text style={{ fontWeight: "700" }}>Allowances / deductions</Text> use
@@ -345,16 +377,16 @@ export default function EmployeeBulkImportScreen() {
           </Text>
           <Pressable onPress={downloadTemplate} style={styles.secondaryBtn}>
             <Ionicons name="download-outline" size={16} color={colors.brandPrimary} />
-            <Text style={styles.secondaryBtnTxt}>Download template CSV</Text>
+            <Text style={styles.secondaryBtnTxt}>Download template (Excel)</Text>
           </Pressable>
         </View>
 
         {/* Step 2 — upload */}
         <View style={styles.card}>
-          <Text style={styles.section}>2 · Upload your filled CSV</Text>
+          <Text style={styles.section}>2 · Upload your filled Excel file</Text>
           <input
             type="file"
-            accept=".csv,text/csv"
+            accept=".xlsx,.xls,.csv"
             onChange={(e) => {
               const f = (e.target as HTMLInputElement).files?.[0];
               if (f) onPickFile(f);

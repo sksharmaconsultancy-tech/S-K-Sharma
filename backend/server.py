@@ -7585,6 +7585,8 @@ async def admin_employees_bulk_import(
         "employee name": "name",
         "employee father name": "father_name", "father name": "father_name",
         "emp type": "employee_type", "emp_type": "employee_type",
+        "emp group": "employee_type", "emp_group": "employee_type",
+        "employee group": "employee_type", "group": "employee_type",
         "marital status": "marital_status",
         "employee basic": "basic_salary", "basic": "basic_salary",
         "pf basic": "pf_basic",
@@ -7827,19 +7829,26 @@ async def admin_employees_bulk_import(
     }
 
 
-@api.get("/admin/employees/bulk-import-template.csv")
+@api.get("/admin/employees/bulk-import-template.xlsx")
 async def admin_bulk_import_template(
     authorization: Optional[str] = Header(None),
 ):
-    """Downloads a CSV template with all supported columns, one sample row."""
+    """Excel (.xlsx) bulk-import template. Iter 132 (user directive):
+    switched from CSV to Excel because CSV editors mangle numeric fields
+    (leading zeros in UAN/ESI/account numbers, dates). Every cell is
+    TEXT-formatted so Excel never converts values."""
     from fastapi.responses import Response
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
     admin = await get_user_from_token(authorization)
     require_role(admin, ["company_admin", "super_admin", "sub_admin"])
     # Iter 125 — template matches the firm's own bulk-import format.
+    # Iter 132 — "Emp Type" renamed to "Emp Group" (General Master Groups).
     columns = [
         "EMPLOYEE PFNO", "UAN_NO", "EMPLOYEE ESINO",
         "EMPLOYEE NAME", "EMPLOYEE FATHER NAME",
-        "Designation", "Department", "Emp Type", "Gender", "Marital Status",
+        "Designation", "Department", "Emp Group", "Gender", "Marital Status",
         "DOB", "DOJ",
         "EMPLOYEE BASIC", "PF_BASIC", "HRA", "CONV", "OVER_TIME", "Gross Pay",
         "Present Add", "Permanent Add",
@@ -7864,14 +7873,95 @@ async def admin_bulk_import_template(
         "Bank", "Monthly", "",
         "22000",
     ]
-    body = (",".join(columns) + "\n" + ",".join(sample) + "\n").encode("utf-8")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Employees"
+    hdr_font = Font(bold=True, color="FFFFFF")
+    hdr_fill = PatternFill("solid", fgColor="1D4ED8")
+    for i, col in enumerate(columns, start=1):
+        c = ws.cell(row=1, column=i, value=col)
+        c.font = hdr_font
+        c.fill = hdr_fill
+        ws.column_dimensions[get_column_letter(i)].width = max(12, min(28, len(col) + 4))
+    for i, val in enumerate(sample, start=1):
+        c = ws.cell(row=2, column=i, value=val)
+        c.number_format = "@"  # TEXT — preserves leading zeros / long numbers
+    # Pre-format 500 blank rows as TEXT so pasted data is never mangled.
+    for r in range(3, 503):
+        for i in range(1, len(columns) + 1):
+            ws.cell(row=r, column=i).number_format = "@"
+    buf = io.BytesIO()
+    wb.save(buf)
     return Response(
-        content=body,
-        media_type="text/csv",
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
-            "Content-Disposition": 'attachment; filename="employee_bulk_import_template.csv"',
+            "Content-Disposition": 'attachment; filename="employee_bulk_import_template.xlsx"',
         },
     )
+
+
+class BulkImportParseBody(BaseModel):
+    file_base64: str
+    filename: Optional[str] = None
+
+
+@api.post("/admin/employees/bulk-import-parse")
+async def admin_bulk_import_parse(
+    payload: BulkImportParseBody,
+    authorization: Optional[str] = Header(None),
+):
+    """Parse an uploaded Excel (.xlsx/.xls) bulk-import file server-side and
+    return {headers, rows} of STRINGS — numeric cells are stringified
+    losslessly (no scientific notation / trailing .0), dates become
+    YYYY-MM-DD. Iter 132 (user directive: Excel instead of CSV)."""
+    import base64 as _b64
+    from openpyxl import load_workbook
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
+    try:
+        blob = _b64.b64decode(payload.file_base64 or "", validate=False)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid file encoding")
+    if not blob:
+        raise HTTPException(status_code=400, detail="Empty file")
+    try:
+        wb = load_workbook(io.BytesIO(blob), read_only=True, data_only=True)
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not read the Excel file — please upload a .xlsx made from the template.",
+        )
+    ws = wb.worksheets[0]
+
+    def cell_str(v: Any) -> str:
+        if v is None:
+            return ""
+        if isinstance(v, datetime):
+            return v.strftime("%Y-%m-%d")
+        if isinstance(v, float):
+            if v.is_integer():
+                return str(int(v))
+            return repr(v)
+        return str(v).strip()
+
+    headers: List[str] = []
+    rows: List[Dict[str, str]] = []
+    for r_idx, row in enumerate(ws.iter_rows(values_only=True)):
+        if r_idx == 0:
+            headers = [cell_str(v) for v in row]
+            # trim trailing empty header columns
+            while headers and not headers[-1]:
+                headers.pop()
+            continue
+        vals = [cell_str(v) for v in row[: len(headers)]]
+        if not any(vals):
+            continue  # skip fully blank rows
+        rows.append({headers[i]: (vals[i] if i < len(vals) else "") for i in range(len(headers)) if headers[i]})
+    wb.close()
+    if not headers:
+        raise HTTPException(status_code=400, detail="No header row found in the Excel file")
+    return {"headers": [h for h in headers if h], "rows": rows, "rows_count": len(rows)}
 
 
 @api.delete("/admin/employees/{user_id}")

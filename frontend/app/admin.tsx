@@ -53,7 +53,13 @@ export default function AdminScreen() {
     }
     return companies;
   }, [companies, isLocked, lockedCid]);
-  const [companyFilter, setCompanyFilter] = useState<string | "all">("all");
+  const [companyFilter, setCompanyFilter] = useState<string | "all">(lockedCid || "all");
+  // User directive (Iter 132) — Employee Master must show ONLY the selected
+  // company's employees. Whenever the global firm selection changes, scope
+  // this screen to it automatically.
+  useEffect(() => {
+    if (lockedCid) setCompanyFilter(lockedCid);
+  }, [lockedCid]);
   const [employees, setEmployees] = useState<any[]>([]);
   const [typeFilter, setTypeFilter] = useState<string | "all">("all");
   const [rollFilter, setRollFilter] = useState<"all" | "on" | "off">("all");

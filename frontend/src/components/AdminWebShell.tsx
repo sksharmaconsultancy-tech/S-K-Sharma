@@ -137,7 +137,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/masters?tab=shifts", label: "Shifts", icon: "time-outline" },
     ],
   },
-  { route: "/employee-bulk-import", label: "Bulk Import (CSV)", icon: "cloud-upload-outline" },
+  { route: "/employee-bulk-import", label: "Bulk Import (Excel)", icon: "cloud-upload-outline" },
   { route: "/attendance-policy", label: "Attendance Policy", icon: "time-outline" },
   // Iter 85 — Utility group. Users Log Report is a new audit view;
   // Messages + Tickets moved under this umbrella so ops tools live in
@@ -354,7 +354,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
       { route: "/employee-groups", label: "Employee Type", icon: "people-outline" },
     ],
   },
-  { route: "/employee-bulk-import", label: "Bulk Import (CSV)", icon: "cloud-upload-outline" },
+  { route: "/employee-bulk-import", label: "Bulk Import (Excel)", icon: "cloud-upload-outline" },
   { route: "/attendance-policy", label: "Attendance Policy", icon: "time-outline" },
   { route: "/location-audit", label: "Location Audit", icon: "navigate-outline" },
   { route: "/biometric-devices", label: "Biometric Devices", icon: "finger-print-outline" },
