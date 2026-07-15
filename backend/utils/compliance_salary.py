@@ -672,7 +672,7 @@ def build_compliance_register_pdf(
                 + float(r.get("pt") or 0))
 
     # ---- header (drawn on every page) ------------------------------------
-    W, H = A4
+    W, H = landscape(A4)
     pf_code = str(firm.get("pf_code") or "")
     esi_code = str(firm.get("esi_code") or "")
     address = str(firm.get("address") or "")
@@ -1085,9 +1085,9 @@ def build_compliance_register_pdf_v2(
 
     summary = Table([[
         Paragraph(f"Employees: <b>{len(rows)}</b>", lbl),
-        Paragraph(f"Gross: <b>₹{tot['gross']:,.2f}</b>", lbl),
-        Paragraph(f"Total Deductions: <b>₹{tot['ded']:,.2f}</b>", lbl),
-        Paragraph(f"Net Payable: <b>₹{tot['net']:,.2f}</b>", lbl),
+        Paragraph(f"Gross: <b>Rs. {tot['gross']:,.2f}</b>", lbl),
+        Paragraph(f"Total Deductions: <b>Rs. {tot['ded']:,.2f}</b>", lbl),
+        Paragraph(f"Net Payable: <b>Rs. {tot['net']:,.2f}</b>", lbl),
     ]], colWidths=[(W - 12 * mm) / 4.0] * 4)
     summary.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), BAND),
