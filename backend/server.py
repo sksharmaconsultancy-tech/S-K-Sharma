@@ -7323,6 +7323,48 @@ async def super_admin_toggle_user(
     return {"ok": True, "user_id": user_id, "disabled": bool(payload.disabled)}
 
 
+async def _dup_employee_with_orphan_heal(
+    phone: Optional[str], email: Optional[str]
+) -> Optional[Dict[str, Any]]:
+    """Return an existing EMPLOYEE user that blocks this phone/email — after
+    auto-healing orphans. An orphan is an employee whose ``company_id`` points
+    to a firm that no longer exists (force-deleted): such stale records are
+    removed (with their sessions) so the phone/email can be reused when the
+    same people are re-imported. Employees of a LIVE firm still block.
+
+    User report (Iter 134): after Force Delete of a firm from Company Master,
+    re-importing the same employees said "phone / email already registered"
+    because stale user docs survived on the production DB."""
+    or_q: List[Dict[str, Any]] = []
+    if phone:
+        or_q.append({"phone": phone})
+    if email:
+        or_q.append({"email": email})
+    if not or_q:
+        return None
+    stale_ids: List[str] = []
+    blocker: Optional[Dict[str, Any]] = None
+    async for u in db.users.find(
+        {"$or": or_q, "role": "employee"},
+        {"_id": 0, "user_id": 1, "name": 1, "company_id": 1},
+    ):
+        live = None
+        if u.get("company_id"):
+            live = await db.companies.find_one(
+                {"company_id": u["company_id"]}, {"_id": 0, "company_id": 1})
+        if live:
+            blocker = blocker or u
+        else:
+            stale_ids.append(u["user_id"])
+    if stale_ids:
+        await db.users.delete_many({"user_id": {"$in": stale_ids}})
+        await db.user_sessions.delete_many({"user_id": {"$in": stale_ids}})
+        logger.info(
+            "[dup-heal] removed %d orphan employee record(s) for phone=%s email=%s "
+            "(firms already deleted)", len(stale_ids), phone, email)
+    return blocker
+
+
 # ---------------------------------------------------------------------------
 # Delete employees (super_admin or company_admin scoped)
 # ---------------------------------------------------------------------------
@@ -7375,14 +7417,16 @@ async def admin_create_employee(
 
     # Duplicate checks — ONLY employee records block (user directive: an
     # Employer/Firm-Master mobile can also be registered as an Employee).
+    # Orphans (employees of a force-deleted firm) are auto-healed so the
+    # same phone/email can be re-registered.
     if phone:
-        if await db.users.find_one({"phone": phone, "role": "employee"}, {"_id": 0, "user_id": 1}):
+        if await _dup_employee_with_orphan_heal(phone, None):
             raise HTTPException(
                 status_code=409,
                 detail="This phone number is already registered.",
             )
     if email:
-        if await db.users.find_one({"email": email, "role": "employee"}, {"_id": 0, "user_id": 1}):
+        if await _dup_employee_with_orphan_heal(None, email):
             raise HTTPException(
                 status_code=409,
                 detail="This email is already registered.",
@@ -7708,14 +7752,9 @@ async def admin_employees_bulk_import(
                 continue
             # Duplicate check — only EMPLOYEE records block; an employer/
             # admin using the same mobile is allowed (user directive).
-            dup_q: List[Dict[str, Any]] = []
-            if phone:
-                dup_q.append({"phone": phone})
-            if email:
-                dup_q.append({"email": email})
-            dup = await db.users.find_one(
-                {"$or": dup_q, "role": "employee"},
-                {"_id": 0, "user_id": 1, "name": 1}) if dup_q else None
+            # Orphans (employees of a force-deleted firm) are auto-healed
+            # so re-importing the same people succeeds.
+            dup = await _dup_employee_with_orphan_heal(phone, email)
             if dup:
                 skipped_duplicates.append({
                     "row": idx,
