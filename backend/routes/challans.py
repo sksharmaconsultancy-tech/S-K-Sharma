@@ -905,7 +905,7 @@ async def download_portal_upload_file(
     )
 
 
-@router.get("/challans/portal-preview")
+@router.get("/challans-portal-preview")
 async def portal_preview(
     run_id: str,
     kind: str = "epfo",

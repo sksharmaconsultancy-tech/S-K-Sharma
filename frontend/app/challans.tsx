@@ -310,7 +310,7 @@ export default function ChallansScreen() {
     if (preview?.kind === kind) { setPreview(null); return; } // toggle off
     setPreviewBusy(kind);
     try {
-      setPreview(await api<any>(`/admin/challans/portal-preview?run_id=${selRunId}&kind=${kind}`));
+      setPreview(await api<any>(`/admin/challans-portal-preview?run_id=${selRunId}&kind=${kind}`));
     } catch (e: any) {
       if (Platform.OS === "web") globalThis.alert(e?.message || "Preview failed");
     } finally { setPreviewBusy(""); }
