@@ -720,3 +720,8 @@ Verified: /admin/actual-salary-process for 2026-03 (no compliance) → epf/esi 0
 ## Iter 148 — Daily Attendance (date-wise, firm-wise) on employer dashboard — DONE, verified curl + screenshot
 - New screen /daily-attendance (Quick action "Daily attendance (date-wise)" on dashboard for admins): ◀ date ▶ navigation + Jump-to-today, firm picker (super/sub admin; company_admin auto-scoped), tappable Present/Absent/All filter chips, per-employee cards with IN/OUT punch chips (time + colored), worked hrs badge / IN NOW / ABSENT status.
 - Backend: GET /api/admin/daily-attendance?date=YYYY-MM-DD&company_id= (routes/punch_logs.py) — per-employee grouped punches, first_in/last_out, worked_hrs (IN→OUT pair sum, wall-clock), still_in flag, present/absent counts. Sub-admin firm scoping honored.
+
+## Iter 149 — Manual CL/PL balance per employee — DONE, verified curl + screenshot
+- users get optional cl_allowed_override / pl_allowed_override (None = firm Leave Policy default).
+- Backend (routes/leaves.py): GET /api/admin/leave-balance-config?company_id= (employees + overrides + firm defaults), PATCH /api/admin/leave-balance {user_id, cl_allowed, pl_allowed} (null clears; 0–366 validation; firm scoping for company_admin/sub_admin). Overrides applied per-row in /admin/leave-report (+is_override flag) and in employee self-service /leaves/balance.
+- Frontend: new /leave-balance-config screen (firm picker, search, per-employee CL/PL inputs with firm-default placeholder, blank=default, dirty highlight + "manual override" tag, bulk Save). Linked from Leave Report header (options icon).

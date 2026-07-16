@@ -136,6 +136,14 @@ export default function LeaveReportScreen() {
           <Ionicons name="arrow-back" size={22} color={colors.onSurface} />
         </Pressable>
         <Text style={styles.headerTitle}>Leave Report</Text>
+        <Pressable
+          onPress={() => router.push("/leave-balance-config")}
+          hitSlop={10}
+          testID="lr-config"
+          style={{ marginRight: 14 }}
+        >
+          <Ionicons name="options-outline" size={20} color={colors.brandPrimary} />
+        </Pressable>
         <Pressable onPress={downloadCsv} hitSlop={10} testID="lr-csv">
           <Ionicons name="download-outline" size={20} color={colors.brandPrimary} />
         </Pressable>

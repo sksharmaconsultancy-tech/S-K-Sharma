@@ -6,9 +6,9 @@ Endpoints:
   * PATCH /leaves/{leave_id}    - Admin approves/rejects a leave.
 """
 import uuid
-from typing import Optional
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Body, Header, HTTPException, Query
 
 from server import (  # noqa: E402
     db,
@@ -165,7 +165,8 @@ async def leave_report(
 
     emps = await db.users.find(
         {"role": "employee", "company_id": company_id},
-        {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1, "designation": 1},
+        {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1, "designation": 1,
+         "cl_allowed_override": 1, "pl_allowed_override": 1},
     ).to_list(10000)
 
     y_start = date(year, 1, 1)
@@ -200,19 +201,25 @@ async def leave_report(
     rows = []
     for e in emps:
         t = taken.get(e["user_id"]) or {"cl": 0.0, "pl": 0.0, "other": 0.0}
+        # Iter 149 — per-employee manual CL/PL override (None = firm default).
+        clo = e.get("cl_allowed_override")
+        plo = e.get("pl_allowed_override")
+        cl_i = float(clo) if clo is not None else cl_allowed
+        pl_i = float(plo) if plo is not None else pl_allowed
         rows.append({
             "user_id": e["user_id"],
             "employee_code": e.get("employee_code"),
             "name": e.get("name"),
             "designation": e.get("designation"),
-            "cl_allowed": cl_allowed,
+            "cl_allowed": cl_i,
             "cl_taken": t["cl"],
-            "cl_balance": max(0.0, cl_allowed - t["cl"]),
-            "pl_allowed": pl_allowed,
+            "cl_balance": max(0.0, cl_i - t["cl"]),
+            "pl_allowed": pl_i,
             "pl_taken": t["pl"],
-            "pl_balance": max(0.0, pl_allowed - t["pl"]),
+            "pl_balance": max(0.0, pl_i - t["pl"]),
             "other_taken": t["other"],
             "total_taken": t["cl"] + t["pl"] + t["other"],
+            "is_override": clo is not None or plo is not None,
         })
 
     def _code_key(r):
@@ -250,6 +257,14 @@ async def my_leave_balance(authorization: Optional[str] = Header(None)):
     lp = (fm or {}).get("leave_policy") or {}
     cl_allowed = float(lp.get("cl_day_limit") or 0)
     pl_allowed = float(lp.get("pl_day_limit") or 0)
+    # Iter 149 — per-employee manual override wins over the firm default.
+    me = await db.users.find_one(
+        {"user_id": user["user_id"]},
+        {"_id": 0, "cl_allowed_override": 1, "pl_allowed_override": 1}) or {}
+    if me.get("cl_allowed_override") is not None:
+        cl_allowed = float(me["cl_allowed_override"])
+    if me.get("pl_allowed_override") is not None:
+        pl_allowed = float(me["pl_allowed_override"])
 
     y_start = date(year, 1, 1)
     y_end = date(year, 12, 31)
@@ -290,3 +305,96 @@ async def my_leave_balance(authorization: Optional[str] = Header(None)):
         "pl_balance": max(0.0, pl_allowed - pl_taken),
         "other_taken": other_taken,
     }
+
+
+# ---------------------------------------------------------------------------
+# Iter 149 — Manual CL/PL balance per employee (admin config).
+# ---------------------------------------------------------------------------
+@router.get("/admin/leave-balance-config")
+async def leave_balance_config(
+    company_id: str = Query(...),
+    authorization: Optional[str] = Header(None),
+):
+    """Employees of a firm with their manual CL/PL overrides (None = firm
+    default) + the firm's default limits, for the config screen."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    if admin["role"] == "company_admin":
+        company_id = admin.get("company_id") or company_id
+    if admin["role"] == "sub_admin":
+        from server import sub_admin_can_touch_company
+        if not sub_admin_can_touch_company(admin, company_id):
+            raise HTTPException(status_code=403, detail="Firm is outside your assigned scope")
+
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "leave_policy": 1})
+    lp = (fm or {}).get("leave_policy") or {}
+    emps = await db.users.find(
+        {"role": "employee", "company_id": company_id},
+        {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1, "designation": 1,
+         "cl_allowed_override": 1, "pl_allowed_override": 1},
+    ).to_list(10000)
+
+    def _code_key(r):
+        c = str(r.get("employee_code") or "").strip()
+        try:
+            return (0, float(c), "")
+        except ValueError:
+            return (1, 0.0, c.lower())
+
+    emps.sort(key=_code_key)
+    return {
+        "company_id": company_id,
+        "cl_default": float(lp.get("cl_day_limit") or 0),
+        "pl_default": float(lp.get("pl_day_limit") or 0),
+        "cl_pl_applicable": bool(lp.get("cl_pl_applicable")),
+        "employees": emps,
+    }
+
+
+@router.patch("/admin/leave-balance")
+async def set_leave_balance(
+    payload: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(None),
+):
+    """Set / clear the manual CL/PL allowance for ONE employee.
+    Body: {user_id, cl_allowed: number|null, pl_allowed: number|null}
+    (null clears the override → firm default applies)."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    user_id = payload.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+    target = await db.users.find_one(
+        {"user_id": user_id}, {"_id": 0, "user_id": 1, "company_id": 1, "role": 1})
+    if not target:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if admin["role"] == "company_admin" and target.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Employee is outside your firm")
+    if admin["role"] == "sub_admin":
+        from server import sub_admin_can_touch_company
+        if not sub_admin_can_touch_company(admin, target.get("company_id")):
+            raise HTTPException(status_code=403, detail="Employee's firm is outside your assigned scope")
+
+    updates: Dict[str, Any] = {}
+    for key, field in (("cl_allowed", "cl_allowed_override"),
+                       ("pl_allowed", "pl_allowed_override")):
+        if key in payload:
+            v = payload[key]
+            if v is None or v == "":
+                updates[field] = None
+            else:
+                try:
+                    v = float(v)
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail=f"{key} must be a number")
+                if v < 0 or v > 366:
+                    raise HTTPException(status_code=400, detail=f"{key} must be between 0 and 366")
+                updates[field] = v
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    updates["leave_balance_set_by"] = admin["user_id"]
+    updates["leave_balance_set_at"] = now_iso()
+    await db.users.update_one({"user_id": user_id}, {"$set": updates})
+    return {"ok": True, **{k: v for k, v in updates.items()
+                           if k.endswith("_override")}}
