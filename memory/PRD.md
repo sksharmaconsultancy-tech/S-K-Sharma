@@ -725,3 +725,7 @@ Verified: /admin/actual-salary-process for 2026-03 (no compliance) → epf/esi 0
 - users get optional cl_allowed_override / pl_allowed_override (None = firm Leave Policy default).
 - Backend (routes/leaves.py): GET /api/admin/leave-balance-config?company_id= (employees + overrides + firm defaults), PATCH /api/admin/leave-balance {user_id, cl_allowed, pl_allowed} (null clears; 0–366 validation; firm scoping for company_admin/sub_admin). Overrides applied per-row in /admin/leave-report (+is_override flag) and in employee self-service /leaves/balance.
 - Frontend: new /leave-balance-config screen (firm picker, search, per-employee CL/PL inputs with firm-default placeholder, blank=default, dirty highlight + "manual override" tag, bulk Save). Linked from Leave Report header (options icon).
+
+## Iter 150 — Auto-block leave requests exceeding CL/PL balance — DONE, curl-verified 4 cases
+- POST /api/leaves now rejects casual (CL) / earned (PL) requests exceeding remaining yearly balance (allowed = per-employee override else firm Leave Policy limit; used = approved + PENDING days in the from_date's year). Enforced only when firm cl_pl_applicable=true OR employee has a manual override — firms without leave policy unaffected. Other leave types (sick etc.) never blocked.
+- Frontend leaves.tsx: request modal now SHOWS the block reason in a red banner (was silently swallowed); error cleared on modal reopen.

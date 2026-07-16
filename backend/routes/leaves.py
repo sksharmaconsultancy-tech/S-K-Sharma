@@ -25,6 +25,70 @@ router = APIRouter(prefix="/api", tags=["leaves"])
 @router.post("/leaves")
 async def create_leave(payload: LeaveCreate, authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
+
+    # Iter 150 (user directive) — AUTO-BLOCK requests that exceed the
+    # employee's remaining CL/PL balance for the year. Balance = per-employee
+    # manual override (if set) else Firm Master Leave Policy limit, minus
+    # already approved + still-pending CL/PL days this year. Enforced only
+    # when the firm has CL/PL enabled OR the employee has a manual override,
+    # so firms without a leave policy are unaffected.
+    if payload.leave_type in ("casual", "earned"):
+        from datetime import date as _date
+        try:
+            f = _date.fromisoformat(str(payload.from_date)[:10])
+            t = _date.fromisoformat(str(payload.to_date)[:10])
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Invalid leave dates")
+        requested = (t - f).days + 1
+        if requested <= 0:
+            raise HTTPException(status_code=400, detail="'To' date must not be before 'From' date")
+
+        kind = "CL" if payload.leave_type == "casual" else "PL"
+        fm = await db.firm_masters.find_one(
+            {"company_id": user.get("company_id")}, {"_id": 0, "leave_policy": 1},
+        ) if user.get("company_id") else None
+        lp = (fm or {}).get("leave_policy") or {}
+        me = await db.users.find_one(
+            {"user_id": user["user_id"]},
+            {"_id": 0, "cl_allowed_override": 1, "pl_allowed_override": 1}) or {}
+        override = me.get("cl_allowed_override" if kind == "CL" else "pl_allowed_override")
+        firm_limit = float(lp.get("cl_day_limit" if kind == "CL" else "pl_day_limit") or 0)
+        allowed = float(override) if override is not None else firm_limit
+        enforce = bool(lp.get("cl_pl_applicable")) or override is not None
+
+        if enforce:
+            year = f.year
+            y_start, y_end = _date(year, 1, 1), _date(year, 12, 31)
+            taken = 0.0
+            async for lv in db.leaves.find(
+                {
+                    "user_id": user["user_id"],
+                    "leave_type": payload.leave_type,
+                    "status": {"$in": ["approved", "pending"]},
+                    "from_date": {"$lte": y_end.isoformat()},
+                    "to_date": {"$gte": y_start.isoformat()},
+                },
+                {"_id": 0, "from_date": 1, "to_date": 1},
+            ):
+                try:
+                    lf = max(_date.fromisoformat(str(lv["from_date"])[:10]), y_start)
+                    lt_ = min(_date.fromisoformat(str(lv["to_date"])[:10]), y_end)
+                except (ValueError, TypeError):
+                    continue
+                d = (lt_ - lf).days + 1
+                if d > 0:
+                    taken += d
+            balance = max(0.0, allowed - taken)
+            if requested > balance:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Insufficient {kind} balance: you have {balance:g} day(s) left "
+                        f"({allowed:g} allowed − {taken:g} already used/pending in {year}) "
+                        f"but requested {requested} day(s)."
+                    ),
+                )
+
     leave = {
         "leave_id": f"lv_{uuid.uuid4().hex[:12]}",
         "user_id": user["user_id"],

@@ -56,6 +56,7 @@ export default function LeavesScreen() {
   const [to, setTo] = useState("");
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
   // Iter 99 — employee's own CL/PL balance (current year).
   const [balance, setBalance] = useState<any>(null);
@@ -86,6 +87,7 @@ export default function LeavesScreen() {
   const submit = async () => {
     if (!from || !to || !reason) return;
     setSubmitting(true);
+    setSubmitError("");
     try {
       await api("/leaves", {
         method: "POST",
@@ -98,7 +100,9 @@ export default function LeavesScreen() {
       setType("casual");
       await load();
     } catch (e: any) {
-      // toast?
+      // Iter 150 — surface the auto-block reason (e.g. "Insufficient CL
+      // balance…") instead of failing silently.
+      setSubmitError(e?.message || "Could not submit the leave request.");
     } finally {
       setSubmitting(false);
     }
@@ -201,7 +205,7 @@ export default function LeavesScreen() {
         <View style={{ height: 100 }} />
       </KeyboardAwareScrollView>
 
-      <Pressable testID="new-leave-fab" style={styles.fab} onPress={() => setOpen(true)}>
+      <Pressable testID="new-leave-fab" style={styles.fab} onPress={() => { setSubmitError(""); setOpen(true); }}>
         <Ionicons name="add" size={24} color="#fff" />
         <Text style={styles.fabTxt}>Request</Text>
       </Pressable>
@@ -253,6 +257,17 @@ export default function LeavesScreen() {
               style={[styles.input, { height: 80 }]}
               multiline
             />
+
+            {!!submitError && (
+              <View style={{
+                backgroundColor: "#fef2f2", borderColor: "#fecaca", borderWidth: 1,
+                borderRadius: 10, padding: 10, marginTop: 10,
+              }}>
+                <Text style={{ color: "#b91c1c", fontSize: 12.5, fontWeight: "600" }}>
+                  {submitError}
+                </Text>
+              </View>
+            )}
 
             <Pressable
               testID="submit-leave"
