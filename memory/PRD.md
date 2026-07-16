@@ -751,3 +751,7 @@ Verified: /admin/actual-salary-process for 2026-03 (no compliance) → epf/esi 0
 - Reports → "Day-wise Present Count": month nav (1–31), firm picker, per-day Present + OT counts (OT = ≥2 IN punches/day), Sundays red, month man-day totals. Backend GET /api/admin/attendance-report/day-counts?month=YYYY-MM (routes/punch_logs.py).
 - Tapping a count deep-links to /daily-attendance?date=YYYY-MM-DD (param support added) showing the full employee list for that day.
 - PENDING (user asked earlier, not yet done): Punch Approval grid column restructure (Date/Code/Name/Father/Designation/In/Out/Duty HRS/OT In/OT Out/OT HRS/Total HRS/Status/Update Reason/Action) + landscape PDF daily report with Signature column from Punch Approval.
+
+## Iter 156 — DB Backup download fix + VPS deploy (2026-07-16)
+- VPS deployed via temp-code-bundle tar (GitHub main lacked db_backup commit); killed stale uvicorn holding 8001 (spawn error). /api/admin/database-backup live (401).
+- BUGFIX database-backup.tsx: URL.createObjectURL(res) called on apiBinary wrapper object → "Overload resolution failed". Now uses res.webBlobUrl (same pattern as contribution-sheets). E2E verified: zip downloads.

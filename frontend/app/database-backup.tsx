@@ -26,12 +26,12 @@ export default function DatabaseBackup() {
     setMsg("Preparing backup — this can take a minute for large databases…");
     try {
       const res = await apiBinary("/admin/database-backup");
-      const url = URL.createObjectURL(res);
+      if (!res.webBlobUrl) throw new Error("Download is only supported in the web portal");
       const a = (globalThis as any).document.createElement("a");
-      a.href = url;
+      a.href = res.webBlobUrl;
       a.download = `SKSharma_DB_Backup_${new Date().toISOString().slice(0, 10)}.zip`;
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 30000);
       setMsg("Backup downloaded ✓ — keep it in a safe place.");
     } catch (e: any) {
       setMsg(e?.message || "Backup failed");
