@@ -16,6 +16,7 @@ import { useRouter } from "expo-router";
 
 import { api } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
+import ScanOCRButton from "@/src/components/ScanOCRButton";
 import { colors, radius, spacing, type } from "@/src/theme";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import {
@@ -39,6 +40,8 @@ type FamilyMemberInput = {
   dob: string; // DD-MM-YYYY display
   occupation: string;
   contact: string;
+  aadhaar_no?: string; // Iter 151 — from Aadhaar OCR (hidden, preserved)
+  scan_doc_id?: string; // Iter 151b — stored scan copy reference
 };
 
 const RELATION_OPTIONS = [
@@ -117,6 +120,8 @@ export default function ProfileEditScreen() {
           dob: isoToDDMMYYYYDash(m?.dob),
           occupation: (m?.occupation || "").toString(),
           contact: (m?.contact || "").toString(),
+          aadhaar_no: (m?.aadhaar_no || "").toString(),
+          scan_doc_id: (m?.scan_doc_id || "").toString(),
         })),
       );
     } else {
@@ -177,6 +182,8 @@ export default function ProfileEditScreen() {
         dob: dobIso || undefined,
         occupation: (m.occupation || "").trim() || undefined,
         contact: (m.contact || "").trim() || undefined,
+        aadhaar_no: (m.aadhaar_no || "").trim() || undefined,
+        scan_doc_id: (m.scan_doc_id || "").trim() || undefined,
       });
     }
 
@@ -458,6 +465,50 @@ export default function ProfileEditScreen() {
               Add one or more family members with their relation. Contact and
               DOB are optional.
             </Text>
+
+            {/* Iter 151b — scan a family member's Aadhaar → added instantly
+                (name, DOB, Aadhaar no. + scan copy saved to database). */}
+            {Platform.OS === "web" && (
+              <View style={{ marginBottom: 10 }}>
+                <ScanOCRButton
+                  documentType="aadhaar"
+                  endpoint="/ocr/parse-family-document"
+                  label="Scan family member's Aadhaar — add automatically"
+                  onApply={async (f: any) => {
+                    setErr(null);
+                    setOkMsg(null);
+                    if (!f.name) {
+                      setErr("Could not read a name from the Aadhaar scan. Please add the member manually.");
+                      return;
+                    }
+                    try {
+                      const r = await api<any>("/me/family-members", {
+                        method: "POST",
+                        body: {
+                          name: f.name,
+                          dob: f.dob || null,
+                          aadhaar_no: f.aadhaar_no || f.number || null,
+                          scan_doc_id: f.__scan_doc_id || null,
+                        },
+                      });
+                      setFamily((prev) => [...prev, {
+                        name: r.member?.name || String(f.name),
+                        relation: "",
+                        dob: r.member?.dob ? isoToDDMMYYYYDash(r.member.dob) : "",
+                        occupation: "",
+                        contact: "",
+                        aadhaar_no: r.member?.aadhaar_no || "",
+                        scan_doc_id: r.member?.scan_doc_id || "",
+                      }]);
+                      setOkMsg(`${r.member?.name} added from Aadhaar ✓ — you can set their relation below.`);
+                      refresh?.();
+                    } catch (e: any) {
+                      setErr(e?.message || "Could not add family member.");
+                    }
+                  }}
+                />
+              </View>
+            )}
 
             {family.length === 0 ? (
               <View style={styles.emptyFamily} testID="pedit-family-empty">

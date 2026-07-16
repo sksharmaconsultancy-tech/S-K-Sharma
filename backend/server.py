@@ -460,6 +460,8 @@ class FamilyMember(BaseModel):
     dob: Optional[str] = None  # YYYY-MM-DD (optional)
     occupation: Optional[str] = None
     contact: Optional[str] = None
+    aadhaar_no: Optional[str] = None  # Iter 151 — captured via Aadhaar OCR scan
+    scan_doc_id: Optional[str] = None  # Iter 151b — stored scan copy reference
 
 
 class ProfileEditRequest(BaseModel):
@@ -2891,6 +2893,8 @@ async def submit_profile_edit(
                 "dob": (fm.dob or "").strip() or None,
                 "occupation": (fm.occupation or "").strip() or None,
                 "contact": (fm.contact or "").strip() or None,
+                "aadhaar_no": (fm.aadhaar_no or "").strip() or None,
+                "scan_doc_id": (fm.scan_doc_id or "").strip() or None,
             })
         proposed_family = cleaned  # empty list means "clear all family members"
 
@@ -12488,6 +12492,8 @@ async def update_user_role(payload: RoleUpdate, authorization: Optional[str] = H
                 "dob": (fm.dob or "").strip() or None,
                 "occupation": (fm.occupation or "").strip() or None,
                 "contact": (fm.contact or "").strip() or None,
+                "aadhaar_no": (fm.aadhaar_no or "").strip() or None,
+                "scan_doc_id": (fm.scan_doc_id or "").strip() or None,
             })
         updates["family_members"] = cleaned
 
@@ -18954,6 +18960,8 @@ app.include_router(employee_profile_router)
 app.include_router(compliance_reports_router)
 app.include_router(employee_kyc_router)
 app.include_router(ocr_router)
+from routes.ocr import user_router as ocr_user_router  # noqa: E402
+app.include_router(ocr_user_router)
 app.include_router(challans_router)
 app.include_router(biometric_devices_router)
 app.include_router(super_admins_router)

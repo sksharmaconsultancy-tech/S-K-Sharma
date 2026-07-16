@@ -20,6 +20,7 @@ each PDF become images sent to the vision model alongside any photos.
 import base64
 import json
 import os
+import uuid
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Body, Header, HTTPException
@@ -147,7 +148,210 @@ async def ocr_parse_document(
 ):
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    return await _parse_document(admin, payload)
 
+
+# Iter 151 — Employee-accessible OCR (self-onboarding). Any logged-in
+# user can scan THEIR OWN identity document to auto-fill the joining form.
+user_router = APIRouter(prefix="/api", tags=["ocr"])
+
+
+@user_router.post("/ocr/parse-my-document")
+async def ocr_parse_my_document(
+    payload: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(None),
+):
+    user = await get_user_from_token(authorization)
+    result = await _parse_document(user, payload)
+    # Iter 151 — auto-save the scanned document details onto the employee's
+    # own record: full snapshot in `onboarding_ocr` (audit) + standard KYC
+    # keys, but NEVER overwriting a field that already has a value.
+    try:
+        if result.get("ok") and result.get("fields"):
+            from server import db, now_iso
+            f = result["fields"]
+            # Iter 151b — store the scan/captured copy itself in the DB.
+            scan_doc_id = await _store_scan_copy(
+                user, payload, "onboarding",
+                {"document_type_detected": result.get("document_type_detected")})
+            kyc_map = {
+                "aadhaar_no": "aadhar_number",
+                "pan_no": "pan_number",
+                "voter_id": "voter_id_no",
+                "passport_no": "passport_no",
+                "gender": "gender",
+                "address": "present_address",
+                "present_address": "present_address",
+                "father_name": "father_name",
+                "name": "name_as_per_aadhar",
+            }
+            fresh = await db.users.find_one(
+                {"user_id": user["user_id"]},
+                {"_id": 0, **{v: 1 for v in kyc_map.values()}}) or {}
+            updates: Dict[str, Any] = {
+                "onboarding_ocr": {
+                    "fields": {k: v for k, v in f.items() if v},
+                    "document_type_detected": result.get("document_type_detected"),
+                    "confidence": result.get("confidence"),
+                    "scan_doc_id": scan_doc_id,
+                    "scanned_at": now_iso(),
+                },
+            }
+            for src, dst in kyc_map.items():
+                val = f.get(src)
+                if val and not fresh.get(dst):
+                    if dst == "gender":
+                        val = str(val).strip().lower()
+                    updates[dst] = str(val).strip()
+            await db.users.update_one({"user_id": user["user_id"]}, {"$set": updates})
+            logger.info("[ocr] onboarding scan saved for %s — keys=%s",
+                        user["user_id"], sorted(updates.keys()))
+    except Exception:
+        logger.exception("[ocr] failed to persist onboarding scan (non-fatal)")
+    return result
+
+
+@user_router.post("/ocr/parse-family-document")
+async def ocr_parse_family_document(
+    payload: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 151 — parse a FAMILY MEMBER's Aadhaar card. Parse-only: nothing
+    is written to the employee's own KYC fields (unlike parse-my-document)."""
+    user = await get_user_from_token(authorization)
+    payload["document_type"] = "aadhaar"
+    result = await _parse_document(user, payload)
+    # Iter 151b — store the scan copy; frontend passes scan_doc_id back
+    # into POST /me/family-members so the image stays linked to the member.
+    try:
+        if result.get("ok"):
+            result["scan_doc_id"] = await _store_scan_copy(
+                user, payload, "family_member", {"document_type_detected": "aadhaar"})
+    except Exception:
+        logger.exception("[ocr] failed to store family scan copy (non-fatal)")
+    return result
+
+
+@user_router.post("/me/family-members")
+async def add_my_family_member(
+    payload: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 151 — directly append a family member to the employee's own
+    record (no approval flow — same low-risk class as profile photo).
+    Used by the 'Scan family member Aadhaar' auto-add button."""
+    from server import db, now_iso
+    user = await get_user_from_token(authorization)
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Family member name is required")
+    dob = str(payload.get("dob") or "").strip() or None
+    if dob:
+        # Accept DD-MM-YYYY (OCR) or YYYY-MM-DD; store ISO.
+        import re
+        m = re.fullmatch(r"(\d{2})[-/](\d{2})[-/](\d{4})", dob)
+        if m:
+            dob = f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", dob):
+            dob = None
+    aadhaar = str(payload.get("aadhaar_no") or "").replace(" ", "").strip() or None
+    scan_doc_id = str(payload.get("scan_doc_id") or "").strip() or None
+    member = {
+        "name": name,
+        "relation": str(payload.get("relation") or "").strip() or None,
+        "dob": dob,
+        "occupation": str(payload.get("occupation") or "").strip() or None,
+        "contact": str(payload.get("contact") or "").strip() or None,
+        "aadhaar_no": aadhaar,
+        "scan_doc_id": scan_doc_id,
+        "source": "aadhaar_ocr" if aadhaar else "manual",
+        "added_at": now_iso(),
+    }
+    # Duplicate guard: same aadhaar or same name already declared.
+    me = await db.users.find_one(
+        {"user_id": user["user_id"]}, {"_id": 0, "family_members": 1}) or {}
+    for fm in (me.get("family_members") or []):
+        if aadhaar and (fm.get("aadhaar_no") or "").replace(" ", "") == aadhaar:
+            raise HTTPException(status_code=400,
+                                detail=f"'{fm.get('name')}' with this Aadhaar number is already added.")
+        if (fm.get("name") or "").strip().lower() == name.lower():
+            raise HTTPException(status_code=400,
+                                detail=f"A family member named '{name}' is already added.")
+    await db.users.update_one(
+        {"user_id": user["user_id"]}, {"$push": {"family_members": member}})
+    return {"ok": True, "member": member}
+
+
+@user_router.get("/me/scanned-documents/{doc_id}")
+async def get_my_scanned_document(
+    doc_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Employee fetches their own stored scan copy."""
+    from server import db
+    user = await get_user_from_token(authorization)
+    doc = await db.scanned_documents.find_one(
+        {"doc_id": doc_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Scanned document not found")
+    return doc
+
+
+@router.get("/scanned-documents/{doc_id}")
+async def admin_get_scanned_document(
+    doc_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Admin fetches any employee's stored scan copy (firm-scoped)."""
+    from server import db
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    doc = await db.scanned_documents.find_one({"doc_id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Scanned document not found")
+    if admin["role"] == "company_admin" and doc.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Document belongs to another firm")
+    return doc
+
+
+async def _store_scan_copy(user: Dict[str, Any], payload: Dict[str, Any],
+                           purpose: str, extra: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Iter 151b — persist the uploaded scan/captured images into
+    db.scanned_documents (separate collection, keeps user docs small).
+    Returns the doc_id, or None when nothing/too large."""
+    from server import db, now_iso
+    pages = []
+    if payload.get("document_base64"):
+        pages.append({
+            "document_base64": _strip_data_url(payload["document_base64"]),
+            "mime_type": (payload.get("mime_type") or "image/jpeg").lower(),
+        })
+    for p in (payload.get("pages") or []):
+        if isinstance(p, dict) and p.get("document_base64"):
+            pages.append({
+                "document_base64": _strip_data_url(p["document_base64"]),
+                "mime_type": (p.get("mime_type") or "image/jpeg").lower(),
+            })
+    pages = pages[:MAX_PAGES]
+    if not pages:
+        return None
+    if sum(len(p["document_base64"]) for p in pages) > 9_000_000:  # ~6.7MB decoded
+        logger.warning("[ocr] scan copy too large — not stored")
+        return None
+    doc_id = f"scan_{uuid.uuid4().hex[:12]}"
+    await db.scanned_documents.insert_one({
+        "doc_id": doc_id,
+        "user_id": user["user_id"],
+        "company_id": user.get("company_id"),
+        "purpose": purpose,
+        "pages": pages,
+        "created_at": now_iso(),
+        **(extra or {}),
+    })
+    return doc_id
+
+
+async def _parse_document(admin: Dict[str, Any], payload: Dict[str, Any]):
     doc_type = (payload.get("document_type") or "generic").lower()
     hint = (payload.get("hint") or "").strip()
 

@@ -12,6 +12,7 @@ import { api } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import { colors, radius, spacing, type } from "@/src/theme";
 import { ddmmyyyyDashToISO } from "@/src/utils/date";
+import ScanOCRButton from "@/src/components/ScanOCRButton";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 /**
@@ -240,6 +241,28 @@ export default function OnboardingScreen() {
               </View>
 
               <Text style={styles.section}>Personal details</Text>
+
+              {/* Iter 151 — scan Aadhaar / PAN / any ID to auto-fill.
+                  Extra document details (ID numbers, address, gender) are
+                  saved to your profile automatically. */}
+              {Platform.OS === "web" && (
+                <View style={{ marginBottom: 12 }}>
+                  <ScanOCRButton
+                    documentType="generic"
+                    endpoint="/ocr/parse-my-document"
+                    label="Scan Aadhaar / PAN / any ID to auto-fill"
+                    onApply={(f) => {
+                      if (f.name) setName(String(f.name));
+                      if (f.father_name) setFather(String(f.father_name));
+                      if (f.dob) setDob(maskDashDate(String(f.dob).replace(/\//g, "-")));
+                    }}
+                  />
+                  <Text style={styles.ocrHint}>
+                    Your document details (ID number, address, etc.) are saved
+                    securely to your profile.
+                  </Text>
+                </View>
+              )}
 
               <Field label="Full name *" value={name} onChangeText={setName}
                      testID="name-input" placeholder="Ramesh Kumar" />
@@ -511,6 +534,9 @@ const styles = StyleSheet.create({
   section: {
     color: colors.onSurface, fontSize: type.lg, fontWeight: "500",
     marginTop: spacing.xl,
+  },
+  ocrHint: {
+    fontSize: 11.5, color: colors.onSurfaceTertiary, marginTop: 6, lineHeight: 16,
   },
   split: { flexDirection: "row" },
   hint: {

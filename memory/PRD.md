@@ -733,3 +733,9 @@ Verified: /admin/actual-salary-process for 2026-03 (no compliance) → epf/esi 0
 ## Iter 150b — Live CL/PL balance inside leave request form — DONE, verified via screenshot
 - /leaves/balance returns new `enforced` flag (firm cl_pl_applicable OR any manual override).
 - Request modal: selecting Casual/Earned shows a live banner "CL balance 2026: X of Y day(s) left · requesting N day(s)" — turns red with "exceeds your balance, request will be blocked" when over. Balance refetched on modal open. Main balance card now also shows for override-only employees.
+
+## Iter 151 — OCR at employee joining + family member Aadhaar scan + scan copies in DB — DONE, e2e verified (real OCR round-trip)
+- Onboarding (employee PWA): "Scan Aadhaar / PAN / any ID to auto-fill" button on Personal details step → fills Name/Father/DOB on the form; ALL other extracted details (aadhar_number, pan_number, gender, present_address, voter/passport) auto-saved to the employee's KYC fields (never overwrites non-empty) + full snapshot in users.onboarding_ocr.
+- New endpoints (routes/ocr.py user_router prefix /api): POST /ocr/parse-my-document (parse + self-KYC save), POST /ocr/parse-family-document (Aadhaar-only, parse-only, returns scan_doc_id), POST /me/family-members (direct add, no approval — dedupe by aadhaar/name, DD-MM-YYYY→ISO dob), GET /me/scanned-documents/{id} + admin GET /api/admin/scanned-documents/{id} (firm-scoped).
+- Scan/captured copies stored in db.scanned_documents {doc_id, user_id, purpose onboarding|family_member, pages[base64], cap ~6.7MB}; referenced via onboarding_ocr.scan_doc_id and family member.scan_doc_id.
+- Family: profile-edit.tsx "Scan family member's Aadhaar — add automatically" → instant add with name/dob/aadhaar_no/scan_doc_id; FamilyMember model + profile-edit approval flow + admin RoleUpdate cleaning now preserve aadhaar_no/scan_doc_id. ScanOCRButton gained `endpoint` prop + passes __scan_doc_id via onApply.

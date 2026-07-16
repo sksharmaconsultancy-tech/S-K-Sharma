@@ -128,11 +128,14 @@ export default function ScanOCRButton({
   label,
   onApply,
   compact = false,
+  endpoint = "/admin/ocr/parse-document",
 }: {
   documentType?: keyof typeof DOC_LABELS;
   label?: string;
   onApply: (fields: Fields) => void;
   compact?: boolean;
+  /** API path — employees use "/ocr/parse-my-document" (Iter 151). */
+  endpoint?: string;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -208,7 +211,7 @@ export default function ScanOCRButton({
         fields?: Fields;
         raw_text?: string;
         error?: string;
-      }>("/admin/ocr/parse-document", {
+      }>(endpoint, {
         method: "POST",
         body: {
           pages: pages.map((p) => ({
@@ -238,6 +241,8 @@ export default function ScanOCRButton({
       for (const [k, v] of Object.entries(result.fields as Fields)) {
         if (v && String(v).trim()) filtered[k] = String(v).trim();
       }
+      // Iter 151b — pass the stored scan copy reference (if any) along.
+      if (result.scan_doc_id) filtered.__scan_doc_id = String(result.scan_doc_id);
       onApply(filtered);
     }
     setModalOpen(false);
