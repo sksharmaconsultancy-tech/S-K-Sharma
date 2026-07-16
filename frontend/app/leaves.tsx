@@ -146,7 +146,7 @@ export default function LeavesScreen() {
         {user?.role === "employee" && balance ? (
           <View style={styles.balCard} testID="leave-balance-card">
             <Text style={styles.balTitle}>My Leave Balance · {balance.year}</Text>
-            {balance.cl_pl_applicable ? (
+            {(balance.cl_pl_applicable || balance.enforced) ? (
               <View style={styles.balRow}>
                 <View style={styles.balBox}>
                   <Text style={styles.balBoxVal}>{balance.cl_balance}</Text>
@@ -205,7 +205,13 @@ export default function LeavesScreen() {
         <View style={{ height: 100 }} />
       </KeyboardAwareScrollView>
 
-      <Pressable testID="new-leave-fab" style={styles.fab} onPress={() => { setSubmitError(""); setOpen(true); }}>
+      <Pressable testID="new-leave-fab" style={styles.fab} onPress={() => {
+        setSubmitError("");
+        if (user?.role === "employee") {
+          api<any>("/leaves/balance").then(setBalance).catch(() => {});
+        }
+        setOpen(true);
+      }}>
         <Ionicons name="add" size={24} color="#fff" />
         <Text style={styles.fabTxt}>Request</Text>
       </Pressable>
@@ -232,6 +238,40 @@ export default function LeavesScreen() {
                 </Pressable>
               ))}
             </View>
+
+            {/* Iter 150 — live CL/PL balance for the selected type + dates */}
+            {user?.role === "employee" && balance?.enforced &&
+              (type === "casual" || type === "earned") && (() => {
+                const isCL = type === "casual";
+                const left = isCL ? balance.cl_balance : balance.pl_balance;
+                const allowed = isCL ? balance.cl_allowed : balance.pl_allowed;
+                let req = 0;
+                if (from && to) {
+                  const d1 = new Date(`${from}T00:00:00`);
+                  const d2 = new Date(`${to}T00:00:00`);
+                  req = Math.round((d2.getTime() - d1.getTime()) / 86400000) + 1;
+                }
+                const over = req > 0 && req > left;
+                return (
+                  <View
+                    testID="modal-balance-hint"
+                    style={{
+                      backgroundColor: over ? "#fef2f2" : "#f0fdf4",
+                      borderColor: over ? "#fecaca" : "#bbf7d0",
+                      borderWidth: 1, borderRadius: 10, padding: 9, marginTop: 8,
+                    }}
+                  >
+                    <Text style={{
+                      color: over ? "#b91c1c" : "#15803d",
+                      fontSize: 12.5, fontWeight: "700",
+                    }}>
+                      {isCL ? "CL" : "PL"} balance {balance.year}: {left} of {allowed} day(s) left
+                      {req > 0 ? ` · requesting ${req} day(s)` : ""}
+                      {over ? " — exceeds your balance, request will be blocked" : ""}
+                    </Text>
+                  </View>
+                );
+              })()}
 
             <Text style={styles.label}>From date</Text>
             <DateField

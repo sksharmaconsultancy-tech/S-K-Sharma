@@ -361,6 +361,11 @@ async def my_leave_balance(authorization: Optional[str] = Header(None)):
     return {
         "year": year,
         "cl_pl_applicable": bool(lp.get("cl_pl_applicable")),
+        # Iter 150 — True when the auto-block rule applies to this employee
+        # (firm policy ON or a manual per-employee override exists).
+        "enforced": bool(lp.get("cl_pl_applicable"))
+                    or me.get("cl_allowed_override") is not None
+                    or me.get("pl_allowed_override") is not None,
         "cl_allowed": cl_allowed,
         "cl_taken": cl_taken,
         "cl_balance": max(0.0, cl_allowed - cl_taken),

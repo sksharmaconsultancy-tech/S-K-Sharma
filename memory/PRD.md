@@ -729,3 +729,7 @@ Verified: /admin/actual-salary-process for 2026-03 (no compliance) → epf/esi 0
 ## Iter 150 — Auto-block leave requests exceeding CL/PL balance — DONE, curl-verified 4 cases
 - POST /api/leaves now rejects casual (CL) / earned (PL) requests exceeding remaining yearly balance (allowed = per-employee override else firm Leave Policy limit; used = approved + PENDING days in the from_date's year). Enforced only when firm cl_pl_applicable=true OR employee has a manual override — firms without leave policy unaffected. Other leave types (sick etc.) never blocked.
 - Frontend leaves.tsx: request modal now SHOWS the block reason in a red banner (was silently swallowed); error cleared on modal reopen.
+
+## Iter 150b — Live CL/PL balance inside leave request form — DONE, verified via screenshot
+- /leaves/balance returns new `enforced` flag (firm cl_pl_applicable OR any manual override).
+- Request modal: selecting Casual/Earned shows a live banner "CL balance 2026: X of Y day(s) left · requesting N day(s)" — turns red with "exceeds your balance, request will be blocked" when over. Balance refetched on modal open. Main balance card now also shows for override-only employees.
