@@ -152,6 +152,42 @@ export default function ScanOCRButton({
 
   const MAX_UPLOADS = 2;
 
+  /** Iter 152 — downscale camera photos before upload. Phone cameras
+   * produce 4–12MB images which blow past upload limits and slow OCR.
+   * Resizes to max 1600px on the long edge, re-encodes as JPEG q0.8
+   * (typically 200–500KB — plenty for OCR). PDFs pass through untouched. */
+  const compressImage = (dataUrl: string): Promise<{ data: string; mime: string }> =>
+    new Promise((resolve) => {
+      try {
+        const img = new (globalThis as any).Image();
+        img.onload = () => {
+          try {
+            const MAX_EDGE = 1600;
+            let { width, height } = img;
+            const scale = Math.min(1, MAX_EDGE / Math.max(width, height));
+            width = Math.round(width * scale);
+            height = Math.round(height * scale);
+            const canvas = (globalThis as any).document.createElement("canvas");
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0, width, height);
+            const out = canvas.toDataURL("image/jpeg", 0.8);
+            // Fall back to the original if compression somehow grew it.
+            if (out && out.length < dataUrl.length) {
+              resolve({ data: out, mime: "image/jpeg" });
+              return;
+            }
+          } catch {}
+          resolve({ data: dataUrl, mime: "image/jpeg" });
+        };
+        img.onerror = () => resolve({ data: dataUrl, mime: "image/jpeg" });
+        img.src = dataUrl;
+      } catch {
+        resolve({ data: dataUrl, mime: "image/jpeg" });
+      }
+    });
+
   const pickFile = (append: boolean) => {
     if (Platform.OS !== "web") return;
     const input = (globalThis as any).document?.createElement?.("input");
@@ -170,25 +206,38 @@ export default function ScanOCRButton({
       }
       let pending = selected.length;
       const loaded: { data: string; mime: string; name: string }[] = [];
+      const finish = () => {
+        pending -= 1;
+        if (pending <= 0 && loaded.length) {
+          setPages((prev) => (append ? [...prev, ...loaded] : loaded).slice(0, MAX_UPLOADS));
+          setResult(null);
+          setModalOpen(true);
+        }
+      };
       for (const file of selected) {
-        if (file.size > 6 * 1024 * 1024) {
-          window.alert(`"${file.name}" is over 6 MB — please resize/compress it.`);
+        const isPdf = (file.type || "").includes("pdf");
+        // PDFs can't be recompressed client-side — keep the 6MB cap there.
+        // Images of any camera size are accepted and auto-compressed.
+        if (isPdf && file.size > 6 * 1024 * 1024) {
+          window.alert(`"${file.name}" is over 6 MB — please use a smaller PDF.`);
+          pending -= 1;
+          continue;
+        }
+        if (!isPdf && file.size > 25 * 1024 * 1024) {
+          window.alert(`"${file.name}" is too large (over 25 MB).`);
           pending -= 1;
           continue;
         }
         const reader = new (globalThis as any).FileReader();
-        reader.onloadend = () => {
-          loaded.push({
-            data: reader.result as string,
-            mime: file.type || "image/jpeg",
-            name: file.name,
-          });
-          pending -= 1;
-          if (pending <= 0 && loaded.length) {
-            setPages((prev) => (append ? [...prev, ...loaded] : loaded).slice(0, MAX_UPLOADS));
-            setResult(null);
-            setModalOpen(true);
+        reader.onloadend = async () => {
+          const raw = reader.result as string;
+          if (isPdf) {
+            loaded.push({ data: raw, mime: file.type || "application/pdf", name: file.name });
+          } else {
+            const c = await compressImage(raw);
+            loaded.push({ data: c.data, mime: c.mime, name: file.name });
           }
+          finish();
         };
         reader.readAsDataURL(file);
       }
