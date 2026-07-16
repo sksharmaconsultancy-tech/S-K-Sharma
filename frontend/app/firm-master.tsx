@@ -125,7 +125,12 @@ function Dropdown({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <View style={[styles.field, width ? { width } : { flex: 1, minWidth: 180 }]}>
+    <View
+      style={[
+        styles.field,
+        width ? { width } : { flex: 1, minWidth: 180 },
+      ]}
+    >
       <Text style={styles.fieldLabel}>{label}</Text>
       <Pressable
         onPress={() => setOpen((v) => !v)}
@@ -672,6 +677,8 @@ export default function FirmMasterScreen() {
                     onChange={(v) => updateSection("settings", { email_enable: v })} />
             <Toggle label="Allow CategoryRate" value={!!st.allow_category_rate}
                     onChange={(v) => updateSection("settings", { allow_category_rate: v })} />
+            <Toggle label="Auto Employee Code (lock manual entry)" value={!!st.auto_employee_code}
+                    onChange={(v) => updateSection("settings", { auto_employee_code: v })} />
           </View>
 
           {/* Iter 91 — Attendance Policy selection (MANDATORY, pick one).
@@ -1165,14 +1172,13 @@ const styles = StyleSheet.create({
   },
   dropdownTxt: { color: colors.onSurface, fontSize: 13 },
   dropdownList: {
-    position: "absolute",
-    top: 62,
-    left: 0, right: 0,
+    // In-flow (not absolute) so the list never renders behind the
+    // content below (RN-web stacking quirk) — same pattern as MasterSelect.
+    marginTop: 4,
     backgroundColor: colors.surfaceSecondary,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.sm,
-    zIndex: 10,
     maxHeight: 220,
     overflow: "hidden",
     ...(Platform.OS === "web"

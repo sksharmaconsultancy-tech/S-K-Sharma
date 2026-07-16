@@ -34,7 +34,7 @@ import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors, radius, spacing, type } from "@/src/theme";
 
 type Company = { company_id: string; name: string };
-type MasterType = "group" | "department" | "designation" | "allowance" | "deduction";
+type MasterType = "group" | "department" | "designation" | "allowance" | "deduction" | "location";
 type Master = {
   master_id: string;
   type: MasterType;
@@ -51,6 +51,7 @@ const TABS: { key: MasterType; label: string; icon: keyof typeof Ionicons.glyphM
   { key: "designation", label: "Designations", icon: "ribbon-outline" },
   { key: "allowance", label: "Allowances", icon: "cash-outline" },
   { key: "deduction", label: "Deductions", icon: "remove-circle-outline" },
+  { key: "location", label: "Locations", icon: "map-outline" },
 ];
 
 function showMsg(msg: string, title = "Masters") {
@@ -99,6 +100,7 @@ export default function MastersScreen() {
   }, [isSuper]);
 
   const loadItems = useCallback(async () => {
+    if (tab === "location") return; // static reference data — own panel
     // Iter 77 - Masters is now globally scoped: no firm picker required.
     // Query without company_id -> super/sub admin sees ALL firm masters +
     // any ``__global__``-scoped entries.
@@ -313,6 +315,10 @@ export default function MastersScreen() {
           ))}
         </View>
 
+        {tab === "location" ? (
+          <LocationsPanel />
+        ) : (
+          <>
         {/* Add row */}
         <View style={styles.card}>
           <Text style={styles.label}>Add {TABS.find((t) => t.key === tab)?.label.slice(0, -1)}</Text>
@@ -396,6 +402,8 @@ export default function MastersScreen() {
             ))
           )}
         </View>
+          </>
+        )}
 
         {/* Group member editor */}
         {editing ? (
@@ -456,6 +464,120 @@ export default function MastersScreen() {
     </View>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/*  Iter 159 — Locations reference master (State / District / PIN).    */
+/* ------------------------------------------------------------------ */
+function LocationsPanel() {
+  const [states, setStates] = useState<{ state: string; districts: string[] }[]>([]);
+  const [sel, setSel] = useState<string>("");
+  const [pin, setPin] = useState("");
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinRes, setPinRes] = useState<{ pincode: string; state: string; district: string; post_offices: string[] } | null>(null);
+  const [pinErr, setPinErr] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await api<{ states: { state: string; districts: string[] }[] }>("/locations/all");
+        setStates(r.states || []);
+      } catch { /* panel stays empty */ }
+    })();
+  }, []);
+
+  const lookup = async () => {
+    const p = pin.trim();
+    if (!/^[1-9]\d{5}$/.test(p)) { setPinErr("Enter a valid 6-digit PIN code"); setPinRes(null); return; }
+    setPinBusy(true); setPinErr(""); setPinRes(null);
+    try {
+      const r = await api<any>(`/locations/pincode/${p}`);
+      setPinRes(r);
+    } catch (e: any) {
+      setPinErr(e?.message || "PIN not found");
+    } finally { setPinBusy(false); }
+  };
+
+  const selected = states.find((s) => s.state === sel);
+  return (
+    <>
+      {/* PIN lookup */}
+      <View style={styles.card}>
+        <Text style={styles.label}>PIN Code lookup (auto-fills State + District)</Text>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <TextInput
+            testID="loc-pin"
+            value={pin}
+            onChangeText={(v) => setPin(v.replace(/\D/g, "").slice(0, 6))}
+            onSubmitEditing={lookup}
+            placeholder="e.g. 311001"
+            placeholderTextColor={colors.onSurfaceTertiary}
+            keyboardType="numeric"
+            style={[styles.input, { width: 160 }]}
+          />
+          <Pressable
+            onPress={lookup}
+            disabled={pinBusy}
+            style={[styles.primaryBtn, { paddingHorizontal: 16 }, pinBusy && { opacity: 0.5 }]}
+            testID="loc-pin-search"
+          >
+            {pinBusy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnTxt}>Search</Text>}
+          </Pressable>
+        </View>
+        {pinErr ? <Text style={[styles.smallHint, { color: "#B02A2A" }]}>{pinErr}</Text> : null}
+        {pinRes ? (
+          <View style={{ marginTop: 8, gap: 2 }}>
+            <Text style={styles.rowName}>
+              {pinRes.pincode} — {pinRes.district}, {pinRes.state}
+            </Text>
+            <Text style={styles.smallHint}>
+              Post offices: {(pinRes.post_offices || []).join(", ")}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+
+      {/* State -> districts browser */}
+      <View style={styles.card}>
+        <Text style={styles.stepTitle}>
+          {states.length} States / UTs · {states.reduce((n, s) => n + s.districts.length, 0)} Districts
+        </Text>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+          {states.map((s) => (
+            <Pressable
+              key={s.state}
+              onPress={() => setSel(sel === s.state ? "" : s.state)}
+              style={[
+                styles.tab,
+                sel === s.state && styles.tabActive,
+                { paddingVertical: 6 },
+              ]}
+              testID={`loc-state-${s.state}`}
+            >
+              <Text style={[styles.tabTxt, { color: sel === s.state ? "#fff" : colors.onSurfaceSecondary }]}>
+                {s.state} ({s.districts.length})
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        {selected ? (
+          <View style={{ marginTop: 12 }}>
+            <Text style={styles.label}>{selected.state} — {selected.districts.length} districts</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+              {selected.districts.map((d) => (
+                <View key={d} style={[styles.tab, { paddingVertical: 5 }]}>
+                  <Text style={styles.tabTxt}>{d}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : (
+          <Text style={styles.smallHint}>Tap a state to see its districts.</Text>
+        )}
+      </View>
+    </>
+  );
+}
+
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },

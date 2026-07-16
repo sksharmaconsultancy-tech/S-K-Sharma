@@ -30,6 +30,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import DateField from "@/src/components/DateField";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { api } from "@/src/api/client";
@@ -87,6 +88,9 @@ type EmpForm = {
   compliance_allowances: SalaryLine[];
   compliance_deductions: SalaryLine[];
   permanent_address: string;
+  pincode: string;
+  district: string;
+  state: string;
   emergency_contact_name: string;
   emergency_contact_phone: string;
   family_members: { name: string; relation: string; dob: string }[];
@@ -153,23 +157,25 @@ const EMPTY_FORM: EmpForm = {
   upi_id: "",
   address: "",
   permanent_address: "",
+  pincode: "",
+  district: "",
+  state: "",
   emergency_contact_name: "",
   emergency_contact_phone: "",
   family_members: [],
 };
-
-function maskDashDate(input: string): string {
-  const d = (input || "").replace(/\D/g, "").slice(0, 8);
-  if (d.length <= 2) return d;
-  if (d.length <= 4) return `${d.slice(0, 2)}-${d.slice(2)}`;
-  return `${d.slice(0, 2)}-${d.slice(2, 4)}-${d.slice(4)}`;
-}
 
 function ddmmyyyyDashToISO(v: string | undefined): string | null {
   if (!v) return null;
   const m = v.match(/^(\d{2})-(\d{2})-(\d{4})$/);
   if (!m) return null;
   return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
+/** Iter 158 — ISO YYYY-MM-DD (from the calendar picker) -> DD-MM-YYYY. */
+function isoToDDMMDash(iso: string): string {
+  const m = (iso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : "";
 }
 
 /** Iter 113 — map any OCR/legacy gender text onto the strict options. */
@@ -243,7 +249,10 @@ export default function EmployeeAddScreen() {
           dob: isoToDDMM(p.dob),
           doj: isoToDDMM(p.doj),
           blood_group: p.blood_group || "",
-          marital_status: p.marital_status || "",
+          marital_status:
+            (p.marital_status || "").trim().toLowerCase() === "single"
+              ? "Unmarried"
+              : p.marital_status || "",
           spouse_name: p.spouse_name || "",
           designation: p.designation || "",
           department: p.department || "",
@@ -276,6 +285,9 @@ export default function EmployeeAddScreen() {
           upi_id: p.upi_id || "",
           address: p.address || "",
           permanent_address: p.permanent_address || "",
+          pincode: p.pincode || "",
+          district: p.district || "",
+          state: p.state || "",
           emergency_contact_name: p.emergency_contact_name || "",
           emergency_contact_phone: p.emergency_contact_phone || "",
           family_members: (p.family_members || []).map((f: any) => ({
@@ -319,6 +331,20 @@ export default function EmployeeAddScreen() {
   //   • The "Employee Actual Salary" section shows ONLY when the firm's
   //     "Offline Salary → Actual Salary Process" toggle is ON (legacy /
   //     unconfigured firms — both toggles off — keep it visible).
+  // Iter 158 — "Same as Present Address" tick for Permanent Address.
+  const [sameAsPresent, setSameAsPresent] = useState(false);
+  // Iter 159 — PIN Code auto-lookup (India Post) fills District + State.
+  const [pinBusy, setPinBusy] = useState(false);
+  const lookupPin = async (p: string) => {
+    if (!/^[1-9]\d{5}$/.test(p)) return;
+    setPinBusy(true);
+    try {
+      const r = await api<{ district: string; state: string }>(`/locations/pincode/${p}`);
+      if (r.district) setField("district", r.district);
+      if (r.state) setField("state", r.state);
+    } catch { /* manual entry stays possible */ }
+    finally { setPinBusy(false); }
+  };
   const [firmHeads, setFirmHeads] = useState<{
     allowances: string[];
     deductions: string[];
@@ -326,11 +352,12 @@ export default function EmployeeAddScreen() {
     offline: boolean;
     loaded: boolean;
     otAllowed: boolean;
-  }>({ allowances: [], deductions: [], online: false, offline: false, loaded: false, otAllowed: true });
+    autoCode: boolean;
+  }>({ allowances: [], deductions: [], online: false, offline: false, loaded: false, otAllowed: true, autoCode: false });
   useEffect(() => {
     let alive = true;
     if (!selectedCompanyId) {
-      setFirmHeads({ allowances: [], deductions: [], online: false, offline: false, loaded: false, otAllowed: true });
+      setFirmHeads({ allowances: [], deductions: [], online: false, offline: false, loaded: false, otAllowed: true, autoCode: false });
       return;
     }
     (async () => {
@@ -350,10 +377,11 @@ export default function EmployeeAddScreen() {
             offline: !!sp.offline_salary,
             loaded: true,
             otAllowed: sp.ot_allowed !== false,
+            autoCode: !!(m.settings || {}).auto_employee_code,
           });
         }
       } catch {
-        if (alive) setFirmHeads({ allowances: [], deductions: [], online: false, offline: false, loaded: false, otAllowed: true });
+        if (alive) setFirmHeads({ allowances: [], deductions: [], online: false, offline: false, loaded: false, otAllowed: true, autoCode: false });
       }
     })();
     return () => { alive = false; };
@@ -485,7 +513,9 @@ export default function EmployeeAddScreen() {
         company_id: selectedCompanyId,
         // Iter 94 — Employee Code (auto-assigned when blank on Add) and
         // Bio Code (device enrolment no.) — same columns as master sheet.
-        employee_code: form.employee_code.trim() || undefined,
+        employee_code: firmHeads.autoCode && !editUserId
+          ? undefined
+          : form.employee_code.trim() || undefined,
         bio_code: form.bio_code.trim() || undefined,
         // Iter 85 — Business rule: Name & Father Name are ALWAYS stored
         // uppercase in the master to match the source-of-truth register.
@@ -556,6 +586,9 @@ export default function EmployeeAddScreen() {
         upi_id: form.upi_id.trim() || undefined,
         address: form.address.trim() || undefined,
         permanent_address: form.permanent_address.trim() || undefined,
+        pincode: form.pincode.trim() || undefined,
+        district: form.district.trim() || undefined,
+        state: form.state.trim() || undefined,
         emergency_contact_name: form.emergency_contact_name.trim() || undefined,
         emergency_contact_phone: form.emergency_contact_phone.trim() || undefined,
         family_members: form.family_members.filter((f) => f.name.trim()),
@@ -787,26 +820,33 @@ export default function EmployeeAddScreen() {
                 documentType="generic"
                 label="Scan Other Document (OCR)"
                 onApply={(fields) => {
-                  if (fields.name) setField("name", String(fields.name).toUpperCase());
-                  if (fields.father_name) setField("father_name", String(fields.father_name));
-                  if (fields.mother_name) setField("mother_name", String(fields.mother_name));
-                  if (fields.spouse_name) setField("spouse_name", String(fields.spouse_name));
-                  if (fields.dob) setField("dob", String(fields.dob));
-                  if (fields.gender) setField("gender", normGender(String(fields.gender)));
-                  if (fields.present_address) setField("address", String(fields.present_address));
-                  if (fields.permanent_address) setField("permanent_address", String(fields.permanent_address));
-                  if (fields.aadhaar_no) setField("aadhaar_no", String(fields.aadhaar_no));
-                  if (fields.pan_no) setField("pan_no", String(fields.pan_no).toUpperCase());
-                  if (fields.voter_id) setField("voter_id_no", String(fields.voter_id).toUpperCase());
-                  // Family members → append to nominees / dependents field
-                  // if the form has one, otherwise stash into "notes".
-                  if (fields.family_members) {
-                    if ((form as any).nominees !== undefined) {
-                      setField("nominees", String(fields.family_members));
-                    } else {
-                      setField("notes", String(fields.family_members));
+                  // Iter 158 — map EVERY useful extracted key onto the form
+                  // (previously bank/UAN/ESI/phone etc. were dropped).
+                  const pick = (...keys: string[]) => {
+                    for (const k of keys) {
+                      const v = (fields as any)[k];
+                      if (v && String(v).trim()) return String(v).trim();
                     }
-                  }
+                    return "";
+                  };
+                  const nm = pick("name"); if (nm) setField("name", nm.toUpperCase());
+                  const fa = pick("father_name"); if (fa) setField("father_name", fa);
+                  const sp = pick("spouse_name"); if (sp) setField("spouse_name", sp);
+                  const db = pick("dob"); if (db) setField("dob", db);
+                  const ge = pick("gender"); if (ge) setField("gender", normGender(ge));
+                  const pa = pick("present_address", "address"); if (pa) setField("address", pa);
+                  const pm = pick("permanent_address"); if (pm) setField("permanent_address", pm);
+                  const aa = pick("aadhaar_no", "aadhar_no"); if (aa) setField("aadhaar_no", aa);
+                  const pn = pick("pan_no"); if (pn) setField("pan_no", pn.toUpperCase());
+                  const mo = pick("mobile", "phone", "mobile_no"); if (mo) setField("phone", mo);
+                  const em = pick("email"); if (em) setField("email", em);
+                  const ua = pick("uan_no", "uan"); if (ua) setField("uan_no", ua);
+                  const pf = pick("pf_no", "epf_no"); if (pf) setField("pf_no", pf);
+                  const es = pick("esi_no", "esic_no", "esi_ip_no"); if (es) setField("esi_ip_no", es);
+                  const bn = pick("bank_name"); if (bn) setField("bank_name", bn);
+                  const ba = pick("bank_account_no", "account_no", "account_number"); if (ba) setField("bank_account", ba);
+                  const ifc = pick("ifsc", "ifsc_code"); if (ifc) setField("bank_ifsc", ifc.toUpperCase());
+                  const up = pick("upi_id"); if (up) setField("upi_id", up);
                 }}
               />
             </View>
@@ -817,10 +857,15 @@ export default function EmployeeAddScreen() {
               the Actual Salary section — Iter 126g user request.) */}
           <TwoCol>
             <Field
-              label={editUserId ? "Employee Code" : "Employee Code (blank = auto)"}
+              label={
+                firmHeads.autoCode
+                  ? "Employee Code (AUTO — locked in Firm Master)"
+                  : editUserId ? "Employee Code" : "Employee Code (blank = auto)"
+              }
               value={form.employee_code}
               onChange={(v) => setField("employee_code", v)}
-              placeholder="e.g. 101"
+              placeholder={firmHeads.autoCode ? "Auto-assigned by system" : "e.g. 101"}
+              editable={!firmHeads.autoCode}
             />
             <View style={{ flex: 1 }} />
           </TwoCol>
@@ -860,19 +905,15 @@ export default function EmployeeAddScreen() {
             />
           </TwoCol>
           <TwoCol>
-            <Field
-              label="Date of birth"
-              value={form.dob}
-              onChange={(v) => setField("dob", maskDashDate(v))}
-              placeholder="DD-MM-YYYY"
-              keyboardType="numeric"
-            />
-            <Field
-              label="Present Address"
-              value={form.address}
-              onChange={(v) => setField("address", v)}
-              placeholder="Present / current address"
-            />
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={styles.lbl}>Date of birth (pick or type)</Text>
+              <DateField
+                value={ddmmyyyyDashToISO(form.dob) || ""}
+                onChangeISO={(iso) => setField("dob", isoToDDMMDash(iso))}
+                testID="emp-dob"
+              />
+            </View>
+            <View style={{ flex: 1 }} />
           </TwoCol>
           {/* Blood Group + Marital Status (chip pickers) */}
           <ChipRowSelect
@@ -884,7 +925,7 @@ export default function EmployeeAddScreen() {
           />
           <ChipRowSelect
             label="Marital Status"
-            options={["Single", "Married", "Widowed", "Divorced"]}
+            options={["Unmarried", "Married", "Widowed", "Divorced"]}
             value={form.marital_status}
             onChange={(v) => setField("marital_status", v)}
             testIDPrefix="marital"
@@ -897,12 +938,70 @@ export default function EmployeeAddScreen() {
               placeholder="Husband / wife name (shown in reports for married female employees)"
             />
           ) : null}
+          {/* Iter 158 — Present + Permanent address grouped, with a
+              "Same as Present Address" tick that copies & locks. */}
           <TwoCol>
             <Field
-              label="Permanent Address"
-              value={form.permanent_address}
-              onChange={(v) => setField("permanent_address", v)}
-              placeholder="Permanent address"
+              label="Present Address"
+              value={form.address}
+              onChange={(v) => {
+                setField("address", v);
+                if (sameAsPresent) setField("permanent_address", v);
+              }}
+              placeholder="Present / current address"
+            />
+            <View style={{ flex: 1, gap: 4 }}>
+              <Pressable
+                onPress={() => {
+                  const next = !sameAsPresent;
+                  setSameAsPresent(next);
+                  if (next) setField("permanent_address", form.address);
+                }}
+                style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+                testID="same-as-present"
+              >
+                <Ionicons
+                  name={sameAsPresent ? "checkbox" : "square-outline"}
+                  size={18}
+                  color={sameAsPresent ? colors.brandPrimary : colors.onSurfaceSecondary}
+                />
+                <Text style={styles.lbl}>Permanent Address — same as Present Address</Text>
+              </Pressable>
+              <Field
+                label=""
+                value={form.permanent_address}
+                onChange={(v) => setField("permanent_address", v)}
+                placeholder="Permanent address"
+                editable={!sameAsPresent}
+              />
+            </View>
+          </TwoCol>
+          {/* Iter 159 — PIN Code auto-lookup fills District + State. */}
+          <TwoCol>
+            <Field
+              label={pinBusy ? "PIN Code (looking up…)" : "PIN Code (auto-fills District & State)"}
+              value={form.pincode}
+              onChange={(v) => {
+                const p = v.replace(/\D/g, "").slice(0, 6);
+                setField("pincode", p);
+                if (p.length === 6) void lookupPin(p);
+              }}
+              placeholder="e.g. 311001"
+              keyboardType="numeric"
+            />
+            <Field
+              label="District"
+              value={form.district}
+              onChange={(v) => setField("district", v)}
+              placeholder="Auto from PIN (editable)"
+            />
+          </TwoCol>
+          <TwoCol>
+            <Field
+              label="State"
+              value={form.state}
+              onChange={(v) => setField("state", v)}
+              placeholder="Auto from PIN (editable)"
             />
             <View style={{ flex: 1 }} />
           </TwoCol>
@@ -966,13 +1065,14 @@ export default function EmployeeAddScreen() {
                 testID="emp-add-type-group"
               />
             </View>
-            <Field
-              label="Date of joining"
-              value={form.doj}
-              onChange={(v) => setField("doj", maskDashDate(v))}
-              placeholder="DD-MM-YYYY"
-              keyboardType="numeric"
-            />
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={styles.lbl}>Date of joining (pick or type)</Text>
+              <DateField
+                value={ddmmyyyyDashToISO(form.doj) || ""}
+                onChangeISO={(iso) => setField("doj", isoToDDMMDash(iso))}
+                testID="emp-doj"
+              />
+            </View>
           </TwoCol>
           <TwoCol>
             <View style={{ flex: 1, gap: 4 }}>

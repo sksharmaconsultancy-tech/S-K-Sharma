@@ -31,6 +31,8 @@ _STR_FIELDS = [
     "shift_start", "shift_end", "salary_mode", "compliance_salary_mode",
     "uan_no", "pf_no", "esi_ip_no", "pan_no", "aadhaar_no",
     "bank_name", "bank_account", "bank_ifsc", "address",
+    # Iter 159 — structured location (PIN Code auto-lookup)
+    "pincode", "district", "state",
     # Extra master fields: blood group, marital status, PAN name, UPI
     "blood_group", "marital_status", "pan_name", "upi_id", "spouse_name",
     # Iter 109 — was missing: Pay Mode (Bank / Cash / Cheque) never saved
