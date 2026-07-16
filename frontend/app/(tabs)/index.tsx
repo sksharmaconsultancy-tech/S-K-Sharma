@@ -667,6 +667,14 @@ export default function Dashboard() {
               )}
               {user?.role !== "employee" && (
                 <ActionRow
+                  testID="row-daily-attendance"
+                  icon="calendar-number-outline"
+                  label="Daily attendance (date-wise)"
+                  onPress={() => router.push("/daily-attendance")}
+                />
+              )}
+              {user?.role !== "employee" && (
+                <ActionRow
                   testID="row-attendance-approvals"
                   icon="location-outline"
                   label="In-office but not punched"

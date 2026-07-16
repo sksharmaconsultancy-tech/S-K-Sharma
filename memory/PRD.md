@@ -716,3 +716,7 @@ Verified: /admin/actual-salary-process for 2026-03 (no compliance) → epf/esi 0
 
 ## Iter 147 — Geofence punch-in reminder push — DONE, logic verified via direct tick test
 - Background loop (routes/web_push.py punch_reminder_loop, started in server.py startup): every 10 min, employees with a push subscription + fresh location ping (≤30 min old) who are INSIDE their firm's geofence and have NO attendance punch today get web-push "Punch In reminder ⏰". Max 1 reminder/employee/day via db.push_reminder_log. No time-of-day window (night shifts supported). Note: requires employee to have opened the PWA recently (location ping needed).
+
+## Iter 148 — Daily Attendance (date-wise, firm-wise) on employer dashboard — DONE, verified curl + screenshot
+- New screen /daily-attendance (Quick action "Daily attendance (date-wise)" on dashboard for admins): ◀ date ▶ navigation + Jump-to-today, firm picker (super/sub admin; company_admin auto-scoped), tappable Present/Absent/All filter chips, per-employee cards with IN/OUT punch chips (time + colored), worked hrs badge / IN NOW / ABSENT status.
+- Backend: GET /api/admin/daily-attendance?date=YYYY-MM-DD&company_id= (routes/punch_logs.py) — per-employee grouped punches, first_in/last_out, worked_hrs (IN→OUT pair sum, wall-clock), still_in flag, present/absent counts. Sub-admin firm scoping honored.

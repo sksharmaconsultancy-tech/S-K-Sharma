@@ -160,6 +160,114 @@ async def punch_logs(
     }
 
 
+@router.get("/daily-attendance")
+async def daily_attendance(
+    date: str = Query(..., description="YYYY-MM-DD"),
+    company_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 148 — Date-wise attendance summary, firm-wise (employer PWA
+    dashboard). One row per employee with all their punches for the day,
+    first-IN / last-OUT, worked hours and Present/Absent status."""
+    admin = await get_user_from_token(authorization)
+    if admin.get("role") not in ("super_admin", "sub_admin", "company_admin"):
+        raise HTTPException(403, "Admin only")
+    if admin.get("role") == "company_admin":
+        company_id = admin.get("company_id")
+
+    uq: Dict[str, Any] = {"role": "employee", "approval_status": "approved"}
+    if company_id:
+        if not sub_admin_can_touch_company(admin, company_id):
+            raise HTTPException(403, "No access to this firm")
+        uq["company_id"] = company_id
+    elif (admin.get("role") == "sub_admin"
+          and (admin.get("sub_admin_company_scope") or "all") != "all"):
+        uq["company_id"] = {"$in": admin.get("sub_admin_company_ids") or []}
+
+    employees = await db.users.find(
+        uq, {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1,
+             "bio_code": 1, "company_id": 1},
+    ).to_list(3000)
+
+    aq: Dict[str, Any] = {"date": date, "kind": {"$in": ["in", "out"]}}
+    if company_id:
+        aq["company_id"] = company_id
+    recs = await db.attendance.find(
+        aq, {"_id": 0, "user_id": 1, "at": 1, "kind": 1,
+             "source": 1, "device_serial": 1},
+    ).sort([("at", 1)]).to_list(50000)
+
+    by_user: Dict[str, List[dict]] = {}
+    for r in recs:
+        by_user.setdefault(r.get("user_id") or "", []).append(r)
+
+    cids = list({e.get("company_id") for e in employees if e.get("company_id")})
+    firms: Dict[str, str] = {}
+    if cids:
+        async for c in db.companies.find(
+            {"company_id": {"$in": cids}}, {"_id": 0, "company_id": 1, "name": 1},
+        ):
+            firms[c["company_id"]] = c.get("name") or c["company_id"]
+
+    def _mins(at: str) -> Optional[int]:
+        # Wall-clock convention: read HH:MM verbatim from the ISO string.
+        try:
+            return int(at[11:13]) * 60 + int(at[14:16])
+        except Exception:
+            return None
+
+    rows: List[Dict[str, Any]] = []
+    present = 0
+    for e in employees:
+        precs = by_user.get(e["user_id"], [])
+        punches = [{
+            "time": str(p.get("at") or "")[11:16],
+            "kind": p.get("kind"),
+            "machine": _source_label(p),
+        } for p in precs]
+        first_in = next((p for p in precs if p.get("kind") == "in"), None)
+        last_out = next((p for p in reversed(precs) if p.get("kind") == "out"), None)
+        # Worked minutes: sum of IN→next-OUT pairs.
+        worked = 0
+        open_in: Optional[int] = None
+        for p in precs:
+            m = _mins(str(p.get("at") or ""))
+            if m is None:
+                continue
+            if p.get("kind") == "in":
+                open_in = m
+            elif p.get("kind") == "out" and open_in is not None:
+                if m >= open_in:
+                    worked += m - open_in
+                open_in = None
+        status = "present" if precs else "absent"
+        if precs:
+            present += 1
+        rows.append({
+            "user_id": e["user_id"],
+            "name": e.get("name") or "",
+            "employee_code": e.get("employee_code") or "",
+            "company_id": e.get("company_id"),
+            "company_name": firms.get(e.get("company_id") or "", ""),
+            "status": status,
+            "punches": punches,
+            "first_in": str(first_in.get("at"))[11:16] if first_in else None,
+            "last_out": str(last_out.get("at"))[11:16] if last_out else None,
+            "worked_hrs": round(worked / 60, 2) if worked else 0,
+            "still_in": bool(precs) and precs[-1].get("kind") == "in",
+        })
+
+    rows.sort(key=lambda r: (r["status"] != "present",
+                             r.get("first_in") or "99:99", r["name"].lower()))
+    return {
+        "date": date,
+        "total": len(rows),
+        "present": present,
+        "absent": len(rows) - present,
+        "rows": rows,
+    }
+
+
 @router.get("/punch-logs.xlsx")
 async def punch_logs_xlsx(
     company_id: Optional[str] = Query(None),
