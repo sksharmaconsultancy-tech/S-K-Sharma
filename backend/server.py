@@ -14332,7 +14332,7 @@ async def _compute_compliance_run(
         get_standard_compliance_cfg,
         get_firm_statutory_overrides,
     )
-    _std_cfg = await get_standard_compliance_cfg()
+    _std_cfg = await get_standard_compliance_cfg(on_date=f"{payload.month}-31")
     _firm_over = await get_firm_statutory_overrides(payload.company_id)
     effective_statutory = {**_std_cfg, **_firm_over, **(payload.statutory_cfg or {})}
 
@@ -19012,6 +19012,8 @@ from routes.db_backup import router as db_backup_router  # noqa: E402
 app.include_router(db_backup_router)
 from routes.locations import router as locations_router  # noqa: E402
 app.include_router(locations_router)
+from routes.pf_reports import router as pf_reports_router  # noqa: E402
+app.include_router(pf_reports_router)
 app.include_router(compliance_settings_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC

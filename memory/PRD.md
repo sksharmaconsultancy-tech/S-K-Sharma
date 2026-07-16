@@ -779,3 +779,16 @@ Verified: /admin/actual-salary-process for 2026-03 (no compliance) → epf/esi 0
 - EMPLOYEE ADD/EDIT: new PIN Code / District / State fields after the address block — typing a 6-digit PIN auto-fills District+State (editable). New user fields pincode/district/state: server.py create doc + employee_profile.py _STR_FIELDS.
 - Verified: /masters PIN 311001 → Bhilwara,Rajasthan + Rajasthan 33 districts expand; /employee-add PIN 302001 → Jaipur/Rajasthan auto-filled.
 - NOTE: VPS backend needs outbound HTTPS to api.postalpincode.in (first lookup per PIN; cached after).
+
+## Iter 160 — Compliance Settings: Effective Date + Change Log + EPF Act charges (tested)
+- DEFAULT_STATUTORY_CFG += pf_admin_percent 0.5 (A/c 2), pf_edli_percent 0.5 (A/c 21), pf_edli_admin_percent 0.0 (A/c 22). _NUMERIC_FIELDS extended (global + firm overrides auto-flow).
+- get_standard_compliance_cfg(on_date=None): version-aware — picks newest db.compliance_settings_log entry with effective_from <= on_date; server.py compliance run passes month+"-31" (policy per effective date).
+- PUT /admin/compliance-settings: accepts effective_from (YYYY-MM-DD, default today); every save appends full snapshot to compliance_settings_log. GET returns log + effective_from.
+- UI: PF section shows 3 new rows + read-only "Employer TOTAL" row; new "Effective Date & Change Log" section (DateField cs-effective-from + history list). Verified via curl + screenshot.
+
+## Iter 161 — PF Reports + ESIC Reports hub + portal-upload preview (user formats; tested)
+- NEW routes/pf_reports.py (/api/admin/pf-reports/*): challan.pdf/.xlsx (EPFO provisional challan layout: A/c 01/02/10/21/22 rows EE/ER/Admin/7Q/14B; page per month + period summary), ecr.pdf/.xlsx (EPFO Return Statement layout via challans._ecr_lines), esic-sheet.pdf/.xlsx (ESIC Contribution History layout), esic-challan.pdf/.xlsx (ESIC A/C No.1 challan + acknowledgement), summary + esic-summary JSON. Period = month_from..month_to (manual month/year, max 24). Data = latest compliance run/month; A/c2 min ₹500; roles super/sub/company_admin (firm-scoped).
+- NEW /app/frontend/app/pf-reports.tsx (?kind=pf|esic): kind tabs, From/To MonthPickers, 4 download buttons per kind, period preview table, link to old contribution sheet. NAV REPLACED: "P.F. Contribution Sheet"→"PF Reports", "E.S.I. Contribution Sheet"→"ESIC Reports" (both AdminWebShell lists).
+- challans.tsx (PF/ESIC Automation): quick-access buttons to both hubs + "Preview EPF/ESIC Data" toggles → GET /api/admin/challans-portal-preview?run_id&kind (NOTE: path is challans-portal-preview, NOT /challans/portal-preview — that gets shadowed by /challans/{id} route). Red rows = missing UAN/IP (skipped on upload).
+- All 8 downloads curl-tested 200; preview 17 lines both kinds; screenshots OK. GOTCHA: challans._uan_esic_map(rows) is the extras loader (NOT _load_statutory_extra).
+- PENDING (user): old payroll .bak (SQL Server, 750MB) import — user will do later; guided SSMS restore→CSV export→then build import mapping.

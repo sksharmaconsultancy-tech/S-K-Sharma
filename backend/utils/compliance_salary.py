@@ -66,6 +66,14 @@ DEFAULT_STATUTORY_CFG: Dict[str, float] = {
     "pf_percent_employer_eps": 8.33,
     "pf_wage_cap": 15000.0,
 
+    # Iter 160 — EPF Act employer charges (monthly challan accounts):
+    #   A/c 2  — EPF Admin Charges  0.50% (min ₹500/month statutory)
+    #   A/c 21 — EDLI Contribution  0.50% (on EDLI wages, capped ₹15,000)
+    #   A/c 22 — EDLI Admin Charges 0.00% (NIL since 01-04-2017)
+    "pf_admin_percent": 0.5,
+    "pf_edli_percent": 0.5,
+    "pf_edli_admin_percent": 0.0,
+
     # ESIC
     "esic_percent_employee": 0.75,
     "esic_percent_employer": 3.25,

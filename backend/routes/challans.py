@@ -903,3 +903,54 @@ async def download_portal_upload_file(
         media_type=mime,
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+@router.get("/challans-portal-preview")
+async def portal_preview(
+    run_id: str,
+    kind: str = "epfo",
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 161 — on-screen data preview BEFORE the auto portal upload.
+    Returns the exact member lines that will go to the portal."""
+    user = await _assert_admin(authorization)
+    run = await _load_run_for_portal(run_id, user)
+    extra = await _uan_esic_map(run.get("rows") or [])
+    if kind == "esic":
+        lines = []
+        for r in run.get("rows") or []:
+            if not r.get("esic_applicable"):
+                continue
+            ex = extra.get(r.get("user_id"), {}) or {}
+            days = float(r.get("present_days") or 0)
+            lines.append({
+                "ip_no": str(ex.get("esi_ip_no") or "").strip(),
+                "name": (r.get("name") or "").upper(),
+                "days": int(days) if days.is_integer() else days,
+                "wages": round(float(r.get("gross_paid") or 0), 2),
+                "ee": int(round(float(r.get("esic_employee") or 0))),
+                "skipped": not str(ex.get("esi_ip_no") or "").strip(),
+            })
+        totals = {
+            "members": len(lines),
+            "uploadable": sum(1 for x in lines if not x["skipped"]),
+            "wages": round(sum(x["wages"] for x in lines), 2),
+            "ee": sum(x["ee"] for x in lines),
+        }
+        return {"kind": "esic", "month": run.get("month"), "lines": lines, "totals": totals}
+    members = _ecr_lines(run, extra)
+    lines = [{
+        "uan": m["uan"] or "", "name": m["name"], "gross": m["gross"],
+        "epf_wages": m["epf_wages"], "eps_wages": m["eps_wages"],
+        "edli_wages": m["edli_wages"], "epf_ee": m["epf_ee"],
+        "eps_er": m["eps_er"], "diff_er": m["diff_er"],
+        "ncp": m["ncp"], "skipped": not (m["uan"] or "").strip(),
+    } for m in members]
+    totals = {
+        "members": len(lines),
+        "uploadable": sum(1 for x in lines if not x["skipped"]),
+        "epf_ee": sum(x["epf_ee"] for x in lines),
+        "eps_er": sum(x["eps_er"] for x in lines),
+        "diff_er": sum(x["diff_er"] for x in lines),
+    }
+    return {"kind": "epfo", "month": run.get("month"), "lines": lines, "totals": totals}
