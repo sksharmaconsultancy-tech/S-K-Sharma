@@ -2185,6 +2185,14 @@ async def startup():
     except Exception:
         logger.exception("[startup] punch reminder loop failed to start")
 
+    # Iter 157 — Sub Admin inactivity monitor: warn at 25 days without a
+    # login, auto-disable at 30 days + notify every Super Admin.
+    try:
+        from routes.sub_admin_inactivity import inactivity_loop
+        asyncio.create_task(inactivity_loop())
+    except Exception:
+        logger.exception("[startup] sub-admin inactivity loop failed to start")
+
 
 async def _bg_enforce_geofence_defaults():
     """Iter 68 — Enforce the new default: geofence ON + strict rejection
@@ -15428,6 +15436,15 @@ async def update_sub_admin(
         updates["sub_admin_company_ids"] = [c for c in payload.company_ids if c]
     if "disabled" in fset and payload.disabled is not None:
         updates["disabled"] = bool(payload.disabled)
+        if payload.disabled:
+            updates["disabled_reason"] = "manual"
+        else:
+            # Iter 157 — re-enable resets the inactivity clock so the
+            # auto-disable job doesn't flag the account again immediately.
+            updates["disabled_reason"] = None
+            updates["auto_disabled_at"] = None
+            updates["inactivity_warned_for"] = None
+            updates["reactivated_at"] = now_iso()
     if "menu_rights" in fset and payload.menu_rights is not None:
         updates["menu_rights"] = {
             str(k): bool(v)
