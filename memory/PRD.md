@@ -762,3 +762,20 @@ Verified: /admin/actual-salary-process for 2026-03 (no compliance) → epf/esi 0
 - sub-admins.tsx: row shows "Last login: <date>" + "⏸ auto-disabled (30 days inactive)" chip.
 - utils/compliance_salary.py BOTH register builders (v1 Form-27 + v2 modern): fixed 10 employees per A4-landscape page (chunked tables + PageBreak, headers repeat, GRAND TOTAL on last page, v2 zebra uses global index). Verified: 55-row run → v1 7 pages, v2 6 pages. NOTE: parse_month tail had pre-existing dead-code garbage — cleaned.
 - Tested via direct _tick(): warn@26d ✓, disable@31d + super notif ✓, idempotent ✓, test sub-admin state restored.
+
+## Iter 158 — Batch of user requests (2026-07-16, all screenshot-verified)
+1. FIRM MASTER dropdown fix: Salary Structure options rendered BEHIND content below (RN-web stacking). dropdownList now IN-FLOW (marginTop 4, no absolute) — same pattern as MasterSelect. Verified selectable.
+2. AUTO EMPLOYEE CODE lock: new Firm Settings toggle "Auto Employee Code (lock manual entry)" (firm_masters settings.auto_employee_code, default False). employee-add.tsx firmHeads.autoCode → Employee Code field disabled + "(AUTO — locked in Firm Master)" label; submit omits manual code on Add.
+3. ADDRESSES: Present + Permanent grouped in one TwoCol with "Permanent Address — same as Present Address" checkbox (testID same-as-present) that copies & locks + live-syncs. Verified copies.
+4. DOB/DOJ CALENDAR: replaced masked text inputs with DateField (browser calendar + manual typing; ISO↔DD-MM-YYYY converters isoToDDMMDash). maskDashDate removed (unused).
+5. MARITAL STATUS: chip "Single" → "Unmarried" (edit-prefill normalises legacy "Single"→"Unmarried"; relation.py/rpa already handle both).
+6. OCR "Scan Other Document": generic prompt now also asks for address/mobile/email/uan_no/pf_no/esi_no/bank_name/bank_account_no/ifsc/upi_id; employee-add generic onApply maps ALL keys w/ alias fallbacks (address→present, ifsc_code→bank_ifsc, account_no→bank_account etc.) — previously extracted-but-unmapped fields were silently dropped (user bug). NEEDS user re-test with a real doc.
+- PENDING USER ANSWER: Location master (State/District/PIN) clarifying question (auto-lookup vs full directory vs manual) — asked, not yet answered.
+
+## Iter 159 — India Location Master: States + Districts + PIN Code (user request; verified E2E)
+- NEW /app/backend/data/india_locations.json: 37 states/UTs, 727 districts (GitHub sab99r dataset + Ladakh + A&N added manually).
+- NEW routes/locations.py (registered in server.py): GET /api/locations/states | /districts?state= | /all | /pincode/{pin}. PIN lookup proxies FREE India Post API (api.postalpincode.in) with db.pincode_cache Mongo cache; any authenticated user. 503 w/ manual-entry hint if API down.
+- MASTERS screen: new "Locations" tab (mst-tab-location) → LocationsPanel: PIN lookup box (loc-pin/loc-pin-search) showing "PIN — District, State + post offices", plus state chips (with district counts) → district chips browser. CRUD add/list cards hidden for this tab.
+- EMPLOYEE ADD/EDIT: new PIN Code / District / State fields after the address block — typing a 6-digit PIN auto-fills District+State (editable). New user fields pincode/district/state: server.py create doc + employee_profile.py _STR_FIELDS.
+- Verified: /masters PIN 311001 → Bhilwara,Rajasthan + Rajasthan 33 districts expand; /employee-add PIN 302001 → Jaipur/Rajasthan auto-filled.
+- NOTE: VPS backend needs outbound HTTPS to api.postalpincode.in (first lookup per PIN; cached after).

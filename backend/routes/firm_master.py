@@ -135,6 +135,9 @@ def _empty_master(company_id: str, company_name: str = "") -> Dict[str, Any]:
             "auto_email_process": False,
             "email_enable": False,
             "allow_category_rate": False,
+            # Iter 158 — when ON, Employee Code is ALWAYS auto-assigned and
+            # the manual code field is locked in Add/Edit Employee.
+            "auto_employee_code": False,
         },
         "contact_persons": [],  # {name, mobile, position}
         "salary_process": {

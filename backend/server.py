@@ -7625,6 +7625,10 @@ async def admin_create_employee(
         "spouse_name": payload.get("spouse_name") or None,
         "pay_mode": payload.get("pay_mode") or "Bank",
         "address": (str(payload.get("address") or "").strip() or None),
+        # Iter 159 — structured location (PIN auto-lookup on the form).
+        "pincode": (str(payload.get("pincode") or "").strip() or None),
+        "district": (str(payload.get("district") or "").strip() or None),
+        "state": (str(payload.get("state") or "").strip() or None),
         # Iter 109 — extra master fields: addresses, emergency & family
         "permanent_address": (str(payload.get("permanent_address") or "").strip() or None),
         "emergency_contact_name": (str(payload.get("emergency_contact_name") or "").strip() or None),
@@ -19006,6 +19010,8 @@ from routes.sheet_verification import router as sheet_verification_router  # noq
 app.include_router(sheet_verification_router)
 from routes.db_backup import router as db_backup_router  # noqa: E402
 app.include_router(db_backup_router)
+from routes.locations import router as locations_router  # noqa: E402
+app.include_router(locations_router)
 app.include_router(compliance_settings_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
