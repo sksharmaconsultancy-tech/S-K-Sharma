@@ -17,7 +17,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
@@ -77,7 +77,7 @@ export default function DailyAttendance() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [filter, setFilter] = useState<"all" | "present" | "absent">("all");
+  const [filter, setFilter] = useState<"all" | "present" | "absent" | "mismatch">("all");
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -107,6 +107,7 @@ export default function DailyAttendance() {
     const all: Row[] = data?.rows || [];
     if (filter === "present") return all.filter((r) => r.status === "present");
     if (filter === "absent") return all.filter((r) => r.status === "absent");
+    if (filter === "mismatch") return all.filter((r) => (r as any).mode_mismatch);
     return all;
   }, [data, filter]);
 
@@ -174,6 +175,7 @@ export default function DailyAttendance() {
           ["all", `All ${data?.total ?? 0}`, colors.brandPrimary],
           ["present", `Present ${data?.present ?? 0}`, "#16a34a"],
           ["absent", `Absent ${data?.absent ?? 0}`, "#dc2626"],
+          ["mismatch", `Mode ⚠ ${data?.mismatch ?? 0}`, "#b45309"],
         ] as const).map(([key, lbl, clr]) => (
           <Pressable
             key={key}
@@ -220,6 +222,20 @@ export default function DailyAttendance() {
                   {!!item.company_name && (companyId === "all") && (
                     <Text style={styles.firmT} numberOfLines={1}>{item.company_name}</Text>
                   )}
+                  {/* Iter 155 — eligibility vs actual punching mode */}
+                  <View style={{ flexDirection: "row", gap: 5, marginTop: 3 }}>
+                    <Text style={[styles.modeBadge,
+                      (item as any).mode_expected === "biometric"
+                        ? { backgroundColor: "#e0e7ff", color: "#3730a3" }
+                        : { backgroundColor: "#f3f4f6", color: "#374151" }]}>
+                      {(item as any).mode_expected === "biometric" ? "BIO ELIGIBLE" : "MANUAL"}
+                    </Text>
+                    {(item as any).mode_mismatch && (
+                      <Text style={[styles.modeBadge, { backgroundColor: "#fef3c7", color: "#b45309" }]}>
+                        ⚠ punched via {(item as any).mode_actual === "mixed" ? "app+machine" : "app/manual"}
+                      </Text>
+                    )}
+                  </View>
                 </View>
                 {item.status === "present" ? (
                   <View style={[styles.badge, item.still_in ? styles.badgeIn : styles.badgeDone]}>
@@ -303,6 +319,10 @@ const styles = StyleSheet.create({
   empName: { fontSize: 14.5, fontWeight: "700", color: colors.onSurface },
   empCode: { fontSize: 12, fontWeight: "600", color: colors.onSurfaceTertiary },
   firmT: { fontSize: 11.5, color: colors.onSurfaceTertiary, marginTop: 1 },
+  modeBadge: {
+    fontSize: 9.5, fontWeight: "800", borderRadius: 5, overflow: "hidden",
+    paddingVertical: 2, paddingHorizontal: 6,
+  },
 
   badge: { borderRadius: 8, paddingVertical: 4, paddingHorizontal: 10 },
   badgeIn: { backgroundColor: "#dcfce7" },

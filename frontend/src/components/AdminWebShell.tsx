@@ -160,6 +160,8 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/punch-log-report", label: "Punch Log Report", icon: "finger-print-outline" },
       // Iter 153 — handwritten sheet OCR reconciliation (MIS).
       { route: "/sheet-verification", label: "Sheet Verification (OCR)", icon: "document-attach-outline" },
+      // Iter 155 — full DB backup (screen itself is super-admin gated).
+      { route: "/database-backup", label: "Database Backup", icon: "server-outline" },
       { route: "/messages", label: "Messages", icon: "chatbubbles-outline" },
       { route: "/tickets", label: "Tickets", icon: "ticket-outline" },
       { route: "/mailbox", label: "Mailbox (Email)", icon: "mail-outline" },

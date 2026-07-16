@@ -242,24 +242,31 @@ export default function OnboardingScreen() {
 
               <Text style={styles.section}>Personal details</Text>
 
-              {/* Iter 151 — scan Aadhaar / PAN / any ID to auto-fill.
-                  Extra document details (ID numbers, address, gender) are
-                  saved to your profile automatically. */}
+              {/* Iter 155 (user spec) — only TWO documents at joining:
+                  Aadhaar + Bank passbook/cheque. Both OPTIONAL — they can
+                  be scanned after joining from Edit Profile. */}
               {Platform.OS === "web" && (
-                <View style={{ marginBottom: 12 }}>
+                <View style={{ marginBottom: 12, gap: 8 }}>
                   <ScanOCRButton
-                    documentType="generic"
+                    documentType="aadhaar"
                     endpoint="/ocr/parse-my-document"
-                    label="Scan Aadhaar / PAN / any ID to auto-fill"
+                    label="Scan Aadhaar card (optional)"
                     onApply={(f) => {
                       if (f.name) setName(String(f.name));
                       if (f.father_name) setFather(String(f.father_name));
                       if (f.dob) setDob(maskDashDate(String(f.dob).replace(/\//g, "-")));
                     }}
                   />
+                  <ScanOCRButton
+                    documentType="bank_passbook"
+                    endpoint="/ocr/parse-my-document"
+                    label="Scan Bank passbook / cheque (optional)"
+                    onApply={() => {}}
+                  />
                   <Text style={styles.ocrHint}>
-                    Your document details (ID number, address, etc.) are saved
-                    securely to your profile.
+                    Aadhaar fills your name & DOB; bank details are saved to
+                    your profile automatically. Don&apos;t have them now? Skip —
+                    you can scan both later from Edit Profile after joining.
                   </Text>
                 </View>
               )}
