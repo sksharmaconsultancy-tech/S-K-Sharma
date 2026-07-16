@@ -96,6 +96,7 @@ export const NAV_SUPER: NavItem[] = [
     icon: "bar-chart-outline",
     children: [
       { route: "/attendance-grid", label: "Attendance Report", icon: "grid-outline" },
+      { route: "/daily-present-report", label: "Day-wise Present Count", icon: "people-outline" },
       { route: "/salary-day-sheet", label: "Day-wise Salary Sheet", icon: "calendar-outline" },
       { route: "/master-data-report", label: "Master Data", icon: "server-outline" },
       { route: "/compliance-reports", label: "Compliance Reports", icon: "shield-checkmark-outline" },
@@ -157,6 +158,8 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/users-log-report", label: "Users Log Report", icon: "document-text-outline" },
       // Iter 145 (user spec) — full punch audit trail with Excel download.
       { route: "/punch-log-report", label: "Punch Log Report", icon: "finger-print-outline" },
+      // Iter 153 — handwritten sheet OCR reconciliation (MIS).
+      { route: "/sheet-verification", label: "Sheet Verification (OCR)", icon: "document-attach-outline" },
       { route: "/messages", label: "Messages", icon: "chatbubbles-outline" },
       { route: "/tickets", label: "Tickets", icon: "ticket-outline" },
       { route: "/mailbox", label: "Mailbox (Email)", icon: "mail-outline" },
@@ -337,6 +340,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
     icon: "bar-chart-outline",
     children: [
       { route: "/attendance-grid", label: "Attendance Report", icon: "grid-outline" },
+      { route: "/daily-present-report", label: "Day-wise Present Count", icon: "people-outline" },
       { route: "/salary-day-sheet", label: "Day-wise Salary Sheet", icon: "calendar-outline" },
       { route: "/master-data-report", label: "Master Data", icon: "server-outline" },
       { route: "/compliance-reports", label: "Compliance Reports", icon: "shield-checkmark-outline" },

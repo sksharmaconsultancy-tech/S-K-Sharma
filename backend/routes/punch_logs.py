@@ -268,6 +268,66 @@ async def daily_attendance(
     }
 
 
+@router.get("/attendance-report/day-counts")
+async def attendance_day_counts(
+    month: str = Query(..., description="YYYY-MM"),
+    company_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 154 — day-wise present count for a month (1–31), including how
+    many employees worked OT (2nd IN→OUT pair) each day. Tapping a count in
+    the UI deep-links to /daily-attendance for the full employee list."""
+    admin = await get_user_from_token(authorization)
+    if admin.get("role") not in ("super_admin", "sub_admin", "company_admin"):
+        raise HTTPException(403, "Admin only")
+    if admin.get("role") == "company_admin":
+        company_id = admin.get("company_id")
+    import re as _re
+    if not _re.fullmatch(r"\d{4}-\d{2}", month or ""):
+        raise HTTPException(400, "month must be YYYY-MM")
+
+    aq: Dict[str, Any] = {
+        "date": {"$gte": f"{month}-01", "$lte": f"{month}-31"},
+        "kind": {"$in": ["in", "out"]},
+        "status": {"$ne": "rejected"},
+    }
+    if company_id:
+        if not sub_admin_can_touch_company(admin, company_id):
+            raise HTTPException(403, "No access to this firm")
+        aq["company_id"] = company_id
+    elif (admin.get("role") == "sub_admin"
+          and (admin.get("sub_admin_company_scope") or "all") != "all"):
+        aq["company_id"] = {"$in": admin.get("sub_admin_company_ids") or []}
+
+    recs = await db.attendance.find(
+        aq, {"_id": 0, "date": 1, "user_id": 1, "kind": 1},
+    ).to_list(200000)
+
+    # per day: distinct present users + users with ≥2 IN punches (OT pair).
+    per_day: Dict[str, Dict[str, Any]] = {}
+    for r in recs:
+        d = per_day.setdefault(r["date"], {"users": set(), "ins": {}})
+        d["users"].add(r["user_id"])
+        if r["kind"] == "in":
+            d["ins"][r["user_id"]] = d["ins"].get(r["user_id"], 0) + 1
+
+    from calendar import monthrange
+    y, m = int(month[:4]), int(month[5:7])
+    ndays = monthrange(y, m)[1]
+    days = []
+    tot_present = tot_ot = 0
+    for i in range(1, ndays + 1):
+        date = f"{month}-{i:02d}"
+        d = per_day.get(date)
+        present = len(d["users"]) if d else 0
+        ot = sum(1 for c in (d["ins"].values() if d else []) if c >= 2)
+        tot_present += present
+        tot_ot += ot
+        days.append({"date": date, "present": present, "ot_count": ot})
+    return {"month": month, "days": days,
+            "total_present_mandays": tot_present, "total_ot_mandays": tot_ot}
+
+
 @router.get("/punch-logs.xlsx")
 async def punch_logs_xlsx(
     company_id: Optional[str] = Query(None),

@@ -742,3 +742,12 @@ Verified: /admin/actual-salary-process for 2026-03 (no compliance) → epf/esi 0
 
 ## Iter 152 — OCR photo auto-compression (fix "Not able to scan" from phone camera) — DONE
 - ScanOCRButton: camera photos of ANY size now accepted and auto-downscaled client-side (canvas, max 1600px long edge, JPEG q0.8 → ~200–500KB) before upload. Old behavior rejected files >6MB outright — phone cameras produce 4–12MB, so employees couldn't scan. PDFs unchanged (6MB cap). Advise VPS nginx client_max_body_size 10m for multi-page scans.
+
+## Iter 153 — Sheet Verification (OCR reconciliation) utility — DONE, e2e verified with real LLM OCR
+- Utility → "Sheet Verification (OCR)" (super/sub/company admin). Flow: upload handwritten sheet (photo/PDF, ≤4 pages, client-compressed 2000px) → POST /api/admin/sheet-verification/ocr (gpt-5.4 vision, strict JSON rows {code,name,in,out,ot,signature}) → editable review table → POST .../match (code exact → fuzzy name ≥0.75; tolerance default ±15min) → MIS verdict table: MATCHED / TIME_MISMATCH / NOT_IN_SYSTEM / NOT_ON_SHEET / UNMATCHED_ROW + signature flag; run saved in db.sheet_verifications.
+- Per-employee actions: "Fix with OCR" (writes sheet times: existing punch edited w/ audit original_at/edit_reason, missing punch created source manual_admin) or "Leave". SUB-ADMIN fixes queue in db.sheet_fix_requests → SUPER ADMIN approve/reject panel on the same screen (PATCH /api/admin/sheet-fix-requests/{id}). Verified: OCR extraction exact, super fix applied (IN 08:54→09:00), leave, sub-admin firm-scoping enforced.
+
+## Iter 154 — Day-wise Present Count report — DONE, verified via screenshots
+- Reports → "Day-wise Present Count": month nav (1–31), firm picker, per-day Present + OT counts (OT = ≥2 IN punches/day), Sundays red, month man-day totals. Backend GET /api/admin/attendance-report/day-counts?month=YYYY-MM (routes/punch_logs.py).
+- Tapping a count deep-links to /daily-attendance?date=YYYY-MM-DD (param support added) showing the full employee list for that day.
+- PENDING (user asked earlier, not yet done): Punch Approval grid column restructure (Date/Code/Name/Father/Designation/In/Out/Duty HRS/OT In/OT Out/OT HRS/Total HRS/Status/Update Reason/Action) + landscape PDF daily report with Signature column from Punch Approval.

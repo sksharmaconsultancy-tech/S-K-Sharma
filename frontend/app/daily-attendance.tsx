@@ -17,7 +17,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
@@ -58,6 +58,7 @@ export default function DailyAttendance() {
   const { user } = useAuth();
   const router = useRouter();
   const { selectedCompanyId } = useSelectedCompany();
+  const params = useLocalSearchParams();
 
   const isAdmin =
     user?.role === "super_admin" ||
@@ -65,7 +66,11 @@ export default function DailyAttendance() {
     user?.role === "company_admin";
   const canPickFirm = user?.role !== "company_admin";
 
-  const [date, setDate] = useState<string>(isoDate(new Date()));
+  const [date, setDate] = useState<string>(() => {
+    // Iter 154 — deep link support: /daily-attendance?date=YYYY-MM-DD
+    const p = String((params as any)?.date || "");
+    return /^\d{4}-\d{2}-\d{2}$/.test(p) ? p : isoDate(new Date());
+  });
   const [companyId, setCompanyId] = useState<string | "all">(
     selectedCompanyId || "all",
   );

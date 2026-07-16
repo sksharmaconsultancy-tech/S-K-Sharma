@@ -18985,6 +18985,8 @@ from routes.punch_logs import router as punch_logs_router  # noqa: E402
 app.include_router(punch_logs_router)
 from routes.web_push import router as web_push_router  # noqa: E402
 app.include_router(web_push_router)
+from routes.sheet_verification import router as sheet_verification_router  # noqa: E402
+app.include_router(sheet_verification_router)
 app.include_router(compliance_settings_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
