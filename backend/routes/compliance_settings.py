@@ -8,6 +8,8 @@ ceilings, wage-base floor and whole-rupee rounding rules). Per-run
 Stored as a singleton doc in ``db.app_settings`` with key
 ``standard_compliance``.
 """
+import re
+import uuid
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Body, Header, HTTPException
@@ -28,6 +30,8 @@ _NUMERIC_FIELDS = (
     "pf_percent_employee", "pf_percent_employer_epf", "pf_percent_employer_eps",
     "pf_wage_cap", "esic_percent_employee", "esic_percent_employer",
     "esic_gross_threshold", "stat_wage_floor_pct",
+    # Iter 160 — EPF Act employer charge accounts
+    "pf_admin_percent", "pf_edli_percent", "pf_edli_admin_percent",
 )
 _ROUND_MODES = ("nearest", "ceil", "floor", "none")
 
@@ -112,10 +116,22 @@ async def save_firm_compliance_settings(
     return {"ok": True, "overrides": await get_firm_statutory_overrides(company_id)}
 
 
-async def get_standard_compliance_cfg() -> Dict[str, Any]:
+async def get_standard_compliance_cfg(on_date: Optional[str] = None) -> Dict[str, Any]:
     """Effective global statutory cfg = defaults overridden by the saved doc.
-    Imported by server.py when computing compliance runs."""
+    Imported by server.py when computing compliance runs.
+
+    Iter 160 — if ``on_date`` (YYYY-MM-DD) is given, the newest logged
+    version whose ``effective_from`` <= on_date is used, so salary runs
+    follow the policy that was in force for that period. Falls back to
+    the current singleton when no version applies (pre-versioning data).
+    """
     doc = await db.app_settings.find_one(_KEY, {"_id": 0}) or {}
+    if on_date:
+        ver = await db.compliance_settings_log.find_one(
+            {"effective_from": {"$lte": on_date}}, {"_id": 0},
+            sort=[("effective_from", -1), ("updated_at", -1)])
+        if ver:
+            doc = ver.get("settings") or {}
     cfg = dict(DEFAULT_STATUTORY_CFG)
     for k in _NUMERIC_FIELDS:
         if doc.get(k) is not None:
@@ -131,11 +147,16 @@ async def read_compliance_settings(authorization: Optional[str] = Header(None)):
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "sub_admin", "company_admin"])
     doc = await db.app_settings.find_one(_KEY, {"_id": 0}) or {}
+    log = await db.compliance_settings_log.find(
+        {}, {"_id": 0}).sort(
+        [("effective_from", -1), ("updated_at", -1)]).to_list(50)
     return {
         "settings": await get_standard_compliance_cfg(),
         "defaults": DEFAULT_STATUTORY_CFG,
         "updated_at": doc.get("updated_at"),
         "updated_by_name": doc.get("updated_by_name"),
+        "effective_from": doc.get("effective_from"),
+        "log": log,
     }
 
 
@@ -165,8 +186,22 @@ async def save_compliance_settings(
     if not upd:
         raise HTTPException(status_code=400, detail="Nothing to update")
 
+    # Iter 160 — effective date + version log.
+    eff = str(payload.get("effective_from") or "").strip() or now_iso()[:10]
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", eff):
+        raise HTTPException(status_code=400,
+                            detail="effective_from must be YYYY-MM-DD")
+    upd["effective_from"] = eff
     upd["updated_at"] = now_iso()
     upd["updated_by"] = admin["user_id"]
     upd["updated_by_name"] = admin.get("name") or admin.get("email") or ""
     await db.app_settings.update_one(_KEY, {"$set": upd, "$setOnInsert": _KEY}, upsert=True)
-    return {"ok": True, "settings": await get_standard_compliance_cfg()}
+    snapshot = await get_standard_compliance_cfg()
+    await db.compliance_settings_log.insert_one({
+        "log_id": f"csl_{uuid.uuid4().hex[:10]}",
+        "effective_from": eff,
+        "settings": snapshot,
+        "updated_at": upd["updated_at"],
+        "updated_by_name": upd["updated_by_name"],
+    })
+    return {"ok": True, "settings": snapshot}

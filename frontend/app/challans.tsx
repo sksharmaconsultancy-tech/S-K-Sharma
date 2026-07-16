@@ -302,6 +302,19 @@ export default function ChallansScreen() {
   };
   const [upJobs, setUpJobs] = useState<UpJob[]>([]);
   const [queueing, setQueueing] = useState<string | null>(null);
+  // Iter 161 — on-screen data preview before portal upload.
+  const [preview, setPreview] = useState<any>(null);
+  const [previewBusy, setPreviewBusy] = useState<string>("");
+  const loadPreview = async (kind: "epfo" | "esic") => {
+    if (!selRunId) return;
+    if (preview?.kind === kind) { setPreview(null); return; } // toggle off
+    setPreviewBusy(kind);
+    try {
+      setPreview(await api<any>(`/admin/challans/portal-preview?run_id=${selRunId}&kind=${kind}`));
+    } catch (e: any) {
+      if (Platform.OS === "web") globalThis.alert(e?.message || "Preview failed");
+    } finally { setPreviewBusy(""); }
+  };
 
   const loadUpJobs = React.useCallback(async () => {
     try {
@@ -372,6 +385,25 @@ export default function ChallansScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: spacing.md, gap: spacing.md }}>
+        {/* Iter 161 — direct access to the new PF / ESIC report hubs */}
+        <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+          <Pressable
+            onPress={() => router.push("/pf-reports?kind=pf" as any)}
+            style={styles2.quickBtn}
+            testID="quick-pf-reports"
+          >
+            <Ionicons name="briefcase-outline" size={15} color="#fff" />
+            <Text style={styles2.quickTxt}>PF Reports (Challan + ECR)</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => router.push("/pf-reports?kind=esic" as any)}
+            style={styles2.quickBtn}
+            testID="quick-esic-reports"
+          >
+            <Ionicons name="medkit-outline" size={15} color="#fff" />
+            <Text style={styles2.quickTxt}>ESIC Reports (Sheet + Challan)</Text>
+          </Pressable>
+        </View>
         {/* Iter 95i — EPFO / ESIC portal upload file generator */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>🏛️ Portal Upload Files (EPFO ECR / ESIC MC)</Text>
@@ -482,6 +514,24 @@ export default function ChallansScreen() {
           </Text>
           <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
             <Pressable
+              onPress={() => loadPreview("epfo")}
+              disabled={!!previewBusy || !selRunId}
+              style={[styles.uploadBtn, { backgroundColor: "#334155" }, !!previewBusy && { opacity: 0.6 }]}
+              testID="preview-epfo"
+            >
+              {previewBusy === "epfo" ? <ActivityIndicator size="small" color="#FFF" /> : <Ionicons name="eye-outline" size={14} color="#FFF" />}
+              <Text style={styles.uploadBtnTxt}>{preview?.kind === "epfo" ? "Hide EPF Data" : "Preview EPF Data"}</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => loadPreview("esic")}
+              disabled={!!previewBusy || !selRunId}
+              style={[styles.uploadBtn, { backgroundColor: "#475569" }, !!previewBusy && { opacity: 0.6 }]}
+              testID="preview-esic"
+            >
+              {previewBusy === "esic" ? <ActivityIndicator size="small" color="#FFF" /> : <Ionicons name="eye-outline" size={14} color="#FFF" />}
+              <Text style={styles.uploadBtnTxt}>{preview?.kind === "esic" ? "Hide ESIC Data" : "Preview ESIC Data"}</Text>
+            </Pressable>
+            <Pressable
               onPress={() => queueUpload("epfo")}
               disabled={!!queueing}
               style={[styles.uploadBtn, { backgroundColor: "#7C3AED" }, !!queueing && { opacity: 0.6 }]}
@@ -500,6 +550,42 @@ export default function ChallansScreen() {
               <Text style={styles.uploadBtnTxt}>Auto-Upload ESIC Bulk Sheet → ESIC</Text>
             </Pressable>
           </View>
+          {/* Iter 161 — data table shown BEFORE allowing portal upload */}
+          {preview ? (
+            <View style={{ marginTop: 10, borderWidth: 1, borderColor: "#E2E8F0", borderRadius: 8, overflow: "hidden" }}>
+              <View style={{ backgroundColor: "#F1F5F9", padding: 8 }}>
+                <Text style={{ fontSize: 12, fontWeight: "800", color: colors.onSurface }}>
+                  {preview.kind === "epfo" ? "EPF ECR Data" : "ESIC Upload Data"} · {preview.month} ·{" "}
+                  {preview.totals.uploadable}/{preview.totals.members} members uploadable
+                  {preview.kind === "epfo"
+                    ? ` · EE ₹${preview.totals.epf_ee} · EPS ₹${preview.totals.eps_er} · ER ₹${preview.totals.diff_er}`
+                    : ` · Wages ₹${preview.totals.wages} · EE ₹${preview.totals.ee}`}
+                </Text>
+              </View>
+              <View style={{ flexDirection: "row", backgroundColor: "#F8FAFC", borderBottomWidth: 1, borderBottomColor: "#E2E8F0" }}>
+                {(preview.kind === "epfo"
+                  ? ["UAN", "Name", "Gross", "EPF Wg", "EPS Wg", "EE", "EPS", "ER", "NCP"]
+                  : ["IP Number", "Name", "Days", "Wages", "EE Contri."]
+                ).map((h) => (
+                  <Text key={h} style={{ flex: h === "Name" ? 2 : 1, padding: 6, fontSize: 10.5, fontWeight: "800", color: colors.onSurfaceSecondary }}>{h}</Text>
+                ))}
+              </View>
+              {(preview.lines || []).map((x: any, i: number) => (
+                <View key={i} style={{ flexDirection: "row", borderBottomWidth: 1, borderBottomColor: "#F1F5F9", backgroundColor: x.skipped ? "#FEF2F2" : undefined }}>
+                  {(preview.kind === "epfo"
+                    ? [x.uan || "⚠ no UAN", x.name, x.gross, x.epf_wages, x.eps_wages, x.epf_ee, x.eps_er, x.diff_er, x.ncp]
+                    : [x.ip_no || "⚠ no IP", x.name, x.days, x.wages, x.ee]
+                  ).map((v: any, j: number) => (
+                    <Text key={j} style={{ flex: j === 1 ? 2 : 1, padding: 6, fontSize: 10.5, color: x.skipped ? "#B91C1C" : colors.onSurface }}>{String(v)}</Text>
+                  ))}
+                </View>
+              ))}
+              <Text style={{ padding: 6, fontSize: 10, color: colors.onSurfaceTertiary }}>
+                Rows in red are missing UAN / IP number and will be SKIPPED by the portal upload.
+                Verify this data, then use the Auto-Upload button above.
+              </Text>
+            </View>
+          ) : null}
           {upJobs.length > 0 ? (
             <View style={{ marginTop: 10, gap: 8 }}>
               {upJobs.map((j) => {
@@ -782,4 +868,14 @@ const styles = StyleSheet.create({
   },
   tRowAlt: { backgroundColor: colors.surfaceSecondary },
   tC: { padding: 8, ...type.caption, color: colors.onSurface },
+});
+
+// Iter 161 — quick-access buttons to the PF / ESIC report hubs.
+const styles2 = StyleSheet.create({
+  quickBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: colors.brandPrimary, paddingHorizontal: 14,
+    paddingVertical: 10, borderRadius: radius.sm,
+  },
+  quickTxt: { color: "#fff", fontSize: 12, fontWeight: "700" },
 });

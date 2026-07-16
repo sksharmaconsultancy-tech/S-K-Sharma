@@ -19,6 +19,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 import { api } from "@/src/api/client";
+import DateField from "@/src/components/DateField";
 import { useAuth } from "@/src/context/AuthContext";
 import { colors, radius, spacing } from "@/src/theme";
 
@@ -28,6 +29,9 @@ const NUM_FIELDS: { key: string; label: string; suffix: string; group: "pf" | "e
   { key: "pf_percent_employee", label: "PF — Employee share", suffix: "%", group: "pf" },
   { key: "pf_percent_employer_epf", label: "PF — Employer EPF share", suffix: "%", group: "pf" },
   { key: "pf_percent_employer_eps", label: "PF — Employer EPS (Pension)", suffix: "%", group: "pf" },
+  { key: "pf_admin_percent", label: "EPF Admin Charges (A/c 2)", suffix: "%", group: "pf" },
+  { key: "pf_edli_percent", label: "EDLI Contribution (A/c 21)", suffix: "%", group: "pf" },
+  { key: "pf_edli_admin_percent", label: "EDLI Admin Charges (A/c 22)", suffix: "%", group: "pf" },
   { key: "pf_wage_cap", label: "EPF wage ceiling", suffix: "₹", group: "pf" },
   { key: "esic_percent_employee", label: "ESIC — Employee share", suffix: "%", group: "esic" },
   { key: "esic_percent_employer", label: "ESIC — Employer share", suffix: "%", group: "esic" },
@@ -52,6 +56,9 @@ export default function ComplianceSettingsScreen() {
 
   const [form, setForm] = useState<Cfg>({});
   const [meta, setMeta] = useState<{ updated_at?: string; updated_by_name?: string }>({});
+  // Iter 160 — effective date + change log (Standard scope only).
+  const [effectiveFrom, setEffectiveFrom] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [log, setLog] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [banner, setBanner] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
@@ -72,12 +79,14 @@ export default function ComplianceSettingsScreen() {
     try {
       let settings: Cfg;
       if (scope === "standard") {
-        const r = await api<{ settings: Cfg; updated_at?: string; updated_by_name?: string }>(
+        const r = await api<any>(
           "/admin/compliance-settings",
         );
         settings = r.settings || {};
         setHasOverride(false);
         setMeta({ updated_at: r.updated_at, updated_by_name: r.updated_by_name });
+        setLog(r.log || []);
+        if (r.effective_from) setEffectiveFrom(r.effective_from);
       } else {
         const r = await api<{ effective: Cfg; has_override: boolean; overrides: Cfg }>(
           `/admin/compliance-settings/firm/${scope}`,
@@ -118,7 +127,7 @@ export default function ComplianceSettingsScreen() {
         body[key] = v;
       }
       if (scope === "standard") {
-        await api("/admin/compliance-settings", { method: "PUT", body });
+        await api("/admin/compliance-settings", { method: "PUT", body: { ...body, effective_from: effectiveFrom } });
         await load();
         setBanner({ kind: "ok", msg: "Standard settings saved — applies to ALL firms from the next Salary Process / Re-calculate." });
       } else {
@@ -262,6 +271,14 @@ export default function ComplianceSettingsScreen() {
           <>
             <Section title="Provident Fund (PF)" icon="shield-checkmark-outline">
               {NUM_FIELDS.filter((f) => f.group === "pf").map((f) => <NumRow key={f.key} f={f} />)}
+              {/* Iter 160 — employer TOTAL per EPF Act accounts */}
+              <View style={[styles.fieldRow, { backgroundColor: "#F0F9FF", borderRadius: 8, paddingHorizontal: 8 }]}>
+                <Text style={[styles.fieldLbl, { fontWeight: "700" }]}>Employer TOTAL (EPF + EPS + A/c 2 + A/c 21 + A/c 22)</Text>
+                <Text style={{ fontWeight: "800", color: colors.brandPrimary, fontSize: 13 }}>
+                  {(["pf_percent_employer_epf", "pf_percent_employer_eps", "pf_admin_percent", "pf_edli_percent", "pf_edli_admin_percent"]
+                    .reduce((n, k) => n + (Number(form[k]) || 0), 0)).toFixed(2)}%
+                </Text>
+              </View>
               <RoundPicker k="pf_rounding" label="PF rounding" />
               <Text style={styles.hint}>
                 PF wages = max(Basic, floor% of gross) capped at the ceiling — unless the
@@ -286,6 +303,38 @@ export default function ComplianceSettingsScreen() {
                 PF & ESIC wage base = max(Basic, this % of Gross Earning) — new labour code rule.
               </Text>
             </Section>
+
+            {scope === "standard" ? (
+              <Section title="Effective Date & Change Log" icon="calendar-outline">
+                <View style={styles.fieldRow}>
+                  <Text style={styles.fieldLbl}>Effective from (policy applies to salary months on/after this date)</Text>
+                  <DateField value={effectiveFrom} onChangeISO={(v) => v && setEffectiveFrom(v)} testID="cs-effective-from" />
+                </View>
+                {log.length === 0 ? (
+                  <Text style={styles.hint}>No changes logged yet — every save is recorded here with its effective date.</Text>
+                ) : (
+                  log.map((l, i) => {
+                    const s = l.settings || {};
+                    return (
+                      <View key={l.log_id || i} style={{ borderTopWidth: i ? 1 : 0, borderTopColor: colors.border, paddingVertical: 6 }}>
+                        <Text style={{ fontSize: 12, fontWeight: "700", color: colors.onSurface }}>
+                          Effective {l.effective_from}
+                          <Text style={{ fontWeight: "400", color: colors.onSurfaceTertiary }}>
+                            {"  ·  saved "}{(l.updated_at || "").slice(0, 10)} by {l.updated_by_name || "—"}
+                          </Text>
+                        </Text>
+                        <Text style={{ fontSize: 11, color: colors.onSurfaceSecondary, marginTop: 2 }}>
+                          PF {s.pf_percent_employee}% / EPF {s.pf_percent_employer_epf}% / EPS {s.pf_percent_employer_eps}% ·
+                          A/c2 {s.pf_admin_percent ?? 0.5}% · A/c21 {s.pf_edli_percent ?? 0.5}% · A/c22 {s.pf_edli_admin_percent ?? 0}% ·
+                          Ceiling ₹{s.pf_wage_cap} · ESIC {s.esic_percent_employee}%/{s.esic_percent_employer}% (limit ₹{s.esic_gross_threshold}) ·
+                          Floor {s.stat_wage_floor_pct}%
+                        </Text>
+                      </View>
+                    );
+                  })
+                )}
+              </Section>
+            ) : null}
 
             {isSuper ? (
               <>
