@@ -40,6 +40,9 @@ type SubAdmin = {
   sub_admin_company_scope: "all" | "restricted";
   sub_admin_company_ids: string[];
   disabled?: boolean;
+  disabled_reason?: string | null;
+  pin_last_login_at?: string | null;
+  password_last_login_at?: string | null;
   created_at?: string;
   password_must_change?: boolean;
   // Iter 94 — per-sidebar-button visibility ({route: false} == hidden)
@@ -241,6 +244,18 @@ export default function SubAdminsScreen() {
                     ? "All companies"
                     : `${r.sub_admin_company_ids?.length || 0} companies`}
                   {r.password_must_change ? "  ·  🔐 must change password" : ""}
+                </Text>
+                <Text style={styles.meta2}>
+                  Last login:{" "}
+                  {(() => {
+                    const a = r.pin_last_login_at || "";
+                    const b = r.password_last_login_at || "";
+                    const last = a > b ? a : b;
+                    return last ? new Date(last).toLocaleDateString("en-IN") : "never";
+                  })()}
+                  {r.disabled && r.disabled_reason === "auto_inactivity"
+                    ? "  ·  ⏸ auto-disabled (30 days inactive)"
+                    : ""}
                 </Text>
               </View>
               <View style={styles.rowActions}>

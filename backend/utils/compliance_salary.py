@@ -798,28 +798,45 @@ def build_compliance_register_pdf(
     widths = [6, 26, 23, 13, 8, 11, 9, 9, 9, 11, 9, 8, 8, 9, 8, 11, 12, 10]
     # Landscape — stretch the reference column ratios to the full width.
     _scale = (W - 12 * mm) / (sum(widths) * mm)
-    tbl = Table(data, colWidths=[wmm * mm * _scale for wmm in widths], repeatRows=2)
-    last = len(data) - 1
-    tbl.setStyle(TableStyle([
-        ("SPAN", (5, 0), (9, 0)), ("SPAN", (10, 0), (15, 0)),
-        ("SPAN", (0, 0), (0, 1)), ("SPAN", (1, 0), (1, 1)), ("SPAN", (2, 0), (2, 1)),
-        ("SPAN", (3, 0), (3, 1)), ("SPAN", (4, 0), (4, 1)),
-        ("SPAN", (16, 0), (16, 1)), ("SPAN", (17, 0), (17, 1)),
-        ("FONTNAME", (0, 0), (-1, 1), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 1), 6.5),
-        ("FONTNAME", (0, 2), (-1, -1), "Helvetica"),
-        ("FONTSIZE", (0, 2), (-1, -1), 6.5),
-        ("FONTNAME", (0, last), (-1, last), "Helvetica-Bold"),
-        ("ALIGN", (0, 0), (-1, 1), "CENTER"),
-        ("ALIGN", (4, 2), (-1, -1), "RIGHT"),
-        ("ALIGN", (0, 2), (0, -1), "CENTER"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("GRID", (0, 0), (-1, -1), 0.4, rl_colors.black),
-        ("LEFTPADDING", (0, 0), (-1, -1), 1.5),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 1.5),
-        ("TOPPADDING", (0, 0), (-1, -1), 1),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
-    ]))
+    col_widths = [wmm * mm * _scale for wmm in widths]
+
+    def _base_style() -> list:
+        return [
+            ("SPAN", (5, 0), (9, 0)), ("SPAN", (10, 0), (15, 0)),
+            ("SPAN", (0, 0), (0, 1)), ("SPAN", (1, 0), (1, 1)), ("SPAN", (2, 0), (2, 1)),
+            ("SPAN", (3, 0), (3, 1)), ("SPAN", (4, 0), (4, 1)),
+            ("SPAN", (16, 0), (16, 1)), ("SPAN", (17, 0), (17, 1)),
+            ("FONTNAME", (0, 0), (-1, 1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 1), 6.5),
+            ("FONTNAME", (0, 2), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 2), (-1, -1), 6.5),
+            ("ALIGN", (0, 0), (-1, 1), "CENTER"),
+            ("ALIGN", (4, 2), (-1, -1), "RIGHT"),
+            ("ALIGN", (0, 2), (0, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("GRID", (0, 0), (-1, -1), 0.4, rl_colors.black),
+            ("LEFTPADDING", (0, 0), (-1, -1), 1.5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 1.5),
+            ("TOPPADDING", (0, 0), (-1, -1), 1),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+        ]
+
+    # Iter 157 (user request) — fixed 10 employees per A4-landscape page.
+    PER_PAGE = 10
+    body_rows = data[2:-1]  # employee rows (skip the 2 header rows + total)
+    grand_row = data[-1]
+    chunks = [body_rows[i:i + PER_PAGE]
+              for i in range(0, len(body_rows), PER_PAGE)] or [[]]
+    page_tables: List[Any] = []
+    for ci, ch in enumerate(chunks):
+        is_final = ci == len(chunks) - 1
+        d = [hdr_top, hdr_sub] + ch + ([grand_row] if is_final else [])
+        t = Table(d, colWidths=col_widths, repeatRows=2)
+        st = _base_style()
+        if is_final:
+            st.append(("FONTNAME", (0, len(d) - 1), (-1, len(d) - 1), "Helvetica-Bold"))
+        t.setStyle(TableStyle(st))
+        page_tables.append(t)
 
     # ---- summary page -----------------------------------------------------
     lbl = ParagraphStyle("lbl", fontName="Helvetica", fontSize=8, leading=11)
@@ -839,7 +856,10 @@ def build_compliance_register_pdf(
         ]))
         return t
 
-    story: List[Any] = [tbl, PageBreak()]
+    story: List[Any] = []
+    for t in page_tables:
+        story.append(t)
+        story.append(PageBreak())
     story.append(sec([
         ("No. Of Emp", str(len(rows))),
         ("Total Salary Amount", A(tot["sal"])),
@@ -911,7 +931,7 @@ def build_compliance_register_pdf_v2(
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.pdfgen import canvas as rl_canvas
     from reportlab.platypus import (
-        BaseDocTemplate, Frame, PageTemplate,
+        BaseDocTemplate, Frame, PageTemplate, PageBreak,
         Paragraph, Spacer, Table, TableStyle,
     )
     from utils.salary_register_pdf import _num_to_words_inr
@@ -1055,30 +1075,47 @@ def build_compliance_register_pdf_v2(
 
     widths = [7, 12, 40, 24, 18, 8, 13, 12, 12, 12, 15, 12, 11, 12, 11, 15, 15]
     _scale = (W - 12 * mm) / (sum(widths) * mm)
-    tbl = Table(data, colWidths=[wmm * mm * _scale for wmm in widths], repeatRows=1)
-    last = len(data) - 1
-    style = [
-        ("BACKGROUND", (0, 0), (-1, 0), BRAND),
-        ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 7),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-        ("FONTSIZE", (0, 1), (-1, -1), 6.8),
-        ("FONTNAME", (0, last), (-1, last), "Helvetica-Bold"),
-        ("BACKGROUND", (0, last), (-1, last), BAND),
-        ("ALIGN", (5, 0), (-1, -1), "RIGHT"),
-        ("ALIGN", (0, 0), (1, -1), "CENTER"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("GRID", (0, 0), (-1, -1), 0.35, rl_colors.HexColor("#B9C4CE")),
-        ("LEFTPADDING", (0, 0), (-1, -1), 2.5),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 2.5),
-        ("TOPPADDING", (0, 0), (-1, -1), 2),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-    ]
-    for ri in range(1, last):
-        if ri % 2 == 0:
-            style.append(("BACKGROUND", (0, ri), (-1, ri), ZEBRA))
-    tbl.setStyle(TableStyle(style))
+    col_widths = [wmm * mm * _scale for wmm in widths]
+
+    def _v2_style(n_body: int, zebra_offset: int, is_final: bool) -> TableStyle:
+        last = n_body + (1 if is_final else 0)  # grand-total row index
+        style = [
+            ("BACKGROUND", (0, 0), (-1, 0), BRAND),
+            ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 7),
+            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 1), (-1, -1), 6.8),
+            ("ALIGN", (5, 0), (-1, -1), "RIGHT"),
+            ("ALIGN", (0, 0), (1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("GRID", (0, 0), (-1, -1), 0.35, rl_colors.HexColor("#B9C4CE")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 2.5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 2.5),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ]
+        if is_final:
+            style.append(("FONTNAME", (0, last), (-1, last), "Helvetica-Bold"))
+            style.append(("BACKGROUND", (0, last), (-1, last), BAND))
+        for ri in range(1, n_body + 1):
+            if (zebra_offset + ri) % 2 == 0:
+                style.append(("BACKGROUND", (0, ri), (-1, ri), ZEBRA))
+        return TableStyle(style)
+
+    # Iter 157 (user request) — fixed 10 employees per A4-landscape page.
+    PER_PAGE = 10
+    body_rows = data[1:-1]
+    grand_row = data[-1]
+    chunks = [body_rows[i:i + PER_PAGE]
+              for i in range(0, len(body_rows), PER_PAGE)] or [[]]
+    page_tables: List[Any] = []
+    for ci, ch in enumerate(chunks):
+        is_final = ci == len(chunks) - 1
+        d = [header] + ch + ([grand_row] if is_final else [])
+        t = Table(d, colWidths=col_widths, repeatRows=1)
+        t.setStyle(_v2_style(len(ch), ci * PER_PAGE, is_final))
+        page_tables.append(t)
 
     lbl = ParagraphStyle("lbl", fontName="Helvetica", fontSize=8.5, leading=12)
     lblb = ParagraphStyle("lblb", fontName="Helvetica-Bold", fontSize=8.5, leading=12)
@@ -1108,8 +1145,12 @@ def build_compliance_register_pdf_v2(
         ("TOPPADDING", (0, 1), (-1, 1), 14),
     ]))
 
-    story: List[Any] = [
-        tbl,
+    story: List[Any] = []
+    for ci, t in enumerate(page_tables):
+        story.append(t)
+        if ci < len(page_tables) - 1:
+            story.append(PageBreak())
+    story += [
         Spacer(1, 4 * mm),
         summary,
         Spacer(1, 3 * mm),
@@ -1129,10 +1170,6 @@ def parse_month(month_str: str) -> tuple[int, int]:
     mo = int(m.group(2))
     if not (2020 <= y <= 2100):
         raise ValueError("year out of range")
-    if not (1 <= mo <= 12):
-        raise ValueError("month must be 1..12")
-    return y, mo
-
     if not (1 <= mo <= 12):
         raise ValueError("month must be 1..12")
     return y, mo

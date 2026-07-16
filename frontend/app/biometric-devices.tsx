@@ -776,7 +776,29 @@ function SetupGuide({ devices }: { devices: Device[] }) {
         employee. The device card here will turn <Text style={styles.b}>Online</Text> once it
         starts pushing.
       </GuideStep>
-      <GuideStep n={7} title="Approval policy">
+      <GuideStep n={7} title="Keep the connection stable (IP & power)">
+        The machine always dials <Text style={styles.b}>out</Text> to the server, so the
+        machine&apos;s own IP changing does <Text style={styles.b}>not</Text> break punch
+        syncing. Still, give the machine a fixed IP so it is always reachable on your LAN:
+        {"\n\n"}
+        <Text style={styles.mono}>
+          Menu → Comm → Ethernet
+          {"\n"}DHCP: OFF
+          {"\n"}IP Address: 192.168.1.201 (pick one outside the router&apos;s DHCP range)
+          {"\n"}Subnet Mask: 255.255.255.0
+          {"\n"}Gateway: your router IP (usually 192.168.1.1)
+          {"\n"}DNS: 8.8.8.8
+        </Text>
+        {"\n\n"}
+        (Alternative: keep DHCP ON and add a <Text style={styles.b}>DHCP reservation</Text>{" "}
+        for the machine&apos;s MAC address in your router — same fixed IP, no device change.)
+        {"\n\n"}
+        <Text style={styles.b}>After a power cut:</Text> the machine sometimes boots before
+        the internet router is ready and then waits on a long retry cycle. If punches stop
+        appearing for 2–3 minutes, restart the machine once. Best practice: power the machine
+        and router from a small UPS so both stay online together.
+      </GuideStep>
+      <GuideStep n={8} title="Approval policy">
         Machine punches are <Text style={styles.b}>auto-approved</Text> — they skip the
         Punch-Approvals queue (which is used only for mobile auto-punches). If a device pushes
         a User ID that is not enrolled in the app, it lands in the{" "}
@@ -848,6 +870,14 @@ function buildSetupGuideText(devices: Device[]): string {
     "3. Save & restart the device. It connects within 30–60 seconds.",
     "4. Enrol employees — set each app user's `bio_code` to the number they punch on the device.",
     "5. Punch on the device — it appears in the app within 3–5 seconds.",
+    "",
+    "KEEPING THE CONNECTION STABLE (IP & POWER):",
+    "  • The machine dials OUT to the server — its own IP changing does NOT break syncing.",
+    "  • Still, set a fixed IP: Menu → Comm → Ethernet → DHCP OFF →",
+    "      IP 192.168.1.201 / Subnet 255.255.255.0 / Gateway (router IP) / DNS 8.8.8.8",
+    "    (or add a DHCP reservation for the machine's MAC address in the router).",
+    "  • After a power cut, if punches stop for 2–3 minutes, restart the machine once",
+    "    (it may have booted before the router). Ideally power machine + router via a UPS.",
     "",
     `Entry / Both device: SN ${inD?.serial_number || "(register first)"}`,
     `Exit (OUT) device:  SN ${outD?.serial_number || "(only for IN+OUT pairs)"}`,

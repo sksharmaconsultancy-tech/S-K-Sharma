@@ -452,6 +452,35 @@ export default function ProfileEditScreen() {
           </View>
 
           {/* Family details block */}
+          {/* Iter 155 — post-joining document scanning (Aadhaar + Bank) for
+              employees who skipped scanning at joining time. */}
+          {Platform.OS === "web" && (
+            <View style={styles.card}>
+              <View style={styles.cardHead}>
+                <Ionicons name="scan-outline" size={16} color={colors.brandPrimary} />
+                <Text style={styles.cardHeadTitle}>Scan documents</Text>
+              </View>
+              <Text style={styles.helperTxt}>
+                Didn&apos;t scan at joining? Scan now — details & the document copy
+                are saved to your profile automatically.
+              </Text>
+              <View style={{ gap: 8, marginTop: 4 }}>
+                <ScanOCRButton
+                  documentType="aadhaar"
+                  endpoint="/ocr/parse-my-document"
+                  label="Scan my Aadhaar card"
+                  onApply={() => { setErr(null); setOkMsg("Aadhaar details saved to your profile ✓"); }}
+                />
+                <ScanOCRButton
+                  documentType="bank_passbook"
+                  endpoint="/ocr/parse-my-document"
+                  label="Scan my Bank passbook / cheque"
+                  onApply={() => { setErr(null); setOkMsg("Bank details saved to your profile ✓"); }}
+                />
+              </View>
+            </View>
+          )}
+
           <View style={styles.card}>
             <View style={styles.cardHead}>
               <Ionicons

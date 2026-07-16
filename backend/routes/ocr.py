@@ -47,6 +47,12 @@ DOC_PROMPTS: Dict[str, str] = {
         "The card is often bilingual (Hindi + English) - use whichever "
         "you can read clearly. If a field is not visible, set it to null."
     ),
+    "bank_passbook": (
+        "This is an Indian bank passbook front page / cancelled cheque. Extract:\n"
+        "  account_holder_name, bank_account_number (digits only), "
+        "ifsc_code (AAAA0XXXXXX), bank_name, branch_name\n"
+        "If a field is not visible, set it to null."
+    ),
     "pan": (
         "This is an Indian PAN card. Extract these fields:\n"
         "  name (as printed - person's name), father_name, "
@@ -184,6 +190,14 @@ async def ocr_parse_my_document(
                 "present_address": "present_address",
                 "father_name": "father_name",
                 "name": "name_as_per_aadhar",
+                # Iter 155 — bank passbook / cancelled cheque scan.
+                "bank_account_number": "bank_account_number",
+                "account_no": "bank_account_number",
+                "ifsc_code": "ifsc_code",
+                "ifsc": "ifsc_code",
+                "bank_name": "bank_name",
+                "branch_name": "bank_branch",
+                "account_holder_name": "name_as_per_bank",
             }
             fresh = await db.users.find_one(
                 {"user_id": user["user_id"]},

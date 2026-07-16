@@ -197,6 +197,10 @@ async def daily_attendance(
              "source": 1, "device_serial": 1},
     ).sort([("at", 1)]).to_list(50000)
 
+    def _is_machine(src: str) -> bool:
+        s = (src or "").lower()
+        return s.startswith("zkteco") or s.startswith("import:") or "machine" in s
+
     by_user: Dict[str, List[dict]] = {}
     for r in recs:
         by_user.setdefault(r.get("user_id") or "", []).append(r)
@@ -243,6 +247,18 @@ async def daily_attendance(
         status = "present" if precs else "absent"
         if precs:
             present += 1
+        # Iter 155 — expected punching mode vs how they actually punched.
+        expected = "biometric" if (e.get("bio_code") or "").strip() else "manual"
+        machine_cnt = sum(1 for p in precs if _is_machine(p.get("source") or ""))
+        if not precs:
+            actual = None
+        elif machine_cnt == len(precs):
+            actual = "machine"
+        elif machine_cnt == 0:
+            actual = "app"
+        else:
+            actual = "mixed"
+        mode_mismatch = expected == "biometric" and actual in ("app", "mixed")
         rows.append({
             "user_id": e["user_id"],
             "name": e.get("name") or "",
@@ -255,6 +271,9 @@ async def daily_attendance(
             "last_out": str(last_out.get("at"))[11:16] if last_out else None,
             "worked_hrs": round(worked / 60, 2) if worked else 0,
             "still_in": bool(precs) and precs[-1].get("kind") == "in",
+            "mode_expected": expected,
+            "mode_actual": actual,
+            "mode_mismatch": mode_mismatch,
         })
 
     rows.sort(key=lambda r: (r["status"] != "present",
@@ -264,6 +283,7 @@ async def daily_attendance(
         "total": len(rows),
         "present": present,
         "absent": len(rows) - present,
+        "mismatch": sum(1 for r in rows if r.get("mode_mismatch")),
         "rows": rows,
     }
 

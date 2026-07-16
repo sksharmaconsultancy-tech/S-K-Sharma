@@ -751,3 +751,14 @@ Verified: /admin/actual-salary-process for 2026-03 (no compliance) → epf/esi 0
 - Reports → "Day-wise Present Count": month nav (1–31), firm picker, per-day Present + OT counts (OT = ≥2 IN punches/day), Sundays red, month man-day totals. Backend GET /api/admin/attendance-report/day-counts?month=YYYY-MM (routes/punch_logs.py).
 - Tapping a count deep-links to /daily-attendance?date=YYYY-MM-DD (param support added) showing the full employee list for that day.
 - PENDING (user asked earlier, not yet done): Punch Approval grid column restructure (Date/Code/Name/Father/Designation/In/Out/Duty HRS/OT In/OT Out/OT HRS/Total HRS/Status/Update Reason/Action) + landscape PDF daily report with Signature column from Punch Approval.
+
+## Iter 156 — DB Backup download fix + VPS deploy (2026-07-16)
+- VPS deployed via temp-code-bundle tar (GitHub main lacked db_backup commit); killed stale uvicorn holding 8001 (spawn error). /api/admin/database-backup live (401).
+- BUGFIX database-backup.tsx: URL.createObjectURL(res) called on apiBinary wrapper object → "Overload resolution failed". Now uses res.webBlobUrl (same pattern as contribution-sheets). E2E verified: zip downloads.
+
+## Iter 157 — Sub Admin inactivity auto-disable + Compliance PDF 10-per-page (user requests, both tested)
+- NEW routes/sub_admin_inactivity.py: inactivity_loop (6h sweep, started in server.py startup). Warn sub admin at 25d inactive (in-app + push + email, once per inactivity period via inactivity_warned_for=last_activity_iso); auto-disable at 30d (disabled=true, disabled_reason=auto_inactivity, auto_disabled_at) + notify ALL super admins (in-app + push + email). Last activity = max(pin_last_login_at, password_last_login_at, reactivated_at, created_at). Email via email_notifications _get_settings/_send_and_log (works on VPS where SMTP configured).
+- server.py PATCH /admin/sub-admins/{id}: disabled=true sets disabled_reason=manual; disabled=false clears flags + sets reactivated_at (resets clock).
+- sub-admins.tsx: row shows "Last login: <date>" + "⏸ auto-disabled (30 days inactive)" chip.
+- utils/compliance_salary.py BOTH register builders (v1 Form-27 + v2 modern): fixed 10 employees per A4-landscape page (chunked tables + PageBreak, headers repeat, GRAND TOTAL on last page, v2 zebra uses global index). Verified: 55-row run → v1 7 pages, v2 6 pages. NOTE: parse_month tail had pre-existing dead-code garbage — cleaned.
+- Tested via direct _tick(): warn@26d ✓, disable@31d + super notif ✓, idempotent ✓, test sub-admin state restored.
