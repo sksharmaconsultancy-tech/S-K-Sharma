@@ -2175,6 +2175,14 @@ async def startup():
     except Exception:
         logger.exception("[startup] daily attendance report scheduler failed to start")
 
+    # Iter 146 — geofence punch reminder: web-push employees who are inside
+    # the office geofence but haven't punched in yet (max 1/day, 10-min scan).
+    try:
+        from routes.web_push import punch_reminder_loop
+        asyncio.create_task(punch_reminder_loop())
+    except Exception:
+        logger.exception("[startup] punch reminder loop failed to start")
+
 
 async def _bg_enforce_geofence_defaults():
     """Iter 68 — Enforce the new default: geofence ON + strict rejection
