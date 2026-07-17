@@ -18,6 +18,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { api } from "@/src/api/client";
 import PolicyVariantPicker from "@/src/components/PolicyVariantPicker";
+import PolicyMasterSummary from "@/src/components/PolicyMasterSummary";
 import useEnterNav from "@/src/hooks/useEnterNav";
 import useSaveShortcut from "@/src/hooks/useSaveShortcut";
 import { useAuth } from "@/src/context/AuthContext";
@@ -799,7 +800,19 @@ export default function FirmMasterScreen() {
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.md }}>
           <View style={{ flex: 1, minWidth: 380 }}>
             <Section icon="time-outline" title="10a. Attendance Policy Variant">
-              <PolicyVariantPicker companyId={companyId} onVariantChange={setPolicyVariant} />
+              {/* Iter 175 (user rule) — the Policy Selection option only
+                  shows when an Industry Type is selected AND Off-roll
+                  (Offline) Salary AND Biometric Attendance are enabled. */}
+              {(h.category || "").trim() && sp.offline_salary && sp.bio_matrix_attendance ? (
+                <PolicyVariantPicker companyId={companyId} onVariantChange={setPolicyVariant} />
+              ) : (
+                <Text style={{ fontSize: 11.5, color: colors.onSurfaceTertiary }}>
+                  Policy selection unlocks when: ① Industry Type is selected
+                  (Firm Category), ② Offline Salary is enabled and ③ Bio Matrix
+                  Attendance is enabled in Salary Process Settings.
+                </Text>
+              )}
+              <PolicyMasterSummary companyId={companyId} />
             </Section>
 
             {/* Iter 175 — Contractor Employees (Policy 2 only). */}

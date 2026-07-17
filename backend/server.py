@@ -1126,6 +1126,32 @@ def _validate_policy(raw: dict) -> dict:
             detail="OT Calculation: choose EITHER % of Basic OR % of Gross — not both.",
         )
 
+    # Iter 175 — Policy Master "Sub Points" (user-specified catalogue).
+    # Free config block; sanitised to known keys with safe defaults.
+    pm_raw = raw.get("policy_master") if isinstance(raw.get("policy_master"), dict) else {}
+    def _choice(key: str, options: List[str], default: str) -> str:
+        v = str(pm_raw.get(key) or default).strip().lower()
+        return v if v in options else default
+    def _flag(key: str, default: bool = False) -> bool:
+        return bool(pm_raw.get(key, default))
+    _punch_types = pm_raw.get("punch_types")
+    if not isinstance(_punch_types, list):
+        _punch_types = ["biometric", "mobile"]
+    _punch_types = [p for p in ("biometric", "mobile", "manual", "gps")
+                    if p in [str(x).lower() for x in _punch_types]]
+    policy_master = {
+        "attendance_basis": _choice("attendance_basis", ["monthly", "daily", "hourly"], "monthly"),
+        "shift_type": _choice("shift_type", ["fixed", "rotational", "open"], "fixed"),
+        "punch_types": _punch_types or ["biometric"],
+        "contractor_assignment_required": _flag("contractor_assignment_required"),
+        "site_wise_attendance": _flag("site_wise_attendance"),
+        "client_wise_attendance": _flag("client_wise_attendance"),
+        "multiple_punch_allowed": _flag("multiple_punch_allowed", True),
+        "auto_shift_detection": _flag("auto_shift_detection"),
+        "wfh_allowed": _flag("wfh_allowed"),
+        "geofencing_required": _flag("geofencing_required", True),
+    }
+
     return {
         "shifts": shifts,
         "weekly_off_days": sorted(days),
@@ -1150,6 +1176,8 @@ def _validate_policy(raw: dict) -> dict:
         # Iter 131 — OT Calculation config (Textile Policy 2).
         "ot_pct_basic": ot_pct_basic,
         "ot_pct_gross": ot_pct_gross,
+        # Iter 175 — Policy Master Sub Points.
+        "policy_master": policy_master,
     }
 
 
@@ -8684,9 +8712,11 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
                 "flagged": record["identity_flagged"],
             })
 
+    # Iter 175 — contractual employees: stamp contractor for the report
+    # (app punches are already pending, so no status change here).
+    await apply_contractual_gate(record)
     await db.attendance.insert_one(record)
     record.pop("_id", None)
-
     # Iter 99 — personal punch notification with the joined firm's name.
     # Works the same for IN and OUT, all sources (manual / auto / first-login).
     try:
@@ -19321,6 +19351,8 @@ from routes.report_formats import router as report_formats_router  # noqa: E402
 app.include_router(report_formats_router)
 from routes.punch_import import router as punch_import_router  # noqa: E402
 app.include_router(punch_import_router)
+from routes.contractor_punches import router as contractor_punches_router  # noqa: E402
+app.include_router(contractor_punches_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.

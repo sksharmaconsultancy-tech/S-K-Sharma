@@ -157,6 +157,8 @@ type Policy = {
   // OT hourly rate = (%Basic per-day + %Gross per-day) ÷ full-day hours.
   ot_pct_basic?: number;
   ot_pct_gross?: number;
+  // Iter 175 — Policy Master Sub Points.
+  policy_master?: Record<string, any>;
 };
 
 type PolicyResponse = {
@@ -463,6 +465,16 @@ export default function AttendancePolicyScreen() {
               add/edit/delete. Shifts here are then assigned PER EMPLOYEE
               from the Employee Master screen — no firm-wide bundle. */}
           <ShiftMasterSection isSuper={isSuper} />
+
+          {/* Iter 175 — Policy Master Sub Points (user catalogue). */}
+          <SectionTitle
+            title="Policy Master — Sub Points"
+            hint="Core policy configuration — these settings are shown in Firm Master (linked to this Attendance Policy Master)."
+          />
+          <PolicyMasterSubPoints
+            value={policy.policy_master || {}}
+            onChange={(pm) => setPolicy({ ...policy, policy_master: pm })}
+          />
 
           {/* Weekly off */}
           <SectionTitle title="Weekly off" hint="Days that don’t count as working days." />
@@ -805,6 +817,127 @@ function Header({
     </View>
   );
 }
+
+// Iter 175 — Policy Master Sub Points editor (user-specified catalogue).
+// Choice rows (single-select chips), multi-select punch types and Yes/No
+// flags. Stored under attendance_policy.policy_master.
+const PM_FLAGS: { key: string; label: string }[] = [
+  { key: "contractor_assignment_required", label: "Contractor Assignment Required" },
+  { key: "site_wise_attendance", label: "Site-wise Attendance" },
+  { key: "client_wise_attendance", label: "Client-wise Attendance" },
+  { key: "multiple_punch_allowed", label: "Multiple Punch Allowed" },
+  { key: "auto_shift_detection", label: "Auto Shift Detection" },
+  { key: "wfh_allowed", label: "WFH Allowed" },
+  { key: "geofencing_required", label: "Geo-fencing Required" },
+];
+
+function PolicyMasterSubPoints({
+  value,
+  onChange,
+}: {
+  value: Record<string, any>;
+  onChange: (v: Record<string, any>) => void;
+}) {
+  const set = (patch: Record<string, any>) => onChange({ ...value, ...patch });
+  const punchTypes: string[] = Array.isArray(value.punch_types) ? value.punch_types : ["biometric", "mobile"];
+  const togglePunch = (p: string) => {
+    const next = punchTypes.includes(p) ? punchTypes.filter((x) => x !== p) : [...punchTypes, p];
+    set({ punch_types: next.length ? next : [p] });
+  };
+  const Choice = ({ label, k, options, def }: { label: string; k: string; options: string[]; def: string }) => (
+    <View style={pmStyles.row}>
+      <Text style={pmStyles.lbl}>{label}</Text>
+      <View style={pmStyles.chips}>
+        {options.map((o) => {
+          const on = (value[k] || def) === o;
+          return (
+            <Pressable key={o} onPress={() => set({ [k]: o })}
+              style={[pmStyles.chip, on && pmStyles.chipOn]} testID={`pm-${k}-${o}`}>
+              <Text style={[pmStyles.chipTxt, on && { color: "#fff" }]}>
+                {o.charAt(0).toUpperCase() + o.slice(1)}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+  return (
+    <View style={pmStyles.card} testID="policy-master-subpoints">
+      <Choice label="Attendance Basis" k="attendance_basis" options={["monthly", "daily", "hourly"]} def="monthly" />
+      <Choice label="Shift Type" k="shift_type" options={["fixed", "rotational", "open"]} def="fixed" />
+      <View style={pmStyles.row}>
+        <Text style={pmStyles.lbl}>Punch Type (multi-select)</Text>
+        <View style={pmStyles.chips}>
+          {["biometric", "mobile", "manual", "gps"].map((p) => {
+            const on = punchTypes.includes(p);
+            return (
+              <Pressable key={p} onPress={() => togglePunch(p)}
+                style={[pmStyles.chip, on && pmStyles.chipOn]} testID={`pm-punch-${p}`}>
+                <Text style={[pmStyles.chipTxt, on && { color: "#fff" }]}>
+                  {p === "gps" ? "GPS" : p.charAt(0).toUpperCase() + p.slice(1)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+      {PM_FLAGS.map((f) => {
+        const dflt = f.key === "multiple_punch_allowed" || f.key === "geofencing_required";
+        const on = value[f.key] === undefined ? dflt : !!value[f.key];
+        return (
+          <View key={f.key} style={pmStyles.row}>
+            <Text style={pmStyles.lbl}>{f.label}</Text>
+            <View style={pmStyles.chips}>
+              {[true, false].map((b) => (
+                <Pressable key={String(b)} onPress={() => set({ [f.key]: b })}
+                  style={[pmStyles.chip, on === b && pmStyles.chipOn]}
+                  testID={`pm-${f.key}-${b ? "yes" : "no"}`}>
+                  <Text style={[pmStyles.chipTxt, on === b && { color: "#fff" }]}>{b ? "Yes" : "No"}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        );
+      })}
+      <Text style={pmStyles.note}>
+        These sub-points are saved with the Attendance Policy and shown in the
+        Firm Master (linked). Grace Time, Late Mark, Half-Day, OT, Weekly Off
+        and Holiday rules are configured in the sections below.
+      </Text>
+    </View>
+  );
+}
+
+const pmStyles = StyleSheet.create({
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    padding: 12,
+    marginBottom: 14,
+  },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: 6,
+    paddingVertical: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.divider,
+  },
+  lbl: { fontSize: 12.5, fontWeight: "700", color: colors.onSurface, flexShrink: 1 },
+  chips: { flexDirection: "row", gap: 6, flexWrap: "wrap" },
+  chip: {
+    borderWidth: 1, borderColor: colors.brandPrimary, borderRadius: 999,
+    paddingHorizontal: 12, paddingVertical: 6,
+  },
+  chipOn: { backgroundColor: colors.brandPrimary },
+  chipTxt: { fontSize: 11.5, fontWeight: "700", color: colors.brandPrimary },
+  note: { fontSize: 10.5, color: colors.onSurfaceTertiary, marginTop: 8, lineHeight: 15 },
+});
 
 function SectionTitle({ title, hint }: { title: string; hint?: string }) {
   return (

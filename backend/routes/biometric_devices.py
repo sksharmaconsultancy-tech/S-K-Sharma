@@ -189,6 +189,10 @@ async def _ingest_attlog_line(
     }, {"_id": 0, "record_id": 1})
     if exists:
         return True, "duplicate_ignored"
+    # Iter 175 — contractual employees: machine punches must be approved
+    # by the company first (Contractor Punch approvals).
+    from server import apply_contractual_gate
+    await apply_contractual_gate(record)
     await db.attendance.insert_one(record)
     return True, None
 

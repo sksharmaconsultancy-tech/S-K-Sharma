@@ -77,6 +77,7 @@ export const NAV_SUPER: NavItem[] = [
     children: [
       { route: "/company-requests", label: "Company Requests", icon: "mail-open-outline" },
       { route: "/punch-approvals", label: "Punch Approvals", icon: "checkmark-circle-outline" },
+      { route: "/contractor-punches", label: "Contractor Punches", icon: "briefcase-outline" },
       { route: "/shift-approvals", label: "Shift Change Approvals", icon: "swap-horizontal-outline" },
       { route: "/attendance-approvals", label: "Attendance Approvals", icon: "hand-right-outline" },
       { route: "/deletion-approvals", label: "Deletion Approvals", icon: "trash-bin-outline" },
@@ -330,6 +331,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
     icon: "checkmark-done-circle-outline",
     children: [
       { route: "/punch-approvals", label: "Punch Approvals", icon: "checkmark-circle-outline" },
+      { route: "/contractor-punches", label: "Contractor Punches", icon: "briefcase-outline" },
       { route: "/shift-approvals", label: "Shift Change Approvals", icon: "swap-horizontal-outline" },
       { route: "/attendance-approvals", label: "Attendance Approvals", icon: "hand-right-outline" },
       { route: "/deletion-approvals", label: "Deletion Approvals", icon: "trash-bin-outline" },
