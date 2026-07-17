@@ -204,6 +204,9 @@ export default function EmployeeMasterScreen() {
             fingerprint_required: full.fingerprint_required === true,
             fingerprint_enrolled_at: full.fingerprint_enrolled_at ?? null,
             fingerprint_device: full.fingerprint_device ?? null,
+            // Iter 175 — contractual employee link (Firm Master contractors)
+            is_contractual: full.is_contractual === true,
+            contractor_name: full.contractor_name ?? null,
             // Iter 76 — biometric device enrolment ID
             bio_code: full.bio_code ?? null,
             // Iter 91 — residential address (OCR-filled) + statutory nos.
@@ -1105,6 +1108,17 @@ function UanEsicCard({ emp }: { emp: EmpDetail }) {
   );
 }
 
+// Iter 175 — contractor chip styles (Grouping card).
+const cchip = StyleSheet.create({
+  chip: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    borderWidth: 1, borderColor: colors.brandPrimary, borderRadius: 999,
+    paddingHorizontal: 12, paddingVertical: 7, backgroundColor: colors.surface,
+  },
+  chipOn: { backgroundColor: colors.brandPrimary },
+  txt: { fontSize: 12, fontWeight: "700", color: colors.brandPrimary },
+});
+
 function EmployeeGroupingCard({
   emp,
   onSaved,
@@ -1123,6 +1137,13 @@ function EmployeeGroupingCard({
   const [bioAllowed, setBioAllowed] = useState<boolean | null>(null);
   const [fpRequired, setFpRequired] = useState<boolean>(
     (emp as any).fingerprint_required === true);
+  // Iter 175 — Contractual employee (Firm Master Policy 2 contractors).
+  const [contractorAllowed, setContractorAllowed] = useState<boolean>(false);
+  const [contractorList, setContractorList] = useState<{ name: string; father_name?: string }[]>([]);
+  const [isContractual, setIsContractual] = useState<boolean>(
+    (emp as any).is_contractual === true);
+  const [contractorName, setContractorName] = useState<string>(
+    (emp as any).contractor_name || "");
 
   useEffect(() => {
     let alive = true;
@@ -1135,6 +1156,13 @@ function EmployeeGroupingCard({
           if (!sp.offline_salary) setOnroll(true);
           setBioAllowed(!!sp.bio_matrix_attendance);
           if (!sp.bio_matrix_attendance) setFpRequired(false);
+          // Iter 175 — contractor list from Firm Master (Policy 2 section)
+          const st = (fm?.master || {}).settings || {};
+          const list = ((fm?.master || {}).contractors || []).filter(
+            (c: any) => (c?.name || "").trim(),
+          );
+          setContractorAllowed(!!st.contractor_employees && list.length > 0);
+          setContractorList(list);
         }
       } catch { if (alive) { setOfflineAllowed(true); setBioAllowed(false); } }
     })();
@@ -1154,6 +1182,11 @@ function EmployeeGroupingCard({
           is_onroll: onroll,
           // Iter 165 — only send when the firm allows biometric attendance.
           ...(bioAllowed ? { fingerprint_required: fpRequired } : {}),
+          // Iter 175 — contractual employee link (Firm Master contractors).
+          ...(contractorAllowed
+            ? { is_contractual: isContractual,
+                contractor_name: isContractual ? (contractorName || null) : null }
+            : {}),
         },
       });
       await onSaved();
@@ -1243,6 +1276,59 @@ function EmployeeGroupingCard({
           <View style={[styles.toggleKnob, fpRequired && styles.toggleKnobOn]} />
         </View>
       </Pressable>
+
+      {/* Iter 175 — Contractual employee (Firm Master Policy 2 contractors).
+          Only shown when the firm enabled Contractor Employees and has at
+          least one contractor defined in Firm Master. */}
+      {contractorAllowed ? (
+        <>
+          <Pressable
+            testID="grouping-contractual-toggle"
+            onPress={() => setIsContractual((v) => !v)}
+            style={styles.onrollRow}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.metaValue}>
+                {isContractual ? "Contractual Employee: YES" : "Contractual Employee: NO"}
+              </Text>
+              <Text style={styles.fieldHint}>
+                {isContractual
+                  ? "Punches go to the Contractor Punch approval queue — the company must approve/reject before they count in attendance."
+                  : "Turn ON if this employee works under one of the firm's contractors (Firm Master → Contractor Employees)."}
+              </Text>
+            </View>
+            <View style={[styles.toggleTrack, isContractual && styles.toggleTrackOn]}>
+              <View style={[styles.toggleKnob, isContractual && styles.toggleKnobOn]} />
+            </View>
+          </Pressable>
+          {isContractual ? (
+            <View style={{ marginTop: 8 }}>
+              <Text style={styles.fieldHint}>Select the contractor this employee works under:</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                {contractorList.map((c) => {
+                  const on = contractorName === c.name;
+                  return (
+                    <Pressable
+                      key={c.name}
+                      onPress={() => setContractorName(c.name)}
+                      style={[cchip.chip, on && cchip.chipOn]}
+                      testID={`grouping-contractor-${c.name}`}
+                    >
+                      <Ionicons name="briefcase-outline" size={12} color={on ? "#fff" : colors.brandPrimary} />
+                      <Text style={[cchip.txt, on && { color: "#fff" }]}>{c.name}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {!contractorName ? (
+                <Text style={[styles.fieldHint, { color: "#B45309", marginTop: 4 }]}>
+                  ⚠ Pick a contractor — punches cannot be grouped without one.
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+        </>
+      ) : null}
 
       <Pressable
         testID="grouping-save"

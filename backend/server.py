@@ -559,6 +559,11 @@ class RoleUpdate(BaseModel):
     # (Employee PWA). Only settable when the firm's Bio Matrix Attendance
     # is enabled in Firm Master.
     fingerprint_required: Optional[bool] = None
+    # Iter 175 — Contractual employee (Firm Master Policy 2 contractors).
+    # When is_contractual=True the employee is linked to one of the firm's
+    # contractors (firm_masters.contractors) by name.
+    is_contractual: Optional[bool] = None
+    contractor_name: Optional[str] = None
     # Standing advance / salary loan balance for this employee. Deducted
     # from monthly gross by the Salary Process. Employer decreases the
     # balance on each pay-cycle to reflect repayment.
@@ -10915,6 +10920,37 @@ class ManualPunchEdit(BaseModel):
     reason: str  # mandatory audit note on every edit
 
 
+# ---------------------------------------------------------------------------
+# Iter 175 — Contractual employees (Firm Master Policy 2 contractors).
+# Their punches NEVER land directly in attendance: machine/auto-approved
+# punches are forced to "pending" so the company approves/rejects them
+# first (Contractor Punch approvals). Once approved they flow into the
+# attendance policy computation exactly like any other punch.
+# ---------------------------------------------------------------------------
+async def apply_contractual_gate(record: dict, user_doc: Optional[dict] = None) -> dict:
+    u = user_doc
+    if u is None or "is_contractual" not in u:
+        u = await db.users.find_one(
+            {"user_id": record.get("user_id")},
+            {"_id": 0, "is_contractual": 1, "contractor_name": 1},
+        ) or {}
+    if not u.get("is_contractual"):
+        return record
+    record["is_contractual"] = True
+    record.setdefault("contractor_name", u.get("contractor_name"))
+    # Only demote punches that were AUTO-approved by a machine/system —
+    # punches created directly by an admin stay approved (that IS the
+    # company's approval).
+    if (record.get("status") == "approved"
+            and str(record.get("decision_by") or "").startswith("system:")):
+        record["status"] = "pending"
+        record["decision_by"] = None
+        record["decision_at"] = None
+        record["decision_reason"] = None
+        record["pending_reason"] = "contractual_employee"
+    return record
+
+
 def _parse_manual_at(raw: str) -> datetime:
     """Accept 'YYYY-MM-DDTHH:MM' / 'YYYY-MM-DD HH:MM' / full ISO w/ tz. Falls
     back to UTC when no timezone is supplied."""
@@ -12584,6 +12620,14 @@ async def update_user_role(payload: RoleUpdate, authorization: Optional[str] = H
                 detail=("Fingerprint verification is not allowed — enable Bio "
                         "Matrix Attendance for this firm in Firm Master first."))
         updates["fingerprint_required"] = bool(payload.fingerprint_required)
+    # Iter 175 — Contractual employee link (Firm Master Policy 2 contractors).
+    if "is_contractual" in fset and payload.is_contractual is not None:
+        updates["is_contractual"] = bool(payload.is_contractual)
+        if not payload.is_contractual:
+            updates["contractor_name"] = None
+    if "contractor_name" in fset:
+        _cn = (payload.contractor_name or "").strip()
+        updates["contractor_name"] = _cn or None
     if "advance_balance" in fset:
         v = payload.advance_balance
         try:
