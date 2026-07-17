@@ -837,3 +837,13 @@ Verified: /admin/actual-salary-process for 2026-03 (no compliance) → epf/esi 0
 - GET /admin/employee-types (~10800): $match now excludes disabled + exit_date/resign_date set → group count chips (Employee Master + Compliance EMPLOYEE GROUP) count ACTIVE employees only.
 - admin.tsx: isResigned/matchesStatus hoisted to component scope; EmployeeFilterChips now receives employees.filter(matchesStatus) so type counts always match the visible list.
 - NOTE for user (compliance run screenshot): saved runs are snapshots — must click Reprocess after setting exit dates; exit-month employees stay included (final settlement, user-confirmed).
+
+## Iter 172 — Bulk Punch Import via Excel (Punch Approvals) — TESTED, ALL PASS
+- User request: import punching data company-wise from Excel, match by Bio Code OR Name, insert In/Out punches date-wise directly into the punching report.
+- Backend: /app/backend/routes/punch_import.py (registered in server.py):
+  * GET /api/admin/punch-import/template → sample xlsx (base64) with headers Bio Code|Name|Date|In Time|Out Time.
+  * POST /preview → parses xlsx (auto-detects header row/columns), matches by bio_code → employee_code → name; returns rows with status matched/unmatched/error + summary. Handles DD-MM-YYYY dates, AM/PM & Excel-fraction times.
+  * POST /commit → inserts approved attendance records (source="excel_import", import_batch_id) with duplicate skip; IST wall-clock stored as Z per convention.
+  * Company scoping: non-super-admins 403 on other firms.
+- Frontend: /app/frontend/src/components/PunchImportModal.tsx (new); green "Import Excel" button (testID pa-import-excel) in punch-approvals.tsx header row; modal flow: Sample template download (web blob) → Choose Excel → preview table w/ summary chips → Import N punches → success screen; refreshes grid via load(true) after import.
+- Testing: backend pytest 6/6 + frontend Playwright E2E incl. real file-chooser upload — all pass (testing agent). Test excel_import records cleaned up.
