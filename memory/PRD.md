@@ -847,3 +847,7 @@ Verified: /admin/actual-salary-process for 2026-03 (no compliance) → epf/esi 0
   * Company scoping: non-super-admins 403 on other firms.
 - Frontend: /app/frontend/src/components/PunchImportModal.tsx (new); green "Import Excel" button (testID pa-import-excel) in punch-approvals.tsx header row; modal flow: Sample template download (web blob) → Choose Excel → preview table w/ summary chips → Import N punches → success screen; refreshes grid via load(true) after import.
 - Testing: backend pytest 6/6 + frontend Playwright E2E incl. real file-chooser upload — all pass (testing agent). Test excel_import records cleaned up.
+
+## Iter 173 — Removed "resigned employees auto-excluded" banner (user request)
+- compliance-salary-run.tsx: deleted the Iter 167 red banner JSX (testID resigned-summary) + resignedBanner* styles. Backend still computes/stores excluded_resigned on runs (harmless, unused by UI now). Screenshot-verified screen renders clean.
+- VPS deploy note: pip install of requirements.txt FAILS on VPS (litellm direct-URL vs emergentintegrations ResolutionImpossible) — skip pip when requirements unchanged, or strip the litellm line. GitHub push + code sync worked; user redeploys via temp-code-bundle script.
