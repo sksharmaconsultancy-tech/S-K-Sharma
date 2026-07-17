@@ -329,6 +329,10 @@ class AttendancePunch(BaseModel):
     source: Optional[
         Literal["manual", "manual-nogps", "geofence-auto", "admin_approved"]
     ] = "manual"
+    # Iter 176 — guided punch workflow: worksite the employee selected
+    # (main office or a branch). Stored on the record for reports.
+    worksite_id: Optional[str] = None
+    worksite_name: Optional[str] = None
 
 
 class LocationPing(BaseModel):
@@ -8345,6 +8349,42 @@ async def _resolve_geofence(company: dict, lat: float, lng: float) -> tuple[floa
     return (best_dist, best)
 
 
+@api.get("/attendance/worksites")
+async def my_worksites(authorization: Optional[str] = Header(None)):
+    """Iter 176 — worksites for the guided punch flow: the firm's main
+    office plus all active branches (id, name, coords, radius). Available
+    to any logged-in employee of the firm."""
+    user = await get_user_from_token(authorization)
+    if not user.get("company_id"):
+        raise HTTPException(status_code=400, detail="No company assigned")
+    company = await db.companies.find_one(
+        {"company_id": user["company_id"]},
+        {"_id": 0, "name": 1, "office_lat": 1, "office_lng": 1, "geofence_radius_m": 1},
+    )
+    sites: List[dict] = []
+    if company and company.get("office_lat") is not None:
+        sites.append({
+            "worksite_id": "main",
+            "name": f"{company.get('name') or 'Main Office'} (Main Office)",
+            "office_lat": company["office_lat"],
+            "office_lng": company["office_lng"],
+            "geofence_radius_m": company.get("geofence_radius_m") or 200,
+        })
+    async for b in db.branches.find(
+        {"company_id": user["company_id"], "active": {"$ne": False}},
+        {"_id": 0, "branch_id": 1, "name": 1, "office_lat": 1,
+         "office_lng": 1, "geofence_radius_m": 1},
+    ):
+        sites.append({
+            "worksite_id": b["branch_id"],
+            "name": b.get("name") or "Branch",
+            "office_lat": b["office_lat"],
+            "office_lng": b["office_lng"],
+            "geofence_radius_m": b.get("geofence_radius_m") or 200,
+        })
+    return {"worksites": sites}
+
+
 @api.post("/attendance/punch")
 async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
@@ -8631,6 +8671,9 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
         "outside_geofence": bool(outside),
         "gps_verified": (not no_gps_manual),
         "location_status": location_status,
+        # Iter 176 — guided punch workflow: employee-selected worksite.
+        "worksite_id": payload.worksite_id or (closest or {}).get("branch_id"),
+        "worksite_name": payload.worksite_name or (closest or {}).get("name"),
     }
     # Determine approval status. Auto punches (geofence enter/exit background
     # trigger) land as "pending" when the firm has punch_approval_required=True.

@@ -1,0 +1,44 @@
+{
+  "summary": "Iter 176 guided punch workflow tested end-to-end. Backend: 5/5 pytest cases pass — GET /api/attendance/worksites returns 'main' with correct Kankani coords (25.3463, 74.6408) and radius; POST /api/company/branches (super admin) creates a branch that immediately appears in the employee's worksites list; DELETE cleans it up. POST /api/attendance/punch persists worksite_name on the attendance record; far-away coords (26.9, 75.8) are rejected with 400. Frontend (mobile viewport 390x844, employee TNF40186C/2750): PunchFlowModal opens on biometric-punch-cta tap; stepper shows pf-step-gps done ('Inside geofence · 0m'), pf-step-worksite skipped (single site — Kankani Main Office), FaceCaptureModal ('Face Verification') opens. Cancel → pf-step-face marked failed 'Cancelled', error banner 'Face verification is required to punch.' visible, pf-retry button rendered. With geolocation set to Jaipur (26.9124, 75.7873): GPS step fails with '208.4 km outside Kankani Enterprises (Main Office)' + banner \"You're 208.2 km outside the work zone. Come inside the geofence to punch.\" + pf-retry. Super-admin /punch-approvals loads with no functional errors. Note: the TNF40186C test user was locked behind a pin_must_change gate on first login; test rotated PIN (2750 → 275099 → 998877) so /attendance is reachable without the gate.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "attendance.tsx",
+        "issue": "When company has attendance_punching_enabled === false AND user is in biometric-only mode, the 'Attendance punching is disabled' card renders inline BUT the sticky biometric-punch-cta 'Punch In (Face + Fingerprint)' bar still shows and is tappable, launching the PunchFlowModal. UX inconsistency — the disabled-card branch should also suppress the sticky CTA.",
+        "testID": "biometric-punch-cta",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "PunchFlowModal / attendance",
+        "issues": [
+          "Console: 'Invalid style property of \"outline\" / \"background\" / padding \"0 8px\"' shorthand warnings on web — not blocking but should be cleaned up."
+        ]
+      }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter176_punchflow.py",
+    "/app/test_reports/pytest/iter176.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: In /app/frontend/app/(tabs)/attendance.tsx, when (company as any).attendance_punching_enabled === false, hide the biometric-only sticky CTA so the disabled-punching state is fully consistent (currently the CTA still shows).",
+    "OPTIONAL: Clean up 'Invalid style property' web console warnings (outline / background / padding shorthand)."
+  ],
+  "critical_code_review_comments": [
+    "PunchFlowModal correctly implements the specified pipeline (GPS → Worksite → Face → Biometric → Save) with all required testIDs (pf-step-*, pf-close, pf-retry, pf-site-{id}, pf-success, pf-done).",
+    "Geofence check honours user.is_live_in as a bypass — good.",
+    "AttendancePunch model accepts optional worksite_id/worksite_name and the server persists them onto the attendance record (server.py:8675)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter176_punchflow.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Rotated PIN for TNF40186C (user_94e190f2843e): admin reset then /auth/pin-change so pin_must_change=false — required so /attendance page renders instead of the /pin-change gate. New PIN 998877 (login still works via emp-code-login with phone_last4:'2750'). All test attendance records and test branches were cleaned up.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Employee TNF40186C now has PIN 998877 (no longer must_change). Login via /api/auth/emp-code-login {employee_code:'TNF40186C', phone_last4:'2750'} still works. PunchFlowModal testIDs: pf-step-{gps|worksite|face|biometric|save}, pf-close, pf-retry, pf-site-{id}, pf-success, pf-done. FaceCaptureModal cancel testID: face-cancel. Company cmp_527fecdd7c has attendance_punching_enabled=false at firm level but employee is in biometric-only mode → sticky biometric-punch-cta still shows (see UI bug).",
+  "rca_of_issue": "N/A"
+}
