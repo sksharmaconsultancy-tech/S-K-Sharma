@@ -344,6 +344,24 @@ export default function ActualSalaryProcessScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.run_id, isAdmin]);
 
+  // Iter 162 — auto-open the LAST processed run on screen load so the
+  // report is visible without clicking "Process Salary" (user request).
+  const autoOpenedRef = React.useRef(false);
+  useEffect(() => {
+    if (!isAdmin || params.run_id || autoOpenedRef.current || !selectedCompanyId) return;
+    autoOpenedRef.current = true;
+    (async () => {
+      try {
+        const j = await api<{ runs: PastRunSummary[] }>(
+          `/admin/salary-runs?company_id=${encodeURIComponent(selectedCompanyId)}`,
+        );
+        const latest = (j.runs || [])[0];
+        if (latest?.run_id) await openPastRun(latest);
+      } catch { /* screen stays on fresh state */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, selectedCompanyId]);
+
   /* ----- Auto-save (debounced) ----- */
   const patchTimersRef = useRef<Record<string, any>>({});
   const pendingRef = useRef<Record<string, Partial<ActualRow>>>({});

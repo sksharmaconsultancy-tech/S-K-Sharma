@@ -15022,7 +15022,15 @@ async def export_compliance_salary_register_pdf(
         firm_info["pf_code"] = ((fm or {}).get("epf") or {}).get("epf_no") or ""
         firm_info["esi_code"] = ((fm or {}).get("esi") or {}).get("esi_no") or ""
     builder = build_compliance_register_pdf_v2 if int(variant or 1) == 2 else build_compliance_register_pdf
-    pdf_bytes = builder(run, company_name=company_name, firm=firm_info)
+    if int(variant or 1) == 2:
+        # Iter 162 — apply the ONE-TIME saved register layout (columns /
+        # order / headings / widths / rows-per-page / row height).
+        _lay = await db.app_settings.find_one(
+            {"key": "compliance_register_layout"}, {"_id": 0, "layout": 1})
+        pdf_bytes = builder(run, company_name=company_name, firm=firm_info,
+                            layout=(_lay or {}).get("layout"))
+    else:
+        pdf_bytes = builder(run, company_name=company_name, firm=firm_info)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -19015,6 +19023,8 @@ app.include_router(locations_router)
 from routes.pf_reports import router as pf_reports_router  # noqa: E402
 app.include_router(pf_reports_router)
 app.include_router(compliance_settings_router)
+from routes.report_formats import router as report_formats_router  # noqa: E402
+app.include_router(report_formats_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.

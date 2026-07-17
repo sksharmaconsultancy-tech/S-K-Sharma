@@ -134,20 +134,26 @@ async def pf_reports_summary(company_id: str, month_from: str, month_to: str,
 
 
 # --------------------------------------------------------------- challan
-def _challan_pdf(firm: Dict[str, Any], months: List[Dict[str, Any]]) -> bytes:
+def _challan_pdf(firm: Dict[str, Any], months: List[Dict[str, Any]],
+                 fmt: Optional[Dict[str, Any]] = None) -> bytes:
     from reportlab.lib import colors as rl
-    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
     from reportlab.platypus import (PageBreak, Paragraph, SimpleDocTemplate,
                                     Spacer, Table, TableStyle)
+    # Iter 163 — saved global format (Utilities → PDF Report Formats).
+    fmt = fmt or {}
+    fs = float(fmt.get("font_size") or 8)
+    org_title = fmt.get("title") or "EMPLOYEES' PROVIDENT FUND ORGANISATION"
+    pagesize = landscape(A4) if (fmt.get("orientation") == "landscape") else A4
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=12 * mm,
+    doc = SimpleDocTemplate(buf, pagesize=pagesize, leftMargin=12 * mm,
                             rightMargin=12 * mm, topMargin=12 * mm,
                             bottomMargin=12 * mm)
     H1 = ParagraphStyle("h1", fontName="Helvetica-Bold", fontSize=12, alignment=1)
     H2 = ParagraphStyle("h2", fontName="Helvetica-Bold", fontSize=10, alignment=1)
-    LBL = ParagraphStyle("lbl", fontName="Helvetica", fontSize=8.5)
+    LBL = ParagraphStyle("lbl", fontName="Helvetica", fontSize=fs + 0.5)
     NOTE = ParagraphStyle("note", fontName="Helvetica", fontSize=7.5,
                           textColor=rl.HexColor("#444444"))
     story: List[Any] = []
@@ -174,7 +180,7 @@ def _challan_pdf(firm: Dict[str, Any], months: List[Dict[str, Any]]) -> bytes:
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
             ("FONTNAME", (0, 1), (-1, -2), "Helvetica"),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("FONTSIZE", (0, 0), (-1, -1), fs),
             ("ALIGN", (2, 0), (-1, -1), "CENTER"),
             ("GRID", (0, 0), (-1, -1), 0.5, rl.black),
             ("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#EEEEEE")),
@@ -187,7 +193,7 @@ def _challan_pdf(firm: Dict[str, Any], months: List[Dict[str, Any]]) -> bytes:
         story.append(Paragraph(
             f"PROVISIONAL CHALLAN FOR WAGE MONTH: {c['label']}", H1))
         story.append(Spacer(1, 2 * mm))
-        story.append(Paragraph("EMPLOYEES' PROVIDENT FUND ORGANISATION", H2))
+        story.append(Paragraph(org_title, H2))
         story.append(Spacer(1, 5 * mm))
         story.append(Paragraph(
             f"<b>Establishment Code &amp; Name :</b> "
@@ -227,7 +233,7 @@ def _challan_pdf(firm: Dict[str, Any], months: List[Dict[str, Any]]) -> bytes:
         t.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("FONTSIZE", (0, 0), (-1, -1), fs),
             ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
             ("GRID", (0, 0), (-1, -1), 0.5, rl.black),
             ("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#EEEEEE")),
@@ -247,7 +253,8 @@ async def challan_pdf(company_id: str, month_from: str, month_to: str,
     if not months:
         raise HTTPException(status_code=404,
                             detail="No compliance salary run found in this period")
-    pdf = _challan_pdf(firm, months)
+    from routes.report_formats import get_report_format
+    pdf = _challan_pdf(firm, months, await get_report_format("pf_challan"))
     fn = f"PF_Challan_{firm.get('name', '')}_{month_from}_{month_to}.pdf".replace(" ", "_")
     return Response(pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{fn}"'})
@@ -316,24 +323,35 @@ _ECR_HDR = ["Sl.", "UAN", "Member Name", "Gross Wages", "EPF Wages",
 
 
 def _ecr_pdf(firm: Dict[str, Any], sections: List[Dict[str, Any]],
-             rate: float) -> bytes:
+             rate: float, fmt: Optional[Dict[str, Any]] = None) -> bytes:
     from reportlab.lib import colors as rl
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
     from reportlab.platypus import (PageBreak, Paragraph, SimpleDocTemplate,
                                     Spacer, Table, TableStyle)
+    from routes.report_formats import resolve_columns
+    # Iter 163 — saved global format (Utilities → PDF Report Formats).
+    fmt = fmt or {}
+    cols = resolve_columns("pf_ecr", fmt)
+    fs = float(fmt.get("font_size") or 7.5)
+    title = fmt.get("title") or "EMPLOYEE'S PROVIDENT FUND ORGANISATION"
+    pagesize = A4 if (fmt.get("orientation") == "portrait") else landscape(A4)
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=10 * mm,
+    doc = SimpleDocTemplate(buf, pagesize=pagesize, leftMargin=10 * mm,
                             rightMargin=10 * mm, topMargin=10 * mm,
                             bottomMargin=10 * mm)
     H1 = ParagraphStyle("h1", fontName="Helvetica-Bold", fontSize=12, alignment=1)
     H2 = ParagraphStyle("h2", fontName="Helvetica-Bold", fontSize=10, alignment=1)
     LBL = ParagraphStyle("lbl", fontName="Helvetica", fontSize=8.5)
+    # widths are proportions — stretch to the full printable width
+    avail = pagesize[0] - 20 * mm
+    wsum = sum(c["width"] for c in cols) or 1
+    col_widths = [avail * c["width"] / wsum for c in cols]
     story: List[Any] = []
     for si, sec in enumerate(sections):
         lines = sec["lines"]
-        story.append(Paragraph("EMPLOYEE'S PROVIDENT FUND ORGANISATION", H1))
+        story.append(Paragraph(title, H1))
         story.append(Paragraph(
             f"RETURN STATEMENT (Regular Return) : {sec['label']}", H2))
         story.append(Spacer(1, 3 * mm))
@@ -351,28 +369,36 @@ def _ecr_pdf(firm: Dict[str, Any], sections: List[Dict[str, Any]],
             f"&nbsp;&nbsp;&nbsp;<b>Total EPF-EPS (ER Diff.) :</b> {er_t}"
             f"&nbsp;&nbsp;&nbsp;<b>Total Refund of Advances :</b> 0", LBL))
         story.append(Spacer(1, 3 * mm))
-        data = [_ECR_HDR] + [
-            [i + 1, x["uan"] or "—", x["name"], x["gross"], x["epf_wages"],
-             x["eps_wages"], x["edli_wages"], x["epf_ee"], x["eps_er"],
-             x["diff_er"], x["refund"], x["ncp"]]
-            for i, x in enumerate(lines)]
-        data.append(["", "", "TOTAL",
-                     sum(x["gross"] for x in lines),
-                     sum(x["epf_wages"] for x in lines),
-                     sum(x["eps_wages"] for x in lines),
-                     sum(x["edli_wages"] for x in lines),
-                     ee_t, eps_t, er_t, 0, ""])
-        t = Table(data, colWidths=[10 * mm, 28 * mm, 62 * mm] + [22 * mm] * 8 + [16 * mm],
-                  repeatRows=1)
-        t.setStyle(TableStyle([
+
+        def _cell(x: Dict[str, Any], i: int, key: str) -> Any:
+            if key == "sl":
+                return i + 1
+            if key == "uan":
+                return x["uan"] or "—"
+            return x.get(key, "")
+
+        tot = {"name": "TOTAL",
+               "gross": sum(x["gross"] for x in lines),
+               "epf_wages": sum(x["epf_wages"] for x in lines),
+               "eps_wages": sum(x["eps_wages"] for x in lines),
+               "edli_wages": sum(x["edli_wages"] for x in lines),
+               "epf_ee": ee_t, "eps_er": eps_t, "diff_er": er_t, "refund": 0}
+        data = [[c["heading"] for c in cols]] + [
+            [_cell(x, i, c["key"]) for c in cols] for i, x in enumerate(lines)]
+        data.append([tot.get(c["key"], "") for c in cols])
+        t = Table(data, colWidths=col_widths, repeatRows=1)
+        style = [
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 7.5),
-            ("ALIGN", (3, 0), (-1, -1), "RIGHT"),
+            ("FONTSIZE", (0, 0), (-1, -1), fs),
             ("GRID", (0, 0), (-1, -1), 0.4, rl.HexColor("#888888")),
             ("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#EEEEEE")),
             ("BACKGROUND", (0, -1), (-1, -1), rl.HexColor("#F5F5F5")),
-        ]))
+        ]
+        for ci, c in enumerate(cols):
+            if c["numeric"]:
+                style.append(("ALIGN", (ci, 0), (ci, -1), "RIGHT"))
+        t.setStyle(TableStyle(style))
         story.append(t)
         if si < len(sections) - 1:
             story.append(PageBreak())
@@ -395,7 +421,8 @@ async def ecr_pdf(company_id: str, month_from: str, month_to: str,
     if not sections:
         raise HTTPException(status_code=404,
                             detail="No PF members / compliance run found in this period")
-    pdf = _ecr_pdf(firm, sections, rate)
+    from routes.report_formats import get_report_format
+    pdf = _ecr_pdf(firm, sections, rate, await get_report_format("pf_ecr"))
     fn = f"PF_ECR_{firm.get('name', '')}_{month_from}_{month_to}.pdf".replace(" ", "_")
     return Response(pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{fn}"'})
@@ -489,24 +516,35 @@ async def _month_esic(company_id: str, month: str) -> Optional[Dict[str, Any]]:
     }
 
 
-def _esic_sheet_pdf(firm: Dict[str, Any], sections: List[Dict[str, Any]]) -> bytes:
+def _esic_sheet_pdf(firm: Dict[str, Any], sections: List[Dict[str, Any]],
+                    fmt: Optional[Dict[str, Any]] = None) -> bytes:
     from reportlab.lib import colors as rl
-    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
     from reportlab.platypus import (PageBreak, Paragraph, SimpleDocTemplate,
                                     Spacer, Table, TableStyle)
+    from routes.report_formats import resolve_columns
+    # Iter 163 — saved global format (Utilities → PDF Report Formats).
+    fmt = fmt or {}
+    cols = resolve_columns("esic_contribution", fmt)
+    fs = float(fmt.get("font_size") or 7.5)
+    title = fmt.get("title") or "Employees' State Insurance Corporation"
+    pagesize = landscape(A4) if (fmt.get("orientation") == "landscape") else A4
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=10 * mm,
+    doc = SimpleDocTemplate(buf, pagesize=pagesize, leftMargin=10 * mm,
                             rightMargin=10 * mm, topMargin=10 * mm,
                             bottomMargin=10 * mm)
     H1 = ParagraphStyle("h1", fontName="Helvetica-Bold", fontSize=12, alignment=1)
     H2 = ParagraphStyle("h2", fontName="Helvetica-Bold", fontSize=9.5, alignment=1)
     LBL = ParagraphStyle("lbl", fontName="Helvetica", fontSize=8.5)
+    avail = pagesize[0] - 20 * mm
+    wsum = sum(c["width"] for c in cols) or 1
+    col_widths = [avail * c["width"] / wsum for c in cols]
     story: List[Any] = []
     for si, sec in enumerate(sections):
         lines = sec["lines"]
-        story.append(Paragraph("Employees' State Insurance Corporation", H1))
+        story.append(Paragraph(title, H1))
         story.append(Paragraph(
             f"Contribution History Of {firm.get('esi_code') or firm.get('name') or ''} "
             f"for {sec['label']}", H2))
@@ -518,24 +556,37 @@ def _esic_sheet_pdf(firm: Dict[str, Any], sections: List[Dict[str, Any]]) -> byt
             f"&nbsp;&nbsp;&nbsp;<b>Total Government Contribution :</b> 0.00"
             f"&nbsp;&nbsp;&nbsp;<b>Total Monthly Wages :</b> {sec['wages']:,.2f}", LBL))
         story.append(Spacer(1, 3 * mm))
-        data = [["SNo.", "Is Disable", "IP Number", "IP Name",
-                 "No. Of Days", "Total Wages", "IP Contribution", "Reason"]]
-        for i, x in enumerate(lines):
-            data.append([i + 1, "", x["ip_no"] or "—", x["name"], x["days"],
-                         f"{x['wages']:.2f}", f"{x['ee']:.2f}", x["reason"]])
-        data.append(["", "", "", "TOTAL", "",
-                     f"{sec['wages']:.2f}", f"{sec['ee']:.2f}", ""])
-        t = Table(data, colWidths=[11 * mm, 16 * mm, 26 * mm, 62 * mm,
-                                   18 * mm, 24 * mm, 24 * mm, 22 * mm],
-                  repeatRows=1)
-        t.setStyle(TableStyle([
+
+        def _cell(x: Dict[str, Any], i: int, key: str) -> Any:
+            if key == "sl":
+                return i + 1
+            if key == "disable":
+                return ""
+            if key == "ip_no":
+                return x["ip_no"] or "—"
+            if key == "wages":
+                return f"{x['wages']:.2f}"
+            if key == "ee":
+                return f"{x['ee']:.2f}"
+            return x.get(key, "")
+
+        tot = {"name": "TOTAL", "wages": f"{sec['wages']:.2f}",
+               "ee": f"{sec['ee']:.2f}"}
+        data = [[c["heading"] for c in cols]] + [
+            [_cell(x, i, c["key"]) for c in cols] for i, x in enumerate(lines)]
+        data.append([tot.get(c["key"], "") for c in cols])
+        t = Table(data, colWidths=col_widths, repeatRows=1)
+        style = [
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 7.5),
-            ("ALIGN", (4, 0), (6, -1), "RIGHT"),
+            ("FONTSIZE", (0, 0), (-1, -1), fs),
             ("GRID", (0, 0), (-1, -1), 0.4, rl.HexColor("#888888")),
             ("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#EEEEEE")),
-        ]))
+        ]
+        for ci, c in enumerate(cols):
+            if c["numeric"]:
+                style.append(("ALIGN", (ci, 0), (ci, -1), "RIGHT"))
+        t.setStyle(TableStyle(style))
         story.append(t)
         if si < len(sections) - 1:
             story.append(PageBreak())
@@ -543,21 +594,27 @@ def _esic_sheet_pdf(firm: Dict[str, Any], sections: List[Dict[str, Any]]) -> byt
     return buf.getvalue()
 
 
-def _esic_challan_pdf(firm: Dict[str, Any], months: List[Dict[str, Any]]) -> bytes:
+def _esic_challan_pdf(firm: Dict[str, Any], months: List[Dict[str, Any]],
+                      fmt: Optional[Dict[str, Any]] = None) -> bytes:
     from reportlab.lib import colors as rl
-    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
     from reportlab.platypus import (PageBreak, Paragraph, SimpleDocTemplate,
                                     Spacer, Table, TableStyle)
     from utils.salary_register_pdf import _num_to_words_inr
+    # Iter 163 — saved global format (Utilities → PDF Report Formats).
+    fmt = fmt or {}
+    fs = float(fmt.get("font_size") or 9)
+    org_title = fmt.get("title") or "EMPLOYEE STATE INSURANCE CORPORATION"
+    pagesize = landscape(A4) if (fmt.get("orientation") == "landscape") else A4
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=14 * mm,
+    doc = SimpleDocTemplate(buf, pagesize=pagesize, leftMargin=14 * mm,
                             rightMargin=14 * mm, topMargin=12 * mm,
                             bottomMargin=12 * mm)
     H1 = ParagraphStyle("h1", fontName="Helvetica-Bold", fontSize=13, alignment=1)
     H2 = ParagraphStyle("h2", fontName="Helvetica-Bold", fontSize=10, alignment=1)
-    LBL = ParagraphStyle("lbl", fontName="Helvetica", fontSize=9, leading=14)
+    LBL = ParagraphStyle("lbl", fontName="Helvetica", fontSize=fs, leading=fs + 5)
     SM = ParagraphStyle("sm", fontName="Helvetica", fontSize=8,
                         textColor=rl.HexColor("#444444"), leading=12)
     story: List[Any] = []
@@ -565,7 +622,7 @@ def _esic_challan_pdf(firm: Dict[str, Any], months: List[Dict[str, Any]]) -> byt
         story.append(Paragraph(
             f"Code No. : {firm.get('esi_code') or '—'}", LBL))
         story.append(Spacer(1, 2 * mm))
-        story.append(Paragraph("EMPLOYEE STATE INSURANCE CORPORATION", H1))
+        story.append(Paragraph(org_title, H1))
         story.append(Paragraph("Challan For Deposit In A/C No. 1", H2))
         story.append(Spacer(1, 5 * mm))
         story.append(Paragraph(
@@ -591,7 +648,7 @@ def _esic_challan_pdf(firm: Dict[str, Any], months: List[Dict[str, Any]]) -> byt
         t.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, 1), "Helvetica"),
             ("FONTNAME", (0, 2), (-1, 2), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 9.5),
+            ("FONTSIZE", (0, 0), (-1, -1), fs + 0.5),
             ("ALIGN", (1, 0), (1, -1), "RIGHT"),
             ("GRID", (0, 0), (-1, -1), 0.5, rl.black),
             ("TOPPADDING", (0, 0), (-1, -1), 5),
@@ -637,7 +694,9 @@ async def esic_sheet_pdf(company_id: str, month_from: str, month_to: str,
     if not sections:
         raise HTTPException(status_code=404,
                             detail="No ESIC members / compliance run found in this period")
-    pdf = _esic_sheet_pdf(firm, sections)
+    from routes.report_formats import get_report_format
+    pdf = _esic_sheet_pdf(firm, sections,
+                          await get_report_format("esic_contribution"))
     fn = f"ESIC_Contribution_{firm.get('name', '')}_{month_from}_{month_to}.pdf".replace(" ", "_")
     return Response(pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{fn}"'})
@@ -701,7 +760,9 @@ async def esic_challan_pdf(company_id: str, month_from: str, month_to: str,
     if not months:
         raise HTTPException(status_code=404,
                             detail="No ESIC members / compliance run found in this period")
-    pdf = _esic_challan_pdf(firm, months)
+    from routes.report_formats import get_report_format
+    pdf = _esic_challan_pdf(firm, months,
+                            await get_report_format("esic_challan"))
     fn = f"ESIC_Challan_{firm.get('name', '')}_{month_from}_{month_to}.pdf".replace(" ", "_")
     return Response(pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{fn}"'})

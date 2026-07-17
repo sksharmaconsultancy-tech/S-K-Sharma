@@ -91,6 +91,28 @@ DEFAULT_STATUTORY_CFG: Dict[str, float] = {
 
 _ROUNDING_KEYS = ("pf_rounding", "esic_rounding")
 
+# Iter 162 — column catalog for the customisable v2 register PDF.
+# key -> (default heading, default width unit, numeric?)
+V2_REGISTER_COLUMNS: List[Any] = [
+    ("sno", "S.No", 7, False),
+    ("code", "Code", 12, False),
+    ("name", "Employee / Father Name", 40, False),
+    ("uan_esi", "UAN / ESI No.", 24, False),
+    ("desig", "Desig.", 18, False),
+    ("days", "Days", 8, True),
+    ("basic", "Basic", 13, True),
+    ("hra", "HRA", 12, True),
+    ("conv", "Conv.", 12, True),
+    ("other_earn", "Other", 12, True),
+    ("gross", "GROSS", 15, True),
+    ("pf", "PF", 12, True),
+    ("esi", "ESI", 11, True),
+    ("other_ded", "Other Ded.", 12, True),
+    ("tds", "TDS", 11, True),
+    ("total_ded", "TOTAL DED.", 15, True),
+    ("net", "NET PAY", 15, True),
+]
+
 
 def _round_stat(v: float, mode: str) -> float:
     """Whole-rupee statutory rounding."""
@@ -926,6 +948,7 @@ def build_compliance_register_pdf_v2(
     run: Dict[str, Any],
     company_name: str = "S.K. Sharma & Co.",
     firm: Optional[Dict[str, Any]] = None,
+    layout: Optional[Dict[str, Any]] = None,
 ) -> bytes:
     """Iter 137 — OPTION 2 (recommended modern format).
 
@@ -1024,11 +1047,20 @@ def build_compliance_register_pdf_v2(
     doc.addPageTemplates([PageTemplate(id="pg", frames=[frame], onPage=_header)])
 
     cell = ParagraphStyle("cell", fontName="Helvetica", fontSize=6.8, leading=8)
-    header = [
-        "S.No", "Code", "Employee / Father Name", "UAN / ESI No.", "Desig.",
-        "Days", "Basic", "HRA", "Conv.", "Other", "GROSS",
-        "PF", "ESI", "Other Ded.", "TDS", "TOTAL DED.", "NET PAY",
-    ]
+
+    # Iter 162 — layout-driven columns (choose / order / rename / widths),
+    # saved ONE TIME in Settings and applied on every download.
+    layout = layout or {}
+    _defaults = {k: (h, w) for k, h, w, _n in V2_REGISTER_COLUMNS}
+    _numeric = {k for k, _h, _w, n in V2_REGISTER_COLUMNS if n}
+    cols_spec = [c for c in (layout.get("columns") or [])
+                 if isinstance(c, dict) and c.get("key") in _defaults]
+    if not cols_spec:
+        cols_spec = [{"key": k} for k, _h, _w, _n in V2_REGISTER_COLUMNS]
+    col_keys = [c["key"] for c in cols_spec]
+    header = [str(c.get("heading") or _defaults[c["key"]][0]) for c in cols_spec]
+    widths = [max(4.0, float(c.get("width") or _defaults[c["key"]][1]))
+              for c in cols_spec]
     data: List[List[Any]] = [header]
 
     def other_earn(r):
@@ -1059,31 +1091,38 @@ def build_compliance_register_pdf_v2(
         tot["tds"] += float(r.get("tds") or 0)
         tot["ded"] += float(r.get("total_deduction") or 0)
         tot["net"] += float(r.get("net") or 0)
-        data.append([
-            str(i),
-            str(r.get("employee_code") or ""),
-            Paragraph(
+        vals = {
+            "sno": str(i),
+            "code": str(r.get("employee_code") or ""),
+            "name": Paragraph(
                 f"<b>{(r.get('name') or '').upper()}</b><br/>{(r.get('father_name') or '').upper()}",
                 cell),
-            Paragraph(
+            "uan_esi": Paragraph(
                 f"{r.get('uan_no') or '-'}<br/>{r.get('esi_ip_no') or '-'}", cell),
-            Paragraph((r.get("designation") or "").upper(), cell),
-            f"{days:g}",
-            A(r.get("basic")), A(r.get("hra")), A(r.get("conveyance")),
-            A(oth_e), A(r.get("gross_paid")),
-            A(pf_v), A(r.get("esic_employee")), A(oth_d), A(r.get("tds")),
-            A(r.get("total_deduction")), A(r.get("net")),
-        ])
-    data.append([
-        "", "", "GRAND TOTAL", "", "", f"{tot['days']:g}",
-        A(tot["basic"]), A(tot["hra"]), A(tot["conv"]), A(tot["oth"]), A(tot["gross"]),
-        A(tot["pf"]), A(tot["esi"]), A(tot["othd"]), A(tot["tds"]),
-        A(tot["ded"]), A(tot["net"]),
-    ])
+            "desig": Paragraph((r.get("designation") or "").upper(), cell),
+            "days": f"{days:g}",
+            "basic": A(r.get("basic")), "hra": A(r.get("hra")),
+            "conv": A(r.get("conveyance")), "other_earn": A(oth_e),
+            "gross": A(r.get("gross_paid")), "pf": A(pf_v),
+            "esi": A(r.get("esic_employee")), "other_ded": A(oth_d),
+            "tds": A(r.get("tds")), "total_ded": A(r.get("total_deduction")),
+            "net": A(r.get("net")),
+        }
+        data.append([vals[k] for k in col_keys])
+    tot_vals = {
+        "sno": "", "code": "", "name": "GRAND TOTAL", "uan_esi": "", "desig": "",
+        "days": f"{tot['days']:g}", "basic": A(tot["basic"]), "hra": A(tot["hra"]),
+        "conv": A(tot["conv"]), "other_earn": A(tot["oth"]), "gross": A(tot["gross"]),
+        "pf": A(tot["pf"]), "esi": A(tot["esi"]), "other_ded": A(tot["othd"]),
+        "tds": A(tot["tds"]), "total_ded": A(tot["ded"]), "net": A(tot["net"]),
+    }
+    if "name" not in col_keys and col_keys:
+        tot_vals[col_keys[0]] = "GRAND TOTAL"
+    data.append([tot_vals[k] for k in col_keys])
 
-    widths = [7, 12, 40, 24, 18, 8, 13, 12, 12, 12, 15, 12, 11, 12, 11, 15, 15]
     _scale = (W - 12 * mm) / (sum(widths) * mm)
     col_widths = [wmm * mm * _scale for wmm in widths]
+    _num_idx = [i for i, k in enumerate(col_keys) if k in _numeric]
 
     def _v2_style(n_body: int, zebra_offset: int, is_final: bool) -> TableStyle:
         last = n_body + (1 if is_final else 0)  # grand-total row index
@@ -1094,8 +1133,6 @@ def build_compliance_register_pdf_v2(
             ("FONTSIZE", (0, 0), (-1, 0), 7),
             ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
             ("FONTSIZE", (0, 1), (-1, -1), 6.8),
-            ("ALIGN", (5, 0), (-1, -1), "RIGHT"),
-            ("ALIGN", (0, 0), (1, -1), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("GRID", (0, 0), (-1, -1), 0.35, rl_colors.HexColor("#B9C4CE")),
             ("LEFTPADDING", (0, 0), (-1, -1), 2.5),
@@ -1103,6 +1140,11 @@ def build_compliance_register_pdf_v2(
             ("TOPPADDING", (0, 0), (-1, -1), 2),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
         ]
+        for ci_ in _num_idx:
+            style.append(("ALIGN", (ci_, 0), (ci_, -1), "RIGHT"))
+        for ci_, k in enumerate(col_keys):
+            if k in ("sno", "code"):
+                style.append(("ALIGN", (ci_, 0), (ci_, -1), "CENTER"))
         if is_final:
             style.append(("FONTNAME", (0, last), (-1, last), "Helvetica-Bold"))
             style.append(("BACKGROUND", (0, last), (-1, last), BAND))
@@ -1111,8 +1153,16 @@ def build_compliance_register_pdf_v2(
                 style.append(("BACKGROUND", (0, ri), (-1, ri), ZEBRA))
         return TableStyle(style)
 
-    # Iter 157 (user request) — fixed 10 employees per A4-landscape page.
-    PER_PAGE = 10
+    # Iter 157/162 — employees per page + optional fixed row height,
+    # both user-configurable in the saved layout.
+    try:
+        PER_PAGE = max(1, min(50, int(layout.get("per_page") or 10)))
+    except Exception:
+        PER_PAGE = 10
+    try:
+        _rh = float(layout.get("row_height") or 0)  # mm; 0 = auto
+    except Exception:
+        _rh = 0
     body_rows = data[1:-1]
     grand_row = data[-1]
     chunks = [body_rows[i:i + PER_PAGE]
@@ -1121,7 +1171,10 @@ def build_compliance_register_pdf_v2(
     for ci, ch in enumerate(chunks):
         is_final = ci == len(chunks) - 1
         d = [header] + ch + ([grand_row] if is_final else [])
-        t = Table(d, colWidths=col_widths, repeatRows=1)
+        row_heights = None
+        if _rh > 0:
+            row_heights = [None] + [_rh * mm] * len(ch) + ([None] if is_final else [])
+        t = Table(d, colWidths=col_widths, repeatRows=1, rowHeights=row_heights)
         t.setStyle(_v2_style(len(ch), ci * PER_PAGE, is_final))
         page_tables.append(t)
 

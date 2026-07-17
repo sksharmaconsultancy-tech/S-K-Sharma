@@ -42,6 +42,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
   
 import MonthPicker from "@/src/components/MonthPicker";
+import RegisterLayoutEditor from "@/src/components/RegisterLayoutEditor";
 import { GridScroller, stickyCol, stickyHeader } from "@/src/components/GridFreeze";
 import { colors, radius, spacing, type } from "@/src/theme";
 import { sortEmployeeTypes } from "@/src/utils/employeeTypes";
@@ -212,6 +213,7 @@ export default function ComplianceSalaryRunScreen() {
   const [run, setRun] = useState<CompRun | null>(null);
   const [runs, setRuns] = useState<CompRun[]>([]);
   const [downloading, setDownloading] = useState(false);
+  const [layoutOpen, setLayoutOpen] = useState(false); // Iter 162 — PDF layout editor
   const [pushing, setPushing] = useState(false);
   const [reprocessing, setReprocessing] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
@@ -817,6 +819,24 @@ export default function ComplianceSalaryRunScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlParams.run_id, isAdmin]);
 
+  // Iter 162 — auto-open the LAST processed run on screen load so the
+  // report is visible without clicking "Process Salary" (user request).
+  const autoOpenedRef = React.useRef(false);
+  useEffect(() => {
+    if (!isAdmin || urlParams.run_id || autoOpenedRef.current || !activeCompanyId) return;
+    autoOpenedRef.current = true;
+    (async () => {
+      try {
+        const j = await api<{ runs: CompRun[] }>(
+          `/admin/compliance-salary-runs?company_id=${encodeURIComponent(activeCompanyId)}`,
+        );
+        const latest = (j.runs || [])[0];
+        if (latest?.run_id) await openPastRun(latest);
+      } catch { /* screen stays on fresh state */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, activeCompanyId]);
+
   /**
    * Iter 85 — Client-side re-computation when the admin edits an
    * employee's Present Days in the Compliance Salary grid.
@@ -1392,6 +1412,10 @@ export default function ComplianceSalaryRunScreen() {
                 <ActionBtn icon="grid-outline" label="Excel" busy={downloading} onPress={() => downloadFile("xlsx")} />
                 <ActionBtn icon="document-text-outline" label="PDF" busy={downloading} onPress={() => downloadFile("pdf")} />
                 <ActionBtn icon="document-outline" label="PDF (Option 2)" busy={downloading} onPress={() => downloadFile("pdf2")} />
+                {user?.role === "super_admin" ? (
+                  <ActionBtn icon="options-outline" label="PDF Layout ⚙" busy={false} onPress={() => setLayoutOpen(true)} />
+                ) : null}
+                <RegisterLayoutEditor visible={layoutOpen} onClose={() => setLayoutOpen(false)} />
                 <ActionBtn icon="download-outline" label="CSV" busy={downloading} onPress={() => downloadFile("csv")} />
                 <ActionBtn icon="paper-plane-outline" label="Push payslips" busy={pushing} onPress={pushToPayslips} primary />
               </View>
