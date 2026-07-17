@@ -27,7 +27,7 @@ type Row = Record<string, any>;
 
 const STATUS_TABS = [
   { key: "active", label: "Active Employees" },
-  { key: "left", label: "Left Employees" },
+  { key: "left", label: "Resigned Employees" },
   { key: "all", label: "All Data" },
 ] as const;
 
