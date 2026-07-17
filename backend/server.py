@@ -10107,19 +10107,51 @@ def _last_completed_month(now: datetime) -> str:
     return f"{now.year}-{now.month - 1:02d}"
 
 
+def _parse_any_date(val: Any) -> Optional[datetime]:
+    """Iter 170 — tolerant date parser for exit/leaving dates that may be
+    stored as YYYY-MM-DD, DD-MM-YYYY, DD/MM/YYYY or YYYY/MM/DD."""
+    s = str(val or "").strip()[:10].replace("/", "-")
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s)
+    except Exception:
+        pass
+    try:
+        d, m, y = s.split("-")
+        if len(y) == 4:
+            return datetime(int(y), int(m), int(d))
+    except Exception:
+        pass
+    return None
+
+
 def _month_is_after_exit(user: dict, month_str: str) -> bool:
-    """Iter 166 — True when the employee resigned/exited BEFORE the run
-    month starts. The exit month itself remains payable (final settlement);
-    every later month is excluded from ALL salary processing (both the
-    Compliance and the Actual salary process — user directive)."""
-    ed = user.get("exit_date") or user.get("resign_date")
+    """Iter 166/170 — True when the employee is resigned/exited and must be
+    excluded from salary processing (user directive: applies to BOTH the
+    Compliance and the Actual salary process).
+
+    Rules:
+      * exit/leaving date BEFORE the 1st of the run month → excluded;
+      * exit date DURING the run month → still payable (final settlement);
+      * marked resigned/exited (employment_status) with NO parseable date,
+        or an unreadable exit date → excluded entirely (can't determine
+        the month, so never show them in a salary run).
+    """
+    ed = (user.get("exit_date") or user.get("resign_date")
+          or user.get("date_of_leaving") or user.get("leaving_date"))
+    status_resigned = str(user.get("employment_status") or "").strip().lower() in (
+        "exited", "resigned", "terminated", "inactive", "left")
     if not ed:
-        return False
+        return status_resigned  # marked resigned without a date → exclude
+    dt = _parse_any_date(ed)
+    if dt is None:
+        return True  # exit marker present but unreadable → exclude
     try:
         y, m = int(month_str[:4]), int(month_str[5:7])
-        return datetime.fromisoformat(str(ed)[:10]) < datetime(y, m, 1)
+        return dt < datetime(y, m, 1)
     except Exception:
-        return False
+        return True
 
 
 def _month_is_before_doj(user: dict, month_str: str) -> bool:
@@ -10813,11 +10845,16 @@ async def list_employee_types(
         # Iter 169 (user bug) — group counts must reflect ACTIVE employees
         # only; resigned/exited/disabled staff inflated the numbers.
         "disabled": {"$ne": True},
+        "employment_status": {"$not": {"$regex": "^(exited|resigned|terminated|inactive|left)$", "$options": "i"}},
         "$and": [
             {"$or": [{"exit_date": {"$in": [None, ""]}},
                      {"exit_date": {"$exists": False}}]},
             {"$or": [{"resign_date": {"$in": [None, ""]}},
                      {"resign_date": {"$exists": False}}]},
+            {"$or": [{"date_of_leaving": {"$in": [None, ""]}},
+                     {"date_of_leaving": {"$exists": False}}]},
+            {"$or": [{"leaving_date": {"$in": [None, ""]}},
+                     {"leaving_date": {"$exists": False}}]},
         ],
     }
     if user["role"] == "company_admin":
@@ -14489,11 +14526,33 @@ async def _compute_compliance_run(
         async for fm in db.firm_masters.find(
             {"company_id": {"$in": company_ids}},
             {"_id": 0, "company_id": 1, "epf": 1, "esi": 1,
-             "salary_process.ot_allowed": 1},
+             "salary_process.ot_allowed": 1, "allowances": 1, "deductions": 1},
         ):
+            _fm_allow = fm.get("allowances") or {}
+            _fm_ded = fm.get("deductions") or {}
+            # Iter 171 (user request) — Firm Master Allowances/Deductions
+            # toggles drive the Compliance Salary columns. A mask of None
+            # means the firm never configured that catalog (show defaults).
+            _amap = {"HRA": "hra", "CONV.": "conveyance",
+                     "MEDICAL ALLOWANCES": "medical", "OTH. ALLOW.": "special",
+                     "OTHER MISC.ALLOWANCE": "others"}
+            allow_mask = {h for lbl, h in _amap.items() if _fm_allow.get(lbl)}
+            _pf_col = bool(_fm_ded.get("PF")) or bool((fm.get("epf") or {}).get("applicable"))
+            _esi_col = bool(_fm_ded.get("ESI")) or bool((fm.get("esi") or {}).get("applicable"))
+            ded_mask = set()
+            if _pf_col:
+                ded_mask.add("pf")
+            if _esi_col:
+                ded_mask.add("esi")
+            if _fm_ded.get("PT"):
+                ded_mask.add("pt")
+            if _fm_ded.get("TDS") or _fm_ded.get("I. TAX"):
+                ded_mask.add("tds")
             firm_stat_flags[fm["company_id"]] = {
                 "pf": bool((fm.get("epf") or {}).get("applicable")),
                 "esic": bool((fm.get("esi") or {}).get("applicable")),
+                "allow_mask": allow_mask if allow_mask else None,
+                "ded_mask": ded_mask if any(bool(v) for v in _fm_ded.values()) else None,
             }
             # Iter 142 — Firm Master OT gate for compliance-salary rows.
             _v = (fm.get("salary_process") or {}).get("ot_allowed")
@@ -14556,13 +14615,26 @@ async def _compute_compliance_run(
         row["company_id"] = emp.get("company_id")
         row["company_name"] = company_doc.get("name")
         # Iter 85 — Apply the firm's Compliance-Allowances toggles.
-        # Basic is always kept (statutory floor). Any allowance head the
-        # firm has switched OFF is zeroed out so it doesn't inflate
+        # Iter 171 — ALSO honour the Firm Master Allowances catalog: when
+        # the firm configured allowances there, the two masks intersect.
+        # Basic is always kept (statutory floor). Any allowance head that
+        # is switched OFF is zeroed out so it doesn't inflate
         # Total Gross / statutory bases.
         firm_comp_policy = company_doc.get("compliance_policy") or {}
         enabled = firm_comp_policy.get("enabled_allowances")
-        if enabled and isinstance(enabled, list):
-            enabled_set = {str(x).lower() for x in enabled}
+        _pol_set = ({str(x).lower() for x in enabled}
+                    if enabled and isinstance(enabled, list) else None)
+        _fm_masks = firm_stat_flags.get(emp.get("company_id")) or {}
+        _fm_set = _fm_masks.get("allow_mask")
+        if _pol_set is not None and _fm_set is not None:
+            enabled_set = _pol_set & set(_fm_set)
+        elif _pol_set is not None:
+            enabled_set = _pol_set
+        elif _fm_set is not None:
+            enabled_set = set(_fm_set)
+        else:
+            enabled_set = None
+        if enabled_set is not None:
             enabled_set.add("basic")  # always
             for head in ("hra", "conveyance", "medical", "special", "others"):
                 if head not in enabled_set:
@@ -14578,6 +14650,23 @@ async def _compute_compliance_run(
             )
             row["monthly_gross"] = round(heads_sum, 2)
             row["enabled_allowances"] = sorted(enabled_set)
+
+        # Iter 171 — Firm Master DEDUCTIONS catalog drives the deduction
+        # columns. PF/ESI stay governed by statutory applicability; PT and
+        # TDS are zeroed (and removed from Total Ded. / added back to Net)
+        # when the firm switched them OFF.
+        _ded_set = _fm_masks.get("ded_mask")
+        if _ded_set is not None:
+            _removed = 0.0
+            for _dk in ("pt", "tds"):
+                if _dk not in _ded_set and float(row.get(_dk) or 0):
+                    _removed += float(row[_dk])
+                    row[_dk] = 0.0
+            if _removed:
+                row["total_deduction"] = round(
+                    float(row.get("total_deduction") or 0) - _removed, 2)
+                row["net"] = round(float(row.get("net") or 0) + _removed, 2)
+            row["enabled_deductions"] = sorted(_ded_set)
 
         # Iter 85 — DOJ / Exit-date cap for Compliance Salary. Same idea
         # as Actual Salary: cap present_days at the number of days the

@@ -1,0 +1,31 @@
+{
+  "summary": "Iter 170/171 fully verified. Backend pytest: 15/15 passed — 11-case _month_is_after_exit unit matrix (ISO, DD-MM-YYYY, DD/MM/YYYY, resign_date/leaving_date aliases, employment_status w/o date, unreadable exit_date, empty user) + Master Data Report status filter (setting employment_status='resigned' with no exit_date makes the user drop out of ?status=active and appear in ?status=left for Kankani cmp_527fecdd7c) + Compliance Salary Iter 171 masking (Firm Master allowances={HRA:true}/deductions={PF,ESI:true} → every generated row: conveyance=medical=special=others=0, enabled_allowances=['basic','hra'], enabled_deductions=['esi','pf'], pt=tds=0, monthly_gross=basic+hra, net consistent with gp-td) + all-false regression (no mask applied → enabled_allowances/enabled_deductions absent so UI renders defaults). Frontend: /compliance-salary-run at 2026-07 with mask applied renders exactly the expected column set — MASTER group [M.Basic, M.HRA, M.Gross], CALCULATED [Basic, HRA, Gross], DEDUCTIONS [Wage Base, PF (E), PF (Er), ESI (E), ESI (Er), Other*, Total Ded., Net] — NO PT and NO TDS columns; table figures and TOTAL row align under correct headers (visible 126 rows). /employee-add Family Members DOB uses DateField (testID family-dob-0) — clicking opens the native calendar picker overlay, calendar-outline icon prefix + `<input type=\"date\">` rendered, the display format follows browser locale (in browser en-US shows mm/dd/yyyy per DateField comment; India locale would render DD-MM-YYYY). MANDATORY CLEANUP verified: firm_masters.cmp_527fecdd7c allowances + deductions restored to original values (HRA/CONV./OVER TIME true; PF/ESI/ADVANCE true), all employment_status='resigned' markers cleared, both test-created compliance runs deleted (csrun_6cf480542b15 + 2 more from pytest teardown). 3 pre-existing 2026-07 runs left untouched.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter170_171_exit_and_compliance_masks.py",
+    "/app/test_reports/pytest/iter170_171_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py _month_is_after_exit (~L10129) — now handles DD-MM-YYYY, DD/MM/YYYY, ISO, resign_date/date_of_leaving/leaving_date aliases, status-only marker (exited/resigned/terminated/inactive/left) and unreadable date → excluded. This addresses the concern raised in iter166 review.",
+    "server.py Iter 171 mask (~L14524-14669) — ded_mask is None (i.e. skipped) when every deduction value is False (`any(bool(v))` guard). This matches spec: 'mask applied only when firm configured ≥1 deduction'. allow_mask uses truthy-only union which yields empty set → falls back to None; same behaviour. Good defensive design.",
+    "server.py Iter 171 allowance mask (~L14629-14634) — intersection with compliance_policy.enabled_allowances only when BOTH are set; sensible fallback ordering.",
+    "compliance-salary-run.tsx — hasDed default `!ed` correctly falls back to showing all deduction columns when the backend didn't emit an enabled_deductions field (pre-mask runs & firms without a deductions catalog). This is the regression path covered by the all-false pytest.",
+    "DateField.tsx web branch uses `<input type=\"date\">` which follows browser locale (India locale = DD-MM-YYYY, en-US locale = mm/dd/yyyy). The visible format therefore depends on the tester's locale rather than the app. Acceptable per current implementation comment; consider a manual mask if the app ever ships with a forced locale."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter170_171_exit_and_compliance_masks.py (new)"
+  ],
+  "success_rate": {"backend": "100% (15/15)", "frontend": "100% (mask columns + family DOB picker verified)"},
+  "seed_data_creation": "During tests: (a) employment_status set to 'resigned' on one active Kankani user for Master-Data-Report tab check — restored in teardown, (b) firm_masters.cmp_527fecdd7c allowances/deductions temporarily replaced with HRA-only + PF/ESI-only (and later with all-false) — original captured and restored in teardown, (c) 3 compliance_salary_runs for 2026-07 created (2 via pytest + 1 for UI) — all deleted post-verification via tracked run_id. Pre-existing 3 real runs for 2026-07 left untouched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 170 helpers: _parse_any_date (~L10110) + _month_is_after_exit (~L10129) in server.py. Iter 171 firm-master-driven column mask lives in _compute_compliance_run around L14520-14670: allow_mask keyed on Firm Master keys {HRA, CONV., MEDICAL ALLOWANCES, OTH. ALLOW., OTHER MISC.ALLOWANCE} → row heads {hra, conveyance, medical, special, others}; ded_mask keys {PF, ESI, PT, TDS/I. TAX}. When mask active, row carries enabled_allowances/enabled_deductions arrays. Frontend compliance-salary-run.tsx reads r0.enabled_deductions with `hasDed = (k) => !ed || ed.includes(k)`; header IIFEs (~L1482, 1506) and TOTAL row IIFE (~L1680) all use the same predicate. To retest: apply mask via Mongo update to firm_masters.<company_id>.allowances/deductions, POST /api/admin/compliance-salary-runs, load /compliance-salary-run?company_id=X&month=YYYY-MM&run_id=... in UI. ALWAYS capture original firm_masters values first and delete the run afterward.",
+  "rca_of_issue": "N/A — no bugs found. Both Iter 170 (resigned-employee exclusion hardening) and Iter 171 (Firm Master allowance/deduction column masking) match specification end-to-end at unit, API and UI layers."
+}

@@ -1650,11 +1650,18 @@ export default function EmployeeAddScreen() {
                   const list = [...form.family_members]; list[idx] = { ...fm, relation: v };
                   setField("family_members", list);
                 }} placeholder="Wife / Son / Father…" />
-              <Field label={idx === 0 ? "DOB" : ""} value={fm.dob}
-                onChange={(v) => {
-                  const list = [...form.family_members]; list[idx] = { ...fm, dob: v };
-                  setField("family_members", list);
-                }} placeholder="YYYY-MM-DD" />
+              {/* Iter 170 — Family DOB uses DD-MM-YYYY + calendar picker */}
+              <View style={{ flex: 1 }}>
+                <DateField
+                  label={idx === 0 ? "DOB" : ""}
+                  value={fm.dob}
+                  onChangeISO={(iso) => {
+                    const list = [...form.family_members]; list[idx] = { ...fm, dob: iso };
+                    setField("family_members", list);
+                  }}
+                  testID={`family-dob-${idx}`}
+                />
+              </View>
               <Pressable
                 onPress={() => setField("family_members", form.family_members.filter((_, i) => i !== idx))}
                 style={{ paddingBottom: 12 }} testID={`family-del-${idx}`}>
