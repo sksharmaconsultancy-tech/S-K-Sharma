@@ -323,6 +323,17 @@ async def update_employee_kyc(
     if updates.get("present_address"):
         updates["address"] = updates["present_address"]
 
+    # Iter 169 — keep the employee's real "Bank Details" section in sync.
+    # The Add/Edit Employee form, salary and payment reports read
+    # users.bank_account / users.bank_ifsc, while KYC stores the same data
+    # as bank_account_number / ifsc_code. Mirror on every KYC write so an
+    # OCR passbook scan fills the actual Bank Details too (user bug).
+    if updates.get("bank_account_number"):
+        digits = "".join(c for c in str(updates["bank_account_number"]) if c.isdigit())
+        updates["bank_account"] = digits or str(updates["bank_account_number"])
+    if updates.get("ifsc_code"):
+        updates["bank_ifsc"] = updates["ifsc_code"]
+
     await db.kyc_history.insert_one({
         "user_id": user_id,
         "company_id": emp.get("company_id"),

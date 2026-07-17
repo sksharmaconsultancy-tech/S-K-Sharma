@@ -831,3 +831,9 @@ Verified: /admin/actual-salary-process for 2026-03 (no compliance) → epf/esi 0
 - server.py: the 3 filter sites (~13395 _compute_salary_run, ~14410 _compute_compliance_run, ~18521 create_actual_salary_process) now also filter e.get("disabled") is not True (marker: "# Iter 166/168").
 - Verified via curl: disabled=True on SURENDRA SINGH → excluded from compliance run 2026-07 (125 rows); state restored, test run deleted.
 - master-data-report.tsx: renamed "Left Employees" tab → "Resigned Employees" (user asked for Active/Resign/All on Master Data Report — feature already existed with status=active|left|all backend param).
+
+## Iter 169 — OCR bank details fix + active-only group counts (verified via curl)
+- ROOT CAUSE (user bug "OCR bank details not filling"): OCR/KYC writes stored bank_account_number/ifsc_code but the Employee "Bank Details" section + salary/payment reports read users.bank_account/bank_ifsc. FIX: mirror on every KYC write — routes/employee_kyc.py PATCH (admin OCR autofill), server.py _validate_kyc (/me/kyc), routes/ocr.py parse-my-document. Verified: PATCH kyc with bank_account_number/ifsc_code → users doc got bank_account+bank_ifsc.
+- GET /admin/employee-types (~10800): $match now excludes disabled + exit_date/resign_date set → group count chips (Employee Master + Compliance EMPLOYEE GROUP) count ACTIVE employees only.
+- admin.tsx: isResigned/matchesStatus hoisted to component scope; EmployeeFilterChips now receives employees.filter(matchesStatus) so type counts always match the visible list.
+- NOTE for user (compliance run screenshot): saved runs are snapshots — must click Reprocess after setting exit dates; exit-month employees stay included (final settlement, user-confirmed).

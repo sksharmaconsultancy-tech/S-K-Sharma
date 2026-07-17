@@ -2766,6 +2766,13 @@ def _validate_kyc(payload: "KycUpdate") -> dict:
     if payload.name_as_per_bank is not None:
         v = (payload.name_as_per_bank or "").strip()
         updates["name_as_per_bank"] = v if v else None
+    # Iter 169 — mirror KYC bank keys onto the employee's real Bank Details
+    # fields (users.bank_account / users.bank_ifsc) used by the Employee
+    # form, salary and payment reports.
+    if updates.get("bank_account_number"):
+        updates["bank_account"] = updates["bank_account_number"]
+    if updates.get("ifsc_code"):
+        updates["bank_ifsc"] = updates["ifsc_code"]
     return updates
 
 
@@ -10801,7 +10808,18 @@ async def list_employee_types(
     """
     user = await get_user_from_token(authorization)
     require_role(user, ["company_admin", "sub_admin", "super_admin"])
-    match: dict = {"employee_type": {"$exists": True, "$nin": [None, ""]}}
+    match: dict = {
+        "employee_type": {"$exists": True, "$nin": [None, ""]},
+        # Iter 169 (user bug) — group counts must reflect ACTIVE employees
+        # only; resigned/exited/disabled staff inflated the numbers.
+        "disabled": {"$ne": True},
+        "$and": [
+            {"$or": [{"exit_date": {"$in": [None, ""]}},
+                     {"exit_date": {"$exists": False}}]},
+            {"$or": [{"resign_date": {"$in": [None, ""]}},
+                     {"resign_date": {"$exists": False}}]},
+        ],
+    }
     if user["role"] == "company_admin":
         match["company_id"] = user.get("company_id")
     elif company_id:

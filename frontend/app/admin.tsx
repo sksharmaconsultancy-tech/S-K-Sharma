@@ -69,6 +69,29 @@ export default function AdminScreen() {
   // Iter 166 — employment status filter (user request): Active (default) /
   // Resigned / All employees.
   const [statusFilter, setStatusFilter] = useState<"active" | "resigned" | "all">("active");
+  // Iter 169 — shared status helpers (used by the type-count chips AND the
+  // list so the counts always match what is displayed).
+  const isResigned = (e: any) => {
+    if (e.exit_date) return true;
+    if (e.resign_date) return true;
+    if (
+      typeof e.employment_status === "string" &&
+      ["exited", "resigned", "terminated", "inactive"].includes(
+        e.employment_status.toLowerCase(),
+      )
+    ) {
+      return true;
+    }
+    return false;
+  };
+  const matchesStatus = (e: any) => {
+    if (statusFilter === "resigned") return isResigned(e);
+    if (statusFilter === "all") return true;
+    // active (default) — keep the pre-Iter-166 behaviour
+    if (e.is_onroll === false) return false;
+    if (e.disabled === true) return false;
+    return !isResigned(e);
+  };
   const [pending, setPending] = useState<any[]>([]);
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [stats, setStats] = useState<any>(null);
@@ -638,9 +661,9 @@ export default function AdminScreen() {
           ))}
         </View>
 
-        {/* Filter chips: Type + On/Off-roll */}
+        {/* Filter chips: Type + On/Off-roll (counts follow the status filter) */}
         <EmployeeFilterChips
-          employees={employees}
+          employees={employees.filter(matchesStatus)}
           typeFilter={typeFilter}
           onTypeChange={setTypeFilter}
           rollFilter={rollFilter}
@@ -655,30 +678,8 @@ export default function AdminScreen() {
           </Text>
         ) : (
           (() => {
-            // Iter 166 — status filter replaces the old always-hide rule:
-            // "Active" (default) behaves like before, "Resigned" surfaces
-            // exited/resigned staff, "All" shows everyone.
-            const isResigned = (e: any) => {
-              if (e.exit_date) return true;
-              if (e.resign_date) return true;
-              if (
-                typeof e.employment_status === "string" &&
-                ["exited", "resigned", "terminated", "inactive"].includes(
-                  e.employment_status.toLowerCase(),
-                )
-              ) {
-                return true;
-              }
-              return false;
-            };
-            const matchesStatus = (e: any) => {
-              if (statusFilter === "resigned") return isResigned(e);
-              if (statusFilter === "all") return true;
-              // active (default) — keep the pre-Iter-166 behaviour
-              if (e.is_onroll === false) return false;
-              if (e.disabled === true) return false;
-              return !isResigned(e);
-            };
+            // Iter 166/169 — status filter (helpers hoisted to component
+            // scope so the count chips share the same logic).
             const visible = employees.filter((e) => {
               if (!matchesStatus(e)) return false;
               if (rollFilter === "on" && e.is_onroll === false) return false;

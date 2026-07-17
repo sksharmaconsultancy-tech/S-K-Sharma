@@ -219,6 +219,12 @@ async def ocr_parse_my_document(
                     if dst == "gender":
                         val = str(val).strip().lower()
                     updates[dst] = str(val).strip()
+            # Iter 169 — mirror OCR bank keys onto the employee's real Bank
+            # Details fields used by the form / salary / payment reports.
+            if updates.get("bank_account_number"):
+                updates.setdefault("bank_account", updates["bank_account_number"])
+            if updates.get("ifsc_code"):
+                updates.setdefault("bank_ifsc", updates["ifsc_code"])
             await db.users.update_one({"user_id": user["user_id"]}, {"$set": updates})
             logger.info("[ocr] onboarding scan saved for %s — keys=%s",
                         user["user_id"], sorted(updates.keys()))
