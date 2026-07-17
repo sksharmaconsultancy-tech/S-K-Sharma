@@ -10100,6 +10100,21 @@ def _last_completed_month(now: datetime) -> str:
     return f"{now.year}-{now.month - 1:02d}"
 
 
+def _month_is_after_exit(user: dict, month_str: str) -> bool:
+    """Iter 166 — True when the employee resigned/exited BEFORE the run
+    month starts. The exit month itself remains payable (final settlement);
+    every later month is excluded from ALL salary processing (both the
+    Compliance and the Actual salary process — user directive)."""
+    ed = user.get("exit_date") or user.get("resign_date")
+    if not ed:
+        return False
+    try:
+        y, m = int(month_str[:4]), int(month_str[5:7])
+        return datetime.fromisoformat(str(ed)[:10]) < datetime(y, m, 1)
+    except Exception:
+        return False
+
+
 def _month_is_before_doj(user: dict, month_str: str) -> bool:
     """Return True when the given 'YYYY-MM' precedes the employee's DOJ.
 
@@ -13375,7 +13390,8 @@ async def _compute_salary_run(
 
     # Iter 57 — Exclude employees whose date-of-joining is AFTER the run's
     # month end. Payslips must never be generated for pre-DOJ months.
-    employees = [e for e in employees if not _month_is_before_doj(e, payload.month)]
+    employees = [e for e in employees if not _month_is_before_doj(e, payload.month)
+                 and not _month_is_after_exit(e, payload.month)]  # Iter 166
 
     # ---- Load attendance for the month once (indexed by user_id) ----
     date_from = f"{year:04d}-{mon:02d}-01"
@@ -14377,7 +14393,8 @@ async def _compute_compliance_run(
 
     # Iter 57 — Exclude employees whose date-of-joining is AFTER the run's
     # month end. Payslips must never be generated for pre-DOJ months.
-    employees = [e for e in employees if not _month_is_before_doj(e, payload.month)]
+    employees = [e for e in employees if not _month_is_before_doj(e, payload.month)
+                 and not _month_is_after_exit(e, payload.month)]  # Iter 166
 
     # Iter 127f/g — statutory config precedence: global Standard Compliance
     # Settings < firm-specific overrides (Firm Master) < per-run cfg.
@@ -18483,7 +18500,8 @@ async def create_actual_salary_process(
     employees = await db.users.find(
         q, {"_id": 0}
     ).sort([("employee_code", 1), ("name", 1)]).to_list(4000)
-    employees = [e for e in employees if not _month_is_before_doj(e, payload.month)]
+    employees = [e for e in employees if not _month_is_before_doj(e, payload.month)
+                 and not _month_is_after_exit(e, payload.month)]  # Iter 166
 
     # Iter 85 — Exclude resigned/left employees. An employee whose
     # ``exit_date`` is on or before the LAST day of the run month has
