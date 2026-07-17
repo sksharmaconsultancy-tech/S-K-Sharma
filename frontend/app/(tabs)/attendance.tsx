@@ -29,6 +29,9 @@ import {
   authenticateBiometricStrict,
   getBiometricPreference,
 } from "@/src/utils/biometric";
+import {
+  fingerprintSupported, verifyFingerprint, enrollFingerprint,
+} from "@/src/utils/fingerprintGate";
 
 type Company = {
   name: string;
@@ -291,6 +294,35 @@ export default function AttendanceScreen() {
 
   const [faceOpen, setFaceOpen] = useState(false);
 
+  /** Iter 165 — WEB (PWA) fingerprint gate before a punch. Runs only when
+   *  the admin requires fingerprint for this employee AND the browser has
+   *  a platform authenticator; silently passes otherwise (user choice:
+   *  fall back to the normal flow). First use auto-enrolls the device
+   *  (WebAuthn create performs fingerprint verification itself). */
+  const ensureFingerprintWeb = async (): Promise<boolean> => {
+    if (Platform.OS !== "web") return true; // native path prompts already
+    if ((user as any)?.effective_fingerprint_required !== true) return true;
+    if (!(await fingerprintSupported())) return true; // silent fallback
+    const r = await verifyFingerprint(user!.user_id, `Verify fingerprint to punch ${nextKind}`);
+    if (!r.ok && r.message === "NOT_ENROLLED") {
+      showToast("Set up fingerprint for punching — follow the prompt.", "ok");
+      const e = await enrollFingerprint(user!.user_id, user!.name || "");
+      if (e.ok) {
+        api("/me/fingerprint/enrolled", {
+          method: "POST", body: { device: "web-pwa" },
+        }).catch(() => {});
+        return true; // enrollment itself verified the fingerprint
+      }
+      showToast(e.message || "Fingerprint setup failed", "err");
+      return false;
+    }
+    if (!r.ok) {
+      showToast(r.message || "Fingerprint verification failed", "err");
+      return false;
+    }
+    return true;
+  };
+
   /** Shared punch call. If a selfie base64 is provided the method is "face"
    *  and the selfie is uploaded to the server for the record.
    *
@@ -304,6 +336,8 @@ export default function AttendanceScreen() {
     method: "fingerprint" | "face",
     selfie_base64?: string,
   ) => {
+    // Iter 165 — web fingerprint gate (admin-required, silent fallback).
+    if (!(await ensureFingerprintWeb())) return;
     // Biometric-only OR auto-punch off → no-GPS manual punch.
     if (biometricOnlyMode || !autoPunchActive) {
       if (biometricOnlyMode && !selfie_base64) {
@@ -558,6 +592,8 @@ export default function AttendanceScreen() {
       showToast("You're outside the office zone", "err");
       return;
     }
+    // Iter 165 — web fingerprint gate (admin-required, silent fallback).
+    if (!(await ensureFingerprintWeb())) return;
     setBusy(true);
     try {
       let method: "fingerprint" | "face" = "fingerprint";

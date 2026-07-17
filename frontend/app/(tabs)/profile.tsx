@@ -22,6 +22,9 @@ import {
   enableReminders,
   disableReminders,
 } from "@/src/utils/punchReminders";
+import {
+  fingerprintSupported, fingerprintEnrolled, enrollFingerprint, verifyFingerprint,
+} from "@/src/utils/fingerprintGate";
 
 const LOGO_MARK = require("../../assets/images/logo-mark.png");
 
@@ -316,6 +319,16 @@ export default function ProfileScreen() {
           </View>
         ) : null}
 
+        {/* Iter 165 — Fingerprint verification card (only when the firm's
+            Bio Matrix Attendance is enabled in Firm Master). */}
+        {user?.role === "employee" && (user as any)?.firm_biometric_enabled ? (
+          <FingerprintCard
+            userId={user.user_id}
+            userName={user.name || ""}
+            required={(user as any)?.fingerprint_required === true}
+          />
+        ) : null}
+
         <Row
           testID="row-history"
           icon="time-outline"
@@ -594,6 +607,113 @@ export default function ProfileScreen() {
     </View>
   );
 }
+
+/** Iter 165 — Fingerprint verification status + setup for employees. */
+function FingerprintCard({
+  userId, userName, required,
+}: { userId: string; userName: string; required: boolean }) {
+  const [supported, setSupported] = useState<boolean | null>(null);
+  const [enrolled, setEnrolled] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      setSupported(await fingerprintSupported());
+      setEnrolled(fingerprintEnrolled(userId));
+    })();
+  }, [userId]);
+
+  const setup = async () => {
+    setBusy(true); setMsg("");
+    try {
+      const r = await enrollFingerprint(userId, userName);
+      if (r.ok) {
+        setEnrolled(true);
+        setMsg("Fingerprint set up on this device ✓");
+        api("/me/fingerprint/enrolled", {
+          method: "POST", body: { device: "web-pwa" },
+        }).catch(() => {});
+      } else {
+        setMsg(r.message || "Setup failed");
+      }
+    } finally { setBusy(false); }
+  };
+
+  const test = async () => {
+    setBusy(true); setMsg("");
+    try {
+      const r = await verifyFingerprint(userId, "Test your fingerprint");
+      setMsg(r.ok ? "Fingerprint verified ✓" : (r.message === "NOT_ENROLLED" ? "Not set up yet — tap Set up first." : r.message || "Verification failed"));
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <View style={fpStyles.card} testID="fingerprint-card">
+      <View style={fpStyles.head}>
+        <Ionicons name="finger-print" size={16} color={colors.brandPrimary} />
+        <Text style={fpStyles.title}>Fingerprint verification</Text>
+        <View style={[fpStyles.badge, required ? fpStyles.badgeOn : fpStyles.badgeOff]}>
+          <Text style={[fpStyles.badgeTxt, { color: required ? "#065F46" : "#6B7280" }]}>
+            {required ? "REQUIRED BY EMPLOYER" : "NOT REQUIRED"}
+          </Text>
+        </View>
+      </View>
+      {supported === false ? (
+        <Text style={fpStyles.hint}>
+          This device/browser has no fingerprint support — you&apos;ll continue
+          with the normal flow automatically.
+        </Text>
+      ) : (
+        <>
+          <Text style={fpStyles.hint}>
+            {required
+              ? "Your employer requires fingerprint at app open and punch."
+              : "Your firm supports fingerprint verification."}{" "}
+            {enrolled ? "This device is set up." : "This device is not set up yet."}
+          </Text>
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+            <Pressable onPress={setup} disabled={busy}
+              style={[fpStyles.btn, busy && { opacity: 0.6 }]} testID="fp-setup-btn">
+              <Ionicons name="finger-print" size={14} color="#fff" />
+              <Text style={fpStyles.btnTxt}>{enrolled ? "Re-enroll" : "Set up fingerprint"}</Text>
+            </Pressable>
+            {enrolled ? (
+              <Pressable onPress={test} disabled={busy}
+                style={[fpStyles.btn, { backgroundColor: "#64748B" }, busy && { opacity: 0.6 }]}
+                testID="fp-test-btn">
+                <Text style={fpStyles.btnTxt}>Test</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </>
+      )}
+      {msg ? <Text style={fpStyles.msg}>{msg}</Text> : null}
+    </View>
+  );
+}
+
+const fpStyles = StyleSheet.create({
+  card: {
+    backgroundColor: colors.surfaceSecondary, borderWidth: 1,
+    borderColor: colors.border, borderRadius: radius.md,
+    padding: spacing.lg, marginBottom: 12,
+  },
+  head: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  title: { fontSize: 13.5, fontWeight: "700", color: colors.onSurface, flex: 1 },
+  badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  badgeOn: { backgroundColor: "#D1FAE5" },
+  badgeOff: { backgroundColor: "#F3F4F6" },
+  badgeTxt: { fontSize: 9.5, fontWeight: "800" },
+  hint: { fontSize: 11.5, color: colors.onSurfaceSecondary, marginTop: 6 },
+  msg: { fontSize: 12, fontWeight: "600", color: colors.brandPrimary, marginTop: 8 },
+  btn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: colors.brandPrimary, paddingHorizontal: 14,
+    paddingVertical: 9, borderRadius: radius.sm,
+  },
+  btnTxt: { color: "#fff", fontSize: 12, fontWeight: "700" },
+});
 
 function roleLabel(role?: string) {
   if (role === "super_admin") return "SUPER ADMIN";

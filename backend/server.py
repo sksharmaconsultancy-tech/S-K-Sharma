@@ -555,6 +555,10 @@ class RoleUpdate(BaseModel):
     # On-roll (payroll employee) vs Off-roll (contract / agency-deployed).
     # Purely for reporting / filtering — does not block punch or auth.
     is_onroll: Optional[bool] = None
+    # Iter 165 — admin-controlled fingerprint verification requirement
+    # (Employee PWA). Only settable when the firm's Bio Matrix Attendance
+    # is enabled in Firm Master.
+    fingerprint_required: Optional[bool] = None
     # Standing advance / salary loan balance for this employee. Deducted
     # from monthly gross by the Salary Process. Employer decreases the
     # balance on each pay-cycle to reflect repayment.
@@ -2567,6 +2571,23 @@ async def _enrich_user_with_company(user: dict) -> dict:
     user_gps_opt = bool(user.get("gps_punch_enabled") is True)
     user["gps_punch_enabled"] = user_gps_opt
     user["effective_gps_punch"] = bool(company_loc_punch and user_gps_opt)
+
+    # Iter 165 — Fingerprint verification (Employee PWA). Available only
+    # when the firm's Bio Matrix Attendance is enabled in Firm Master;
+    # required per-employee by the admin (users.fingerprint_required).
+    firm_bio = False
+    if cid and user.get("role") == "employee":
+        try:
+            fm = await db.firm_masters.find_one(
+                {"company_id": cid}, {"_id": 0, "salary_process": 1})
+            firm_bio = bool(((fm or {}).get("salary_process") or {})
+                            .get("bio_matrix_attendance"))
+        except Exception:
+            firm_bio = False
+    user["firm_biometric_enabled"] = firm_bio
+    user["fingerprint_required"] = bool(user.get("fingerprint_required"))
+    user["effective_fingerprint_required"] = bool(
+        firm_bio and user.get("fingerprint_required"))
     # Auto-punch requires GPS. If effective GPS is off, auto-punch is off.
     if not user["effective_gps_punch"]:
         user["effective_auto_punch"] = False
@@ -2637,6 +2658,23 @@ async def auth_me(authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
     user = await _enrich_user_with_company(user)
     return {"user": user}
+
+
+@api.post("/me/fingerprint/enrolled")
+async def record_fingerprint_enrollment(
+    payload: Dict[str, Any] = Body(default={}),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 165 — Employee PWA reports a successful device-fingerprint
+    enrollment (WebAuthn on web / OS biometrics on native) so admins can
+    see who has set it up. Device-local credential; nothing sensitive."""
+    user = await get_user_from_token(authorization)
+    device = str(payload.get("device") or "")[:80]
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"fingerprint_enrolled_at": now_iso(),
+                  "fingerprint_device": device or None}})
+    return {"ok": True}
 
 
 def _normalise_aadhar(value: str) -> str:
@@ -12466,6 +12504,16 @@ async def update_user_role(payload: RoleUpdate, authorization: Optional[str] = H
         # Default treated as True everywhere the field is absent; store
         # explicit True/False so filtering with $eq works cleanly.
         updates["is_onroll"] = None if v is None else bool(v)
+    if "fingerprint_required" in fset and payload.fingerprint_required is not None:
+        # Iter 165 — requiring fingerprint needs the firm's Bio Matrix
+        # Attendance enabled (Firm Master → Salary Process Settings).
+        if payload.fingerprint_required and not await _firm_biometric_attendance_enabled(
+                target.get("company_id")):
+            raise HTTPException(
+                status_code=400,
+                detail=("Fingerprint verification is not allowed — enable Bio "
+                        "Matrix Attendance for this firm in Firm Master first."))
+        updates["fingerprint_required"] = bool(payload.fingerprint_required)
     if "advance_balance" in fset:
         v = payload.advance_balance
         try:
@@ -14547,6 +14595,18 @@ async def _firm_offline_salary_enabled(company_id: Optional[str]) -> bool:
         {"company_id": company_id}, {"_id": 0, "salary_process": 1},
     )
     return bool(((fm or {}).get("salary_process") or {}).get("offline_salary"))
+
+
+async def _firm_biometric_attendance_enabled(company_id: Optional[str]) -> bool:
+    """Iter 165 — True when the firm's Firm Master has 'Bio Matrix
+    Attendance' (salary_process.bio_matrix_attendance) enabled. Gates the
+    per-employee fingerprint verification requirement."""
+    if not company_id:
+        return False
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "salary_process": 1},
+    )
+    return bool(((fm or {}).get("salary_process") or {}).get("bio_matrix_attendance"))
 
 
 async def _require_firm_salary_permission(company_id: Optional[str], kind: str) -> None:
