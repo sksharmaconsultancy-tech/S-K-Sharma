@@ -162,6 +162,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/sheet-verification", label: "Sheet Verification (OCR)", icon: "document-attach-outline" },
       // Iter 155 — full DB backup (screen itself is super-admin gated).
       { route: "/database-backup", label: "Database Backup", icon: "server-outline" },
+      { route: "/report-formats", label: "PDF Report Formats", icon: "options-outline" },
       { route: "/messages", label: "Messages", icon: "chatbubbles-outline" },
       { route: "/tickets", label: "Tickets", icon: "ticket-outline" },
       { route: "/mailbox", label: "Mailbox (Email)", icon: "mail-outline" },

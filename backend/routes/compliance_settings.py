@@ -205,3 +205,77 @@ async def save_compliance_settings(
         "updated_by_name": upd["updated_by_name"],
     })
     return {"ok": True, "settings": snapshot}
+
+
+# ------------------------------------------------------------------------
+# Iter 162 — Compliance Salary Register PDF layout (columns / order /
+# headings / widths / rows-per-page / row height). Saved ONE TIME here,
+# applied automatically on every variant-2 register download.
+_LAYOUT_KEY = {"key": "compliance_register_layout"}
+
+
+@router.get("/admin/compliance-register-layout")
+async def get_register_layout(authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    from utils.compliance_salary import V2_REGISTER_COLUMNS
+    doc = await db.app_settings.find_one(_LAYOUT_KEY, {"_id": 0}) or {}
+    return {
+        "layout": doc.get("layout") or None,
+        "catalog": [{"key": k, "heading": h, "width": w, "numeric": n}
+                    for k, h, w, n in V2_REGISTER_COLUMNS],
+        "updated_at": doc.get("updated_at"),
+        "updated_by_name": doc.get("updated_by_name"),
+    }
+
+
+@router.put("/admin/compliance-register-layout")
+async def put_register_layout(payload: Dict[str, Any] = Body(...),
+                              authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin"])  # user directive: super admin ONLY
+    from utils.compliance_salary import V2_REGISTER_COLUMNS
+    valid = {k for k, _h, _w, _n in V2_REGISTER_COLUMNS}
+    cols_in = payload.get("columns") or []
+    cols = []
+    for c in cols_in:
+        if not isinstance(c, dict) or c.get("key") not in valid:
+            continue
+        item: Dict[str, Any] = {"key": c["key"]}
+        if str(c.get("heading") or "").strip():
+            item["heading"] = str(c["heading"]).strip()[:40]
+        try:
+            w = float(c.get("width") or 0)
+            if w > 0:
+                item["width"] = max(4.0, min(80.0, w))
+        except Exception:
+            pass
+        cols.append(item)
+    if not cols:
+        raise HTTPException(status_code=400, detail="Select at least one column")
+    layout: Dict[str, Any] = {"columns": cols}
+    try:
+        pp = int(payload.get("per_page") or 10)
+        layout["per_page"] = max(1, min(50, pp))
+    except Exception:
+        layout["per_page"] = 10
+    try:
+        rh = float(payload.get("row_height") or 0)
+        if rh > 0:
+            layout["row_height"] = max(3.0, min(30.0, rh))
+    except Exception:
+        pass
+    await db.app_settings.update_one(
+        _LAYOUT_KEY,
+        {"$set": {"layout": layout, "updated_at": now_iso(),
+                  "updated_by_name": admin.get("name") or admin.get("email") or ""},
+         "$setOnInsert": _LAYOUT_KEY}, upsert=True)
+    return {"ok": True, "layout": layout}
+
+
+@router.delete("/admin/compliance-register-layout")
+async def reset_register_layout(authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin"])  # user directive: super admin ONLY
+    await db.app_settings.delete_one(_LAYOUT_KEY)
+    return {"ok": True}

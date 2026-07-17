@@ -200,6 +200,10 @@ export default function EmployeeMasterScreen() {
             // Grouping fields
             employee_type: full.employee_type ?? null,
             is_onroll: full.is_onroll === undefined ? true : !!full.is_onroll,
+            // Iter 165 — admin-controlled fingerprint requirement + status
+            fingerprint_required: full.fingerprint_required === true,
+            fingerprint_enrolled_at: full.fingerprint_enrolled_at ?? null,
+            fingerprint_device: full.fingerprint_device ?? null,
             // Iter 76 — biometric device enrolment ID
             bio_code: full.bio_code ?? null,
             // Iter 91 — residential address (OCR-filled) + statutory nos.
@@ -1111,6 +1115,33 @@ function EmployeeGroupingCard({
   const [typeVal, setTypeVal] = useState<string>(emp.employee_type || "");
   const [onroll, setOnroll] = useState<boolean>(emp.is_onroll !== false);
   const [saving, setSaving] = useState(false);
+  // Iter 164 — Off-roll only allowed when the firm's Offline Salary is
+  // enabled in Firm Master; otherwise the toggle is locked to On-roll.
+  const [offlineAllowed, setOfflineAllowed] = useState<boolean | null>(null);
+  // Iter 165 — admin-controlled fingerprint requirement; only when the
+  // firm's Bio Matrix Attendance is enabled in Firm Master.
+  const [bioAllowed, setBioAllowed] = useState<boolean | null>(null);
+  const [fpRequired, setFpRequired] = useState<boolean>(
+    (emp as any).fingerprint_required === true);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const fm = await api<any>(`/admin/firm-master/${emp.company_id}`);
+        const sp = (fm?.master || {}).salary_process || {};
+        if (alive) {
+          setOfflineAllowed(!!sp.offline_salary);
+          if (!sp.offline_salary) setOnroll(true);
+          setBioAllowed(!!sp.bio_matrix_attendance);
+          if (!sp.bio_matrix_attendance) setFpRequired(false);
+        }
+      } catch { if (alive) { setOfflineAllowed(true); setBioAllowed(false); } }
+    })();
+    return () => { alive = false; };
+  }, [emp.company_id]);
+
+  const rollLocked = offlineAllowed === false;
 
   const doSave = async () => {
     setSaving(true);
@@ -1121,6 +1152,8 @@ function EmployeeGroupingCard({
           user_id: emp.user_id,
           employee_type: (typeVal || "").trim() || null,
           is_onroll: onroll,
+          // Iter 165 — only send when the firm allows biometric attendance.
+          ...(bioAllowed ? { fingerprint_required: fpRequired } : {}),
         },
       });
       await onSaved();
@@ -1154,21 +1187,60 @@ function EmployeeGroupingCard({
 
       <Pressable
         testID="grouping-onroll-toggle"
-        onPress={() => setOnroll((v) => !v)}
-        style={styles.onrollRow}
+        onPress={() => {
+          if (rollLocked) return;
+          setOnroll((v) => !v);
+        }}
+        style={[styles.onrollRow, rollLocked && { opacity: 0.6 }]}
       >
         <View style={{ flex: 1 }}>
           <Text style={styles.metaValue}>
             {onroll ? "On-roll (payroll employee)" : "Off-roll (contract / agency)"}
           </Text>
           <Text style={styles.fieldHint}>
-            {onroll
+            {rollLocked
+              ? "Locked to On-roll — Offline Salary is disabled for this firm in Firm Master."
+              : onroll
               ? "Regular payroll employee. Included in default reports."
-              : "Third-party / contractor. Segregated in reports; punch flow unchanged."}
+              : "Third-party / contractor. Segregated in reports; punch flow unchanged. Excluded from Compliance Salary."}
           </Text>
         </View>
         <View style={[styles.toggleTrack, onroll && styles.toggleTrackOn]}>
           <View style={[styles.toggleKnob, onroll && styles.toggleKnobOn]} />
+        </View>
+      </Pressable>
+
+      {/* Iter 165 — admin-controlled fingerprint verification (Employee
+          PWA). Only editable when the firm's Bio Matrix Attendance is
+          enabled in Firm Master. */}
+      <Pressable
+        testID="grouping-fingerprint-toggle"
+        onPress={() => {
+          if (!bioAllowed) return;
+          setFpRequired((v) => !v);
+        }}
+        style={[styles.onrollRow, !bioAllowed && { opacity: 0.6 }]}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.metaValue}>
+            {fpRequired ? "Fingerprint verification: ON" : "Fingerprint verification: OFF"}
+          </Text>
+          <Text style={styles.fieldHint}>
+            {bioAllowed === false
+              ? "Locked — enable Bio Matrix Attendance for this firm in Firm Master first."
+              : fpRequired
+              ? "Employee must verify device fingerprint to open the app and to punch (phones without a sensor fall back automatically)."
+              : "Employee uses the normal flow. Turn ON to require device fingerprint at app open and punch."}
+          </Text>
+          {(emp as any).fingerprint_enrolled_at ? (
+            <Text style={[styles.fieldHint, { color: "#059669" }]}>
+              Enrolled on device ({(emp as any).fingerprint_device || "device"}) ·{" "}
+              {String((emp as any).fingerprint_enrolled_at).slice(0, 10)}
+            </Text>
+          ) : null}
+        </View>
+        <View style={[styles.toggleTrack, fpRequired && styles.toggleTrackOn]}>
+          <View style={[styles.toggleKnob, fpRequired && styles.toggleKnobOn]} />
         </View>
       </Pressable>
 

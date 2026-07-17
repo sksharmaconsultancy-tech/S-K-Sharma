@@ -386,6 +386,12 @@ export default function EmployeeAddScreen() {
     })();
     return () => { alive = false; };
   }, [selectedCompanyId]);
+  // Iter 164 — firm without Offline Salary ⇒ employee is always On-roll.
+  useEffect(() => {
+    if (firmHeads.loaded && !firmHeads.offline && !form.is_onroll) {
+      setField("is_onroll", true);
+    }
+  }, [firmHeads.loaded, firmHeads.offline, form.is_onroll]);
   // Actual salary visible unless the firm explicitly runs online-only.
   const showActualSalary =
     !firmHeads.loaded || (!firmHeads.online && !firmHeads.offline) || firmHeads.offline;
@@ -1077,18 +1083,33 @@ export default function EmployeeAddScreen() {
           <TwoCol>
             <View style={{ flex: 1, gap: 4 }}>
               <Text style={styles.lbl}>On-roll?</Text>
-              <View style={{ flexDirection: "row", gap: 8 }}>
-                <Chip
-                  active={form.is_onroll}
-                  label="On-roll"
-                  onPress={() => setField("is_onroll", true)}
-                />
-                <Chip
-                  active={!form.is_onroll}
-                  label="Off-roll"
-                  onPress={() => setField("is_onroll", false)}
-                />
-              </View>
+              {/* Iter 164 — Off-roll option only when the firm's Offline
+                  Salary is enabled in Firm Master. Otherwise the employee
+                  joins On-roll directly. */}
+              {firmHeads.loaded && !firmHeads.offline ? (
+                <>
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    <Chip active label="On-roll" onPress={() => {}} />
+                  </View>
+                  <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary }}>
+                    Offline Salary is disabled for this firm — employees join
+                    On-roll directly.
+                  </Text>
+                </>
+              ) : (
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  <Chip
+                    active={form.is_onroll}
+                    label="On-roll"
+                    onPress={() => setField("is_onroll", true)}
+                  />
+                  <Chip
+                    active={!form.is_onroll}
+                    label="Off-roll"
+                    onPress={() => setField("is_onroll", false)}
+                  />
+                </View>
+              )}
             </View>
             <View style={{ flex: 1 }} />
           </TwoCol>

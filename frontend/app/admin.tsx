@@ -66,6 +66,9 @@ export default function AdminScreen() {
   const [employees, setEmployees] = useState<any[]>([]);
   const [typeFilter, setTypeFilter] = useState<string | "all">("all");
   const [rollFilter, setRollFilter] = useState<"all" | "on" | "off">("all");
+  // Iter 166 — employment status filter (user request): Active (default) /
+  // Resigned / All employees.
+  const [statusFilter, setStatusFilter] = useState<"active" | "resigned" | "all">("active");
   const [pending, setPending] = useState<any[]>([]);
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [stats, setStats] = useState<any>(null);
@@ -615,6 +618,26 @@ export default function AdminScreen() {
           </View>
         </View>
 
+        {/* Iter 166 — Employment status filter chips */}
+        <View style={styles.statusChipRow}>
+          {([
+            ["active", "ACTIVE EMPLOYEE"],
+            ["resigned", "RESIGN EMPLOYEE"],
+            ["all", "ALL EMPLOYEE"],
+          ] as const).map(([key, label]) => (
+            <Pressable
+              key={key}
+              onPress={() => setStatusFilter(key)}
+              style={[styles.statusChip, statusFilter === key && styles.statusChipOn]}
+              testID={`status-filter-${key}`}
+            >
+              <Text style={[styles.statusChipTxt, statusFilter === key && styles.statusChipTxtOn]}>
+                {label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
         {/* Filter chips: Type + On/Off-roll */}
         <EmployeeFilterChips
           employees={employees}
@@ -632,28 +655,32 @@ export default function AdminScreen() {
           </Text>
         ) : (
           (() => {
-            // Iter 76 — Employee section is READ-ONLY. Only actively-employed
-            // rows are surfaced (excludes off-roll, disabled, exited or
-            // resigned staff). Admins who need to edit or off-board must
-            // use the dedicated forms (Employee Master, Employee Policy,
-            // Bulk Employee Correction).
-            const isActive = (e: any) => {
-              if (e.is_onroll === false) return false;
-              if (e.disabled === true) return false;
-              if (e.exit_date) return false;
-              if (e.resign_date) return false;
+            // Iter 166 — status filter replaces the old always-hide rule:
+            // "Active" (default) behaves like before, "Resigned" surfaces
+            // exited/resigned staff, "All" shows everyone.
+            const isResigned = (e: any) => {
+              if (e.exit_date) return true;
+              if (e.resign_date) return true;
               if (
                 typeof e.employment_status === "string" &&
                 ["exited", "resigned", "terminated", "inactive"].includes(
                   e.employment_status.toLowerCase(),
                 )
               ) {
-                return false;
+                return true;
               }
-              return true;
+              return false;
+            };
+            const matchesStatus = (e: any) => {
+              if (statusFilter === "resigned") return isResigned(e);
+              if (statusFilter === "all") return true;
+              // active (default) — keep the pre-Iter-166 behaviour
+              if (e.is_onroll === false) return false;
+              if (e.disabled === true) return false;
+              return !isResigned(e);
             };
             const visible = employees.filter((e) => {
-              if (!isActive(e)) return false;
+              if (!matchesStatus(e)) return false;
               if (rollFilter === "on" && e.is_onroll === false) return false;
               if (rollFilter === "off" && e.is_onroll !== false) return false;
               if (typeFilter !== "all") {
@@ -695,7 +722,7 @@ export default function AdminScreen() {
             if (visible.length === 0) {
               return (
                 <Text style={styles.empty}>
-                  No active employees match the current filters.
+                  No employees match the current filters.
                 </Text>
               );
             }
@@ -722,6 +749,13 @@ export default function AdminScreen() {
                   {e.employee_code ? (
                     <View style={styles.codePill}>
                       <Text style={styles.codePillTxt}>#{e.employee_code}</Text>
+                    </View>
+                  ) : null}
+                  {isResigned(e) ? (
+                    <View style={styles.resignedPill}>
+                      <Text style={styles.resignedPillTxt}>
+                        RESIGNED{e.exit_date ? ` · ${String(e.exit_date).slice(0, 10)}` : ""}
+                      </Text>
                     </View>
                   ) : null}
                 </View>
@@ -1438,6 +1472,43 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: radius.pill,
+  },
+  // Iter 166 — employment status filter + resigned badge
+  statusChipRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 10,
+    flexWrap: "wrap",
+  },
+  statusChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  statusChipOn: {
+    backgroundColor: colors.brandPrimary,
+    borderColor: colors.brandPrimary,
+  },
+  statusChipTxt: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: colors.onSurfaceSecondary,
+    letterSpacing: 0.4,
+  },
+  statusChipTxtOn: { color: "#fff" },
+  resignedPill: {
+    backgroundColor: "#FEE2E2",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+  },
+  resignedPillTxt: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#B91C1C",
   },
   codePillTxt: {
     color: colors.onBrandTertiary,

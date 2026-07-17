@@ -2,6 +2,7 @@ import { Redirect, Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { ActivityIndicator, View, StyleSheet, Pressable } from "react-native";
 import { useAuth } from "@/src/context/AuthContext";
+import FingerprintUnlockGate from "@/src/components/FingerprintUnlockGate";
 import { colors, shadow, spacing } from "@/src/theme";
 
 export default function TabsLayout() {
@@ -21,7 +22,13 @@ export default function TabsLayout() {
 
   const isSuperAdmin = user.role === "super_admin";
 
-  return (
+  // Iter 165 — employees whose admin enabled Fingerprint verification must
+  // unlock the app with the device fingerprint (silent skip when the
+  // device/browser has no biometric support).
+  const needsFpGate =
+    user.role === "employee" && (user as any).effective_fingerprint_required === true;
+
+  const tabs = (
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -92,6 +99,15 @@ export default function TabsLayout() {
       />
     </Tabs>
   );
+
+  if (needsFpGate) {
+    return (
+      <FingerprintUnlockGate userId={user.user_id} userName={user.name || ""}>
+        {tabs}
+      </FingerprintUnlockGate>
+    );
+  }
+  return tabs;
 }
 
 const styles = StyleSheet.create({

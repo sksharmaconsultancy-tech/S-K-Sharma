@@ -555,6 +555,10 @@ class RoleUpdate(BaseModel):
     # On-roll (payroll employee) vs Off-roll (contract / agency-deployed).
     # Purely for reporting / filtering — does not block punch or auth.
     is_onroll: Optional[bool] = None
+    # Iter 165 — admin-controlled fingerprint verification requirement
+    # (Employee PWA). Only settable when the firm's Bio Matrix Attendance
+    # is enabled in Firm Master.
+    fingerprint_required: Optional[bool] = None
     # Standing advance / salary loan balance for this employee. Deducted
     # from monthly gross by the Salary Process. Employer decreases the
     # balance on each pay-cycle to reflect repayment.
@@ -2567,6 +2571,23 @@ async def _enrich_user_with_company(user: dict) -> dict:
     user_gps_opt = bool(user.get("gps_punch_enabled") is True)
     user["gps_punch_enabled"] = user_gps_opt
     user["effective_gps_punch"] = bool(company_loc_punch and user_gps_opt)
+
+    # Iter 165 — Fingerprint verification (Employee PWA). Available only
+    # when the firm's Bio Matrix Attendance is enabled in Firm Master;
+    # required per-employee by the admin (users.fingerprint_required).
+    firm_bio = False
+    if cid and user.get("role") == "employee":
+        try:
+            fm = await db.firm_masters.find_one(
+                {"company_id": cid}, {"_id": 0, "salary_process": 1})
+            firm_bio = bool(((fm or {}).get("salary_process") or {})
+                            .get("bio_matrix_attendance"))
+        except Exception:
+            firm_bio = False
+    user["firm_biometric_enabled"] = firm_bio
+    user["fingerprint_required"] = bool(user.get("fingerprint_required"))
+    user["effective_fingerprint_required"] = bool(
+        firm_bio and user.get("fingerprint_required"))
     # Auto-punch requires GPS. If effective GPS is off, auto-punch is off.
     if not user["effective_gps_punch"]:
         user["effective_auto_punch"] = False
@@ -2637,6 +2658,23 @@ async def auth_me(authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
     user = await _enrich_user_with_company(user)
     return {"user": user}
+
+
+@api.post("/me/fingerprint/enrolled")
+async def record_fingerprint_enrollment(
+    payload: Dict[str, Any] = Body(default={}),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 165 — Employee PWA reports a successful device-fingerprint
+    enrollment (WebAuthn on web / OS biometrics on native) so admins can
+    see who has set it up. Device-local credential; nothing sensitive."""
+    user = await get_user_from_token(authorization)
+    device = str(payload.get("device") or "")[:80]
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"fingerprint_enrolled_at": now_iso(),
+                  "fingerprint_device": device or None}})
+    return {"ok": True}
 
 
 def _normalise_aadhar(value: str) -> str:
@@ -7555,6 +7593,14 @@ async def admin_create_employee(
     import secrets as _secrets
     temp_pin = f"{_secrets.randbelow(1_000_000):06d}"
 
+    # Iter 164 — On/Off-roll gated by Firm Master 'Offline Salary': when
+    # the firm has Offline Salary DISABLED, the employee joins On-roll
+    # directly regardless of what the form sent.
+    _onroll_in = payload.get("is_onroll")
+    _onroll_val = True if _onroll_in is None else bool(_onroll_in)
+    if _onroll_val is False and not await _firm_offline_salary_enabled(cid):
+        _onroll_val = True
+
     # Copy over allowed employee master fields.
     doc: Dict[str, Any] = {
         "user_id": f"user_{uuid.uuid4().hex[:12]}",
@@ -7580,7 +7626,7 @@ async def admin_create_employee(
         "department": payload.get("department") or None,
         "employee_type": payload.get("employee_type") or None,
         "employee_group": payload.get("employee_group") or None,
-        "is_onroll": payload.get("is_onroll") if payload.get("is_onroll") is not None else True,
+        "is_onroll": _onroll_val,
         "shift_start": payload.get("shift_start") or None,
         "shift_end": payload.get("shift_end") or None,
         "salary_mode": payload.get("salary_mode") or None,
@@ -10054,6 +10100,21 @@ def _last_completed_month(now: datetime) -> str:
     return f"{now.year}-{now.month - 1:02d}"
 
 
+def _month_is_after_exit(user: dict, month_str: str) -> bool:
+    """Iter 166 — True when the employee resigned/exited BEFORE the run
+    month starts. The exit month itself remains payable (final settlement);
+    every later month is excluded from ALL salary processing (both the
+    Compliance and the Actual salary process — user directive)."""
+    ed = user.get("exit_date") or user.get("resign_date")
+    if not ed:
+        return False
+    try:
+        y, m = int(month_str[:4]), int(month_str[5:7])
+        return datetime.fromisoformat(str(ed)[:10]) < datetime(y, m, 1)
+    except Exception:
+        return False
+
+
 def _month_is_before_doj(user: dict, month_str: str) -> bool:
     """Return True when the given 'YYYY-MM' precedes the employee's DOJ.
 
@@ -12448,9 +12509,26 @@ async def update_user_role(payload: RoleUpdate, authorization: Optional[str] = H
             updates["employee_group"] = None
     if "is_onroll" in fset:
         v = payload.is_onroll
+        # Iter 164 — Off-roll requires the firm's 'Offline Salary' (Firm
+        # Master → Salary Process Settings) to be enabled.
+        if v is False and not await _firm_offline_salary_enabled(target.get("company_id")):
+            raise HTTPException(
+                status_code=400,
+                detail=("Off-roll is not allowed — enable Offline Salary for "
+                        "this firm in Firm Master first."))
         # Default treated as True everywhere the field is absent; store
         # explicit True/False so filtering with $eq works cleanly.
         updates["is_onroll"] = None if v is None else bool(v)
+    if "fingerprint_required" in fset and payload.fingerprint_required is not None:
+        # Iter 165 — requiring fingerprint needs the firm's Bio Matrix
+        # Attendance enabled (Firm Master → Salary Process Settings).
+        if payload.fingerprint_required and not await _firm_biometric_attendance_enabled(
+                target.get("company_id")):
+            raise HTTPException(
+                status_code=400,
+                detail=("Fingerprint verification is not allowed — enable Bio "
+                        "Matrix Attendance for this firm in Firm Master first."))
+        updates["fingerprint_required"] = bool(payload.fingerprint_required)
     if "advance_balance" in fset:
         v = payload.advance_balance
         try:
@@ -13312,7 +13390,8 @@ async def _compute_salary_run(
 
     # Iter 57 — Exclude employees whose date-of-joining is AFTER the run's
     # month end. Payslips must never be generated for pre-DOJ months.
-    employees = [e for e in employees if not _month_is_before_doj(e, payload.month)]
+    employees = [e for e in employees if not _month_is_before_doj(e, payload.month)
+                 and not _month_is_after_exit(e, payload.month)]  # Iter 166
 
     # ---- Load attendance for the month once (indexed by user_id) ----
     date_from = f"{year:04d}-{mon:02d}-01"
@@ -14293,38 +14372,29 @@ async def _compute_compliance_run(
         elif et and et.lower() != "all":
             title = et.title()
             q["employee_type"] = {"$in": [title, et, et.lower(), et.upper()]}
-    if payload.is_onroll is not None:
-        if payload.is_onroll:
-            q.setdefault("$and", []).append({
-                "$or": [
-                    {"is_onroll": True},
-                    {"is_onroll": {"$exists": False}},
-                    {"is_onroll": None},
-                ]
-            })
-        else:
-            q["is_onroll"] = False
-
-    # Iter 77j - Off-roll runs FORCE the is_onroll=False filter regardless
-    # of what the caller passed in the payload.
+    # Iter 164 (user directive) — Compliance Salary Process is STRICTLY
+    # ON-ROLL: off-roll employees are excluded from compliance runs no
+    # matter what filter the caller sent. The dedicated off-roll run type
+    # (Iter 77j) is the only exception.
     run_type = (getattr(payload, "run_type", None) or "compliance").lower()
     if run_type == "off_roll":
         q["is_onroll"] = False
-        if "$and" in q:
-            q["$and"] = [
-                clause for clause in q["$and"]
-                if not (isinstance(clause, dict) and "$or" in clause and any(
-                    ("is_onroll" in (sub or {})) for sub in (clause.get("$or") or [])
-                ))
+    else:
+        q.pop("is_onroll", None)
+        q.setdefault("$and", []).append({
+            "$or": [
+                {"is_onroll": True},
+                {"is_onroll": {"$exists": False}},
+                {"is_onroll": None},
             ]
-            if not q["$and"]:
-                q.pop("$and", None)
+        })
 
     employees = await db.users.find(q, {"_id": 0}).to_list(2000)
 
     # Iter 57 — Exclude employees whose date-of-joining is AFTER the run's
     # month end. Payslips must never be generated for pre-DOJ months.
-    employees = [e for e in employees if not _month_is_before_doj(e, payload.month)]
+    employees = [e for e in employees if not _month_is_before_doj(e, payload.month)
+                 and not _month_is_after_exit(e, payload.month)]  # Iter 166
 
     # Iter 127f/g — statutory config precedence: global Standard Compliance
     # Settings < firm-specific overrides (Firm Master) < per-run cfg.
@@ -14530,6 +14600,30 @@ async def _compute_compliance_run(
         "generated_by": admin["user_id"],
         "generated_at": now_iso(),
     }
+
+
+async def _firm_offline_salary_enabled(company_id: Optional[str]) -> bool:
+    """Iter 164 — True when the firm's Firm Master has 'Offline Salary'
+    (salary_process.offline_salary) enabled. Off-roll employees are only
+    allowed in such firms; everywhere else employees are always On-roll."""
+    if not company_id:
+        return False
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "salary_process": 1},
+    )
+    return bool(((fm or {}).get("salary_process") or {}).get("offline_salary"))
+
+
+async def _firm_biometric_attendance_enabled(company_id: Optional[str]) -> bool:
+    """Iter 165 — True when the firm's Firm Master has 'Bio Matrix
+    Attendance' (salary_process.bio_matrix_attendance) enabled. Gates the
+    per-employee fingerprint verification requirement."""
+    if not company_id:
+        return False
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "salary_process": 1},
+    )
+    return bool(((fm or {}).get("salary_process") or {}).get("bio_matrix_attendance"))
 
 
 async def _require_firm_salary_permission(company_id: Optional[str], kind: str) -> None:
@@ -15022,7 +15116,15 @@ async def export_compliance_salary_register_pdf(
         firm_info["pf_code"] = ((fm or {}).get("epf") or {}).get("epf_no") or ""
         firm_info["esi_code"] = ((fm or {}).get("esi") or {}).get("esi_no") or ""
     builder = build_compliance_register_pdf_v2 if int(variant or 1) == 2 else build_compliance_register_pdf
-    pdf_bytes = builder(run, company_name=company_name, firm=firm_info)
+    if int(variant or 1) == 2:
+        # Iter 162 — apply the ONE-TIME saved register layout (columns /
+        # order / headings / widths / rows-per-page / row height).
+        _lay = await db.app_settings.find_one(
+            {"key": "compliance_register_layout"}, {"_id": 0, "layout": 1})
+        pdf_bytes = builder(run, company_name=company_name, firm=firm_info,
+                            layout=(_lay or {}).get("layout"))
+    else:
+        pdf_bytes = builder(run, company_name=company_name, firm=firm_info)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -18398,7 +18500,8 @@ async def create_actual_salary_process(
     employees = await db.users.find(
         q, {"_id": 0}
     ).sort([("employee_code", 1), ("name", 1)]).to_list(4000)
-    employees = [e for e in employees if not _month_is_before_doj(e, payload.month)]
+    employees = [e for e in employees if not _month_is_before_doj(e, payload.month)
+                 and not _month_is_after_exit(e, payload.month)]  # Iter 166
 
     # Iter 85 — Exclude resigned/left employees. An employee whose
     # ``exit_date`` is on or before the LAST day of the run month has
@@ -19015,6 +19118,8 @@ app.include_router(locations_router)
 from routes.pf_reports import router as pf_reports_router  # noqa: E402
 app.include_router(pf_reports_router)
 app.include_router(compliance_settings_router)
+from routes.report_formats import router as report_formats_router  # noqa: E402
+app.include_router(report_formats_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
