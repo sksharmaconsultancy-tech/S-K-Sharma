@@ -1111,6 +1111,26 @@ function EmployeeGroupingCard({
   const [typeVal, setTypeVal] = useState<string>(emp.employee_type || "");
   const [onroll, setOnroll] = useState<boolean>(emp.is_onroll !== false);
   const [saving, setSaving] = useState(false);
+  // Iter 164 — Off-roll only allowed when the firm's Offline Salary is
+  // enabled in Firm Master; otherwise the toggle is locked to On-roll.
+  const [offlineAllowed, setOfflineAllowed] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const fm = await api<any>(`/admin/firm-master/${emp.company_id}`);
+        const allowed = !!((fm?.master || {}).salary_process || {}).offline_salary;
+        if (alive) {
+          setOfflineAllowed(allowed);
+          if (!allowed) setOnroll(true);
+        }
+      } catch { if (alive) setOfflineAllowed(true); }
+    })();
+    return () => { alive = false; };
+  }, [emp.company_id]);
+
+  const rollLocked = offlineAllowed === false;
 
   const doSave = async () => {
     setSaving(true);
@@ -1154,17 +1174,22 @@ function EmployeeGroupingCard({
 
       <Pressable
         testID="grouping-onroll-toggle"
-        onPress={() => setOnroll((v) => !v)}
-        style={styles.onrollRow}
+        onPress={() => {
+          if (rollLocked) return;
+          setOnroll((v) => !v);
+        }}
+        style={[styles.onrollRow, rollLocked && { opacity: 0.6 }]}
       >
         <View style={{ flex: 1 }}>
           <Text style={styles.metaValue}>
             {onroll ? "On-roll (payroll employee)" : "Off-roll (contract / agency)"}
           </Text>
           <Text style={styles.fieldHint}>
-            {onroll
+            {rollLocked
+              ? "Locked to On-roll — Offline Salary is disabled for this firm in Firm Master."
+              : onroll
               ? "Regular payroll employee. Included in default reports."
-              : "Third-party / contractor. Segregated in reports; punch flow unchanged."}
+              : "Third-party / contractor. Segregated in reports; punch flow unchanged. Excluded from Compliance Salary."}
           </Text>
         </View>
         <View style={[styles.toggleTrack, onroll && styles.toggleTrackOn]}>

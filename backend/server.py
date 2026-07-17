@@ -7555,6 +7555,14 @@ async def admin_create_employee(
     import secrets as _secrets
     temp_pin = f"{_secrets.randbelow(1_000_000):06d}"
 
+    # Iter 164 — On/Off-roll gated by Firm Master 'Offline Salary': when
+    # the firm has Offline Salary DISABLED, the employee joins On-roll
+    # directly regardless of what the form sent.
+    _onroll_in = payload.get("is_onroll")
+    _onroll_val = True if _onroll_in is None else bool(_onroll_in)
+    if _onroll_val is False and not await _firm_offline_salary_enabled(cid):
+        _onroll_val = True
+
     # Copy over allowed employee master fields.
     doc: Dict[str, Any] = {
         "user_id": f"user_{uuid.uuid4().hex[:12]}",
@@ -7580,7 +7588,7 @@ async def admin_create_employee(
         "department": payload.get("department") or None,
         "employee_type": payload.get("employee_type") or None,
         "employee_group": payload.get("employee_group") or None,
-        "is_onroll": payload.get("is_onroll") if payload.get("is_onroll") is not None else True,
+        "is_onroll": _onroll_val,
         "shift_start": payload.get("shift_start") or None,
         "shift_end": payload.get("shift_end") or None,
         "salary_mode": payload.get("salary_mode") or None,
@@ -12448,6 +12456,13 @@ async def update_user_role(payload: RoleUpdate, authorization: Optional[str] = H
             updates["employee_group"] = None
     if "is_onroll" in fset:
         v = payload.is_onroll
+        # Iter 164 — Off-roll requires the firm's 'Offline Salary' (Firm
+        # Master → Salary Process Settings) to be enabled.
+        if v is False and not await _firm_offline_salary_enabled(target.get("company_id")):
+            raise HTTPException(
+                status_code=400,
+                detail=("Off-roll is not allowed — enable Offline Salary for "
+                        "this firm in Firm Master first."))
         # Default treated as True everywhere the field is absent; store
         # explicit True/False so filtering with $eq works cleanly.
         updates["is_onroll"] = None if v is None else bool(v)
@@ -14293,32 +14308,22 @@ async def _compute_compliance_run(
         elif et and et.lower() != "all":
             title = et.title()
             q["employee_type"] = {"$in": [title, et, et.lower(), et.upper()]}
-    if payload.is_onroll is not None:
-        if payload.is_onroll:
-            q.setdefault("$and", []).append({
-                "$or": [
-                    {"is_onroll": True},
-                    {"is_onroll": {"$exists": False}},
-                    {"is_onroll": None},
-                ]
-            })
-        else:
-            q["is_onroll"] = False
-
-    # Iter 77j - Off-roll runs FORCE the is_onroll=False filter regardless
-    # of what the caller passed in the payload.
+    # Iter 164 (user directive) — Compliance Salary Process is STRICTLY
+    # ON-ROLL: off-roll employees are excluded from compliance runs no
+    # matter what filter the caller sent. The dedicated off-roll run type
+    # (Iter 77j) is the only exception.
     run_type = (getattr(payload, "run_type", None) or "compliance").lower()
     if run_type == "off_roll":
         q["is_onroll"] = False
-        if "$and" in q:
-            q["$and"] = [
-                clause for clause in q["$and"]
-                if not (isinstance(clause, dict) and "$or" in clause and any(
-                    ("is_onroll" in (sub or {})) for sub in (clause.get("$or") or [])
-                ))
+    else:
+        q.pop("is_onroll", None)
+        q.setdefault("$and", []).append({
+            "$or": [
+                {"is_onroll": True},
+                {"is_onroll": {"$exists": False}},
+                {"is_onroll": None},
             ]
-            if not q["$and"]:
-                q.pop("$and", None)
+        })
 
     employees = await db.users.find(q, {"_id": 0}).to_list(2000)
 
@@ -14530,6 +14535,18 @@ async def _compute_compliance_run(
         "generated_by": admin["user_id"],
         "generated_at": now_iso(),
     }
+
+
+async def _firm_offline_salary_enabled(company_id: Optional[str]) -> bool:
+    """Iter 164 — True when the firm's Firm Master has 'Offline Salary'
+    (salary_process.offline_salary) enabled. Off-roll employees are only
+    allowed in such firms; everywhere else employees are always On-roll."""
+    if not company_id:
+        return False
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "salary_process": 1},
+    )
+    return bool(((fm or {}).get("salary_process") or {}).get("offline_salary"))
 
 
 async def _require_firm_salary_permission(company_id: Optional[str], kind: str) -> None:

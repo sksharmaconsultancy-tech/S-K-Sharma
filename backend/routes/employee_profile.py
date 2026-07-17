@@ -129,6 +129,15 @@ async def patch_employee_profile(
     for k in _BOOL_FIELDS:
         if k in payload:
             updates[k] = bool(payload[k])
+    # Iter 164 — Off-roll requires the firm's 'Offline Salary' (Firm
+    # Master → Salary Process Settings) to be enabled.
+    if updates.get("is_onroll") is False:
+        from server import _firm_offline_salary_enabled
+        if not await _firm_offline_salary_enabled(emp.get("company_id")):
+            raise HTTPException(
+                status_code=400,
+                detail=("Off-roll is not allowed — enable Offline Salary for "
+                        "this firm in Firm Master first."))
     for k in _LIST_FIELDS:
         if k in payload and isinstance(payload[k], list):
             updates[k] = payload[k]

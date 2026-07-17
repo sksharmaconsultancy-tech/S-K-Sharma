@@ -220,6 +220,10 @@ export default function ProfileScreen() {
               value={(user as any)?.designation || "—"}
             />
             <DetailLine
+              label="Salary roll"
+              value={(user as any)?.is_onroll === false ? "Off-roll" : "On-roll"}
+            />
+            <DetailLine
               label="Father's name"
               value={(user as any)?.father_name || "—"}
             />

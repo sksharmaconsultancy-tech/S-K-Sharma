@@ -1,0 +1,27 @@
+{
+  "summary": "Iter 164 On/Off-roll gating by Firm Master 'Offline Salary' — VERIFIED PASS. Backend: 9/9 pytest cases pass (test_iter164_onroll_gating.py) covering (a) PATCH /api/admin/user-role + PATCH /api/admin/employees/{uid}/profile → 400 when offline_salary=false, (b) POST /api/admin/employees silently coerces is_onroll=false→true (stored doc verified via Mongo), (c) after flipping offline_salary=true, user-role off-roll transition returns 200, (d) POST /api/admin/compliance-salary-runs for cmp_527fecdd7c month 2026-07 EXCLUDES off-roll user_44cd6f561da0 (SURENDRA SINGH) both when payload sends is_onroll:false and when it omits is_onroll — on-roll employees are still included (rows>0). Frontend: (i) /employee-add with Kankani selected shows a single locked 'On-roll' chip and the hint 'Offline Salary is disabled for this firm — employees join On-roll directly.' (Off-roll chip absent, count=0). (ii) /employee-master?user_id=user_44cd6f561da0 → Grouping card shows the toggle with hint 'Locked to On-roll — Offline Salary is disabled for this firm in Firm Master.'; tapping [data-testid=grouping-onroll-toggle] does NOT flip state. (iii) PWA employee login (TEST50 / 123456) → Profile tab → Personal details shows 'SALARY ROLL: On-roll'. All Mongo state restored (offline_salary=false, user_44cd6f561da0 is_onroll=true, temp employee deleted, self-created compliance runs deleted; pre-existing 2026-07 runs from 2026-07-09 untouched).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter164_onroll_gating.py",
+    "/app/test_reports/pytest/pytest_iter164.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py exceeds 19,000 lines — Iter 164 logic is spread across ~7559, ~12449, ~14311, ~14540. Consider extracting the on/off-roll gating helpers (_firm_offline_salary_enabled + the compliance-run scope block) into a small module to improve maintainability; not a functional bug."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter164_onroll_gating.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "None permanent. Temporary employee (phone +919000164164) created and deleted within the same run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 164 fully verified. Firm cmp_527fecdd7c currently has salary_process={online_salary:true, offline_salary:false} — restored. Off-roll gating is enforced both in the API layer (400) and in Compliance _compute_compliance_run (forced $or on is_onroll for run_type!='off_roll'). Note: _compute_salary_run (Actual salary) intentionally still allows off-roll and is NOT bug per user directive. For frontend testing use localStorage keys 'llc_session_token' + 'skc:selected_company' to short-circuit login/firm-select in Playwright.",
+  "rca_of_issue": "N/A — verification pass, no bug."
+}
