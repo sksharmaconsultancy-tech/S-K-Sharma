@@ -70,12 +70,6 @@ async def _fetch_rows(
     elif company_id:
         query["company_id"] = company_id
 
-    if status == "active":
-        query["$or"] = [{"exit_date": {"$in": [None, ""]}},
-                        {"exit_date": {"$exists": False}}]
-    elif status == "left":
-        query["exit_date"] = {"$nin": [None, ""]}
-
     if employee_type:
         query["employee_type"] = employee_type
     if is_onroll in ("true", "false"):
@@ -88,6 +82,21 @@ async def _fetch_rows(
         ]}]
 
     users = await db.users.find(query, {"_id": 0}).sort("name", 1).to_list(5000)
+
+    # Iter 170 (user bug) — "Active" must exclude EVERY resigned/exit marker:
+    # exit_date, resign_date, date_of_leaving, leaving_date or an
+    # employment_status of exited/resigned/terminated/inactive/left.
+    def _is_resigned(u: Dict[str, Any]) -> bool:
+        if (u.get("exit_date") or u.get("resign_date")
+                or u.get("date_of_leaving") or u.get("leaving_date")):
+            return True
+        return str(u.get("employment_status") or "").strip().lower() in (
+            "exited", "resigned", "terminated", "inactive", "left")
+
+    if status == "active":
+        users = [u for u in users if not _is_resigned(u)]
+    elif status == "left":
+        users = [u for u in users if _is_resigned(u)]
 
     # Firm names for display
     cids = {u.get("company_id") for u in users if u.get("company_id")}

@@ -74,9 +74,10 @@ export default function AdminScreen() {
   const isResigned = (e: any) => {
     if (e.exit_date) return true;
     if (e.resign_date) return true;
+    if (e.date_of_leaving || e.leaving_date) return true;
     if (
       typeof e.employment_status === "string" &&
-      ["exited", "resigned", "terminated", "inactive"].includes(
+      ["exited", "resigned", "terminated", "inactive", "left"].includes(
         e.employment_status.toLowerCase(),
       )
     ) {

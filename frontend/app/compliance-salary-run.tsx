@@ -173,6 +173,9 @@ export default function ComplianceSalaryRunScreen() {
     user?.role === "company_admin";
 
   const [month, setMonth] = useState(currentMonth());
+  // Iter 172 — firm dropdown state
+  const [firmDdOpen, setFirmDdOpen] = useState(false);
+  const [firmSearch, setFirmSearch] = useState("");
   // Iter 96s — Month days defaults to 26 (standard duty days). Admins can
   // change it; it's still clamped to the month's calendar days below.
   const [monthDaysOverride, setMonthDaysOverride] = useState("26");
@@ -1083,31 +1086,69 @@ export default function ComplianceSalaryRunScreen() {
               Pick one firm from all active firms — the compliance salary
               will be processed for its employees after selection.
             </Text>
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-              {(ctxCompanies || []).map((c: any) => {
-                const on = activeCompanyId === c.company_id;
-                return (
-                  <Pressable
-                    key={c.company_id}
-                    onPress={() => setLocalCid(c.company_id)}
-                    style={[
-                      { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1 },
-                      on
-                        ? { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary }
-                        : { backgroundColor: colors.surface, borderColor: colors.divider },
-                    ]}
-                    testID={`csr-firm-${c.company_id}`}
-                  >
-                    <Text style={{ fontSize: 12, fontWeight: "700", color: on ? "#fff" : colors.onSurface }}>
-                      {c.name || c.company_id}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-              {(ctxCompanies || []).length === 0 ? (
-                <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary }}>No firms found.</Text>
-              ) : null}
-            </View>
+            {/* Iter 172 (user request) — dropdown list instead of chip
+                cloud: scales to many firms, with search. */}
+            <Pressable
+              onPress={() => setFirmDdOpen((v) => !v)}
+              style={{
+                flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+                borderWidth: 1, borderColor: colors.divider, borderRadius: 10,
+                paddingHorizontal: 12, paddingVertical: 10, backgroundColor: colors.surface,
+              }}
+              testID="csr-firm-dropdown"
+            >
+              <Text style={{ fontSize: 13, fontWeight: "700", color: activeCompanyId ? colors.onSurface : colors.onSurfaceTertiary }}>
+                {(ctxCompanies || []).find((c: any) => c.company_id === activeCompanyId)?.name || "— Select firm —"}
+              </Text>
+              <Ionicons name={firmDdOpen ? "chevron-up" : "chevron-down"} size={16} color={colors.onSurfaceSecondary} />
+            </Pressable>
+            {firmDdOpen ? (
+              <View style={{
+                borderWidth: 1, borderColor: colors.divider, borderRadius: 10,
+                marginTop: 4, backgroundColor: colors.surface, maxHeight: 260, overflow: "hidden",
+              }}>
+                <TextInput
+                  value={firmSearch}
+                  onChangeText={setFirmSearch}
+                  placeholder="Search firm…"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  style={{
+                    borderBottomWidth: 1, borderBottomColor: colors.divider,
+                    paddingHorizontal: 12, paddingVertical: 8, fontSize: 12.5, color: colors.onSurface,
+                  }}
+                  testID="csr-firm-search"
+                />
+                <ScrollView style={{ maxHeight: 210 }} nestedScrollEnabled>
+                  {(ctxCompanies || [])
+                    .filter((c: any) => !firmSearch.trim() ||
+                      String(c.name || "").toLowerCase().includes(firmSearch.trim().toLowerCase()))
+                    .map((c: any) => {
+                      const on = activeCompanyId === c.company_id;
+                      return (
+                        <Pressable
+                          key={c.company_id}
+                          onPress={() => { setLocalCid(c.company_id); setFirmDdOpen(false); setFirmSearch(""); }}
+                          style={{
+                            flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+                            paddingHorizontal: 12, paddingVertical: 10,
+                            backgroundColor: on ? colors.brandTertiary : "transparent",
+                            borderBottomWidth: 1, borderBottomColor: colors.divider,
+                          }}
+                          testID={`csr-firm-${c.company_id}`}
+                        >
+                          <Text style={{ fontSize: 12.5, fontWeight: on ? "800" : "600", color: colors.onSurface }}>
+                            {c.name || c.company_id}
+                          </Text>
+                          {on ? <Ionicons name="checkmark" size={15} color={colors.brandPrimary} /> : null}
+                        </Pressable>
+                      );
+                    })}
+                  {(ctxCompanies || []).length === 0 ? (
+                    <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary, padding: 12 }}>No firms found.</Text>
+                  ) : null}
+                </ScrollView>
+              </View>
+            ) : null}
           </View>
         ) : null}
 
@@ -1478,7 +1519,12 @@ export default function ComplianceSalaryRunScreen() {
                   const optKeys = ["basic","hra","conveyance","medical","special","others"].filter((k) => has(k));
                   const masterCount = optKeys.length + 1; // +M.Gross
                   const calcCount = optKeys.length + 1;   // +Gross
-                  const dedCount = 10;                    // WageBase,PF(E),PF(Er),ESI(E),ESI(Er),PT,TDS,Other,TotalDed,Net
+                  // Iter 171 — deduction columns follow Firm Master Deductions
+                  const ed = (run.rows[0] as any)?.enabled_deductions as string[] | undefined;
+                  const hasDed = (k: string) => !ed || ed.includes(k);
+                  const dedCount = 4 // WageBase, Other, TotalDed, Net
+                    + (hasDed("pf") ? 2 : 0) + (hasDed("esi") ? 2 : 0)
+                    + (hasDed("pt") ? 1 : 0) + (hasDed("tds") ? 1 : 0);
                   return (
                     <View style={[styles.tblRow, styles.groupHdrRow]}>
                       <View style={[{ width: FROZEN_W }, stickyCol(0, colors.surface)]} />
@@ -1498,6 +1544,8 @@ export default function ComplianceSalaryRunScreen() {
                 {(() => {
                   const en = (run.rows[0] as any)?.enabled_allowances as string[] | undefined;
                   const has = (k: string) => !en || en.includes(k) || k === "basic";
+                  const ed = (run.rows[0] as any)?.enabled_deductions as string[] | undefined;
+                  const hasDed = (k: string) => !ed || ed.includes(k);
                   const headers: { label: string; group: "info" | "master" | "calc" | "ded" }[] = [
                     // User directive — Employee Code HIDDEN; show Father
                     // Name, Designation, UAN No. & ESIC No. instead.
@@ -1522,7 +1570,15 @@ export default function ComplianceSalaryRunScreen() {
                   if (has("special")) headers.push({ label: "Spl", group: "calc" });
                   if (has("others")) headers.push({ label: "Others*", group: "calc" });
                   headers.push({ label: "Gross", group: "calc" });
-                  const dedLabels = ["Wage Base", "PF (E)", "PF (Er)", "ESI (E)", "ESI (Er)", "PT", "TDS", "Other*", "Total Ded.", "Net"];
+                  const dedLabels = [
+                    "Wage Base",
+                    // Iter 171 — deduction columns follow Firm Master Deductions
+                    ...(hasDed("pf") ? ["PF (E)", "PF (Er)"] : []),
+                    ...(hasDed("esi") ? ["ESI (E)", "ESI (Er)"] : []),
+                    ...(hasDed("pt") ? ["PT"] : []),
+                    ...(hasDed("tds") ? ["TDS"] : []),
+                    "Other*", "Total Ded.", "Net",
+                  ];
                   for (const d of dedLabels) headers.push({ label: d, group: "ded" });
                   return (
                     <View style={[styles.tblRow, styles.tblHeader]}>
@@ -1619,12 +1675,21 @@ export default function ComplianceSalaryRunScreen() {
                     })()}
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.gross_paid)}</Text>
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.stat_wage_base)}</Text>
-                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{r.pf_applicable ? fmtInr(r.pf_employee) : "—"}</Text>
-                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{r.pf_applicable ? fmtInr(r.pf_employer_total) : "—"}</Text>
-                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{r.esic_applicable ? fmtInr(r.esic_employee) : "—"}</Text>
-                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{r.esic_applicable ? fmtInr(r.esic_employer) : "—"}</Text>
-                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.pt)}</Text>
-                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.tds)}</Text>
+                    {/* Iter 171 — deduction cells follow Firm Master Deductions */}
+                    {(() => {
+                      const ed = (r as any).enabled_deductions as string[] | undefined;
+                      const hasDed = (k: string) => !ed || ed.includes(k);
+                      return (
+                        <>
+                          {hasDed("pf") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{r.pf_applicable ? fmtInr(r.pf_employee) : "—"}</Text> : null}
+                          {hasDed("pf") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{r.pf_applicable ? fmtInr(r.pf_employer_total) : "—"}</Text> : null}
+                          {hasDed("esi") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{r.esic_applicable ? fmtInr(r.esic_employee) : "—"}</Text> : null}
+                          {hasDed("esi") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{r.esic_applicable ? fmtInr(r.esic_employer) : "—"}</Text> : null}
+                          {hasDed("pt") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.pt)}</Text> : null}
+                          {hasDed("tds") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.tds)}</Text> : null}
+                        </>
+                      );
+                    })()}
                     {/* Iter 85 — Editable "Other" deduction. */}
                     <TextInput
                       value={String(Math.round((r as any).other_deduction || 0))}
@@ -1648,23 +1713,40 @@ export default function ComplianceSalaryRunScreen() {
                   <Text style={[styles.tblCell, { width: colW.uan }]}>—</Text>
                   <Text style={[styles.tblCell, { width: colW.esi }]}>—</Text>
                   <Text style={[styles.tblCell, { width: colW.pd }]}>—</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.basic)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.hra)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.conveyance)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.medical)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.special)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.others)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.gross_paid)}</Text>
-                  <Text style={[styles.tblCell, { width: colW.num }]}>—</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.pf_employee)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.pf_employer_total)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.esic_employee)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.esic_employer)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.pt)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.tds)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr((run.rows || []).reduce((s, r) => s + (Number((r as any).other_deduction) || 0), 0))}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.total_deduction)}</Text>
-                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(run.totals?.net)}</Text>
+                  {/* Iter 171 — totals row follows the same column masks so
+                      every figure lands under its own header. */}
+                  {(() => {
+                    const en = (run.rows[0] as any)?.enabled_allowances as string[] | undefined;
+                    const has = (k: string) => !en || en.includes(k) || k === "basic";
+                    const ed = (run.rows[0] as any)?.enabled_deductions as string[] | undefined;
+                    const hasDed = (k: string) => !ed || ed.includes(k);
+                    const opt = ["basic", "hra", "conveyance", "medical", "special", "others"].filter(has);
+                    const num = (v: any) => (
+                      <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(v)}</Text>
+                    );
+                    const dash = () => <Text style={[styles.tblCell, { width: colW.num }]}>—</Text>;
+                    return (
+                      <>
+                        {/* Master group — dashes (+M.Gross) */}
+                        {opt.map((k) => <React.Fragment key={`tm-${k}`}>{dash()}</React.Fragment>)}
+                        {dash()}
+                        {/* Calculated group totals (+Gross) */}
+                        {opt.map((k) => <React.Fragment key={`tc-${k}`}>{num((run.totals as any)?.[k])}</React.Fragment>)}
+                        {num(run.totals?.gross_paid)}
+                        {/* Deductions group */}
+                        {dash()}
+                        {hasDed("pf") ? num(run.totals?.pf_employee) : null}
+                        {hasDed("pf") ? num(run.totals?.pf_employer_total) : null}
+                        {hasDed("esi") ? num(run.totals?.esic_employee) : null}
+                        {hasDed("esi") ? num(run.totals?.esic_employer) : null}
+                        {hasDed("pt") ? num(run.totals?.pt) : null}
+                        {hasDed("tds") ? num(run.totals?.tds) : null}
+                        {num((run.rows || []).reduce((s, r) => s + (Number((r as any).other_deduction) || 0), 0))}
+                        {num(run.totals?.total_deduction)}
+                        {num(run.totals?.net)}
+                      </>
+                    );
+                  })()}
                 </View>
             </GridScroller>
           </View>

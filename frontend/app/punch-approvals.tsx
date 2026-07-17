@@ -23,6 +23,7 @@ import { useOnRefresh } from "@/src/context/RefreshBusContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
 import DateField from "@/src/components/DateField";
+import PunchImportModal from "@/src/components/PunchImportModal";
 
 type EmployeeMini = {
   user_id?: string;
@@ -167,6 +168,8 @@ export default function PunchApprovalsScreen() {
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [batchDecisions, setBatchDecisions] = useState<Record<string, "approve" | "reject">>({});
   const [savingBatch, setSavingBatch] = useState(false);
+  // Iter 172 — Bulk punch import from Excel.
+  const [importOpen, setImportOpen] = useState(false);
 
   // Iter 83 — Date filter + Updated-Punches rows for the selected day.
   // Iter 91 — "Periodic" mode: pick From + To dates to review a range.
@@ -730,6 +733,14 @@ export default function PunchApprovalsScreen() {
         {/* Iter 113 — manual punch for ANY individual employee. */}
         {canAct ? (
           <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginBottom: 8 }}>
+            <Pressable
+              onPress={() => setImportOpen(true)}
+              style={[upStyles.indBtn, { backgroundColor: "#15803D" }]}
+              testID="pa-import-excel"
+            >
+              <Ionicons name="cloud-upload-outline" size={15} color="#fff" />
+              <Text style={upStyles.indBtnTxt}>Import Excel</Text>
+            </Pressable>
             <Pressable
               onPress={() => {
                 const next = !mlogOpen;
@@ -1476,6 +1487,14 @@ export default function PunchApprovalsScreen() {
           <View style={{ height: 40 }} />
         </ScrollView>
       )}
+
+      {/* Iter 172 — Bulk punch import from Excel. */}
+      <PunchImportModal
+        visible={importOpen}
+        companyId={selectedCompanyId}
+        onClose={() => setImportOpen(false)}
+        onImported={() => load(true)}
+      />
 
       <Modal visible={photo.open} transparent animationType="fade" onRequestClose={() => setPhoto((p) => ({ ...p, open: false }))}>
         <Pressable style={photoStyles.overlay} onPress={() => setPhoto((p) => ({ ...p, open: false }))}>
