@@ -851,3 +851,10 @@ Verified: /admin/actual-salary-process for 2026-03 (no compliance) → epf/esi 0
 ## Iter 173 — Removed "resigned employees auto-excluded" banner (user request)
 - compliance-salary-run.tsx: deleted the Iter 167 red banner JSX (testID resigned-summary) + resignedBanner* styles. Backend still computes/stores excluded_resigned on runs (harmless, unused by UI now). Screenshot-verified screen renders clean.
 - VPS deploy note: pip install of requirements.txt FAILS on VPS (litellm direct-URL vs emergentintegrations ResolutionImpossible) — skip pip when requirements unchanged, or strip the litellm line. GitHub push + code sync worked; user redeploys via temp-code-bundle script.
+
+## Iter 174 — Automation (EPFO/ESIC) shows ONLY FINALIZED runs + replace-on-reprocess (user directive; curl+UI verified)
+- server.py GET /admin/compliance-salary-runs: new query param finalized_only=true → filters finalized:True AND dedupes to NEWEST run per (company_id, month, employee_type).
+- server.py POST /admin/compliance-salary-runs: before insert, delete_many older NON-finalized runs for same month+company_id+employee_type (case-insensitive group match; None/"" group matched together) — fresh processing REPLACES old draft data (finalized months still blocked with 409).
+- challans.tsx (Automation → PF/ESIC Challans): run fetch now uses ?finalized_only=true; empty-dropdown message → "No FINALIZED compliance run — finalize the month in Salary Process first".
+- Verified: workspace had 23 duplicate 2026-06 Staff drafts → collapse to 1 on reprocess; finalized_only=0 until finalize → then 1; UI dropdown shows only "2026-06 · Staff · 17 emp ✓"; create on finalized month blocked. Test run de-finalized after (workspace state neutral).
+- NOTE: PF Reports / ESIC Reports hubs (pf_reports.py "latest run per month") intentionally NOT changed — user scoped this to Automation.

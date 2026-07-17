@@ -212,7 +212,10 @@ export default function ChallansScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const q = companyId ? `?company_id=${companyId}` : "";
+        // Iter 174 (user directive) — Automation only works on FINALIZED
+        // compliance data; drafts are hidden and reprocessed months are
+        // deduped server-side to the newest run.
+        const q = `?finalized_only=true${companyId ? `&company_id=${companyId}` : ""}`;
         const r = await api<{ runs: RunLite[] }>(`/admin/compliance-salary-runs${q}`);
         const list = (r.runs || []).slice(0, 60);
         setRuns(list);
@@ -455,7 +458,7 @@ export default function ChallansScreen() {
                   }}
                   data-testid="portal-run-select"
                 >
-                  {filteredRuns.length === 0 ? <option value="">No compliance runs for this month/group</option> : null}
+                  {filteredRuns.length === 0 ? <option value="">No FINALIZED compliance run — finalize the month in Salary Process first</option> : null}
                   {filteredRuns.map((r) => (
                     <option key={r.run_id} value={r.run_id}>
                       {r.month} · {r.employee_type || "All"} · {r.employees_count || 0} emp{r.finalized_at ? " ✓" : ""}

@@ -14810,6 +14810,20 @@ async def create_compliance_salary_run(
         )
     run = await _compute_compliance_run(admin, payload)
     run["run_id"] = f"csrun_{uuid.uuid4().hex[:12]}"
+    # Iter 174 (user directive) — REPLACE old data: a fresh process for the
+    # same firm + month + employee group deletes the previous draft run(s)
+    # so only the newest data exists (finalized runs are already blocked
+    # above and are never touched).
+    _grp = (payload.employee_type or "").strip()
+    await db.compliance_salary_runs.delete_many({
+        "month": payload.month,
+        "company_id": payload.company_id,
+        "employee_type": (
+            {"$regex": f"^{re.escape(_grp)}$", "$options": "i"} if _grp
+            else {"$in": [None, ""]}
+        ),
+        "finalized": {"$ne": True},
+    })
     await db.compliance_salary_runs.insert_one(run)
     return {"ok": True, "run": {k: v for k, v in run.items() if k != "_id"}}
 
@@ -14822,6 +14836,9 @@ async def list_compliance_salary_runs(
     ),
     month: Optional[str] = Query(None),
     fy_start_year: Optional[int] = Query(None),
+    finalized_only: bool = Query(
+        False, description="Iter 174 — only FINALIZED runs (Automation screens), "
+                           "deduped to the newest run per firm+month+group."),
     authorization: Optional[str] = Header(None),
 ):
     admin = await get_user_from_token(authorization)
@@ -14842,9 +14859,23 @@ async def list_compliance_salary_runs(
     if fy_start_year is not None:
         y = int(fy_start_year)
         q["month"] = q.get("month") or {"$gte": f"{y}-04", "$lte": f"{y + 1}-03"}
+    if finalized_only:
+        q["finalized"] = True
     runs = await db.compliance_salary_runs.find(
         q, {"_id": 0, "rows": 0},
     ).sort("generated_at", -1).to_list(500)
+    if finalized_only:
+        # Keep only the NEWEST run per firm + month + employee group so
+        # replaced/reprocessed data never shows alongside the old copy.
+        seen: set = set()
+        deduped = []
+        for r in runs:
+            key = (r.get("company_id"), r.get("month"), r.get("employee_type"))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(r)
+        runs = deduped
     # Iter 85 — Enrich with generator/finalizer names for audit display.
     uids: set = set()
     for r in runs:
