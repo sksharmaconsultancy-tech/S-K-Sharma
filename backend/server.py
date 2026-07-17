@@ -19244,6 +19244,8 @@ app.include_router(pf_reports_router)
 app.include_router(compliance_settings_router)
 from routes.report_formats import router as report_formats_router  # noqa: E402
 app.include_router(report_formats_router)
+from routes.punch_import import router as punch_import_router  # noqa: E402
+app.include_router(punch_import_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.

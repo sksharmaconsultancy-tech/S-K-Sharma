@@ -173,6 +173,9 @@ export default function ComplianceSalaryRunScreen() {
     user?.role === "company_admin";
 
   const [month, setMonth] = useState(currentMonth());
+  // Iter 172 — firm dropdown state
+  const [firmDdOpen, setFirmDdOpen] = useState(false);
+  const [firmSearch, setFirmSearch] = useState("");
   // Iter 96s — Month days defaults to 26 (standard duty days). Admins can
   // change it; it's still clamped to the month's calendar days below.
   const [monthDaysOverride, setMonthDaysOverride] = useState("26");
@@ -1083,31 +1086,69 @@ export default function ComplianceSalaryRunScreen() {
               Pick one firm from all active firms — the compliance salary
               will be processed for its employees after selection.
             </Text>
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-              {(ctxCompanies || []).map((c: any) => {
-                const on = activeCompanyId === c.company_id;
-                return (
-                  <Pressable
-                    key={c.company_id}
-                    onPress={() => setLocalCid(c.company_id)}
-                    style={[
-                      { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1 },
-                      on
-                        ? { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary }
-                        : { backgroundColor: colors.surface, borderColor: colors.divider },
-                    ]}
-                    testID={`csr-firm-${c.company_id}`}
-                  >
-                    <Text style={{ fontSize: 12, fontWeight: "700", color: on ? "#fff" : colors.onSurface }}>
-                      {c.name || c.company_id}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-              {(ctxCompanies || []).length === 0 ? (
-                <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary }}>No firms found.</Text>
-              ) : null}
-            </View>
+            {/* Iter 172 (user request) — dropdown list instead of chip
+                cloud: scales to many firms, with search. */}
+            <Pressable
+              onPress={() => setFirmDdOpen((v) => !v)}
+              style={{
+                flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+                borderWidth: 1, borderColor: colors.divider, borderRadius: 10,
+                paddingHorizontal: 12, paddingVertical: 10, backgroundColor: colors.surface,
+              }}
+              testID="csr-firm-dropdown"
+            >
+              <Text style={{ fontSize: 13, fontWeight: "700", color: activeCompanyId ? colors.onSurface : colors.onSurfaceTertiary }}>
+                {(ctxCompanies || []).find((c: any) => c.company_id === activeCompanyId)?.name || "— Select firm —"}
+              </Text>
+              <Ionicons name={firmDdOpen ? "chevron-up" : "chevron-down"} size={16} color={colors.onSurfaceSecondary} />
+            </Pressable>
+            {firmDdOpen ? (
+              <View style={{
+                borderWidth: 1, borderColor: colors.divider, borderRadius: 10,
+                marginTop: 4, backgroundColor: colors.surface, maxHeight: 260, overflow: "hidden",
+              }}>
+                <TextInput
+                  value={firmSearch}
+                  onChangeText={setFirmSearch}
+                  placeholder="Search firm…"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  style={{
+                    borderBottomWidth: 1, borderBottomColor: colors.divider,
+                    paddingHorizontal: 12, paddingVertical: 8, fontSize: 12.5, color: colors.onSurface,
+                  }}
+                  testID="csr-firm-search"
+                />
+                <ScrollView style={{ maxHeight: 210 }} nestedScrollEnabled>
+                  {(ctxCompanies || [])
+                    .filter((c: any) => !firmSearch.trim() ||
+                      String(c.name || "").toLowerCase().includes(firmSearch.trim().toLowerCase()))
+                    .map((c: any) => {
+                      const on = activeCompanyId === c.company_id;
+                      return (
+                        <Pressable
+                          key={c.company_id}
+                          onPress={() => { setLocalCid(c.company_id); setFirmDdOpen(false); setFirmSearch(""); }}
+                          style={{
+                            flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+                            paddingHorizontal: 12, paddingVertical: 10,
+                            backgroundColor: on ? colors.brandTertiary : "transparent",
+                            borderBottomWidth: 1, borderBottomColor: colors.divider,
+                          }}
+                          testID={`csr-firm-${c.company_id}`}
+                        >
+                          <Text style={{ fontSize: 12.5, fontWeight: on ? "800" : "600", color: colors.onSurface }}>
+                            {c.name || c.company_id}
+                          </Text>
+                          {on ? <Ionicons name="checkmark" size={15} color={colors.brandPrimary} /> : null}
+                        </Pressable>
+                      );
+                    })}
+                  {(ctxCompanies || []).length === 0 ? (
+                    <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary, padding: 12 }}>No firms found.</Text>
+                  ) : null}
+                </ScrollView>
+              </View>
+            ) : null}
           </View>
         ) : null}
 

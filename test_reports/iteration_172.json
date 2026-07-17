@@ -1,0 +1,32 @@
+{
+  "summary": "Iter 172 (Bulk Punch Import via Excel) VERIFIED end-to-end. Backend pytest 6/6 pass: (a) GET /api/admin/punch-import/template returns a real xlsx (PK header, openable via openpyxl, headers Bio Code|Name|Date|In Time|Out Time), (b) POST /preview matches bio '72' as bio_code + AM/PM parses '9:00 AM'->'09:00' & '6:00 PM'->'18:00', matches 'SURENDRA SINGH' by name, marks bio '99999' as unmatched, row with empty date flagged status='error', DD-MM-YYYY converted to ISO ('20-06-2026'->'2026-06-20'), summary counts {total:4, matched:2, unmatched:1, errors:1, punches_to_create:4}, (c) POST /commit for 22-06-2026 09:00/18:00 -> created=2 skipped_duplicates=0; identical rerun -> created=0 skipped_duplicates=2, (d) day-status grid at 2026-06-22 shows the created 09:00/18:00 punches for user_44cd6f561da0, (e) cross-company auth: testsub@sksharma.co (sub_admin scoped to City Care Hospital cmp_adddad3f65 not Kankani) receives 403 'Not authorised for this firm' on both preview AND commit against cmp_527fecdd7c. Frontend E2E (web preview, super-admin token injected via add_init_script): /punch-approvals loads, green 'Import Excel' button (testID pa-import-excel) visible, click opens PunchImportModal with 'Choose Excel file' (pimp-pick) + 'Sample template' (pimp-template) + 'Import Punches from Excel' title; DocumentPicker triggers a native file chooser (captured with page.expect_file_chooser) and accepts the generated xlsx; preview renders the 4 summary chips (Rows/Matched/Unmatched/Errors) with row detail showing '✓ by Bio Code' and unmatched GHOST row; commit button label 'Import 2 punches (1 rows)' fires and 'Import complete' success screen with pimp-done button appears. MANDATORY CLEANUP verified: pytest teardown + post-UI Mongo delete_many({source:'excel_import'}) — 0 excel_import records remain. Existing ZK-device punches for June 2026 were preserved (only source='excel_import' targeted). No React Native / Expo deprecated-package issues detected in the two new files.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter172_punch_import.py",
+    "/app/test_reports/pytest/iter172_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "/app/backend/routes/punch_import.py _norm_bio strips a trailing '.0' from Excel-numeric bio codes and left-strips zeros — good match for openpyxl reading numeric cells as floats. Edge: bio_code '0' handled explicitly (returns '0'), preventing empty-string collision.",
+    "_parse_time_cell handles Excel time fraction, AM/PM, 24h, dot-separated ('9.00 PM'), and empty/dash sentinels — solid coverage.",
+    "_auth (~L163) correctly blocks non-super-admin whose admin.company_id != request.company_id with 403; sub-admins scoped to a different firm are also blocked because sub-admin docs carry a company_id. Verified in cross-company test.",
+    "Commit-time dedup key = (user_id, date, kind, at) with source-agnostic match — meaning a re-run of the SAME Excel row against an existing device punch at the same second will also be skipped. That is safe for correctness but if the user re-imports at HH:MM (no seconds) it will overwrite/skip the same import batch fine (skipped_duplicates counter is accurate).",
+    "PunchImportModal.tsx uses fetch+FileReader for base64 on web instead of DocumentPicker's built-in base64 (which is Native-only). Clean cross-platform handling.",
+    "Frontend downloadTemplate uses Blob+URL.createObjectURL on web with proper URL.revokeObjectURL cleanup. Good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter172_punch_import.py (new)"
+  ],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "100% (open modal + upload + preview + commit + success screen all confirmed)"},
+  "seed_data_creation": "Test-only Excel punches were created via preview/commit for SURENDRA SINGH on 2026-06-22 (pytest) and 2026-06-24 (UI). ALL records with source='excel_import' were deleted after tests — MongoDB confirms 0 excel_import docs remaining. Pre-existing ZK-device attendance for June 2026 was left untouched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend routes live at /app/backend/routes/punch_import.py (prefix /api/admin/punch-import). Endpoints: GET /template, POST /preview {company_id,file_base64}, POST /commit {company_id,rows[]}. Frontend modal at /app/frontend/src/components/PunchImportModal.tsx (testIDs: pimp-pick, pimp-template, pimp-commit, pimp-done, pimp-close). Trigger button in /app/frontend/app/punch-approvals.tsx: testID pa-import-excel (line 739). Excel-import punches carry source='excel_import' + import_batch_id — use `db.attendance.delete_many({source:'excel_import'})` for cleanup. Cross-company block verified via testsub@sksharma.co whose company_id ties to cmp_adddad3f65 (City Care Hospital) — reused for future firm-scope regression tests.",
+  "rca_of_issue": "N/A — feature implemented correctly; no defects observed at API, integration or UI layer."
+}
