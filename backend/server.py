@@ -13391,7 +13391,8 @@ async def _compute_salary_run(
     # Iter 57 — Exclude employees whose date-of-joining is AFTER the run's
     # month end. Payslips must never be generated for pre-DOJ months.
     employees = [e for e in employees if not _month_is_before_doj(e, payload.month)
-                 and not _month_is_after_exit(e, payload.month)]  # Iter 166
+                 and not _month_is_after_exit(e, payload.month)
+                 and e.get("disabled") is not True]  # Iter 166/168
 
     # ---- Load attendance for the month once (indexed by user_id) ----
     date_from = f"{year:04d}-{mon:02d}-01"
@@ -14405,7 +14406,8 @@ async def _compute_compliance_run(
     # Iter 57 — Exclude employees whose date-of-joining is AFTER the run's
     # month end. Payslips must never be generated for pre-DOJ months.
     employees = [e for e in employees if not _month_is_before_doj(e, payload.month)
-                 and not _month_is_after_exit(e, payload.month)]  # Iter 166
+                 and not _month_is_after_exit(e, payload.month)
+                 and e.get("disabled") is not True]  # Iter 166/168
 
     # Iter 127f/g — statutory config precedence: global Standard Compliance
     # Settings < firm-specific overrides (Firm Master) < per-run cfg.
@@ -18515,7 +18517,8 @@ async def create_actual_salary_process(
         q, {"_id": 0}
     ).sort([("employee_code", 1), ("name", 1)]).to_list(4000)
     employees = [e for e in employees if not _month_is_before_doj(e, payload.month)
-                 and not _month_is_after_exit(e, payload.month)]  # Iter 166
+                 and not _month_is_after_exit(e, payload.month)
+                 and e.get("disabled") is not True]  # Iter 166/168
 
     # Iter 85 — Exclude resigned/left employees. An employee whose
     # ``exit_date`` is on or before the LAST day of the run month has

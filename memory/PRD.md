@@ -825,3 +825,9 @@ Verified: /admin/actual-salary-process for 2026-03 (no compliance) → epf/esi 0
 - _compute_compliance_run captures excluded_resigned [{user_id,name,employee_code,exit_date}] + excluded_resigned_count before the Iter 166 filter; stored on run doc / returned in response.
 - compliance-salary-run.tsx: red banner (testID resigned-summary, styles resignedBanner*) below the result-card header listing "N resigned employees auto-excluded" with names/codes/exit dates.
 - Verified: exit_date 2026-06-15 on SURENDRA SINGH → run 2026-07 returned excluded_resigned_count=1 with his entry, not in rows; state restored, test run deleted.
+
+## Iter 168 — Salary process strictly ACTIVE employees (user confirmed choices)
+- User choices: exit-month stays payable (final settlement, unchanged); DISABLED employees now excluded from salary processing too.
+- server.py: the 3 filter sites (~13395 _compute_salary_run, ~14410 _compute_compliance_run, ~18521 create_actual_salary_process) now also filter e.get("disabled") is not True (marker: "# Iter 166/168").
+- Verified via curl: disabled=True on SURENDRA SINGH → excluded from compliance run 2026-07 (125 rows); state restored, test run deleted.
+- master-data-report.tsx: renamed "Left Employees" tab → "Resigned Employees" (user asked for Active/Resign/All on Master Data Report — feature already existed with status=active|left|all backend param).
