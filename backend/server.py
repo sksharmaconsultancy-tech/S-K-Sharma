@@ -14391,6 +14391,17 @@ async def _compute_compliance_run(
 
     employees = await db.users.find(q, {"_id": 0}).to_list(2000)
 
+    # Iter 167 — "Resigned this month" summary: capture who gets auto-
+    # excluded because they resigned/exited before the run month starts,
+    # so the Compliance Salary screen can show the list.
+    excluded_resigned = [
+        {"user_id": e.get("user_id"), "name": e.get("name"),
+         "employee_code": e.get("employee_code"),
+         "exit_date": str(e.get("exit_date") or e.get("resign_date") or "")[:10]}
+        for e in employees if _month_is_after_exit(e, payload.month)
+    ]
+    excluded_resigned.sort(key=lambda x: (x.get("name") or "").lower())
+
     # Iter 57 — Exclude employees whose date-of-joining is AFTER the run's
     # month end. Payslips must never be generated for pre-DOJ months.
     employees = [e for e in employees if not _month_is_before_doj(e, payload.month)
@@ -14594,6 +14605,9 @@ async def _compute_compliance_run(
         "statutory_cfg": payload.statutory_cfg or {},
         "employees_count": len(rows),
         "rows": rows,
+        # Iter 167 — resigned staff auto-excluded from this run.
+        "excluded_resigned": excluded_resigned,
+        "excluded_resigned_count": len(excluded_resigned),
         "attendance_source": "imported_sheet" if payload.use_imported_sheet else "biometric",
 
         "totals": totals,
