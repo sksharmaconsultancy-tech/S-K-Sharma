@@ -820,3 +820,8 @@ Verified: /admin/actual-salary-process for 2026-03 (no compliance) → epf/esi 0
 - /admin (Employee Master Data, admin.tsx): NEW status chips ACTIVE EMPLOYEE (default, pre-existing hide rules) / RESIGN EMPLOYEE / ALL EMPLOYEE (testIDs status-filter-*). isResigned(e)= exit_date|resign_date|employment_status in exited/resigned/terminated/inactive. Red "RESIGNED · date" pill (resignedPill) beside code pill. Old always-hide isActive gate replaced by matchesStatus.
 - server.py: NEW _month_is_after_exit(user, month) beside _month_is_before_doj (~10103) — exit_date/resign_date < 1st of run month ⇒ excluded; exit month itself stays payable (final settlement). Applied at 3 sites (~13394 _compute_salary_run, ~14397 _compute_compliance_run, ~18504 create_actual_salary_process) — covers BOTH Compliance and Actual salary per user directive.
 - Tested: iteration_166 — 4/4 pytest (test_iter166_resign_exclusion.py: excluded 2026-07, included exit-month 2026-06, actual-salary excluded) + Playwright UI (chips default/active/resigned/all, pill, existing type/roll chips intact). DB state fully restored.
+
+## Iter 167 — "Resigned this month" summary on Compliance Salary screen (verified via curl)
+- _compute_compliance_run captures excluded_resigned [{user_id,name,employee_code,exit_date}] + excluded_resigned_count before the Iter 166 filter; stored on run doc / returned in response.
+- compliance-salary-run.tsx: red banner (testID resigned-summary, styles resignedBanner*) below the result-card header listing "N resigned employees auto-excluded" with names/codes/exit dates.
+- Verified: exit_date 2026-06-15 on SURENDRA SINGH → run 2026-07 returned excluded_resigned_count=1 with his entry, not in rows; state restored, test run deleted.

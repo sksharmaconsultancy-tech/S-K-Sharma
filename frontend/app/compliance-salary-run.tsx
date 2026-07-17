@@ -1421,6 +1421,25 @@ export default function ComplianceSalaryRunScreen() {
               </View>
             </View>
 
+            {/* Iter 167 — "Resigned this month" summary: staff auto-excluded
+                from this run because their exit date is before the month. */}
+            {((run as any).excluded_resigned || []).length > 0 ? (
+              <View style={styles.resignedBanner} testID="resigned-summary">
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Ionicons name="person-remove-outline" size={14} color="#B91C1C" />
+                  <Text style={styles.resignedBannerTitle}>
+                    {(run as any).excluded_resigned.length} resigned employee
+                    {(run as any).excluded_resigned.length > 1 ? "s" : ""} auto-excluded from this run
+                  </Text>
+                </View>
+                <Text style={styles.resignedBannerList}>
+                  {((run as any).excluded_resigned as any[])
+                    .map((x) => `${x.name}${x.employee_code ? ` (#${x.employee_code})` : ""}${x.exit_date ? ` — exit ${x.exit_date}` : ""}`)
+                    .join("  ·  ")}
+                </Text>
+              </View>
+            ) : null}
+
             {/* Iter 98 — sort chips */}
             <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
               <Text style={{ color: colors.onSurfaceSecondary, fontSize: 11, fontWeight: "700" }}>Sort:</Text>
@@ -2064,6 +2083,17 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   cardTitle: { ...type.h6, color: colors.onSurface, fontWeight: "700", marginBottom: 6 },
+  // Iter 167 — resigned-employees summary banner
+  resignedBanner: {
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    borderRadius: radius.md,
+    padding: 10,
+    marginTop: 8,
+  },
+  resignedBannerTitle: { fontSize: 12, fontWeight: "800", color: "#B91C1C" },
+  resignedBannerList: { fontSize: 11, color: "#7F1D1D", marginTop: 4, lineHeight: 16 },
   subheading: {
     ...type.tiny,
     color: colors.onSurfaceSecondary,
