@@ -308,8 +308,9 @@ export default function Dashboard() {
           <ActivityIndicator style={{ marginTop: 80 }} color={colors.brandPrimary} />
         ) : (
           <>
-            {/* Hero shift card — hidden for super_admin (they don't punch) */}
-            {user?.role !== "super_admin" && (
+            {/* Hero shift card — EMPLOYEES ONLY (Iter 177: employers don't
+                punch from the dashboard; they use My Attendance). */}
+            {user?.role === "employee" && (
               <View style={styles.hero} testID="hero-shift">
                 <View style={styles.heroTopRow}>
                   <View>
@@ -359,8 +360,9 @@ export default function Dashboard() {
               </View>
             )}
 
-            {/* Duty hours summary — not shown to super_admin (they don't punch) */}
-            {user?.role !== "super_admin" && attSummary && (
+            {/* Duty hours summary — employee only (employers see their own
+                duty inside My Attendance). */}
+            {user?.role === "employee" && attSummary && (
               <DutyHoursSection
                 summary={attSummary}
                 onPressHistory={() => router.push("/history")}
@@ -616,6 +618,17 @@ export default function Dashboard() {
                   icon="swap-horizontal-outline"
                   label="Shift change request"
                   onPress={() => router.push("/shift-change")}
+                />
+              )}
+              {/* Iter 177 — employer-as-employee self attendance: punch
+                  lives ONLY in the Employee flow; employers reach it via
+                  this explicit "My Attendance" module. */}
+              {(user?.role === "company_admin" || (user?.role as string) === "sub_admin") && (
+                <ActionRow
+                  testID="row-my-attendance"
+                  icon="finger-print-outline"
+                  label="My Attendance (Employee Mode)"
+                  onPress={() => router.push("/(tabs)/attendance")}
                 />
               )}
               {user?.role !== "employee" && (

@@ -97,6 +97,7 @@ export const NAV_SUPER: NavItem[] = [
     icon: "bar-chart-outline",
     children: [
       { route: "/attendance-grid", label: "Attendance Report", icon: "grid-outline" },
+      { route: "/labour-reports", label: "Labour Law Reports", icon: "library-outline" },
       { route: "/daily-present-report", label: "Day-wise Present Count", icon: "people-outline" },
       { route: "/salary-day-sheet", label: "Day-wise Salary Sheet", icon: "calendar-outline" },
       { route: "/master-data-report", label: "Master Data", icon: "server-outline" },
@@ -345,6 +346,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
     icon: "bar-chart-outline",
     children: [
       { route: "/attendance-grid", label: "Attendance Report", icon: "grid-outline" },
+      { route: "/labour-reports", label: "Labour Law Reports", icon: "library-outline" },
       { route: "/daily-present-report", label: "Day-wise Present Count", icon: "people-outline" },
       { route: "/salary-day-sheet", label: "Day-wise Salary Sheet", icon: "calendar-outline" },
       { route: "/master-data-report", label: "Master Data", icon: "server-outline" },

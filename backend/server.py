@@ -19396,6 +19396,8 @@ from routes.punch_import import router as punch_import_router  # noqa: E402
 app.include_router(punch_import_router)
 from routes.contractor_punches import router as contractor_punches_router  # noqa: E402
 app.include_router(contractor_punches_router)
+from routes.labour_reports import router as labour_reports_router  # noqa: E402
+app.include_router(labour_reports_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.

@@ -618,9 +618,13 @@ export default function AttendanceScreen() {
     <View style={styles.root}>
       <SafeAreaView edges={["top"]} style={{ backgroundColor: colors.surface }}>
         <View style={styles.header}>
-          <Text style={styles.h1}>Smart Punch</Text>
+          <Text style={styles.h1}>
+            {user?.role === "employee" ? "Smart Punch" : "My Attendance"}
+          </Text>
           <Text style={styles.sub}>
-            {user?.name} · {company?.name || "—"}
+            {user?.role === "employee"
+              ? `${user?.name} · ${company?.name || "—"}`
+              : `${user?.name} · Employee Mode — your own attendance only`}
           </Text>
         </View>
       </SafeAreaView>
@@ -838,7 +842,8 @@ export default function AttendanceScreen() {
         </Pressable>
       </Modal>
 
-      {/* Sticky CTA
+      {/* Sticky CTA — hidden entirely when the firm's attendance punching
+       *  is OFF (Iter 176 fix: view-only mode must not show punch buttons).
        *  Iter 64 — three modes:
        *   • Biometric-only: single big CTA that opens Face Capture. GPS
        *     is disabled at firm or user level. Both fingerprint (device)
@@ -846,7 +851,7 @@ export default function AttendanceScreen() {
        *   • Manual + GPS: Face scan + Punch In/Out (needs geofence pass).
        *   • Auto-punch ON: no manual UI — the geofence handler fires in
        *     the background. */}
-      {biometricOnlyMode ? (
+      {(company as any)?.attendance_punching_enabled === false ? null : biometricOnlyMode ? (
         <View style={styles.stickyBar}>
           <Pressable
             testID="biometric-punch-cta"

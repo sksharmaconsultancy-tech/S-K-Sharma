@@ -1,0 +1,34 @@
+{
+  "summary": "Iter 177 Labour Law Compliance Reports Module + Part 1 role separation tested end-to-end. Backend: 36/36 pytest passed — catalogue returns 22 reports; all 22 report_keys generate 200 JSON (Kankani cmp_527fecdd7c, month 2026-06); pdf export has valid %PDF magic (>4KB), excel export valid PK zip, csv exports have proper headers; gender filter reduces rows monotonically; explicit from/to range honoured; >62-day range returns 400; unknown report_key returns 400; missing company_id / month+dates returns 400; verify endpoint round-trip works publicly (no auth) and unknown verify_id returns 404. Frontend: /labour-reports screen loads for super admin; chips grouped into Registers/Daily Reports/Shift Reports/Technology Reports (all 22 visible); selecting Muster Roll + lr-month=2026-06 + Generate produces preview card with table (126 rows Kankani) and 'Verify: lrv_...' meta; CSV export triggered with no error state; left-shell 'Labour Law Reports' link is present and highlighted (see screenshot). Part 1 (role separation): Super admin dashboard shows NO hero-shift card and admin-brand-center IS present. Employee TNF40186C dashboard shows hero-shift + tab-punch present (iter176 view-only pill also correctly renders because the firm has attendance_punching_enabled=false — sticky CTAs hidden). Company admin scenario for 403 + row-my-attendance NOT executable (no working company_admin credentials in /app/memory/test_credentials.md — Prakash Kankani PIN/password unknown per doc line 49).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "app-wide (web)", "issues": ["Console noise: repeated warnings 'shadow* style props deprecated. Use boxShadow', invalid 'outline'/'background'/'padding shorthand' style property errors. Not blocking but should be cleaned up."]},
+      {"screen": "employee dashboard (mobile web)", "issues": ["High volume of 429 'Too Many Requests' from repeated polling after login. Likely /messages/unread-count or /attendance/today live-sync loop. Investigate rate-limit / dedupe."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter177_labour_reports.py",
+    "/app/test_reports/pytest/iter177.xml"
+  ],
+  "action_items": [
+    "Optional: seed a company_admin test account (Kankani or fresh firm) in /app/memory/test_credentials.md so the cross-firm 403 case and the 'My Attendance (Employee Mode)' quick-action / attendance title='My Attendance' can be verified end-to-end.",
+    "Investigate 429 storm on employee dashboard after login — appears to hit /messages/unread-count / /attendance/today loop.",
+    "Clean up web-only style prop warnings (shadow*, outline, background, padding shorthand)."
+  ],
+  "critical_code_review_comments": [
+    "labour_reports.py: solid single-engine design. QR verification stored server-side. Filters correctly narrow the employee master; report builders keyed off a shared _day_summary — good DRY.",
+    "labour-reports.tsx: web download flow uses browser Blob + revokeObjectURL — clean. Native fallback missing but not required for web preview.",
+    "Dashboard hero card & Punch tab correctly gated behind user.role === 'employee'. row-my-attendance appears for company_admin/sub_admin only (Part 1 satisfied by code inspection). Attendance screen title switches to 'My Attendance' for non-employees."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter177_labour_reports.py"],
+  "success_rate": {"backend": "100% (36/36)", "frontend": "~90% (labour-reports UI + super/employee role separation verified; company_admin cases untested due to missing creds)"},
+  "seed_data_creation": "None. Report verification docs (lrv_*) intentionally left in db.report_verifications per request.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend suite /app/backend/tests/test_iter177_labour_reports.py is a fast (~8s) regression covering all 22 report keys, 3 file formats, filter behaviour, range validation, error paths, and QR verify endpoint. Super admin session_token key = 'session_token' (login endpoint /api/auth/admin-password-login). Frontend web shell exposes 'Labour Law Reports' link under Reports side-nav.",
+  "rca_of_issue": "N/A — no bugs found for this iteration."
+}
