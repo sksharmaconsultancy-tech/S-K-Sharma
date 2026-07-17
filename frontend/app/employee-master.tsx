@@ -200,6 +200,10 @@ export default function EmployeeMasterScreen() {
             // Grouping fields
             employee_type: full.employee_type ?? null,
             is_onroll: full.is_onroll === undefined ? true : !!full.is_onroll,
+            // Iter 165 — admin-controlled fingerprint requirement + status
+            fingerprint_required: full.fingerprint_required === true,
+            fingerprint_enrolled_at: full.fingerprint_enrolled_at ?? null,
+            fingerprint_device: full.fingerprint_device ?? null,
             // Iter 76 — biometric device enrolment ID
             bio_code: full.bio_code ?? null,
             // Iter 91 — residential address (OCR-filled) + statutory nos.
