@@ -559,6 +559,11 @@ class RoleUpdate(BaseModel):
     # (Employee PWA). Only settable when the firm's Bio Matrix Attendance
     # is enabled in Firm Master.
     fingerprint_required: Optional[bool] = None
+    # Iter 175 — Contractual employee (Firm Master Policy 2 contractors).
+    # When is_contractual=True the employee is linked to one of the firm's
+    # contractors (firm_masters.contractors) by name.
+    is_contractual: Optional[bool] = None
+    contractor_name: Optional[str] = None
     # Standing advance / salary loan balance for this employee. Deducted
     # from monthly gross by the Salary Process. Employer decreases the
     # balance on each pay-cycle to reflect repayment.
@@ -1121,6 +1126,32 @@ def _validate_policy(raw: dict) -> dict:
             detail="OT Calculation: choose EITHER % of Basic OR % of Gross — not both.",
         )
 
+    # Iter 175 — Policy Master "Sub Points" (user-specified catalogue).
+    # Free config block; sanitised to known keys with safe defaults.
+    pm_raw = raw.get("policy_master") if isinstance(raw.get("policy_master"), dict) else {}
+    def _choice(key: str, options: List[str], default: str) -> str:
+        v = str(pm_raw.get(key) or default).strip().lower()
+        return v if v in options else default
+    def _flag(key: str, default: bool = False) -> bool:
+        return bool(pm_raw.get(key, default))
+    _punch_types = pm_raw.get("punch_types")
+    if not isinstance(_punch_types, list):
+        _punch_types = ["biometric", "mobile"]
+    _punch_types = [p for p in ("biometric", "mobile", "manual", "gps")
+                    if p in [str(x).lower() for x in _punch_types]]
+    policy_master = {
+        "attendance_basis": _choice("attendance_basis", ["monthly", "daily", "hourly"], "monthly"),
+        "shift_type": _choice("shift_type", ["fixed", "rotational", "open"], "fixed"),
+        "punch_types": _punch_types or ["biometric"],
+        "contractor_assignment_required": _flag("contractor_assignment_required"),
+        "site_wise_attendance": _flag("site_wise_attendance"),
+        "client_wise_attendance": _flag("client_wise_attendance"),
+        "multiple_punch_allowed": _flag("multiple_punch_allowed", True),
+        "auto_shift_detection": _flag("auto_shift_detection"),
+        "wfh_allowed": _flag("wfh_allowed"),
+        "geofencing_required": _flag("geofencing_required", True),
+    }
+
     return {
         "shifts": shifts,
         "weekly_off_days": sorted(days),
@@ -1145,6 +1176,8 @@ def _validate_policy(raw: dict) -> dict:
         # Iter 131 — OT Calculation config (Textile Policy 2).
         "ot_pct_basic": ot_pct_basic,
         "ot_pct_gross": ot_pct_gross,
+        # Iter 175 — Policy Master Sub Points.
+        "policy_master": policy_master,
     }
 
 
@@ -8679,9 +8712,11 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
                 "flagged": record["identity_flagged"],
             })
 
+    # Iter 175 — contractual employees: stamp contractor for the report
+    # (app punches are already pending, so no status change here).
+    await apply_contractual_gate(record)
     await db.attendance.insert_one(record)
     record.pop("_id", None)
-
     # Iter 99 — personal punch notification with the joined firm's name.
     # Works the same for IN and OUT, all sources (manual / auto / first-login).
     try:
@@ -10915,6 +10950,37 @@ class ManualPunchEdit(BaseModel):
     reason: str  # mandatory audit note on every edit
 
 
+# ---------------------------------------------------------------------------
+# Iter 175 — Contractual employees (Firm Master Policy 2 contractors).
+# Their punches NEVER land directly in attendance: machine/auto-approved
+# punches are forced to "pending" so the company approves/rejects them
+# first (Contractor Punch approvals). Once approved they flow into the
+# attendance policy computation exactly like any other punch.
+# ---------------------------------------------------------------------------
+async def apply_contractual_gate(record: dict, user_doc: Optional[dict] = None) -> dict:
+    u = user_doc
+    if u is None or "is_contractual" not in u:
+        u = await db.users.find_one(
+            {"user_id": record.get("user_id")},
+            {"_id": 0, "is_contractual": 1, "contractor_name": 1},
+        ) or {}
+    if not u.get("is_contractual"):
+        return record
+    record["is_contractual"] = True
+    record.setdefault("contractor_name", u.get("contractor_name"))
+    # Only demote punches that were AUTO-approved by a machine/system —
+    # punches created directly by an admin stay approved (that IS the
+    # company's approval).
+    if (record.get("status") == "approved"
+            and str(record.get("decision_by") or "").startswith("system:")):
+        record["status"] = "pending"
+        record["decision_by"] = None
+        record["decision_at"] = None
+        record["decision_reason"] = None
+        record["pending_reason"] = "contractual_employee"
+    return record
+
+
 def _parse_manual_at(raw: str) -> datetime:
     """Accept 'YYYY-MM-DDTHH:MM' / 'YYYY-MM-DD HH:MM' / full ISO w/ tz. Falls
     back to UTC when no timezone is supplied."""
@@ -12584,6 +12650,14 @@ async def update_user_role(payload: RoleUpdate, authorization: Optional[str] = H
                 detail=("Fingerprint verification is not allowed — enable Bio "
                         "Matrix Attendance for this firm in Firm Master first."))
         updates["fingerprint_required"] = bool(payload.fingerprint_required)
+    # Iter 175 — Contractual employee link (Firm Master Policy 2 contractors).
+    if "is_contractual" in fset and payload.is_contractual is not None:
+        updates["is_contractual"] = bool(payload.is_contractual)
+        if not payload.is_contractual:
+            updates["contractor_name"] = None
+    if "contractor_name" in fset:
+        _cn = (payload.contractor_name or "").strip()
+        updates["contractor_name"] = _cn or None
     if "advance_balance" in fset:
         v = payload.advance_balance
         try:
@@ -14810,6 +14884,20 @@ async def create_compliance_salary_run(
         )
     run = await _compute_compliance_run(admin, payload)
     run["run_id"] = f"csrun_{uuid.uuid4().hex[:12]}"
+    # Iter 174 (user directive) — REPLACE old data: a fresh process for the
+    # same firm + month + employee group deletes the previous draft run(s)
+    # so only the newest data exists (finalized runs are already blocked
+    # above and are never touched).
+    _grp = (payload.employee_type or "").strip()
+    await db.compliance_salary_runs.delete_many({
+        "month": payload.month,
+        "company_id": payload.company_id,
+        "employee_type": (
+            {"$regex": f"^{re.escape(_grp)}$", "$options": "i"} if _grp
+            else {"$in": [None, ""]}
+        ),
+        "finalized": {"$ne": True},
+    })
     await db.compliance_salary_runs.insert_one(run)
     return {"ok": True, "run": {k: v for k, v in run.items() if k != "_id"}}
 
@@ -14822,6 +14910,9 @@ async def list_compliance_salary_runs(
     ),
     month: Optional[str] = Query(None),
     fy_start_year: Optional[int] = Query(None),
+    finalized_only: bool = Query(
+        False, description="Iter 174 — only FINALIZED runs (Automation screens), "
+                           "deduped to the newest run per firm+month+group."),
     authorization: Optional[str] = Header(None),
 ):
     admin = await get_user_from_token(authorization)
@@ -14842,9 +14933,23 @@ async def list_compliance_salary_runs(
     if fy_start_year is not None:
         y = int(fy_start_year)
         q["month"] = q.get("month") or {"$gte": f"{y}-04", "$lte": f"{y + 1}-03"}
+    if finalized_only:
+        q["finalized"] = True
     runs = await db.compliance_salary_runs.find(
         q, {"_id": 0, "rows": 0},
     ).sort("generated_at", -1).to_list(500)
+    if finalized_only:
+        # Keep only the NEWEST run per firm + month + employee group so
+        # replaced/reprocessed data never shows alongside the old copy.
+        seen: set = set()
+        deduped = []
+        for r in runs:
+            key = (r.get("company_id"), r.get("month"), r.get("employee_type"))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(r)
+        runs = deduped
     # Iter 85 — Enrich with generator/finalizer names for audit display.
     uids: set = set()
     for r in runs:
@@ -19246,6 +19351,8 @@ from routes.report_formats import router as report_formats_router  # noqa: E402
 app.include_router(report_formats_router)
 from routes.punch_import import router as punch_import_router  # noqa: E402
 app.include_router(punch_import_router)
+from routes.contractor_punches import router as contractor_punches_router  # noqa: E402
+app.include_router(contractor_punches_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.

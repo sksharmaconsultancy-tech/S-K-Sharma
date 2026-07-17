@@ -14,7 +14,7 @@ const OPTIONS = [
   { key: "policy_2", label: "Policy 2", desc: "Textile rule — below 8 hrs = Half Day, rest logic to OT" },
 ];
 
-export default function PolicyVariantPicker({ companyId }: { companyId: string | null }) {
+export default function PolicyVariantPicker({ companyId, onVariantChange }: { companyId: string | null; onVariantChange?: (v: string | null) => void }) {
   const [variant, setVariant] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -23,15 +23,20 @@ export default function PolicyVariantPicker({ companyId }: { companyId: string |
     if (!companyId) { setLoading(false); return; }
     setLoading(true);
     api<any>(`/attendance/policy?company_id=${encodeURIComponent(companyId)}`)
-      .then((r) => setVariant((r.policy || r)?.policy_variant || "policy_1"))
-      .catch(() => setVariant("policy_1"))
+      .then((r) => {
+        const v = (r.policy || r)?.policy_variant || "policy_1";
+        setVariant(v);
+        onVariantChange?.(v);
+      })
+      .catch(() => { setVariant("policy_1"); onVariantChange?.("policy_1"); })
       .finally(() => setLoading(false));
-  }, [companyId]);
+  }, [companyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pick = async (key: string) => {
     if (!companyId || saving) return;
     const prev = variant;
     setVariant(key);
+    onVariantChange?.(key);
     setSaving(true);
     try {
       await api(`/attendance/policy?company_id=${encodeURIComponent(companyId)}`, {
@@ -39,6 +44,7 @@ export default function PolicyVariantPicker({ companyId }: { companyId: string |
       });
     } catch (e: any) {
       setVariant(prev);
+      onVariantChange?.(prev);
       const msg = e?.message || "Failed to save policy variant";
       if (Platform.OS === "web") globalThis.alert(msg); else Alert.alert("Policy", msg);
     } finally { setSaving(false); }

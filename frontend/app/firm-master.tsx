@@ -18,6 +18,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { api } from "@/src/api/client";
 import PolicyVariantPicker from "@/src/components/PolicyVariantPicker";
+import PolicyMasterSummary from "@/src/components/PolicyMasterSummary";
 import useEnterNav from "@/src/hooks/useEnterNav";
 import useSaveShortcut from "@/src/hooks/useSaveShortcut";
 import { useAuth } from "@/src/context/AuthContext";
@@ -231,6 +232,9 @@ export default function FirmMasterScreen() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  // Iter 175 — Policy variant mirrored from PolicyVariantPicker so the
+  // Contractor Employees section only shows for Policy 2 firms.
+  const [policyVariant, setPolicyVariant] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!companyId) return;
@@ -312,6 +316,22 @@ export default function FirmMasterScreen() {
     const rows = [...(master?.contact_persons || [])];
     rows[idx] = { ...(rows[idx] || {}), ...patch };
     update({ contact_persons: rows });
+  };
+
+  // ---------- Iter 175 — Contractor Employees (Policy 2) repeatable rows ----------
+  const addContractor = () => {
+    const rows = [...(master?.contractors || []), { name: "", father_name: "", from_date: null, to_date: null }];
+    update({ contractors: rows });
+  };
+  const removeContractor = (idx: number) => {
+    const rows = [...(master?.contractors || [])];
+    rows.splice(idx, 1);
+    update({ contractors: rows });
+  };
+  const editContractor = (idx: number, patch: Record<string, any>) => {
+    const rows = [...(master?.contractors || [])];
+    rows[idx] = { ...(rows[idx] || {}), ...patch };
+    update({ contractors: rows });
   };
 
   // ---------- Compliance docs & portal logins are FIXED row edits ----------
@@ -780,8 +800,91 @@ export default function FirmMasterScreen() {
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.md }}>
           <View style={{ flex: 1, minWidth: 380 }}>
             <Section icon="time-outline" title="10a. Attendance Policy Variant">
-              <PolicyVariantPicker companyId={companyId} />
+              {/* Iter 175 (user rule) — the Policy Selection option only
+                  shows when an Industry Type is selected AND Off-roll
+                  (Offline) Salary AND Biometric Attendance are enabled. */}
+              {(h.category || "").trim() && sp.offline_salary && sp.bio_matrix_attendance ? (
+                <PolicyVariantPicker companyId={companyId} onVariantChange={setPolicyVariant} />
+              ) : (
+                <Text style={{ fontSize: 11.5, color: colors.onSurfaceTertiary }}>
+                  Policy selection unlocks when: ① Industry Type is selected
+                  (Firm Category), ② Offline Salary is enabled and ③ Bio Matrix
+                  Attendance is enabled in Salary Process Settings.
+                </Text>
+              )}
+              <PolicyMasterSummary companyId={companyId} />
             </Section>
+
+            {/* Iter 175 — Contractor Employees (Policy 2 only). */}
+            {policyVariant === "policy_2" ? (
+              <Section icon="briefcase-outline" title="10b. Contractor Employees (Policy 2)">
+                <Toggle
+                  label="Contractual (Contractor) Employees Applicable"
+                  value={!!st.contractor_employees}
+                  testID="fm-contractor-toggle"
+                  onChange={(v) => updateSection("settings", { contractor_employees: v })}
+                />
+                {st.contractor_employees ? (
+                  <View style={{ marginTop: 10 }}>
+                    <View style={styles.gridHead}>
+                      <Text style={[styles.gridHeadCell, { flex: 2 }]}>Contractor Name</Text>
+                      <Text style={[styles.gridHeadCell, { flex: 2 }]}>Father Name</Text>
+                      <Text style={[styles.gridHeadCell, { flex: 1.6 }]}>Contract From</Text>
+                      <Text style={[styles.gridHeadCell, { flex: 1.6 }]}>Contract To</Text>
+                      <Text style={[styles.gridHeadCell, { width: 40 }]}> </Text>
+                    </View>
+                    {(master.contractors || []).map((row: any, idx: number) => (
+                      <View key={idx} style={[styles.gridRow, { alignItems: "center" }]}>
+                        <TextInput
+                          style={[styles.gridInput, { flex: 2 }]}
+                          value={row.name || ""}
+                          placeholder="Contractor name"
+                          placeholderTextColor={colors.onSurfaceTertiary}
+                          onChangeText={(v) => editContractor(idx, { name: v })}
+                          testID={`fm-contractor-name-${idx}`}
+                        />
+                        <TextInput
+                          style={[styles.gridInput, { flex: 2 }]}
+                          value={row.father_name || ""}
+                          placeholder="Father name"
+                          placeholderTextColor={colors.onSurfaceTertiary}
+                          onChangeText={(v) => editContractor(idx, { father_name: v })}
+                          testID={`fm-contractor-father-${idx}`}
+                        />
+                        <View style={{ flex: 1.6 }}>
+                          <DateField
+                            value={toIsoDate(row.from_date || "")}
+                            onChangeISO={(v) => editContractor(idx, { from_date: v })}
+                            compact
+                            testID={`fm-contractor-from-${idx}`}
+                          />
+                        </View>
+                        <View style={{ flex: 1.6 }}>
+                          <DateField
+                            value={toIsoDate(row.to_date || "")}
+                            onChangeISO={(v) => editContractor(idx, { to_date: v })}
+                            min={toIsoDate(row.from_date || "") || undefined}
+                            compact
+                            testID={`fm-contractor-to-${idx}`}
+                          />
+                        </View>
+                        <Pressable
+                          onPress={() => removeContractor(idx)}
+                          style={styles.rowDelBtn}
+                          testID={`fm-contractor-del-${idx}`}
+                        >
+                          <Ionicons name="trash-outline" size={14} color={colors.error} />
+                        </Pressable>
+                      </View>
+                    ))}
+                    <Pressable onPress={addContractor} style={styles.addRowBtn} testID="fm-contractor-add">
+                      <Ionicons name="add-circle-outline" size={14} color={colors.brandPrimary} />
+                      <Text style={styles.addRowTxt}>Add More Contractors</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+              </Section>
+            ) : null}
 
             <Section icon="cash-outline" title="10. Salary Process Settings">
               <View style={styles.rowWrap}>

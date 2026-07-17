@@ -396,6 +396,14 @@ async def import_zk_dat_bytes(
     + source)."""
     tag = source_tag or f"import:zk_upload_{datetime.now(timezone.utc):%Y%m%dT%H%M%S}"
     bio_index = await _build_bio_index(db, company_id)
+    # Iter 175 — contractual employees: their imported punches must be
+    # approved by the company first (Contractor Punch approvals).
+    contractual_map: Dict[str, Optional[str]] = {}
+    async for _c in db.users.find(
+        {"company_id": company_id, "is_contractual": True},
+        {"_id": 0, "user_id": 1, "contractor_name": 1},
+    ):
+        contractual_map[_c["user_id"]] = _c.get("contractor_name")
 
     # Iter 139 — every slot now accepts classic .dat text, the device .TXT
     # export AND the binary GENLOG .DAT backup (format auto-detected).
@@ -525,6 +533,17 @@ async def import_zk_dat_bytes(
                 "selfie_base64": None,
                 "created_at": now_iso(),
             }
+            # Iter 175 — contractual employee: force pending + stamp contractor.
+            if user["user_id"] in contractual_map:
+                record.update({
+                    "is_contractual": True,
+                    "contractor_name": contractual_map[user["user_id"]],
+                    "status": "pending",
+                    "decision_by": None,
+                    "decision_at": None,
+                    "decision_reason": None,
+                    "pending_reason": "contractual_employee",
+                })
             await db.attendance.insert_one(record)
             stats["inserted"] += 1
 
