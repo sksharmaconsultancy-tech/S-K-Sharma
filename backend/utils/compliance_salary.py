@@ -128,9 +128,49 @@ def _round_stat(v: float, mode: str) -> float:
 # Professional Tax — monthly ₹ per state. Simplified flat monthly amounts.
 # Admins can override per-employee with `pt_amount_override`.
 # --------------------------------------------------------------------------- 
+# ---------------------------------------------------------------------------
+# Iter 178 — STATE-WISE PT SLABS (monthly gross → monthly PT ₹).
+# `upto: None` means "and above". Set on the FIRM via
+# compliance_policy.pt_state; per-employee override still wins.
+# ---------------------------------------------------------------------------
+PT_STATE_SLABS: Dict[str, List[Dict[str, Any]]] = {
+    "Maharashtra": [{"upto": 7500, "amount": 0}, {"upto": 10000, "amount": 175}, {"upto": None, "amount": 200}],
+    "Karnataka": [{"upto": 24999, "amount": 0}, {"upto": None, "amount": 200}],
+    "West Bengal": [{"upto": 10000, "amount": 0}, {"upto": 15000, "amount": 110}, {"upto": 25000, "amount": 130}, {"upto": 40000, "amount": 150}, {"upto": None, "amount": 200}],
+    "Madhya Pradesh": [{"upto": 18750, "amount": 0}, {"upto": 25000, "amount": 125}, {"upto": 33333, "amount": 167}, {"upto": None, "amount": 208}],
+    "Gujarat": [{"upto": 11999, "amount": 0}, {"upto": None, "amount": 200}],
+    "Telangana": [{"upto": 15000, "amount": 0}, {"upto": 20000, "amount": 150}, {"upto": None, "amount": 200}],
+    "Andhra Pradesh": [{"upto": 15000, "amount": 0}, {"upto": 20000, "amount": 150}, {"upto": None, "amount": 200}],
+    "Tamil Nadu": [{"upto": 3500, "amount": 0}, {"upto": 5000, "amount": 22}, {"upto": 7500, "amount": 52}, {"upto": 10000, "amount": 115}, {"upto": 12500, "amount": 171}, {"upto": None, "amount": 208}],
+    "Kerala": [{"upto": 1999, "amount": 0}, {"upto": 2999, "amount": 20}, {"upto": 4999, "amount": 30}, {"upto": 7499, "amount": 50}, {"upto": 9999, "amount": 75}, {"upto": 12499, "amount": 100}, {"upto": 16666, "amount": 125}, {"upto": 20833, "amount": 166}, {"upto": None, "amount": 208}],
+    "Bihar": [{"upto": 25000, "amount": 0}, {"upto": 41666, "amount": 83.33}, {"upto": 83333, "amount": 166.67}, {"upto": None, "amount": 208.33}],
+    "Jharkhand": [{"upto": 25000, "amount": 0}, {"upto": 41666, "amount": 100}, {"upto": 66666, "amount": 150}, {"upto": 83333, "amount": 175}, {"upto": None, "amount": 208}],
+    "Odisha": [{"upto": 13304, "amount": 0}, {"upto": 25000, "amount": 125}, {"upto": None, "amount": 200}],
+    "Assam": [{"upto": 10000, "amount": 0}, {"upto": 15000, "amount": 150}, {"upto": 25000, "amount": 180}, {"upto": None, "amount": 208}],
+    "Punjab": [{"upto": 20833, "amount": 0}, {"upto": None, "amount": 200}],
+    "Sikkim": [{"upto": 20000, "amount": 0}, {"upto": 30000, "amount": 125}, {"upto": 40000, "amount": 150}, {"upto": None, "amount": 200}],
+    "Meghalaya": [{"upto": 4166, "amount": 0}, {"upto": 6250, "amount": 16.5}, {"upto": 8333, "amount": 25}, {"upto": 12500, "amount": 41.5}, {"upto": 16666, "amount": 62.5}, {"upto": 20833, "amount": 83.33}, {"upto": 25000, "amount": 104.16}, {"upto": 29166, "amount": 125}, {"upto": 33333, "amount": 150}, {"upto": 37500, "amount": 175}, {"upto": 41666, "amount": 200}, {"upto": None, "amount": 208}],
+    "Tripura": [{"upto": 7500, "amount": 0}, {"upto": 15000, "amount": 150}, {"upto": None, "amount": 208}],
+    # States/UTs with NO Professional Tax:
+    "Rajasthan": [], "Delhi": [], "Haryana": [], "Uttar Pradesh": [],
+    "Uttarakhand": [], "Himachal Pradesh": [], "Chandigarh": [],
+    "Jammu & Kashmir": [], "Goa": [{"upto": 15000, "amount": 0}, {"upto": 25000, "amount": 150}, {"upto": None, "amount": 200}],
+    "Chhattisgarh": [{"upto": 12500, "amount": 0}, {"upto": 16667, "amount": 150}, {"upto": 20833, "amount": 180}, {"upto": None, "amount": 208}],
+}
+
+
+def pt_from_slabs(monthly_gross: float, slabs: List[Dict[str, Any]]) -> float:
+    """Monthly PT ₹ for a monthly gross using {upto, amount} slabs."""
+    g = _num(monthly_gross, 0.0)
+    for s in slabs or []:
+        upto = s.get("upto")
+        if upto is None or g <= _num(upto, 0.0):
+            return round(_num(s.get("amount"), 0.0), 2)
+    return 0.0
+
+
 PT_STATE_MONTHLY: Dict[str, float] = {
-    "Maharashtra": 200.0,
-    "Karnataka": 200.0,
+    "Maharashtra": 200.0,    "Karnataka": 200.0,
     "West Bengal": 200.0,
     "Gujarat": 200.0,
     "Tamil Nadu": 208.0,        # ~₹1,250 half-yearly / 6
@@ -283,6 +323,7 @@ def compute_compliance_row(
     statutory_cfg: Optional[Dict[str, float]] = None,
     firm_pf_enabled: bool = True,
     firm_esic_enabled: bool = True,
+    firm_pt: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Compute the full compliance salary row for a single employee.
 
@@ -526,10 +567,18 @@ def compute_compliance_row(
         esic_employee = esic_employer = 0.0
 
     # ---- Professional Tax ----
+    # Iter 178 resolution order: per-employee override ▸ firm custom slabs ▸
+    # firm STATE slabs (compliance_policy.pt_state) ▸ legacy per-employee
+    # flat state amount.
     pt_state = (user.get("pt_state") or "None").strip() or "None"
     pt_override = user.get("pt_amount_override")
+    _fpt = firm_pt or {}
     if pt_override is not None and _num(pt_override, -1) >= 0:
         pt = _num(pt_override, 0.0)
+    elif isinstance(_fpt.get("slabs"), list) and _fpt.get("slabs"):
+        pt = pt_from_slabs(gross_paid, _fpt["slabs"])
+    elif (_fpt.get("state") or "").strip():
+        pt = pt_from_slabs(gross_paid, PT_STATE_SLABS.get(str(_fpt["state"]).strip(), []))
     else:
         pt = PT_STATE_MONTHLY.get(pt_state, 0.0)
 

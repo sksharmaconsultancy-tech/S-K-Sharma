@@ -14715,12 +14715,15 @@ async def _compute_compliance_run(
                 "ot_hours": 0.0,
             }
         _ff = firm_stat_flags.get(emp.get("company_id")) or {"pf": False, "esic": False}
+        # Iter 178 — state-wise PT from the firm's compliance policy.
+        _fcp = (company_doc.get("compliance_policy") or {}) if company_doc else {}
         row = compute_compliance_row(
             emp, merged_pol, int(month_days), stats,
             company_structure_pct=payload.structure_pct,
             statutory_cfg=effective_statutory,
             firm_pf_enabled=_ff["pf"],
             firm_esic_enabled=_ff["esic"],
+            firm_pt={"state": _fcp.get("pt_state"), "slabs": _fcp.get("pt_slabs")},
         )
         # Iter 100 — Attendance Master "Other Deduction" (Advance/TDS etc.)
         if _am and float(_am.get("deduction_amount") or 0) > 0:
@@ -17719,6 +17722,8 @@ class CompliancePolicyPayload(BaseModel):
     esic_wage_threshold: Optional[float] = None
     tds_regime: Optional[str] = None
     pt_slabs: Optional[List[Dict[str, Any]]] = None
+    # Iter 178 — state-wise PT: firm's PT state auto-applies statutory slabs.
+    pt_state: Optional[str] = None
     apply_pf: Optional[bool] = None
     apply_esic: Optional[bool] = None
     apply_pt: Optional[bool] = None
@@ -17746,6 +17751,19 @@ class CompliancePolicyPayload(BaseModel):
     # Compliance Salary Process only shows / applies the enabled heads.
     enabled_allowances: Optional[List[str]] = None  # e.g. ["basic","hra","conveyance"]
     notes: Optional[str] = None
+
+
+@api.get("/admin/pt-states")
+async def list_pt_states(authorization: Optional[str] = Header(None)):
+    """Iter 178 — state-wise Professional Tax slab catalogue (monthly
+    gross → monthly PT). Used by the firm Compliance Policy screen."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    from utils.compliance_salary import PT_STATE_SLABS
+    return {"states": [
+        {"state": s, "slabs": slabs, "has_pt": bool(slabs)}
+        for s, slabs in sorted(PT_STATE_SLABS.items())
+    ]}
 
 
 @api.get("/admin/companies/{company_id}/compliance-policy")
@@ -19398,6 +19416,8 @@ from routes.contractor_punches import router as contractor_punches_router  # noq
 app.include_router(contractor_punches_router)
 from routes.labour_reports import router as labour_reports_router  # noqa: E402
 app.include_router(labour_reports_router)
+from routes.portal_dashboard import router as portal_dashboard_router  # noqa: E402
+app.include_router(portal_dashboard_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
