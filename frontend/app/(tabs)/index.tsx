@@ -607,7 +607,7 @@ export default function Dashboard() {
                   testID="row-leave-approvals"
                   icon="calendar-outline"
                   label={
-                    stats.pending_leaves > 0
+                    (stats?.pending_leaves ?? 0) > 0
                       ? `Leave approvals (${stats.pending_leaves})`
                       : "Leave approvals"
                   }

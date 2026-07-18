@@ -958,3 +958,7 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 ## Iter 189 — Enterprise Employee Form (SAP/Workday-grade) — desktop + mobile PWA (tested, all pass)
 - /employee-add (Add + Edit modes) desktop shell: breadcrumb sticky header, 6 section anchor-tabs (nativeID + scrollIntoView), left summary panel (avatar/status/summary rows; completion checklist in add mode, Open Full Profile in edit), sticky bottom bar (Cancel/Save Draft/Create-Save). Form logic untouched; E2E create+edit verified by testing agent (TESTQA employee created+deleted).
 - Iter 189b mobile PWA: horizontal section jump-tabs + live completion bar under header + sticky bottom action bar (web only; native untouched).
+
+## Iter 190 — FIX: blank page after Super Admin login on LIVE PWA
+- Reproduced on live with playwright: after login, "/" → /(tabs) crashed with "Cannot read properties of null (reading 'pending_leaves')" — the admin "Leave approvals" ActionRow dereferenced stats before /admin/stats resolved (timing-dependent; static export on live hit it consistently).
+- Fix: optional chaining (stats?.pending_leaves ?? 0) in (tabs)/index.tsx line ~610. All other stats.* accesses verified guarded (stats && block / admin.tsx line 322).
