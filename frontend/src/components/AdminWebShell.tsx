@@ -67,7 +67,6 @@ export const NAV_SUPER: NavItem[] = [
   // KYC & Document Expiry Tracker — enterprise module (Aadhaar/PAN/Bank
   // completeness + DL/Passport validity reminders).
   { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
-  { route: "/test-portal", label: "Test", icon: "flask-outline" },
   { route: "/roles", label: "Roles & Permissions", icon: "key-outline" },
   {
     label: "Salary Process",
@@ -360,7 +359,6 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
   { route: "/zk-dat-import", label: "Import Biometric .dat", icon: "finger-print-outline" },
   { route: "/join-qr", label: "QR Codes (Join / App)", icon: "qr-code-outline" },
   { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
-  { route: "/test-portal", label: "Test", icon: "flask-outline" },
   { route: "/roles", label: "Roles & Permissions", icon: "key-outline" },
   {
     label: "Reports",
