@@ -134,14 +134,30 @@ function AutomationCard() {
           </Pressable>
 
           <Text style={st.step}>
-            1. Download &amp; unzip the folder ONCE (needs Chrome + Python).{"\n"}
-            2. Windows: double-click <Text style={st.mono}>run_esic.bat</Text> (or{" "}
+            1. Download the zip, then unzip and MOVE the folder to a fixed
+            location (see below) — needs Chrome + Python.{"\n"}
+            2. Open that folder. Windows: double-click{" "}
+            <Text style={st.mono}>run_esic.bat</Text> (or{" "}
             <Text style={st.mono}>run_pf.bat</Text>). Mac/Linux: run{" "}
             <Text style={st.mono}>./run.sh esic</Text>.{"\n"}
             3. A controlled Chrome window opens and logs in automatically —
-            check the captcha and click Login. It self-updates every run, so
-            you never download again.
+            check the captcha and click Login. It self-updates in that folder
+            every run, so you never download again.
           </Text>
+
+          <View style={st.folderBox}>
+            <Ionicons name="folder-open-outline" size={16} color="#059669" />
+            <View style={{ flex: 1 }}>
+              <Text style={st.folderHead}>Keep the folder here (first time):</Text>
+              <Text style={st.folderPath}>Windows:  C:\SKS-AutoLogin</Text>
+              <Text style={st.folderPath}>Mac:  /Users/&lt;you&gt;/SKS-AutoLogin</Text>
+              <Text style={st.folderPath}>Linux:  /home/&lt;you&gt;/SKS-AutoLogin</Text>
+              <Text style={st.folderNote}>
+                Run it from this same folder each time so it can auto-update
+                itself in place.
+              </Text>
+            </View>
+          </View>
 
           <Pressable
             style={[st.linkBtn, busy === "ext" && st.disabled]}
@@ -198,6 +214,14 @@ const st = StyleSheet.create({
   disabled: { opacity: 0.7 },
   step: { fontSize: 12.5, color: colors.textSecondary, lineHeight: 19 },
   mono: { fontWeight: "800", color: colors.textPrimary },
+  folderBox: {
+    flexDirection: "row", alignItems: "flex-start", gap: 8,
+    backgroundColor: "#ECFDF5", borderRadius: 10, padding: 12,
+    borderWidth: 1, borderColor: "#05966933",
+  },
+  folderHead: { fontSize: 12.5, fontWeight: "800", color: "#065F46", marginBottom: 3 },
+  folderPath: { fontSize: 12.5, color: "#065F46", fontWeight: "700", lineHeight: 19 },
+  folderNote: { fontSize: 11.5, color: "#047857", marginTop: 4, lineHeight: 16 },
   linkBtn: {
     flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start",
     borderWidth: 1, borderColor: colors.brandPrimary, borderRadius: 8,
