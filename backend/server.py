@@ -1986,6 +1986,21 @@ async def get_user_from_token(authorization: Optional[str]) -> dict:
     user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    # RBAC Phase 1 — company_staff (HR Manager / Payroll Manager / ...) are
+    # NORMALIZED to a firm-scoped company_admin so every existing endpoint
+    # keeps its company scoping. Their permission subset (from the
+    # company_roles matrix) rides along and is enforced by
+    # require_permission + frontend nav gating. Fail-safe: missing role
+    # config → empty permissions (no access), never full access.
+    if user.get("role") == "company_staff":
+        crole = await db.company_roles.find_one(
+            {"role_id": user.get("company_role_id") or "", "company_id": user.get("company_id")},
+            {"_id": 0},
+        )
+        user["is_company_staff"] = True
+        user["staff_role_name"] = (crole or {}).get("name") or "Staff"
+        user["staff_permissions"] = (crole or {}).get("permissions") or []
+        user["role"] = "company_admin"
     # Super admins are never blocked (they are the ones who disable others).
     if user.get("role") != "super_admin":
         if user.get("disabled"):
@@ -2086,6 +2101,16 @@ def require_permission(user: dict, permission: str):
     if role == "super_admin":
         return
     if role == "company_admin":
+        # RBAC Phase 1 — company_staff (normalized to company_admin) are
+        # gated by their role's permission matrix. Real company_admins
+        # keep free reign (unchanged behavior).
+        if user.get("is_company_staff"):
+            if permission in (user.get("staff_permissions") or []):
+                return
+            raise HTTPException(
+                status_code=403,
+                detail=f"Your role '{user.get('staff_role_name') or 'Staff'}' doesn't have the '{permission}' permission.",
+            )
         return
     if role == "sub_admin":
         perms = user.get("sub_admin_permissions") or []
@@ -4527,7 +4552,7 @@ async def admin_pin_login(payload: AdminPinLoginRequest):
                     ),
                 )
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    if user.get("role") not in ("company_admin", "super_admin", "sub_admin"):
+    if user.get("role") not in ("company_admin", "super_admin", "sub_admin", "company_staff"):
         raise HTTPException(status_code=403, detail="This login is only for administrators")
 
     # Disabled-account guard (super admin bypasses)
@@ -4618,7 +4643,7 @@ async def admin_password_login(payload: AdminPasswordLoginRequest):
                 # tolerate saved formats like "+91 96802 73960" / no +91
                 user = await db.users.find_one(
                     {"phone": {"$regex": f"{digits[-10:]}$"},
-                     "role": {"$in": ["company_admin", "super_admin", "sub_admin"]}},
+                     "role": {"$in": ["company_admin", "super_admin", "sub_admin", "company_staff"]}},
                     {"_id": 0},
                 )
         if not user:
@@ -4630,7 +4655,7 @@ async def admin_password_login(payload: AdminPasswordLoginRequest):
     email = ident  # keep var name for the log lines below
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    if user.get("role") not in ("company_admin", "super_admin", "sub_admin"):
+    if user.get("role") not in ("company_admin", "super_admin", "sub_admin", "company_staff"):
         raise HTTPException(status_code=403, detail="This login is only for administrators")
     if not user.get("password_hash"):
         raise HTTPException(
@@ -4681,6 +4706,17 @@ async def admin_password_login(payload: AdminPasswordLoginRequest):
     token = await _issue_session(user["user_id"], "password")
     fresh = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
     fresh = await _enrich_user_with_company(fresh)
+    # RBAC Phase 1 — normalize company_staff in the login response the same
+    # way get_user_from_token does, so post-login routing works unchanged.
+    if fresh.get("role") == "company_staff":
+        crole = await db.company_roles.find_one(
+            {"role_id": fresh.get("company_role_id") or "", "company_id": fresh.get("company_id")},
+            {"_id": 0},
+        )
+        fresh["is_company_staff"] = True
+        fresh["staff_role_name"] = (crole or {}).get("name") or "Staff"
+        fresh["staff_permissions"] = (crole or {}).get("permissions") or []
+        fresh["role"] = "company_admin"
     logger.info(f"[password admin] login OK for {email}")
     return {
         "session_token": token,
@@ -18965,6 +19001,10 @@ from routes.employee_documents import router as employee_documents_router  # noq
 app.include_router(employee_documents_router)
 from routes.advances import router as advances_router  # noqa: E402
 app.include_router(advances_router)
+from routes.company_roles import router as company_roles_router  # noqa: E402
+app.include_router(company_roles_router)
+from routes.approvals_engine import router as approvals_engine_router  # noqa: E402
+app.include_router(approvals_engine_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.

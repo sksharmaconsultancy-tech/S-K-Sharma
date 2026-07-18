@@ -17,6 +17,7 @@ import { colors } from "@/src/theme";
 const STATUS_COLORS: Record<string, string> = {
   active: "#059669", scheduled: "#2563EB", on_hold: "#D97706",
   closed: "#DC2626", waived: "#64748B",
+  pending_approval: "#7C3AED", rejected: "#B91C1C",
 };
 const inr = (v: any) => `₹${Number(v || 0).toLocaleString("en-IN")}`;
 

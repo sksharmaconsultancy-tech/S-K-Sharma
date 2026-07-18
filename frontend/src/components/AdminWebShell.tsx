@@ -67,6 +67,7 @@ export const NAV_SUPER: NavItem[] = [
   // KYC & Document Expiry Tracker — enterprise module (Aadhaar/PAN/Bank
   // completeness + DL/Passport validity reminders).
   { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
+  { route: "/roles", label: "Roles & Permissions", icon: "key-outline" },
   {
     label: "Salary Process",
     icon: "cash-outline",
@@ -83,6 +84,8 @@ export const NAV_SUPER: NavItem[] = [
     label: "Approvals",
     icon: "checkmark-done-circle-outline",
     children: [
+      { route: "/approval-inbox", label: "Approval Inbox", icon: "file-tray-full-outline" },
+      { route: "/approval-workflows", label: "Workflow Builder", icon: "git-branch-outline" },
       { route: "/company-requests", label: "Company Requests", icon: "mail-open-outline" },
       { route: "/punch-approvals", label: "Punch Approvals", icon: "checkmark-circle-outline" },
       { route: "/contractor-punches", label: "Contractor Punches", icon: "briefcase-outline" },
@@ -343,6 +346,8 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
     label: "Approvals",
     icon: "checkmark-done-circle-outline",
     children: [
+      { route: "/approval-inbox", label: "Approval Inbox", icon: "file-tray-full-outline" },
+      { route: "/approval-workflows", label: "Workflow Builder", icon: "git-branch-outline" },
       { route: "/punch-approvals", label: "Punch Approvals", icon: "checkmark-circle-outline" },
       { route: "/contractor-punches", label: "Contractor Punches", icon: "briefcase-outline" },
       { route: "/shift-approvals", label: "Shift Change Approvals", icon: "swap-horizontal-outline" },
@@ -354,6 +359,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
   { route: "/zk-dat-import", label: "Import Biometric .dat", icon: "finger-print-outline" },
   { route: "/join-qr", label: "QR Codes (Join / App)", icon: "qr-code-outline" },
   { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
+  { route: "/roles", label: "Roles & Permissions", icon: "key-outline" },
   {
     label: "Reports",
     icon: "bar-chart-outline",
@@ -542,6 +548,21 @@ export default function AdminWebShell({ children }: Props) {
         (user as any)?.menu_rights || {};
       const menuAllowed = (item: NavItem) =>
         menuRights[item.route || ""] !== false;
+      // RBAC Phase 1 — company_staff (normalized company_admin) are gated
+      // by their role's permission matrix; Roles & Permissions itself is
+      // for real admins only.
+      const isStaff = !!(user as any)?.is_company_staff;
+      const staffPerms = new Set<string>(((user as any)?.staff_permissions || []) as string[]);
+      const staffAllowed = (item: NavItem) => {
+        if (!isStaff) return true;
+        const r = (item.route || "").split("?")[0];
+        if (r === "/roles" || r === "/approval-workflows") return false;
+        if (r === "/approval-inbox") return true;
+        if (r === "/(tabs)") return true;
+        const gates = NAV_PERMISSION_MAP[r];
+        if (!gates || gates.length === 0) return true;
+        return gates.some((g) => staffPerms.has(g));
+      };
       const hasComplianceGrant =
         permSet.has("compliance_salary:read") ||
         permSet.has("compliance_salary:write");
@@ -551,6 +572,7 @@ export default function AdminWebShell({ children }: Props) {
       if (empPerms.length === 0) {
         return filterNav(NAV_COMPANY_ADMIN, (item) => {
           if (!menuAllowed(item)) return false;
+          if (!staffAllowed(item)) return false;
           const r = (item.route || "").split("?")[0];
           if (COMPLIANCE_ROUTES.has(r)) return hasComplianceGrant;
           if (SALARY_ROUTES.has(r)) return hasSalaryGrant;
@@ -559,6 +581,7 @@ export default function AdminWebShell({ children }: Props) {
       }
       return filterNav(NAV_COMPANY_ADMIN, (item) => {
         if (!menuAllowed(item)) return false;
+        if (!staffAllowed(item)) return false;
         const r = (item.route || "").split("?")[0];
         if (r === "/(tabs)") return true;
         const gates = NAV_PERMISSION_MAP[r];

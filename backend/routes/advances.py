@@ -392,8 +392,34 @@ async def create_advance(payload: AdvanceCreate, authorization: Optional[str] = 
         "created_at": now_iso(),
         "created_by": admin["user_id"],
     }
+    # RBAC Phase 3 — if this firm has an enabled approval workflow for the
+    # 'advance' module, park the advance as pending_approval and raise an
+    # approval request. It only becomes active once the chain approves.
+    from routes.approvals_engine import get_active_workflow, create_approval_request
+    wf = await get_active_workflow(emp.get("company_id") or "", "advance")
+    approval_request = None
+    if wf:
+        a["status"] = "pending_approval"
+        a["audit"].append(_audit(admin["user_id"], "approval", "Sent for approval (workflow)"))
     await db.advances.insert_one(a)
-    return {"ok": True, "advance": _pub(a)}
+    if wf:
+        approval_request = await create_approval_request(
+            company_id=emp.get("company_id") or "",
+            module="advance",
+            record_id=a["advance_id"],
+            title=f"{a['voucher_no']} · {a['employee_name']} · ₹{amount}",
+            summary={
+                "voucher_no": a["voucher_no"], "employee_name": a["employee_name"],
+                "employee_code": a.get("employee_code"), "amount": amount,
+                "advance_type": a["advance_type"], "recovery_type": a["recovery_type"],
+                "emi_amount": a.get("emi_amount"), "start_month": a["start_month"],
+            },
+            requested_by=admin,
+            workflow=wf,
+        )
+    return {"ok": True, "advance": _pub(a),
+            "pending_approval": bool(wf),
+            "approval_request_id": (approval_request or {}).get("request_id")}
 
 
 @router.get("/admin/advances")

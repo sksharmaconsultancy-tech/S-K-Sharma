@@ -48,6 +48,7 @@ const REPORTS = [
 const STATUS_COLORS: Record<string, string> = {
   active: "#059669", scheduled: "#2563EB", on_hold: "#D97706",
   closed: "#DC2626", waived: "#64748B",
+  pending_approval: "#7C3AED", rejected: "#B91C1C",
 };
 
 function inr(v: any) {
@@ -222,7 +223,9 @@ export default function AdvancesScreen() {
       body.emi_amount = f.recovery_type === "emi" ? Number(f.emi_amount) : undefined;
       body.installments = f.installments ? Number(f.installments) : undefined;
       const r = await api("/admin/advances", { method: "POST", body });
-      toast(`Advance ${r.advance.voucher_no} created.`);
+      toast(r.pending_approval
+        ? `Advance ${r.advance.voucher_no} sent for approval (workflow).`
+        : `Advance ${r.advance.voucher_no} created.`);
       setShowForm(false);
       setF({ ...f, user_id: "", amount: "", emi_amount: "", installments: "", purpose: "", remarks: "" });
       await load();
@@ -331,7 +334,7 @@ export default function AdvancesScreen() {
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
               <View style={{ flexDirection: "row", gap: 8 }}>
-                {["all", "active", "scheduled", "on_hold", "closed", "waived"].map((k) => (
+                {["all", "pending_approval", "active", "scheduled", "on_hold", "closed", "waived", "rejected"].map((k) => (
                   <Pressable key={k} onPress={() => setStatusF(k)} style={[s.chip, statusF === k && s.chipOn]} testID={`adv-filter-${k}`}>
                     <Text style={[s.chipTxt, statusF === k && s.chipTxtOn]}>{k === "all" ? "All" : k.replace("_", " ")}</Text>
                   </Pressable>

@@ -1,0 +1,34 @@
+{
+  "summary": "RBAC Phase 1 (Company Roles + Staff) and Phase 3 (Approval Workflow Engine + Inbox) fully regression tested. 19/19 backend pytest tests PASS covering: role catalog (10 modules), 6 seeded roles with staff_count, create/patch/delete-blocked-if-assigned, staff login normalization (role=company_admin, is_company_staff=true, staff_role_name='HR Manager'), staff permission gating (kyc-tracker allowed, advances 403, roles 403), staff CRUD (dup 409, weak-pw 400, password reset revokes old session, disabled blocks login, delete OK), workflow save + invalid role 404, advance E2E approve chain (super creates -> pending_approval -> maker-checker blocks creator -> staff HR approves L1 -> Kankani admin approves L2 -> advance flips to scheduled), reject requires remarks (400 without, 200 with -> advance rejected), hold->approve continues, inbox counts + can_action flags (staff can_action true at L1, requester false). Frontend web (1920px) PASS for super admin: /roles renders 6 role cards with Edit Matrix modal (permission checkbox matrix rendered), Add Staff User modal available; /approval-workflows shows Advance L1 HR Manager -> L2 Company Admin chain with Add/Remove level; /approval-inbox shows chips (pending/on_hold/approved/rejected/returned) with counts. Staff HR login E2E: sidebar CORRECTLY hides Salary Process, Roles & Permissions, Workflow Builder while showing Employee Master and Approval Inbox (Approvals group). Cleanup deleted all TEST_iter193 advances via advances DELETE endpoint.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "/advances route (staff HR)", "issue": "Direct navigation to /advances by a staff user (HR Manager without salary_process:read) still renders the full Advance Management UI shell (chips, 'New Advance' button, empty state) instead of redirecting away or showing an explicit 'Not allowed' banner. Backend correctly returns 403 (visible as network errors in console) but the frontend does not gate the page. Recommend a route guard in /app/frontend/app/advances.tsx (or a shared usePermissionGate) that checks staff_permissions and redirects to /portal-dashboard or shows a permission block.", "testID": "n/a", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": ["Console warnings on every screen: 'shadow*' style props deprecated (use boxShadow); invalid style properties outline/background/padding shorthand not supported on web. Non-blocking but noisy — should be cleaned to reduce noise in dev console."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter193_rbac_phase1_phase3.py",
+    "/app/test_reports/pytest/iter193.xml"
+  ],
+  "action_items": [
+    "Add a client-side permission gate on /app/frontend/app/advances.tsx: if user.is_company_staff && !staff_permissions includes 'salary_process:read', redirect (router.replace('/portal-dashboard')) or render a 'You do not have access to this module' card. Right now staff can navigate directly by URL and see the shell.",
+    "Optional polish: clean up the deprecated shadow* style props and shorthand outline/background/padding warnings on web.",
+    "Optional: hide non-permitted attendance/biometric shortcuts (Import Biometric .dat, QR Codes, Location Audit) from staff HR sidebar since HR Manager default perms don't include biometric_devices/attendance_review — currently they show because NAV_PERMISSION_MAP has no entry for those routes so staffAllowed returns true."
+  ],
+  "critical_code_review_comments": [
+    "approvals_engine.py: MODULES list has 4 modules but only 'advance' is wired to _finalize. Others (employee_creation, salary_lock, leave) will silently store approved without side-effects — OK for Phase 3 scope but document it.",
+    "company_roles.py:_role_manager blocks any company_admin whose is_company_staff==true from managing roles — correct, matches intent."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter193_rbac_phase1_phase3.py"],
+  "success_rate": {"backend": "100% (19/19)", "frontend": "~90% (super admin flows all working; staff sidebar filtering working; /advances route-guard missing)"},
+  "seed_data_creation": "No new seed data. Test-created advances and approval requests were cleaned up in test_zzz_cleanup. Roles/staff/workflow configs referenced by the review request (HR Manager assignee testhr, advance workflow L1->L2) are intact.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All backend RBAC + approval APIs verified passing. Reuse /app/backend/tests/test_iter193_rbac_phase1_phase3.py as regression. If main agent adds a route-guard on /advances (and other staff-forbidden pages), retest by logging in as testhr@kankani.test / Hr@123456 and navigating directly to /advances, /salary-run, /roles, /approval-workflows — expect either redirect or explicit access-denied UI instead of the page shell.",
+  "rca_of_issue": "/advances client-side leak: The staffAllowed() gate in AdminWebShell only removes the sidebar entry; there is no per-page route guard that inspects user.staff_permissions before rendering the screen. Users typing/pasting the URL bypass the sidebar filter. Fix: add a small useEffect at the top of advances.tsx (and similar) that checks staff_permissions and calls router.replace() to a safe landing page when access is denied. Backend correctly enforces 403 so no data leaks, but UX is confusing (empty page with actions the user can't perform)."
+}
