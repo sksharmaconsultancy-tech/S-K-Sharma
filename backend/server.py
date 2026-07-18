@@ -14945,6 +14945,10 @@ async def create_compliance_salary_run(
         "finalized": {"$ne": True},
     })
     await db.compliance_salary_runs.insert_one(run)
+    # Iter 182 — audit trail
+    from routes.salary_audit import write_salary_audit
+    await write_salary_audit(admin, "process", run,
+                             f"Processed {len(run.get('rows') or [])} employees")
     return {"ok": True, "run": {k: v for k, v in run.items() if k != "_id"}}
 
 

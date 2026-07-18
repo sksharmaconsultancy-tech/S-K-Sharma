@@ -160,3 +160,7 @@ See `/app/memory/test_credentials.md`. Super admin
 ## Iter 180/181 — Premium UI redesign + payroll punch line + default dashboard
 - Testing agent iteration_180: 11/11 backend pytest + full desktop/mobile E2E pass (premium overview, dark mode persist, global search, ESS home, employee tab bar, landing restyle). No regressions.
 - Iter 181 self-tested: payslip PDF builds w/ punch line (23KB), punch line visible on Compliance Salary screen, "/" redirects desktop admins to /portal-dashboard, sidebar has single "Dashboard" entry.
+
+## Iter 182 — Salary audit log + premium Employee Master/Salary UX
+- 6/6 pytest (tests/test_iter182_salary_audit.py) + 7/7 frontend flows green (iteration_182.json). Auto-save, search, shortcuts, audit modal, stats bar all verified.
+- Fixed post-test: "process" audit hook re-added at server.py compliance run creation.
