@@ -962,3 +962,4 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 ## Iter 190 — FIX: blank page after Super Admin login on LIVE PWA
 - Reproduced on live with playwright: after login, "/" → /(tabs) crashed with "Cannot read properties of null (reading 'pending_leaves')" — the admin "Leave approvals" ActionRow dereferenced stats before /admin/stats resolved (timing-dependent; static export on live hit it consistently).
 - Fix: optional chaining (stats?.pending_leaves ?? 0) in (tabs)/index.tsx line ~610. All other stats.* accesses verified guarded (stats && block / admin.tsx line 322).
+- Iter 190 deployed + VERIFIED ON LIVE: super admin login → premium home renders on smartpayrolling.com mobile (entry-d6dec4fd).
