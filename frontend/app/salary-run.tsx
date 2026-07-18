@@ -44,6 +44,8 @@ import { useAuth } from "@/src/context/AuthContext";
 import { useOnRefresh } from "@/src/context/RefreshBusContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import MonthPicker from "@/src/components/MonthPicker";
+import ProcessCommandCenter from "@/src/components/salary/ProcessCommandCenter";
+import TotalsFooter from "@/src/components/salary/TotalsFooter";
 import GridFilterChips, { GRID_FILTER_DEFAULT, rowMatchesFilters, type GridFilters } from "@/src/components/GridFilterChips";
 import { GridScroller, stickyCol, stickyHeader } from "@/src/components/GridFreeze";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
@@ -525,6 +527,17 @@ export default function ActualSalaryProcessScreen() {
       </SafeAreaView>
 
       <ScrollView contentContainerStyle={styles.scroll}>
+        {/* Enterprise Process Command Center — KPI cards, workflow stepper
+            and live validation (DB-driven per firm + month). */}
+        <ProcessCommandCenter
+          companyId={selectedCompanyId || user?.company_id}
+          month={month}
+          processType="actual"
+          runExists={!!run}
+          runFinalized={!!run?.finalized}
+          refreshKey={(run ? 1 : 0) + (run?.finalized ? 2 : 0)}
+        />
+
         {/* Iter 91 — In-screen firm picker for Super Admin. Shows ALL
             active firms regardless of attendance source. */}
         {user?.role === "super_admin" || user?.role === "sub_admin" ? (
@@ -699,6 +712,18 @@ export default function ActualSalaryProcessScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* Enterprise footer summary — sticky run totals */}
+      {run ? (
+        <TotalsFooter items={[
+          { label: "Gross", value: run.totals?.total_gross ?? 0 },
+          { label: "EPF", value: run.totals?.epf ?? 0 },
+          { label: "ESI", value: run.totals?.esi ?? 0 },
+          { label: "Advance", value: run.totals?.adv ?? 0 },
+          { label: "TDS", value: run.totals?.tds ?? 0 },
+          { label: "Net Pay", value: run.totals?.net_pay ?? 0, tone: "#059669" },
+        ]} />
+      ) : null}
     </View>
   );
 }

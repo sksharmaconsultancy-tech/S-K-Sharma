@@ -43,6 +43,8 @@ import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
   
 import MonthPicker from "@/src/components/MonthPicker";
+import ProcessCommandCenter from "@/src/components/salary/ProcessCommandCenter";
+import TotalsFooter from "@/src/components/salary/TotalsFooter";
 import GridFilterChips, { GRID_FILTER_DEFAULT, rowMatchesFilters, type GridFilters } from "@/src/components/GridFilterChips";
 import RegisterLayoutEditor from "@/src/components/RegisterLayoutEditor";
 import { GridScroller, stickyCol, stickyHeader } from "@/src/components/GridFreeze";
@@ -1149,6 +1151,17 @@ export default function ComplianceSalaryRunScreen() {
           </Pressable>
         </View>
 
+        {/* Enterprise Process Command Center — KPI cards, workflow stepper
+            and live compliance validation (DB-driven per firm + month). */}
+        <ProcessCommandCenter
+          companyId={activeCompanyId}
+          month={month}
+          processType="compliance"
+          runExists={!!run}
+          runFinalized={runFinalized}
+          refreshKey={(run ? 1 : 0) + (runFinalized ? 2 : 0)}
+        />
+
         {/* Iter 91 — In-screen firm selection: ALL active firms listed,
             pick ONE and the salary process runs for that firm. */}
         {isSuper ? (
@@ -1939,6 +1952,22 @@ export default function ComplianceSalaryRunScreen() {
           &ldquo;Your Satisfaction is Our First Ambition&rdquo;
         </Text>
       </ScrollView>
+
+      {/* Enterprise footer summary — sticky run totals */}
+      {run ? (
+        <TotalsFooter items={[
+          { label: "Gross", value: run.totals?.gross_paid ?? run.totals?.monthly_gross ?? 0 },
+          { label: "PF (EE)", value: run.totals?.pf_employee ?? 0 },
+          { label: "PF (ER)", value: run.totals?.pf_employer_total ?? 0 },
+          { label: "ESIC (EE)", value: run.totals?.esic_employee ?? 0 },
+          { label: "ESIC (ER)", value: run.totals?.esic_employer ?? 0 },
+          { label: "PT", value: run.totals?.pt ?? 0 },
+          { label: "TDS", value: run.totals?.tds ?? 0 },
+          { label: "Advance", value: run.totals?.advance_recovery ?? 0 },
+          { label: "Deductions", value: run.totals?.total_deduction ?? 0 },
+          { label: "Net Salary", value: run.totals?.net ?? 0, tone: "#059669" },
+        ]} />
+      ) : null}
 
       {/* Employee config modal */}
       <EmployeeConfigModal

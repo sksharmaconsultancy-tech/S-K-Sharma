@@ -1,0 +1,34 @@
+{
+  "summary": "Iter 195 — Process Command Center (Compliance/Actual/Arrear salary pages) full backend + frontend regression PASSED. Backend: 5/5 pytest tests pass on GET /api/admin/salary-process/readiness. Live verified for Kankani cmp_527fecdd7c + 2026-06: ok=true, compliance_pct=28.9, kpis.total_employees=126 (matches spec), pf_eligible=126, esic_eligible=0 (data-driven — Kankani is daily-rate labour force), pt_applicable=0, compliance_errors=7, salary_processed.compliance=true count=17 (existing 2026-05 draft), challans.pending=2. Exactly 11 checks returned with correct keys {attendance, salary_structure, uan, esic_ip, aadhaar, pan, bank, wage_def, duplicates, contractor, documents}, each having ok/passed/total/note/na/label. Validation: 400 on missing month, 400 on malformed month '2026-6', 400 on missing company_id, 401/403 without token. Frontend: /compliance-salary-run renders Process Command Center [data-testid=process-command-center] with all 7 KPI cards (Total Employees 126, Salary Processed 126 Draft, PF Eligible 126, ESIC Eligible 0, PT Applicable 0, Compliance Errors 8, Challans Pending 2), 8-step horizontal workflow stepper (green done / blue current / grey pending: Load Employees + Validate Employee Data done, Salary Calculation current, Attendance Validation + Compliance Validation + Review & Approve + Finalize & Lock + Challans & Returns pending), 'Compliance Validation — 28.8%' toggle expands showing all 11 checks with icons + notes matching backend readiness response. Sticky TotalsFooter renders at bottom of page with Gross/PF(EE)/PF(ER)/ESIC(EE)/ESIC(ER)/PT/TDS/Advance/Deductions/Net Salary. /salary-run (Actual) renders PCC with exactly 6 KPI cards (NO Challans KPI — correct per spec). /arrear-salary-run renders PCC with arrear-specific stepper labels (Load Employees, Validate Data, Base Runs Available, Compute Arrears, Review & Export) — all 5 labels present in DOM. Firm switching (Kankani chip) triggers readiness re-fetch and KPIs update instantly. Existing payroll flows (firm picker, month picker, draft grid, inline edits, past runs) remain intact — the PCC is a non-invasive UI wrapper. NO salary runs finalized. NO test data created (readiness endpoint is read-only).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": ["Pre-existing (not new to iter 195) console warnings: 'shadow*' style props deprecated, invalid style properties outline/background/padding-shorthand. Non-blocking, spans many files, flagged in iter 194 already."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter195_salary_readiness.py",
+    "/app/test_reports/pytest/iter195.xml"
+  ],
+  "action_items": [
+    "Nothing critical. Optional polish: same pre-existing console-warning cleanup (shadow* / outline / background / padding shorthand) already noted in iter 194 — long-standing global issue, not caused by this iter's PCC/TotalsFooter additions.",
+    "Optional: consider `data-testid=\"totals-footer\"` is present but no explicit assertion in this run — E1 can self-verify it's visible at bottom of screen after Process (visible in the compliance screenshot with values Gross ₹0 · PF(EE) ₹0 · PF(ER) ₹0 · ESIC(EE) ₹120 · ESIC(ER) ₹520 · PT ₹0 · TDS ₹0 · Advance ₹0 · Deductions ₹120 · Net Salary ₹-120 — these are from the existing 2026-05 draft run for 17 employees)."
+  ],
+  "critical_code_review_comments": [
+    "salary_readiness.py (~226 lines) is well-organised: single-pass employee scan, dataclass-like Counter usage, clean check builder. `_id` correctly projected out of Mongo query.",
+    "compliance_pct weighting logic correctly skips na=True checks and treats duplicates as a boolean point — matches the docstring intent.",
+    "ProcessCommandCenter re-fetches readiness on companyId, month and refreshKey change (useCallback + useEffect(load)) — no stale-state risk.",
+    "TotalsFooter component is tiny (49 lines), well-scoped, reused across all three salary screens — good pattern.",
+    "Arrear PCC hard-codes 5 steps; matches spec. Compliance adds 'Challans & Returns' step; Actual page correctly hides both the Challans step (only compliance receives it) and the Challans KPI card — verified in DOM."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter195_salary_readiness.py", "/app/test_reports/pytest/iter195.xml"],
+  "success_rate": {"backend": "100% (5/5 pytest)", "frontend": "100% for tested flows (PCC on all 3 pages, KPIs, stepper, validation toggle, checks panel, firm switching, TotalsFooter presence)"},
+  "seed_data_creation": "None. Readiness endpoint is read-only; no compliance runs / salary runs / statutory registrations were created. Existing 2026-05 Kankani draft (17 employees, mentioned in agent_to_agent_context_note) was left untouched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "PCC readiness endpoint and the 3 salary process screens are green. Reuse /app/backend/tests/test_iter195_salary_readiness.py for future regression on GET /api/admin/salary-process/readiness. Kankani intentionally shows low compliance % (28.8-28.9%) and 0 ESIC eligible — this is CORRECT data-driven output for a mostly-daily-wage labour firm, not a bug. Compliance page defaults to previous month (May 2026) so it may show 8 errors while API-tested 2026-06 shows 7 — both are correct per data. To auth-inject into browser: POST /api/auth/admin-password-login {email, password} → put session_token in localStorage under BOTH 'llc_session_token' and 'session_token' BEFORE navigating to protected route (navigation kills execution context).",
+  "rca_of_issue": "N/A — no bugs found."
+}

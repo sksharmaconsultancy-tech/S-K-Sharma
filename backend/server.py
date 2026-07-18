@@ -19016,6 +19016,9 @@ app.include_router(approvals_engine_router)
 from routes.statutory_registration import router as statutory_registration_router  # noqa: E402
 app.include_router(statutory_registration_router)
 
+from routes.salary_readiness import router as salary_readiness_router  # noqa: E402
+app.include_router(salary_readiness_router)
+
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
 maybe_start_rpa_worker(app, db)

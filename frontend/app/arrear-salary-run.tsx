@@ -21,6 +21,8 @@ import { api, apiBinary } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import MonthPicker from "@/src/components/MonthPicker";
+import ProcessCommandCenter from "@/src/components/salary/ProcessCommandCenter";
+import TotalsFooter from "@/src/components/salary/TotalsFooter";
 import { colors, radius, spacing, type } from "@/src/theme";
 
 function showMsg(msg: string) {
@@ -171,6 +173,17 @@ export default function ArrearSalaryRunScreen() {
             </Text>
           </View>
         </View>
+
+        {/* Enterprise Process Command Center — KPI cards, workflow stepper
+            and live validation (DB-driven per firm + month range). */}
+        <ProcessCommandCenter
+          companyId={activeCompanyId}
+          month={toMonth}
+          processType="arrear"
+          runExists={!!run}
+          runFinalized={!!run}
+          refreshKey={run ? 1 : 0}
+        />
 
         {/* Firm selection (super/sub admins) */}
         {isSuper ? (
@@ -333,6 +346,18 @@ export default function ArrearSalaryRunScreen() {
           ))}
         </View>
       </ScrollView>
+
+      {/* Enterprise footer summary — sticky arrear totals */}
+      {run ? (
+        <TotalsFooter items={[
+          { label: "Arrear Gross", value: t.arrear_gross ?? 0 },
+          { label: "EPF Wages", value: t.arrear_epf_wages ?? 0 },
+          { label: "EPF Due (EE)", value: t.epf_due ?? 0 },
+          { label: "EPS Due", value: t.eps_due ?? 0 },
+          { label: "ER Due (3.67)", value: t.er_due ?? 0 },
+          { label: "ESIC (EE)", value: t.esic_employee ?? 0, tone: "#059669" },
+        ]} />
+      ) : null}
     </SafeAreaView>
   );
 }
