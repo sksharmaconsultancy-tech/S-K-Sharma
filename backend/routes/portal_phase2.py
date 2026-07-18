@@ -387,7 +387,54 @@ async def update_task(task_id: str, payload: TaskUpdate,
     upd["updated_at"] = _now().isoformat()
     await db.portal_tasks.update_one({"task_id": task_id}, {"$set": upd})
     t2 = await db.portal_tasks.find_one({"task_id": task_id}, {"_id": 0})
+    if payload.status is not None:
+        await _sync_calendar_from_task(admin, t2)
     return {"ok": True, "task": t2}
+
+
+# Statutory recurring preset → compliance-calendar item key mapping
+SEED_TO_CAL_KEY = {"pf_ecr": "pf", "esic": "esic", "tds": "tds", "pt": "pt"}
+
+
+async def _sync_calendar_from_task(admin: dict, task: dict) -> None:
+    """Keep the Compliance Calendar tick in sync when a statutory
+    recurring task is marked done/reopened."""
+    rtask_id = task.get("source_rtask_id")
+    if not rtask_id:
+        return
+    tpl = await db.recurring_tasks.find_one(
+        {"rtask_id": rtask_id}, {"_id": 0, "seed_key": 1})
+    item_key = SEED_TO_CAL_KEY.get((tpl or {}).get("seed_key") or "")
+    if not item_key:
+        return
+    month = task.get("month") or (task.get("due_date") or "")[:7]
+    if not month:
+        return
+    firm_scope = task.get("company_id") or "__all__"
+    if task.get("status") == "done":
+        await db.calendar_completions.update_one(
+            {"month": month, "scope": firm_scope, "item_key": item_key},
+            {"$set": {"completed_by": admin["user_id"],
+                      "completed_at": _now().isoformat(),
+                      "via": f"task:{task['task_id']}"}},
+            upsert=True)
+        # if EVERY firm's task for this template+month is done, tick the
+        # all-firms calendar view too
+        remaining = await db.portal_tasks.count_documents(
+            {"source_rtask_id": rtask_id, "month": month,
+             "status": {"$ne": "done"}})
+        if remaining == 0:
+            await db.calendar_completions.update_one(
+                {"month": month, "scope": "__all__", "item_key": item_key},
+                {"$set": {"completed_by": admin["user_id"],
+                          "completed_at": _now().isoformat(),
+                          "via": f"task:{task['task_id']}"}},
+                upsert=True)
+    else:
+        # reopened → un-tick this firm's scope and the all-firms rollup
+        await db.calendar_completions.delete_many(
+            {"month": month, "item_key": item_key,
+             "scope": {"$in": [firm_scope, "__all__"]}})
 
 
 @router.delete("/portal-tasks/{task_id}")

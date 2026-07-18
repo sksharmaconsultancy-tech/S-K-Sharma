@@ -153,3 +153,6 @@ See `/app/memory/test_credentials.md`. Super admin
 ## Iter 179b — Recurring Monthly Tasks
 - Endpoints: /api/admin/portal-recurring-tasks (CRUD) + /seed-statutory. Lazy idempotent monthly generation on task listing (per-firm expansion for all_firms templates).
 - Verified via curl (seed→4 templates→8 auto tasks, idempotent relist) + Playwright (Recurring modal, toggles, custom form).
+
+## Iter 179c — Statutory task Done auto-ticks Compliance Calendar
+- Marking a statutory recurring task done ticks that firm's calendar item; all-firms view ticks only when every firm's task is done; reopening un-ticks both. Curl-verified end to end (workspace left neutral).

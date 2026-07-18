@@ -892,3 +892,8 @@ Verified: /admin/actual-salary-process for 2026-03 (no compliance) → epf/esi 0
 - portal_phase2.py: recurring_tasks collection. GET/POST /api/admin/portal-recurring-tasks, PATCH/DELETE /{rtask_id} (PATCH active=true resets last_generated_month for regeneration). POST /portal-recurring-tasks/seed-statutory → 4 idempotent presets (PF ECR d15 high, ESIC d15 high, TDS d7 med, PT d21 med); super_admin seeds all_firms=True, company_admin own firm.
 - Lazy generation: _generate_recurring(admin) runs on GET /portal-tasks — creates this month's tasks per firm (all_firms templates expand across companies), due day clamped to month length, idempotent via {source_rtask_id, month, company_id}; created_by "system:recurring". Generated tasks show a repeat icon in TasksPanel.
 - TasksPanel.tsx: "Recurring" button (pd-task-recurring) → manage modal (pd-rec-seed presets, pd-rec-add custom form w/ title/day/priority/All-firms-or-firm chips, ON/OFF toggles pd-rec-toggle-*, delete). Verified: seed created 4 templates → 8 tasks (4 × 2 firms) for 2026-07, second listing idempotent (9 total incl. seed task).
+
+## Iter 179c — Task↔Calendar sync (curl verified, both directions)
+- portal_phase2.py: _sync_calendar_from_task() called from PATCH /portal-tasks when status changes. SEED_TO_CAL_KEY maps statutory recurring presets (pf_ecr→pf, esic, tds, pt) to calendar item keys.
+- Done → upserts calendar_completions for the task's firm scope (via: "task:{id}"); when ALL firms' tasks for that template+month are done → also ticks "__all__" scope (all-firms calendar view).
+- Reopen → deletes completion for firm scope AND "__all__" rollup. Verified: firm tick, rollup only after both firms done, un-tick on reopen. Custom (non-seed) recurring/manual tasks unaffected.
