@@ -134,6 +134,7 @@ export default function StatutoryRegistration() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [regs, setRegs] = useState<Reg[]>([]);
   const [eligible, setEligible] = useState<EligibleEmp[]>([]);
+  const [alerts, setAlerts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -160,15 +161,20 @@ export default function StatutoryRegistration() {
     setLoading(true);
     try {
       const q = cid ? `?company_id=${cid}` : "";
-      const [d, r, e] = await Promise.all([
+      const [d, r, e, a] = await Promise.all([
         api<any>(`/admin/statutory/${portal}/dashboard${q}`),
         api<any>(`/admin/statutory/${portal}/registrations${q}`),
         api<any>(`/admin/statutory/${portal}/eligible${q}`),
+        portal === "esic"
+          ? api<any>(`/admin/statutory/esic/alerts${q}`)
+          : Promise.resolve({ alerts: [] }),
       ]);
       setKpis(d.kpis); setSettings(d.settings);
       setRegs(r.registrations || []);
       setEligible(e.employees || []);
-    } catch { setKpis(null); setRegs([]); setEligible([]); }
+      setAlerts((a.alerts || []).filter(
+        (x: any) => (x.needs_registration || []).length || (x.ceiling_crossed || []).length));
+    } catch { setKpis(null); setRegs([]); setEligible([]); setAlerts([]); }
     finally { setLoading(false); }
   }, [portal, cid]);
   useEffect(() => { load(); setSelected(new Set()); }, [load]);
@@ -389,6 +395,44 @@ export default function StatutoryRegistration() {
                     icon="alert-circle-outline" />
                   <KpiCard label="Failed" value={kpis.failed} tone="#DC2626" icon="close-circle-outline" />
                 </ScrollView>
+              )}
+
+              {/* ESIC monthly salary-run alerts */}
+              {portal === "esic" && alerts.length > 0 && (
+                <View style={s.alertCard} testID="esic-alerts-card">
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Ionicons name="warning-outline" size={16} color="#B45309" />
+                    <Text style={s.alertTitle}>
+                      ESIC Alerts — salary run {alerts[0].month}
+                    </Text>
+                  </View>
+                  {(alerts[0].needs_registration || []).length > 0 && (
+                    <Pressable onPress={() => setTab("eligible")} testID="alert-needs-reg">
+                      <Text style={s.alertLine}>
+                        • {(alerts[0].needs_registration || []).length} eligible employee(s)
+                        still missing an IP number — tap to review:{" "}
+                        <Text style={{ fontWeight: "800" }}>
+                          {(alerts[0].needs_registration || []).slice(0, 4)
+                            .map((x: any) => x.name).join(", ")}
+                          {(alerts[0].needs_registration || []).length > 4 ? "…" : ""}
+                        </Text>
+                      </Text>
+                    </Pressable>
+                  )}
+                  {(alerts[0].ceiling_crossed || []).length > 0 && (
+                    <Text style={s.alertLine} testID="alert-ceiling-crossed">
+                      • {(alerts[0].ceiling_crossed || []).length} IP holder(s) crossed the
+                      ₹{Number(alerts[0].ceiling).toLocaleString("en-IN")} wage ceiling — continue
+                      contributions till the contribution-period end, then mark exit:{" "}
+                      <Text style={{ fontWeight: "800" }}>
+                        {(alerts[0].ceiling_crossed || []).slice(0, 4)
+                          .map((x: any) => `${x.name} (₹${Math.round(x.gross).toLocaleString("en-IN")})`)
+                          .join(", ")}
+                        {(alerts[0].ceiling_crossed || []).length > 4 ? "…" : ""}
+                      </Text>
+                    </Text>
+                  )}
+                </View>
               )}
 
               {/* Tabs */}
@@ -838,6 +882,12 @@ const s = StyleSheet.create({
   kpiSub: { fontSize: 10.5, fontWeight: "700" },
 
   tabRow: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 10 },
+  alertCard: {
+    marginHorizontal: 16, marginTop: 8, padding: 12, borderRadius: radius.lg,
+    backgroundColor: "#FFFBEB", borderWidth: 1, borderColor: "#FDE68A", gap: 6,
+  },
+  alertTitle: { fontSize: 13, fontWeight: "800", color: "#B45309" },
+  alertLine: { fontSize: 12, color: "#78350F", lineHeight: 17 },
   tabBtn: {
     paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10,
     backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border,

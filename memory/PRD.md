@@ -1004,3 +1004,10 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - RBAC FIX (Iter 193 gap): /advances and /statutory-registration now redirect staff without the matching permission to /portal-dashboard on direct URL access.
 - Notes: Kankani firm has EPFO creds (UAN jobs queue) but NO ESIC creds (ESIC → action_required manual mode). Gov portals block datacenter IPs → jobs end action_required unless PORTAL_PROXY_URL set (existing behavior).
 - NOT yet deployed to live VPS.
+
+## Iter 194b — ESIC monthly salary-run alerts + deploy script (tested)
+- scan_esic_alerts() in routes/statutory_registration.py hooked into compliance salary process + reprocess (server.py, after apply_advance_recovery, never raises): upserts esic_alerts doc per (company, month) with needs_registration[] (gross ≤ ceiling, no esi_ip_no) and ceiling_crossed[] (has IP, gross > ceiling); inserts admin notification when counts change.
+- GET /api/admin/statutory/esic/alerts (last 6 months, company-scoped).
+- Frontend: amber "ESIC Alerts — salary run {month}" banner on /statutory-registration ESIC view (needs-reg line taps to Eligible tab; ceiling-crossed shows names+gross).
+- Verified: direct function test (SURENDRA SINGH flagged missing, synthetic crossed case), endpoint + banner screenshot OK; synthetic data cleaned.
+- /app/deploy_vps_iter194.sh created (Iter 193+194 → live VPS; includes stop → fuser -k 8001/tcp orphan kill → start; verifies 401 on company-roles, approval-workflows, statutory routes; PWA reopen-twice reminder).

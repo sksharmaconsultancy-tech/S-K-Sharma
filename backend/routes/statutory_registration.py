@@ -401,6 +401,86 @@ async def link_existing_value(*, portal: str, admin: Dict[str, Any],
 
 
 # ---------------------------------------------------------------------------
+# ESIC monthly alerts — called from the Compliance Salary process so HR is
+# flagged every month about (a) eligible employees still missing an IP
+# number and (b) IP holders whose gross crossed the wage ceiling (exit due
+# at the end of the contribution period).
+# ---------------------------------------------------------------------------
+
+async def scan_esic_alerts(company_id: Optional[str], month: str,
+                           rows: List[Dict[str, Any]]) -> None:
+    """Upsert an esic_alerts doc for (company, month) from salary-run rows.
+    Never raises — salary processing must not fail because of alerting."""
+    try:
+        user_ids = [r.get("user_id") for r in rows if r.get("user_id")]
+        if not user_ids:
+            return
+        settings = await get_settings(company_id)
+        ceiling = float(settings.get("esic_wage_ceiling") or 21000)
+        users: Dict[str, Dict[str, Any]] = {}
+        async for u in db.users.find(
+                {"user_id": {"$in": user_ids}},
+                {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1, "esi_ip_no": 1}):
+            users[u["user_id"]] = u
+
+        needs_registration: List[Dict[str, Any]] = []
+        ceiling_crossed: List[Dict[str, Any]] = []
+        for r in rows:
+            u = users.get(r.get("user_id") or "")
+            if not u:
+                continue
+            gross = float(r.get("monthly_gross") or r.get("gross_master") or 0)
+            has_ip = bool((u.get("esi_ip_no") or "").strip())
+            entry = {"user_id": u["user_id"], "name": u.get("name"),
+                     "employee_code": u.get("employee_code"),
+                     "gross": round(gross, 2)}
+            if not has_ip and 0 < gross <= ceiling:
+                needs_registration.append(entry)
+            elif has_ip and gross > ceiling:
+                ceiling_crossed.append(entry)
+
+        prev = await db.esic_alerts.find_one(
+            {"company_id": company_id, "month": month}, {"_id": 0}) or {}
+        await db.esic_alerts.update_one(
+            {"company_id": company_id, "month": month},
+            {"$set": {"company_id": company_id, "month": month,
+                      "ceiling": ceiling,
+                      "needs_registration": needs_registration,
+                      "ceiling_crossed": ceiling_crossed,
+                      "generated_at": now_iso()}},
+            upsert=True,
+        )
+        counts_changed = (
+            len(prev.get("needs_registration") or []) != len(needs_registration)
+            or len(prev.get("ceiling_crossed") or []) != len(ceiling_crossed)
+        )
+        if (needs_registration or ceiling_crossed) and counts_changed:
+            parts = []
+            if needs_registration:
+                parts.append(f"{len(needs_registration)} eligible employee(s) still "
+                             "missing an ESIC IP number")
+            if ceiling_crossed:
+                parts.append(f"{len(ceiling_crossed)} IP holder(s) crossed the "
+                             f"₹{ceiling:,.0f} wage ceiling (exit due at contribution period end)")
+            await _notify(company_id, f"ESIC Alerts — {month}",
+                          "Salary run flagged: " + "; ".join(parts) +
+                          ". Review them on the Statutory Registration screen.")
+        logger.info("[statutory] esic alerts %s/%s: missing=%s crossed=%s",
+                    company_id, month, len(needs_registration), len(ceiling_crossed))
+    except Exception as exc:  # noqa: BLE001 — alerting must never break payroll
+        logger.warning("[statutory] esic alert scan failed: %s", exc)
+
+
+@router.get("/esic/alerts")
+async def esic_alerts(company_id: Optional[str] = Query(None),
+                      authorization: Optional[str] = Header(None)):
+    admin = await _admin_or_403(authorization)
+    q = _company_query(admin, company_id)
+    rows = await db.esic_alerts.find(q, {"_id": 0}).sort("month", -1).to_list(6)
+    return {"ok": True, "alerts": rows}
+
+
+# ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
 
