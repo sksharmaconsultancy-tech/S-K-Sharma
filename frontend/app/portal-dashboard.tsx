@@ -21,6 +21,19 @@ import { api } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors, radius, spacing, type } from "@/src/theme";
+import TasksPanel from "@/src/components/portal/TasksPanel";
+import ClientHealthPanel from "@/src/components/portal/ClientHealthPanel";
+import DocumentExpiryPanel from "@/src/components/portal/DocumentExpiryPanel";
+import CalendarPanel from "@/src/components/portal/CalendarPanel";
+import AlertsModal from "@/src/components/portal/AlertsModal";
+
+const TABS: { key: string; label: string; icon: string }[] = [
+  { key: "overview", label: "Overview", icon: "grid-outline" },
+  { key: "tasks", label: "Tasks", icon: "clipboard-outline" },
+  { key: "clients", label: "Client Health", icon: "pulse-outline" },
+  { key: "documents", label: "Documents", icon: "document-text-outline" },
+  { key: "calendar", label: "Calendar", icon: "calendar-outline" },
+];
 
 type Dash = {
   generated_at: string;
@@ -72,12 +85,16 @@ function BarChart({ data, labels, color }: { data: number[]; labels: string[]; c
 export default function PortalDashboardScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const { selectedCompanyId } = useSelectedCompany();
+  const { selectedCompanyId, companies } = useSelectedCompany();
   const canView =
     user?.role === "super_admin" || user?.role === "company_admin" || user?.role === "sub_admin";
+  const canPickFirm = user?.role !== "company_admin";
 
   const [dash, setDash] = useState<Dash | null>(null);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("overview");
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const [alertCount, setAlertCount] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -86,6 +103,11 @@ export default function PortalDashboardScreen() {
       setDash(await api<Dash>(`/admin/portal-dashboard${q}`));
     } catch { setDash(null); }
     setLoading(false);
+    // best-effort alert badge refresh
+    try {
+      const r = await api<{ alerts: any[] }>("/admin/portal-dashboard/alerts");
+      setAlertCount(r.alerts.length);
+    } catch { /* noop */ }
   }, [selectedCompanyId]);
 
   useEffect(() => { load(); }, [load]);
@@ -105,13 +127,48 @@ export default function PortalDashboardScreen() {
               {selectedCompanyId ? "Firm view" : "All firms"} · Updated {dash?.generated_at || "—"}
             </Text>
           </View>
+          <Pressable onPress={() => setAlertsOpen(true)} style={st.refreshBtn} testID="pd-bell">
+            <Ionicons name="notifications-outline" size={16} color={colors.brandPrimary} />
+            {alertCount > 0 ? (
+              <View style={st.bellBadge}>
+                <Text style={st.bellBadgeTxt}>{alertCount > 9 ? "9+" : alertCount}</Text>
+              </View>
+            ) : null}
+          </Pressable>
           <Pressable onPress={load} style={st.refreshBtn} testID="pd-refresh">
             <Ionicons name="refresh-outline" size={16} color={colors.brandPrimary} />
           </Pressable>
         </View>
+        {/* Tab strip */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}
+          contentContainerStyle={st.tabStrip}>
+          {TABS.map((t) => (
+            <Pressable key={t.key} onPress={() => setTab(t.key)}
+              style={[st.tabBtn, tab === t.key && st.tabBtnOn]} testID={`pd-tab-${t.key}`}>
+              <Ionicons name={t.icon as any} size={13}
+                color={tab === t.key ? colors.brandPrimary : colors.onSurfaceSecondary} />
+              <Text style={[st.tabTxt, tab === t.key && st.tabTxtOn]}>{t.label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
       </SafeAreaView>
 
-      {loading && !dash ? (
+      <AlertsModal visible={alertsOpen} onClose={() => setAlertsOpen(false)}
+        onGoTab={(k) => setTab(k)} />
+
+      {tab !== "overview" ? (
+        <ScrollView contentContainerStyle={{ padding: spacing.md, paddingBottom: 60 }}>
+          {tab === "tasks" ? (
+            <TasksPanel companyId={selectedCompanyId} companies={companies} canPickFirm={canPickFirm} />
+          ) : tab === "clients" ? (
+            <ClientHealthPanel />
+          ) : tab === "documents" ? (
+            <DocumentExpiryPanel companyId={selectedCompanyId} companies={companies} canPickFirm={canPickFirm} />
+          ) : (
+            <CalendarPanel companyId={selectedCompanyId} />
+          )}
+        </ScrollView>
+      ) : loading && !dash ? (
         <View style={st.center}><ActivityIndicator color={colors.brandPrimary} /></View>
       ) : (
         <ScrollView
@@ -230,6 +287,23 @@ const st = StyleSheet.create({
     borderWidth: 1, borderColor: colors.divider, borderRadius: radius.md,
     padding: 8, backgroundColor: colors.surface,
   },
+  bellBadge: {
+    position: "absolute", top: -5, right: -5, backgroundColor: "#B91C1C",
+    borderRadius: 8, minWidth: 16, height: 16, alignItems: "center",
+    justifyContent: "center", paddingHorizontal: 3,
+  },
+  bellBadgeTxt: { fontSize: 8.5, fontWeight: "800", color: "#fff" },
+  tabStrip: {
+    flexDirection: "row", gap: 6, paddingHorizontal: spacing.md, paddingBottom: 10,
+  },
+  tabBtn: {
+    flexDirection: "row", alignItems: "center", gap: 5, borderRadius: 999,
+    borderWidth: 1, borderColor: colors.divider, paddingHorizontal: 12,
+    paddingVertical: 7, backgroundColor: colors.surface,
+  },
+  tabBtnOn: { borderColor: colors.brandPrimary, backgroundColor: `${colors.brandPrimary}12` },
+  tabTxt: { fontSize: 11.5, fontWeight: "700", color: colors.onSurfaceSecondary },
+  tabTxtOn: { color: colors.brandPrimary },
   kpiGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   kpiCard: {
     minWidth: 150, flexGrow: 1, flexBasis: "22%", backgroundColor: colors.surface,

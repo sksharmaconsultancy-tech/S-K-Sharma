@@ -19418,6 +19418,8 @@ from routes.labour_reports import router as labour_reports_router  # noqa: E402
 app.include_router(labour_reports_router)
 from routes.portal_dashboard import router as portal_dashboard_router  # noqa: E402
 app.include_router(portal_dashboard_router)
+from routes.portal_phase2 import router as portal_phase2_router  # noqa: E402
+app.include_router(portal_phase2_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
