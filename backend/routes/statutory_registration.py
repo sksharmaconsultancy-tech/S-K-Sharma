@@ -629,6 +629,44 @@ async def eligible_employees(portal: str, company_id: Optional[str] = Query(None
 # Registration CRUD + workflow
 # ---------------------------------------------------------------------------
 
+@router.get("/{portal}/employee/{user_id}/prefill")
+async def registration_prefill(portal: str, user_id: str,
+                               authorization: Optional[str] = Header(None)):
+    """Everything the full-page registration form needs in ONE call:
+    employee snapshot, live validation, duplicate info, the open
+    registration (family/nominee/dispensary) and eligibility settings."""
+    cfg = _portal_or_400(portal)
+    admin = await _admin_or_403(authorization)
+    emp = await _load_emp_scoped(user_id, admin)
+    settings = await get_settings(emp.get("company_id"))
+    snap = _snapshot(emp)
+    open_reg = await db.statutory_registrations.find_one(
+        {"portal": portal, "employee_user_id": user_id,
+         "status": {"$nin": ["generated", "linked_existing", "rejected"]}},
+        {"_id": 0}, sort=[("updated_at", -1)],
+    )
+    if open_reg and open_reg.get("snapshot"):
+        snap = {**snap, **{k: v for k, v in open_reg["snapshot"].items()
+                           if v not in (None, "")}}
+    company = await db.companies.find_one(
+        {"company_id": emp.get("company_id")}, {"_id": 0, "name": 1}) or {}
+    return {
+        "ok": True,
+        "employee": {
+            "user_id": emp["user_id"], "name": emp.get("name"),
+            "employee_code": emp.get("employee_code"),
+            "company_id": emp.get("company_id"),
+            "company_name": company.get("name") or "",
+            "current_value": emp.get(cfg["field"]) or "",
+        },
+        "snapshot": snap,
+        "validation": validate_snapshot(portal, snap, settings),
+        "duplicate": await _duplicate_check(cfg, emp),
+        "registration": open_reg,
+        "settings": settings,
+    }
+
+
 @router.get("/{portal}/registrations")
 async def list_registrations(portal: str,
                              company_id: Optional[str] = Query(None),

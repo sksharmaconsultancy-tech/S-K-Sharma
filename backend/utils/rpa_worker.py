@@ -54,7 +54,9 @@ POLL_SEC = int(os.environ.get("RPA_WORKER_POLL_SEC", "30"))
 
 _PORTAL_URLS = {
     "epfo": "https://unifiedportal-emp.epfindia.gov.in/epfo/",
-    "esic": "https://www.esic.in/EmployerPortal/",
+    # Direct employer sign-in page (user-confirmed URL) — the employer
+    # enters ID + password here for ESIC employee (IP) registration.
+    "esic": "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx",
 }
 _PORTAL_LOGIN_LABEL = {
     "epfo": "PF LOGIN",
@@ -520,7 +522,49 @@ _ESIC_IP_NAV_TEXTS = ["Register New IP", "REGISTER NEW IP",
                       "IP Registration", "Insured Person Registration"]
 
 
-async def _attempt_esic_ip_registration(page, snap: Dict[str, Any]) -> Dict[str, Any]:
+async def _wait_for_otp(db, job_id: Optional[str], page, timeout: int = 180) -> Optional[str]:
+    """Aadhaar-authentication handoff — the portal sent an OTP to the
+    employee's Aadhaar-linked mobile. Pause the run (status=awaiting_otp),
+    keep streaming the live screen, and poll the job doc for `otp_input`
+    typed by the admin in the Live View. Returns the OTP or None."""
+    if db is None or not job_id:
+        return None
+    await db.portal_automation_jobs.update_one(
+        {"job_id": job_id},
+        {"$set": {"status": "awaiting_otp", "otp_requested_at": _now_iso(),
+                  "updated_at": _now_iso()},
+         "$unset": {"otp_input": ""}},
+    )
+    await _append_step(db, job_id,
+                       "Aadhaar authentication OTP requested — waiting for the "
+                       "admin to enter it in the Live View (3 min).")
+    for _ in range(max(timeout // 3, 1)):
+        await asyncio.sleep(3)
+        j = await db.portal_automation_jobs.find_one(
+            {"job_id": job_id}, {"_id": 0, "otp_input": 1})
+        otp = str((j or {}).get("otp_input") or "").strip()
+        if otp:
+            await db.portal_automation_jobs.update_one(
+                {"job_id": job_id},
+                {"$set": {"status": "in_progress", "updated_at": _now_iso()},
+                 "$unset": {"otp_input": ""}},
+            )
+            await _append_step(db, job_id, "OTP received from admin — continuing.")
+            return otp
+        try:
+            if page.is_closed():
+                return None
+        except Exception:
+            return None
+    await db.portal_automation_jobs.update_one(
+        {"job_id": job_id},
+        {"$set": {"status": "in_progress", "updated_at": _now_iso()}},
+    )
+    return None
+
+
+async def _attempt_esic_ip_registration(page, snap: Dict[str, Any],
+                                        db=None, job_id: Optional[str] = None) -> Dict[str, Any]:
     """Best-effort ESIC 'Register New IP' (Insured Person) registration.
     Returns {registered: bool, ip_no: str|None, screenshot_b64, message}."""
 
@@ -594,13 +638,62 @@ async def _attempt_esic_ip_registration(page, snap: Dict[str, Any]) -> Dict[str,
                 continue
         return False
 
-    # 2) Fill the IP registration form.
+    # 2) AADHAAR-FIRST flow (user-specified): enter Aadhaar → trigger
+    # authentication (portal may send an OTP to the Aadhaar-linked mobile;
+    # UIDAI then returns Name/DOB/Gender). If an OTP prompt appears, the
+    # run PAUSES (awaiting_otp) so the admin can type the OTP in the Live
+    # View, then continues automatically.
     aadhaar_ok = await _fill_any(
         ["input[name*='aadhaar' i]", "input[id*='aadhaar' i]",
          "input[name*='aadhar' i]", "input[id*='aadhar' i]",
          "input[name*='uid' i]"],
         (snap.get("aadhaar_no") or "").replace(" ", ""),
     )
+    if aadhaar_ok:
+        for txt in ("Verify Aadhaar", "Authenticate", "Verify", "Validate",
+                    "Get Details", "Fetch", "Send OTP"):
+            try:
+                btn = page.get_by_role("button", name=txt).first
+                if await btn.count() == 0:
+                    btn = page.locator(
+                        f"input[type='submit'][value*='{txt}' i], input[type='button'][value*='{txt}' i]").first
+                if await btn.count() > 0 and await btn.is_visible():
+                    await btn.click(timeout=3000)
+                    await page.wait_for_timeout(3500)
+                    break
+            except Exception:
+                continue
+        # OTP prompt? → live handoff to the admin.
+        try:
+            otp_field = page.locator(
+                "input[name*='otp' i], input[id*='otp' i], input[placeholder*='OTP' i]").first
+            if await otp_field.count() > 0 and await otp_field.is_visible():
+                otp = await _wait_for_otp(db, job_id, page)
+                if otp:
+                    await otp_field.fill(otp, timeout=3000)
+                    for txt in ("Verify OTP", "Verify", "Submit", "Validate", "Confirm"):
+                        try:
+                            b = page.get_by_role("button", name=txt).first
+                            if await b.count() == 0:
+                                b = page.locator(
+                                    f"input[type='submit'][value*='{txt}' i]").first
+                            if await b.count() > 0 and await b.is_visible():
+                                await b.click(timeout=3000)
+                                await page.wait_for_timeout(3500)
+                                break
+                        except Exception:
+                            continue
+                else:
+                    return {
+                        "registered": False, "ip_no": None,
+                        "screenshot_b64": await _shot(),
+                        "message": ("Aadhaar authentication OTP was requested "
+                                    "but not provided in time — re-run and "
+                                    "enter the OTP in the Live View, or "
+                                    "complete manually."),
+                    }
+        except Exception:
+            pass
     name_ok = await _fill_any(
         ["input[name*='ipName' i]", "input[id*='ipName' i]",
          "input[name*='insuredPersonName' i]", "input[name*='firstName' i]",
@@ -713,7 +806,9 @@ async def _attempt_esic_ip_registration(page, snap: Dict[str, Any]) -> Dict[str,
         "message": (
             (f"IP form filled and '{clicked}' clicked. " if clicked
              else "IP form filled but no Save/Submit button was found. ")
-            + (f"Allotted ESIC Insurance No. {ip_no} detected and saved to the Employee Master."
+            + (f"Allotted ESIC Insurance No. {ip_no} detected and saved to "
+               "the Employee Master. The e-Pehchan card can be downloaded "
+               "from the ESIC portal."
                if ip_no else
                "Insurance number not visible yet — verify the IP on the portal, "
                "then enter the allotted number via Manual Complete.")
@@ -721,10 +816,35 @@ async def _attempt_esic_ip_registration(page, snap: Dict[str, Any]) -> Dict[str,
     }
 
 
+async def _live_stream_loop(db, job_id: str, page) -> None:
+    """LIVE VIEW — continuously mirror the RPA browser screen onto the job
+    document (live_frame_base64) so admins can WATCH the portal
+    registration happening in real time from the web UI.
+    Self-terminating: exits when the page closes (screenshot raises) or
+    after 10 minutes."""
+    import time as _time
+    started = _time.monotonic()
+    while _time.monotonic() - started < 600:
+        try:
+            shot = await page.screenshot(full_page=False, type="jpeg", quality=45)
+            await db.portal_automation_jobs.update_one(
+                {"job_id": job_id},
+                {"$set": {
+                    "live_frame_base64": base64.b64encode(shot).decode("ascii"),
+                    "live_frame_at": _now_iso(),
+                    "live_url": page.url,
+                }},
+            )
+        except Exception:  # page closed / browser gone — stop streaming
+            break
+        await asyncio.sleep(2)
+
+
 async def _perform_login(portal: str, url: str, creds: Dict[str, str],
                          upload: Optional[Dict[str, Any]] = None,
                          uan_snap: Optional[Dict[str, Any]] = None,
-                         esic_snap: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                         esic_snap: Optional[Dict[str, Any]] = None,
+                         db=None, job_id: Optional[str] = None) -> Dict[str, Any]:
     """Try to open the portal and login via Playwright, reading the text
     captcha automatically with the AI-vision reader. Returns a dict:
       { "ok": bool, "status": "logged_in" | "captcha_failed" |
@@ -776,6 +896,10 @@ async def _perform_login(portal: str, url: str, creds: Dict[str, str],
             browser = await pw.chromium.launch(**launch_kw)
             ctx = await browser.new_context()
             page = await ctx.new_page()
+            # LIVE VIEW — stream the browser screen onto the job doc so the
+            # admin can watch the whole registration as it happens.
+            if db is not None and job_id:
+                asyncio.create_task(_live_stream_loop(db, job_id, page))
             await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
 
             # Government portals frequently block cloud / datacenter IPs at
@@ -827,7 +951,7 @@ async def _perform_login(portal: str, url: str, creds: Dict[str, str],
                         "message": "Logged in (no captcha). " + reg["message"],
                     }
                 if ok and esic_snap:
-                    reg = await _attempt_esic_ip_registration(page, esic_snap)
+                    reg = await _attempt_esic_ip_registration(page, esic_snap, db=db, job_id=job_id)
                     await browser.close()
                     return {
                         "ok": reg["registered"],
@@ -893,7 +1017,7 @@ async def _perform_login(portal: str, url: str, creds: Dict[str, str],
                             ),
                         }
                     if esic_snap:
-                        reg = await _attempt_esic_ip_registration(page, esic_snap)
+                        reg = await _attempt_esic_ip_registration(page, esic_snap, db=db, job_id=job_id)
                         await browser.close()
                         return {
                             "ok": reg["registered"],
@@ -1063,6 +1187,7 @@ async def _process_one_job(db, job: Dict[str, Any]) -> None:
         portal, creds["login_url"], creds, upload=upload_payload,
         uan_snap=(job.get("employee_snapshot") if action == "generate_uan" else None),
         esic_snap=(job.get("employee_snapshot") if action == "generate_esic" else None),
+        db=db, job_id=job_id,
     )
     await _append_step(db, job_id, result["message"], result.get("screenshot_b64"))
 

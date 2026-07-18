@@ -291,6 +291,75 @@ async def test_portal_login(
     }
 
 
+@router.get("/portal-automation/jobs/{job_id}/live")
+async def portal_job_live(
+    job_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """LIVE VIEW feed — the web UI polls this every ~2s to show the RPA
+    browser screen (live_frame) plus the running step log while a portal
+    registration is executing."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
+    job = await db.portal_automation_jobs.find_one(
+        {"job_id": job_id},
+        {"_id": 0, "steps.screenshot_base64": 0, "employee_snapshot.family_members": 0},
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if admin["role"] == "company_admin" and job.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not your firm's job")
+    if admin["role"] == "sub_admin":
+        from server import sub_admin_can_touch_company
+        if not sub_admin_can_touch_company(admin, job.get("company_id")):
+            raise HTTPException(status_code=403, detail="Firm is outside your assigned scope")
+    steps = [{"at": s.get("at"), "note": s.get("note") or s.get("msg")}
+             for s in (job.get("steps") or [])][-8:]
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "status": job.get("status"),
+        "action_type": job.get("action_type"),
+        "employee_name": (job.get("employee_snapshot") or {}).get("name"),
+        "live_frame_base64": job.get("live_frame_base64"),
+        "live_frame_at": job.get("live_frame_at"),
+        "live_url": job.get("live_url"),
+        "steps": steps,
+        "manual_reason": job.get("manual_reason"),
+        "error": job.get("error"),
+        "result": job.get("result"),
+    }
+
+
+@router.post("/portal-automation/jobs/{job_id}/otp")
+async def portal_job_otp(
+    job_id: str,
+    payload: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(None),
+):
+    """Aadhaar-authentication handoff — the admin types the OTP (sent to
+    the employee's Aadhaar-linked mobile) into the Live View; the RPA
+    worker picks it up and continues the registration."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
+    code = "".join(ch for ch in str(payload.get("code") or "") if ch.isdigit())
+    if not (4 <= len(code) <= 8):
+        raise HTTPException(status_code=400, detail="OTP should be 4–8 digits")
+    job = await db.portal_automation_jobs.find_one(
+        {"job_id": job_id}, {"_id": 0, "company_id": 1, "status": 1})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if admin["role"] == "company_admin" and job.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not your firm's job")
+    if job.get("status") != "awaiting_otp":
+        raise HTTPException(status_code=400, detail="Job is not waiting for an OTP right now")
+    await db.portal_automation_jobs.update_one(
+        {"job_id": job_id},
+        {"$set": {"otp_input": code, "updated_at": now_iso()}},
+    )
+    return {"ok": True, "message": "OTP sent to the automation — it will continue in a few seconds."}
+
+
 @router.post("/portal-automation/jobs/{job_id}/manual-complete")
 async def manual_complete_job(
     job_id: str,

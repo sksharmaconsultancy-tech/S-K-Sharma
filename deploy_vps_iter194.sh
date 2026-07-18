@@ -29,6 +29,13 @@ grep -v "^litellm" $APP_DIR/backend/requirements.txt > /tmp/reqs.txt
 $PIP install -r /tmp/reqs.txt --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ -q || \
   echo "   (pip failed — safe to continue if requirements unchanged)"
 
+echo "==> 3b/7 Installing Playwright Chromium for portal RPA (ESIC/EPFO automation)..."
+PYBIN=$APP_DIR/backend/venv/bin/python
+$PYBIN -m playwright install-deps chromium || true
+$PYBIN -m playwright install chromium || echo "   (Chromium install failed — RPA jobs will fall to manual mode)"
+grep -q "^RPA_WORKER_ENABLED=" $APP_DIR/backend/.env || echo "RPA_WORKER_ENABLED=1" >> $APP_DIR/backend/.env
+sed -i 's/^RPA_WORKER_ENABLED=0/RPA_WORKER_ENABLED=1/' $APP_DIR/backend/.env
+
 echo "==> 4/7 Building web frontend (expo export)..."
 cd $APP_DIR/frontend
 yarn install --frozen-lockfile --silent 2>/dev/null || yarn install --silent

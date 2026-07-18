@@ -14,12 +14,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { Redirect, useLocalSearchParams } from "expo-router";
+import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 
 import { api } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import CompanyPicker from "@/src/components/CompanyPicker";
+import LiveRunViewer from "@/src/components/LiveRunViewer";
 import { colors, radius } from "@/src/theme";
 
 type Portal = "esic" | "uan";
@@ -116,6 +117,7 @@ function KpiCard({ label, value, tone, icon, sub }: {
 
 export default function StatutoryRegistration() {
   const params = useLocalSearchParams<{ portal?: string }>();
+  const router = useRouter();
   const { user, loading: authLoading } = useAuth();
   const { selectedCompanyId } = useSelectedCompany();
   const role = user?.role as string;
@@ -130,6 +132,7 @@ export default function StatutoryRegistration() {
     role === "company_admin" ? (user?.company_id || "all") : (selectedCompanyId || "all"),
   );
   const [tab, setTab] = useState<"queue" | "eligible">("queue");
+  const firstLoadDone = React.useRef(false);
   const [kpis, setKpis] = useState<Kpis | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [regs, setRegs] = useState<Reg[]>([]);
@@ -143,7 +146,6 @@ export default function StatutoryRegistration() {
 
   // detail modal
   const [detail, setDetail] = useState<Reg | null>(null);
-  const [detailJob, setDetailJob] = useState<any>(null);
   const [detailBusy, setDetailBusy] = useState<string | null>(null);
   const [linkVal, setLinkVal] = useState("");
   const [famDraft, setFamDraft] = useState<FamilyMember[]>([]);
@@ -174,6 +176,12 @@ export default function StatutoryRegistration() {
       setEligible(e.employees || []);
       setAlerts((a.alerts || []).filter(
         (x: any) => (x.needs_registration || []).length || (x.ceiling_crossed || []).length));
+      // First load: start on the Eligible tab when the queue is empty so
+      // the admin lands straight on "who can I register".
+      if (!firstLoadDone.current) {
+        firstLoadDone.current = true;
+        if (!(r.registrations || []).length) setTab("eligible");
+      }
     } catch { setKpis(null); setRegs([]); setEligible([]); setAlerts([]); }
     finally { setLoading(false); }
   }, [portal, cid]);
@@ -203,7 +211,7 @@ export default function StatutoryRegistration() {
   const openDetail = async (regId: string) => {
     try {
       const d = await api<any>(`/admin/statutory/registrations/${regId}`);
-      setDetail(d.registration); setDetailJob(d.rpa_job || null);
+      setDetail(d.registration);
       setFamDraft(d.registration.family_members || []);
       setDispDraft(d.registration.dispensary || "");
       setLinkVal("");
@@ -257,12 +265,33 @@ export default function StatutoryRegistration() {
   };
 
   const registerOne = async (emp: EligibleEmp) => {
+    // ONE-CLICK flow — create + validate + queue on the portal in a single
+    // call. If validation fails, jump to the full form to fix the gaps.
     try {
-      const r = await api<any>(`/admin/statutory/${portal}/registrations`,
-        { method: "POST", body: { employee_user_id: emp.user_id } });
-      await load();
-      await openDetail(r.registration.reg_id);
-    } catch (e: any) { toast(e?.message || "Failed to create registration"); }
+      const r = await api<any>(`/admin/statutory/${portal}/bulk`,
+        { method: "POST", body: { employee_user_ids: [emp.user_id] } });
+      const res = (r.results || [])[0] || {};
+      if (res.status === "queued") {
+        toast(`${emp.name}: registration started on the portal — opening live view…`);
+        await load();
+        const reg = await api<any>(`/admin/statutory/${portal}/registrations${cid ? `?company_id=${cid}` : ""}`);
+        const mine = (reg.registrations || []).find((x: any) => x.employee_user_id === emp.user_id);
+        if (mine) await openDetail(mine.reg_id);
+        return;
+      }
+      if (res.status === "pending_approval") {
+        toast(`${emp.name}: sent for HR approval.`);
+        await load();
+        return;
+      }
+      // draft (validation gaps) / existing_found → open the full form
+      toast(res.note || `${emp.name}: some details are missing — opening the form.`);
+      router.push(`/statutory-registration-form?portal=${portal}&user_id=${emp.user_id}`);
+    } catch (e: any) { toast(e?.message || "Failed to register"); }
+  };
+
+  const openForm = (userId: string) => {
+    router.push(`/statutory-registration-form?portal=${portal}&user_id=${userId}`);
   };
 
   const linkExistingFromEligible = async (emp: EligibleEmp) => {
@@ -573,7 +602,12 @@ export default function StatutoryRegistration() {
                   <View style={{ flexDirection: "row", gap: 6 }}>
                     <Pressable style={s.miniBtn} onPress={() => registerOne(item)}
                       testID={`btn-register-${item.user_id}`}>
-                      <Text style={s.miniBtnTxt}>Register</Text>
+                      <Text style={s.miniBtnTxt}>Register on Portal</Text>
+                    </Pressable>
+                    <Pressable style={[s.miniBtn, s.miniBtnAlt]}
+                      onPress={() => openForm(item.user_id)}
+                      testID={`btn-form-${item.user_id}`}>
+                      <Text style={[s.miniBtnTxt, { color: colors.brandPrimary }]}>Form</Text>
                     </Pressable>
                     <Pressable style={[s.miniBtn, s.miniBtnAlt]}
                       onPress={() => linkExistingFromEligible(item)}
@@ -691,18 +725,13 @@ export default function StatutoryRegistration() {
                 </View>
               )}
 
-              {/* RPA job trail */}
-              {detailJob && (
-                <View style={s.section}>
-                  <Text style={s.sectionTitle}>Portal Automation Run ({detailJob.status})</Text>
-                  {(detailJob.steps || []).slice(-5).map((st: any, idx: number) => (
-                    <Text key={idx} style={s.valLine}>• {st.msg || st.note}</Text>
-                  ))}
-                  {detailJob.manual_reason ? (
-                    <Text style={[s.valLine, { color: "#EA580C" }]}>{detailJob.manual_reason}</Text>
-                  ) : null}
+              {/* LIVE portal view — watch the RPA run the registration */}
+              {detail?.rpa_job_id ? (
+                <View style={{ marginBottom: 10 }}>
+                  <LiveRunViewer jobId={detail.rpa_job_id}
+                    onDone={() => { openDetail(detail.reg_id); load(); }} />
                 </View>
-              )}
+              ) : null}
 
               {/* Audit history */}
               <View style={s.section}>
