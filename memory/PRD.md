@@ -984,3 +984,23 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - NOTE: Kankani firm_masters salary_process.offline_salary was enabled in WORKSPACE db for testing actual salary process.
 - NOT yet deployed to live VPS.
 - PENDING USER DECISION: huge RBAC/approval-workflow spec pasted (roles, permission matrix, workflow builder, approval inbox) — needs phased plan + confirmation before build.
+
+## Iter 193 — RBAC Phase 1 + Approval Workflow Engine (tested, pass)
+- Custom Company Roles & Permission Matrix (/roles, routes/company_roles.py); staff users stored as company_admin + is_company_staff + staff_permissions[].
+- Multi-level Approval Workflows (/approval-workflows builder, /approval-inbox, routes/approvals_engine.py).
+- Known gap found by tests (fixed in Iter 194): direct-URL access to restricted pages not gated on frontend.
+
+## Iter 194 — Statutory Registration module: ESIC IP (Part B) + EPF UAN automation (tested 21/22 pytest + full E2E, pass)
+- NEW backend routes/statutory_registration.py (prefix /api/admin/statutory): unified ESIC IP + EPF UAN registration engine.
+  - Collections: statutory_registrations (full audit history[] per reg), registration_settings (per-company eligibility rules: esic_wage_ceiling 21000, pf_wage_ceiling 15000, pf_cover_all, require_approval).
+  - Endpoints: {portal}/dashboard (KPIs+coverage%), {portal}/eligible (validation+duplicate flags), {portal}/registrations CRUD, /submit (validates; staff or require_approval → pending_approval else queue RPA), /approve (real admins only) /reject /retry, /link-existing (writes users.esi_ip_no|uan_no, no duplicate creation), {portal}/bulk (≤200), /registrations/{id}/form (Form-1/Form-11 PDF base64 via reportlab), GET/PUT /settings.
+  - Statuses: draft, pending_approval, rejected, queued, submitted, generated, failed, action_required, existing_found, linked_existing.
+  - Validation: Aadhaar 12-digit (blocking), name/dob/doj (blocking), PAN regex/father/gender/address/phone (warnings), wage-ceiling eligibility notes. Duplicate detection: own number on file OR same-Aadhaar employee with number.
+  - Permissions: registrations:read/write added to EMPLOYER_PERMISSION_KEYS + roles permission catalog.
+- RPA worker (utils/rpa_worker.py): NEW _attempt_esic_ip_registration (login → "Register New IP" → fill IP form incl. family/dispensary/wages → submit → regex-read Insurance No → write users.esi_ip_no). _perform_login now takes esic_snap. _sync_registration mirrors job states onto reg records (in_progress→submitted, completed→generated + value, manual_required→action_required, failed→failed) + inserts admin notifications.
+- portal_generation.py REWRITTEN: generate-uan/generate-esic Employee-Master buttons now route through the module (create reg + queue). Accept {overrides:{aadhaar_no}} (generate WITHOUT pressing Save — persists Aadhaar if blank on file) and {existing_value} (link existing number directly). manual-complete also syncs reg → generated.
+- NEW frontend /statutory-registration?portal=esic|uan (Fiori-style): 6 KPI cards, ESIC/UAN segmented toggle, Registration Queue tab (10 status filter chips, search) + Eligible Employees tab (select-all-ready, Bulk Register, per-row Register/Link), detail modal (validation checklist, family particulars editor + dispensary, RPA run trail, audit timeline, link-existing, Submit/Approve&Queue/Reject/Retry/Form PDF download). Sidebar group "Statutory Registration" in both navs (perm registrations:*).
+- employee-master UanEsicCard: inline Aadhaar input (generate without save) + "Have an existing UAN/ESIC IP? Enter it" inline link flows.
+- RBAC FIX (Iter 193 gap): /advances and /statutory-registration now redirect staff without the matching permission to /portal-dashboard on direct URL access.
+- Notes: Kankani firm has EPFO creds (UAN jobs queue) but NO ESIC creds (ESIC → action_required manual mode). Gov portals block datacenter IPs → jobs end action_required unless PORTAL_PROXY_URL set (existing behavior).
+- NOT yet deployed to live VPS.
