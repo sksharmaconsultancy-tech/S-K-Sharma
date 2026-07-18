@@ -47,15 +47,6 @@ export default function TestPortalScreen() {
         </Text>
 
         <AutomationCard />
-
-        <View style={st.noteBox}>
-          <Ionicons name="information-circle-outline" size={16} color="#2563EB" />
-          <Text style={st.noteTxt}>
-            The automation runs on your computer (not our server), because the
-            government portals block server/datacenter connections. It opens its
-            own Chrome window and controls it directly — no tabs, no manual typing.
-          </Text>
-        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -71,8 +62,13 @@ function AutomationCard() {
       setError(null);
       setBusy(kind);
       try {
-        const origin =
-          Platform.OS === "web" ? (globalThis as any).location?.origin : "";
+        if (Platform.OS !== "web") {
+          setError(
+            "Please open this page on a computer (Chrome/Edge browser) to download and run the auto-login.",
+          );
+          return;
+        }
+        const origin = (globalThis as any).location?.origin || "";
         const ep =
           kind === "runner"
             ? "/admin/portal-automation/runner-download"
@@ -117,67 +113,59 @@ function AutomationCard() {
         </View>
       </View>
 
-      {Platform.OS === "web" ? (
-        <>
-          <Pressable
-            style={[st.dlBtn, busy === "runner" && st.disabled]}
-            onPress={() => download("runner")}
-            disabled={busy !== null}
-            testID="btn-download-runner"
-          >
-            {busy === "runner" ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <Ionicons name="download-outline" size={18} color="#fff" />
-            )}
-            <Text style={st.dlBtnTxt}>Get Automated Chrome Login</Text>
-          </Pressable>
+      <Pressable
+        style={[st.dlBtn, busy === "runner" && st.disabled]}
+        onPress={() => download("runner")}
+        disabled={busy !== null}
+        testID="btn-download-runner"
+      >
+        {busy === "runner" ? (
+          <ActivityIndicator color="#fff" size="small" />
+        ) : (
+          <Ionicons name="download-outline" size={18} color="#fff" />
+        )}
+        <Text style={st.dlBtnTxt}>Get Automated Chrome Login</Text>
+      </Pressable>
 
-          <Text style={st.step}>
-            1. Download the zip, then unzip and MOVE the folder to a fixed
-            location (see below) — needs Chrome + Python.{"\n"}
-            2. Open that folder. Windows: double-click{" "}
-            <Text style={st.mono}>run_esic.bat</Text> (or{" "}
-            <Text style={st.mono}>run_pf.bat</Text>). Mac/Linux: run{" "}
-            <Text style={st.mono}>./run.sh esic</Text>.{"\n"}
-            3. A controlled Chrome window opens and logs in automatically —
-            check the captcha and click Login. It self-updates in that folder
-            every run, so you never download again.
+      <Text style={st.step}>
+        1. Download the zip, then unzip and MOVE the folder to a fixed
+        location (see below) — needs Chrome + Python.{"\n"}
+        2. Open that folder. Windows: double-click{" "}
+        <Text style={st.mono}>run_esic.bat</Text> (or{" "}
+        <Text style={st.mono}>run_pf.bat</Text>). Mac/Linux: run{" "}
+        <Text style={st.mono}>./run.sh esic</Text>.{"\n"}
+        3. A controlled Chrome window opens and logs in automatically —
+        check the captcha and click Login. It self-updates in that folder
+        every run, so you never download again.
+      </Text>
+
+      <View style={st.folderBox}>
+        <Ionicons name="folder-open-outline" size={16} color="#059669" />
+        <View style={{ flex: 1 }}>
+          <Text style={st.folderHead}>Keep the folder here (first time):</Text>
+          <Text style={st.folderPath}>Windows:  C:\SKS-AutoLogin</Text>
+          <Text style={st.folderPath}>Mac:  /Users/&lt;you&gt;/SKS-AutoLogin</Text>
+          <Text style={st.folderPath}>Linux:  /home/&lt;you&gt;/SKS-AutoLogin</Text>
+          <Text style={st.folderNote}>
+            Run it from this same folder each time so it can auto-update
+            itself in place.
           </Text>
+        </View>
+      </View>
 
-          <View style={st.folderBox}>
-            <Ionicons name="folder-open-outline" size={16} color="#059669" />
-            <View style={{ flex: 1 }}>
-              <Text style={st.folderHead}>Keep the folder here (first time):</Text>
-              <Text style={st.folderPath}>Windows:  C:\SKS-AutoLogin</Text>
-              <Text style={st.folderPath}>Mac:  /Users/&lt;you&gt;/SKS-AutoLogin</Text>
-              <Text style={st.folderPath}>Linux:  /home/&lt;you&gt;/SKS-AutoLogin</Text>
-              <Text style={st.folderNote}>
-                Run it from this same folder each time so it can auto-update
-                itself in place.
-              </Text>
-            </View>
-          </View>
-
-          <Pressable
-            style={[st.linkBtn, busy === "ext" && st.disabled]}
-            onPress={() => download("ext")}
-            disabled={busy !== null}
-            testID="btn-download-extension"
-          >
-            {busy === "ext" ? (
-              <ActivityIndicator color={colors.brandPrimary} size="small" />
-            ) : (
-              <Ionicons name="extension-puzzle-outline" size={16} color={colors.brandPrimary} />
-            )}
-            <Text style={st.linkTxt}>Prefer a Chrome extension? Download here (no Python)</Text>
-          </Pressable>
-        </>
-      ) : (
-        <Text style={st.step}>
-          Open this page on your computer (web) to set up the automated Chrome login.
-        </Text>
-      )}
+      <Pressable
+        style={[st.linkBtn, busy === "ext" && st.disabled]}
+        onPress={() => download("ext")}
+        disabled={busy !== null}
+        testID="btn-download-extension"
+      >
+        {busy === "ext" ? (
+          <ActivityIndicator color={colors.brandPrimary} size="small" />
+        ) : (
+          <Ionicons name="extension-puzzle-outline" size={16} color={colors.brandPrimary} />
+        )}
+        <Text style={st.linkTxt}>Prefer a Chrome extension? Download here (no Python)</Text>
+      </Pressable>
 
       {error ? (
         <View style={st.errorBox}>
@@ -233,9 +221,4 @@ const st = StyleSheet.create({
     backgroundColor: "#FEE2E2", borderRadius: 10, padding: 12,
   },
   errorTxt: { color: "#991B1B", fontSize: 13, flex: 1 },
-  noteBox: {
-    flexDirection: "row", alignItems: "flex-start", gap: 8,
-    backgroundColor: "#EFF6FF", borderRadius: 10, padding: 12,
-  },
-  noteTxt: { flex: 1, color: "#1D4ED8", fontSize: 12, lineHeight: 17 },
 });
