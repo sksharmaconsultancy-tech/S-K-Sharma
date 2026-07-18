@@ -67,6 +67,227 @@ async def _task_out(t: dict) -> dict:
     return t
 
 
+# ======================= RECURRING TASKS ============================
+
+STATUTORY_PRESETS = [
+    {"seed_key": "pf_ecr", "title": "File PF ECR + payment", "day_of_month": 15, "priority": "high"},
+    {"seed_key": "esic", "title": "ESIC contribution payment", "day_of_month": 15, "priority": "high"},
+    {"seed_key": "tds", "title": "TDS deposit", "day_of_month": 7, "priority": "medium"},
+    {"seed_key": "pt", "title": "Professional Tax deposit", "day_of_month": 21, "priority": "medium"},
+]
+
+
+def _month_days(month: str) -> int:
+    y, m = int(month[:4]), int(month[5:7])
+    if m == 12:
+        nxt = datetime(y + 1, 1, 1)
+    else:
+        nxt = datetime(y, m + 1, 1)
+    return (nxt - datetime(y, m, 1)).days
+
+
+async def _generate_recurring(admin: dict) -> None:
+    """Idempotently create this month's tasks from active recurring
+    templates visible to this admin. Called lazily on task listing."""
+    month = _now().strftime("%Y-%m")
+    rq: Dict[str, Any] = {"active": True,
+                          "last_generated_month": {"$ne": month}}
+    if admin.get("role") == "company_admin":
+        rq["company_id"] = admin.get("company_id")
+        rq["all_firms"] = {"$ne": True}
+    templates = await db.recurring_tasks.find(rq).to_list(200)
+    if not templates:
+        return
+    firms = await db.companies.find(
+        {}, {"_id": 0, "company_id": 1, "name": 1}).to_list(300)
+    firm_names = {f["company_id"]: f.get("name") for f in firms}
+    max_day = _month_days(month)
+    for tpl in templates:
+        day = min(max(1, int(tpl.get("day_of_month") or 1)), max_day)
+        due = f"{month}-{day:02d}"
+        if tpl.get("all_firms"):
+            targets = [(f["company_id"], firm_names[f["company_id"]]) for f in firms]
+        else:
+            cid = tpl.get("company_id")
+            targets = [(cid, firm_names.get(cid))]
+        for cid, cname in targets:
+            exists = await db.portal_tasks.find_one(
+                {"source_rtask_id": tpl["rtask_id"], "month": month,
+                 "company_id": cid})
+            if exists:
+                continue
+            await db.portal_tasks.insert_one({
+                "task_id": f"task_{uuid.uuid4().hex[:12]}",
+                "title": tpl["title"],
+                "description": tpl.get("description"),
+                "company_id": cid,
+                "company_name": cname,
+                "assignee_id": None, "assignee_name": None,
+                "due_date": due,
+                "priority": tpl.get("priority", "medium"),
+                "status": "open",
+                "source_rtask_id": tpl["rtask_id"],
+                "month": month,
+                "created_by": "system:recurring",
+                "created_by_name": "Recurring schedule",
+                "created_at": _now().isoformat(),
+                "updated_at": _now().isoformat(),
+            })
+        await db.recurring_tasks.update_one(
+            {"rtask_id": tpl["rtask_id"]},
+            {"$set": {"last_generated_month": month}})
+
+
+class RecurringCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    company_id: Optional[str] = None
+    all_firms: bool = False
+    day_of_month: int = 15
+    priority: str = "medium"
+
+
+class RecurringUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    day_of_month: Optional[int] = None
+    priority: Optional[str] = None
+    active: Optional[bool] = None
+
+
+@router.get("/portal-recurring-tasks")
+async def list_recurring_tasks(authorization: Optional[str] = Header(None)):
+    admin = await _admin(authorization)
+    q: Dict[str, Any] = {}
+    if admin.get("role") == "company_admin":
+        q = {"company_id": admin.get("company_id"), "all_firms": {"$ne": True}}
+    items = await db.recurring_tasks.find(q, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return {"recurring_tasks": items}
+
+
+@router.post("/portal-recurring-tasks")
+async def create_recurring_task(payload: RecurringCreate,
+                                authorization: Optional[str] = Header(None)):
+    admin = await _admin(authorization)
+    title = (payload.title or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title is required")
+    if payload.priority not in TASK_PRIORITIES:
+        raise HTTPException(status_code=400, detail="Invalid priority")
+    if not 1 <= int(payload.day_of_month) <= 31:
+        raise HTTPException(status_code=400, detail="day_of_month must be 1-31")
+    all_firms = bool(payload.all_firms) and admin.get("role") != "company_admin"
+    cid = None if all_firms else _scope(admin, payload.company_id)
+    if not all_firms and not cid:
+        raise HTTPException(status_code=400,
+                            detail="Pick a firm or enable all_firms")
+    company_name = None
+    if cid:
+        c = await db.companies.find_one({"company_id": cid}, {"_id": 0, "name": 1})
+        company_name = (c or {}).get("name")
+    tpl = {
+        "rtask_id": f"rtask_{uuid.uuid4().hex[:12]}",
+        "title": title,
+        "description": (payload.description or "").strip() or None,
+        "company_id": cid,
+        "company_name": company_name,
+        "all_firms": all_firms,
+        "day_of_month": int(payload.day_of_month),
+        "priority": payload.priority,
+        "active": True,
+        "last_generated_month": None,
+        "created_by": admin["user_id"],
+        "created_at": _now().isoformat(),
+    }
+    await db.recurring_tasks.insert_one(dict(tpl))
+    await _generate_recurring(admin)
+    return {"ok": True, "recurring_task": tpl}
+
+
+@router.post("/portal-recurring-tasks/seed-statutory")
+async def seed_statutory_recurring(authorization: Optional[str] = Header(None)):
+    """One-click: add the 4 standard statutory recurring to-dos.
+    Super admin → all firms; company admin → own firm. Idempotent."""
+    admin = await _admin(authorization)
+    is_ca = admin.get("role") == "company_admin"
+    cid = admin.get("company_id") if is_ca else None
+    company_name = None
+    if cid:
+        c = await db.companies.find_one({"company_id": cid}, {"_id": 0, "name": 1})
+        company_name = (c or {}).get("name")
+    created = 0
+    for p in STATUTORY_PRESETS:
+        scope_q = {"seed_key": p["seed_key"],
+                   "company_id": cid} if is_ca else {"seed_key": p["seed_key"], "all_firms": True}
+        if await db.recurring_tasks.find_one(scope_q):
+            continue
+        await db.recurring_tasks.insert_one({
+            "rtask_id": f"rtask_{uuid.uuid4().hex[:12]}",
+            "seed_key": p["seed_key"],
+            "title": p["title"],
+            "description": "Statutory monthly compliance (auto-created)",
+            "company_id": cid,
+            "company_name": company_name,
+            "all_firms": not is_ca,
+            "day_of_month": p["day_of_month"],
+            "priority": p["priority"],
+            "active": True,
+            "last_generated_month": None,
+            "created_by": admin["user_id"],
+            "created_at": _now().isoformat(),
+        })
+        created += 1
+    await _generate_recurring(admin)
+    return {"ok": True, "created": created}
+
+
+@router.patch("/portal-recurring-tasks/{rtask_id}")
+async def update_recurring_task(rtask_id: str, payload: RecurringUpdate,
+                                authorization: Optional[str] = Header(None)):
+    admin = await _admin(authorization)
+    tpl = await db.recurring_tasks.find_one({"rtask_id": rtask_id})
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Recurring task not found")
+    if admin.get("role") == "company_admin" and (
+            tpl.get("all_firms") or tpl.get("company_id") != admin.get("company_id")):
+        raise HTTPException(status_code=403, detail="Not your firm's recurring task")
+    upd: Dict[str, Any] = {}
+    if payload.title is not None:
+        upd["title"] = payload.title.strip() or tpl["title"]
+    if payload.description is not None:
+        upd["description"] = payload.description.strip() or None
+    if payload.day_of_month is not None:
+        if not 1 <= int(payload.day_of_month) <= 31:
+            raise HTTPException(status_code=400, detail="day_of_month must be 1-31")
+        upd["day_of_month"] = int(payload.day_of_month)
+    if payload.priority is not None:
+        if payload.priority not in TASK_PRIORITIES:
+            raise HTTPException(status_code=400, detail="Invalid priority")
+        upd["priority"] = payload.priority
+    if payload.active is not None:
+        upd["active"] = bool(payload.active)
+        if payload.active:
+            # allow regeneration for the current month when re-activated
+            upd["last_generated_month"] = None
+    await db.recurring_tasks.update_one({"rtask_id": rtask_id}, {"$set": upd})
+    t2 = await db.recurring_tasks.find_one({"rtask_id": rtask_id}, {"_id": 0})
+    return {"ok": True, "recurring_task": t2}
+
+
+@router.delete("/portal-recurring-tasks/{rtask_id}")
+async def delete_recurring_task(rtask_id: str,
+                                authorization: Optional[str] = Header(None)):
+    admin = await _admin(authorization)
+    tpl = await db.recurring_tasks.find_one({"rtask_id": rtask_id})
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Recurring task not found")
+    if admin.get("role") == "company_admin" and (
+            tpl.get("all_firms") or tpl.get("company_id") != admin.get("company_id")):
+        raise HTTPException(status_code=403, detail="Not your firm's recurring task")
+    await db.recurring_tasks.delete_one({"rtask_id": rtask_id})
+    return {"ok": True}
+
+
 @router.get("/portal-tasks")
 async def list_tasks(
     status: Optional[str] = Query(None),
@@ -74,6 +295,7 @@ async def list_tasks(
     authorization: Optional[str] = Header(None),
 ):
     admin = await _admin(authorization)
+    await _generate_recurring(admin)
     cid = _scope(admin, company_id)
     q: Dict[str, Any] = {}
     if cid:

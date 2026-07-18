@@ -149,3 +149,7 @@ See `/app/memory/test_credentials.md`. Super admin
 - Backend: routes/portal_phase2.py — portal tasks CRUD, tracked documents CRUD (expiry buckets), client health scores, enhanced calendar (+toggle done), alerts/notification center. 24/24 pytest pass (tests/test_iter178_portal_phase2.py).
 - Frontend: portal-dashboard.tsx tab strip + bell badge; new src/components/portal/{TasksPanel,DocumentExpiryPanel,ClientHealthPanel,CalendarPanel,AlertsModal}.tsx. Full web E2E by testing agent — all pass, Overview (Phase 1) regression intact.
 - Known cosmetic: RN-web shadow*/shorthand CSS console warnings (pre-existing pattern, non-blocking).
+
+## Iter 179b — Recurring Monthly Tasks
+- Endpoints: /api/admin/portal-recurring-tasks (CRUD) + /seed-statutory. Lazy idempotent monthly generation on task listing (per-firm expansion for all_firms templates).
+- Verified via curl (seed→4 templates→8 auto tasks, idempotent relist) + Playwright (Recurring modal, toggles, custom form).
