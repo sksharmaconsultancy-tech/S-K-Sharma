@@ -97,23 +97,24 @@ function HBarList({ rows, color }: { rows: { label: string; count: number }[]; c
 type Dash = any;
 type Client = { company_id: string; name: string; score: number; grade: string };
 
-const KPIS: { key: string; label: string; icon: string; grad: [string, string]; route?: string; money?: boolean; soon?: boolean }[] = [
+const KPIS: { key: string; label: string; icon: string; grad: [string, string]; route?: string; tab?: string; money?: boolean; soon?: boolean }[] = [
   { key: "firms", label: "Total Clients", icon: "business", grad: ["#2563EB", "#4338CA"], route: "/companies" },
   { key: "total_employees", label: "Total Employees", icon: "people", grad: ["#0891B2", "#2563EB"], route: "/employee-master" },
   { key: "present_today", label: "Today's Attendance", icon: "checkmark-done", grad: ["#059669", "#10B981"], route: "/daily-attendance" },
   { key: "pending_payroll_firms", label: "Pending Payroll", icon: "hourglass", grad: ["#D97706", "#F59E0B"], route: "/compliance-salary-run" },
   { key: "payroll_finalized_firms", label: "Processed Payroll", icon: "shield-checkmark", grad: ["#059669", "#0891B2"], route: "/compliance-salary-run" },
   { key: "pending_punch_approvals", label: "Pending Approvals", icon: "time", grad: ["#B45309", "#D97706"], route: "/punch-approvals" },
-  { key: "pending_tasks", label: "Pending Tasks", icon: "clipboard", grad: ["#7C3AED", "#DB2777"] },
+  { key: "pending_tasks", label: "Pending Tasks", icon: "clipboard", grad: ["#7C3AED", "#DB2777"], tab: "tasks" },
   { key: "__revenue", label: "Monthly Revenue", icon: "trending-up", grad: ["#64748B", "#94A3B8"], soon: true },
 ];
 
 /* ---------------------------- component ------------------------------ */
 
 export default function OverviewPremium({
-  dash, alertsCount, onGoTab, userName,
+  dash, alertsCount, onGoTab, userName, firmName,
 }: {
   dash: Dash; alertsCount: number; onGoTab: (tab: string) => void; userName: string;
+  firmName?: string;
 }) {
   const router = useRouter();
   const [clients, setClients] = useState<Client[]>([]);
@@ -138,13 +139,22 @@ export default function OverviewPremium({
             Here&apos;s what&apos;s happening with your compliance management today.
           </Text>
         </View>
+        {firmName ? (
+          <View style={st.firmChip} testID="pd-firm-chip">
+            <Ionicons name="business" size={13} color={colors.brandPrimary} />
+            <Text style={st.firmChipTxt} numberOfLines={1}>{firmName}</Text>
+          </View>
+        ) : null}
       </View>
 
       {/* KPI cards */}
       <View style={st.kpiGrid}>
         {KPIS.map((d) => (
           <Pressable key={d.key}
-            onPress={() => d.route && router.push(d.route as any)}
+            onPress={() => {
+              if (d.route) router.push(d.route as any);
+              else if (d.tab) onGoTab(d.tab);
+            }}
             style={({ pressed, hovered }: any) => [
               st.kpiCard, pressed && { transform: [{ scale: 0.97 }] },
               hovered && Platform.OS === "web" && { transform: [{ scale: 1.02 }] }]}
@@ -356,6 +366,12 @@ const st = StyleSheet.create({
   },
   welcomeTitle: { fontSize: 18, fontWeight: "800", color: colors.onSurface },
   welcomeSub: { fontSize: 11.5, color: colors.onSurfaceSecondary, marginTop: 3 },
+  firmChip: {
+    flexDirection: "row", alignItems: "center", gap: 6, maxWidth: 260,
+    borderWidth: 1, borderColor: `${colors.brandPrimary}55`, borderRadius: 999,
+    backgroundColor: `${colors.brandPrimary}12`, paddingHorizontal: 12, paddingVertical: 7,
+  },
+  firmChipTxt: { fontSize: 12, fontWeight: "800", color: colors.brandPrimary, flexShrink: 1 },
   kpiGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   kpiCard: {
     minWidth: 150, flexGrow: 1, flexBasis: "22%", backgroundColor: colors.surfaceSecondary,

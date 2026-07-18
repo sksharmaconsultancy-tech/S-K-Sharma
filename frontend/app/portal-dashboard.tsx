@@ -132,6 +132,11 @@ export default function PortalDashboardScreen() {
             alertsCount={alertCount}
             onGoTab={(t) => setTab(t)}
             userName={user?.name || "Admin"}
+            firmName={
+              selectedCompanyId
+                ? companies.find((c: any) => c.company_id === selectedCompanyId)?.name || "Selected firm"
+                : `All Firms${companies.length ? ` (${companies.length})` : ""}`
+            }
           />
         </ScrollView>
       )}

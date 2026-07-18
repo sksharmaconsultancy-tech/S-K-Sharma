@@ -44,7 +44,7 @@ export default function OtpLoginScreen() {
   }
   if (user) {
     if (user.role === "employee" && !user.onboarded) return <Redirect href="/onboarding" />;
-    return <Redirect href="/(tabs)" />;
+    return <Redirect href="/" />;
   }
 
   const sendOtp = async () => {
@@ -92,7 +92,7 @@ export default function OtpLoginScreen() {
       await refresh();
       // Redirect handled by top-level guard once user is set
       if (r.user?.role === "employee" && !r.user?.onboarded) router.replace("/onboarding");
-      else router.replace("/(tabs)");
+      else router.replace("/"); // Iter 184 — root guard picks dashboard/tabs
     } catch (e: any) {
       setError(e.message || "Verification failed");
     } finally {

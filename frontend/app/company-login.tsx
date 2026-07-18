@@ -61,7 +61,7 @@ export default function CompanyLoginScreen() {
   }
   if (user) {
     if (user.pin_must_change) return <Redirect href="/pin-change" />;
-    return <Redirect href="/(tabs)" />;
+    return <Redirect href="/" />;
   }
 
   const submit = async () => {
@@ -95,7 +95,9 @@ export default function CompanyLoginScreen() {
       );
       await saveToken(r.session_token);
       await refresh();
-      router.replace(r.pin_must_change ? "/pin-change" : "/(tabs)");
+      // Iter 184 — land on "/" so the root guard routes admins to the
+      // Portal Dashboard (desktop web) or /(tabs) (mobile).
+      router.replace(r.pin_must_change ? "/pin-change" : "/");
     } catch (e: any) {
       setError(e.message || "Sign-in failed");
     } finally {

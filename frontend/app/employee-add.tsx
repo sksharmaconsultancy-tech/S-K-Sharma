@@ -30,6 +30,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import DateField from "@/src/components/DateField";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
@@ -648,12 +649,19 @@ export default function EmployeeAddScreen() {
     <View style={styles.root}>
       <SafeAreaView edges={["top"]} style={{ backgroundColor: colors.surface }}>
         <View style={styles.header}>
-          <Pressable onPress={() => router.back()} hitSlop={8}>
-            <Ionicons name="chevron-back" size={26} color={colors.onSurface} />
+          <Pressable onPress={() => router.back()} hitSlop={8} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={22} color={colors.onSurface} />
           </Pressable>
-          <View style={{ flex: 1, alignItems: "center" }}>
+          <LinearGradient
+            colors={editUserId ? ["#0891B2", "#2563EB"] : ["#2563EB", "#4338CA"]}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+            style={styles.headerIcon}
+          >
+            <Ionicons name={editUserId ? "create-outline" : "person-add-outline"} size={18} color="#fff" />
+          </LinearGradient>
+          <View style={{ flex: 1 }}>
             <Text style={styles.h1}>
-              {editUserId ? `Edit employee${editCode ? ` · ${editCode}` : ""}` : "Add employee"}
+              {editUserId ? `Employee Details${editCode ? ` · ${editCode}` : ""}` : "Add New Employee"}
             </Text>
             <Text style={styles.hsub}>
               {editUserId
@@ -773,7 +781,7 @@ export default function EmployeeAddScreen() {
             !selectedCompanyId && { opacity: 0.5, pointerEvents: "none" as any },
           ]}
         >
-          <Text style={styles.section}>Identity</Text>
+          <SectionHeader icon="person-circle-outline" title="Identity" tint="#2563EB" first />
 
           {/* Iter 89 — Scan document with OCR to auto-fill Identity fields.
               Web-only. Aadhaar / PAN / Voter ID / Driving License supported.
@@ -1027,7 +1035,7 @@ export default function EmployeeAddScreen() {
             />
           </TwoCol>
 
-          <Text style={styles.section}>Employment</Text>
+          <SectionHeader icon="briefcase-outline" title="Employment" tint="#4338CA" />
           <TwoCol>
             <View style={{ flex: 1 }}>
               {/* Iter 91 — Designation is a dropdown from the Designation
@@ -1178,7 +1186,7 @@ export default function EmployeeAddScreen() {
             </TwoCol>
           ) : null}
           {showActualSalary ? (<>
-          <Text style={styles.section}>Employee Actual Salary</Text>
+          <SectionHeader icon="cash-outline" title="Employee Actual Salary" tint="#059669" />
           {/* Iter 126g — Bio Code moved here (user request) */}
           <TwoCol>
             <Field
@@ -1309,9 +1317,7 @@ export default function EmployeeAddScreen() {
           </>) : null}
 
           {/* Iter 94 — COMPLIANCE salary: separate section, own rate basis */}
-          <Text style={[styles.section, { color: "#B45309" }]}>
-            Compliance Salary (PF / ESI / TDS) — Separate
-          </Text>
+          <SectionHeader icon="shield-half-outline" title="Compliance Salary (PF / ESI / TDS) — Separate" tint="#B45309" />
           <Text style={styles.lbl}>Rate Basis (Compliance)</Text>
           <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
             {(["monthly", "daily", "hourly"] as const).map((m) => (
@@ -1483,7 +1489,7 @@ export default function EmployeeAddScreen() {
             ))}
           </View>
 
-          <Text style={styles.section}>Statutory / Bank</Text>
+          <SectionHeader icon="shield-checkmark-outline" title="Statutory / Bank" tint="#0891B2" />
           <TwoCol>
             <View style={{ flex: 1 }}>
               <Field
@@ -1637,7 +1643,7 @@ export default function EmployeeAddScreen() {
 
           {/* Iter 126g — Family Details moved to the END of the form
               (user-requested flow) */}
-          <Text style={styles.section}>Family Details</Text>
+          <SectionHeader icon="people-outline" title="Family Details" tint="#DB2777" />
           {form.family_members.map((fm, idx) => (
             <View key={idx} style={{ flexDirection: "row", gap: 8, alignItems: "flex-end", marginTop: 6 }}>
               <Field label={idx === 0 ? "Member Name" : ""} value={fm.name}
@@ -1815,6 +1821,21 @@ export default function EmployeeAddScreen() {
   );
 }
 
+/** Premium section header — gradient-tinted icon chip + title + divider. */
+function SectionHeader({ icon, title, tint, first }: {
+  icon: any; title: string; tint: string; first?: boolean;
+}) {
+  return (
+    <View style={[styles.sectionHead, first && { marginTop: 0 }]}>
+      <View style={[styles.sectionIcon, { backgroundColor: `${tint}18`, borderColor: `${tint}40` }]}>
+        <Ionicons name={icon} size={15} color={tint} />
+      </View>
+      <Text style={[styles.sectionTitle, { color: tint }]} numberOfLines={2}>{title}</Text>
+      <View style={styles.sectionLine} />
+    </View>
+  );
+}
+
 /** Small labeled field wrapper. */
 function Field(props: {
   label: string;
@@ -1946,6 +1967,24 @@ const styles = StyleSheet.create({
   },
   h1: { ...type.h2, color: colors.onSurface },
   hsub: { ...type.caption, color: colors.onSurfaceSecondary, marginTop: 2 },
+  backBtn: {
+    width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: colors.divider, backgroundColor: colors.surface,
+  },
+  headerIcon: {
+    width: 36, height: 36, borderRadius: 11, alignItems: "center", justifyContent: "center",
+  },
+  sectionHead: {
+    flexDirection: "row", alignItems: "center", gap: 8, marginTop: 14, marginBottom: 4,
+  },
+  sectionIcon: {
+    width: 28, height: 28, borderRadius: 9, alignItems: "center",
+    justifyContent: "center", borderWidth: 1,
+  },
+  sectionTitle: {
+    fontSize: 13.5, fontWeight: "800", letterSpacing: 0.2, flexShrink: 1,
+  },
+  sectionLine: { flex: 1, height: 1, backgroundColor: colors.divider },
   forbid: {
     flex: 1,
     alignItems: "center",
@@ -2043,13 +2082,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: colors.brandPrimary,
   },
-  section: {
-    ...type.body,
-    fontWeight: "700",
-    color: colors.onSurface,
-    marginTop: 6,
-    marginBottom: 2,
-  },
   // Iter 89 — small pill button for "Generate UAN / ESIC" actions
   generateBtn: {
     flexDirection: "row",
@@ -2102,12 +2134,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 6,
     paddingHorizontal: 14,
-    paddingVertical: 13,
-    borderRadius: 12,
+    paddingVertical: 14,
+    borderRadius: 14,
     backgroundColor: colors.brandPrimary,
     ...shadow.cta,
   },
-  primaryBtnTxt: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  primaryBtnTxt: { color: "#fff", fontWeight: "800", fontSize: 14.5, letterSpacing: 0.2 },
   btnDisabled: { opacity: 0.5 },
   draftBox: {
     backgroundColor: "#FFF8E7", borderWidth: 1, borderColor: "#F2D9A0",

@@ -41,7 +41,7 @@ export default function AdminPinLoginScreen() {
     // Employees are not allowed in the Employer/Admin portal.
     if (user.role === "employee") return <Redirect href="/employee" />;
     if (user.pin_must_change) return <Redirect href="/pin-change" />;
-    return <Redirect href="/(tabs)" />;
+    return <Redirect href="/" />;
   }
 
   const submit = async () => {
@@ -62,7 +62,9 @@ export default function AdminPinLoginScreen() {
         );
         await saveToken(r.session_token);
         await refresh();
-        router.replace(r.pin_must_change ? "/pin-change" : "/(tabs)");
+        // Iter 184 — land on "/" so the root guard routes admins to the
+        // Portal Dashboard (desktop web) or /(tabs) (mobile).
+        router.replace(r.pin_must_change ? "/pin-change" : "/");
       } catch (e: any) {
         setError(e.message || "Sign-in failed");
       } finally {
@@ -79,7 +81,8 @@ export default function AdminPinLoginScreen() {
         );
         await saveToken(r.session_token);
         await refresh();
-        router.replace("/(tabs)");
+        // Iter 184 — root guard sends admins to the Portal Dashboard.
+        router.replace("/");
       } catch (e: any) {
         const msg = e?.message || "Sign-in failed";
         // Iter 64 — When the server tells us the account has no web

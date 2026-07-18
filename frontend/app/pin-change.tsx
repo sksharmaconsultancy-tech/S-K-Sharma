@@ -60,7 +60,8 @@ export default function PinChangeScreen() {
       });
       setSuccess(true);
       await refresh();
-      router.replace("/(tabs)");
+      // Iter 184 — root guard routes admins to the Portal Dashboard.
+      router.replace("/");
     } catch (e: any) {
       setError(e.message || "Could not change PIN");
     } finally {
