@@ -1023,3 +1023,7 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - NEW shared components src/components/salary/: ProcessCommandCenter.tsx (KPI card strip + workflow stepper [8 compliance / 7 actual / 5 arrear steps, green done/blue current/grey pending] + collapsible validation panel w/ progress bar; self-fetches on companyId/month/refreshKey change) and TotalsFooter.tsx (sticky bottom run-totals strip).
 - Integrated into compliance-salary-run.tsx (footer: Gross/PF EE-ER/ESIC EE-ER/PT/TDS/Advance/Deductions/Net), salary-run.tsx (Gross/EPF/ESI/Advance/TDS/Net Pay), arrear-salary-run.tsx (Arrear Gross/EPF wages/dues/ESIC). Existing payroll logic untouched (UI wrapper only) — regression verified.
 - NOT yet deployed to live VPS (deploy194.sh 2-liner works for future deploys: kind=script).
+
+## Iter 195b — DEPLOYED TO LIVE VPS (2026-07-18, user-confirmed output)
+- deploy194.sh (kind=script 2-liner) run on VPS: all 5 route checks ✅ incl. new /api/admin/salary-process/readiness. Live now includes Iter 195 Process Command Center on all 3 salary pages.
+- PENDING USER VERIFICATION on live: reopen PWA twice → Compliance Salary Process → pick firm → KPI cards/stepper/validation panel/totals footer.
