@@ -1,0 +1,4 @@
+email: sksharmaconsultancy@gmail.com
+phone: +919680273960
+temp_pin: 246810
+note: PIN reset on 2026-07-05. Works on BOTH web (Admin sign in → PIN tab) AND mobile app (Admin sign in → PIN mode). pin_must_change=false so no forced change flow.
