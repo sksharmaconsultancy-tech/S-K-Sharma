@@ -1,201 +1,148 @@
 {
-  "project_identity": {
-    "name": "S.K. Sharma & Co.",
-    "tagline": "Compliance · Payroll · Manpower",
-    "domain": "Labour Law Compliance & Biometric Attendance System",
-    "theme": "Light Theme",
-    "archetype": "Enterprise Trusted & Tactile Swiss",
-    "emotion": "Professional, Authoritative, Clear, Tactile",
-    "target_users": ["Blue-collar employees", "HR Admins", "Super Admins"]
-  },
-  "colors": {
-    "brand": {
-      "primary_navy": "#1B3A6E",
-      "deep_navy": "#12294F",
-      "accent_amber": "#E39A2A"
-    },
-    "surface": {
-      "background_cream": "#FBFBF9",
-      "card_white": "#FFFFFF",
-      "tab_bar": "#FFFFFF"
-    },
-    "text": {
-      "primary": "#12294F",
-      "secondary": "#4B5A76",
-      "inverse": "#FFFFFF",
-      "accent": "#E39A2A"
-    },
-    "status": {
-      "success": "#2D7A4F",
-      "error": "#D32F2F",
-      "warning": "#E39A2A"
+  "app_name": "S.K. Sharma & Co. B2B Portal & ESS",
+  "personality": "Fusion: 2 Material You structure + 6 Glass / Luxe surfaces",
+  "personality_one_liner": "A premium, executive-level SaaS portal combining Material Design 3's responsive structure with the cinematic depth of glassmorphism and vivid blue/indigo accents, delivering a Zoho One/RazorpayX-level experience.",
+  "color": {
+    "surface": "#F3F4F6",
+    "onSurface": "#111827",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#1F2937",
+    "surfaceTertiary": "#E5E7EB",
+    "onSurfaceTertiary": "#374151",
+    "surfaceInverse": "#0F172A",
+    "onSurfaceInverse": "#F9FAFB",
+    "brand": "#2563EB",
+    "brandPrimary": "#2563EB",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#4338CA",
+    "onBrandSecondary": "#FFFFFF",
+    "brandTertiary": "#DBEAFE",
+    "onBrandTertiary": "#1D4ED8",
+    "success": "#10B981",
+    "onSuccess": "#FFFFFF",
+    "warning": "#F59E0B",
+    "onWarning": "#FFFFFF",
+    "error": "#EF4444",
+    "onError": "#FFFFFF",
+    "info": "#3B82F6",
+    "onInfo": "#FFFFFF",
+    "border": "#E5E7EB",
+    "borderStrong": "#D1D5DB",
+    "divider": "#E5E7EB",
+    "dark_mode_overrides": {
+      "surface": "#020617",
+      "onSurface": "#F8FAFC",
+      "surfaceSecondary": "#0F172A",
+      "onSurfaceSecondary": "#F1F5F9",
+      "surfaceTertiary": "#1E293B",
+      "onSurfaceTertiary": "#CBD5E1",
+      "surfaceInverse": "#FFFFFF",
+      "onSurfaceInverse": "#0F172A",
+      "brandTertiary": "#1E3A8A",
+      "onBrandTertiary": "#BFDBFE",
+      "border": "#1E293B",
+      "borderStrong": "#334155",
+      "divider": "#1E293B"
     }
   },
   "typography": {
-    "font_family_primary": "System-UI, 'Inter', sans-serif",
-    "font_family_heading": "System-UI, 'IBM Plex Sans', sans-serif",
+    "displayFontFamily": "Plus Jakarta Sans",
+    "textFontFamily": "Plus Jakarta Sans",
     "scale": {
-      "h1": { "fontSize": 32, "fontWeight": "800", "letterSpacing": -1 },
-      "h2": { "fontSize": 24, "fontWeight": "700", "letterSpacing": -0.5 },
-      "h3": { "fontSize": 20, "fontWeight": "600", "letterSpacing": 0 },
-      "body_large": { "fontSize": 16, "fontWeight": "500", "lineHeight": 24 },
-      "body_regular": { "fontSize": 14, "fontWeight": "400", "lineHeight": 20 },
-      "caption": { "fontSize": 12, "fontWeight": "600", "letterSpacing": 0.5, "textTransform": "uppercase" }
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
     }
   },
   "spacing": {
+    "rule": "Generous SaaS padding. Cards must never be flush to the edge. Dashboard widgets use md (12px) or lg (16px) gaps.",
     "xs": 4,
     "sm": 8,
-    "md": 16,
-    "lg": 24,
-    "xl": 32,
-    "2xl": 48
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
   },
-  "layout_and_surfaces": {
-    "border_radius": {
-      "sm": 8,
-      "md": 12,
-      "lg": 16,
-      "pill": 100
-    },
-    "shadows": {
-      "card": {
-        "ios": { "shadowColor": "#12294F", "shadowOffset": { "width": 0, "height": 4 }, "shadowOpacity": 0.08, "shadowRadius": 12 },
-        "android": { "elevation": 4 }
-      },
-      "cta_button": {
-        "ios": { "shadowColor": "#E39A2A", "shadowOffset": { "width": 0, "height": 4 }, "shadowOpacity": 0.2, "shadowRadius": 8 },
-        "android": { "elevation": 6 }
-      }
-    }
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 16,
+    "pill": 999
   },
-  "components": {
-    "buttons": {
-      "primary": {
-        "backgroundColor": "#E39A2A",
-        "borderRadius": 100,
-        "paddingVertical": 16,
-        "paddingHorizontal": 32,
-        "alignItems": "center",
-        "justifyContent": "center",
-        "minHeight": 56
-      },
-      "secondary": {
-        "backgroundColor": "#1B3A6E",
-        "borderRadius": 100,
-        "paddingVertical": 16,
-        "paddingHorizontal": 32,
-        "alignItems": "center",
-        "justifyContent": "center",
-        "minHeight": 56
-      }
-    },
-    "cards": {
-      "base": {
-        "backgroundColor": "#FFFFFF",
-        "borderRadius": 16,
-        "padding": 24,
-        "borderWidth": 1,
-        "borderColor": "rgba(27,58,110,0.05)"
-      }
-    }
-  },
-  "media": {
-    "logos": [
-      {
-        "category": "brand_mark",
-        "url": "/app/frontend/assets/images/logo-mark.png",
-        "description": "S.K. Sharma & Co. sun-mark SK monogram."
-      }
+  "shadow_tier": "2",
+  "navigation": "bottom_tabs_and_drawer",
+  "icon_set": "MaterialIcons",
+  "glassmorphism": {
+    "enabled": "true",
+    "do's": [
+      "Use rgba(255,255,255,0.7) with backdrop-filter: blur(12px) for light mode cards over subtle gradient backgrounds.",
+      "Use rgba(255,255,255,0.05) with backdrop-filter: blur(12px) and 1px border rgba(255,255,255,0.1) for dark mode cards.",
+      "Apply to sticky headers, bottom tab bars, and featured KPI dashboard cards."
     ],
-    "images": [
-      {
-        "category": "factory_worker_profile",
-        "url": "https://images.pexels.com/photos/31336004/pexels-photo-31336004.jpeg",
-        "description": "Female factory worker operating machinery. Use for employee profile placeholders or onboarding background."
-      },
-      {
-        "category": "corporate_admin",
-        "url": "https://images.pexels.com/photos/12903168/pexels-photo-12903168.jpeg",
-        "description": "Professional team collaborating in office. Use for Super Admin or HR dashboard headers."
-      },
-      {
-        "category": "biometric_fingerprint",
-        "url": "https://images.unsplash.com/photo-1585079374502-415f8516dcc3",
-        "description": "Close up of biometric fingerprint scanning technology. Use for Smart Punch screen visualization."
-      }
+    "dont's": [
+      "Do not apply glassmorphism to dense data tables or deep nested form inputs.",
+      "Do not make text unreadable; always ensure solid contrast over the glass."
     ]
   },
-  "screen_blueprints": {
-    "google_sign_in": {
-      "layout": "Centered vertical stack",
-      "elements": [
-        "Massive brand logo (logo-mark.png) centered.",
-        "H1 'S.K. Sharma & Co.' in Deep Navy.",
-        "Caption tagline 'Compliance · Payroll · Manpower' in Accent Amber.",
-        "Large Google Sign-In Button at the bottom (min 56px height)."
-      ]
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-blur",
+      "android": "expo-blur",
+      "web": "style={{ backdropFilter: 'blur(12px)', backgroundColor: 'rgba(255,255,255,0.7)' }}",
+      "low_end_android_fallback": "solid surfaceSecondary"
     },
-    "onboarding_wizard": {
-      "layout": "Step-by-step wizard with persistent bottom CTA.",
-      "elements": [
-        "Top segmented progress bar (3 steps).",
-        "Step 1: 'Enter Company Code' with massive centered text input.",
-        "Step 2: 'Personal Details' form (Name, Role).",
-        "Step 3: 'Employment Terms' document review.",
-        "Bottom sticky Action bar with Primary Amber button."
-      ]
-    },
-    "home_dashboard": {
-      "layout": "Scrollable dashboard with Bento Grid layout.",
-      "elements": [
-        "Header: Greeting with User Name and Company Code badge.",
-        "Hero Card: 'Today's Shift' (Navy background, White text). Shows current status (Punched In/Out) and a quick punch CTA.",
-        "Grid: 2x2 Bento grid for quick stats (Leaves, Tickets, Attendance %, Alerts).",
-        "Recent Notifications list below the grid."
-      ]
-    },
-    "smart_punch": {
-      "layout": "Immersive single-action screen.",
-      "elements": [
-        "Header: Current Date and Time (Massive typography).",
-        "Center: Circular biometric graphic (using biometric_fingerprint image in a masked circle) surrounded by a Geofence radius indicator.",
-        "Status Text: 'You are within office premises.'",
-        "Footer: Sticky massive Amber 'PUNCH IN' / 'PUNCH OUT' button (minHeight: 64px, pill shape)."
-      ]
-    },
-    "super_admin_companies": {
-      "layout": "List view with search.",
-      "elements": [
-        "Header: 'Client Companies' with a Search Bar.",
-        "List Item Card: Company Name (H3), Active Employees (Badge), and a 'Shareable 6-char Code' block highlighted in Amber.",
-        "Floating Action Button (FAB) in Navy to 'Add New Company'."
-      ]
-    }
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
   },
-  "navigation": {
-    "type": "bottom_tabs",
-    "tabs": [
-      { "name": "Home", "icon": "home" },
-      { "name": "Punch", "icon": "fingerprint", "highlight": true },
-      { "name": "Docs", "icon": "document" },
-      { "name": "Profile", "icon": "person" }
-    ],
-    "style": {
-      "backgroundColor": "#FFFFFF",
-      "activeColor": "#E39A2A",
-      "inactiveColor": "#4B5A76",
-      "borderTopColor": "rgba(27,58,110,0.1)",
-      "height": 72
+  "screens": [
+    {
+      "name": "Admin Dashboard",
+      "purpose": "A RazorpayX-style high-level executive snapshot for tracking KPI metrics, pending compliance, and payroll.",
+      "states": {
+        "loading": "Shimmer skeleton layout mimicking the grid structure of KPI cards and charts.",
+        "empty": "Glassmorphic card with 'No data available' and a call to action.",
+        "error": "Error card with a retry button centered on screen."
+      },
+      "layout": "Header with global search and profile. Centralized grid for KPI cards (Total Clients, PF/ESIC Liability) with soft gradients. Horizontal scroll for Quick Actions. Interactive bar/line charts for Payroll Trend."
+    },
+    {
+      "name": "Employee ESS Home",
+      "purpose": "A CRED-inspired, intuitive one-stop self-service portal for employees to punch in/out, view balance, and access payslips.",
+      "states": {
+        "loading": "Shimmer skeleton for the main attendance card and quick links.",
+        "empty": "Illustration for 'No upcoming shifts or announcements'.",
+        "error": "Error toast or full-page error state with retry."
+      },
+      "layout": "Welcome Header (Good morning, [Name]). Main Glassmorphic Attendance Card (prominent Punch In/Out button, current time). 2-col grid for Quick Cards (Leave Balance, Payslip). Horizontal list for Announcements."
+    }
+  ],
+  "images": {
+    "hero_background": {
+      "url": "https://images.unsplash.com/photo-1749497268209-c167ed52b682?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njd8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMGluZGlnbyUyMGJsdWUlMjBnbGFzcyUyMG1vZGVybiUyMGVudGVycHJpc2UlMjBiYWNrZ3JvdW5kfGVufDB8fHx8MTc4NDMzNDM2OXww&ixlib=rb-4.1.0&q=85",
+      "dark": "https://images.unsplash.com/photo-1687817994377-645a82293c3a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njd8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMGluZGlnbyUyMGJsdWUlMjBnbGFzcyUyMG1vZGVybiUyMGVudGVycHJpc2UlMjBiYWNrZ3JvdW5kfGVufDB8fHx8MTc4NDMzNDM2OXww&ixlib=rb-4.1.0&q=85",
+      "alt": "Abstract modern enterprise blue background for hero sections"
+    },
+    "employee_avatar": {
+      "url": "https://images.unsplash.com/photo-1560250097-0b93528c311a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODB8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBtYWxlJTIwZW1wbG95ZWUlMjBoZWFkc2hvdCUyMGF2YXRhcnxlbnwwfHx8fDE3ODQzMzQzNjl8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Professional male employee headshot"
     }
   },
   "instructions_to_main_agent": [
-    "TRANSLATE TO REACT NATIVE: Use React Native `StyleSheet.create` for all styling. Do NOT use Tailwind CSS classes.",
-    "TEST IDS: Add `testID` prop to all interactive elements (buttons, inputs, tabs). Example: `testID='punch-in-button'`.",
-    "COLORS: Strictly use the defined colors (Primary Navy: #1B3A6E, Deep Navy: #12294F, Accent Amber: #E39A2A, Cream: #FBFBF9).",
-    "LAYOUT: Use `SafeAreaView` heavily for screens. The main background color for screens should be `#FBFBF9`.",
-    "TOUCH TARGETS: Ensure all buttons and touchable icons have a minimum height and width of 48px to accommodate blue-collar workers.",
-    "ASSETS: Use the exact URL `/app/frontend/assets/images/logo-mark.png` for the logo. Use provided remote image URLs for other visual placeholders.",
-    "TAB BAR: Implement a custom bottom tab bar where the 'Punch' tab is visually distinct (e.g., elevated or colored Amber)."
+    "MANDATORY: Respect the user's explicit override for colors. Use Blue (#2563EB) and Indigo (#4338CA) as the primary brand colors.",
+    "Implement the 'midnight_dark' and a new 'azure_light' theme preset in /app/frontend/src/theme.ts, updating the ThemeColors object in-place to support these exact hex codes.",
+    "Ensure all cards use a border-radius of 16px (lg token).",
+    "Implement glassmorphism on the web using the `style={{ backdropFilter: 'blur(12px)' }}` prop since CSS files are not used. Use expo-blur for mobile targets.",
+    "Wrap interactive cards in Pressable with a scale(0.97) animation on press and a hover effect scaling to 1.02 on web.",
+    "For the Admin Portal: Layout the mobile footer navigation as Dashboard, Attendance, Payroll, Compliance, Reports, More.",
+    "For the Employee ESS: Layout the bottom navigation as Home, Attendance, Leave, Payslip, Profile.",
+    "Apply soft shadows: `shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 24` for light mode, slightly higher opacity for dark mode.",
+    "Implement loading skeletons using a shimmer effect (Reanimated) over surfaceTertiary blocks before data loads.",
+    "Use MaterialIcons as the primary icon set per the user's request."
   ]
 }
