@@ -164,3 +164,6 @@ See `/app/memory/test_credentials.md`. Super admin
 ## Iter 182 — Salary audit log + premium Employee Master/Salary UX
 - 6/6 pytest (tests/test_iter182_salary_audit.py) + 7/7 frontend flows green (iteration_182.json). Auto-save, search, shortcuts, audit modal, stats bar all verified.
 - Fixed post-test: "process" audit hook re-added at server.py compliance run creation.
+
+## Iter 183 — Login redesign + grid filter chips
+- Testing agent: 2/2 backend pytest (tests/test_iter183_filter_chips.py) + all frontend flows green (iteration_183.json). Employee TEST50/123456 login works on redesigned page; chips filter/clear verified on fresh Kankani 2026-05 compliance run.
