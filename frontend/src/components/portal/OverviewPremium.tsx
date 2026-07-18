@@ -99,7 +99,7 @@ type Client = { company_id: string; name: string; score: number; grade: string }
 
 const KPIS: { key: string; label: string; icon: string; grad: [string, string]; route?: string; tab?: string; money?: boolean; soon?: boolean }[] = [
   { key: "firms", label: "Total Clients", icon: "business", grad: ["#2563EB", "#4338CA"], route: "/companies" },
-  { key: "total_employees", label: "Total Employees", icon: "people", grad: ["#0891B2", "#2563EB"], route: "/employee-master" },
+  { key: "total_employees", label: "Total Employees", icon: "people", grad: ["#0891B2", "#2563EB"], route: "/admin" },
   { key: "present_today", label: "Today's Attendance", icon: "checkmark-done", grad: ["#059669", "#10B981"], route: "/daily-attendance" },
   { key: "pending_payroll_firms", label: "Pending Payroll", icon: "hourglass", grad: ["#D97706", "#F59E0B"], route: "/compliance-salary-run" },
   { key: "payroll_finalized_firms", label: "Processed Payroll", icon: "shield-checkmark", grad: ["#059669", "#0891B2"], route: "/compliance-salary-run" },

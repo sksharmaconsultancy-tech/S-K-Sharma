@@ -167,3 +167,7 @@ See `/app/memory/test_credentials.md`. Super admin
 
 ## Iter 183 — Login redesign + grid filter chips
 - Testing agent: 2/2 backend pytest (tests/test_iter183_filter_chips.py) + all frontend flows green (iteration_183.json). Employee TEST50/123456 login works on redesigned page; chips filter/clear verified on fresh Kankani 2026-05 compliance run.
+
+## Iter 184 — Login→Dashboard default + dashboard options audit + employee form redesign
+- Testing agent iteration_184.json: login redirect PASS, 8/8 KPI cards (after /admin route fix), 8/8 quick actions, 5/5 tabs, bell/refresh/links/firm-chip PASS, employee add+edit premium form PASS, TEST50 employee login regression PASS.
+- Known cosmetic: expo-router "REPLACE payload index" dev warning after login redirect (non-blocking).

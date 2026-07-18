@@ -921,3 +921,10 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 ## Iter 183 — Premium PWA Login Redesign + Salary Grid Filter Chips (tested 2/2 pytest + full E2E, iteration_183.json)
 - `/pin-login` (Employee) & `/company-login` (Employer) fully redesigned: blue gradient (#1E3A8A→#3B82F6), glassmorphism card, gradient CTA, brand header, trust footer. Auth logic + all testIDs unchanged.
 - Branch/Dept/Contractor filter chips on Compliance + Actual Salary grids via new `src/components/GridFilterChips.tsx`; backend row builders (utils/compliance_salary.py, utils/salary_run.py) emit branch_name/department/contractor_name. Chips render only for groups with data; old saved runs (no fields) show no chips — no crash.
+
+## Iter 184 — Dashboard default home + option interlinks + Employee form premium redesign (tested, iteration_184.json)
+- All post-login redirects now go through "/" → desktop-web admins land on /portal-dashboard automatically (admin-pin-login, company-login, otp-login, pin-change; guards on login screens too).
+- Dashboard audit: ALL KPI cards/quick-actions/tabs/links verified against DB. Fixes: Pending Tasks KPI now opens Tasks tab; Total Employees KPI route corrected /employee-master→/admin (was dead click showing "Missing employee").
+- Welcome banner shows selected firm chip (pd-firm-chip) — firm name or "All Firms (N)".
+- /employee-add (both Add New Employee + Employee Details edit modes) premium redesign: gradient header icon, SectionHeader chips (Identity/Employment/Actual Salary/Compliance/Statutory-Bank/Family). Actual Salary section still conditional on firm Offline Salary toggle (by design).
+- Deployed note: user must redeploy on VPS for live/PWA to update; PWA needs app reopen×2 or hard refresh.
