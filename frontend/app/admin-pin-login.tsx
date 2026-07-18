@@ -5,6 +5,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { Redirect, useRouter } from "expo-router";
 
 import { api, saveToken } from "@/src/api/client";
@@ -114,9 +115,13 @@ export default function AdminPinLoginScreen() {
   const formContent = (
     <View style={isWeb ? styles.webCard : undefined}>
       {!isWeb && (
-        <View style={styles.iconWrap}>
-          <Ionicons name="shield-checkmark" size={30} color={colors.onCta} />
-        </View>
+        <LinearGradient
+          colors={["#1D4ED8", "#2563EB"]}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+          style={styles.iconWrap}
+        >
+          <Ionicons name="shield-checkmark" size={26} color="#fff" />
+        </LinearGradient>
       )}
       {isWeb && (
         <View style={styles.webCardHead}>
@@ -132,7 +137,7 @@ export default function AdminPinLoginScreen() {
       )}
       {!isWeb && (
         <>
-          <Text style={styles.title}>Admin sign in</Text>
+          <Text style={styles.title}>Employer Sign In</Text>
           <Text style={styles.subtitle}>
             {mode === "pin"
               ? "Enter your registered email or phone number, followed by your 6-digit PIN."
@@ -345,13 +350,27 @@ export default function AdminPinLoginScreen() {
 
   return (
     <View style={styles.root} testID="admin-pin-login-screen">
+      <LinearGradient
+        colors={["#1E3A8A", "#1D4ED8", "#2563EB", "#3B82F6"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+      <View style={styles.orb1} pointerEvents="none" />
+      <View style={styles.orb2} pointerEvents="none" />
+
       <SafeAreaView edges={["top", "bottom"]} style={{ flex: 1 }}>
         <View style={styles.header}>
-          <Pressable onPress={() => router.back()} hitSlop={8}>
-            <Ionicons name="chevron-back" size={26} color={colors.onSurface} />
+          <Pressable onPress={() => router.back()} hitSlop={8} style={styles.mobBackBtn}>
+            <Ionicons name="chevron-back" size={22} color="#fff" />
           </Pressable>
-          <Text style={styles.h1}>Admin sign in</Text>
-          <View style={{ width: 26 }} />
+          <View style={styles.brandRow}>
+            <View style={styles.brandMark}>
+              <Ionicons name="shield-checkmark" size={14} color="#fff" />
+            </View>
+            <Text style={styles.brandTxt}>S.K. Sharma &amp; Co.</Text>
+          </View>
+          <View style={{ width: 38 }} />
         </View>
 
         <KeyboardAvoidingView
@@ -362,7 +381,14 @@ export default function AdminPinLoginScreen() {
             contentContainerStyle={styles.scroll}
             keyboardShouldPersistTaps="handled"
           >
-            {formContent}
+            <View style={styles.mobCard}>
+              {formContent}
+            </View>
+            <View style={styles.trustRowMob}>
+              <Ionicons name="lock-closed" size={12} color="rgba(255,255,255,0.85)" />
+              <Text style={styles.trustTxtMob}>Secured with end-to-end encryption</Text>
+            </View>
+            <Text style={styles.footerTxtMob}>Compliance &amp; Workforce Portal · S.K. Sharma &amp; Co.</Text>
           </KeyboardAwareScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -380,20 +406,66 @@ function WebTrust({ icon, label }: { icon: any; label: string }) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.surface },
+  root: { flex: 1, backgroundColor: "#1D4ED8" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
+  orb1: {
+    position: "absolute", width: 280, height: 280, borderRadius: 140,
+    backgroundColor: "rgba(255,255,255,0.08)", top: -90, right: -70,
+  },
+  orb2: {
+    position: "absolute", width: 200, height: 200, borderRadius: 100,
+    backgroundColor: "rgba(255,255,255,0.06)", bottom: 60, left: -80,
+  },
+  mobBackBtn: {
+    width: 38, height: 38, borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.25)",
+    alignItems: "center", justifyContent: "center",
+  },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  brandMark: {
+    width: 24, height: 24, borderRadius: 8,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.35)",
+    alignItems: "center", justifyContent: "center",
+  },
+  brandTxt: { color: "#fff", fontSize: 14, fontWeight: "800", letterSpacing: 0.3 },
+  mobCard: {
+    backgroundColor: "rgba(255,255,255,0.95)",
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.7)",
+    padding: 22,
+    shadowColor: "#0B1E56",
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.35,
+    shadowRadius: 32,
+    elevation: 14,
+  },
+  trustRowMob: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 6, marginTop: 18,
+  },
+  trustTxtMob: { color: "rgba(255,255,255,0.85)", fontSize: 12, fontWeight: "600" },
+  footerTxtMob: {
+    color: "rgba(255,255,255,0.6)", fontSize: 11, textAlign: "center", marginTop: 6,
+  },
   header: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
   },
   h1: { color: colors.onSurface, fontSize: type.lg, fontWeight: "700" },
-  scroll: { padding: spacing.lg, paddingBottom: spacing.xl },
+  scroll: { padding: spacing.lg, paddingBottom: spacing.xl, flexGrow: 1, justifyContent: "center" },
   iconWrap: {
-    width: 60, height: 60, borderRadius: 30,
-    backgroundColor: colors.brandPrimary,
+    width: 56, height: 56, borderRadius: 18,
     alignItems: "center", justifyContent: "center",
     alignSelf: "center",
     marginBottom: spacing.md,
+    shadowColor: "#1D4ED8",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 14,
+    elevation: 8,
   },
   title: { color: colors.onSurface, fontSize: type.xl, fontWeight: "800", textAlign: "center" },
   subtitle: {

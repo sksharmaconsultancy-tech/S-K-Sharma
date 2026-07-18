@@ -928,3 +928,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Welcome banner shows selected firm chip (pd-firm-chip) — firm name or "All Firms (N)".
 - /employee-add (both Add New Employee + Employee Details edit modes) premium redesign: gradient header icon, SectionHeader chips (Identity/Employment/Actual Salary/Compliance/Statutory-Bank/Family). Actual Salary section still conditional on firm Offline Salary toggle (by design).
 - Deployed note: user must redeploy on VPS for live/PWA to update; PWA needs app reopen×2 or hard refresh.
+
+## Iter 185 — Employer PWA mobile login premium + QR install button always visible
+- admin-pin-login.tsx MOBILE layout redesigned (gradient bg + glass card, "Employer Sign In") — installed Employer PWA opens this screen (desktop split-screen untouched).
+- get-app.tsx (QR target): Install button now ALWAYS visible; when beforeinstallprompt unavailable (iOS/in-app browsers) it shows manual install steps alert; sets correct manifest per type (manifest-employer.json / manifest-employee.json) + apple-web-app title.
+- Self-tested via screenshots (390px): premium mobile employer login + install button on /get-app?type=employer.

@@ -12,6 +12,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { colors, radius, spacing, type } from "@/src/theme";
+import { setAppleWebAppTitle, setManifestHref } from "@/src/utils/pwa";
 
 const LOGO = require("../assets/images/logo-mark.png");
 
@@ -32,6 +33,10 @@ export default function GetAppScreen() {
     try {
       window.localStorage.setItem("qr_entry_type", isEmployer ? "employer" : "employee");
     } catch {}
+    // Iter 185 — point the browser at the correct app manifest so the
+    // Install prompt installs the right PWA (Employer vs Employee).
+    setManifestHref(isEmployer ? "/manifest-employer.json" : "/manifest-employee.json");
+    setAppleWebAppTitle(isEmployer ? "SKS Employer" : "SKS Employee");
   }, [isEmployer]);
 
   useEffect(() => {
@@ -72,7 +77,16 @@ export default function GetAppScreen() {
       setInstallEvt(null);
       (window as any).__pwaInstallEvent = null;
       (window as any).__pwaInstallEvt = null;
+      return;
     }
+    // Iter 185 — no native prompt available (iOS Safari, in-app browsers,
+    // or already-dismissed prompt): show clear manual install steps so the
+    // user is never left without an install path.
+    window.alert(
+      iosHint
+        ? 'Install on iPhone/iPad:\n\n1. Open this page in Safari\n2. Tap the Share button (square with ↑)\n3. Scroll and tap "Add to Home Screen"\n4. Tap "Add"'
+        : 'Install on Android:\n\n1. Open this page in Chrome\n2. Tap the menu (⋮) at top-right\n3. Tap "Install app" or "Add to Home screen"\n\nTip: If you opened this from WhatsApp/Camera, first tap "Open in Chrome".',
+    );
   };
 
   const goRegister = () => {
@@ -105,17 +119,22 @@ export default function GetAppScreen() {
           <Text style={styles.stepTitle}>Download / Install the App</Text>
           {isStandalone || installed ? (
             <Text style={styles.okTxt}>✓ App is installed — continue to Step 2</Text>
-          ) : installEvt ? (
-            <Pressable style={styles.installBtn} onPress={install} testID="getapp-install">
-              <Ionicons name="download-outline" size={18} color="#fff" />
-              <Text style={styles.installTxt}>Install App</Text>
-            </Pressable>
           ) : (
-            <Text style={styles.hintTxt}>
-              {iosHint
-                ? 'Tap the Share button (□↑) in Safari, then choose "Add to Home Screen".'
-                : 'Open your browser menu (⋮) and choose "Install app" / "Add to Home Screen".'}
-            </Text>
+            <>
+              <Pressable style={styles.installBtn} onPress={install} testID="getapp-install">
+                <Ionicons name="download-outline" size={18} color="#fff" />
+                <Text style={styles.installTxt}>
+                  {installEvt ? "Install App" : "Install App on this Phone"}
+                </Text>
+              </Pressable>
+              {!installEvt ? (
+                <Text style={styles.hintTxt}>
+                  {iosHint
+                    ? 'Tap the button above for steps, or use Safari\u2019s Share button (□↑) → "Add to Home Screen".'
+                    : 'Tap the button above. If nothing happens, open your browser menu (⋮) and choose "Install app" / "Add to Home Screen".'}
+                </Text>
+              ) : null}
+            </>
           )}
         </View>
 
