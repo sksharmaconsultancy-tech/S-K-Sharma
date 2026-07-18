@@ -954,3 +954,7 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - (tabs)/index.tsx: stale-response guard (loadSeqRef) — switching firms no longer lets an older in-flight /admin/stats response overwrite the new firm's data.
 - biometric-prefs.tsx: NEW WebBiometricPrefs branch for web/PWA — employees can now ENABLE (WebAuthn enroll), TEST and REMOVE device biometrics in the browser (was a dead-end "open on your phone" screen). Uses existing fingerprintGate utils (same as required-fingerprint flow).
 - PunchFlowModal: optional-skip message now points users to Profile → Biometric preferences to enable.
+
+## Iter 189 — Enterprise Employee Form (SAP/Workday-grade) — desktop + mobile PWA (tested, all pass)
+- /employee-add (Add + Edit modes) desktop shell: breadcrumb sticky header, 6 section anchor-tabs (nativeID + scrollIntoView), left summary panel (avatar/status/summary rows; completion checklist in add mode, Open Full Profile in edit), sticky bottom bar (Cancel/Save Draft/Create-Save). Form logic untouched; E2E create+edit verified by testing agent (TESTQA employee created+deleted).
+- Iter 189b mobile PWA: horizontal section jump-tabs + live completion bar under header + sticky bottom action bar (web only; native untouched).

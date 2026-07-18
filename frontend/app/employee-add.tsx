@@ -777,6 +777,33 @@ export default function EmployeeAddScreen() {
       </SafeAreaView>
       )}
 
+      {/* Iter 189b — mobile PWA: section jump-tabs + completion bar */}
+      {!isWide && Platform.OS === "web" && (
+        <View style={styles.mobTabsWrap}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mobTabs}>
+            {SECTION_TABS.map((t) => (
+              <Pressable
+                key={t.id}
+                onPress={() => scrollToSection(t.id)}
+                style={[styles.entTab, activeTab === t.id && styles.entTabOn]}
+                testID={`mob-tab-${t.id}`}
+              >
+                <Ionicons name={t.icon as any} size={13} color={activeTab === t.id ? "#fff" : colors.onSurfaceSecondary} />
+                <Text style={[styles.entTabTxt, activeTab === t.id && { color: "#fff" }]}>{t.label}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+          {!editUserId && (
+            <View style={styles.mobProgressRow}>
+              <View style={[styles.entProgressTrack, { flex: 1, marginBottom: 0 }]}>
+                <View style={[styles.entProgressFill, { width: `${(doneCount / checklist.length) * 100}%` }]} />
+              </View>
+              <Text style={styles.mobProgressTxt}>{doneCount}/{checklist.length}</Text>
+            </View>
+          )}
+        </View>
+      )}
+
       <View style={styles.entBody}>
         {isWide && (
           <View style={styles.entPanel}>
@@ -1926,12 +1953,14 @@ export default function EmployeeAddScreen() {
         </View>
       </View>
 
-      {/* Sticky bottom action bar — desktop enterprise shell */}
-      {isWide && (
-        <View style={styles.entBottomBar}>
-          <Pressable onPress={() => router.back()} style={styles.entGhostBtn} testID="ent-cancel">
-            <Text style={styles.entGhostTxt}>Cancel</Text>
-          </Pressable>
+      {/* Sticky bottom action bar — web (desktop + mobile PWA) */}
+      {Platform.OS === "web" && (
+        <View style={[styles.entBottomBar, !isWide && styles.mobBottomBar]}>
+          {isWide && (
+            <Pressable onPress={() => router.back()} style={styles.entGhostBtn} testID="ent-cancel">
+              <Text style={styles.entGhostTxt}>Cancel</Text>
+            </Pressable>
+          )}
           <View style={{ flex: 1 }} />
           {!editUserId && (
             <Pressable
@@ -2244,6 +2273,19 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
   },
   entPrimaryTxt: { color: "#fff", fontSize: 13.5, fontWeight: "800" },
+  mobTabsWrap: {
+    backgroundColor: "#FFFFFF",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0",
+    paddingVertical: 8,
+  },
+  mobTabs: { paddingHorizontal: 12, gap: 6, flexDirection: "row" },
+  mobProgressRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingHorizontal: 14, marginTop: 8,
+  },
+  mobProgressTxt: { fontSize: 11, fontWeight: "800", color: colors.brandPrimary },
+  mobBottomBar: { paddingHorizontal: 12, paddingVertical: 8, paddingBottom: 12 },
 
   root: { flex: 1, backgroundColor: colors.background },
   header: {
