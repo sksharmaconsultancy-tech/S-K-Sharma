@@ -12,6 +12,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect } from "@react-navigation/native";
 import * as Location from "expo-location";
 
@@ -243,40 +244,51 @@ export default function Dashboard() {
           }
         />
       ) : (
-      <SafeAreaView edges={["top"]} style={{ backgroundColor: colors.surface }}>
-        <View style={styles.topBar}>
-          <View style={styles.topLeft}>
-            <Image source={LOGO} style={styles.brandLogo} contentFit="contain" />
-            <View>
-              <Text style={styles.greetSmall}>Hello,</Text>
-              <Text style={styles.greetName}>{user?.name?.split(" ")[0] || "there"}</Text>
-              {user?.role === "employee" && user?.employee_code ? (
-                <Text style={styles.greetCode} testID="employee-code-display">
-                  ID: {user.employee_code}
+      <SafeAreaView edges={["top"]} style={{ backgroundColor: "transparent" }}>
+        {/* Iter 186 — premium gradient header for Employer / Admin home */}
+        <LinearGradient
+          colors={["#1E3A8A", "#1D4ED8", "#2563EB"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.adminHero}
+        >
+          <View style={styles.topBar}>
+            <View style={styles.topLeft}>
+              <View style={styles.heroLogoChip}>
+                <Image source={LOGO} style={styles.brandLogo} contentFit="contain" />
+              </View>
+              <View style={{ flexShrink: 1 }}>
+                <Text style={styles.greetSmall}>Welcome back,</Text>
+                <Text style={styles.greetName} numberOfLines={1}>
+                  {user?.name?.split(" ")[0] || "there"} 👋
                 </Text>
-              ) : null}
+              </View>
             </View>
+            <Pressable
+              testID="notif-bell"
+              onPress={() => router.push("/notifications")}
+              style={styles.bell}
+            >
+              <Ionicons name="notifications-outline" size={21} color="#fff" />
+              {unreadNotifs > 0 && <View style={styles.bellDot} />}
+            </Pressable>
           </View>
-          <Pressable
-            testID="notif-bell"
-            onPress={() => router.push("/notifications")}
-            style={styles.bell}
-          >
-            <Ionicons name="notifications-outline" size={22} color={colors.onSurface} />
-            {unreadNotifs > 0 && <View style={styles.bellDot} />}
-          </Pressable>
-        </View>
 
-        <View style={styles.roleRow}>
-          <View style={styles.rolePill}>
-            <Text style={styles.rolePillTxt}>{roleBadge}</Text>
+          <View style={styles.roleRow}>
+            <View style={styles.rolePill}>
+              <Ionicons name="shield-checkmark" size={11} color="#fff" />
+              <Text style={styles.rolePillTxt}>{roleBadge}</Text>
+            </View>
+            {company && (
+              <View style={styles.companyPill}>
+                <Ionicons name="business" size={11} color="#BFDBFE" />
+                <Text style={styles.companyLabel} numberOfLines={1}>
+                  {company.name}
+                </Text>
+              </View>
+            )}
           </View>
-          {company && (
-            <Text style={styles.companyLabel} numberOfLines={1}>
-              · {company.name}
-            </Text>
-          )}
-        </View>
+        </LinearGradient>
       </SafeAreaView>
       )}
 
@@ -1110,61 +1122,84 @@ function ActionRow({
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.surface },
+  adminHero: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    shadowColor: "#0B1E56",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  heroLogoChip: {
+    width: 48, height: 48, borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.5)",
+  },
   topBar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
   },
-  topLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
-  brandLogo: { width: 42, height: 42 },
+  topLeft: { flexDirection: "row", alignItems: "center", gap: 12, flexShrink: 1 },
+  brandLogo: { width: 38, height: 38 },
   brandCenter: { alignItems: "center", marginTop: 4, marginBottom: 14 },
   brandCenterLogo: { width: 72, height: 72, marginBottom: 6 },
   brandCenterName: { fontSize: 20, fontWeight: "900", color: colors.onSurface, textAlign: "center" },
   brandCenterSub: { fontSize: 12, fontWeight: "700", color: colors.brandPrimary, marginTop: 2, textAlign: "center" },
-  greetSmall: { color: colors.onSurfaceSecondary, fontSize: type.sm },
+  greetSmall: { color: "rgba(255,255,255,0.8)", fontSize: type.sm },
   greetName: {
-    color: colors.onSurface, fontSize: type.xl,
-    fontWeight: "700", letterSpacing: -0.5, marginTop: -2,
-  },
-  greetCode: {
-    color: colors.brandPrimary,
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-    marginTop: 2,
+    color: "#fff", fontSize: type.xl,
+    fontWeight: "800", letterSpacing: -0.5, marginTop: -2,
   },
   bell: {
     width: 44, height: 44, borderRadius: 22,
-    backgroundColor: colors.surfaceSecondary,
+    backgroundColor: "rgba(255,255,255,0.16)",
     alignItems: "center", justifyContent: "center",
-    borderWidth: 1, borderColor: colors.border,
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.3)",
   },
   bellDot: {
     position: "absolute", top: 10, right: 12,
-    width: 8, height: 8, borderRadius: 4, backgroundColor: colors.cta,
+    width: 8, height: 8, borderRadius: 4, backgroundColor: "#F59E0B",
   },
   roleRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: spacing.lg,
+    gap: 8,
     marginTop: spacing.sm,
-    marginBottom: spacing.md,
   },
   rolePill: {
-    backgroundColor: colors.brandTertiary,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.3)",
     paddingHorizontal: 10, paddingVertical: 4,
     borderRadius: radius.pill,
   },
   rolePillTxt: {
-    color: colors.brandPrimary, fontSize: 10,
-    fontWeight: "700", letterSpacing: 1,
+    color: "#fff", fontSize: 10,
+    fontWeight: "800", letterSpacing: 1,
   },
-  companyLabel: { color: colors.onSurfaceSecondary, fontSize: type.sm, flex: 1 },
+  companyPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    flexShrink: 1,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
+    paddingHorizontal: 10, paddingVertical: 4,
+    borderRadius: radius.pill,
+  },
+  companyLabel: { color: "#DBEAFE", fontSize: 11, fontWeight: "700", flexShrink: 1 },
 
-  scroll: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg },
+  scroll: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg, paddingTop: spacing.md },
   // Iter 180 — ESS scroll overlaps the gradient welcome header so the
   // punch card floats over it (no child clipping issues).
   essScroll: { marginTop: -44 },

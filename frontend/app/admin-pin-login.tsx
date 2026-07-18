@@ -297,8 +297,14 @@ export default function AdminPinLoginScreen() {
   if (isWeb) {
     return (
       <View style={styles.webRoot} testID="admin-pin-login-screen">
-        {/* Left brand panel */}
-        <View style={styles.webLeftPane}>
+        {/* Left brand panel — Iter 186 deep blue gradient (matches new
+            Employer/Employee login design language) */}
+        <LinearGradient
+          colors={["#1E3A8A", "#1D4ED8", "#2563EB"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.webLeftPane}
+        >
           <View style={styles.webLeftBlob} />
           <View style={styles.webLeftBlob2} />
           <View style={styles.webLeftContent}>
@@ -332,7 +338,7 @@ export default function AdminPinLoginScreen() {
               </Text>
             </View>
           </View>
-        </View>
+        </LinearGradient>
 
         {/* Right sign-in pane */}
         <View style={styles.webRightPane}>
@@ -399,7 +405,7 @@ export default function AdminPinLoginScreen() {
 function WebTrust({ icon, label }: { icon: any; label: string }) {
   return (
     <View style={styles.webTrustItem}>
-      <Ionicons name={icon} size={14} color="#0EA5E9" />
+      <Ionicons name={icon} size={14} color="#FFFFFF" />
       <Text style={styles.webTrustTxt}>{label}</Text>
     </View>
   );
@@ -557,38 +563,35 @@ const styles = StyleSheet.create({
   },
   webLeftPane: {
     flex: 1,
-    backgroundColor: "#EFF6FF",
     padding: spacing.xl * 1.5,
     justifyContent: "center",
     overflow: "hidden",
     position: "relative",
     minWidth: 360,
     maxWidth: 620,
-    borderRightWidth: 1,
-    borderRightColor: "#DBEAFE",
   },
   webLeftBlob: {
     position: "absolute", top: -160, right: -160,
     width: 480, height: 480, borderRadius: 240,
-    backgroundColor: "#93C5FD", opacity: 0.35,
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   webLeftBlob2: {
     position: "absolute", bottom: -140, left: -120,
     width: 380, height: 380, borderRadius: 190,
-    backgroundColor: "#BAE6FD", opacity: 0.55,
+    backgroundColor: "rgba(96,165,250,0.25)",
   },
   webLeftContent: { zIndex: 1 },
   webLogo: {
     width: 88, height: 88, borderRadius: 22,
-    backgroundColor: "#ffffff",
-    borderWidth: 1, borderColor: "#DBEAFE",
+    backgroundColor: "rgba(255,255,255,0.95)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.5)",
     alignItems: "center", justifyContent: "center",
     marginBottom: spacing.lg,
-    shadowColor: "#0F172A", shadowOpacity: 0.06,
-    shadowRadius: 12, shadowOffset: { width: 0, height: 4 },
+    shadowColor: "#0B1E56", shadowOpacity: 0.3,
+    shadowRadius: 16, shadowOffset: { width: 0, height: 8 },
   },
   webBrand: {
-    color: "#0F172A", fontSize: 40, fontWeight: "800",
+    color: "#FFFFFF", fontSize: 40, fontWeight: "800",
     letterSpacing: -1, marginBottom: spacing.md,
   },
   webTagRow: {
@@ -596,24 +599,24 @@ const styles = StyleSheet.create({
     gap: 10, marginBottom: spacing.lg,
   },
   webTagPill: {
-    color: "#0369A1", fontSize: 11, fontWeight: "800", letterSpacing: 2,
+    color: "#BFDBFE", fontSize: 11, fontWeight: "800", letterSpacing: 2,
   },
-  webDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: "#60A5FA" },
+  webDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.5)" },
   webTagline: {
-    color: "#334155", fontSize: 16, lineHeight: 26,
+    color: "rgba(255,255,255,0.88)", fontSize: 16, lineHeight: 26,
     marginBottom: spacing.xl, maxWidth: 460,
   },
   webTrustRow: { flexDirection: "row", gap: 10, flexWrap: "wrap" },
   webTrustItem: {
     flexDirection: "row", alignItems: "center", gap: 6,
-    backgroundColor: "#ffffff",
+    backgroundColor: "rgba(255,255,255,0.14)",
     paddingHorizontal: 12, paddingVertical: 8,
-    borderRadius: 999, borderWidth: 1, borderColor: "#DBEAFE",
+    borderRadius: 999, borderWidth: 1, borderColor: "rgba(255,255,255,0.3)",
   },
-  webTrustTxt: { color: "#0369A1", fontSize: 12, fontWeight: "700" },
+  webTrustTxt: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" },
   webFoot: { position: "absolute", bottom: -spacing.xl, left: 0, right: 0 },
   webFootTxt: {
-    color: "#64748B", fontSize: 11, marginTop: spacing.xl * 2,
+    color: "rgba(255,255,255,0.6)", fontSize: 11, marginTop: spacing.xl * 2,
   },
 
   webRightPane: {

@@ -933,3 +933,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - admin-pin-login.tsx MOBILE layout redesigned (gradient bg + glass card, "Employer Sign In") — installed Employer PWA opens this screen (desktop split-screen untouched).
 - get-app.tsx (QR target): Install button now ALWAYS visible; when beforeinstallprompt unavailable (iOS/in-app browsers) it shows manual install steps alert; sets correct manifest per type (manifest-employer.json / manifest-employee.json) + apple-web-app title.
 - Self-tested via screenshots (390px): premium mobile employer login + install button on /get-app?type=employer.
+
+## Iter 186 — Post-login Admin home + Admin Sign In premium consistency
+- (tabs)/index.tsx admin/employer MOBILE home: old "Hello" top bar replaced with premium gradient hero header (Welcome back + role pill + company pill + glass bell). Employee ESS home untouched.
+- admin-pin-login.tsx DESKTOP left brand panel converted from light blue to deep #1E3A8A→#2563EB gradient with white text + glass trust pills (matches new login design language across app).
+- Verified via screenshots (desktop 1920 + mobile 390 after real login).
