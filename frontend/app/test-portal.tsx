@@ -10,7 +10,7 @@
  * Note: browsers do not allow one website to type into another site's
  * tab (cross-origin security), so paste is the fastest safe fill.
  */
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -62,6 +62,30 @@ function openInNewTab(url: string) {
   }
 }
 
+/**
+ * Build a bookmarklet that, when clicked ON the portal login page, types
+ * the User ID + Password into that page's own fields. This is the only
+ * browser-safe way to auto-fill a third-party site (cross-origin blocks
+ * our app from touching the portal tab directly).
+ */
+function buildBookmarklet(userId: string, password: string): string {
+  const code =
+    "(function(){var U=" +
+    JSON.stringify(userId) +
+    ",P=" +
+    JSON.stringify(password) +
+    ";function s(e,v){var p=e.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;" +
+    "var d=Object.getOwnPropertyDescriptor(p,'value').set;d.call(e,v);" +
+    "e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));}" +
+    "var pw=document.querySelector('input[type=password]');if(pw)s(pw,P);" +
+    "var t=[].slice.call(document.querySelectorAll('input[type=text],input:not([type])'));" +
+    "var u=t.filter(function(i){var n=((i.name||'')+(i.id||'')+(i.placeholder||''));" +
+    "return !/captcha|code|otp|search/i.test(n)&&i.offsetParent!==null;})[0];if(u)s(u,U);" +
+    "if(!pw&&!u){alert('Login fields not found — open the portal LOGIN page first, then click Auto-Fill.');}" +
+    "else{try{(u||pw).focus();}catch(e){}}})();";
+  return "javascript:" + encodeURIComponent(code);
+}
+
 export default function TestPortalScreen() {
   const { user, loading } = useAuth();
 
@@ -96,6 +120,19 @@ function PortalCard({ portalKey }: { portalKey: PortalKey }) {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<"user" | "pass" | null>(null);
   const [revealPass, setRevealPass] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
+
+  const bookmarklet = useMemo(
+    () => (creds ? buildBookmarklet(creds.user_id, creds.password) : ""),
+    [creds],
+  );
+
+  const copyCode = useCallback(async () => {
+    if (!bookmarklet) return;
+    await Clipboard.setStringAsync(bookmarklet);
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 1800);
+  }, [bookmarklet]);
 
   const copy = useCallback(async (value: string, which: "user" | "pass") => {
     await Clipboard.setStringAsync(value);
@@ -197,9 +234,86 @@ function PortalCard({ portalKey }: { portalKey: PortalKey }) {
               on the Password and paste it too.
             </Text>
           </View>
+
+          <View style={st.divider} />
+
+          <Text style={st.autoHead}>
+            ⚡ Auto-Fill the portal (one-time setup)
+          </Text>
+          {Platform.OS === "web" ? (
+            <>
+              <WebDragButton href={bookmarklet} />
+              <Text style={st.autoStep}>
+                1. Drag the purple “Auto-Fill” button above onto your browser’s
+                Bookmarks bar (press Ctrl+Shift+B to show it).{"\n"}
+                2. Open the {portalKey === "esic" ? "ESIC" : "PF"} login page
+                (button above).{"\n"}
+                3. On that page, click the “Auto-Fill” bookmark — your User ID &
+                Password fill in automatically. Enter the captcha and sign in.
+              </Text>
+            </>
+          ) : (
+            <Text style={st.autoStep}>
+              Open this Test page on a computer (web) to use one-click Auto-Fill.
+              On mobile, use the Copy buttons above and paste into the portal.
+            </Text>
+          )}
+          <Pressable
+            style={[st.codeBtn, codeCopied && st.copyBtnOk]}
+            onPress={copyCode}
+            hitSlop={6}
+          >
+            <Ionicons
+              name={codeCopied ? "checkmark" : "code-slash-outline"}
+              size={16}
+              color={codeCopied ? "#059669" : colors.brandPrimary}
+            />
+            <Text style={[st.copyTxt, codeCopied && { color: "#059669" }]}>
+              {codeCopied ? "Auto-Fill code copied" : "Copy Auto-Fill code (manual bookmark)"}
+            </Text>
+          </Pressable>
         </View>
       ) : null}
     </View>
+  );
+}
+
+/**
+ * Web-only draggable anchor rendered as a real HTML <a> so the user can
+ * drag it to the bookmarks bar. On web, react-dom renders lowercase tags
+ * directly, so this works even inside react-native-web.
+ */
+function WebDragButton({ href }: { href: string }) {
+  if (Platform.OS !== "web" || !href) return null;
+  // React DOM sanitizes `javascript:` hrefs (replaces them with an error).
+  // Set the attribute directly on the mounted node to bypass that so the
+  // dragged bookmark keeps the real bookmarklet code.
+  const setRef = (node: any) => {
+    if (node) node.setAttribute("href", href);
+  };
+  return React.createElement(
+    "a",
+    {
+      ref: setRef,
+      draggable: true,
+      onClick: (e: any) => e.preventDefault(),
+      style: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        background: "#7C3AED",
+        color: "#fff",
+        padding: "12px 16px",
+        borderRadius: 10,
+        textDecoration: "none",
+        fontWeight: 800,
+        fontSize: 14,
+        cursor: "grab",
+        alignSelf: "flex-start",
+        userSelect: "none",
+      },
+    },
+    "🔖 SKS Auto-Fill (drag me to Bookmarks bar)",
   );
 }
 
@@ -291,4 +405,12 @@ const st = StyleSheet.create({
     backgroundColor: "#EFF6FF", borderRadius: 10, padding: 11,
   },
   hintTxt: { flex: 1, color: "#1D4ED8", fontSize: 12, lineHeight: 17 },
+  divider: { height: 1, backgroundColor: colors.border, marginVertical: 2 },
+  autoHead: { fontSize: 13.5, fontWeight: "800", color: colors.textPrimary },
+  autoStep: { fontSize: 12.5, color: colors.textSecondary, lineHeight: 19 },
+  codeBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start",
+    borderWidth: 1, borderColor: colors.brandPrimary, borderRadius: 8,
+    paddingVertical: 8, paddingHorizontal: 12,
+  },
 });
