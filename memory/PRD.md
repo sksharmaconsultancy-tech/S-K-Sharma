@@ -972,3 +972,15 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - REFACTOR: employee-add.tsx form model (EmpForm, EMPTY_FORM, SECTION_TABS, date/gender helpers) extracted to src/utils/employeeForm.ts (2647→2503 lines). No UI change.
 - Testing agent iteration: 13/13 backend pytest (tests/test_iter190_kyc_tracker.py) + full desktop E2E green; /employee-add & TEST50 login regressions pass.
 - NOT deployed to live yet — user must run the VPS deploy script and reopen PWA twice.
+
+## Iter 192 — Employee Advance Management System (tested 25/25, E2E pass)
+- NEW backend routes/advances.py: advances + advance_transactions collections. POST/GET/PATCH/DELETE /api/admin/advances, /dashboard (KPIs, 6-mo trend, dept/contractor/type breakdowns), /reports (9 kinds + xlsx via openpyxl), /{id}/action (pause|resume|skip_month|recover_full[fnf]|waive), GET /api/me/advances (ESS).
+- Advance types: Salary/Festival/Loan/Emergency/Medical/Travel/Other; payment modes Cash/Bank/UPI/Cheque; recovery single|emi; source compliance|actual|both; priority high/normal/low (oldest-first tiebreak); auto voucher ADV-NNNNN (db.counters); auto end-month; auto-close at balance 0; audit trail on every action.
+- SALARY SYNC hooks in server.py: compliance create (~14426), compliance reprocess (~14799), actual-salary-process (~18470) call routes.advances.apply_advance_recovery. Idempotent per (advance, month, process); 'both' source mirrors in 2nd process WITHOUT double balance decrement (balance_applied flag); deduction capped at row net. Compliance rows: advance_recovery/total_deduction/net + totals; Actual rows: adv/net_pay.
+- Frontend /advances (enterprise UI): tabs Dashboard/Ledger/Reports, New Advance modal (employee search, EMI auto-installments, end-month auto), detail modal (summary boxes, progress, schedule, recovery history, audit, action buttons w/ confirmations), Excel export. Sidebar: Salary Process group > "Advance Management" (both navs, perm salary_process:*).
+- Frontend /my-advances (ESS read-only) + "My Advances" quick card on employee dashboard.
+- User constraint honored: NO changes to super_admin/sub_admin role logic.
+- Iter 191.5 fix: temp-code-bundle endpoint now ALWAYS rebuilds tar (stale-cache deploy bug); live VPS orphan process on port 8001 killed (spawn error root cause).
+- NOTE: Kankani firm_masters salary_process.offline_salary was enabled in WORKSPACE db for testing actual salary process.
+- NOT yet deployed to live VPS.
+- PENDING USER DECISION: huge RBAC/approval-workflow spec pasted (roles, permission matrix, workflow builder, approval inbox) — needs phased plan + confirmation before build.

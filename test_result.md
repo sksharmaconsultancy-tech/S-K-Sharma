@@ -176,3 +176,8 @@ See `/app/memory/test_credentials.md`. Super admin
 - Backend: routes/kyc_tracker.py (GET /api/admin/kyc-tracker), employee_kyc.py +dl_valid_upto/passport_valid_upto; routes/employee_documents.py extracted from server.py (identical behaviour verified).
 - Frontend: app/kyc-tracker.tsx (KPI cards/chips/search/Validity modal), AdminWebShell sidebar entries; employee-add.tsx model → src/utils/employeeForm.ts.
 - Testing agent: 13/13 pytest (tests/test_iter190_kyc_tracker.py, report /app/test_reports/pytest/iter190.xml) + full web E2E pass (modal save → EXPIRING badge + KPI increment; cleanup done). 2 cosmetic issues fixed post-test (kyc echo fields, testID non-ASCII slug).
+
+## Iter 192 — Employee Advance Management
+- Backend: routes/advances.py + salary hooks (compliance create/reprocess, actual process). 25/25 pytest (tests/test_iter192_advances.py). Idempotency, 'both' mirroring, net-cap, all action validations verified.
+- Frontend: app/advances.tsx (Dashboard/Ledger/Reports + modals), app/my-advances.tsx (ESS), sidebar + ESS quick card. E2E pass (create ADV-00001, pause->on_hold, delete, reports).
+- Test data fully cleaned by testing agent.
