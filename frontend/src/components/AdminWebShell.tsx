@@ -68,6 +68,7 @@ export const NAV_SUPER: NavItem[] = [
   // completeness + DL/Passport validity reminders).
   { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
   { route: "/roles", label: "Roles & Permissions", icon: "key-outline" },
+  { route: "/proposals", label: "Sales · Proposals", icon: "document-text-outline" },
   {
     label: "Salary Process",
     icon: "cash-outline",
@@ -157,6 +158,7 @@ export const NAV_SUPER: NavItem[] = [
   },
   { route: "/employee-bulk-import", label: "Bulk Import (Excel)", icon: "cloud-upload-outline" },
   { route: "/attendance-policy", label: "Attendance Policy", icon: "time-outline" },
+  { route: "/geofence-policy", label: "Geofence Policy", icon: "location-outline" },
   // Iter 85 — Utility group. Users Log Report is a new audit view;
   // Messages + Tickets moved under this umbrella so ops tools live in
   // one collapsible section.
@@ -361,6 +363,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
   { route: "/join-qr", label: "QR Codes (Join / App)", icon: "qr-code-outline" },
   { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
   { route: "/roles", label: "Roles & Permissions", icon: "key-outline" },
+  { route: "/proposals", label: "Sales · Proposals", icon: "document-text-outline" },
   {
     label: "Reports",
     icon: "bar-chart-outline",
@@ -395,6 +398,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
   },
   { route: "/employee-bulk-import", label: "Bulk Import (Excel)", icon: "cloud-upload-outline" },
   { route: "/attendance-policy", label: "Attendance Policy", icon: "time-outline" },
+  { route: "/geofence-policy", label: "Geofence Policy", icon: "location-outline" },
   { route: "/location-audit", label: "Location Audit", icon: "navigate-outline" },
   { route: "/biometric-devices", label: "Biometric Devices", icon: "finger-print-outline" },
   { route: "/messages", label: "Messages", icon: "chatbubbles-outline" },
