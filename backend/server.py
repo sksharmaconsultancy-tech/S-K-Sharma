@@ -333,6 +333,17 @@ class AttendancePunch(BaseModel):
     # (main office or a branch). Stored on the record for reports.
     worksite_id: Optional[str] = None
     worksite_name: Optional[str] = None
+    # Geofence-policy fields (Phase 1 — mode-driven punch).
+    # reason: required for Flexible-outside / Emergency punches.
+    reason: Optional[str] = None
+    # Client-reported GPS accuracy in metres (for accuracy-threshold checks).
+    gps_accuracy_m: Optional[float] = None
+    # Optional device battery level 0-100 (audit only).
+    battery_level: Optional[int] = None
+    # Client hint that the OS reported a mock/fake location (fake-GPS check).
+    mock_location: Optional[bool] = None
+    # Optional extra photo for Emergency mode.
+    photo_base64: Optional[str] = None
 
 
 class LocationPing(BaseModel):
@@ -8564,8 +8575,32 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
 
     # Iter 68 — GEOFENCE IS ON BY DEFAULT.
     #
-    # Punch policy:
-    #   • Outside the geofence → HARD REJECT (400 error, notify admins).
+    # Phase-1 geofence POLICY: resolve the effective mode (strict / flexible
+    # / field / remote / emergency) for this employee and let it drive the
+    # accept / reject / approval decision. Default = strict, which keeps the
+    # original behaviour intact for firms that don't configure a policy.
+    from routes.geo_policy import resolve_geo_policy, evaluate_geo_punch
+    _pol = await resolve_geo_policy(user, company)
+    pol_mode = _pol["mode"]
+    pol_settings = _pol["settings"]
+    pol_decision = evaluate_geo_punch(
+        pol_mode, pol_settings,
+        outside=bool(outside), dist=float(dist), radius=float(radius),
+        lat=payload.latitude, lng=payload.longitude,
+        has_selfie=bool(payload.selfie_base64),
+        reason=payload.reason, is_live_in=is_live_in,
+    )
+    # A non-strict mode may permit an outside punch — in that case we skip
+    # the legacy hard-reject and let the record carry the policy status.
+    policy_allows_outside = bool(pol_decision["allow"]) and pol_mode != "strict"
+
+    # If the policy explicitly rejects (strict-outside, remote-outside,
+    # missing reason/selfie for flexible/emergency) surface that message.
+    if outside and not pol_decision["allow"]:
+        raise HTTPException(status_code=400, detail=pol_decision["reject_reason"])
+
+    # Iter 68 punch policy:
+    #   • Outside the geofence → HARD REJECT (strict mode only).
     #   • Inside the geofence  → allow.  Auto-punches ("geofence-auto"
     #     source) are always marked "needs_approval" so the employer
     #     signs off before they count.  Manual punches from within the
@@ -8573,7 +8608,8 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
     #
     # A firm can OPT-OUT of strict rejection by setting
     # ``companies.reject_outside_geofence = False`` in Firm Settings.
-    strict_outside = company.get("reject_outside_geofence") is not False
+    strict_outside = (company.get("reject_outside_geofence") is not False) \
+        and not policy_allows_outside
     outside_note: Optional[str] = None
     if outside:
         loc_name = (closest or {}).get("name") or "office"
@@ -8710,6 +8746,13 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
         # Iter 176 — guided punch workflow: employee-selected worksite.
         "worksite_id": payload.worksite_id or (closest or {}).get("branch_id"),
         "worksite_name": payload.worksite_name or (closest or {}).get("name"),
+        # Phase-1 geofence policy metadata (audit + reporting).
+        "policy_mode": pol_mode,
+        "policy_source": _pol["source"],
+        "punch_reason": (payload.reason or None),
+        "gps_accuracy_m": payload.gps_accuracy_m,
+        "battery_level": payload.battery_level,
+        "mock_location": bool(payload.mock_location) if payload.mock_location is not None else None,
     }
     # Determine approval status. Auto punches (geofence enter/exit background
     # trigger) land as "pending" when the firm has punch_approval_required=True.
@@ -8728,15 +8771,25 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
     # decides to relax the app-approval requirement in the future.
     src = (record.get("source") or "manual").lower()
     _ = "auto" in src or "geofence" in src  # kept for audit reason text (unused after Iter 86)
-    needs_approval = True  # every app-originated punch now needs approval
+    # Field mode auto-approves; every other app punch still needs approval.
+    field_auto = bool(pol_decision.get("auto_approve")) and pol_mode == "field"
+    needs_approval = not field_auto
     record["status"] = "pending" if needs_approval else "approved"
+    # Expanded status workflow (Phase 1) — richer value for badges/reports;
+    # `status` stays pending/approved/rejected for backward compatibility.
+    record["attendance_status"] = (
+        "approved" if field_auto else pol_decision.get("attendance_status")
+        or "pending_manager_approval"
+    )
     record["original_at"] = record["at"]  # immutable original punch time
     if not needs_approval:
         # Manual / instantly-approved punches carry a synthetic decision so
         # audit trails remain uniform across the collection.
         record["decision_at"] = record["at"]
         record["decision_by"] = user["user_id"]
-        if src == "manual-nogps":
+        if field_auto:
+            record["decision_reason"] = "auto-approved (field-employee geofence policy)"
+        elif src == "manual-nogps":
             record["decision_reason"] = (
                 "auto-approved (manual biometric punch — GPS off)"
             )
@@ -19014,6 +19067,9 @@ app.include_router(portal_extension_router)
 
 from routes.clra_registers import router as clra_registers_router  # noqa: E402
 app.include_router(clra_registers_router)
+
+from routes.geo_policy import router as geo_policy_router  # noqa: E402
+app.include_router(geo_policy_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
