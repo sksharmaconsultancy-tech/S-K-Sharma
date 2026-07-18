@@ -331,13 +331,18 @@ async def test_portal_login(
 @router.get("/portal-automation/esic-credentials")
 async def get_esic_credentials(
     company_id: Optional[str] = None,
+    portal: str = "esic",
     authorization: Optional[str] = Header(None),
 ):
-    """Return the firm's saved ESIC User ID + Password so the Test screen
-    can auto-fill / copy them when opening the portal in a new tab. Role-
-    gated to admins scoped to the firm (they entered these themselves)."""
+    """Return the firm's saved ESIC / EPFO User ID + Password so the Test
+    screen can auto-fill / copy them when opening the portal in a new tab.
+    Role-gated to admins scoped to the firm (they entered these themselves)."""
     admin = await get_user_from_token(authorization)
     require_role(admin, ["company_admin", "super_admin", "sub_admin"])
+
+    portal = (portal or "esic").lower()
+    if portal not in ("esic", "epfo"):
+        raise HTTPException(status_code=400, detail="portal must be 'esic' or 'epfo'")
 
     if admin["role"] == "company_admin":
         company_id = admin.get("company_id")
@@ -350,13 +355,14 @@ async def get_esic_credentials(
 
     from utils.rpa_worker import _fetch_creds
 
-    creds = await _fetch_creds(db, company_id, "esic")
+    creds = await _fetch_creds(db, company_id, portal)
     if not creds:
+        section = "ESIC Detail" if portal == "esic" else "EPF Detail"
         raise HTTPException(
             status_code=412,
             detail=(
-                "No ESIC User ID / Password saved on Firm Master → ESIC Detail. "
-                "Add them there first."
+                f"No {portal.upper()} User ID / Password saved on Firm Master → "
+                f"{section}. Add them there first."
             ),
         )
     return {

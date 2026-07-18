@@ -1,11 +1,11 @@
 /**
- * Test — ESIC portal quick launcher.
+ * Test — ESIC / EPFO portal quick launcher.
  *
- * Opens the ESIC employer portal in a NEW TAB (the operator's own browser
- * reaches the portal fine) and makes the firm's saved ESIC User ID +
- * Password one-tap fillable: the User ID is auto-copied to the clipboard
- * on open, and both fields have Copy buttons so the operator just pastes
- * them into the portal and types the captcha.
+ * Two buttons open the government employer portals (ESIC & EPFO) in a
+ * NEW TAB (the operator's own browser reaches the portals fine) and make
+ * the firm's saved User ID + Password one-tap fillable: the User ID is
+ * auto-copied to the clipboard on open, and both fields have Copy buttons
+ * so the operator just pastes them into the portal and types the captcha.
  *
  * Note: browsers do not allow one website to type into another site's
  * tab (cross-origin security), so paste is the fastest safe fill.
@@ -18,6 +18,7 @@ import {
   Pressable,
   Platform,
   Linking,
+  ScrollView,
   ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -30,10 +31,28 @@ import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { api } from "@/src/api/client";
 import { colors, radius } from "@/src/theme";
 
-const ESIC_URL =
-  "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx";
-
+type PortalKey = "esic" | "epfo";
 type Creds = { user_id: string; password: string; login_url: string };
+
+const PORTALS: Record<
+  PortalKey,
+  { name: string; url: string; icon: any; tint: string; section: string }
+> = {
+  esic: {
+    name: "ESIC Employer Portal",
+    url: "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx",
+    icon: "medkit",
+    tint: "#0891B2",
+    section: "ESIC Detail",
+  },
+  epfo: {
+    name: "EPFO Employer Portal (PF)",
+    url: "https://unifiedportal-emp.epfindia.gov.in/epfo/",
+    icon: "shield-checkmark",
+    tint: "#7C3AED",
+    section: "EPF Detail",
+  },
+};
 
 function openInNewTab(url: string) {
   if (Platform.OS === "web") {
@@ -45,7 +64,33 @@ function openInNewTab(url: string) {
 
 export default function TestPortalScreen() {
   const { user, loading } = useAuth();
+
+  if (loading) return null;
+  const role = user?.role as string;
+  if (!user || !["super_admin", "sub_admin", "company_admin"].includes(role)) {
+    return <Redirect href="/" />;
+  }
+
+  return (
+    <SafeAreaView style={st.safe} edges={["top"]}>
+      <ScrollView contentContainerStyle={st.wrap}>
+        <Text style={st.title}>Test — Statutory Portals</Text>
+        <Text style={st.subtitle}>
+          Opens a government employer portal in a new tab and copies your saved
+          User ID to the clipboard. Paste the User ID &amp; Password below into
+          the portal, enter the captcha, and sign in.
+        </Text>
+
+        <PortalCard portalKey="esic" />
+        <PortalCard portalKey="epfo" />
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function PortalCard({ portalKey }: { portalKey: PortalKey }) {
   const { selectedCompanyId } = useSelectedCompany();
+  const cfg = PORTALS[portalKey];
   const [creds, setCreds] = useState<Creds | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,110 +107,99 @@ export default function TestPortalScreen() {
     setError(null);
     setBusy(true);
     try {
-      const c = await api<Creds>(
-        `/admin/portal-automation/esic-credentials${
-          selectedCompanyId ? `?company_id=${selectedCompanyId}` : ""
-        }`,
-      );
+      const qs = `?portal=${portalKey}${
+        selectedCompanyId ? `&company_id=${selectedCompanyId}` : ""
+      }`;
+      const c = await api<Creds>(`/admin/portal-automation/esic-credentials${qs}`);
       setCreds(c);
-      // Auto-copy the User ID so the operator can paste it straight away.
       if (c.user_id) await copy(c.user_id, "user");
-      openInNewTab(ESIC_URL);
+      openInNewTab(cfg.url);
     } catch (e: any) {
-      setError(e?.message || "Could not load ESIC credentials.");
+      setError(e?.message || "Could not load portal credentials.");
     } finally {
       setBusy(false);
     }
-  }, [selectedCompanyId, copy]);
-
-  if (loading) return null;
-  const role = user?.role as string;
-  if (!user || !["super_admin", "sub_admin", "company_admin"].includes(role)) {
-    return <Redirect href="/" />;
-  }
+  }, [portalKey, selectedCompanyId, copy, cfg.url]);
 
   return (
-    <SafeAreaView style={st.safe} edges={["top"]}>
-      <View style={st.wrap}>
-        <Text style={st.title}>Test — ESIC Portal</Text>
-        <Text style={st.subtitle}>
-          Opens the ESIC employer portal in a new tab and copies your saved
-          User ID to the clipboard. Paste the User ID &amp; Password below into
-          the portal, enter the captcha, and sign in.
-        </Text>
-
-        <View style={st.card}>
-          <View style={st.cardHead}>
-            <View style={st.iconWrap}>
-              <Ionicons name="medkit" size={22} color="#0891B2" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={st.cardTitle}>ESIC Employer Portal</Text>
-              <Text style={st.cardUrl} numberOfLines={2}>{ESIC_URL}</Text>
-            </View>
+    <View style={st.group}>
+      <View style={st.card}>
+        <View style={st.cardHead}>
+          <View style={[st.iconWrap, { backgroundColor: `${cfg.tint}16` }]}>
+            <Ionicons name={cfg.icon} size={22} color={cfg.tint} />
           </View>
-
-          <Pressable
-            style={[st.openBtn, busy && st.openBtnDisabled]}
-            onPress={launch}
-            disabled={busy}
-            testID="btn-open-esic-portal"
-          >
-            {busy ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <Ionicons name="open-outline" size={18} color="#fff" />
-            )}
-            <Text style={st.openBtnTxt}>Open ESIC Portal (New Tab)</Text>
-          </Pressable>
+          <View style={{ flex: 1 }}>
+            <Text style={st.cardTitle}>{cfg.name}</Text>
+            <Text style={st.cardUrl} numberOfLines={2}>{cfg.url}</Text>
+          </View>
         </View>
 
-        {error ? (
-          <View style={st.errorBox}>
-            <Ionicons name="alert-circle" size={16} color="#DC2626" />
-            <Text style={st.errorTxt}>{error}</Text>
-          </View>
-        ) : null}
-
-        {creds ? (
-          <View style={st.credCard}>
-            <Text style={st.credHead}>Your ESIC Login (from Firm Master)</Text>
-
-            <CredRow
-              label="User ID"
-              value={creds.user_id}
-              display={creds.user_id}
-              copied={copied === "user"}
-              onCopy={() => copy(creds.user_id, "user")}
-            />
-            <CredRow
-              label="Password"
-              value={creds.password}
-              display={revealPass ? creds.password : "•".repeat(Math.min(creds.password.length, 12))}
-              copied={copied === "pass"}
-              onCopy={() => copy(creds.password, "pass")}
-              trailing={
-                <Pressable onPress={() => setRevealPass((v) => !v)} hitSlop={8} style={st.eyeBtn}>
-                  <Ionicons
-                    name={revealPass ? "eye-off-outline" : "eye-outline"}
-                    size={18}
-                    color={colors.textSecondary}
-                  />
-                </Pressable>
-              }
-            />
-
-            <View style={st.hintBox}>
-              <Ionicons name="information-circle-outline" size={15} color="#2563EB" />
-              <Text style={st.hintTxt}>
-                User ID copied — paste it (Ctrl+V) into the portal, then tap Copy
-                on the Password and paste it too.
-              </Text>
-            </View>
-          </View>
-        ) : null}
+        <Pressable
+          style={[st.openBtn, busy && st.openBtnDisabled]}
+          onPress={launch}
+          disabled={busy}
+          testID={`btn-open-${portalKey}-portal`}
+        >
+          {busy ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Ionicons name="open-outline" size={18} color="#fff" />
+          )}
+          <Text style={st.openBtnTxt}>
+            Open {portalKey === "esic" ? "ESIC" : "PF"} Portal (New Tab)
+          </Text>
+        </Pressable>
       </View>
-    </SafeAreaView>
+
+      {error ? (
+        <View style={st.errorBox}>
+          <Ionicons name="alert-circle" size={16} color="#DC2626" />
+          <Text style={st.errorTxt}>{error}</Text>
+        </View>
+      ) : null}
+
+      {creds ? (
+        <View style={st.credCard}>
+          <Text style={st.credHead}>
+            Your {portalKey === "esic" ? "ESIC" : "PF (EPFO)"} Login (from Firm Master)
+          </Text>
+
+          <CredRow
+            label="User ID"
+            display={creds.user_id}
+            copied={copied === "user"}
+            onCopy={() => copy(creds.user_id, "user")}
+          />
+          <CredRow
+            label="Password"
+            display={
+              revealPass
+                ? creds.password
+                : "•".repeat(Math.min(creds.password.length, 12))
+            }
+            copied={copied === "pass"}
+            onCopy={() => copy(creds.password, "pass")}
+            trailing={
+              <Pressable onPress={() => setRevealPass((v) => !v)} hitSlop={8} style={st.eyeBtn}>
+                <Ionicons
+                  name={revealPass ? "eye-off-outline" : "eye-outline"}
+                  size={18}
+                  color={colors.textSecondary}
+                />
+              </Pressable>
+            }
+          />
+
+          <View style={st.hintBox}>
+            <Ionicons name="information-circle-outline" size={15} color="#2563EB" />
+            <Text style={st.hintTxt}>
+              User ID copied — paste it (Ctrl+V) into the portal, then tap Copy
+              on the Password and paste it too.
+            </Text>
+          </View>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -177,7 +211,6 @@ function CredRow({
   trailing,
 }: {
   label: string;
-  value: string;
   display: string;
   onCopy: () => void;
   copied: boolean;
@@ -206,9 +239,10 @@ function CredRow({
 
 const st = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
-  wrap: { padding: 20, gap: 12, maxWidth: 640, width: "100%", alignSelf: "center" },
+  wrap: { padding: 20, gap: 16, maxWidth: 640, width: "100%", alignSelf: "center" },
   title: { fontSize: 22, fontWeight: "800", color: colors.textPrimary },
   subtitle: { fontSize: 13, color: colors.textSecondary, lineHeight: 19 },
+  group: { gap: 12 },
   card: {
     backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg,
     borderWidth: 1, borderColor: colors.border, padding: 16, gap: 14,
@@ -216,7 +250,7 @@ const st = StyleSheet.create({
   cardHead: { flexDirection: "row", alignItems: "center", gap: 12 },
   iconWrap: {
     width: 44, height: 44, borderRadius: 12, alignItems: "center",
-    justifyContent: "center", backgroundColor: "#0891B216",
+    justifyContent: "center",
   },
   cardTitle: { fontSize: 15, fontWeight: "800", color: colors.textPrimary },
   cardUrl: { fontSize: 11, color: colors.textSecondary, marginTop: 3 },
