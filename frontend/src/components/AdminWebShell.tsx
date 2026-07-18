@@ -57,8 +57,9 @@ function formatSinceRefresh(iso: string): string {
 export const DESKTOP_MIN = 960;
 
 export const NAV_SUPER: NavItem[] = [
-  { route: "/(tabs)", label: "Dashboard", icon: "home-outline" },
-  { route: "/portal-dashboard", label: "Portal Dashboard", icon: "speedometer-outline" },
+  // Iter 181 — the premium Portal Dashboard is the ONE default dashboard
+  // on the web portal (old /(tabs) dashboard removed from the sidebar).
+  { route: "/portal-dashboard", label: "Dashboard", icon: "speedometer-outline" },
   // Iter 89 — Add New Employee shifted to position 2 per user request.
   { route: "/employee-add", label: "Add New Employee", icon: "person-add-outline" },
   { route: "/companies", label: "Companies (Firm Master)", icon: "business-outline" },
@@ -315,8 +316,8 @@ function NavRow({
 
 
 export const NAV_COMPANY_ADMIN: NavItem[] = [
-  { route: "/(tabs)", label: "Dashboard", icon: "home-outline" },
-  { route: "/portal-dashboard", label: "Portal Dashboard", icon: "speedometer-outline" },
+  // Iter 181 — premium Portal Dashboard is the single default dashboard.
+  { route: "/portal-dashboard", label: "Dashboard", icon: "speedometer-outline" },
   // Iter 89 — Add New Employee shifted to position 2 per user request.
   { route: "/employee-add", label: "Add New Employee", icon: "person-add-outline" },
   { route: "/admin", label: "Employee Master Data", icon: "people-outline" },

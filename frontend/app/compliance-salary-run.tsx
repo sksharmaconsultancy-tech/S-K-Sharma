@@ -1751,6 +1751,13 @@ export default function ComplianceSalaryRunScreen() {
           </View>
           <Ionicons name="chevron-forward" size={16} color={colors.onSurfaceTertiary} />
         </Pressable>
+        {/* Iter 181 — payroll punch line (user request) */}
+        <Text style={{
+          color: colors.brandPrimary, fontSize: 12.5, fontWeight: "700",
+          fontStyle: "italic", textAlign: "center", marginTop: 18, marginBottom: 8,
+        }}>
+          &ldquo;Your Satisfaction is Our First Ambition&rdquo;
+        </Text>
       </ScrollView>
 
       {/* Employee config modal */}

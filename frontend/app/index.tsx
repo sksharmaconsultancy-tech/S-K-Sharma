@@ -47,6 +47,12 @@ export default function Landing() {
     // Admin flows are unchanged (they land on the dashboard directly).
     const isSubAdmin = (user.role as string) === "sub_admin";
     if (isSubAdmin && !selectedCompanyId) return <Redirect href="/firm-select" />;
+    // Iter 181 — admins on desktop web land on the premium Portal
+    // Dashboard (single default dashboard). Mobile/app keeps /(tabs).
+    const isAdminRole = ["super_admin", "company_admin", "sub_admin"].includes(user.role as string);
+    if (isAdminRole && Platform.OS === "web" && width >= DESKTOP_MIN) {
+      return <Redirect href="/portal-dashboard" />;
+    }
     return <Redirect href="/(tabs)" />;
   }
 

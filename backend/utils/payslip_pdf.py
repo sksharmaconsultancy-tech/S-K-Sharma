@@ -373,6 +373,15 @@ def _flow_for_employee(
         colWidths=[80 * mm, 94 * mm],
         style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]),
     ))
+    # Punch line footer (Iter 181 — user request)
+    flow.append(Spacer(1, 8 * mm))
+    flow.append(Paragraph(
+        '<i>"Your Satisfaction is Our First Ambition"</i>',
+        ParagraphStyle(
+            "punchline", parent=styles["muted_c"], fontSize=9.5,
+            textColor=BRAND,
+        ),
+    ))
     return flow
 
 

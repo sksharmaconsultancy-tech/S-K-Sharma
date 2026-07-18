@@ -156,3 +156,7 @@ See `/app/memory/test_credentials.md`. Super admin
 
 ## Iter 179c — Statutory task Done auto-ticks Compliance Calendar
 - Marking a statutory recurring task done ticks that firm's calendar item; all-firms view ticks only when every firm's task is done; reopening un-ticks both. Curl-verified end to end (workspace left neutral).
+
+## Iter 180/181 — Premium UI redesign + payroll punch line + default dashboard
+- Testing agent iteration_180: 11/11 backend pytest + full desktop/mobile E2E pass (premium overview, dark mode persist, global search, ESS home, employee tab bar, landing restyle). No regressions.
+- Iter 181 self-tested: payslip PDF builds w/ punch line (23KB), punch line visible on Compliance Salary screen, "/" redirects desktop admins to /portal-dashboard, sidebar has single "Dashboard" entry.
