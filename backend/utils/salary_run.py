@@ -237,6 +237,10 @@ def compute_salary_row(
         "name": user.get("name"),
         "employee_code": user.get("employee_code"),
         "employee_type": user.get("employee_type"),
+        # Iter 183 — Branch / Department / Contractor for grid filter chips.
+        "branch_name": user.get("branch_name"),
+        "department": user.get("department"),
+        "contractor_name": user.get("contractor_name"),
         "is_onroll": user.get("is_onroll") is not False,  # default True
         "salary_mode": salary_mode,
         "rate": round(rate, 2),

@@ -44,6 +44,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { useOnRefresh } from "@/src/context/RefreshBusContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import MonthPicker from "@/src/components/MonthPicker";
+import GridFilterChips, { GRID_FILTER_DEFAULT, rowMatchesFilters, type GridFilters } from "@/src/components/GridFilterChips";
 import { GridScroller, stickyCol, stickyHeader } from "@/src/components/GridFreeze";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
 import { EmployeeListSkeleton } from "@/src/components/EmployeeStatsBar";
@@ -783,11 +784,13 @@ function ResultGrid({
   const [sortBy, setSortBy] = useState<string>("");
   // Iter 182 — instant employee search.
   const [empSearch, setEmpSearch] = useState("");
+  // Iter 183 — Branch / Dept / Contractor filter chips.
+  const [gridFilters, setGridFilters] = useState<GridFilters>(GRID_FILTER_DEFAULT);
   const sortRows = (rows: ActualRow[]) => {
-    let base = rows;
+    let base = rows.filter((r) => rowMatchesFilters(r, gridFilters));
     const q = empSearch.trim().toLowerCase();
     if (q) {
-      base = rows.filter((r: any) =>
+      base = base.filter((r: any) =>
         [r.name, r.employee_code, r.designation, r.father_name]
           .some((v) => String(v || "").toLowerCase().includes(q)));
     }
@@ -869,6 +872,9 @@ function ResultGrid({
           </Pressable>
         ))}
       </View>
+
+      {/* Iter 183 — Branch / Dept / Contractor filter chips */}
+      <GridFilterChips rows={run.rows} filters={gridFilters} onChange={setGridFilters} testPrefix="asal" />
 
       <GridScroller>
         <View style={Platform.OS === "web" ? undefined : { minWidth: totalMinWidth }}>

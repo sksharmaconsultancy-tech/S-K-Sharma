@@ -43,6 +43,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
   
 import MonthPicker from "@/src/components/MonthPicker";
+import GridFilterChips, { GRID_FILTER_DEFAULT, rowMatchesFilters, type GridFilters } from "@/src/components/GridFilterChips";
 import RegisterLayoutEditor from "@/src/components/RegisterLayoutEditor";
 import { GridScroller, stickyCol, stickyHeader } from "@/src/components/GridFreeze";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
@@ -247,6 +248,8 @@ export default function ComplianceSalaryRunScreen() {
   // Iter 182 — instant employee search + audit log
   const [empSearch, setEmpSearch] = useState("");
   const empSearchRef = useRef<TextInput | null>(null);
+  // Iter 183 — Branch / Dept / Contractor filter chips.
+  const [gridFilters, setGridFilters] = useState<GridFilters>(GRID_FILTER_DEFAULT);
   const [auditOpen, setAuditOpen] = useState(false);
   const [auditEntries, setAuditEntries] = useState<any[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
@@ -279,11 +282,12 @@ export default function ComplianceSalaryRunScreen() {
     };
   }, [run?.rows]);
   const sortRows = (rows: CompRow[]) => {
-    // Iter 182 — instant search filters the grid before sorting.
-    let base = rows;
+    // Iter 183 — branch/dept/contractor chips filter first…
+    let base = rows.filter((r) => rowMatchesFilters(r, gridFilters));
+    // …then Iter 182 — instant search filters the grid before sorting.
     const q = empSearch.trim().toLowerCase();
     if (q) {
-      base = rows.filter((r: any) =>
+      base = base.filter((r: any) =>
         [r.name, r.employee_code, r.uan_no, r.esi_ip_no, r.designation, r.father_name]
           .some((v) => String(v || "").toLowerCase().includes(q)));
     }
@@ -1653,6 +1657,9 @@ export default function ComplianceSalaryRunScreen() {
                 </Pressable>
               ))}
             </View>
+
+            {/* Iter 183 — Branch / Dept / Contractor filter chips */}
+            <GridFilterChips rows={run.rows} filters={gridFilters} onChange={setGridFilters} testPrefix="comp" />
 
             <GridScroller>
                 {/* Iter 85 pt 1 — Column-hide by firm's enabled_allowances.

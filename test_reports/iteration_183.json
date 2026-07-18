@@ -1,0 +1,31 @@
+{
+  "summary": "Iter 183 acceptance criteria fully verified. Backend: POST /api/admin/compliance-salary-runs (Kankani, 2026-05) returns 126 rows, each row now contains branch_name, department, contractor_name keys. Observed WEAVING + SECURITY departments and RAM PRASAD contractor as specified. Frontend: /pin-login premium redesign (blue gradient, glassmorphism 'Employee Sign In' card, gradient CTA) renders correctly and Username-tab + TEST50 + PIN 123456 successfully logs into employee home; testIDs preserved (pin-ident-*, pin-mode-*, pin-phone-input, pin-pin-input, pin-submit, pin-error). /company-login premium redesign ('Employer Sign In', segmented Mobile-Email vs Company-Code toggle) renders correctly; short PIN 1234 produces expected validation error 'PIN must be exactly 6 digits' in company-login-error; company-mode-code toggle switches to company-code-input; Forgot PIN + Register your company links present. Frontend filter chips: after processing a fresh 2026-05 run, comp-filter-chips renders with Dept (WEAVING, SECURITY, QA-SUPER-ITER123) + Contractor (RAM PRASAD) groups (Branch group correctly hidden — no branch data). Clicking WEAVING chip renders comp-filter-clear button. Regression: legacy runs without new fields → chips row simply not rendered (GridFilterChips returns null when anyGroup is false). All good.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter183_filter_chips.py",
+    "/app/test_reports/pytest/iter183.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "GridFilterChips.tsx: clean — derives options from rows via useMemo, returns null when no groups have values (correct regression behaviour for pre-Iter-183 stored runs), uses stable testIDs testPrefix-filter-chips / testPrefix-filter-{group}-{value|all} / testPrefix-filter-clear.",
+    "compliance_salary.py compute_compliance_row: correctly propagates user.branch_name/department/contractor_name into row output (lines 616-618); no PII risk since these are HR classification fields already visible in Employee Master."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter183_filter_chips.py (NEW — 2 tests, both passing)"
+  ],
+  "success_rate": {"backend": "100% (2/2 pytest)", "frontend": "100% (all acceptance flows: pin-login login, company-login validation+toggle, comp-filter-chips render + selection + clear)"},
+  "seed_data_creation": "None. Processed a fresh 2026-05 Kankani compliance run via POST /api/admin/compliance-salary-runs (draft, not finalized). Old draft runs for the same month were auto-replaced per Iter 174 rule.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 183 shipped GridFilterChips + branch/dept/contractor row fields for BOTH compliance_salary.py and salary_run.py. Backend test /app/backend/tests/test_iter183_filter_chips.py hits POST /api/admin/compliance-salary-runs with {company_id: cmp_527fecdd7c, month: 2026-05} and asserts rows[0] contains branch_name / department / contractor_name. Rows are inside body.run.rows (NOT body.rows). Kankani has depts WEAVING, SECURITY, QA-SUPER-ITER123 and contractor RAM PRASAD; no branch data. Login pages testIDs unchanged: pin-phone-input is REUSED for both phone AND username fields (there is no pin-login_id-input); pin-mode-pin/password only render after Username tab is selected. Use viewport 390x844 mobile for the login pages; 1440x900 desktop for /compliance-salary-run.",
+  "rca_of_issue": "N/A — feature works as designed. Verified all 5 problem-statement acceptance items."
+}

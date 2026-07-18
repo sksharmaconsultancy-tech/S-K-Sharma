@@ -612,6 +612,10 @@ def compute_compliance_row(
         "uan_no": user.get("uan_no"),
         "esi_ip_no": user.get("esi_ip_no"),
         "employee_type": user.get("employee_type"),
+        # Iter 183 — Branch / Department / Contractor for grid filter chips.
+        "branch_name": user.get("branch_name"),
+        "department": user.get("department"),
+        "contractor_name": user.get("contractor_name"),
         "is_onroll": user.get("is_onroll") is not False,
         "salary_mode": salary_mode,
         "rate": round(rate, 2),
