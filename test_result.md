@@ -144,3 +144,8 @@ See `/app/memory/test_credentials.md`. Super admin
   overrides still come from `companies.compliance_policy` (iter59).
 - Payslip email delivery is best-effort. If Resend rate limits us or a
   particular employee email bounces, we log the failure but do not retry.
+
+## Iter 179 — SaaS Portal Dashboard Phase 2 (2026-06)
+- Backend: routes/portal_phase2.py — portal tasks CRUD, tracked documents CRUD (expiry buckets), client health scores, enhanced calendar (+toggle done), alerts/notification center. 24/24 pytest pass (tests/test_iter178_portal_phase2.py).
+- Frontend: portal-dashboard.tsx tab strip + bell badge; new src/components/portal/{TasksPanel,DocumentExpiryPanel,ClientHealthPanel,CalendarPanel,AlertsModal}.tsx. Full web E2E by testing agent — all pass, Overview (Phase 1) regression intact.
+- Known cosmetic: RN-web shadow*/shorthand CSS console warnings (pre-existing pattern, non-blocking).
