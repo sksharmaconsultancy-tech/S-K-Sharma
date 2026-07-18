@@ -19012,6 +19012,9 @@ app.include_router(salary_readiness_router)
 from routes.portal_extension import router as portal_extension_router  # noqa: E402
 app.include_router(portal_extension_router)
 
+from routes.clra_registers import router as clra_registers_router  # noqa: E402
+app.include_router(clra_registers_router)
+
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
 maybe_start_rpa_worker(app, db)
