@@ -359,6 +359,7 @@ export default function Dashboard() {
                     { icon: "time-outline", label: "Attendance", color: "#2563EB", route: "/history" },
                     { icon: "calendar-outline", label: "Leaves", color: "#7C3AED", route: "/leaves" },
                     { icon: "cash-outline", label: "Payslip", color: "#059669", route: "/payslip" },
+                    { icon: "wallet-outline", label: "My Advances", color: "#0891B2", route: "/my-advances" },
                     { icon: "document-text-outline", label: "Documents", color: "#0891B2", route: "/(tabs)/documents" },
                     { icon: "id-card-outline", label: "KYC", color: "#B45309", route: "/kyc" },
                     { icon: "card-outline", label: "ID Card", color: "#4338CA", route: "/id-card" },

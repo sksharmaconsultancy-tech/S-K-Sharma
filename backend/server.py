@@ -14421,6 +14421,17 @@ async def create_compliance_salary_run(
         )
     run = await _compute_compliance_run(admin, payload)
     run["run_id"] = f"csrun_{uuid.uuid4().hex[:12]}"
+    # Advance Management — auto-deduct active advance EMIs / single-shot
+    # recoveries into the rows (idempotent per month+process).
+    from routes.advances import apply_advance_recovery
+    _adv_total = await apply_advance_recovery(
+        payload.company_id, payload.month, "compliance", run["run_id"], run["rows"])
+    if _adv_total or any(r.get("advance_recovery") for r in run["rows"]):
+        t = run.get("totals") or {}
+        t["advance_recovery"] = round(sum(float(r.get("advance_recovery") or 0) for r in run["rows"]), 2)
+        t["total_deduction"] = round(sum(float(r.get("total_deduction") or 0) for r in run["rows"]), 2)
+        t["net"] = round(sum(float(r.get("net") or 0) for r in run["rows"]), 2)
+        run["totals"] = t
     # Iter 174 (user directive) — REPLACE old data: a fresh process for the
     # same firm + month + employee group deletes the previous draft run(s)
     # so only the newest data exists (finalized runs are already blocked
@@ -14782,6 +14793,17 @@ async def reprocess_compliance_salary_run(
     run = await _compute_compliance_run(admin, payload)
     run["run_id"] = run_id
     run["reprocessed_from_at"] = existing.get("generated_at")
+    # Advance Management — re-apply (idempotent) advance deductions so the
+    # reprocessed sheet still shows the recovery lines.
+    from routes.advances import apply_advance_recovery
+    _adv_total = await apply_advance_recovery(
+        existing.get("company_id"), existing["month"], "compliance", run_id, run["rows"])
+    if _adv_total or any(r.get("advance_recovery") for r in run["rows"]):
+        t = run.get("totals") or {}
+        t["advance_recovery"] = round(sum(float(r.get("advance_recovery") or 0) for r in run["rows"]), 2)
+        t["total_deduction"] = round(sum(float(r.get("total_deduction") or 0) for r in run["rows"]), 2)
+        t["net"] = round(sum(float(r.get("net") or 0) for r in run["rows"]), 2)
+        run["totals"] = t
     await db.compliance_salary_runs.replace_one({"run_id": run_id}, run)
     return {"ok": True, "run": {k: v for k, v in run.items() if k != "_id"}}
 
@@ -18465,10 +18487,16 @@ async def create_actual_salary_process(
         }
         rows.append(_actual_salary_row_compute(row, month_days, ot_basis=_ot_basis))
 
+    # Advance Management — auto-deduct active advance EMIs / single-shot
+    # recoveries into rows BEFORE totals (idempotent per month+process).
+    _actual_run_id = f"asal_{uuid.uuid4().hex[:12]}"
+    from routes.advances import apply_advance_recovery
+    await apply_advance_recovery(company_id, payload.month, "actual", _actual_run_id, rows)
+
     totals = _actual_salary_totals(rows)
 
     run = {
-        "run_id": f"asal_{uuid.uuid4().hex[:12]}",
+        "run_id": _actual_run_id,
         "run_type": "actual",
         "month": payload.month,
         "year": year,
@@ -18935,6 +18963,8 @@ from routes.kyc_tracker import router as kyc_tracker_router  # noqa: E402
 app.include_router(kyc_tracker_router)
 from routes.employee_documents import router as employee_documents_router  # noqa: E402
 app.include_router(employee_documents_router)
+from routes.advances import router as advances_router  # noqa: E402
+app.include_router(advances_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
