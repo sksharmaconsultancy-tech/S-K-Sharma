@@ -949,3 +949,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Root cause 1: dashboard CompanyPicker used setSelectedCompanyId() which is blocked by the Iter-77 session lock; switched to switchCompany() (explicit pick overrides lock — same as desktop header).
 - Root cause 2: CompanyPicker Modal sheet could render below the visual viewport on scrolled mobile web pages (taps never landed); sheetWrap now position:fixed inset-0 on web. Fix benefits all CompanyPicker usages.
 - Verified: mobile 390px real login, switched Kankani→City Care→Kankani successfully.
+
+## Iter 188 — Dashboard firm-switch race fix + Employee device-biometrics enable on PWA
+- (tabs)/index.tsx: stale-response guard (loadSeqRef) — switching firms no longer lets an older in-flight /admin/stats response overwrite the new firm's data.
+- biometric-prefs.tsx: NEW WebBiometricPrefs branch for web/PWA — employees can now ENABLE (WebAuthn enroll), TEST and REMOVE device biometrics in the browser (was a dead-end "open on your phone" screen). Uses existing fingerprintGate utils (same as required-fingerprint flow).
+- PunchFlowModal: optional-skip message now points users to Profile → Biometric preferences to enable.

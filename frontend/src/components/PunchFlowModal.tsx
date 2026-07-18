@@ -177,7 +177,7 @@ export default function PunchFlowModal({ visible, kind, user, onClose, onDone }:
           return true;
         }
         if (!required && !fingerprintEnrolled(user?.user_id || "")) {
-          setStep("biometric", "skipped", "Optional — not enrolled");
+          setStep("biometric", "skipped", "Optional — enable in Profile → Biometric preferences");
           return true;
         }
         let r = await verifyFingerprint(user!.user_id, `Verify fingerprint to punch ${kind.toUpperCase()}`);

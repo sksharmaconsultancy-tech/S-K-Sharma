@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -77,8 +77,14 @@ export default function Dashboard() {
   // Iter 104 — hospital firms only: employees may request a shift change
   // before punching in. Drives the "Shift change request" quick action.
   const [shiftChangeAllowed, setShiftChangeAllowed] = useState(false);
+  // Iter 187b — monotonic sequence for load() so stale responses are dropped.
+  const loadSeqRef = useRef(0);
 
   const load = useCallback(async () => {
+    // Iter 187b — stale-response guard: switching firms fires a new load()
+    // while the previous one may still be in flight; without this the OLD
+    // firm's stats can land last and overwrite the newly selected firm.
+    const seq = ++loadSeqRef.current;
     try {
       const isSuper = user?.role === "super_admin";
       const [t, l, n, s] = await Promise.all([
@@ -115,7 +121,7 @@ export default function Dashboard() {
               ? `?company_id=${companyFilter}`
               : "";
           const s = await api(`/admin/stats${scopeParam}`);
-          setStats(s);
+          if (seq === loadSeqRef.current) setStats(s);
         } catch {}
       }
       if (
@@ -139,7 +145,7 @@ export default function Dashboard() {
           const emp = await api<{ pending: any[] }>(
             `/admin/pending-approvals${apprQ}`,
           ).catch(() => ({ pending: [] as any[] }));
-          setPendingEmpCount((emp.pending || []).length);
+          if (seq === loadSeqRef.current) setPendingEmpCount((emp.pending || []).length);
         } catch {}
         if (user.role === "super_admin") {
           try {

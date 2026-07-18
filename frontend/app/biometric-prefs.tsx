@@ -32,6 +32,7 @@ import { useRouter } from "expo-router";
 import * as LocalAuthentication from "expo-local-authentication";
 
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
+import { useAuth } from "@/src/context/AuthContext";
 import {
   authenticateBiometricStrict,
   BiometricPreference,
@@ -39,6 +40,13 @@ import {
   getBiometricPreference,
   setBiometricPreference,
 } from "@/src/utils/biometric";
+import {
+  clearFingerprintEnrollment,
+  enrollFingerprint,
+  fingerprintEnrolled,
+  fingerprintSupported,
+  verifyFingerprint,
+} from "@/src/utils/fingerprintGate";
 
 export default function BiometricPrefsScreen() {
   const router = useRouter();
@@ -132,28 +140,7 @@ export default function BiometricPrefsScreen() {
   };
 
   if (Platform.OS === "web") {
-    return (
-      <View style={styles.root}>
-        <SafeAreaView edges={["top"]} style={{ backgroundColor: colors.surface }}>
-          <View style={styles.header}>
-            <Pressable onPress={() => router.back()} hitSlop={8}>
-              <Ionicons name="chevron-back" size={26} color={colors.onSurface} />
-            </Pressable>
-            <View style={{ flex: 1, alignItems: "center" }}>
-              <Text style={styles.h1}>Biometric preferences</Text>
-            </View>
-            <View style={{ width: 26 }} />
-          </View>
-        </SafeAreaView>
-        <View style={styles.forbid}>
-          <Ionicons name="phone-portrait-outline" size={40} color={colors.onSurfaceTertiary} />
-          <Text style={styles.forbidT}>Open this on your phone</Text>
-          <Text style={styles.forbidHint}>
-            Biometric options are device-level — set this from the mobile app.
-          </Text>
-        </View>
-      </View>
-    );
+    return <WebBiometricPrefs />;
   }
 
   return (
@@ -380,7 +367,243 @@ function Option(props: {
   );
 }
 
+/**
+ * Iter 188 — Web/PWA branch: employees CAN enable device biometrics in the
+ * browser via WebAuthn (fingerprint / face unlock through the phone's own
+ * screen-lock). Previously this screen just said "open on your phone",
+ * leaving PWA users with no way to enrol.
+ */
+function WebBiometricPrefs() {
+  const router = useRouter();
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [supported, setSupported] = useState(false);
+  const [enrolled, setEnrolled] = useState(false);
+  const [busy, setBusy] = useState<"enroll" | "test" | "remove" | null>(null);
+  const [msg, setMsg] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const s = await fingerprintSupported();
+        setSupported(s);
+        setEnrolled(fingerprintEnrolled(user?.user_id || ""));
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [user?.user_id]);
+
+  const doEnroll = async () => {
+    if (!user) return;
+    setBusy("enroll");
+    setMsg(null);
+    try {
+      const r = await enrollFingerprint(user.user_id, user.name || "");
+      if (r.ok) {
+        setEnrolled(true);
+        setMsg({ tone: "ok", text: "Device biometric enabled — it will be used on your next punch." });
+      } else {
+        setMsg({ tone: "err", text: r.message || "Could not enable — try again." });
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const doTest = async () => {
+    if (!user) return;
+    setBusy("test");
+    setMsg(null);
+    try {
+      const r = await verifyFingerprint(user.user_id, "Testing your device biometric");
+      if (r.ok) setMsg({ tone: "ok", text: "Success — biometric verified and ready for punching." });
+      else if (r.message === "NOT_ENROLLED") {
+        setEnrolled(false);
+        setMsg({ tone: "err", text: "No enrolment found on this device — tap Enable first." });
+      } else setMsg({ tone: "err", text: r.message || "Verification failed." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const doRemove = () => {
+    if (!user) return;
+    setBusy("remove");
+    try {
+      clearFingerprintEnrollment(user.user_id);
+      setEnrolled(false);
+      setMsg({ tone: "ok", text: "Removed. You can re-enable it anytime." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <View style={styles.root}>
+      <SafeAreaView edges={["top"]} style={{ backgroundColor: colors.surface }}>
+        <View style={styles.header}>
+          <Pressable onPress={() => router.back()} hitSlop={8}>
+            <Ionicons name="chevron-back" size={26} color={colors.onSurface} />
+          </Pressable>
+          <View style={{ flex: 1, alignItems: "center" }}>
+            <Text style={styles.h1}>Device biometrics</Text>
+          </View>
+          <View style={{ width: 26 }} />
+        </View>
+      </SafeAreaView>
+
+      {loading ? (
+        <ActivityIndicator style={{ marginTop: 60 }} color={colors.brandPrimary} />
+      ) : !supported ? (
+        <View style={styles.forbid}>
+          <Ionicons name="finger-print-outline" size={40} color={colors.onSurfaceTertiary} />
+          <Text style={styles.forbidT}>Not available in this browser</Text>
+          <Text style={styles.forbidHint}>
+            Your phone/browser doesn&apos;t expose a screen-lock biometric to
+            web apps. Make sure a fingerprint or face unlock is set up in the
+            phone settings, and open the app in Chrome (Android) or Safari (iPhone).
+          </Text>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={{ padding: spacing.lg }}>
+          <View style={styles.webCard}>
+            <View style={[styles.webBadge, { backgroundColor: enrolled ? "#DCFCE7" : "#FEF9C3" }]}>
+              <Ionicons
+                name={enrolled ? "checkmark-circle" : "alert-circle"}
+                size={16}
+                color={enrolled ? "#15803D" : "#A16207"}
+              />
+              <Text style={[styles.webBadgeTxt, { color: enrolled ? "#15803D" : "#A16207" }]}>
+                {enrolled ? "Enabled on this device" : "Not enabled yet"}
+              </Text>
+            </View>
+            <Text style={styles.webTitle}>Fingerprint / Face unlock for punching</Text>
+            <Text style={styles.webSub}>
+              Uses your phone&apos;s own screen-lock biometric (via the browser) as an
+              extra identity check when you punch IN / OUT. Your fingerprint never
+              leaves your phone.
+            </Text>
+
+            {msg && (
+              <View style={[styles.webMsg, msg.tone === "ok" ? styles.webMsgOk : styles.webMsgErr]}>
+                <Text style={{ color: msg.tone === "ok" ? "#15803D" : "#B91C1C", fontSize: 13, fontWeight: "600" }}>
+                  {msg.text}
+                </Text>
+              </View>
+            )}
+
+            {!enrolled ? (
+              <Pressable
+                style={styles.webCta}
+                onPress={doEnroll}
+                disabled={busy !== null}
+                testID="web-biometric-enroll"
+              >
+                {busy === "enroll" ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="finger-print" size={18} color="#fff" />
+                    <Text style={styles.webCtaTxt}>Enable device biometric</Text>
+                  </>
+                )}
+              </Pressable>
+            ) : (
+              <>
+                <Pressable
+                  style={styles.webCta}
+                  onPress={doTest}
+                  disabled={busy !== null}
+                  testID="web-biometric-test"
+                >
+                  {busy === "test" ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons name="shield-checkmark" size={18} color="#fff" />
+                      <Text style={styles.webCtaTxt}>Test now</Text>
+                    </>
+                  )}
+                </Pressable>
+                <Pressable
+                  style={styles.webGhost}
+                  onPress={doRemove}
+                  disabled={busy !== null}
+                  testID="web-biometric-remove"
+                >
+                  <Ionicons name="trash-outline" size={16} color={colors.error} />
+                  <Text style={styles.webGhostTxt}>Remove from this device</Text>
+                </Pressable>
+              </>
+            )}
+          </View>
+          <Text style={styles.webNote}>
+            Note: enrolment is per device &amp; per browser. If you change phones,
+            simply enable it again on the new phone.
+          </Text>
+        </ScrollView>
+      )}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  webCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#EEF2F7",
+    padding: spacing.lg,
+    ...shadow.card,
+  },
+  webBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    alignSelf: "flex-start",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    marginBottom: 12,
+  },
+  webBadgeTxt: { fontSize: 12, fontWeight: "800" },
+  webTitle: { color: colors.onSurface, fontSize: 17, fontWeight: "800" },
+  webSub: { color: colors.onSurfaceSecondary, fontSize: 13, lineHeight: 19, marginTop: 6, marginBottom: 14 },
+  webMsg: { borderRadius: 12, padding: 10, marginBottom: 12, borderWidth: 1 },
+  webMsgOk: { backgroundColor: "#F0FDF4", borderColor: "#BBF7D0" },
+  webMsgErr: { backgroundColor: "#FEF2F2", borderColor: "#FECACA" },
+  webCta: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: colors.brandPrimary,
+    borderRadius: 14,
+    paddingVertical: 14,
+    ...shadow.cta,
+  },
+  webCtaTxt: { color: "#fff", fontSize: 15, fontWeight: "800" },
+  webGhost: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    marginTop: 10,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: "#FECACA",
+    backgroundColor: "#FEF2F2",
+  },
+  webGhostTxt: { color: colors.error, fontSize: 13.5, fontWeight: "700" },
+  webNote: {
+    color: colors.onSurfaceTertiary,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 12,
+    textAlign: "center",
+  },
   root: { flex: 1, backgroundColor: colors.background },
   header: {
     flexDirection: "row",
