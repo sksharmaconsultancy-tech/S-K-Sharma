@@ -115,7 +115,7 @@ function StatCard({
     <Pressable
       onPress={onPress}
       style={[s.statCard, active && { borderColor: tone, borderWidth: 1.5 }]}
-      testID={`kpi-${label.replace(/\s+/g, "-").toLowerCase()}`}
+      testID={`kpi-${label.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase()}`}
     >
       <View style={[s.statIconWrap, { backgroundColor: `${tone}18` }]}>
         <Ionicons name={icon} size={16} color={tone} />

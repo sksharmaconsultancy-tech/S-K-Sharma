@@ -171,3 +171,8 @@ See `/app/memory/test_credentials.md`. Super admin
 ## Iter 184 — Login→Dashboard default + dashboard options audit + employee form redesign
 - Testing agent iteration_184.json: login redirect PASS, 8/8 KPI cards (after /admin route fix), 8/8 quick actions, 5/5 tabs, bell/refresh/links/firm-chip PASS, employee add+edit premium form PASS, TEST50 employee login regression PASS.
 - Known cosmetic: expo-router "REPLACE payload index" dev warning after login redirect (non-blocking).
+
+## Iter 191 — KYC & Doc Expiry Tracker + modularization refactors
+- Backend: routes/kyc_tracker.py (GET /api/admin/kyc-tracker), employee_kyc.py +dl_valid_upto/passport_valid_upto; routes/employee_documents.py extracted from server.py (identical behaviour verified).
+- Frontend: app/kyc-tracker.tsx (KPI cards/chips/search/Validity modal), AdminWebShell sidebar entries; employee-add.tsx model → src/utils/employeeForm.ts.
+- Testing agent: 13/13 pytest (tests/test_iter190_kyc_tracker.py, report /app/test_reports/pytest/iter190.xml) + full web E2E pass (modal save → EXPIRING badge + KPI increment; cleanup done). 2 cosmetic issues fixed post-test (kyc echo fields, testID non-ASCII slug).

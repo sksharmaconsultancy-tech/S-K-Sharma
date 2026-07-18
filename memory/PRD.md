@@ -963,3 +963,12 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Reproduced on live with playwright: after login, "/" → /(tabs) crashed with "Cannot read properties of null (reading 'pending_leaves')" — the admin "Leave approvals" ActionRow dereferenced stats before /admin/stats resolved (timing-dependent; static export on live hit it consistently).
 - Fix: optional chaining (stats?.pending_leaves ?? 0) in (tabs)/index.tsx line ~610. All other stats.* accesses verified guarded (stats && block / admin.tsx line 322).
 - Iter 190 deployed + VERIFIED ON LIVE: super admin login → premium home renders on smartpayrolling.com mobile (entry-d6dec4fd).
+
+## Iter 191 — KYC & Document Expiry Tracker (enterprise module) + refactors (tested, all pass)
+- NEW backend routes/kyc_tracker.py: GET /api/admin/kyc-tracker — per-employee Aadhaar/PAN/Bank completeness + DL/Passport valid-upto expiry (statuses complete/incomplete/expiring(≤60d)/expired) + summary counts; role-scoped (super/sub/company admin).
+- employee_kyc.py PATCH now accepts dl_valid_upto / passport_valid_upto (ISO or DD-MM-YYYY, 400 on garbage, blank clears; echoed in kyc response).
+- NEW frontend /kyc-tracker (enterprise UI): 7 KPI stat cards (clickable filters), filter chips, search, per-employee doc chips (Aadhaar/PAN/Bank/DL/Passport with expiry badges), "Validity" modal (DateFields → PATCH), row → /employee-master. Sidebar entry "KYC & Doc Expiry Tracker" in both super-admin & company-admin navs (perm-gated employees:read).
+- REFACTOR: employee documents endpoints (9: admin docs CRUD, master-pdf, master-pdf/bulk, /me/documents*) moved out of server.py into routes/employee_documents.py (server.py 19451→18948 lines). _load_scoped_employee_any_role stays in server.py (shared import).
+- REFACTOR: employee-add.tsx form model (EmpForm, EMPTY_FORM, SECTION_TABS, date/gender helpers) extracted to src/utils/employeeForm.ts (2647→2503 lines). No UI change.
+- Testing agent iteration: 13/13 backend pytest (tests/test_iter190_kyc_tracker.py) + full desktop E2E green; /employee-add & TEST50 login regressions pass.
+- NOT deployed to live yet — user must run the VPS deploy script and reopen PWA twice.
