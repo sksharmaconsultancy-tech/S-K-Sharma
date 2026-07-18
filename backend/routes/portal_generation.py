@@ -21,7 +21,6 @@ that consumes ``pending`` jobs — this MVP focuses on the intent capture
 and status feedback so admins have a single-click workflow from the
 Employee Master screen.
 """
-import uuid
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Body, Header, HTTPException
@@ -55,37 +54,6 @@ async def _load_employee_scoped(user_id: str, admin: Dict[str, Any]) -> Dict[str
     return emp
 
 
-async def _portal_creds_present(company_id: str, portal_key: str) -> bool:
-    """Credentials live on Firm Master. Iter 98 — the EPF Detail / ESIC
-    Detail sections (epf_user_id/epf_password, esi_user_id/esi_password)
-    are checked FIRST; the legacy Portal Logins rows ('PF LOGIN' /
-    'ESI Login') act as a fallback."""
-    master = await db.firm_masters.find_one(
-        {"company_id": company_id},
-        {"_id": 0, "portal_logins": 1, "epf": 1, "esi": 1},
-    )
-    if not master:
-        return False
-    if portal_key == "epfo":
-        sec = master.get("epf") or {}
-        if (sec.get("epf_user_id") or "").strip() and (sec.get("epf_password") or "").strip():
-            return True
-    elif portal_key == "esic":
-        sec = master.get("esi") or {}
-        if (sec.get("esi_user_id") or "").strip() and (sec.get("esi_password") or "").strip():
-            return True
-    lookup = {
-        "epfo": "PF LOGIN",
-        "esic": "ESI Login",
-    }
-    label = lookup.get(portal_key)
-    for row in (master.get("portal_logins") or []):
-        if row.get("login_type") == label:
-            return bool((row.get("user_name") or "").strip()
-                        and (row.get("password") or "").strip())
-    return False
-
-
 def _require_aadhaar(emp: Dict[str, Any], what: str) -> None:
     """Iter 91 — Only Aadhaar is mandatory to queue a generation job."""
     aadhaar = (emp.get("aadhaar_no") or emp.get("aadhar_number") or "").strip()
@@ -99,144 +67,139 @@ def _require_aadhaar(emp: Dict[str, Any], what: str) -> None:
         )
 
 
-async def _queue_generation_job(
+async def _generate_via_module(
     *,
-    portal: str,        # "epfo" | "esic"
-    action_type: str,   # "generate_uan" | "generate_esic"
-    admin: Dict[str, Any],
-    employee: Dict[str, Any],
-    creds_present: bool = True,
+    portal: str,          # "uan" | "esic" (statutory module keys)
+    field: str,           # users field the number lands in
+    label: str,
+    user_id: str,
+    payload: Optional[Dict[str, Any]],
+    authorization: Optional[str],
 ) -> Dict[str, Any]:
-    job_id = f"paj_{uuid.uuid4().hex[:12]}"
-    job = {
-        "job_id": job_id,
-        "portal": portal,
-        "action_type": action_type,
-        "company_id": employee.get("company_id"),
-        "employee_user_id": employee["user_id"],
-        "employee_snapshot": {
-            "name": employee.get("name"),
-            "father_name": employee.get("father_name"),
-            "mother_name": employee.get("mother_name"),
-            "dob": employee.get("dob"),
-            "gender": employee.get("gender"),
-            "marital_status": employee.get("marital_status"),
-            "aadhaar_no": employee.get("aadhaar_no") or employee.get("aadhar_number"),
-            "pan_no": employee.get("pan_no") or employee.get("pan_number"),
-            "phone": employee.get("phone"),
-            "email": employee.get("email"),
-            "doj": employee.get("doj"),
-            "employee_code": employee.get("employee_code"),
-        },
-        # Iter 91 — no portal creds is no longer a blocker: the job is
-        # queued straight into manual_required so the ops admin can
-        # complete it on the government portal and write the number back.
-        "status": "pending" if creds_present else "manual_required",
-        "steps": [] if creds_present else [{
-            "at": now_iso(),
-            "note": (
-                "Portal credentials missing on Firm Master — automation "
-                "skipped. Complete manually and use Manual Complete."
-            ),
-        }],
-        "created_by": admin["user_id"],
-        "created_at": now_iso(),
-        "updated_at": now_iso(),
-    }
-    await db.portal_automation_jobs.insert_one(job)
-    logger.info(
-        "[portal-gen] queued %s job=%s employee=%s by %s",
-        action_type, job_id, employee["user_id"], admin["user_id"],
+    """Shared body for the Employee-Master Generate UAN / ESIC buttons.
+
+    Routes through the Statutory Registration module so every button click
+    shows up on the /statutory-registration dashboard with full audit
+    history. Supports:
+      * ``existing_value`` — link an existing number instead of registering
+      * ``overrides``      — unsaved form values (e.g. Aadhaar typed but the
+        admin hasn't pressed Save yet) merged into the snapshot
+    """
+    from routes.statutory_registration import (
+        create_registration, queue_rpa_job, link_existing_value, get_settings,
     )
-    job.pop("_id", None)
-    return job
+
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
+    emp = await _load_employee_scoped(user_id, admin)
+    payload = payload or {}
+
+    # 1) Link an existing number — no portal registration needed.
+    existing_value = (payload.get("existing_value") or "").strip()
+    if existing_value:
+        res = await link_existing_value(
+            portal=portal, admin=admin, emp=emp, value=existing_value)
+        return {
+            "ok": True, field: res["value"],
+            "message": f"Existing {label} {res['value']} saved to the Employee Master.",
+        }
+
+    if (emp.get(field) or "").strip():
+        return {
+            "ok": True, "already_present": True, field: emp[field],
+            "message": f"Employee already has {'a' if portal == 'uan' else 'an'} {label} on file.",
+        }
+
+    company_id = emp.get("company_id")
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Employee not linked to a firm")
+
+    # 2) Unsaved-form overrides ("generate without Save"): persist an
+    # Aadhaar typed in the form so KYC and the snapshot stay in sync.
+    overrides = payload.get("overrides") or {}
+    ov_aadhaar = "".join(ch for ch in str(overrides.get("aadhaar_no") or "") if ch.isdigit())
+    if len(ov_aadhaar) == 12 and not (emp.get("aadhaar_no") or emp.get("aadhar_number") or "").strip():
+        await db.users.update_one(
+            {"user_id": emp["user_id"]},
+            {"$set": {"aadhaar_no": ov_aadhaar, "kyc_updated_at": now_iso(),
+                      "kyc_updated_by": admin["user_id"]}},
+        )
+        emp["aadhaar_no"] = ov_aadhaar
+
+    merged = {**emp, **{k: v for k, v in overrides.items() if v not in (None, "")}}
+    _require_aadhaar(merged, f"{'a' if portal == 'uan' else 'an'} {label}")
+
+    # 3) Create (or reuse) the registration record.
+    res = await create_registration(
+        portal=portal, admin=admin, emp=emp, overrides=overrides,
+        source="employee_master",
+    )
+    reg = res["reg"]
+
+    if reg["status"] == "existing_found":
+        dup = reg.get("duplicate") or {}
+        return {"ok": True, "registration": reg,
+                "message": dup.get("note") or
+                f"A matching {label} already exists — link it on the Statutory Registration screen."}
+    if res["existing"] and reg["status"] in ("queued", "submitted"):
+        return {"ok": True, "registration": reg,
+                "message": f"{label} registration is already in progress — track it on the Statutory Registration screen."}
+    if res["existing"] and reg["status"] == "pending_approval":
+        return {"ok": True, "registration": reg,
+                "message": f"{label} registration is awaiting HR approval."}
+
+    # 4) HR-approval gate (staff users / firms with approval enabled).
+    settings = await get_settings(company_id)
+    if settings.get("require_approval") or admin.get("is_company_staff"):
+        await db.statutory_registrations.update_one(
+            {"reg_id": reg["reg_id"]},
+            {"$set": {"status": "pending_approval", "updated_at": now_iso()},
+             "$push": {"history": {
+                 "at": now_iso(), "by": admin["user_id"],
+                 "by_name": admin.get("name") or "", "action": "submitted",
+                 "note": "Employee Master button — sent for HR approval"}}},
+        )
+        return {"ok": True, "registration": reg,
+                "message": f"{label} registration sent for HR approval — approve it on the Statutory Registration screen."}
+
+    # 5) Queue the RPA job.
+    q = await queue_rpa_job(portal=portal, admin=admin, emp=emp, reg=reg)
+    logger.info("[portal-gen] queued %s reg=%s employee=%s by %s",
+                portal, reg["reg_id"], emp["user_id"], admin["user_id"])
+    return {
+        "ok": True, "job": q["job"], "registration_id": reg["reg_id"],
+        "message": (
+            f"{label} generation queued. Track progress on the Statutory Registration screen."
+            if q["creds_present"] else
+            f"{label} job queued in MANUAL mode — portal credentials are "
+            "missing on Firm Master, so complete it on the portal and use "
+            "Manual Complete."
+        ),
+    }
 
 
 @router.post("/employees/{user_id}/generate-uan")
 async def generate_uan(
     user_id: str,
+    payload: Optional[Dict[str, Any]] = Body(default=None),
     authorization: Optional[str] = Header(None),
 ):
-    admin = await get_user_from_token(authorization)
-    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
-    emp = await _load_employee_scoped(user_id, admin)
-
-    # If a UAN is already on file we short-circuit — no need to re-run.
-    if (emp.get("uan_no") or "").strip():
-        return {
-            "ok": True,
-            "already_present": True,
-            "uan_no": emp["uan_no"],
-            "message": "Employee already has a UAN on file.",
-        }
-
-    company_id = emp.get("company_id")
-    if not company_id:
-        raise HTTPException(status_code=400, detail="Employee not linked to a firm")
-
-    _require_aadhaar(emp, "a PF UAN")
-    creds = await _portal_creds_present(company_id, "epfo")
-
-    job = await _queue_generation_job(
-        portal="epfo",
-        action_type="generate_uan",
-        admin=admin,
-        employee=emp,
-        creds_present=creds,
+    return await _generate_via_module(
+        portal="uan", field="uan_no", label="PF UAN",
+        user_id=user_id, payload=payload, authorization=authorization,
     )
-    return {
-        "ok": True, "job": job,
-        "message": (
-            "UAN generation queued. Track progress on Portal Automation."
-            if creds else
-            "UAN job queued in MANUAL mode — EPFO portal credentials are "
-            "missing on Firm Master, so complete it on the portal and use "
-            "Manual Complete on the Portal Automation screen."
-        ),
-    }
 
 
 @router.post("/employees/{user_id}/generate-esic")
 async def generate_esic(
     user_id: str,
+    payload: Optional[Dict[str, Any]] = Body(default=None),
     authorization: Optional[str] = Header(None),
 ):
-    admin = await get_user_from_token(authorization)
-    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
-    emp = await _load_employee_scoped(user_id, admin)
-
-    if (emp.get("esi_ip_no") or "").strip():
-        return {
-            "ok": True,
-            "already_present": True,
-            "esi_ip_no": emp["esi_ip_no"],
-            "message": "Employee already has an ESIC IP number on file.",
-        }
-
-    company_id = emp.get("company_id")
-    if not company_id:
-        raise HTTPException(status_code=400, detail="Employee not linked to a firm")
-
-    _require_aadhaar(emp, "an ESIC IP number")
-    creds = await _portal_creds_present(company_id, "esic")
-
-    job = await _queue_generation_job(
-        portal="esic",
-        action_type="generate_esic",
-        admin=admin,
-        employee=emp,
-        creds_present=creds,
+    return await _generate_via_module(
+        portal="esic", field="esi_ip_no", label="ESIC IP number",
+        user_id=user_id, payload=payload, authorization=authorization,
     )
-    return {
-        "ok": True, "job": job,
-        "message": (
-            "ESIC generation queued. Track progress on Portal Automation."
-            if creds else
-            "ESIC job queued in MANUAL mode — ESIC portal credentials are "
-            "missing on Firm Master, so complete it on the portal and use "
-            "Manual Complete on the Portal Automation screen."
-        ),
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -388,6 +351,18 @@ async def manual_complete_job(
              "msg": f"Manually completed by ops admin — wrote {field}={digits} to employee.",
          }}},
     )
+    # Sync the linked Statutory Registration record (if the job came from
+    # the registration module / Employee-Master buttons).
+    if job.get("reg_id"):
+        await db.statutory_registrations.update_one(
+            {"reg_id": job["reg_id"]},
+            {"$set": {"status": "generated", "value": digits,
+                      "completed_at": now_iso(), "updated_at": now_iso()},
+             "$push": {"history": {
+                 "at": now_iso(), "by": admin["user_id"],
+                 "by_name": admin.get("name") or "", "action": "generated",
+                 "note": f"Manually completed — {field}={digits}"}}},
+        )
     logger.info("[portal-gen] manual complete job=%s field=%s value=%s",
                 job_id, field, digits)
     return {"ok": True, "field": field, "value": digits}

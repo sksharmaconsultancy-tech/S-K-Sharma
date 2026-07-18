@@ -2061,6 +2061,7 @@ EMPLOYER_PERMISSION_KEYS: List[str] = [
     "messages:read", "messages:write",
     "tickets:read", "tickets:write",
     "portal_credentials:read", "portal_credentials:write",
+    "registrations:read", "registrations:write",
 ]
 
 
@@ -19005,6 +19006,9 @@ from routes.company_roles import router as company_roles_router  # noqa: E402
 app.include_router(company_roles_router)
 from routes.approvals_engine import router as approvals_engine_router  # noqa: E402
 app.include_router(approvals_engine_router)
+
+from routes.statutory_registration import router as statutory_registration_router  # noqa: E402
+app.include_router(statutory_registration_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.

@@ -1,0 +1,34 @@
+{
+  "summary": "Iter 194 — Statutory Registration (ESIC IP + EPF UAN) end-to-end regression PASSED. Backend: 21/22 pytest tests PASS (1 skipped only because Kankani has just enough eligible employees for a single approve-path run; reject path skipped correctly). Coverage: esic/uan dashboards return KPIs + settings; eligible endpoint returns per-employee ready/eligible/issues/warnings/duplicate/open_registration; full ESIC lifecycle (create draft -> update family_members + dispensary -> submit -> action_required as expected with no ESIC creds -> detail with history[] + rpa_job -> Form-1 PDF base64 (JVBERi prefix verified) -> link-existing 1234567890 persists esi_ip_no + flips status to linked_existing); UAN submit reaches 'queued' with EPFO creds present; approval workflow (PUT settings require_approval:true -> submit lands in pending_approval -> approve queues -> settings reset); bulk /esic/bulk returns per-employee results; employee-master routes: generate-esic with overrides.aadhaar_no persists Aadhaar 999911112222, generate-uan with existing_value:'123456789012' directly links, generate-esic empty body on aadhaar-having employee creates a statutory_registrations row (registration_id returned), and generate-esic on employee already having esi_ip_no returns already_present:true. Frontend (1920x900, super admin): /statutory-registration?portal=esic loads with 6 KPI cards (Registered, Eligible w/o number, In Progress, Pending Approval, Action Required, Failed), ESIC IP / EPF UAN segmented toggle switches page title + content, Registration Queue and Eligible Employees tabs both render, all 10 status filter chips present (All, Draft, Pending Approval, Queued, Submitted, Generated, Linked Existing, Action Required, Existing Found, Failed). Eligible tab shows 97 rows (ready ones) with Register + Link buttons; clicking Register opens detail modal with Validation section, Family Particulars editor (Add member + Dispensary input + Save Details), Portal Automation Run info, Audit History timeline (shows 'created — S.K. Sharma & Co. Admin — Draft created (module)'), Link existing input + Link button, Submit + Retry + Form-1 PDF buttons + Close button. Clicking Submit transitions status chip to 'Action Required' (expected — no ESIC creds on Kankani firm) and Retry button appears. Bulk select-all + Bulk Register button present. Sidebar shows 'Statutory Registration' group. RBAC: staff HR testhr@kankani.test deep-linking to /advances CORRECTLY redirects to /portal-dashboard (previous iter193 gap now fixed); /statutory-registration also correctly redirects to /portal-dashboard for staff. Regression: /employee-master?user_id=... renders 'PF UAN / ESIC Generation' card with 'Have an existing ESIC IP? Enter it →' hint link. Cleanup: all TEST-created statutory_registrations + portal_automation_jobs deleted, touched users' aadhaar_no/uan_no/esi_ip_no restored to original nulls, require_approval reset to False. Console still has non-blocking design warnings ('shadow*' deprecated, 'outline'/'background'/'padding' shorthand) — pre-existing, not new to this iter.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": ["Console warnings on every screen (pre-existing from prior iters): 'shadow*' style props deprecated (use boxShadow); invalid style properties outline/background/padding shorthand not supported on web. Non-blocking, noisy in dev console."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter194_statutory_registration.py",
+    "/app/test_reports/pytest/iter194.xml"
+  ],
+  "action_items": [
+    "Optional polish: clean up deprecated shadow* style props and shorthand outline/background/padding warnings on web (long-standing, spans many files, unrelated to statutory registration)."
+  ],
+  "critical_code_review_comments": [
+    "statutory_registration.py (~948 lines) is dense but well organised — could be split into services (create/submit/link/queue) if it grows further.",
+    "statutory-registration.tsx (~956 lines) is near the 700-line guideline threshold. Consider splitting Detail Modal + Bulk Register into subcomponents.",
+    "queue_rpa_job() correctly detects credentials on firm_masters (portal_logins OR epf/esi sub-object) and gracefully falls back to manual_required — matches expected behaviour for Kankani (no ESIC creds, has EPFO creds).",
+    "link-existing on already-completed registration correctly returns 400 (Registration is already completed) — good guard.",
+    "Duplicate detection covers both own-number and same-Aadhaar-on-another-employee paths.",
+    "PDF generation uses reportlab canvas synchronously in an async handler — for very large forms this could block the event loop; not a concern at current record volume."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter194_statutory_registration.py"],
+  "success_rate": {"backend": "95% (21/22 passed, 1 skipped by design)", "frontend": "100% for tested flows"},
+  "seed_data_creation": "No permanent seed data. All TEST-created statutory_registrations + portal_automation_jobs deleted in test_zzz_cleanup and by post-UI cleanup script; users' aadhaar_no/uan_no/esi_ip_no restored to original values; registration_settings.require_approval reset to False.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reuse /app/backend/tests/test_iter194_statutory_registration.py as regression for statutory registration APIs. Test fixture logs into super admin (sksharmaconsultancy@gmail.com / sharma123) and operates on Kankani cmp_527fecdd7c which intentionally has EPFO creds but NOT ESIC creds — so ESIC submits reach action_required (manual mode) and UAN submits reach queued. The test file self-cleans in test_zzz_cleanup. Staff HR RBAC redirect confirmed live for /advances and /statutory-registration.",
+  "rca_of_issue": "N/A — no bugs found."
+}

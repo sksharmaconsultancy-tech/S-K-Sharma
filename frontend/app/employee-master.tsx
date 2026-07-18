@@ -1032,6 +1032,9 @@ function MetaCell({ label, value }: { label: string; value: any }) {
  */
 function UanEsicCard({ emp }: { emp: EmpDetail }) {
   const [busy, setBusy] = useState<"uan" | "esic" | null>(null);
+  const [linkFor, setLinkFor] = useState<"uan" | "esic" | null>(null);
+  const [linkVal, setLinkVal] = useState("");
+  const [aadhaarVal, setAadhaarVal] = useState("");
   const uan = (emp as any).uan_no || "";
   const esi = (emp as any).esi_ip_no || "";
   const hasAadhaar = !!((emp as any).aadhar_number || (emp as any).aadhaar_no);
@@ -1042,13 +1045,42 @@ function UanEsicCard({ emp }: { emp: EmpDetail }) {
     try {
       const r = await api<{ message?: string; already_present?: boolean }>(
         `/admin/employees/${emp.user_id}/generate-${kind}`,
-        { method: "POST", body: {} },
+        {
+          method: "POST",
+          // "Generate without Save" — an Aadhaar typed in the inline box is
+          // sent as an override so the admin never has to press Save first.
+          body: aadhaarVal.trim()
+            ? { overrides: { aadhaar_no: aadhaarVal.trim() } }
+            : {},
+        },
       );
       const msg = r.message || "Generation queued.";
       if (Platform.OS === "web") globalThis.alert(msg);
       else Alert.alert("Portal automation", msg);
     } catch (e: any) {
       const msg = e?.message || "Failed to queue generation";
+      if (Platform.OS === "web") globalThis.alert(msg);
+      else Alert.alert("Portal automation", msg);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const linkExisting = async () => {
+    if (!linkFor || !linkVal.trim() || busy) return;
+    setBusy(linkFor);
+    try {
+      const r = await api<{ message?: string }>(
+        `/admin/employees/${emp.user_id}/generate-${linkFor}`,
+        { method: "POST", body: { existing_value: linkVal.trim() } },
+      );
+      const msg = r.message || "Existing number saved.";
+      if (Platform.OS === "web") globalThis.alert(msg);
+      else Alert.alert("Portal automation", msg);
+      setLinkFor(null);
+      setLinkVal("");
+    } catch (e: any) {
+      const msg = e?.message || "Failed to save the number";
       if (Platform.OS === "web") globalThis.alert(msg);
       else Alert.alert("Portal automation", msg);
     } finally {
@@ -1104,6 +1136,73 @@ function UanEsicCard({ emp }: { emp: EmpDetail }) {
           )}
         </Pressable>
       </View>
+      {!hasAadhaar && (
+        <TextInput
+          style={{
+            borderWidth: 1, borderColor: colors.border, borderRadius: 8,
+            paddingHorizontal: 10, paddingVertical: 8, fontSize: 13,
+            color: colors.textPrimary, backgroundColor: colors.surface, marginTop: 8,
+          }}
+          placeholder="Aadhaar (12 digits) — generates without saving the form"
+          placeholderTextColor={colors.textSecondary}
+          keyboardType="number-pad"
+          maxLength={12}
+          value={aadhaarVal}
+          onChangeText={setAadhaarVal}
+          testID="uan-esic-aadhaar-inline"
+        />
+      )}
+      {/* Link an existing number instead of registering on the portal */}
+      <View style={{ flexDirection: "row", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
+        {!uan && (
+          <Pressable
+            onPress={() => { setLinkFor(linkFor === "uan" ? null : "uan"); setLinkVal(""); }}
+            testID="btn-link-uan"
+          >
+            <Text style={{ fontSize: 12, fontWeight: "700", color: colors.brandPrimary }}>
+              Have an existing UAN? Enter it →
+            </Text>
+          </Pressable>
+        )}
+        {!esi && (
+          <Pressable
+            onPress={() => { setLinkFor(linkFor === "esic" ? null : "esic"); setLinkVal(""); }}
+            testID="btn-link-esic"
+          >
+            <Text style={{ fontSize: 12, fontWeight: "700", color: "#0891B2" }}>
+              Have an existing ESIC IP? Enter it →
+            </Text>
+          </Pressable>
+        )}
+      </View>
+      {linkFor && (
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+          <TextInput
+            style={{
+              flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 8,
+              paddingHorizontal: 10, paddingVertical: 8, fontSize: 13,
+              color: colors.textPrimary, backgroundColor: colors.surface,
+            }}
+            placeholder={linkFor === "uan" ? "12-digit UAN" : "10–17 digit ESIC Insurance No."}
+            placeholderTextColor={colors.textSecondary}
+            keyboardType="number-pad"
+            value={linkVal}
+            onChangeText={setLinkVal}
+            testID="uan-esic-link-input"
+          />
+          <Pressable
+            onPress={linkExisting}
+            disabled={!linkVal.trim() || busy !== null}
+            style={[styles.primaryBtn, { backgroundColor: "#0891B2" },
+              (!linkVal.trim() || busy !== null) && styles.btnDisabled]}
+            testID="uan-esic-link-save"
+          >
+            {busy === linkFor ? <ActivityIndicator color="#fff" /> : (
+              <Text style={styles.primaryBtnTxt}>Save</Text>
+            )}
+          </Pressable>
+        </View>
+      )}
     </View>
   );
 }

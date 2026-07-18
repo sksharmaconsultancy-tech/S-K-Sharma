@@ -251,6 +251,13 @@ export default function AdvancesScreen() {
 
   if (authLoading) return null;
   if (!user || !["super_admin", "sub_admin", "company_admin"].includes(role)) return <Redirect href="/" />;
+  // RBAC — company staff need a salary_process grant to open this module
+  // (direct-URL access must be gated, not just the sidebar button).
+  const _isStaff = !!(user as any)?.is_company_staff;
+  const _staffPerms: string[] = ((user as any)?.staff_permissions || []) as string[];
+  if (_isStaff && !_staffPerms.some((p) => p === "salary_process:read" || p === "salary_process:write")) {
+    return <Redirect href="/portal-dashboard" />;
+  }
 
   const selEmp = emps.find((e) => e.user_id === f.user_id);
   const emiInstallments = f.recovery_type === "emi" && Number(f.amount) && Number(f.emi_amount)
