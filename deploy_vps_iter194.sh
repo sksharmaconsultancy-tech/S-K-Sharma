@@ -3,6 +3,9 @@
 # Iter 193 (RBAC Roles & Permissions + Approval Workflows)
 # + Iter 194 (Statutory Registration: ESIC IP Part B + EPF UAN automation,
 #   ESIC monthly salary-run alerts, Employee-Master button linking)
+# + Iter 195 (Enterprise Process Command Center on Compliance / Actual /
+#   Arrear salary process pages — KPI cards, workflow stepper, live
+#   validation panel, sticky totals footer)
 # Run ON THE VPS as the sksharma user.
 set -e
 
@@ -56,6 +59,7 @@ check "/api/admin/company-roles" "Iter 193 RBAC roles route"
 check "/api/admin/approval-workflows" "Iter 193 approval workflow route"
 check "/api/admin/statutory/esic/dashboard" "Iter 194 Statutory Registration route"
 check "/api/admin/statutory/esic/alerts" "Iter 194 ESIC alerts route"
+check "/api/admin/salary-process/readiness" "Iter 195 Process Command Center route"
 echo
 echo "Deploy complete."
 echo "REMINDER: on your phone/PC, close and reopen the PWA TWICE (or clear"
