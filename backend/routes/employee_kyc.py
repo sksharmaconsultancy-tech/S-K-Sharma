@@ -187,6 +187,29 @@ def _validate_kyc_admin(payload: Dict[str, Any]) -> Dict[str, Any]:
                 continue
             updates[k] = ("+" + v) if plus else v
 
+    # Document validity dates (KYC Tracker) — DL / Passport "valid upto".
+    # Accept ISO YYYY-MM-DD or Indian DD-MM-YYYY; store normalised ISO.
+    for k in ("dl_valid_upto", "passport_valid_upto"):
+        if k in payload:
+            raw = _title(payload[k])
+            if not raw:
+                updates[k] = None
+                continue
+            v = raw.replace("/", "-")
+            m = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", v)
+            if not m:
+                m2 = re.fullmatch(r"(\d{1,2})-(\d{1,2})-(\d{4})", v)
+                if m2:
+                    v = f"{m2.group(3)}-{int(m2.group(2)):02d}-{int(m2.group(1)):02d}"
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{k} must be a date (YYYY-MM-DD or DD-MM-YYYY).",
+                    )
+            else:
+                v = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+            updates[k] = v
+
     # DOB should be a plain ISO YYYY-MM-DD OR common Indian DD-MM-YYYY.
     # Accept as-is; the master form does its own parsing.
     if "dob" in payload:

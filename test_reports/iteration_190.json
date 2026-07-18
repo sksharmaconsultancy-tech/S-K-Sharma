@@ -1,0 +1,42 @@
+{
+  "summary": "Iter 190 regression pass — new KYC & Doc Expiry Tracker module (backend + frontend) and refactored employee-documents / employeeForm.ts modules. Backend: 13/13 pytest cases green. Frontend: /kyc-tracker renders 7 KPI cards for Kankani (126 employees), filter chips + search + Validity modal all working; setting DL Valid Upto to 2026-08-15 → row shows EXPIRING badge, KPI 'Expiring ≤60d' incremented 0→1, backend summary confirmed; row click navigates to /employee-master?user_id=…; cleanup PATCH restored empty state. /employee-add renders full enterprise form with section tabs + completion checklist (no crash from employeeForm.ts extraction). Refactored document endpoints (list/upload/inline-download/master-pdf/me/documents/delete) all behave identically to pre-refactor.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PATCH /api/admin/employees/{uid}/kyc", "issue": "Response 'kyc' echo block in employee_kyc.py `keys` list (lines 381-393) omits dl_valid_upto/passport_valid_upto — the fields ARE persisted (updated_keys returns them and GET /api/admin/kyc-tracker reflects the new value), but the immediate response payload doesn't echo them. UI reads via kyc-tracker so no functional impact, but callers relying only on PATCH echo would miss the new values. Cosmetic."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Global (all admin pages)", "issues": [
+        "Console noise: repeated 'Invalid style property of outline / background / padding' warnings on every admin page. Pre-existing style-prop shortcuts in RN Web components — not blocking but should be tidied.",
+        "kpi testID 'kpi-expiring-≤60d' contains non-ASCII '≤' character (from label slugification). Works but brittle for automation — consider slugging to 'kpi-expiring-60d'."
+      ]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter190_kyc_tracker.py",
+    "/app/test_reports/pytest/iter190.xml"
+  ],
+  "action_items": [
+    "OPTIONAL (minor): Add 'dl_valid_upto' and 'passport_valid_upto' to the response 'keys' list in /app/backend/routes/employee_kyc.py PATCH handler (lines 381-393) so the PATCH echo reflects the newly-saved expiry dates.",
+    "OPTIONAL: Slugify kpi label to ASCII — replace '≤' before generating testID in /app/frontend/app/kyc-tracker.tsx line 118 to yield 'kpi-expiring-60d' instead of 'kpi-expiring-≤60d'."
+  ],
+  "critical_code_review_comments": [
+    "kyc_tracker.py cleanly imports from server.py (db, get_user_from_token, require_role, apply_sub_admin_company_scope) — no code duplication, sub-admin scoping honoured.",
+    "employee_documents.py: role-gated correctly; delete restricted to super/company admin; base64 validation + 15 MB cap + mime whitelist present; /me/documents scopes strictly by user_id — good.",
+    "employee_kyc.py enforces Aadhaar/PAN immutability + kyc_history audit trail — solid. Date parser accepts YYYY-MM-DD and DD-MM-YYYY as spec'd, rejects garbage with 400."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter190_kyc_tracker.py (new)"
+  ],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "100% for KYC-tracker + employee-add regression"},
+  "seed_data_creation": "Ephemeral only — cleaned up after each test. Test employee (code 50, user_ca0cba59bcdb) dl_valid_upto/passport_valid_upto cleared. UI-side flow toggled dl_valid_upto on MAHAVEER SINGH (user_83f0e0c387bb) to 2026-08-15 then cleared it back via PATCH. Uploaded PNG doc deleted after test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "New backend module /app/backend/routes/kyc_tracker.py — GET /api/admin/kyc-tracker returns {summary,employees}. Kankani cmp_527fecdd7c has 126 employees, KYC data almost entirely empty in seed (124 missing Aadhaar, 126 missing PAN/Bank). PATCH /api/admin/employees/{uid}/kyc accepts dl_valid_upto & passport_valid_upto in ISO or DD-MM-YYYY. Frontend page /kyc-tracker has testIDs: kpi-*, filter-*, kyc-row-{uid}, edit-expiry-{uid}, dl-valid-upto, passport-valid-upto, save-validity, kyc-search. Employee documents endpoints now live in routes/employee_documents.py (identical behaviour). Employee-add form model extracted to src/utils/employeeForm.ts — form still renders normally. Container date is Jul 2026.",
+  "rca_of_issue": "No blocking bugs found. Only minor cosmetic gaps: (1) PATCH /kyc response 'kyc' echo list omits the two new expiry keys — persisted state is correct, only the echoed dict lacks them; (2) kpi testID slug contains '≤' which is legal HTML but non-ASCII/awkward for automation."
+}

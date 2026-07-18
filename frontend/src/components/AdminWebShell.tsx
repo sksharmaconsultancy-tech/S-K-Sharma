@@ -64,6 +64,9 @@ export const NAV_SUPER: NavItem[] = [
   { route: "/employee-add", label: "Add New Employee", icon: "person-add-outline" },
   { route: "/companies", label: "Companies (Firm Master)", icon: "business-outline" },
   { route: "/admin", label: "Employee Master Data", icon: "people-outline" },
+  // KYC & Document Expiry Tracker — enterprise module (Aadhaar/PAN/Bank
+  // completeness + DL/Passport validity reminders).
+  { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
   {
     label: "Salary Process",
     icon: "cash-outline",
@@ -187,6 +190,7 @@ const NAV_PERMISSION_MAP: Record<string, string[]> = {
   "/companies": ["companies:read", "companies:write"],
   "/company-requests": ["company_requests:read", "company_requests:write"],
   "/bulk-employee-correction": ["employees:read", "employees:write"],
+  "/kyc-tracker": ["employees:read", "employees:write"],
   "/attendance-policy": ["attendance_policy:read", "attendance_policy:write"],
   "/punch-approvals": ["punch_approvals:read", "punch_approvals:write"],
   "/location-audit": ["punch_approvals:read", "punch_approvals:write"],
@@ -346,6 +350,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
   },
   { route: "/zk-dat-import", label: "Import Biometric .dat", icon: "finger-print-outline" },
   { route: "/join-qr", label: "QR Codes (Join / App)", icon: "qr-code-outline" },
+  { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
   {
     label: "Reports",
     icon: "bar-chart-outline",
