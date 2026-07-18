@@ -504,6 +504,11 @@ def _pdf_bytes(title, company, header_meta, columns, rows, verify_id) -> bytes:
         canvas.setFont("Helvetica", 7)
         canvas.drawRightString(page[0] - 12 * mm, 8 * mm, f"Page {doc.page}")
         canvas.drawString(12 * mm, 8 * mm, f"Verify: {verify_id}")
+        # Iter 182 — brand punch line on every statutory report page
+        canvas.setFont("Helvetica-Oblique", 7.5)
+        canvas.setFillColorRGB(0.145, 0.388, 0.922)  # #2563EB
+        canvas.drawCentredString(page[0] / 2, 8 * mm,
+                                 '"Your Satisfaction is Our First Ambition"')
         canvas.restoreState()
 
     doc = SimpleDocTemplate(buf, pagesize=page,

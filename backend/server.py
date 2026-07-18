@@ -15082,6 +15082,10 @@ async def save_compliance_run_rows(
     if isinstance(totals, dict) and totals:
         updates["totals"] = totals
     await db.compliance_salary_runs.update_one({"run_id": run_id}, {"$set": updates})
+    # Iter 182 — audit trail
+    from routes.salary_audit import write_salary_audit
+    await write_salary_audit(admin, "save_rows", run,
+                             f"Saved draft edits for {len(rows)} rows")
     return {"ok": True, "draft_saved_at": updates["draft_saved_at"]}
 
 
@@ -15110,6 +15114,9 @@ async def finalize_compliance_salary_run(
     }
     await db.compliance_salary_runs.update_one({"run_id": run_id}, {"$set": stamp})
     logger.info("[compliance-run] finalized run=%s by %s", run_id, admin["user_id"])
+    # Iter 182 — audit trail
+    from routes.salary_audit import write_salary_audit
+    await write_salary_audit(admin, "finalize", run, "Run finalized (locked)")
     # Iter 103 — automated email trigger
     try:
         from routes.email_notifications import fire_email_event
@@ -15235,6 +15242,13 @@ async def decide_salary_unlock_request(
             }},
         )
         logger.info("[compliance-run] unlock APPROVED run=%s req=%s", req["run_id"], req_id)
+        # Iter 182 — audit trail
+        from routes.salary_audit import write_salary_audit
+        run_doc = await db.compliance_salary_runs.find_one(
+            {"run_id": req["run_id"]}, {"_id": 0, "run_id": 1, "company_id": 1,
+                                        "company_name": 1, "month": 1})
+        await write_salary_audit(admin, "unlock", run_doc or {"run_id": req["run_id"]},
+                                 f"Unlock approved — {note or 'no note'}")
     return {"ok": True, "approved": approve}
 
 
@@ -19420,6 +19434,8 @@ from routes.portal_dashboard import router as portal_dashboard_router  # noqa: E
 app.include_router(portal_dashboard_router)
 from routes.portal_phase2 import router as portal_phase2_router  # noqa: E402
 app.include_router(portal_phase2_router)
+from routes.salary_audit import router as salary_audit_router  # noqa: E402
+app.include_router(salary_audit_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.

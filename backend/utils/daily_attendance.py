@@ -260,5 +260,7 @@ def build_daily_pdf(grid: Dict[str, Any], date_s: str) -> bytes:
     table = Table(data, colWidths=col_w, repeatRows=1)
     table.setStyle(TableStyle(style))
     story.append(table)
+    from utils.pdf_branding import punchline_flowables
+    story.extend(punchline_flowables())
     doc.build(story)
     return buf.getvalue()

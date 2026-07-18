@@ -45,7 +45,8 @@ import { useOnRefresh } from "@/src/context/RefreshBusContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import MonthPicker from "@/src/components/MonthPicker";
 import { GridScroller, stickyCol, stickyHeader } from "@/src/components/GridFreeze";
-import { colors, radius, spacing, type } from "@/src/theme";
+import { colors, radius, shadow, spacing, type } from "@/src/theme";
+import { EmployeeListSkeleton } from "@/src/components/EmployeeStatsBar";
 import MasterSelect from "@/src/components/MasterSelect";
 
 /* ------------------------------------------------------------------- */
@@ -644,6 +645,9 @@ export default function ActualSalaryProcessScreen() {
           </Pressable>
         </View>
 
+        {/* Iter 182 — loading skeleton while processing */}
+        {busy && !run ? <EmployeeListSkeleton rows={6} /> : null}
+
         {/* --- Result grid --- */}
         {run ? (
           <ResultGrid
@@ -777,10 +781,19 @@ function ResultGrid({
 
   // Iter 98 — display sorting for the process grid.
   const [sortBy, setSortBy] = useState<string>("");
+  // Iter 182 — instant employee search.
+  const [empSearch, setEmpSearch] = useState("");
   const sortRows = (rows: ActualRow[]) => {
-    if (!sortBy) return rows;
+    let base = rows;
+    const q = empSearch.trim().toLowerCase();
+    if (q) {
+      base = rows.filter((r: any) =>
+        [r.name, r.employee_code, r.designation, r.father_name]
+          .some((v) => String(v || "").toLowerCase().includes(q)));
+    }
+    if (!sortBy) return base;
     const num = (v: any) => Number(v ?? 0);
-    const arr = [...rows];
+    const arr = [...base];
     if (sortBy === "name") arr.sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")));
     else if (sortBy === "code") arr.sort((a: any, b: any) => num(a.employee_code) - num(b.employee_code));
     else if (sortBy === "net") arr.sort((a: any, b: any) => num(b.net_pay ?? b.net) - num(a.net_pay ?? a.net));
@@ -819,6 +832,27 @@ function ResultGrid({
 
       {/* Iter 98 — sort chips */}
       <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+        <View style={{
+          flexDirection: "row", alignItems: "center", gap: 6, flexGrow: 1, minWidth: 180,
+          maxWidth: 300, borderWidth: 1, borderColor: colors.border, borderRadius: 999,
+          paddingHorizontal: 12, paddingVertical: 6, backgroundColor: colors.surface,
+        }}>
+          <Ionicons name="search-outline" size={13} color={colors.onSurfaceTertiary} />
+          <TextInput
+            value={empSearch}
+            onChangeText={setEmpSearch}
+            placeholder="Search employee…"
+            placeholderTextColor={colors.onSurfaceTertiary}
+            style={{ flex: 1, fontSize: 11.5, color: colors.onSurface, paddingVertical: 0,
+              ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as any) : null) }}
+            testID="actual-emp-search"
+          />
+          {empSearch ? (
+            <Pressable onPress={() => setEmpSearch("")} hitSlop={6}>
+              <Ionicons name="close-circle" size={13} color={colors.onSurfaceTertiary} />
+            </Pressable>
+          ) : null}
+        </View>
         <Text style={{ color: colors.onSurfaceSecondary, fontSize: 11, fontWeight: "700" }}>Sort:</Text>
         {[["", "Default"], ["name", "Name"], ["code", "Code"], ["net", "Net ↓"], ["gross", "Gross ↓"]].map(([val, lab]) => (
           <Pressable
@@ -1197,11 +1231,12 @@ const styles = StyleSheet.create({
 
   card: {
     backgroundColor: colors.surfaceSecondary,
-    borderRadius: radius.lg,
+    borderRadius: 16,
     padding: spacing.md,
     marginBottom: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
+    ...shadow.card,
   },
   cardTitle: {
     ...type.h6,

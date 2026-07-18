@@ -141,5 +141,7 @@ def build_off_roll_slip_pdf(
         ),
     ))
 
+    from utils.pdf_branding import punchline_flowables
+    story.extend(punchline_flowables())
     doc.build(story)
     return buf.getvalue()

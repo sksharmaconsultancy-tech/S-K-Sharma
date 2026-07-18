@@ -989,6 +989,8 @@ def build_compliance_register_pdf(
     ]))
     story.append(foot)
 
+    from utils.pdf_branding import punchline_flowables
+    story.extend(punchline_flowables())
     doc.build(story, canvasmaker=_NumberedCanvas)
     return buf.getvalue()
 
@@ -1268,6 +1270,8 @@ def build_compliance_register_pdf_v2(
         Spacer(1, 8 * mm),
         foot,
     ]
+    from utils.pdf_branding import punchline_flowables
+    story.extend(punchline_flowables())
     doc.build(story, canvasmaker=_NumberedCanvas)
     return buf.getvalue()
 

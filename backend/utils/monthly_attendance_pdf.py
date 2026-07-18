@@ -208,6 +208,8 @@ def build_monthly_inout_pdf(grid: Dict[str, Any]) -> bytes:
         if not is_last_page:
             story.append(PageBreak())
 
+    from utils.pdf_branding import punchline_flowables
+    story.extend(punchline_flowables())
     doc.build(story)
     return buf.getvalue()
 
@@ -287,5 +289,7 @@ def build_monthly_hours_pdf(grid: Dict[str, Any]) -> bytes:
         if not is_last_page:
             story.append(PageBreak())
 
+    from utils.pdf_branding import punchline_flowables
+    story.extend(punchline_flowables())
     doc.build(story)
     return buf.getvalue()

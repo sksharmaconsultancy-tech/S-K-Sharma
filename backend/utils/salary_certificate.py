@@ -360,5 +360,7 @@ def build_salary_certificate_pdf(
     )
     flow.append(sig_tbl)
 
+    from utils.pdf_branding import punchline_flowables
+    flow.extend(punchline_flowables())
     doc.build(flow)
     return buf.getvalue()
