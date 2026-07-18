@@ -46,7 +46,8 @@ async def temp_code_bundle(token: str = Query(...), kind: str = Query("tar")):
         return FileResponse(path, filename=os.path.basename(path),
                             media_type="application/octet-stream")
     async with _LOCK:
-        if not os.path.exists(_TAR):
-            await _build_tar()
+        # Always rebuild — a cached tar previously served STALE code to the
+        # VPS (Iter 191 deploy downloaded Iter 190). Build takes ~2s.
+        await _build_tar()
     return FileResponse(_TAR, filename=os.path.basename(_TAR),
                         media_type="application/octet-stream")
