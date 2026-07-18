@@ -23,7 +23,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 import { api, apiBinary } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
-import { colors, radius, spacing, type } from "@/src/theme";
+import { colors, radius, shadow, spacing, type } from "@/src/theme";
 import { formatDate } from "@/src/utils/date";
 import ScanOCRButton from "@/src/components/ScanOCRButton";
 import MasterSelect from "@/src/components/MasterSelect";
@@ -1716,11 +1716,12 @@ const styles = StyleSheet.create({
 
   card: {
     backgroundColor: colors.surfaceSecondary,
-    borderRadius: radius.lg,
+    borderRadius: 16,
     padding: spacing.md,
     marginBottom: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
+    ...shadow.card,
   },
   cardTitle: {
     ...type.h6,

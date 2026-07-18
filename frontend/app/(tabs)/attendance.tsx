@@ -24,10 +24,10 @@ import { api } from "@/src/api/client";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
 import { useAuth } from "@/src/context/AuthContext";
 import FaceCaptureModal from "@/src/components/FaceCaptureModal";
+import PunchFlowModal from "@/src/components/PunchFlowModal";
 import LocationPill from "@/src/components/LocationPill";
 import {
   authenticateBiometricStrict,
-  getBiometricPreference,
 } from "@/src/utils/biometric";
 import {
   fingerprintSupported, verifyFingerprint, enrollFingerprint,
@@ -39,17 +39,6 @@ type Company = {
   office_lng: number;
   geofence_radius_m: number;
 };
-
-function haversine(a: [number, number], b: [number, number]) {
-  const R = 6371000;
-  const toRad = (x: number) => (x * Math.PI) / 180;
-  const dLat = toRad(b[0] - a[0]);
-  const dLng = toRad(b[1] - a[1]);
-  const s =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(a[0])) * Math.cos(toRad(b[0])) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(s));
-}
 
 export default function AttendanceScreen() {
   const { user, refresh } = useAuth();
@@ -179,44 +168,96 @@ export default function AttendanceScreen() {
   const nextKind: "in" | "out" = isPunchedIn ? "out" : "in";
 
   const insideNotifiedRef = useRef(false);
+  const exitNotifiedRef = useRef(false);
+  const prevInsideRef = useRef<boolean | null>(null);
+
+  // Iter 176 — rich duty notification (user-specified format):
+  //   Good Morning, <Name>
+  //   📅 17-Jul-2026 / 🕘 Current Time / 📍 Current Location
+  //   Firm Name / Status / [Punch IN / Punch Out]
+  const sendDutyNotification = async (punchKind: "in" | "out") => {
+    const now = new Date();
+    const hr = now.getHours();
+    const greet = hr < 12 ? "Good Morning" : hr < 17 ? "Good Afternoon" : "Good Evening";
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const dateTxt = `${String(now.getDate()).padStart(2, "0")}-${months[now.getMonth()]}-${now.getFullYear()}`;
+    let hh = now.getHours() % 12; if (hh === 0) hh = 12;
+    const ampm = now.getHours() >= 12 ? "PM" : "AM";
+    const timeTxt = `${String(hh).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")} ${ampm}`;
+    const title = `${greet}, ${user?.name || "Employee"}`;
+    const body = [
+      `📅 ${dateTxt}`,
+      `🕘 Current Time : ${timeTxt}`,
+      `📍 ${address || "Current Location"}`,
+      company?.name ? `🏢 ${company.name}` : null,
+      `Status: ${isPunchedIn ? "Punched In" : "Not Punched In"}`,
+      `👉 Tap to Punch ${punchKind.toUpperCase()}`,
+    ].filter(Boolean).join("\n");
+    try {
+      if (Platform.OS === "web") {
+        if (typeof window !== "undefined" && "Notification" in window) {
+          let perm = window.Notification.permission;
+          if (perm !== "granted" && perm !== "denied") {
+            perm = await window.Notification.requestPermission();
+          }
+          if (perm === "granted") {
+            // Prefer the service worker so the notification supports the
+            // action button + opens the punch screen on tap (PWA).
+            let shown = false;
+            try {
+              const reg = await (navigator as any).serviceWorker?.ready;
+              if (reg?.showNotification) {
+                await reg.showNotification(title, {
+                  body,
+                  icon: "/icons/icon-192.png",
+                  badge: "/icons/icon-192.png",
+                  tag: `duty-${punchKind}`,
+                  data: { url: "/attendance" },
+                  actions: [{ action: "punch", title: punchKind === "in" ? "Punch IN" : "Punch OUT" }],
+                } as any);
+                shown = true;
+              }
+            } catch { /* fall through */ }
+            if (!shown) new window.Notification(title, { body });
+          }
+        }
+      } else {
+        const Notifications = await import("expo-notifications");
+        let perm = await Notifications.getPermissionsAsync();
+        if (!perm.granted && perm.canAskAgain) {
+          perm = await Notifications.requestPermissionsAsync();
+        }
+        if (perm.granted) {
+          await Notifications.scheduleNotificationAsync({
+            content: { title, body, data: { url: "/attendance" } },
+            trigger: null,
+          });
+        }
+      }
+    } catch {}
+    showToast(`${title} — Tap to Punch ${punchKind.toUpperCase()}`, "ok");
+  };
+
   useEffect(() => {
     // Reset when the employee leaves the geofence so a fresh entry
     // (e.g., returning after lunch) triggers the reminder again.
     if (!inside) {
       insideNotifiedRef.current = false;
+      // Iter 176 — EXIT notification: left the geofence while still
+      // punched IN → "going out from duty" nudge with Punch OUT.
+      if (prevInsideRef.current === true && isPunchedIn && !exitNotifiedRef.current) {
+        exitNotifiedRef.current = true;
+        sendDutyNotification("out");
+      }
+      prevInsideRef.current = false;
       return;
     }
+    exitNotifiedRef.current = false;
+    prevInsideRef.current = true;
     if (isPunchedIn || insideNotifiedRef.current) return;
     insideNotifiedRef.current = true;
-    const title = "You are in office premises";
-    const body = `Please punch your attendance${company?.name ? ` · ${company.name}` : ""}`;
-    (async () => {
-      try {
-        if (Platform.OS === "web") {
-          if (typeof window !== "undefined" && "Notification" in window) {
-            if (window.Notification.permission === "granted") {
-              new window.Notification(title, { body });
-            } else if (window.Notification.permission !== "denied") {
-              const p = await window.Notification.requestPermission();
-              if (p === "granted") new window.Notification(title, { body });
-            }
-          }
-        } else {
-          const Notifications = await import("expo-notifications");
-          let perm = await Notifications.getPermissionsAsync();
-          if (!perm.granted && perm.canAskAgain) {
-            perm = await Notifications.requestPermissionsAsync();
-          }
-          if (perm.granted) {
-            await Notifications.scheduleNotificationAsync({
-              content: { title, body },
-              trigger: null,
-            });
-          }
-        }
-      } catch {}
-      showToast(`${title} — ${body}`, "ok");
-    })();
+    // Iter 176 — ARRIVAL notification (come to duty) with Punch IN.
+    sendDutyNotification("in");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inside, isPunchedIn]);
 
@@ -245,7 +286,6 @@ export default function AttendanceScreen() {
         firstPunchTried.current = true;
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company, today]);
 
   // Auto-refresh location every 30 seconds — but only when auto-punch
@@ -293,6 +333,9 @@ export default function AttendanceScreen() {
   }, [company, refreshLocation, autoPunchActive]);
 
   const [faceOpen, setFaceOpen] = useState(false);
+  // Iter 176 — guided punch workflow modal (GPS → Worksite → Face →
+  // Device Biometric → Save). All manual punch CTAs open this.
+  const [flowOpen, setFlowOpen] = useState(false);
 
   /** Iter 165 — WEB (PWA) fingerprint gate before a punch. Runs only when
    *  the admin requires fingerprint for this employee AND the browser has
@@ -555,135 +598,13 @@ export default function AttendanceScreen() {
   };
 
   const handlePunch = async () => {
-    // Iter 64 — three paths:
-    //
-    // (A) Biometric-only mode  — GPS punching is not allowed for this
-    //     employee (firm OFF or user not opted in). Require device
-    //     biometric AND a face selfie. We open the face capture modal
-    //     which then calls submitPunch("face", b64) after successful
-    //     device biometric.
-    // (B) Manual-with-GPS mode — the employee has an active geofence and
-    //     the GPS punching flow is available; we go through the classic
-    //     flow that requires location + inside geofence.
-    // (C) Auto-punch off (legacy) — no GPS available on device, biometric-
-    //     only fallback is allowed by server since auto_punch is off.
-    if (biometricOnlyMode) {
-      // Path (A) — hand off to the face capture modal. Device biometric
-      // (fingerprint / face) will run inside the modal AFTER the selfie
-      // is captured so both factors are required.
-      setFaceOpen(true);
-      return;
-    }
-
-    if (!loc) {
-      // Try one-shot GPS fetch; if user denies, fall back to biometric-
-      // only if auto-punch is off (server accepts no-GPS in that case).
-      const ok = await refreshLocation();
-      if (!ok) {
-        if (!autoPunchActive) {
-          setFaceOpen(true);
-          return;
-        }
-        showToast("Fetch your location first", "err");
-        return;
-      }
-    }
-    if (!inside) {
-      showToast("You're outside the office zone", "err");
-      return;
-    }
-    // Iter 165 — web fingerprint gate (admin-required, silent fallback).
-    if (!(await ensureFingerprintWeb())) return;
-    setBusy(true);
-    try {
-      let method: "fingerprint" | "face" = "fingerprint";
-      if (Platform.OS !== "web") {
-        const hasHw = await LocalAuthentication.hasHardwareAsync();
-        const enrolled = await LocalAuthentication.isEnrolledAsync();
-        if (hasHw && enrolled) {
-          const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
-          const pref = await getBiometricPreference();
-          if (pref === "face") {
-            method = "face";
-          } else if (pref === "fingerprint") {
-            method = "fingerprint";
-          } else if (
-            types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)
-          ) {
-            method = "face";
-          }
-          const bio = await authenticateBiometricStrict(
-            `Authenticate to punch ${nextKind}`,
-          );
-          if (!bio.ok) {
-            showToast(bio.message || "Biometric failed", "err");
-            setBusy(false);
-            return;
-          }
-        }
-      }
-      const res = await api<{
-        ok: boolean; distance_m: number;
-        status?: string; approval_required?: boolean;
-      }>("/attendance/punch", {
-        method: "POST",
-        body: {
-          kind: nextKind,
-          latitude: loc!.latitude,
-          longitude: loc!.longitude,
-          biometric_method: method,
-          device_info: Platform.OS,
-        },
-      });
-      if (Platform.OS !== "web") {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        // Iter 68 — double-tap the haptic so the user gets an audible /
-        // tactile cue that mimics a "success chime" without needing an
-        // audio asset shipped with the app.
-        setTimeout(
-          () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
-          150,
-        );
-      } else {
-        // Web — play a short beep via the Web Audio API so field devices
-        // running the PWA still get an audible "duty in / out successful"
-        // signal without shipping a sound file.
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const AC: any = (globalThis as any).AudioContext || (globalThis as any).webkitAudioContext;
-          if (AC) {
-            const ctx = new AC();
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.type = "sine";
-            osc.frequency.value = nextKind === "in" ? 880 : 660;
-            gain.gain.value = 0.001;
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start();
-            gain.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.03);
-            gain.gain.exponentialRampToValueAtTime(0.0005, ctx.currentTime + 0.35);
-            osc.stop(ctx.currentTime + 0.4);
-          }
-        } catch { /* ignore */ }
-      }
-      showToast(
-        (res?.status === "pending" || res?.approval_required === true)
-          ? (nextKind === "in"
-              ? `Duty IN submitted · ${Math.round(res.distance_m)}m from office — awaiting admin approval`
-              : `Duty OUT submitted · ${Math.round(res.distance_m)}m from office — awaiting admin approval`)
-          : (nextKind === "in"
-              ? `Duty IN successfully · ${Math.round(res.distance_m)}m from office`
-              : `Duty OUT successfully · ${Math.round(res.distance_m)}m from office`),
-        "ok",
-      );
-      await loadAll();
-    } catch (e: any) {
-      showToast(e.message || "Punch failed", "err");
-    } finally {
-      setBusy(false);
-    }
+    // Iter 176 — every manual punch goes through the guided workflow:
+    // GPS Verification → Select Worksite (if applicable) → Face
+    // Verification → Optional Device Biometric → Attendance Saved
+    // (photo + location + time stored) → Payroll updated.
+    setFlowOpen(true);
   };
+
 
   const canPunch = !!loc && inside && !busy;
   const canPunchBiometric = !busy;   // manual biometric mode never blocks on GPS
@@ -697,9 +618,13 @@ export default function AttendanceScreen() {
     <View style={styles.root}>
       <SafeAreaView edges={["top"]} style={{ backgroundColor: colors.surface }}>
         <View style={styles.header}>
-          <Text style={styles.h1}>Smart Punch</Text>
+          <Text style={styles.h1}>
+            {user?.role === "employee" ? "Smart Punch" : "My Attendance"}
+          </Text>
           <Text style={styles.sub}>
-            {user?.name} · {company?.name || "—"}
+            {user?.role === "employee"
+              ? `${user?.name} · ${company?.name || "—"}`
+              : `${user?.name} · Employee Mode — your own attendance only`}
           </Text>
         </View>
       </SafeAreaView>
@@ -917,7 +842,8 @@ export default function AttendanceScreen() {
         </Pressable>
       </Modal>
 
-      {/* Sticky CTA
+      {/* Sticky CTA — hidden entirely when the firm's attendance punching
+       *  is OFF (Iter 176 fix: view-only mode must not show punch buttons).
        *  Iter 64 — three modes:
        *   • Biometric-only: single big CTA that opens Face Capture. GPS
        *     is disabled at firm or user level. Both fingerprint (device)
@@ -925,12 +851,12 @@ export default function AttendanceScreen() {
        *   • Manual + GPS: Face scan + Punch In/Out (needs geofence pass).
        *   • Auto-punch ON: no manual UI — the geofence handler fires in
        *     the background. */}
-      {biometricOnlyMode ? (
+      {(company as any)?.attendance_punching_enabled === false ? null : biometricOnlyMode ? (
         <View style={styles.stickyBar}>
           <Pressable
             testID="biometric-punch-cta"
             disabled={!canPunchBiometric}
-            onPress={() => setFaceOpen(true)}
+            onPress={() => setFlowOpen(true)}
             style={[
               styles.cta,
               { flex: 1 },
@@ -953,8 +879,8 @@ export default function AttendanceScreen() {
         <View style={styles.stickyBar}>
           <Pressable
             testID="face-cta"
-            disabled={!canPunch}
-            onPress={() => setFaceOpen(true)}
+            disabled={busy}
+            onPress={() => setFlowOpen(true)}
             style={[
               styles.ctaSecondary,
               !canPunch && { borderColor: colors.borderStrong, opacity: 0.6 },
@@ -1042,6 +968,16 @@ export default function AttendanceScreen() {
           setFaceOpen(false);
           await submitPunch("face", b64);
         }}
+      />
+
+      {/* Iter 176 — guided punch workflow (GPS → Worksite → Face →
+          Biometric → Save). */}
+      <PunchFlowModal
+        visible={flowOpen}
+        kind={nextKind}
+        user={user}
+        onClose={() => setFlowOpen(false)}
+        onDone={loadAll}
       />
 
       {toast && (

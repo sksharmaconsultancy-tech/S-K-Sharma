@@ -329,6 +329,10 @@ class AttendancePunch(BaseModel):
     source: Optional[
         Literal["manual", "manual-nogps", "geofence-auto", "admin_approved"]
     ] = "manual"
+    # Iter 176 — guided punch workflow: worksite the employee selected
+    # (main office or a branch). Stored on the record for reports.
+    worksite_id: Optional[str] = None
+    worksite_name: Optional[str] = None
 
 
 class LocationPing(BaseModel):
@@ -8345,6 +8349,42 @@ async def _resolve_geofence(company: dict, lat: float, lng: float) -> tuple[floa
     return (best_dist, best)
 
 
+@api.get("/attendance/worksites")
+async def my_worksites(authorization: Optional[str] = Header(None)):
+    """Iter 176 — worksites for the guided punch flow: the firm's main
+    office plus all active branches (id, name, coords, radius). Available
+    to any logged-in employee of the firm."""
+    user = await get_user_from_token(authorization)
+    if not user.get("company_id"):
+        raise HTTPException(status_code=400, detail="No company assigned")
+    company = await db.companies.find_one(
+        {"company_id": user["company_id"]},
+        {"_id": 0, "name": 1, "office_lat": 1, "office_lng": 1, "geofence_radius_m": 1},
+    )
+    sites: List[dict] = []
+    if company and company.get("office_lat") is not None:
+        sites.append({
+            "worksite_id": "main",
+            "name": f"{company.get('name') or 'Main Office'} (Main Office)",
+            "office_lat": company["office_lat"],
+            "office_lng": company["office_lng"],
+            "geofence_radius_m": company.get("geofence_radius_m") or 200,
+        })
+    async for b in db.branches.find(
+        {"company_id": user["company_id"], "active": {"$ne": False}},
+        {"_id": 0, "branch_id": 1, "name": 1, "office_lat": 1,
+         "office_lng": 1, "geofence_radius_m": 1},
+    ):
+        sites.append({
+            "worksite_id": b["branch_id"],
+            "name": b.get("name") or "Branch",
+            "office_lat": b["office_lat"],
+            "office_lng": b["office_lng"],
+            "geofence_radius_m": b.get("geofence_radius_m") or 200,
+        })
+    return {"worksites": sites}
+
+
 @api.post("/attendance/punch")
 async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
@@ -8631,6 +8671,9 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
         "outside_geofence": bool(outside),
         "gps_verified": (not no_gps_manual),
         "location_status": location_status,
+        # Iter 176 — guided punch workflow: employee-selected worksite.
+        "worksite_id": payload.worksite_id or (closest or {}).get("branch_id"),
+        "worksite_name": payload.worksite_name or (closest or {}).get("name"),
     }
     # Determine approval status. Auto punches (geofence enter/exit background
     # trigger) land as "pending" when the firm has punch_approval_required=True.
@@ -14672,12 +14715,15 @@ async def _compute_compliance_run(
                 "ot_hours": 0.0,
             }
         _ff = firm_stat_flags.get(emp.get("company_id")) or {"pf": False, "esic": False}
+        # Iter 178 — state-wise PT from the firm's compliance policy.
+        _fcp = (company_doc.get("compliance_policy") or {}) if company_doc else {}
         row = compute_compliance_row(
             emp, merged_pol, int(month_days), stats,
             company_structure_pct=payload.structure_pct,
             statutory_cfg=effective_statutory,
             firm_pf_enabled=_ff["pf"],
             firm_esic_enabled=_ff["esic"],
+            firm_pt={"state": _fcp.get("pt_state"), "slabs": _fcp.get("pt_slabs")},
         )
         # Iter 100 — Attendance Master "Other Deduction" (Advance/TDS etc.)
         if _am and float(_am.get("deduction_amount") or 0) > 0:
@@ -14899,6 +14945,10 @@ async def create_compliance_salary_run(
         "finalized": {"$ne": True},
     })
     await db.compliance_salary_runs.insert_one(run)
+    # Iter 182 — audit trail
+    from routes.salary_audit import write_salary_audit
+    await write_salary_audit(admin, "process", run,
+                             f"Processed {len(run.get('rows') or [])} employees")
     return {"ok": True, "run": {k: v for k, v in run.items() if k != "_id"}}
 
 
@@ -15036,6 +15086,10 @@ async def save_compliance_run_rows(
     if isinstance(totals, dict) and totals:
         updates["totals"] = totals
     await db.compliance_salary_runs.update_one({"run_id": run_id}, {"$set": updates})
+    # Iter 182 — audit trail
+    from routes.salary_audit import write_salary_audit
+    await write_salary_audit(admin, "save_rows", run,
+                             f"Saved draft edits for {len(rows)} rows")
     return {"ok": True, "draft_saved_at": updates["draft_saved_at"]}
 
 
@@ -15064,6 +15118,9 @@ async def finalize_compliance_salary_run(
     }
     await db.compliance_salary_runs.update_one({"run_id": run_id}, {"$set": stamp})
     logger.info("[compliance-run] finalized run=%s by %s", run_id, admin["user_id"])
+    # Iter 182 — audit trail
+    from routes.salary_audit import write_salary_audit
+    await write_salary_audit(admin, "finalize", run, "Run finalized (locked)")
     # Iter 103 — automated email trigger
     try:
         from routes.email_notifications import fire_email_event
@@ -15189,6 +15246,13 @@ async def decide_salary_unlock_request(
             }},
         )
         logger.info("[compliance-run] unlock APPROVED run=%s req=%s", req["run_id"], req_id)
+        # Iter 182 — audit trail
+        from routes.salary_audit import write_salary_audit
+        run_doc = await db.compliance_salary_runs.find_one(
+            {"run_id": req["run_id"]}, {"_id": 0, "run_id": 1, "company_id": 1,
+                                        "company_name": 1, "month": 1})
+        await write_salary_audit(admin, "unlock", run_doc or {"run_id": req["run_id"]},
+                                 f"Unlock approved — {note or 'no note'}")
     return {"ok": True, "approved": approve}
 
 
@@ -17676,6 +17740,8 @@ class CompliancePolicyPayload(BaseModel):
     esic_wage_threshold: Optional[float] = None
     tds_regime: Optional[str] = None
     pt_slabs: Optional[List[Dict[str, Any]]] = None
+    # Iter 178 — state-wise PT: firm's PT state auto-applies statutory slabs.
+    pt_state: Optional[str] = None
     apply_pf: Optional[bool] = None
     apply_esic: Optional[bool] = None
     apply_pt: Optional[bool] = None
@@ -17703,6 +17769,19 @@ class CompliancePolicyPayload(BaseModel):
     # Compliance Salary Process only shows / applies the enabled heads.
     enabled_allowances: Optional[List[str]] = None  # e.g. ["basic","hra","conveyance"]
     notes: Optional[str] = None
+
+
+@api.get("/admin/pt-states")
+async def list_pt_states(authorization: Optional[str] = Header(None)):
+    """Iter 178 — state-wise Professional Tax slab catalogue (monthly
+    gross → monthly PT). Used by the firm Compliance Policy screen."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    from utils.compliance_salary import PT_STATE_SLABS
+    return {"states": [
+        {"state": s, "slabs": slabs, "has_pt": bool(slabs)}
+        for s, slabs in sorted(PT_STATE_SLABS.items())
+    ]}
 
 
 @api.get("/admin/companies/{company_id}/compliance-policy")
@@ -19353,6 +19432,14 @@ from routes.punch_import import router as punch_import_router  # noqa: E402
 app.include_router(punch_import_router)
 from routes.contractor_punches import router as contractor_punches_router  # noqa: E402
 app.include_router(contractor_punches_router)
+from routes.labour_reports import router as labour_reports_router  # noqa: E402
+app.include_router(labour_reports_router)
+from routes.portal_dashboard import router as portal_dashboard_router  # noqa: E402
+app.include_router(portal_dashboard_router)
+from routes.portal_phase2 import router as portal_phase2_router  # noqa: E402
+app.include_router(portal_phase2_router)
+from routes.salary_audit import router as salary_audit_router  # noqa: E402
+app.include_router(salary_audit_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.

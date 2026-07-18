@@ -8,6 +8,7 @@ import {
   useWindowDimensions,
   ScrollView,
   Image,
+  TextInput,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { usePathname, useRouter } from "expo-router";
@@ -19,7 +20,8 @@ import { useRefreshBus } from "@/src/context/RefreshBusContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { useUnreadNotifications } from "@/src/hooks/useUnreadNotifications";
 import { usePrimaryInbox } from "@/src/hooks/usePrimaryInbox";
-import { colors, radius, spacing, type } from "@/src/theme";
+import { useTheme } from "@/src/context/ThemeContext";
+import { colors, radius, spacing, type, isDarkTheme, DARK_THEME_ID } from "@/src/theme";
 
 /**
  * Formats an ISO timestamp as a "Xs / Xm / Xh ago" chip.  Used by the
@@ -55,7 +57,9 @@ function formatSinceRefresh(iso: string): string {
 export const DESKTOP_MIN = 960;
 
 export const NAV_SUPER: NavItem[] = [
-  { route: "/(tabs)", label: "Dashboard", icon: "home-outline" },
+  // Iter 181 — the premium Portal Dashboard is the ONE default dashboard
+  // on the web portal (old /(tabs) dashboard removed from the sidebar).
+  { route: "/portal-dashboard", label: "Dashboard", icon: "speedometer-outline" },
   // Iter 89 — Add New Employee shifted to position 2 per user request.
   { route: "/employee-add", label: "Add New Employee", icon: "person-add-outline" },
   { route: "/companies", label: "Companies (Firm Master)", icon: "business-outline" },
@@ -97,6 +101,7 @@ export const NAV_SUPER: NavItem[] = [
     icon: "bar-chart-outline",
     children: [
       { route: "/attendance-grid", label: "Attendance Report", icon: "grid-outline" },
+      { route: "/labour-reports", label: "Labour Law Reports", icon: "library-outline" },
       { route: "/daily-present-report", label: "Day-wise Present Count", icon: "people-outline" },
       { route: "/salary-day-sheet", label: "Day-wise Salary Sheet", icon: "calendar-outline" },
       { route: "/master-data-report", label: "Master Data", icon: "server-outline" },
@@ -311,7 +316,8 @@ function NavRow({
 
 
 export const NAV_COMPANY_ADMIN: NavItem[] = [
-  { route: "/(tabs)", label: "Dashboard", icon: "home-outline" },
+  // Iter 181 — premium Portal Dashboard is the single default dashboard.
+  { route: "/portal-dashboard", label: "Dashboard", icon: "speedometer-outline" },
   // Iter 89 — Add New Employee shifted to position 2 per user request.
   { route: "/employee-add", label: "Add New Employee", icon: "person-add-outline" },
   { route: "/admin", label: "Employee Master Data", icon: "people-outline" },
@@ -345,6 +351,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
     icon: "bar-chart-outline",
     children: [
       { route: "/attendance-grid", label: "Attendance Report", icon: "grid-outline" },
+      { route: "/labour-reports", label: "Labour Law Reports", icon: "library-outline" },
       { route: "/daily-present-report", label: "Day-wise Present Count", icon: "people-outline" },
       { route: "/salary-day-sheet", label: "Day-wise Salary Sheet", icon: "calendar-outline" },
       { route: "/master-data-report", label: "Master Data", icon: "server-outline" },
@@ -406,6 +413,9 @@ export default function AdminWebShell({ children }: Props) {
   const [logoutModal, setLogoutModal] = React.useState(false);
   // Iter 89 — Notifications bell + unread badge for the admin header.
   const { unreadCount: unreadNotifCount } = useUnreadNotifications();
+  // Iter 180 — global menu search + dark mode toggle.
+  const [navQuery, setNavQuery] = React.useState("");
+  const { themeId, setThemeId } = useTheme();
 
   // Show the desktop portal shell ONLY on a wide web viewport (≥ 960px).
   // On a phone-sized web viewport (mobile browser / installed PWA on a
@@ -722,6 +732,48 @@ export default function AdminWebShell({ children }: Props) {
           <Text style={styles.pageTitle}>
             {flatNav.find((n) => n.route === activeRoute)?.label || "Workspace"}
           </Text>
+          {/* Iter 180 — Global search over portal screens. */}
+          <View style={styles.gsWrap}>
+            <View style={styles.gsBox}>
+              <Ionicons name="search-outline" size={14} color={colors.onSurfaceTertiary} />
+              <TextInput
+                style={styles.gsInput}
+                placeholder="Search menu… (clients, payroll, reports)"
+                placeholderTextColor={colors.onSurfaceTertiary}
+                value={navQuery}
+                onChangeText={setNavQuery}
+                testID="web-global-search"
+              />
+              {navQuery ? (
+                <Pressable onPress={() => setNavQuery("")} hitSlop={6}>
+                  <Ionicons name="close-circle" size={14} color={colors.onSurfaceTertiary} />
+                </Pressable>
+              ) : null}
+            </View>
+            {navQuery.trim() ? (
+              <View style={styles.gsResults}>
+                {flatNav
+                  .filter((n) => n.label.toLowerCase().includes(navQuery.trim().toLowerCase()))
+                  .slice(0, 8)
+                  .map((n) => (
+                    <Pressable
+                      key={n.route}
+                      onPress={() => { setNavQuery(""); router.push(n.route as any); }}
+                      style={({ hovered }: any) => [
+                        styles.gsItem, hovered && { backgroundColor: colors.surfaceTertiary }]}
+                      testID={`gs-result-${n.route.slice(1)}`}
+                    >
+                      <Ionicons name={(n as any).icon || "chevron-forward"} size={14}
+                        color={colors.brandPrimary} />
+                      <Text style={styles.gsItemTxt}>{n.label}</Text>
+                    </Pressable>
+                  ))}
+                {flatNav.filter((n) => n.label.toLowerCase().includes(navQuery.trim().toLowerCase())).length === 0 ? (
+                  <Text style={styles.gsEmpty}>No screens match “{navQuery.trim()}”</Text>
+                ) : null}
+              </View>
+            ) : null}
+          </View>
           <View style={styles.topRight}>
             {isSubAdmin ? (
               <Pressable
@@ -803,6 +855,19 @@ export default function AdminWebShell({ children }: Props) {
                   </Text>
                 </View>
               ) : null}
+            </Pressable>
+            {/* Iter 180 — Dark / light mode toggle. */}
+            <Pressable
+              onPress={() => setThemeId(isDarkTheme(themeId) ? "azure_light" : DARK_THEME_ID)}
+              style={({ pressed }) => [styles.notifBellBtn, pressed && { opacity: 0.85 }]}
+              testID="web-dark-toggle"
+              hitSlop={6}
+            >
+              <Ionicons
+                name={isDarkTheme(themeId) ? "sunny-outline" : "moon-outline"}
+                size={18}
+                color={colors.brandPrimary}
+              />
             </Pressable>
             <Text style={styles.envTxt}>Web portal</Text>
             {/* Iter 85 — Logout button. For Super/Sub admins it opens a
@@ -1055,6 +1120,31 @@ const styles = StyleSheet.create({
     zIndex: 3000,
   },
   pageTitle: { color: colors.onSurface, fontSize: type.lg, fontWeight: "800" },
+  // Iter 180 — global menu search
+  gsWrap: { flex: 1, maxWidth: 380, marginLeft: spacing.lg, zIndex: 4000 },
+  gsBox: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: colors.surfaceTertiary, borderRadius: 999,
+    borderWidth: 1, borderColor: colors.border,
+    paddingHorizontal: 12, height: 36,
+  },
+  gsInput: {
+    flex: 1, fontSize: 12, color: colors.onSurface,
+    ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as any) : null),
+  },
+  gsResults: {
+    position: "absolute", top: 42, left: 0, right: 0,
+    backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg,
+    borderWidth: 1, borderColor: colors.border, paddingVertical: 4,
+    shadowColor: "#0F172A", shadowOpacity: 0.15, shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 }, zIndex: 5000,
+  },
+  gsItem: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    paddingHorizontal: 14, paddingVertical: 9,
+  },
+  gsItemTxt: { fontSize: 12.5, fontWeight: "600", color: colors.onSurface },
+  gsEmpty: { fontSize: 11.5, color: colors.onSurfaceTertiary, padding: 12 },
   topRight: { flexDirection: "row", alignItems: "center", gap: 12 },
   envTxt: {
     color: colors.brandPrimary,

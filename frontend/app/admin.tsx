@@ -16,6 +16,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import CompanyPicker from "@/src/components/CompanyPicker";
 import SalaryUpdateModal from "@/src/components/SalaryUpdateModal";
+import { EmployeeStatsBar, EmployeeListSkeleton } from "@/src/components/EmployeeStatsBar";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
 import DateField from "@/src/components/DateField";
 import { formatDate, ddmmyyyyToISO } from "@/src/utils/date";
@@ -598,6 +599,11 @@ export default function AdminScreen() {
           </View>
         </View>
 
+        {/* Iter 182 — premium stat cards */}
+        {!loading && employees.length > 0 ? (
+          <EmployeeStatsBar employees={employees} />
+        ) : null}
+
         {/* Iter 77 - Employee search + sort controls */}
         <View style={styles.empToolbar}>
           <View style={styles.empSearchBox}>
@@ -672,7 +678,7 @@ export default function AdminScreen() {
         />
 
         {loading ? (
-          <ActivityIndicator color={colors.brandPrimary} />
+          <EmployeeListSkeleton rows={6} />
         ) : employees.length === 0 ? (
           <Text style={styles.empty}>
             No employees yet. New Google sign-ups will appear here.
@@ -1405,17 +1411,18 @@ const styles = StyleSheet.create({
   empty: { color: colors.onSurfaceTertiary, textAlign: "center", paddingVertical: spacing.xl },
   empRow: {
     flexDirection: "row", alignItems: "center", gap: spacing.md,
-    backgroundColor: colors.surfaceSecondary, borderRadius: radius.md,
+    backgroundColor: colors.surfaceSecondary, borderRadius: 16,
     padding: spacing.md, borderWidth: 1, borderColor: colors.border,
     marginBottom: spacing.sm,
+    ...shadow.card,
   },
   avatar: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: colors.brandTertiary,
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: colors.brandPrimary,
     alignItems: "center", justifyContent: "center",
   },
-  avatarTxt: { color: colors.onBrandTertiary, fontSize: type.lg, fontWeight: "500" },
-  empName: { color: colors.onSurface, fontSize: type.base, fontWeight: "500" },
+  avatarTxt: { color: "#FFFFFF", fontSize: type.lg, fontWeight: "700" },
+  empName: { color: colors.onSurface, fontSize: type.base, fontWeight: "700" },
   trashBtn: {
     padding: 8,
     borderRadius: 8,
@@ -1610,12 +1617,13 @@ const styles = StyleSheet.create({
     gap: 6,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 6,
-    backgroundColor: colors.surface,
+    borderRadius: 999,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    backgroundColor: colors.surfaceSecondary,
     flex: 1,
     minWidth: 200,
+    ...shadow.card,
   },
   empSearchInput: {
     flex: 1,

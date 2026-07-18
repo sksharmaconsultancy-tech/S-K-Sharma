@@ -249,6 +249,7 @@ export default function PayslipScreen() {
           </>
         )}
 
+        <Text style={styles.punchLine}>&ldquo;Your Satisfaction is Our First Ambition&rdquo;</Text>
         <View style={{ height: 40 }} />
       </ScrollView>
     </View>
@@ -356,6 +357,10 @@ const styles = StyleSheet.create({
   divider: { height: 1, backgroundColor: colors.border, marginVertical: 8 },
 
   footNote: { color: colors.onSurfaceTertiary, fontSize: 11, textAlign: "center", lineHeight: 16 },
+  punchLine: {
+    color: colors.brandPrimary, fontSize: 12.5, fontWeight: "700",
+    fontStyle: "italic", textAlign: "center", marginTop: 18,
+  },
   warnBox: {
     marginTop: spacing.md, flexDirection: "row", gap: 6,
     backgroundColor: "#FFF4E5",

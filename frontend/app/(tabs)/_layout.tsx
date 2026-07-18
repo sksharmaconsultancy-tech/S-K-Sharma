@@ -20,7 +20,7 @@ export default function TabsLayout() {
   if (user.role === "employee" && user.approval_pending) return <Redirect href="/pending-approval" />;
   if (user.role === "employee" && !user.onboarded) return <Redirect href="/register-choice" />;
 
-  const isSuperAdmin = user.role === "super_admin";
+
 
   // Iter 165 — employees whose admin enabled Fingerprint verification must
   // unlock the app with the device fingerprint (silent skip when the
@@ -55,16 +55,28 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="leave"
+        options={{
+          title: "Leave",
+          // Iter 180 — ESS bottom nav: Leave tab is employee-only.
+          href: user.role === "employee" ? undefined : null,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="calendar-outline" color={color} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="attendance"
         options={{
           title: "",
           tabBarLabel: () => null,
-          // Super admins don't punch — hide the middle Punch tab entirely.
+          // Iter 177 — the Punch tab shows ONLY for employees. Employers
+          // reach the same screen via Dashboard → "My Attendance".
           // NOTE: Expo Router forbids passing both `href` and `tabBarButton`
           // for the same screen, so we use only `href: null` to hide it and
           // let the default tab button behaviour apply otherwise.
-          href: isSuperAdmin ? null : undefined,
-          tabBarButton: isSuperAdmin
+          href: user.role === "employee" ? undefined : null,
+          tabBarButton: user.role !== "employee"
             ? undefined
             : (props) => (
                 <Pressable
@@ -80,9 +92,23 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="payslip"
+        options={{
+          title: "Payslip",
+          // Iter 180 — ESS bottom nav: Payslip tab is employee-only.
+          href: user.role === "employee" ? undefined : null,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="cash-outline" color={color} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="documents"
         options={{
           title: "Documents",
+          // Iter 180 — employees reach Documents from Home quick cards;
+          // the tab slot goes to Leave/Payslip instead.
+          href: user.role === "employee" ? null : undefined,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="document-text-outline" color={color} size={size} />
           ),

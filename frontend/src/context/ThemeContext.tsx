@@ -41,7 +41,15 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const saved = await AsyncStorage.getItem(STORAGE_KEY);
+        // Iter 180 — same corporate_sapphire → azure_light migration as
+        // theme.ts (native path uses AsyncStorage).
+        const migrated = await AsyncStorage.getItem("sksharma.theme.migrated.v2");
+        let saved = await AsyncStorage.getItem(STORAGE_KEY);
+        if (saved === "corporate_sapphire" && !migrated) {
+          saved = "azure_light";
+          await AsyncStorage.setItem(STORAGE_KEY, saved);
+          await AsyncStorage.setItem("sksharma.theme.migrated.v2", "1");
+        }
         const id = (saved as ThemeId) || DEFAULT_THEME_ID;
         if (THEME_PRESETS.find(p => p.id === id)) {
           applyThemePreset(id);

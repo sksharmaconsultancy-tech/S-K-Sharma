@@ -135,6 +135,11 @@ export default function CompliancePolicyScreen() {
     if (globalCid) setCompanyId(globalCid);
   }, [globalCid]);
   const [policy, setPolicy] = useState<Policy>({});
+  // Iter 178 — state-wise PT catalogue.
+  const [ptStates, setPtStates] = useState<{ state: string; slabs: any[]; has_pt: boolean }[]>([]);
+  useEffect(() => {
+    api<{ states: any[] }>("/admin/pt-states").then((r) => setPtStates(r.states || [])).catch(() => {});
+  }, []);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -424,6 +429,45 @@ export default function CompliancePolicyScreen() {
                   );
                 })}
               </View>
+            </View>
+
+            {/* Iter 178 — State-wise Professional Tax */}
+            <View style={styles.card} testID="pt-state-card">
+              <Text style={styles.label}>Professional Tax — State (auto slabs)</Text>
+              <Text style={{ fontSize: 11, color: colors.onSurfaceSecondary, marginBottom: 8 }}>
+                Pick the firm&apos;s state — statutory monthly PT slabs apply automatically
+                in Compliance Salary. Per-employee PT override still wins.
+              </Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                {ptStates.map((s) => {
+                  const on = (policy as any).pt_state === s.state;
+                  return (
+                    <Pressable key={s.state}
+                      onPress={() => setPolicy((p) => ({ ...p, pt_state: on ? "" : s.state } as any))}
+                      style={[styles.allowChip, on && styles.allowChipOn, { minWidth: 120 }]}
+                      testID={`pt-state-${s.state}`}>
+                      <Text style={[styles.allowLabel, on && { color: "#fff" }]}>
+                        {s.state}{s.has_pt ? "" : " (No PT)"}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {(policy as any).pt_state ? (
+                <View style={{ marginTop: 8 }}>
+                  <Text style={[styles.label, { fontSize: 11 }]}>
+                    {(policy as any).pt_state} slabs (monthly gross → PT ₹):
+                  </Text>
+                  {(ptStates.find((s) => s.state === (policy as any).pt_state)?.slabs || []).map((sl: any, i: number) => (
+                    <Text key={i} style={{ fontSize: 11, color: colors.onSurfaceSecondary }}>
+                      {sl.upto == null ? "Above previous slab" : `Up to ₹${sl.upto}`} → ₹{sl.amount}
+                    </Text>
+                  ))}
+                  {!(ptStates.find((s) => s.state === (policy as any).pt_state)?.slabs || []).length ? (
+                    <Text style={{ fontSize: 11, color: colors.onSurfaceSecondary }}>No Professional Tax in this state.</Text>
+                  ) : null}
+                </View>
+              ) : null}
             </View>
 
             <View style={styles.card}>

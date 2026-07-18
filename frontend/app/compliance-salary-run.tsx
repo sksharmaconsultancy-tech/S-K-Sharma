@@ -38,13 +38,14 @@ import * as DocumentPicker from "expo-document-picker";
 
 import { api, apiBinary } from "@/src/api/client";
 import { confirmYesNo } from "@/src/utils/confirm";
+import { EmployeeListSkeleton } from "@/src/components/EmployeeStatsBar";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
   
 import MonthPicker from "@/src/components/MonthPicker";
 import RegisterLayoutEditor from "@/src/components/RegisterLayoutEditor";
 import { GridScroller, stickyCol, stickyHeader } from "@/src/components/GridFreeze";
-import { colors, radius, spacing, type } from "@/src/theme";
+import { colors, radius, shadow, spacing, type } from "@/src/theme";
 import { sortEmployeeTypes } from "@/src/utils/employeeTypes";
 
 const PT_STATES = [
@@ -243,6 +244,12 @@ export default function ComplianceSalaryRunScreen() {
   const [mailLoading, setMailLoading] = useState(false);
   // Iter 98 — display sorting for the compliance grid.
   const [sortBy, setSortBy] = useState<string>("");
+  // Iter 182 — instant employee search + audit log
+  const [empSearch, setEmpSearch] = useState("");
+  const empSearchRef = useRef<TextInput | null>(null);
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [auditEntries, setAuditEntries] = useState<any[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
   // Iter 127e — AUTO-ADJUST every column to its widest content so nothing
   // is cut off (user request; replaces the wrap-text experiment).
   const colW = useMemo(() => {
@@ -272,14 +279,55 @@ export default function ComplianceSalaryRunScreen() {
     };
   }, [run?.rows]);
   const sortRows = (rows: CompRow[]) => {
-    if (!sortBy) return rows;
+    // Iter 182 — instant search filters the grid before sorting.
+    let base = rows;
+    const q = empSearch.trim().toLowerCase();
+    if (q) {
+      base = rows.filter((r: any) =>
+        [r.name, r.employee_code, r.uan_no, r.esi_ip_no, r.designation, r.father_name]
+          .some((v) => String(v || "").toLowerCase().includes(q)));
+    }
+    if (!sortBy) return base;
     const num = (v: any) => Number(v ?? 0);
-    const arr = [...rows];
+    const arr = [...base];
     if (sortBy === "name") arr.sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")));
     else if (sortBy === "code") arr.sort((a: any, b: any) => num(a.employee_code) - num(b.employee_code));
     else if (sortBy === "net") arr.sort((a: any, b: any) => num(b.net) - num(a.net));
     else if (sortBy === "gross") arr.sort((a: any, b: any) => num(b.gross) - num(a.gross));
     return arr;
+  };
+
+  // Iter 182 — keyboard shortcuts (web): "/" focuses employee search,
+  // Ctrl/Cmd+S saves the draft.
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    const onKey = (e: any) => {
+      const tag = (e.target?.tagName || "").toLowerCase();
+      const typing = tag === "input" || tag === "textarea";
+      if (e.key === "/" && !typing) {
+        e.preventDefault();
+        empSearchRef.current?.focus();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (run && !(run as any).finalized) saveAsDraft();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run]);
+
+  const openAudit = async () => {
+    setAuditOpen(true);
+    setAuditLoading(true);
+    try {
+      const p = new URLSearchParams({ limit: "60" });
+      if (run?.run_id) p.set("run_id", run.run_id);
+      else if (month) p.set("month", month);
+      const r = await api<{ entries: any[] }>(`/admin/salary-audit-log?${p.toString()}`);
+      setAuditEntries(r.entries);
+    } catch { setAuditEntries([]); }
+    setAuditLoading(false);
   };
 
   // Prefill from global picker whenever batch mode is turned on.
@@ -628,6 +676,29 @@ export default function ComplianceSalaryRunScreen() {
   // grid (Present Days / Others / Other Deduction) to the backend. It used
   // to be a no-op, so every edit vanished when the run was reopened.
   const [savingDraft, setSavingDraft] = useState(false);
+  // Iter 182 — silent auto-save: 3s after any grid edit the draft is
+  // stored automatically (skips finalized runs and the initial compute).
+  const autoSaveSkipRef = useRef<string | null>(null);
+  const [autoSavedAt, setAutoSavedAt] = useState<string | null>(null);
+  useEffect(() => {
+    if (!run || (run as any).finalized) return;
+    if (autoSaveSkipRef.current !== run.run_id) {
+      // first sighting of this run (compute/open) — don't auto-save yet
+      autoSaveSkipRef.current = run.run_id;
+      return;
+    }
+    const t = setTimeout(async () => {
+      try {
+        await api(`/admin/compliance-salary-runs/${run.run_id}/save-rows`, {
+          method: "POST",
+          body: { rows: run.rows, totals: run.totals },
+        });
+        setAutoSavedAt(new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }));
+      } catch { /* silent */ }
+    }, 3000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run]);
   const saveAsDraft = async () => {
     if (!run || savingDraft) return;
     if ((run as any).finalized) {
@@ -1294,6 +1365,72 @@ export default function ComplianceSalaryRunScreen() {
             </Pressable>
           </View>
 
+          {/* Iter 182 — Audit Log modal */}
+          <Modal
+            visible={auditOpen}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setAuditOpen(false)}
+          >
+            <View style={{
+              flex: 1, backgroundColor: "rgba(15,23,42,0.45)",
+              alignItems: "center", justifyContent: "center", padding: 20,
+            }}>
+              <View style={{
+                backgroundColor: colors.surfaceSecondary, borderRadius: 16, padding: 16,
+                width: "100%", maxWidth: 560, maxHeight: "80%",
+                borderWidth: 1, borderColor: colors.border,
+              }}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <Text style={{ fontSize: 15, fontWeight: "800", color: colors.onSurface }}>
+                    🕘 Salary Process Audit Log
+                  </Text>
+                  <Pressable onPress={() => setAuditOpen(false)} hitSlop={10} testID="comp-audit-close">
+                    <Ionicons name="close" size={18} color={colors.onSurfaceSecondary} />
+                  </Pressable>
+                </View>
+                {auditLoading ? (
+                  <ActivityIndicator color={colors.brandPrimary} style={{ marginVertical: 24 }} />
+                ) : auditEntries.length === 0 ? (
+                  <Text style={{ fontSize: 12, color: colors.onSurfaceSecondary, paddingVertical: 16 }}>
+                    No audit entries yet — actions (process / save / finalize / unlock) will appear here.
+                  </Text>
+                ) : (
+                  <ScrollView style={{ maxHeight: 420 }}>
+                    {auditEntries.map((a) => {
+                      const ui: any = {
+                        process: { c: "#2563EB", i: "play-circle-outline" },
+                        save_rows: { c: "#0891B2", i: "save-outline" },
+                        finalize: { c: "#16A34A", i: "lock-closed-outline" },
+                        unlock: { c: "#F97316", i: "lock-open-outline" },
+                      }[a.action] || { c: colors.onSurfaceSecondary, i: "ellipse-outline" };
+                      return (
+                        <View key={a.audit_id} style={{
+                          flexDirection: "row", gap: 10, paddingVertical: 8,
+                          borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider,
+                        }}>
+                          <Ionicons name={ui.i} size={16} color={ui.c} style={{ marginTop: 2 }} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 12, fontWeight: "700", color: colors.onSurface }}>
+                              {String(a.action).replace("_", " ").toUpperCase()}
+                              {a.month ? `  ·  ${a.month}` : ""}
+                            </Text>
+                            <Text style={{ fontSize: 11, color: colors.onSurfaceSecondary, marginTop: 1 }}>
+                              {a.detail || ""}{a.company_name ? `  ·  ${a.company_name}` : ""}
+                            </Text>
+                            <Text style={{ fontSize: 9.5, color: colors.onSurfaceTertiary, marginTop: 2 }}>
+                              {a.actor_name || a.actor_id} ({a.actor_role}) · {String(a.at || "").slice(0, 16).replace("T", " ")}
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </ScrollView>
+                )}
+              </View>
+            </View>
+          </Modal>
+
           {/* Iter 101 — Gmail attachment picker */}
           <Modal
             visible={mailModal}
@@ -1396,6 +1533,9 @@ export default function ComplianceSalaryRunScreen() {
           </View>
         </View>
 
+        {/* Iter 182 — loading skeleton while a run computes */}
+        {busy && !run ? <EmployeeListSkeleton rows={6} /> : null}
+
         {/* Result table */}
         {run ? (
           <View style={styles.card}>
@@ -1458,12 +1598,45 @@ export default function ComplianceSalaryRunScreen() {
                 ) : null}
                 <RegisterLayoutEditor visible={layoutOpen} onClose={() => setLayoutOpen(false)} />
                 <ActionBtn icon="download-outline" label="CSV" busy={downloading} onPress={() => downloadFile("csv")} />
+                <ActionBtn icon="time-outline" label="Audit Log" busy={auditLoading} onPress={openAudit} />
+                {autoSavedAt ? (
+                  <Text style={{ fontSize: 9.5, color: colors.success, fontWeight: "700", alignSelf: "center" }}>
+                    ✓ Auto-saved {autoSavedAt}
+                  </Text>
+                ) : null}
                 <ActionBtn icon="paper-plane-outline" label="Push payslips" busy={pushing} onPress={pushToPayslips} primary />
               </View>
             </View>
 
-            {/* Iter 98 — sort chips */}
+            {/* Iter 98 — sort chips + Iter 182 instant search */}
             <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+              <View style={{
+                flexDirection: "row", alignItems: "center", gap: 6, flexGrow: 1, minWidth: 190,
+                maxWidth: 320, borderWidth: 1, borderColor: colors.border, borderRadius: 999,
+                paddingHorizontal: 12, paddingVertical: 6, backgroundColor: colors.surface,
+              }}>
+                <Ionicons name="search-outline" size={13} color={colors.onSurfaceTertiary} />
+                <TextInput
+                  ref={empSearchRef}
+                  value={empSearch}
+                  onChangeText={setEmpSearch}
+                  placeholder='Search employee…  (press "/")'
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  style={{ flex: 1, fontSize: 11.5, color: colors.onSurface, paddingVertical: 0,
+                    ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as any) : null) }}
+                  testID="comp-emp-search"
+                />
+                {empSearch ? (
+                  <Pressable onPress={() => setEmpSearch("")} hitSlop={6}>
+                    <Ionicons name="close-circle" size={13} color={colors.onSurfaceTertiary} />
+                  </Pressable>
+                ) : null}
+              </View>
+              {empSearch.trim() ? (
+                <Text style={{ fontSize: 10.5, fontWeight: "700", color: colors.brandPrimary }}>
+                  {sortRows(run.rows).length}/{run.rows.length} match
+                </Text>
+              ) : null}
               <Text style={{ color: colors.onSurfaceSecondary, fontSize: 11, fontWeight: "700" }}>Sort:</Text>
               {[["", "Default"], ["name", "Name"], ["code", "Code"], ["net", "Net ↓"], ["gross", "Gross ↓"]].map(([val, lab]) => (
                 <Pressable
@@ -1751,6 +1924,13 @@ export default function ComplianceSalaryRunScreen() {
           </View>
           <Ionicons name="chevron-forward" size={16} color={colors.onSurfaceTertiary} />
         </Pressable>
+        {/* Iter 181 — payroll punch line (user request) */}
+        <Text style={{
+          color: colors.brandPrimary, fontSize: 12.5, fontWeight: "700",
+          fontStyle: "italic", textAlign: "center", marginTop: 18, marginBottom: 8,
+        }}>
+          &ldquo;Your Satisfaction is Our First Ambition&rdquo;
+        </Text>
       </ScrollView>
 
       {/* Employee config modal */}
@@ -2139,11 +2319,12 @@ const styles = StyleSheet.create({
 
   card: {
     backgroundColor: colors.surfaceSecondary,
-    borderRadius: radius.lg,
+    borderRadius: 16,
     padding: spacing.md,
     marginBottom: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
+    ...shadow.card,
   },
   cardTitle: { ...type.h6, color: colors.onSurface, fontWeight: "700", marginBottom: 6 },
   subheading: {
