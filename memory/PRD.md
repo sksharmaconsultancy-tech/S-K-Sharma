@@ -1011,3 +1011,9 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Frontend: amber "ESIC Alerts — salary run {month}" banner on /statutory-registration ESIC view (needs-reg line taps to Eligible tab; ceiling-crossed shows names+gross).
 - Verified: direct function test (SURENDRA SINGH flagged missing, synthetic crossed case), endpoint + banner screenshot OK; synthetic data cleaned.
 - /app/deploy_vps_iter194.sh created (Iter 193+194 → live VPS; includes stop → fuser -k 8001/tcp orphan kill → start; verifies 401 on company-roles, approval-workflows, statutory routes; PWA reopen-twice reminder).
+
+## Iter 194c — DEPLOYED TO LIVE VPS (2026-07-18, user-confirmed output)
+- deploy194.sh run on VPS as root: bundle extracted, deps installed, expo export → /var/www/sksharma, backend restarted with port-8001 orphan kill. All 4 route checks ✅ (company-roles, approval-workflows, statutory/esic/dashboard, statutory/esic/alerts). /api/health ok.
+- temp_bundle.py now supports kind=script (serves /app/deploy_vps_iter194.sh) so future deploys are a 2-line wget+bash — no more terminal script pasting.
+- Live now includes: Iter 193 (RBAC + Approval Workflows) + Iter 194 (Statutory Registration ESIC/UAN + ESIC alerts + Employee Master button linking + RBAC URL gating).
+- PENDING USER VERIFICATION on live: open PWA twice, check Statutory Registration sidebar group + Employee Master Generate buttons; add ESIC portal login on Firm Master for ESIC RPA.
