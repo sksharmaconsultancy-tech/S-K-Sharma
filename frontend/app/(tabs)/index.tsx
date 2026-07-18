@@ -46,7 +46,7 @@ export default function Dashboard() {
   const [companies, setCompanies] = useState<any[]>([]);
   // Iter 136 (user directive) — the dashboard follows the GLOBAL firm
   // selection: all tiles/stats are per-company, never combined.
-  const { selectedCompanyId, setSelectedCompanyId } = useSelectedCompany();
+  const { selectedCompanyId, setSelectedCompanyId, switchCompany } = useSelectedCompany();
   const companyFilter: string | "all" = selectedCompanyId || "all";
   // Super/Sub-admins manage multiple firms — the dashboard must always be
   // scoped to ONE selected firm (never combined).
@@ -425,7 +425,10 @@ export default function Dashboard() {
                       testID="dashboard-company-picker"
                       value={companyFilter}
                       onChange={(v) =>
-                        setSelectedCompanyId(v === "all" ? null : String(v))
+                        // Iter 187 — use switchCompany (not setSelectedCompanyId):
+                        // an explicit pick from this dropdown must override the
+                        // session lock, same as the desktop header picker.
+                        switchCompany(v === "all" ? null : String(v))
                       }
                       companies={companies}
                       label=""

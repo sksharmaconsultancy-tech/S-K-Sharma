@@ -331,6 +331,12 @@ const styles = StyleSheet.create({
   sheetWrap: {
     flex: 1,
     justifyContent: "flex-end",
+    // Iter 187 — on mobile web the Modal container can be positioned
+    // relative to the (scrolled) document, pushing the sheet below the
+    // visible viewport so taps never land. Pin it to the viewport.
+    ...(Platform.OS === "web"
+      ? ({ position: "fixed", top: 0, left: 0, right: 0, bottom: 0 } as any)
+      : null),
   },
   sheet: {
     backgroundColor: colors.surface,

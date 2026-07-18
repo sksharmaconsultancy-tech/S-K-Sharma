@@ -944,3 +944,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - ActionRow → white cards 16 radius, soft shadow, 38px rounded-square icon chips, bolder labels.
 - Removed old centered logo+name block (admin-brand-center) — identity now lives in gradient hero header.
 - Verified via mobile 390px screenshot after real super admin login.
+
+## Iter 187 — FIX: Super Admin couldn't change company in mobile PWA
+- Root cause 1: dashboard CompanyPicker used setSelectedCompanyId() which is blocked by the Iter-77 session lock; switched to switchCompany() (explicit pick overrides lock — same as desktop header).
+- Root cause 2: CompanyPicker Modal sheet could render below the visual viewport on scrolled mobile web pages (taps never landed); sheetWrap now position:fixed inset-0 on web. Fix benefits all CompanyPicker usages.
+- Verified: mobile 390px real login, switched Kankani→City Care→Kankani successfully.
