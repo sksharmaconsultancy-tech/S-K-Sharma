@@ -314,15 +314,6 @@ export default function Dashboard() {
         {/* Iter 62 — "Currently viewing" badge (web only) */}
         <SelectedCompanyBadge variant="banner" />
 
-        {/* Super Admin / Sub Admin — centered name + logo (user request) */}
-        {(user?.role === "super_admin" || user?.role === "sub_admin") && (
-          <View style={styles.brandCenter} testID="admin-brand-center">
-            <Image source={LOGO} style={styles.brandCenterLogo} contentFit="contain" />
-            <Text style={styles.brandCenterName}>{user?.name}</Text>
-            <Text style={styles.brandCenterSub}>{roleBadge}</Text>
-          </View>
-        )}
-
         {/* Iter 127 — "New email in Primary Inbox" ping (Super/Sub Admin) */}
         <PrimaryInboxBanner />
         <PushBanner />
@@ -1025,6 +1016,12 @@ function SystemHealthBadge({
   );
 }
 
+const TILE_GRADS: Record<string, [string, string]> = {
+  light: ["#2563EB", "#4F46E5"],
+  dark: ["#0891B2", "#2563EB"],
+  accent: ["#7C3AED", "#DB2777"],
+};
+
 function BentoTile({
   icon, value, label, onPress, testID, variant = "light", dim = false,
 }: {
@@ -1033,43 +1030,23 @@ function BentoTile({
   variant?: "light" | "dark" | "accent";
   dim?: boolean;
 }) {
-  const isDark = variant === "dark";
-  const isAccent = variant === "accent";
   return (
     <Pressable
       testID={testID}
       onPress={onPress}
       disabled={!onPress}
-      style={[
-        styles.bentoTile,
-        isDark && { backgroundColor: colors.brandPrimary },
-        isAccent && { backgroundColor: colors.cta },
-        dim && { opacity: 0.55 },
-      ]}
+      style={[styles.bentoTile, dim && { opacity: 0.55 }]}
     >
-      <View style={[
-        styles.bentoIcon,
-        isDark && { backgroundColor: "rgba(255,255,255,0.14)" },
-        isAccent && { backgroundColor: "rgba(255,255,255,0.22)" },
-      ]}>
-        <Ionicons
-          name={icon}
-          size={18}
-          color={isDark || isAccent ? "#fff" : colors.brandPrimary}
-        />
-      </View>
-      <Text style={[
-        styles.bentoValue,
-        (isDark || isAccent) && { color: "#fff" },
-      ]}>
-        {value}
-      </Text>
-      <Text style={[
-        styles.bentoLabel,
-        (isDark || isAccent) && { color: "rgba(255,255,255,0.85)" },
-      ]}>
-        {label}
-      </Text>
+      <LinearGradient
+        colors={TILE_GRADS[variant]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.bentoIcon}
+      >
+        <Ionicons name={icon} size={17} color="#fff" />
+      </LinearGradient>
+      <Text style={styles.bentoValue}>{value}</Text>
+      <Text style={styles.bentoLabel}>{label}</Text>
     </Pressable>
   );
 }
@@ -1147,10 +1124,6 @@ const styles = StyleSheet.create({
   },
   topLeft: { flexDirection: "row", alignItems: "center", gap: 12, flexShrink: 1 },
   brandLogo: { width: 38, height: 38 },
-  brandCenter: { alignItems: "center", marginTop: 4, marginBottom: 14 },
-  brandCenterLogo: { width: 72, height: 72, marginBottom: 6 },
-  brandCenterName: { fontSize: 20, fontWeight: "900", color: colors.onSurface, textAlign: "center" },
-  brandCenterSub: { fontSize: 12, fontWeight: "700", color: colors.brandPrimary, marginTop: 2, textAlign: "center" },
   greetSmall: { color: "rgba(255,255,255,0.8)", fontSize: type.sm },
   greetName: {
     color: "#fff", fontSize: type.xl,
@@ -1324,29 +1297,34 @@ const styles = StyleSheet.create({
   },
   bentoTile: {
     width: "47.5%",
-    backgroundColor: colors.surfaceSecondary,
-    borderRadius: radius.lg,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
     padding: spacing.md,
-    minHeight: 118,
+    minHeight: 116,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: "#EEF2F7",
     justifyContent: "space-between",
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.06,
+    shadowRadius: 14,
+    elevation: 3,
   },
   bentoIcon: {
-    width: 34, height: 34, borderRadius: 17,
-    backgroundColor: colors.brandTertiary,
+    width: 36, height: 36, borderRadius: 12,
     alignItems: "center", justifyContent: "center",
   },
   bentoValue: {
     color: colors.onSurface,
-    fontSize: 28,
-    fontWeight: "700",
+    fontSize: 26,
+    fontWeight: "800",
     letterSpacing: -0.5,
     marginTop: 4,
   },
   bentoLabel: {
     color: colors.onSurfaceSecondary,
-    fontSize: type.sm,
+    fontSize: 12,
+    fontWeight: "600",
     marginTop: 2,
   },
 
@@ -1363,16 +1341,21 @@ const styles = StyleSheet.create({
   },
   sectionAction: { color: colors.accent, fontSize: type.sm, fontWeight: "600" },
 
-  actions: { gap: 8 },
+  actions: { gap: 10 },
   actionRow: {
     flexDirection: "row", alignItems: "center", gap: 12,
-    backgroundColor: colors.surfaceSecondary,
-    borderRadius: radius.lg, padding: spacing.md,
-    borderWidth: 1, borderColor: colors.border,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16, padding: spacing.md,
+    borderWidth: 1, borderColor: "#EEF2F7",
     minHeight: 60,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 2,
   },
   actionIcon: {
-    width: 36, height: 36, borderRadius: 18,
+    width: 38, height: 38, borderRadius: 12,
     backgroundColor: colors.brandTertiary,
     alignItems: "center", justifyContent: "center",
   },
@@ -1396,7 +1379,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     lineHeight: 12,
   },
-  actionLabel: { flex: 1, color: colors.onSurface, fontSize: type.base, fontWeight: "500" },
+  actionLabel: { flex: 1, color: colors.onSurface, fontSize: type.base, fontWeight: "600" },
 
   notifCard: {
     flexDirection: "row", gap: 12,

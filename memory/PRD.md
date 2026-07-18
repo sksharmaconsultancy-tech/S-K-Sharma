@@ -938,3 +938,9 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - (tabs)/index.tsx admin/employer MOBILE home: old "Hello" top bar replaced with premium gradient hero header (Welcome back + role pill + company pill + glass bell). Employee ESS home untouched.
 - admin-pin-login.tsx DESKTOP left brand panel converted from light blue to deep #1E3A8A→#2563EB gradient with white text + glass trust pills (matches new login design language across app).
 - Verified via screenshots (desktop 1920 + mobile 390 after real login).
+
+## Iter 186b — Mobile PWA Admin home body premium (Super/Sub Admin)
+- BentoTile → premium white cards, 18 radius, soft shadow, per-variant gradient icon chips (light=blue/indigo, dark=cyan/blue, accent=violet/pink).
+- ActionRow → white cards 16 radius, soft shadow, 38px rounded-square icon chips, bolder labels.
+- Removed old centered logo+name block (admin-brand-center) — identity now lives in gradient hero header.
+- Verified via mobile 390px screenshot after real super admin login.
