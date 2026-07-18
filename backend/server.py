@@ -2061,7 +2061,6 @@ EMPLOYER_PERMISSION_KEYS: List[str] = [
     "messages:read", "messages:write",
     "tickets:read", "tickets:write",
     "portal_credentials:read", "portal_credentials:write",
-    "registrations:read", "registrations:write",
 ]
 
 
@@ -14463,10 +14462,6 @@ async def create_compliance_salary_run(
     from routes.advances import apply_advance_recovery
     _adv_total = await apply_advance_recovery(
         payload.company_id, payload.month, "compliance", run["run_id"], run["rows"])
-    # Statutory Registration — flag missing-IP / ceiling-crossed employees
-    # for HR every month (never raises).
-    from routes.statutory_registration import scan_esic_alerts
-    await scan_esic_alerts(payload.company_id, payload.month, run["rows"])
     if _adv_total or any(r.get("advance_recovery") for r in run["rows"]):
         t = run.get("totals") or {}
         t["advance_recovery"] = round(sum(float(r.get("advance_recovery") or 0) for r in run["rows"]), 2)
@@ -14839,8 +14834,6 @@ async def reprocess_compliance_salary_run(
     from routes.advances import apply_advance_recovery
     _adv_total = await apply_advance_recovery(
         existing.get("company_id"), existing["month"], "compliance", run_id, run["rows"])
-    from routes.statutory_registration import scan_esic_alerts
-    await scan_esic_alerts(existing.get("company_id"), existing["month"], run["rows"])
     if _adv_total or any(r.get("advance_recovery") for r in run["rows"]):
         t = run.get("totals") or {}
         t["advance_recovery"] = round(sum(float(r.get("advance_recovery") or 0) for r in run["rows"]), 2)
@@ -19012,9 +19005,6 @@ from routes.company_roles import router as company_roles_router  # noqa: E402
 app.include_router(company_roles_router)
 from routes.approvals_engine import router as approvals_engine_router  # noqa: E402
 app.include_router(approvals_engine_router)
-
-from routes.statutory_registration import router as statutory_registration_router  # noqa: E402
-app.include_router(statutory_registration_router)
 
 from routes.salary_readiness import router as salary_readiness_router  # noqa: E402
 app.include_router(salary_readiness_router)

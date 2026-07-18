@@ -67,14 +67,7 @@ export const NAV_SUPER: NavItem[] = [
   // KYC & Document Expiry Tracker — enterprise module (Aadhaar/PAN/Bank
   // completeness + DL/Passport validity reminders).
   { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
-  {
-    label: "Statutory Registration",
-    icon: "shield-checkmark-outline",
-    children: [
-      { route: "/statutory-registration?portal=esic", label: "ESIC IP Registration", icon: "medkit-outline" },
-      { route: "/statutory-registration?portal=uan", label: "EPF UAN Generation", icon: "briefcase-outline" },
-    ],
-  },
+  { route: "/test-portal", label: "Test", icon: "flask-outline" },
   { route: "/roles", label: "Roles & Permissions", icon: "key-outline" },
   {
     label: "Salary Process",
@@ -203,7 +196,6 @@ const NAV_PERMISSION_MAP: Record<string, string[]> = {
   "/company-requests": ["company_requests:read", "company_requests:write"],
   "/bulk-employee-correction": ["employees:read", "employees:write"],
   "/kyc-tracker": ["employees:read", "employees:write"],
-  "/statutory-registration": ["registrations:read", "registrations:write"],
   "/advances": ["salary_process:read", "salary_process:write"],
   "/attendance-policy": ["attendance_policy:read", "attendance_policy:write"],
   "/punch-approvals": ["punch_approvals:read", "punch_approvals:write"],
@@ -368,14 +360,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
   { route: "/zk-dat-import", label: "Import Biometric .dat", icon: "finger-print-outline" },
   { route: "/join-qr", label: "QR Codes (Join / App)", icon: "qr-code-outline" },
   { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
-  {
-    label: "Statutory Registration",
-    icon: "shield-checkmark-outline",
-    children: [
-      { route: "/statutory-registration?portal=esic", label: "ESIC IP Registration", icon: "medkit-outline" },
-      { route: "/statutory-registration?portal=uan", label: "EPF UAN Generation", icon: "briefcase-outline" },
-    ],
-  },
+  { route: "/test-portal", label: "Test", icon: "flask-outline" },
   { route: "/roles", label: "Roles & Permissions", icon: "key-outline" },
   {
     label: "Reports",

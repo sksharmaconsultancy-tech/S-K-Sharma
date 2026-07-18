@@ -24,6 +24,13 @@ router = APIRouter(prefix="/api/admin", tags=["salary-readiness"])
 
 _PAN_RE = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
 
+# Statutory eligibility defaults (ESIC Act / EPF Act ceilings).
+DEFAULT_ELIGIBILITY = {
+    "esic_wage_ceiling": 21000,
+    "pf_wage_ceiling": 15000,
+    "pf_cover_all": True,
+}
+
 
 @router.get("/salary-process/readiness")
 async def salary_process_readiness(
@@ -43,9 +50,11 @@ async def salary_process_readiness(
     if not month or not re.match(r"^\d{4}-\d{2}$", month):
         raise HTTPException(status_code=400, detail="month must be YYYY-MM")
 
-    # ---- Eligibility rules (shared with the Statutory Registration module)
-    from routes.statutory_registration import get_settings
-    settings = await get_settings(company_id)
+    # ---- Eligibility rules (ESIC/EPF statutory wage ceilings)
+    settings = dict(DEFAULT_ELIGIBILITY)
+    doc = await db.registration_settings.find_one(
+        {"company_id": company_id}, {"_id": 0}) or {}
+    settings.update({k: v for k, v in doc.items() if k in DEFAULT_ELIGIBILITY})
     esic_ceiling = float(settings.get("esic_wage_ceiling") or 21000)
     pf_ceiling = float(settings.get("pf_wage_ceiling") or 15000)
     pf_cover_all = bool(settings.get("pf_cover_all", True))

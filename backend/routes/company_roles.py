@@ -40,7 +40,6 @@ PERMISSION_CATALOG = [
     {"module": "Messages", "read": "messages:read", "write": "messages:write"},
     {"module": "Tickets", "read": "tickets:read", "write": "tickets:write"},
     {"module": "Portal Credentials", "read": "portal_credentials:read", "write": "portal_credentials:write"},
-    {"module": "Statutory Registration (UAN/ESIC)", "read": "registrations:read", "write": "registrations:write"},
 ]
 KNOWN_KEYS = set(EMPLOYER_PERMISSION_KEYS)
 

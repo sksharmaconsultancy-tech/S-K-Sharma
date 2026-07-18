@@ -1,11 +1,10 @@
 #!/bin/bash
 # S.K. Sharma & Co. — VPS deploy script
-# Iter 193 (RBAC Roles & Permissions + Approval Workflows)
-# + Iter 194 (Statutory Registration: ESIC IP Part B + EPF UAN automation,
-#   ESIC monthly salary-run alerts, Employee-Master button linking)
-# + Iter 195 (Enterprise Process Command Center on Compliance / Actual /
-#   Arrear salary process pages — KPI cards, workflow stepper, live
-#   validation panel, sticky totals footer)
+# ROLLBACK release: the entire Statutory Registration module (ESIC IP +
+# EPF UAN screens, buttons and backend) has been REMOVED per user request.
+# Ships: Iter 193 (RBAC + Approval Workflows), Iter 195 (Process Command
+# Center on salary pages) and the new sidebar "Test" page (one-click ESIC
+# portal launcher in a new tab).
 # Run ON THE VPS as the sksharma user.
 set -e
 
@@ -64,9 +63,13 @@ check() {
 }
 check "/api/admin/company-roles" "Iter 193 RBAC roles route"
 check "/api/admin/approval-workflows" "Iter 193 approval workflow route"
-check "/api/admin/statutory/esic/dashboard" "Iter 194 Statutory Registration route"
-check "/api/admin/statutory/esic/alerts" "Iter 194 ESIC alerts route"
 check "/api/admin/salary-process/readiness" "Iter 195 Process Command Center route"
+STAT=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8001/api/admin/statutory/esic/dashboard")
+if [ "$STAT" = "404" ]; then
+  echo "✅ Statutory Registration module removed (route returns 404 as expected)."
+else
+  echo "❌ /api/admin/statutory/esic/dashboard returned $STAT (expected 404 after rollback)."
+fi
 echo
 echo "Deploy complete."
 echo "REMINDER: on your phone/PC, close and reopen the PWA TWICE (or clear"

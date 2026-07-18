@@ -1027,3 +1027,15 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 ## Iter 195b — DEPLOYED TO LIVE VPS (2026-07-18, user-confirmed output)
 - deploy194.sh (kind=script 2-liner) run on VPS: all 5 route checks ✅ incl. new /api/admin/salary-process/readiness. Live now includes Iter 195 Process Command Center on all 3 salary pages.
 - PENDING USER VERIFICATION on live: reopen PWA twice → Compliance Salary Process → pick firm → KPI cards/stepper/validation panel/totals footer.
+
+## Iter 196 — Statutory Registration overhaul: LIVE portal view + OTP handoff + one-click + full form (tested pass, iteration_196.json)
+- USER DISSATISFACTION FIX (flow confusing, wanted live view, portal-style form):
+- LIVE VIEW: rpa_worker streams browser JPEG frames every 2s onto job doc (_live_stream_loop, self-terminating); GET /api/admin/portal-automation/jobs/{id}/live; LiveRunViewer component (dark browser-mock: LIVE badge, URL bar, frame, step log) in queue detail modal + form page.
+- AADHAAR OTP HANDOFF: worker pauses at OTP prompt (status awaiting_otp, _wait_for_otp polls 3 min), admin types OTP in Live View → POST /jobs/{id}/otp → worker continues.
+- ONE-CLICK: eligible row "Register on Portal" = bulk([1]) → queue + auto-opens live modal; validation gaps → jumps to full form.
+- FULL FORM: /statutory-registration-form?portal=&user_id= — portal-flow strip, 4 stepped sections (Aadhaar first per user's flowchart), dispensary+family+nominee, actions (Register on Portal Now / Save / Link existing), pre-reg checks sidebar, embedded live viewer. Prefill endpoint GET /statutory/{portal}/employee/{uid}/prefill.
+- USER-CONFIRMED PORTAL URLS: ESIC = portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx; EPFO = unifiedportal-emp.epfindia.gov.in/epfo/ (unchanged).
+- EPF FLOW (user flowchart): _attempt_uan_registration now: dialog auto-accept, existing-UAN branch (Previous Employment Yes + fill UAN → Member ID under existing UAN), fill Name/DOB/Aadhaar/Gender, click Verify → OK → submit. generate-uan accepts {register_member:true} for employees WITH uan_no (skips dup check, source=member_registration); form page shows "Register Member ID under existing UAN" button. SNAP_FIELDS now includes uan_no.
+- ESIC FLOW (user flowchart): Aadhaar-first entry → Verify/Send OTP → OTP handoff → UIDAI details → mobile/employment/dispensary/family → IP + e-Pehchan note.
+- deploy194.sh now installs Playwright Chromium + deps and forces RPA_WORKER_ENABLED=1 on VPS (root cause of "registration doesn't happen": Chromium was never installed on VPS). Chromium also installed in this pod.
+- NOT yet deployed to live VPS.

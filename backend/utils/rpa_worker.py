@@ -54,9 +54,7 @@ POLL_SEC = int(os.environ.get("RPA_WORKER_POLL_SEC", "30"))
 
 _PORTAL_URLS = {
     "epfo": "https://unifiedportal-emp.epfindia.gov.in/epfo/",
-    # Direct employer sign-in page (user-confirmed URL) — the employer
-    # enters ID + password here for ESIC employee (IP) registration.
-    "esic": "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx",
+    "esic": "https://www.esic.in/EmployerPortal/",
 }
 _PORTAL_LOGIN_LABEL = {
     "epfo": "PF LOGIN",
@@ -510,341 +508,9 @@ async def _attempt_uan_registration(page, snap: Dict[str, Any]) -> Dict[str, Any
     }
 
 
-# ---------------------------------------------------------------------------
-# ESIC IP registration automation ("Part B" — user directive) — after login
-# on the ESIC employer portal, open "Register New IP", fill the Insured
-# Person form from the Employee Master snapshot (incl. family particulars
-# and dispensary), submit, and try to read the allotted Insurance Number.
-# ---------------------------------------------------------------------------
-
-_ESIC_IP_NAV_TEXTS = ["Register New IP", "REGISTER NEW IP",
-                      "Register New Insured Person", "Register Insured Person",
-                      "IP Registration", "Insured Person Registration"]
-
-
-async def _wait_for_otp(db, job_id: Optional[str], page, timeout: int = 180) -> Optional[str]:
-    """Aadhaar-authentication handoff — the portal sent an OTP to the
-    employee's Aadhaar-linked mobile. Pause the run (status=awaiting_otp),
-    keep streaming the live screen, and poll the job doc for `otp_input`
-    typed by the admin in the Live View. Returns the OTP or None."""
-    if db is None or not job_id:
-        return None
-    await db.portal_automation_jobs.update_one(
-        {"job_id": job_id},
-        {"$set": {"status": "awaiting_otp", "otp_requested_at": _now_iso(),
-                  "updated_at": _now_iso()},
-         "$unset": {"otp_input": ""}},
-    )
-    await _append_step(db, job_id,
-                       "Aadhaar authentication OTP requested — waiting for the "
-                       "admin to enter it in the Live View (3 min).")
-    for _ in range(max(timeout // 3, 1)):
-        await asyncio.sleep(3)
-        j = await db.portal_automation_jobs.find_one(
-            {"job_id": job_id}, {"_id": 0, "otp_input": 1})
-        otp = str((j or {}).get("otp_input") or "").strip()
-        if otp:
-            await db.portal_automation_jobs.update_one(
-                {"job_id": job_id},
-                {"$set": {"status": "in_progress", "updated_at": _now_iso()},
-                 "$unset": {"otp_input": ""}},
-            )
-            await _append_step(db, job_id, "OTP received from admin — continuing.")
-            return otp
-        try:
-            if page.is_closed():
-                return None
-        except Exception:
-            return None
-    await db.portal_automation_jobs.update_one(
-        {"job_id": job_id},
-        {"$set": {"status": "in_progress", "updated_at": _now_iso()}},
-    )
-    return None
-
-
-async def _attempt_esic_ip_registration(page, snap: Dict[str, Any],
-                                        db=None, job_id: Optional[str] = None) -> Dict[str, Any]:
-    """Best-effort ESIC 'Register New IP' (Insured Person) registration.
-    Returns {registered: bool, ip_no: str|None, screenshot_b64, message}."""
-
-    async def _shot() -> str:
-        return base64.b64encode(await page.screenshot(full_page=False)).decode("ascii")
-
-    # 1) Open the Register New IP screen.
-    opened = False
-    for txt in _ESIC_IP_NAV_TEXTS:
-        try:
-            loc = page.get_by_text(txt, exact=False).first
-            if await loc.count() > 0:
-                await loc.click(timeout=4000)
-                await page.wait_for_timeout(2500)
-                opened = True
-                break
-        except Exception:
-            continue
-    if not opened:
-        return {
-            "registered": False, "ip_no": None, "screenshot_b64": await _shot(),
-            "message": ("Logged in, but could not open 'Register New IP' "
-                        "automatically — the portal layout may have changed. "
-                        "Register the IP manually (details are on this job) "
-                        "and use Manual Complete."),
-        }
-
-    # 1b) "Is the IP already registered?" gate — choose No, then continue.
-    try:
-        no_radio = page.locator(
-            "input[type='radio'][value*='no' i], input[type='radio'][id*='no' i]").first
-        if await no_radio.count() > 0 and await no_radio.is_visible():
-            await no_radio.check(timeout=2500)
-            await page.wait_for_timeout(600)
-            for txt in ("Continue", "CONTINUE", "Proceed", "Next", "Submit"):
-                btn = page.get_by_role("button", name=txt).first
-                if await btn.count() == 0:
-                    btn = page.locator(f"input[type='submit'][value*='{txt}' i]").first
-                if await btn.count() > 0:
-                    await btn.click(timeout=3000)
-                    await page.wait_for_timeout(2200)
-                    break
-    except Exception:
-        pass
-
-    async def _fill_any(selectors, value) -> bool:
-        if not value:
-            return False
-        for sel in selectors:
-            try:
-                loc = page.locator(sel).first
-                if await loc.count() > 0 and await loc.is_visible():
-                    await loc.fill(str(value), timeout=2500)
-                    return True
-            except Exception:
-                continue
-        return False
-
-    async def _select_any(selectors, label_options) -> bool:
-        for sel in selectors:
-            try:
-                loc = page.locator(sel).first
-                if await loc.count() > 0 and await loc.is_visible():
-                    for lbl in label_options:
-                        try:
-                            await loc.select_option(label=lbl, timeout=1500)
-                            return True
-                        except Exception:
-                            continue
-            except Exception:
-                continue
-        return False
-
-    # 2) AADHAAR-FIRST flow (user-specified): enter Aadhaar → trigger
-    # authentication (portal may send an OTP to the Aadhaar-linked mobile;
-    # UIDAI then returns Name/DOB/Gender). If an OTP prompt appears, the
-    # run PAUSES (awaiting_otp) so the admin can type the OTP in the Live
-    # View, then continues automatically.
-    aadhaar_ok = await _fill_any(
-        ["input[name*='aadhaar' i]", "input[id*='aadhaar' i]",
-         "input[name*='aadhar' i]", "input[id*='aadhar' i]",
-         "input[name*='uid' i]"],
-        (snap.get("aadhaar_no") or "").replace(" ", ""),
-    )
-    if aadhaar_ok:
-        for txt in ("Verify Aadhaar", "Authenticate", "Verify", "Validate",
-                    "Get Details", "Fetch", "Send OTP"):
-            try:
-                btn = page.get_by_role("button", name=txt).first
-                if await btn.count() == 0:
-                    btn = page.locator(
-                        f"input[type='submit'][value*='{txt}' i], input[type='button'][value*='{txt}' i]").first
-                if await btn.count() > 0 and await btn.is_visible():
-                    await btn.click(timeout=3000)
-                    await page.wait_for_timeout(3500)
-                    break
-            except Exception:
-                continue
-        # OTP prompt? → live handoff to the admin.
-        try:
-            otp_field = page.locator(
-                "input[name*='otp' i], input[id*='otp' i], input[placeholder*='OTP' i]").first
-            if await otp_field.count() > 0 and await otp_field.is_visible():
-                otp = await _wait_for_otp(db, job_id, page)
-                if otp:
-                    await otp_field.fill(otp, timeout=3000)
-                    for txt in ("Verify OTP", "Verify", "Submit", "Validate", "Confirm"):
-                        try:
-                            b = page.get_by_role("button", name=txt).first
-                            if await b.count() == 0:
-                                b = page.locator(
-                                    f"input[type='submit'][value*='{txt}' i]").first
-                            if await b.count() > 0 and await b.is_visible():
-                                await b.click(timeout=3000)
-                                await page.wait_for_timeout(3500)
-                                break
-                        except Exception:
-                            continue
-                else:
-                    return {
-                        "registered": False, "ip_no": None,
-                        "screenshot_b64": await _shot(),
-                        "message": ("Aadhaar authentication OTP was requested "
-                                    "but not provided in time — re-run and "
-                                    "enter the OTP in the Live View, or "
-                                    "complete manually."),
-                    }
-        except Exception:
-            pass
-    name_ok = await _fill_any(
-        ["input[name*='ipName' i]", "input[id*='ipName' i]",
-         "input[name*='insuredPersonName' i]", "input[name*='firstName' i]",
-         "input[id*='name' i]", "input[name='name']"],
-        (snap.get("name") or "").upper(),
-    )
-    await _fill_any(
-        ["input[name*='father' i]", "input[id*='father' i]",
-         "input[name*='fatherHusband' i]", "input[id*='fh' i]"],
-        (snap.get("father_name") or "").upper(),
-    )
-    await _fill_any(
-        ["input[name*='dob' i]", "input[id*='dob' i]",
-         "input[name*='dateOfBirth' i]", "input[placeholder*='DD/MM' i]"],
-        _iso_to_ddmmyyyy(snap.get("dob")),
-    )
-    g = (snap.get("gender") or "").strip().lower()
-    if g:
-        gender_lbls = {"male": ["MALE", "Male", "M"], "female": ["FEMALE", "Female", "F"],
-                       "transgender": ["TRANSGENDER", "Transgender", "T"]}.get(g, [g.upper()])
-        await _select_any(["select[name*='gender' i]", "select[id*='gender' i]",
-                           "select[name*='sex' i]"], gender_lbls)
-    ms = (snap.get("marital_status") or "").strip().lower()
-    if ms:
-        ms_lbls = {"single": ["UNMARRIED", "Unmarried", "Single"],
-                   "married": ["MARRIED", "Married"],
-                   "widowed": ["WIDOW/WIDOWER", "Widow/Widower", "Widowed"],
-                   "divorced": ["DIVORCEE", "Divorcee", "Divorced"]}.get(ms, [ms.upper()])
-        await _select_any(["select[name*='marital' i]", "select[id*='marital' i]"], ms_lbls)
-    phone = "".join(ch for ch in str(snap.get("phone") or "") if ch.isdigit())[-10:]
-    await _fill_any(["input[name*='mobile' i]", "input[id*='mobile' i]",
-                     "input[name*='phone' i]"], phone)
-    await _fill_any(["input[name*='email' i]", "input[id*='email' i]"], snap.get("email"))
-    await _fill_any(
-        ["input[name*='appointment' i]", "input[id*='appointment' i]",
-         "input[name*='doj' i]", "input[id*='doj' i]",
-         "input[name*='dateOfJoining' i]"],
-        _iso_to_ddmmyyyy(snap.get("doj")),
-    )
-    addr = (snap.get("present_address") or snap.get("address") or "").strip()
-    await _fill_any(
-        ["textarea[name*='address' i]", "textarea[id*='address' i]",
-         "input[name*='address' i]", "input[id*='address' i]"],
-        addr.upper(),
-    )
-    wage = snap.get("salary_monthly")
-    if wage:
-        await _fill_any(["input[name*='wage' i]", "input[id*='wage' i]",
-                         "input[name*='salary' i]"], str(int(float(wage))))
-    disp = (snap.get("dispensary") or "").strip()
-    if disp:
-        ok = await _select_any(
-            ["select[name*='dispensary' i]", "select[id*='dispensary' i]",
-             "select[name*='imp' i]"], [disp, disp.upper(), disp.title()])
-        if not ok:
-            await _fill_any(["input[name*='dispensary' i]", "input[id*='dispensary' i]"], disp)
-
-    # 2b) Family particulars — best-effort first rows of the family grid.
-    fam = snap.get("family_members") or []
-    for idx, member in enumerate(fam[:4]):
-        try:
-            row_name = page.locator(
-                f"input[name*='family' i][name*='name' i], input[id*='famName{idx}' i]").nth(idx)
-            if await row_name.count() > 0 and await row_name.is_visible():
-                await row_name.fill((member.get("name") or "").upper(), timeout=2000)
-        except Exception:
-            continue
-
-    if not aadhaar_ok and not name_ok:
-        return {
-            "registered": False, "ip_no": None, "screenshot_b64": await _shot(),
-            "message": ("Opened 'Register New IP' but the form fields were "
-                        "not found — the portal layout may have changed. "
-                        "Finish the registration manually and use Manual Complete."),
-        }
-
-    # 3) Submit (Save / Submit / Register — never payment-ish buttons).
-    clicked = None
-    for txt in ("Save", "SAVE", "Submit", "SUBMIT", "Register", "REGISTER", "Continue"):
-        try:
-            btn = page.get_by_role("button", name=txt).first
-            if await btn.count() == 0:
-                btn = page.locator(f"input[type='submit'][value*='{txt}' i]").first
-            if await btn.count() > 0:
-                label = ((await btn.text_content()) or txt).strip().lower()
-                if any(b in label for b in _PAYMENT_BLOCKLIST):
-                    continue
-                await btn.click(timeout=3500)
-                await page.wait_for_timeout(3500)
-                clicked = txt
-                break
-        except Exception:
-            continue
-
-    # 4) Try to read the allotted Insurance (IP) number off the page.
-    ip_no = None
-    try:
-        body = await page.content()
-        m = re.search(r"(?:Insurance|IP)\s*(?:No\.?|Number)[^0-9]{0,80}(\d{10,17})", body,
-                      re.IGNORECASE)
-        if m:
-            ip_no = m.group(1)
-    except Exception:
-        pass
-
-    return {
-        "registered": bool(clicked),
-        "ip_no": ip_no,
-        "screenshot_b64": await _shot(),
-        "message": (
-            (f"IP form filled and '{clicked}' clicked. " if clicked
-             else "IP form filled but no Save/Submit button was found. ")
-            + (f"Allotted ESIC Insurance No. {ip_no} detected and saved to "
-               "the Employee Master. The e-Pehchan card can be downloaded "
-               "from the ESIC portal."
-               if ip_no else
-               "Insurance number not visible yet — verify the IP on the portal, "
-               "then enter the allotted number via Manual Complete.")
-        ),
-    }
-
-
-async def _live_stream_loop(db, job_id: str, page) -> None:
-    """LIVE VIEW — continuously mirror the RPA browser screen onto the job
-    document (live_frame_base64) so admins can WATCH the portal
-    registration happening in real time from the web UI.
-    Self-terminating: exits when the page closes (screenshot raises) or
-    after 10 minutes."""
-    import time as _time
-    started = _time.monotonic()
-    while _time.monotonic() - started < 600:
-        try:
-            shot = await page.screenshot(full_page=False, type="jpeg", quality=45)
-            await db.portal_automation_jobs.update_one(
-                {"job_id": job_id},
-                {"$set": {
-                    "live_frame_base64": base64.b64encode(shot).decode("ascii"),
-                    "live_frame_at": _now_iso(),
-                    "live_url": page.url,
-                }},
-            )
-        except Exception:  # page closed / browser gone — stop streaming
-            break
-        await asyncio.sleep(2)
-
-
 async def _perform_login(portal: str, url: str, creds: Dict[str, str],
                          upload: Optional[Dict[str, Any]] = None,
-                         uan_snap: Optional[Dict[str, Any]] = None,
-                         esic_snap: Optional[Dict[str, Any]] = None,
-                         db=None, job_id: Optional[str] = None) -> Dict[str, Any]:
+                         uan_snap: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Try to open the portal and login via Playwright, reading the text
     captcha automatically with the AI-vision reader. Returns a dict:
       { "ok": bool, "status": "logged_in" | "captcha_failed" |
@@ -896,10 +562,6 @@ async def _perform_login(portal: str, url: str, creds: Dict[str, str],
             browser = await pw.chromium.launch(**launch_kw)
             ctx = await browser.new_context()
             page = await ctx.new_page()
-            # LIVE VIEW — stream the browser screen onto the job doc so the
-            # admin can watch the whole registration as it happens.
-            if db is not None and job_id:
-                asyncio.create_task(_live_stream_loop(db, job_id, page))
             await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
 
             # Government portals frequently block cloud / datacenter IPs at
@@ -946,17 +608,6 @@ async def _perform_login(portal: str, url: str, creds: Dict[str, str],
                         "ok": reg["registered"],
                         "status": "uan_registered" if reg["registered"] else "uan_manual",
                         "uan": reg.get("uan"),
-                        "screenshot_b64": reg.get("screenshot_b64") or last_shot,
-                        "captcha_attempts": 0,
-                        "message": "Logged in (no captcha). " + reg["message"],
-                    }
-                if ok and esic_snap:
-                    reg = await _attempt_esic_ip_registration(page, esic_snap, db=db, job_id=job_id)
-                    await browser.close()
-                    return {
-                        "ok": reg["registered"],
-                        "status": "esic_registered" if reg["registered"] else "esic_manual",
-                        "ip_no": reg.get("ip_no"),
                         "screenshot_b64": reg.get("screenshot_b64") or last_shot,
                         "captcha_attempts": 0,
                         "message": "Logged in (no captcha). " + reg["message"],
@@ -1016,19 +667,6 @@ async def _perform_login(portal: str, url: str, creds: Dict[str, str],
                                 f"Logged in (captcha attempt {attempts}). " + reg["message"]
                             ),
                         }
-                    if esic_snap:
-                        reg = await _attempt_esic_ip_registration(page, esic_snap, db=db, job_id=job_id)
-                        await browser.close()
-                        return {
-                            "ok": reg["registered"],
-                            "status": "esic_registered" if reg["registered"] else "esic_manual",
-                            "ip_no": reg.get("ip_no"),
-                            "screenshot_b64": reg.get("screenshot_b64") or last_shot,
-                            "captcha_attempts": attempts,
-                            "message": (
-                                f"Logged in (captcha attempt {attempts}). " + reg["message"]
-                            ),
-                        }
                     if upload:
                         up = await _attempt_portal_upload(
                             page, portal, upload["file_name"], upload["file_bytes"])
@@ -1076,65 +714,6 @@ async def _perform_login(portal: str, url: str, creds: Dict[str, str],
         }
 
 
-async def _sync_registration(db, job_id: str) -> None:
-    """Mirror a job's terminal state onto its linked Statutory Registration
-    record (statutory_registrations.reg_id) and notify the firm's admins."""
-    job = await db.portal_automation_jobs.find_one(
-        {"job_id": job_id},
-        {"_id": 0, "reg_id": 1, "status": 1, "result": 1, "manual_reason": 1,
-         "error": 1, "action_type": 1, "company_id": 1, "employee_snapshot": 1},
-    )
-    if not job or not job.get("reg_id"):
-        return
-    status = job.get("status")
-    label = "PF UAN" if job.get("action_type") == "generate_uan" else "ESIC IP"
-    emp_name = (job.get("employee_snapshot") or {}).get("name") or "employee"
-    upd: Dict[str, Any] = {"updated_at": _now_iso()}
-    note = ""
-    notify: Optional[str] = None
-    if status == "completed":
-        res = job.get("result") or {}
-        val = res.get("uan_no") or res.get("esi_ip_no")
-        upd.update({"status": "generated", "value": val,
-                    "completed_at": _now_iso(), "last_error": None})
-        note = f"Portal automation completed — {label} {val or 'saved'}"
-        notify = f"{label} {val or ''} generated for {emp_name} and saved to the Employee Master."
-    elif status == "manual_required":
-        upd.update({"status": "action_required",
-                    "last_error": job.get("manual_reason")})
-        note = job.get("manual_reason") or "Manual action required on the portal"
-        notify = f"{label} registration for {emp_name} needs manual action: {note}"
-    elif status == "failed":
-        upd.update({"status": "failed", "last_error": job.get("error")})
-        note = job.get("error") or "Portal automation failed"
-        notify = f"{label} registration for {emp_name} failed: {note}"
-    elif status == "in_progress":
-        upd.update({"status": "submitted"})
-        note = "RPA worker started the portal run"
-    else:
-        return
-    await db.statutory_registrations.update_one(
-        {"reg_id": job["reg_id"]},
-        {"$set": upd,
-         "$push": {"history": {"at": _now_iso(), "by": "rpa_worker",
-                               "by_name": "RPA Worker",
-                               "action": upd.get("status") or status,
-                               "note": note}}},
-    )
-    if notify:
-        try:
-            import uuid as _uuid
-            await db.notifications.insert_one({
-                "notification_id": f"n_{_uuid.uuid4().hex[:10]}",
-                "title": f"{label} Registration",
-                "body": notify, "audience": "admins",
-                "company_id": job.get("company_id"),
-                "created_at": _now_iso(), "created_by": "RPA Worker",
-            })
-        except Exception:  # noqa: BLE001
-            pass
-
-
 async def _process_one_job(db, job: Dict[str, Any]) -> None:
     job_id = job["job_id"]
     portal = job.get("portal", "epfo")
@@ -1146,7 +725,6 @@ async def _process_one_job(db, job: Dict[str, Any]) -> None:
         {"$set": {"status": "in_progress", "updated_at": _now_iso()}},
     )
     await _append_step(db, job_id, f"Worker picked up {action} for portal={portal}")
-    await _sync_registration(db, job_id)
 
     creds = await _fetch_creds(db, company_id, portal)
     if not creds:
@@ -1160,7 +738,6 @@ async def _process_one_job(db, job: Dict[str, Any]) -> None:
             db, job_id,
             f"No {portal.upper()} credentials on firm_masters.portal_logins — abort.",
         )
-        await _sync_registration(db, job_id)
         return
 
     # Challan-upload jobs carry the generated file to submit after login.
@@ -1180,14 +757,11 @@ async def _process_one_job(db, job: Dict[str, Any]) -> None:
                           "updated_at": _now_iso()}},
             )
             await _append_step(db, job_id, "Generated upload file missing on the job — abort.")
-            await _sync_registration(db, job_id)
             return
 
     result = await _perform_login(
         portal, creds["login_url"], creds, upload=upload_payload,
         uan_snap=(job.get("employee_snapshot") if action == "generate_uan" else None),
-        esic_snap=(job.get("employee_snapshot") if action == "generate_esic" else None),
-        db=db, job_id=job_id,
     )
     await _append_step(db, job_id, result["message"], result.get("screenshot_b64"))
 
@@ -1224,47 +798,6 @@ async def _process_one_job(db, job: Dict[str, Any]) -> None:
                           "updated_at": _now_iso()}},
             )
     elif result["status"] == "uan_manual":
-        await db.portal_automation_jobs.update_one(
-            {"job_id": job_id},
-            {"$set": {"status": "manual_required",
-                      "captcha_solved": True,
-                      "captcha_attempts": result.get("captcha_attempts", 0),
-                      "manual_reason": result["message"],
-                      "updated_at": _now_iso()}},
-        )
-    elif result["status"] == "esic_registered":
-        ip_no = result.get("ip_no")
-        emp_id = job.get("employee_user_id")
-        if ip_no and emp_id:
-            await db.users.update_one(
-                {"user_id": emp_id},
-                {"$set": {"esi_ip_no": ip_no, "esi_ip_no_updated_at": _now_iso(),
-                          "esi_ip_no_source": "rpa_auto"}},
-            )
-            await db.portal_automation_jobs.update_one(
-                {"job_id": job_id},
-                {"$set": {"status": "completed",
-                          "captcha_solved": True,
-                          "captcha_attempts": result.get("captcha_attempts", 0),
-                          "result": {"esi_ip_no": ip_no},
-                          "completed_at": _now_iso(),
-                          "updated_at": _now_iso()}},
-            )
-            await _append_step(db, job_id,
-                               f"ESIC IP {ip_no} saved to the Employee Master automatically.")
-        else:
-            await db.portal_automation_jobs.update_one(
-                {"job_id": job_id},
-                {"$set": {"status": "manual_required",
-                          "captcha_solved": True,
-                          "captcha_attempts": result.get("captcha_attempts", 0),
-                          "manual_reason": (
-                              "IP registration was submitted on the ESIC "
-                              "portal. Verify it there, then enter the "
-                              "allotted Insurance No. via Manual Complete."),
-                          "updated_at": _now_iso()}},
-            )
-    elif result["status"] == "esic_manual":
         await db.portal_automation_jobs.update_one(
             {"job_id": job_id},
             {"$set": {"status": "manual_required",
@@ -1336,7 +869,6 @@ async def _process_one_job(db, job: Dict[str, Any]) -> None:
                       "manual_reason": result["message"],
                       "updated_at": _now_iso()}},
         )
-    await _sync_registration(db, job_id)
 
 
 async def rpa_worker_loop(db) -> None:
