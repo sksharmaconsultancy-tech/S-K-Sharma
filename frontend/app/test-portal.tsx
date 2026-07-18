@@ -28,7 +28,7 @@ import * as Clipboard from "expo-clipboard";
 
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
-import { api } from "@/src/api/client";
+import { api, apiBinary } from "@/src/api/client";
 import { colors, radius } from "@/src/theme";
 
 type PortalKey = "esic" | "epfo";
@@ -107,8 +107,127 @@ export default function TestPortalScreen() {
 
         <PortalCard portalKey="esic" />
         <PortalCard portalKey="epfo" />
+
+        <AutomationCard />
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+/**
+ * Full one-click automation: download a small PC program that opens Chrome,
+ * fills the login + reads the captcha (runs on the operator's own machine so
+ * the portal's IP block doesn't apply). ChromeDriver auto-updates via
+ * Selenium Manager. Web-only download.
+ */
+function AutomationCard() {
+  const { selectedCompanyId } = useSelectedCompany();
+  const [busy, setBusy] = useState<"runner" | "ext" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const download = useCallback(
+    async (kind: "runner" | "ext") => {
+      setError(null);
+      setBusy(kind);
+      try {
+        const origin =
+          Platform.OS === "web" ? (globalThis as any).location?.origin : "";
+        const ep =
+          kind === "runner"
+            ? "/admin/portal-automation/runner-download"
+            : "/admin/portal-automation/extension-download";
+        const qs = `?api_base=${encodeURIComponent(origin)}${
+          selectedCompanyId ? `&company_id=${selectedCompanyId}` : ""
+        }`;
+        const { webBlobUrl } = await apiBinary(`${ep}${qs}`);
+        if (Platform.OS === "web" && webBlobUrl) {
+          const a = document.createElement("a");
+          a.href = webBlobUrl;
+          a.download =
+            kind === "runner"
+              ? "sks-autologin-pc.zip"
+              : "sks-auto-login-extension.zip";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+        }
+      } catch (e: any) {
+        setError(e?.message || "Download failed.");
+      } finally {
+        setBusy(null);
+      }
+    },
+    [selectedCompanyId],
+  );
+
+  return (
+    <View style={st.autoCard}>
+      <View style={st.cardHead}>
+        <View style={[st.iconWrap, { backgroundColor: "#05966916" }]}>
+          <Ionicons name="hardware-chip-outline" size={22} color="#059669" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={st.cardTitle}>Full Auto-Login (runs on your PC)</Text>
+          <Text style={st.autoSub}>
+            Opens Chrome, fills User ID + Password and reads the captcha
+            automatically. Runs on your computer, so the portal accepts it.
+            ChromeDriver auto-updates itself.
+          </Text>
+        </View>
+      </View>
+
+      {Platform.OS === "web" ? (
+        <>
+          <Pressable
+            style={[st.dlBtn, busy === "runner" && st.openBtnDisabled]}
+            onPress={() => download("runner")}
+            disabled={busy !== null}
+            testID="btn-download-runner"
+          >
+            {busy === "runner" ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Ionicons name="download-outline" size={18} color="#fff" />
+            )}
+            <Text style={st.openBtnTxt}>Download PC Auto-Login (Chrome)</Text>
+          </Pressable>
+
+          <Text style={st.autoStep}>
+            1. Download &amp; unzip the folder on your PC (needs Chrome + Python).{"\n"}
+            2. Windows: double-click <Text style={st.mono}>run_esic.bat</Text> (or{" "}
+            <Text style={st.mono}>run_pf.bat</Text>). Mac/Linux: run{" "}
+            <Text style={st.mono}>./run.sh esic</Text>.{"\n"}
+            3. Chrome opens and logs in automatically — verify the captcha and
+            click Login. Credentials refresh live each run.
+          </Text>
+
+          <Pressable
+            style={[st.codeBtn, busy === "ext" && st.openBtnDisabled]}
+            onPress={() => download("ext")}
+            disabled={busy !== null}
+            testID="btn-download-extension"
+          >
+            {busy === "ext" ? (
+              <ActivityIndicator color={colors.brandPrimary} size="small" />
+            ) : (
+              <Ionicons name="extension-puzzle-outline" size={16} color={colors.brandPrimary} />
+            )}
+            <Text style={st.copyTxt}>Or download Chrome Extension (no Python)</Text>
+          </Pressable>
+        </>
+      ) : (
+        <Text style={st.autoStep}>
+          Open this page on your computer (web) to download the PC auto-login.
+        </Text>
+      )}
+
+      {error ? (
+        <View style={st.errorBox}>
+          <Ionicons name="alert-circle" size={16} color="#DC2626" />
+          <Text style={st.errorTxt}>{error}</Text>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -413,4 +532,15 @@ const st = StyleSheet.create({
     borderWidth: 1, borderColor: colors.brandPrimary, borderRadius: 8,
     paddingVertical: 8, paddingHorizontal: 12,
   },
+  autoCard: {
+    backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg,
+    borderWidth: 1, borderColor: "#05966955", padding: 16, gap: 12,
+  },
+  autoSub: { fontSize: 12, color: colors.textSecondary, marginTop: 3, lineHeight: 17 },
+  dlBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 8, backgroundColor: "#059669", borderRadius: 10,
+    paddingVertical: 14, minHeight: 48,
+  },
+  mono: { fontWeight: "800", color: colors.textPrimary },
 });
