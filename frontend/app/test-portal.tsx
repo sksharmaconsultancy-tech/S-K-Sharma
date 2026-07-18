@@ -168,11 +168,11 @@ function AutomationCard() {
         </View>
         <View style={{ flex: 1 }}>
           <Text style={st.cardTitle}>Full Auto-Login (runs on your PC)</Text>
-          <Text style={st.autoSub}>
-            Opens Chrome, fills User ID + Password and reads the captcha
-            automatically. Runs on your computer, so the portal accepts it.
-            ChromeDriver auto-updates itself.
-          </Text>
+            <Text style={st.autoSub}>
+              Opens Chrome, fills User ID + Password and reads the captcha
+              automatically. Runs on your computer, so the portal accepts it.
+              Download once — the script &amp; ChromeDriver auto-update themselves.
+            </Text>
         </View>
       </View>
 
@@ -193,12 +193,12 @@ function AutomationCard() {
           </Pressable>
 
           <Text style={st.autoStep}>
-            1. Download &amp; unzip the folder on your PC (needs Chrome + Python).{"\n"}
+            1. Download &amp; unzip the folder ONCE (needs Chrome + Python).{"\n"}
             2. Windows: double-click <Text style={st.mono}>run_esic.bat</Text> (or{" "}
             <Text style={st.mono}>run_pf.bat</Text>). Mac/Linux: run{" "}
             <Text style={st.mono}>./run.sh esic</Text>.{"\n"}
-            3. Chrome opens and logs in automatically — verify the captcha and
-            click Login. Credentials refresh live each run.
+            3. It self-updates every run — the login script, ChromeDriver and your
+            credentials all refresh automatically. You never download again.
           </Text>
 
           <Pressable

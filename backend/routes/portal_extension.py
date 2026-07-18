@@ -18,6 +18,7 @@ Endpoints:
 The token lives in ``automation_ext_tokens`` and is tied to one firm.
 """
 import io
+import json
 import secrets
 import zipfile
 from typing import Any, Dict, Optional
@@ -244,31 +245,20 @@ async def ext_solve_captcha(payload: Dict[str, Any] = Body(...)):
 
 # --- Local PC runner (Selenium + auto-managed ChromeDriver) ---------------
 # Selenium 4.6+ ships "Selenium Manager", which automatically downloads and
-# updates the chromedriver matching the installed Chrome — so the driver
-# stays current with no manual step.
+# updates the chromedriver matching the installed Chrome. On top of that, a
+# tiny LAUNCHER self-updates the login script from the app on every run — so
+# the operator downloads ONCE and the folder stays current forever.
 
-_RUNNER_PY = r'''"""SKS Portal Auto-Login — local PC runner.
+# Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
+RUNNER_VERSION = "1"
 
-Runs on YOUR computer (allowed ISP IP), opens Chrome via Selenium, fills
-the firm's ESIC / EPFO User ID + Password (fetched live from the SKS app),
-reads the captcha with the app's AI, and leaves the browser open for you
-to verify the captcha and click Login.
-
-ChromeDriver is handled automatically by Selenium Manager (Selenium 4.6+),
-so the driver auto-updates to match your installed Chrome — no manual
-driver download or version juggling.
-
-Usage:   python sks_autologin.py           (defaults to ESIC)
-         python sks_autologin.py epfo      (EPFO / PF portal)
-"""
+# The actual login logic — served (not baked) so it can auto-update in the
+# operator's folder. Exposes run(API_BASE, TOKEN, portal).
+_RUNNER_CODE = r'''"""SKS Portal Auto-Login — login script (auto-updated by launcher)."""
 import base64
 import json
-import sys
 import time
 import urllib.request
-
-API_BASE = %%BASE%%
-TOKEN = %%TOKEN%%
 
 PORTALS = {
     "esic": "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx",
@@ -276,44 +266,35 @@ PORTALS = {
 }
 
 
-def _get(url):
-    with urllib.request.urlopen(url, timeout=30) as r:
-        return json.load(r)
-
-
-def _post(url, data):
-    req = urllib.request.Request(
-        url, data=json.dumps(data).encode(),
-        headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return json.load(r)
-
-
-def main():
-    portal = (sys.argv[1] if len(sys.argv) > 1 else "esic").lower()
+def run(API_BASE, TOKEN, portal):
+    portal = (portal or "esic").lower()
     if portal not in PORTALS:
         print("Unknown portal. Use 'esic' or 'epfo'."); return
 
+    def _get(url):
+        with urllib.request.urlopen(url, timeout=30) as r:
+            return json.load(r)
+
+    def _post(url, data):
+        req = urllib.request.Request(
+            url, data=json.dumps(data).encode(),
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.load(r)
+
     print("Fetching your %s login from the SKS app..." % portal.upper())
-    try:
-        creds = _get("%s/api/portal-ext/creds?token=%s&portal=%s" % (API_BASE, TOKEN, portal))
-    except Exception as e:
-        print("Could not load credentials:", e); return
+    creds = _get("%s/api/portal-ext/creds?token=%s&portal=%s" % (API_BASE, TOKEN, portal))
     if not creds.get("ok"):
         print("Server error:", creds); return
 
-    try:
-        from selenium import webdriver
-        from selenium.webdriver.common.by import By
-        from selenium.webdriver.chrome.options import Options
-    except Exception:
-        print("Selenium is not installed. Run:  pip install -r requirements.txt")
-        return
+    from selenium import webdriver
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.chrome.options import Options
 
     opts = Options()
-    opts.add_experimental_option("detach", True)  # keep Chrome open after script ends
+    opts.add_experimental_option("detach", True)
     print("Launching Chrome (auto-managed driver)...")
-    driver = webdriver.Chrome(options=opts)       # Selenium Manager auto-updates the driver
+    driver = webdriver.Chrome(options=opts)
     driver.get(PORTALS[portal])
     time.sleep(3)
 
@@ -323,7 +304,6 @@ def main():
             "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));"
             "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));", el, val)
 
-    # User ID: first visible text input that isn't a captcha/otp/search box.
     user_el = None
     for el in driver.find_elements(By.CSS_SELECTOR, "input[type=text], input:not([type])"):
         try:
@@ -342,7 +322,6 @@ def main():
     if pass_el:
         set_val(pass_el, creds["password"]); print("Filled Password.")
 
-    # Captcha: screenshot the image element, ask the app to read it.
     cap_img = None
     for sel in ("img#captchaimg", "img[alt*=captcha i]", "img[src*=captcha i]",
                 "img[id*=captcha i]", "img[title*=captcha i]"):
@@ -358,8 +337,7 @@ def main():
 
     if cap_img is not None and cap_in is not None:
         try:
-            png = cap_img.screenshot_as_png
-            b64 = base64.b64encode(png).decode("ascii")
+            b64 = base64.b64encode(cap_img.screenshot_as_png).decode("ascii")
             print("Reading captcha with AI...")
             sol = _post("%s/api/portal-ext/solve-captcha" % API_BASE,
                         {"token": TOKEN, "image_base64": b64, "numeric_only": portal == "esic"})
@@ -374,6 +352,79 @@ def main():
 
     print("\\nDone. Verify the captcha in Chrome, then click the portal's Login button.")
     print("(Chrome stays open. Close it yourself when finished.)")
+'''
+
+# The launcher (baked with api_base + token in config.json alongside it).
+# On every run it: ensures Selenium is installed, pulls the latest login
+# script into the SAME folder if a newer version exists, then runs it.
+_LAUNCHER_PY = r'''"""SKS Portal Auto-Login — self-updating launcher.
+
+Downloaded once. On each run it auto-updates the login script (and
+Selenium keeps chromedriver current), so you never re-download anything.
+
+Usage:  python sks_launcher.py esic     (or: epfo)
+"""
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+import urllib.request
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _cfg():
+    with open(os.path.join(HERE, "config.json"), "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _ensure_selenium():
+    try:
+        import selenium  # noqa: F401
+        return
+    except Exception:
+        print("Installing Selenium (first run only)...")
+        subprocess.run([sys.executable, "-m", "pip", "install", "selenium>=4.16"], check=False)
+
+
+def _self_update(api_base, token):
+    try:
+        url = "%s/api/portal-ext/runner-script?token=%s" % (api_base, token)
+        with urllib.request.urlopen(url, timeout=30) as r:
+            data = json.load(r)
+        ver = str(data.get("version") or "0")
+        code = data.get("code") or ""
+        script = os.path.join(HERE, "sks_autologin.py")
+        vfile = os.path.join(HERE, ".runner_version")
+        local = ""
+        if os.path.exists(vfile):
+            with open(vfile, "r", encoding="utf-8") as f:
+                local = f.read().strip()
+        if code and (local != ver or not os.path.exists(script)):
+            with open(script, "w", encoding="utf-8") as f:
+                f.write(code)
+            with open(vfile, "w", encoding="utf-8") as f:
+                f.write(ver)
+            print("Auto-login script updated to v%s." % ver)
+    except Exception as e:
+        print("Update check skipped (%s) - using existing script." % e)
+
+
+def main():
+    cfg = _cfg()
+    api_base, token = cfg["api_base"], cfg["token"]
+    portal = sys.argv[1] if len(sys.argv) > 1 else "esic"
+    _ensure_selenium()
+    _self_update(api_base, token)
+    script = os.path.join(HERE, "sks_autologin.py")
+    if not os.path.exists(script):
+        print("Could not obtain the login script. Check your internet and try again.")
+        return
+    spec = importlib.util.spec_from_file_location("sks_autologin", script)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.run(api_base, token, portal)
 
 
 if __name__ == "__main__":
@@ -384,44 +435,43 @@ _RUNNER_REQ = "selenium>=4.16\n"
 
 _RUNNER_BAT = (
     "@echo off\r\n"
-    "echo Installing dependencies (first run only)...\r\n"
-    "python -m pip install -r requirements.txt\r\n"
-    "echo Starting ESIC auto-login...\r\n"
-    "python sks_autologin.py esic\r\n"
+    "python sks_launcher.py esic\r\n"
     "pause\r\n"
 )
 
 _RUNNER_BAT_PF = (
     "@echo off\r\n"
-    "python -m pip install -r requirements.txt\r\n"
-    "python sks_autologin.py epfo\r\n"
+    "python sks_launcher.py epfo\r\n"
     "pause\r\n"
 )
 
 _RUNNER_SH = (
     "#!/bin/sh\n"
-    "python3 -m pip install -r requirements.txt\n"
-    "python3 sks_autologin.py \"${1:-esic}\"\n"
+    "python3 sks_launcher.py \"${1:-esic}\"\n"
 )
 
 _RUNNER_README = (
-    "SKS Portal Auto-Login - PC Runner (ChromeDriver)\n"
-    "================================================\n\n"
-    "Requirements: Google Chrome + Python 3.9+ installed on this PC.\n"
-    "The chromedriver is downloaded & auto-updated by Selenium automatically\n"
-    "(Selenium Manager) - you never manage the driver yourself.\n\n"
-    "WINDOWS:\n"
-    "  - Double-click run_esic.bat   (ESIC login)\n"
-    "  - Double-click run_pf.bat      (EPFO / PF login)\n\n"
-    "MAC / LINUX:\n"
-    "  - chmod +x run.sh  then  ./run.sh esic   (or ./run.sh epfo)\n\n"
-    "What happens:\n"
-    "  Chrome opens the portal login page, your User ID + Password are filled\n"
-    "  from the SKS app, and the captcha is read by AI and filled. Check the\n"
-    "  captcha, then click the portal's Login button.\n\n"
-    "Credentials update automatically - they are fetched live each run, so you\n"
-    "never need to re-download this folder when you change them in Firm Master.\n"
+    "SKS Portal Auto-Login - PC Runner (self-updating)\n"
+    "=================================================\n\n"
+    "Requirements: Google Chrome + Python 3.9+ on this PC.\n"
+    "Download this folder ONCE. It updates itself every run:\n"
+    "  - The login script auto-updates from the SKS app.\n"
+    "  - ChromeDriver auto-updates via Selenium (Selenium Manager).\n"
+    "  - Your User ID/Password are fetched live each run.\n"
+    "So you never need to download again.\n\n"
+    "WINDOWS:  double-click run_esic.bat  (or run_pf.bat)\n"
+    "MAC/LINUX: chmod +x run.sh ; ./run.sh esic   (or ./run.sh epfo)\n\n"
+    "Chrome opens the portal, fills your login + captcha automatically.\n"
+    "Verify the captcha, then click the portal's Login button.\n"
 )
+
+
+@router.get("/portal-ext/runner-script")
+async def runner_script(token: str):
+    doc = await db.automation_ext_tokens.find_one({"token": token})
+    if not doc:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return {"version": RUNNER_VERSION, "code": _RUNNER_CODE}
 
 
 @router.get("/admin/portal-automation/runner-download")
@@ -447,15 +497,12 @@ async def runner_download(
         "kind": "pc_runner",
     })
 
-    runner = (
-        _RUNNER_PY
-        .replace("%%BASE%%", _js_str(base))
-        .replace("%%TOKEN%%", _js_str(token))
-    )
+    config = json.dumps({"api_base": base, "token": token}, indent=2)
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("sks_autologin.py", runner)
+        z.writestr("sks_launcher.py", _LAUNCHER_PY)
+        z.writestr("config.json", config)
         z.writestr("requirements.txt", _RUNNER_REQ)
         z.writestr("run_esic.bat", _RUNNER_BAT)
         z.writestr("run_pf.bat", _RUNNER_BAT_PF)
