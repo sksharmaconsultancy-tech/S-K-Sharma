@@ -16,7 +16,7 @@
  *   • On success the API returns a temp 6-digit PIN which we surface
  *     prominently so the operator can share it with the new hire.
  */
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -27,6 +27,7 @@ import {
   Platform,
   ScrollView,
   Modal,
+  useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -108,6 +109,17 @@ type EmpForm = {
   upi_id: string;
   address: string;
 };
+// Iter 189 — enterprise desktop shell section tabs (anchor navigation).
+const SECTION_TABS = [
+  { id: "sec-identity", label: "Personal", icon: "person-circle-outline" },
+  { id: "sec-employment", label: "Employment", icon: "briefcase-outline" },
+  { id: "sec-actual-salary", label: "Salary", icon: "cash-outline" },
+  { id: "sec-compliance", label: "Compliance", icon: "shield-half-outline" },
+  { id: "sec-statutory", label: "Statutory & Bank", icon: "shield-checkmark-outline" },
+  { id: "sec-family", label: "Family", icon: "people-outline" },
+];
+
+
 
 const EMPTY_FORM: EmpForm = {
   employee_code: "",
@@ -218,6 +230,18 @@ export default function EmployeeAddScreen() {
   // Master → "Edit All Details").
   const urlParams = useLocalSearchParams<{ user_id?: string }>();
   const editUserId = urlParams.user_id ? String(urlParams.user_id) : null;
+  // Iter 189 — enterprise desktop shell
+  const { width: winW } = useWindowDimensions();
+  const isWide = Platform.OS === "web" && winW >= 1024;
+  const [activeTab, setActiveTab] = useState<string>("sec-identity");
+  const scrollToSection = useCallback((id: string) => {
+    setActiveTab(id);
+    if (Platform.OS === "web") {
+      try {
+        (document.getElementById(id) as any)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch {}
+    }
+  }, []);
   // Firm switching is disabled while editing — lock to the employee's firm.
   const canSwitchFirm = canSwitchFirmRole && !editUserId;
   const [editCode, setEditCode] = useState<string | null>(null);
@@ -645,8 +669,87 @@ export default function EmployeeAddScreen() {
     );
   }
 
+  // ---- Iter 189 — Enterprise desktop shell (SAP/Workday-style) ----------
+  const pageTitle = editUserId
+    ? `Employee Details${editCode ? ` · ${editCode}` : ""}`
+    : "Add New Employee";
+  const initials = (form.name || "?")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() || "")
+    .join("") || "?";
+  const checklist: { label: string; done: boolean }[] = [
+    { label: "Firm selected", done: !!selectedCompanyId },
+    { label: "Name", done: !!form.name.trim() },
+    { label: "Mobile number", done: !!form.phone.trim() },
+    { label: "Designation", done: !!form.designation.trim() },
+    { label: "Date of joining", done: !!form.doj.trim() },
+    { label: "Salary details", done: !!(form.salary_monthly || form.compliance_gross) },
+    { label: "Bank details", done: !!form.bank_name.trim() },
+    { label: "Aadhaar", done: !!form.aadhaar_no.trim() },
+  ];
+  const doneCount = checklist.filter((c) => c.done).length;
+  const summaryRows: [string, string][] = [
+    ["Employee code", editCode || "Auto-assigned"],
+    ["Type", form.employee_type || "—"],
+    ["Department", form.department || "—"],
+    ["Designation", form.designation || "—"],
+    ["Company", selectedCompany?.name || "—"],
+    ["Date of joining", form.doj || "—"],
+  ];
+  const enterprisePrimary = (
+    <Pressable
+      onPress={editUserId ? submit : () => setReviewOpen(true)}
+      disabled={!canSubmit || busy}
+      style={[styles.entPrimaryBtn, (!canSubmit || busy) && styles.btnDisabled]}
+      testID="ent-primary-save"
+    >
+      {busy ? (
+        <ActivityIndicator color="#fff" size="small" />
+      ) : (
+        <>
+          <Ionicons name={editUserId ? "save-outline" : "person-add-outline"} size={16} color="#fff" />
+          <Text style={styles.entPrimaryTxt}>{editUserId ? "Save" : "Create Employee"}</Text>
+        </>
+      )}
+    </Pressable>
+  );
+
   return (
     <View style={styles.root}>
+      {isWide ? (
+        <View style={styles.entHeader}>
+          <Pressable onPress={() => router.back()} hitSlop={8} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={20} color={colors.onSurface} />
+          </Pressable>
+          <View style={{ flex: 1 }}>
+            <View style={styles.crumbRow}>
+              <Text style={styles.crumb}>Dashboard</Text>
+              <Ionicons name="chevron-forward" size={11} color={colors.onSurfaceTertiary} />
+              <Text style={styles.crumb}>Employee Management</Text>
+              <Ionicons name="chevron-forward" size={11} color={colors.onSurfaceTertiary} />
+              <Text style={[styles.crumb, styles.crumbActive]}>{pageTitle}</Text>
+            </View>
+            <Text style={styles.entTitle}>{pageTitle}</Text>
+          </View>
+          {/* Section tabs */}
+          <View style={styles.entTabs}>
+            {SECTION_TABS.map((t) => (
+              <Pressable
+                key={t.id}
+                onPress={() => scrollToSection(t.id)}
+                style={[styles.entTab, activeTab === t.id && styles.entTabOn]}
+                testID={`ent-tab-${t.id}`}
+              >
+                <Ionicons name={t.icon as any} size={13} color={activeTab === t.id ? "#fff" : colors.onSurfaceSecondary} />
+                <Text style={[styles.entTabTxt, activeTab === t.id && { color: "#fff" }]}>{t.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {enterprisePrimary}
+        </View>
+      ) : (
       <SafeAreaView edges={["top"]} style={{ backgroundColor: colors.surface }}>
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} hitSlop={8} style={styles.backBtn}>
@@ -672,9 +775,73 @@ export default function EmployeeAddScreen() {
           <View style={{ width: 26 }} />
         </View>
       </SafeAreaView>
+      )}
 
+      <View style={styles.entBody}>
+        {isWide && (
+          <View style={styles.entPanel}>
+            {/* Left summary card */}
+            <View style={styles.entAvatarWrap}>
+              <LinearGradient
+                colors={["#2563EB", "#4338CA"]}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                style={styles.entAvatar}
+              >
+                <Text style={styles.entAvatarTxt}>{initials}</Text>
+              </LinearGradient>
+              <Text style={styles.entName} numberOfLines={1}>{form.name || "New Employee"}</Text>
+              <View style={[styles.entStatus, { backgroundColor: editUserId ? "#DCFCE7" : "#FEF9C3" }]}>
+                <View style={[styles.entStatusDot, { backgroundColor: editUserId ? "#16A34A" : "#F59E0B" }]} />
+                <Text style={[styles.entStatusTxt, { color: editUserId ? "#15803D" : "#A16207" }]}>
+                  {editUserId ? "Active" : "New Entry"}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.entDivider} />
+            {summaryRows.map(([k, v]) => (
+              <View key={k} style={styles.entRow}>
+                <Text style={styles.entRowK}>{k}</Text>
+                <Text style={styles.entRowV} numberOfLines={1}>{v}</Text>
+              </View>
+            ))}
+            <View style={styles.entDivider} />
+            {editUserId ? (
+              <Pressable
+                onPress={() => router.push(`/employee-master?user_id=${editUserId}` as any)}
+                style={styles.entQuickBtn}
+                testID="ent-full-profile"
+              >
+                <Ionicons name="person-outline" size={15} color={colors.brandPrimary} />
+                <Text style={styles.entQuickTxt}>Open Full Profile</Text>
+              </Pressable>
+            ) : (
+              <>
+                <View style={styles.entProgressHead}>
+                  <Text style={styles.entProgressTitle}>Completion</Text>
+                  <Text style={styles.entProgressPct}>{doneCount}/{checklist.length}</Text>
+                </View>
+                <View style={styles.entProgressTrack}>
+                  <View style={[styles.entProgressFill, { width: `${(doneCount / checklist.length) * 100}%` }]} />
+                </View>
+                {checklist.map((c) => (
+                  <View key={c.label} style={styles.entCheckRow}>
+                    <Ionicons
+                      name={c.done ? "checkmark-circle" : "ellipse-outline"}
+                      size={15}
+                      color={c.done ? "#16A34A" : colors.onSurfaceTertiary}
+                    />
+                    <Text style={[styles.entCheckTxt, c.done && { color: colors.onSurface }]}>{c.label}</Text>
+                  </View>
+                ))}
+              </>
+            )}
+          </View>
+        )}
+        <View style={{ flex: 1 }}>
       <ScrollView
-        contentContainerStyle={{ padding: spacing.md, gap: spacing.md }}
+        contentContainerStyle={isWide
+          ? { padding: spacing.lg, gap: spacing.md, maxWidth: 1000, width: "100%", alignSelf: "center" }
+          : { padding: spacing.md, gap: spacing.md }}
         showsVerticalScrollIndicator
       >
         {/* Inline firm picker — Iter 70.
@@ -781,7 +948,7 @@ export default function EmployeeAddScreen() {
             !selectedCompanyId && { opacity: 0.5, pointerEvents: "none" as any },
           ]}
         >
-          <SectionHeader icon="person-circle-outline" title="Identity" tint="#2563EB" first />
+          <SectionHeader icon="person-circle-outline" title="Identity" tint="#2563EB" first anchorId="sec-identity" />
 
           {/* Iter 89 — Scan document with OCR to auto-fill Identity fields.
               Web-only. Aadhaar / PAN / Voter ID / Driving License supported.
@@ -1035,7 +1202,7 @@ export default function EmployeeAddScreen() {
             />
           </TwoCol>
 
-          <SectionHeader icon="briefcase-outline" title="Employment" tint="#4338CA" />
+          <SectionHeader icon="briefcase-outline" title="Employment" tint="#4338CA" anchorId="sec-employment" />
           <TwoCol>
             <View style={{ flex: 1 }}>
               {/* Iter 91 — Designation is a dropdown from the Designation
@@ -1186,7 +1353,7 @@ export default function EmployeeAddScreen() {
             </TwoCol>
           ) : null}
           {showActualSalary ? (<>
-          <SectionHeader icon="cash-outline" title="Employee Actual Salary" tint="#059669" />
+          <SectionHeader icon="cash-outline" title="Employee Actual Salary" tint="#059669" anchorId="sec-actual-salary" />
           {/* Iter 126g — Bio Code moved here (user request) */}
           <TwoCol>
             <Field
@@ -1317,7 +1484,7 @@ export default function EmployeeAddScreen() {
           </>) : null}
 
           {/* Iter 94 — COMPLIANCE salary: separate section, own rate basis */}
-          <SectionHeader icon="shield-half-outline" title="Compliance Salary (PF / ESI / TDS) — Separate" tint="#B45309" />
+          <SectionHeader icon="shield-half-outline" title="Compliance Salary (PF / ESI / TDS) — Separate" tint="#B45309" anchorId="sec-compliance" />
           <Text style={styles.lbl}>Rate Basis (Compliance)</Text>
           <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
             {(["monthly", "daily", "hourly"] as const).map((m) => (
@@ -1489,7 +1656,7 @@ export default function EmployeeAddScreen() {
             ))}
           </View>
 
-          <SectionHeader icon="shield-checkmark-outline" title="Statutory / Bank" tint="#0891B2" />
+          <SectionHeader icon="shield-checkmark-outline" title="Statutory / Bank" tint="#0891B2" anchorId="sec-statutory" />
           <TwoCol>
             <View style={{ flex: 1 }}>
               <Field
@@ -1643,7 +1810,7 @@ export default function EmployeeAddScreen() {
 
           {/* Iter 126g — Family Details moved to the END of the form
               (user-requested flow) */}
-          <SectionHeader icon="people-outline" title="Family Details" tint="#DB2777" />
+          <SectionHeader icon="people-outline" title="Family Details" tint="#DB2777" anchorId="sec-family" />
           {form.family_members.map((fm, idx) => (
             <View key={idx} style={{ flexDirection: "row", gap: 8, alignItems: "flex-end", marginTop: 6 }}>
               <Field label={idx === 0 ? "Member Name" : ""} value={fm.name}
@@ -1756,6 +1923,36 @@ export default function EmployeeAddScreen() {
           </Text>
         </View>
       </ScrollView>
+        </View>
+      </View>
+
+      {/* Sticky bottom action bar — desktop enterprise shell */}
+      {isWide && (
+        <View style={styles.entBottomBar}>
+          <Pressable onPress={() => router.back()} style={styles.entGhostBtn} testID="ent-cancel">
+            <Text style={styles.entGhostTxt}>Cancel</Text>
+          </Pressable>
+          <View style={{ flex: 1 }} />
+          {!editUserId && (
+            <Pressable
+              onPress={saveDraft}
+              disabled={draftBusy}
+              style={[styles.entDraftBtn, draftBusy && styles.btnDisabled]}
+              testID="ent-save-draft"
+            >
+              {draftBusy ? (
+                <ActivityIndicator color={colors.brandPrimary} size="small" />
+              ) : (
+                <>
+                  <Ionicons name="bookmark-outline" size={15} color={colors.brandPrimary} />
+                  <Text style={styles.entDraftTxt}>Save Draft</Text>
+                </>
+              )}
+            </Pressable>
+          )}
+          {enterprisePrimary}
+        </View>
+      )}
 
       {/* Iter 109 — review all details before final create */}
       <Modal visible={reviewOpen} transparent animationType="fade" onRequestClose={() => setReviewOpen(false)}>
@@ -1822,11 +2019,11 @@ export default function EmployeeAddScreen() {
 }
 
 /** Premium section header — gradient-tinted icon chip + title + divider. */
-function SectionHeader({ icon, title, tint, first }: {
-  icon: any; title: string; tint: string; first?: boolean;
+function SectionHeader({ icon, title, tint, first, anchorId }: {
+  icon: any; title: string; tint: string; first?: boolean; anchorId?: string;
 }) {
   return (
-    <View style={[styles.sectionHead, first && { marginTop: 0 }]}>
+    <View nativeID={anchorId} style={[styles.sectionHead, first && { marginTop: 0 }]}>
       <View style={[styles.sectionIcon, { backgroundColor: `${tint}18`, borderColor: `${tint}40` }]}>
         <Ionicons name={icon} size={15} color={tint} />
       </View>
@@ -1954,6 +2151,100 @@ function Chip(props: { active: boolean; label: string; onPress: () => void }) {
 }
 
 const styles = StyleSheet.create({
+  // ---- Iter 189 — enterprise desktop shell styles ----
+  entHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: "#FFFFFF",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0",
+    zIndex: 5,
+  },
+  crumbRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  crumb: { fontSize: 11, color: colors.onSurfaceTertiary, fontWeight: "600" },
+  crumbActive: { color: colors.brandPrimary },
+  entTitle: { fontSize: 17, fontWeight: "800", color: colors.onSurface, marginTop: 1 },
+  entTabs: { flexDirection: "row", gap: 4, flexWrap: "wrap", justifyContent: "flex-end", flexShrink: 1 },
+  entTab: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    paddingHorizontal: 10, paddingVertical: 7,
+    borderRadius: 999, backgroundColor: "#F1F5F9",
+  },
+  entTabOn: { backgroundColor: "#2563EB" },
+  entTabTxt: { fontSize: 11.5, fontWeight: "700", color: colors.onSurfaceSecondary },
+  entBody: { flex: 1, flexDirection: "row" },
+  entPanel: {
+    width: 290,
+    backgroundColor: "#FFFFFF",
+    borderRightWidth: 1,
+    borderRightColor: "#E2E8F0",
+    padding: 18,
+  },
+  entAvatarWrap: { alignItems: "center" },
+  entAvatar: {
+    width: 72, height: 72, borderRadius: 24,
+    alignItems: "center", justifyContent: "center",
+    shadowColor: "#2563EB", shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3, shadowRadius: 12, elevation: 6,
+  },
+  entAvatarTxt: { color: "#fff", fontSize: 24, fontWeight: "800" },
+  entName: { color: colors.onSurface, fontSize: 16, fontWeight: "800", marginTop: 10, textAlign: "center" },
+  entStatus: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, marginTop: 6,
+  },
+  entStatusDot: { width: 7, height: 7, borderRadius: 4 },
+  entStatusTxt: { fontSize: 11, fontWeight: "800" },
+  entDivider: { height: 1, backgroundColor: "#EEF2F7", marginVertical: 14 },
+  entRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 5, gap: 8 },
+  entRowK: { fontSize: 12, color: colors.onSurfaceSecondary, fontWeight: "600" },
+  entRowV: { fontSize: 12.5, color: colors.onSurface, fontWeight: "700", flexShrink: 1, textAlign: "right" },
+  entQuickBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7,
+    borderWidth: 1.5, borderColor: "#BFDBFE", backgroundColor: "#EFF6FF",
+    borderRadius: 12, paddingVertical: 11,
+  },
+  entQuickTxt: { color: colors.brandPrimary, fontSize: 13, fontWeight: "800" },
+  entProgressHead: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
+  entProgressTitle: { fontSize: 12.5, fontWeight: "800", color: colors.onSurface },
+  entProgressPct: { fontSize: 12, fontWeight: "800", color: colors.brandPrimary },
+  entProgressTrack: { height: 6, borderRadius: 3, backgroundColor: "#EEF2F7", marginBottom: 10, overflow: "hidden" },
+  entProgressFill: { height: 6, borderRadius: 3, backgroundColor: "#16A34A" },
+  entCheckRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 },
+  entCheckTxt: { fontSize: 12.5, color: colors.onSurfaceTertiary, fontWeight: "600" },
+  entBottomBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: "#FFFFFF",
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
+  },
+  entGhostBtn: {
+    paddingHorizontal: 18, paddingVertical: 10, borderRadius: 12,
+    borderWidth: 1.5, borderColor: "#E2E8F0",
+  },
+  entGhostTxt: { color: colors.onSurfaceSecondary, fontSize: 13.5, fontWeight: "700" },
+  entDraftBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12,
+    borderWidth: 1.5, borderColor: "#BFDBFE", backgroundColor: "#EFF6FF",
+  },
+  entDraftTxt: { color: colors.brandPrimary, fontSize: 13.5, fontWeight: "800" },
+  entPrimaryBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7,
+    paddingHorizontal: 20, paddingVertical: 10, borderRadius: 12,
+    backgroundColor: "#2563EB",
+    shadowColor: "#2563EB", shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
+  },
+  entPrimaryTxt: { color: "#fff", fontSize: 13.5, fontWeight: "800" },
+
   root: { flex: 1, backgroundColor: colors.background },
   header: {
     flexDirection: "row",
