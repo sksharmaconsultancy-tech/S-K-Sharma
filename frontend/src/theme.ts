@@ -15,6 +15,7 @@
 // -----------------------------------------------------------------------------
 
 export type ThemeId =
+  | "azure_light"
   | "corporate_sapphire"
   | "executive_noir"
   | "emerald_prestige"
@@ -124,6 +125,22 @@ function buildPalette(
 }
 
 export const THEME_PRESETS: PresetDef[] = [
+  // Iter 180 — Premium SaaS redesign default: Azure Blue + Indigo
+  // (Zoho One / RazorpayX inspired, Material Design 3 tokens).
+  {
+    id: "azure_light",
+    name: "Azure Indigo",
+    vibe: "Premium SaaS",
+    description: "Vivid azure blue with deep indigo — modern enterprise SaaS.",
+    primary: "#2563EB",
+    secondary: "#4338CA",
+    accent: "#4338CA",
+    colors: buildPalette(
+      "#2563EB", "#4338CA", "#DBEAFE", "#1D4ED8",
+      "#4338CA", "#E0E7FF", "#3730A3",
+      "#F3F4F6", "#E5E7EB",
+    ),
+  },
   {
     id: "corporate_sapphire",
     name: "Corporate Sapphire",
@@ -276,7 +293,14 @@ export const THEME_PRESETS: PresetDef[] = [
   },
 ];
 
-export const DEFAULT_THEME_ID: ThemeId = "corporate_sapphire";
+export const DEFAULT_THEME_ID: ThemeId = "azure_light";
+
+/** Dark-mode helpers — the toggle flips between the premium light and
+ *  dark presets while any other explicitly-picked preset stays put. */
+export const DARK_THEME_ID: ThemeId = "midnight_dark";
+export function isDarkTheme(id: ThemeId): boolean {
+  return id === "midnight_dark";
+}
 
 /**
  * Iter 85 (fix) — Read the persisted choice SYNCHRONOUSLY at module load
@@ -287,10 +311,19 @@ export const DEFAULT_THEME_ID: ThemeId = "corporate_sapphire";
  * — a hard reload after Save re-runs this snippet with the new id.
  */
 const _STORAGE_KEY = "sksharma.theme.id.v1";
+const _MIGRATE_FLAG = "sksharma.theme.migrated.v2";
 function _bootThemeSync(): ThemeId {
   try {
     if (typeof globalThis !== "undefined" && (globalThis as any).localStorage) {
-      const saved = (globalThis as any).localStorage.getItem(_STORAGE_KEY);
+      const ls = (globalThis as any).localStorage;
+      // Iter 180 one-time migration: devices still on the OLD default
+      // (corporate_sapphire, never explicitly re-picked) move to the new
+      // premium azure_light default. Explicit picks after this flag stay.
+      if (ls.getItem(_STORAGE_KEY) === "corporate_sapphire" && !ls.getItem(_MIGRATE_FLAG)) {
+        ls.setItem(_STORAGE_KEY, "azure_light");
+        ls.setItem(_MIGRATE_FLAG, "1");
+      }
+      const saved = ls.getItem(_STORAGE_KEY);
       if (saved && THEME_PRESETS.find(p => p.id === saved)) {
         return saved as ThemeId;
       }

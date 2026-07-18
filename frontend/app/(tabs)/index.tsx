@@ -24,6 +24,10 @@ import SelectedCompanyBadge from "@/src/components/SelectedCompanyBadge";
 import PrimaryInboxBanner from "@/src/components/PrimaryInboxBanner";
 import PushBanner from "@/src/components/PushBanner";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
+import EssWelcomeHeader from "@/src/components/ess/EssWelcomeHeader";
+import PunchHeroCard from "@/src/components/ess/PunchHeroCard";
+import QuickCardsGrid from "@/src/components/ess/QuickCardsGrid";
+import MonthCalendarCard from "@/src/components/ess/MonthCalendarCard";
 
 const LOGO = require("../../assets/images/logo-mark.png");
 
@@ -214,16 +218,6 @@ export default function Dashboard() {
     };
   }, [user?.user_id, user?.role]);
 
-  const lastRec = today?.records?.[today.records.length - 1];
-  const punchedIn = lastRec?.kind === "in";
-  const punchedOut = lastRec?.kind === "out";
-  const shiftStatus =
-    punchedIn && !punchedOut ? "Clocked in" :
-    punchedOut ? "Shift complete" :
-    "Not started";
-  const shiftStatusEmoji =
-    punchedIn && !punchedOut ? "●" : punchedOut ? "✓" : "○";
-
   const activityCount = today?.records?.length || 0;
   const pendingLeaves = leaves.filter((l) => l.status === "pending").length;
   const unreadNotifs = notifs.length;
@@ -234,6 +228,21 @@ export default function Dashboard() {
 
   return (
     <View style={styles.root}>
+      {user?.role === "employee" ? (
+        <EssWelcomeHeader
+          name={user?.name || ""}
+          employeeCode={user?.employee_code}
+          companyName={company?.name}
+          photoBase64={(user as any)?.profile_photo_base64}
+          unread={unreadNotifs}
+          onBell={() => router.push("/notifications")}
+          shiftLabel={
+            user?.shift_start && user?.shift_end
+              ? `Shift ${user.shift_start}–${user.shift_end}`
+              : null
+          }
+        />
+      ) : (
       <SafeAreaView edges={["top"]} style={{ backgroundColor: colors.surface }}>
         <View style={styles.topBar}>
           <View style={styles.topLeft}>
@@ -269,8 +278,10 @@ export default function Dashboard() {
           )}
         </View>
       </SafeAreaView>
+      )}
 
       <ScrollView
+        style={user?.role === "employee" ? styles.essScroll : undefined}
         contentContainerStyle={styles.scroll}
         refreshControl={
           <RefreshControl
@@ -308,56 +319,16 @@ export default function Dashboard() {
           <ActivityIndicator style={{ marginTop: 80 }} color={colors.brandPrimary} />
         ) : (
           <>
-            {/* Hero shift card — EMPLOYEES ONLY (Iter 177: employers don't
-                punch from the dashboard; they use My Attendance). */}
+            {/* Iter 180 — Premium ESS punch card (live clock + working
+                hours). Employers use My Attendance instead. */}
             {user?.role === "employee" && (
-              <View style={styles.hero} testID="hero-shift">
-                <View style={styles.heroTopRow}>
-                  <View>
-                    <Text style={styles.heroLabel}>TODAY&apos;S SHIFT</Text>
-                    <Text style={styles.heroStatus}>
-                      {shiftStatusEmoji}  {shiftStatus}
-                    </Text>
-                  </View>
-                  <View style={styles.heroClock}>
-                    <Text style={styles.heroClockTxt}>
-                      {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.heroDivider} />
-
-                <View style={styles.heroBottomRow}>
-                  <View>
-                    <Text style={styles.heroMeta}>{activityCount} activity today</Text>
-                    {user?.shift_start && user?.shift_end ? (
-                      <Text style={styles.heroMetaSub}>
-                        Shift {user.shift_start} – {user.shift_end}
-                      </Text>
-                    ) : null}
-                  </View>
-                  {/* Iter 114 — punching hidden when the firm's Bio Matrix
-                      Attendance is OFF (view-only mode per process flow). */}
-                  {company?.attendance_punching_enabled === false ? (
-                    <View style={[styles.heroCta, { backgroundColor: "transparent" }]}>
-                      <Ionicons name="eye-outline" size={16} color={colors.onSurfaceTertiary} />
-                      <Text style={[styles.heroCtaTxt, { color: colors.onSurfaceTertiary }]}>View only</Text>
-                    </View>
-                  ) : (
-                  <Pressable
-                    testID="hero-punch-cta"
-                    style={styles.heroCta}
-                    onPress={() => router.push("/(tabs)/attendance")}
-                  >
-                    <Ionicons name="finger-print" size={16} color={colors.onCta} />
-                    <Text style={styles.heroCtaTxt}>
-                      {punchedIn && !punchedOut ? "Punch Out" : "Punch In"}
-                    </Text>
-                  </Pressable>
-                  )}
-                </View>
-              </View>
+              <PunchHeroCard
+                records={today?.records || []}
+                shiftStart={user?.shift_start}
+                shiftEnd={user?.shift_end}
+                punchingEnabled={company?.attendance_punching_enabled !== false}
+                onPunch={() => router.push("/(tabs)/attendance")}
+              />
             )}
 
             {/* Duty hours summary — employee only (employers see their own
@@ -369,7 +340,30 @@ export default function Dashboard() {
               />
             )}
 
-            {/* Bento grid 2x2 */}
+            {/* Iter 180 — ESS quick service cards + month calendar for
+                employees; admins keep the classic bento grid. */}
+            {user?.role === "employee" ? (
+              <>
+                <SectionHeader title="My services" />
+                <QuickCardsGrid
+                  cards={[
+                    { icon: "time-outline", label: "Attendance", color: "#2563EB", route: "/history" },
+                    { icon: "calendar-outline", label: "Leaves", color: "#7C3AED", route: "/leaves" },
+                    { icon: "cash-outline", label: "Payslip", color: "#059669", route: "/payslip" },
+                    { icon: "document-text-outline", label: "Documents", color: "#0891B2", route: "/(tabs)/documents" },
+                    { icon: "id-card-outline", label: "KYC", color: "#B45309", route: "/kyc" },
+                    { icon: "card-outline", label: "ID Card", color: "#4338CA", route: "/id-card" },
+                    { icon: "chatbubbles-outline", label: "Helpdesk", color: "#DB2777", route: "/tickets" },
+                    { icon: "mail-outline", label: "Messages", color: "#0369A1", route: "/messages" },
+                    { icon: "receipt-outline", label: "Expense Claim", color: "#64748B", comingSoon: true },
+                    { icon: "wallet-outline", label: "Reimbursement", color: "#64748B", comingSoon: true },
+                  ]}
+                />
+                <View style={{ height: spacing.md }} />
+                <MonthCalendarCard />
+                <View style={{ height: spacing.sm }} />
+              </>
+            ) : (
             <View style={styles.bento}>
               <BentoTile
                 testID="bento-leaves"
@@ -406,6 +400,7 @@ export default function Dashboard() {
                 onPress={() => router.push("/tickets")}
               />
             </View>
+            )}
 
             {user?.role !== "employee" && stats && (
               <>
@@ -1170,6 +1165,9 @@ const styles = StyleSheet.create({
   companyLabel: { color: colors.onSurfaceSecondary, fontSize: type.sm, flex: 1 },
 
   scroll: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg },
+  // Iter 180 — ESS scroll overlaps the gradient welcome header so the
+  // punch card floats over it (no child clipping issues).
+  essScroll: { marginTop: -44 },
 
   hero: {
     backgroundColor: colors.brandPrimary,

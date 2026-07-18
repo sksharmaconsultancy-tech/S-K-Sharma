@@ -3,6 +3,7 @@ import { useState } from "react";
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, Platform, useWindowDimensions } from "react-native";
 import { Image } from "expo-image";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "@/src/context/AuthContext";
@@ -56,14 +57,16 @@ export default function Landing() {
   const isWebDesktop = isWeb && width >= DESKTOP_MIN;
 
   if (isWebDesktop) {
-    // Iter 65 — Professional enterprise landing on web. Split-screen with
-    // a navy hero pane on the LEFT (branding + trust chips + tagline) and
-    // a clean CTA card on the RIGHT (Admin sign in + Company sign in).
+    // Iter 180 — SAME content as the original landing (brand, tag pills,
+    // tagline, 3 features, Admin/Company sign-in CTAs, employee note,
+    // legal) with the premium blue→indigo glassmorphism design only.
     return (
       <View style={styles.webRoot} testID="landing-screen">
-        <View style={styles.webLeftPane}>
-          <View style={styles.webLeftBlob} />
-          <View style={styles.webLeftBlob2} />
+        <LinearGradient
+          colors={["#0B2A6B", "#1E3A8A", "#312E81"]}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+          style={styles.webLeftPane}
+        >
           <View style={styles.webLeftContent}>
             <View style={styles.webLogo}>
               <Image
@@ -93,7 +96,7 @@ export default function Landing() {
               <Text style={styles.webFootTxt}>© 2026 S.K. Sharma & Co. · Trusted by 500+ firms</Text>
             </View>
           </View>
-        </View>
+        </LinearGradient>
 
         <View style={styles.webRightPane}>
           <View style={styles.webCard}>
@@ -105,6 +108,7 @@ export default function Landing() {
             <Text style={styles.webCardSub}>
               Choose your role to access the S.K. Sharma & Co. portal.
             </Text>
+            <View style={styles.lpUnderline} />
 
             {authError && (
               <View style={styles.errorBanner} testID="auth-error-banner">
@@ -118,17 +122,23 @@ export default function Landing() {
 
             <Pressable
               testID="admin-pin-login-button"
-              style={({ pressed }) => [styles.webCtaPrimary, pressed && { opacity: 0.92 }]}
               onPress={() => router.push("/admin-pin-login")}
+              style={({ pressed }) => [pressed && { opacity: 0.92 }]}
             >
-              <Ionicons name="shield-checkmark-outline" size={20} color="#ffffff" />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.webCtaPrimaryTxt}>Admin sign in</Text>
-                <Text style={styles.webCtaPrimarySub}>
-                  For Super Admins, Company Admins & Sub-Admins
-                </Text>
-              </View>
-              <Ionicons name="arrow-forward" size={18} color="#ffffff" />
+              <LinearGradient
+                colors={["#2563EB", "#4338CA"]}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                style={styles.webCtaPrimary}
+              >
+                <Ionicons name="shield-checkmark-outline" size={20} color="#ffffff" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.webCtaPrimaryTxt}>Admin sign in</Text>
+                  <Text style={styles.webCtaPrimarySub}>
+                    For Super Admins, Company Admins & Sub-Admins
+                  </Text>
+                </View>
+                <Ionicons name="arrow-forward" size={18} color="#ffffff" />
+              </LinearGradient>
             </Pressable>
 
             <Pressable
@@ -136,14 +146,14 @@ export default function Landing() {
               style={({ pressed }) => [styles.webCtaSecondary, pressed && { opacity: 0.9 }]}
               onPress={() => router.push("/company-login")}
             >
-              <Ionicons name="business-outline" size={20} color="#0F172A" />
+              <Ionicons name="business-outline" size={20} color={colors.onSurface} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.webCtaSecondaryTxt}>Company sign in / register</Text>
                 <Text style={styles.webCtaSecondarySub}>
                   Employer / firm owner portal onboarding
                 </Text>
               </View>
-              <Ionicons name="arrow-forward" size={16} color="#0F172A" />
+              <Ionicons name="arrow-forward" size={16} color={colors.onSurface} />
             </Pressable>
 
             <View style={styles.webEmpNote} testID="employee-web-note">
@@ -306,7 +316,7 @@ function WebFeature({
   return (
     <View style={styles.webFeat}>
       <View style={styles.webFeatIcon}>
-        <Ionicons name={icon} size={18} color="#0EA5E9" />
+        <Ionicons name={icon} size={18} color="#93C5FD" />
       </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.webFeatTitle}>{title}</Text>
@@ -317,6 +327,11 @@ function WebFeature({
 }
 
 const styles = StyleSheet.create({
+  // Iter 180 — premium landing accents
+  lpUnderline: {
+    width: 64, height: 3, borderRadius: 2, backgroundColor: colors.brandPrimary,
+    marginTop: 4, marginBottom: 16,
+  },
   root: { flex: 1, backgroundColor: colors.surface },
   safe: { flex: 1, paddingHorizontal: spacing.lg },
   blob: {
@@ -490,38 +505,14 @@ const styles = StyleSheet.create({
   },
   webLeftPane: {
     flex: 1,
-    // Iter 66 — Switched from dark navy to a soft sky-blue that reduces
-    // eye strain during long portal sessions. Text switches to dark
-    // navy for readable contrast.
-    backgroundColor: "#EFF6FF",
+    // Iter 180 — premium blue→indigo gradient pane (gradient applied by
+    // the LinearGradient component; text switches to light).
     padding: spacing.xl * 1.5,
     justifyContent: "center",
     overflow: "hidden",
     position: "relative",
     minWidth: 360,
     maxWidth: 620,
-    borderRightWidth: 1,
-    borderRightColor: "#DBEAFE",
-  },
-  webLeftBlob: {
-    position: "absolute",
-    top: -160,
-    right: -160,
-    width: 480,
-    height: 480,
-    borderRadius: 240,
-    backgroundColor: "#93C5FD",
-    opacity: 0.35,
-  },
-  webLeftBlob2: {
-    position: "absolute",
-    bottom: -140,
-    left: -120,
-    width: 380,
-    height: 380,
-    borderRadius: 190,
-    backgroundColor: "#BAE6FD",
-    opacity: 0.55,
   },
   webLeftContent: { zIndex: 1 },
   webLogo: {
@@ -530,17 +521,17 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     backgroundColor: "#ffffff",
     borderWidth: 1,
-    borderColor: "#DBEAFE",
+    borderColor: "rgba(255,255,255,0.35)",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: spacing.lg,
     shadowColor: "#0F172A",
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
   },
   webBrand: {
-    color: "#0F172A",
+    color: "#FFFFFF",
     fontSize: 40,
     fontWeight: "800",
     letterSpacing: -1,
@@ -553,7 +544,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   webTagPill: {
-    color: "#0369A1",
+    color: "#93C5FD",
     fontSize: 11,
     fontWeight: "800",
     letterSpacing: 2,
@@ -565,34 +556,45 @@ const styles = StyleSheet.create({
     backgroundColor: "#60A5FA",
   },
   webTagline: {
-    color: "#334155",
+    color: "rgba(255,255,255,0.85)",
     fontSize: 16,
     lineHeight: 26,
     marginBottom: spacing.xl,
     maxWidth: 460,
   },
-  webFeatRow: { gap: 14, marginBottom: spacing.xl },
-  webFeat: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  webFeatRow: { gap: 12, marginBottom: spacing.xl },
+  webFeat: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+    borderRadius: 16,
+    padding: 12,
+    maxWidth: 460,
+    ...(Platform.OS === "web" ? ({ backdropFilter: "blur(10px)" } as any) : null),
+  },
   webFeatIcon: {
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "#ffffff",
+    backgroundColor: "rgba(255,255,255,0.12)",
     borderWidth: 1,
-    borderColor: "#DBEAFE",
+    borderColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
-  webFeatTitle: { color: "#0F172A", fontSize: 14, fontWeight: "700" },
+  webFeatTitle: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
   webFeatBody: {
-    color: "#64748B",
+    color: "rgba(255,255,255,0.72)",
     fontSize: 12,
     lineHeight: 18,
     marginTop: 2,
   },
   webFoot: { marginTop: spacing.xl },
   webFootTxt: {
-    color: "#64748B",
+    color: "rgba(255,255,255,0.6)",
     fontSize: 11,
   },
 

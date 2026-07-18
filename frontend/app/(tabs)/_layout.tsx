@@ -55,6 +55,17 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="leave"
+        options={{
+          title: "Leave",
+          // Iter 180 — ESS bottom nav: Leave tab is employee-only.
+          href: user.role === "employee" ? undefined : null,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="calendar-outline" color={color} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="attendance"
         options={{
           title: "",
@@ -81,9 +92,23 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="payslip"
+        options={{
+          title: "Payslip",
+          // Iter 180 — ESS bottom nav: Payslip tab is employee-only.
+          href: user.role === "employee" ? undefined : null,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="cash-outline" color={color} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="documents"
         options={{
           title: "Documents",
+          // Iter 180 — employees reach Documents from Home quick cards;
+          // the tab slot goes to Leave/Payslip instead.
+          href: user.role === "employee" ? null : undefined,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="document-text-outline" color={color} size={size} />
           ),

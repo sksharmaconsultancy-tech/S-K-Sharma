@@ -26,6 +26,7 @@ import ClientHealthPanel from "@/src/components/portal/ClientHealthPanel";
 import DocumentExpiryPanel from "@/src/components/portal/DocumentExpiryPanel";
 import CalendarPanel from "@/src/components/portal/CalendarPanel";
 import AlertsModal from "@/src/components/portal/AlertsModal";
+import OverviewPremium from "@/src/components/portal/OverviewPremium";
 
 const TABS: { key: string; label: string; icon: string }[] = [
   { key: "overview", label: "Overview", icon: "grid-outline" },
@@ -35,55 +36,9 @@ const TABS: { key: string; label: string; icon: string }[] = [
   { key: "calendar", label: "Calendar", icon: "calendar-outline" },
 ];
 
-type Dash = {
-  generated_at: string;
-  month: string;
-  kpis: Record<string, number>;
-  attendance_trend: { date: string; present: number }[];
-  payroll_trend: { month: string; net_total: number }[];
-  compliance_status: { company_id: string; name: string; status: string }[];
-  compliance_calendar: { date: string; title: string; kind: string }[];
-};
-
-const KPI_DEFS: { key: string; label: string; icon: string; color: string; route?: string }[] = [
-  { key: "total_employees", label: "Active Employees", icon: "people-outline", color: "#1D4ED8", route: "/employee-master" },
-  { key: "present_today", label: "Present Today", icon: "checkmark-circle-outline", color: "#16A34A", route: "/daily-attendance" },
-  { key: "absent_today", label: "Absent Today", icon: "close-circle-outline", color: "#B91C1C" },
-  { key: "pending_punch_approvals", label: "Pending Punch Approvals", icon: "time-outline", color: "#B45309", route: "/punch-approvals" },
-  { key: "pending_leaves", label: "Pending Leaves", icon: "calendar-outline", color: "#7C3AED", route: "/leave-approvals" },
-  { key: "open_tickets", label: "Open Tickets", icon: "chatbubbles-outline", color: "#0891B2", route: "/tickets" },
-  { key: "expiring_documents_30d", label: "Docs Expiring (30d)", icon: "document-text-outline", color: "#DB2777" },
-  { key: "payroll_finalized_firms", label: "Payroll Finalized Firms", icon: "shield-checkmark-outline", color: "#059669", route: "/compliance-salary-run" },
-];
-
-const STATUS_UI: Record<string, { label: string; bg: string; fg: string }> = {
-  finalized: { label: "FINALIZED", bg: "#F0FDF4", fg: "#16A34A" },
-  processed: { label: "DRAFT", bg: "#FFFBEB", fg: "#B45309" },
-  not_processed: { label: "NOT PROCESSED", bg: "#FEF2F2", fg: "#B91C1C" },
-};
-
-function BarChart({ data, labels, color }: { data: number[]; labels: string[]; color: string }) {
-  const max = Math.max(1, ...data);
-  return (
-    <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 4, height: 110 }}>
-      {data.map((v, i) => (
-        <View key={i} style={{ flex: 1, alignItems: "center", gap: 2 }}>
-          <Text style={{ fontSize: 8, color: colors.onSurfaceTertiary }}>{v ? v : ""}</Text>
-          <View style={{
-            width: "72%", borderTopLeftRadius: 3, borderTopRightRadius: 3,
-            height: Math.max(2, (v / max) * 80), backgroundColor: color, opacity: 0.9,
-          }} />
-          <Text style={{ fontSize: 7.5, color: colors.onSurfaceTertiary }} numberOfLines={1}>
-            {labels[i]}
-          </Text>
-        </View>
-      ))}
-    </View>
-  );
-}
+type Dash = Record<string, any>;
 
 export default function PortalDashboardScreen() {
-  const router = useRouter();
   const { user } = useAuth();
   const { selectedCompanyId, companies } = useSelectedCompany();
   const canView =
@@ -113,9 +68,6 @@ export default function PortalDashboardScreen() {
   useEffect(() => { load(); }, [load]);
 
   if (!canView) return <View style={st.center}><Text style={st.dim}>Admins only.</Text></View>;
-
-  const k = dash?.kpis || {};
-  const today = new Date().toISOString().slice(0, 10);
 
   return (
     <View style={st.root} testID="portal-dashboard-screen">
@@ -175,101 +127,12 @@ export default function PortalDashboardScreen() {
           contentContainerStyle={{ padding: spacing.md, paddingBottom: 60 }}
           refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}
         >
-          {/* KPI cards */}
-          <View style={st.kpiGrid}>
-            {KPI_DEFS.map((d) => (
-              <Pressable
-                key={d.key}
-                onPress={() => d.route && router.push(d.route as any)}
-                style={st.kpiCard}
-                testID={`pd-kpi-${d.key}`}
-              >
-                <View style={[st.kpiIcon, { backgroundColor: `${d.color}18` }]}>
-                  <Ionicons name={d.icon as any} size={17} color={d.color} />
-                </View>
-                <Text style={st.kpiVal}>{k[d.key] ?? "—"}</Text>
-                <Text style={st.kpiLbl} numberOfLines={2}>{d.label}</Text>
-              </Pressable>
-            ))}
-          </View>
-
-          {/* Charts row */}
-          <View style={st.twoCol}>
-            <View style={[st.card, { flex: 1.3 }]} testID="pd-attendance-chart">
-              <Text style={st.cardTitle}>📈 Attendance — last 14 days (present)</Text>
-              <BarChart
-                data={(dash?.attendance_trend || []).map((d) => d.present)}
-                labels={(dash?.attendance_trend || []).map((d) => d.date.slice(8))}
-                color="#1D4ED8"
-              />
-            </View>
-            <View style={[st.card, { flex: 1 }]} testID="pd-payroll-chart">
-              <Text style={st.cardTitle}>💰 Payroll — net total (6 months)</Text>
-              <BarChart
-                data={(dash?.payroll_trend || []).map((d) => d.net_total)}
-                labels={(dash?.payroll_trend || []).map((d) => d.month.slice(5))}
-                color="#059669"
-              />
-            </View>
-          </View>
-
-          <View style={st.twoCol}>
-            {/* Compliance status per firm */}
-            <View style={[st.card, { flex: 1.3 }]} testID="pd-compliance-status">
-              <Text style={st.cardTitle}>🛡️ Compliance Status — {dash?.month}</Text>
-              {(dash?.compliance_status || []).slice(0, 12).map((c) => {
-                const sui = STATUS_UI[c.status] || STATUS_UI.not_processed;
-                return (
-                  <View key={c.company_id} style={st.statusRow}>
-                    <Text style={st.statusName} numberOfLines={1}>{c.name}</Text>
-                    <Text style={[st.statusChip, { backgroundColor: sui.bg, color: sui.fg }]}>
-                      {sui.label}
-                    </Text>
-                  </View>
-                );
-              })}
-              {!dash?.compliance_status?.length ? <Text style={st.dim}>No firms.</Text> : null}
-            </View>
-
-            {/* Statutory calendar */}
-            <View style={[st.card, { flex: 1 }]} testID="pd-calendar">
-              <Text style={st.cardTitle}>📅 Compliance Calendar — {dash?.month}</Text>
-              {(dash?.compliance_calendar || []).map((e, i) => {
-                const overdue = e.date < today;
-                return (
-                  <View key={i} style={st.calRow}>
-                    <View style={[st.calDate, overdue && { backgroundColor: "#FEF2F2" }]}>
-                      <Text style={[st.calDay, overdue && { color: "#B91C1C" }]}>{e.date.slice(8)}</Text>
-                      <Text style={st.calKind}>{e.kind}</Text>
-                    </View>
-                    <Text style={st.calTitle} numberOfLines={2}>{e.title}</Text>
-                  </View>
-                );
-              })}
-            </View>
-          </View>
-
-          {/* Quick actions */}
-          <View style={st.card}>
-            <Text style={st.cardTitle}>⚡ Quick Actions</Text>
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-              {[
-                { label: "Punch Approvals", route: "/punch-approvals", icon: "checkmark-done-outline" },
-                { label: "Contractor Punches", route: "/contractor-punches", icon: "briefcase-outline" },
-                { label: "Compliance Salary", route: "/compliance-salary-run", icon: "cash-outline" },
-                { label: "Labour Law Reports", route: "/labour-reports", icon: "library-outline" },
-                { label: "EPFO / ESIC Automation", route: "/challans", icon: "cog-outline" },
-                { label: "Employee Master", route: "/employee-master", icon: "people-outline" },
-                { label: "Firm Master", route: "/firm-master", icon: "business-outline" },
-              ].map((a) => (
-                <Pressable key={a.route} onPress={() => router.push(a.route as any)}
-                  style={st.qaBtn} testID={`pd-qa-${a.route.slice(1)}`}>
-                  <Ionicons name={a.icon as any} size={13} color={colors.brandPrimary} />
-                  <Text style={st.qaTxt}>{a.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </View>
+          <OverviewPremium
+            dash={dash}
+            alertsCount={alertCount}
+            onGoTab={(t) => setTab(t)}
+            userName={user?.name || "Admin"}
+          />
         </ScrollView>
       )}
     </View>

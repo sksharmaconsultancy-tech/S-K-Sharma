@@ -126,6 +126,59 @@ async def portal_dashboard(
     except Exception:
         pass
 
+    # --- Iter 180: premium dashboard extras -------------------------
+    # Statutory liabilities for the current month (finalized-first runs)
+    liabilities = {"pf": 0.0, "esic": 0.0, "tds": 0.0, "pt": 0.0}
+    for (cid2, mth), r in best_by.items():
+        if mth != month:
+            continue
+        tot = r.get("totals") or {}
+        liabilities["pf"] += float(tot.get("pf_employee") or 0) + float(tot.get("pf_employer_total") or 0)
+        liabilities["esic"] += float(tot.get("esic_employee") or 0) + float(tot.get("esic_employer") or 0)
+        liabilities["tds"] += float(tot.get("tds") or 0)
+        liabilities["pt"] += float(tot.get("pt") or 0)
+    liabilities = {k: round(v, 0) for k, v in liabilities.items()}
+
+    # Compliance overview donut (per-firm payroll compliance state)
+    n_fin = sum(1 for c in compliance_status if c["status"] == "finalized")
+    n_proc = sum(1 for c in compliance_status if c["status"] == "processed")
+    n_not = sum(1 for c in compliance_status if c["status"] == "not_processed")
+    donut = {"complied": n_fin, "due_soon": n_proc,
+             "overdue": n_not if int(today[8:]) > 15 else 0,
+             "pending": 0 if int(today[8:]) > 15 else n_not,
+             "total": len(compliance_status)}
+
+    # Client distribution (state / industry)
+    by_state: Dict[str, int] = defaultdict(int)
+    by_industry: Dict[str, int] = defaultdict(int)
+    async for c in db.companies.find(firm_q, {"_id": 0, "state": 1, "business_category": 1}):
+        by_state[(c.get("state") or "Unknown").strip() or "Unknown"] += 1
+        by_industry[(c.get("business_category") or "Other").strip() or "Other"] += 1
+    clients_by_state = sorted(
+        [{"label": k, "count": v} for k, v in by_state.items()],
+        key=lambda x: -x["count"])[:8]
+    clients_by_industry = sorted(
+        [{"label": k, "count": v} for k, v in by_industry.items()],
+        key=lambda x: -x["count"])[:8]
+
+    # Employee growth — cumulative active employees by month (last 6)
+    growth = []
+    joined_by_month: Dict[str, int] = defaultdict(int)
+    async for u in db.users.find(emp_q, {"_id": 0, "created_at": 1}):
+        ca = (u.get("created_at") or "")[:7]
+        if ca:
+            joined_by_month[ca] += 1
+    total_before = sum(v for k, v in joined_by_month.items() if k < months[0])
+    run_total = total_before
+    for m2 in months:
+        run_total += joined_by_month.get(m2, 0)
+        growth.append({"month": m2, "employees": run_total})
+
+    # Pending portal tasks
+    pending_tasks = await db.portal_tasks.count_documents(
+        {**({"company_id": company_id} if company_id else {}),
+         "status": {"$ne": "done"}})
+
     return {
         "generated_at": now.strftime("%d-%m-%Y %I:%M %p"),
         "month": month,
@@ -139,7 +192,15 @@ async def portal_dashboard(
             "expiring_documents_30d": expiring_docs,
             "firms": len(firms),
             "payroll_finalized_firms": sum(1 for c in compliance_status if c["status"] == "finalized"),
+            "pending_tasks": pending_tasks,
+            "pending_payroll_firms": len(compliance_status) - n_fin,
         },
+        "liabilities": liabilities,
+        "compliance_donut": donut,
+        "clients_by_state": clients_by_state,
+        "clients_by_industry": clients_by_industry,
+        "employee_growth": growth,
+        "payroll_processed_pct": round(100 * n_fin / max(1, len(compliance_status))),
         "attendance_trend": attendance_trend,
         "payroll_trend": payroll_trend,
         "compliance_status": compliance_status[:50],
