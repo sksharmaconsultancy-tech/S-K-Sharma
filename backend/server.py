@@ -5906,7 +5906,10 @@ async def attendance_textile_compute_day(
     ).sort("at", 1).to_list(500)
     # Iter 77c — Honour per-employee shift override (manual or auto-by-first-punch)
     shifts_by_id, shifts_list = await load_shift_masters_map()
-    resolved_shift = resolve_shift_for_user(emp, punches, shifts_by_id, shifts_list)
+    # Iter 204 — approved daily shift assignment wins.
+    _dso = await load_daily_shift_overrides(emp.get("company_id") or "", date, date)
+    resolved_shift = _dso.get((user_id, date)) or resolve_shift_for_user(
+        emp, punches, shifts_by_id, shifts_list)
     policy = apply_resolved_shift_to_policy(policy, resolved_shift)
     policy = apply_employee_policy_override(policy, emp)
     summary = compute_textile_day(punches, policy, emp, d.weekday())
@@ -9120,6 +9123,37 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
         await _ws.broadcast_user(user["user_id"], _ev)
     except Exception:
         pass
+    # Iter 204 — Instant Shift Exception: if this IN punch clearly doesn't
+    # match the employee's assigned shift (and no approved daily assignment
+    # exists for today), prompt the PWA to raise a Shift Change Request.
+    _shift_mismatch = None
+    try:
+        _sc_cfg = (company.get("attendance_policy") or {}).get("shift_change") or {}
+        if _sc_cfg.get("enabled") and _sc_cfg.get("instant_exception", True) \
+                and record.get("kind") == "in" and user.get("shift_start"):
+            _today = record.get("date")
+            _has_override = await db.daily_shift_assignments.find_one(
+                {"user_id": user["user_id"], "date": _today}, {"_id": 1})
+            if not _has_override:
+                _ist2 = timezone(timedelta(hours=5, minutes=30))
+                _now_min = datetime.now(_ist2).hour * 60 + datetime.now(_ist2).minute
+                _sh, _sm = int(user["shift_start"][:2]), int(user["shift_start"][3:5])
+                _start_min = _sh * 60 + _sm
+                _diff = min(abs(_now_min - _start_min), 1440 - abs(_now_min - _start_min))
+                if _diff > 120:  # > 2 hours away from assigned shift start
+                    _shift_mismatch = {
+                        "detected": True,
+                        "assigned_shift": {
+                            "name": user.get("shift_name"),
+                            "start": user.get("shift_start"),
+                            "end": user.get("shift_end"),
+                        },
+                        "message": ("Your punch does not match your assigned shift. "
+                                    "Do you want to submit a Shift Change Request?"),
+                    }
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "record_id": record_id,
@@ -9130,6 +9164,7 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
         "identity": identity,
         "status": record["status"],
         "approval_required": needs_approval,
+        "shift_mismatch": _shift_mismatch,
     }
 
 

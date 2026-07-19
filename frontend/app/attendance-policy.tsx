@@ -177,6 +177,8 @@ type Policy = {
   };
   // Iter 200 — allowed salary processes: actual | compliance | both.
   salary_allowed?: string;
+  // Iter 204 — Employee Shift Change Management config.
+  shift_change?: Record<string, any>;
 };
 
 type PolicyResponse = {
@@ -237,6 +239,16 @@ function normalisePolicy(p: Policy): Policy {
       default_view: p.report_settings?.default_view || "inout",
     },
     salary_allowed: (p as any).salary_allowed || "both",
+    // Iter 204 — Employee Shift Change Management config.
+    shift_change: {
+      enabled: !!(p as any).shift_change?.enabled,
+      reason_mandatory: ((p as any).shift_change?.reason_mandatory ?? true) !== false,
+      post_punch_allowed: !!(p as any).shift_change?.post_punch_allowed,
+      auto_approve: !!(p as any).shift_change?.auto_approve,
+      instant_exception: ((p as any).shift_change?.instant_exception ?? true) !== false,
+      time_window: (p as any).shift_change?.time_window || "any",
+      approval_levels: (p as any).shift_change?.approval_levels || "single",
+    },
   };
 }
 
@@ -512,6 +524,70 @@ export default function AttendancePolicyScreen() {
             value={policy.policy_master || {}}
             onChange={(pm) => setPolicy({ ...policy, policy_master: pm })}
           />
+
+          {/* Iter 204 — Employee Shift Change Management */}
+          <SectionTitle
+            title="Employee Shift Change"
+            hint="Employees must request a shift change; the new shift applies only after approval. Rejected/pending → attendance stays on the original shift."
+          />
+          {(() => {
+            const sc = (policy.shift_change || {}) as Record<string, any>;
+            const setSc = (patch: Record<string, any>) =>
+              setPolicy({ ...policy, shift_change: { ...sc, ...patch } });
+            const yn = (key: string, label: string, helper: string) => (
+              <Pressable
+                key={key}
+                testID={`ap-sc-${key}`}
+                style={styles.toggleRow}
+                onPress={() => setSc({ [key]: !sc[key] })}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.toggleLabel}>{label}</Text>
+                  <Text style={styles.helper}>{helper}</Text>
+                </View>
+                <View style={[styles.toggle, sc[key] && styles.toggleOn]}>
+                  <View style={[styles.toggleKnob, sc[key] && styles.toggleKnobOn]} />
+                </View>
+              </Pressable>
+            );
+            const chips = (key: string, options: [string, string][]) => (
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                {options.map(([v, lbl]) => (
+                  <Pressable
+                    key={v}
+                    onPress={() => setSc({ [key]: v })}
+                    style={[scStyles.chip, sc[key] === v && scStyles.chipOn]}
+                  >
+                    <Text style={[scStyles.chipTxt, sc[key] === v && scStyles.chipTxtOn]}>{lbl}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            );
+            return (
+              <View>
+                {yn("enabled", "Employee Can Change Shift (Yes/No)",
+                    "Yes → employees see 'Request Shift Change' in the app; approvals flow to the admin portal.")}
+                {sc.enabled ? (
+                  <>
+                    {yn("reason_mandatory", "Reason Mandatory",
+                        "Employee must give a reason with every request.")}
+                    {yn("post_punch_allowed", "Allow Post-Punch Shift Change",
+                        "Supervisor/HR can approve a shift change after the employee has already punched.")}
+                    {yn("instant_exception", "Instant Shift Exception",
+                        "If a punch doesn't match the assigned shift, the app immediately offers to raise a Shift Change Request.")}
+                    {yn("auto_approve", "Auto Approve",
+                        "Requests are approved automatically (no manual approval step).")}
+                    <Text style={styles.toggleLabel}>Request Time Window</Text>
+                    {chips("time_window", [["any", "Any Time"], ["prev_day", "Previous Day"],
+                      ["before_shift_start", "Before Shift Start"], ["within_2h", "Within 2 Hours"]])}
+                    <Text style={styles.toggleLabel}>Approval Levels</Text>
+                    {chips("approval_levels", [["single", "Single Approval (Manager/HR/Admin)"],
+                      ["two_level", "Two Level (Manager → HR/Admin)"]])}
+                  </>
+                ) : null}
+              </View>
+            );
+          })()}
 
           {/* Weekly off — Iter 201 (user request): N/A + Rotation Basis */}
           <SectionTitle title="Weekly off" hint="Days that don’t count as working days." />
@@ -1813,6 +1889,18 @@ function NumRow({
     </View>
   );
 }
+
+// Iter 204 — chips for the Employee Shift Change config section.
+const scStyles = StyleSheet.create({
+  chip: {
+    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999,
+    backgroundColor: "#F1F5F9", borderWidth: 1, borderColor: "#E2E8F0",
+  },
+  chipOn: { backgroundColor: "#EFF6FF", borderColor: "#1D4ED8" },
+  chipTxt: { fontSize: 12.5, color: "#475569", fontWeight: "600" },
+  chipTxtOn: { color: "#1D4ED8" },
+});
+
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.surface },

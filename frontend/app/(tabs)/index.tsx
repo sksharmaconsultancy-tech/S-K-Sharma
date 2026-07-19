@@ -77,6 +77,7 @@ export default function Dashboard() {
   // Iter 104 — hospital firms only: employees may request a shift change
   // before punching in. Drives the "Shift change request" quick action.
   const [shiftChangeAllowed, setShiftChangeAllowed] = useState(false);
+  const [shiftChangeV2, setShiftChangeV2] = useState(false);
   // Iter 187b — monotonic sequence for load() so stale responses are dropped.
   const loadSeqRef = useRef(0);
 
@@ -111,6 +112,11 @@ export default function Dashboard() {
         try {
           const o = await api<{ allowed: boolean }>("/shift-change/options");
           setShiftChangeAllowed(!!o.allowed);
+        } catch {}
+        try {
+          // Iter 204 — policy-driven Shift Change Request module.
+          const sc = await api<any>("/shift-change/config");
+          setShiftChangeV2(!!sc?.config?.enabled);
         } catch {}
       }
       if (user && user.role !== "employee") {
@@ -618,6 +624,14 @@ export default function Dashboard() {
                       params: { scope: "all" },
                     })
                   }
+                />
+              )}
+              {user?.role === "employee" && shiftChangeV2 && (
+                <ActionRow
+                  testID="row-shift-change-v2"
+                  icon="swap-horizontal"
+                  label="Request shift change"
+                  onPress={() => router.push("/shift-change-request")}
                 />
               )}
               {user?.role === "employee" && shiftChangeAllowed && (

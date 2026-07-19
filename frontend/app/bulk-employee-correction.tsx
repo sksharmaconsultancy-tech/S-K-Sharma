@@ -225,22 +225,43 @@ export default function BulkEmployeeCorrectionScreen() {
   const [dirty, setDirty] = useState<Record<string, Record<string, any>>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Iter 204 (user request) — search filter + sorting for the data table.
+  const [searchQ, setSearchQ] = useState("");
+  const [sortKey, setSortKey] = useState<string>("employee_code");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   useEffect(() => { setGroupFilter(""); setMode("compliance"); }, [companyId]);
 
   const isResigned = (e: EmployeeRow) =>
     e.active === false || !!(e.resign_date && String(e.resign_date).trim());
-  const rows = useMemo(
-    () =>
-      allRows
-        .filter((e) => (empFilter === "resigned" ? isResigned(e) : !isResigned(e)))
-        .filter((e) => {
-          if (!groupFilter) return true;
-          if (groupFilter === "__none__") return !e.employee_group_id;
-          return e.employee_group_id === groupFilter;
-        }),
-    [allRows, empFilter, groupFilter],
-  );
+  const rows = useMemo(() => {
+    const q = searchQ.trim().toLowerCase();
+    const base = allRows
+      .filter((e) => (empFilter === "resigned" ? isResigned(e) : !isResigned(e)))
+      .filter((e) => {
+        if (!groupFilter) return true;
+        if (groupFilter === "__none__") return !e.employee_group_id;
+        return e.employee_group_id === groupFilter;
+      })
+      .filter((e) => {
+        if (!q) return true;
+        return [
+          e.name, (e as any).father_name, e.employee_code, (e as any).bio_code,
+          (e as any).designation, (e as any).department, (e as any).company_name,
+          (e as any).employee_group, (e as any).uan_no, (e as any).esic_no,
+        ].some((v) => String(v ?? "").toLowerCase().includes(q));
+      });
+    const dir = sortDir === "asc" ? 1 : -1;
+    const val = (e: any) => e?.[sortKey];
+    return base.slice().sort((a, b) => {
+      const va = val(a);
+      const vb = val(b);
+      const na = parseFloat(String(va));
+      const nb = parseFloat(String(vb));
+      if (!Number.isNaN(na) && !Number.isNaN(nb)) return (na - nb) * dir;
+      return String(va ?? "").localeCompare(String(vb ?? ""), "en", { sensitivity: "base" }) * dir;
+    });
+  }, [allRows, empFilter, groupFilter, searchQ, sortKey, sortDir]);
   const filterCounts = useMemo(() => {
     let a = 0, r = 0;
     for (const e of allRows) {
@@ -582,7 +603,9 @@ export default function BulkEmployeeCorrectionScreen() {
     // audit trail lives — NOT via bulk edit.
     // Iter 141 — In ACTUAL mode Name / Father Name ARE editable (user
     // spec); only the Emp Code stays locked.
-    const lockedNow = mode === "actual" ? f.key === "employee_code" : LOCKED_FIELDS.has(f.key);
+    // Iter 204 (user request) — Emp Code / Name / Father Name are locked in
+    // BOTH Actual and Compliance modes (no editing/typing box).
+    const lockedNow = LOCKED_FIELDS.has(f.key);
     if (lockedNow) {
       const raw = (row as any)[f.key];
       const display = raw === null || raw === undefined || raw === "" ? "—" : String(raw);
@@ -934,6 +957,53 @@ export default function BulkEmployeeCorrectionScreen() {
               ))}
             </select>
           ) : null}
+          {/* Iter 204 (user request) — search + sorting */}
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search name / code / designation…"
+            placeholderTextColor="#94A3B8"
+            value={searchQ}
+            onChangeText={setSearchQ}
+            testID="bc-search"
+          />
+          {Platform.OS === "web" ? (
+            <select
+              value={sortKey}
+              onChange={(e) => setSortKey((e.target as HTMLSelectElement).value)}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 999,
+                border: `1px solid ${colors.borderStrong}`,
+                background: colors.surface,
+                color: colors.onSurface,
+                fontSize: 12,
+                fontWeight: 700,
+              } as any}
+              data-testid="bc-sort-key"
+            >
+              <option value="employee_code">Sort: Emp Code</option>
+              <option value="name">Sort: Name</option>
+              <option value="designation">Sort: Designation</option>
+              <option value="department">Sort: Department</option>
+              <option value="company_name">Sort: Firm</option>
+              <option value="compliance_basic">Sort: Basic Salary</option>
+              <option value="doj">Sort: DOJ</option>
+            </select>
+          ) : null}
+          <Pressable
+            onPress={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+            style={[styles.filterChip, styles.filterChipOn]}
+            testID="bc-sort-dir"
+          >
+            <Ionicons
+              name={sortDir === "asc" ? "arrow-up-outline" : "arrow-down-outline"}
+              size={13}
+              color="#fff"
+            />
+            <Text style={[styles.filterChipTxt, styles.filterChipTxtOn]}>
+              {sortDir === "asc" ? "A→Z" : "Z→A"}
+            </Text>
+          </Pressable>
         </View>
 
         <View style={styles.actionsBar}>
@@ -1265,6 +1335,11 @@ const styles = StyleSheet.create({
   },
   filterChipTxt: { fontSize: 12, fontWeight: "700", color: colors.onSurfaceSecondary },
   filterChipTxtOn: { color: "#fff" },
+  searchInput: {
+    borderWidth: 1, borderColor: colors.borderStrong, borderRadius: 999,
+    paddingHorizontal: 14, paddingVertical: 8, fontSize: 12.5,
+    color: colors.onSurface, backgroundColor: colors.surface, minWidth: 220,
+  },
   crossToggleRow: {
     flexDirection: "row",
     marginBottom: 8,

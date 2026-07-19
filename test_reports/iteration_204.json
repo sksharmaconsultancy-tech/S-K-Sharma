@@ -1,0 +1,38 @@
+{
+  "summary": "Iter 204 — Shift Change Request & Approval Module (v2) + Instant Shift Exception tested end-to-end. Backend: 17/17 pytest passed against the public preview URL — admin/password + employee/pin auth, PATCH attendance policy accepts shift_change block and persists it (enabled/reason_mandatory/time_window/approval_levels/instant_exception), GET /api/shift-change/config returns cfg+shifts+current_shift, employee POST creates request with SCR-YYMM-XXXX number, GET /my lists it, admin list returns rows+counts, approve writes to daily_shift_assignments (source=shift_change_request) and flips status→approved with history trail, reject/send_back/cancel work, xlsx exports (Register + Daily Assignments) return valid PK-signed workbooks, reason_mandatory enforced (400), duplicate blocked (400), unauth returns 401. Frontend admin (web PWA, /shift-change-admin): sidebar Approvals → 'Shift Change' loads for super admin, shows status filter chips with counts, month/year picker, Register (Excel) + Daily Assignments buttons, bulk bar with remarks input + Approve/Reject/Send Back, per-request card with Approve button — approving via UI moves status to APPROVED (verified by API roundtrip). Frontend employee (/shift-change-request): form renders with current shift, date, shift chips (Day/Night), Reason (mandatory *), Remarks, Submit Request; My Requests list with filter chips + status badges + approver name shown. Amber instant-exception banner shows when ?instant=1 is passed. No blocking issues found.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global (web PWA)", "issues": [
+        "Console warns: 'Invalid style property of outline / background / padding: 0 8px' — React-Native-Web complains about shorthand CSS values in existing styles. Cosmetic only; page renders fine. Not blocking."
+      ]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter204_shift_change_v2.py",
+    "/app/test_reports/pytest/iter204.xml"
+  ],
+  "action_items": [
+    "Optional: sanitize the shorthand CSS style props (outline / background / padding: '0 8px') that trigger RN-Web console warnings — non-blocking cleanup.",
+    "Optional: add explicit testIDs to Register (Excel) / Daily Assignments download buttons and the Reject / Send Back individual buttons on shift-change-admin.tsx to make future automation stricter (currently found via text)."
+  ],
+  "critical_code_review_comments": [
+    "shift_change_v2.py cleanly separates policy-gated request workflow from legacy hospital shift-swap (routes/shift_change.py) — no route collisions.",
+    "_apply_approval() upserts daily_shift_assignments and appends immutable history — correct.",
+    "policy validator whitelists shift_change keys (server.py line ~1202) including instant_exception with default True — good.",
+    "PATCH /attendance/policy performs partial-merge with preset+existing before validation, so callers can send only the shift_change delta — verified via test.",
+    "Auth token key in login responses is `session_token` (not `token`) — worth documenting for future test authors."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter204_shift_change_v2.py (new)"
+  ],
+  "success_rate": {"backend": "100% (17/17)", "frontend": "100% (admin approve flow + employee submit form + instant banner all verified)"},
+  "seed_data_creation": "Created several test SCR requests (SCR-2607-*) under employee code 50 / SURENDRA SINGH for future dates 2026-08+; a few in approved/rejected/sent_back/cancelled states. daily_shift_assignments upserted for approved dates. All reasons prefixed 'TEST_iter204' or 'UI test'. Shift_change policy for Kankani cmp_527fecdd7c is left with enabled=true, reason_mandatory=true, time_window=any, approval_levels=single, post_punch_allowed=false, auto_approve=false, instant_exception=true.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login token JSON key is `session_token` (frontend also stores it in localStorage as `llc_session_token`). Employee TEST50/PIN 123456 works via pin-login {login_id, pin}. Admin uses email/password via admin-password-login. Policy PATCH endpoint accepts {policy:{shift_change:{...}}}. To reproduce UI flow: hit /shift-change-admin as super admin, use ?month=<yyyy-mm> or the picker to view the correct month. Employee shift-change-request?instant=1 shows amber banner. Two-level approval, auto_approve, post_punch flows, and time_window branches (prev_day/before_shift_start/within_2h) were NOT stress-tested and can be exercised in a follow-up iteration.",
+  "rca_of_issue": "N/A — no bugs found. Only cosmetic RN-Web style-shorthand warnings in console."
+}

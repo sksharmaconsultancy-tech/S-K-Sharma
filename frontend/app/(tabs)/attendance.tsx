@@ -9,6 +9,7 @@ import {
   Platform,
   Modal,
   Image,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -17,7 +18,7 @@ import { MiniMap } from "@/src/components/MiniMap";
 import { formatDistance, reverseGeocode } from "@/src/utils/location";
 import * as LocalAuthentication from "expo-local-authentication";
 import * as Haptics from "expo-haptics";
-import { Redirect } from "expo-router";
+import { Redirect, router as navRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
 
 import { api } from "@/src/api/client";
@@ -461,6 +462,30 @@ export default function AttendanceScreen() {
    *   • Auto-punch OFF legacy: no-GPS allowed with face selfie only.
    *   • Auto-punch ON: GPS-verified geofence punch.
    */
+  // Iter 204 — Instant Shift Exception: server flags an IN punch that
+  // doesn't match the assigned shift; offer to raise a Shift Change Request.
+  const maybePromptShiftException = (res: any) => {
+    const sm = res?.shift_mismatch;
+    if (!sm?.detected) return;
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const go = () =>
+      navRouter.push({
+        pathname: "/shift-change-request",
+        params: { instant: "1", date: dateStr },
+      });
+    const message =
+      sm.message ||
+      "Your punch does not match your assigned shift. Submit a Shift Change Request?";
+    if (Platform.OS === "web") {
+      if (globalThis.confirm(message)) go();
+    } else {
+      Alert.alert("Shift mismatch detected", message, [
+        { text: "Not now", style: "cancel" },
+        { text: "Request shift change", onPress: go },
+      ]);
+    }
+  };
+
   const submitPunch = async (
     method: "fingerprint" | "face",
     selfie_base64?: string,
@@ -573,6 +598,7 @@ export default function AttendanceScreen() {
             : `${kindTxt} successfully (biometric)${firmTxt}`,
           "ok",
         );
+        maybePromptShiftException(res);
         await loadAll();
       } catch (e: any) {
         showToast(e.message || "Punch failed", "err");
@@ -663,6 +689,7 @@ export default function AttendanceScreen() {
           : `${kindTxt} successfully · ${distanceTxt}${firmTxt}`,
         "ok",
       );
+      maybePromptShiftException(res);
       await loadAll();
     } catch (e: any) {
       showToast(e.message || "Punch failed", "err");

@@ -170,8 +170,11 @@ async def create_request(
     punched = await db.attendance.find_one(
         {"user_id": user["user_id"], "date": date}, {"_id": 1})
     if punched and not cfg["post_punch_allowed"]:
-        raise HTTPException(status_code=400,
-                            detail="You have already punched on this date — post-punch shift change is not allowed")
+        # Instant Shift Exception (punch-screen prompt) is allowed post-punch
+        # when the firm has instant_exception enabled.
+        if not (payload.get("instant_exception") and cfg.get("instant_exception", True)):
+            raise HTTPException(status_code=400,
+                                detail="You have already punched on this date — post-punch shift change is not allowed")
 
     # Approved-leave rule
     leave = await db.leaves.find_one({
