@@ -1191,6 +1191,11 @@ def _validate_policy(raw: dict) -> dict:
         # working hrs counts as 1 Present Day (extra hrs → OT per policy).
         # Applies only when the firm's Salary Allowed includes Compliance.
         "compliance_present_8hr": _flag("compliance_present_8hr"),
+        # Iter 203 (user request) — Half-Day Threshold Rule: worked hrs
+        # below the half-day threshold → ALL hrs to OT (0 Present); between
+        # threshold and full day → ½ Present Day + remaining hrs to OT.
+        # Duty HRS counts ONLY present-day hours.
+        "halfday_threshold_rule": _flag("halfday_threshold_rule"),
     }
 
     # Iter 200 — Report Settings (user request): which attendance reports
@@ -17031,12 +17036,14 @@ async def _compute_monthly_grid_data(
                 "total_days_computed": (
                     round(total_hours / (8.0 if _pm_8hr_reports else emp_daily_hrs), 2)
                     if _pm_firm.get("attendance_by_duty_hours")
+                    and not _pm_firm.get("halfday_threshold_rule")
                     and (8.0 if _pm_8hr_reports else emp_daily_hrs) > 0
                     else round(total_present_policy, 2)
                 ),
                 "present_days_policy": (
                     round(total_hours / (8.0 if _pm_8hr_reports else emp_daily_hrs), 2)
                     if _pm_firm.get("attendance_by_duty_hours")
+                    and not _pm_firm.get("halfday_threshold_rule")
                     and (8.0 if _pm_8hr_reports else emp_daily_hrs) > 0
                     else round(total_present_policy, 2)
                 ),
@@ -17049,6 +17056,7 @@ async def _compute_monthly_grid_data(
                 "total_days_int": (
                     int(total_hours // (8.0 if _pm_8hr_reports else emp_daily_hrs))
                     if _pm_firm.get("attendance_by_duty_hours")
+                    and not _pm_firm.get("halfday_threshold_rule")
                     and (8.0 if _pm_8hr_reports else emp_daily_hrs) > 0
                     else int(total_present_policy)
                 ),
