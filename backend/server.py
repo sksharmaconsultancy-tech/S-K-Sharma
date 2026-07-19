@@ -1204,6 +1204,12 @@ def _validate_policy(raw: dict) -> dict:
         rs_default = next(k for k in _REPORT_KEYS if rs_enabled[k])
     report_settings = {"enabled": rs_enabled, "default_view": rs_default}
 
+    # Iter 201 (user request) — Weekly-off Rotation Basis: firm sets NO fixed
+    # week-off day; each employee's own week-off override applies instead.
+    weekoff_rotation = bool(raw.get("weekoff_rotation_basis"))
+    if weekoff_rotation:
+        days = set()
+
     # Iter 200 (user request) — Salary Allowed: which salary processes this
     # firm may run (actual / compliance / both). Attendance auto-transfers
     # into the allowed process(es).
@@ -5679,6 +5685,13 @@ async def get_attendance_policy(
         "default_view": _rs.get("default_view") or "inout",
     }
     policy.setdefault("salary_allowed", "both")
+    policy.setdefault("weekoff_rotation_basis", False)
+    # Iter 200/201 — backfill new Policy Master sub-point flags for firms
+    # whose policy was saved before these options existed.
+    _pm_bf = policy.get("policy_master")
+    if isinstance(_pm_bf, dict):
+        for _k in ("attendance_by_duty_hours", "weekoff_present_add_ot", "holiday_present_add_ot"):
+            _pm_bf.setdefault(_k, False)
     # "Default preset" here means: no admin has explicitly saved / overridden
     # the policy yet. Because we auto-attach a preset on company creation,
     # the presence of `attendance_policy` alone isn't a good signal — we

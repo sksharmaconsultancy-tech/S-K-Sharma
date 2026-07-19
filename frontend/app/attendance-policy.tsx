@@ -143,6 +143,8 @@ const REPORT_TYPES: [string, string][] = [
 type Policy = {
   shifts: Shift[];
   weekly_off_days: number[];
+  // Iter 201 — rotation basis: firm sets NO week-off; employee-wise applies.
+  weekoff_rotation_basis?: boolean;
   grace_minutes_late: number;
   half_day_hours: number;
   full_day_hours: number;
@@ -212,6 +214,7 @@ function normalisePolicy(p: Policy): Policy {
     weekly_off_days: Array.from(new Set((p.weekly_off_days || []).map((d) => Number(d))))
       .filter((d) => d >= 0 && d <= 6)
       .sort((a, b) => a - b),
+    weekoff_rotation_basis: !!(p as any).weekoff_rotation_basis,
     grace_minutes_late: Number(p.grace_minutes_late ?? anyp.grace_minutes ?? 10),
     half_day_hours: Number(p.half_day_hours ?? 4),
     full_day_hours: Number(p.full_day_hours ?? anyp.workday_hours ?? 8),
@@ -510,31 +513,67 @@ export default function AttendancePolicyScreen() {
             onChange={(pm) => setPolicy({ ...policy, policy_master: pm })}
           />
 
-          {/* Weekly off */}
+          {/* Weekly off — Iter 201 (user request): N/A + Rotation Basis */}
           <SectionTitle title="Weekly off" hint="Days that don’t count as working days." />
-          <View style={styles.chipsRow}>
-            {(meta?.weekday_labels || ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]).map((lbl, idx) => {
-              const on = policy.weekly_off_days.includes(idx);
-              return (
-                <Pressable
-                  key={lbl}
-                  testID={`ap-weekday-${idx}`}
-                  style={[styles.chip, on && styles.chipOn]}
-                  onPress={() => {
-                    const set = new Set(policy.weekly_off_days);
-                    if (on) set.delete(idx);
-                    else set.add(idx);
-                    setPolicy({ ...policy, weekly_off_days: Array.from(set).sort((a, b) => a - b) });
-                  }}
-                >
-                  <Text style={[styles.chipTxt, on && styles.chipTxtOn]}>{lbl}</Text>
-                </Pressable>
-              );
+          <Pressable
+            testID="ap-weekoff-rotation"
+            style={styles.toggleRow}
+            onPress={() => setPolicy({
+              ...policy,
+              weekoff_rotation_basis: !policy.weekoff_rotation_basis,
+              ...(policy.weekoff_rotation_basis ? {} : { weekly_off_days: [] }),
             })}
-          </View>
-          {policy.weekly_off_days.length === 0 && (
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.toggleLabel}>Weekly Off — Rotation Basis</Text>
+              <Text style={styles.helper}>
+                Yes → no firm-level week-off day; each employee’s own week-off
+                (Employee Attendance Policy) applies.
+              </Text>
+            </View>
+            <View style={[styles.toggle, policy.weekoff_rotation_basis && styles.toggleOn]}>
+              <View style={[styles.toggleKnob, policy.weekoff_rotation_basis && styles.toggleKnobOn]} />
+            </View>
+          </Pressable>
+          {!policy.weekoff_rotation_basis ? (
+            <View style={styles.chipsRow}>
+              <Pressable
+                testID="ap-weekday-na"
+                style={[styles.chip, policy.weekly_off_days.length === 0 && styles.chipOn]}
+                onPress={() => setPolicy({ ...policy, weekly_off_days: [] })}
+              >
+                <Text style={[styles.chipTxt, policy.weekly_off_days.length === 0 && styles.chipTxtOn]}>
+                  N/A
+                </Text>
+              </Pressable>
+              {(meta?.weekday_labels || ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]).map((lbl, idx) => {
+                const on = policy.weekly_off_days.includes(idx);
+                return (
+                  <Pressable
+                    key={lbl}
+                    testID={`ap-weekday-${idx}`}
+                    style={[styles.chip, on && styles.chipOn]}
+                    onPress={() => {
+                      const set = new Set(policy.weekly_off_days);
+                      if (on) set.delete(idx);
+                      else set.add(idx);
+                      setPolicy({ ...policy, weekly_off_days: Array.from(set).sort((a, b) => a - b) });
+                    }}
+                  >
+                    <Text style={[styles.chipTxt, on && styles.chipTxtOn]}>{lbl}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : (
             <Text style={styles.helper}>
-              No fixed weekly off — appropriate for rotational rosters (hotels, hospitals, sites).
+              Rotation basis ON — week-off selection here is disabled; set each
+              employee’s week-off from their Employee Attendance Policy.
+            </Text>
+          )}
+          {!policy.weekoff_rotation_basis && policy.weekly_off_days.length === 0 && (
+            <Text style={styles.helper}>
+              N/A — no fixed weekly off for this firm.
             </Text>
           )}
 
