@@ -668,12 +668,17 @@ def build_grid_view_xlsx(grid: Dict[str, Any]) -> bytes:
             combined = float(totals.get("hours") or 0.0)
             ot = float(totals.get("ot_hours") or 0.0)
             duty_only_total = round(max(0.0, combined - ot), 2)
+            # Iter 204 fix — Present Days per the firm's attendance
+            # policy (includes 0.5 half-day credits).
+            _pdp = totals.get("present_days_policy")
+            if _pdp is None:
+                _pdp = totals.get("present_days") or 0.0
             if row_type == "D-Out":
                 tot_wrk = duty_only_total
-                day_total = float(totals.get("present_days") or 0.0)
+                day_total = float(_pdp)
             elif row_type == "T-Hrs":
                 tot_wrk = duty_only_total
-                day_total = float(totals.get("present_days") or 0.0)
+                day_total = float(_pdp)
             else:  # D-In
                 tot_wrk = 0.0
                 day_total = 0.0
@@ -723,7 +728,10 @@ def build_grid_view_xlsx(grid: Dict[str, Any]) -> bytes:
             for e in employees
         )
         grand_days = sum(
-            float((e.get("totals") or {}).get("present_days") or 0.0) for e in employees
+            float((e.get("totals") or {}).get("present_days_policy")
+                  if (e.get("totals") or {}).get("present_days_policy") is not None
+                  else (e.get("totals") or {}).get("present_days") or 0.0)
+            for e in employees
         )
         c = ws.cell(row=footer_row, column=6 + days_n, value=round(grand_hrs, 2))
         c.font = total_font
@@ -918,7 +926,7 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
             c = ws.cell(row=duty_row, column=6 + days_n + k, value=val)
             c.alignment = center
             c.border = border
-            c.number_format = "0" if k == 3 else "0.00"
+            c.number_format = "0.##" if k == 3 else "0.00"
             c.font = total_font
 
         for r_ in (duty_row, ot_row):
@@ -948,7 +956,7 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
             c = ws.cell(row=cur, column=6 + days_n + k, value=val)
             c.font = total_font
             c.alignment = center
-            c.number_format = "0" if k == 3 else "0.00"
+            c.number_format = "0.##" if k == 3 else "0.00"
 
     buf = io.BytesIO()
     wb.save(buf)

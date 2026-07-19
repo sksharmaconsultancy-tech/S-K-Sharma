@@ -1198,6 +1198,27 @@ def _validate_policy(raw: dict) -> dict:
         "halfday_threshold_rule": _flag("halfday_threshold_rule"),
     }
 
+    # Iter 204 (user request) — Employee Shift Change Management config.
+    sc_raw = raw.get("shift_change") if isinstance(raw.get("shift_change"), dict) else {}
+    _sc_tw = str(sc_raw.get("time_window") or "any").strip().lower()
+    if _sc_tw not in ("any", "prev_day", "before_shift_start", "within_2h"):
+        _sc_tw = "any"
+    _sc_lv = str(sc_raw.get("approval_levels") or "single").strip().lower()
+    if _sc_lv not in ("single", "two_level"):
+        _sc_lv = "single"
+    shift_change_cfg = {
+        "enabled": bool(sc_raw.get("enabled")),
+        "reason_mandatory": bool(sc_raw.get("reason_mandatory", True)),
+        "post_punch_allowed": bool(sc_raw.get("post_punch_allowed")),
+        "auto_approve": bool(sc_raw.get("auto_approve")),
+        # Instant Shift Exception: punch/shift mismatch prompts the employee
+        # to raise a request straight from the punch screen (post-punch
+        # allowed for this flow even when post_punch_allowed is off).
+        "instant_exception": bool(sc_raw.get("instant_exception", True)),
+        "time_window": _sc_tw,
+        "approval_levels": _sc_lv,
+    }
+
     # Iter 200 — Report Settings (user request): which attendance reports
     # (grid views + downloads) are enabled for this firm + the default view.
     _REPORT_KEYS = ("inout", "ot", "hours", "salary", "inout_salary")
@@ -1256,6 +1277,8 @@ def _validate_policy(raw: dict) -> dict:
         "report_settings": report_settings,
         # Iter 200 — allowed salary processes for this firm.
         "salary_allowed": salary_allowed,
+        # Iter 204 — Employee Shift Change Management config.
+        "shift_change": shift_change_cfg,
     }
 
 
@@ -1393,6 +1416,21 @@ def apply_resolved_shift_to_policy(
     if not patched.get("half_day_hours"):
         patched["half_day_hours"] = round(hrs / 2.0, 2)
     return patched
+
+
+async def load_daily_shift_overrides(
+    company_id: str, date_from: str, date_to: str,
+) -> Dict[tuple, dict]:
+    """Iter 204 — approved Shift Change Requests write per-day shift
+    assignments; the attendance engine gives them top precedence so
+    attendance/OT/payroll views recompute on the APPROVED shift."""
+    out: Dict[tuple, dict] = {}
+    async for a in db.daily_shift_assignments.find(
+            {"company_id": company_id, "date": {"$gte": date_from, "$lte": date_to}},
+            {"_id": 0, "user_id": 1, "date": 1, "shift_id": 1,
+             "name": 1, "start": 1, "end": 1}):
+        out[(a["user_id"], a["date"])] = a
+    return out
 
 
 def apply_employee_policy_override(policy: dict, user: Optional[dict]) -> dict:
@@ -16615,6 +16653,9 @@ async def _compute_monthly_grid_data(
         date_to = f"{y:04d}-{m:02d}-{days_in_month:02d}"
         day_iter = [(y, m, d) for d in range(1, days_in_month + 1)]
 
+    # Iter 204 — per-day APPROVED shift assignments (Shift Change module).
+    _daily_shift_ovr = await load_daily_shift_overrides(company_id, date_from, date_to)
+
     # ----- Employees in scope --------------------------------------------
     query: Dict[str, Any] = {"role": "employee", "company_id": company_id}
     if only_user_id:
@@ -16832,7 +16873,9 @@ async def _compute_monthly_grid_data(
             # Iter 77e - Compute POLICY-ADJUSTED duty hours. This applies
             # the OT cap (shift-hours if OT off, 24h if OT on), OT-merge
             # for Policy 1, and the week-off min-hours full-day rule.
-            resolved_shift = resolve_shift_for_user(
+            resolved_shift = _daily_shift_ovr.get(
+                (emp_full.get("user_id"), date_key_iso),
+            ) or resolve_shift_for_user(
                 emp_full, day_punches, shifts_by_id, shifts_list,
             )
             eff_policy = apply_resolved_shift_to_policy(pol, resolved_shift)
@@ -17199,6 +17242,8 @@ async def _build_ot_report_rows(
          "week_off_govt_holiday_enabled": 1},
     ).to_list(4000)
     full_emp_by_id = {u["user_id"]: u for u in full_emp_docs}
+    # Iter 204 — per-day APPROVED shift assignments (Shift Change module).
+    _daily_shift_ovr = await load_daily_shift_overrides(company_id, date_from, date_to)
 
     from utils.monthly_attendance import _pair_punches as _pp
     weekday_short = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -19471,6 +19516,9 @@ app.include_router(bulk_ops_router)
 
 from routes.statutory_extra_reports import router as statutory_extra_reports_router  # noqa: E402
 app.include_router(statutory_extra_reports_router)
+
+from routes.shift_change_v2 import router as shift_change_v2_router  # noqa: E402
+app.include_router(shift_change_v2_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
