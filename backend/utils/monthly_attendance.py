@@ -953,3 +953,130 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def build_ot_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
+    """Iter 203 (user request) — OT Duty HRS report.
+
+    One row per employee; each day cell shows ONLY the policy-computed OT
+    hours (HH:MM) for that day — Present-day Duty HRS are excluded. The
+    trailing column totals the month's OT."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
+    company_name = ((grid or {}).get("company") or {}).get("name") or ""
+    month = grid.get("month") or ""
+    period = grid.get("period_label") or month
+    day_labels: List[str] = list(grid.get("day_labels") or [])
+    weekday_labels: List[str] = list(grid.get("weekday_labels") or [])
+    employees: List[Dict[str, Any]] = list(grid.get("employees") or [])
+    days_n = len(day_labels)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "OT Duty HRS"
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    hdr_font = Font(bold=True, color="FFFFFF", size=9)
+    hdr_fill = PatternFill("solid", fgColor="B45309")
+    zebra_a = PatternFill("solid", fgColor="FFFFFF")
+    zebra_b = PatternFill("solid", fgColor="FFF7ED")
+    total_font = Font(bold=True, color="7C2D12", size=10)
+    thin = Side(style="thin", color="E2E8F0")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    total_cols = 4 + days_n + 1
+    ws.cell(row=1, column=1, value=f"{company_name} — OT Duty HRS Report").font = \
+        Font(bold=True, size=13, color="7C2D12")
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_cols)
+    ws.cell(row=2, column=1, value=(
+        f"{period} · Days: {days_n} · Day-wise OT HRS ONLY (per attendance "
+        f"policy) — Present-day Duty HRS are excluded. Generated: "
+        f"{datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime('%d-%b-%Y %H:%M IST')}"
+    )).font = Font(italic=True, color="475569", size=10)
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=total_cols)
+
+    header_row = 4
+    for i, label in enumerate(["Bio Code", "Emp Name", "Emp Father Name", "Designation"], start=1):
+        c = ws.cell(row=header_row, column=i, value=label)
+        c.font = hdr_font
+        c.fill = hdr_fill
+        c.alignment = center
+        c.border = border
+    for j, day_lbl in enumerate(day_labels):
+        wk = weekday_labels[j] if j < len(weekday_labels) else ""
+        c = ws.cell(row=header_row, column=5 + j, value=f"D{day_lbl}\n{wk}")
+        c.font = hdr_font
+        c.fill = hdr_fill
+        c.alignment = center
+        c.border = border
+    c = ws.cell(row=header_row, column=5 + days_n, value="Total OT HRS")
+    c.font = hdr_font
+    c.fill = hdr_fill
+    c.alignment = center
+    c.border = border
+    ws.row_dimensions[header_row].height = 32
+
+    ws.column_dimensions["A"].width = 10
+    ws.column_dimensions["B"].width = 26
+    ws.column_dimensions["C"].width = 22
+    ws.column_dimensions["D"].width = 18
+    for j in range(days_n):
+        ws.column_dimensions[get_column_letter(5 + j)].width = 8
+    ws.column_dimensions[get_column_letter(5 + days_n)].width = 12
+    ws.freeze_panes = f"E{header_row + 1}"
+
+    def _hhmm(hrs: float) -> str:
+        if hrs <= 0:
+            return "00:00"
+        h = int(hrs)
+        mm = int(round((hrs - h) * 60))
+        if mm >= 60:
+            h += 1
+            mm -= 60
+        return f"{h:02d}:{mm:02d}"
+
+    cur = header_row + 1
+    grand_ot = 0.0
+    for idx, emp in enumerate(employees):
+        days_cell = emp.get("days") or {}
+        totals = emp.get("totals") or {}
+        fill = zebra_a if idx % 2 == 0 else zebra_b
+        _bio = emp.get("bio_code")
+        ws.cell(row=cur, column=1, value="" if _bio in (None, "") else str(_bio))
+        ws.cell(row=cur, column=2, value=emp.get("name") or "")
+        ws.cell(row=cur, column=3, value=emp.get("father_name") or "")
+        ws.cell(row=cur, column=4,
+                value=emp.get("designation") or emp.get("department") or "")
+        for j, day_lbl in enumerate(day_labels):
+            d = days_cell.get(day_lbl) or {}
+            ot_h = float(d.get("ot_hours") or 0.0)
+            c = ws.cell(row=cur, column=5 + j, value=_hhmm(ot_h))
+            c.alignment = center
+            c.border = border
+            c.font = Font(size=9, color="B45309" if ot_h > 0 else "94A3B8")
+        ot_tot = float(totals.get("ot_hours") or 0.0)
+        grand_ot += ot_tot
+        c = ws.cell(row=cur, column=5 + days_n, value=round(ot_tot, 2))
+        c.alignment = center
+        c.border = border
+        c.number_format = "0.00"
+        c.font = total_font
+        for c_ in range(1, total_cols + 1):
+            cell = ws.cell(row=cur, column=c_)
+            cell.fill = fill
+            cell.border = border
+        ws.row_dimensions[cur].height = 17
+        cur += 1
+
+    if employees:
+        cur += 1
+        ws.cell(row=cur, column=1, value=f"Employees: {len(employees)}").font = total_font
+        c = ws.cell(row=cur, column=5 + days_n, value=round(grand_ot, 2))
+        c.font = total_font
+        c.number_format = "0.00"
+        c.alignment = center
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()

@@ -53,6 +53,8 @@ def compute_present_days_and_ot(
         full_day_hours = _pd_override
     # Iter 200 — Policy Master Sub Points (dynamic attendance calc).
     pm = policy.get("policy_master") or {}
+    # Iter 203 — Half-Day Threshold Rule (see grid compute for the spec).
+    _halfday_rule = bool(pm.get("halfday_threshold_rule"))
     weekly_offs = set(policy.get("weekly_off_days") or [])
     holiday_dates = set(policy.get("_holiday_dates") or [])
 
@@ -112,6 +114,24 @@ def compute_present_days_and_ot(
             forced_ot_min += day_min
             present_days += 1
             continue
+        # Iter 203 — Half-Day Threshold Rule (per-day):
+        #   below half-day threshold → ALL hrs to OT, 0 present;
+        #   half-day band → ½ day (duty = threshold hrs), rest to OT;
+        #   full day → duty capped at full-day hrs, extra to OT.
+        # Duty HRS counts ONLY present-day hours; OT never included.
+        if _halfday_rule and day_min > 0:
+            if day_hours < half_day_hours:
+                forced_ot_min += day_min
+                continue
+            if day_hours < full_day_hours:
+                half_days += 1
+                total_duty_min += half_day_hours * 60.0
+                forced_ot_min += day_min - half_day_hours * 60.0
+                continue
+            present_days += 1
+            total_duty_min += full_day_hours * 60.0
+            forced_ot_min += day_min - full_day_hours * 60.0
+            continue
         total_duty_min += day_min
         if day_hours >= full_day_hours:
             present_days += 1
@@ -122,6 +142,10 @@ def compute_present_days_and_ot(
     # Overtime = total worked beyond `present_days * full_day_hours`.
     # Half days DON'T generate OT (partial-day rule).
     threshold_hours = present_days * full_day_hours
+    if _halfday_rule:
+        # Iter 203 — duty already credited exactly per present/half days;
+        # everything else sits in forced_ot_min.
+        threshold_hours = present_days * full_day_hours + half_days * half_day_hours
     ot_hours = round(max(0.0, duty_hours - threshold_hours) + forced_ot_min / 60.0, 2)
     # Iter 142 — per-employee `ot_allowed` / Firm Master `firm_ot_allowed`
     # gates: when either is explicitly OFF, NO overtime is credited.

@@ -445,8 +445,8 @@ export default function AttendanceGridScreen() {
       if (!effectiveCid || exporting) return;
       setExporting(true);
       try {
-        const kind = view === "inout" ? "InOut" : "Hours";
-        const slug = view === "inout" ? "monthly-inout" : "monthly-hours";
+        const kind = view === "inout" ? "InOut" : view === "ot" ? "OTDutyHRS" : "Hours";
+        const slug = view === "inout" ? "monthly-inout" : view === "ot" ? "monthly-ot" : "monthly-hours";
         const path = `/admin/attendance/${slug}/${effectiveCid}/${month}.${fmt}`;
         const res = await apiBinary(path);
         const fname = `MonthlyAttendance_${kind}_${month}.${fmt}`;

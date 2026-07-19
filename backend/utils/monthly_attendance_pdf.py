@@ -218,7 +218,18 @@ def build_monthly_inout_pdf(grid: Dict[str, Any]) -> bytes:
 # Hours-only PDF
 # ---------------------------------------------------------------------------
 
-def build_monthly_hours_pdf(grid: Dict[str, Any]) -> bytes:
+def build_monthly_ot_pdf(grid: Dict[str, Any]) -> bytes:
+    """Iter 203 — OT Duty HRS report (PDF): one cell per day showing ONLY
+    the policy-computed OT hours."""
+    return build_monthly_hours_pdf(grid, field="ot_hours", title="OT Duty HRS")
+
+
+def build_monthly_hours_pdf(
+    grid: Dict[str, Any],
+    *,
+    field: str = "hours",
+    title: str = "Working Hours",
+) -> bytes:
     """Landscape A4 PDF - one cell per day, working hours (duty + OT) in
     HH:MM. Consumes the policy-computed grid so numbers match the Grid View
     screen and the Hours XLSX export."""
@@ -237,7 +248,7 @@ def build_monthly_hours_pdf(grid: Dict[str, Any]) -> bytes:
     )
     story: List[Any] = []
     story.append(Paragraph(
-        f"{company_name} &mdash; Monthly Attendance Data (Working Hours)",
+        f"{company_name} &mdash; Monthly Attendance Data ({title})",
         _TITLE,
     ))
     now_ist = datetime.now(timezone(timedelta(hours=5, minutes=30)))
@@ -273,7 +284,7 @@ def build_monthly_hours_pdf(grid: Dict[str, Any]) -> bytes:
                 if d.get("anomaly"):
                     row.append("MISS")
                 else:
-                    row.append(_fmt_hhmm(float(d.get("hours") or 0.0)))
+                    row.append(_fmt_hhmm(float(d.get(field) or 0.0)))
             if is_last_page:
                 row += _emp_trailing_row(emp.get("totals") or {})
             rows.append(row)

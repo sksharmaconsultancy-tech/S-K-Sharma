@@ -1057,6 +1057,7 @@ const PM_FLAGS: { key: string; label: string }[] = [
   { key: "weekoff_present_add_ot", label: "Week-off Day Worked → Add hours in OT (not counted Present)" },
   { key: "holiday_present_add_ot", label: "Holiday (Holiday Master) Worked → Present + hours in OT" },
   { key: "compliance_present_8hr", label: "Count Present Day @ 8 HRS — Compliance Salary only (8+ worked hrs = 1 Present Day, extra hrs → OT; applies when Salary Allowed includes Compliance)" },
+  { key: "halfday_threshold_rule", label: "Half-Day Threshold Rule — worked hrs BELOW Half-Day Threshold → all hrs to OT (0 Present); above threshold but below Full Day → ½ Present Day + remaining hrs to OT. Duty HRS counts ONLY Present-Day hrs (OT never included in Duty HRS)" },
 ];
 
 function PolicyMasterSubPoints({

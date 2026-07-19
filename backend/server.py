@@ -5695,7 +5695,8 @@ async def get_attendance_policy(
     _pm_bf = policy.get("policy_master")
     if isinstance(_pm_bf, dict):
         for _k in ("attendance_by_duty_hours", "weekoff_present_add_ot",
-                   "holiday_present_add_ot", "compliance_present_8hr"):
+                   "holiday_present_add_ot", "compliance_present_8hr",
+                   "halfday_threshold_rule"):
             _pm_bf.setdefault(_k, False)
     # "Default preset" here means: no admin has explicitly saved / overridden
     # the policy yet. Because we auto-attach a preset on company creation,
@@ -16134,6 +16135,35 @@ async def _monthly_report_impl(
             media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
+    elif variant == "ot":
+        # Iter 203 (user request) — OT Duty HRS report: day-wise OT ONLY.
+        from utils.monthly_attendance import build_ot_only_grid_xlsx
+        grid = await _compute_monthly_grid_data(
+            company_id=company_id,
+            month=month,
+            group_id=group_id,
+            from_date=None,
+            to_date=None,
+        )
+        xlsx_bytes = build_ot_only_grid_xlsx(grid)
+        variant_slug = "OTDutyHRS"
+    elif variant == "ot_pdf":
+        from utils.monthly_attendance_pdf import build_monthly_ot_pdf
+        grid = await _compute_monthly_grid_data(
+            company_id=company_id,
+            month=month,
+            group_id=group_id,
+            from_date=None,
+            to_date=None,
+        )
+        pdf_bytes = build_monthly_ot_pdf(grid)
+        company_slug = (company.get("name") or "company").replace(" ", "_")
+        filename = f"MonthlyAttendance_OTDutyHRS_{company_slug}_{month}.pdf"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
     elif variant == "hours_pdf":
         from utils.monthly_attendance_pdf import build_monthly_hours_pdf
         grid = await _compute_monthly_grid_data(
@@ -16185,6 +16215,29 @@ async def monthly_attendance_hours(
     """Monthly working-hours matrix (mirrors the user's reference sheet)."""
     admin = await get_user_from_token(authorization)
     return await _monthly_report_impl(company_id, month, admin, "hours", group_id)
+
+
+@api.get("/admin/attendance/monthly-ot/{company_id}/{month}.xlsx")
+async def monthly_attendance_ot(
+    company_id: str,
+    month: str,
+    group_id: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 203 — OT Duty HRS report (day-wise OT only, policy-computed)."""
+    admin = await get_user_from_token(authorization)
+    return await _monthly_report_impl(company_id, month, admin, "ot", group_id)
+
+
+@api.get("/admin/attendance/monthly-ot/{company_id}/{month}.pdf")
+async def monthly_attendance_ot_pdf(
+    company_id: str,
+    month: str,
+    group_id: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+):
+    admin = await get_user_from_token(authorization)
+    return await _monthly_report_impl(company_id, month, admin, "ot_pdf", group_id)
 
 
 @api.get("/admin/attendance/monthly-inout/{company_id}/{month}.xlsx")
@@ -16886,6 +16939,24 @@ async def _compute_monthly_grid_data(
             _day_present = float(summary.get("present_days") or 0.0)
             if _pm_8hr_reports and (duty_only_hrs + ot_hrs) >= 8.0:
                 _day_present = max(_day_present, 1.0)
+            # Iter 203 — "Half-Day Threshold Rule" sub-point (user request):
+            #   worked < half-day threshold  → 0 Present, ALL hrs → OT
+            #   threshold ≤ worked < full    → ½ Present, duty = threshold
+            #                                  hrs, remaining hrs → OT
+            #   worked ≥ full day            → unchanged.
+            # Duty HRS therefore counts ONLY present-day hours — OT is
+            # never included in Duty HRS.
+            if _pm_flags.get("halfday_threshold_rule") and hrs > 0:
+                _half_h = float(eff_policy.get("half_day_hours") or 4.0)
+                _worked = round(duty_only_hrs + ot_hrs, 2)
+                if _worked < _half_h:
+                    ot_hrs = _worked
+                    duty_only_hrs = 0.0
+                    _day_present = 0.0
+                elif _worked < standard_h:
+                    duty_only_hrs = _half_h
+                    ot_hrs = round(_worked - _half_h, 2)
+                    _day_present = 0.5
             if hrs > 0 and summary.get("is_weekly_off") and _pm_flags.get("weekoff_present_add_ot"):
                 ot_hrs = round(duty_only_hrs + ot_hrs, 2)
                 duty_only_hrs = 0.0
