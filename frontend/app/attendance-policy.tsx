@@ -131,6 +131,15 @@ function InlineCompanyPicker({ onPick }: { onPick: (cid: string) => void }) {
 
 type Shift = { name: string; start: string; end: string };
 
+// Iter 200 — Report Settings catalogue (mirrors Attendance Grid views).
+const REPORT_TYPES: [string, string][] = [
+  ["inout", "In / Out"],
+  ["ot", "OT In / Out"],
+  ["hours", "Hours Only"],
+  ["salary", "Per-Day Salary"],
+  ["inout_salary", "In/Out + Salary"],
+];
+
 type Policy = {
   shifts: Shift[];
   weekly_off_days: number[];
@@ -159,6 +168,11 @@ type Policy = {
   ot_pct_gross?: number;
   // Iter 175 — Policy Master Sub Points.
   policy_master?: Record<string, any>;
+  // Iter 200 — per-firm report availability + default grid view.
+  report_settings?: {
+    enabled: Record<string, boolean>;
+    default_view: string;
+  };
 };
 
 type PolicyResponse = {
@@ -211,6 +225,12 @@ function normalisePolicy(p: Policy): Policy {
     ot_pct_basic: Number(p.ot_pct_basic ?? 0),
     ot_pct_gross: Number(p.ot_pct_gross ?? 0),
     punch_approval_required: p.punch_approval_required ?? true,
+    report_settings: {
+      enabled: Object.fromEntries(
+        REPORT_TYPES.map(([k]) => [k, (p.report_settings?.enabled?.[k] ?? true) !== false]),
+      ),
+      default_view: p.report_settings?.default_view || "inout",
+    },
   };
 }
 
@@ -684,6 +704,69 @@ export default function AttendancePolicyScreen() {
               onChange={(patch) => setPolicy({ ...policy, ...patch })}
             />
           ) : null}
+
+          {/* Iter 200 (user request) — per-firm report availability. */}
+          <SectionTitle
+            title="Report Settings"
+            hint="Choose which attendance reports this firm can view & download, plus the default report."
+          />
+          {REPORT_TYPES.map(([key, label]) => {
+            const on = (policy.report_settings?.enabled?.[key] ?? true) !== false;
+            return (
+              <Pressable
+                key={key}
+                style={styles.toggleRow}
+                testID={`ap-report-${key}`}
+                onPress={() => {
+                  const rs = policy.report_settings || { enabled: {}, default_view: "inout" };
+                  const enabled = { ...rs.enabled, [key]: !on };
+                  if (!REPORT_TYPES.some(([k]) => (enabled[k] ?? true) !== false)) return; // keep ≥1 enabled
+                  let def = rs.default_view || "inout";
+                  if ((enabled[def] ?? true) === false) {
+                    def = REPORT_TYPES.find(([k]) => (enabled[k] ?? true) !== false)?.[0] || "inout";
+                  }
+                  setPolicy({ ...policy, report_settings: { enabled, default_view: def } });
+                }}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.toggleLabel}>{label} report</Text>
+                </View>
+                <View style={[styles.toggle, on && styles.toggleOn]}>
+                  <View style={[styles.toggleKnob, on && styles.toggleKnobOn]} />
+                </View>
+              </Pressable>
+            );
+          })}
+          <Text style={styles.toggleHint}>Default report (opens first in Attendance Grid):</Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+            {REPORT_TYPES.filter(([k]) => (policy.report_settings?.enabled?.[k] ?? true) !== false)
+              .map(([key, label]) => {
+                const active = (policy.report_settings?.default_view || "inout") === key;
+                return (
+                  <Pressable
+                    key={key}
+                    testID={`ap-report-default-${key}`}
+                    onPress={() => setPolicy({
+                      ...policy,
+                      report_settings: {
+                        enabled: policy.report_settings?.enabled || {},
+                        default_view: key,
+                      },
+                    })}
+                    style={{
+                      borderWidth: 1, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12,
+                      borderColor: active ? colors.brandPrimary : colors.border,
+                      backgroundColor: active ? colors.brandPrimary : colors.surface,
+                    }}
+                  >
+                    <Text style={{
+                      fontSize: 12, fontWeight: "700",
+                      color: active ? "#fff" : colors.onSurfaceSecondary,
+                    }}>{label}</Text>
+                  </Pressable>
+                );
+              })}
+          </View>
 
           <SectionTitle title="Notes" hint="Optional — surfaced on employee onboarding." />
           <TextInput

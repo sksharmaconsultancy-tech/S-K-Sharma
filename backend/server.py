@@ -1175,6 +1175,21 @@ def _validate_policy(raw: dict) -> dict:
         "geofencing_required": _flag("geofencing_required", True),
     }
 
+    # Iter 200 — Report Settings (user request): which attendance reports
+    # (grid views + downloads) are enabled for this firm + the default view.
+    _REPORT_KEYS = ("inout", "ot", "hours", "salary", "inout_salary")
+    rs_raw = raw.get("report_settings") if isinstance(raw.get("report_settings"), dict) else {}
+    rs_en_raw = rs_raw.get("enabled") if isinstance(rs_raw.get("enabled"), dict) else {}
+    rs_enabled = {k: bool(rs_en_raw.get(k, True)) for k in _REPORT_KEYS}
+    if not any(rs_enabled.values()):
+        raise HTTPException(
+            status_code=400,
+            detail="Report Settings: enable at least one report type.")
+    rs_default = str(rs_raw.get("default_view") or "inout").strip().lower()
+    if rs_default not in _REPORT_KEYS or not rs_enabled.get(rs_default):
+        rs_default = next(k for k in _REPORT_KEYS if rs_enabled[k])
+    report_settings = {"enabled": rs_enabled, "default_view": rs_default}
+
     return {
         "shifts": shifts,
         "weekly_off_days": sorted(days),
@@ -5573,6 +5588,14 @@ async def get_attendance_policy(
     policy.setdefault("week_off_min_working_hours", 0)
     policy.setdefault("weekly_off_days", [])
     policy.setdefault("shifts", [])
+    # Iter 200 — Report Settings default: every report enabled, In/Out first.
+    _rs = policy.get("report_settings") if isinstance(policy.get("report_settings"), dict) else {}
+    _rs_en = _rs.get("enabled") if isinstance(_rs.get("enabled"), dict) else {}
+    policy["report_settings"] = {
+        "enabled": {k: bool(_rs_en.get(k, True))
+                    for k in ("inout", "ot", "hours", "salary", "inout_salary")},
+        "default_view": _rs.get("default_view") or "inout",
+    }
     # "Default preset" here means: no admin has explicitly saved / overridden
     # the policy yet. Because we auto-attach a preset on company creation,
     # the presence of `attendance_policy` alone isn't a good signal — we
@@ -15899,9 +15922,22 @@ async def _monthly_report_impl(
     if admin.get("role") == "company_admin" and admin.get("company_id") != company_id:
         raise HTTPException(status_code=403, detail="You can only export your own firm")
 
-    company = await db.companies.find_one({"company_id": company_id}, {"_id": 0, "name": 1})
+    company = await db.companies.find_one(
+        {"company_id": company_id},
+        {"_id": 0, "name": 1, "attendance_policy": 1})
     if company is None:
         raise HTTPException(status_code=404, detail="Company not found")
+    # Iter 200 (user request) — Report Settings live on the firm's attendance
+    # policy. A disabled report type cannot be exported for that firm.
+    _rs_key = "inout" if variant.startswith("inout") else "hours"
+    _rs = ((company.get("attendance_policy") or {}).get("report_settings") or {})
+    _rs_en = _rs.get("enabled") or {}
+    if _rs_key in _rs_en and not _rs_en.get(_rs_key):
+        _lbl = "In/Out" if _rs_key == "inout" else "Hours Only"
+        raise HTTPException(
+            status_code=403,
+            detail=f"The {_lbl} report is disabled for this firm "
+                   "(Attendance Policy → Report Settings).")
     try:
         y, m = int(month[:4]), int(month[5:7])
         if m < 1 or m > 12:
