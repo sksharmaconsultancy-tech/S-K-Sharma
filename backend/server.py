@@ -344,6 +344,11 @@ class AttendancePunch(BaseModel):
     mock_location: Optional[bool] = None
     # Optional extra photo for Emergency mode.
     photo_base64: Optional[str] = None
+    # Offline sync (Phase 2): idempotency id + original capture time so a
+    # queued offline punch keeps its real time and never duplicates on retry.
+    offline: Optional[bool] = None
+    client_dedupe_id: Optional[str] = None
+    client_punch_at: Optional[str] = None
 
 
 class LocationPing(BaseModel):
@@ -8446,6 +8451,20 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
     if not company:
         raise HTTPException(status_code=400, detail="Company not found")
 
+    # Offline-sync idempotency (Phase 2): if this exact queued punch was
+    # already accepted (same client_dedupe_id), return it instead of making
+    # a duplicate. Keeps retries / multi-tab sync safe.
+    if payload.client_dedupe_id:
+        dup = await db.attendance.find_one(
+            {"user_id": user["user_id"], "client_dedupe_id": payload.client_dedupe_id},
+            {"_id": 0, "status": 1, "attendance_status": 1, "distance_m": 1})
+        if dup:
+            return {"ok": True, "duplicate": True,
+                    "status": dup.get("status"),
+                    "attendance_status": dup.get("attendance_status"),
+                    "distance_m": dup.get("distance_m", 0),
+                    "approval_required": dup.get("status") == "pending"}
+
     # Live-in staff (e.g. resort housekeeping who sleep on premises) are
     # ALWAYS inside the resort, but they can still be off-duty. For them
     # we bypass the geofence hard-reject entirely — the shift schedule +
@@ -8529,7 +8548,25 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
     # rejecting double-IN or double-OUT which would corrupt the log.
     # Rejected punches are ignored for the last-kind check.
     # Iter 144 — "today" follows IST wall-clock (punch storage convention).
-    today = ist_wallclock_now().strftime("%Y-%m-%d")
+    # Phase 2 (offline sync): a punch queued offline carries its ORIGINAL
+    # capture time (client_punch_at, real UTC ISO). Honour it so the punch
+    # lands on the correct date/time even if it syncs hours/days later.
+    punch_at_iso = None
+    if payload.offline and payload.client_punch_at:
+        try:
+            _cap = datetime.fromisoformat(payload.client_punch_at.replace("Z", "+00:00"))
+            if _cap.tzinfo is None:
+                _cap = _cap.replace(tzinfo=timezone.utc)
+            # Convert to IST wall-clock labelled UTC (storage convention).
+            _cap_ist = _cap.astimezone(IST_TZ).replace(tzinfo=timezone.utc)
+            # Sanity: reject future times / older than 7 days (clock tampering).
+            _now = ist_wallclock_now()
+            if _now - timedelta(days=7) <= _cap_ist <= _now + timedelta(minutes=10):
+                punch_at_iso = _cap_ist.isoformat()
+        except Exception:
+            punch_at_iso = None
+    today = (punch_at_iso[:10] if punch_at_iso
+             else ist_wallclock_now().strftime("%Y-%m-%d"))
     today_recs = await db.attendance.find(
         {"user_id": user["user_id"], "date": today,
          "status": {"$ne": "rejected"}},
@@ -8737,7 +8774,8 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
         "branch_name": (closest or {}).get("name"),
         "date": today,
         "kind": payload.kind,
-        "at": ist_wallclock_iso(),
+        "at": (punch_at_iso or ist_wallclock_iso()),
+        "synced_at": (ist_wallclock_iso() if payload.offline else None),
         "latitude": payload.latitude,
         "longitude": payload.longitude,
         "distance_m": round(dist, 1),
@@ -8758,6 +8796,10 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
         "gps_accuracy_m": payload.gps_accuracy_m,
         "battery_level": payload.battery_level,
         "mock_location": bool(payload.mock_location) if payload.mock_location is not None else None,
+        # Offline sync metadata (Phase 2).
+        "offline_punch": bool(payload.offline) if payload.offline is not None else False,
+        "client_dedupe_id": payload.client_dedupe_id,
+        "client_punch_at": payload.client_punch_at,
     }
     # Determine approval status. Auto punches (geofence enter/exit background
     # trigger) land as "pending" when the firm has punch_approval_required=True.

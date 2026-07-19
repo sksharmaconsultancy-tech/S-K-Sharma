@@ -41,6 +41,9 @@ type Props = {
   visible: boolean;
   kind: "in" | "out";
   user: any;
+  /** Offline-capable poster from the attendance screen. Falls back to a
+   *  direct API call when not provided. Returns {offline:true} if queued. */
+  postPunch?: (body: Record<string, any>) => Promise<any>;
   onClose: () => void;
   onDone: () => void;
 };
@@ -64,7 +67,7 @@ function haversineM(lat1: number, lon1: number, lat2: number, lon2: number) {
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-export default function PunchFlowModal({ visible, kind, user, onClose, onDone }: Props) {
+export default function PunchFlowModal({ visible, kind, user, postPunch, onClose, onDone }: Props) {
   const [steps, setSteps] = useState<Record<StepKey, StepState>>({
     gps: "pending", worksite: "pending", face: "pending", biometric: "pending", save: "pending",
   });
@@ -75,7 +78,7 @@ export default function PunchFlowModal({ visible, kind, user, onClose, onDone }:
   const [chosenSite, setChosenSite] = useState<Worksite | null>(null);
   const [awaitingSitePick, setAwaitingSitePick] = useState(false);
   const [faceOpen, setFaceOpen] = useState(false);
-  const [result, setResult] = useState<{ pending: boolean; distance_m: number } | null>(null);
+  const [result, setResult] = useState<{ pending: boolean; distance_m: number; offline?: boolean } | null>(null);
   const runningRef = useRef(false);
   const selfieRef = useRef<string | null>(null);
   const methodRef = useRef<"fingerprint" | "face">("face");
@@ -224,27 +227,32 @@ export default function PunchFlowModal({ visible, kind, user, onClose, onDone }:
     }
   }, [user, kind]);
 
-  // ---- Step 5: save punch ----
+  // ---- Step 5: save punch (offline-aware when postPunch prop is given) ----
   const runSave = useCallback(async (pos: { latitude: number; longitude: number } | null, site: Worksite | null) => {
     setStep("save", "active", "Saving attendance…");
     try {
-      const res = await api<{ ok: boolean; distance_m: number; status?: string; approval_required?: boolean }>(
-        "/attendance/punch",
-        {
-          method: "POST",
-          body: {
-            kind,
-            latitude: pos?.latitude ?? null,
-            longitude: pos?.longitude ?? null,
-            biometric_method: methodRef.current,
-            selfie_base64: selfieRef.current,
-            device_info: Platform.OS,
-            ...(site && site.worksite_id !== "main"
-              ? { worksite_id: site.worksite_id, worksite_name: site.name }
-              : site ? { worksite_name: site.name } : {}),
-          },
-        },
-      );
+      const body = {
+        kind,
+        latitude: pos?.latitude ?? null,
+        longitude: pos?.longitude ?? null,
+        biometric_method: methodRef.current,
+        selfie_base64: selfieRef.current,
+        device_info: Platform.OS,
+        ...(site && site.worksite_id !== "main"
+          ? { worksite_id: site.worksite_id, worksite_name: site.name }
+          : site ? { worksite_name: site.name } : {}),
+      };
+      const res = postPunch
+        ? await postPunch(body)
+        : await api<{ ok: boolean; distance_m: number; status?: string; approval_required?: boolean }>(
+            "/attendance/punch", { method: "POST", body },
+          );
+      if (res?.offline) {
+        setStep("save", "done", "Saved on device — pending synchronization");
+        setResult({ pending: false, distance_m: 0, offline: true });
+        onDone();
+        return;
+      }
       setStep("save", "done", "Attendance saved");
       setResult({
         pending: res?.status === "pending" || res?.approval_required === true,
@@ -255,7 +263,7 @@ export default function PunchFlowModal({ visible, kind, user, onClose, onDone }:
       setStep("save", "failed", e?.message || "Save failed");
       setError(e?.message || "Punch failed");
     }
-  }, [kind, onDone]);
+  }, [kind, onDone, postPunch]);
 
   // ---- Orchestrator ----
   const start = useCallback(async () => {
@@ -316,12 +324,18 @@ export default function PunchFlowModal({ visible, kind, user, onClose, onDone }:
 
           {result ? (
             <View style={st.doneBox} testID="pf-success">
-              <Ionicons name="checkmark-circle" size={46} color="#16A34A" />
-              <Text style={st.doneTitle}>Attendance Saved</Text>
+              <Ionicons
+                name={result.offline ? "cloud-offline-outline" : "checkmark-circle"}
+                size={46}
+                color={result.offline ? "#B45309" : "#16A34A"}
+              />
+              <Text style={st.doneTitle}>
+                {result.offline ? "Saved — Pending Sync" : "Attendance Saved"}
+              </Text>
               <Text style={st.doneTxt}>
-                📸 Photo · 📍 Location · 🕘 Time stored{"\n"}
-                {result.distance_m ? `${result.distance_m}m from worksite · ` : ""}
-                {result.pending ? "Awaiting admin approval — payroll updates after approval." : "Payroll will update automatically."}
+                {result.offline
+                  ? "📸 Photo · 📍 Location · 🕘 Time stored on this device.\nAttendance saved successfully. Status: Pending Synchronization — it will upload automatically when internet returns."
+                  : `📸 Photo · 📍 Location · 🕘 Time stored\n${result.distance_m ? `${result.distance_m}m from worksite · ` : ""}${result.pending ? "Awaiting admin approval — payroll updates after approval." : "Payroll will update automatically."}`}
               </Text>
               <Pressable onPress={onClose} style={st.primaryBtn} testID="pf-done">
                 <Text style={st.primaryBtnTxt}>Done</Text>

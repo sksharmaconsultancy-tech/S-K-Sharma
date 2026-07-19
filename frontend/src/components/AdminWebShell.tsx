@@ -642,6 +642,38 @@ export default function AdminWebShell({ children }: Props) {
     return out;
   }, [gatedNav]);
 
+  // RBAC Phase 2 — FRONTEND ROUTE PROTECTION. Hiding a sidebar button is
+  // not enough: a staff/sub-admin user could type the URL directly. Any
+  // route that exists in the master nav universe but is NOT in this user's
+  // permission-filtered nav is denied. Super admins are never gated.
+  const routeDenied = useMemo(() => {
+    if (role === "super_admin") return false;
+    const base = (r?: string) => (r || "").split("?")[0];
+    const collect = (items: NavItem[], into: Set<string>) => {
+      for (const it of items) {
+        if (it.route) into.add(base(it.route));
+        if (it.children) collect(it.children, into);
+      }
+    };
+    const universe = new Set<string>();
+    collect(NAV_SUPER, universe);
+    collect(NAV_COMPANY_ADMIN, universe);
+    universe.delete("/(tabs)");
+    // Which universe base does the current path fall under? (longest match)
+    let hit: string | null = null;
+    for (const u of universe) {
+      if (pathname === u || pathname.startsWith(`${u}/`)) {
+        if (!hit || u.length > hit.length) hit = u;
+      }
+    }
+    if (!hit) return false; // not a nav-gated page (detail/dynamic route)
+    const allowed = new Set<string>();
+    // Guard on the permission-filtered nav (`nav`), not the business-flow
+    // pruned `gatedNav`, so firm salary toggles never lock admins out.
+    collect(nav, allowed);
+    return !allowed.has(hit);
+  }, [role, nav, pathname]);
+
   if (!isWebDesktop || !user) return <>{children}</>;
   if (isBareRoute) return <>{children}</>;
 
@@ -930,7 +962,26 @@ export default function AdminWebShell({ children }: Props) {
           </View>
         </View>
         <View style={styles.main} testID="admin-web-main">
-          {children}
+          {routeDenied ? (
+            <View style={styles.deniedWrap} testID="route-access-denied">
+              <Ionicons name="lock-closed-outline" size={52} color="#B91C1C" />
+              <Text style={styles.deniedTitle}>Access Denied</Text>
+              <Text style={styles.deniedTxt}>
+                You do not have permission to view this page.{"\n"}
+                Contact your administrator if you believe this is a mistake.
+              </Text>
+              <Pressable
+                onPress={() => router.replace("/(tabs)" as any)}
+                style={styles.deniedBtn}
+                testID="denied-go-home"
+              >
+                <Ionicons name="home-outline" size={15} color="#fff" />
+                <Text style={styles.deniedBtnTxt}>Go to Dashboard</Text>
+              </Pressable>
+            </View>
+          ) : (
+            children
+          )}
         </View>
       </View>
 
@@ -1039,6 +1090,19 @@ function EmployeeWebGate() {
 const SIDEBAR_WIDTH = 244;
 
 const styles = StyleSheet.create({
+  deniedWrap: {
+    flex: 1, alignItems: "center", justifyContent: "center", gap: 10, padding: 32,
+  },
+  deniedTitle: { fontSize: 22, fontWeight: "800", color: "#B91C1C" },
+  deniedTxt: {
+    fontSize: 13.5, color: "#64748B", textAlign: "center", lineHeight: 21,
+  },
+  deniedBtn: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: "#0F3D3E", borderRadius: 8,
+    paddingHorizontal: 18, paddingVertical: 11, marginTop: 8,
+  },
+  deniedBtnTxt: { color: "#fff", fontSize: 13, fontWeight: "700" },
   shell: {
     flex: 1,
     flexDirection: "row",

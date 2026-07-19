@@ -32,6 +32,9 @@ import {
 import {
   fingerprintSupported, verifyFingerprint, enrollFingerprint,
 } from "@/src/utils/fingerprintGate";
+import {
+  enqueuePunch, flushQueue, isOnline, pendingCount, setLastSync,
+} from "@/src/utils/offlinePunch";
 
 type Company = {
   name: string;
@@ -52,6 +55,80 @@ export default function AttendanceScreen() {
   const [locationEnabled, setLocationEnabled] = useState<boolean>(false);
   const [today, setToday] = useState<any>(null);
   const [busy, setBusy] = useState(false);
+
+  // Offline punch (Phase 2) — gated by the firm's "Offline punching" switch.
+  const [offlineEnabled, setOfflineEnabled] = useState(false);
+  const [online, setOnline] = useState(isOnline());
+  const [pendingSync, setPendingSync] = useState(0);
+
+  const refreshPending = useCallback(async () => {
+    try { setPendingSync(await pendingCount()); } catch {}
+  }, []);
+
+  const doFlush = useCallback(async () => {
+    if (!offlineEnabled || !isOnline()) return;
+    try {
+      const r = await flushQueue(api as any);
+      if (r.synced > 0) { await setLastSync(Date.now()); await loadAllRef.current?.(); }
+      setPendingSync(r.remaining);
+    } catch {}
+  }, [offlineEnabled]);
+
+  // Keep a ref to loadAll so the flush callback can refresh the screen.
+  const loadAllRef = useRef<null | (() => Promise<void>)>(null);
+
+  useEffect(() => {
+    // Resolve whether this firm allows offline punching.
+    api<{ offline_punch_enabled?: boolean }>("/attendance/my-geo-policy")
+      .then((p) => setOfflineEnabled(!!p?.offline_punch_enabled))
+      .catch(() => {});
+    void refreshPending();
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      const on = () => { setOnline(true); void doFlush(); };
+      const off = () => setOnline(false);
+      window.addEventListener("online", on);
+      window.addEventListener("offline", off);
+      return () => {
+        window.removeEventListener("online", on);
+        window.removeEventListener("offline", off);
+      };
+    }
+  }, [refreshPending, doFlush]);
+
+  // Attempt a sync whenever offline is enabled + we think we're online.
+  useEffect(() => { if (offlineEnabled && online) void doFlush(); }, [offlineEnabled, online, doFlush]);
+
+  // Punch poster with offline fallback. When the firm allows offline
+  // punching and we're offline (or the request fails on the network), the
+  // punch is queued on-device and synced later. Returns {offline:true} then.
+  const postPunch = useCallback(
+    async (body: Record<string, any>): Promise<any> => {
+      const enrich = {
+        ...body,
+        gps_accuracy_m: body.gps_accuracy_m ?? null,
+        battery_level: body.battery_level ?? null,
+      };
+      if (offlineEnabled && !isOnline()) {
+        await enqueuePunch(enrich);
+        await refreshPending();
+        return { ok: true, offline: true, status: "pending_sync", distance_m: 0 };
+      }
+      try {
+        return await api("/attendance/punch", { method: "POST", body: enrich });
+      } catch (e: any) {
+        const netErr = /network|failed to fetch|timeout|load failed/i.test(
+          String(e?.message || ""),
+        );
+        if (offlineEnabled && netErr) {
+          await enqueuePunch(enrich);
+          await refreshPending();
+          return { ok: true, offline: true, status: "pending_sync", distance_m: 0 };
+        }
+        throw e;
+      }
+    },
+    [offlineEnabled, refreshPending],
+  );
 
   // Punch-mode flags — MUST be declared before any effect that lists them
   // as dependencies (previously declared near the render return, which
@@ -98,6 +175,9 @@ export default function AttendanceScreen() {
       showToast(e.message || "Failed to load", "err");
     }
   }, []);
+
+  // Keep flush callback able to refresh the screen after background syncs.
+  useEffect(() => { loadAllRef.current = loadAll; }, [loadAll]);
 
   const refreshLocation = useCallback(async () => {
     setLocError(null);
@@ -462,30 +542,22 @@ export default function AttendanceScreen() {
         // Iter 86 — Response now carries `status` + `approval_required`.
         // Every app-punch is queued for admin review by design, so surface
         // that to the employee instead of a blanket "success" toast.
-        const res = await api<{
-          ok: boolean; distance_m: number;
-          status?: string; approval_required?: boolean;
-        }>(
-          "/attendance/punch",
-          {
-            method: "POST",
-            body: {
-              kind: nextKind,
-              // Iter 70 — biometric punches now also submit GPS so the
-              // server can enforce geofence and store an accurate audit
-              // trail.  `punchLoc` will be null only when the firm has
-              // no geofence configured (rare, admin-controlled).
-              latitude: punchLoc?.latitude ?? null,
-              longitude: punchLoc?.longitude ?? null,
-              biometric_method: method,
-              selfie_base64,
-              device_info: Platform.OS,
-              source: "manual",
-            },
-          },
-        );
+        const res = await postPunch({
+          kind: nextKind,
+          latitude: punchLoc?.latitude ?? null,
+          longitude: punchLoc?.longitude ?? null,
+          biometric_method: method,
+          selfie_base64,
+          device_info: Platform.OS,
+          source: "manual",
+        });
         if (Platform.OS !== "web")
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        if (res?.offline) {
+          showToast("Attendance saved successfully. Status: Pending Synchronization", "ok");
+          await loadAll();
+          return;
+        }
         const isPending = res?.status === "pending" || res?.approval_required === true;
         const kindTxt = nextKind === "in" ? "Duty IN" : "Duty OUT";
         const firmTxt = company?.name ? ` · ${company.name}` : "";
@@ -560,25 +632,21 @@ export default function AttendanceScreen() {
     }
     setBusy(true);
     try {
-      const res = await api<{
-        ok: boolean; distance_m: number;
-        status?: string; approval_required?: boolean;
-      }>(
-        "/attendance/punch",
-        {
-          method: "POST",
-          body: {
-            kind: nextKind,
-            latitude: useLoc.latitude,
-            longitude: useLoc.longitude,
-            biometric_method: method,
-            selfie_base64,
-            device_info: Platform.OS,
-          },
-        },
-      );
+      const res = await postPunch({
+        kind: nextKind,
+        latitude: useLoc.latitude,
+        longitude: useLoc.longitude,
+        biometric_method: method,
+        selfie_base64,
+        device_info: Platform.OS,
+      });
       if (Platform.OS !== "web")
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (res?.offline) {
+        showToast("Attendance saved successfully. Status: Pending Synchronization", "ok");
+        await loadAll();
+        return;
+      }
       const isPending = res?.status === "pending" || res?.approval_required === true;
       const kindTxt = nextKind === "in" ? "Duty IN" : "Duty OUT";
       const distanceTxt = `${Math.round(res.distance_m)}m from office`;
@@ -630,6 +698,39 @@ export default function AttendanceScreen() {
       </SafeAreaView>
 
       <ScrollView contentContainerStyle={styles.scroll}>
+        {/* Geofence Phase 2 — offline punch status banner (firm-gated). */}
+        {offlineEnabled && (!online || pendingSync > 0) ? (
+          <View
+            style={[styles.syncBanner, !online ? styles.syncBannerOffline : null]}
+            testID="offline-sync-banner"
+          >
+            <Ionicons
+              name={!online ? "cloud-offline-outline" : "cloud-upload-outline"}
+              size={18}
+              color={!online ? "#B45309" : "#0369A1"}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.syncBannerTitle, !online && { color: "#92400E" }]}>
+                {!online
+                  ? "You're offline — punches will be saved on this device"
+                  : `${pendingSync} punch${pendingSync === 1 ? "" : "es"} pending synchronization`}
+              </Text>
+              {pendingSync > 0 ? (
+                <Text style={styles.syncBannerSub}>
+                  {!online
+                    ? `${pendingSync} saved punch${pendingSync === 1 ? "" : "es"} will sync automatically when internet returns`
+                    : "Syncs automatically — or tap Sync now"}
+                </Text>
+              ) : null}
+            </View>
+            {online && pendingSync > 0 ? (
+              <Pressable onPress={() => void doFlush()} style={styles.syncNowBtn} testID="sync-now-btn">
+                <Text style={styles.syncNowTxt}>Sync now</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+
         {(company as any)?.attendance_punching_enabled === false ? (
           /* Iter 114 — process flow: Bio Matrix Attendance OFF for this firm
              → employees cannot punch; they can only VIEW their service data,
@@ -976,8 +1077,9 @@ export default function AttendanceScreen() {
         visible={flowOpen}
         kind={nextKind}
         user={user}
+        postPunch={postPunch}
         onClose={() => setFlowOpen(false)}
-        onDone={loadAll}
+        onDone={() => { void loadAll(); void refreshPending(); }}
       />
 
       {toast && (
@@ -1002,6 +1104,19 @@ export default function AttendanceScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.surface },
+  syncBanner: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    backgroundColor: "#F0F9FF", borderWidth: 1, borderColor: "#BAE6FD",
+    borderRadius: radius.md, padding: 12, marginBottom: 12,
+  },
+  syncBannerOffline: { backgroundColor: "#FFFBEB", borderColor: "#FDE68A" },
+  syncBannerTitle: { fontSize: 12.5, fontWeight: "800", color: "#0369A1" },
+  syncBannerSub: { fontSize: 11, color: colors.onSurfaceSecondary, marginTop: 2 },
+  syncNowBtn: {
+    backgroundColor: "#0369A1", borderRadius: 999,
+    paddingHorizontal: 12, paddingVertical: 7,
+  },
+  syncNowTxt: { color: "#fff", fontSize: 11.5, fontWeight: "800" },
   header: { paddingHorizontal: spacing.xl, paddingVertical: spacing.md },
   h1: { fontSize: 26, color: colors.onSurface, fontWeight: "500" },
   sub: { fontSize: type.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
