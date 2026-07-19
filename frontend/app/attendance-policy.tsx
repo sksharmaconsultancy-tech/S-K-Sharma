@@ -1056,6 +1056,7 @@ const PM_FLAGS: { key: string; label: string }[] = [
   { key: "attendance_by_duty_hours", label: "Attendance Calculation as per Duty HRS (Days = Total Duty HRS ÷ Daily Duty HRS from Firm Master)" },
   { key: "weekoff_present_add_ot", label: "Week-off Day Worked → Add hours in OT (not counted Present)" },
   { key: "holiday_present_add_ot", label: "Holiday (Holiday Master) Worked → Present + hours in OT" },
+  { key: "compliance_present_8hr", label: "Count Present Day @ 8 HRS — Compliance Salary only (8+ worked hrs = 1 Present Day, extra hrs → OT; applies when Salary Allowed includes Compliance)" },
 ];
 
 function PolicyMasterSubPoints({

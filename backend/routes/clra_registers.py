@@ -300,3 +300,164 @@ async def clra_form_xv(
             "entry. Finalize the salary run for this month to auto-fill them."))
     _sig_block(pdf, company.get("name") or "")
     return _pdf_response(pdf, f"CLRA_FormXV_WageRegister_{month}.pdf")
+
+
+# ---------------------------------------------------------------------------
+# Iter 202 — EXCEL exports for the CLRA registers (user request).
+# ---------------------------------------------------------------------------
+def _clra_xlsx(title: str, subtitle: str, headers: List[str],
+               rows: List[List[Any]], fname: str):
+    import io
+    from fastapi.responses import Response
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    wb = Workbook()
+    ws = wb.active
+    ws.title = title[:31]
+    ws.cell(row=1, column=1, value=title).font = Font(bold=True, size=13, color="1F3D7A")
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max(1, len(headers)))
+    ws.cell(row=2, column=1, value=subtitle).font = Font(italic=True, size=10, color="555555")
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=max(1, len(headers)))
+    for i, h in enumerate(headers, start=1):
+        c = ws.cell(row=3, column=i, value=h)
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="0F2E3D")
+        c.alignment = Alignment(horizontal="center", vertical="center")
+    ws.freeze_panes = "A4"
+    for r_idx, row in enumerate(rows, start=4):
+        for c_idx, v in enumerate(row, start=1):
+            ws.cell(row=r_idx, column=c_idx, value=v)
+    for i, h in enumerate(headers, start=1):
+        w = max(len(str(h)), *(len(str(r[i - 1] or "")) for r in rows)) if rows else len(str(h))
+        ws.column_dimensions[get_column_letter(i)].width = min(w + 3, 44)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@router.get("/admin/clra-registers/form-xii.xlsx")
+async def clra_form_xii_xlsx(
+    company_id: str = Query(...),
+    authorization: Optional[str] = Header(None),
+):
+    admin = await get_user_from_token(authorization)
+    await _check(admin, company_id)
+    company = await _company(company_id)
+    groups = _by_contractor(await _workmen(company_id))
+    location = ", ".join([p for p in [company.get("city"), company.get("state")] if p]) or "-"
+    rows: List[List[Any]] = []
+    for i, (cname, members) in enumerate(groups.items(), start=1):
+        desigs = sorted({(m.get("designation") or m.get("position") or "").strip()
+                         for m in members if (m.get("designation") or m.get("position"))})
+        nature = ", ".join(list(desigs)[:4]) + (" ..." if len(desigs) > 4 else "")
+        rows.append([i, cname, nature or "-", location, "", len(members), ""])
+    return _clra_xlsx(
+        "FORM XII - Register of Contractors",
+        f"{company.get('name') or ''} - Rule 74, Contract Labour (R&A) Central Rules, 1971",
+        ["Sl", "Name & address of contractor", "Nature of work",
+         "Location of work", "Period of contract", "Max workmen", "Remarks"],
+        rows, "CLRA_FormXII_RegisterOfContractors.xlsx")
+
+
+@router.get("/admin/clra-registers/form-xiii.xlsx")
+async def clra_form_xiii_xlsx(
+    company_id: str = Query(...),
+    authorization: Optional[str] = Header(None),
+):
+    admin = await get_user_from_token(authorization)
+    await _check(admin, company_id)
+    company = await _company(company_id)
+    groups = _by_contractor(await _workmen(company_id))
+    rows: List[List[Any]] = []
+    for cname, members in groups.items():
+        for i, e in enumerate(members, start=1):
+            age = _age(e.get("dob"))
+            sex = _sex(e.get("gender"))
+            rows.append([
+                cname, i, e.get("name") or "",
+                f"{age}/{sex}" if (age or sex) else "",
+                e.get("father_name") or "",
+                e.get("designation") or e.get("position") or "",
+                (e.get("address") or e.get("present_address") or ""),
+                e.get("doj") or "", e.get("exit_date") or "", "",
+            ])
+    return _clra_xlsx(
+        "FORM XIII - Register of Workmen",
+        f"{company.get('name') or ''} - Rule 75, Contract Labour (R&A) Central Rules, 1971",
+        ["Contractor", "Sl", "Name of workman", "Age & Sex",
+         "Father's / Husband's name", "Designation", "Permanent address",
+         "Date of commencement", "Date of termination", "Remarks"],
+        rows, "CLRA_FormXIII_RegisterOfWorkmen.xlsx")
+
+
+@router.get("/admin/clra-registers/form-xiv.xlsx")
+async def clra_form_xiv_xlsx(
+    company_id: str = Query(...),
+    authorization: Optional[str] = Header(None),
+):
+    admin = await get_user_from_token(authorization)
+    await _check(admin, company_id)
+    company = await _company(company_id)
+    emps = await _workmen(company_id)
+    rows: List[List[Any]] = []
+    for i, e in enumerate(emps, start=1):
+        rows.append([
+            i, e.get("name") or "",
+            e.get("contractor_name") or "DIRECT / COMPANY ROLL",
+            e.get("designation") or e.get("position") or "",
+            _basic_rate(e), "Monthly", e.get("doj") or "",
+        ])
+    return _clra_xlsx(
+        "FORM XIV - Employment Cards",
+        f"{company.get('name') or ''} - Rule 76, Contract Labour (R&A) Central Rules, 1971",
+        ["Sl", "Name of workman", "Contractor", "Designation",
+         "Wage rate", "Wage period", "Date of commencement"],
+        rows, "CLRA_FormXIV_EmploymentCards.xlsx")
+
+
+@router.get("/admin/clra-registers/form-xv.xlsx")
+async def clra_form_xv_xlsx(
+    company_id: str = Query(...),
+    month: str = Query(..., description="YYYY-MM"),
+    authorization: Optional[str] = Header(None),
+):
+    admin = await get_user_from_token(authorization)
+    await _check(admin, company_id)
+    company = await _company(company_id)
+    run = await db.salary_runs.find_one(
+        {"company_id": company_id, "month": month, "finalized": True}, {"_id": 0})
+    if not run:
+        run = await db.salary_runs.find_one(
+            {"company_id": company_id, "month": month}, {"_id": 0})
+    emps = {e["user_id"]: e for e in await _workmen(company_id)}
+    rows: List[List[Any]] = []
+    if run and run.get("rows"):
+        for i, r in enumerate(run["rows"], start=1):
+            emp = emps.get(r.get("user_id"), {})
+            gross = float(r.get("total_gross") or 0)
+            ded = float(r.get("epf") or 0) + float(r.get("esi") or 0) \
+                + float(r.get("adv") or 0) + float(r.get("tds") or 0)
+            net = float(r.get("net_pay") or 0) or (gross - ded)
+            rows.append([
+                i, r.get("name") or "", r.get("designation") or "",
+                float(r.get("p_days") or 0), _basic_rate(emp),
+                float(r.get("basic") or 0), float(r.get("oth_allo") or 0),
+                round(gross, 2), round(ded, 2), round(net, 2), "",
+            ])
+    else:
+        for i, e in enumerate(emps.values(), start=1):
+            rows.append([i, e.get("name") or "",
+                         e.get("designation") or e.get("position") or "",
+                         "", _basic_rate(e), "", "", "", "", "", ""])
+    return _clra_xlsx(
+        f"FORM XV - Register of Wages ({month})",
+        f"{company.get('name') or ''} - Rule 78(1)(a)(i), Contract Labour (R&A) Central Rules, 1971",
+        ["Sl", "Name of workman", "Designation", "Days worked", "Wage rate",
+         "Basic earned", "OT / Other", "Gross (Rs.)", "Deductions (Rs.)",
+         "Net paid (Rs.)", "Signature"],
+        rows, f"CLRA_FormXV_WageRegister_{month}.xlsx")

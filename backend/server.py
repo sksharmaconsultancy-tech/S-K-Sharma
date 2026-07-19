@@ -1187,6 +1187,10 @@ def _validate_policy(raw: dict) -> dict:
         "attendance_by_duty_hours": _flag("attendance_by_duty_hours"),
         "weekoff_present_add_ot": _flag("weekoff_present_add_ot"),
         "holiday_present_add_ot": _flag("holiday_present_add_ot"),
+        # Iter 202 (user request) — Compliance Salary only: a day with 8+
+        # working hrs counts as 1 Present Day (extra hrs → OT per policy).
+        # Applies only when the firm's Salary Allowed includes Compliance.
+        "compliance_present_8hr": _flag("compliance_present_8hr"),
     }
 
     # Iter 200 — Report Settings (user request): which attendance reports
@@ -5690,7 +5694,8 @@ async def get_attendance_policy(
     # whose policy was saved before these options existed.
     _pm_bf = policy.get("policy_master")
     if isinstance(_pm_bf, dict):
-        for _k in ("attendance_by_duty_hours", "weekoff_present_add_ot", "holiday_present_add_ot"):
+        for _k in ("attendance_by_duty_hours", "weekoff_present_add_ot",
+                   "holiday_present_add_ot", "compliance_present_8hr"):
             _pm_bf.setdefault(_k, False)
     # "Default preset" here means: no admin has explicitly saved / overridden
     # the policy yet. Because we auto-attach a preset on company creation,
@@ -14492,6 +14497,13 @@ async def _compute_compliance_run(
             # biometrics via the grid's textile pipeline (8 hrs = 1 day).
             stats = _policy2_biometric_stats(att_rows, merged_pol, emp)
         else:
+            # Iter 202 — "Count Present Day @ 8 HRS" sub-point: compliance
+            # runs count 1 Present Day per 8 worked hrs (extra hrs → OT)
+            # when the firm's Salary Allowed includes Compliance.
+            _pm_202 = (att_pol.get("policy_master") or {})
+            if _pm_202.get("compliance_present_8hr") and \
+                    (att_pol.get("salary_allowed") or "both") in ("compliance", "both"):
+                merged_pol["_present_day_hours_override"] = 8.0
             stats = compute_present_days_and_ot(att_rows, merged_pol)
         _am = am_entries.get(emp["user_id"]) if payload.use_imported_sheet else None
         if payload.use_imported_sheet:
@@ -16594,6 +16606,14 @@ async def _compute_monthly_grid_data(
     pol = company.get("attendance_policy") or {}
     pol = await inject_firm_ot_flag(dict(pol), company.get("company_id"))
     full_day_hours = float(pol.get("full_day_hours") or 8.0)
+    # Iter 202 (user request) — "Count Present Day @ 8 HRS" sub-point:
+    # when ON (and Salary Allowed includes Compliance), the Day-wise
+    # IN/OUT, OT IN/OUT and HRS-Only reports split regular duty vs OT at
+    # 8 hrs — 10 worked hrs show as 8 duty + 2 OT.
+    _pm_8hr_reports = bool(
+        (pol.get("policy_master") or {}).get("compliance_present_8hr")
+        and (pol.get("salary_allowed") or "both") in ("compliance", "both")
+    )
     # Iter 200 — Holiday Master dates (for holiday_present_add_ot).
     _holiday_dates = await holiday_dates_for_company(company_id)
     # Iter 77e — Load the GLOBAL Shift Master catalogue once so we can
@@ -16781,6 +16801,9 @@ async def _compute_monthly_grid_data(
                 or eff_policy.get("standard_working_hours")
                 or 8.0
             )
+            # Iter 202 — 8-HR present-day sub-point: reports split at 8 hrs.
+            if _pm_8hr_reports:
+                standard_h = min(standard_h, 8.0)
             # Iter 77z-fix — PAIR-BASED time & hour derivation.
             #   • Regular duty comes from the FIRST paired IN→OUT.
             #   • OT comes from the SECOND paired IN→OUT (or arithmetic
@@ -19335,6 +19358,12 @@ app.include_router(geofence_reports_router)
 
 from routes.proposals import router as proposals_router  # noqa: E402
 app.include_router(proposals_router)
+
+from routes.bulk_ops import router as bulk_ops_router  # noqa: E402
+app.include_router(bulk_ops_router)
+
+from routes.statutory_extra_reports import router as statutory_extra_reports_router  # noqa: E402
+app.include_router(statutory_extra_reports_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.

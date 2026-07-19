@@ -44,6 +44,13 @@ def compute_present_days_and_ot(
     """
     full_day_hours = _num(policy.get("full_day_hours"), 8.0)
     half_day_hours = _num(policy.get("half_day_hours"), 4.0)
+    # Iter 202 — "Count Present Day @ 8 HRS" (compliance-only sub-point):
+    # caller sets ``_present_day_hours_override`` so a day with >= 8 worked
+    # hours counts as 1 Present Day even when the firm's duty hours are
+    # 10/12; the extra hours flow into OT per the dynamic policy below.
+    _pd_override = _num(policy.get("_present_day_hours_override"), 0.0)
+    if _pd_override > 0:
+        full_day_hours = _pd_override
     # Iter 200 — Policy Master Sub Points (dynamic attendance calc).
     pm = policy.get("policy_master") or {}
     weekly_offs = set(policy.get("weekly_off_days") or [])
