@@ -40,6 +40,7 @@ export default function CompaniesScreen() {
   const { user } = useAuth();
   const router = useRouter();
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [firmQuery, setFirmQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Company | null>(null);
@@ -402,6 +403,14 @@ export default function CompaniesScreen() {
     );
   }
 
+  const _fq = firmQuery.trim().toLowerCase();
+  const shownCompanies = _fq
+    ? companies.filter((c) =>
+        [c.name, (c as any).company_code, c.address,
+         c.business_category, c.business_subcategory]
+          .some((v) => String(v || "").toLowerCase().includes(_fq)))
+    : companies;
+
   return (
     <View style={styles.root}>
       <SafeAreaView edges={["top"]} style={{ backgroundColor: colors.surface }}>
@@ -415,6 +424,24 @@ export default function CompaniesScreen() {
         <Text style={styles.sub}>
           All client companies managed under S.K. Sharma & Co.
         </Text>
+        {/* Firm search (user request) — filters by name / code / address / category */}
+        <View style={styles.searchWrap}>
+          <Ionicons name="search-outline" size={17} color={colors.onSurfaceSecondary} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search firm by name, code or address…"
+            placeholderTextColor={colors.onSurfaceSecondary}
+            value={firmQuery}
+            onChangeText={setFirmQuery}
+            autoCorrect={false}
+            testID="firm-search-input"
+          />
+          {firmQuery ? (
+            <Pressable onPress={() => setFirmQuery("")} hitSlop={8} testID="firm-search-clear">
+              <Ionicons name="close-circle" size={17} color={colors.onSurfaceSecondary} />
+            </Pressable>
+          ) : null}
+        </View>
       </SafeAreaView>
 
       <KeyboardAwareScrollView bottomOffset={62} contentContainerStyle={styles.scroll}>
@@ -431,8 +458,18 @@ export default function CompaniesScreen() {
               payroll and compliance under one panel.
             </Text>
           </View>
+        ) : shownCompanies.length === 0 ? (
+          <View style={styles.empty}>
+            <View style={styles.emptyIcon}>
+              <Ionicons name="search-outline" size={30} color={colors.onBrandTertiary} />
+            </View>
+            <Text style={styles.emptyTitle}>No firm matches “{firmQuery.trim()}”</Text>
+            <Text style={styles.emptyBody}>
+              Try a different name, firm code or address.
+            </Text>
+          </View>
         ) : (
-          companies.map((c) => (
+          shownCompanies.map((c) => (
             <Pressable
               key={c.company_id}
               style={styles.card}
@@ -918,6 +955,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl, paddingBottom: spacing.md,
   },
   scroll: { padding: spacing.xl },
+  searchWrap: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    marginHorizontal: spacing.xl, marginBottom: spacing.md,
+    backgroundColor: colors.surfaceSecondary, borderWidth: 1,
+    borderColor: colors.border, borderRadius: radius.md,
+    paddingHorizontal: 12, paddingVertical: Platform.OS === "web" ? 9 : 6,
+  },
+  searchInput: {
+    flex: 1, fontSize: type.sm, color: colors.onSurface,
+    paddingVertical: 2,
+    ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as any) : {}),
+  },
   card: {
     backgroundColor: colors.surfaceSecondary, borderRadius: radius.md,
     padding: spacing.lg, borderWidth: 1, borderColor: colors.border,

@@ -18,6 +18,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Redirect } from "expo-router";
 
 import { useAuth } from "@/src/context/AuthContext";
+import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { api, apiBinary } from "@/src/api/client";
 import { colors, radius } from "@/src/theme";
 
@@ -73,6 +74,7 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function ProposalsScreen() {
   const { user, loading } = useAuth();
+  const { selectedCompanyId } = useSelectedCompany();
   const [data, setData] = useState<ListResp | null>(null);
   const [busy, setBusy] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -88,13 +90,14 @@ export default function ProposalsScreen() {
   const load = useCallback(async () => {
     setBusy(true);
     try {
-      setData(await api<ListResp>("/admin/proposals"));
+      const qs = selectedCompanyId ? `?company_id=${selectedCompanyId}` : "";
+      setData(await api<ListResp>(`/admin/proposals${qs}`));
     } catch (e: any) {
       setMsg(e?.message || "Failed to load.");
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [selectedCompanyId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -109,7 +112,8 @@ export default function ProposalsScreen() {
       Object.entries(price).forEach(([k, v]) => { if (v !== "") pricing[k] = Number(v) || 0; });
       await api("/admin/proposals", {
         method: "POST",
-        body: { client, proposal_types: types, services, pricing },
+        body: { client, proposal_types: types, services, pricing,
+                company_id: selectedCompanyId || undefined },
       });
       setShowForm(false); setClient({}); setTypes([]); setServices([]);
       setPrice({ gst_pct: "18", billing_months: "12" });
@@ -120,7 +124,7 @@ export default function ProposalsScreen() {
     } finally {
       setSaving(false);
     }
-  }, [client, types, services, price, load]);
+  }, [client, types, services, price, load, selectedCompanyId]);
 
   const download = useCallback(async (id: string, kind: "pdf" | "doc") => {
     try {
@@ -138,14 +142,15 @@ export default function ProposalsScreen() {
     setConverting(id); setMsg(null);
     try {
       const r = await api<{ ok: boolean; company_name?: string; company_code?: string; already_converted?: boolean }>(
-        `/admin/proposals/${id}/convert`, { method: "POST", body: {} });
+        `/admin/proposals/${id}/convert`,
+        { method: "POST", body: { company_id: selectedCompanyId || undefined } });
       setMsg(r.already_converted
         ? `"${r.company_name || clientName}" is already a customer firm.`
         : `🎉 "${r.company_name || clientName}" created as a new firm (code ${r.company_code || "—"}) with an active service agreement.`);
       await load();
     } catch (e: any) { setMsg(e?.message || "Convert failed."); }
     finally { setConverting(null); }
-  }, [load]);
+  }, [load, selectedCompanyId]);
 
   if (loading) return null;
   const role = user?.role as string;
