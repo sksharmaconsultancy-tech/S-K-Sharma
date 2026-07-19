@@ -174,7 +174,7 @@ export default function StatutoryReportsScreen() {
 
         <Text style={st.footNote}>
           PT &amp; LWF slabs follow commonly-published state notifications — verify
-          with the latest notification before filing. The firm's state comes from
+          with the latest notification before filing. The firm&apos;s state comes from
           the Firm Master address.
         </Text>
       </ScrollView>

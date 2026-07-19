@@ -81,6 +81,9 @@ export const NAV_SUPER: NavItem[] = [
     ],
   },
   { route: "/bulk-employee-correction", label: "Bulk Employee Correction", icon: "people-outline" },
+  // Iter 202 — bulk attendance upload / salary revision / transfer /
+  // resignation / shift assignment.
+  { route: "/bulk-operations", label: "Bulk Operations", icon: "layers-outline" },
   {
     label: "Approvals",
     icon: "checkmark-done-circle-outline",
@@ -117,6 +120,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/pf-reports?kind=pf", label: "PF Reports", icon: "briefcase-outline" },
       { route: "/pf-reports?kind=esic", label: "ESIC Reports", icon: "medkit-outline" },
       { route: "/clra-registers", label: "CLRA Registers (Form XII–XV)", icon: "documents-outline" },
+      { route: "/statutory-reports", label: "PT / LWF / Gratuity / F&F / MIS", icon: "receipt-outline" },
       { route: "/bank-sheet", label: "Bank Sheet Format", icon: "card-outline" },
       { route: "/reports?tab=salary", label: "Actual Salary Report", icon: "cash-outline" },
       { route: "/reports?tab=compliance", label: "Compliance Report", icon: "shield-checkmark-outline" },
@@ -198,6 +202,7 @@ const NAV_PERMISSION_MAP: Record<string, string[]> = {
   "/companies": ["companies:read", "companies:write"],
   "/company-requests": ["company_requests:read", "company_requests:write"],
   "/bulk-employee-correction": ["employees:read", "employees:write"],
+  "/bulk-operations": ["employees:write", "salary_process:write"],
   "/kyc-tracker": ["employees:read", "employees:write"],
   "/advances": ["salary_process:read", "salary_process:write"],
   "/attendance-policy": ["attendance_policy:read", "attendance_policy:write"],
@@ -379,6 +384,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
       { route: "/pf-reports?kind=pf", label: "PF Reports", icon: "briefcase-outline" },
       { route: "/pf-reports?kind=esic", label: "ESIC Reports", icon: "medkit-outline" },
       { route: "/clra-registers", label: "CLRA Registers (Form XII–XV)", icon: "documents-outline" },
+      { route: "/statutory-reports", label: "PT / LWF / Gratuity / F&F / MIS", icon: "receipt-outline" },
       { route: "/bank-sheet", label: "Bank Sheet Format", icon: "card-outline" },
       { route: "/reports?tab=salary", label: "Actual Salary Report", icon: "cash-outline" },
       { route: "/reports?tab=compliance", label: "Compliance Report", icon: "shield-checkmark-outline" },

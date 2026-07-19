@@ -344,7 +344,11 @@ def _xlsx_bytes(title: str, subtitle: str, cols: List[Tuple[str, str, bool]],
     from openpyxl.utils import get_column_letter
     wb = Workbook()
     ws = wb.active
-    ws.title = title[:31]
+    # Sanitize sheet title — openpyxl rejects / \ * ? : [ ]
+    _safe_title = title[:31]
+    for _ch in "/\\*?:[]":
+        _safe_title = _safe_title.replace(_ch, "-")
+    ws.title = _safe_title
     ws.cell(row=1, column=1, value=title).font = Font(bold=True, size=13, color="1F3D7A")
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max(1, len(cols)))
     ws.cell(row=2, column=1, value=subtitle).font = Font(italic=True, size=10, color="555555")
@@ -600,12 +604,23 @@ async def fnf_report(
         exit_month = str(u["exit_date"])[:7]
         gmap, _src = await _gross_map(company_id, exit_month)
         gross = gmap.get(u["user_id"]) or _master_gross(u)
-        # Days worked in the exit month (distinct punch dates up to exit day)
-        days_worked = len(await db.attendance.distinct("date", {
-            "user_id": u["user_id"], "kind": "in",
-            "date": {"$gte": f"{exit_month}-01", "$lte": str(u["exit_date"])},
-            "status": {"$in": ["approved", None]},
-        }))
+        # Iter 202 (user request) — Present Days per the firm's Attendance
+        # Policy (same pipeline as the grid: 8-HR sub-point, duty-hours
+        # basis, week-off/holiday sub-points), not a raw punch-date count.
+        from server import _compute_monthly_grid_data
+        try:
+            _grid = await _compute_monthly_grid_data(
+                company_id=company_id, month=exit_month,
+                only_user_id=u["user_id"])
+            _tot = ((_grid.get("rows") or [{}])[0].get("totals") or {})
+            days_worked = _num(_tot.get("present_days_policy"),
+                               _num(_tot.get("present_days")))
+        except Exception:
+            days_worked = len(await db.attendance.distinct("date", {
+                "user_id": u["user_id"], "kind": "in",
+                "date": {"$gte": f"{exit_month}-01", "$lte": str(u["exit_date"])},
+                "status": {"$in": ["approved", None]},
+            }))
         y, m = int(exit_month[:4]), int(exit_month[5:7])
         month_days = calendar.monthrange(y, m)[1]
         earned = round(gross * days_worked / max(1, month_days), 2)
@@ -626,13 +641,13 @@ async def fnf_report(
         rows.append({
             "employee_code": u.get("employee_code"), "name": u.get("name"),
             "doj": u.get("doj"), "exit_date": u.get("exit_date"),
-            "service_years": yrs, "days_worked": days_worked,
+            "service_years": yrs, "days_worked": round(_num(days_worked), 2),
             "monthly_gross": round(gross, 2), "earned_salary": earned,
             "gratuity": gratuity, "advance_recovery": adv_out, "net_payable": net,
         })
     cols = [("Emp Code", "employee_code", False), ("Name", "name", False),
             ("DOJ", "doj", False), ("Exit Date", "exit_date", False),
-            ("Service (Yrs)", "service_years", False), ("Days Worked", "days_worked", False),
+            ("Service (Yrs)", "service_years", False), ("Present Days", "days_worked", False),
             ("Monthly Gross", "monthly_gross", True), ("Earned Salary", "earned_salary", True),
             ("Gratuity", "gratuity", True), ("Advance Recovery", "advance_recovery", True),
             ("Net Payable", "net_payable", True)]

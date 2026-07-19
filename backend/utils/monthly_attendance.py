@@ -147,7 +147,7 @@ def _summary_columns_hours() -> List[str]:
     return [
         "Extra  Hrs", "Work Hrs", "Week Off Hrs", "GP Hrs",
         "MOT Hrs", "OT Hrs", "Lost Hrs", "PL Days", "CL Days",
-        "Remaining Hrs", "Tot. Days", "Tot. Hrs",
+        "Remaining Hrs", "Present Days", "Tot. Hrs",
     ]
 
 
@@ -580,7 +580,7 @@ def build_grid_view_xlsx(grid: Dict[str, Any]) -> bytes:
     c.fill = hdr_fill
     c.alignment = center
     c.border = border
-    c = ws.cell(row=header_row, column=6 + days_n + 1, value="Days")
+    c = ws.cell(row=header_row, column=6 + days_n + 1, value="Present Days")
     c.font = hdr_font
     c.fill = hdr_fill
     c.alignment = center
@@ -782,7 +782,7 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
     # Layout: A=Bio Code, B=Name, C=Father, D=Designation, E..=days, then Duty, OT, Total Duty, Days, Extra
-    trail_labels = ["Duty HRS", "OT HRS", "Total Duty HRS", "Days", "Extra HRS"]
+    trail_labels = ["Duty HRS", "OT HRS", "Total Duty HRS", "Present Days", "Extra HRS"]
     total_cols = 4 + days_n + len(trail_labels)
 
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_cols)
@@ -882,7 +882,10 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
         duty_only = round(max(0.0, combined - ot), 2)
         present = float(totals.get("present_days") or 0.0)
         # Iter 83 — Split days into whole days + extra HRS.
-        days_int = int(totals.get("total_days_int") or 0)
+        # Iter 202 — Present Days per the firm's attendance policy.
+        days_int = totals.get("present_days_policy")
+        if days_int is None:
+            days_int = int(totals.get("total_days_int") or 0)
         extra_hrs = float(totals.get("total_extra_hrs") or 0.0)
         grand_duty += duty_only
         grand_ot += ot
@@ -911,7 +914,11 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
             ws.cell(row=cur, column=c_).fill = PatternFill("solid", fgColor="E6EDED")
             ws.cell(row=cur, column=c_).border = border
         ws.cell(row=cur, column=1, value=f"Employees: {len(employees)}").font = total_font
-        grand_days_int = sum(int((e.get("totals") or {}).get("total_days_int") or 0) for e in employees)
+        grand_days_int = sum(
+        float((e.get("totals") or {}).get("present_days_policy")
+              if (e.get("totals") or {}).get("present_days_policy") is not None
+              else (e.get("totals") or {}).get("total_days_int") or 0)
+        for e in employees)
         grand_extra_hrs = sum(float((e.get("totals") or {}).get("total_extra_hrs") or 0.0) for e in employees)
         for k, val in enumerate([
             round(grand_duty, 2), round(grand_ot, 2),

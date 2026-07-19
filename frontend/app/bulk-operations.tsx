@@ -517,8 +517,8 @@ export default function BulkOperationsScreen() {
               <MonthPicker value={attMonth} onChange={setAttMonth} />
             </View>
             <Text style={st.hint}>
-              Status codes: P (Present) & HD (Half Day) create punches from the
-              employee's shift timing; A / WO / H / L are skipped (policy handles them).
+              Status codes: P (Present) &amp; HD (Half Day) create punches from the
+              employee&apos;s shift timing; A / WO / H / L are skipped (policy handles them).
             </Text>
             <Pressable style={st.secondaryBtn} onPress={downloadAttTemplate} disabled={busy}>
               <Ionicons name="download-outline" size={16} color={colors.brandPrimary} />

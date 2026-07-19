@@ -49,7 +49,7 @@ export default function ClraRegistersScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const download = useCallback(
-    async (form: (typeof FORMS)[number]) => {
+    async (form: (typeof FORMS)[number], ext: "pdf" | "xlsx" = "pdf") => {
       setError(null);
       if (!selectedCompanyId) {
         setError("Select a firm from the top bar first.");
@@ -59,18 +59,18 @@ export default function ClraRegistersScreen() {
         setError("Pick a wage month for Form XV.");
         return;
       }
-      setBusy(form.key);
+      setBusy(`${form.key}:${ext}`);
       try {
         const q =
           `?company_id=${encodeURIComponent(selectedCompanyId)}` +
           (form.needsMonth ? `&month=${encodeURIComponent(month)}` : "");
         const { webBlobUrl } = await apiBinary(
-          `/admin/clra-registers/${form.file}.pdf${q}`,
+          `/admin/clra-registers/${form.file}.${ext}${q}`,
         );
         if (Platform.OS === "web" && webBlobUrl) {
           const a = document.createElement("a");
           a.href = webBlobUrl;
-          a.download = `CLRA_${form.file}.pdf`;
+          a.download = `CLRA_${form.file}.${ext}`;
           a.click();
           setTimeout(() => URL.revokeObjectURL(webBlobUrl), 30000);
         }
@@ -120,12 +120,25 @@ export default function ClraRegistersScreen() {
               <Text style={st.cardDesc}>{f.desc}</Text>
             </View>
             <Pressable
-              style={[st.dlBtn, busy === f.key && st.disabled]}
-              onPress={() => download(f)}
+              style={[st.dlBtn, st.dlBtnAlt, busy === `${f.key}:xlsx` && st.disabled]}
+              onPress={() => download(f, "xlsx")}
+              disabled={busy !== null}
+              testID={`clra-xlsx-${f.key}`}
+            >
+              {busy === `${f.key}:xlsx` ? (
+                <ActivityIndicator color={colors.brandPrimary} size="small" />
+              ) : (
+                <Ionicons name="grid-outline" size={16} color={colors.brandPrimary} />
+              )}
+              <Text style={[st.dlBtnTxt, { color: colors.brandPrimary }]}>Excel</Text>
+            </Pressable>
+            <Pressable
+              style={[st.dlBtn, busy === `${f.key}:pdf` && st.disabled]}
+              onPress={() => download(f, "pdf")}
               disabled={busy !== null}
               testID={`clra-dl-${f.key}`}
             >
-              {busy === f.key ? (
+              {busy === `${f.key}:pdf` ? (
                 <ActivityIndicator color="#fff" size="small" />
               ) : (
                 <Ionicons name="download-outline" size={16} color="#fff" />
@@ -172,5 +185,9 @@ const st = StyleSheet.create({
     paddingVertical: 10, paddingHorizontal: 14, minHeight: 42,
   },
   disabled: { opacity: 0.7 },
+  dlBtnAlt: {
+    backgroundColor: "transparent", borderWidth: 1,
+    borderColor: colors.brandPrimary,
+  },
   dlBtnTxt: { color: "#fff", fontSize: 13.5, fontWeight: "800" },
 });

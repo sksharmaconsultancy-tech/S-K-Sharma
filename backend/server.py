@@ -16614,6 +16614,10 @@ async def _compute_monthly_grid_data(
         (pol.get("policy_master") or {}).get("compliance_present_8hr")
         and (pol.get("salary_allowed") or "both") in ("compliance", "both")
     )
+    # Iter 202 — firm-level Policy Master flags for the policy-based
+    # "Present Days" column (user request: every report shows Present Days
+    # calculated per the firm's attendance policy).
+    _pm_firm = pol.get("policy_master") or {}
     # Iter 200 — Holiday Master dates (for holiday_present_add_ot).
     _holiday_dates = await holiday_dates_for_company(company_id)
     # Iter 77e — Load the GLOBAL Shift Master catalogue once so we can
@@ -16696,6 +16700,7 @@ async def _compute_monthly_grid_data(
         by_day = punches_by_user_day.get(uid, {})
         days_cell: Dict[str, Dict[str, Any]] = {}
         total_present_days = 0
+        total_present_policy = 0.0  # Iter 202 — policy-based Present Days
         total_hours = 0.0
         total_ot_hours = 0.0
         total_duty_only = 0.0   # Iter 77s — duty excluding OT
@@ -16877,13 +16882,20 @@ async def _compute_monthly_grid_data(
             #     present AND hours go to the OT column.
             _pm_flags = eff_policy.get("policy_master") or {}
             _holiday_present_credit = False
+            # Iter 202 — policy-based per-day Present credit.
+            _day_present = float(summary.get("present_days") or 0.0)
+            if _pm_8hr_reports and (duty_only_hrs + ot_hrs) >= 8.0:
+                _day_present = max(_day_present, 1.0)
             if hrs > 0 and summary.get("is_weekly_off") and _pm_flags.get("weekoff_present_add_ot"):
                 ot_hrs = round(duty_only_hrs + ot_hrs, 2)
                 duty_only_hrs = 0.0
+                _day_present = 0.0
             if hrs > 0 and _is_holiday_day and _pm_flags.get("holiday_present_add_ot"):
                 ot_hrs = round(duty_only_hrs + ot_hrs, 2)
                 duty_only_hrs = 0.0
                 _holiday_present_credit = True
+                _day_present = 1.0
+            total_present_policy += _day_present
             days_cell[key] = {
                 "in": _in_display.strftime("%H:%M") if _in_display else None,
                 "out": _out_display.strftime("%H:%M") if _out_display else None,
@@ -16895,7 +16907,7 @@ async def _compute_monthly_grid_data(
                 "ot_hours": ot_hrs,     # separate OT (for OT report)
                 "punches": len(day_punches),
                 "sources": seen,
-                "present": summary.get("present_days") or 0.0,
+                "present": _day_present,
                 "weekly_off": bool(summary.get("is_weekly_off")),
                 "holiday": _is_holiday_day,
                 # Iter 94 — day-wise earned salary (basic-rate based).
@@ -16938,10 +16950,24 @@ async def _compute_monthly_grid_data(
                 #   2. Firm-level standard_working_hours / full_day_hours
                 # This mirrors the payroll compute so admins see the exact
                 # day count that will be used on the salary run.
+                # Iter 202 (user request) — "Present Days" replaces the old
+                # hours÷divisor "Days" column EVERYWHERE. Value follows the
+                # firm's Attendance Policy:
+                #   • attendance_by_duty_hours sub-point ON → Total HRS ÷
+                #     Daily Duty HRS (8 when the 8-HR sub-point is active).
+                #   • otherwise → per-day policy present counting (week-off /
+                #     holiday sub-points + 8-HR rule applied per day).
                 "total_days_computed": (
-                    round(total_hours / emp_daily_hrs, 2)
-                    if emp_daily_hrs > 0
-                    else 0.0
+                    round(total_hours / (8.0 if _pm_8hr_reports else emp_daily_hrs), 2)
+                    if _pm_firm.get("attendance_by_duty_hours")
+                    and (8.0 if _pm_8hr_reports else emp_daily_hrs) > 0
+                    else round(total_present_policy, 2)
+                ),
+                "present_days_policy": (
+                    round(total_hours / (8.0 if _pm_8hr_reports else emp_daily_hrs), 2)
+                    if _pm_firm.get("attendance_by_duty_hours")
+                    and (8.0 if _pm_8hr_reports else emp_daily_hrs) > 0
+                    else round(total_present_policy, 2)
                 ),
                 # Iter 83 — Split the decimal days into whole-days +
                 # remainder-hours per user request:
@@ -16950,8 +16976,10 @@ async def _compute_monthly_grid_data(
                 #     → total_extra_hrs = 11.30
                 # (Extra HRS = Total Duty HRS − total_days_int × Daily.)
                 "total_days_int": (
-                    int(total_hours // emp_daily_hrs)
-                    if emp_daily_hrs > 0 else 0
+                    int(total_hours // (8.0 if _pm_8hr_reports else emp_daily_hrs))
+                    if _pm_firm.get("attendance_by_duty_hours")
+                    and (8.0 if _pm_8hr_reports else emp_daily_hrs) > 0
+                    else int(total_present_policy)
                 ),
                 "total_extra_hrs": (
                     round(

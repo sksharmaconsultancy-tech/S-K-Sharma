@@ -1,0 +1,46 @@
+{
+  "summary": "Iter 202 backend + frontend verification. Wrote /app/backend/tests/test_iter202_bulk_ops_reports.py (32 tests) covering bulk-ops attendance in/out round trip, salary excel preview, transfer/resignation/shift-assign validations, PT/LWF/Gratuity/F&F/Advance-Loan/MIS JSON+XLSX+PDF, CLRA XLSX exports, grid.totals.present_days_policy, the 8-HR compliance sub-point round trip (flag ON → 10hr day splits duty<=8h + ot>=1h; flag reset OFF), and 401 auth checks. All 32 tests PASS after one small backend fix (openpyxl sheet-title sanitize). Frontend: /bulk-operations page loads correctly with 6 tabs (Attendance Upload / Salary Revision / Transfer / Resignation / Shift Assign / History), format chips (Status Grid / In-Out Times) and Download template button; sidebar shows Bulk Operations entry, Reports group and firm selector shows Kankani Enterprises · KEPS. Deep clicks into every sub-tab and /statutory-reports, /clra-registers, /attendance-grid were partially verified — repeated cross-page navigation caused the auth session to redirect back to the sign-in landing (localStorage token injected but Web app re-hydrates through a role gate after visiting '/'), so items 15/16/17 need one manual pass or a bulk-nav retest. No React-Native/Expo deprecation issues found in the touched screens (this is the Expo web PWA).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/admin/reports/advance-loan?fmt=xlsx (and any report whose title contains '/')",
+       "issue": "openpyxl rejects '/' in sheet title — was raising 500 'Invalid character / found in sheet title'. FIXED in /app/backend/routes/statutory_extra_reports.py `_xlsx_bytes` by replacing forbidden chars (/\\*?:[]) with '-'."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Super-admin web session persistence across page.goto navigations in Playwright",
+       "issue": "Injecting session_token into localStorage works on the first authenticated route load (/bulk-operations rendered fine), but navigating first to '/' clears the intended route and shows the landing 'Sign in to continue' card again. Suggests the SPA reads token from a different store (e.g. Zustand-persist under an alternate key) or rehydrates asynchronously. Recommend main agent expose a documented test-hook or accept ?token= in URL. Non-blocking for real users.",
+       "affected_testIDs": []}
+    ],
+    "design_issues": [
+      {"screen": "Employer Sign In / Bulk Operations",
+       "issues": ["Console warnings: 'Invalid style property outline / background' and shorthand padding '0 8px' — RN-web style warnings; harmless but noisy."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter202_bulk_ops_reports.py",
+    "/app/test_reports/pytest/iter202.xml"
+  ],
+  "action_items": [
+    "None blocking. Optional: normalize RN-web style shorthand ('outline', 'background', padding '0 8px') to silence console warnings.",
+    "Optional: provide a test-mode auth-inject helper so playwright can traverse multiple protected pages after cross-nav to '/'."
+  ],
+  "critical_code_review_comments": [
+    "openpyxl sheet-title had to be sanitized (fixed) — apply the same guard to any other _xlsx path that uses the report title verbatim.",
+    "Bulk-ops attendance-apply does not currently expose a batch-delete endpoint. Cleanup here was done via direct mongo. Consider adding DELETE /api/admin/attendance/by-batch/{batch} for operator undo.",
+    "bulk_ops.py `_revise_actual` uses a `for/else` that recomputes new_basic even when a Basic row is found; harmless but the `else` clause is redundant."
+  ],
+  "updated_files": [
+    "/app/backend/routes/statutory_extra_reports.py (sanitize sheet title in _xlsx_bytes)",
+    "/app/backend/tests/test_iter202_bulk_ops_reports.py (new)"
+  ],
+  "success_rate": {"backend": "100% (32/32)", "frontend": "70% (Bulk Operations page fully verified; statutory-reports/clra-registers/attendance-grid pages not deeply clicked due to auth-state loss on cross-navigation)"},
+  "seed_data_creation": "No permanent seed data. Test-created punches for TEST50 on 2026-07-20 and 2026-08-05 were removed via mongo (import_batch). policy_master.compliance_present_8hr was toggled to true then reset to false.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "For frontend E2E on protected pages, prefer landing on /company-login (or /admin-set-password), inject token BEFORE the SPA hydrates, then go directly to the target page. Cross-navigating through '/' first will re-route to the sign-in landing.",
+  "rca_of_issue": "advance-loan xlsx 500: title 'Advance / Loan Register' contains '/' which openpyxl forbids in worksheet titles. Fix applied in _xlsx_bytes by stripping /\\*?:[] characters. Verified via pytest — all report/xlsx endpoints now return PK-magic xlsx bytes."
+}

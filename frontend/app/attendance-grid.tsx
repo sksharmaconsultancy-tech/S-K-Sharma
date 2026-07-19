@@ -796,7 +796,7 @@ export default function AttendanceGridScreen() {
         <View style={styles.groupBox}>
           <Text style={styles.rangeLabel}>Sort</Text>
           <View style={styles.groupChipsRow}>
-            {([["code", "Code"], ["name", "Name"], ["days", "Days"], ["duty", "Duty HRS"], ["ot", "OT HRS"]] as const).map(([col, lab]) => (
+            {([["code", "Code"], ["name", "Name"], ["days", "Present Days"], ["duty", "Duty HRS"], ["ot", "OT HRS"]] as const).map(([col, lab]) => (
               <Pressable
                 key={col}
                 onPress={() => toggleSort(col as any)}
@@ -995,7 +995,7 @@ function GridHeader({
         onPress={tap("days")}
         style={[styles.hcell, styles.sumCell, { width: COL.sum }]}
       >
-        <Text style={styles.hcellTxt}>Days{arrow("days")}</Text>
+        <Text style={styles.hcellTxt}>Present Days{arrow("days")}</Text>
       </Pressable>
       {/* Iter 83 — Extra HRS column: remainder of (Total Duty HRS mod Daily HRS). */}
       <View style={[styles.hcell, styles.sumCell, { width: COL.sum }]}>
@@ -1070,9 +1070,11 @@ function GridRow({
       </View>
       <View style={[styles.cell, styles.sumCellLight, { width: COL.sum }]}>
         <Text style={styles.sumTxt}>
-          {typeof (emp.totals as any).total_days_int === "number"
-            ? (emp.totals as any).total_days_int
-            : emp.totals.present_days}
+          {typeof (emp.totals as any).present_days_policy === "number"
+            ? (emp.totals as any).present_days_policy
+            : typeof (emp.totals as any).total_days_int === "number"
+              ? (emp.totals as any).total_days_int
+              : emp.totals.present_days}
         </Text>
       </View>
       {/* Iter 83 — Extra HRS (fractional part of days × daily hrs). */}
