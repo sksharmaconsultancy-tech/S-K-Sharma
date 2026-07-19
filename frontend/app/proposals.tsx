@@ -126,16 +126,18 @@ export default function ProposalsScreen() {
     }
   }, [client, types, services, price, load, selectedCompanyId]);
 
-  const download = useCallback(async (id: string, kind: "pdf" | "doc") => {
+  const download = useCallback(async (id: string, kind: "pdf" | "doc", cid?: string) => {
     try {
-      const { webBlobUrl } = await apiBinary(`/admin/proposals/${id}/export.${kind}`);
+      const qcid = cid || selectedCompanyId;
+      const qs = qcid ? `?company_id=${encodeURIComponent(qcid)}` : "";
+      const { webBlobUrl } = await apiBinary(`/admin/proposals/${id}/export.${kind}${qs}`);
       if (Platform.OS === "web" && webBlobUrl) {
         const a = document.createElement("a");
         a.href = webBlobUrl; a.download = `${id}.${kind}`; a.click();
         setTimeout(() => URL.revokeObjectURL(webBlobUrl), 30000);
       }
     } catch (e: any) { setMsg(e?.message || "Export failed."); }
-  }, []);
+  }, [selectedCompanyId]);
 
   const [converting, setConverting] = useState<string | null>(null);
   const convert = useCallback(async (id: string, clientName: string) => {
@@ -279,11 +281,11 @@ export default function ProposalsScreen() {
                   <Text style={st.pTotal}>₹ {Math.round(p.pricing?.grand_total || 0).toLocaleString("en-IN")}</Text>
                 </View>
               </View>
-              <Pressable style={st.expBtn} onPress={() => download(p.proposal_id, "pdf")}>
+              <Pressable style={st.expBtn} onPress={() => download(p.proposal_id, "pdf", (p as any).company_id)}>
                 <Ionicons name="document-outline" size={15} color={colors.brandPrimary} />
                 <Text style={st.expTxt}>PDF</Text>
               </Pressable>
-              <Pressable style={st.expBtn} onPress={() => download(p.proposal_id, "doc")}>
+              <Pressable style={st.expBtn} onPress={() => download(p.proposal_id, "doc", (p as any).company_id)}>
                 <Ionicons name="document-text-outline" size={15} color="#2563EB" />
                 <Text style={[st.expTxt, { color: "#2563EB" }]}>Word</Text>
               </Pressable>
