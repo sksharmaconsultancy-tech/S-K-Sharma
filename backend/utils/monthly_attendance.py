@@ -781,9 +781,11 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
     )
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    # Layout: A=Bio Code, B=Name, C=Father, D=Designation, E..=days, then Duty, OT, Total Duty, Days, Extra
+    # Layout (Iter 202 — user request): A=Bio Code, B=Name, C=Father,
+    # D=Designation, E=Type (Duty HRS / OT HRS — one row EACH per employee,
+    # day-wise, per the attendance policy), F..=days, then trailing totals.
     trail_labels = ["Duty HRS", "OT HRS", "Total Duty HRS", "Present Days", "Extra HRS"]
-    total_cols = 4 + days_n + len(trail_labels)
+    total_cols = 5 + days_n + len(trail_labels)
 
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_cols)
     ws.cell(row=1, column=1, value=f"{company_name} — Hours Only").font = Font(
@@ -801,14 +803,15 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
     )
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=total_cols)
     ws.cell(row=2, column=1, value=(
-        f"{period} · Days: {days_n} · Each cell shows Duty HRS + OT HRS combined per day. "
+        f"{period} · Days: {days_n} · Duty HRS and OT HRS shown in SEPARATE rows "
+        f"per employee, day-wise, as per the firm's attendance policy. "
         f"Generated: {datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime('%d-%b-%Y %H:%M IST')}"
     )).font = Font(italic=True, color="475569", size=10)
     ws.cell(row=2, column=1).alignment = center
     ws.row_dimensions[2].height = 18
 
     header_row = 4
-    hdrs = ["Bio Code", "Emp Name", "Emp Father Name", "Designation"]
+    hdrs = ["Bio Code", "Emp Name", "Emp Father Name", "Designation", "Type"]
     for i, label in enumerate(hdrs, start=1):
         c = ws.cell(row=header_row, column=i, value=label)
         c.font = hdr_font
@@ -817,13 +820,13 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
         c.border = border
     for j, day_lbl in enumerate(day_labels):
         wk = weekday_labels[j] if j < len(weekday_labels) else ""
-        c = ws.cell(row=header_row, column=5 + j, value=f"D{day_lbl}\n{wk}")
+        c = ws.cell(row=header_row, column=6 + j, value=f"D{day_lbl}\n{wk}")
         c.font = hdr_font
         c.fill = hdr_fill
         c.alignment = center
         c.border = border
     for k, label in enumerate(trail_labels):
-        c = ws.cell(row=header_row, column=5 + days_n + k, value=label)
+        c = ws.cell(row=header_row, column=6 + days_n + k, value=label)
         c.font = hdr_font
         c.fill = hdr_fill
         c.alignment = center
@@ -834,11 +837,22 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
     ws.column_dimensions["B"].width = 26
     ws.column_dimensions["C"].width = 22
     ws.column_dimensions["D"].width = 18
+    ws.column_dimensions["E"].width = 10
     for j in range(days_n):
-        ws.column_dimensions[get_column_letter(5 + j)].width = 8
+        ws.column_dimensions[get_column_letter(6 + j)].width = 8
     for k in range(len(trail_labels)):
-        ws.column_dimensions[get_column_letter(5 + days_n + k)].width = 11
-    ws.freeze_panes = f"E{header_row + 1}"
+        ws.column_dimensions[get_column_letter(6 + days_n + k)].width = 11
+    ws.freeze_panes = f"F{header_row + 1}"
+
+    def _fmt_hhmm(hrs: float) -> str:
+        if hrs <= 0:
+            return "00:00"
+        h = int(hrs)
+        mm = int(round((hrs - h) * 60))
+        if mm >= 60:
+            h += 1
+            mm -= 60
+        return f"{h:02d}:{mm:02d}"
 
     cur = header_row + 1
     grand_duty = grand_ot = grand_total = 0.0
@@ -847,41 +861,45 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
         days_cell = emp.get("days") or {}
         totals = emp.get("totals") or {}
         fill = zebra_a if idx % 2 == 0 else zebra_b
+        duty_row, ot_row = cur, cur + 1
 
+        # Identity columns merged vertically across the Duty/OT row pair.
         _bio = emp.get("bio_code")
-        ws.cell(row=cur, column=1, value="" if _bio in (None, "") else str(_bio))
-        ws.cell(row=cur, column=2, value=emp.get("name") or "")
-        ws.cell(row=cur, column=3, value=emp.get("father_name") or "")
-        ws.cell(
-            row=cur, column=4,
-            value=emp.get("designation") or emp.get("department") or "",
-        )
+        id_vals = [
+            "" if _bio in (None, "") else str(_bio),
+            emp.get("name") or "",
+            emp.get("father_name") or "",
+            emp.get("designation") or emp.get("department") or "",
+        ]
+        for col_i, v in enumerate(id_vals, start=1):
+            ws.merge_cells(start_row=duty_row, start_column=col_i,
+                           end_row=ot_row, end_column=col_i)
+            c = ws.cell(row=duty_row, column=col_i, value=v)
+            c.alignment = Alignment(vertical="center", wrap_text=True)
+        ws.cell(row=duty_row, column=5, value="Duty HRS").font = Font(size=9, bold=True)
+        ws.cell(row=ot_row, column=5, value="OT HRS").font = Font(
+            size=9, bold=True, color="B45309")
 
+        # Iter 202 (user request) — day-wise Duty HRS and OT HRS in
+        # SEPARATE rows, both already policy-adjusted upstream (8-HR
+        # sub-point, week-off / holiday rules, rounding, OT gates).
         for j, day_lbl in enumerate(day_labels):
             d = days_cell.get(day_lbl) or {}
-            # Iter 77z-final — Per-day cell = Duty HRS + OT HRS (both
-            # included). Trailing columns still break out Duty / OT /
-            # Total / Days separately for clarity.
-            hrs = float(d.get("hours") or 0.0)  # already includes OT
-            if hrs > 0:
-                h = int(hrs)
-                mm = int(round((hrs - h) * 60))
-                if mm >= 60:
-                    h += 1
-                    mm -= 60
-                val = f"{h:02d}:{mm:02d}"
-            else:
-                val = "00:00"
-            c = ws.cell(row=cur, column=5 + j, value=val)
+            duty_h = float(d.get("duty_hours") or 0.0)
+            ot_h = float(d.get("ot_hours") or 0.0)
+            c = ws.cell(row=duty_row, column=6 + j, value=_fmt_hhmm(duty_h))
             c.alignment = center
             c.border = border
             c.font = Font(size=9)
+            c2 = ws.cell(row=ot_row, column=6 + j, value=_fmt_hhmm(ot_h))
+            c2.alignment = center
+            c2.border = border
+            c2.font = Font(size=9, color="B45309" if ot_h > 0 else "94A3B8")
 
         combined = float(totals.get("hours") or 0.0)
         ot = float(totals.get("ot_hours") or 0.0)
         duty_only = round(max(0.0, combined - ot), 2)
         present = float(totals.get("present_days") or 0.0)
-        # Iter 83 — Split days into whole days + extra HRS.
         # Iter 202 — Present Days per the firm's attendance policy.
         days_int = totals.get("present_days_policy")
         if days_int is None:
@@ -895,18 +913,21 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
             round(duty_only, 2), round(ot, 2),
             round(combined, 2), days_int, round(extra_hrs, 2),
         ]):
-            c = ws.cell(row=cur, column=5 + days_n + k, value=val)
+            ws.merge_cells(start_row=duty_row, start_column=6 + days_n + k,
+                           end_row=ot_row, end_column=6 + days_n + k)
+            c = ws.cell(row=duty_row, column=6 + days_n + k, value=val)
             c.alignment = center
             c.border = border
             c.number_format = "0" if k == 3 else "0.00"
             c.font = total_font
 
-        for c_ in range(1, total_cols + 1):
-            cell = ws.cell(row=cur, column=c_)
-            cell.fill = fill
-            cell.border = border
-        ws.row_dimensions[cur].height = 18
-        cur += 1
+        for r_ in (duty_row, ot_row):
+            for c_ in range(1, total_cols + 1):
+                cell = ws.cell(row=r_, column=c_)
+                cell.fill = fill
+                cell.border = border
+            ws.row_dimensions[r_].height = 17
+        cur += 2
 
     # Footer totals
     if employees:
@@ -924,7 +945,7 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
             round(grand_duty, 2), round(grand_ot, 2),
             round(grand_total, 2), grand_days_int, round(grand_extra_hrs, 2),
         ]):
-            c = ws.cell(row=cur, column=5 + days_n + k, value=val)
+            c = ws.cell(row=cur, column=6 + days_n + k, value=val)
             c.font = total_font
             c.alignment = center
             c.number_format = "0" if k == 3 else "0.00"
