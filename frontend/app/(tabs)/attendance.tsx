@@ -33,7 +33,7 @@ import {
   fingerprintSupported, verifyFingerprint, enrollFingerprint,
 } from "@/src/utils/fingerprintGate";
 import {
-  enqueuePunch, flushQueue, isOnline, pendingCount, setLastSync,
+  enqueuePunch, flushQueue, getOfflinePunchEnabled, isOnline, pendingCount, setLastSync,
 } from "@/src/utils/offlinePunch";
 
 type Company = {
@@ -76,15 +76,20 @@ export default function AttendanceScreen() {
 
   // Keep a ref to loadAll so the flush callback can refresh the screen.
   const loadAllRef = useRef<null | (() => Promise<void>)>(null);
+  // Ref to the latest doFlush so mount-only listeners never go stale.
+  const doFlushRef = useRef(doFlush);
+  useEffect(() => { doFlushRef.current = doFlush; }, [doFlush]);
 
   useEffect(() => {
-    // Resolve whether this firm allows offline punching.
-    api<{ offline_punch_enabled?: boolean }>("/attendance/my-geo-policy")
-      .then((p) => setOfflineEnabled(!!p?.offline_punch_enabled))
+    // MOUNT-ONLY: resolve whether this firm allows offline punching
+    // (TTL-cached — see offlinePunch.ts, prevents 429 storms on remounts)
+    // and hook up online/offline listeners once.
+    getOfflinePunchEnabled(api as any)
+      .then((enabled) => setOfflineEnabled(enabled))
       .catch(() => {});
     void refreshPending();
     if (Platform.OS === "web" && typeof window !== "undefined") {
-      const on = () => { setOnline(true); void doFlush(); };
+      const on = () => { setOnline(true); void doFlushRef.current(); };
       const off = () => setOnline(false);
       window.addEventListener("online", on);
       window.addEventListener("offline", off);
@@ -93,7 +98,8 @@ export default function AttendanceScreen() {
         window.removeEventListener("offline", off);
       };
     }
-  }, [refreshPending, doFlush]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Attempt a sync whenever offline is enabled + we think we're online.
   useEffect(() => { if (offlineEnabled && online) void doFlush(); }, [offlineEnabled, online, doFlush]);

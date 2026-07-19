@@ -181,3 +181,9 @@ See `/app/memory/test_credentials.md`. Super admin
 - Backend: routes/advances.py + salary hooks (compliance create/reprocess, actual process). 25/25 pytest (tests/test_iter192_advances.py). Idempotency, 'both' mirroring, net-cap, all action validations verified.
 - Frontend: app/advances.tsx (Dashboard/Ledger/Reports + modals), app/my-advances.tsx (ESS), sidebar + ESS quick card. E2E pass (create ADV-00001, pause->on_hold, delete, reports).
 - Test data fully cleaned by testing agent.
+
+## Iter 197/198 — Geofence Phase 2 (offline punch queue) + RBAC route protection
+- Backend 4/4 pytest (tests/test_iter_geofence_phase2.py): my-geo-policy toggle, offline capture-time honoured (IST), dedupe idempotency, 7-day sanity window. Curl E2E: offline punch with client_punch_at stored with correct at/date/synced_at/pending.
+- RBAC: fixed Stack-remount reset in AdminWebShell (stable skeleton) + boot-path restore in index.tsx; staff/sub-admin direct URLs to restricted pages now show Access Denied (route-access-denied) with URL preserved. Page guards in roles/approval-workflows/advances return null on web instead of Redirect.
+- iteration_198 429-storm on /attendance/my-geo-policy fixed via TTL cache + AsyncStorage persistence + mount-only effect (offlinePunch.getOfflinePunchEnabled).
+- Known env noise: dev LogBox "Failed to fetch" overlay when simulating offline in dev builds (dev-only); Cloudflare security-check challenges under heavy automation.

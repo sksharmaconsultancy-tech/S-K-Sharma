@@ -256,6 +256,9 @@ export default function AdvancesScreen() {
   const _isStaff = !!(user as any)?.is_company_staff;
   const _staffPerms: string[] = ((user as any)?.staff_permissions || []) as string[];
   if (_isStaff && !_staffPerms.some((p) => p === "salary_process:read" || p === "salary_process:write")) {
+    // Desktop web: AdminWebShell overlays "Access Denied" while this screen
+    // stays mounted — a <Redirect> here would clobber the URL. Render nothing.
+    if (Platform.OS === "web") return null;
     return <Redirect href="/portal-dashboard" />;
   }
 

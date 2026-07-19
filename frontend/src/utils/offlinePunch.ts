@@ -159,11 +159,21 @@ export async function flushQueue(
         await remove(item.client_dedupe_id);
         synced += 1;
       } catch (e: any) {
-        // Duplicate / already-accepted → drop it. Other errors → keep & retry.
+        // Duplicate / already-accepted → drop it. Permanent server rejections
+        // (validation, geofence, double-punch → 4xx) → drop too, otherwise a
+        // dead punch would retry forever and the pending banner never clears.
+        // Transient failures (network, 401 session refresh, 429, 5xx) → keep.
         const msg = String(e?.message || "").toLowerCase();
-        if (msg.includes("duplicate") || e?.status === 409) {
+        const status = Number(e?.status || 0);
+        if (msg.includes("duplicate") || status === 409) {
           await remove(item.client_dedupe_id);
           synced += 1;
+        } else if (
+          (status >= 400 && status < 500 && status !== 401 && status !== 429) ||
+          item.attempts >= 20
+        ) {
+          await remove(item.client_dedupe_id);
+          failed += 1;
         } else {
           await bump(item);
           failed += 1;
@@ -183,4 +193,39 @@ export async function setLastSync(ts: number): Promise<void> {
 export async function getLastSync(): Promise<number | null> {
   const v = await AsyncStorage.getItem(lastSyncKey);
   return v ? Number(v) : null;
+}
+
+// ---- Firm offline-punch policy (TTL-cached + in-flight deduped) -----------
+// The attendance screen may remount/re-render aggressively; without this
+// cache the /attendance/my-geo-policy call can storm the API (429s).
+let _polCache: { at: number; enabled: boolean } | null = null;
+let _polInflight: Promise<boolean> | null = null;
+const POL_TTL_MS = 60_000;
+const POL_STORE_KEY = "sks_offline_policy";
+
+export async function getOfflinePunchEnabled(
+  get: (path: string) => Promise<any>,
+): Promise<boolean> {
+  if (_polCache && Date.now() - _polCache.at < POL_TTL_MS) return _polCache.enabled;
+  if (_polInflight) return _polInflight;
+  _polInflight = get("/attendance/my-geo-policy")
+    .then((p: any) => {
+      _polCache = { at: Date.now(), enabled: !!p?.offline_punch_enabled };
+      void AsyncStorage.setItem(POL_STORE_KEY, _polCache.enabled ? "1" : "0");
+      return _polCache.enabled;
+    })
+    .catch(async () => {
+      // Network/rate-limit failure (typically because we're OFFLINE — the
+      // exact moment this flag matters). Fall back to the last-known value
+      // persisted on-device; retry the server in 15s.
+      let prev = _polCache?.enabled ?? false;
+      try {
+        const stored = await AsyncStorage.getItem(POL_STORE_KEY);
+        if (stored !== null) prev = stored === "1";
+      } catch {}
+      _polCache = { at: Date.now() - (POL_TTL_MS - 15_000), enabled: prev };
+      return prev;
+    })
+    .finally(() => { _polInflight = null; });
+  return _polInflight;
 }

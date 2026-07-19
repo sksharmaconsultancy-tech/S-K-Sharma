@@ -63,7 +63,13 @@ export default function ApprovalWorkflows() {
   };
 
   if (authLoading) return null;
-  if (!user || isStaff || !["super_admin", "sub_admin", "company_admin"].includes(role)) {
+  if (!user || !["super_admin", "sub_admin", "company_admin"].includes(role)) {
+    return <Redirect href="/" />;
+  }
+  if (isStaff) {
+    // Desktop web: AdminWebShell overlays "Access Denied" while this screen
+    // stays mounted — a <Redirect> here would clobber the URL. Render nothing.
+    if (Platform.OS === "web") return null;
     return <Redirect href="/" />;
   }
 

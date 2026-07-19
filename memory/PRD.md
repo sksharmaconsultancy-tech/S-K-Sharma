@@ -1039,3 +1039,18 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - ESIC FLOW (user flowchart): Aadhaar-first entry → Verify/Send OTP → OTP handoff → UIDAI details → mobile/employment/dispensary/family → IP + e-Pehchan note.
 - deploy194.sh now installs Playwright Chromium + deps and forces RPA_WORKER_ENABLED=1 on VPS (root cause of "registration doesn't happen": Chromium was never installed on VPS). Chromium also installed in this pod.
 - NOT yet deployed to live VPS.
+
+## Iter 197 — Geofence Phase 2 COMPLETE (Offline Attendance Queue + Background Sync) + RBAC Frontend Route Protection (tested: iteration_197/198 + self-verified)
+- OFFLINE PUNCHING (firm-gated, default OFF per user directive):
+  - PunchFlowModal now accepts a `postPunch` prop (offline-capable poster from attendance.tsx); offline result shows "Saved — Pending Sync" screen.
+  - attendance.tsx: offline sync banner (testID offline-sync-banner) with pending count + "Sync now" (testID sync-now-btn); auto-flush on window `online` event; mount-only effects with doFlushRef.
+  - offlinePunch.ts: IndexedDB queue (db sks_offline / store punches); getOfflinePunchEnabled() — TTL-cached (60s) + in-flight dedupe + AsyncStorage-persisted last-known policy (survives offline cold start; fixes 429 storm found in iteration_198); flushQueue drops permanently-rejected punches (4xx except 401/429) and after 20 attempts.
+  - Backend /api/attendance/punch: honours client_punch_at for `at`/`date` (IST wall-clock) when offline=true, sanity window (-7d..+10min), stores offline_punch/synced_at/client_dedupe_id; idempotent on client_dedupe_id (returns duplicate:true). 4/4 pytest (tests/test_iter_geofence_phase2.py) + curl E2E verified.
+  - GET /api/attendance/my-geo-policy returns offline_punch_enabled from companies.offline_geofence_enabled (default false).
+- RBAC ROUTE PROTECTION (P1 issue CLOSED):
+  - AdminWebShell: routeDenied memo — any master-nav route not in the user's permission-filtered nav renders "Access Denied" (testID route-access-denied) + Go to Dashboard; super admins never gated; children (Stack) kept mounted via display:none.
+  - ROOT CAUSE FIXED: AdminWebShell used to remount the Stack (bare -> shell) during auth bootstrap, RESETTING navigation to index and clobbering deep links (also caused the old "REPLACE payload index" quirk + URL-stuck-at-"/"). Now renders a position-stable skeleton so the Stack never remounts. index.tsx also has a boot-path restore (__bootPath) + notAtRoot guard.
+  - Page-level staff guards in roles.tsx / approval-workflows.tsx / advances.tsx return null on web (instead of <Redirect>) so the shell's denied screen keeps the URL.
+  - Self-verified via Playwright: sub-admin (testsub) /salary-run + /messages denied w/ URL preserved; staff HR (testhr) /roles denied; allowed pages render; super admin unaffected; employee TEST50 mobile login/punch intact.
+- Cleanup: offline_geofence_enabled=false restored on Kankani; all test punches deleted.
+- NOT yet deployed to live VPS.
