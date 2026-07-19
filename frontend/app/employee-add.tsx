@@ -1301,48 +1301,9 @@ export default function EmployeeAddScreen() {
             </TwoCol>
           ))}
 
-          {/* Iter 127d — Firm-Master-linked allowance / deduction heads for
-              the ACTUAL salary too (user request: allowances must fetch
-              from the Employee Master in BOTH salary processes). Saved as
-              actual_salary_allowances / actual_salary_deductions. */}
-          {firmHeads.allowances.length > 0 ? (
-            <>
-              <Text style={styles.lbl}>Allowances — Actual Salary (from Firm Master)</Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {firmHeads.allowances.map((h) => (
-                  <View key={h} style={{ minWidth: 150, flexGrow: 1, flexBasis: "30%" }}>
-                    <Field
-                      label={h}
-                      value={lineAmount(form.actual_allowances, h)}
-                      onChange={(v) => setLineAmount("actual_allowances", h, v)}
-                      placeholder="0"
-                      keyboardType="numeric"
-                    />
-                  </View>
-                ))}
-              </View>
-            </>
-          ) : null}
-          {firmHeads.deductions.length > 0 ? (
-            <>
-              <Text style={styles.lbl}>Deductions — Actual Salary (from Firm Master)</Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {firmHeads.deductions.map((h) => (
-                  <View key={h} style={{ minWidth: 150, flexGrow: 1, flexBasis: "30%" }}>
-                    <Field
-                      label={h}
-                      value={lineAmount(form.actual_deductions, h)}
-                      onChange={(v) => setLineAmount("actual_deductions", h, v)}
-                      placeholder="0"
-                      keyboardType="numeric"
-                    />
-                  </View>
-                ))}
-              </View>
-            </>
-          ) : null}
           {/* Iter 137 (user directive) — Total of allowances + gross moved
-              AFTER the Allowances section. */}
+              AFTER the Allowances section. (Allowance/Deduction heads moved
+              below Rate Basis (Compliance) per user request.) */}
           {firmHeads.allowances.length > 0 ? (
             <Text style={[styles.smallNote, { fontWeight: "800" }]}>
               Total Allowances (Actual): ₹{actualAllowTotal.toLocaleString()}
@@ -1380,6 +1341,46 @@ export default function EmployeeAddScreen() {
               />
             ))}
           </View>
+          {/* Iter 200 (user request) — Allowance / Deduction heads (Actual,
+              from Firm Master) moved here, right after Rate Basis
+              (Compliance). Saved as actual_salary_allowances /
+              actual_salary_deductions — unchanged storage. */}
+          {showActualSalary && firmHeads.allowances.length > 0 ? (
+            <>
+              <Text style={styles.lbl}>Allowances — Actual Salary (from Firm Master)</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {firmHeads.allowances.map((h) => (
+                  <View key={h} style={{ minWidth: 150, flexGrow: 1, flexBasis: "30%" }}>
+                    <Field
+                      label={h}
+                      value={lineAmount(form.actual_allowances, h)}
+                      onChange={(v) => setLineAmount("actual_allowances", h, v)}
+                      placeholder="0"
+                      keyboardType="numeric"
+                    />
+                  </View>
+                ))}
+              </View>
+            </>
+          ) : null}
+          {showActualSalary && firmHeads.deductions.length > 0 ? (
+            <>
+              <Text style={styles.lbl}>Deductions — Actual Salary (from Firm Master)</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {firmHeads.deductions.map((h) => (
+                  <View key={h} style={{ minWidth: 150, flexGrow: 1, flexBasis: "30%" }}>
+                    <Field
+                      label={h}
+                      value={lineAmount(form.actual_deductions, h)}
+                      onChange={(v) => setLineAmount("actual_deductions", h, v)}
+                      placeholder="0"
+                      keyboardType="numeric"
+                    />
+                  </View>
+                ))}
+              </View>
+            </>
+          ) : null}
           {/* Iter 126g — Compliance Basic + PF Basic (user request).
               EPF ceiling rule: Basic < ₹15,000 → PF Basic auto-copies the
               Basic; Basic ≥ ₹15,000 → PF Basic is optional (if filled,

@@ -173,6 +173,8 @@ type Policy = {
     enabled: Record<string, boolean>;
     default_view: string;
   };
+  // Iter 200 — allowed salary processes: actual | compliance | both.
+  salary_allowed?: string;
 };
 
 type PolicyResponse = {
@@ -231,6 +233,7 @@ function normalisePolicy(p: Policy): Policy {
       ),
       default_view: p.report_settings?.default_view || "inout",
     },
+    salary_allowed: (p as any).salary_allowed || "both",
   };
 }
 
@@ -258,6 +261,17 @@ export default function AttendancePolicyScreen() {
   const [policy, setPolicy] = useState<Policy | null>(null);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [presetOpen, setPresetOpen] = useState(false);
+  // Iter 200 — firms with a saved policy (bottom-of-page list).
+  const [savedFirms, setSavedFirms] = useState<any[]>([]);
+  const role = (user?.role as string) || "";
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await api<{ firms: any[] }>("/attendance/policy/saved-list");
+        setSavedFirms(r.firms || []);
+      } catch { setSavedFirms([]); }
+    })();
+  }, [saving]);
 
   const canManage = user?.role === "company_admin" || user?.role === "super_admin";
 
@@ -698,12 +712,9 @@ export default function AttendancePolicyScreen() {
             </View>
           </Pressable>
 
-          {meta?.business_category === "textile" ? (
-            <TextilePolicySection
-              policy={policy}
-              onChange={(patch) => setPolicy({ ...policy, ...patch })}
-            />
-          ) : null}
+          {/* Iter 200 (user directive) — Textile Policy 1/2 & Hospital
+              presets retired; attendance policy is fully managed from
+              this screen now. */}
 
           {/* Iter 200 (user request) — per-firm report availability. */}
           <SectionTitle
@@ -768,6 +779,45 @@ export default function AttendancePolicyScreen() {
               })}
           </View>
 
+          {/* Iter 200 (user request) — Salary Allowed per firm. */}
+          <SectionTitle
+            title="Salary Allowed"
+            hint="Which salary process(es) this firm runs. Attendance (present days + OT hrs) auto-transfers into the allowed process."
+          />
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+            {([
+              ["actual", "Actual Salary"],
+              ["compliance", "Compliance Salary"],
+              ["both", "Both"],
+            ] as [string, string][]).map(([key, label]) => {
+              const active = (policy.salary_allowed || "both") === key;
+              return (
+                <Pressable
+                  key={key}
+                  testID={`ap-salary-allowed-${key}`}
+                  onPress={() => setPolicy({ ...policy, salary_allowed: key })}
+                  style={{
+                    borderWidth: 1, borderRadius: 999, paddingVertical: 8, paddingHorizontal: 14,
+                    borderColor: active ? colors.brandPrimary : colors.border,
+                    backgroundColor: active ? colors.brandPrimary : colors.surface,
+                  }}
+                >
+                  <Text style={{
+                    fontSize: 12.5, fontWeight: "700",
+                    color: active ? "#fff" : colors.onSurfaceSecondary,
+                  }}>{label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.toggleHint}>
+            {policy.salary_allowed === "actual"
+              ? "Present days + remaining HRS auto-transfer into the Actual Salary process (on-roll & off-roll)."
+              : policy.salary_allowed === "compliance"
+                ? "Present days auto-transfer into Compliance Salary; remaining OT HRS sync with the OT Salary process."
+                : "Both processes enabled — off-roll employees are NOT PF/ESIC eligible in Actual Salary; on-roll are."}
+          </Text>
+
           <SectionTitle title="Notes" hint="Optional — surfaced on employee onboarding." />
           <TextInput
             testID="ap-notes"
@@ -814,6 +864,57 @@ export default function AttendancePolicyScreen() {
               Reset to {meta?.business_category ? "business-type default" : "generic default"}
             </Text>
           </Pressable>
+
+          {/* Iter 200 (user request) — switch firm + firms with a saved
+              policy listed at the bottom of the page. */}
+          {(role === "super_admin" || role === "sub_admin") ? (
+            <>
+              <SectionTitle
+                title="Switch Firm"
+                hint="Attendance policy is per-firm — pick another firm to view/edit its policy."
+              />
+              <InlineCompanyPicker
+                onPick={(cid) =>
+                  router.replace(`/attendance-policy?company_id=${encodeURIComponent(cid)}`)
+                }
+              />
+            </>
+          ) : null}
+          {savedFirms.length > 0 ? (
+            <>
+              <SectionTitle
+                title={`Saved Policies (${savedFirms.length} firms)`}
+                hint="Firms that already have an attendance policy saved. Tap to open."
+              />
+              {savedFirms.map((f) => (
+                <Pressable
+                  key={f.company_id}
+                  testID={`ap-saved-${f.company_id}`}
+                  onPress={() =>
+                    router.replace(`/attendance-policy?company_id=${encodeURIComponent(f.company_id)}`)
+                  }
+                  style={{
+                    flexDirection: "row", alignItems: "center", gap: 10,
+                    backgroundColor: colors.surfaceSecondary, borderWidth: 1,
+                    borderColor: colors.border, borderRadius: radius.md,
+                    paddingVertical: 10, paddingHorizontal: 12, marginBottom: 8,
+                  }}
+                >
+                  <Ionicons name="business-outline" size={16} color={colors.brandPrimary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 13, fontWeight: "700", color: colors.onSurface }}>
+                      {f.name}
+                    </Text>
+                    <Text style={{ fontSize: 11, color: colors.onSurfaceSecondary, marginTop: 1 }}>
+                      {f.full_day_hours ? `${f.full_day_hours} hrs/day` : "—"}
+                      {f.default_report ? ` · default report: ${f.default_report}` : ""}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={15} color={colors.onSurfaceTertiary} />
+                </Pressable>
+              ))}
+            </>
+          ) : null}
 
           <View style={{ height: 40 }} />
         </KeyboardAwareScrollView>
@@ -912,6 +1013,10 @@ const PM_FLAGS: { key: string; label: string }[] = [
   { key: "auto_shift_detection", label: "Auto Shift Detection" },
   { key: "wfh_allowed", label: "WFH Allowed" },
   { key: "geofencing_required", label: "Geo-fencing Required" },
+  // Iter 200 (user request) — dynamic attendance calculation points.
+  { key: "attendance_by_duty_hours", label: "Attendance Calculation as per Duty HRS (Days = Total Duty HRS ÷ Daily Duty HRS from Firm Master)" },
+  { key: "weekoff_present_add_ot", label: "Week-off Day Worked → Add hours in OT (not counted Present)" },
+  { key: "holiday_present_add_ot", label: "Holiday (Holiday Master) Worked → Present + hours in OT" },
 ];
 
 function PolicyMasterSubPoints({
@@ -1176,271 +1281,6 @@ const sppStyles = StyleSheet.create({
   footerTxt: { color: colors.onSurfaceSecondary, fontSize: 11, flex: 1, lineHeight: 15 },
   err: { color: "#dc2626", fontSize: 12 },
 });
-
-/** Textile industry policy configuration. Only rendered when the company's
- * business category is "textile". Two mutually-exclusive variants:
- *
- * • **Policy 1** – Hourly + Daily calc; OT-enabled employees may work a
- *   24-hr duty when starting evening; week-off day work → Full Day
- *   Payment (per-employee flag).
- * • **Policy 2** – 8-hr day = 1 Present Day. Extras → OT. Week-off /
- *   govt-holiday worked → NO present day (all hours = OT).
- */
-function TextilePolicySection({
-  policy,
-  onChange,
-}: {
-  policy: Policy;
-  onChange: (patch: Partial<Policy>) => void;
-}) {
-  const variant = (policy.policy_variant || null) as "policy_1" | "policy_2" | null;
-  const rounding = policy.duty_hours_rounding_minutes ?? 0;
-  const standardHrs = policy.standard_working_hours ?? policy.full_day_hours ?? 8;
-  const weekOffFullDefault = !!policy.week_off_full_day_payment_default;
-
-  return (
-    <>
-      <SectionTitle
-        title="Textile industry"
-        hint="Choose the calculation model for this firm. Employee-level toggles (OT applicable, Week-off Full Day, Week-off / govt holiday) are set on each Employee Master."
-      />
-
-      {/* Variant radio */}
-      <View style={styles.textileVariantRow}>
-        {[
-          { key: "policy_1", label: "Policy 1", sub: "Hourly + Daily · 24-hr OT allowed" },
-          { key: "policy_2", label: "Policy 2", sub: "8 hrs = 1 Present Day · extras → OT" },
-        ].map((opt) => {
-          const active = variant === opt.key;
-          return (
-            <Pressable
-              key={opt.key}
-              testID={`textile-variant-${opt.key}`}
-              onPress={() =>
-                onChange({ policy_variant: opt.key as "policy_1" | "policy_2" })
-              }
-              style={[styles.variantCard, active && styles.variantCardActive]}
-            >
-              <View style={styles.variantRadio}>
-                <View
-                  style={[
-                    styles.variantRadioOuter,
-                    active && styles.variantRadioOuterActive,
-                  ]}
-                >
-                  {active ? <View style={styles.variantRadioDot} /> : null}
-                </View>
-                <Text style={[styles.variantLabel, active && styles.variantLabelActive]}>
-                  {opt.label}
-                </Text>
-              </View>
-              <Text
-                style={[
-                  styles.variantSub,
-                  active && { color: colors.brandPrimary },
-                ]}
-              >
-                {opt.sub}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      {/* Iter 98 — plain-language rules explainer for the selected variant */}
-      {variant === "policy_2" ? (
-        <View style={styles.variantRules} testID="textile-policy2-rules">
-          <Text style={styles.variantRulesTitle}>📋 Policy 2 — how it works</Text>
-          <Text style={styles.variantRulesLine}>• {standardHrs} duty hours = 1 Present Day.</Text>
-          <Text style={styles.variantRulesLine}>• Hours beyond {standardHrs} hrs → counted as OT (only if the employee&apos;s &quot;OT applicable&quot; flag is ON in Employee Master; otherwise extra hours are ignored).</Text>
-          <Text style={styles.variantRulesLine}>• Less than {standardHrs} hrs worked → NO Half Day / Absent — ALL worked hours are counted as OT hours instead.</Text>
-          <Text style={styles.variantRulesLine}>• Week-off / Govt Holiday: if the employee&apos;s &quot;Week-off / Govt-Holiday enabled&quot; flag is ON and they work on their off day → NO present day is given; ALL worked hours become OT.</Text>
-          <Text style={styles.variantRulesLine}>• Duty hours are rounded per the rounding rule below ({rounding === 0 ? "no rounding" : `${rounding} min`}).</Text>
-        </View>
-      ) : variant === "policy_1" ? (
-        <View style={styles.variantRules} testID="textile-policy1-rules">
-          <Text style={styles.variantRulesTitle}>📋 Policy 1 — how it works</Text>
-          <Text style={styles.variantRulesLine}>• Hourly + Daily basis calculation — OT is folded into Total Duty Hours (paid per-hour, no separate OT column).</Text>
-          <Text style={styles.variantRulesLine}>• OT-allowed employees can work up to a 24-hr duty (Day + Night combo). OT-not-allowed employees are capped at standard shift hours.</Text>
-          <Text style={styles.variantRulesLine}>• Week-off day work → Full Day Payment if the employee&apos;s &quot;Week-off Full Day&quot; flag is ON.</Text>
-          <Text style={styles.variantRulesLine}>• Week-off days are free from the standard-hours cap (min hours rule below applies).</Text>
-        </View>
-      ) : null}
-
-      {/* Duty hours rounding dropdown */}
-      <SectionTitle
-        title="Duty hours rounding"
-        hint="Round the total on-duty minutes. 15 min uses the special rule: 0-15 → :00, 16-45 → :30, 46-59 → next hour."
-      />
-      <View style={styles.chipsRow}>
-        {[0, 15, 30].map((step) => {
-          const active = rounding === step;
-          return (
-            <Pressable
-              key={step}
-              testID={`rounding-${step}`}
-              onPress={() => onChange({ duty_hours_rounding_minutes: step })}
-              style={[styles.roundChip, active && styles.roundChipActive]}
-            >
-              <Text
-                style={[styles.roundChipTxt, active && styles.roundChipTxtActive]}
-              >
-                {step === 0 ? "No round" : `${step} min`}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      {/* Standard working hours (used by Policy 2 as the present-day threshold) */}
-      <SectionTitle
-        title="Standard working hours"
-        hint="Duty hours that make up 1 Present Day (Policy 2). Extras beyond this → OT."
-      />
-      <TextInput
-        testID="textile-standard-hrs"
-        value={String(standardHrs)}
-        onChangeText={(t) => {
-          const n = Number(t);
-          if (!Number.isNaN(n) && n > 0 && n <= 16) {
-            onChange({ standard_working_hours: n });
-          } else if (t === "") {
-            // Iter 76 — leaving the field blank falls back to full_day
-            // hours instead of writing 0 (the backend rejects 0 as
-            // outside the 1..16 range).
-            onChange({ standard_working_hours: undefined });
-          }
-        }}
-        keyboardType="decimal-pad"
-        placeholder="8"
-        placeholderTextColor={colors.onSurfaceTertiary}
-        style={styles.input}
-      />
-
-      {/* Week-off Full Day Payment — company default */}
-      <Pressable
-        testID="textile-weekoff-fdp-toggle"
-        onPress={() =>
-          onChange({ week_off_full_day_payment_default: !weekOffFullDefault })
-        }
-        style={styles.toggleRow}
-      >
-        <View style={{ flex: 1 }}>
-          <Text style={styles.toggleLabel}>
-            Week-off Full-Day Payment (default)
-          </Text>
-          <Text style={styles.toggleHint}>
-            Company-wide default for the per-employee &quot;Week-off Full
-            Day&quot; flag. Employees flagged True get full-day pay when
-            they work on a weekly-off day. Individual employees can still
-            override this from Employee Master.
-          </Text>
-        </View>
-        <View style={[styles.toggle, weekOffFullDefault && styles.toggleOn]}>
-          <View
-            style={[
-              styles.toggleKnob,
-              weekOffFullDefault && styles.toggleKnobOn,
-            ]}
-          />
-        </View>
-      </Pressable>
-
-      {/* Iter 77d — Week-off minimum working hours */}
-      <Text style={[styles.label, { marginTop: 12 }]}>
-        Min working hours on week-off for full-day credit
-      </Text>
-      <Text style={styles.smallHint}>
-        When an employee works on their weekly-off day and their duty
-        hours are &ge; this value, they earn a FULL DAY attendance. Set
-        0 to disable (any positive work is treated as full-day for
-        legacy setups).
-      </Text>
-      <TextInput
-        testID="textile-weekoff-min-hours"
-        value={
-          policy.week_off_min_working_hours !== undefined &&
-          policy.week_off_min_working_hours !== null
-            ? String(policy.week_off_min_working_hours)
-            : ""
-        }
-        onChangeText={(t) => {
-          if (t === "") {
-            onChange({ week_off_min_working_hours: 0 });
-            return;
-          }
-          const n = Number(t);
-          if (!Number.isNaN(n) && n >= 0 && n <= 16) {
-            onChange({ week_off_min_working_hours: n });
-          }
-        }}
-        keyboardType="decimal-pad"
-        placeholder="0 (disabled)"
-        placeholderTextColor={colors.onSurfaceTertiary}
-        style={styles.input}
-      />
-
-      {/* Iter 131 (user directive) — OT Calculation config, Policy 2 only.
-          Iter 131b — EITHER Basic OR Gross: filling one disables the other. */}
-      {variant === "policy_2" ? (
-        <>
-          <SectionTitle
-            title="OT Calculation"
-            hint="Choose ONE base — enter the % in either Basic or Gross. The other option is disabled automatically. OT hourly rate = per-day base × % ÷ full-day hours. Used by Salary Process (OT)."
-          />
-          <View style={{ flexDirection: "row", gap: 12 }}>
-            <View style={{ flex: 1, opacity: (policy.ot_pct_gross || 0) > 0 ? 0.4 : 1 }}>
-              <Text style={styles.label}>
-                % of Basic{(policy.ot_pct_gross || 0) > 0 ? "  (disabled — Gross selected)" : ""}
-              </Text>
-              <TextInput
-                testID="ot-pct-basic"
-                editable={!((policy.ot_pct_gross || 0) > 0)}
-                value={policy.ot_pct_basic ? String(policy.ot_pct_basic) : ""}
-                onChangeText={(t) => {
-                  if (t === "") { onChange({ ot_pct_basic: 0 }); return; }
-                  const n = Number(t);
-                  if (!Number.isNaN(n) && n >= 0 && n <= 500) {
-                    onChange({ ot_pct_basic: n, ot_pct_gross: 0 });
-                  }
-                }}
-                keyboardType="decimal-pad"
-                placeholder="e.g. 100"
-                placeholderTextColor={colors.onSurfaceTertiary}
-                style={styles.input}
-              />
-            </View>
-            <View style={{ flex: 1, opacity: (policy.ot_pct_basic || 0) > 0 ? 0.4 : 1 }}>
-              <Text style={styles.label}>
-                % of Gross{(policy.ot_pct_basic || 0) > 0 ? "  (disabled — Basic selected)" : ""}
-              </Text>
-              <TextInput
-                testID="ot-pct-gross"
-                editable={!((policy.ot_pct_basic || 0) > 0)}
-                value={policy.ot_pct_gross ? String(policy.ot_pct_gross) : ""}
-                onChangeText={(t) => {
-                  if (t === "") { onChange({ ot_pct_gross: 0 }); return; }
-                  const n = Number(t);
-                  if (!Number.isNaN(n) && n >= 0 && n <= 500) {
-                    onChange({ ot_pct_gross: n, ot_pct_basic: 0 });
-                  }
-                }}
-                keyboardType="decimal-pad"
-                placeholder="e.g. 50"
-                placeholderTextColor={colors.onSurfaceTertiary}
-                style={styles.input}
-              />
-            </View>
-          </View>
-          <Text style={styles.smallHint}>
-            Only ONE can be active. To switch, clear the filled field first (set
-            it to 0 / empty) — the other unlocks instantly.
-          </Text>
-        </>
-      ) : null}
-    </>
-  );
-}
 
 function ShiftRow({
   value,

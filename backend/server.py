@@ -578,6 +578,10 @@ class RoleUpdate(BaseModel):
     # On-roll (payroll employee) vs Off-roll (contract / agency-deployed).
     # Purely for reporting / filtering — does not block punch or auth.
     is_onroll: Optional[bool] = None
+    # Iter 200 (user request) — per-employee "Offline Salary: Yes/No".
+    # False → excluded from offline/off-roll salary runs. Only settable
+    # when the firm's Offline Salary is enabled in Firm Master.
+    offline_salary_enabled: Optional[bool] = None
     # Iter 165 — admin-controlled fingerprint verification requirement
     # (Employee PWA). Only settable when the firm's Bio Matrix Attendance
     # is enabled in Firm Master.
@@ -1173,6 +1177,16 @@ def _validate_policy(raw: dict) -> dict:
         "auto_shift_detection": _flag("auto_shift_detection"),
         "wfh_allowed": _flag("wfh_allowed"),
         "geofencing_required": _flag("geofencing_required", True),
+        # Iter 200 (user request) — dynamic attendance calculation points:
+        # • attendance_by_duty_hours: Days = Total Duty HRS ÷ Daily Duty HRS
+        #   (firm's full-day hours) instead of per-day present counting.
+        # • weekoff_present_add_ot: worked on week-off → hours go to OT,
+        #   day NOT counted present.
+        # • holiday_present_add_ot: worked on a Holiday-Master day → day
+        #   counts present AND hours also go to OT.
+        "attendance_by_duty_hours": _flag("attendance_by_duty_hours"),
+        "weekoff_present_add_ot": _flag("weekoff_present_add_ot"),
+        "holiday_present_add_ot": _flag("holiday_present_add_ot"),
     }
 
     # Iter 200 — Report Settings (user request): which attendance reports
@@ -1189,6 +1203,13 @@ def _validate_policy(raw: dict) -> dict:
     if rs_default not in _REPORT_KEYS or not rs_enabled.get(rs_default):
         rs_default = next(k for k in _REPORT_KEYS if rs_enabled[k])
     report_settings = {"enabled": rs_enabled, "default_view": rs_default}
+
+    # Iter 200 (user request) — Salary Allowed: which salary processes this
+    # firm may run (actual / compliance / both). Attendance auto-transfers
+    # into the allowed process(es).
+    salary_allowed = str(raw.get("salary_allowed") or "both").strip().lower()
+    if salary_allowed not in ("actual", "compliance", "both"):
+        salary_allowed = "both"
 
     return {
         "shifts": shifts,
@@ -1216,6 +1237,10 @@ def _validate_policy(raw: dict) -> dict:
         "ot_pct_gross": ot_pct_gross,
         # Iter 175 — Policy Master Sub Points.
         "policy_master": policy_master,
+        # Iter 200 — per-firm report availability + default grid view.
+        "report_settings": report_settings,
+        # Iter 200 — allowed salary processes for this firm.
+        "salary_allowed": salary_allowed,
     }
 
 
@@ -1689,6 +1714,7 @@ def compute_textile_day(
     policy: dict,
     user: dict,
     day_weekday: int,
+    is_holiday: bool = False,
 ) -> dict:
     """Compute the attendance summary for a single day under a textile
     policy. Returns a dict with:
@@ -1908,6 +1934,23 @@ def compute_textile_day(
         if not ot_applicable_user:
             ot_min = 0.0
 
+    # Iter 200 — Policy Master Sub Points (user directives):
+    #   • Week-off worked + weekoff_present_add_ot → ALL hours go to OT,
+    #     the day is NOT counted present ("if Week off Allowed Do not
+    #     Count in Present").
+    #   • Holiday-Master day worked + holiday_present_add_ot → the day
+    #     counts PRESENT and the hours ALSO go to the OT column.
+    _pm = policy.get("policy_master") or {}
+    if total_min > 0 and is_weekly_off and _pm.get("weekoff_present_add_ot"):
+        present_days = 0.0
+        full_day_pay_weekoff = False
+        ot_min = total_min if ot_applicable_user else 0.0
+        notes.append("pm: week-off worked → hours to OT, not counted present")
+    if total_min > 0 and is_holiday and _pm.get("holiday_present_add_ot"):
+        present_days = max(present_days, 1.0)
+        ot_min = total_min if ot_applicable_user else 0.0
+        notes.append("pm: holiday worked → present day + hours to OT")
+
     return {
         "variant": variant,
         "duty_minutes": round(total_min, 2),
@@ -1918,6 +1961,7 @@ def compute_textile_day(
         "ot_applicable": bool(ot_applicable_user),
         "full_day_pay_weekoff": full_day_pay_weekoff,
         "is_weekly_off": is_weekly_off,
+        "is_holiday": bool(is_holiday),
         "notes": notes,
     }
 
@@ -1973,6 +2017,19 @@ def _business_category_label(
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+async def holiday_dates_for_company(company_id: Optional[str]) -> set:
+    """YYYY-MM-DD dates from the Holiday Master (firm + global scope)."""
+    out: set = set()
+    async for m_ in db.masters.find(
+        {"type": "holiday",
+         "company_id": {"$in": [company_id, "__global__", None]}},
+        {"_id": 0, "date": 1},
+    ):
+        if m_.get("date"):
+            out.add(str(m_["date"])[:10])
+    return out
 
 
 # Iter 144 — project-wide PUNCH TIME convention: attendance `at` timestamps
@@ -5508,6 +5565,39 @@ class ShiftMasterIn(BaseModel):
 
 
 
+@api.get("/attendance/policy/saved-list")
+async def attendance_policy_saved_list(
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 200 (user request) — firms that already have a saved attendance
+    policy, shown at the bottom of the Policy Master screen."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    q: Dict[str, Any] = {"attendance_policy": {"$ne": None}}
+    if admin["role"] == "company_admin":
+        q["company_id"] = admin.get("company_id")
+    out = []
+    async for c in db.companies.find(
+        q, {"_id": 0, "company_id": 1, "name": 1,
+            "attendance_policy.policy_variant": 1,
+            "attendance_policy.full_day_hours": 1,
+            "attendance_policy.updated_at": 1,
+            "attendance_policy.report_settings.default_view": 1},
+    ).sort("name", 1):
+        ap = c.get("attendance_policy") or {}
+        if admin["role"] == "sub_admin" and not sub_admin_can_touch_company(admin, c["company_id"]):
+            continue
+        out.append({
+            "company_id": c["company_id"],
+            "name": c.get("name"),
+            "policy_variant": ap.get("policy_variant"),
+            "full_day_hours": ap.get("full_day_hours"),
+            "default_report": (ap.get("report_settings") or {}).get("default_view"),
+            "updated_at": ap.get("updated_at"),
+        })
+    return {"firms": out}
+
+
 @api.get("/attendance/policy/presets")
 async def list_attendance_policy_presets(
     authorization: Optional[str] = Header(None),
@@ -5517,28 +5607,20 @@ async def list_attendance_policy_presets(
     user = await get_user_from_token(authorization)
     require_role(user, ["super_admin", "company_admin"])
     # Enrich with the human label taken from BUSINESS_CATEGORIES
+    # Iter 200 (user directive) — Textile Policy 1/2 & the Hospital preset
+    # are RETIRED from the picker: all attendance policy is now managed
+    # dynamically from this screen. (Engine support for firms already saved
+    # on those variants is unchanged.)
     presets: List[dict] = []
     for cat in BUSINESS_CATEGORIES:
         key = cat["key"]
+        if key == "hospital":
+            continue
         presets.append({
             "business_category": key,
             "label": cat["label"],
             "policy": _policy_for_category(key),
         })
-    # Surface any sub-category presets that aren't top-level categories.
-    # Textile lives inside `industry` on the org chart but has its own
-    # dedicated policy blob (5 shifts, policy_variant='policy_1',
-    # duty_hours_rounding_minutes=15) — expose it so the client can offer
-    # a "Load textile preset" button.
-    for sub_key in ("textile",):
-        preset = ATTENDANCE_POLICY_PRESETS.get(sub_key)
-        if preset:
-            presets.append({
-                "business_category": sub_key,
-                "business_subcategory": sub_key.title(),
-                "label": sub_key.title(),
-                "policy": json.loads(json.dumps(preset)),
-            })
     return {
         "weekday_labels": _WEEKDAY_LABELS,
         "presets": presets,
@@ -5596,6 +5678,7 @@ async def get_attendance_policy(
                     for k in ("inout", "ot", "hours", "salary", "inout_salary")},
         "default_view": _rs.get("default_view") or "inout",
     }
+    policy.setdefault("salary_allowed", "both")
     # "Default preset" here means: no admin has explicitly saved / overridden
     # the policy yet. Because we auto-attach a preset on company creation,
     # the presence of `attendance_policy` alone isn't a good signal — we
@@ -12846,6 +12929,15 @@ async def update_user_role(payload: RoleUpdate, authorization: Optional[str] = H
         # Default treated as True everywhere the field is absent; store
         # explicit True/False so filtering with $eq works cleanly.
         updates["is_onroll"] = None if v is None else bool(v)
+    # Iter 200 (user request) — per-employee Offline Salary Yes/No.
+    if "offline_salary_enabled" in fset:
+        v2 = payload.offline_salary_enabled
+        if v2 is not None and not await _firm_offline_salary_enabled(target.get("company_id")):
+            raise HTTPException(
+                status_code=400,
+                detail=("Offline Salary option is not available — enable "
+                        "Offline Salary for this firm in Firm Master first."))
+        updates["offline_salary_enabled"] = None if v2 is None else bool(v2)
     if "fingerprint_required" in fset and payload.fingerprint_required is not None:
         # Iter 165 — requiring fingerprint needs the firm's Bio Matrix
         # Attendance enabled (Firm Master → Salary Process Settings).
@@ -13264,7 +13356,17 @@ async def _compute_salary_run(
                 company_policies[_fm["company_id"]]["attendance_policy"] = _ap
 
     rows = []
+    # Iter 200 — Holiday Master dates per firm + per-employee Offline
+    # Salary gate (users.offline_salary_enabled = False → excluded from
+    # the offline/actual salary run).
+    _holidays_by_cid2: Dict[str, list] = {}
+    for _cid2_ in {e.get("company_id") for e in employees if e.get("company_id")}:
+        _holidays_by_cid2[_cid2_] = sorted(await holiday_dates_for_company(_cid2_))
     for emp in employees:
+        # Iter 200 (user request) — per-employee "Offline Salary: Yes/No":
+        # excluded employees are skipped in offline/off-roll salary runs.
+        if run_type == "off_roll" and emp.get("offline_salary_enabled") is False:
+            continue
         emp = dict(emp)
         emp.pop("pin_hash", None)
         emp.pop("password_hash", None)
@@ -13276,6 +13378,7 @@ async def _compute_salary_run(
         # math is consistent across textile / non-textile firms.
         att_pol = company_doc.get("attendance_policy") or {}
         merged_pol = {**att_pol, **pol}  # user policy fields win
+        merged_pol["_holiday_dates"] = _holidays_by_cid2.get(emp.get("company_id")) or []
         # Iter 142 — per-employee OT flag (override wins over legacy flag).
         _ov = emp.get("attendance_policy_override") or {}
         _emp_ot = _ov.get("ot_allowed", emp.get("ot_applicable"))
@@ -13342,6 +13445,23 @@ async def create_salary_run(
     require_role(admin, ["super_admin", "sub_admin", "company_admin"])
     require_permission(admin, "salary_process:write")
     await require_employer_permission(admin, "salary_process:write", db)
+    # Iter 200 (user request) — Attendance Policy "Salary Allowed" gate:
+    # actual / compliance / both. Off-roll (actual) runs require "actual"
+    # or "both"; compliance runs require "compliance" or "both".
+    _gate_cid = getattr(payload, "company_id", None) or admin.get("company_id")
+    if _gate_cid:
+        _co = await db.companies.find_one(
+            {"company_id": _gate_cid}, {"_id": 0, "attendance_policy.salary_allowed": 1})
+        _sa = ((_co or {}).get("attendance_policy") or {}).get("salary_allowed") or "both"
+        _rt = (getattr(payload, "run_type", None) or "compliance")
+        if _rt == "off_roll" and _sa == "compliance":
+            raise HTTPException(status_code=400, detail=(
+                "Actual/Offline salary runs are not allowed for this firm — "
+                "Attendance Policy → Salary Allowed is set to Compliance only."))
+        if _rt != "off_roll" and _sa == "actual":
+            raise HTTPException(status_code=400, detail=(
+                "Compliance salary runs are not allowed for this firm — "
+                "Attendance Policy → Salary Allowed is set to Actual only."))
     run = await _compute_salary_run(admin, payload)
     run["run_id"] = f"srun_{uuid.uuid4().hex[:12]}"
     await db.salary_runs.insert_one(run)
@@ -14333,6 +14453,10 @@ async def _compute_compliance_run(
                 company_policies[fm["company_id"]]["attendance_policy"] = _ap
 
     rows = []
+    # Iter 200 — Holiday Master dates per firm (for holiday_present_add_ot).
+    _holidays_by_cid: Dict[str, list] = {}
+    for _cid_ in {e.get("company_id") for e in employees if e.get("company_id")}:
+        _holidays_by_cid[_cid_] = sorted(await holiday_dates_for_company(_cid_))
     for emp in employees:
         emp = dict(emp)
         emp.pop("pin_hash", None)
@@ -14343,6 +14467,7 @@ async def _compute_compliance_run(
         company_doc = company_policies.get(emp.get("company_id")) or {}
         att_pol = company_doc.get("attendance_policy") or {}
         merged_pol = {**att_pol, **pol}
+        merged_pol["_holiday_dates"] = _holidays_by_cid.get(emp.get("company_id")) or []
         # Iter 142 — per-employee OT flag (override wins over legacy flag).
         _emp_ot = (emp.get("attendance_policy_override") or {}).get(
             "ot_allowed", emp.get("ot_applicable"))
@@ -16456,6 +16581,8 @@ async def _compute_monthly_grid_data(
     pol = company.get("attendance_policy") or {}
     pol = await inject_firm_ot_flag(dict(pol), company.get("company_id"))
     full_day_hours = float(pol.get("full_day_hours") or 8.0)
+    # Iter 200 — Holiday Master dates (for holiday_present_add_ot).
+    _holiday_dates = await holiday_dates_for_company(company_id)
     # Iter 77e — Load the GLOBAL Shift Master catalogue once so we can
     # resolve per-employee shift overrides for every day compute.
     shifts_by_id, shifts_list = await load_shift_masters_map()
@@ -16619,7 +16746,10 @@ async def _compute_monthly_grid_data(
             # firm default is 8h).
             eff_policy = apply_employee_policy_override(eff_policy, emp_full)
             weekday = datetime(yy, mm, dd).weekday()
-            summary = compute_textile_day(day_punches, eff_policy, emp_full, weekday)
+            _is_holiday_day = date_key_iso in _holiday_dates
+            summary = compute_textile_day(
+                day_punches, eff_policy, emp_full, weekday,
+                is_holiday=_is_holiday_day)
             # Iter 77q — OT trigger threshold. Priority:
             #   1. eff_policy.full_day_hours  (firm's "full day" = actual
             #      daily working quota. Firms with a 12-hour shift set
@@ -16704,6 +16834,20 @@ async def _compute_monthly_grid_data(
                     day_sal = ((_sal_basic / _md_divisor) * (hrs / emp_daily_hrs)
                                if emp_daily_hrs > 0 and _md_divisor > 0 else 0.0)
                 day_sal = round(day_sal, 2)
+            # Iter 200 — Policy Master Sub Points:
+            #   • week-off worked + weekoff_present_add_ot → ALL hours to
+            #     OT, day NOT counted present.
+            #   • holiday worked + holiday_present_add_ot → day counts
+            #     present AND hours go to the OT column.
+            _pm_flags = eff_policy.get("policy_master") or {}
+            _holiday_present_credit = False
+            if hrs > 0 and summary.get("is_weekly_off") and _pm_flags.get("weekoff_present_add_ot"):
+                ot_hrs = round(duty_only_hrs + ot_hrs, 2)
+                duty_only_hrs = 0.0
+            if hrs > 0 and _is_holiday_day and _pm_flags.get("holiday_present_add_ot"):
+                ot_hrs = round(duty_only_hrs + ot_hrs, 2)
+                duty_only_hrs = 0.0
+                _holiday_present_credit = True
             days_cell[key] = {
                 "in": _in_display.strftime("%H:%M") if _in_display else None,
                 "out": _out_display.strftime("%H:%M") if _out_display else None,
@@ -16717,6 +16861,7 @@ async def _compute_monthly_grid_data(
                 "sources": seen,
                 "present": summary.get("present_days") or 0.0,
                 "weekly_off": bool(summary.get("is_weekly_off")),
+                "holiday": _is_holiday_day,
                 # Iter 94 — day-wise earned salary (basic-rate based).
                 "salary": day_sal,
             }
@@ -16724,7 +16869,7 @@ async def _compute_monthly_grid_data(
                 total_salary += day_sal
                 day_salary_totals[key] = round(day_salary_totals.get(key, 0.0) + day_sal, 2)
             if hrs > 0:
-                total_present_days += 1 if duty_only_hrs > 0 else 0
+                total_present_days += 1 if (duty_only_hrs > 0 or _holiday_present_credit) else 0
                 total_hours += hrs
                 total_ot_hours += ot_hrs
                 # User rule (Iter 83): ``totals.duty_hours`` = REGULAR
@@ -17256,7 +17401,7 @@ async def apply_master_sheet_mapping_legacy(
 #   name: str
 #   member_user_ids: List[str]  (for `group` type, optional otherwise)
 #   created_at, updated_at, created_by
-_MASTER_TYPES = ("group", "department", "designation", "allowance", "deduction")
+_MASTER_TYPES = ("group", "department", "designation", "allowance", "deduction", "holiday")
 
 
 class MasterUpsert(BaseModel):
@@ -17264,6 +17409,8 @@ class MasterUpsert(BaseModel):
     company_id: str
     name: str
     member_user_ids: Optional[List[str]] = None
+    # Iter 200 — Holiday Master entries carry a calendar date (YYYY-MM-DD).
+    date: Optional[str] = None
 
 
 @api.get("/admin/masters")
@@ -17337,16 +17484,28 @@ async def create_master(
     }
     if payload.type != "group" and not is_global:
         dup_q["company_id"] = {"$in": [target_cid, "__global__", None]}
+    if payload.type == "holiday":
+        # Same holiday name may repeat on different dates (yearly festivals).
+        dup_q["date"] = (payload.date or "").strip()[:10]
     dup = await db.masters.find_one(dup_q, {"_id": 0, "master_id": 1})
     if dup:
         raise HTTPException(status_code=409, detail=f"A {payload.type} named '{name}' already exists")
     master_id = f"mst_{uuid.uuid4().hex[:12]}"
+    # Iter 200 — Holiday Master needs a valid date.
+    _hol_date = None
+    if payload.type == "holiday":
+        _hol_date = (payload.date or "").strip()[:10]
+        try:
+            datetime.strptime(_hol_date, "%Y-%m-%d")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Holiday requires a valid date (YYYY-MM-DD)")
     doc = {
         "master_id": master_id,
         "type": payload.type,
         "company_id": target_cid,
         "name": name,
         "member_user_ids": list(payload.member_user_ids or []) if payload.type == "group" else [],
+        "date": _hol_date,
         "created_at": now_iso(),
         "updated_at": now_iso(),
         "created_by": admin["user_id"],

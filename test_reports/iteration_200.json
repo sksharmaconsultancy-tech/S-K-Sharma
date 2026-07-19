@@ -1,0 +1,36 @@
+{
+  "summary": "Iter 200 backend + frontend verified. All 8 pytest cases pass (report_settings gate + 403 export, holiday master with date, policy_master flags (holiday/weekoff→OT) in monthly-grid, salary_allowed gate, per-employee offline_salary toggle, saved-list & presets without hospital/textile subs). Frontend: attendance-policy shows all 10 required testIDs (5 report toggles, default pill, 3 salary-allowed chips, save), 2 saved-list entries and Switch Firm picker present; companies firm-search-input filters correctly ('kankani' → 1 card); masters Holidays tab present; employee-add DOM order verified: Rate Basis (Compliance)@496 < Allowances Actual@504 < Deductions Actual@518. Cleanup restored all seeded/flag state.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/attendance/policy", "issue": "For firms whose attendance_policy was saved before Iter 200, the 3 new policy_master flags (attendance_by_duty_hours / weekoff_present_add_ot / holiday_present_add_ot) are NOT backfilled by the GET path — they only appear after a PATCH re-runs _validate_policy. Other numeric fields (grace_minutes_late, full_day_hours, etc.) are backfilled via setdefault at ~L5660. Consider adding equivalent setdefaults for the 3 new flags in the GET response (or backfill on read) so consumers see them immediately."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter200_report_settings_and_flags.py",
+    "/app/test_reports/pytest/iter200.xml"
+  ],
+  "action_items": [
+    "(Minor) In server.py GET /api/attendance/policy, backfill policy_master.attendance_by_duty_hours / weekoff_present_add_ot / holiday_present_add_ot with False when the stored policy predates Iter 200 (mirrors the setdefault pattern used for numeric fields nearby)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is >19,300 lines — well past the 700-line guideline. Consider modularising by domain (attendance_policy, masters, salary_runs, employee_grouping).",
+    "PATCH /attendance/policy validates via _validate_policy which auto-adds new fields; GET does not. This asymmetry can confuse first-time viewers of un-touched firms (see minor issue above).",
+    "Frontend attendance-policy.tsx now correctly emits testID for every interactive toggle/chip/pill — good for future regression."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter200_report_settings_and_flags.py (new)"
+  ],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "100% verified (5/6 spot-checks confirmed; grouping-offline-salary-toggle and mst-holiday-date require deeper UI interactions but code paths already exercised via backend tests 2 & 5)"},
+  "seed_data_creation": "Backend tests seeded 4 iter200_test punches, 1 holiday master ('TEST HOLIDAY' 2026-07-15) and 1 compliance salary run — all deleted after the test class finished. All policy_master, salary_allowed, report_settings and firm_masters.salary_process.offline_salary flags were captured and restored to their pre-test values in tearDown paths.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Kankani (cmp_527fecdd7c) firm master had salary_process.offline_salary=true when this iteration finished, and TEST50 (user_44cd6f561da0) offline_salary_enabled restored to its original value. Preview URL and super-admin creds unchanged. Backend GET-policy backfill for the 3 new policy_master flags is the only lingering minor issue.",
+  "rca_of_issue": "N/A — no blocking bugs. Only asymmetry: _validate_policy (used in PATCH) initialises the 3 new PM flags via _flag(); GET response layer (L5660) sets defaults for scalar policy fields but doesn't touch policy_master, so an un-patched firm's GET response lacks the flags."
+}

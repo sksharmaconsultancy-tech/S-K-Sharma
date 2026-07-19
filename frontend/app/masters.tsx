@@ -34,7 +34,7 @@ import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors, radius, spacing, type } from "@/src/theme";
 
 type Company = { company_id: string; name: string };
-type MasterType = "group" | "department" | "designation" | "allowance" | "deduction" | "location";
+type MasterType = "group" | "department" | "designation" | "allowance" | "deduction" | "holiday" | "location";
 type Master = {
   master_id: string;
   type: MasterType;
@@ -51,6 +51,7 @@ const TABS: { key: MasterType; label: string; icon: keyof typeof Ionicons.glyphM
   { key: "designation", label: "Designations", icon: "ribbon-outline" },
   { key: "allowance", label: "Allowances", icon: "cash-outline" },
   { key: "deduction", label: "Deductions", icon: "remove-circle-outline" },
+  { key: "holiday", label: "Holidays", icon: "calendar-outline" },
   { key: "location", label: "Locations", icon: "map-outline" },
 ];
 
@@ -74,6 +75,8 @@ export default function MastersScreen() {
   const [items, setItems] = useState<Master[]>([]);
   const [loading, setLoading] = useState(false);
   const [newName, setNewName] = useState("");
+  // Iter 200 — Holiday Master entries carry a date (YYYY-MM-DD).
+  const [newDate, setNewDate] = useState("");
   const [saving, setSaving] = useState(false);
 
   // Group editor state
@@ -146,16 +149,25 @@ export default function MastersScreen() {
   const create = async () => {
     const name = newName.trim();
     if (!name) return showMsg("Enter a name");
+    if (tab === "holiday" && !/^\d{4}-\d{2}-\d{2}$/.test(newDate.trim())) {
+      return showMsg("Enter the holiday date as YYYY-MM-DD");
+    }
     // Iter 68 - Clear the typed value immediately so the input is ready for
     // the next entry, regardless of whether the API call succeeds or fails.
     const nameToCreate = name;
+    const dateToCreate = newDate.trim();
     setNewName("");
+    if (tab === "holiday") setNewDate("");
     setSaving(true);
     try {
       // Iter 77 - Masters are now created with global scope.
       await api("/admin/masters", {
         method: "POST",
-        body: { type: tab, company_id: "__global__", name: nameToCreate, member_user_ids: [] },
+        body: {
+          type: tab, company_id: "__global__", name: nameToCreate,
+          member_user_ids: [],
+          ...(tab === "holiday" ? { date: dateToCreate } : {}),
+        },
       });
       await loadItems();
     } catch (e: any) {
@@ -339,11 +351,23 @@ export default function MastersScreen() {
                       ? "e.g. Manager, Guard, Housekeeping"
                       : tab === "allowance"
                         ? "e.g. Petrol Allowance, Meal Allowance"
-                        : "e.g. Late Fine, Tea & Snacks, Loan Recovery"
+                        : tab === "holiday"
+                          ? "e.g. Diwali, Holi, Republic Day"
+                          : "e.g. Late Fine, Tea & Snacks, Loan Recovery"
               }
               placeholderTextColor={colors.onSurfaceTertiary}
               style={[styles.input, { flex: 1 }]}
             />
+            {tab === "holiday" ? (
+              <TextInput
+                testID="mst-holiday-date"
+                value={newDate}
+                onChangeText={setNewDate}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={colors.onSurfaceTertiary}
+                style={[styles.input, { width: 130 }]}
+              />
+            ) : null}
             <Pressable
               onPress={create}
               disabled={saving || !newName.trim() || !companyId}
@@ -379,6 +403,9 @@ export default function MastersScreen() {
                   <Text style={styles.rowName}>{m.name}</Text>
                   {tab === "group" ? (
                     <Text style={styles.smallHint}>{memberCount(m)} members</Text>
+                  ) : null}
+                  {tab === "holiday" && (m as any).date ? (
+                    <Text style={styles.smallHint}>{(m as any).date}</Text>
                   ) : null}
                 </View>
                 {tab === "group" ? (

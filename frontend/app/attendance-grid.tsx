@@ -182,6 +182,11 @@ export default function AttendanceGridScreen() {
 
   const [month, setMonth] = useState<string>(initialMonth);
   const [view, setView] = useState<GridView>("inout");
+
+  // Iter 200 (user request) — per-firm Report Settings (Attendance Policy →
+  // Report Settings) decide which report views exist for this firm and
+  // which one opens by default.
+  const [reportCfg, setReportCfg] = useState<{ enabled: Record<string, boolean>; default_view: string } | null>(null);
   // Iter 94 — HIDE the day columns 1–31 (hide only, data untouched).
   // When hidden, only summary columns show: OT HRS, Total Duty HRS,
   // Days, Extra HRS.
@@ -327,6 +332,33 @@ export default function AttendanceGridScreen() {
 
   // Reset group filter when firm changes (a group belongs to one firm).
   useEffect(() => { setGroupId(null); }, [effectiveCid]);
+
+  // Iter 200 — load the firm's Report Settings and apply availability + default.
+  useEffect(() => {
+    if (!effectiveCid) return;
+    let alive = true;
+    (async () => {
+      try {
+        const r = await api<any>(
+          `/attendance/policy?company_id=${encodeURIComponent(effectiveCid)}`);
+        if (!alive) return;
+        const rs = r?.policy?.report_settings || {};
+        const enabled: Record<string, boolean> = rs.enabled || {};
+        const order: GridView[] = ["inout", "ot", "hours", "salary", "inout_salary"];
+        const isOn = (k: string) => (enabled[k] ?? true) !== false;
+        let def = String(rs.default_view || "inout") as GridView;
+        if (!isOn(def)) def = order.find(isOn) || "inout";
+        setReportCfg({ enabled, default_view: def });
+        setView(def);
+      } catch { if (alive) setReportCfg(null); }
+    })();
+    return () => { alive = false; };
+  }, [effectiveCid]);
+
+  const viewEnabled = useCallback(
+    (k: GridView) => (reportCfg?.enabled?.[k] ?? true) !== false,
+    [reportCfg],
+  );
 
   // Iter 77n — Live-sync: auto-refetch the grid when a new punch (mobile,
   // biometric or ZK push) lands for this firm. Debounced so a flurry of
@@ -543,52 +575,28 @@ export default function AttendanceGridScreen() {
           <Ionicons name="chevron-forward" size={16} color={colors.onSurface} />
         </Pressable>
 
-        {/* View toggle */}
+        {/* View toggle — Iter 200: options follow the firm's Report Settings */}
         <View style={styles.segment}>
-          <Pressable
-            style={[styles.segmentBtn, view === "inout" && styles.segmentBtnOn]}
-            onPress={() => setView("inout")}
-          >
-            <Text style={[styles.segmentTxt, view === "inout" && styles.segmentTxtOn]}>
-              IN / OUT
-            </Text>
-          </Pressable>
-          {/* Iter 77l — OT IN/OUT view (per-day OT punches inline). */}
-          <Pressable
-            style={[styles.segmentBtn, view === "ot" && styles.segmentBtnOn]}
-            onPress={() => setView("ot")}
-          >
-            <Text style={[styles.segmentTxt, view === "ot" && styles.segmentTxtOn]}>
-              OT IN / OUT
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[styles.segmentBtn, view === "hours" && styles.segmentBtnOn]}
-            onPress={() => setView("hours")}
-          >
-            <Text style={[styles.segmentTxt, view === "hours" && styles.segmentTxtOn]}>
-              Hours only
-            </Text>
-          </Pressable>
-          {/* Iter 94 — Per-Day Salary + In/Out with Salary reports */}
-          <Pressable
-            style={[styles.segmentBtn, view === "salary" && styles.segmentBtnOn]}
-            onPress={() => setView("salary")}
-            testID="view-salary"
-          >
-            <Text style={[styles.segmentTxt, view === "salary" && styles.segmentTxtOn]}>
-              Day Salary
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[styles.segmentBtn, view === "inout_salary" && styles.segmentBtnOn]}
-            onPress={() => setView("inout_salary")}
-            testID="view-inout-salary"
-          >
-            <Text style={[styles.segmentTxt, view === "inout_salary" && styles.segmentTxtOn]}>
-              IN/OUT + Salary
-            </Text>
-          </Pressable>
+          {([
+            ["inout", "IN / OUT", undefined],
+            ["ot", "OT IN / OUT", undefined],
+            ["hours", "Hours only", undefined],
+            ["salary", "Day Salary", "view-salary"],
+            ["inout_salary", "IN/OUT + Salary", "view-inout-salary"],
+          ] as [GridView, string, string | undefined][])
+            .filter(([k]) => viewEnabled(k))
+            .map(([k, label, tid]) => (
+              <Pressable
+                key={k}
+                style={[styles.segmentBtn, view === k && styles.segmentBtnOn]}
+                onPress={() => setView(k)}
+                testID={tid}
+              >
+                <Text style={[styles.segmentTxt, view === k && styles.segmentTxtOn]}>
+                  {label}
+                </Text>
+              </Pressable>
+            ))}
         </View>
 
         <TextInput

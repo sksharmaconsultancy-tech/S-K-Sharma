@@ -44,6 +44,10 @@ def compute_present_days_and_ot(
     """
     full_day_hours = _num(policy.get("full_day_hours"), 8.0)
     half_day_hours = _num(policy.get("half_day_hours"), 4.0)
+    # Iter 200 — Policy Master Sub Points (dynamic attendance calc).
+    pm = policy.get("policy_master") or {}
+    weekly_offs = set(policy.get("weekly_off_days") or [])
+    holiday_dates = set(policy.get("_holiday_dates") or [])
 
     from datetime import datetime, timezone
 
@@ -55,6 +59,7 @@ def compute_present_days_and_ot(
         by_date.setdefault(d, []).append(r)
 
     total_duty_min = 0.0
+    forced_ot_min = 0.0
     present_days = 0
     half_days = 0
     absent_days = 0
@@ -84,6 +89,22 @@ def compute_present_days_and_ot(
                     day_min += dm
                 open_in = None
         day_hours = day_min / 60.0
+        # Iter 200 — Policy Master Sub Points:
+        #   • week-off worked + weekoff_present_add_ot → ALL hours to OT,
+        #     day NOT counted present.
+        #   • holiday worked + holiday_present_add_ot → day counts present
+        #     AND hours go to OT.
+        try:
+            _wd = datetime.strptime(d, "%Y-%m-%d").weekday()
+        except Exception:
+            _wd = None
+        if day_min > 0 and _wd is not None and _wd in weekly_offs and pm.get("weekoff_present_add_ot"):
+            forced_ot_min += day_min
+            continue
+        if day_min > 0 and d in holiday_dates and pm.get("holiday_present_add_ot"):
+            forced_ot_min += day_min
+            present_days += 1
+            continue
         total_duty_min += day_min
         if day_hours >= full_day_hours:
             present_days += 1
@@ -94,13 +115,19 @@ def compute_present_days_and_ot(
     # Overtime = total worked beyond `present_days * full_day_hours`.
     # Half days DON'T generate OT (partial-day rule).
     threshold_hours = present_days * full_day_hours
-    ot_hours = round(max(0.0, duty_hours - threshold_hours), 2)
+    ot_hours = round(max(0.0, duty_hours - threshold_hours) + forced_ot_min / 60.0, 2)
     # Iter 142 — per-employee `ot_allowed` / Firm Master `firm_ot_allowed`
     # gates: when either is explicitly OFF, NO overtime is credited.
     if policy.get("ot_allowed") is False or policy.get("firm_ot_allowed") is False:
         ot_hours = 0.0
     # Effective "present" for pro-ration = full days + 0.5 * half days
     effective_present = present_days + 0.5 * half_days
+    # Iter 200 — "Attendance Calculation as per Duty HRS":
+    # Days = Total Duty HRS ÷ Daily Duty HRS (firm's full-day hours).
+    if pm.get("attendance_by_duty_hours") and full_day_hours > 0:
+        effective_present = round(duty_hours / full_day_hours, 2)
+        present_days = int(effective_present)
+        half_days = 0
     return {
         "present_days": present_days,
         "half_days": half_days,

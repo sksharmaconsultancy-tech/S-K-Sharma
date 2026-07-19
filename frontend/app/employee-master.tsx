@@ -200,6 +200,8 @@ export default function EmployeeMasterScreen() {
             // Grouping fields
             employee_type: full.employee_type ?? null,
             is_onroll: full.is_onroll === undefined ? true : !!full.is_onroll,
+            // Iter 200 — per-employee Offline Salary Yes/No
+            offline_salary_enabled: full.offline_salary_enabled !== false,
             // Iter 165 — admin-controlled fingerprint requirement + status
             fingerprint_required: full.fingerprint_required === true,
             fingerprint_enrolled_at: full.fingerprint_enrolled_at ?? null,
@@ -1129,6 +1131,9 @@ function EmployeeGroupingCard({
   const [typeVal, setTypeVal] = useState<string>(emp.employee_type || "");
   const [onroll, setOnroll] = useState<boolean>(emp.is_onroll !== false);
   const [saving, setSaving] = useState(false);
+  // Iter 200 (user request) — per-employee "Offline Salary: Yes/No".
+  const [offSal, setOffSal] = useState<boolean>(
+    (emp as any).offline_salary_enabled !== false);
   // Iter 164 — Off-roll only allowed when the firm's Offline Salary is
   // enabled in Firm Master; otherwise the toggle is locked to On-roll.
   const [offlineAllowed, setOfflineAllowed] = useState<boolean | null>(null);
@@ -1180,6 +1185,8 @@ function EmployeeGroupingCard({
           user_id: emp.user_id,
           employee_type: (typeVal || "").trim() || null,
           is_onroll: onroll,
+          // Iter 200 — Offline Salary Yes/No (firm's Offline Salary must be ON).
+          ...(offlineAllowed ? { offline_salary_enabled: offSal } : {}),
           // Iter 165 — only send when the firm allows biometric attendance.
           ...(bioAllowed ? { fingerprint_required: fpRequired } : {}),
           // Iter 175 — contractual employee link (Firm Master contractors).
@@ -1242,6 +1249,30 @@ function EmployeeGroupingCard({
           <View style={[styles.toggleKnob, onroll && styles.toggleKnobOn]} />
         </View>
       </Pressable>
+
+      {/* Iter 200 (user request) — clear per-employee Offline Salary toggle,
+          visible only when the firm's Offline Salary is ON in Firm Master. */}
+      {offlineAllowed ? (
+        <Pressable
+          testID="grouping-offline-salary-toggle"
+          onPress={() => setOffSal((v) => !v)}
+          style={styles.onrollRow}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.metaValue}>
+              {offSal ? "Offline Salary: YES" : "Offline Salary: NO"}
+            </Text>
+            <Text style={styles.fieldHint}>
+              {offSal
+                ? "Included in the Offline (Actual) Salary process."
+                : "Excluded from Offline (Actual) Salary runs for this firm."}
+            </Text>
+          </View>
+          <View style={[styles.toggleTrack, offSal && styles.toggleTrackOn]}>
+            <View style={[styles.toggleKnob, offSal && styles.toggleKnobOn]} />
+          </View>
+        </Pressable>
+      ) : null}
 
       {/* Iter 165 — admin-controlled fingerprint verification (Employee
           PWA). Only editable when the firm's Bio Matrix Attendance is
