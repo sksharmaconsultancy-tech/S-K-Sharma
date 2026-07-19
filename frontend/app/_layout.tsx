@@ -20,6 +20,14 @@ import { ThemeProvider, useTheme } from "@/src/context/ThemeContext";
 
 LogBox.ignoreAllLogs(true);
 
+// Deep-link preservation — capture the path the browser ACTUALLY opened
+// before any router hydration/remount can clobber it. app/index.tsx uses
+// this to restore direct URLs (e.g. /salary-run) after the auth bootstrap
+// remounts the Stack and resets it to "/".
+if (typeof window !== "undefined" && !(window as any).__bootPath) {
+  (window as any).__bootPath = window.location.pathname + window.location.search;
+}
+
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {

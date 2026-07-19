@@ -674,8 +674,27 @@ export default function AdminWebShell({ children }: Props) {
     return !allowed.has(hit);
   }, [role, nav, pathname]);
 
-  if (!isWebDesktop || !user) return <>{children}</>;
-  if (isBareRoute) return <>{children}</>;
+  // IMPORTANT (Iter 197) — the Stack navigator lives inside {children}. If
+  // we return it bare in one branch and nested inside shell chrome in
+  // another, React REMOUNTS the navigator when auth finishes bootstrapping,
+  // which RESETS navigation state to the index route and clobbers direct
+  // URLs (deep links like /salary-run bounced to /portal-dashboard). Render
+  // a skeleton with IDENTICAL nesting positions so children never remount.
+  if (!isWebDesktop || !user || isBareRoute) {
+    return (
+      <View style={{ flex: 1 }}>
+        {null}
+        <View style={{ flex: 1 }}>
+          {null}
+          <View style={{ flex: 1 }}>
+            <View style={{ flex: 1 }}>{children}</View>
+            {null}
+          </View>
+        </View>
+        {null}
+      </View>
+    );
+  }
 
   // Web-only guard — employees logged into the web preview see a friendly
   // "download the mobile app" screen instead of the full tabs UI.
@@ -962,6 +981,9 @@ export default function AdminWebShell({ children }: Props) {
           </View>
         </View>
         <View style={styles.main} testID="admin-web-main">
+          {/* children (the Stack) stays MOUNTED even when access is denied —
+              unmounting it resets navigation state (see skeleton note). */}
+          <View style={{ flex: 1, display: routeDenied ? "none" : "flex" }}>{children}</View>
           {routeDenied ? (
             <View style={styles.deniedWrap} testID="route-access-denied">
               <Ionicons name="lock-closed-outline" size={52} color="#B91C1C" />
@@ -971,7 +993,7 @@ export default function AdminWebShell({ children }: Props) {
                 Contact your administrator if you believe this is a mistake.
               </Text>
               <Pressable
-                onPress={() => router.replace("/(tabs)" as any)}
+                onPress={() => router.replace("/portal-dashboard" as any)}
                 style={styles.deniedBtn}
                 testID="denied-go-home"
               >
@@ -979,9 +1001,7 @@ export default function AdminWebShell({ children }: Props) {
                 <Text style={styles.deniedBtnTxt}>Go to Dashboard</Text>
               </Pressable>
             </View>
-          ) : (
-            children
-          )}
+          ) : null}
         </View>
       </View>
 

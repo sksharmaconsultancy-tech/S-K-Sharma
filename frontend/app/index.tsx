@@ -1,4 +1,4 @@
-import { Redirect, useRouter } from "expo-router";
+import { Redirect, useRouter, usePathname } from "expo-router";
 import { useState } from "react";
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, Platform, useWindowDimensions } from "react-native";
 import { Image } from "expo-image";
@@ -15,7 +15,20 @@ export default function Landing() {
   const { user, loading, authError, clearAuthError } = useAuth();
   const { selectedCompanyId } = useSelectedCompany();
   const router = useRouter();
+  const pathname = usePathname();
   const { width } = useWindowDimensions();
+
+  // RBAC fix (Iter 197) — on web deep links (e.g. direct URL /salary-run)
+  // expo-router mounts this index screen at the BOTTOM of the stack (and
+  // briefly reports pathname "/" during rehydration). Its <Redirect> used
+  // to fire anyway and clobber the deep-linked route, bouncing users to
+  // /portal-dashboard. Trust the BROWSER url — only redirect at real "/".
+  const browserPath =
+    Platform.OS === "web" && typeof window !== "undefined"
+      ? window.location.pathname
+      : pathname;
+  const notAtRoot =
+    Platform.OS === "web" && browserPath && browserPath !== "/" && browserPath !== "/index";
 
   // QR-scoped landing: when the visitor arrived via an Employee QR we hide
   // the Admin / Company options; via an Employer QR we hide Employee sign-in.
@@ -37,6 +50,7 @@ export default function Landing() {
       </View>
     );
   }
+  if (notAtRoot) return null;
   if (user) {
     if (user.pin_must_change) return <Redirect href="/pin-change" />;
     if (user.role === "employee" && user.offboarded) return <Redirect href="/offboarded" />;
@@ -47,6 +61,19 @@ export default function Landing() {
     // Admin flows are unchanged (they land on the dashboard directly).
     const isSubAdmin = (user.role as string) === "sub_admin";
     if (isSubAdmin && !selectedCompanyId) return <Redirect href="/firm-select" />;
+    // Deep-link restore — during the auth bootstrap the Stack navigator
+    // remounts (bare tree → admin shell) and RESETS to this index route,
+    // wiping whatever direct URL the user opened (e.g. /salary-run).
+    // _layout.tsx captured the original path at boot; send them back once.
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      const w = window as any;
+      const boot: string | null = w.__bootPath || null;
+      const bootBase = (boot || "").split("?")[0];
+      if (boot && !w.__bootPathConsumed && bootBase !== "/" && bootBase !== "/index" && bootBase !== "/firm-select") {
+        w.__bootPathConsumed = true;
+        return <Redirect href={boot as any} />;
+      }
+    }
     // Iter 181 — admins on desktop web land on the premium Portal
     // Dashboard (single default dashboard). Mobile/app keeps /(tabs).
     const isAdminRole = ["super_admin", "company_admin", "sub_admin"].includes(user.role as string);
