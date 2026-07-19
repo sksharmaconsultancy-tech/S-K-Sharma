@@ -6,3 +6,4 @@ __pycache__/
 dist/
 memory/test_credentials.md
 memory/superadmin_pin.txt
+SksPay.env

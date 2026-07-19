@@ -187,3 +187,9 @@ See `/app/memory/test_credentials.md`. Super admin
 - RBAC: fixed Stack-remount reset in AdminWebShell (stable skeleton) + boot-path restore in index.tsx; staff/sub-admin direct URLs to restricted pages now show Access Denied (route-access-denied) with URL preserved. Page guards in roles/approval-workflows/advances return null on web instead of Redirect.
 - iteration_198 429-storm on /attendance/my-geo-policy fixed via TTL cache + AsyncStorage persistence + mount-only effect (offlinePunch.getOfflinePunchEnabled).
 - Known env noise: dev LogBox "Failed to fetch" overlay when simulating offline in dev builds (dev-only); Cloudflare security-check challenges under heavy automation.
+
+## Iter 202 — Bulk Operations + Statutory Reports + 8-HR Present Day rule
+- Backend: routes/bulk_ops.py (attendance upload status/inout, salary revision select+excel, transfer, resignation, shift assign, history) + routes/statutory_extra_reports.py (PT/LWF/Gratuity/FnF/Advance-Loan/MIS in json/xlsx/pdf) + CLRA form XII-XV .xlsx exports.
+- Policy: new policy_master.compliance_present_8hr sub-point → compliance run present days at 8 hrs (utils/salary_run.py _present_day_hours_override) + grid duty/OT split at 8 hrs; "Days" replaced by policy-based "Present Days" (totals.present_days_policy) in grid JSON, XLSX builders and FnF.
+- Frontend: app/bulk-operations.tsx, app/statutory-reports.tsx, clra-registers.tsx Excel buttons, attendance-grid "Present Days" labels, AdminWebShell nav entries.
+- Testing agent: 32/32 pytest (tests/test_iter202_bulk_ops_reports.py) incl. 8-HR sub-point E2E; fixed advance-loan xlsx sheet-title "/" 500. Frontend bulk-operations page verified; statutory-reports/clra/attendance-grid partially (Playwright session loss, not a user bug). All test data cleaned.
