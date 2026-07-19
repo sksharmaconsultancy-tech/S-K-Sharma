@@ -280,6 +280,105 @@ async def archive_proposal(proposal_id: str, company_id: Optional[str] = None,
 
 
 # ---------------------------------------------------------------------------
+# Phase 2 — one-click "Convert to Customer"
+# ---------------------------------------------------------------------------
+@router.post("/admin/proposals/{proposal_id}/convert")
+async def convert_to_customer(proposal_id: str,
+                              payload: Dict[str, Any] = Body(default={}),
+                              authorization: Optional[str] = Header(None)):
+    """Create a Firm (company) + service agreement snapshot from a proposal.
+
+    Idempotent — converting twice returns the already-linked firm.
+    """
+    admin = await _guard(authorization, payload.get("company_id"))
+    require_role(admin, ["super_admin", "sub_admin"])
+    p = await db.proposals.find_one(
+        {"proposal_id": proposal_id, "company_id": admin["_cid"]}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if p.get("converted_company_id"):
+        existing = await db.companies.find_one(
+            {"company_id": p["converted_company_id"]}, {"_id": 0, "name": 1})
+        return {"ok": True, "already_converted": True,
+                "company_id": p["converted_company_id"],
+                "company_name": (existing or {}).get("name")}
+
+    client = p.get("client") or {}
+    name = str(client.get("company_name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Proposal has no client company name")
+    import re as _re
+    dup = await db.companies.find_one(
+        {"name": {"$regex": f"^{_re.escape(name)}$", "$options": "i"}},
+        {"_id": 0, "company_id": 1, "name": 1})
+    if dup and not payload.get("force"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"A firm named \"{dup['name']}\" already exists "
+                   f"(company_id={dup['company_id']}). Retry with force=true "
+                   "to create anyway.")
+
+    from server import Company
+    company = Company(
+        name=name,
+        address=client.get("address") or None,
+        office_lat=0.0, office_lng=0.0,
+        geofence_radius_m=200,
+        compliance_enabled=True,
+    ).model_dump()
+    company.update({
+        "created_by": admin["user_id"],
+        "source": "proposal_conversion",
+        "proposal_id": proposal_id,
+        "contact_person": client.get("contact_person"),
+        "contact_email": client.get("email"),
+        "contact_mobile": client.get("mobile"),
+        "gst_no": client.get("gst"),
+        "pan_no": client.get("pan"),
+    })
+    try:
+        await db.companies.insert_one(company)
+    except Exception:  # rare company_code collision — retry with fresh code
+        company.pop("_id", None)
+        company["company_code"] = uuid.uuid4().hex[:6].upper()
+        await db.companies.insert_one(company)
+
+    # Service agreement snapshot (services + pricing frozen at conversion).
+    agreement = {
+        "agreement_id": f"agr_{uuid.uuid4().hex[:12]}",
+        "company_id": company["company_id"],
+        "consultant_company_id": admin["_cid"],
+        "proposal_id": proposal_id,
+        "proposal_number": p.get("number"),
+        "services": p.get("services") or [],
+        "scope": p.get("scope") or [],
+        "pricing": p.get("pricing") or {},
+        "terms": p.get("terms"),
+        "start_date": now_iso()[:10],
+        "billing_months": (p.get("pricing_input") or {}).get("billing_months"),
+        "status": "active",
+        "created_at": now_iso(),
+        "created_by": admin["user_id"],
+    }
+    await db.client_agreements.insert_one(agreement)
+
+    now = now_iso()
+    await db.proposals.update_one(
+        {"proposal_id": proposal_id},
+        {"$set": {"status": "converted", "converted_company_id": company["company_id"],
+                  "converted_at": now, "agreement_id": agreement["agreement_id"]},
+         "$push": {"audit": {"action": "converted_to_customer",
+                             "by": admin["user_id"], "name": admin.get("name"),
+                             "at": now, "company_id": company["company_id"]}}},
+    )
+    logger.info("[proposals] %s converted -> firm %s (%s) by %s",
+                p.get("number"), company["company_id"], name, admin["user_id"])
+    return {"ok": True, "company_id": company["company_id"],
+            "company_code": company.get("company_code"), "company_name": name,
+            "agreement_id": agreement["agreement_id"]}
+
+
+# ---------------------------------------------------------------------------
 # Document generation (PDF + Word)
 # ---------------------------------------------------------------------------
 async def _load(proposal_id: str, cid: str) -> Dict[str, Any]:

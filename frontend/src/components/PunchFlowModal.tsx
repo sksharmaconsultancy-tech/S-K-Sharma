@@ -82,6 +82,8 @@ export default function PunchFlowModal({ visible, kind, user, postPunch, onClose
   const runningRef = useRef(false);
   const selfieRef = useRef<string | null>(null);
   const methodRef = useRef<"fingerprint" | "face">("face");
+  const mockRef = useRef<boolean>(false);
+  const accuracyRef = useRef<number | null>(null);
 
   const setStep = (k: StepKey, s: StepState, note?: string) => {
     setSteps((p) => ({ ...p, [k]: s }));
@@ -118,6 +120,9 @@ export default function PunchFlowModal({ visible, kind, user, postPunch, onClose
       }
       const l = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       const pos = { latitude: l.coords.latitude, longitude: l.coords.longitude };
+      // Phase 3 — fake/mock GPS detection (Android reports `mocked`).
+      mockRef.current = (l as any)?.mocked === true || (l.coords as any)?.mocked === true;
+      accuracyRef.current = typeof l.coords.accuracy === "number" ? Math.round(l.coords.accuracy) : null;
       setCoords(pos);
       if (!sites.length) {
         setStep("gps", "done", "Location captured (no geofence configured)");
@@ -238,6 +243,8 @@ export default function PunchFlowModal({ visible, kind, user, postPunch, onClose
         biometric_method: methodRef.current,
         selfie_base64: selfieRef.current,
         device_info: Platform.OS,
+        mock_location: mockRef.current || undefined,
+        gps_accuracy_m: accuracyRef.current ?? undefined,
         ...(site && site.worksite_id !== "main"
           ? { worksite_id: site.worksite_id, worksite_name: site.name }
           : site ? { worksite_name: site.name } : {}),

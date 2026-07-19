@@ -159,6 +159,7 @@ export const NAV_SUPER: NavItem[] = [
   { route: "/employee-bulk-import", label: "Bulk Import (Excel)", icon: "cloud-upload-outline" },
   { route: "/attendance-policy", label: "Attendance Policy", icon: "time-outline" },
   { route: "/geofence-policy", label: "Geofence Policy", icon: "location-outline" },
+  { route: "/geofence-monitor", label: "Geofence Monitor", icon: "navigate-circle-outline" },
   // Iter 85 — Utility group. Users Log Report is a new audit view;
   // Messages + Tickets moved under this umbrella so ops tools live in
   // one collapsible section.
@@ -202,6 +203,7 @@ const NAV_PERMISSION_MAP: Record<string, string[]> = {
   "/attendance-policy": ["attendance_policy:read", "attendance_policy:write"],
   "/punch-approvals": ["punch_approvals:read", "punch_approvals:write"],
   "/location-audit": ["punch_approvals:read", "punch_approvals:write"],
+  "/geofence-monitor": ["punch_approvals:read", "punch_approvals:write"],
   "/biometric-devices": ["biometric_devices:read", "biometric_devices:write"],
   "/attendance-review": ["attendance_review:read", "attendance_review:write"],
   "/salary-run": ["salary_process:read", "salary_process:write"],
@@ -399,6 +401,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
   { route: "/employee-bulk-import", label: "Bulk Import (Excel)", icon: "cloud-upload-outline" },
   { route: "/attendance-policy", label: "Attendance Policy", icon: "time-outline" },
   { route: "/geofence-policy", label: "Geofence Policy", icon: "location-outline" },
+  { route: "/geofence-monitor", label: "Geofence Monitor", icon: "navigate-circle-outline" },
   { route: "/location-audit", label: "Location Audit", icon: "navigate-outline" },
   { route: "/biometric-devices", label: "Biometric Devices", icon: "finger-print-outline" },
   { route: "/messages", label: "Messages", icon: "chatbubbles-outline" },

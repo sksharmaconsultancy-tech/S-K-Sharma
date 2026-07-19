@@ -8820,6 +8820,10 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
     _ = "auto" in src or "geofence" in src  # kept for audit reason text (unused after Iter 86)
     # Field mode auto-approves; every other app punch still needs approval.
     field_auto = bool(pol_decision.get("auto_approve")) and pol_mode == "field"
+    # Phase 3 — fake/mock GPS flagged punches ALWAYS need manual approval,
+    # even in auto-approving Field mode.
+    if record.get("mock_location"):
+        field_auto = False
     needs_approval = not field_auto
     record["status"] = "pending" if needs_approval else "approved"
     # Expanded status workflow (Phase 1) — richer value for badges/reports;
@@ -19117,6 +19121,9 @@ app.include_router(clra_registers_router)
 
 from routes.geo_policy import router as geo_policy_router  # noqa: E402
 app.include_router(geo_policy_router)
+
+from routes.geofence_reports import router as geofence_reports_router  # noqa: E402
+app.include_router(geofence_reports_router)
 
 from routes.proposals import router as proposals_router  # noqa: E402
 app.include_router(proposals_router)

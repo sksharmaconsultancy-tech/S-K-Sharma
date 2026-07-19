@@ -133,6 +133,20 @@ export default function ProposalsScreen() {
     } catch (e: any) { setMsg(e?.message || "Export failed."); }
   }, []);
 
+  const [converting, setConverting] = useState<string | null>(null);
+  const convert = useCallback(async (id: string, clientName: string) => {
+    setConverting(id); setMsg(null);
+    try {
+      const r = await api<{ ok: boolean; company_name?: string; company_code?: string; already_converted?: boolean }>(
+        `/admin/proposals/${id}/convert`, { method: "POST", body: {} });
+      setMsg(r.already_converted
+        ? `"${r.company_name || clientName}" is already a customer firm.`
+        : `🎉 "${r.company_name || clientName}" created as a new firm (code ${r.company_code || "—"}) with an active service agreement.`);
+      await load();
+    } catch (e: any) { setMsg(e?.message || "Convert failed."); }
+    finally { setConverting(null); }
+  }, [load]);
+
   if (loading) return null;
   const role = user?.role as string;
   if (!user || !["super_admin", "sub_admin", "company_admin"].includes(role)) {
@@ -268,6 +282,24 @@ export default function ProposalsScreen() {
                 <Ionicons name="document-text-outline" size={15} color="#2563EB" />
                 <Text style={[st.expTxt, { color: "#2563EB" }]}>Word</Text>
               </Pressable>
+              {p.status === "converted" ? (
+                <View style={[st.expBtn, { borderColor: "#7C3AED", backgroundColor: "#F5F3FF" }]}>
+                  <Ionicons name="checkmark-done-outline" size={15} color="#7C3AED" />
+                  <Text style={[st.expTxt, { color: "#7C3AED" }]}>Customer</Text>
+                </View>
+              ) : (role === "super_admin" || role === "sub_admin") ? (
+                <Pressable
+                  style={[st.expBtn, { borderColor: "#059669", backgroundColor: "#ECFDF5" }]}
+                  disabled={converting === p.proposal_id}
+                  onPress={() => convert(p.proposal_id, p.client?.company_name || "")}
+                  testID={`convert-${p.proposal_id}`}
+                >
+                  <Ionicons name="business-outline" size={15} color="#059669" />
+                  <Text style={[st.expTxt, { color: "#059669" }]}>
+                    {converting === p.proposal_id ? "Converting…" : "Convert to Customer"}
+                  </Text>
+                </Pressable>
+              ) : null}
             </View>
           ))
         )}
