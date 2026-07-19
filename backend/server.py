@@ -449,6 +449,9 @@ class CompanyUpdate(BaseModel):
     auto_punch_enabled: Optional[bool] = None
     location_punching_enabled: Optional[bool] = None
     reject_outside_geofence: Optional[bool] = None
+    # Firm Master switch — when True, the employee PWA may queue punches
+    # offline (IndexedDB) and sync them when back online.
+    offline_geofence_enabled: Optional[bool] = None
 
 
 class KycUpdate(BaseModel):
@@ -6732,6 +6735,8 @@ async def update_company(
         "location_punching_enabled",
         # Iter 64 — Reject outside-geofence IN-punches (strict mode).
         "reject_outside_geofence",
+        # Firm Master — allow offline punch queue + sync in the employee PWA.
+        "offline_geofence_enabled",
         "punch_approval_required",
     }
     updates = {k: v for k, v in payload.items() if k in allowed}

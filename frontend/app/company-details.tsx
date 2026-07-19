@@ -38,6 +38,7 @@ type Company = {
   auto_punch_enabled?: boolean;
   // Iter 64 — Firm-level GPS punching master switch. Default FALSE.
   location_punching_enabled?: boolean;
+  offline_geofence_enabled?: boolean;
   enabled: boolean;
   disabled_at?: string | null;
   disabled_reason?: string | null;
@@ -203,6 +204,33 @@ export default function CompanyDetailsScreen() {
           { text: currentlyOn ? "Switch to Manual" : "Enable Auto", onPress: proceed },
         ],
       );
+    }
+  };
+
+  const toggleOfflineGeofence = async () => {
+    if (!data) return;
+    const currentlyOn = data.company.offline_geofence_enabled === true;
+    const proceed = async () => {
+      try {
+        await api(`/companies/${company_id}`, {
+          method: "PATCH",
+          body: { offline_geofence_enabled: !currentlyOn },
+        });
+        await load();
+      } catch (e: any) {
+        alertUser("Update failed", e?.message || "Please try again.");
+      }
+    };
+    const m = currentlyOn
+      ? "Disable OFFLINE punching?\n\nEmployees will need internet to punch."
+      : "Enable OFFLINE punching?\n\nWhen offline, the employee PWA will save punches (GPS + selfie) on-device and sync them automatically when internet returns.";
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined" && window.confirm(m)) proceed();
+    } else {
+      Alert.alert(currentlyOn ? "Disable offline" : "Enable offline", m, [
+        { text: "Cancel", style: "cancel" },
+        { text: currentlyOn ? "Disable" : "Enable", onPress: proceed },
+      ]);
     }
   };
 
@@ -466,6 +494,24 @@ export default function CompanyDetailsScreen() {
                 size={14}
                 color={colors.brandPrimary}
               />
+              <Text style={styles.inlineToggleTxt}>Switch</Text>
+            </Pressable>
+          </View>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <View style={{ flex: 1 }}>
+              <KV
+                label="Offline punching (PWA)"
+                value={company.offline_geofence_enabled === true ? "ON (offline allowed)" : "OFF"}
+                tint={company.offline_geofence_enabled === true ? "#065F46" : "#7A4E00"}
+              />
+            </View>
+            <Pressable
+              testID="toggle-offline-geofence"
+              onPress={toggleOfflineGeofence}
+              style={styles.inlineToggleBtn}
+              hitSlop={8}
+            >
+              <Ionicons name="cloud-offline-outline" size={14} color={colors.brandPrimary} />
               <Text style={styles.inlineToggleTxt}>Switch</Text>
             </Pressable>
           </View>

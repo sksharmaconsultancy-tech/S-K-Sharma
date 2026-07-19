@@ -348,4 +348,6 @@ async def my_geo_policy(authorization: Optional[str] = Header(None)):
     res = await resolve_geo_policy(user, company)
     cat = next((m for m in MODE_CATALOGUE if m["mode"] == res["mode"]), MODE_CATALOGUE[0])
     return {"mode": res["mode"], "label": cat["label"], "color": cat["color"],
-            "desc": cat["desc"], "settings": res["settings"], "source": res["source"]}
+            "desc": cat["desc"], "settings": res["settings"], "source": res["source"],
+            # Firm Master switch — the PWA enables offline punching only when True.
+            "offline_punch_enabled": bool(company.get("offline_geofence_enabled"))}
