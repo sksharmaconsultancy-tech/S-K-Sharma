@@ -11,9 +11,10 @@ Endpoints:
 """
 import base64
 import io
+import re
 import uuid
 from datetime import datetime, time as dtime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Body, Header, HTTPException
 
@@ -55,8 +56,17 @@ def _parse_time_cell(v: Any) -> Optional[str]:
         return v.strftime("%H:%M")
     if isinstance(v, dtime):
         return v.strftime("%H:%M")
-    if isinstance(v, (int, float)):  # Excel time fraction
-        total = int(round(float(v) % 1 * 24 * 60))
+    if isinstance(v, (int, float)):
+        f = float(v)
+        # H.MM convention (e.g. 20.07 → 20:07, 12.3 → 12:30) — common in
+        # Indian attendance-software exports where the dot separates
+        # hours.minutes rather than being a decimal fraction.
+        if 1 <= f < 24:
+            mins = round((f % 1) * 100)
+            if mins < 60 and abs((f % 1) * 100 - mins) < 0.01:
+                return f"{int(f):02d}:{int(mins):02d}"
+        # Excel time fraction (0.8382 → 20:07) / datetime serial tail.
+        total = int(round(f % 1 * 24 * 60))
         return f"{total // 60:02d}:{total % 60:02d}"
     s = str(v).strip().upper().replace(".", ":")
     if not s or s in ("-", "—"):
@@ -79,29 +89,94 @@ def _parse_time_cell(v: Any) -> Optional[str]:
     return None
 
 
-def _parse_sheet(data: bytes) -> List[Dict[str, Any]]:
-    """Detect header row + columns (bio / name / date / in / out) and
-    return raw parsed rows."""
-    from openpyxl import load_workbook
-    wb = load_workbook(io.BytesIO(data), data_only=True, read_only=True)
-    ws = wb.active
-    rows = list(ws.iter_rows(values_only=True))
-    wb.close()
+def _read_grid(data: bytes) -> List[List[Any]]:
+    """Read raw cell values from .xlsx (openpyxl) or legacy .xls (xlrd)."""
+    try:
+        from openpyxl import load_workbook
+        wb = load_workbook(io.BytesIO(data), data_only=True, read_only=True)
+        ws = wb.active
+        rows = [list(r) for r in ws.iter_rows(values_only=True)]
+        wb.close()
+        return rows
+    except Exception:
+        pass
+    try:
+        import xlrd
+        wb = xlrd.open_workbook(file_contents=data)
+        ws = wb.sheet_by_index(0)
+        out: List[List[Any]] = []
+        for i in range(ws.nrows):
+            row: List[Any] = []
+            for c in ws.row(i):
+                if c.ctype == 3:  # date/time cell
+                    try:
+                        t = xlrd.xldate_as_tuple(c.value, wb.datemode)
+                        row.append(dtime(t[3], t[4], t[5]) if t[0] == 0
+                                   else datetime(*t))
+                    except Exception:
+                        row.append(c.value)
+                else:
+                    row.append(c.value)
+            out.append(row)
+        return out
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not read this file. Upload an Excel sheet (.xlsx or .xls).")
+
+
+def _ot_kind(lbl: str) -> Optional[str]:
+    """Detect an OT punch column from a header label. Accepts OT In,
+    OT-In, OTIN Time, O.T. In, Overtime In, OT Start/End/From/To …"""
+    key = re.sub(r"[^a-z]", "", (lbl or "").lower())
+    if key.startswith("overtime"):
+        rest = key[8:]
+    elif key.startswith("ot"):
+        rest = key[2:]
+    else:
+        return None
+    if "out" in rest or "end" in rest or rest == "to":
+        return "ot_out"
+    if "in" in rest or "start" in rest or "from" in rest or "begin" in rest:
+        return "ot_in"
+    return None
+
+
+def _parse_sheet(data: bytes) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Detect header row + columns (bio / name / date / in / out / ot in /
+    ot out) and return (raw parsed rows, column-detection meta)."""
+    rows = _read_grid(data)
     header_idx, cols = None, {}
+    header_labels: List[str] = []
     for i, r in enumerate(rows[:15]):
         labels = [str(c or "").strip().lower() for c in r]
+        # Forward-filled labels of the row ABOVE — catches merged "OT"
+        # group headers spanning In/Out sub-columns.
+        above: List[str] = []
+        if i > 0:
+            last = ""
+            for c in rows[i - 1]:
+                s = str(c or "").strip().lower()
+                if s:
+                    last = s
+                above.append(last)
         cmap: Dict[str, int] = {}
         for j, lbl in enumerate(labels):
             if not lbl:
                 continue
-            # Iter 208 — OT punch columns (checked BEFORE plain in/out so
-            # "OT Out" never hijacks the regular Out column).
-            if "ot" in lbl.split() or lbl.startswith("ot") or "o.t" in lbl:
-                if "out" in lbl:
-                    cmap.setdefault("ot_out", j)
-                elif "in" in lbl:
-                    cmap.setdefault("ot_in", j)
+            # Iter 208/209 — OT punch columns (checked BEFORE plain in/out
+            # so "OT Out" never hijacks the regular Out column).
+            ot = _ot_kind(lbl)
+            if ot is None and j < len(above):
+                # Merged header: "OT" on the row above + "In"/"Out" here.
+                grp = re.sub(r"[^a-z]", "", above[j])
+                if grp in ("ot", "overtime"):
+                    ot = _ot_kind(f"ot {lbl}")
+            if ot:
+                cmap.setdefault(ot, j)
                 continue
+            if "ot" in lbl.split() or lbl.startswith("ot") or "o.t" in lbl:
+                continue  # other OT columns (OT Hrs etc.) — ignore
             if "bio" in lbl or lbl in ("code", "emp code", "employee code", "emp. code"):
                 cmap.setdefault("bio", j)
             elif "name" in lbl:
@@ -110,10 +185,11 @@ def _parse_sheet(data: bytes) -> List[Dict[str, Any]]:
                 cmap.setdefault("date", j)
             elif "out" in lbl:
                 cmap.setdefault("out", j)
-            elif lbl == "in" or "in time" in lbl or "punch in" in lbl or lbl.startswith("in "):
+            elif lbl == "in" or "in time" in lbl or "punch in" in lbl or lbl.startswith("in ") or lbl == "intime":
                 cmap.setdefault("in", j)
         if "date" in cmap and ("bio" in cmap or "name" in cmap) and ("in" in cmap or "out" in cmap):
             header_idx, cols = i, cmap
+            header_labels = [l for l in labels if l]
             break
     if header_idx is None:
         raise HTTPException(
@@ -140,7 +216,12 @@ def _parse_sheet(data: bytes) -> List[Dict[str, Any]]:
             "ot_in_time": _parse_time_cell(get("ot_in")),
             "ot_out_time": _parse_time_cell(get("ot_out")),
         })
-    return out
+    meta = {
+        "headers": header_labels,
+        "found": {k: (k in cols) for k in ("bio", "name", "date", "in", "out", "ot_in", "ot_out")},
+        "ot_detected": ("ot_in" in cols or "ot_out" in cols),
+    }
+    return out, meta
 
 
 async def _match_rows(company_id: str, raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -226,10 +307,12 @@ async def preview_import(payload: Dict[str, Any] = Body(...),
         raise HTTPException(status_code=400, detail="Invalid file upload")
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
-    rows = await _match_rows(company_id, _parse_sheet(data))
+    raw, col_meta = _parse_sheet(data)
+    rows = await _match_rows(company_id, raw)
     matched = [r for r in rows if r["status"] == "matched"]
     return {
         "rows": rows,
+        "columns": col_meta,
         "summary": {
             "total": len(rows),
             "matched": len(matched),

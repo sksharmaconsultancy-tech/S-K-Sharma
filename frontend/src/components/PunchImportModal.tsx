@@ -36,6 +36,11 @@ type Row = {
 
 type Preview = {
   rows: Row[];
+  columns?: {
+    headers: string[];
+    found: Record<string, boolean>;
+    ot_detected: boolean;
+  };
   summary: {
     total: number;
     matched: number;
@@ -258,6 +263,24 @@ export default function PunchImportModal({ visible, companyId, onClose, onImport
                     </View>
                   </View>
 
+                  {preview.columns ? (
+                    preview.columns.ot_detected ? (
+                      <View style={st.otOkBanner}>
+                        <Ionicons name="checkmark-circle" size={14} color="#16A34A" />
+                        <Text style={st.otOkTxt}>OT In / OT Out columns detected — night OT will be imported.</Text>
+                      </View>
+                    ) : (
+                      <View style={st.otWarnBanner}>
+                        <Ionicons name="warning" size={14} color="#B91C1C" />
+                        <Text style={st.otWarnTxt}>
+                          OT In / OT Out columns NOT found — OT punches will NOT be imported.
+                          Headers found in your file: {preview.columns.headers.join(", ") || "none"}.
+                          Rename your OT columns to &quot;OT In&quot; and &quot;OT Out&quot; (or download the sample template).
+                        </Text>
+                      </View>
+                    )
+                  ) : null}
+
                   <ScrollView style={st.rowsBox}>
                     <View style={st.tRow}>
                       <Text style={[st.tCell, st.tHead, { width: 34 }]}>Row</Text>
@@ -386,6 +409,30 @@ const st = StyleSheet.create({
   },
   sumNum: { fontSize: 16, fontWeight: "800" },
   sumLbl: { fontSize: 10.5, color: colors.onSurfaceSecondary },
+  otOkBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#F0FDF4",
+    borderRadius: radius.md,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    marginBottom: 8,
+  },
+  otOkTxt: { fontSize: 11.5, color: "#15803D", fontWeight: "600", flex: 1 },
+  otWarnBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 6,
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    borderRadius: radius.md,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    marginBottom: 8,
+  },
+  otWarnTxt: { fontSize: 11.5, color: "#B91C1C", fontWeight: "600", flex: 1, lineHeight: 16 },
   rowsBox: {
     maxHeight: 320,
     borderWidth: 1,
