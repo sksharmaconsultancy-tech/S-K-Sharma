@@ -78,6 +78,12 @@ def _fmt_hours_hm(minutes_total: int) -> str:
     return _fmt_hours_sample(minutes_total)
 
 
+def _hhmm_from_hours(hrs: float) -> str:
+    """Iter 205 — clock-timing totals: decimal hours → HH:MM string."""
+    m = int(round(max(0.0, float(hrs or 0.0)) * 60))
+    return f"{m // 60:02d}:{m % 60:02d}"
+
+
 def _parse_iso(v: Any) -> Optional[datetime]:
     """Parse an ISO timestamp field (str or datetime) to a UTC datetime."""
     if not v:
@@ -673,15 +679,13 @@ def build_grid_view_xlsx(grid: Dict[str, Any]) -> bytes:
             _pdp = totals.get("present_days_policy")
             if _pdp is None:
                 _pdp = totals.get("present_days") or 0.0
-            if row_type == "D-Out":
-                tot_wrk = duty_only_total
-                day_total = float(_pdp)
-            elif row_type == "T-Hrs":
-                tot_wrk = duty_only_total
+            if row_type in ("D-Out", "T-Hrs"):
+                # Iter 205 — clock-timing totals (HH:MM, not decimals).
+                tot_wrk = _hhmm_from_hours(duty_only_total)
                 day_total = float(_pdp)
             else:  # D-In
-                tot_wrk = 0.0
-                day_total = 0.0
+                tot_wrk = ""
+                day_total = ""
 
             sc = ws.cell(row=r, column=5 + days_n, value=tot_wrk)
             sc.alignment = center
@@ -697,7 +701,7 @@ def build_grid_view_xlsx(grid: Dict[str, Any]) -> bytes:
             if row_type == "T-Hrs":
                 dc.font = total_font
             if isinstance(day_total, (int, float)):
-                dc.number_format = "0.00"
+                dc.number_format = "0.##"
 
             # Apply zebra fill + borders to all cells in the row.
             for c_ in range(1, 5 + days_n + 2):
@@ -733,14 +737,17 @@ def build_grid_view_xlsx(grid: Dict[str, Any]) -> bytes:
                   else (e.get("totals") or {}).get("present_days") or 0.0)
             for e in employees
         )
-        c = ws.cell(row=footer_row, column=6 + days_n, value=round(grand_hrs, 2))
+        c = ws.cell(row=footer_row, column=6 + days_n, value=_hhmm_from_hours(grand_hrs))
         c.font = total_font
         c.alignment = center
-        c.number_format = "0.00"
         c = ws.cell(row=footer_row, column=6 + days_n + 1, value=round(grand_days, 2))
         c.font = total_font
         c.alignment = center
-        c.number_format = "0.00"
+        c.number_format = "0.##"
+
+    # Iter 205 (user request) — separate day-wise OT HRS sheet for
+    # cross-verification of the OT totals.
+    write_ot_hours_sheet(wb.create_sheet("OT HRS"), grid)
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -918,15 +925,16 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
         grand_total += combined
         grand_days += present
         for k, val in enumerate([
-            round(duty_only, 2), round(ot, 2),
-            round(combined, 2), days_int, round(extra_hrs, 2),
+            _fmt_hhmm(duty_only), _fmt_hhmm(ot),
+            _fmt_hhmm(combined), days_int, _fmt_hhmm(extra_hrs),
         ]):
             ws.merge_cells(start_row=duty_row, start_column=6 + days_n + k,
                            end_row=ot_row, end_column=6 + days_n + k)
             c = ws.cell(row=duty_row, column=6 + days_n + k, value=val)
             c.alignment = center
             c.border = border
-            c.number_format = "0.##" if k == 3 else "0.00"
+            if k == 3:
+                c.number_format = "0.##"
             c.font = total_font
 
         for r_ in (duty_row, ot_row):
@@ -950,13 +958,18 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
         for e in employees)
         grand_extra_hrs = sum(float((e.get("totals") or {}).get("total_extra_hrs") or 0.0) for e in employees)
         for k, val in enumerate([
-            round(grand_duty, 2), round(grand_ot, 2),
-            round(grand_total, 2), grand_days_int, round(grand_extra_hrs, 2),
+            _fmt_hhmm(grand_duty), _fmt_hhmm(grand_ot),
+            _fmt_hhmm(grand_total), grand_days_int, _fmt_hhmm(grand_extra_hrs),
         ]):
             c = ws.cell(row=cur, column=6 + days_n + k, value=val)
             c.font = total_font
             c.alignment = center
-            c.number_format = "0.##" if k == 3 else "0.00"
+            if k == 3:
+                c.number_format = "0.##"
+
+    # Iter 205 (user request) — separate day-wise OT HRS sheet for
+    # cross-verification of the OT totals.
+    write_ot_hours_sheet(wb.create_sheet("OT HRS"), grid)
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -970,6 +983,21 @@ def build_ot_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
     hours (HH:MM) for that day — Present-day Duty HRS are excluded. The
     trailing column totals the month's OT."""
     from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "OT Duty HRS"
+    write_ot_hours_sheet(ws, grid)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def write_ot_hours_sheet(ws, grid: Dict[str, Any]) -> None:
+    """Write the day-wise OT-only sheet into ``ws``. Shared by the
+    standalone OT report AND (Iter 205 — user request) as a separate
+    "OT HRS" cross-verification tab inside the attendance workbooks."""
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
 
@@ -981,9 +1009,6 @@ def build_ot_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
     employees: List[Dict[str, Any]] = list(grid.get("employees") or [])
     days_n = len(day_labels)
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "OT Duty HRS"
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
     hdr_font = Font(bold=True, color="FFFFFF", size=9)
     hdr_fill = PatternFill("solid", fgColor="B45309")
@@ -1065,10 +1090,9 @@ def build_ot_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
             c.font = Font(size=9, color="B45309" if ot_h > 0 else "94A3B8")
         ot_tot = float(totals.get("ot_hours") or 0.0)
         grand_ot += ot_tot
-        c = ws.cell(row=cur, column=5 + days_n, value=round(ot_tot, 2))
+        c = ws.cell(row=cur, column=5 + days_n, value=_hhmm(ot_tot))
         c.alignment = center
         c.border = border
-        c.number_format = "0.00"
         c.font = total_font
         for c_ in range(1, total_cols + 1):
             cell = ws.cell(row=cur, column=c_)
@@ -1080,11 +1104,6 @@ def build_ot_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
     if employees:
         cur += 1
         ws.cell(row=cur, column=1, value=f"Employees: {len(employees)}").font = total_font
-        c = ws.cell(row=cur, column=5 + days_n, value=round(grand_ot, 2))
+        c = ws.cell(row=cur, column=5 + days_n, value=_hhmm(grand_ot))
         c.font = total_font
-        c.number_format = "0.00"
         c.alignment = center
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()

@@ -1219,6 +1219,32 @@ def _validate_policy(raw: dict) -> dict:
         "approval_levels": _sc_lv,
     }
 
+    # Iter 205 (user request) — Week-Off Worked Attendance: what happens
+    # when an employee works on their weekly-off day. Fully dynamic per
+    # firm; ``mode`` empty = module off (legacy week-off rules apply).
+    wow_raw = raw.get("week_off_worked") if isinstance(raw.get("week_off_worked"), dict) else {}
+    _wow_mode = str(wow_raw.get("mode") or "").strip().lower()
+    if _wow_mode not in ("", "ot_only", "half_day_ot", "full_day_ot", "hourly"):
+        _wow_mode = ""
+    def _wow_num(key: str, default: float) -> float:
+        try:
+            v = float(wow_raw.get(key) if wow_raw.get(key) is not None else default)
+        except (TypeError, ValueError):
+            v = default
+        return max(0.0, min(24.0, v))
+    week_off_worked_cfg = {
+        "mode": _wow_mode,
+        "half_day_threshold": _wow_num("half_day_threshold", 4.0),
+        "full_day_threshold": _wow_num("full_day_threshold", 8.0),
+        "ot_after": _wow_num("ot_after", 0.0),
+        "salary_credit": bool(wow_raw.get("salary_credit", True)),
+        "leave_adjustment": bool(wow_raw.get("leave_adjustment")),
+        "comp_off": bool(wow_raw.get("comp_off")),
+        "double_ot": bool(wow_raw.get("double_ot")),
+        "double_wages": bool(wow_raw.get("double_wages")),
+        "approval_required": bool(wow_raw.get("approval_required")),
+    }
+
     # Iter 200 — Report Settings (user request): which attendance reports
     # (grid views + downloads) are enabled for this firm + the default view.
     _REPORT_KEYS = ("inout", "ot", "hours", "salary", "inout_salary")
@@ -1279,6 +1305,8 @@ def _validate_policy(raw: dict) -> dict:
         "salary_allowed": salary_allowed,
         # Iter 204 — Employee Shift Change Management config.
         "shift_change": shift_change_cfg,
+        # Iter 205 — Week-Off Worked Attendance config.
+        "week_off_worked": week_off_worked_cfg,
     }
 
 
@@ -1994,7 +2022,48 @@ def compute_textile_day(
     #   • Holiday-Master day worked + holiday_present_add_ot → the day
     #     counts PRESENT and the hours ALSO go to the OT column.
     _pm = policy.get("policy_master") or {}
-    if total_min > 0 and is_weekly_off and _pm.get("weekoff_present_add_ot"):
+    # Iter 205 (user request) — Week-Off Worked Attendance module: when a
+    # mode is configured it takes precedence over the legacy week-off
+    # sub-point below.
+    _wow = policy.get("week_off_worked") or {}
+    _wow_mode = str(_wow.get("mode") or "")
+    if total_min > 0 and is_weekly_off and _wow_mode:
+        _worked_h = total_min / 60.0
+        _half_t = float(_wow.get("half_day_threshold") or 4.0)
+        _full_t = float(_wow.get("full_day_threshold") or 8.0)
+        _ot_after = float(_wow.get("ot_after") or 0.0)
+        full_day_pay_weekoff = False
+        if _wow_mode == "ot_only":
+            present_days = 0.0
+            ot_min = total_min if ot_applicable_user else 0.0
+        elif _wow_mode == "half_day_ot":
+            if _worked_h >= _half_t:
+                present_days = 0.5
+                _cut = _ot_after if _ot_after > 0 else _half_t
+            else:
+                present_days = 0.0
+                _cut = 0.0
+            ot_min = max(0.0, (_worked_h - _cut) * 60.0) if ot_applicable_user else 0.0
+        elif _wow_mode == "full_day_ot":
+            if _worked_h >= _full_t:
+                present_days = 1.0
+                full_day_pay_weekoff = True
+                _cut = _ot_after if _ot_after > 0 else _full_t
+            elif _worked_h >= _half_t:
+                present_days = 0.5
+                _cut = _half_t
+            else:
+                present_days = 0.0
+                _cut = 0.0
+            ot_min = max(0.0, (_worked_h - _cut) * 60.0) if ot_applicable_user else 0.0
+        elif _wow_mode == "hourly":
+            # Hourly Conversion — hours stay plain duty; no present/OT.
+            present_days = 0.0
+            ot_min = 0.0
+        if _wow.get("double_ot") and ot_min > 0:
+            ot_min *= 2.0
+        notes.append(f"week_off_worked: mode={_wow_mode} ({_worked_h:.2f}h)")
+    elif total_min > 0 and is_weekly_off and _pm.get("weekoff_present_add_ot"):
         present_days = 0.0
         full_day_pay_weekoff = False
         ot_min = total_min if ot_applicable_user else 0.0
@@ -16835,9 +16904,12 @@ async def _compute_monthly_grid_data(
         days_cell: Dict[str, Dict[str, Any]] = {}
         total_present_days = 0
         total_present_policy = 0.0  # Iter 202 — policy-based Present Days
-        total_hours = 0.0
-        total_ot_hours = 0.0
-        total_duty_only = 0.0   # Iter 77s — duty excluding OT
+        # Iter 205 — CLOCK-accurate totals: accumulate whole MINUTES so
+        # monthly totals equal the exact sum of the displayed HH:MM cells
+        # (no decimal-rounding drift).
+        total_hours_min = 0
+        total_ot_min = 0
+        total_duty_only_min = 0   # Iter 77s — duty excluding OT
         # ---- Iter 94 — day-wise salary (mirrors _actual_salary_row_compute
         # rate resolution: Basic row on salary_structure_actual overrides
         # salary_monthly; rate_type overrides salary_mode). ---------------
@@ -17040,7 +17112,53 @@ async def _compute_monthly_grid_data(
                     duty_only_hrs = _half_h
                     ot_hrs = round(_worked - _half_h, 2)
                     _day_present = 0.5
-            if hrs > 0 and summary.get("is_weekly_off") and _pm_flags.get("weekoff_present_add_ot"):
+            # Iter 205 (user request) — Week-Off Worked Attendance: fully
+            # dynamic handling of week-off-day work per firm policy.
+            _wow = eff_policy.get("week_off_worked") or {}
+            _wow_mode = str(_wow.get("mode") or "")
+            if hrs > 0 and summary.get("is_weekly_off") and _wow_mode:
+                _worked_w = round(duty_only_hrs + ot_hrs, 2)
+                _half_t = float(_wow.get("half_day_threshold") or 4.0)
+                _full_t = float(_wow.get("full_day_threshold") or 8.0)
+                _ot_after = float(_wow.get("ot_after") or 0.0)
+                if _wow_mode == "ot_only":
+                    duty_only_hrs = 0.0
+                    ot_hrs = _worked_w
+                    _day_present = 0.0
+                elif _wow_mode == "half_day_ot":
+                    if _worked_w >= _half_t:
+                        _day_present = 0.5
+                        _cut = _ot_after if _ot_after > 0 else _half_t
+                        duty_only_hrs = round(min(_worked_w, _cut), 2)
+                        ot_hrs = round(max(0.0, _worked_w - duty_only_hrs), 2)
+                    else:
+                        _day_present = 0.0
+                        duty_only_hrs = 0.0
+                        ot_hrs = _worked_w
+                elif _wow_mode == "full_day_ot":
+                    if _worked_w >= _full_t:
+                        _day_present = 1.0
+                        _cut = _ot_after if _ot_after > 0 else _full_t
+                        duty_only_hrs = round(min(_worked_w, _cut), 2)
+                        ot_hrs = round(max(0.0, _worked_w - duty_only_hrs), 2)
+                    elif _worked_w >= _half_t:
+                        _day_present = 0.5
+                        duty_only_hrs = round(min(_worked_w, _half_t), 2)
+                        ot_hrs = round(max(0.0, _worked_w - duty_only_hrs), 2)
+                    else:
+                        _day_present = 0.0
+                        duty_only_hrs = 0.0
+                        ot_hrs = _worked_w
+                elif _wow_mode == "hourly":
+                    # Hourly Conversion — worked hours stay plain DUTY hours
+                    # (paid per hour); no present-day / OT credit.
+                    duty_only_hrs = _worked_w
+                    ot_hrs = 0.0
+                    _day_present = 0.0
+                if _wow.get("double_ot") and ot_hrs > 0:
+                    ot_hrs = round(ot_hrs * 2.0, 2)
+                hrs = round(duty_only_hrs + ot_hrs, 2)
+            elif hrs > 0 and summary.get("is_weekly_off") and _pm_flags.get("weekoff_present_add_ot"):
                 ot_hrs = round(duty_only_hrs + ot_hrs, 2)
                 duty_only_hrs = 0.0
                 _day_present = 0.0
@@ -17072,13 +17190,36 @@ async def _compute_monthly_grid_data(
                 day_salary_totals[key] = round(day_salary_totals.get(key, 0.0) + day_sal, 2)
             if hrs > 0:
                 total_present_days += 1 if (duty_only_hrs > 0 or _holiday_present_credit) else 0
-                total_hours += hrs
-                total_ot_hours += ot_hrs
+                total_hours_min += round(hrs * 60)
+                total_ot_min += round(ot_hrs * 60)
                 # User rule (Iter 83): ``totals.duty_hours`` = REGULAR
                 # DUTY only (excludes OT). Frontend renders it as
                 # "Total HRS" while ``totals.hours`` (duty + OT) is the
                 # "Total Duty HRS" grand total.
-                total_duty_only += duty_only_hrs
+                total_duty_only_min += round(duty_only_hrs * 60)
+        # Iter 205 — clock-timing summary math (user request): totals are
+        # exact HH:MM sums; division-mode "Present Days" is the WHOLE day
+        # count (Total Duty HRS ÷ Daily HRS) with the remainder shown in
+        # Extra HRS — never a decimal like 13.58.
+        total_hours = round(total_hours_min / 60.0, 4)
+        total_ot_hours = round(total_ot_min / 60.0, 4)
+        total_duty_only = round(total_duty_only_min / 60.0, 4)
+        _div_min = int(round((8.0 if _pm_8hr_reports else emp_daily_hrs) * 60))
+        _division_mode = bool(
+            _pm_firm.get("attendance_by_duty_hours")
+            and not _pm_firm.get("halfday_threshold_rule")
+            and _div_min > 0
+        )
+        if _division_mode:
+            _days_whole = total_hours_min // _div_min
+            _extra_min = total_hours_min - _days_whole * _div_min
+        else:
+            _days_whole = 0
+            _daily_min = int(round(emp_daily_hrs * 60))
+            _extra_min = (
+                total_hours_min - (total_hours_min // _daily_min) * _daily_min
+                if _daily_min > 0 else 0
+            )
         rows.append({
             "user_id": uid,
             "employee_code": e.get("employee_code"),
@@ -17093,11 +17234,11 @@ async def _compute_monthly_grid_data(
             "days": days_cell,
             "totals": {
                 "present_days": total_present_days,
-                "hours": round(total_hours, 2),
-                "ot_hours": round(total_ot_hours, 2),
+                "hours": total_hours,
+                "ot_hours": total_ot_hours,
                 # Iter 77s — duty excluding OT (for the new "Total Duty HRS"
                 # column on the HRS view).
-                "duty_hours": round(total_duty_only, 2),
+                "duty_hours": total_duty_only,
                 # Iter 77k/77p - TOTAL DAYS = Total Duty HRS / Daily Working HRS.
                 # Divisor priority (highest first):
                 #   1. Employee override standard_working_hours
@@ -17112,17 +17253,11 @@ async def _compute_monthly_grid_data(
                 #   • otherwise → per-day policy present counting (week-off /
                 #     holiday sub-points + 8-HR rule applied per day).
                 "total_days_computed": (
-                    round(total_hours / (8.0 if _pm_8hr_reports else emp_daily_hrs), 2)
-                    if _pm_firm.get("attendance_by_duty_hours")
-                    and not _pm_firm.get("halfday_threshold_rule")
-                    and (8.0 if _pm_8hr_reports else emp_daily_hrs) > 0
+                    int(_days_whole) if _division_mode
                     else round(total_present_policy, 2)
                 ),
                 "present_days_policy": (
-                    round(total_hours / (8.0 if _pm_8hr_reports else emp_daily_hrs), 2)
-                    if _pm_firm.get("attendance_by_duty_hours")
-                    and not _pm_firm.get("halfday_threshold_rule")
-                    and (8.0 if _pm_8hr_reports else emp_daily_hrs) > 0
+                    int(_days_whole) if _division_mode
                     else round(total_present_policy, 2)
                 ),
                 # Iter 83 — Split the decimal days into whole-days +
@@ -17132,19 +17267,10 @@ async def _compute_monthly_grid_data(
                 #     → total_extra_hrs = 11.30
                 # (Extra HRS = Total Duty HRS − total_days_int × Daily.)
                 "total_days_int": (
-                    int(total_hours // (8.0 if _pm_8hr_reports else emp_daily_hrs))
-                    if _pm_firm.get("attendance_by_duty_hours")
-                    and not _pm_firm.get("halfday_threshold_rule")
-                    and (8.0 if _pm_8hr_reports else emp_daily_hrs) > 0
+                    int(_days_whole) if _division_mode
                     else int(total_present_policy)
                 ),
-                "total_extra_hrs": (
-                    round(
-                        total_hours - (int(total_hours // emp_daily_hrs) * emp_daily_hrs),
-                        2,
-                    )
-                    if emp_daily_hrs > 0 else 0.0
-                ),
+                "total_extra_hrs": round(_extra_min / 60.0, 4),
                 "shift_hours": emp_daily_hrs,
                 # Iter 94 — employee-wise earned salary for the window.
                 "salary_total": round(total_salary, 2),

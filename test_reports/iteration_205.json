@@ -1,0 +1,38 @@
+{
+  "summary": "Iter 205 backend + frontend verification of Attendance Report grid overhaul, clock-timing HH:MM totals, week_off_worked policy engine + UI, and 2-sheet XLSX exports. Wrote /app/backend/tests/test_iter205_attendance_grid_weekoff.py with 10 pytest tests — ALL 10 PASS. Frontend verified via headless Chromium against the public preview URL. Backend: (1) PATCH /api/attendance/policy?company_id=cmp_527fecdd7c with week_off_worked {mode:'half_day_ot', half_day_threshold:4, full_day_threshold:8, ot_after:0, double_ot:true} persists and GET returns sanitized dict with correct types (booleans stay bool). (2) Seeded approved punches for user_44cd6f561da0 on Sun 2026-06-14 08:00→14:00 IST (used 06-14 because 06-21 already had 3 pre-existing ZK-imported punches — do-not-delete-existing rule). Verified half_day_ot + double_ot mode: day 14 cell present=0.5, duty=4.0, ot=4.0 (2h beyond half-day-threshold doubled). Verified ot_only mode: present=0, duty=0, ot=6.0. Punches cleaned up (manual_reason regex TEST_iter205*). (3) monthly-grid totals are clock-exact — sum of day-cell (duty+ot)*60 minutes equals totals.hours*60 within 1 minute tolerance. (4) In attendance_by_duty_hours=true + halfday_threshold_rule=false mode, totals.present_days_policy is a whole integer for every row exposing the field (extra hours flow to totals.total_extra_hrs). (5) XLSX: /api/admin/attendance/monthly-hours/{cid}/2026-06.xlsx has sheets ['Hours Only','OT HRS']; trailing totals in Hours Only contain HH:MM strings; /api/admin/attendance/monthly-inout/{cid}/2026-06.xlsx has ['Grid View','OT HRS']. Frontend web (super admin, 1440×900): (a) /attendance-grid — first column is Name, then Father Name, Designation, Bio (NO 'Code' column anywhere); [data-testid='sort-code'] count = 0; sort chips visible are sort-name / sort-present / sort-hours (Duty HRS) / sort-ot / sort-duty / sort-days; 509 CSS position:sticky elements confirmed on identity columns with left offsets 0/190/320/430 px (Name / Father Name / Designation / Bio) — frozen columns work. (b) /attendance-policy for Kankani — new 'Week-Off Worked Attendance' section renders with 5 mode chips (Off / OT Only / Half Day + OT / Full Day + OT / Hourly Conversion) all with testIDs ap-wow-mode-{off|ot_only|half_day_ot|full_day_ot|hourly}. Selecting 'Full Day + OT' reveals 3 NumRow thresholds (ap-wow-half, ap-wow-full, ap-wow-otafter) + 6 toggles (Salary Credit / Leave Adjustment / Comp-Off / Double OT / Double Wages / Approval Required); selecting 'OT Only' hides the thresholds (per code). Save persists as verified by API roundtrip earlier. No blocking issues found. Only pre-existing RN-web cosmetic console warnings ('outline', 'background', padding '0 8px').",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global (RN-web)", "issues": [
+        "Recurring RN-web console warnings: 'Invalid style property of outline / background' and shorthand padding '0 8px'. Cosmetic only, same as iter 202/204. Non-blocking."
+      ]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter205_attendance_grid_weekoff.py",
+    "/app/test_reports/pytest/iter205.xml"
+  ],
+  "action_items": [
+    "Optional: sanitize the shorthand CSS style props (outline / background / padding: '0 8px') to silence RN-web console warnings — non-blocking cleanup that has carried across several iterations.",
+    "Optional: add testID to the 'Save Policy' button on /attendance-policy for stricter automation (currently found via text)."
+  ],
+  "critical_code_review_comments": [
+    "attendance-grid.tsx correctly uses Platform.OS==='web' guard around position:'sticky' — RN mobile is unaffected while the web PWA gets frozen identity columns + sticky header row.",
+    "week_off_worked policy sanitizer preserves boolean toggles and numeric thresholds (see server.py ~1222 area).",
+    "attendance engine applies double_ot AFTER the OT-hours calculation on week-off day — verified via monthly-grid cell 4.0/4.0.",
+    "monthly-grid totals are floats but round-trip within 1 minute of the summed day cells — clock-exact by-minute is preserved; consider also exposing totals as HH:MM string for the UI so no future rounding drift is possible.",
+    "TEST_DAY_ISO had to be moved from 2026-06-21 (spec) to 2026-06-14 because 06-21 has 3 pre-existing ZK-imported punches (import_batch zk_web_...20260709T035405) which cannot be deleted per the review-request rules. Consider using a truly empty day (e.g. late-month Sunday) for future week-off engine tests or delete-and-restore in the test setup."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter205_attendance_grid_weekoff.py (new)"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "100% (attendance-grid columns + sort chips + sticky columns verified; attendance-policy Week-Off Worked section with all modes/thresholds/toggles verified)"},
+  "seed_data_creation": "Test punches for user_44cd6f561da0 on 2026-06-14 IST 08:00->14:00 (kind=in/out, source=manual_admin, status=approved, manual_reason='TEST_iter205_*'). All test punches are deleted at test teardown by regex on manual_reason. Left over side-effects: policy.week_off_worked restored to the pre-test snapshot in test_zzz_restore (mode 'full_day_ot' etc.). No production/existing data touched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend attendance schema uses fields {record_id, user_id, company_id, date (YYYY-MM-DD), kind (in|out), at (UTC ISO str), source, status, manual_reason, approved_by, created_by, created_at}. NOT {attendance_id, type, timestamp}. Use manual_reason as batch tag for cleanup. Kankani June 2026 already has ZK-imported punches on Sundays 06-07/06-21/06-28 — use 06-14 for clean week-off engine testing. Frontend session token key is 'llc_session_token' in localStorage (login via /api/auth/admin-password-login returns session_token). Attendance-grid uses testIDs sort-{name|present|hours|ot|duty|days|father|dept|bio}; no sort-code chip.",
+  "rca_of_issue": "N/A — no bugs found. Deviation from spec: used 2026-06-14 instead of 2026-06-21 as the week-off test day because the spec-listed day already has 3 ZK-imported real punches (import_batch zk_web_user_677_20260709T035405) that the review-request explicitly asked not to delete. Choosing an empty Sunday isolated the engine calculation and the assertions still validate the exact policy math (present=0.5 duty=4.0 ot=4.0 for half_day_ot+double_ot at 6h worked; present=0 duty=0 ot=6.0 for ot_only). All other assertions untouched."
+}

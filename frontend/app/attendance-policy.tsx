@@ -179,6 +179,8 @@ type Policy = {
   salary_allowed?: string;
   // Iter 204 — Employee Shift Change Management config.
   shift_change?: Record<string, any>;
+  // Iter 205 — Week-Off Worked Attendance config.
+  week_off_worked?: Record<string, any>;
 };
 
 type PolicyResponse = {
@@ -248,6 +250,19 @@ function normalisePolicy(p: Policy): Policy {
       instant_exception: ((p as any).shift_change?.instant_exception ?? true) !== false,
       time_window: (p as any).shift_change?.time_window || "any",
       approval_levels: (p as any).shift_change?.approval_levels || "single",
+    },
+    // Iter 205 — Week-Off Worked Attendance config.
+    week_off_worked: {
+      mode: (p as any).week_off_worked?.mode || "",
+      half_day_threshold: Number((p as any).week_off_worked?.half_day_threshold ?? 4),
+      full_day_threshold: Number((p as any).week_off_worked?.full_day_threshold ?? 8),
+      ot_after: Number((p as any).week_off_worked?.ot_after ?? 0),
+      salary_credit: ((p as any).week_off_worked?.salary_credit ?? true) !== false,
+      leave_adjustment: !!(p as any).week_off_worked?.leave_adjustment,
+      comp_off: !!(p as any).week_off_worked?.comp_off,
+      double_ot: !!(p as any).week_off_worked?.double_ot,
+      double_wages: !!(p as any).week_off_worked?.double_wages,
+      approval_required: !!(p as any).week_off_worked?.approval_required,
     },
   };
 }
@@ -652,6 +667,105 @@ export default function AttendancePolicyScreen() {
               N/A — no fixed weekly off for this firm.
             </Text>
           )}
+
+          {/* Iter 205 — Week-Off Worked Attendance (user request) */}
+          <SectionTitle
+            title="Week-Off Worked Attendance"
+            hint="What happens when an employee works on their weekly-off day. Off = legacy week-off rules apply."
+          />
+          {(() => {
+            const wow = (policy.week_off_worked || {}) as Record<string, any>;
+            const setWow = (patch: Record<string, any>) =>
+              setPolicy({ ...policy, week_off_worked: { ...wow, ...patch } });
+            const yn = (key: string, label: string, helper: string) => (
+              <Pressable
+                key={key}
+                testID={`ap-wow-${key}`}
+                style={styles.toggleRow}
+                onPress={() => setWow({ [key]: !wow[key] })}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.toggleLabel}>{label}</Text>
+                  <Text style={styles.helper}>{helper}</Text>
+                </View>
+                <View style={[styles.toggle, wow[key] && styles.toggleOn]}>
+                  <View style={[styles.toggleKnob, wow[key] && styles.toggleKnobOn]} />
+                </View>
+              </Pressable>
+            );
+            return (
+              <View>
+                <Text style={styles.toggleLabel}>Week-Off Worked — Attendance Mode</Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginVertical: 8 }}>
+                  {([["", "Off (Legacy Rules)"], ["ot_only", "OT Only"],
+                     ["half_day_ot", "Half Day + OT"], ["full_day_ot", "Full Day + OT"],
+                     ["hourly", "Hourly Conversion"]] as [string, string][]).map(([v, lbl]) => (
+                    <Pressable
+                      key={v || "off"}
+                      testID={`ap-wow-mode-${v || "off"}`}
+                      onPress={() => setWow({ mode: v })}
+                      style={[scStyles.chip, (wow.mode || "") === v && scStyles.chipOn]}
+                    >
+                      <Text style={[scStyles.chipTxt, (wow.mode || "") === v && scStyles.chipTxtOn]}>{lbl}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+                {wow.mode ? (
+                  <>
+                    <Text style={styles.helper}>
+                      {wow.mode === "ot_only"
+                        ? "All worked hours on a week-off go to OT — day NOT counted Present."
+                        : wow.mode === "half_day_ot"
+                          ? "Worked ≥ half-day threshold → ½ Present Day; hours beyond the OT-start go to OT."
+                          : wow.mode === "full_day_ot"
+                            ? "Worked ≥ full-day threshold → 1 Present Day (≥ half → ½); hours beyond the OT-start go to OT."
+                            : "Worked hours stay plain Duty HRS (paid hourly) — no Present Day / OT credit."}
+                    </Text>
+                    {wow.mode !== "ot_only" && wow.mode !== "hourly" ? (
+                      <>
+                        <NumRow
+                          label="Week-Off Half Day Threshold (hours)"
+                          value={Number(wow.half_day_threshold ?? 4)}
+                          onChange={(v) => setWow({ half_day_threshold: Math.max(0, Math.min(24, v)) })}
+                          step={0.5}
+                          decimals={1}
+                          testID="ap-wow-half"
+                        />
+                        <NumRow
+                          label="Week-Off Full Day Threshold (hours)"
+                          value={Number(wow.full_day_threshold ?? 8)}
+                          onChange={(v) => setWow({ full_day_threshold: Math.max(0, Math.min(24, v)) })}
+                          step={0.5}
+                          decimals={1}
+                          testID="ap-wow-full"
+                        />
+                        <NumRow
+                          label="Week-Off OT Starts After (hours) — 0 = at the day threshold"
+                          value={Number(wow.ot_after ?? 0)}
+                          onChange={(v) => setWow({ ot_after: Math.max(0, Math.min(24, v)) })}
+                          step={0.5}
+                          decimals={1}
+                          testID="ap-wow-otafter"
+                        />
+                      </>
+                    ) : null}
+                    {yn("salary_credit", "Week-Off Salary Credit",
+                        "Pay for the Present Day / hours earned on a worked week-off in the salary run.")}
+                    {yn("leave_adjustment", "Week-Off Leave Adjustment",
+                        "Worked week-off can be adjusted against a leave day (leave balance credit).")}
+                    {yn("comp_off", "Week-Off Compensatory Off (Comp-Off)",
+                        "Employee earns a compensatory off for working the week-off day.")}
+                    {yn("double_ot", "Week-Off Double OT Allowed",
+                        "OT hours earned on a week-off count DOUBLE in the OT column and OT reports.")}
+                    {yn("double_wages", "Week-Off Double Wages Allowed",
+                        "Week-off worked hours are paid at 2× the normal rate in the salary run.")}
+                    {yn("approval_required", "Week-Off Approval Required",
+                        "Week-off work counts only after admin approves the punches for that day.")}
+                  </>
+                ) : null}
+              </View>
+            );
+          })()}
 
           {/* Hours */}
           <SectionTitle title="Hours & thresholds" hint="How worked hours map to attendance." />

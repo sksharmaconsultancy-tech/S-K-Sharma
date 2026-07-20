@@ -378,8 +378,8 @@ export default function AttendanceGridScreen() {
 
   // Iter 77m — Sortable columns on the Attendance Grid.
   const [sortBy, setSortBy] = useState<
-    "code" | "name" | "dept" | "department" | "designation" | "bio" | "days" | "hours" | "ot" | "duty"
-  >("code");
+    "name" | "father" | "dept" | "department" | "designation" | "bio" | "days" | "hours" | "ot" | "duty"
+  >("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const toggleSort = useCallback(
     (col: typeof sortBy) => {
@@ -408,10 +408,11 @@ export default function AttendanceGridScreen() {
       const key = (v: string | number | null | undefined) =>
         v === null || v === undefined ? "" : String(v).toLowerCase();
       switch (sortBy) {
-        case "code":
-          return key(a.employee_code).localeCompare(key(b.employee_code), "en", { numeric: true }) * dir;
         case "name":
           return key(a.name).localeCompare(key(b.name)) * dir;
+        case "father":
+          return key(a.father_name).localeCompare(key(b.father_name)) * dir
+            || key(a.name).localeCompare(key(b.name));
         case "dept":
           return key(a.designation || a.department).localeCompare(
             key(b.designation || b.department),
@@ -748,7 +749,7 @@ export default function AttendanceGridScreen() {
 
         {/* Iter 114 — quick sort options (user rule): Department / Designation wise */}
         <Text style={[styles.rangeLabel, { marginLeft: 12 }]}>Sort</Text>
-        {([["department", "Department wise"], ["designation", "Designation wise"], ["name", "Name"], ["code", "Code"]] as const).map(([k, lbl]) => (
+        {([["department", "Department wise"], ["designation", "Designation wise"], ["name", "Name"]] as const).map(([k, lbl]) => (
           <Pressable
             key={k}
             onPress={() => toggleSort(k)}
@@ -796,7 +797,7 @@ export default function AttendanceGridScreen() {
         <View style={styles.groupBox}>
           <Text style={styles.rangeLabel}>Sort</Text>
           <View style={styles.groupChipsRow}>
-            {([["code", "Code"], ["name", "Name"], ["days", "Present Days"], ["duty", "Duty HRS"], ["ot", "OT HRS"]] as const).map(([col, lab]) => (
+            {([["name", "Name"], ["days", "Present Days"], ["duty", "Duty HRS"], ["ot", "OT HRS"]] as const).map(([col, lab]) => (
               <Pressable
                 key={col}
                 onPress={() => toggleSort(col as any)}
@@ -867,6 +868,31 @@ export default function AttendanceGridScreen() {
           <Text style={styles.emptyTitle}>No employees match</Text>
           <Text style={styles.emptyBody}>Try clearing the search or picking a different month.</Text>
         </View>
+      ) : Platform.OS === "web" ? (
+        /* Iter 205 — single scroll container so identity columns freeze
+           horizontally AND the header row freezes vertically (CSS sticky). */
+        <View style={{ flex: 1, overflow: "auto" } as any}>
+          <View style={styles.gridRoot}>
+            <GridHeader
+              data={data}
+              view={view}
+              hideDays={hideDays}
+              sortBy={sortBy as any}
+              sortDir={sortDir}
+              onSort={toggleSort as any}
+            />
+            {filteredEmployees.map((e, idx) => (
+              <GridRow
+                key={e.user_id}
+                emp={e}
+                data={data}
+                view={view}
+                hideDays={hideDays}
+                zebra={idx % 2 === 1}
+              />
+            ))}
+          </View>
+        </View>
       ) : (
         <ScrollView horizontal style={{ flex: 1 }} showsHorizontalScrollIndicator>
           <ScrollView showsVerticalScrollIndicator>
@@ -875,9 +901,9 @@ export default function AttendanceGridScreen() {
                 data={data}
                 view={view}
                 hideDays={hideDays}
-                sortBy={sortBy}
+                sortBy={sortBy as any}
                 sortDir={sortDir}
-                onSort={toggleSort}
+                onSort={toggleSort as any}
               />
               {filteredEmployees.map((e, idx) => (
                 <GridRow
@@ -901,8 +927,8 @@ export default function AttendanceGridScreen() {
 // Grid header / row
 // ---------------------------------------------------------------------------
 const COL = {
-  code: 62,
   name: 190,
+  father: 130,
   dept: 110,
   bio: 60,
   day: 66,
@@ -910,6 +936,20 @@ const COL = {
   daySal: 58,
   sum: 62,
 };
+
+// Iter 205 — frozen identity columns (web): Name, Father Name, Designation
+// and Bio stay pinned while the day columns scroll horizontally; the
+// header row stays pinned while scrolling down.
+const LEFT = {
+  name: 0,
+  father: COL.name,
+  dept: COL.name + COL.father,
+  bio: COL.name + COL.father + COL.dept,
+};
+const stickyCol = (left: number, z = 5): any =>
+  Platform.OS === "web" ? { position: "sticky", left, zIndex: z } : null;
+const STICKY_TOP: any =
+  Platform.OS === "web" ? { position: "sticky", top: 0, zIndex: 25 } : null;
 
 function GridHeader({
   data,
@@ -922,9 +962,9 @@ function GridHeader({
   data: GridResp;
   view: GridView;
   hideDays?: boolean;
-  sortBy?: "code" | "name" | "dept" | "bio" | "days" | "hours" | "ot" | "duty";
+  sortBy?: "name" | "father" | "dept" | "bio" | "days" | "hours" | "ot" | "duty";
   sortDir?: "asc" | "desc";
-  onSort?: (col: "code" | "name" | "dept" | "bio" | "days" | "hours" | "ot" | "duty") => void;
+  onSort?: (col: "name" | "father" | "dept" | "bio" | "days" | "hours" | "ot" | "duty") => void;
 }) {
   const dayW =
     view === "inout" || view === "inout_salary"
@@ -934,32 +974,32 @@ function GridHeader({
         : COL.dayHours;
   const arrow = (col: string) =>
     sortBy === col ? (sortDir === "asc" ? " ▲" : " ▼") : "";
-  const tap = (col: "code" | "name" | "dept" | "bio" | "days" | "hours" | "ot" | "duty") => () => {
+  const tap = (col: "name" | "father" | "dept" | "bio" | "days" | "hours" | "ot" | "duty") => () => {
     if (onSort) onSort(col);
   };
   return (
-    <View style={styles.headerRow}>
-      <Pressable
-        onPress={tap("code")}
-        style={[styles.hcell, { width: COL.code }]}
-      >
-        <Text style={styles.hcellTxt}>Code{arrow("code")}</Text>
-      </Pressable>
+    <View style={[styles.headerRow, STICKY_TOP]}>
       <Pressable
         onPress={tap("name")}
-        style={[styles.hcell, { width: COL.name }]}
+        style={[styles.hcell, styles.hcellFrozen, { width: COL.name }, stickyCol(LEFT.name, 30)]}
       >
         <Text style={styles.hcellTxt}>Name{arrow("name")}</Text>
       </Pressable>
       <Pressable
+        onPress={tap("father")}
+        style={[styles.hcell, styles.hcellFrozen, { width: COL.father }, stickyCol(LEFT.father, 30)]}
+      >
+        <Text style={styles.hcellTxt}>Father Name{arrow("father")}</Text>
+      </Pressable>
+      <Pressable
         onPress={tap("dept")}
-        style={[styles.hcell, { width: COL.dept }]}
+        style={[styles.hcell, styles.hcellFrozen, { width: COL.dept }, stickyCol(LEFT.dept, 30)]}
       >
         <Text style={styles.hcellTxt}>Designation{arrow("dept")}</Text>
       </Pressable>
       <Pressable
         onPress={tap("bio")}
-        style={[styles.hcell, { width: COL.bio }]}
+        style={[styles.hcell, styles.hcellFrozen, { width: COL.bio }, stickyCol(LEFT.bio, 30)]}
       >
         <Text style={styles.hcellTxt}>Bio{arrow("bio")}</Text>
       </Pressable>
@@ -1024,21 +1064,22 @@ function GridRow({
       : view === "salary"
         ? COL.daySal
         : COL.dayHours;
+  const frozenBg = { backgroundColor: zebra ? colors.surfaceSecondary : colors.surface };
   return (
     <View style={[styles.row, zebra && styles.rowZebra]}>
-      <View style={[styles.cell, { width: COL.code }]}>
-        <Text style={styles.codeTxt}>{emp.employee_code || "—"}</Text>
-      </View>
-      <View style={[styles.cell, { width: COL.name }]}>
+      <View style={[styles.cell, { width: COL.name }, stickyCol(LEFT.name), frozenBg]}>
         <Text style={styles.nameTxt} numberOfLines={1}>{emp.name}</Text>
         {emp.employee_group ? (
           <Text style={styles.subTxt} numberOfLines={1}>{emp.employee_group}</Text>
         ) : null}
       </View>
-      <View style={[styles.cell, { width: COL.dept }]}>
+      <View style={[styles.cell, { width: COL.father }, stickyCol(LEFT.father), frozenBg]}>
+        <Text style={styles.deptTxt} numberOfLines={1}>{emp.father_name || "—"}</Text>
+      </View>
+      <View style={[styles.cell, { width: COL.dept }, stickyCol(LEFT.dept), frozenBg]}>
         <Text style={styles.deptTxt} numberOfLines={1}>{emp.designation || emp.position || "—"}</Text>
       </View>
-      <View style={[styles.cell, { width: COL.bio }]}>
+      <View style={[styles.cell, { width: COL.bio }, stickyCol(LEFT.bio), frozenBg]}>
         <Text style={styles.bioTxt}>
           {emp.bio_code !== null && emp.bio_code !== undefined ? String(emp.bio_code) : "—"}
         </Text>
@@ -1509,7 +1550,6 @@ const styles = StyleSheet.create({
     borderRightColor: colors.divider,
     justifyContent: "center",
   },
-  codeTxt: { color: colors.onSurface, fontWeight: "700", fontSize: 11 },
   nameTxt: { color: colors.onSurface, fontWeight: "600", fontSize: 12 },
   subTxt: { color: colors.onSurfaceTertiary, fontSize: 10, marginTop: 1 },
   deptTxt: { color: colors.onSurfaceSecondary, fontSize: 11 },
