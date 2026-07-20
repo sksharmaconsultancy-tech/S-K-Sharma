@@ -90,6 +90,9 @@ type DayRow = {
   employee_code?: string | null;
   in: DayCell;
   out: DayCell;
+  // Iter 210 — second punch pair = OT window.
+  ot_in?: DayCell;
+  ot_out?: DayCell;
   updated: boolean;
   // Iter 95g — employee's shift times (Shift Master) for "Fill from shift".
   shift_start?: string | null;
@@ -170,6 +173,18 @@ export default function PunchApprovalsScreen() {
   const [savingBatch, setSavingBatch] = useState(false);
   // Iter 172 — Bulk punch import from Excel.
   const [importOpen, setImportOpen] = useState(false);
+  // Iter 210 — Employee search filter. One search box that narrows the
+  // rows on EVERY tab (Pending / Approved / Rejected / Updated / Auto /
+  // Manual / Additional Duty) by name, father name, code or designation.
+  const [rowSearch, setRowSearch] = useState("");
+  const rowMatch = useCallback(
+    (...fields: (string | null | undefined)[]) => {
+      const q = rowSearch.trim().toLowerCase();
+      if (!q) return true;
+      return fields.some((f) => (f || "").toLowerCase().includes(q));
+    },
+    [rowSearch],
+  );
 
   // Iter 83 — Date filter + Updated-Punches rows for the selected day.
   // Iter 91 — "Periodic" mode: pick From + To dates to review a range.
@@ -325,12 +340,51 @@ export default function PunchApprovalsScreen() {
   // employee + day and paired: first IN→OUT pair = regular duty, any
   // later pairs = OT. Same column layout as the Updated tab.
   const groupedRows = useMemo(() => {
+    // Iter 210 — group from a POOL that includes ONE day past the selected
+    // range so a night-OT OUT punch (next morning) can be stitched back to
+    // its first-punch day (same rule as the attendance engine).
+    const effTo = dateMode === "period" && toDate >= selectedDate ? toDate : selectedDate;
+    const nextDay = (d: string) => {
+      const t = new Date(`${d}T00:00:00Z`);
+      t.setUTCDate(t.getUTCDate() + 1);
+      return t.toISOString().slice(0, 10);
+    };
+    const hi = nextDay(effTo);
+    const wantStatus = tab === "pending" || tab === "approved" || tab === "rejected"
+      ? tab : null;
+    const pool = wantStatus === null ? visibleRecords : records.filter((r) => {
+      const d = (r.at || "").slice(0, 10);
+      return (r.status || "") === wantStatus && d >= selectedDate && d <= hi;
+    });
     const byKey = new Map<string, Punch[]>();
-    for (const p of visibleRecords) {
+    for (const p of pool) {
       const d = (p.at || "").slice(0, 10);
       const k = `${p.user_id}|${d}`;
       const arr = byKey.get(k);
       if (arr) arr.push(p); else byKey.set(k, [p]);
+    }
+    // Cross-day stitch: a day ending with an un-paired IN pulls the NEXT
+    // day's leading OUT into itself (night duty / night OT).
+    for (const [k, ps] of byKey) {
+      ps.sort((a, b) => ((a.at || "") < (b.at || "") ? -1 : 1));
+      let bal = 0;
+      for (const p of ps) {
+        if (p.kind === "in") bal += 1;
+        else bal = Math.max(0, bal - 1);
+      }
+      const last = ps[ps.length - 1];
+      if (bal <= 0 || !last || last.kind !== "in") continue;
+      const [uid, d] = k.split("|");
+      const nk = `${uid}|${nextDay(d)}`;
+      const nps = byKey.get(nk);
+      if (!nps) continue;
+      nps.sort((a, b) => ((a.at || "") < (b.at || "") ? -1 : 1));
+      const first = nps[0];
+      if (first && first.kind === "out" && (first.at || "") > (last.at || "")) {
+        ps.push(first);
+        nps.shift();
+        if (!nps.length) byKey.delete(nk);
+      }
     }
     const hrs = (a?: string | null, b?: string | null) => {
       if (!a || !b) return 0;
@@ -339,9 +393,11 @@ export default function PunchApprovalsScreen() {
     };
     const rows = [] as {
       key: string; date: string;
+      employee_code?: string | null;
       name?: string | null; father_name?: string | null; designation?: string | null;
       in: string | null; out: string | null; ot_in: string | null; ot_out: string | null;
       duty_hours: number; ot_hours: number; total_hours: number;
+      reason?: string | null;
       recordIds: string[];
     }[];
     for (const [k, ps] of byKey) {
@@ -360,14 +416,20 @@ export default function PunchApprovalsScreen() {
       let ot = 0;
       for (let i = 1; i < pairs.length; i++) ot += hrs(pairs[i][0].at, pairs[i][1].at);
       const emp = ps[0].employee || {};
+      // Iter 210 — first non-empty stored reason across the day's punches.
+      const reason = ps.map((p) =>
+        (p.decision_reason || (p as any).edit_reason || (p as any).manual_reason || "").trim(),
+      ).find((x) => x) || null;
       rows.push({
         key: k,
         date: (ps[0].at || "").slice(0, 10),
+        employee_code: emp.employee_code,
         name: emp.name,
         father_name: emp.father_name,
         designation: emp.designation,
         in: firstIn, out: firstOut, ot_in: otIn, ot_out: otOut,
         duty_hours: duty, ot_hours: ot, total_hours: duty + ot,
+        reason,
         recordIds: ps.map((p) => p.record_id),
       });
     }
@@ -376,18 +438,25 @@ export default function PunchApprovalsScreen() {
         ? (a.name || "").localeCompare(b.name || "")
         : a.date < b.date ? -1 : 1,
     );
-    return rows;
-  }, [visibleRecords]);
+    // Drop groups that fall past the selected range (leftover next-day
+    // punches that were only loaded for stitching), then apply the search.
+    return rows
+      .filter((r) => r.date >= selectedDate && r.date <= effTo)
+      .filter((r) => rowMatch(r.name, r.father_name, r.designation, r.employee_code));
+  }, [visibleRecords, records, tab, selectedDate, dateMode, toDate, rowMatch]);
 
   // Iter 94 — filter the day-status rows per source tab.
   const dayVisible = useMemo(() => {
-    if (tab === "updated") return dayRows.filter((r) => r.updated);
-    if (tab === "auto") return dayRows.filter((r) => !!r.in && !!r.out);
-    if (tab === "manual") return dayRows.filter((r) => !r.in || !r.out);
+    let base: DayRow[] = [];
+    if (tab === "updated") base = dayRows.filter((r) => r.updated);
+    else if (tab === "auto") base = dayRows.filter((r) => !!r.in && !!r.out);
+    else if (tab === "manual") base = dayRows.filter((r) => !r.in || !r.out);
     // Additional Duty: ONLY employees whose BOTH punches are complete.
-    if (tab === "extra") return dayRows.filter((r) => !!r.in && !!r.out);
-    return [];
-  }, [dayRows, tab]);
+    else if (tab === "extra") base = dayRows.filter((r) => !!r.in && !!r.out);
+    // Iter 210 — apply the search box on every source-tab row.
+    return base.filter((r) =>
+      rowMatch(r.name, r.father_name, r.designation, r.employee_code));
+  }, [dayRows, tab, rowMatch]);
 
   // Save one Additional Duty row (extra HRS and/or ₹ amount).
   // Iter 111 — value can be entered in HRS or MIN, and can be NEGATIVE
@@ -890,6 +959,25 @@ export default function PunchApprovalsScreen() {
           >
             <Text style={styles.dateTodayTxt}>Today</Text>
           </Pressable>
+          {/* Iter 210 — Employee search (filters the rows on every tab). */}
+          <View style={styles.searchWrap}>
+            <Ionicons name="search" size={13} color={colors.onSurfaceSecondary} />
+            <TextInput
+              value={rowSearch}
+              onChangeText={setRowSearch}
+              placeholder="Search name / code / designation"
+              placeholderTextColor={colors.onSurfaceSecondary}
+              style={styles.searchInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+              testID="pa-search"
+            />
+            {rowSearch ? (
+              <Pressable onPress={() => setRowSearch("")} hitSlop={8} testID="pa-search-clear">
+                <Ionicons name="close-circle" size={14} color={colors.onSurfaceSecondary} />
+              </Pressable>
+            ) : null}
+          </View>
           {/* Iter 85 — "Show" and "Save" action buttons.
               • Show — explicit trigger to fetch the punch list with the
                 currently-selected filters.
@@ -969,12 +1057,13 @@ export default function PunchApprovalsScreen() {
             <View>
               <View style={upStyles.hdrRow}>
                 {[
-                  { w: 82, txt: "Date" },
                   { w: 54, txt: "Code" },
                   { w: 150, txt: "Name" },
                   { w: 110, txt: "Designation" },
-                  { w: 60, txt: "In" },
-                  { w: 60, txt: "Out" },
+                  { w: 86, txt: "In / Date" },
+                  { w: 86, txt: "Out / Date" },
+                  { w: 86, txt: "OT In / Date" },
+                  { w: 86, txt: "OT Out / Date" },
                   { w: 66, txt: "Duty HRS" },
                   { w: 160, txt: "Extra Duty ± (HRS/MIN)" },
                   { w: 74, txt: "Total HRS" },
@@ -1025,10 +1114,34 @@ export default function PunchApprovalsScreen() {
                     const hh = unit === "min" ? v / 60 : v;
                     return sign === "-" ? -hh : hh;
                   })();
-                  const totalDuty = Math.max(0, baseDuty + signedExtra);
+                  // Iter 210 — OT window (second punch pair) counts into
+                  // the Total HRS preview too.
+                  const otH = (() => {
+                    const a = r.ot_in?.at; const b = r.ot_out?.at;
+                    if (!a || !b) return 0;
+                    const ms = new Date(b).getTime() - new Date(a).getTime();
+                    return ms > 0 ? ms / 3600000 : 0;
+                  })();
+                  const totalDuty = Math.max(0, baseDuty + otH + signedExtra);
+                  const punchCell = (k: "in" | "out" | "ot_in" | "ot_out") => {
+                    const cell = r[k];
+                    const nightShift = Boolean(cell?.date && cell.date !== r.date);
+                    return (
+                      <View key={k} style={{ width: 86 }}>
+                        <Text style={[upStyles.cell, { width: 86 }, !cell && { color: colors.onSurfaceTertiary }]}>
+                          {cell?.hhmm || "—"}
+                        </Text>
+                        <Text
+                          style={[upStyles.punchDate, nightShift && { color: "#B45309", fontWeight: "800" }]}
+                          numberOfLines={1}
+                        >
+                          {cell?.date ? `${fmtDate(cell.date)}${nightShift ? " (+1)" : ""}` : ""}
+                        </Text>
+                      </View>
+                    );
+                  };
                   return (
                     <View key={r.key} style={[upStyles.row, i % 2 === 0 && upStyles.rowAlt]}>
-                      <Text style={[upStyles.cell, { width: 82 }]}>{fmtDate(r.date)}</Text>
                       <Text style={[upStyles.cell, { width: 54 }]}>{r.employee_code || "—"}</Text>
                       <Text style={[upStyles.cell, { width: 150, fontWeight: "600" }]} numberOfLines={1}>
                         {r.name || "—"}
@@ -1036,8 +1149,10 @@ export default function PunchApprovalsScreen() {
                       <Text style={[upStyles.cell, { width: 110 }]} numberOfLines={1}>
                         {r.designation || "—"}
                       </Text>
-                      <Text style={[upStyles.cell, { width: 60 }]}>{r.in?.hhmm || "—"}</Text>
-                      <Text style={[upStyles.cell, { width: 60 }]}>{r.out?.hhmm || "—"}</Text>
+                      {punchCell("in")}
+                      {punchCell("out")}
+                      {punchCell("ot_in")}
+                      {punchCell("ot_out")}
                       <Text style={[upStyles.cell, upStyles.num, { width: 66 }]}>
                         {fmtHoursHM(baseDuty)}
                       </Text>
@@ -1163,15 +1278,16 @@ export default function PunchApprovalsScreen() {
             <View>
               <View style={upStyles.hdrRow}>
                 {[
-                  { w: 82, txt: "Date" },
                   { w: 54, txt: "Code" },
                   { w: 150, txt: "Name" },
                   { w: 130, txt: "Father Name" },
                   { w: 110, txt: "Designation" },
                   { w: 86, txt: "In / Date" },
                   { w: 86, txt: "Out / Date" },
+                  { w: 86, txt: "OT In / Date" },
+                  { w: 86, txt: "OT Out / Date" },
                   { w: 68, txt: "Duty HRS" },
-                  { w: 90, txt: "Status" },
+                  { w: 92, txt: "Total Duty HRS" },
                   ...(tab === "updated" ? [{ w: 230, txt: "Update Details (Punch · Reason · By)" }] : []),
                   ...(canAct ? [{ w: 160, txt: "Update Reason" }, { w: 70, txt: "Action" }] : []),
                 ].map((c) => (
@@ -1206,9 +1322,16 @@ export default function PunchApprovalsScreen() {
                   const dirty = (e.in !== undefined && e.in !== (r.in?.hhmm || "")) ||
                     (e.out !== undefined && e.out !== (r.out?.hhmm || ""));
                   const canEdit = canAct;
+                  // Iter 210 — OT window hours (second punch pair) for the
+                  // Total Duty HRS column.
+                  const otH = (() => {
+                    const a = r.ot_in?.at; const b = r.ot_out?.at;
+                    if (!a || !b) return 0;
+                    const ms = new Date(b).getTime() - new Date(a).getTime();
+                    return ms > 0 ? ms / 3600000 : 0;
+                  })();
                   return (
                     <View key={r.key} style={[upStyles.row, i % 2 === 0 && upStyles.rowAlt]}>
-                      <Text style={[upStyles.cell, { width: 82 }]}>{fmtDate(r.date)}</Text>
                       <Text style={[upStyles.cell, { width: 54 }]}>{r.employee_code || "—"}</Text>
                       <Text style={[upStyles.cell, { width: 150, fontWeight: "600" }]} numberOfLines={1}>
                         {r.name || "—"}
@@ -1309,20 +1432,43 @@ export default function PunchApprovalsScreen() {
                           </View>
                         );
                       })}
+                      {/* Iter 210 — OT window (second punch pair), read-only. */}
+                      {(["ot_in", "ot_out"] as const).map((k) => {
+                        const cell = r[k];
+                        const nightShift = Boolean(cell?.date && cell.date !== r.date);
+                        return (
+                          <View key={k} style={{ width: 86 }}>
+                            <Text style={[upStyles.cell, { width: 86 }, !cell && { color: colors.onSurfaceTertiary }]}>
+                              {cell?.hhmm || "—"}
+                            </Text>
+                            <Text
+                              style={[
+                                upStyles.punchDate,
+                                nightShift && { color: "#B45309", fontWeight: "800" },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {cell?.date ? `${fmtDate(cell.date)}${nightShift ? " (+1)" : ""}` : ""}
+                            </Text>
+                            {cell?.record_id ? (
+                              <Pressable
+                                onPress={() => openPunchPhoto(cell.record_id)}
+                                style={upStyles.photoBtn}
+                                testID={`ds-photo-${k}-${r.key}`}
+                              >
+                                <Ionicons name="camera" size={10} color={colors.brandPrimary} />
+                                <Text style={upStyles.photoBtnTxt}>Photo</Text>
+                              </Pressable>
+                            ) : null}
+                          </View>
+                        );
+                      })}
                       <Text style={[upStyles.cell, upStyles.num, { width: 68 }]}>
                         {fmtHoursHM(dutyH)}
                       </Text>
-                      <View style={{ width: 90, justifyContent: "center" }}>
-                        {tab === "manual" ? (
-                          <Text style={[upStyles.badge, upStyles.badgeMiss]}>
-                            {!r.in && !r.out ? "BOTH MISSING" : !r.in ? "IN MISSING" : "OUT MISSING"}
-                          </Text>
-                        ) : r.updated ? (
-                          <Text style={[upStyles.badge, upStyles.badgeUpd]}>UPDATED</Text>
-                        ) : (
-                          <Text style={[upStyles.badge, upStyles.badgeOk]}>COMPLETE</Text>
-                        )}
-                      </View>
+                      <Text style={[upStyles.cell, upStyles.num, { width: 92, fontWeight: "700" }]}>
+                        {fmtHoursHM(dutyH + otH)}
+                      </Text>
                       {/* Iter 111 — Updated tab: which punch changed, old →
                           new time, reason and the editing admin. */}
                       {tab === "updated" ? (
@@ -1384,7 +1530,7 @@ export default function PunchApprovalsScreen() {
           </ScrollView>
           <View style={{ height: 40 }} />
         </ScrollView>
-      ) : visibleRecords.length === 0 ? (
+      ) : groupedRows.length === 0 ? (
         <View style={styles.center} testID="empty-state">
           <Ionicons
             name={tab === "pending" ? "checkmark-done-circle" : "time-outline"}
@@ -1393,7 +1539,9 @@ export default function PunchApprovalsScreen() {
           />
           <Text style={styles.dimTitle}>No {tab === "auto" ? "auto" : tab === "manual" ? "manual" : tab} punches</Text>
           <Text style={styles.dimBody}>
-            {hasLoadedOnce
+            {rowSearch.trim() && visibleRecords.length > 0
+              ? `No rows match "${rowSearch.trim()}". Clear the search to see all ${visibleRecords.length} record(s).`
+              : hasLoadedOnce
               ? `No ${tab === "auto" ? "auto-punch" : tab === "manual" ? "manual entry" : tab} records for ${selectedDate}${dateMode === "period" ? ` – ${toDate}` : ""}. Try another date or tab.`
               : "Pick a date and tap Show to load punches."}
           </Text>
@@ -1416,17 +1564,17 @@ export default function PunchApprovalsScreen() {
             <View>
               <View style={upStyles.hdrRow}>
                 {[
-                  { w: 82, txt: "Date" },
+                  { w: 54, txt: "Code" },
                   { w: 150, txt: "Name" },
                   { w: 130, txt: "Father Name" },
                   { w: 110, txt: "Designation" },
-                  { w: 62, txt: "In" },
-                  { w: 62, txt: "Out" },
+                  { w: 86, txt: "In / Date" },
+                  { w: 86, txt: "Out / Date" },
+                  { w: 86, txt: "OT In / Date" },
+                  { w: 86, txt: "OT Out / Date" },
                   { w: 72, txt: "Duty HRS" },
-                  { w: 62, txt: "OT In" },
-                  { w: 62, txt: "OT Out" },
-                  { w: 68, txt: "Total OT" },
                   { w: 92, txt: "Total Duty HRS" },
+                  { w: 150, txt: "Update Reason" },
                   ...(canAct && tab !== "approved" && tab !== "rejected" ? [{ w: 92, txt: "Action" }] : []),
                 ].map((c) => (
                   <Text key={c.txt} style={[upStyles.hdrCell, { width: c.w }]}>
@@ -1436,9 +1584,31 @@ export default function PunchApprovalsScreen() {
               </View>
               {groupedRows.map((r, i) => {
                 const decision = batchDecisions[r.recordIds[0]];
+                // Iter 210 — each punch cell shows its time + its own
+                // calendar date (amber "+1" when it lands the next day,
+                // e.g. night-OT out).
+                const punchCell = (iso: string | null, key: string) => {
+                  const d = iso ? iso.slice(0, 10) : null;
+                  const next = Boolean(d && d !== r.date);
+                  return (
+                    <View key={key} style={{ width: 86 }}>
+                      <Text style={[upStyles.cell, { width: 86 }, !iso && { color: colors.onSurfaceTertiary }]}>
+                        {iso ? fmtTime(iso) : "—"}
+                      </Text>
+                      {d ? (
+                        <Text
+                          style={[upStyles.punchDate, next && { color: "#B45309", fontWeight: "800" }]}
+                          numberOfLines={1}
+                        >
+                          {fmtDate(d)}{next ? " (+1)" : ""}
+                        </Text>
+                      ) : null}
+                    </View>
+                  );
+                };
                 return (
                   <View key={r.key} style={[upStyles.row, i % 2 === 0 && upStyles.rowAlt]}>
-                    <Text style={[upStyles.cell, { width: 82 }]}>{fmtDate(r.date)}</Text>
+                    <Text style={[upStyles.cell, { width: 54 }]}>{r.employee_code || "—"}</Text>
                     <Text style={[upStyles.cell, { width: 150, fontWeight: "600" }]} numberOfLines={1}>
                       {r.name || "—"}
                     </Text>
@@ -1448,16 +1618,16 @@ export default function PunchApprovalsScreen() {
                     <Text style={[upStyles.cell, { width: 110 }]} numberOfLines={1}>
                       {r.designation || "—"}
                     </Text>
-                    <Text style={[upStyles.cell, { width: 62 }]}>{r.in ? fmtTime(r.in) : "—"}</Text>
-                    <Text style={[upStyles.cell, { width: 62 }]}>{r.out ? fmtTime(r.out) : "—"}</Text>
+                    {punchCell(r.in, "in")}
+                    {punchCell(r.out, "out")}
+                    {punchCell(r.ot_in, "ot_in")}
+                    {punchCell(r.ot_out, "ot_out")}
                     <Text style={[upStyles.cell, upStyles.num, { width: 72 }]}>{fmtHoursHM(r.duty_hours)}</Text>
-                    <Text style={[upStyles.cell, { width: 62 }]}>{r.ot_in ? fmtTime(r.ot_in) : "—"}</Text>
-                    <Text style={[upStyles.cell, { width: 62 }]}>{r.ot_out ? fmtTime(r.ot_out) : "—"}</Text>
-                    <Text style={[upStyles.cell, upStyles.num, { width: 68, color: r.ot_hours > 0 ? colors.accent : colors.onSurfaceTertiary }]}>
-                      {r.ot_hours > 0 ? fmtHoursHM(r.ot_hours) : "—"}
-                    </Text>
                     <Text style={[upStyles.cell, upStyles.num, { width: 92, fontWeight: "700" }]}>
                       {fmtHoursHM(r.total_hours)}
+                    </Text>
+                    <Text style={[upStyles.cell, { width: 150 }]} numberOfLines={2}>
+                      {r.reason || "—"}
                     </Text>
                     {/* Iter 95f — already-decided rows (Approved/Rejected
                         tabs) are read-only: no ✓ / ✗ buttons. */}
@@ -1831,6 +2001,28 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   dateTodayTxt: { color: "#FFFFFF", fontWeight: "700", fontSize: 12 },
+  // Iter 210 — search box in the filter bar (filters rows on every tab).
+  searchWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: colors.surfaceTertiary,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    backgroundColor: "#FFFFFF",
+    minWidth: 190,
+    flexGrow: 1,
+    maxWidth: 300,
+    height: 32,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 12.5,
+    color: colors.onSurface,
+    paddingVertical: 0,
+    ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as any) : null),
+  },
 
   // Iter 85 — Show + Save button styles next to the date filter.
   showBtn: {

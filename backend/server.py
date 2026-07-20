@@ -11698,7 +11698,32 @@ async def attendance_day_status(
                 if outs:
                     out_rec = outs[-1]
                     consumed.add(out_rec["record_id"])
-            day_pairs[d] = {"in": first_in, "out": out_rec}
+            # Iter 210 — SECOND pair = OT window (e.g. duty 08:00-20:00 then
+            # OT-In 20:07 → OT-Out 07:59 next morning). Surfaced as its own
+            # OT In / OT Out columns on the Punch Approvals tables.
+            ot_in_rec = ot_out_rec = None
+            if first_in and out_rec:
+                ot_in_rec = next(
+                    (p for p in ps
+                     if p["date"] == d and p.get("kind") == "in"
+                     and p["record_id"] not in consumed
+                     and p["_dt"] > out_rec["_dt"]),
+                    None,
+                )
+                if ot_in_rec:
+                    consumed.add(ot_in_rec["record_id"])
+                    limit2 = ot_in_rec["_dt"] + timedelta(hours=24)
+                    ot_out_rec = next(
+                        (p for p in ps
+                         if p.get("kind") == "out"
+                         and p["record_id"] not in consumed
+                         and p["_dt"] > ot_in_rec["_dt"] and p["_dt"] <= limit2),
+                        None,
+                    )
+                    if ot_out_rec:
+                        consumed.add(ot_out_rec["record_id"])
+            day_pairs[d] = {"in": first_in, "out": out_rec,
+                            "ot_in": ot_in_rec, "ot_out": ot_out_rec}
         for d in dates:
             pr = day_pairs.get(d) or {}
             first_in, out_rec = pr.get("in"), pr.get("out")
@@ -11716,6 +11741,8 @@ async def attendance_day_status(
                 "employee_code": e.get("employee_code"),
                 "in": _cell(first_in),
                 "out": _cell(out_rec),
+                "ot_in": _cell(pr.get("ot_in")),
+                "ot_out": _cell(pr.get("ot_out")),
                 "updated": edited_any,
                 "shift_start": _shift_start,
                 "shift_end": _shift_end,
