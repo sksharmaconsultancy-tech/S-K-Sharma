@@ -79,7 +79,7 @@ async def save_firm_compliance_settings(
     """Save (or clear with {"clear": true}) firm-specific statutory
     overrides — stored on the Firm Master, applied to that firm only."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin"])
+    require_role(admin, ["super_admin", "sub_admin"])
 
     if payload.get("clear"):
         await db.firm_masters.update_one(

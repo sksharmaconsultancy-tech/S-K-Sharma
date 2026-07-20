@@ -127,7 +127,7 @@ async def list_leaves(
     if scope == "mine":
         q = {"user_id": user["user_id"]}
     else:
-        require_role(user, ["company_admin", "super_admin"])
+        require_role(user, ["company_admin", "super_admin", "sub_admin"])
         # Company admin sees only their company. Super admin sees all.
         if user["role"] == "company_admin" and user.get("company_id"):
             q = {"company_id": user["company_id"]}
@@ -139,7 +139,7 @@ async def list_leaves(
 async def decide_leave(leave_id: str, payload: LeaveDecision,
                        authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     # Iter 206 — "Adjust against Comp-Off": validate the employee's balance
     # BEFORE approving so we never approve an unfunded comp-off leave.
     _lv0 = await db.leaves.find_one({"leave_id": leave_id}, {"_id": 0})

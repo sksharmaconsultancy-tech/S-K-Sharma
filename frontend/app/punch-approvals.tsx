@@ -154,7 +154,8 @@ type ExtraDutyEntry = {
 export default function PunchApprovalsScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const canAct = user?.role === "super_admin" || user?.role === "company_admin";
+  const canAct = user?.role === "super_admin" || user?.role === "company_admin" ||
+    (user?.role as string) === "sub_admin";
   // Iter 68 — Follow the global firm selection for Sub-Admin impersonation.
   const { selectedCompanyId } = useSelectedCompany();
 
@@ -723,6 +724,9 @@ export default function PunchApprovalsScreen() {
         target = j.dateOverride;
       } else if (j.mode === "edit") {
         target = r[j.field]?.date || r.date;
+      } else if (j.field === "ot_in") {
+        // Iter 212 — OT In defaults to the OUT punch's date (user rule).
+        target = r.out?.date || r.date;
       } else if (j.field === "out" || j.field === "ot_out") {
         const pairIn = j.field === "out" ? "in" as const : "ot_in" as const;
         const inBase = r[pairIn]?.date || r.date;
@@ -1331,11 +1335,12 @@ export default function PunchApprovalsScreen() {
                   { w: 150, txt: "Name" },
                   { w: 130, txt: "Father Name" },
                   { w: 110, txt: "Designation" },
-                  { w: 86, txt: "In / Date" },
-                  { w: 86, txt: "Out / Date" },
+                  { w: 86, txt: "In Punch / Date" },
+                  { w: 86, txt: "Out Punch / Date" },
+                  { w: 68, txt: "Duty HRS" },
                   { w: 86, txt: "OT In / Date" },
                   { w: 86, txt: "OT Out / Date" },
-                  { w: 68, txt: "Duty HRS" },
+                  { w: 68, txt: "OT Duty HRS" },
                   { w: 92, txt: "Total Duty HRS" },
                   ...(tab === "updated" ? [{ w: 230, txt: "Update Details (Punch · Reason · By)" }] : []),
                   ...(canAct ? [{ w: 160, txt: "Update Reason" }, { w: 70, txt: "Action" }] : []),
@@ -1383,6 +1388,11 @@ export default function PunchApprovalsScreen() {
                     const ms = new Date(b).getTime() - new Date(a).getTime();
                     return ms > 0 ? ms / 3600000 : 0;
                   })();
+                  // Iter 212 — OT is allowed ONLY when the FIRST punch is
+                  // a MORNING punch (before 12:00). Evening/night first
+                  // punches get no OT entry (user rule).
+                  const firstIn = (inVal || "").trim() || r.in?.hhmm || "";
+                  const otAllowed = Boolean(firstIn && firstIn < "12:00");
                   return (
                     <View key={r.key} style={[upStyles.row, i % 2 === 0 && upStyles.rowAlt]}>
                       <Text style={[upStyles.cell, { width: 54 }]}>{r.employee_code || "—"}</Text>
@@ -1485,14 +1495,28 @@ export default function PunchApprovalsScreen() {
                           </View>
                         );
                       })}
+                      <Text style={[upStyles.cell, upStyles.num, { width: 68 }]}>
+                        {fmtHoursHM(dutyH)}
+                      </Text>
                       {/* Iter 210/211 — OT window (second punch pair).
                           Editable exactly like In/Out: change an existing
                           OT punch time, or type a time into an empty box
                           to ADD a missing OT-In / OT-Out. An OT-Out
                           earlier than OT-In lands on the NEXT morning
-                          automatically. */}
+                          automatically. Iter 212 — OT only for MORNING
+                          first punches (before 12:00). */}
                       {(["ot_in", "ot_out"] as const).map((k) => {
                         const cell = r[k];
+                        if (!otAllowed && !cell) {
+                          return (
+                            <View key={k} style={{ width: 86 }}>
+                              <Text style={[upStyles.cell, { width: 86, color: colors.onSurfaceTertiary }]}>—</Text>
+                              <Text style={upStyles.punchDate} numberOfLines={1}>
+                                {firstIn ? "OT N/A · evening" : ""}
+                              </Text>
+                            </View>
+                          );
+                        }
                         const val = e[k] ?? (cell?.hhmm || "");
                         const dKey = k === "ot_in" ? "ot_in_date" as const : "ot_out_date" as const;
                         const dVal = e[dKey] ?? isoToDMY(cell?.date);
@@ -1556,8 +1580,8 @@ export default function PunchApprovalsScreen() {
                           </View>
                         );
                       })}
-                      <Text style={[upStyles.cell, upStyles.num, { width: 68 }]}>
-                        {fmtHoursHM(dutyH)}
+                      <Text style={[upStyles.cell, upStyles.num, { width: 68, color: otH > 0 ? colors.accent : colors.onSurfaceTertiary }]}>
+                        {otH > 0 ? fmtHoursHM(otH) : "—"}
                       </Text>
                       <Text style={[upStyles.cell, upStyles.num, { width: 92, fontWeight: "700" }]}>
                         {fmtHoursHM(dutyH + otH)}
@@ -1661,11 +1685,12 @@ export default function PunchApprovalsScreen() {
                   { w: 150, txt: "Name" },
                   { w: 130, txt: "Father Name" },
                   { w: 110, txt: "Designation" },
-                  { w: 86, txt: "In / Date" },
-                  { w: 86, txt: "Out / Date" },
+                  { w: 86, txt: "In Punch / Date" },
+                  { w: 86, txt: "Out Punch / Date" },
+                  { w: 72, txt: "Duty HRS" },
                   { w: 86, txt: "OT In / Date" },
                   { w: 86, txt: "OT Out / Date" },
-                  { w: 72, txt: "Duty HRS" },
+                  { w: 68, txt: "OT Duty HRS" },
                   { w: 92, txt: "Total Duty HRS" },
                   { w: 150, txt: "Update Reason" },
                   ...(canAct && tab !== "approved" && tab !== "rejected" ? [{ w: 92, txt: "Action" }] : []),
@@ -1713,9 +1738,12 @@ export default function PunchApprovalsScreen() {
                     </Text>
                     {punchCell(r.in, "in")}
                     {punchCell(r.out, "out")}
+                    <Text style={[upStyles.cell, upStyles.num, { width: 72 }]}>{fmtHoursHM(r.duty_hours)}</Text>
                     {punchCell(r.ot_in, "ot_in")}
                     {punchCell(r.ot_out, "ot_out")}
-                    <Text style={[upStyles.cell, upStyles.num, { width: 72 }]}>{fmtHoursHM(r.duty_hours)}</Text>
+                    <Text style={[upStyles.cell, upStyles.num, { width: 68, color: r.ot_hours > 0 ? colors.accent : colors.onSurfaceTertiary }]}>
+                      {r.ot_hours > 0 ? fmtHoursHM(r.ot_hours) : "—"}
+                    </Text>
                     <Text style={[upStyles.cell, upStyles.num, { width: 92, fontWeight: "700" }]}>
                       {fmtHoursHM(r.total_hours)}
                     </Text>

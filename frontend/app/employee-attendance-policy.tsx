@@ -96,7 +96,8 @@ export default function EmployeeAttendancePolicyScreen() {
   const params = useLocalSearchParams<{ user_id?: string }>();
   const uid = typeof params.user_id === "string" ? params.user_id : "";
   const canEdit =
-    user?.role === "super_admin" || user?.role === "company_admin";
+    user?.role === "super_admin" || user?.role === "company_admin" ||
+    (user?.role as string) === "sub_admin";
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

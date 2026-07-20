@@ -65,7 +65,7 @@ const fmtWhen = (iso: string) => {
 export default function FlaggedPunchesScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const isSuper = user?.role === "super_admin";
+  const isSuper = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
   const [items, setItems] = useState<Flagged[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

@@ -570,7 +570,7 @@ async def gmail_message_detail(msg_id: str, authorization: Optional[str] = Heade
 @router.post("/gmail/send")
 async def gmail_send(payload: dict, authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
-    require_role(user, ["super_admin"])
+    require_role(user, ["super_admin", "sub_admin"])
     to = (payload.get("to") or "").strip()
     subject = payload.get("subject") or ""
     body = payload.get("body") or ""

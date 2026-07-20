@@ -162,7 +162,7 @@ async def list_tickets(scope: str = Query("mine"),
                        authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
     if scope == "all":
-        require_role(user, ["company_admin", "super_admin"])
+        require_role(user, ["company_admin", "super_admin", "sub_admin"])
         q = {}
         if user["role"] == "company_admin" and user.get("company_id"):
             q = {"company_id": user["company_id"]}
@@ -190,7 +190,7 @@ async def list_tickets(scope: str = Query("mine"),
 async def update_ticket(ticket_id: str, payload: TicketUpdate,
                         authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     r = await db.tickets.update_one(
         {"ticket_id": ticket_id},
         {"$set": {"status": payload.status,

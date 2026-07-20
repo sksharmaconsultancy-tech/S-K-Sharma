@@ -52,7 +52,7 @@ export default function AiInsightsScreen() {
   const { user } = useAuth();
   const router = useRouter();
 
-  const isSuperAdmin = user?.role === "super_admin";
+  const isSuperAdmin = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
 
   const [tab, setTab] = useState<"chat" | "summary" | "anomalies">("chat");
   const [firms, setFirms] = useState<Firm[]>([]);

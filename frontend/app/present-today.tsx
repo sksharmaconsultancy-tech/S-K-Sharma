@@ -76,7 +76,7 @@ export default function PresentTodayScreen() {
     setExpanded((prev) => ({ ...prev, [uid]: !prev[uid] }));
   }, []);
 
-  const isSuper = user?.role === "super_admin";
+  const isSuper = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
 
   const load = useCallback(async () => {
     setLoading(true);

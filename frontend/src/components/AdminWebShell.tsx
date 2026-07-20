@@ -514,8 +514,6 @@ export default function AdminWebShell({ children }: Props) {
 
     if (role === "super_admin") return NAV_SUPER;
     if (role === "sub_admin") {
-      const perms: string[] = (user as any)?.sub_admin_permissions || [];
-      const permSet = new Set(perms);
       // Iter 93 — per-sidebar-button gating set by the super admin on the
       // Sub Admins screen. menu_rights[route] === false hides the button.
       const subMenuRights: Record<string, boolean> =
@@ -526,20 +524,20 @@ export default function AdminWebShell({ children }: Props) {
         if (r === "/sub-admins") return false;
         if (r === "/employer-access-rights") return false;
         if (r === "/super-admin-access") return false;
-        if (r === "/attendance-sheet") return false;
-        if (r === "/masters") return false;
-        if (r === "/compliance-policy") return false;
-        if (r === "/portal-automation") return false;
-        if (r === "/ai-insights") return false;
+        // Iter 212 — user directive: Sub Super Admins get ALL features.
+        // (Previously-hidden entries below are now allowed; per-button
+        // menu_rights set by the super admin still apply above.)
         // Iter 85 — Appearance / Theme switching is Super-Admin-only.
         if (r === "/appearance") return false;
         if (r === "/attendance-email") return true;
         if (r === "/bulk-employee-correction") return true;
         if (r === "/bonus-run") return true;
         if (r === "/(tabs)") return true;
-        const gates = NAV_PERMISSION_MAP[r];
-        if (!gates || gates.length === 0) return true;
-        return gates.some((g) => permSet.has(g));
+        // Iter 212 — user directive: Sub Super Admins see ALL features.
+        // The permission matrix no longer hides menus; only explicit
+        // per-button menu_rights[route] === false (handled above) and the
+        // platform-admin screens stay hidden.
+        return true;
       });
     }
     if (role === "company_admin") {

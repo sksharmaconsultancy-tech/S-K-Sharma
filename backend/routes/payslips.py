@@ -54,7 +54,7 @@ async def my_payslips(authorization: Optional[str] = Header(None)):
 @router.post("/payslips")
 async def create_payslip(payload: PayslipCreate, authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     slip = payload.model_dump()
     slip["slip_id"] = f"ps_{uuid.uuid4().hex[:12]}"
     slip["created_at"] = now_iso()
@@ -81,7 +81,7 @@ async def create_payslip(payload: PayslipCreate, authorization: Optional[str] = 
 async def mark_payslip_paid(slip_id: str,
                             authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     r = await db.payslips.update_one(
         {"slip_id": slip_id},
         {"$set": {"status": "paid", "paid_at": now_iso(),

@@ -134,7 +134,7 @@ def _report_or_404(report_id: str) -> Dict[str, Any]:
 @router.get("")
 async def list_report_formats(authorization: Optional[str] = Header(None)):
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin"])
+    require_role(admin, ["super_admin", "sub_admin"])
     items = []
     for rid, r in REPORTS.items():
         doc = await db.app_settings.find_one(_key(rid), {"_id": 0}) or {}
@@ -151,7 +151,7 @@ async def list_report_formats(authorization: Optional[str] = Header(None)):
 @router.get("/{report_id}")
 async def get_one(report_id: str, authorization: Optional[str] = Header(None)):
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin"])
+    require_role(admin, ["super_admin", "sub_admin"])
     r = _report_or_404(report_id)
     doc = await db.app_settings.find_one(_key(report_id), {"_id": 0}) or {}
     return {

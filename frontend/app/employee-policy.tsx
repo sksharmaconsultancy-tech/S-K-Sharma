@@ -136,7 +136,7 @@ function EmployeePolicyScreen() {
     medical_pct?: number; special_pct?: number; others_pct?: number;
     allow_percent_bifurcation?: boolean;
   } | null>(null);
-  const isAdmin = user?.role === "company_admin" || user?.role === "super_admin";
+  const isAdmin = user?.role === "company_admin" || user?.role === "super_admin" || (user?.role as string) === "sub_admin";
 
   const load = useCallback(async () => {
     if (!targetUserId) {

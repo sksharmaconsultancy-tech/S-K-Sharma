@@ -55,7 +55,7 @@ type Punch = {
 // ---------------------------------------------------------------------------
 export default function ManualPunchEntryScreen() {
   const { user } = useAuth();
-  const isSuper = user?.role === "super_admin";
+  const isSuper = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
   const { selectedCompanyId } = useSelectedCompany();
 
   const [companies, setCompanies] = useState<Company[]>([]);

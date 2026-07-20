@@ -2363,13 +2363,11 @@ def require_permission(user: dict, permission: str):
             )
         return
     if role == "sub_admin":
-        perms = user.get("sub_admin_permissions") or []
-        if permission in perms:
-            return
-        raise HTTPException(
-            status_code=403,
-            detail=f"You don't have the '{permission}' permission. Ask the super admin to grant it.",
-        )
+        # Iter 212 — user directive: Sub Super Admins get ALL features
+        # (deputy of the super admin). Per-button restrictions are still
+        # possible via ``menu_rights`` on the Sub Admins screen; the
+        # granular permission matrix no longer blocks API access.
+        return
     raise HTTPException(status_code=403, detail="Forbidden")
 
 
@@ -3667,7 +3665,7 @@ async def set_company_face_match(
     """Enable / disable face-match verification for a company.
     company_admin may only toggle their own company; super_admin any."""
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     if user["role"] == "company_admin" and user.get("company_id") != company_id:
         raise HTTPException(status_code=403, detail="Not your company")
     r = await db.companies.update_one(
@@ -3702,7 +3700,7 @@ async def set_company_location_punching(
     Guardrails: super_admin can toggle any firm; company_admin only own.
     """
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     if user["role"] == "company_admin" and user.get("company_id") != company_id:
         raise HTTPException(status_code=403, detail="Not your company")
     r = await db.companies.update_one(
@@ -3727,7 +3725,7 @@ async def list_flagged_punches(
     """Return recent punches flagged by face-match. company_admin sees
     their company only; super_admin can filter with ?company_id=."""
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     q: dict = {"identity_flagged": True}
     if user["role"] == "company_admin":
         q["company_id"] = user.get("company_id")
@@ -3971,7 +3969,7 @@ async def clear_flag(
 ):
     """Admin clears the identity_flagged bit after manual review."""
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     rec = await db.attendance.find_one({"record_id": record_id}, {"_id": 0})
     if not rec:
         raise HTTPException(status_code=404, detail="Punch not found")
@@ -3995,7 +3993,7 @@ async def get_punch_selfie(
 ):
     """Return the base64 selfie captured on a specific punch. Admin-only."""
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     rec = await db.attendance.find_one(
         {"record_id": record_id},
         {"_id": 0, "selfie_base64": 1, "company_id": 1},
@@ -4015,7 +4013,7 @@ async def get_user_profile_photo(
     """Return the base64 profile photo of a user. Admin-only, scoped by
     company for company_admin."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["company_admin", "super_admin"])
+    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
     target = await db.users.find_one(
         {"user_id": user_id},
         {"_id": 0, "profile_photo_base64": 1, "company_id": 1},
@@ -4036,7 +4034,7 @@ async def list_profile_edits(
     """List profile-edit requests. Scoped to caller company for company_admin;
     super_admin may filter by company_id."""
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     q: dict = {}
     if status and status != "all":
         q["status"] = status
@@ -4081,7 +4079,7 @@ async def review_profile_edit(
     authorization: Optional[str] = Header(None),
 ):
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     req = await db.profile_edit_requests.find_one({"request_id": request_id})
     if not req:
         raise HTTPException(status_code=404, detail="Request not found")
@@ -5437,7 +5435,7 @@ async def pin_change(payload: PinChangeRequest, authorization: Optional[str] = H
 async def admin_reset_pin(payload: AdminPinResetRequest, authorization: Optional[str] = Header(None)):
     """Company/Super admin resets an employee's PIN. Returns the temp PIN once."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["company_admin", "super_admin"])
+    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
     target = await db.users.find_one({"user_id": payload.user_id}, {"_id": 0})
     if not target:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -5764,7 +5762,7 @@ async def list_attendance_policy_presets(
     """Available policy presets per business type. Company admins use this to
     pick / reset to a preset from the Attendance Policy screen."""
     user = await get_user_from_token(authorization)
-    require_role(user, ["super_admin", "company_admin"])
+    require_role(user, ["super_admin", "company_admin", "sub_admin"])
     # Enrich with the human label taken from BUSINESS_CATEGORIES
     # Iter 200 (user directive) — Textile Policy 1/2 & the Hospital preset
     # are RETIRED from the picker: all attendance policy is now managed
@@ -5985,7 +5983,7 @@ async def attendance_textile_compute_day(
             their own company; super admins may pass any user_id.
     """
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     if not user_id:
         raise HTTPException(status_code=400, detail="user_id is required")
     emp = await db.users.find_one({"user_id": user_id}, {"_id": 0})
@@ -6860,7 +6858,7 @@ async def list_pending_approvals(
     authorization: Optional[str] = Header(None),
 ):
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["company_admin", "super_admin"])
+    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
     q: dict = {"role": "employee", "approval_status": "pending", "onboarded": True}
     if admin["role"] == "company_admin":
         if not admin.get("company_id"):
@@ -6892,7 +6890,7 @@ async def decide_employee_approval(
     authorization: Optional[str] = Header(None),
 ):
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["company_admin", "super_admin"])
+    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
     if payload.action not in ("approve", "reject"):
         raise HTTPException(status_code=400, detail="action must be 'approve' or 'reject'")
 
@@ -7002,7 +7000,7 @@ async def update_company(
     authorization: Optional[str] = Header(None),
 ):
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     if not user.get("company_id"):
         raise HTTPException(status_code=400, detail="No company")
     allowed = {
@@ -7055,7 +7053,7 @@ async def list_branches(
     """List branches for a company. company_admin sees their own; super
     admin can pass `company_id` (else returns all)."""
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     q: dict = {}
     if user["role"] == "company_admin":
         q["company_id"] = user.get("company_id")
@@ -7071,7 +7069,7 @@ async def create_branch(
     authorization: Optional[str] = Header(None),
 ):
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
 
     scope_cid = user.get("company_id") if user["role"] == "company_admin" else payload.company_id
     if not scope_cid:
@@ -7105,7 +7103,7 @@ async def update_branch(
     authorization: Optional[str] = Header(None),
 ):
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     b = await db.branches.find_one({"branch_id": branch_id}, {"_id": 0})
     if not b:
         raise HTTPException(status_code=404, detail="Branch not found")
@@ -7127,7 +7125,7 @@ async def delete_branch(
     authorization: Optional[str] = Header(None),
 ):
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     b = await db.branches.find_one({"branch_id": branch_id}, {"_id": 0})
     if not b:
         raise HTTPException(status_code=404, detail="Branch not found")
@@ -7778,7 +7776,7 @@ async def super_admin_toggle_user(
     Disabled users are blocked from logging in and existing sessions are
     invalidated so the change is immediate."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     target = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
@@ -8619,7 +8617,7 @@ async def delete_employee(user_id: str,
     - Super admins cannot be deleted via this endpoint (safety guard).
     """
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["company_admin", "super_admin"])
+    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
     target = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     if not target:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -9433,7 +9431,7 @@ async def list_pending_punches(
     scoped to their own company. Set ?include_decided=true to also return
     the last N records that were already approved/rejected (audit view)."""
     user = await get_user_from_token(authorization)
-    require_role(user, ["super_admin", "company_admin"])
+    require_role(user, ["super_admin", "company_admin", "sub_admin"])
     q: dict = {}
     if user["role"] == "company_admin":
         q["company_id"] = user["company_id"]
@@ -9477,7 +9475,7 @@ async def decide_punch(
 ):
     """Approve / Reject / Adjust a pending auto-punch."""
     user = await get_user_from_token(authorization)
-    require_role(user, ["super_admin", "company_admin"])
+    require_role(user, ["super_admin", "company_admin", "sub_admin"])
     rec = await db.attendance.find_one({"record_id": record_id}, {"_id": 0})
     if not rec:
         raise HTTPException(status_code=404, detail="Punch not found")
@@ -9784,7 +9782,7 @@ async def admin_attendance_today(
     duty hours so far. Scoped to the caller's company for company_admin; super
     admin may pass ?company_id=... to filter."""
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     scope_company: Optional[str] = None
     if user["role"] == "company_admin":
         scope_company = user.get("company_id")
@@ -9904,7 +9902,7 @@ async def admin_present_not_punched(
     employee identity so the employer can review + approve.
     """
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
 
     scope_company: Optional[str] = None
     if user["role"] == "company_admin":
@@ -10060,7 +10058,7 @@ async def admin_approve_punch(
     office geofence (based on their last-known location). Records the
     creator + optional note for audit."""
     admin_user = await get_user_from_token(authorization)
-    require_role(admin_user, ["company_admin", "super_admin"])
+    require_role(admin_user, ["company_admin", "super_admin", "sub_admin"])
 
     emp = await db.users.find_one({"user_id": payload.user_id}, {"_id": 0})
     if not emp or emp.get("role") != "employee":
@@ -10288,7 +10286,7 @@ async def admin_trigger_auto_close(authorization: Optional[str] = Header(None)):
     """On-demand trigger of the auto-close job. Only super_admin and
     company_admin can invoke — useful for manual verification / testing."""
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     summary = await _auto_close_open_shifts()
     return {"ok": True, **summary}
 
@@ -10301,7 +10299,7 @@ async def list_open_shifts(
     """Return employees who have punched IN today but never punched OUT.
     Useful for admins to see who might need a manual close."""
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     now_utc = datetime.now(timezone.utc)
@@ -10411,7 +10409,7 @@ async def get_daily_roster(
     the supervisor to mark present/absent for live-in staff whose
     phones may never leave the premises."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["company_admin", "super_admin"])
+    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     scope_filter: dict = {"role": "employee"}
@@ -10489,7 +10487,7 @@ async def batch_roster_mark(
     `approve-punch` guard logic. Skipping rows that would create a
     double-IN / double-OUT is silent — we return per-row results."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["company_admin", "super_admin"])
+    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     results = []
@@ -10979,7 +10977,7 @@ async def admin_payroll(
 ):
     """List payslips across employees, scoped to the admin's company."""
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     q: dict = {}
     if user["role"] == "company_admin":
         q["company_id"] = user.get("company_id")
@@ -11012,7 +11010,7 @@ async def admin_payroll_run(
     """Compute a lightweight monthly payroll run for every eligible
     employee in scope. See `_compute_payroll_run` for details."""
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     return await _compute_payroll_run(user, year, month, company_id)
 
 
@@ -11701,8 +11699,11 @@ async def attendance_day_status(
             # Iter 210 — SECOND pair = OT window (e.g. duty 08:00-20:00 then
             # OT-In 20:07 → OT-Out 07:59 next morning). Surfaced as its own
             # OT In / OT Out columns on the Punch Approvals tables.
+            # Iter 212 — OT only applies to MORNING-shift employees (first
+            # punch before 12:00). Evening/night first punches get no OT
+            # pair (user rule).
             ot_in_rec = ot_out_rec = None
-            if first_in and out_rec:
+            if first_in and out_rec and first_in["_dt"].hour < 12:
                 ot_in_rec = next(
                     (p for p in ps
                      if p["date"] == d and p.get("kind") == "in"
@@ -11797,7 +11798,7 @@ async def upsert_extra_duty(
     authorization: Optional[str] = Header(None),
 ):
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     user_id = str(payload.get("user_id") or "").strip()
     date_s = str(payload.get("date") or "").strip()
     if not user_id or not re.match(r"^\d{4}-\d{2}-\d{2}$", date_s):
@@ -11848,7 +11849,7 @@ async def create_manual_punch(
     payroll picks it up immediately.
     """
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     reason = (payload.reason or "").strip()
     if not reason:
         raise HTTPException(status_code=400, detail="A short reason is required for audit.")
@@ -11903,7 +11904,7 @@ async def edit_attendance_record(
     """Edit an existing attendance record's time and/or kind. Reason is
     mandatory for audit."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     reason = (payload.reason or "").strip()
     if not reason:
         raise HTTPException(status_code=400, detail="A short reason is required for audit.")
@@ -11966,7 +11967,7 @@ async def delete_attendance_record(
     """Hard-delete an attendance record. Restricted to 90-day lookback for
     company_admin. Original row is captured in the audit log."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     reason = (reason or "").strip()
     if not reason:
         raise HTTPException(status_code=400, detail="A short reason is required for audit.")
@@ -12044,7 +12045,7 @@ async def get_attendance_audit(
     admins are scoped to their own company via the current record's
     company_id (or via any historical audit row that references it)."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     # Attempt to fetch the current record (may be deleted — that's fine)
     rec = await db.attendance.find_one({"record_id": record_id}, {"_id": 0})
     if rec and admin["role"] == "company_admin":
@@ -12068,7 +12069,7 @@ async def list_attendance_history(
     """Admin-facing history search used by the Back-date Punch editor.
     Company admins are always scoped to their own company."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     q: dict = {}
     if admin["role"] == "company_admin":
         q["company_id"] = admin.get("company_id")
@@ -12189,7 +12190,7 @@ async def admin_payroll_email_report(
     When `recipients=employees`, each employee receives a report scoped to
     ONLY their own data (no cross-employee leaks)."""
     admin_user = await get_user_from_token(authorization)
-    require_role(admin_user, ["company_admin", "super_admin"])
+    require_role(admin_user, ["company_admin", "super_admin", "sub_admin"])
 
     data = await _compute_payroll_run(
         admin_user, payload.year, payload.month, payload.company_id,
@@ -12431,7 +12432,7 @@ async def set_employee_policy(
     Also mirrors `salary` into the legacy top-level `salary_monthly` so the
     existing payslip auto-creation loop keeps working."""
     admin_user = await get_user_from_token(authorization)
-    require_role(admin_user, ["company_admin", "super_admin"])
+    require_role(admin_user, ["company_admin", "super_admin", "sub_admin"])
     emp = await _load_scoped_employee(user_id, admin_user)
 
     patch = payload.model_dump(exclude_none=True) if hasattr(payload, "model_dump") else payload.dict(exclude_none=True)  # type: ignore[attr-defined]
@@ -12536,7 +12537,7 @@ async def get_employee_attendance_policy_override(
     authorization: Optional[str] = Header(None),
 ):
     admin_user = await get_user_from_token(authorization)
-    require_role(admin_user, ["company_admin", "super_admin"])
+    require_role(admin_user, ["company_admin", "super_admin", "sub_admin"])
     emp = await _load_scoped_employee(user_id, admin_user)
     override = emp.get("attendance_policy_override") or {}
     # For the UI include the current firm-level effective policy for reference.
@@ -12713,7 +12714,7 @@ async def list_employee_groups(
     when the caller is a super_admin). Also returns the current member
     count for each group so the UI can show badges."""
     admin_user = await get_user_from_token(authorization)
-    require_role(admin_user, ["company_admin", "super_admin"])
+    require_role(admin_user, ["company_admin", "super_admin", "sub_admin"])
     target_cid = await _resolve_target_company(admin_user, company_id)
 
     groups = await db.employee_group_policies.find(
@@ -12762,7 +12763,7 @@ async def create_employee_group(
     authorization: Optional[str] = Header(None),
 ):
     admin_user = await get_user_from_token(authorization)
-    require_role(admin_user, ["company_admin", "super_admin"])
+    require_role(admin_user, ["company_admin", "super_admin", "sub_admin"])
     name = (payload.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="Group name is required.")
@@ -12810,7 +12811,7 @@ async def update_employee_group(
     `bio_code` are preserved on each employee unless `overwrite_salary`
     is also true (only affects the salary field)."""
     admin_user = await get_user_from_token(authorization)
-    require_role(admin_user, ["company_admin", "super_admin"])
+    require_role(admin_user, ["company_admin", "super_admin", "sub_admin"])
     group = await db.employee_group_policies.find_one({"group_id": group_id}, {"_id": 0})
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -12872,7 +12873,7 @@ async def apply_employee_group(
     group with the current template. Preserves individual salary unless
     `overwrite_salary=true`."""
     admin_user = await get_user_from_token(authorization)
-    require_role(admin_user, ["company_admin", "super_admin"])
+    require_role(admin_user, ["company_admin", "super_admin", "sub_admin"])
     group = await db.employee_group_policies.find_one({"group_id": group_id}, {"_id": 0})
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -12897,7 +12898,7 @@ async def delete_employee_group(
     they simply lose the group link (the `employee_group` label is left
     intact so admins can still find them)."""
     admin_user = await get_user_from_token(authorization)
-    require_role(admin_user, ["company_admin", "super_admin"])
+    require_role(admin_user, ["company_admin", "super_admin", "sub_admin"])
     group = await db.employee_group_policies.find_one({"group_id": group_id}, {"_id": 0})
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -13902,7 +13903,7 @@ async def reprocess_salary_run(
     override month_days, filters, deductions etc. Otherwise we reuse the
     previously-stored parameters."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     await require_employer_permission(admin, "salary_process:write", db)
     existing = await db.salary_runs.find_one({"run_id": run_id}, {"_id": 0})
     if not existing:
@@ -14364,7 +14365,7 @@ async def generate_payslips_from_run(
     Employee Payslips screen picks them up. Idempotent per (user_id,
     month) — re-running replaces the previous slip for that month."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     await require_employer_permission(admin, "salary_process:write", db)
     run = await db.salary_runs.find_one({"run_id": run_id}, {"_id": 0})
     if not run:
@@ -15105,7 +15106,7 @@ async def save_compliance_run_rows(
     Salary sheet. Previously "Save as Draft" saved NOTHING — every edit
     was client-side only and vanished when the run was reopened."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     await require_employer_permission(admin, "compliance_salary:write", db)
     run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
     if not run:
@@ -15149,7 +15150,7 @@ async def finalize_compliance_salary_run(
     """Iter 91 — Save/Finalize a compliance salary run. Marks the run as
     finalized (read-only): reprocessing is blocked until unfinalized."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     await require_employer_permission(admin, "compliance_salary:write", db)
     run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
     if not run:
@@ -15189,7 +15190,7 @@ async def request_compliance_run_unlock(
     employers must raise an unlock request that the Super Admin approves
     before any change is possible. Super admin unlock is immediate."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     await require_employer_permission(admin, "compliance_salary:write", db)
     run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
     if not run:
@@ -15244,7 +15245,7 @@ async def list_salary_unlock_requests(
     """Iter 126h — pending finalized-salary unlock requests. Super admin
     sees all; requesters see their own (to show 'pending' state)."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     q: Dict[str, Any] = {}
     if status:
         q["status"] = status
@@ -15629,7 +15630,7 @@ async def generate_compliance_payslips_from_run(
     Stored separately (kind='compliance') so the base + compliance payslips
     don't collide."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     await require_employer_permission(admin, "compliance_salary:write", db)
     run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
     if not run:
@@ -19033,7 +19034,7 @@ async def create_actual_salary_process(
     """Compute + persist a new Actual Salary Process run."""
     from utils.salary_run import actual_days_in_month, parse_month
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     require_permission(admin, "salary_process:write")
 
     try:
@@ -19333,7 +19334,7 @@ async def patch_actual_salary_row(
     initial defaults — admins can override any row inline until the
     run is finalized. The DOJ / exit-date cap still caps p_days."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     require_permission(admin, "salary_process:write")
 
     run = await db.salary_runs.find_one(
@@ -19402,7 +19403,7 @@ async def finalize_actual_salary_run(
 ):
     """Freeze the run — subsequent PATCH calls return 409."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     require_permission(admin, "salary_process:write")
 
     existing = await db.salary_runs.find_one(

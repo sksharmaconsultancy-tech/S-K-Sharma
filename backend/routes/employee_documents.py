@@ -117,7 +117,7 @@ async def download_employee_master_pdf(
     copy in the `employee_master_pdfs` collection for record.
     """
     admin_user = await get_user_from_token(authorization)
-    require_role(admin_user, ["company_admin", "super_admin"])
+    require_role(admin_user, ["company_admin", "super_admin", "sub_admin"])
     emp = await _load_scoped_employee_any_role(user_id, admin_user)
 
     company = None
@@ -365,7 +365,7 @@ async def delete_employee_document(
     authorization: Optional[str] = Header(None),
 ):
     admin_user = await get_user_from_token(authorization)
-    require_role(admin_user, ["company_admin", "super_admin"])
+    require_role(admin_user, ["company_admin", "super_admin", "sub_admin"])
     await _load_scoped_employee_any_role(user_id, admin_user)
 
     result = await db.employee_documents.delete_one(

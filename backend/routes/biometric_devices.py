@@ -392,7 +392,7 @@ async def register_biometric_device(
     authorization: Optional[str] = Header(None),
 ):
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     sn = payload.serial_number.strip()
     if not sn:
         raise HTTPException(status_code=400, detail="Serial number is required")
@@ -430,7 +430,7 @@ async def list_biometric_devices(
     authorization: Optional[str] = Header(None),
 ):
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     q: dict = {}
     if admin["role"] == "company_admin":
         q["company_id"] = admin["company_id"]
@@ -460,7 +460,7 @@ async def update_biometric_device(
     authorization: Optional[str] = Header(None),
 ):
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     device = await db.biometric_devices.find_one({"device_id": device_id}, {"_id": 0})
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -482,7 +482,7 @@ async def delete_biometric_device(
     authorization: Optional[str] = Header(None),
 ):
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     device = await db.biometric_devices.find_one({"device_id": device_id})
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -499,7 +499,7 @@ async def biometric_device_logs(
     authorization: Optional[str] = Header(None),
 ):
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     device = await db.biometric_devices.find_one({"device_id": device_id}, {"_id": 0})
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -521,7 +521,7 @@ async def biometric_unmapped_punches(
     (bio_code / employee_code not yet set). Admin uses this list to enrol
     workers on the mobile app or add the missing bio_code."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     q: dict = {}
     if admin["role"] == "company_admin":
         # scope by devices belonging to this company
@@ -544,7 +544,7 @@ async def biometric_remap_unmapped(
     employee_code mapping; matches are ingested as normal attendance
     records and removed from the unmapped queue."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     dev_q: dict = {}
     if admin["role"] == "company_admin":
         dev_q["company_id"] = admin["company_id"]
@@ -642,7 +642,7 @@ async def biometric_simulate_punch(
     device so admins can rehearse the end-to-end flow without a physical
     machine present."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     sn = (payload.get("serial_number") or "").strip()
     device_user_id = (payload.get("device_user_id") or "").strip()
     if not sn or not device_user_id:

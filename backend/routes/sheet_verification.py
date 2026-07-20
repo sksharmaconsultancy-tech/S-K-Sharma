@@ -417,7 +417,7 @@ async def decide_sheet_fix(request_id: str,
                            payload: Dict[str, Any] = Body(...),
                            authorization: Optional[str] = Header(None)):
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin"])
+    require_role(admin, ["super_admin", "sub_admin"])
     decision = payload.get("decision")
     if decision not in ("approve", "reject"):
         raise HTTPException(status_code=400, detail="decision must be approve|reject")

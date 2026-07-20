@@ -39,7 +39,7 @@ export default function ChallansScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const { selectedCompany } = useSelectedCompany();
-  const isSuper = user?.role === "super_admin";
+  const isSuper = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
 
   useEffect(() => {
     if (Platform.OS !== "web") router.replace("/(tabs)");

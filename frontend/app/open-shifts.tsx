@@ -69,7 +69,7 @@ const fmtElapsed = (hours: number): string => {
 export default function OpenShiftsScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const isSuper = user?.role === "super_admin";
+  const isSuper = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
   const [items, setItems] = useState<OpenShift[]>([]);
   const [autoCloseAfter, setAutoCloseAfter] = useState(12);
   const [loading, setLoading] = useState(true);

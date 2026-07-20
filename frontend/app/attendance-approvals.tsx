@@ -71,7 +71,7 @@ export default function AttendanceApprovalsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [approving, setApproving] = useState<string | null>(null);
 
-  const isSuper = user?.role === "super_admin";
+  const isSuper = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
   const isAdmin = user?.role === "company_admin" || isSuper;
 
   const load = useCallback(async () => {

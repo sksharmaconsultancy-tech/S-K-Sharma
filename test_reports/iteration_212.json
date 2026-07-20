@@ -1,0 +1,37 @@
+{
+  "summary": "Iter 212 end-to-end verification of (a) morning-only OT rule, (b) reordered Punch Approvals columns with new OT Duty HRS, and (c) sub_admin full-feature access. Backend pytest (9/9 PASS) + frontend Playwright against public preview URL (super admin + sub admin). RESULTS: 7/7 review items PASS end-to-end. Backend: sub_admin now hits day-status, report-formats, shift-masters, /admin/companies, /admin/employees, /admin/attendance-policy, /admin/manual-punch-entries/pending — all non-403 (previously 403). Super-admin regression: /admin/attendance/monthly-grid/cmp_527fecdd7c/2026-07 → 200, day-status returns SURENDRA SINGH (morning, user_44cd6f561da0) WITH ot_in and ALI HASAN (evening, user_4111f8eea5d3) WITHOUT ot_in — server-side OT gating works exactly as spec. Frontend super admin /punch-approvals Auto-Punches tab: header row shows Code / Name / Father Name / Designation / In Punch/Date / Out Punch/Date / Duty HRS / OT In/Date / OT Out/Date / OT Duty HRS / Total Duty HRS / Update Reason / Action ✓; SURENDRA row: 08:00 (20 Jul 2026) / 20:00 (20 Jul 2026) / Duty 12:00 / OT In 20:07 (20-07-2026) / OT Out 07:59 (21-07-2026 amber) / OT Duty 11:52 / Total 23:52 / Update Reason 'Due to Mismatch' ✓; ALI HASAN row: 20:00 / 23:50 / Duty 03:50 / OT In '—' with 'OT N/A · evening' subtitle / OT Out '—' with 'OT N/A · evening' / OT Duty '—' / Total 03:50 — NO OT input boxes rendered for the evening employee ✓. Test 3 (edit-save regression): read ds-ot_in for user_44cd6f561da0|2026-07-20 = 20:07, changed to 20:10, saved via ds-save, reloaded → value persisted as 20:10 and Total Duty HRS live-recalculated to 23:49 in table; reverted to 20:07, saved, reloaded → confirmed 20:07 ✓. Approved tab: renders 'No approved punches' empty state for 2026-07-20 (nothing was approved), pa-search still visible & functional (same known behavior as iter 206 — empty-state hides header row, not a regression). SUB ADMIN (testsub@sksharma.co, sub_admin, scoped cmp_adddad3f65): /punch-approvals loads without 'Access Denied' / 'Admins only' banner, Import Excel + Individual Punch buttons visible, tabs Pending/Approved/Rejected + Updated/Auto/Manual/Additional-Duty all clickable, list correctly empty for City Care Hospital. Sidebar shows Salary Process, Reports, Masters, Approvals, Bulk Employee Correction, Bulk Operations, Bonus, Automation, Bulk Import (Excel), Geofence Policy; and HIDES 'Sub Admins', 'Employer Access Rights', 'Super Admin Access', 'Appearance/Theme' ✓. /masters (General Masters — Group/Departments/Designations/Allowances/Deductions/Holidays/Locations tabs), /compliance-policy (full compliance form with PF/ESI/PT/TDS toggles & rates), /manual-punch-entry (Missing Punch/Manual Entry with firm+employee+date selectors) — all THREE screens render for sub_admin, no 'Access Denied', and ZERO /api 403 responses captured across the entire sub-admin session. No red-screen errors. Recurring RN-web cosmetic warnings (outline / background / padding '0 8px') unchanged from prior iterations. All seed punches on 2026-07-20/21 for user_44cd6f561da0 and user_4111f8eea5d3 preserved; SURENDRA OT In restored to 20:07 after edit-save regression.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global (RN-web)", "issues": [
+        "Recurring RN-web console warnings: 'Invalid style property of outline / background' and shorthand padding '0 8px'. Unchanged since iter 202. Cosmetic — no functional impact.",
+        "React DOM warning on /masters: 'React does not recognize the `%s` prop on a DOM element' — appears to be an interpolation bug in a warning message printer (a component is spreading an unknown prop). Non-blocking; consider auditing General Masters wrapper components."
+      ]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter212_subadmin_access.py",
+    "/app/test_reports/pytest/iter212.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Approved / Rejected tabs still hide the table header row when the day has zero rows (same as iter 206). Consider rendering headers even on empty state so the new column layout is documented to the user. Non-blocking.",
+    "OPTIONAL: Investigate the '%s' React DOM-prop warning surfaced while navigating /masters as sub_admin (harmless but noisy in console)."
+  ],
+  "critical_code_review_comments": [
+    "punch-approvals.tsx is still ~2500 lines. Same recommendation from iter 206 — split per-tab renderers into /app/frontend/src/screens/punch-approvals/*.tsx for maintainability.",
+    "Morning-vs-evening OT gate is implemented consistently in BOTH backend (day-status omits ot_in/ot_out for evening-first employees — verified via API assertion on user_4111f8eea5d3) AND frontend (evening rows render '—' with 'OT N/A · evening' and no input elements). Good defense-in-depth.",
+    "sub_admin require_permission bypass is working: 7 previously-403 admin endpoints now return 200/404 for sub_admin, and 0 /api 403 responses were captured across full sub-admin navigation (punch-approvals + masters + compliance-policy + manual-punch-entry).",
+    "Edit-Save flow saves OT In cleanly with a reason and value persists on reload (verified round-trip 20:07 → 20:10 → 20:07)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter212_subadmin_access.py (new pytest file)"
+  ],
+  "success_rate": {"backend": "9/9 (100%)", "frontend": "7/7 review items PASS"},
+  "seed_data_creation": "None. SURENDRA SINGH (user_44cd6f561da0) OT In was temporarily changed from 20:07 → 20:10, verified persistence on reload, then restored to 20:07 and verified. All other seeded punches on 2026-07-20/21 for user_44cd6f561da0 and user_4111f8eea5d3 untouched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend test file: /app/backend/tests/test_iter212_subadmin_access.py (9 tests, ~2s). Super admin: sksharmaconsultancy@gmail.com / sharma123. Sub admin: testsub@sksharma.co / testsub123 (role=sub_admin, scoped to cmp_adddad3f65). Seeded fixtures on 2026-07-20 in Kankani (cmp_527fecdd7c): user_44cd6f561da0 SURENDRA SINGH (morning IN 08:00/OUT 20:00/OT-IN 20:07/OT-OUT 07:59 next day) — has OT columns; user_4111f8eea5d3 ALI HASAN (evening IN 20:00/OUT 23:50) — OT rendered as '—' with 'OT N/A · evening' label, no OT inputs. Row key format on Auto tab: `{user_id}|{yyyy-mm-dd}`. Key testIDs: pa-date-input, pa-show, pa-save, pa-search, pa-search-clear, tab-pending/approved/rejected/updated/auto/manual/extra, ds-{field}-{rowKey}, ds-reason-{rowKey}, ds-save-{rowKey}, reason-opt-{idx}, reason-opt-custom. Attendance-grid endpoint is /api/admin/attendance/monthly-grid/{company_id}/{month} (NOT /admin/attendance/grid — that's 405)."
+}

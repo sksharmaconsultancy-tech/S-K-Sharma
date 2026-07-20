@@ -105,7 +105,7 @@ const today = (): string => new Date().toISOString().slice(0, 10);
 export default function BackdatePunchesScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const isSuper = user?.role === "super_admin";
+  const isSuper = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
   const isAdmin = isSuper || user?.role === "company_admin";
 
   const [employees, setEmployees] = useState<Employee[]>([]);

@@ -50,7 +50,7 @@ async def create_shift_master(
     authorization: Optional[str] = Header(None),
 ):
     user = await get_user_from_token(authorization)
-    require_role(user, ["super_admin"])
+    require_role(user, ["super_admin", "sub_admin"])
     name = (payload.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="Shift name is required.")
@@ -88,7 +88,7 @@ async def update_shift_master(
     authorization: Optional[str] = Header(None),
 ):
     user = await get_user_from_token(authorization)
-    require_role(user, ["super_admin"])
+    require_role(user, ["super_admin", "sub_admin"])
     shift = await db.shift_masters.find_one({"shift_id": shift_id}, {"_id": 0})
     if not shift:
         raise HTTPException(status_code=404, detail="Shift not found")
@@ -133,7 +133,7 @@ async def delete_shift_master(
     authorization: Optional[str] = Header(None),
 ):
     user = await get_user_from_token(authorization)
-    require_role(user, ["super_admin"])
+    require_role(user, ["super_admin", "sub_admin"])
     r = await db.shift_masters.delete_one({"shift_id": shift_id})
     if r.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Shift not found")

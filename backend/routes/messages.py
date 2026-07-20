@@ -44,7 +44,7 @@ async def send_message(
     """Admin sends a message to one or more employees, or broadcasts to
     the whole company."""
     sender = await get_user_from_token(authorization)
-    require_role(sender, ["company_admin", "super_admin"])
+    require_role(sender, ["company_admin", "super_admin", "sub_admin"])
 
     subject = (payload.subject or "").strip()
     body = (payload.body or "").strip()
@@ -198,7 +198,7 @@ async def get_sent_messages(
     authorization: Optional[str] = Header(None),
 ):
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     limit = max(1, min(500, int(limit or 100)))
     msgs = await db.messages.find(
         {"sender_user_id": user["user_id"]},
@@ -273,7 +273,7 @@ async def list_message_recipients(
     authorization: Optional[str] = Header(None),
 ):
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["company_admin", "super_admin"])
+    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
     query: dict = {"role": "employee"}
     if admin["role"] == "company_admin":
         query["company_id"] = admin.get("company_id")

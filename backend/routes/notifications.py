@@ -52,7 +52,7 @@ async def list_notifications(authorization: Optional[str] = Header(None)):
 async def create_notification(payload: NotificationCreate,
                               authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     n = payload.model_dump()
     # Company admins can only broadcast within their own company
     if user["role"] == "company_admin":

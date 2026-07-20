@@ -67,7 +67,7 @@ function fmtFamily(v: any): string {
 export default function ProfileEditReviewScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const isSuper = user?.role === "super_admin";
+  const isSuper = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
   const [items, setItems] = useState<ProfileReq[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);

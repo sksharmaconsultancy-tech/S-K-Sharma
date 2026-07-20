@@ -37,7 +37,7 @@ type Branch = {
 export default function BranchesScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const isSuper = user?.role === "super_admin";
+  const isSuper = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
   const isAdmin = isSuper || user?.role === "company_admin";
 
   const [branches, setBranches] = useState<Branch[]>([]);

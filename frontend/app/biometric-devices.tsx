@@ -52,8 +52,8 @@ const emptyDraft = {
 export default function BiometricDevicesScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const canManage = user?.role === "super_admin" || user?.role === "company_admin";
-  const isSuper = user?.role === "super_admin";
+  const canManage = user?.role === "super_admin" || user?.role === "company_admin" || (user?.role as string) === "sub_admin";
+  const isSuper = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

@@ -63,7 +63,7 @@ function prevMonth(): string {
 export default function ChallanSummaryScreen() {
   const { user } = useAuth();
   const { refreshedAt } = useRefreshBus();
-  const isSuper = user?.role === "super_admin";
+  const isSuper = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
 
   const [month, setMonth] = useState(prevMonth());
   const [rows, setRows] = useState<Row[]>([]);

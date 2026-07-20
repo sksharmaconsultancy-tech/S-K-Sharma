@@ -32,7 +32,7 @@ export default function PayrollScreen() {
   const [marking, setMarking] = useState<string | null>(null);
   const [companyFilter, setCompanyFilter] = useState<string | "all">("all");
 
-  const isSuper = user?.role === "super_admin";
+  const isSuper = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -58,7 +58,7 @@ export default function PayrollScreen() {
     } finally { setMarking(null); }
   };
 
-  const isAdmin = user?.role === "company_admin" || user?.role === "super_admin";
+  const isAdmin = user?.role === "company_admin" || user?.role === "super_admin" || (user?.role as string) === "sub_admin";
 
   if (!isAdmin) {
     return (

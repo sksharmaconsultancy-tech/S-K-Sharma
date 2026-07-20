@@ -46,7 +46,7 @@ const ROUND_LABEL: Record<string, string> = {
 
 export default function ComplianceSettingsScreen() {
   const { user } = useAuth();
-  const isSuper = user?.role === "super_admin";
+  const isSuper = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
 
   // Iter 127g — scope: "standard" (all firms) OR a specific firm whose
   // overrides are saved on its Firm Master.

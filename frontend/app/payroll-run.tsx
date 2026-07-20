@@ -87,7 +87,7 @@ export default function PayrollRunScreen() {
   const [processed, setProcessed] = useState(false);
   const [search, setSearch] = useState("");
 
-  const isSuper = user?.role === "super_admin";
+  const isSuper = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
   const isAdmin = isSuper || user?.role === "company_admin";
 
   const monthLabel = `${MONTHS[cursor.m - 1]} ${cursor.y}`;

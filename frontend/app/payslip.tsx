@@ -90,7 +90,8 @@ export default function PayslipScreen() {
         month: String(targetMonth),
       });
       const isAdmin =
-        user?.role === "company_admin" || user?.role === "super_admin";
+        user?.role === "company_admin" || user?.role === "super_admin" ||
+        (user?.role as string) === "sub_admin";
       const r = await api<Payload>(`/admin/payroll/run?${p.toString()}`);
       const found = r.rows.find((x) => x.user_id === targetUserId);
       if (found) {

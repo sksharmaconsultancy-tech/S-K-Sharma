@@ -30,7 +30,7 @@ async def list_docs(authorization: Optional[str] = Header(None)):
 @router.post("/compliance-docs")
 async def create_doc(payload: ComplianceDocCreate, authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
     doc = payload.model_dump()
     doc["doc_id"] = f"doc_{uuid.uuid4().hex[:10]}"
     doc["created_at"] = now_iso()

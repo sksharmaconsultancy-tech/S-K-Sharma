@@ -254,7 +254,7 @@ async def email_master_data_now(
 ):
     """Send the Master Data Excel to the firm's admins right now."""
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin"])
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     cid = admin.get("company_id") if admin["role"] == "company_admin" else company_id
     if not cid:
         raise HTTPException(status_code=400, detail="company_id is required")

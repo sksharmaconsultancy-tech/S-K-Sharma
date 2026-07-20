@@ -50,7 +50,7 @@ const showMsg = (title: string, msg: string) => {
 export default function AttendanceReviewScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const isSuper = user?.role === "super_admin";
+  const isSuper = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
   const { selectedCompanyId: globalCid } = useSelectedCompany();
 
   const [tab, setTab] = useState<Tab>("roster");

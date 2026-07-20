@@ -54,7 +54,7 @@ const showMsg = (msg: string) => {
 export default function RosterScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const isSuper = user?.role === "super_admin";
+  const isSuper = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
 
   const [rows, setRows] = useState<RosterRow[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
