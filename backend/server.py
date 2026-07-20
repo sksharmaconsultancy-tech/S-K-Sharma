@@ -376,6 +376,9 @@ class LeaveCreate(BaseModel):
 class LeaveDecision(BaseModel):
     status: Literal["approved", "rejected"]
     comment: Optional[str] = None
+    # Iter 206 — approve the leave adjusting it against the employee's
+    # Comp-Off balance (creates a 'use' entry in comp_off_ledger).
+    use_comp_off: Optional[bool] = False
 
 
 class TicketAttachment(BaseModel):
@@ -19680,6 +19683,8 @@ app.include_router(statutory_extra_reports_router)
 
 from routes.shift_change_v2 import router as shift_change_v2_router  # noqa: E402
 app.include_router(shift_change_v2_router)
+from routes.comp_off import router as comp_off_router  # noqa: E402
+app.include_router(comp_off_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.

@@ -140,15 +140,54 @@ async def decide_leave(leave_id: str, payload: LeaveDecision,
                        authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
     require_role(user, ["company_admin", "super_admin"])
+    # Iter 206 — "Adjust against Comp-Off": validate the employee's balance
+    # BEFORE approving so we never approve an unfunded comp-off leave.
+    _lv0 = await db.leaves.find_one({"leave_id": leave_id}, {"_id": 0})
+    if not _lv0:
+        raise HTTPException(status_code=404, detail="Leave not found")
+    _co_days = 0.0
+    if payload.status == "approved" and getattr(payload, "use_comp_off", False):
+        from datetime import date as _d
+        try:
+            _f = _d.fromisoformat(str(_lv0.get("from_date"))[:10])
+            _t = _d.fromisoformat(str(_lv0.get("to_date"))[:10])
+            _co_days = float(max(1, (_t - _f).days + 1))
+        except (ValueError, TypeError):
+            _co_days = 1.0
+        from routes.comp_off import comp_off_balance
+        _bal = await comp_off_balance(_lv0["user_id"])
+        if _co_days > _bal["balance"]:
+            raise HTTPException(
+                status_code=400,
+                detail=(f"Insufficient comp-off balance: employee has "
+                        f"{_bal['balance']:g} day(s) but the leave is "
+                        f"{_co_days:g} day(s)."))
     r = await db.leaves.update_one(
         {"leave_id": leave_id},
         {"$set": {"status": payload.status,
                   "admin_comment": payload.comment,
+                  "comp_off_adjusted": bool(getattr(payload, "use_comp_off", False)
+                                            and payload.status == "approved"),
                   "decided_by": user["name"],
                   "decided_at": now_iso()}},
     )
     if r.matched_count == 0:
         raise HTTPException(status_code=404, detail="Leave not found")
+    if _co_days > 0:
+        await db.comp_off_ledger.insert_one({
+            "ledger_id": f"cof_{uuid.uuid4().hex[:12]}",
+            "company_id": _lv0.get("company_id"),
+            "user_id": _lv0["user_id"],
+            "date": now_iso()[:10],
+            "days": _co_days,
+            "direction": "use",
+            "source": "leave_adjust",
+            "ref": leave_id,
+            "remarks": (f"Adjusted against {_lv0.get('leave_type')} leave "
+                        f"{_lv0.get('from_date')} → {_lv0.get('to_date')}"),
+            "created_by": user["user_id"],
+            "created_at": now_iso(),
+        })
     leave = await db.leaves.find_one({"leave_id": leave_id}, {"_id": 0})
     # Iter 77n - broadcast leave decision to admins + the employee.
     try:

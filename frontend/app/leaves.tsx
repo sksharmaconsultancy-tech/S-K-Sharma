@@ -60,9 +60,13 @@ export default function LeavesScreen() {
 
   // Iter 99 — employee's own CL/PL balance (current year).
   const [balance, setBalance] = useState<any>(null);
+  // Iter 206 — employee's Comp-Off balance + admin decide errors.
+  const [compOff, setCompOff] = useState<any>(null);
+  const [decideError, setDecideError] = useState<string | null>(null);
   useEffect(() => {
     if (!user || user.role !== "employee") return;
     api<any>("/leaves/balance").then(setBalance).catch(() => setBalance(null));
+    api<any>("/comp-off/my").then(setCompOff).catch(() => setCompOff(null));
   }, [user]);
 
   const load = useCallback(async () => {
@@ -108,9 +112,17 @@ export default function LeavesScreen() {
     }
   };
 
-  const decide = async (id: string, status: "approved" | "rejected") => {
-    await api(`/leaves/${id}`, { method: "PATCH", body: { status } });
-    await load();
+  const decide = async (id: string, status: "approved" | "rejected", useCompOff = false) => {
+    try {
+      setDecideError(null);
+      await api(`/leaves/${id}`, {
+        method: "PATCH",
+        body: { status, use_comp_off: useCompOff },
+      });
+      await load();
+    } catch (e: any) {
+      setDecideError(e?.message || "Could not update the leave.");
+    }
   };
 
   return (
@@ -162,8 +174,14 @@ export default function LeavesScreen() {
             ) : (
               <Text style={styles.balNa}>CL/PL policy is not enabled for your firm yet.</Text>
             )}
+            {compOff && compOff.earned > 0 ? (
+              <Text style={styles.compOffBal} testID="compoff-balance">
+                Comp-Off balance: {compOff.balance} day(s) ({compOff.earned} earned · {compOff.used} used)
+              </Text>
+            ) : null}
           </View>
         ) : null}
+        {decideError ? <Text style={styles.decideErr}>{decideError}</Text> : null}
         {loading ? (
           <ActivityIndicator style={{ marginTop: 60 }} color={colors.brandPrimary} />
         ) : leaves.length === 0 ? (
@@ -190,6 +208,13 @@ export default function LeavesScreen() {
                     <Text style={styles.actionTxt}>Approve</Text>
                   </Pressable>
                   <Pressable
+                    testID={`approve-compoff-${l.leave_id}`}
+                    style={[styles.actionBtn, { backgroundColor: colors.brandPrimary }]}
+                    onPress={() => decide(l.leave_id, "approved", true)}
+                  >
+                    <Text style={styles.actionTxt}>Approve · Comp-Off</Text>
+                  </Pressable>
+                  <Pressable
                     testID={`reject-${l.leave_id}`}
                     style={[styles.actionBtn, { backgroundColor: colors.error }]}
                     onPress={() => decide(l.leave_id, "rejected")}
@@ -198,6 +223,9 @@ export default function LeavesScreen() {
                   </Pressable>
                 </View>
               )}
+              {(l as any).comp_off_adjusted ? (
+                <Text style={styles.compOffTag}>Adjusted against Comp-Off</Text>
+              ) : null}
               {l.admin_comment && <Text style={styles.comment}>Admin: {l.admin_comment}</Text>}
             </View>
           ))
@@ -387,7 +415,16 @@ const styles = StyleSheet.create({
   leaveDates: { color: colors.onSurface, fontSize: type.lg, fontWeight: "500", marginTop: 4 },
   leaveReason: { color: colors.onSurfaceSecondary, fontSize: type.base, marginTop: 4 },
   comment: { color: colors.onSurfaceTertiary, fontSize: type.sm, marginTop: 8, fontStyle: "italic" },
-  actionsRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md },
+  actionsRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md, flexWrap: "wrap" },
+  // Iter 206 — Comp-Off styling.
+  compOffTag: {
+    marginTop: 6, alignSelf: "flex-start", fontSize: 11, fontWeight: "700",
+    color: colors.brandPrimary, backgroundColor: "#EFF6FF",
+    paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.pill,
+    overflow: "hidden",
+  },
+  compOffBal: { marginTop: 8, fontSize: 12, fontWeight: "700", color: colors.brandPrimary },
+  decideErr: { color: colors.error, marginHorizontal: spacing.md, marginTop: 6, fontWeight: "600" },
   actionBtn: {
     flex: 1, paddingVertical: 10, borderRadius: radius.md,
     alignItems: "center", justifyContent: "center",
