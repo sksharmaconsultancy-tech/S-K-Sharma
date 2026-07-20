@@ -84,6 +84,8 @@ type EmpDetail = {
   ot_applicable?: boolean | null;
   week_off_full_day?: boolean | null;
   week_off_govt_holiday_enabled?: boolean | null;
+  // Iter 207 — per-employee Weekly Off (used when firm Weekly Off = N/A).
+  weekly_off_days_override?: number[] | null;
   available_shifts?: { name: string; start: string; end: string }[];
   policy_variant?: "policy_1" | "policy_2" | null;
   // ---- Grouping ----
@@ -197,6 +199,7 @@ export default function EmployeeMasterScreen() {
               full.week_off_govt_holiday_enabled === undefined
                 ? null
                 : full.week_off_govt_holiday_enabled,
+            weekly_off_days_override: full.weekly_off_days_override ?? null,
             // Grouping fields
             employee_type: full.employee_type ?? null,
             is_onroll: full.is_onroll === undefined ? true : !!full.is_onroll,
@@ -1414,6 +1417,10 @@ function TextileMasterCard({
       ? null
       : emp.week_off_govt_holiday_enabled ?? null,
   );
+  // Iter 207 — per-employee Weekly Off days (empty = firm default).
+  const [weeklyOff, setWeeklyOff] = useState<number[]>(
+    Array.isArray(emp.weekly_off_days_override) ? emp.weekly_off_days_override : [],
+  );
   const [saving, setSaving] = useState(false);
   const [shiftPickerOpen, setShiftPickerOpen] = useState(false);
 
@@ -1431,6 +1438,7 @@ function TextileMasterCard({
           ot_applicable: ot,
           week_off_full_day: weFullDay,
           week_off_govt_holiday_enabled: weGovt,
+          weekly_off_days_override: weeklyOff,
         },
       });
       await onSaved();
@@ -1498,6 +1506,41 @@ function TextileMasterCard({
           />
         </>
       ) : null}
+
+      {/* Iter 207 — per-employee Weekly Off (Employee Master decides when
+          the firm's Attendance Policy keeps Weekly Off = N/A). */}
+      <Text style={styles.fieldLabel}>Weekly Off (this employee)</Text>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 4 }}>
+        <Pressable
+          testID="emp-weekoff-default"
+          onPress={() => setWeeklyOff([])}
+          style={[styles.weekOffChip, weeklyOff.length === 0 && styles.weekOffChipOn]}
+        >
+          <Text style={[styles.weekOffChipTxt, weeklyOff.length === 0 && styles.weekOffChipTxtOn]}>
+            Firm default
+          </Text>
+        </Pressable>
+        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((lbl, idx) => {
+          const on = weeklyOff.includes(idx);
+          return (
+            <Pressable
+              key={lbl}
+              testID={`emp-weekoff-${lbl}`}
+              onPress={() =>
+                setWeeklyOff(on ? weeklyOff.filter((d) => d !== idx) : [...weeklyOff, idx])
+              }
+              style={[styles.weekOffChip, on && styles.weekOffChipOn]}
+            >
+              <Text style={[styles.weekOffChipTxt, on && styles.weekOffChipTxtOn]}>{lbl}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Text style={styles.cardHint}>
+        Overrides the firm weekly off for this employee. Keep &quot;Firm
+        default&quot; to follow the Attendance Policy (or none when the firm
+        policy is N/A).
+      </Text>
 
       {/* Week-off Full Day — Policy 1 */}
       {variant !== "policy_2" ? (
@@ -2095,6 +2138,14 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     lineHeight: 16,
   },
+  // Iter 207 — per-employee Weekly Off chips.
+  weekOffChip: {
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999,
+    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface,
+  },
+  weekOffChipOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  weekOffChipTxt: { fontSize: 12, color: colors.onSurface, fontWeight: "600" },
+  weekOffChipTxtOn: { color: "#fff" },
   selectField: {
     flexDirection: "row",
     alignItems: "center",

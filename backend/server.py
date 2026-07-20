@@ -535,6 +535,9 @@ class RoleUpdate(BaseModel):
     half_day_hrs: Optional[float] = None
     full_day_hrs: Optional[float] = None
     exit_date: Optional[str] = None  # YYYY-MM-DD; empty string = clear
+    # Iter 207 — per-employee Weekly Off days (0=Mon .. 6=Sun); None/[] =
+    # follow firm policy. Used when firm Weekly Off is N/A.
+    weekly_off_days_override: Optional[List[int]] = None
     # Resort / hospitality use-case: live-in staff are always physically
     # inside the premises so geofence-based auto-punch does not apply.
     # When True: (1) OUT punches from outside the fence are accepted
@@ -1227,7 +1230,8 @@ def _validate_policy(raw: dict) -> dict:
     # firm; ``mode`` empty = module off (legacy week-off rules apply).
     wow_raw = raw.get("week_off_worked") if isinstance(raw.get("week_off_worked"), dict) else {}
     _wow_mode = str(wow_raw.get("mode") or "").strip().lower()
-    if _wow_mode not in ("", "ot_only", "half_day_ot", "full_day_ot", "hourly"):
+    if _wow_mode not in ("", "ot_only", "half_day_ot", "full_day_ot",
+                         "full_day_min_hours", "hourly"):
         _wow_mode = ""
     def _wow_num(key: str, default: float) -> float:
         try:
@@ -1240,6 +1244,9 @@ def _validate_policy(raw: dict) -> dict:
         "half_day_threshold": _wow_num("half_day_threshold", 4.0),
         "full_day_threshold": _wow_num("full_day_threshold", 8.0),
         "ot_after": _wow_num("ot_after", 0.0),
+        # Iter 207 — "Full Day Attendance (Minimum Hours)" mode:
+        # 0 = auto (50% of the employee's daily duty hours).
+        "min_hours": _wow_num("min_hours", 0.0),
         "salary_credit": bool(wow_raw.get("salary_credit", True)),
         "leave_adjustment": bool(wow_raw.get("leave_adjustment")),
         "comp_off": bool(wow_raw.get("comp_off")),
@@ -1479,17 +1486,30 @@ def apply_employee_policy_override(policy: dict, user: Optional[dict]) -> dict:
     the override key is unset. Returns a NEW dict (shallow copy).
     """
     ov = (user or {}).get("attendance_policy_override") or {}
+    # Iter 207 (user request) — per-employee Weekly Off from the Employee
+    # Master. When set it REPLACES the firm's weekly_off_days for this
+    # employee (used when the firm policy keeps Weekly Off = N/A).
+    _wo_emp = (user or {}).get("weekly_off_days_override")
+    _wo_patch = None
+    if isinstance(_wo_emp, list) and len(_wo_emp) > 0:
+        _wo_patch = [int(x) for x in _wo_emp
+                     if isinstance(x, (int, float)) and 0 <= int(x) <= 6]
     # Iter 142 — legacy per-employee ``ot_applicable`` flag (set from the
     # Employee Master OT option) also gates OT when no explicit
     # attendance_policy_override.ot_allowed exists.
     _legacy_ot = (user or {}).get("ot_applicable")
     if not ov:
-        if _legacy_ot is None:
+        if _legacy_ot is None and _wo_patch is None:
             return policy
         patched = dict(policy or {})
-        patched["ot_allowed"] = bool(_legacy_ot)
+        if _legacy_ot is not None:
+            patched["ot_allowed"] = bool(_legacy_ot)
+        if _wo_patch is not None:
+            patched["weekly_off_days"] = _wo_patch
         return patched
     patched = dict(policy or {})
+    if _wo_patch is not None:
+        patched["weekly_off_days"] = _wo_patch
     for key in (
         "full_day_hours",
         "standard_working_hours",
@@ -2059,6 +2079,20 @@ def compute_textile_day(
                 present_days = 0.0
                 _cut = 0.0
             ot_min = max(0.0, (_worked_h - _cut) * 60.0) if ot_applicable_user else 0.0
+        elif _wow_mode == "full_day_min_hours":
+            # Iter 207 — Full Day Attendance (Minimum Hours) on week-off.
+            _daily_h = float(policy.get("full_day_hours")
+                             or policy.get("standard_working_hours") or 8.0)
+            _min_h = float(_wow.get("min_hours") or 0.0) or (_daily_h * 0.5)
+            if _worked_h >= _min_h:
+                present_days = 1.0
+                full_day_pay_weekoff = True
+                _cut = _ot_after if _ot_after > 0 else _daily_h
+                ot_min = max(0.0, (_worked_h - _cut) * 60.0) if ot_applicable_user else 0.0
+            else:
+                # Below minimum: hours stay plain duty — no present/OT.
+                present_days = 0.0
+                ot_min = 0.0
         elif _wow_mode == "hourly":
             # Hourly Conversion — hours stay plain duty; no present/OT.
             present_days = 0.0
@@ -13069,6 +13103,13 @@ async def update_user_role(payload: RoleUpdate, authorization: Optional[str] = H
     if "week_off_govt_holiday_enabled" in fset:
         v = payload.week_off_govt_holiday_enabled
         updates["week_off_govt_holiday_enabled"] = None if v is None else bool(v)
+    # Iter 207 — per-employee Weekly Off (Employee Master decides when the
+    # firm policy keeps Weekly Off = N/A). Empty list / None = firm default.
+    if "weekly_off_days_override" in fset:
+        v = payload.weekly_off_days_override
+        updates["weekly_off_days_override"] = (
+            sorted({int(x) for x in v if 0 <= int(x) <= 6}) if v else None
+        )
 
     # ---- Employee grouping fields ----
     # Iter 91 — employee_type and employee_group are UNIFIED: whichever is
@@ -16837,6 +16878,8 @@ async def _compute_monthly_grid_data(
                 "_id": 0, "user_id": 1, "attendance_policy_override": 1,
                 "ot_applicable": 1, "week_off_full_day": 1,
                 "week_off_govt_holiday_enabled": 1,
+                # Iter 207 — per-employee Weekly Off from Employee Master.
+                "weekly_off_days_override": 1,
                 # Iter 94 — salary fields for the day-wise salary report.
                 "salary_monthly": 1, "salary_mode": 1,
                 "salary_structure_actual": 1,
@@ -17152,6 +17195,21 @@ async def _compute_monthly_grid_data(
                         _day_present = 0.0
                         duty_only_hrs = 0.0
                         ot_hrs = _worked_w
+                elif _wow_mode == "full_day_min_hours":
+                    # Iter 207 — Full Day Attendance (Minimum Hours):
+                    # worked ≥ min hours (default 50% of daily duty hrs)
+                    # → FULL present day; below the minimum the worked
+                    # hours count only as plain DUTY HRS (no present/OT).
+                    _min_h = float(_wow.get("min_hours") or 0.0) or (emp_daily_hrs * 0.5)
+                    if _worked_w >= _min_h:
+                        _day_present = 1.0
+                        _cut = _ot_after if _ot_after > 0 else emp_daily_hrs
+                        duty_only_hrs = round(min(_worked_w, _cut), 2)
+                        ot_hrs = round(max(0.0, _worked_w - duty_only_hrs), 2)
+                    else:
+                        _day_present = 0.0
+                        duty_only_hrs = _worked_w
+                        ot_hrs = 0.0
                 elif _wow_mode == "hourly":
                     # Hourly Conversion — worked hours stay plain DUTY hours
                     # (paid per hour); no present-day / OT credit.
@@ -17403,7 +17461,8 @@ async def _build_ot_report_rows(
         {"user_id": {"$in": user_ids}},
         {"_id": 0, "user_id": 1, "attendance_policy_override": 1,
          "ot_applicable": 1, "week_off_full_day": 1,
-         "week_off_govt_holiday_enabled": 1},
+         "week_off_govt_holiday_enabled": 1,
+         "weekly_off_days_override": 1},
     ).to_list(4000)
     full_emp_by_id = {u["user_id"]: u for u in full_emp_docs}
     # Iter 204 — per-day APPROVED shift assignments (Shift Change module).

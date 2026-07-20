@@ -257,6 +257,7 @@ function normalisePolicy(p: Policy): Policy {
       half_day_threshold: Number((p as any).week_off_worked?.half_day_threshold ?? 4),
       full_day_threshold: Number((p as any).week_off_worked?.full_day_threshold ?? 8),
       ot_after: Number((p as any).week_off_worked?.ot_after ?? 0),
+      min_hours: Number((p as any).week_off_worked?.min_hours ?? 0),
       salary_credit: ((p as any).week_off_worked?.salary_credit ?? true) !== false,
       leave_adjustment: !!(p as any).week_off_worked?.leave_adjustment,
       comp_off: !!(p as any).week_off_worked?.comp_off,
@@ -634,9 +635,16 @@ export default function AttendancePolicyScreen() {
                 onPress={() => setPolicy({ ...policy, weekly_off_days: [] })}
               >
                 <Text style={[styles.chipTxt, policy.weekly_off_days.length === 0 && styles.chipTxtOn]}>
-                  N/A
+                  N/A — Employee Master decides
                 </Text>
               </Pressable>
+              {policy.weekly_off_days.length === 0 && !policy.weekoff_rotation_basis ? (
+                <Text style={styles.helper}>
+                  Weekly Off is N/A for the firm — each employee&apos;s Weekly Off comes
+                  from the Employee Master (Weekly Off field). Leave the employee field
+                  blank for no weekly off.
+                </Text>
+              ) : null}
               {(meta?.weekday_labels || ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]).map((lbl, idx) => {
                 const on = policy.weekly_off_days.includes(idx);
                 return (
@@ -699,6 +707,7 @@ export default function AttendancePolicyScreen() {
                 <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginVertical: 8 }}>
                   {([["", "Off (Legacy Rules)"], ["ot_only", "OT Only"],
                      ["half_day_ot", "Half Day + OT"], ["full_day_ot", "Full Day + OT"],
+                     ["full_day_min_hours", "Full Day (Min Hours)"],
                      ["hourly", "Hourly Conversion"]] as [string, string][]).map(([v, lbl]) => (
                     <Pressable
                       key={v || "off"}
@@ -719,9 +728,11 @@ export default function AttendancePolicyScreen() {
                           ? "Worked ≥ half-day threshold → ½ Present Day; hours beyond the OT-start go to OT."
                           : wow.mode === "full_day_ot"
                             ? "Worked ≥ full-day threshold → 1 Present Day (≥ half → ½); hours beyond the OT-start go to OT."
-                            : "Worked hours stay plain Duty HRS (paid hourly) — no Present Day / OT credit."}
+                            : wow.mode === "full_day_min_hours"
+                              ? "Worked ≥ minimum hours → 1 FULL Present Day. Below the minimum, the actual hours count only as plain Duty HRS (no Present/OT)."
+                              : "Worked hours stay plain Duty HRS (paid hourly) — no Present Day / OT credit."}
                     </Text>
-                    {wow.mode !== "ot_only" && wow.mode !== "hourly" ? (
+                    {wow.mode === "half_day_ot" || wow.mode === "full_day_ot" ? (
                       <>
                         <NumRow
                           label="Week-Off Half Day Threshold (hours)"
@@ -746,6 +757,26 @@ export default function AttendancePolicyScreen() {
                           step={0.5}
                           decimals={1}
                           testID="ap-wow-otafter"
+                        />
+                      </>
+                    ) : null}
+                    {wow.mode === "full_day_min_hours" ? (
+                      <>
+                        <NumRow
+                          label="Minimum Hours for Full Day Attendance on Week-Off (0 = 50% of Duty Hours)"
+                          value={Number(wow.min_hours ?? 0)}
+                          onChange={(v) => setWow({ min_hours: Math.max(0, Math.min(24, v)) })}
+                          step={0.5}
+                          decimals={1}
+                          testID="ap-wow-minhours"
+                        />
+                        <NumRow
+                          label="Week-Off OT Starts After (hours) — 0 = at the daily duty hours"
+                          value={Number(wow.ot_after ?? 0)}
+                          onChange={(v) => setWow({ ot_after: Math.max(0, Math.min(24, v)) })}
+                          step={0.5}
+                          decimals={1}
+                          testID="ap-wow-otafter-min"
                         />
                       </>
                     ) : null}

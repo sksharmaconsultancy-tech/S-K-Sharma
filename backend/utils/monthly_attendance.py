@@ -898,11 +898,15 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
         # Iter 202 (user request) — day-wise Duty HRS and OT HRS in
         # SEPARATE rows, both already policy-adjusted upstream (8-HR
         # sub-point, week-off / holiday rules, rounding, OT gates).
+        # Iter 207 (user request) — the Duty HRS row per day INCLUDES the
+        # day's OT (Duty + OT combined, capped at 24 hrs). The OT row
+        # below still shows the OT split for cross-verification.
         for j, day_lbl in enumerate(day_labels):
             d = days_cell.get(day_lbl) or {}
             duty_h = float(d.get("duty_hours") or 0.0)
             ot_h = float(d.get("ot_hours") or 0.0)
-            c = ws.cell(row=duty_row, column=6 + j, value=_fmt_hhmm(duty_h))
+            day_total_h = min(duty_h + ot_h, 24.0)
+            c = ws.cell(row=duty_row, column=6 + j, value=_fmt_hhmm(day_total_h))
             c.alignment = center
             c.border = border
             c.font = Font(size=9)
