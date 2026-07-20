@@ -11722,6 +11722,20 @@ async def attendance_day_status(
                     )
                     if ot_out_rec:
                         consumed.add(ot_out_rec["record_id"])
+                else:
+                    # Iter 211 — OT-Out WITHOUT an OT-In (employee forgot
+                    # the OT-In punch): a second un-consumed OUT later the
+                    # same day surfaces as a one-sided OT pair so the admin
+                    # can fill the missing OT-In from Punch Approvals.
+                    ot_out_rec = next(
+                        (p for p in ps
+                         if p["date"] == d and p.get("kind") == "out"
+                         and p["record_id"] not in consumed
+                         and p["_dt"] > out_rec["_dt"]),
+                        None,
+                    )
+                    if ot_out_rec:
+                        consumed.add(ot_out_rec["record_id"])
             day_pairs[d] = {"in": first_in, "out": out_rec,
                             "ot_in": ot_in_rec, "ot_out": ot_out_rec}
         for d in dates:

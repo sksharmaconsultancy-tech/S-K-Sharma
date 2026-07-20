@@ -211,7 +211,7 @@ export default function PunchApprovalsScreen() {
     }
   }, []);
   // Per-row time edits keyed by row.key → {in?: "HH:MM", out?: "HH:MM"}
-  const [edits, setEdits] = useState<Record<string, { in?: string; out?: string }>>({});
+  const [edits, setEdits] = useState<Record<string, { in?: string; out?: string; ot_in?: string; ot_out?: string; ot_in_date?: string; ot_out_date?: string }>>({});
   const [savingRow, setSavingRow] = useState<string | null>(null);
   // Iter 111 — per-row updation reason (defaults to the first preset).
   const [reasonSel, setReasonSel] = useState<Record<string, string>>({});
@@ -450,7 +450,11 @@ export default function PunchApprovalsScreen() {
     let base: DayRow[] = [];
     if (tab === "updated") base = dayRows.filter((r) => r.updated);
     else if (tab === "auto") base = dayRows.filter((r) => !!r.in && !!r.out);
-    else if (tab === "manual") base = dayRows.filter((r) => !r.in || !r.out);
+    // Manual Entries — missing regular punches (In / Out / Both) AND
+    // Iter 211: incomplete OT pairs (OT In without OT Out or vice-versa)
+    // so a forgotten OT punch can be filled in.
+    else if (tab === "manual") base = dayRows.filter(
+      (r) => !r.in || !r.out || (!!r.ot_in !== !!r.ot_out));
     // Additional Duty: ONLY employees whose BOTH punches are complete.
     else if (tab === "extra") base = dayRows.filter((r) => !!r.in && !!r.out);
     // Iter 210 — apply the search box on every source-tab row.
@@ -516,8 +520,26 @@ export default function PunchApprovalsScreen() {
     return d.length > 2 ? `${d.slice(0, 2)}:${d.slice(2)}` : d;
   };
 
-  const setEdit = (key: string, field: "in" | "out", v: string) => {
+  const setEdit = (key: string, field: "in" | "out" | "ot_in" | "ot_out", v: string) => {
     setEdits((prev) => ({ ...prev, [key]: { ...prev[key], [field]: formatHHMM(v) } }));
+  };
+  // Iter 211 — editable punch DATE for OT In / OT Out (DD-MM-YYYY with
+  // auto-hyphen while typing).
+  const setEditDate = (key: string, field: "ot_in_date" | "ot_out_date", v: string) => {
+    const digits = v.replace(/[^0-9]/g, "").slice(0, 8);
+    let s = digits;
+    if (digits.length > 4) s = `${digits.slice(0, 2)}-${digits.slice(2, 4)}-${digits.slice(4)}`;
+    else if (digits.length > 2) s = `${digits.slice(0, 2)}-${digits.slice(2)}`;
+    setEdits((prev) => ({ ...prev, [key]: { ...prev[key], [field]: s } }));
+  };
+  const isoToDMY = (iso?: string | null): string =>
+    iso && iso.length >= 10 ? `${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}` : "";
+  const dmyToISO = (s: string): string | null => {
+    const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(s.trim());
+    if (!m) return null;
+    const iso = `${m[3]}-${m[2]}-${m[1]}`;
+    const d = new Date(`${iso}T12:00:00`);
+    return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== iso ? null : iso;
   };
 
   // "2026-07-09" → "2026-07-10" (night-shift OUT lands on the next day).
@@ -640,21 +662,40 @@ export default function PunchApprovalsScreen() {
 
   const saveRow = async (r: DayRow) => {
     const e = edits[r.key] || {};
-    const jobs: { kind: "in" | "out"; mode: "edit" | "create"; recordId?: string; hhmm: string }[] = [];
-    (["in", "out"] as const).forEach((k) => {
+    const jobs: {
+      field: "in" | "out" | "ot_in" | "ot_out";
+      kind: "in" | "out"; mode: "edit" | "create";
+      recordId?: string; hhmm: string; dateOverride?: string;
+    }[] = [];
+    let badInput = false;
+    (["in", "out", "ot_in", "ot_out"] as const).forEach((k) => {
       const v = (e[k] || "").trim();
-      if (!v) return;
-      if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(v)) {
-        showAlert("Invalid time", `${k.toUpperCase()} time must be HH:MM (24-hour). Got "${v}".`);
+      if (v && !/^([01]?\d|2[0-3]):[0-5]\d$/.test(v)) {
+        showAlert("Invalid time", `${k.replace("_", " ").toUpperCase()} time must be HH:MM (24-hour). Got "${v}".`);
+        badInput = true;
         return;
       }
       const cell = r[k];
-      if (cell && v !== cell.hhmm) {
-        jobs.push({ kind: k, mode: "edit", recordId: cell.record_id, hhmm: v });
-      } else if (!cell) {
-        jobs.push({ kind: k, mode: "create", hhmm: v });
+      const kind = k.endsWith("out") ? "out" as const : "in" as const;
+      // Iter 211 — OT punches also take an editable DATE (DD-MM-YYYY).
+      const dKey = k === "ot_in" ? "ot_in_date" as const : k === "ot_out" ? "ot_out_date" as const : null;
+      const dRaw = dKey ? (e[dKey] || "").trim() : "";
+      const dISO = dRaw ? dmyToISO(dRaw) : null;
+      if (dRaw && !dISO) {
+        showAlert("Invalid date", `${k.replace("_", " ").toUpperCase()} date must be DD-MM-YYYY. Got "${dRaw}".`);
+        badInput = true;
+        return;
+      }
+      const timeChanged = Boolean(v && cell && v !== cell.hhmm);
+      const dateChanged = Boolean(dISO && cell && dISO !== cell.date);
+      if (cell && (timeChanged || dateChanged)) {
+        jobs.push({ field: k, kind, mode: "edit", recordId: cell.record_id,
+                    hhmm: v || cell.hhmm, dateOverride: dateChanged ? dISO! : undefined });
+      } else if (!cell && v) {
+        jobs.push({ field: k, kind, mode: "create", hhmm: v, dateOverride: dISO || undefined });
       }
     });
+    if (badInput) return;
     if (jobs.length === 0) {
       showAlert("Nothing to save", "Change a time or fill a missing punch first.");
       return;
@@ -672,14 +713,20 @@ export default function PunchApprovalsScreen() {
     for (const j of jobs) {
       // Night-shift aware target date:
       //  • edits keep the punch's OWN calendar date;
-      //  • a filled-in OUT that is earlier than the IN time belongs to
-      //    the NEXT day (e.g. IN 20:00 → OUT 08:00 next morning).
+      //  • a filled-in OUT / OT-OUT that is earlier than its pair's IN
+      //    time belongs to the NEXT day (e.g. OT-In 20:07 → OT-Out 07:59
+      //    next morning; the attendance engine stitches it back so the
+      //    whole session counts on the first punch day).
       let target = r.date;
-      if (j.mode === "edit") {
-        target = (j.kind === "in" ? r.in?.date : r.out?.date) || r.date;
-      } else if (j.kind === "out") {
-        const inBase = r.in?.date || r.date;
-        const inMin = toMin((e.in || r.in?.hhmm || "").trim());
+      if (j.dateOverride) {
+        // Iter 211 — admin explicitly picked the punch's calendar date.
+        target = j.dateOverride;
+      } else if (j.mode === "edit") {
+        target = r[j.field]?.date || r.date;
+      } else if (j.field === "out" || j.field === "ot_out") {
+        const pairIn = j.field === "out" ? "in" as const : "ot_in" as const;
+        const inBase = r[pairIn]?.date || r.date;
+        const inMin = toMin((e[pairIn] || r[pairIn]?.hhmm || "").trim());
         const outMin = toMin(j.hhmm);
         target = inMin != null && outMin != null && outMin <= inMin
           ? nextDay(inBase)
@@ -710,10 +757,12 @@ export default function PunchApprovalsScreen() {
     // Iter 111 — post-update confirmation shows WHO was updated, WHICH
     // punch changed (old → new) and the reason, for full transparency.
     const detailLines = jobs.map((j) => {
-      const oldT = j.kind === "in" ? r.in?.hhmm : r.out?.hhmm;
+      const oldT = r[j.field]?.hhmm;
+      const lbl = j.field.replace("_", " ").toUpperCase();
+      const dNote = j.dateOverride ? ` on ${fmtDate(j.dateOverride)}` : "";
       return j.mode === "edit"
-        ? `• ${j.kind.toUpperCase()} punch edited: ${oldT || "—"} → ${j.hhmm}`
-        : `• ${j.kind.toUpperCase()} punch added: ${j.hhmm} (was missing)`;
+        ? `• ${lbl} punch edited: ${oldT || "—"} → ${j.hhmm}${dNote}`
+        : `• ${lbl} punch added: ${j.hhmm}${dNote} (was missing)`;
     }).join("\n");
     showAlert(
       fail > 0 ? "Punch save (partial)" : "Punch updated ✓",
@@ -1270,8 +1319,8 @@ export default function PunchApprovalsScreen() {
               {tab === "updated"
                 ? "Employees whose punch was UPDATED from the App or Web Portal. Edits by Company / Super Admin apply DIRECTLY to Employee Attendance (audit-logged)."
                 : tab === "auto"
-                  ? "Employees whose BOTH punches (In & Out) are available. Change any time (HH:MM, 24-hr) and press Save — linked directly to Employee Attendance."
-                  : "Employees with MISSING punches — In missing, Out missing, or Both. Fill the missing time (HH:MM, 24-hr) and press Save to record a manual punch — linked directly to Employee Attendance."}
+                  ? "Employees whose BOTH punches (In & Out) are available. Change any time (HH:MM, 24-hr) and press Save — linked directly to Employee Attendance. OT not punched? Type the OT In / OT Out times (and date if needed) into the empty OT boxes and Save."
+                  : "Employees with MISSING punches — In missing, Out missing, Both, or an INCOMPLETE OT pair (OT In without OT Out / OT Out without OT In). Fill the missing time (HH:MM, 24-hr) and press Save to record a manual punch — linked directly to Employee Attendance."}
             </Text>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={true}>
@@ -1320,7 +1369,11 @@ export default function PunchApprovalsScreen() {
                     return mins / 60;
                   })();
                   const dirty = (e.in !== undefined && e.in !== (r.in?.hhmm || "")) ||
-                    (e.out !== undefined && e.out !== (r.out?.hhmm || ""));
+                    (e.out !== undefined && e.out !== (r.out?.hhmm || "")) ||
+                    (e.ot_in !== undefined && e.ot_in !== (r.ot_in?.hhmm || "")) ||
+                    (e.ot_out !== undefined && e.ot_out !== (r.ot_out?.hhmm || "")) ||
+                    (e.ot_in_date !== undefined && e.ot_in_date !== isoToDMY(r.ot_in?.date)) ||
+                    (e.ot_out_date !== undefined && e.ot_out_date !== isoToDMY(r.ot_out?.date));
                   const canEdit = canAct;
                   // Iter 210 — OT window hours (second punch pair) for the
                   // Total Duty HRS column.
@@ -1432,11 +1485,61 @@ export default function PunchApprovalsScreen() {
                           </View>
                         );
                       })}
-                      {/* Iter 210 — OT window (second punch pair), read-only. */}
+                      {/* Iter 210/211 — OT window (second punch pair).
+                          Editable exactly like In/Out: change an existing
+                          OT punch time, or type a time into an empty box
+                          to ADD a missing OT-In / OT-Out. An OT-Out
+                          earlier than OT-In lands on the NEXT morning
+                          automatically. */}
                       {(["ot_in", "ot_out"] as const).map((k) => {
                         const cell = r[k];
+                        const val = e[k] ?? (cell?.hhmm || "");
+                        const dKey = k === "ot_in" ? "ot_in_date" as const : "ot_out_date" as const;
+                        const dVal = e[dKey] ?? isoToDMY(cell?.date);
                         const nightShift = Boolean(cell?.date && cell.date !== r.date);
-                        return (
+                        return canEdit ? (
+                          <View key={k} style={{ width: 86, paddingHorizontal: 3 }}>
+                            <TextInput
+                              value={val}
+                              onChangeText={(v) => setEdit(r.key, k, v)}
+                              placeholder={cell ? cell.hhmm : "HH:MM"}
+                              placeholderTextColor={colors.onSurfaceTertiary}
+                              selectTextOnFocus
+                              style={[
+                                upStyles.timeInput,
+                                !cell && upStyles.timeInputMissing,
+                                cell?.edited && upStyles.timeInputEdited,
+                              ]}
+                              testID={`ds-${k}-${r.key}`}
+                            />
+                            {/* Iter 211 — the punch's calendar DATE is
+                                editable too (DD-MM-YYYY). Left empty on a
+                                new OT-Out, the date is picked automatically
+                                (next morning when earlier than OT-In). */}
+                            <TextInput
+                              value={dVal}
+                              onChangeText={(v) => setEditDate(r.key, dKey, v)}
+                              placeholder={k === "ot_out" ? "auto date" : "DD-MM-YYYY"}
+                              placeholderTextColor={colors.onSurfaceTertiary}
+                              selectTextOnFocus
+                              style={[
+                                upStyles.dateInputSmall,
+                                nightShift && !e[dKey] && { color: "#B45309", borderColor: "#FCD34D" },
+                              ]}
+                              testID={`ds-${k}-date-${r.key}`}
+                            />
+                            {cell?.record_id ? (
+                              <Pressable
+                                onPress={() => openPunchPhoto(cell.record_id)}
+                                style={upStyles.photoBtn}
+                                testID={`ds-photo-${k}-${r.key}`}
+                              >
+                                <Ionicons name="camera" size={10} color={colors.brandPrimary} />
+                                <Text style={upStyles.photoBtnTxt}>Photo</Text>
+                              </Pressable>
+                            ) : null}
+                          </View>
+                        ) : (
                           <View key={k} style={{ width: 86 }}>
                             <Text style={[upStyles.cell, { width: 86 }, !cell && { color: colors.onSurfaceTertiary }]}>
                               {cell?.hhmm || "—"}
@@ -1450,16 +1553,6 @@ export default function PunchApprovalsScreen() {
                             >
                               {cell?.date ? `${fmtDate(cell.date)}${nightShift ? " (+1)" : ""}` : ""}
                             </Text>
-                            {cell?.record_id ? (
-                              <Pressable
-                                onPress={() => openPunchPhoto(cell.record_id)}
-                                style={upStyles.photoBtn}
-                                testID={`ds-photo-${k}-${r.key}`}
-                              >
-                                <Ionicons name="camera" size={10} color={colors.brandPrimary} />
-                                <Text style={upStyles.photoBtnTxt}>Photo</Text>
-                              </Pressable>
-                            ) : null}
                           </View>
                         );
                       })}
@@ -2307,6 +2400,19 @@ const upStyles = StyleSheet.create({
   },
   timeInputMissing: { borderColor: "#DC2626", backgroundColor: "#FEF2F2" },
   timeInputEdited: { borderColor: "#B45309", backgroundColor: "#FFFBEB" },
+  // Iter 211 — small editable punch-date field under OT time inputs.
+  dateInputSmall: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 5,
+    paddingHorizontal: 3,
+    paddingVertical: 2,
+    fontSize: 9.5,
+    color: colors.onSurfaceSecondary,
+    backgroundColor: colors.surface,
+    textAlign: "center",
+    marginTop: 2,
+  },
   badge: {
     fontSize: 9,
     fontWeight: "800",
