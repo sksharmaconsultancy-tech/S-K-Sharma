@@ -550,6 +550,12 @@ export default function PunchApprovalsScreen() {
     return dt.toISOString().slice(0, 10);
   };
 
+  // "HH:MM" → minutes since midnight (null when not a valid time yet).
+  const toMinHM = (s: string): number | null => {
+    const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec((s || "").trim());
+    return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : null;
+  };
+
   // Save one row: PATCH existing punches whose time changed; POST a
   // manual punch for missing cells the admin filled in.
   // Iter 113 — Manual Punches log: load + undo.
@@ -711,6 +717,16 @@ export default function PunchApprovalsScreen() {
       const mm = s.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
       return mm ? Number(mm[1]) * 60 + Number(mm[2]) : null;
     };
+    // Iter 213 — OT In's calendar date (user rule): OT In just after the
+    // regular Out punch keeps the Out punch's date; an OT In time EARLIER
+    // than the Out time crossed midnight → next day.
+    const otInDate = (): string => {
+      if (r.ot_in?.date) return r.ot_in.date;
+      const base = r.out?.date || r.date;
+      const im = toMin((e.ot_in || "").trim());
+      const om = toMin(((e.out ?? r.out?.hhmm) || "").trim());
+      return im != null && om != null && im < om ? nextDay(base) : base;
+    };
     for (const j of jobs) {
       // Night-shift aware target date:
       //  • edits keep the punch's OWN calendar date;
@@ -725,11 +741,10 @@ export default function PunchApprovalsScreen() {
       } else if (j.mode === "edit") {
         target = r[j.field]?.date || r.date;
       } else if (j.field === "ot_in") {
-        // Iter 212 — OT In defaults to the OUT punch's date (user rule).
-        target = r.out?.date || r.date;
+        target = otInDate();
       } else if (j.field === "out" || j.field === "ot_out") {
         const pairIn = j.field === "out" ? "in" as const : "ot_in" as const;
-        const inBase = r[pairIn]?.date || r.date;
+        const inBase = j.field === "ot_out" ? otInDate() : (r.in?.date || r.date);
         const inMin = toMin((e[pairIn] || r[pairIn]?.hhmm || "").trim());
         const outMin = toMin(j.hhmm);
         target = inMin != null && outMin != null && outMin <= inMin
@@ -1393,6 +1408,18 @@ export default function PunchApprovalsScreen() {
                   // punches get no OT entry (user rule).
                   const firstIn = (inVal || "").trim() || r.in?.hhmm || "";
                   const otAllowed = Boolean(firstIn && firstIn < "12:00");
+                  // Iter 213 — OT In's calendar date (user rule): an OT In
+                  // just after the regular Out punch (e.g. Out 19:58 →
+                  // OT In 20:07) takes the SAME date as the Out punch; an
+                  // OT In whose time is EARLIER than the Out time crossed
+                  // midnight and lands on the NEXT day.
+                  const otInAutoISO = (() => {
+                    if (r.ot_in?.date) return r.ot_in.date;
+                    const base = r.out?.date || r.date;
+                    const im = toMinHM((e.ot_in || "").trim());
+                    const om = toMinHM((e.out ?? r.out?.hhmm ?? "").trim());
+                    return im != null && om != null && im < om ? nextDay(base) : base;
+                  })();
                   return (
                     <View key={r.key} style={[upStyles.row, i % 2 === 0 && upStyles.rowAlt]}>
                       <Text style={[upStyles.cell, { width: 54 }]}>{r.employee_code || "—"}</Text>
@@ -1519,7 +1546,29 @@ export default function PunchApprovalsScreen() {
                         }
                         const val = e[k] ?? (cell?.hhmm || "");
                         const dKey = k === "ot_in" ? "ot_in_date" as const : "ot_out_date" as const;
-                        const dVal = e[dKey] ?? isoToDMY(cell?.date);
+                        // Iter 213 — AUTO-FETCH the punch date so the admin
+                        // doesn't have to type it:
+                        //  • OT In  → same date as the Out punch (next day
+                        //    only when its time crossed midnight).
+                        //  • OT Out → computed live from the typed times:
+                        //    same day as OT In, or the NEXT day once the
+                        //    OT Out time passes midnight (00:01+, i.e.
+                        //    ≤ OT In time).
+                        // Typing a date manually always overrides.
+                        const autoDate = (() => {
+                          if (cell?.date) return isoToDMY(cell.date);
+                          if (k === "ot_in") return isoToDMY(otInAutoISO);
+                          const otOutT = (e.ot_out || "").trim();
+                          if (!otOutT) return "";
+                          const baseISO =
+                            (e.ot_in_date ? dmyToISO(e.ot_in_date) : null) ||
+                            otInAutoISO;
+                          const im = toMinHM((e.ot_in || r.ot_in?.hhmm || "").trim());
+                          const om = toMinHM(otOutT);
+                          if (im != null && om != null && om <= im) return isoToDMY(nextDay(baseISO));
+                          return om != null ? isoToDMY(baseISO) : "";
+                        })();
+                        const dVal = e[dKey] ?? autoDate;
                         const nightShift = Boolean(cell?.date && cell.date !== r.date);
                         return canEdit ? (
                           <View key={k} style={{ width: 86, paddingHorizontal: 3 }}>
