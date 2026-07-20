@@ -1054,3 +1054,12 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   - Self-verified via Playwright: sub-admin (testsub) /salary-run + /messages denied w/ URL preserved; staff HR (testhr) /roles denied; allowed pages render; super admin unaffected; employee TEST50 mobile login/punch intact.
 - Cleanup: offline_geofence_enabled=false restored on Kankani; all test punches deleted.
 - NOT yet deployed to live VPS.
+
+## Iter 204–207 (July 2026 fork session)
+- Iter 204: Shift Change Request & Approval Module v2 (employee UI /shift-change-request, admin /shift-change-admin, Instant Shift Exception on off-shift punches, policy config). DEPLOYED.
+- Iter 205: Attendance grid — Emp Code removed, Father Name added, frozen identity columns + sticky header (web CSS sticky, solid bg fix); clock-timing HH:MM totals (minute-accurate); division-mode Present Days = whole days + Extra HRS; separate "OT HRS" cross-check sheet in monthly-inout/monthly-hours XLSX; Week-Off Worked Attendance policy module (ot_only/half_day_ot/full_day_ot/hourly + thresholds + toggles) in policy.week_off_worked, engine hooks in grid compute + compute_textile_day. Group filter shows only groups with active employees. DEPLOYED.
+- Iter 206: Comp-Off Ledger (routes/comp_off.py, comp_off_ledger collection) — earn from worked week-offs (>=full→1, >=half→0.5), admin screen /comp-off-ledger (sidebar Reports), manual Grant/Use, "Approve · Comp-Off" in leave approvals (routes/leaves.py, use_comp_off flag + balance enforcement), employee balance on Leaves screen. DEPLOYED.
+- Iter 207: Week-Off mode "full_day_min_hours" (>=min_hours→full day; below→plain duty only, cap 24; min_hours 0 = 50% of duty hrs); Weekly Off N/A → per-employee weekly_off_days_override (users collection, saved via /admin/user-role, applied in apply_employee_policy_override, projections at server.py ~16866 & ~17447); Employee Master weekly-off chips; Hours-Only day duty row = duty+OT capped 24. DEPLOYED.
+- Fixes: proposal PDF/Word export company_id param; IKORE halfday_threshold_rule enabled directly on live DB.
+- CAUTION: search_replace on server.py occasionally reports success but does not persist (phantom edits) — ALWAYS re-grep after editing server.py.
+- Deploy flow: /app/deploy_vps_iter207.sh served via GET /api/temp-code-bundle?token=sks-deploy-7391&kind=script (pointer in routes/temp_bundle.py). User runs wget+bash on VPS.
