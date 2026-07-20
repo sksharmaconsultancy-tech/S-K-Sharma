@@ -266,6 +266,8 @@ export default function PunchImportModal({ visible, companyId, onClose, onImport
                       <Text style={[st.tCell, st.tHead, { width: 78 }]}>Date</Text>
                       <Text style={[st.tCell, st.tHead, { width: 44 }]}>In</Text>
                       <Text style={[st.tCell, st.tHead, { width: 44 }]}>Out</Text>
+                      <Text style={[st.tCell, st.tHead, { width: 44 }]}>OT In</Text>
+                      <Text style={[st.tCell, st.tHead, { width: 44 }]}>OT Out</Text>
                       <Text style={[st.tCell, st.tHead, { flex: 1 }]}>Status</Text>
                     </View>
                     {preview.rows.map((r) => (
@@ -278,6 +280,8 @@ export default function PunchImportModal({ visible, companyId, onClose, onImport
                         <Text style={[st.tCell, { width: 78 }]}>{fmtDMY(r.date)}</Text>
                         <Text style={[st.tCell, { width: 44 }]}>{r.in_time || "—"}</Text>
                         <Text style={[st.tCell, { width: 44 }]}>{r.out_time || "—"}</Text>
+                        <Text style={[st.tCell, { width: 44 }]}>{(r as any).ot_in_time || "—"}</Text>
+                        <Text style={[st.tCell, { width: 44 }]}>{(r as any).ot_out_time || "—"}</Text>
                         {r.status === "matched" ? (
                           <Text style={[st.tCell, { flex: 1, color: "#16A34A", fontWeight: "700" }]}>
                             ✓ {r.matched_by === "name" ? "by Name" : "by Bio Code"}

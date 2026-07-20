@@ -94,6 +94,14 @@ def _parse_sheet(data: bytes) -> List[Dict[str, Any]]:
         for j, lbl in enumerate(labels):
             if not lbl:
                 continue
+            # Iter 208 — OT punch columns (checked BEFORE plain in/out so
+            # "OT Out" never hijacks the regular Out column).
+            if "ot" in lbl.split() or lbl.startswith("ot") or "o.t" in lbl:
+                if "out" in lbl:
+                    cmap.setdefault("ot_out", j)
+                elif "in" in lbl:
+                    cmap.setdefault("ot_in", j)
+                continue
             if "bio" in lbl or lbl in ("code", "emp code", "employee code", "emp. code"):
                 cmap.setdefault("bio", j)
             elif "name" in lbl:
@@ -124,6 +132,13 @@ def _parse_sheet(data: bytes) -> List[Dict[str, Any]]:
             "date": _parse_date_cell(get("date")),
             "in_time": _parse_time_cell(get("in")),
             "out_time": _parse_time_cell(get("out")),
+            # Iter 208 — optional OT punch pair. When OT-Out is earlier
+            # than OT-In it means the OT ran past midnight (night OT);
+            # the OT-Out punch is stored on the NEXT calendar day and the
+            # attendance engine stitches it back so the whole OT session
+            # counts on the FIRST punch day (user rule).
+            "ot_in_time": _parse_time_cell(get("ot_in")),
+            "ot_out_time": _parse_time_cell(get("ot_out")),
         })
     return out
 
@@ -178,15 +193,17 @@ async def download_template(authorization: Optional[str] = Header(None)):
     wb = Workbook()
     ws = wb.active
     ws.title = "Punches"
-    headers = ["Bio Code", "Name", "Date", "In Time", "Out Time"]
+    headers = ["Bio Code", "Name", "Date", "In Time", "Out Time", "OT In", "OT Out"]
     ws.append(headers)
     for c in ws[1]:
         c.font = Font(bold=True, color="FFFFFF")
         c.fill = PatternFill("solid", fgColor="1D4ED8")
-    ws.append(["101", "RAKESH KUMAR", "01-06-2026", "09:00", "18:00"])
-    ws.append(["102", "", "01-06-2026", "09:15", "18:30"])
-    ws.append(["", "SUNITA DEVI", "02-06-2026", "08:55", ""])
-    for i, w in enumerate([12, 24, 14, 10, 10], start=1):
+    ws.append(["101", "RAKESH KUMAR", "01-06-2026", "09:00", "18:00", "", ""])
+    ws.append(["102", "", "01-06-2026", "09:15", "18:30", "19:00", "23:30"])
+    # Night OT: OT Out earlier than OT In = ends NEXT morning; it still
+    # counts on the first punch day.
+    ws.append(["", "SUNITA DEVI", "02-06-2026", "08:55", "19:58", "20:07", "07:59"])
+    for i, w in enumerate([12, 24, 14, 10, 10, 10, 10], start=1):
         ws.column_dimensions[chr(64 + i)].width = w
     buf = io.BytesIO()
     wb.save(buf)
@@ -220,6 +237,7 @@ async def preview_import(payload: Dict[str, Any] = Body(...),
             "errors": len([r for r in rows if r["status"] == "error"]),
             "punches_to_create": sum(
                 (1 if r["in_time"] else 0) + (1 if r["out_time"] else 0)
+                + (1 if r.get("ot_in_time") else 0) + (1 if r.get("ot_out_time") else 0)
                 for r in matched),
         },
     }
@@ -240,12 +258,28 @@ async def commit_import(payload: Dict[str, Any] = Body(...),
         date = str(r.get("date") or "")
         if not uid or not date:
             continue
-        for kind, tval in (("in", r.get("in_time")), ("out", r.get("out_time"))):
+        # Iter 208 — OT punches. Night OT (OT-Out < OT-In) rolls the
+        # OT-Out to the next calendar day; stitch_cross_day_ot pairs it
+        # back so the OT counts on the FIRST punch day.
+        punch_list = [("in", r.get("in_time"), date),
+                      ("out", r.get("out_time"), date)]
+        ot_in_t = r.get("ot_in_time")
+        ot_out_t = r.get("ot_out_time")
+        if ot_in_t:
+            punch_list.append(("in", ot_in_t, date))
+        if ot_out_t:
+            ot_out_date = date
+            if ot_in_t and ot_out_t <= ot_in_t:
+                from datetime import timedelta
+                ot_out_date = (datetime.fromisoformat(date)
+                               + timedelta(days=1)).strftime("%Y-%m-%d")
+            punch_list.append(("out", ot_out_t, ot_out_date))
+        for kind, tval, p_date in punch_list:
             if not tval:
                 continue
-            at = f"{date}T{tval}:00Z"
+            at = f"{p_date}T{tval}:00Z"
             dup = await db.attendance.find_one(
-                {"user_id": uid, "date": date, "kind": kind, "at": at}, {"_id": 1})
+                {"user_id": uid, "date": p_date, "kind": kind, "at": at}, {"_id": 1})
             if dup:
                 skipped += 1
                 continue
@@ -253,7 +287,7 @@ async def commit_import(payload: Dict[str, Any] = Body(...),
                 "record_id": f"att_{uuid.uuid4().hex[:12]}",
                 "user_id": uid,
                 "company_id": company_id,
-                "date": date,
+                "date": p_date,
                 "kind": kind,
                 "at": at,
                 "source": "excel_import",
