@@ -1530,6 +1530,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   hcellTxt: { color: "#fff", fontWeight: "700", fontSize: 11, letterSpacing: 0.4 },
+  // Iter 205b — frozen header identity cells need their own SOLID bg so day
+  // headers disappear behind them while scrolling right.
+  hcellFrozen: { backgroundColor: colors.brandPrimary },
   hcellDay: { color: "#fff", fontWeight: "700", fontSize: 12 },
   hcellDayLabel: { color: "rgba(255,255,255,0.75)", fontSize: 9, marginTop: 1 },
   sumCell: { backgroundColor: colors.brandSecondary || colors.brandPrimary, alignItems: "center" },
