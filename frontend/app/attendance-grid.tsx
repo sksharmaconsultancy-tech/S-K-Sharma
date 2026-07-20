@@ -207,6 +207,9 @@ export default function AttendanceGridScreen() {
 
   // Iter 77 - Employee-Group filter (Group Wise). None = all employees.
   const [groups, setGroups] = useState<{ group_id: string; name: string }[]>([]);
+  // Iter 205c (user request) — only show Group chips that actually have
+  // employees in the selected firm (learned from unfiltered grid loads).
+  const [activeGroupNames, setActiveGroupNames] = useState<Set<string>>(new Set());
   const [groupId, setGroupId] = useState<string | null>(null);
 
   // Iter 76 — Honour ?company_id= passed from the Attendance Sheet
@@ -301,6 +304,9 @@ export default function AttendanceGridScreen() {
     let cancelled = false;
     (async () => {
       if (!effectiveCid) { setGroups([]); return; }
+      // Firm changed — clear any previous firm's group selection/chips.
+      setGroupId(null);
+      setActiveGroupNames(new Set());
       try {
         const [egp, legacy] = await Promise.all([
           api<{ groups: { group_id: string; name: string }[] }>(
@@ -391,6 +397,22 @@ export default function AttendanceGridScreen() {
       }
     },
     [sortBy],
+  );
+
+  // Learn which groups actually have employees whenever an UNFILTERED
+  // grid load completes (a group-filtered load only contains that group).
+  useEffect(() => {
+    if (!data || groupId) return;
+    setActiveGroupNames(new Set(
+      (data.employees || [])
+        .map((e) => String(e.employee_group || "").trim().toLowerCase())
+        .filter(Boolean),
+    ));
+  }, [data, groupId]);
+
+  const activeGroups = useMemo(
+    () => groups.filter((g) => activeGroupNames.has((g.name || "").trim().toLowerCase())),
+    [groups, activeGroupNames],
   );
 
   const filteredEmployees = useMemo(() => {
@@ -775,7 +797,7 @@ export default function AttendanceGridScreen() {
                 All
               </Text>
             </Pressable>
-            {groups.map((g) => (
+            {activeGroups.map((g) => (
               <Pressable
                 key={g.group_id}
                 onPress={() => setGroupId(g.group_id)}
@@ -787,8 +809,8 @@ export default function AttendanceGridScreen() {
                 </Text>
               </Pressable>
             ))}
-            {groups.length === 0 && effectiveCid ? (
-              <Text style={styles.inheritHintSm}>No groups defined for this firm</Text>
+            {activeGroups.length === 0 && effectiveCid ? (
+              <Text style={styles.inheritHintSm}>No groups in use for this firm</Text>
             ) : null}
           </View>
         </View>
