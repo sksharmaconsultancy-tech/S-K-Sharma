@@ -1291,7 +1291,21 @@ async def _run_session(db, sid: str) -> None:
             )
             page = await context.new_page()
 
-            # Download manager — every portal download lands in the job
+            # EPFO (and some other portals) pop a JavaScript alert/confirm on
+            # load that blocks the form until dismissed. Auto-accept every
+            # native dialog (click "OK") so the automation can proceed.
+            async def _accept_dialog(dialog) -> None:
+                try:
+                    _log(sid, f"🔔 Portal alert: “{(dialog.message or '')[:80]}” — clicking OK")
+                    await dialog.accept()
+                except Exception:
+                    try:
+                        await dialog.dismiss()
+                    except Exception:
+                        pass
+
+            page.on("dialog",
+                    lambda d: asyncio.get_event_loop().create_task(_accept_dialog(d)))
             # folder and is indexed on the session/history doc.
             async def _save_dl(download) -> None:
                 try:
