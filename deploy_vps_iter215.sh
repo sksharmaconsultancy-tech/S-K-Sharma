@@ -61,7 +61,7 @@ check() {
   fi
 }
 check "/api/admin/actual-salary-process" "405" "Actual Salary Process API"
-check "/api/admin/compliance-salary-runs" "405" "Compliance Salary API"
+check "/api/admin/compliance-salary-runs" "401" "Compliance Salary API"
 echo
 echo "🎉 Deploy complete."
 echo "   Salary Process → Actual: pick Biometric (Auto) — Present Days and"
