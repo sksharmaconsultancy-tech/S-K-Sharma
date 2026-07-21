@@ -342,20 +342,40 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
         return day_rows(lambda s, d, e: s["pairs"] >= 2, ["Shifts (in-out cycles)"],
                         lambda s, d, e: [s["pairs"]])
     if key == "shift_report":
-        cols = ["Shift"] + EMP_HEAD + ["Days Present", "Total Hours"]
+        # Iter 214 — Shift / live-muster report (user spec): everyone who
+        # punched in, with their shift (from the Shift Master), punch-in
+        # time and a blank Signature column — usable as an emergency
+        # evacuation / muster roll for factories, hospitals, warehouses,
+        # security teams etc. Employees currently on OT (second in-out
+        # cycle after a morning first punch) get an "OT —" marker in
+        # front of their name.
+        multi = len(dates) > 1
+        cols = ((["Date"] if multi else [])
+                + ["Shift (From Master)", "Code", "Employee Name",
+                   "Department", "Designation", "Punch In Time", "Signature"])
         rows = []
-        for e in emps:
-            shift = f"{e.get('shift_start') or '—'} – {e.get('shift_end') or '—'}"
-            p, th = 0, 0.0
-            for d in dates:
+        for d in dates:
+            for e in emps:
                 recs = recs_by.get((e["user_id"], d))
-                if recs:
-                    s = _day_summary(recs, policy, e)
-                    p += 1 if s["status"] in ("P", "HD") else 0
-                    th += s["hours"]
-            if p:
-                rows.append([shift] + _emp_cols(e) + [p, round(th, 1)])
-        rows.sort(key=lambda r: r[0])
+                if not recs:
+                    continue
+                s = _day_summary(recs, policy, e)
+                if not s["first_in"]:
+                    continue
+                shift = (e.get("shift_name") or "").strip()
+                if not shift:
+                    ss, se = e.get("shift_start"), e.get("shift_end")
+                    shift = f"{ss} – {se}" if ss and se else (ss or se or "—")
+                name = e.get("name") or ""
+                fi = _mins(s["first_in"])
+                ins_count = sum(1 for r in recs if r["kind"] == "in")
+                if (s["pairs"] >= 2 or ins_count >= 2) and fi is not None and fi < 720:
+                    name = f"OT — {name}"
+                rows.append(([d] if multi else [])
+                            + [shift, str(e.get("employee_code") or ""), name,
+                               e.get("department") or "", e.get("designation") or "",
+                               s["first_in"], ""])
+        rows.sort(key=lambda r: (r[0], r[1], r[2]) if multi else (r[0], r[1]))
         return cols, rows
     if key == "night_shift":
         ns, ne = _mins(night_start) or 1320, _mins(night_end) or 360
@@ -479,8 +499,12 @@ def _excel_bytes(title, header_lines, columns, rows) -> bytes:
         r_i += 1
         for c_i, v in enumerate(row, start=1):
             ws.cell(row=r_i, column=c_i, value=v)
-    for c_i in range(1, len(columns) + 1):
-        ws.column_dimensions[ws.cell(row=1, column=c_i).column_letter].width = 16
+        # Iter 214 — signature reports get taller rows to sign in.
+        if "Signature" in columns:
+            ws.row_dimensions[r_i].height = 26
+    for c_i, col_name in enumerate(columns, start=1):
+        letter = ws.cell(row=1, column=c_i).column_letter
+        ws.column_dimensions[letter].width = 28 if col_name == "Signature" else 16
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()
@@ -547,14 +571,27 @@ def _pdf_bytes(title, company, header_meta, columns, rows, verify_id) -> bytes:
     data = [[Paragraph(f"<b>{c}</b>", cell_style) for c in columns]]
     for r in rows[:4000]:
         data.append([Paragraph(str(v), cell_style) for v in r])
-    tbl = Table(data, repeatRows=1)
+    # Iter 214 — signature reports: give the Signature column a wide fixed
+    # box and taller rows so it prints properly for physical sign-off.
+    col_widths = None
+    has_sig = "Signature" in columns
+    if has_sig:
+        avail = page[0] - 20 * mm
+        sig_w = 34 * mm
+        other = (avail - sig_w) / max(1, len(columns) - 1)
+        col_widths = [other] * len(columns)
+        col_widths[columns.index("Signature")] = sig_w
+    tbl = Table(data, repeatRows=1, colWidths=col_widths)
     tbl.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor("#1D4ED8")),
         ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
         ("GRID", (0, 0), (-1, -1), 0.4, rl_colors.HexColor("#94A3B8")),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor("#F1F5F9")]),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-    ]))
+    ] + ([
+        ("TOPPADDING", (0, 1), (-1, -1), 7),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 7),
+    ] if has_sig else [])))
     story.append(tbl)
     doc.build(story, onFirstPage=on_page, onLaterPages=on_page)
     return buf.getvalue()
