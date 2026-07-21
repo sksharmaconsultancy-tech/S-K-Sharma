@@ -23,6 +23,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors, radius } from "@/src/theme";
 import { confirmYesNo } from "@/src/utils/confirm";
+import PunchRepairModal from "@/src/components/PunchRepairModal";
 
 function showMsg(msg: string) {
   if (Platform.OS === "web") (globalThis as any).alert?.(msg);
@@ -59,6 +60,7 @@ export default function AttendanceDoctorScreen() {
   const [problemCount, setProblemCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [repairBusy, setRepairBusy] = useState(false);
+  const [repair2, setRepair2] = useState<{ userId: string; name: string; date: string } | null>(null);
 
   useEffect(() => {
     if (!firmId && selectedCompanyId) setFirmId(selectedCompanyId);
@@ -211,7 +213,11 @@ export default function AttendanceDoctorScreen() {
               testID="ad-search"
             />
             {filtered.map((r) => (
-              <View key={`${r.user_id}_${r.date}`} style={styles.dayRow}>
+              <Pressable
+                key={`${r.user_id}_${r.date}`}
+                style={styles.dayRow}
+                onPress={() => setRepair2({ userId: r.user_id, name: r.name || r.employee_code || "Employee", date: r.date })}
+              >
                 <View style={{ flexDirection: "row", justifyContent: "space-between", flexWrap: "wrap" }}>
                   <Text style={styles.dayEmp}>
                     {r.employee_code || "—"} · {r.name || ""} {r.bio_code ? `(bio ${r.bio_code})` : ""}
@@ -238,11 +244,24 @@ export default function AttendanceDoctorScreen() {
                     {r.duty_hhmm ? `  ·  Duty ${r.duty_hhmm}` : ""}
                   </Text>
                 ) : null}
-              </View>
+                <Text style={styles.fixHint}>👆 Tap to add / fix the missing punch</Text>
+              </Pressable>
             ))}
           </View>
         ) : null}
       </ScrollView>
+      {repair2 && (
+        <PunchRepairModal
+          userId={repair2.userId}
+          empName={repair2.name}
+          dateIso={repair2.date}
+          onSaved={() => diagnose()}
+          onClose={(changed) => {
+            setRepair2(null);
+            if (changed) diagnose();
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -261,6 +280,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border, marginBottom: 14,
   },
   cardTitle: { fontSize: 15, fontWeight: "800", color: colors.onSurface, marginBottom: 8 },
+  fixHint: { fontSize: 11.5, fontWeight: "700", color: "#B45309", marginTop: 6 },
   label: { fontSize: 12, fontWeight: "700", color: colors.onSurfaceSecondary, marginTop: 8, marginBottom: 4 },
   input: {
     borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,

@@ -32,6 +32,7 @@ type Punch = {
   kind: "in" | "out";
   at: string;
   source?: string;
+  status?: string;
   manual_reason?: string;
 };
 
@@ -76,12 +77,14 @@ export default function PunchRepairModal({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await api<{ items: Punch[] }>(
-        `/admin/attendance/records?user_id=${userId}&from=${dateIso}&to=${dateIso}`,
+      const r = await api<{ records: Punch[] }>(
+        `/admin/attendance/history?user_id=${userId}&date_from=${dateIso}&date_to=${dateIso}&limit=100`,
       );
-      setPunches(
-        (r.items || []).sort((a, b) => (a.at || "").localeCompare(b.at || "")),
+      // Show real punches only (hide rejected / auto-ignored noise).
+      const visible = (r.records || []).filter(
+        (p) => !["rejected", "auto_ignored"].includes(String(p.status || "")),
       );
+      setPunches(visible.sort((a, b) => (a.at || "").localeCompare(b.at || "")));
     } catch {
       setPunches([]);
     } finally {
@@ -205,6 +208,11 @@ export default function PunchRepairModal({
             </Pressable>
           </View>
 
+          <ScrollView
+            style={st.body}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator
+          >
           {/* Missing-punch banner */}
           {!loading && punches.length > 0 && hasIn !== hasOut && (
             <View style={st.warnBanner}>
@@ -223,7 +231,7 @@ export default function PunchRepairModal({
           {loading ? (
             <ActivityIndicator style={{ marginVertical: 24 }} color={colors.primary} />
           ) : (
-            <ScrollView style={{ maxHeight: 260 }}>
+            <View>
               {punches.map((p) => (
                 <View key={p.record_id} style={st.punchRow}>
                   <View style={[st.kindBadge, p.kind === "in" ? st.kindIn : st.kindOut]}>
@@ -240,7 +248,7 @@ export default function PunchRepairModal({
                   </Pressable>
                 </View>
               ))}
-            </ScrollView>
+            </View>
           )}
 
           {/* Add buttons */}
@@ -300,7 +308,10 @@ export default function PunchRepairModal({
                   {busy ? (
                     <ActivityIndicator size="small" color="#fff" />
                   ) : (
-                    <Text style={st.saveTxt}>Save Punch</Text>
+                    <>
+                      <Ionicons name="checkmark" size={16} color="#fff" />
+                      <Text style={st.saveTxt}>Save Punch</Text>
+                    </>
                   )}
                 </Pressable>
               </View>
@@ -318,6 +329,7 @@ export default function PunchRepairModal({
               <Text style={st.doneTxt}>{changed ? "Save & Close" : "Close"}</Text>
             </Pressable>
           )}
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -335,11 +347,13 @@ const st = StyleSheet.create({
   card: {
     width: "100%",
     maxWidth: 420,
+    maxHeight: "88%",
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     padding: spacing.lg,
   },
   header: { flexDirection: "row", alignItems: "center", marginBottom: spacing.sm },
+  body: { flexGrow: 0 },
   title: { fontSize: 16, fontWeight: "800", color: colors.onSurface },
   subtitle: { fontSize: 12.5, color: colors.onSurfaceSecondary, marginTop: 2 },
   closeBtn: { padding: 4 },
@@ -418,18 +432,28 @@ const st = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   errTxt: { color: "#DC2626", fontSize: 12, fontWeight: "700", marginTop: 6 },
-  formActions: { flexDirection: "row", justifyContent: "flex-end", gap: spacing.sm, marginTop: spacing.md },
-  cancelBtn: { paddingHorizontal: 14, paddingVertical: 9 },
-  cancelTxt: { fontSize: 13, fontWeight: "700", color: colors.onSurfaceSecondary },
-  saveBtn: {
-    backgroundColor: colors.primary,
+  formActions: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md },
+  cancelBtn: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: colors.border,
     borderRadius: radius.md,
-    paddingHorizontal: 18,
-    paddingVertical: 9,
-    minWidth: 100,
+    paddingVertical: 11,
     alignItems: "center",
+    justifyContent: "center",
   },
-  saveTxt: { fontSize: 13, fontWeight: "800", color: "#fff" },
+  cancelTxt: { fontSize: 14, fontWeight: "800", color: colors.onSurfaceSecondary },
+  saveBtn: {
+    flex: 1,
+    flexDirection: "row",
+    gap: 6,
+    backgroundColor: "#15803D",
+    borderRadius: radius.md,
+    paddingVertical: 11,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  saveTxt: { fontSize: 14, fontWeight: "800", color: "#fff" },
   doneBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
     marginTop: spacing.lg, backgroundColor: "#15803D", borderRadius: radius.md,

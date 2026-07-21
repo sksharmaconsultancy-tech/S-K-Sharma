@@ -43,7 +43,7 @@ PORTALS: Dict[str, Dict[str, str]] = {
     "epfo": {"label": "EPFO — Employer Portal",
              "url": "https://unifiedportal-emp.epfindia.gov.in/epfo/"},
     "esic": {"label": "ESIC — Employer Portal",
-             "url": "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx"},
+             "url": "https://www.esic.gov.in/"},
     "shram_suvidha": {"label": "Shram Suvidha Portal",
                       "url": "https://shramsuvidha.gov.in/user/login"},
     "ptax": {"label": "Professional Tax Portal", "url": ""},
@@ -439,9 +439,21 @@ class Ctx:
             self.mult = max(self.mult, 1.5)
         self.timeout_ms = self.settings["timeout_sec"] * 1000
 
+    def switch_page(self, new_page) -> None:
+        """Switch the active page (e.g., ESIC opens login in a new tab) so
+        the live stream, clicks and handlers all follow the new tab."""
+        self.page = new_page
+        self.c["page"] = new_page
+        wire = self.c.get("wire_page")
+        if wire:
+            try:
+                wire(new_page)
+            except Exception:
+                pass
+
     async def audit(self, event: str, detail: str = "") -> None:
-        """Security req #9 — persistent audit trail of every significant
-        action (login, upload, download, submission, file generation)."""
+        """Persistent audit trail of every significant action (login,
+        upload, download, submission, file generation)."""
         try:
             await self.db.rpa_audit.insert_one({
                 "at": _now_iso(), "session_id": self.sid,
@@ -694,6 +706,49 @@ async def _step_open_portal(ctx: Ctx) -> None:
         pass
     ctx.log("✅ Portal loaded")
     await ctx.snap("portal_loaded")
+    # ESIC: the home page (esic.gov.in) is not the login form — click
+    # "Employer Login" to reach the sign-in page (user request).
+    if ctx.s["portal"] == "esic":
+        await _esic_goto_employer_login(ctx)
+
+
+async def _esic_goto_employer_login(ctx: Ctx) -> None:
+    # Already on a login form? nothing to do.
+    if await ctx.first_visible(["input[type='password']"]):
+        return
+    candidates = ["Employer Login", "EMPLOYER LOGIN", "Employer Sign In",
+                  "Employer", "Login"]
+    for txt in candidates:
+        loc = None
+        try:
+            loc = ctx.page.get_by_role("link", name=txt, exact=False).first
+            if await loc.count() == 0:
+                loc = ctx.page.get_by_text(txt, exact=False).first
+        except Exception:
+            loc = ctx.page.get_by_text(txt, exact=False).first
+        try:
+            if loc and await loc.count() > 0 and await loc.is_visible():
+                # The link may open a new tab — capture it if so.
+                ctx.log(f"🖱 Clicking '{txt}' to open the ESIC login page…")
+                try:
+                    async with ctx.page.context.expect_page(timeout=6000) as newp:
+                        await loc.click(timeout=ctx.timeout_ms)
+                    new_page = await newp.value
+                    await new_page.wait_for_load_state("domcontentloaded", timeout=15000)
+                    ctx.switch_page(new_page)  # follow the login tab
+                    ctx.s["current_url"] = new_page.url
+                except Exception:
+                    # Same-tab navigation
+                    await ctx.sleep(2.5)
+                await ctx.sleep(1.5)
+                await ctx.snap("esic_login_page")
+                if await ctx.first_visible(["input[type='password']"]):
+                    ctx.log("✅ ESIC login page opened")
+                    return
+        except Exception:
+            continue
+    ctx.log("Could not auto-open the ESIC Employer Login — you can click it "
+            "in the live view, then press Retry.", "warn")
 
 
 async def _step_fill_credentials(ctx: Ctx) -> None:
@@ -719,38 +774,31 @@ async def _step_captcha_and_login(ctx: Ctx) -> None:
         _find_captcha_image_b64, _fill_captcha_input, _click_login_submit,
         _reload_captcha, _login_succeeded,
     )
-    from utils.captcha_reader import read_captcha
-    numeric = ctx.s["portal"] == "esic"
-    max_auto = min(3, ctx.settings["retry_count"])
-    backoff = [5, 15, 30]  # security req #5 — exponential backoff, max 3 retries
 
-    for attempt in range(1, max_auto + 2):
+    # Captcha is ALWAYS entered manually by the user (per request) — the
+    # engine never reads/guesses it. It shows the captcha image + input bar
+    # and waits for the user's Submit, then signs in.
+    for attempt in range(1, 7):
         await ctx.gate()
-        if attempt > 1:
-            wait_s = backoff[min(attempt - 2, len(backoff) - 1)]
-            ctx.log(f"⏳ Backing off {wait_s}s before retry (responsible pacing)…")
-            await ctx.sleep(wait_s / max(ctx.mult, 1.0))
         cap_b64 = await _find_captcha_image_b64(ctx.page)
         if not cap_b64:
             ctx.log("No captcha on this form — signing in…")
             await _click_login_submit(ctx.page)
             await ctx.sleep(3.0)
+            if await _login_succeeded(ctx.page):
+                ctx.log("🎉 Login successful")
+                await ctx.audit("login_success", ctx.s["portal_label"])
+                await ctx.snap("login_success")
             return
-        text: Optional[str] = None
-        if attempt <= max_auto and not ctx.settings.get("training_mode"):
-            ctx.log(f"🤖 Reading captcha with AI vision (try {attempt}/{max_auto})…")
-            text = await read_captcha(cap_b64, numeric_only=numeric,
-                                      session_id=f"rpa-{ctx.sid}-{attempt}")
+        text = await ctx.wait_user_input(
+            "captcha",
+            "Type the captcha shown in the image, then press Submit to log in",
+            image_b64=cap_b64)
         if not text:
-            # Hand over to the human — never bypass, never guess forever.
-            text = await ctx.wait_user_input(
-                "captcha", "Type the captcha characters shown in the image",
-                image_b64=cap_b64)
-            if not text:
-                # user hit retry/skip — refresh captcha and loop
-                await _reload_captcha(ctx.page)
-                await ctx.sleep(1.0)
-                continue
+            # user hit retry/skip — refresh captcha and loop
+            await _reload_captcha(ctx.page)
+            await ctx.sleep(1.0)
+            continue
         ctx.log(f"Captcha entered: {text}")
         cap_loc = await ctx.first_visible([
             "input[name*='captcha' i]", "input[id*='captcha' i]",
@@ -775,7 +823,7 @@ async def _step_captcha_and_login(ctx: Ctx) -> None:
             await ctx.audit("login_success", ctx.s["portal_label"])
             await ctx.snap("login_success")
             return
-        ctx.log(f"Sign-in not confirmed (try {attempt}) — refreshing captcha…", "warn")
+        ctx.log(f"Sign-in not confirmed (try {attempt}) — enter the new captcha…", "warn")
         await ctx.snap(f"login_attempt_{attempt}")
         await _reload_captcha(ctx.page)
         await ctx.sleep(1.0)
@@ -1232,17 +1280,21 @@ async def _step_assist_hold(ctx: Ctx) -> None:
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
-async def _frame_loop(sid: str, page) -> None:
-    """Capture a live JPEG frame ~every second while the session runs."""
+async def _frame_loop(sid: str) -> None:
+    """Capture a live JPEG frame ~every second while the session runs.
+    Always screenshots the CURRENT active page (follows ESIC new tabs)."""
     s = _SESSIONS.get(sid)
+    c = _CTRL.get(sid)
     while s and s["status"] not in ("completed", "failed", "stopped"):
-        try:
-            shot = await page.screenshot(type="jpeg", quality=45)
-            s["frame_b64"] = base64.b64encode(shot).decode("ascii")
-            s["current_url"] = page.url
-            s["network"] = "online"
-        except Exception:
-            pass
+        page = (c or {}).get("page")
+        if page is not None:
+            try:
+                shot = await page.screenshot(type="jpeg", quality=45)
+                s["frame_b64"] = base64.b64encode(shot).decode("ascii")
+                s["current_url"] = page.url
+                s["network"] = "online"
+            except Exception:
+                pass
         await asyncio.sleep(1.0)
         s = _SESSIONS.get(sid)
 
@@ -1291,9 +1343,10 @@ async def _run_session(db, sid: str) -> None:
             )
             page = await context.new_page()
 
-            # EPFO (and some other portals) pop a JavaScript alert/confirm on
-            # load that blocks the form until dismissed. Auto-accept every
-            # native dialog (click "OK") so the automation can proceed.
+            # Wire native-dialog + download handlers on a page. EPFO (and
+            # some portals) pop a JavaScript alert on load that blocks the
+            # form until dismissed — auto-accept it (click "OK"). Applied to
+            # every page/tab so ESIC's new-tab login works too.
             async def _accept_dialog(dialog) -> None:
                 try:
                     _log(sid, f"🔔 Portal alert: “{(dialog.message or '')[:80]}” — clicking OK")
@@ -1304,9 +1357,6 @@ async def _run_session(db, sid: str) -> None:
                     except Exception:
                         pass
 
-            page.on("dialog",
-                    lambda d: asyncio.get_event_loop().create_task(_accept_dialog(d)))
-            # folder and is indexed on the session/history doc.
             async def _save_dl(download) -> None:
                 try:
                     fname = download.suggested_filename or f"file_{len(s['downloads'])}"
@@ -1320,12 +1370,20 @@ async def _run_session(db, sid: str) -> None:
                 except Exception as exc:  # noqa: BLE001
                     _log(sid, f"Download save failed: {exc}", "warn")
 
-            page.on("download",
-                    lambda d: asyncio.get_event_loop().create_task(_save_dl(d)))
+            def _wire(pg) -> None:
+                pg.on("dialog",
+                      lambda d: asyncio.get_event_loop().create_task(_accept_dialog(d)))
+                pg.on("download",
+                      lambda d: asyncio.get_event_loop().create_task(_save_dl(d)))
+
+            c["wire_page"] = _wire  # used by Ctx.switch_page on tab switch
+            _wire(page)
+            context.on("page", lambda pg: _wire(pg))
+            c["page"] = page
             s["browser"] = "running"
             s["status"] = "running"
             _log(sid, "✅ Chrome started")
-            frame_task = asyncio.get_event_loop().create_task(_frame_loop(sid, page))
+            frame_task = asyncio.get_event_loop().create_task(_frame_loop(sid))
             await _persist_job(db, sid)
 
             ctx = Ctx(db, sid, page)
