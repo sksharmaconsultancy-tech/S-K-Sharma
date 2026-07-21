@@ -14769,10 +14769,61 @@ async def _compute_compliance_run(
         # Iter 216 (user request) — override with the Attendance Report's
         # Present Days + OT so the Compliance Salary run always agrees
         # with the report (and the Actual process). Applies to policy_2
-        # firms too. Skipped when the compliance-only 8-HR sub-point is
-        # active (that keeps its dedicated compute above).
+        # firms too.
+        # Iter 219 — "Count Present Day @ 8 HRS" now ALSO direct-syncs
+        # from the Attendance Report grid (same punch pipeline as the
+        # report): per day, 8+ worked hrs = 1 Present Day with the extra
+        # hrs → OT; the Half-Day Threshold Rule is honoured (½ day, rest
+        # → OT); week-off / holiday sub-points mirror the grid compute.
         _g_c = grid_by_user_c.get(emp["user_id"])
-        if _g_c and not _pm_202.get("compliance_present_8hr"):
+        _c8_on = bool(_pm_202.get("compliance_present_8hr")) and \
+            (att_pol.get("salary_allowed") or "both") in ("compliance", "both")
+        if _g_c and _c8_on:
+            _half_h8 = float(merged_pol.get("half_day_hours") or 4.0)
+            _hd_rule8 = bool(_pm_202.get("halfday_threshold_rule"))
+            _pd8 = 0.0
+            _half8 = 0
+            _duty8 = 0.0
+            _ot8 = 0.0
+            for _dcell in (_g_c.get("days") or {}).values():
+                _dcell = _dcell or {}
+                _w = float(_dcell.get("hours") or _dcell.get("raw_hours") or 0.0)
+                if _w <= 0:
+                    continue
+                if _dcell.get("weekly_off") and _pm_202.get("weekoff_present_add_ot"):
+                    _ot8 += _w
+                    continue
+                if _dcell.get("holiday") and _pm_202.get("holiday_present_add_ot"):
+                    _pd8 += 1.0
+                    _ot8 += _w
+                    continue
+                if _w >= 8.0:
+                    _pd8 += 1.0
+                    _duty8 += 8.0
+                    _ot8 += _w - 8.0
+                elif _hd_rule8 and _w >= _half_h8:
+                    _half8 += 1
+                    _duty8 += _half_h8
+                    _ot8 += _w - _half_h8
+                elif _hd_rule8:
+                    _ot8 += _w
+                else:
+                    if _w >= _half_h8:
+                        _half8 += 1
+                    _duty8 += _w
+            if merged_pol.get("ot_allowed") is False or \
+                    merged_pol.get("firm_ot_allowed") is False:
+                _ot8 = 0.0
+            _eff8 = _pd8 + 0.5 * _half8
+            stats = {
+                "present_days": round(_eff8 * 2) / 2.0,
+                "half_days": _half8,
+                "absent_days": 0,
+                "duty_hours": round(_duty8, 2),
+                "ot_hours": round(_ot8, 2),
+                "effective_present": _eff8,
+            }
+        elif _g_c and not _c8_on:
             _t_c = _g_c.get("totals") or {}
             _pd_c = _t_c.get("present_days_policy")
             if _pd_c is None:
@@ -14780,7 +14831,8 @@ async def _compute_compliance_run(
             if _pd_c is not None:
                 _pd_cf = float(_pd_c or 0.0)
                 stats = dict(stats)
-                stats["present_days"] = int(_pd_cf)
+                # Iter 219 — keep half days (26.5) instead of int().
+                stats["present_days"] = round(_pd_cf * 2) / 2.0
                 stats["effective_present"] = _pd_cf
                 stats["half_days"] = 0
                 stats["duty_hours"] = float(
@@ -14794,10 +14846,11 @@ async def _compute_compliance_run(
         if payload.use_imported_sheet:
             # Imported sheet wins: present days from the uploaded/email
             # salary sheet (0 when the employee has no row).
+            # Iter 219 — half days (e.g. 18.5) are kept, not truncated.
             _pd = float((_am or {}).get("present_days") or 0)
             _fdh = float(merged_pol.get("full_day_hours") or 8.0)
             stats = {
-                "present_days": int(_pd),
+                "present_days": round(_pd * 2) / 2.0,
                 "half_days": 0,
                 "effective_present": _pd,
                 "duty_hours": round(_pd * _fdh, 2),

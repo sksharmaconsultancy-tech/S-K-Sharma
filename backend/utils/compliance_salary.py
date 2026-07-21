@@ -358,7 +358,10 @@ def compute_compliance_row(
     effective_present = float(stats.get("effective_present", stats.get("present_days", 0)))
     duty_hours = float(stats.get("duty_hours", 0.0))
     ot_hours = float(stats.get("ot_hours", 0.0))
-    present_days = int(stats.get("present_days", 0))
+    # Iter 219 (user request) — SHOW HALF DAYS: the sheet's Present Days
+    # column is the effective present (full days + 0.5 × half days),
+    # kept in half-day steps (e.g. 18.5) instead of a truncated integer.
+    present_days = round(effective_present * 2) / 2.0
     half_days = int(stats.get("half_days", 0))
 
     full_day_hours = _num(policy.get("full_day_hours"), 8.0)

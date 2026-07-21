@@ -982,7 +982,9 @@ export default function ComplianceSalaryRunScreen() {
       const rows = prev.rows.map((r) => {
         if (r.user_id !== userId) return r;
 
-        const pd = Math.max(0, Math.min(monthDays, Number(newPd) || 0));
+        // Iter 219 (user request) — allow HALF-DAY manual input: value is
+        // clamped to half-day steps (.0 / .5) and the month-days cap.
+        const pd = Math.max(0, Math.min(monthDays, Math.round((Number(newPd) || 0) * 2) / 2));
         const ratio = pd / monthDays;
 
         // FULL monthly heads. The MASTER columns (basic_master, …) are the

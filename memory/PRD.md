@@ -1078,3 +1078,9 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Iter 218 gate: firm policy_master.compliance_present_8hr ON (+salary_allowed includes compliance) → Actual process blocks on-roll (400 on is_onroll=True; excludes on-roll on ALL runs, 400 if none left). On-roll paid via Compliance only (8hr direct sync, pre-existing Iter 202 path — grid override skipped there).
 - Compliance grid fetch hardened: grids resolved for every company_id among scoped employees (super admin without firm filter covered).
 - deploy_vps_iter216.sh created; temp_bundle pointer → deploy216.sh.
+
+## Iter 219 (June 2026 fork session, same day)
+- ROOT CAUSE of "compliance attendance not syncing" on live: user's firm has compliance_present_8hr ON → grid override was intentionally skipped, falling back to compute_present_days_and_ot on raw db.attendance (misses punch approvals/manual entries pipeline). FIX: 8-HR mode now computes per-day from grid cells (`days` map, w=hours): w>=8 → 1 day + (w-8)→OT; halfday_threshold_rule → 0.5 day @ half_day_hours, rest→OT; weekoff/holiday sub-points mirrored; ot_allowed/firm_ot_allowed gates honored. Verified 68 rows 0 mismatch vs expected.
+- Half days SHOWN in compliance: compute_compliance_row present_days = round(effective_present*2)/2 (float, .5 steps); grid override + imported-sheet stats keep halves; frontend updatePresentDays clamps input to .5 steps (manual half-day entry allowed).
+- Regression: toggle OFF path still 126/126 (test_iter216.py updated exp to half steps).
+- deploy_vps_iter217.sh created; temp_bundle pointer → deploy217.sh.
