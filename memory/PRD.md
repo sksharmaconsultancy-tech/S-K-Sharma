@@ -1141,3 +1141,7 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - REMINDER (recurring): search_replace edits on server.py sometimes silently roll back — ALWAYS grep-verify after editing (happened again with _is_shift_open call sites).
 - User rectification steps after deploy: re-upload both .dat files → conflict report → "Replace Machine Data" once. For rotational firms: Attendance Policy → Shift Mode → Open/Rotational → Save.
 - deploy_vps_iter224.sh; push to github main done this session.
+
+## Iter 229 (June 2026 fork session, same day) — grid OUT column showed synthetic split boundary
+- User bug: In/Out grid showed OUT with SAME minutes as IN (19:55 → "07:55") because single-pair days split arithmetically for OT displayed the boundary (IN + shift hrs) as OUT.
+- Fix at server.py _compute_monthly_grid_data (~17375): when ot_in_dt == reg_out_dt (arithmetic split, not a real punch) → _out_display = ot_out_dt (the ACTUAL machine OUT, e.g. 08:03). Explicit OT pairs unchanged. OT-report endpoint left as-is (boundary intentionally marks the duty/OT window split).

@@ -17374,6 +17374,13 @@ async def _compute_monthly_grid_data(
             # are already routed to the anomaly branch above).
             _in_display = reg_in_dt or in_dt
             _out_display = reg_out_dt or out_dt
+            # Iter 229 (user bug — "same minutes on IN and OUT") — when a
+            # single-pair day was split ARITHMETICALLY for OT, the split
+            # boundary (IN + shift hours, e.g. 19:55 → "07:55") is NOT a
+            # real punch. Display the ACTUAL machine OUT (e.g. 08:03).
+            # Explicit OT pairs (in/out/in/out) keep their real times.
+            if ot_in_dt is not None and reg_out_dt is not None and ot_in_dt == reg_out_dt:
+                _out_display = ot_out_dt or out_dt
             # Unique source badges present in this day's punches.
             seen: List[str] = []
             for p in day_punches:
