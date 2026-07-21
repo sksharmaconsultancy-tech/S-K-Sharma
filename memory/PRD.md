@@ -1126,3 +1126,18 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - PENDING NEXT: Attendance Policy "Shift Rotational or Open" option — Open = per-day shift auto-detected from employee's FIRST IN punch (nearest shift master), attendance + OT computed on the detected shift. NOT implemented yet.
 - Local artifacts: /tmp/kankani_in.dat,/tmp/kankani_out.dat (re-download from customer-assets URLs in chat if lost).
 - deploy_vps_iter223.sh; temp_bundle → deploy223.sh.
+
+## Iter 227 + 228 (June 2026 fork session) — Rotational/Open shifts + "Wrong Data Minutes" import fix
+- FIXED P0: `shift_mode` NameError in server.py _validate_policy (previous session's blocker) — shift_mode ("fixed"|"open") now validated + persisted in attendance_policy.
+- Iter 227 SHIFT ROTATIONAL/OPEN: new `_is_shift_open(policy)` helper (server.py ~1406) — True when policy.shift_mode=="open" OR policy_master.shift_type in (rotational, open). Passed as firm_shift_open to ALL 3 resolve_shift_for_user call sites (compute-day ~6089, monthly grid ~17293, OT report ~17755). Open mode: shift auto-picked per day by circular distance of first IN punch to Shift Master start times; apply_resolved_shift_to_policy sets full_day/standard hours from shift duration. Frontend attendance-policy.tsx: new "Shift Mode" chip selector after ShiftMasterSection (testID ap-shift-mode-fixed/open); onPress also syncs policy_master.shift_type. Verified: bio 20 first-IN 19:55 → Night Shift 12h duty; bio 15 first-IN 08:03 → Day Shift 12h.
+- Iter 228 "WRONG DATA MINUTES" (user complaint, zk_dat_import.py) — ROOT CAUSE: shift-anchor blind re-alternation corrupted days with same-kind noise (IN 08:25 + IN 09:51 + OUT 20:17 → fake IN 08:25/OUT 09:51 = 1.4h). FIXES:
+  1. Anchor-alternation REMOVED → same-kind RUN COLLAPSE: IN-run keep FIRST (+ keep later IN if ≥6h gap = new session), OUT-run keep LAST. Slot kinds stay authoritative.
+  2. Edge-bounce drop (_drop_edge_bounces, run before conflict check AND after collapse): leading OUT followed by IN ≤15min → drop OUT; trailing IN ≤15min after OUT → drop IN.
+  3. Cross-day bounce: IN ≤15min after a night-exit OUT that was stitched to prev day → dropped (stitch loop).
+  4. Night-exit-on-IN-machine flip: morning (<12h) IN-file punch after prev-day dangling evening IN (6-16h) with another IN ≥6h later same day → kind flipped to "out", moved to prev day.
+  5. _is_bounce_in guard on stitch + flip: an "IN" ≤15min after an OUT is NOT treated as a night IN — kills phantom 22-24h double-shift days (emp 316 23.75h→11.73h etc.).
+  - stats["noise_collapsed"] counter added. Verified against real kankani .dat files: 0 timestamp errors, multi-punch 0-hr days 30→8 (rest genuinely ambiguous → flagged), phantom 24h days eliminated, all bio-20 night shifts intact.
+- Tests: /app/tests/test_iter228.py (+ 223/224 still pass). Audit harness /tmp/audit_import.py.
+- REMINDER (recurring): search_replace edits on server.py sometimes silently roll back — ALWAYS grep-verify after editing (happened again with _is_shift_open call sites).
+- User rectification steps after deploy: re-upload both .dat files → conflict report → "Replace Machine Data" once. For rotational firms: Attendance Policy → Shift Mode → Open/Rotational → Save.
+- deploy_vps_iter224.sh; push to github main done this session.

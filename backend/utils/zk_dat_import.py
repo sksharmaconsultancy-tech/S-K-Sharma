@@ -455,6 +455,9 @@ async def import_zk_dat_bytes(
         "inserted": 0,
         "duplicate": 0,
         "near_duplicate": 0,
+        # Iter 228 — same-kind noise punches dropped by the run-collapse
+        # (stray double INs / double OUTs beyond the 15-min window).
+        "noise_collapsed": 0,
         "unmapped": 0,
         "out_of_range": 0,
         "missing_kind": 0,
@@ -533,7 +536,36 @@ async def import_zk_dat_bytes(
         tagged.sort(key=lambda x: x[1]["dt"])
         prev_item: Optional[Dict[str, Any]] = None
         prev_date: Optional[str] = None
+
+        def _is_bounce_in(j: int) -> bool:
+            """True when tagged[j] is an IN sitting ≤15 min after an OUT —
+            i.e. a cross-machine double-read on the way out, NOT a real
+            (night/OT) session opener."""
+            if j <= 0 or j >= len(tagged):
+                return False
+            _d, _it = tagged[j]
+            _pd, _pit = tagged[j - 1]
+            return (
+                _it["raw_kind"] == "in"
+                and _pit["raw_kind"] == "out"
+                and (_it["dt"] - _pit["dt"]).total_seconds() <= 15 * 60
+            )
+
         for idx, (date_str, it) in enumerate(tagged):
+            # Iter 228 — cross-day bounce: an IN pressed within 15 min
+            # AFTER a night-shift exit OUT (which the stitch just moved
+            # to the previous day) is a double-read on the way out.
+            if (
+                it["slot"] in ("in_file", "out_file")
+                and it["raw_kind"] == "in"
+                and prev_item is not None
+                and prev_item["raw_kind"] == "out"
+                and prev_date is not None
+                and prev_date < date_str
+                and (it["dt"] - prev_item["dt"]).total_seconds() <= 15 * 60
+            ):
+                stats["noise_collapsed"] += 1
+                continue
             eff_date = date_str
             if (
                 it["slot"] in ("in_file", "out_file")
@@ -543,6 +575,9 @@ async def import_zk_dat_bytes(
                 and prev_date is not None
                 and prev_date < date_str
                 and (it["dt"] - prev_item["dt"]).total_seconds() <= 16 * 3600
+                # Iter 228 — the prev-day IN must be a REAL night IN, not
+                # a bounce double-read right after that day's OUT.
+                and not _is_bounce_in(idx - 1)
             ):
                 eff_date = prev_date
             elif (
@@ -561,6 +596,33 @@ async def import_zk_dat_bytes(
                 and (tagged[idx + 1][1]["dt"] - it["dt"]).total_seconds() >= 6 * 3600
             ):
                 eff_date = (it["dt"] - timedelta(days=1)).strftime("%Y-%m-%d")
+            elif (
+                # Iter 228 — NIGHT-EXIT ON THE WRONG MACHINE: a night
+                # shifter sometimes presses the IN terminal on the way
+                # OUT in the morning. Detected when a morning (<12:00)
+                # IN-file punch directly follows the PREVIOUS day's
+                # dangling evening IN (6-16 h gap = one night shift) and
+                # the same day has ANOTHER IN later (the real evening
+                # IN). The punch is re-classified as that night shift's
+                # OUT and moved to the previous day.
+                it["slot"] == "in_file"
+                and it["raw_kind"] == "in"
+                and it["dt"].hour < 12
+                and prev_item is not None
+                and prev_item["raw_kind"] == "in"
+                and prev_date is not None
+                and prev_date < date_str
+                and 6 * 3600 <= (it["dt"] - prev_item["dt"]).total_seconds() <= 16 * 3600
+                and not _is_bounce_in(idx - 1)
+                and any(
+                    t_date == date_str
+                    and t_it["raw_kind"] == "in"
+                    and (t_it["dt"] - it["dt"]).total_seconds() >= 6 * 3600
+                    for t_date, t_it in tagged[idx + 1:idx + 8]
+                )
+            ):
+                it["raw_kind"] = "out"
+                eff_date = prev_date
             pending_by_user_day.setdefault((uid, eff_date), []).append(it)
             prev_item, prev_date = it, eff_date
 
@@ -584,6 +646,39 @@ async def import_zk_dat_bytes(
         items = kept
         if not items:
             continue
+
+        # Iter 228 — CROSS-MACHINE BOUNCE (user bug "Wrong Data Minutes"):
+        # a worker pressing the OUT terminal seconds/minutes before the
+        # IN terminal (or vice-versa at day end) creates an unpairable
+        # stray punch that voids the whole day ("missing punch" → 0 hrs).
+        # Within the 15-min window already decided for duplicates:
+        #   • a LEADING OUT immediately followed by an IN → drop the OUT;
+        #   • a TRAILING IN immediately preceded by an OUT → drop the IN.
+        def _drop_edge_bounces(its: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            if not any(i["slot"] in ("in_file", "out_file") for i in its):
+                return its
+            _changed = True
+            while _changed and len(its) >= 2:
+                _changed = False
+                if (
+                    its[0]["raw_kind"] == "out"
+                    and its[1]["raw_kind"] == "in"
+                    and (its[1]["dt"] - its[0]["dt"]).total_seconds() <= 15 * 60
+                ):
+                    its = its[1:]
+                    stats["noise_collapsed"] += 1
+                    _changed = True
+                if (
+                    len(its) >= 2
+                    and its[-1]["raw_kind"] == "in"
+                    and its[-2]["raw_kind"] == "out"
+                    and (its[-1]["dt"] - its[-2]["dt"]).total_seconds() <= 15 * 60
+                ):
+                    its = its[:-1]
+                    stats["noise_collapsed"] += 1
+                    _changed = True
+            return its
+        items = _drop_edge_bounces(items)
 
         # Iter 224 (user rule) — EXISTING-DATA PROTECTION:
         #  • A day that already has MANUAL punches from the master is
@@ -655,36 +750,48 @@ async def import_zk_dat_bytes(
             slots_here == {"combined"} and len(items) >= 2 and len(raw_kinds) <= 1
         )
 
-        # Iter 223 (user rule) — BOTH FILES imported: classify according
-        # to the EMPLOYEE'S SHIFT. When the chronological kind sequence
-        # doesn't pair cleanly (two INs or two OUTs in a row), rebuild it
-        # by alternation anchored on the shift: first punch before the
-        # shift midpoint starts as IN (normal day → in/out/OT-in/OT-out,
-        # so an evening IN after a morning IN becomes the OT IN); a day
-        # whose first punch lands after the shift midpoint starts as OUT
-        # (missed morning punch / night shift spillover).
-        shift_anchor: Optional[str] = None
+        # Iter 228 (user bug — "Wrong Data Minutes") — BOTH FILES imported:
+        # the slot kinds are AUTHORITATIVE (IN.dat = IN, OUT.dat = OUT per
+        # the user's Iter-223 rule). The old behaviour re-alternated the
+        # whole day when the sequence wasn't clean, which turned a stray
+        # second IN (gate re-entry 1-2 h after arrival) into a fake OUT
+        # and collapsed a 12 h day into 1.4 h. NEW: keep the slot kinds
+        # and COLLAPSE same-kind runs instead —
+        #   • a run of consecutive INs  → keep the FIRST (arrival); a
+        #     later IN ≥ 6 h after the kept one opens a NEW session
+        #     (evening OT / night shift) so it is kept too;
+        #   • a run of consecutive OUTs → keep the LAST (true exit).
+        # The result alternates cleanly and pairs as first-IN → last-OUT.
         if "in_file" in slots_here and "out_file" in slots_here and len(items) >= 2:
             seq = [i["raw_kind"] for i in items]
-            # Iter 226 — TRUST the slot kinds whenever the chronological
-            # sequence alternates cleanly, REGARDLESS of the starting
-            # kind: a night shifter legitimately starts the day with the
-            # previous shift's OUT (or, after the cross-midnight stitch,
-            # with an evening IN). Only re-classify when two punches of
-            # the same kind sit next to each other.
             clean = all(seq[p] != seq[p + 1] for p in range(len(seq) - 1))
             if not clean:
-                mid = _shift_mid_min(items[0]["user"])
-                first_min = items[0]["dt"].hour * 60 + items[0]["dt"].minute
-                shift_anchor = "in" if first_min < mid else "out"
+                def _pick(run: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                    if run[0]["raw_kind"] == "out":
+                        return [run[-1]]
+                    kept_run = [run[0]]
+                    for r in run[1:]:
+                        if (r["dt"] - kept_run[-1]["dt"]).total_seconds() >= 6 * 3600:
+                            kept_run.append(r)
+                    return kept_run
+                collapsed: List[Dict[str, Any]] = []
+                run: List[Dict[str, Any]] = [items[0]]
+                for it in items[1:]:
+                    if it["raw_kind"] == run[-1]["raw_kind"]:
+                        run.append(it)
+                    else:
+                        collapsed.extend(_pick(run))
+                        run = [it]
+                collapsed.extend(_pick(run))
+                stats["noise_collapsed"] += len(items) - len(collapsed)
+                # Re-run the edge-bounce pass: the collapse can expose a
+                # leading OUT→IN (or trailing OUT→IN) bounce that was
+                # separated by dropped noise punches before.
+                items = _drop_edge_bounces(collapsed)
 
         for pos, item in enumerate(items):
             if force_alternate:
                 kind = "in" if pos % 2 == 0 else "out"
-            elif shift_anchor is not None:
-                even = shift_anchor
-                odd = "out" if shift_anchor == "in" else "in"
-                kind = even if pos % 2 == 0 else odd
             else:
                 kind = item["raw_kind"]
             dt = item["dt"]

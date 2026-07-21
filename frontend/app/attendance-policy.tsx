@@ -177,6 +177,9 @@ type Policy = {
   };
   // Iter 200 — allowed salary processes: actual | compliance | both.
   salary_allowed?: string;
+  // Iter 227 — Shift Mode: "fixed" (assigned shift) or "open"
+  // (Rotational — shift auto-detected daily from the first IN punch).
+  shift_mode?: "fixed" | "open";
   // Iter 204 — Employee Shift Change Management config.
   shift_change?: Record<string, any>;
   // Iter 205 — Week-Off Worked Attendance config.
@@ -241,6 +244,7 @@ function normalisePolicy(p: Policy): Policy {
       default_view: p.report_settings?.default_view || "inout",
     },
     salary_allowed: (p as any).salary_allowed || "both",
+    shift_mode: (p as any).shift_mode === "open" ? "open" : "fixed",
     // Iter 204 — Employee Shift Change Management config.
     shift_change: {
       enabled: !!(p as any).shift_change?.enabled,
@@ -530,6 +534,43 @@ export default function AttendancePolicyScreen() {
               add/edit/delete. Shifts here are then assigned PER EMPLOYEE
               from the Employee Master screen — no firm-wide bundle. */}
           <ShiftMasterSection isSuper={isSuper} />
+
+          {/* Iter 227 — Shift Mode: Fixed vs Open / Rotational. */}
+          <SectionTitle
+            title="Shift Mode"
+            hint="Fixed → every employee works their assigned shift. Open / Rotational → each day the shift is auto-detected from the employee's FIRST IN punch (nearest shift start time in Shift Master wins); Duty HRS and OT follow the detected shift."
+          />
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+            {([["fixed", "Fixed (Assigned Shift)"], ["open", "Open / Rotational (Auto by First IN)"]] as [string, string][]).map(([v, lbl]) => {
+              const on = (policy.shift_mode || "fixed") === v;
+              return (
+                <Pressable
+                  key={v}
+                  testID={`ap-shift-mode-${v}`}
+                  onPress={() => setPolicy({
+                    ...policy,
+                    shift_mode: v as "fixed" | "open",
+                    // Keep the Policy Master "Shift Type" sub-point in sync
+                    // so both controls always show the same mode.
+                    policy_master: {
+                      ...(policy.policy_master || {}),
+                      shift_type: v === "open" ? "open" : "fixed",
+                    },
+                  })}
+                  style={[scStyles.chip, on && scStyles.chipOn]}
+                >
+                  <Text style={[scStyles.chipTxt, on && scStyles.chipTxtOn]}>{lbl}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {(policy.shift_mode || "fixed") === "open" ? (
+            <Text style={[styles.helper, { marginTop: -6, marginBottom: 12 }]}>
+              Rotational shifts use the global Shift Master list above — make sure every
+              rotation shift (Morning / Evening / Night) exists there. Employees no longer
+              need a per-employee shift assignment; each day is matched automatically.
+            </Text>
+          ) : null}
 
           {/* Iter 175 — Policy Master Sub Points (user catalogue). */}
           <SectionTitle

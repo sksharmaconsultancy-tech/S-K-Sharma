@@ -1138,6 +1138,15 @@ def _validate_policy(raw: dict) -> dict:
             detail="policy_variant must be 'policy_1', 'policy_2' or null",
         )
     variant = variant_raw or None
+    # Iter 227 — Shift Mode: "fixed" (default; employee uses assigned shift)
+    # or "open" (Rotational/Open — shift auto-detected daily from the
+    # employee's FIRST IN punch; nearest shift-start wins).
+    shift_mode = str(raw.get("shift_mode") or "fixed").strip().lower()
+    if shift_mode not in ("fixed", "open"):
+        raise HTTPException(
+            status_code=400,
+            detail="shift_mode must be 'fixed' or 'open'",
+        )
     rounding_raw = raw.get("duty_hours_rounding_minutes", 0)
     try:
         rounding = int(rounding_raw)
@@ -1305,6 +1314,7 @@ def _validate_policy(raw: dict) -> dict:
         "night_shift_end": night_end,
         "notes": notes,
         "policy_variant": variant,
+        "shift_mode": shift_mode,
         "duty_hours_rounding_minutes": rounding,
         "standard_working_hours": standard_working,
         "week_off_full_day_payment_default": weekoff_full_default,
@@ -1393,16 +1403,31 @@ def _shift_duration_hours(shift: Optional[dict]) -> Optional[float]:
     return dur / 60.0
 
 
+def _is_shift_open(policy: Optional[dict]) -> bool:
+    """Iter 227 — True when the firm runs OPEN / ROTATIONAL shifts (daily
+    shift auto-detected from the first IN punch). Honours BOTH controls:
+    the top-level ``shift_mode`` and the Policy Master sub-point
+    ``shift_type`` (rotational / open)."""
+    p = policy or {}
+    if str(p.get("shift_mode") or "").lower() == "open":
+        return True
+    return str(
+        (p.get("policy_master") or {}).get("shift_type") or ""
+    ).lower() in ("rotational", "open")
+
+
 def resolve_shift_for_user(
     user: dict,
     sorted_punches: List[dict],
     shifts_by_id: Optional[Dict[str, dict]] = None,
     shifts_list: Optional[List[dict]] = None,
+    firm_shift_open: bool = False,
 ) -> Optional[dict]:
     """Resolve which shift applies to a single employee-day.
 
     Precedence:
-      1. ``attendance_policy_override.auto_shift_by_first_punch``  →
+      1. Firm Attendance Policy ``shift_mode == "open"`` (Iter 227) OR
+         ``attendance_policy_override.auto_shift_by_first_punch``  →
          pick the shift whose START time is closest (circular distance)
          to the first IN punch of the day.
       2. ``attendance_policy_override.shift_id`` → straight lookup in
@@ -1414,7 +1439,7 @@ def resolve_shift_for_user(
     shifts_list = shifts_list or list(shifts_by_id.values())
 
     # 1) Auto by first-IN
-    if ov.get("auto_shift_by_first_punch") and sorted_punches and shifts_list:
+    if (firm_shift_open or ov.get("auto_shift_by_first_punch")) and sorted_punches and shifts_list:
         first_in_min: Optional[int] = None
         for p in sorted_punches:
             if p.get("kind") == "in":
@@ -6060,7 +6085,8 @@ async def attendance_textile_compute_day(
     # Iter 204 — approved daily shift assignment wins.
     _dso = await load_daily_shift_overrides(emp.get("company_id") or "", date, date)
     resolved_shift = _dso.get((user_id, date)) or resolve_shift_for_user(
-        emp, punches, shifts_by_id, shifts_list)
+        emp, punches, shifts_by_id, shifts_list,
+        firm_shift_open=_is_shift_open(policy))
     policy = apply_resolved_shift_to_policy(policy, resolved_shift)
     policy = apply_employee_policy_override(policy, emp)
     summary = compute_textile_day(punches, policy, emp, d.weekday())
@@ -17264,6 +17290,7 @@ async def _compute_monthly_grid_data(
                 (emp_full.get("user_id"), date_key_iso),
             ) or resolve_shift_for_user(
                 emp_full, day_punches, shifts_by_id, shifts_list,
+                firm_shift_open=_is_shift_open(pol),
             )
             eff_policy = apply_resolved_shift_to_policy(pol, resolved_shift)
             # Iter 77z-final — Overlay per-employee policy overrides so
@@ -17725,6 +17752,7 @@ async def _build_ot_report_rows(
             day_min, in_dt, out_dt = _pp(day_punches)
             resolved_shift = resolve_shift_for_user(
                 emp_full, day_punches, shifts_by_id, shifts_list,
+                firm_shift_open=_is_shift_open(pol),
             )
             eff_policy = apply_resolved_shift_to_policy(pol, resolved_shift)
             eff_policy = apply_employee_policy_override(eff_policy, emp_full)
