@@ -1101,3 +1101,12 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 ## Iter 222 (June 2026 fork session, same day)
 - Attendance Report 1–31 day headers recolored to distinct deep teal (#0F766E) via new styles.hcellDayBg in attendance-grid.tsx (identity columns stay brandPrimary blue, totals stay brandSecondary). Verified via screenshot.
 - deploy_vps_iter220.sh; temp_bundle → deploy220.sh. Pushed to github main.
+
+## Iter 223 + 224 (June 2026 fork session, same day) — .dat import rules (utils/zk_dat_import.py)
+- IN.dat slot → ALL punches forced kind "in" (status byte ignored); OUT.dat → "out". Combined-file alternation preserved (slots_here == {"combined"}).
+- Near-duplicate filter: same (user, day, kind) within 15 min → ignored (stats.near_duplicate).
+- Evening IN with morning IN → stays "in" → 3rd punch → pipeline OT IN (verified sequence 08:00 in/17:00 out/19:00 in/23:00 out).
+- Both files → shift-anchored reclassify ONLY when chronological kinds don't pair cleanly: alternate from "in" if first punch < shift midpoint (override.shift_id → shift_masters start+dur/2, fallback 13:00) else "out". _build_bio_index now projects attendance_policy_override.
+- Iter 224 existing-data protection: per (user,day) — any ^manual source → day skipped ALWAYS (manual_locked_days). Machine sources ^(import|zkteco|bio|excel) with DIFFERENT data → skipped (existing_machine_days) unless on_existing="replace" (deletes only machine punches, replaced_days). Exact duplicates flow silent/idempotent. Endpoint /admin/attendance/zk-dat-import gained Form replace_existing; frontend zk-dat-import.tsx prompts confirm() then re-uploads with replace_existing=1; new StatRows.
+- Tests: /app/tests/test_iter223.py + test_iter224.py (all pass). NOTE: search_replace on this repo occasionally rolls back edits on lint-block — ALWAYS grep-verify (stats dict edit had to be re-applied).
+- deploy_vps_iter221.sh; temp_bundle → deploy221.sh.

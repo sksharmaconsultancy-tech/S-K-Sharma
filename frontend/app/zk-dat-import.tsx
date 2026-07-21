@@ -39,9 +39,13 @@ type ImportStats = {
   total_lines: number;
   inserted: number;
   duplicate: number;
+  near_duplicate?: number;
   unmapped: number;
   out_of_range: number;
   missing_kind: number;
+  manual_locked_days?: number;
+  existing_machine_days?: number;
+  replaced_days?: number;
   unmapped_bio_codes?: string[];
   source_tag?: string;
 };
@@ -67,7 +71,7 @@ export default function ZkDatImportScreen() {
   const canRun =
     !!companyId && (inFile || outFile || combinedFile || inExcel || outExcel) && !busy;
 
-  const upload = async () => {
+  const upload = async (replaceExisting = false) => {
     if (!canRun) return;
     setBusy(true);
     setResult(null);
@@ -75,6 +79,7 @@ export default function ZkDatImportScreen() {
     try {
       const form = new FormData();
       form.append("company_id", companyId);
+      if (replaceExisting) form.append("replace_existing", "1");
       const fISO = toISO(fromDate);
       const tISO = toISO(toDate);
       if (fISO) form.append("from_date", fISO);
@@ -107,6 +112,25 @@ export default function ZkDatImportScreen() {
         throw new Error(body?.detail || `HTTP ${res.status}`);
       }
       setResult(body as ImportStats);
+      // Iter 224 (user rule) — machine data already exists for some days:
+      // NEVER replaced silently. Prompt for permission, then re-run with
+      // replace_existing=1 (manual master punches are never touched).
+      const conflicts = Number((body as ImportStats).existing_machine_days || 0);
+      if (!replaceExisting && conflicts > 0) {
+        const ok = (globalThis as any).confirm
+          ? (globalThis as any).confirm(
+              `Machine punch data already exists for ${conflicts} employee-day(s) ` +
+              `and differs from this file.\n\nReplace the OLD machine data with ` +
+              `the NEW file data?\n\n(Manual punches from the master are kept ` +
+              `either way. Choose Cancel to keep all existing data.)`,
+            )
+          : false;
+        if (ok) {
+          setBusy(false);
+          await upload(true);
+          return;
+        }
+      }
     } catch (e: any) {
       setErr(e?.message || "Import failed");
     } finally {
@@ -271,7 +295,7 @@ export default function ZkDatImportScreen() {
           />
 
           <Pressable
-            onPress={upload}
+            onPress={() => upload()}
             disabled={!canRun}
             style={[styles.submitBtn, !canRun && { opacity: 0.5 }]}
             testID="zk-dat-submit"
@@ -299,6 +323,10 @@ export default function ZkDatImportScreen() {
               <StatRow label="Total lines parsed" value={result.total_lines} />
               <StatRow label="Inserted (new)" value={result.inserted} good />
               <StatRow label="Duplicates skipped" value={result.duplicate} />
+              <StatRow label="Double-reads ignored (≤15 min)" value={result.near_duplicate || 0} />
+              <StatRow label="Days kept (manual punches protected)" value={result.manual_locked_days || 0} />
+              <StatRow label="Days kept (existing machine data)" value={result.existing_machine_days || 0} />
+              <StatRow label="Days replaced (with permission)" value={result.replaced_days || 0} />
               <StatRow label="Unmapped bio codes" value={result.unmapped} warn={result.unmapped > 0} />
               <StatRow label="Out of date range" value={result.out_of_range} />
               <StatRow label="Missing IN/OUT kind" value={result.missing_kind} warn={result.missing_kind > 0} />

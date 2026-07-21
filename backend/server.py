@@ -16801,6 +16801,9 @@ async def upload_zk_dat(
     combined_file: Optional[UploadFile] = File(None),
     in_excel: Optional[UploadFile] = File(None),
     out_excel: Optional[UploadFile] = File(None),
+    # Iter 224 (user rule) — machine data already present is NOT replaced
+    # without permission; the UI prompts and re-submits with "1".
+    replace_existing: Optional[str] = Form(None),
     authorization: Optional[str] = Header(None),
 ):
     """Upload ZKTeco ``.dat`` files (IN, OUT, or combined) AND/OR Excel
@@ -16867,6 +16870,7 @@ async def upload_zk_dat(
         from_date=from_date,
         to_date=to_date,
         source_tag=f"import:zk_web_{admin.get('user_id','')[:8]}_{datetime.now(timezone.utc):%Y%m%dT%H%M%S}",
+        on_existing="replace" if str(replace_existing or "").strip() in ("1", "true", "yes") else "skip",
     )
     # Iter 93 — Persist the raw .dat content so the "Refresh Bio" button on
     # the Attendance Report can RE-READ old imports after bio-code fixes in

@@ -372,6 +372,9 @@ async def _build_bio_index(db, company_id: str) -> Dict[str, dict]:
         {
             "_id": 0, "user_id": 1, "name": 1,
             "employee_code": 1, "bio_code": 1,
+            # Iter 223 — shift override so imports can classify punches
+            # according to the employee's shift when both files are given.
+            "attendance_policy_override": 1,
         },
     ):
         key = str(u["bio_code"]).lstrip("0") or "0"
@@ -390,6 +393,7 @@ async def import_zk_dat_bytes(
     from_date: Optional[str] = None,   # YYYY-MM-DD (inclusive) - optional filter
     to_date: Optional[str] = None,     # YYYY-MM-DD (inclusive) - optional filter
     source_tag: Optional[str] = None,
+    on_existing: str = "skip",  # Iter 224 — "skip" (default) | "replace"
 ) -> Dict[str, Any]:
     """Parse + insert ZKTeco punches into ``db.attendance``. Idempotent:
     re-running with the same file is a no-op (dedupes by user + at + kind
@@ -407,18 +411,57 @@ async def import_zk_dat_bytes(
 
     # Iter 139 — every slot now accepts classic .dat text, the device .TXT
     # export AND the binary GENLOG .DAT backup (format auto-detected).
-    rows: List[Tuple[str, datetime, Optional[str]]] = []
-    rows.extend(decode_punch_bytes(in_bytes, default_kind="in"))
-    rows.extend(decode_punch_bytes(out_bytes, default_kind="out"))
-    rows.extend(decode_punch_bytes(combined_bytes))
+    # Iter 223 (user rules) —
+    #   • IN.dat slot  → EVERY punch is an IN punch (status byte ignored).
+    #   • OUT.dat slot → EVERY punch is an OUT punch.
+    #   • Near-duplicates (same employee, same day, same kind within
+    #     15 minutes) are IGNORED — only the first punch is kept.
+    #   • An evening IN punch on a day that already has a morning IN
+    #     lands as the 3rd punch → the pipeline reads it as OT IN.
+    #   • When BOTH files are imported, punches are sanity-checked
+    #     against the EMPLOYEE'S SHIFT (misordered kinds re-classified).
+    rows: List[Tuple[str, datetime, Optional[str], str]] = []
+    rows.extend([(b, d, "in", "in_file") for (b, d, _k) in decode_punch_bytes(in_bytes, default_kind="in")])
+    rows.extend([(b, d, "out", "out_file") for (b, d, _k) in decode_punch_bytes(out_bytes, default_kind="out")])
+    rows.extend([(b, d, k, "combined") for (b, d, k) in decode_punch_bytes(combined_bytes)])
+
+    # Shift Master catalogue (for the both-files shift classification).
+    shift_masters: Dict[str, dict] = {}
+    async for _s in db.shift_masters.find({}, {"_id": 0, "shift_id": 1, "start": 1, "end": 1}):
+        if _s.get("shift_id"):
+            shift_masters[_s["shift_id"]] = _s
+
+    def _hhmm_min(v: Optional[str]) -> Optional[int]:
+        try:
+            hh, mm = str(v).strip().split(":")[:2]
+            return int(hh) * 60 + int(mm)
+        except Exception:
+            return None
+
+    def _shift_mid_min(user: dict) -> int:
+        """Midpoint of the employee's assigned shift (minutes from 00:00).
+        Fallback 13:00 when no shift is assigned."""
+        ov = (user or {}).get("attendance_policy_override") or {}
+        sh = shift_masters.get(ov.get("shift_id") or "")
+        st = _hhmm_min((sh or {}).get("start"))
+        en = _hhmm_min((sh or {}).get("end"))
+        if st is None or en is None:
+            return 13 * 60
+        dur = (en - st) if en >= st else (en + 24 * 60 - st)
+        return (st + dur // 2) % (24 * 60)
 
     stats = {
         "total_lines": len(rows),
         "inserted": 0,
         "duplicate": 0,
+        "near_duplicate": 0,
         "unmapped": 0,
         "out_of_range": 0,
         "missing_kind": 0,
+        # Iter 224 (user rule) — existing-data protection counters.
+        "manual_locked_days": 0,      # days kept untouched (manual master punches)
+        "existing_machine_days": 0,   # days with DIFFERENT machine data → need permission
+        "replaced_days": 0,           # days replaced after permission
     }
     unmapped_seen: set = set()
     # Iter 86 - Buffer punches by (user_id, date) so we can re-classify
@@ -426,7 +469,7 @@ async def import_zk_dat_bytes(
     # same status byte (very common in ZKTeco combined exports).
     pending_by_user_day: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
 
-    for bio, dt, kind in rows:
+    for bio, dt, kind, slot in rows:
         if kind is None:
             stats["missing_kind"] += 1
             continue
@@ -467,26 +510,100 @@ async def import_zk_dat_bytes(
             "user": user,
             "dt": dt,
             "raw_kind": kind,
+            "slot": slot,
         })
     # Now flush pending groups with position-inferred kind when needed.
     for (uid, date_str), items in pending_by_user_day.items():
         items.sort(key=lambda x: x["dt"])
-        # If ALL rows on this (user, date) have identical raw_kind AND
-        # there are 2+ punches, force alternating kind. This handles the
-        # common ZKTeco `combined_file` case where every punch was
-        # exported with the same status byte.
-        #
-        # We DO NOT alternate when there's only one punch on a day
-        # because that would misclassify a user who legitimately
-        # uploaded only IN.dat (or only OUT.dat) - each of those files
-        # typically has exactly one punch per user per day. In such
-        # cases we honor the explicit default_kind picked from the
-        # filename slot.
+
+        # Iter 223 (user rule) — NEAR-DUPLICATE FILTER: within one
+        # employee-day, a punch of the same kind landing within 15 min
+        # of the previously kept punch is a double-read → ignored.
+        kept: List[Dict[str, Any]] = []
+        last_kept_by_kind: Dict[str, datetime] = {}
+        for item in items:
+            k = item["raw_kind"] or ""
+            prev = last_kept_by_kind.get(k)
+            if prev is not None and (item["dt"] - prev).total_seconds() <= 15 * 60:
+                stats["near_duplicate"] += 1
+                continue
+            last_kept_by_kind[k] = item["dt"]
+            kept.append(item)
+        items = kept
+        if not items:
+            continue
+
+        # Iter 224 (user rule) — EXISTING-DATA PROTECTION:
+        #  • A day that already has MANUAL punches from the master is
+        #    NEVER changed/replaced — the whole day is skipped.
+        #  • A day that already has MACHINE punches (device / previous
+        #    import) is NOT replaced without permission: by default the
+        #    day is skipped and reported so the portal can PROMPT the
+        #    admin; a re-run with on_existing="replace" (after the
+        #    prompt) deletes ONLY the old machine punches and imports
+        #    the new ones. Days whose new punches are all exact
+        #    duplicates flow through unchanged (idempotent re-upload).
+        _existing = await db.attendance.find(
+            {"user_id": uid, "date": date_str},
+            {"_id": 0, "at": 1, "kind": 1, "source": 1},
+        ).to_list(300)
+        if any(str(d.get("source") or "").startswith("manual") for d in _existing):
+            stats["manual_locked_days"] += 1
+            continue
+        _machine = [
+            d for d in _existing
+            if re.match(r"^(import|zkteco|bio|excel)", str(d.get("source") or ""))
+        ]
+        if _machine:
+            _have = {(d.get("at"), d.get("kind")) for d in _machine}
+            _all_dup = all(
+                (i["dt"].isoformat(), i["raw_kind"]) in _have for i in items
+            )
+            if not _all_dup:
+                if on_existing == "replace":
+                    await db.attendance.delete_many({
+                        "user_id": uid,
+                        "date": date_str,
+                        "source": {"$regex": "^(import|zkteco|bio|excel)"},
+                    })
+                    stats["replaced_days"] += 1
+                else:
+                    stats["existing_machine_days"] += 1
+                    continue
+
+        slots_here = {i["slot"] for i in items}
         raw_kinds = {i["raw_kind"] for i in items}
-        force_alternate = len(items) >= 2 and len(raw_kinds) <= 1
+        # Legacy combined-file behavior: when EVERY row carries the same
+        # status byte and there are 2+ punches, alternate in/out/in/out.
+        # Slot files (IN.dat / OUT.dat alone) keep their forced kinds.
+        force_alternate = (
+            slots_here == {"combined"} and len(items) >= 2 and len(raw_kinds) <= 1
+        )
+
+        # Iter 223 (user rule) — BOTH FILES imported: classify according
+        # to the EMPLOYEE'S SHIFT. When the chronological kind sequence
+        # doesn't pair cleanly (two INs or two OUTs in a row), rebuild it
+        # by alternation anchored on the shift: first punch before the
+        # shift midpoint starts as IN (normal day → in/out/OT-in/OT-out,
+        # so an evening IN after a morning IN becomes the OT IN); a day
+        # whose first punch lands after the shift midpoint starts as OUT
+        # (missed morning punch / night shift spillover).
+        shift_anchor: Optional[str] = None
+        if "in_file" in slots_here and "out_file" in slots_here and len(items) >= 2:
+            seq = [i["raw_kind"] for i in items]
+            clean = all(seq[p] != seq[p + 1] for p in range(len(seq) - 1)) and seq[0] == "in"
+            if not clean:
+                mid = _shift_mid_min(items[0]["user"])
+                first_min = items[0]["dt"].hour * 60 + items[0]["dt"].minute
+                shift_anchor = "in" if first_min < mid else "out"
+
         for pos, item in enumerate(items):
             if force_alternate:
                 kind = "in" if pos % 2 == 0 else "out"
+            elif shift_anchor is not None:
+                even = shift_anchor
+                odd = "out" if shift_anchor == "in" else "in"
+                kind = even if pos % 2 == 0 else odd
             else:
                 kind = item["raw_kind"]
             dt = item["dt"]
