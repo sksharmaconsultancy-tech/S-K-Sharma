@@ -35,6 +35,15 @@ function formatDdmmyyyy(raw: string): string {
   return `${d.slice(0, 2)}-${d.slice(2, 4)}-${d.slice(4)}`;
 }
 
+type ConflictRow = {
+  type: "machine_conflict" | "manual_protected";
+  date: string;
+  employee_code?: string | null;
+  name?: string | null;
+  existing: string[];
+  new: string[];
+};
+
 type ImportStats = {
   total_lines: number;
   inserted: number;
@@ -46,6 +55,7 @@ type ImportStats = {
   manual_locked_days?: number;
   existing_machine_days?: number;
   replaced_days?: number;
+  conflicts?: ConflictRow[];
   unmapped_bio_codes?: string[];
   source_tag?: string;
 };
@@ -112,25 +122,10 @@ export default function ZkDatImportScreen() {
         throw new Error(body?.detail || `HTTP ${res.status}`);
       }
       setResult(body as ImportStats);
-      // Iter 224 (user rule) — machine data already exists for some days:
-      // NEVER replaced silently. Prompt for permission, then re-run with
-      // replace_existing=1 (manual master punches are never touched).
-      const conflicts = Number((body as ImportStats).existing_machine_days || 0);
-      if (!replaceExisting && conflicts > 0) {
-        const ok = (globalThis as any).confirm
-          ? (globalThis as any).confirm(
-              `Machine punch data already exists for ${conflicts} employee-day(s) ` +
-              `and differs from this file.\n\nReplace the OLD machine data with ` +
-              `the NEW file data?\n\n(Manual punches from the master are kept ` +
-              `either way. Choose Cancel to keep all existing data.)`,
-            )
-          : false;
-        if (ok) {
-          setBusy(false);
-          await upload(true);
-          return;
-        }
-      }
+      // Iter 225 (user request) — when existing data is found, a detailed
+      // CONFLICT REPORT is rendered below (code, name, date, existing vs
+      // new punches). The admin verifies directly and clicks "Replace
+      // Machine Data" to approve — manual punches are never replaced.
     } catch (e: any) {
       setErr(e?.message || "Import failed");
     } finally {
@@ -343,6 +338,66 @@ export default function ZkDatImportScreen() {
               ) : null}
             </View>
           ) : null}
+
+          {/* Iter 225 (user request) — detailed CONFLICT REPORT: verify
+              directly, then approve/deny replacement. Manual-punch days
+              are shown too but are never replaceable. */}
+          {result?.conflicts?.length ? (
+            <View style={styles.conflictBox}>
+              <Text style={styles.conflictTitle}>
+                ⚠ Existing Data Found — Verify Before Replacing
+              </Text>
+              <Text style={styles.hint}>
+                {Number(result.existing_machine_days || 0)} day(s) hold different
+                machine data · {Number(result.manual_locked_days || 0)} day(s)
+                protected by manual punches (never replaced).
+              </Text>
+              <View style={styles.confHead}>
+                <Text style={[styles.confCell, { width: 70, fontWeight: "800" }]}>Code</Text>
+                <Text style={[styles.confCell, { width: 140, fontWeight: "800" }]}>Name</Text>
+                <Text style={[styles.confCell, { width: 90, fontWeight: "800" }]}>Date</Text>
+                <Text style={[styles.confCell, { flex: 1, fontWeight: "800" }]}>Existing punches</Text>
+                <Text style={[styles.confCell, { flex: 1, fontWeight: "800" }]}>New file punches</Text>
+                <Text style={[styles.confCell, { width: 110, fontWeight: "800" }]}>Status</Text>
+              </View>
+              <ScrollView style={{ maxHeight: 320 }}>
+                {result.conflicts.map((c, i) => (
+                  <View key={`${c.employee_code}-${c.date}-${i}`} style={[styles.confRow, i % 2 ? styles.confRowAlt : null]}>
+                    <Text style={[styles.confCell, { width: 70 }]}>{c.employee_code || "—"}</Text>
+                    <Text style={[styles.confCell, { width: 140 }]} numberOfLines={1}>{c.name || "—"}</Text>
+                    <Text style={[styles.confCell, { width: 90 }]}>{c.date}</Text>
+                    <Text style={[styles.confCell, { flex: 1 }]}>{(c.existing || []).join(", ") || "—"}</Text>
+                    <Text style={[styles.confCell, { flex: 1 }]}>{(c.new || []).join(", ") || "—"}</Text>
+                    <Text style={[styles.confCell, { width: 110, fontWeight: "700", color: c.type === "manual_protected" ? "#059669" : "#B45309" }]}>
+                      {c.type === "manual_protected" ? "Manual — kept" : "Needs approval"}
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
+              {Number(result.existing_machine_days || 0) > 0 ? (
+                <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
+                  <Pressable
+                    style={[styles.runBtn, { backgroundColor: "#B91C1C", flex: 1 }]}
+                    disabled={busy}
+                    onPress={() => upload(true)}
+                    testID="replace-machine-data"
+                  >
+                    <Text style={styles.runBtnTxt}>
+                      Replace Machine Data ({result.existing_machine_days} day{Number(result.existing_machine_days) === 1 ? "" : "s"})
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.runBtn, { backgroundColor: colors.onSurfaceTertiary, flex: 1 }]}
+                    disabled={busy}
+                    onPress={() => setResult({ ...result, conflicts: [] })}
+                    testID="keep-existing-data"
+                  >
+                    <Text style={styles.runBtnTxt}>Keep Existing Data</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -505,6 +560,34 @@ const styles = StyleSheet.create({
     color: colors.onSurface, fontWeight: "800", fontSize: type.md,
     marginBottom: 4,
   },
+  // Iter 225 — conflict report card
+  conflictBox: {
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: "#FFFBEB",
+    borderWidth: 1,
+    borderColor: "#F59E0B",
+    gap: 4,
+  },
+  conflictTitle: {
+    color: "#92400E", fontWeight: "800", fontSize: type.md, marginBottom: 4,
+  },
+  confHead: {
+    flexDirection: "row", gap: 8, paddingVertical: 6, marginTop: 6,
+    borderBottomWidth: 1, borderBottomColor: "#F59E0B",
+  },
+  confRow: {
+    flexDirection: "row", gap: 8, paddingVertical: 6,
+    borderBottomWidth: 1, borderBottomColor: "rgba(245,158,11,0.25)",
+  },
+  confRowAlt: { backgroundColor: "rgba(245,158,11,0.06)" },
+  confCell: { color: "#78350F", fontSize: 12 },
+  runBtn: {
+    paddingVertical: 12, borderRadius: radius.md, alignItems: "center",
+    justifyContent: "center",
+  },
+  runBtnTxt: { color: "#fff", fontWeight: "800", fontSize: 13 },
   statRow: {
     flexDirection: "row",
     justifyContent: "space-between",

@@ -1110,3 +1110,10 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Iter 224 existing-data protection: per (user,day) — any ^manual source → day skipped ALWAYS (manual_locked_days). Machine sources ^(import|zkteco|bio|excel) with DIFFERENT data → skipped (existing_machine_days) unless on_existing="replace" (deletes only machine punches, replaced_days). Exact duplicates flow silent/idempotent. Endpoint /admin/attendance/zk-dat-import gained Form replace_existing; frontend zk-dat-import.tsx prompts confirm() then re-uploads with replace_existing=1; new StatRows.
 - Tests: /app/tests/test_iter223.py + test_iter224.py (all pass). NOTE: search_replace on this repo occasionally rolls back edits on lint-block — ALWAYS grep-verify (stats dict edit had to be re-applied).
 - deploy_vps_iter221.sh; temp_bundle → deploy221.sh.
+
+## Iter 225 (June 2026 fork session, same day)
+- Detailed import CONFLICT REPORT (user chose option a): import_zk_dat_bytes collects stats["conflicts"] (≤300 rows: type manual_protected|machine_conflict, date, employee_code, name, existing[] "HH:MM KIND (manual)", new[]). Frontend zk-dat-import.tsx renders amber conflict card (table Code/Name/Date/Existing/New/Status) with "Replace Machine Data" (re-upload replace_existing=1) / "Keep Existing Data" buttons; confirm() prompt removed. Manual days shown as "Manual — kept" (never replaceable). Verified backend payload.
+- PENDING LIVE ISSUES (need user specifics — cannot reproduce locally, local July grid has 0 violations):
+  1. "Round HRS to nearest (minutes)" (duty_hours_rounding_minutes, firm=15 special :00/:30 snap) — user says live Duty HRS not honoring it. Rounding IS applied at server.py 17318/17323 (pair path), 1903 (compute_textile_day), 17745 (2nd path). Need firm+employee+date example.
+  2. "IN/OUT sheet Total Duty HRS not showing for some employees" — hypotheses: policy_2 under-8h days → ALL hrs to OT so duty_hours=0 (frontend line 1124 shows totals.duty_hours); or missing_punch anomaly days (single punch) contribute 0. Need example employee.
+- deploy_vps_iter222.sh; temp_bundle → deploy222.sh.

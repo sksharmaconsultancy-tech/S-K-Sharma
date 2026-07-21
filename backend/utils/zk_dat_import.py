@@ -464,6 +464,10 @@ async def import_zk_dat_bytes(
         "replaced_days": 0,           # days replaced after permission
     }
     unmapped_seen: set = set()
+    # Iter 225 (user request) — detailed CONFLICT REPORT: every skipped
+    # day is listed (code, name, date, existing vs new punches) so the
+    # admin can VERIFY DIRECTLY before granting replace permission.
+    conflicts: List[Dict[str, Any]] = []
     # Iter 86 - Buffer punches by (user_id, date) so we can re-classify
     # kind by punch-position when the source file gave every row the
     # same status byte (very common in ZKTeco combined exports).
@@ -547,8 +551,29 @@ async def import_zk_dat_bytes(
             {"user_id": uid, "date": date_str},
             {"_id": 0, "at": 1, "kind": 1, "source": 1},
         ).to_list(300)
+
+        def _conflict_row(ctype: str) -> Dict[str, Any]:
+            _u = items[0]["user"]
+            return {
+                "type": ctype,
+                "date": date_str,
+                "employee_code": _u.get("employee_code"),
+                "name": _u.get("name"),
+                "existing": [
+                    f"{str(d.get('at') or '')[11:16]} {str(d.get('kind') or '?').upper()}"
+                    + (" (manual)" if str(d.get("source") or "").startswith("manual") else "")
+                    for d in sorted(_existing, key=lambda x: str(x.get("at") or ""))
+                ],
+                "new": [
+                    f"{i['dt']:%H:%M} {str(i['raw_kind'] or '?').upper()}"
+                    for i in items
+                ],
+            }
+
         if any(str(d.get("source") or "").startswith("manual") for d in _existing):
             stats["manual_locked_days"] += 1
+            if len(conflicts) < 300:
+                conflicts.append(_conflict_row("manual_protected"))
             continue
         _machine = [
             d for d in _existing
@@ -569,6 +594,8 @@ async def import_zk_dat_bytes(
                     stats["replaced_days"] += 1
                 else:
                     stats["existing_machine_days"] += 1
+                    if len(conflicts) < 300:
+                        conflicts.append(_conflict_row("machine_conflict"))
                     continue
 
         slots_here = {i["slot"] for i in items}
@@ -667,5 +694,8 @@ async def import_zk_dat_bytes(
     stats["unmapped_bio_codes"] = sorted(
         unmapped_seen, key=lambda x: int(x) if x.isdigit() else 0,
     )[:50]
+    # Iter 225 — conflict report rows (sorted by date, then code).
+    conflicts.sort(key=lambda c: (c.get("date") or "", str(c.get("employee_code") or "")))
+    stats["conflicts"] = conflicts
     stats["source_tag"] = tag
     return stats
