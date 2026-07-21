@@ -1117,3 +1117,12 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   1. "Round HRS to nearest (minutes)" (duty_hours_rounding_minutes, firm=15 special :00/:30 snap) — user says live Duty HRS not honoring it. Rounding IS applied at server.py 17318/17323 (pair path), 1903 (compute_textile_day), 17745 (2nd path). Need firm+employee+date example.
   2. "IN/OUT sheet Total Duty HRS not showing for some employees" — hypotheses: policy_2 under-8h days → ALL hrs to OT so duty_hours=0 (frontend line 1124 shows totals.duty_hours); or missing_punch anomaly days (single punch) contribute 0. Need example employee.
 - deploy_vps_iter222.sh; temp_bundle → deploy222.sh.
+
+## Iter 226 (June 2026 fork session, same day) — NIGHT SHIFT import fix (bio 20 JITENDRA SINGH)
+- ROOT CAUSE: shift-anchor reclassify required seq[0]=="in"; night shifter day = OUT 08:03 + IN 19:55 → flipped to day shift (no shift assigned → 13:00 fallback anchor).
+- FIXES in zk_dat_import.py: (1) clean = alternating regardless of starting kind (trust slot kinds); (2) CROSS-MIDNIGHT STITCH: slot OUT whose prev punch is prev-day IN with gap ≤16h → date moved to prev day; (3) leading morning OUT (<12:00, first of its day, followed same-day by IN ≥6h later) → date-1 (prev month/import spillover).
+- Verified with user's real kankani in/out .dat files: bio 20 grid now 01..: in 19:55, out 03:55(+OT to 08:03), 12.0h, no anomaly; leading July-1 08:03 OUT lands on 2026-06-30.
+- User instruction to rectify live data: re-upload both files after deploy → conflict report → "Replace Machine Data" once.
+- PENDING NEXT: Attendance Policy "Shift Rotational or Open" option — Open = per-day shift auto-detected from employee's FIRST IN punch (nearest shift master), attendance + OT computed on the detected shift. NOT implemented yet.
+- Local artifacts: /tmp/kankani_in.dat,/tmp/kankani_out.dat (re-download from customer-assets URLs in chat if lost).
+- deploy_vps_iter223.sh; temp_bundle → deploy223.sh.

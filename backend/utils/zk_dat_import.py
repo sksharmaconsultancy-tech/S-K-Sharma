@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
@@ -516,6 +516,54 @@ async def import_zk_dat_bytes(
             "raw_kind": kind,
             "slot": slot,
         })
+
+    # Iter 226 (user bug — NIGHT SHIFT, bio 20) — CROSS-MIDNIGHT STITCH:
+    # a night shifter punches IN in the evening and OUT the next morning.
+    # When both slot files are used, a morning OUT whose immediately
+    # preceding punch is an IN on the PREVIOUS calendar day (gap ≤ 16 h)
+    # belongs to that previous day's shift — move it into the previous
+    # day's group so the pair reads IN 19:55 → OUT 08:03 (next morning)
+    # instead of the OUT being mistaken for a day-shift IN.
+    _by_user: Dict[str, List[Tuple[str, Dict[str, Any]]]] = {}
+    for (uid, date_str), its in pending_by_user_day.items():
+        for it in its:
+            _by_user.setdefault(uid, []).append((date_str, it))
+    pending_by_user_day = {}
+    for uid, tagged in _by_user.items():
+        tagged.sort(key=lambda x: x[1]["dt"])
+        prev_item: Optional[Dict[str, Any]] = None
+        prev_date: Optional[str] = None
+        for idx, (date_str, it) in enumerate(tagged):
+            eff_date = date_str
+            if (
+                it["slot"] in ("in_file", "out_file")
+                and it["raw_kind"] == "out"
+                and prev_item is not None
+                and prev_item["raw_kind"] == "in"
+                and prev_date is not None
+                and prev_date < date_str
+                and (it["dt"] - prev_item["dt"]).total_seconds() <= 16 * 3600
+            ):
+                eff_date = prev_date
+            elif (
+                # Iter 226b — leading night-shift spillover: a MORNING OUT
+                # that opens the employee's day (no earlier punch that
+                # date) and is followed the same day by an IN 6+ hours
+                # later belongs to the PREVIOUS day's night shift (its IN
+                # sits in the previous import/month).
+                it["slot"] in ("in_file", "out_file")
+                and it["raw_kind"] == "out"
+                and it["dt"].hour < 12
+                and (prev_date is None or prev_date < date_str)
+                and idx + 1 < len(tagged)
+                and tagged[idx + 1][0] == date_str
+                and tagged[idx + 1][1]["raw_kind"] == "in"
+                and (tagged[idx + 1][1]["dt"] - it["dt"]).total_seconds() >= 6 * 3600
+            ):
+                eff_date = (it["dt"] - timedelta(days=1)).strftime("%Y-%m-%d")
+            pending_by_user_day.setdefault((uid, eff_date), []).append(it)
+            prev_item, prev_date = it, eff_date
+
     # Now flush pending groups with position-inferred kind when needed.
     for (uid, date_str), items in pending_by_user_day.items():
         items.sort(key=lambda x: x["dt"])
@@ -618,7 +666,13 @@ async def import_zk_dat_bytes(
         shift_anchor: Optional[str] = None
         if "in_file" in slots_here and "out_file" in slots_here and len(items) >= 2:
             seq = [i["raw_kind"] for i in items]
-            clean = all(seq[p] != seq[p + 1] for p in range(len(seq) - 1)) and seq[0] == "in"
+            # Iter 226 — TRUST the slot kinds whenever the chronological
+            # sequence alternates cleanly, REGARDLESS of the starting
+            # kind: a night shifter legitimately starts the day with the
+            # previous shift's OUT (or, after the cross-midnight stitch,
+            # with an evening IN). Only re-classify when two punches of
+            # the same kind sit next to each other.
+            clean = all(seq[p] != seq[p + 1] for p in range(len(seq) - 1))
             if not clean:
                 mid = _shift_mid_min(items[0]["user"])
                 first_min = items[0]["dt"].hour * 60 + items[0]["dt"].minute
