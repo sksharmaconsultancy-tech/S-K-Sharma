@@ -972,6 +972,10 @@ const stickyCol = (left: number, z = 5): any =>
   Platform.OS === "web" ? { position: "sticky", left, zIndex: z } : null;
 const STICKY_TOP: any =
   Platform.OS === "web" ? { position: "sticky", top: 0, zIndex: 25 } : null;
+// Iter 221 (user bug) — rows inside the horizontal scroller get width-capped
+// to the viewport on web, so their background stopped painting after ~day 25
+// (header turned blank/white past the 25th). Force rows to fit their content.
+const ROW_FIT: any = Platform.OS === "web" ? { minWidth: "max-content" } : null;
 
 function GridHeader({
   data,
@@ -1000,7 +1004,7 @@ function GridHeader({
     if (onSort) onSort(col);
   };
   return (
-    <View style={[styles.headerRow, STICKY_TOP]}>
+    <View style={[styles.headerRow, STICKY_TOP, ROW_FIT]}>
       <Pressable
         onPress={tap("name")}
         style={[styles.hcell, styles.hcellFrozen, { width: COL.name }, stickyCol(LEFT.name, 30)]}
@@ -1088,7 +1092,7 @@ function GridRow({
         : COL.dayHours;
   const frozenBg = { backgroundColor: zebra ? colors.surfaceSecondary : colors.surface };
   return (
-    <View style={[styles.row, zebra && styles.rowZebra]}>
+    <View style={[styles.row, zebra && styles.rowZebra, ROW_FIT]}>
       <View style={[styles.cell, { width: COL.name }, stickyCol(LEFT.name), frozenBg]}>
         <Text style={styles.nameTxt} numberOfLines={1}>{emp.name}</Text>
         {emp.employee_group ? (
@@ -1550,6 +1554,9 @@ const styles = StyleSheet.create({
     borderRightWidth: 1,
     borderRightColor: "rgba(255,255,255,0.15)",
     justifyContent: "center",
+    // Iter 221 — each header cell paints its own solid bg so day headers
+    // never go blank past the viewport width (bug: blank after the 25th).
+    backgroundColor: colors.brandPrimary,
   },
   hcellTxt: { color: "#fff", fontWeight: "700", fontSize: 11, letterSpacing: 0.4 },
   // Iter 205b — frozen header identity cells need their own SOLID bg so day

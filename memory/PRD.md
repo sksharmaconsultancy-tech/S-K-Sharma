@@ -1093,3 +1093,7 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   - Frontend: roles.tsx staff modal (Mobile always visible/digits-only, PIN field, optional password with linking hint, EMPLOYEE-LINKED pill); sub-admins.tsx (PIN field create+edit, phone digits-only, email-in-phone never prefilled).
   - CAUTION for future agents: search_replace on server.py may silently apply elsewhere / rollback on lint-block — ALWAYS grep-verify edits landed (one edit had to be re-applied; also fixed stray duplicated shutdown block `de_router(...)` at EOF).
 - Verified via /tmp/test_iter220.py (15 checks all pass). deploy_vps_iter218.sh (incl. live phone-field cleanup step); temp_bundle → deploy218.sh.
+
+## Iter 221 (June 2026 fork session, same day)
+- Attendance Report bug "blank day headers after 25th": ROOT CAUSE — on web, headerRow (sticky top flex row) width caps at viewport, so its blue background stopped painting past ~day 25 while cells (transparent bg + white text) turned invisible. FIX in attendance-grid.tsx: (1) styles.hcell now paints its own solid brandPrimary bg; (2) ROW_FIT = { minWidth: "max-content" } (web) applied to headerRow + body rows so backgrounds/zebra span full scroll content. Verified via DOM check (day-28 header bg rgb(37,99,235)) + screenshot with all 26–31 headers visible.
+- deploy_vps_iter219.sh; temp_bundle → deploy219.sh.
