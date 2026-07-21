@@ -543,6 +543,12 @@ export default function AutomationStudioScreen() {
                 <Text style={st.monitorMeta}>
                   {session.portal_label} · {session.flow_label}
                 </Text>
+                {isLive && (
+                  <Pressable style={st.stopTop} onPress={() => control("stop")}>
+                    <Ionicons name="stop-circle" size={16} color="#fff" />
+                    <Text style={st.stopTopTxt}>Stop</Text>
+                  </Pressable>
+                )}
               </View>
 
               {/* Progress */}
@@ -801,6 +807,12 @@ const st = StyleSheet.create({
   safety: { fontSize: 11.5, color: colors.onSurfaceTertiary, marginTop: spacing.sm, lineHeight: 16 },
   monitorHead: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm },
   monitorMeta: { fontSize: 12.5, color: colors.onSurfaceSecondary, flex: 1 },
+  stopTop: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    backgroundColor: "#DC2626", borderRadius: radius.pill,
+    paddingHorizontal: 14, paddingVertical: 7,
+  },
+  stopTopTxt: { fontSize: 13, fontWeight: "800", color: "#fff" },
   statusPill: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
   liveDot: { width: 8, height: 8, borderRadius: 4 },
   statusTxt: { fontSize: 12, fontWeight: "800", textTransform: "capitalize" },
