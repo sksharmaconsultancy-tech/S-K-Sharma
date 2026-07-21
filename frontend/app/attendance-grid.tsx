@@ -689,6 +689,16 @@ export default function AttendanceGridScreen() {
           <Ionicons name="time-outline" size={14} color="#fff" />
           <Text style={styles.exportBtnTxt}>OT Report</Text>
         </Pressable>
+
+        {/* Iter 232 — Attendance Doctor (blank Duty HRS diagnosis + repair). */}
+        <Pressable
+          onPress={() => router.push("/attendance-doctor")}
+          style={styles.exportBtnOt}
+          testID="ms-open-doctor"
+        >
+          <Ionicons name="medkit-outline" size={14} color="#fff" />
+          <Text style={styles.exportBtnTxt}>Doctor</Text>
+        </Pressable>
       </View>
 
       {/* Iter 77 - Date range + source-badge legend */}

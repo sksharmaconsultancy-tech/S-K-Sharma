@@ -20215,6 +20215,8 @@ from routes.locations import router as locations_router  # noqa: E402
 app.include_router(locations_router)
 from routes.pf_reports import router as pf_reports_router  # noqa: E402
 app.include_router(pf_reports_router)
+from routes.attendance_doctor import router as attendance_doctor_router  # noqa: E402
+app.include_router(attendance_doctor_router)
 app.include_router(compliance_settings_router)
 from routes.report_formats import router as report_formats_router  # noqa: E402
 app.include_router(report_formats_router)
