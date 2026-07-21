@@ -575,6 +575,29 @@ class Ctx:
         await self._unhighlight(locator)
         await self.sleep(0.3)
 
+    async def paste(self, locator, text: str, desc: str = "") -> None:
+        """Enter text INSTANTLY (paste-style) — used for the captcha so
+        exactly what the user typed goes into the portal's captcha bar,
+        with no re-reading and no slow char-by-char typing."""
+        await self.highlight(locator)
+        if desc:
+            self.log(f"📋 Pasting {desc}: {text}")
+        try:
+            await locator.click(timeout=4000)
+        except Exception:
+            pass
+        try:
+            await locator.fill(str(text), timeout=self.timeout_ms)
+        except Exception:
+            # Fallback: clear + fast type
+            try:
+                await locator.fill("", timeout=3000)
+            except Exception:
+                pass
+            await locator.press_sequentially(str(text), delay=15)
+        await self._unhighlight(locator)
+        await self.sleep(0.3)
+
     async def first_visible(self, selectors: List[str]):
         for sel in selectors:
             try:
@@ -799,13 +822,14 @@ async def _step_captcha_and_login(ctx: Ctx) -> None:
             await _reload_captcha(ctx.page)
             await ctx.sleep(1.0)
             continue
-        ctx.log(f"Captcha entered: {text}")
+        ctx.log(f"Captcha entered by user: {text}")
         cap_loc = await ctx.first_visible([
             "input[name*='captcha' i]", "input[id*='captcha' i]",
             "input[placeholder*='captcha' i]",
         ])
         if cap_loc:
-            await ctx.type(cap_loc, text, "Captcha")
+            # Paste EXACTLY what the user typed — no AI, no re-reading.
+            await ctx.paste(cap_loc, text, "captcha into the portal")
         else:
             await _fill_captcha_input(ctx.page, text)
         submit_loc = await ctx.first_visible([
