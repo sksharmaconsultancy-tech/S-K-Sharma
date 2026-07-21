@@ -20,13 +20,15 @@ D1 = "2026-04-06"  # empty month locally
 D2 = "2026-04-07"
 D3 = "2026-04-08"
 
-# Case 1 (D1): in 08:25 + stray in 09:51 (>15min, <6h) + out 20:17
-#              + trailing bounce in 20:20 (≤15 min after OUT → dropped)
-# Case 2 (D2): leading out 08:00 + in 08:04 (bounce) + out 20:00
-#              + night IN 20:30 (>15 min after OUT → kept)
+# Case 1 (D1): in 08:25 + stray in 09:51 (>15min, <6h → collapsed) + out
+#              20:17 + quick in 20:20 — the quick IN PAIRS with the next
+#              morning OUT (D2 08:00) → REAL night shift (double duty,
+#              iter 231 user confirmation) → kept + OUT stitched to D1.
+# Case 2 (D2): in 08:04 (3.6 min after the night OUT — pairs with out
+#              20:00 → kept) + out 20:00 + night IN 20:30 (kept).
 # Case 3 (D2 night → D3): morning IN-file punch 08:05 on D3 directly after
-#              D2's dangling evening IN → flipped to OUT on D2; evening IN
-#              20:10 on D3 stays (dangling until next file).
+#              D2's evening IN → flipped to OUT on D2; evening IN 20:10 on
+#              D3 stays (dangling until next file).
 IN_DAT = f"""
 {{BIO}}\t{D1} 08:25:00\t1
 {{BIO}}\t{D1} 09:51:00\t1
@@ -74,13 +76,14 @@ async def main():
     print("D2:", s2)
     print("D3:", s3)
 
-    # Case 1 — stray 09:51 IN collapsed + trailing 20:20 bounce dropped;
-    # day pairs 08:25 → 20:17.
-    assert s1 == [("04-06 08:25", "in"), ("04-06 20:17", "out")], s1
-    print("case 1 ✓ run-collapse + trailing bounce (no fake 1.4h day)")
+    # Case 1 — stray 09:51 IN collapsed; quick IN 20:20 kept as the REAL
+    # night opener; next-morning OUT 08:00 stitched back → double duty.
+    assert s1 == [("04-06 08:25", "in"), ("04-06 20:17", "out"),
+                  ("04-06 20:20", "in"), ("04-07 08:00", "out")], s1
+    print("case 1 ✓ run-collapse + double-duty night IN kept & stitched")
 
-    # Case 2 — leading OUT 08:00 dropped (bounce); night IN 20:30 kept and
-    # its OUT is the flipped D3-morning 08:05 punch (case 3).
+    # Case 2 — quick morning IN 08:04 kept (pairs with 20:00 OUT); night
+    # IN 20:30 kept and its OUT is the flipped D3-morning 08:05 (case 3).
     assert s2 == [("04-07 08:04", "in"), ("04-07 20:00", "out"),
                   ("04-07 20:30", "in"), ("04-08 08:05", "out")], s2
     print("case 2+3 ✓ bounces dropped; night exit on IN machine flipped to OUT on prev day")

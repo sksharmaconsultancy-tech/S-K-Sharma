@@ -1156,3 +1156,9 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 7. PF CHALLAN routes/pf_reports.py — _month_challan extras (eps_subscribers, total_emps, non_pf, non_pf_wages); _challan_pdf + challan.xlsx rebuilt to SBI Combined Challan format (subscribers/wages rows, particulars grid A/C 01/02/10/21/22, grand total in words via _num_to_words_inr, bank/establishment boxes, non-PF footer).
 - server.py ROLLBACK BUG hit AGAIN (w_basic model field) — always grep-verify server.py edits.
 - Testing: iteration_213.json all PASS. deploy_vps_iter225.sh created; pushed to main.
+
+## Iter 231 — user bug: real DOUBLE-DUTY (day+night) attendance was being erased by iter-228 bounce rules
+- User screenshot (AJAY SINGH RAWAT, bio 58): weavers really do OUT 20:00 → IN 20:09 → night work → OUT 07:58 next morning (Total Duty 23:59). Iter-228's 15-min bounce heuristics dropped these punches → days vanished from IN/OUT sheet & Duty HRS.
+- FIX (zk_dat_import.py): quick IN ≤15min after an OUT is now PAIRING-AWARE — kept when the NEXT chronological punch is an OUT within 16h (real session), dropped only when it dangles. Removed _is_bounce_in guard from stitch+flip (stitch again always pulls next-morning OUT to prev-day IN, incl. quick night INs). _drop_edge_bounces reduced to leading-OUT-only. Same rule auto-handles the post-night morning IN (08:02 after 07:58 OUT pairs with evening OUT → kept).
+- test_iter228.py updated to double-duty semantics; 223/224/228 all pass. Real-file audit: AJAY d01 raw 23.83 (duty 8 + OT 16), bio84 d04 regression intact (11.87), zero-hour multi-punch days = 4 (all genuine).
+- REMINDER for user-facing answer: grid counts only APPROVED punches — if employee app punches are pending in Punch Approval, day stays blank until approved. VPS machine days trimmed by iter-228 need re-import with "Replace Machine Data".

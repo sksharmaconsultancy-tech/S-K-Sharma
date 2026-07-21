@@ -537,35 +537,32 @@ async def import_zk_dat_bytes(
         prev_item: Optional[Dict[str, Any]] = None
         prev_date: Optional[str] = None
 
-        def _is_bounce_in(j: int) -> bool:
-            """True when tagged[j] is an IN sitting ≤15 min after an OUT —
-            i.e. a cross-machine double-read on the way out, NOT a real
-            (night/OT) session opener."""
-            if j <= 0 or j >= len(tagged):
-                return False
-            _d, _it = tagged[j]
-            _pd, _pit = tagged[j - 1]
-            return (
-                _it["raw_kind"] == "in"
-                and _pit["raw_kind"] == "out"
-                and (_it["dt"] - _pit["dt"]).total_seconds() <= 15 * 60
-            )
+        def _next_item(j: int):
+            return tagged[j + 1][1] if j + 1 < len(tagged) else None
 
         for idx, (date_str, it) in enumerate(tagged):
-            # Iter 228 — cross-day bounce: an IN pressed within 15 min
-            # AFTER a night-shift exit OUT (which the stitch just moved
-            # to the previous day) is a double-read on the way out.
+            # Iter 231 (user bug — real double-duty erased) — an IN within
+            # 15 min after an OUT is only NOISE when it cannot pair: weavers
+            # genuinely punch OUT 20:00 → IN 20:09 → work the night → OUT
+            # 07:58 next morning (23.9 h double duty, confirmed by the
+            # user). KEEP the quick IN when the very next punch is an OUT
+            # within 16 h (a real session); DROP it otherwise.
             if (
                 it["slot"] in ("in_file", "out_file")
                 and it["raw_kind"] == "in"
                 and prev_item is not None
                 and prev_item["raw_kind"] == "out"
-                and prev_date is not None
-                and prev_date < date_str
                 and (it["dt"] - prev_item["dt"]).total_seconds() <= 15 * 60
             ):
-                stats["noise_collapsed"] += 1
-                continue
+                nxt = _next_item(idx)
+                pairs = (
+                    nxt is not None
+                    and nxt["raw_kind"] == "out"
+                    and 0 < (nxt["dt"] - it["dt"]).total_seconds() <= 16 * 3600
+                )
+                if not pairs:
+                    stats["noise_collapsed"] += 1
+                    continue
             eff_date = date_str
             if (
                 it["slot"] in ("in_file", "out_file")
@@ -575,9 +572,6 @@ async def import_zk_dat_bytes(
                 and prev_date is not None
                 and prev_date < date_str
                 and (it["dt"] - prev_item["dt"]).total_seconds() <= 16 * 3600
-                # Iter 228 — the prev-day IN must be a REAL night IN, not
-                # a bounce double-read right after that day's OUT.
-                and not _is_bounce_in(idx - 1)
             ):
                 eff_date = prev_date
             elif (
@@ -613,7 +607,6 @@ async def import_zk_dat_bytes(
                 and prev_date is not None
                 and prev_date < date_str
                 and 6 * 3600 <= (it["dt"] - prev_item["dt"]).total_seconds() <= 16 * 3600
-                and not _is_bounce_in(idx - 1)
                 and any(
                     t_date == date_str
                     and t_it["raw_kind"] == "in"
