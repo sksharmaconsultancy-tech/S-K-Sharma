@@ -1125,7 +1125,8 @@ async def _step_generate_challan(ctx: Ctx) -> None:
 
 async def _step_download_documents(ctx: Ctx) -> None:
     """Click every visible download link for challan/receipt/ack PDFs.
-    Files are captured by the page 'download' handler into the job folder."""
+    Files are captured by the page 'download' handler into the job folder,
+    then AUTO-ATTACHED to the monthly Challan Summary."""
     texts = ["Download Challan", "Challan Receipt", "Download PDF", "Download",
              "Print Challan", "Acknowledgement", "Receipt", "ECR PDF"]
     got = 0
@@ -1142,10 +1143,64 @@ async def _step_download_documents(ctx: Ctx) -> None:
         except Exception:
             continue
     await ctx.snap("downloads")
+    # Auto-attach downloaded PDFs to the monthly Challan Summary.
+    await _auto_attach_challans(ctx)
     dl = len(ctx.s.get("downloads") or [])
     ctx.log(f"⬇ Download step done — {dl} file(s) captured on this job")
     if got == 0 and dl <= 1:
         ctx.log("No download links matched — save manually if needed", "warn")
+
+
+async def _auto_attach_challans(ctx: Ctx) -> None:
+    """Insert challan PDFs downloaded by the automation into ``db.challans``
+    for this firm+month+portal so they appear on the Challans screen AND
+    the Monthly Challan Summary automatically (user request Iter 235)."""
+    import base64 as _b64
+    month = ctx.s.get("run_month")
+    if not month:
+        return
+    portal = "pf" if ctx.s["portal"] == "epfo" else "esic"
+    dl_dir = MEDIA_ROOT / ctx.s["job_id"] / "downloads"
+    if not dl_dir.exists():
+        return
+    attached = 0
+    for f in sorted(dl_dir.glob("*")):
+        if f.suffix.lower() != ".pdf" or not f.is_file():
+            continue
+        # Idempotency: don't attach the same filename twice for this job.
+        exists = await ctx.db.challans.find_one(
+            {"company_id": ctx.s["company_id"], "month": month, "portal": portal,
+             "rpa_job_id": ctx.s["job_id"], "file_name": f.name},
+            {"_id": 1})
+        if exists:
+            continue
+        try:
+            b64 = _b64.b64encode(f.read_bytes()).decode("ascii")
+        except Exception:
+            continue
+        await ctx.db.challans.insert_one({
+            "challan_id": f"chl_{uuid.uuid4().hex[:12]}",
+            "company_id": ctx.s["company_id"],
+            "portal": portal,
+            "month": month,
+            "amount": float((ctx.s.get("validation") or {}).get("total_contribution") or 0),
+            "trrn": None,
+            "paid_on": None,
+            "notes": f"Auto-attached by Compliance Automation Studio "
+                     f"({ctx.s['flow_label']})",
+            "file_base64": b64,
+            "file_mime": "application/pdf",
+            "file_name": f.name,
+            "source": "rpa_auto",
+            "rpa_job_id": ctx.s["job_id"],
+            "created_by": "system:rpa",
+            "created_at": _now_iso(),
+        })
+        attached += 1
+    if attached:
+        await ctx.audit("challan_attached", f"{attached} PDF(s) → Challan Summary {month}")
+        ctx.log(f"📎 Auto-attached {attached} challan PDF(s) to the "
+                f"{month} Challan Summary")
 
 
 def _mk_nav_step(texts: List[str]) -> Callable:
