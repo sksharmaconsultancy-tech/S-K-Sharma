@@ -657,6 +657,50 @@ export default function ComplianceSalaryRunScreen() {
     } finally { setReprocessing(false); }
   };
 
+  // Iter 230 (user request) — Reprocess: reload the LAST SAVED data of
+  // this run from the server (discards unsaved local edits).
+  const reprocessRun = async () => {
+    if (!run) return;
+    const ok = await confirmYesNo(
+      "Reprocess — reload the previously SAVED salary data for this run?\nAny unsaved edits on screen will be replaced.",
+    );
+    if (!ok) return;
+    try {
+      const j = await api<{ run: CompRun }>(`/admin/compliance-salary-runs/${run.run_id}`);
+      hydratedRunsRef.current[run.run_id] = true;
+      setRun(j.run);
+      showMsg("Reprocessed ✓ — showing the last saved salary data.");
+    } catch (e: any) {
+      showMsg(e?.message || "Reprocess failed");
+    }
+  };
+
+  // Iter 230 (user request) — Delete the salary run (asks TWICE).
+  const deleteRun = async () => {
+    if (!run) return;
+    const ok1 = await confirmYesNo(
+      `DELETE this Compliance Salary run (${run.month})?\nThis cannot be undone.`,
+    );
+    if (!ok1) return;
+    const ok2 = await confirmYesNo(
+      "Are you REALLY sure? Confirm once more to DELETE this salary permanently.",
+    );
+    if (!ok2) return;
+    try {
+      const r = await api<{ deleted?: boolean; approval_required?: boolean; message?: string }>(
+        `/admin/compliance-salary-runs/${run.run_id}`, { method: "DELETE" },
+      );
+      if (r.deleted) {
+        setRun(null);
+        showMsg("Salary run DELETED ✓");
+      } else {
+        showMsg(r.message || "Deletion sent to the Super Admin for approval.");
+      }
+    } catch (e: any) {
+      showMsg(e?.message || "Delete failed");
+    }
+  };
+
   const finalizeRun = async () => {
     if (!run || finalizing) return;
     const okGo = Platform.OS === "web"
@@ -940,9 +984,13 @@ export default function ComplianceSalaryRunScreen() {
   const pdRefs = useRef<Record<number, any>>({});
 
   // Client-side setter for individual row fields (Others allowance,
-  // Other deduction). Recomputes Gross + Net locally so the grid
-  // stays in sync while editing.
-  const updateRowField = (userId: string, key: "others" | "other_deduction", value: number) => {
+  // Other deduction, OT Amount, TDS — Iter 230). Recomputes Gross + Net
+  // locally so the grid stays in sync while editing.
+  const updateRowField = (
+    userId: string,
+    key: "others" | "other_deduction" | "ot_pay" | "tds",
+    value: number,
+  ) => {
     setRun((prev) => {
       if (!prev) return prev;
       const rows = prev.rows.map((r) => {
@@ -951,7 +999,12 @@ export default function ComplianceSalaryRunScreen() {
         if (key === "others") {
           const gross = (next.basic || 0) + (next.hra || 0) + (next.conveyance || 0)
             + (next.medical || 0) + (next.special || 0) + (next.others || 0);
-          next.gross_paid = Math.round(gross);
+          next.monthly_gross = Math.round(gross);
+          next.gross_paid = Math.round(gross + (next.ot_pay || 0));
+        }
+        if (key === "ot_pay") {
+          // Gross Paid = Monthly Gross (heads) + OT Amount.
+          next.gross_paid = Math.round((next.monthly_gross || 0) + value);
         }
         const dedTotal = (next.pf_employee || 0) + (next.esic_employee || 0)
           + (next.pt || 0) + (next.tds || 0) + (next.other_deduction || 0);
@@ -959,7 +1012,13 @@ export default function ComplianceSalaryRunScreen() {
         next.net = Math.round((next.gross_paid || 0) - dedTotal);
         return next;
       });
-      return { ...prev, rows };
+      // Keep the totals strip in sync for the edited keys.
+      const totals = { ...(prev.totals || {}) } as Record<string, number>;
+      for (const k of ["others", "other_deduction", "ot_pay", "tds",
+                       "monthly_gross", "gross_paid", "total_deduction", "net"]) {
+        totals[k] = Math.round(rows.reduce((s, r) => s + (Number((r as any)[k]) || 0), 0));
+      }
+      return { ...prev, rows, totals: totals as any };
     });
     scheduleDraftAutoSave(); // Iter 145 — persist edits automatically
   };
@@ -1606,11 +1665,15 @@ export default function ComplianceSalaryRunScreen() {
                   </>
                 ) : (
                   <>
-                    <ActionBtn icon="save-outline" label="Save as Draft" onPress={saveAsDraft} />
-                    <ActionBtn icon="checkmark-done-outline" label="Finalize (Lock)" busy={finalizing} onPress={finalizeRun} primary />
+                    {/* Iter 230 (user request) — 4-button lifecycle: Save /
+                        Reprocess / Delete / Finalize & Lock. */}
+                    <ActionBtn icon="save-outline" label="Save" onPress={saveAsDraft} />
+                    <ActionBtn icon="refresh-circle-outline" label="Reprocess" onPress={reprocessRun} />
+                    <ActionBtn icon="trash-outline" label="Delete" onPress={deleteRun} />
+                    <ActionBtn icon="checkmark-done-outline" label="Finalize & Lock" busy={finalizing} onPress={finalizeRun} primary />
                   </>
                 )}
-                <ActionBtn icon="refresh" label="Reprocess" busy={reprocessing} onPress={reprocess} />
+                <ActionBtn icon="refresh" label="Recompute (Attendance)" busy={reprocessing} onPress={reprocess} />
                 <ActionBtn icon="grid-outline" label="Excel" busy={downloading} onPress={() => downloadFile("xlsx")} />
                 <ActionBtn icon="document-text-outline" label="PDF" busy={downloading} onPress={() => downloadFile("pdf")} />
                 <ActionBtn icon="document-outline" label="PDF (Option 2)" busy={downloading} onPress={() => downloadFile("pdf2")} />
@@ -1748,6 +1811,8 @@ export default function ComplianceSalaryRunScreen() {
                   if (has("special")) headers.push({ label: "Spl", group: "calc" });
                   if (has("others")) headers.push({ label: "Others*", group: "calc" });
                   headers.push({ label: "Gross", group: "calc" });
+                  // Iter 230 (user request) — editable OT Amount column.
+                  headers.push({ label: "OT Amt*", group: "calc" });
                   const dedLabels = [
                     "Wage Base",
                     // Iter 171 — deduction columns follow Firm Master Deductions
@@ -1852,6 +1917,17 @@ export default function ComplianceSalaryRunScreen() {
                       );
                     })()}
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.gross_paid)}</Text>
+                    {/* Iter 230 (user request) — editable OT Amount. */}
+                    <TextInput
+                      value={String(Math.round(r.ot_pay || 0))}
+                      onChangeText={(v) => {
+                        const n = Number(v.replace(/[^0-9.]/g, ""));
+                        if (!Number.isNaN(n)) updateRowField(r.user_id, "ot_pay", n);
+                      }}
+                      keyboardType="decimal-pad"
+                      selectTextOnFocus
+                      style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
+                    />
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.stat_wage_base)}</Text>
                     {/* Iter 171 — deduction cells follow Firm Master Deductions */}
                     {(() => {
@@ -1864,7 +1940,19 @@ export default function ComplianceSalaryRunScreen() {
                           {hasDed("esi") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{r.esic_applicable ? fmtInr(r.esic_employee) : "—"}</Text> : null}
                           {hasDed("esi") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{r.esic_applicable ? fmtInr(r.esic_employer) : "—"}</Text> : null}
                           {hasDed("pt") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.pt)}</Text> : null}
-                          {hasDed("tds") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.tds)}</Text> : null}
+                          {/* Iter 230 (user request) — editable TDS. */}
+                          {hasDed("tds") ? (
+                            <TextInput
+                              value={String(Math.round(r.tds || 0))}
+                              onChangeText={(v) => {
+                                const n = Number(v.replace(/[^0-9.]/g, ""));
+                                if (!Number.isNaN(n)) updateRowField(r.user_id, "tds", n);
+                              }}
+                              keyboardType="decimal-pad"
+                              selectTextOnFocus
+                              style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
+                            />
+                          ) : null}
                         </>
                       );
                     })()}
@@ -1911,6 +1999,7 @@ export default function ComplianceSalaryRunScreen() {
                         {/* Calculated group totals (+Gross) */}
                         {opt.map((k) => <React.Fragment key={`tc-${k}`}>{num((run.totals as any)?.[k])}</React.Fragment>)}
                         {num(run.totals?.gross_paid)}
+                        {num(run.totals?.ot_pay)}
                         {/* Deductions group */}
                         {dash()}
                         {hasDed("pf") ? num(run.totals?.pf_employee) : null}

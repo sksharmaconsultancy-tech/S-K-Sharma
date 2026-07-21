@@ -15,6 +15,7 @@ import {
   ActivityIndicator,
   ScrollView,
   Platform,
+  Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -111,6 +112,15 @@ export default function EmployeeReportScreen() {
     user?.role === "super_admin" || user?.role === "sub_admin" || user?.role === "company_admin";
 
   const [firmId, setFirmId] = useState<string>(selectedCompanyId || "");
+  // Iter 230 (user request) — firm dropdown + payslip section state.
+  const [firmDdOpen, setFirmDdOpen] = useState(false);
+  const [firmQuery, setFirmQuery] = useState("");
+  const [slipMonth, setSlipMonth] = useState<string>(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 1, 1);
+    return d.toISOString().slice(0, 7);
+  });
+  const [slipBusy, setSlipBusy] = useState<string | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [empLoading, setEmpLoading] = useState(false);
   const [empSearch, setEmpSearch] = useState("");
@@ -159,6 +169,49 @@ export default function EmployeeReportScreen() {
   );
 
   const canGenerate = !!empId && !!fromDate && !!toDate;
+
+  // Iter 230 (user request) — payslip download / mail actions.
+  const payslipAction = async (kind: "dl-one" | "dl-all" | "mail-one" | "mail-all") => {
+    const m = slipMonth.trim();
+    if (!/^\d{4}-\d{2}$/.test(m)) {
+      showMsg("Enter the salary month as YYYY-MM (e.g. 2026-06).");
+      return;
+    }
+    setSlipBusy(kind);
+    try {
+      if (kind === "dl-one") {
+        await downloadBinary(
+          `/admin/employee-payslip.pdf?company_id=${firmId}&user_id=${empId}&month=${m}`,
+          `Payslip_${m}.pdf`,
+        );
+      } else if (kind === "dl-all") {
+        await downloadBinary(
+          `/admin/payslips-month.zip?company_id=${firmId}&month=${m}`,
+          `Payslips_${m}.zip`,
+        );
+      } else {
+        const r = await api<{ sent: number; no_email: string[]; failed: string[] }>(
+          "/admin/payslips/email",
+          {
+            method: "POST",
+            body: {
+              company_id: firmId,
+              month: m,
+              ...(kind === "mail-one" ? { user_id: empId } : {}),
+            },
+          },
+        );
+        let msg = `Payslips e-mailed: ${r.sent}`;
+        if (r.no_email?.length) msg += `\nNo e-mail in master (skipped): ${r.no_email.slice(0, 10).join(", ")}${r.no_email.length > 10 ? "…" : ""}`;
+        if (r.failed?.length) msg += `\nFailed: ${r.failed.slice(0, 10).join(", ")}`;
+        showMsg(msg);
+      }
+    } catch (e: any) {
+      showMsg(e?.message || "Payslip action failed");
+    } finally {
+      setSlipBusy(null);
+    }
+  };
 
   const generate = async () => {
     if (!canGenerate) {
@@ -239,16 +292,61 @@ export default function EmployeeReportScreen() {
           {user?.role !== "company_admin" ? (
             <>
               <Text style={styles.label}>Firm</Text>
-              <View style={styles.chipStrip}>
-                {(companies || []).map((c) => (
-                  <Chip
-                    key={c.company_id}
-                    label={c.name || c.company_id}
-                    active={firmId === c.company_id}
-                    onPress={() => setFirmId(c.company_id)}
-                  />
-                ))}
-              </View>
+              {/* Iter 230 (user request) — firm selection as a dropdown. */}
+              <Pressable
+                onPress={() => setFirmDdOpen(true)}
+                style={styles.ddTrigger}
+                testID="er-firm-dropdown"
+              >
+                <Ionicons name="business-outline" size={15} color={colors.brandPrimary} />
+                <Text style={styles.ddTriggerTxt} numberOfLines={1}>
+                  {(companies || []).find((c) => c.company_id === firmId)?.name || "Select a firm…"}
+                </Text>
+                <Ionicons name="chevron-down" size={15} color={colors.onSurfaceSecondary} />
+              </Pressable>
+              <Modal visible={firmDdOpen} transparent animationType="fade" onRequestClose={() => setFirmDdOpen(false)}>
+                <Pressable style={styles.ddBackdrop} onPress={() => setFirmDdOpen(false)}>
+                  <Pressable style={styles.ddSheet} onPress={() => {}}>
+                    <Text style={styles.ddTitle}>Select firm</Text>
+                    <View style={styles.ddSearchRow}>
+                      <Ionicons name="search" size={14} color={colors.onSurfaceSecondary} />
+                      <TextInput
+                        style={styles.ddSearchInput}
+                        placeholder="Search firm by name…"
+                        placeholderTextColor={colors.onSurfaceTertiary}
+                        value={firmQuery}
+                        onChangeText={setFirmQuery}
+                        autoFocus
+                        testID="er-firm-search"
+                      />
+                    </View>
+                    <ScrollView style={{ maxHeight: 380 }} keyboardShouldPersistTaps="handled">
+                      {(companies || [])
+                        .filter((c) => !firmQuery.trim()
+                          || String(c.name || "").toLowerCase().includes(firmQuery.trim().toLowerCase()))
+                        .map((c) => (
+                          <Pressable
+                            key={c.company_id}
+                            onPress={() => {
+                              setFirmId(c.company_id);
+                              setFirmDdOpen(false);
+                              setFirmQuery("");
+                            }}
+                            style={[styles.ddItem, firmId === c.company_id && styles.ddItemActive]}
+                            testID={`er-firm-${c.company_id}`}
+                          >
+                            <Ionicons
+                              name={firmId === c.company_id ? "radio-button-on" : "radio-button-off"}
+                              size={16}
+                              color={firmId === c.company_id ? colors.brandPrimary : colors.onSurfaceTertiary}
+                            />
+                            <Text style={styles.ddItemTxt} numberOfLines={1}>{c.name || c.company_id}</Text>
+                          </Pressable>
+                        ))}
+                    </ScrollView>
+                  </Pressable>
+                </Pressable>
+              </Modal>
             </>
           ) : null}
 
@@ -353,6 +451,64 @@ export default function EmployeeReportScreen() {
               </Pressable>
             </View>
           ) : null}
+        </View>
+
+        {/* ----- Iter 230 (user request) — Payslips: download / e-mail,
+                employee-wise or ALL employees of the firm. ----- */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>3 · Payslips</Text>
+          <Text style={styles.smallHint}>
+            Uses the latest processed salary run (Compliance first, else Actual)
+            for the chosen month. Mail goes to the employee&apos;s e-mail from the
+            Employee Master.
+          </Text>
+          <Text style={styles.label}>Salary month (YYYY-MM)</Text>
+          <TextInput
+            style={[styles.input, { maxWidth: 160 }]}
+            value={slipMonth}
+            onChangeText={setSlipMonth}
+            placeholder="2026-06"
+            placeholderTextColor={colors.onSurfaceTertiary}
+            testID="er-slip-month"
+          />
+          <View style={[styles.chipStrip, { marginTop: 10 }]}>
+            <Pressable
+              onPress={() => payslipAction("dl-one")}
+              disabled={!empId || !!slipBusy}
+              style={[styles.slipBtn, (!empId || !!slipBusy) && { opacity: 0.5 }]}
+              testID="er-slip-dl-one"
+            >
+              {slipBusy === "dl-one" ? <ActivityIndicator size="small" color={colors.brandPrimary} /> : <Ionicons name="download-outline" size={14} color={colors.brandPrimary} />}
+              <Text style={styles.slipBtnTxt}>Download Payslip (Selected)</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => payslipAction("dl-all")}
+              disabled={!firmId || !!slipBusy}
+              style={[styles.slipBtn, (!firmId || !!slipBusy) && { opacity: 0.5 }]}
+              testID="er-slip-dl-all"
+            >
+              {slipBusy === "dl-all" ? <ActivityIndicator size="small" color={colors.brandPrimary} /> : <Ionicons name="albums-outline" size={14} color={colors.brandPrimary} />}
+              <Text style={styles.slipBtnTxt}>Download ALL (ZIP)</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => payslipAction("mail-one")}
+              disabled={!empId || !!slipBusy}
+              style={[styles.slipBtn, (!empId || !!slipBusy) && { opacity: 0.5 }]}
+              testID="er-slip-mail-one"
+            >
+              {slipBusy === "mail-one" ? <ActivityIndicator size="small" color={colors.brandPrimary} /> : <Ionicons name="mail-outline" size={14} color={colors.brandPrimary} />}
+              <Text style={styles.slipBtnTxt}>Mail Payslip (Selected)</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => payslipAction("mail-all")}
+              disabled={!firmId || !!slipBusy}
+              style={[styles.slipBtn, (!firmId || !!slipBusy) && { opacity: 0.5 }]}
+              testID="er-slip-mail-all"
+            >
+              {slipBusy === "mail-all" ? <ActivityIndicator size="small" color={colors.brandPrimary} /> : <Ionicons name="send-outline" size={14} color={colors.brandPrimary} />}
+              <Text style={styles.slipBtnTxt}>Mail ALL Employees</Text>
+            </Pressable>
+          </View>
         </View>
 
         {/* ----- Report ----- */}
@@ -636,6 +792,42 @@ const styles = StyleSheet.create({
     paddingVertical: 10, paddingHorizontal: 16, backgroundColor: colors.surface,
   },
   exportBtnTxt: { color: colors.brandPrimary, fontWeight: "700", fontSize: 13 },
+  // Iter 230 — payslip buttons + firm dropdown.
+  slipBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    borderWidth: 1, borderColor: colors.brandPrimary, borderRadius: radius.md,
+    paddingVertical: 9, paddingHorizontal: 12, backgroundColor: colors.surface,
+  },
+  slipBtnTxt: { color: colors.brandPrimary, fontWeight: "700", fontSize: 12 },
+  ddTrigger: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
+    paddingVertical: 10, paddingHorizontal: 12, backgroundColor: colors.surface,
+    marginBottom: 6,
+  },
+  ddTriggerTxt: { flex: 1, fontSize: 13, fontWeight: "700", color: colors.onSurface },
+  ddBackdrop: {
+    flex: 1, backgroundColor: "rgba(15,23,42,0.45)",
+    justifyContent: "center", alignItems: "center", padding: 20,
+  },
+  ddSheet: {
+    width: "100%", maxWidth: 440, backgroundColor: colors.surface,
+    borderRadius: radius.lg, padding: 14, borderWidth: 1, borderColor: colors.border,
+  },
+  ddTitle: { fontSize: 15, fontWeight: "800", color: colors.onSurface, marginBottom: 10 },
+  ddSearchRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
+    paddingHorizontal: 10, marginBottom: 8, backgroundColor: colors.background,
+  },
+  ddSearchInput: { flex: 1, paddingVertical: 9, fontSize: 13, color: colors.onSurface },
+  ddItem: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    paddingVertical: 11, paddingHorizontal: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
+  },
+  ddItemActive: { backgroundColor: colors.brandTertiary, borderRadius: radius.sm },
+  ddItemTxt: { flex: 1, fontSize: 13, fontWeight: "600", color: colors.onSurface },
 
   secTitle: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
   secTitleTxt: { ...type.h6, color: colors.onSurface, fontWeight: "700" },

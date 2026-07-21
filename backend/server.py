@@ -14269,6 +14269,194 @@ async def download_bulk_payslips_zip(
     )
 
 
+# ---------------------------------------------------------------------------
+# Iter 230 (user request) — Employee Report payslips: download or e-mail a
+# payslip per employee (or for ALL employees) by firm + month, without
+# needing the run_id. Resolution order: latest COMPLIANCE run for the
+# month (statutory payslip), else latest ACTUAL salary run (mapped).
+# ---------------------------------------------------------------------------
+def _actual_row_to_payslip(r: dict, month_days: Any) -> dict:
+    """Map an Actual-salary row onto the payslip-PDF field names."""
+    epf = float(r.get("epf") or 0)
+    esi = float(r.get("esi") or 0)
+    adv = float(r.get("adv") or 0)
+    tds = float(r.get("tds") or 0)
+    return {
+        **r,
+        "month_days": month_days,
+        "present_days": r.get("p_days"),
+        "ot_hours": r.get("p_hours"),
+        "basic": r.get("basic_salary"),
+        "ot_pay": r.get("w_basic_salary"),
+        "other_earning": r.get("oth_allo"),
+        "gross": r.get("total_gross"),
+        "pf_employee": epf,
+        "esic_employee": esi,
+        "tds": tds,
+        "advance": adv,
+        "total_deduction": epf + esi + adv + tds,
+        "net": r.get("net_pay"),
+    }
+
+
+async def _payslip_rows_for_month(company_id: str, month: str):
+    """(rows, month_days, source) for the latest processed run of a month."""
+    crun = await db.compliance_salary_runs.find_one(
+        {"company_id": company_id, "month": month}, {"_id": 0},
+        sort=[("created_at", -1)])
+    if crun and (crun.get("rows") or []):
+        return (crun.get("rows") or [], crun.get("month_days"), "compliance")
+    arun = await db.salary_runs.find_one(
+        {"company_id": company_id, "month": month, "run_type": "actual"},
+        {"_id": 0}, sort=[("created_at", -1)])
+    if arun and (arun.get("rows") or []):
+        rows = [_actual_row_to_payslip(r, arun.get("month_days"))
+                for r in (arun.get("rows") or [])]
+        return (rows, arun.get("month_days"), "actual")
+    return ([], None, None)
+
+
+_PAYSLIP_EMP_PROJ = {
+    "_id": 0, "user_id": 1, "name": 1, "employee_code": 1, "email": 1,
+    "designation": 1, "department": 1, "doj": 1, "uan_no": 1, "pf_no": 1,
+    "esi_ip_no": 1, "pan_no": 1, "bank_name": 1, "bank_account": 1,
+    "bank_ifsc": 1,
+}
+
+
+@api.get("/admin/employee-payslip.pdf")
+async def admin_employee_payslip_pdf(
+    company_id: str, user_id: str, month: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Payslip PDF for ONE employee by firm + month (no run_id needed)."""
+    from fastapi.responses import Response
+    from utils.payslip_pdf import build_payslip_pdf
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    if admin["role"] == "company_admin" and admin.get("company_id") != company_id:
+        raise HTTPException(status_code=403, detail="Not your firm")
+    rows, month_days, src = await _payslip_rows_for_month(company_id, month)
+    row = next((r for r in rows if r.get("user_id") == user_id), None)
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail="No processed salary found for this employee & month — "
+                   "run the Salary Process first.")
+    company = await db.companies.find_one({"company_id": company_id}, {"_id": 0}) or {}
+    emp = await db.users.find_one({"user_id": user_id}, _PAYSLIP_EMP_PROJ) or {}
+    pdf = build_payslip_pdf(
+        employee=emp, company=company,
+        row={**row, "month_days": month_days}, month=month)
+    fn = f"Payslip_{(emp.get('employee_code') or user_id)}_{month}.pdf"
+    return Response(pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+
+
+@api.get("/admin/payslips-month.zip")
+async def admin_payslips_month_zip(
+    company_id: str, month: str,
+    authorization: Optional[str] = Header(None),
+):
+    """ZIP of payslip PDFs for ALL employees of a firm + month."""
+    import zipfile
+    from fastapi.responses import Response
+    from utils.payslip_pdf import build_payslip_pdf
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    if admin["role"] == "company_admin" and admin.get("company_id") != company_id:
+        raise HTTPException(status_code=403, detail="Not your firm")
+    rows, month_days, src = await _payslip_rows_for_month(company_id, month)
+    if not rows:
+        raise HTTPException(status_code=404,
+                            detail="No processed salary run found for this month.")
+    company = await db.companies.find_one({"company_id": company_id}, {"_id": 0}) or {}
+    uids = [r.get("user_id") for r in rows if r.get("user_id")]
+    emps: Dict[str, Dict[str, Any]] = {}
+    async for u in db.users.find({"user_id": {"$in": uids}}, _PAYSLIP_EMP_PROJ):
+        emps[u["user_id"]] = u
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for r in rows:
+            uid = r.get("user_id")
+            if not uid:
+                continue
+            emp = emps.get(uid) or {"name": r.get("name")}
+            pdf = build_payslip_pdf(
+                employee=emp, company=company,
+                row={**r, "month_days": month_days}, month=month)
+            code = str(emp.get("employee_code") or uid).replace("/", "_")
+            nm = str(emp.get("name") or "employee").replace("/", "_").replace(" ", "_")
+            zf.writestr(f"{code}_{nm}_{month}.pdf", pdf)
+    fn = f"Payslips_{(company.get('name') or 'firm').replace(' ', '_')}_{month}.zip"
+    return Response(buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+
+
+class PayslipEmailBody(BaseModel):
+    company_id: str
+    month: str
+    user_id: Optional[str] = None  # None → all employees in the run
+
+
+@api.post("/admin/payslips/email")
+async def admin_email_payslips(
+    body: PayslipEmailBody,
+    authorization: Optional[str] = Header(None),
+):
+    """E-mail payslip PDFs to employees' e-mail from the Employee Master.
+    ``user_id`` set → one employee; omitted → every employee in the run."""
+    import base64
+    from utils.iter60_features import _send_email_with_attachment
+    from utils.payslip_pdf import build_payslip_pdf
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    if admin["role"] == "company_admin" and admin.get("company_id") != body.company_id:
+        raise HTTPException(status_code=403, detail="Not your firm")
+    rows, month_days, src = await _payslip_rows_for_month(body.company_id, body.month)
+    if body.user_id:
+        rows = [r for r in rows if r.get("user_id") == body.user_id]
+    if not rows:
+        raise HTTPException(status_code=404,
+                            detail="No processed salary found for this month.")
+    company = await db.companies.find_one(
+        {"company_id": body.company_id}, {"_id": 0}) or {}
+    uids = [r.get("user_id") for r in rows if r.get("user_id")]
+    emps: Dict[str, Dict[str, Any]] = {}
+    async for u in db.users.find({"user_id": {"$in": uids}}, _PAYSLIP_EMP_PROJ):
+        emps[u["user_id"]] = u
+    sent, no_email, failed = [], [], []
+    for r in rows:
+        uid = r.get("user_id")
+        emp = emps.get(uid) or {}
+        email = str(emp.get("email") or "").strip()
+        if not email or "@" not in email:
+            no_email.append(emp.get("name") or r.get("name") or uid)
+            continue
+        try:
+            pdf = build_payslip_pdf(
+                employee=emp, company=company,
+                row={**r, "month_days": month_days}, month=body.month)
+            res = await _send_email_with_attachment(
+                to_emails=[email],
+                subject=f"Payslip — {body.month} — {company.get('name') or ''}",
+                text_body=(
+                    f"Dear {emp.get('name') or ''},\n\n"
+                    f"Please find attached your payslip for {body.month}.\n\n"
+                    f"— {company.get('name') or 'S.K. Sharma & Co.'}"),
+                attachments=[{
+                    "filename": f"Payslip_{emp.get('employee_code') or uid}_{body.month}.pdf",
+                    "content": base64.b64encode(pdf).decode(),
+                }])
+            (sent if res.get("delivered") else failed).append(
+                emp.get("name") or uid)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("payslip email to %s failed: %s", email, exc)
+            failed.append(emp.get("name") or uid)
+    return {"ok": True, "sent": len(sent), "no_email": no_email,
+            "failed": failed, "source": src}
+
+
 
 # ---------------------------------------------------------------------------
 # Iter 77z-final — Off-Roll Simple Slip endpoints
@@ -19208,6 +19396,11 @@ def _actual_salary_row_compute(row: dict, month_days: int, ot_basis: str = "basi
         w_basic_salary = (ot_rate * p_hours / denom_hours) if denom_hours > 0 else 0.0
 
     # Iter 91 — Total Gross = Basic Sal + W.Basic Sal + Oth.Allo (per user).
+    # Iter 230 (user request) — manual OT AMOUNT override: when the admin
+    # edits the W.Basic (OT) cell, the typed amount wins over the
+    # hours-based computation until P Hours is edited again.
+    if row.get("w_basic_override") is not None:
+        w_basic_salary = float(row.get("w_basic_override") or 0.0)
     total_gross = basic_salary + w_basic_salary + oth_allo
     # Iter 91 — EPF/ESI come from the Compliance run (already on the row).
     epf = float(row.get("epf") or 0.0)
@@ -19249,6 +19442,8 @@ class ActualSalaryRowPatchBody(BaseModel):
     p_days: Optional[float] = None
     p_hours: Optional[float] = None
     oth_allo: Optional[float] = None
+    # Iter 230 — manual OT amount (W.Basic) override.
+    w_basic: Optional[float] = None
     adv: Optional[float] = None
     tds: Optional[float] = None
 
@@ -19646,6 +19841,9 @@ async def patch_actual_salary_row(
         row["duty_hrs"] = float(body.duty_hrs)
     if body.oth_allo is not None:
         row["oth_allo"] = float(body.oth_allo)
+    # Iter 230 (user request) — OT amount (W.Basic) manual override.
+    if body.w_basic is not None:
+        row["w_basic_override"] = float(body.w_basic)
     if body.adv is not None:
         row["adv"] = float(body.adv)
     if body.tds is not None:
@@ -19659,6 +19857,8 @@ async def patch_actual_salary_row(
         row["p_days"] = min(float(body.p_days), cap)
     if body.p_hours is not None:
         row["p_hours"] = float(body.p_hours)
+        # editing hours re-enables the hours-based OT computation
+        row.pop("w_basic_override", None)
 
     row = _actual_salary_row_compute(
         row, int(run.get("month_days") or 30),

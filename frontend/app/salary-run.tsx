@@ -156,7 +156,12 @@ function computeRow(r: ActualRow, monthDays: number): ActualRow {
     const denomHrs = md * (r.duty_hrs || 0);
     wBasic = denomHrs > 0 ? (r.basic * r.p_hours) / denomHrs : 0;
   }
-  const totalGross = wBasic + r.oth_allo;
+  // Iter 230 (user request) — manual OT amount override wins until
+  // P Hours is edited again (mirrors backend).
+  if ((r as any).w_basic_override != null) {
+    wBasic = Number((r as any).w_basic_override) || 0;
+  }
+  const totalGross = basicSalary + wBasic + r.oth_allo;
   // Iter 96q — PF (EPF) & ESIC are NOT computed here. They are SYNCED from
   // the matching Compliance Salary run by the backend (0 when compliance
   // hasn't been processed for this month/firm). We simply carry the row's
@@ -411,13 +416,81 @@ export default function ActualSalaryProcessScreen() {
       const rows = prev.rows.map(r => {
         if (r.user_id !== user_id) return r;
         const patched: ActualRow = { ...r, [field]: value } as ActualRow;
+        // Iter 230 — OT amount (W.Basic) manual override handling.
+        if (field === ("w_basic_salary" as keyof ActualRow)) {
+          (patched as any).w_basic_override = value;
+        }
+        if (field === "p_hours") {
+          delete (patched as any).w_basic_override;
+        }
         return computeRow(patched, prev.month_days);
       });
       const totals = sumTotals(rows);
       return { ...prev, rows, totals };
     });
-    scheduleSave(user_id, { [field]: value } as Partial<ActualRow>);
+    // Iter 230 — the backend PATCH field for the OT override is `w_basic`.
+    const apiField = field === ("w_basic_salary" as keyof ActualRow) ? "w_basic" : field;
+    scheduleSave(user_id, { [apiField]: value } as Partial<ActualRow>);
   }, [scheduleSave]);
+
+  /* ----- Iter 230 (user request) — Save / Reprocess / Delete ----- */
+  const saveNow = async () => {
+    if (!run) return;
+    // Flush any pending debounced row PATCHes immediately.
+    const pend = pendingRef.current;
+    const ids = Object.keys(pend).filter((k) => Object.keys(pend[k] || {}).length);
+    try {
+      for (const uid of ids) {
+        const body = { user_id: uid, ...pend[uid] };
+        pendingRef.current[uid] = {};
+        if (patchTimersRef.current[uid]) clearTimeout(patchTimersRef.current[uid]);
+        await api(`/admin/actual-salary-process/${run.run_id}/row`, { method: "PATCH", body });
+      }
+      showMsg("Saved ✓ — salary data stored (not finalized).");
+    } catch (e: any) {
+      showMsg(e?.message || "Save failed");
+    }
+  };
+
+  const reprocessRun = async () => {
+    if (!run) return;
+    const ok = await confirmYesNo(
+      "Reprocess — reload the previously SAVED salary data for this run?\nAny unsaved edits on screen will be replaced.",
+    );
+    if (!ok) return;
+    try {
+      const j = await api<{ run: ActualRun }>(`/admin/salary-runs/${run.run_id}`);
+      setRun(j.run);
+      showMsg("Reprocessed ✓ — showing the last saved salary data.");
+    } catch (e: any) {
+      showMsg(e?.message || "Reprocess failed");
+    }
+  };
+
+  const deleteRun = async () => {
+    if (!run) return;
+    const ok1 = await confirmYesNo(
+      `DELETE this Salary Process run (${run.month})?\nThis cannot be undone.`,
+    );
+    if (!ok1) return;
+    const ok2 = await confirmYesNo(
+      "Are you REALLY sure? Confirm once more to DELETE this salary permanently.",
+    );
+    if (!ok2) return;
+    try {
+      const r = await api<{ deleted?: boolean; approval_required?: boolean; message?: string }>(
+        `/admin/salary-runs/${run.run_id}`, { method: "DELETE" },
+      );
+      if (r.deleted) {
+        setRun(null);
+        showMsg("Salary run DELETED ✓");
+      } else {
+        showMsg(r.message || "Deletion sent to the Super Admin for approval.");
+      }
+    } catch (e: any) {
+      showMsg(e?.message || "Delete failed");
+    }
+  };
 
   /* ----- Finalize the run ----- */
   const finalize = async () => {
@@ -667,6 +740,9 @@ export default function ActualSalaryProcessScreen() {
             onFinalize={finalize}
             finalizing={finalizing}
             onExportCsv={exportCsv}
+            onSave={saveNow}
+            onReprocess={reprocessRun}
+            onDelete={deleteRun}
           />
         ) : null}
 
@@ -738,6 +814,7 @@ const BASE_COL_WIDTHS = {
 
 function ResultGrid({
   run, editField, savingRow, onFinalize, finalizing, onExportCsv,
+  onSave, onReprocess, onDelete,
 }: {
   run: ActualRun;
   editField: (uid: string, field: keyof ActualRow, val: number) => void;
@@ -745,6 +822,9 @@ function ResultGrid({
   onFinalize: () => void;
   finalizing: boolean;
   onExportCsv: () => void;
+  onSave: () => void;
+  onReprocess: () => void;
+  onDelete: () => void;
 }) {
   const readOnly = !!run.finalized;
   // Iter 85 — Biometric lock removed; P Days & P Hours always editable.
@@ -838,16 +918,22 @@ function ResultGrid({
             {"  ·  "}ESI {fmtInr(run.totals?.esi)}
           </Text>
         </View>
-        <View style={{ flexDirection: "row", gap: 6 }}>
+        <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
           <ActionBtn icon="download-outline" label="Export CSV" onPress={onExportCsv} />
           {!run.finalized ? (
-            <ActionBtn
-              icon="lock-closed-outline"
-              label="Finalize"
-              busy={finalizing}
-              onPress={onFinalize}
-              primary
-            />
+            <>
+              {/* Iter 230 (user request) — 4-button lifecycle. */}
+              <ActionBtn icon="save-outline" label="Save" onPress={onSave} />
+              <ActionBtn icon="refresh-circle-outline" label="Reprocess" onPress={onReprocess} />
+              <ActionBtn icon="trash-outline" label="Delete" onPress={onDelete} />
+              <ActionBtn
+                icon="lock-closed-outline"
+                label="Finalize & Lock"
+                busy={finalizing}
+                onPress={onFinalize}
+                primary
+              />
+            </>
           ) : null}
         </View>
       </View>
@@ -974,14 +1060,23 @@ function ResultGrid({
                   fetched from the Employee Master's Actual Salary. */}
               <ReadCell w={COL_WIDTHS.basic} bg={GRP.master}>{fmtInr(r.basic)}</ReadCell>
               <ReadCell w={COL_WIDTHS.bsalary} bg={GRP.calc}>{fmtInr(r.basic_salary)}</ReadCell>
-              <ReadCell w={COL_WIDTHS.wbasic} bg={GRP.calc}>{fmtInr(r.w_basic_salary)}</ReadCell>
+              {/* Iter 230 (user request) — OT amount (W.Basic) is editable:
+                  typing an amount overrides the hours-based computation. */}
+              <EditCell
+                w={COL_WIDTHS.wbasic}
+                value={r.w_basic_salary}
+                onChange={(v) => editField(r.user_id, "w_basic_salary", v)}
+                disabled={readOnly}
+                money
+                gridRow={idx} gridCol={3} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.calc}
+              />
               <EditCell
                 w={COL_WIDTHS.othallo}
                 value={r.oth_allo}
                 onChange={(v) => editField(r.user_id, "oth_allo", v)}
                 disabled={readOnly}
                 money
-                gridRow={idx} gridCol={3} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.calc}
+                gridRow={idx} gridCol={4} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.calc}
               />
               <ReadCell w={COL_WIDTHS.gross} bg={GRP.calc}>{fmtInr(r.total_gross)}</ReadCell>
               <ReadCell w={COL_WIDTHS.epf} bg={GRP.ded}>{fmtInr(r.epf)}</ReadCell>
@@ -992,7 +1087,7 @@ function ResultGrid({
                 onChange={(v) => editField(r.user_id, "adv", v)}
                 disabled={readOnly}
                 money
-                gridRow={idx} gridCol={4} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.ded}
+                gridRow={idx} gridCol={5} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.ded}
               />
               <EditCell
                 w={COL_WIDTHS.tds}
@@ -1000,7 +1095,7 @@ function ResultGrid({
                 onChange={(v) => editField(r.user_id, "tds", v)}
                 disabled={readOnly}
                 money
-                gridRow={idx} gridCol={5} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.ded}
+                gridRow={idx} gridCol={6} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.ded}
               />
               <View style={{ width: COL_WIDTHS.net, paddingHorizontal: 6, paddingVertical: 4, justifyContent: "center" }}>
                 <Text style={[styles.readTxt, { textAlign: "right", fontWeight: "700" }]}>
