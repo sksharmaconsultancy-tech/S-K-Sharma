@@ -31,6 +31,7 @@ import { useLiveSync } from "@/src/api/live-sync";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import CompanyPicker from "@/src/components/CompanyPicker";
+import PunchRepairModal from "@/src/components/PunchRepairModal";
 import * as FileSystemNS from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
@@ -81,6 +82,7 @@ type GridResp = {
   days_in_month: number;
   day_labels: string[];
   weekday_labels: string[];
+  day_full_dates?: string[]; // Iter 233 — ISO date per column (cell repair)
   full_day_hours: number;
   employees: EmpRow[];
   // Iter 94 — day-wise salary bottom row + grand total
@@ -211,6 +213,10 @@ export default function AttendanceGridScreen() {
   // employees in the selected firm (learned from unfiltered grid loads).
   const [activeGroupNames, setActiveGroupNames] = useState<Set<string>>(new Set());
   const [groupId, setGroupId] = useState<string | null>(null);
+
+  // Iter 233 (user request) — tap a day cell (esp. "⚠ rectify" missing-punch
+  // cells) to repair that employee-date directly from the grid.
+  const [repair, setRepair] = useState<{ userId: string; name: string; date: string } | null>(null);
 
   // Iter 76 — Honour ?company_id= passed from the Attendance Sheet
   // "Grid View" button so super-admins land on the right firm.
@@ -921,6 +927,7 @@ export default function AttendanceGridScreen() {
                 view={view}
                 hideDays={hideDays}
                 zebra={idx % 2 === 1}
+                onCellPress={(uid, name, date) => setRepair({ userId: uid, name, date })}
               />
             ))}
           </View>
@@ -945,11 +952,23 @@ export default function AttendanceGridScreen() {
                   view={view}
                   hideDays={hideDays}
                   zebra={idx % 2 === 1}
+                  onCellPress={(uid, name, date) => setRepair({ userId: uid, name, date })}
                 />
               ))}
             </View>
           </ScrollView>
         </ScrollView>
+      )}
+      {repair && (
+        <PunchRepairModal
+          userId={repair.userId}
+          empName={repair.name}
+          dateIso={repair.date}
+          onClose={(changed) => {
+            setRepair(null);
+            if (changed) load();
+          }}
+        />
       )}
     </SafeAreaView>
   );
@@ -1087,12 +1106,14 @@ function GridRow({
   view,
   hideDays,
   zebra,
+  onCellPress,
 }: {
   emp: EmpRow;
   data: GridResp;
   view: GridView;
   hideDays?: boolean;
   zebra: boolean;
+  onCellPress?: (userId: string, name: string, dateIso: string) => void;
 }) {
   const dayW =
     view === "inout" || view === "inout_salary"
@@ -1120,10 +1141,22 @@ function GridRow({
           {emp.bio_code !== null && emp.bio_code !== undefined ? String(emp.bio_code) : "—"}
         </Text>
       </View>
-      {hideDays ? null : data.day_labels.map((d) => {
+      {hideDays ? null : data.day_labels.map((d, di) => {
         const cell = emp.days[d];
+        // Iter 233 — tap any day cell to open the punch-repair modal.
+        const fullDate =
+          data.day_full_dates?.[di] ?? `${data.month}-${d.slice(-2)}`;
         return (
-          <DayCell key={d} cell={cell} view={view} width={dayW} fullDay={data.full_day_hours} />
+          <Pressable
+            key={d}
+            onPress={
+              onCellPress
+                ? () => onCellPress(emp.user_id, emp.name || emp.employee_code || "Employee", fullDate)
+                : undefined
+            }
+          >
+            <DayCell cell={cell} view={view} width={dayW} fullDay={data.full_day_hours} />
+          </Pressable>
         );
       })}
       {/* User rule (Iter 83): Total HRS = Regular Duty only, OT HRS = OT total,
@@ -1233,7 +1266,7 @@ function DayCell({
           {cell.out || "— missing OUT —"}
         </Text>
         <Text style={[styles.dayHoursSm, { color: "#b45309", fontWeight: "800" }]}>
-          ⚠ rectify
+          ⚠ tap to fix
         </Text>
       </View>
     );
