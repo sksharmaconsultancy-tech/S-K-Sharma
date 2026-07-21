@@ -48,10 +48,13 @@ CATALOGUE: List[Dict[str, str]] = [
     {"key": "in_out_punch", "label": "In-Out Punch Report", "group": "Daily Reports"},
     {"key": "half_day", "label": "Half Day Report", "group": "Daily Reports"},
     {"key": "shift_report", "label": "Shift Report", "group": "Shift Reports"},
+    {"key": "dummy_shift", "label": "Dummy Shift Report", "group": "Shift Reports"},
     {"key": "night_shift", "label": "Night Shift Report", "group": "Shift Reports"},
     {"key": "double_shift", "label": "Double Shift Report", "group": "Shift Reports"},
     {"key": "weekly_off", "label": "Weekly Off Worked Report", "group": "Shift Reports"},
     {"key": "holiday_attendance", "label": "Holiday Attendance Report", "group": "Shift Reports"},
+    {"key": "department_wise", "label": "Department Wise Report", "group": "Summary Reports"},
+    {"key": "contractor_wise", "label": "Contractor Wise Report", "group": "Summary Reports"},
     {"key": "geofence_attendance", "label": "Geofence Attendance Report", "group": "Technology Reports"},
     {"key": "gps_attendance", "label": "GPS Attendance Report", "group": "Technology Reports"},
     {"key": "face_attendance", "label": "Face Recognition Attendance", "group": "Technology Reports"},
@@ -61,6 +64,30 @@ CATALOGUE: List[Dict[str, str]] = [
     {"key": "location_wise", "label": "Location / Worksite Wise Attendance", "group": "Technology Reports"},
 ]
 CAT_KEYS = {c["key"] for c in CATALOGUE}
+
+# Iter 215 — fixed Dummy Shift master (report-only shifts assigned per
+# employee from the Employee Master when the firm's Attendance Policy has
+# "Dummy Shift Allowed" switched on).
+DUMMY_SHIFTS = [
+    {"name": "SHIFT A1", "start": "07:00", "end": "15:00"},
+    {"name": "SHIFT B1", "start": "15:00", "end": "23:00"},
+    {"name": "SHIFT C1", "start": "23:00", "end": "07:00"},
+    {"name": "SHIFT A", "start": "08:00", "end": "16:00"},
+    {"name": "SHIFT B", "start": "16:00", "end": "00:00"},
+    {"name": "SHIFT C", "start": "00:00", "end": "08:00"},
+    {"name": "GENERAL SHIFT", "start": "10:00", "end": "06:00"},
+]
+DUMMY_SHIFT_NAMES = {s["name"] for s in DUMMY_SHIFTS}
+
+
+def _shift_display(e: dict) -> str:
+    """Employee's assigned shift for reports: Shift-Master name first,
+    then their own timing."""
+    s = (e.get("shift_name") or "").strip()
+    if s:
+        return s
+    ss, se = e.get("shift_start"), e.get("shift_end")
+    return f"{ss} – {se}" if ss and se else (ss or se or "")
 
 
 async def _auth(authorization: Optional[str], company_id: str):
@@ -125,12 +152,15 @@ async def _load_dataset(company_id: str, filters: Dict[str, Any]):
     emps = await db.users.find(q, {
         "_id": 0, "user_id": 1, "name": 1, "employee_code": 1, "department": 1,
         "designation": 1, "employee_type": 1, "gender": 1, "contractor_name": 1,
-        "shift_start": 1, "shift_end": 1, "father_name": 1, "is_contractual": 1,
+        "shift_start": 1, "shift_end": 1, "shift_name": 1, "dummy_shift": 1,
+        "father_name": 1, "is_contractual": 1,
     }).sort("employee_code", 1).to_list(5000)
     shift_f = (filters.get("shift") or "").strip()
     if shift_f:
         emps = [e for e in emps
-                if f"{e.get('shift_start') or ''}-{e.get('shift_end') or ''}" == shift_f
+                if _shift_display(e) == shift_f
+                or (e.get("dummy_shift") or "") == shift_f
+                or f"{e.get('shift_start') or ''}-{e.get('shift_end') or ''}" == shift_f
                 or (e.get("shift_start") or "") == shift_f]
     uids = [e["user_id"] for e in emps]
 
@@ -153,9 +183,15 @@ async def _load_dataset(company_id: str, filters: Dict[str, Any]):
     }).sort("at", 1):
         recs_by[(r["user_id"], r["date"])].append(r)
 
-    # --- policy ---
-    policy = await db.attendance_policies.find_one(
-        {"company_id": company_id}, {"_id": 0}) or {}
+    # --- policy --- (the Attendance Policy screen edits the firm's
+    # companies.attendance_policy — prefer it so Hours / OT Hours follow
+    # the company attendance policy; fall back to the legacy collection.)
+    comp = await db.companies.find_one(
+        {"company_id": company_id}, {"_id": 0, "attendance_policy": 1})
+    policy = (comp or {}).get("attendance_policy") or {}
+    if not policy:
+        policy = await db.attendance_policies.find_one(
+            {"company_id": company_id}, {"_id": 0}) or {}
 
     dates = _dates_between(from_date, to_date)
     return emps, recs_by, policy, dates, from_date, to_date
@@ -194,7 +230,14 @@ def _day_summary(recs: List[dict], policy: dict, emp: dict) -> dict:
             early_by = b - a
     full_h = float(policy.get("full_day_hours") or policy.get("standard_working_hours") or 8.0)
     half_h = float(policy.get("half_day_hours") or 4.0)
-    ot_threshold = float(policy.get("overtime_threshold_hours") or full_h)
+    # Iter 215 — OT threshold follows the EMPLOYEE's own duty hours when
+    # they have a shift timing assigned (Employee Master), else the
+    # company Attendance Policy threshold.
+    emp_dur = None
+    _ss, _se = _mins(emp.get("shift_start") or ""), _mins(emp.get("shift_end") or "")
+    if _ss is not None and _se is not None and _ss != _se:
+        emp_dur = ((_se - _ss) % (24 * 60)) / 60.0
+    ot_threshold = emp_dur or float(policy.get("overtime_threshold_hours") or full_h)
     ot_hours = max(0.0, hours - ot_threshold) if hours else 0.0
     status = "A"
     if recs:
@@ -362,10 +405,7 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
                 s = _day_summary(recs, policy, e)
                 if not s["first_in"]:
                     continue
-                shift = (e.get("shift_name") or "").strip()
-                if not shift:
-                    ss, se = e.get("shift_start"), e.get("shift_end")
-                    shift = f"{ss} – {se}" if ss and se else (ss or se or "—")
+                shift = _shift_display(e) or "—"
                 name = e.get("name") or ""
                 fi = _mins(s["first_in"])
                 ins_count = sum(1 for r in recs if r["kind"] == "in")
@@ -376,6 +416,66 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
                                e.get("department") or "", e.get("designation") or "",
                                s["first_in"], ""])
         rows.sort(key=lambda r: (r[0], r[1], r[2]) if multi else (r[0], r[1]))
+        return cols, rows
+
+    if key == "dummy_shift":
+        # Iter 215 — live-muster layout grouped by the fixed DUMMY shifts
+        # assigned per employee in the Employee Master (report-only,
+        # optional per firm via Attendance Policy → Dummy Shift Allowed).
+        multi = len(dates) > 1
+        cols = ((["Date"] if multi else [])
+                + ["Dummy Shift", "Code", "Employee Name", "Department",
+                   "Designation", "Punch In Time", "Signature"])
+        timing = {s["name"]: f"{s['start']} – {s['end']}" for s in DUMMY_SHIFTS}
+        rows = []
+        for d in dates:
+            for e in emps:
+                ds = (e.get("dummy_shift") or "").strip()
+                if not ds:
+                    continue
+                recs = recs_by.get((e["user_id"], d))
+                if not recs:
+                    continue
+                s = _day_summary(recs, policy, e)
+                if not s["first_in"]:
+                    continue
+                name = e.get("name") or ""
+                fi = _mins(s["first_in"])
+                ins_count = sum(1 for r in recs if r["kind"] == "in")
+                if (s["pairs"] >= 2 or ins_count >= 2) and fi is not None and fi < 720:
+                    name = f"OT — {name}"
+                dsl = f"{ds} ({timing[ds]})" if ds in timing else ds
+                rows.append(([d] if multi else [])
+                            + [dsl, str(e.get("employee_code") or ""), name,
+                               e.get("department") or "", e.get("designation") or "",
+                               s["first_in"], ""])
+        rows.sort(key=lambda r: (r[0], r[1], r[2]) if multi else (r[0], r[1]))
+        return cols, rows
+
+    if key in ("department_wise", "contractor_wise"):
+        # Iter 215 — grouped summaries; Hours / OT Hours / Normal Hours
+        # follow the company Attendance Policy (and each employee's own
+        # duty hours for the OT threshold).
+        fld = "department" if key == "department_wise" else "contractor_name"
+        label = "Department" if key == "department_wise" else "Contractor"
+        agg: Dict[str, dict] = {}
+        for e in emps:
+            g = (e.get(fld) or "").strip() or "— Not set —"
+            a = agg.setdefault(g, {"emps": set(), "days": 0, "hours": 0.0, "ot": 0.0})
+            for d in dates:
+                recs = recs_by.get((e["user_id"], d))
+                if not recs:
+                    continue
+                s = _day_summary(recs, policy, e)
+                a["emps"].add(e["user_id"])
+                a["days"] += 1 if s["status"] in ("P", "HD") else 0
+                a["hours"] += s["hours"]
+                a["ot"] += s["ot_hours"]
+        cols = [label, "Employees", "Days Present", "Total Hours",
+                "OT Hours", "Normal Hours"]
+        rows = [[g, len(a["emps"]), a["days"], round(a["hours"], 1),
+                 round(a["ot"], 1), round(a["hours"] - a["ot"], 1)]
+                for g, a in sorted(agg.items()) if a["emps"]]
         return cols, rows
     if key == "night_shift":
         ns, ne = _mins(night_start) or 1320, _mins(night_end) or 360
@@ -607,6 +707,37 @@ async def catalogue(authorization: Optional[str] = Header(None)):
     return {"reports": CATALOGUE}
 
 
+@router.get("/shift-options")
+async def shift_options(company_id: str,
+                        authorization: Optional[str] = Header(None)):
+    """Iter 215 — shift filter choices: ONLY the shifts actually assigned
+    to ACTIVE employees in the Employee Master, plus the fixed dummy
+    shifts when the firm's Attendance Policy allows them."""
+    await _auth(authorization, company_id)
+    q = {"company_id": company_id, "role": "employee", "active": {"$ne": False}}
+    shifts, dummy_used = set(), set()
+    async for e in db.users.find(q, {
+        "_id": 0, "shift_name": 1, "shift_start": 1, "shift_end": 1,
+        "dummy_shift": 1,
+    }):
+        s = _shift_display(e)
+        if s:
+            shifts.add(s)
+        ds = (e.get("dummy_shift") or "").strip()
+        if ds:
+            dummy_used.add(ds)
+    comp = await db.companies.find_one(
+        {"company_id": company_id},
+        {"_id": 0, "attendance_policy.policy_master.dummy_shift_allowed": 1})
+    allowed = bool((((comp or {}).get("attendance_policy") or {})
+                    .get("policy_master") or {}).get("dummy_shift_allowed"))
+    return {"shifts": sorted(shifts),
+            "dummy_allowed": allowed,
+            "dummy_shifts": [s["name"] for s in DUMMY_SHIFTS],
+            "dummy_shifts_assigned": sorted(dummy_used),
+            "dummy_master": DUMMY_SHIFTS}
+
+
 @router.post("/generate")
 async def generate(payload: Dict[str, Any] = Body(...),
                    authorization: Optional[str] = Header(None)):
@@ -619,6 +750,28 @@ async def generate(payload: Dict[str, Any] = Body(...),
         raise HTTPException(status_code=400, detail="Unknown report_key")
     fmt = str(payload.get("format") or "json").lower()
     filters = payload.get("filters") or {}
+
+    # Iter 215 — the Shift / Dummy Shift muster reports are SINGLE-DAY
+    # reports (live headcount / evacuation roll).
+    if key in ("shift_report", "dummy_shift"):
+        f_d = (filters.get("from_date") or "").strip()
+        t_d = (filters.get("to_date") or "").strip() or f_d
+        if not f_d or f_d != t_d:
+            raise HTTPException(
+                status_code=400,
+                detail="This report is a single-day report — pick one date.")
+        filters = {**filters, "from_date": f_d, "to_date": f_d, "month": None}
+    if key == "dummy_shift":
+        comp_pol = await db.companies.find_one(
+            {"company_id": company_id},
+            {"_id": 0, "attendance_policy.policy_master.dummy_shift_allowed": 1})
+        allowed = bool((((comp_pol or {}).get("attendance_policy") or {})
+                        .get("policy_master") or {}).get("dummy_shift_allowed"))
+        if not allowed:
+            raise HTTPException(
+                status_code=400,
+                detail=("Dummy Shift is not enabled for this firm. Switch on "
+                        "'Dummy Shift Allowed' in the Attendance Policy first."))
 
     emps, recs_by, policy, dates, from_date, to_date = await _load_dataset(company_id, filters)
     columns, rows = build_report(key, emps, recs_by, policy, dates)

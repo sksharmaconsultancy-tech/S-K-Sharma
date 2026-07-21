@@ -49,6 +49,13 @@ function monthNow() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// Iter 215 — single-day muster reports.
+const SINGLE_DAY_KEYS = new Set(["shift_report", "dummy_shift"]);
+
 export default function LabourReportsScreen() {
   const router = useRouter();
   const { user } = useAuth();
@@ -66,6 +73,25 @@ export default function LabourReportsScreen() {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Iter 215 — single-day muster date + shift filter + preview search/sort.
+  const [reportDate, setReportDate] = useState<string>(todayISO());
+  const [shiftSel, setShiftSel] = useState<string>("");
+  const [shiftOpts, setShiftOpts] = useState<{
+    shifts: string[]; dummy_allowed: boolean; dummy_shifts_assigned: string[];
+  } | null>(null);
+  const [q, setQ] = useState("");
+  const [sortCol, setSortCol] = useState<number | null>(null);
+  const [sortAsc, setSortAsc] = useState(true);
+
+  const isSingleDay = SINGLE_DAY_KEYS.has(reportKey);
+
+  useEffect(() => {
+    if (!selectedCompanyId) return;
+    api<{ shifts: string[]; dummy_allowed: boolean; dummy_shifts_assigned: string[] }>(
+      `/admin/labour-reports/shift-options?company_id=${selectedCompanyId}`)
+      .then(setShiftOpts)
+      .catch(() => setShiftOpts(null));
+  }, [selectedCompanyId]);
 
   useEffect(() => {
     api<{ reports: CatItem[] }>("/admin/labour-reports/catalogue")
@@ -84,7 +110,10 @@ export default function LabourReportsScreen() {
     report_key: reportKey,
     format,
     filters: {
-      ...(fromDate && toDate ? { from_date: fromDate, to_date: toDate } : { month }),
+      ...(isSingleDay
+        ? { from_date: reportDate, to_date: reportDate }
+        : fromDate && toDate ? { from_date: fromDate, to_date: toDate } : { month }),
+      ...(shiftSel ? { shift: shiftSel } : {}),
       ...Object.fromEntries(Object.entries(filters).filter(([, v]) => (v || "").trim())),
     },
   });
@@ -103,7 +132,7 @@ export default function LabourReportsScreen() {
       setPreview(null);
     } finally { setBusy(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCompanyId, reportKey, month, fromDate, toDate, filters]);
+  }, [selectedCompanyId, reportKey, month, fromDate, toDate, filters, reportDate, shiftSel]);
 
   const download = async (format: "pdf" | "excel" | "csv") => {
     if (!selectedCompanyId) return;
@@ -176,22 +205,62 @@ export default function LabourReportsScreen() {
         <View style={st.card}>
           <Text style={st.cardTitle}>{currentLabel}</Text>
           <View style={st.rowWrap}>
-            <View style={st.field}>
-              <Text style={st.fieldLbl}>Month (YYYY-MM)</Text>
-              <TextInput value={month} onChangeText={setMonth} style={st.input}
-                placeholder="2026-06" placeholderTextColor={colors.onSurfaceTertiary} testID="lr-month" />
-            </View>
-            <View style={st.field}>
-              <Text style={st.fieldLbl}>From (optional)</Text>
-              <TextInput value={fromDate} onChangeText={setFromDate} style={st.input}
-                placeholder="YYYY-MM-DD" placeholderTextColor={colors.onSurfaceTertiary} testID="lr-from" />
-            </View>
-            <View style={st.field}>
-              <Text style={st.fieldLbl}>To (optional)</Text>
-              <TextInput value={toDate} onChangeText={setToDate} style={st.input}
-                placeholder="YYYY-MM-DD" placeholderTextColor={colors.onSurfaceTertiary} testID="lr-to" />
-            </View>
+            {isSingleDay ? (
+              <View style={st.field}>
+                <Text style={st.fieldLbl}>Report Date (single day)</Text>
+                <TextInput value={reportDate} onChangeText={setReportDate} style={st.input}
+                  placeholder="YYYY-MM-DD" placeholderTextColor={colors.onSurfaceTertiary} testID="lr-report-date" />
+              </View>
+            ) : (
+              <>
+                <View style={st.field}>
+                  <Text style={st.fieldLbl}>Month (YYYY-MM)</Text>
+                  <TextInput value={month} onChangeText={setMonth} style={st.input}
+                    placeholder="2026-06" placeholderTextColor={colors.onSurfaceTertiary} testID="lr-month" />
+                </View>
+                <View style={st.field}>
+                  <Text style={st.fieldLbl}>From (optional)</Text>
+                  <TextInput value={fromDate} onChangeText={setFromDate} style={st.input}
+                    placeholder="YYYY-MM-DD" placeholderTextColor={colors.onSurfaceTertiary} testID="lr-from" />
+                </View>
+                <View style={st.field}>
+                  <Text style={st.fieldLbl}>To (optional)</Text>
+                  <TextInput value={toDate} onChangeText={setToDate} style={st.input}
+                    placeholder="YYYY-MM-DD" placeholderTextColor={colors.onSurfaceTertiary} testID="lr-to" />
+                </View>
+              </>
+            )}
           </View>
+
+          {/* Iter 215 — Shift filter: only shifts actually assigned to
+              ACTIVE employees in the Employee Master. */}
+          {isSingleDay ? (
+            <View style={{ marginTop: 8 }}>
+              <Text style={st.fieldLbl}>
+                {reportKey === "dummy_shift" ? "Dummy Shift filter" : "Shift filter (assigned in Employee Master)"}
+              </Text>
+              <View style={[st.chipsWrap, { marginTop: 4 }]}>
+                <Pressable onPress={() => setShiftSel("")}
+                  style={[st.chip, !shiftSel && st.chipOn]} testID="lr-shift-all">
+                  <Text style={[st.chipTxt, !shiftSel && { color: "#fff" }]}>All Shifts</Text>
+                </Pressable>
+                {(reportKey === "dummy_shift"
+                  ? (shiftOpts?.dummy_shifts_assigned || [])
+                  : (shiftOpts?.shifts || [])).map((s) => (
+                  <Pressable key={s} onPress={() => setShiftSel(shiftSel === s ? "" : s)}
+                    style={[st.chip, shiftSel === s && st.chipOn]} testID={`lr-shift-${s}`}>
+                    <Text style={[st.chipTxt, shiftSel === s && { color: "#fff" }]}>{s}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              {reportKey === "dummy_shift" && shiftOpts && !shiftOpts.dummy_allowed ? (
+                <Text style={st.errTxt}>
+                  Dummy Shift is OFF for this firm — enable “Dummy Shift Allowed” in the Attendance Policy,
+                  then assign dummy shifts in the Employee Master.
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
 
           <Pressable onPress={() => setShowFilters((v) => !v)} style={st.filterToggle} testID="lr-filters-toggle">
             <Ionicons name="funnel-outline" size={13} color={colors.brandPrimary} />
@@ -250,20 +319,56 @@ export default function LabourReportsScreen() {
               {preview.from_date} → {preview.to_date} · {preview.total_rows} rows ·
               Generated {preview.generated_at} by {preview.generated_by} · Verify: {preview.verify_id}
             </Text>
+            {/* Iter 215 — search + tap a column header to sort. */}
+            <View style={st.searchWrap}>
+              <Ionicons name="search" size={13} color={colors.onSurfaceTertiary} />
+              <TextInput value={q} onChangeText={setQ} style={st.searchInput}
+                placeholder="Search in report…" placeholderTextColor={colors.onSurfaceTertiary}
+                testID="lr-preview-search" />
+              {q ? (
+                <Pressable onPress={() => setQ("")} hitSlop={8}>
+                  <Ionicons name="close-circle" size={14} color={colors.onSurfaceTertiary} />
+                </Pressable>
+              ) : null}
+            </View>
             <ScrollView horizontal style={{ marginTop: 8 }}>
               <View>
                 <View style={st.tRow}>
                   {preview.columns.map((c, i) => (
-                    <Text key={i} style={[st.tCell, st.tHead]} numberOfLines={2}>{c}</Text>
+                    <Pressable key={i} onPress={() => {
+                      if (sortCol === i) setSortAsc((v) => !v);
+                      else { setSortCol(i); setSortAsc(true); }
+                    }} testID={`lr-sort-${i}`}>
+                      <Text style={[st.tCell, st.tHead]} numberOfLines={2}>
+                        {c}{sortCol === i ? (sortAsc ? " ▲" : " ▼") : ""}
+                      </Text>
+                    </Pressable>
                   ))}
                 </View>
-                {preview.rows.slice(0, 100).map((r, ri) => (
-                  <View key={ri} style={[st.tRow, ri % 2 === 1 && { backgroundColor: colors.background }]}>
-                    {r.map((v, ci) => (
-                      <Text key={ci} style={st.tCell} numberOfLines={1}>{String(v ?? "")}</Text>
-                    ))}
-                  </View>
-                ))}
+                {(() => {
+                  let rows = preview.rows;
+                  const needle = q.trim().toLowerCase();
+                  if (needle) {
+                    rows = rows.filter((r) => r.some((v) => String(v ?? "").toLowerCase().includes(needle)));
+                  }
+                  if (sortCol != null) {
+                    rows = [...rows].sort((a, b) => {
+                      const av = a[sortCol]; const bv = b[sortCol];
+                      const an = Number(av); const bn = Number(bv);
+                      const cmp = !Number.isNaN(an) && !Number.isNaN(bn) && String(av).trim() !== "" && String(bv).trim() !== ""
+                        ? an - bn
+                        : String(av ?? "").localeCompare(String(bv ?? ""));
+                      return sortAsc ? cmp : -cmp;
+                    });
+                  }
+                  return rows.slice(0, 100).map((r, ri) => (
+                    <View key={ri} style={[st.tRow, ri % 2 === 1 && { backgroundColor: colors.background }]}>
+                      {r.map((v, ci) => (
+                        <Text key={ci} style={st.tCell} numberOfLines={1}>{String(v ?? "")}</Text>
+                      ))}
+                    </View>
+                  ));
+                })()}
               </View>
             </ScrollView>
             {preview.total_rows > 100 ? (
@@ -322,4 +427,10 @@ const st = StyleSheet.create({
   tRow: { flexDirection: "row", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider },
   tCell: { width: 108, fontSize: 10.5, color: colors.onSurface, paddingVertical: 5, paddingHorizontal: 4 },
   tHead: { fontWeight: "800", color: colors.onSurfaceSecondary, backgroundColor: colors.background },
+  searchWrap: {
+    flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1,
+    borderColor: colors.divider, borderRadius: radius.md, paddingHorizontal: 8,
+    height: 32, marginTop: 8, backgroundColor: colors.surface, maxWidth: 320,
+  },
+  searchInput: { flex: 1, fontSize: 12, color: colors.onSurface, paddingVertical: 0 },
 });

@@ -81,6 +81,8 @@ type EmpDetail = {
   // ---- Textile industry per-employee flags ----
   business_category?: string | null;
   shift_preset_name?: string | null;
+  dummy_shift?: string | null;
+  dummy_shift_allowed?: boolean;
   ot_applicable?: boolean | null;
   week_off_full_day?: boolean | null;
   week_off_govt_holiday_enabled?: boolean | null;
@@ -189,6 +191,7 @@ export default function EmployeeMasterScreen() {
             // Textile flags — pass through as null when absent (inherit
             // the company default) so the tri-state toggles render right.
             shift_preset_name: full.shift_preset_name ?? null,
+            dummy_shift: full.dummy_shift ?? null,
             ot_applicable:
               full.ot_applicable === undefined ? null : full.ot_applicable,
             week_off_full_day:
@@ -232,11 +235,14 @@ export default function EmployeeMasterScreen() {
             policy: {
               shifts?: { name: string; start: string; end: string }[];
               policy_variant?: "policy_1" | "policy_2" | null;
+              policy_master?: { dummy_shift_allowed?: boolean };
             };
           }>(`/attendance/policy?company_id=${e.company_id}`);
           e.business_category = p.business_category || null;
           e.available_shifts = p.policy?.shifts || [];
           e.policy_variant = p.policy?.policy_variant || null;
+          // Iter 215 — Dummy Shift picker gate (Attendance Policy flag).
+          e.dummy_shift_allowed = !!p.policy?.policy_master?.dummy_shift_allowed;
         } catch {}
         // Iter 142 — Firm Master OT gate drives whether the per-employee
         // OT option is shown at all.
@@ -711,6 +717,11 @@ export default function EmployeeMasterScreen() {
             {/* Iter 91 — PF UAN / ESIC generation, enabled by default.
                 Only Aadhaar is mandatory (validated server-side). */}
             <UanEsicCard emp={emp} />
+
+            {/* Iter 215 — report-only Dummy Shift (Attendance Policy gate) */}
+            {emp.dummy_shift_allowed ? (
+              <DummyShiftCard emp={emp} onSaved={load} />
+            ) : null}
 
             {/* Textile industry flags — only shown for textile companies */}
             {emp.business_category === "textile" ? (
@@ -1670,6 +1681,93 @@ function TextileMasterCard({
 /** Iter 142 — per-employee Overtime flag for NON-textile firms (textile
  *  firms manage it inside the Textile master flags card). Shown only when
  *  the Firm Master allows OT. */
+// Iter 215 — report-only Dummy Shift picker (fixed master list). Shown
+// only when the firm's Attendance Policy has "Dummy Shift Allowed" ON.
+// Used exclusively by the Dummy Shift Report in Labour Law Reports.
+const DUMMY_SHIFT_MASTER: { name: string; start: string; end: string }[] = [
+  { name: "SHIFT A1", start: "07:00", end: "15:00" },
+  { name: "SHIFT B1", start: "15:00", end: "23:00" },
+  { name: "SHIFT C1", start: "23:00", end: "07:00" },
+  { name: "SHIFT A", start: "08:00", end: "16:00" },
+  { name: "SHIFT B", start: "16:00", end: "00:00" },
+  { name: "SHIFT C", start: "00:00", end: "08:00" },
+  { name: "GENERAL SHIFT", start: "10:00", end: "06:00" },
+];
+
+function DummyShiftCard({
+  emp,
+  onSaved,
+}: {
+  emp: EmpDetail;
+  onSaved: () => Promise<void> | void;
+}) {
+  const [sel, setSel] = useState<string | null>(emp.dummy_shift ?? null);
+  const [saving, setSaving] = useState(false);
+  const doSave = async () => {
+    setSaving(true);
+    try {
+      await api(`/admin/user-role`, {
+        method: "PATCH",
+        body: { user_id: emp.user_id, dummy_shift: sel || "" },
+      });
+      await onSaved();
+      if (Platform.OS === "web") globalThis.alert("Dummy shift saved ✓");
+      else Alert.alert("Saved", "Dummy shift updated.");
+    } catch (e: any) {
+      const msg = e?.message || "Save failed";
+      if (Platform.OS === "web") globalThis.alert(msg);
+      else Alert.alert("Save", msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <View style={styles.card} testID="dummy-shift-card">
+      <Text style={styles.cardTitle}>Dummy Shift (Report Only)</Text>
+      <Text style={styles.cardHint}>
+        Used only for the Dummy Shift Report in Labour Law Reports — it does
+        NOT affect attendance or salary calculations.
+      </Text>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+        <Pressable
+          testID="dummy-shift-none"
+          onPress={() => setSel(null)}
+          style={[styles.chip, sel == null && styles.chipActive]}
+        >
+          <Text style={[styles.chipTxt, sel == null && styles.chipTxtActive]}>None</Text>
+        </Pressable>
+        {DUMMY_SHIFT_MASTER.map((s) => {
+          const on = sel === s.name;
+          return (
+            <Pressable
+              key={s.name}
+              testID={`dummy-shift-${s.name}`}
+              onPress={() => setSel(s.name)}
+              style={[styles.chip, on && styles.chipActive]}
+            >
+              <Text style={[styles.chipTxt, on && styles.chipTxtActive]}>
+                {s.name} ({s.start}–{s.end})
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Pressable
+        testID="dummy-shift-save"
+        onPress={doSave}
+        style={[styles.primaryBtn, saving && styles.btnDisabled]}
+        disabled={saving}
+      >
+        {saving ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.primaryBtnTxt}>Save Dummy Shift</Text>
+        )}
+      </Pressable>
+    </View>
+  );
+}
+
 function OtCard({
   emp,
   onSaved,

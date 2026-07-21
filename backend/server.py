@@ -560,6 +560,10 @@ class RoleUpdate(BaseModel):
     # employee (e.g. "Day 7-7", "Night 8-8"). Purely informational for
     # now — used by the Employee Master PDF and future payroll logic.
     shift_preset_name: Optional[str] = None
+    # Iter 215 — report-only Dummy Shift (fixed master list; requires the
+    # firm policy flag dummy_shift_allowed). Used ONLY by the Dummy Shift
+    # Report in Labour Law Reports.
+    dummy_shift: Optional[str] = None
     # Policy 1: Overtime Applicable for this employee. When False, extra
     # hours beyond the shift are NOT counted as OT (still tracked but
     # payroll treats them as un-billed).
@@ -1183,6 +1187,10 @@ def _validate_policy(raw: dict) -> dict:
         "auto_shift_detection": _flag("auto_shift_detection"),
         "wfh_allowed": _flag("wfh_allowed"),
         "geofencing_required": _flag("geofencing_required", True),
+        # Iter 215 — report-only Dummy Shifts: when ON, the Employee
+        # Master shows a Dummy Shift picker and the Dummy Shift Report
+        # becomes available in Labour Law Reports.
+        "dummy_shift_allowed": _flag("dummy_shift_allowed"),
         # Iter 200 (user request) — dynamic attendance calculation points:
         # • attendance_by_duty_hours: Days = Total Duty HRS ÷ Daily Duty HRS
         #   (firm's full-day hours) instead of per-day present counting.
@@ -13136,6 +13144,9 @@ async def update_user_role(payload: RoleUpdate, authorization: Optional[str] = H
     if "shift_preset_name" in fset:
         v = payload.shift_preset_name
         updates["shift_preset_name"] = (v or "").strip() or None
+    if "dummy_shift" in fset:
+        v = (payload.dummy_shift or "").strip()
+        updates["dummy_shift"] = v or None
     if "ot_applicable" in fset:
         v = payload.ot_applicable
         updates["ot_applicable"] = None if v is None else bool(v)
@@ -14645,6 +14656,18 @@ async def _compute_compliance_run(
         async for e in db.compliance_import_entries.find(_am_q, {"_id": 0}):
             am_entries[e["user_id"]] = e
 
+    # Iter 216 (user request) — Compliance Present Days are FETCHED from
+    # the Attendance Report grid (the exact same source the Actual Salary
+    # Process uses) so the compliance run always matches the report.
+    # Imported-sheet runs keep their own source.
+    grid_by_user_c: Dict[str, Any] = {}
+    if not payload.use_imported_sheet and q.get("company_id"):
+        try:
+            _grid_c = await _compute_monthly_grid_data(q["company_id"], payload.month)
+            for gr in _grid_c.get("employees") or _grid_c.get("rows") or []:
+                grid_by_user_c[gr["user_id"]] = gr
+        except HTTPException:
+            grid_by_user_c = {}
 
     # ---- Load company policies (for full_day_hours / half_day_hours) ----
     company_ids = list({e.get("company_id") for e in employees if e.get("company_id")})
@@ -14726,6 +14749,7 @@ async def _compute_compliance_run(
         if _emp_ot is not None:
             merged_pol["ot_allowed"] = bool(_emp_ot)
         att_rows = attendance_by_user.get(emp["user_id"], [])
+        _pm_202 = (att_pol.get("policy_master") or {})
         if (att_pol.get("policy_variant") or "").strip() == "policy_2":
             # Iter 129c — Textile Policy 2: Present Days auto-synced from
             # biometrics via the grid's textile pipeline (8 hrs = 1 day).
@@ -14734,11 +14758,34 @@ async def _compute_compliance_run(
             # Iter 202 — "Count Present Day @ 8 HRS" sub-point: compliance
             # runs count 1 Present Day per 8 worked hrs (extra hrs → OT)
             # when the firm's Salary Allowed includes Compliance.
-            _pm_202 = (att_pol.get("policy_master") or {})
             if _pm_202.get("compliance_present_8hr") and \
                     (att_pol.get("salary_allowed") or "both") in ("compliance", "both"):
                 merged_pol["_present_day_hours_override"] = 8.0
             stats = compute_present_days_and_ot(att_rows, merged_pol)
+        # Iter 216 (user request) — override with the Attendance Report's
+        # Present Days + OT so the Compliance Salary run always agrees
+        # with the report (and the Actual process). Applies to policy_2
+        # firms too. Skipped when the compliance-only 8-HR sub-point is
+        # active (that keeps its dedicated compute above).
+        _g_c = grid_by_user_c.get(emp["user_id"])
+        if _g_c and not _pm_202.get("compliance_present_8hr"):
+            _t_c = _g_c.get("totals") or {}
+            _pd_c = _t_c.get("present_days_policy")
+            if _pd_c is None:
+                _pd_c = _t_c.get("total_days_computed")
+            if _pd_c is not None:
+                _pd_cf = float(_pd_c or 0.0)
+                stats = dict(stats)
+                stats["present_days"] = int(_pd_cf)
+                stats["effective_present"] = _pd_cf
+                stats["half_days"] = 0
+                stats["duty_hours"] = float(
+                    _t_c.get("duty_hours")
+                    or _t_c.get("hours")
+                    or stats.get("duty_hours")
+                    or 0.0
+                )
+                stats["ot_hours"] = float(_t_c.get("ot_hours") or 0.0)
         _am = am_entries.get(emp["user_id"]) if payload.use_imported_sheet else None
         if payload.use_imported_sheet:
             # Imported sheet wins: present days from the uploaded/email
@@ -17318,11 +17365,11 @@ async def _compute_monthly_grid_data(
             _extra_min = total_hours_min - _days_whole * _div_min
         else:
             _days_whole = 0
-            _daily_min = int(round(emp_daily_hrs * 60))
-            _extra_min = (
-                total_hours_min - (total_hours_min // _daily_min) * _daily_min
-                if _daily_min > 0 else 0
-            )
+            # Iter 216 (user report) — in per-day policy counting mode the
+            # "Extra Duty HRS" are the OT hours beyond regular duty (what
+            # the OT Hours Sheet shows), NOT a division remainder. This is
+            # what auto-fills P HRS on the Actual Salary Process.
+            _extra_min = total_ot_min
         rows.append({
             "user_id": uid,
             "employee_code": e.get("employee_code"),
@@ -19216,9 +19263,17 @@ async def create_actual_salary_process(
             t = g.get("totals") or {}
             # Iter 85 — Per user request: P Days = whole-day count
             # (total_days_int), P Hours = remainder (total_extra_hrs).
+            # Iter 216 — prefer the report's "Present Days"
+            # (present_days_policy) so half-days (26.5) are kept in
+            # per-day policy mode; division mode values are identical.
             # Falls back to legacy present_days / hours when the newer
             # split fields are missing.
-            p_days = float(t.get("total_days_int") if t.get("total_days_int") is not None else t.get("present_days") or 0.0)
+            _pd_pref = t.get("present_days_policy")
+            if _pd_pref is None:
+                _pd_pref = t.get("total_days_computed")
+            if _pd_pref is None:
+                _pd_pref = t.get("total_days_int")
+            p_days = float(_pd_pref if _pd_pref is not None else t.get("present_days") or 0.0)
             p_hours = float(t.get("total_extra_hrs") if t.get("total_extra_hrs") is not None else t.get("hours") or 0.0)
 
         # Iter 85 — DOJ / Exit-date working-days cap. If the employee

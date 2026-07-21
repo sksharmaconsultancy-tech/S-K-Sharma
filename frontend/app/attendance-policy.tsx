@@ -1273,6 +1273,8 @@ const PM_FLAGS: { key: string; label: string }[] = [
   { key: "auto_shift_detection", label: "Auto Shift Detection" },
   { key: "wfh_allowed", label: "WFH Allowed" },
   { key: "geofencing_required", label: "Geo-fencing Required" },
+  // Iter 215 — report-only dummy shifts (SHIFT A1/B1/C1, A/B/C, GENERAL).
+  { key: "dummy_shift_allowed", label: "Dummy Shift Allowed (report-only — shows a Dummy Shift picker in Employee Master and enables the Dummy Shift Report in Labour Law Reports)" },
   // Iter 200 (user request) — dynamic attendance calculation points.
   { key: "attendance_by_duty_hours", label: "Attendance Calculation as per Duty HRS (Days = Total Duty HRS ÷ Daily Duty HRS from Firm Master)" },
   { key: "weekoff_present_add_ot", label: "Week-off Day Worked → Add hours in OT (not counted Present)" },
