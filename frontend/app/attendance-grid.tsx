@@ -1030,7 +1030,7 @@ function GridHeader({
         <Text style={styles.hcellTxt}>Bio{arrow("bio")}</Text>
       </Pressable>
       {hideDays ? null : data.day_labels.map((d, i) => (
-        <View key={d} style={[styles.hcell, { width: dayW, alignItems: "center" }]}>
+        <View key={d} style={[styles.hcell, styles.hcellDayBg, { width: dayW, alignItems: "center" }]}>
           <Text style={styles.hcellDay}>{d}</Text>
           <Text style={styles.hcellDayLabel}>{data.weekday_labels[i]}</Text>
         </View>
@@ -1564,6 +1564,9 @@ const styles = StyleSheet.create({
   hcellFrozen: { backgroundColor: colors.brandPrimary },
   hcellDay: { color: "#fff", fontWeight: "700", fontSize: 12 },
   hcellDayLabel: { color: "rgba(255,255,255,0.75)", fontSize: 9, marginTop: 1 },
+  // Iter 222 (user request) — the 1–31 day headers get their OWN distinct
+  // color (deep teal) so they stand apart from the identity/total columns.
+  hcellDayBg: { backgroundColor: "#0F766E", borderRightColor: "rgba(255,255,255,0.22)" },
   sumCell: { backgroundColor: colors.brandSecondary || colors.brandPrimary, alignItems: "center" },
   // Iter 114 — body Total columns highlighted with a LIGHT tint (user rule).
   sumCellLight: { backgroundColor: "#E9F5F0", alignItems: "center" },
