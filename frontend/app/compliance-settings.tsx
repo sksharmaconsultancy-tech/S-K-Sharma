@@ -5,7 +5,7 @@
  * Compliance Salary Process uses: rates, ceilings, wage-base floor and
  * whole-rupee rounding rules. Super Admin edits; Sub Admins can view.
  */
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -14,6 +14,8 @@ import {
   Pressable,
   TextInput,
   ActivityIndicator,
+  Modal,
+  FlatList,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -53,6 +55,14 @@ export default function ComplianceSettingsScreen() {
   const [scope, setScope] = useState<string>("standard");
   const [companies, setCompanies] = useState<{ company_id: string; name: string }[]>([]);
   const [hasOverride, setHasOverride] = useState(false);
+  // Iter 230 (user request) — firm dropdown state.
+  const [firmDdOpen, setFirmDdOpen] = useState(false);
+  const [firmQuery, setFirmQuery] = useState("");
+  const filteredFirms = useMemo(() => {
+    const q = firmQuery.trim().toLowerCase();
+    if (!q) return companies;
+    return companies.filter((c) => c.name.toLowerCase().includes(q));
+  }, [companies, firmQuery]);
 
   const [form, setForm] = useState<Cfg>({});
   const [meta, setMeta] = useState<{ updated_at?: string; updated_by_name?: string }>({});
@@ -222,7 +232,8 @@ export default function ComplianceSettingsScreen() {
           </View>
         ) : null}
 
-        {/* Iter 127g — scope picker: Standard (all firms) vs a single firm */}
+        {/* Iter 127g — scope picker: Standard (all firms) vs a single firm.
+            Iter 230 (user request) — firm list is a searchable DROPDOWN. */}
         <View style={styles.scopeRow}>
           <Pressable
             onPress={() => setScope("standard")}
@@ -233,19 +244,79 @@ export default function ComplianceSettingsScreen() {
               Standard (All Firms)
             </Text>
           </Pressable>
-          {companies.map((c) => (
-            <Pressable
-              key={c.company_id}
-              onPress={() => setScope(c.company_id)}
-              style={[styles.chip, scope === c.company_id && styles.chipActive]}
-              testID={`cs-scope-${c.company_id}`}
+          <Pressable
+            onPress={() => setFirmDdOpen(true)}
+            style={[styles.ddTrigger, scope !== "standard" && styles.chipActive]}
+            testID="cs-scope-firm-dropdown"
+          >
+            <Ionicons
+              name="business-outline"
+              size={14}
+              color={scope !== "standard" ? "#fff" : colors.brandPrimary}
+            />
+            <Text
+              style={[styles.chipTxt, scope !== "standard" && styles.chipTxtActive, { maxWidth: 220 }]}
+              numberOfLines={1}
             >
-              <Text style={[styles.chipTxt, scope === c.company_id && styles.chipTxtActive]} numberOfLines={1}>
-                {c.name}
-              </Text>
-            </Pressable>
-          ))}
+              {scope !== "standard"
+                ? companies.find((c) => c.company_id === scope)?.name || "Selected firm"
+                : "Select a firm…"}
+            </Text>
+            <Ionicons
+              name="chevron-down"
+              size={14}
+              color={scope !== "standard" ? "#fff" : colors.brandPrimary}
+            />
+          </Pressable>
         </View>
+        <Modal visible={firmDdOpen} transparent animationType="fade" onRequestClose={() => setFirmDdOpen(false)}>
+          <Pressable style={styles.ddBackdrop} onPress={() => setFirmDdOpen(false)}>
+            <Pressable style={styles.ddSheet} onPress={() => {}}>
+              <Text style={styles.ddTitle}>Select firm</Text>
+              <View style={styles.ddSearchRow}>
+                <Ionicons name="search" size={14} color={colors.onSurfaceSecondary} />
+                <TextInput
+                  style={styles.ddSearchInput}
+                  placeholder="Search firm by name…"
+                  placeholderTextColor={colors.onSurfaceSecondary}
+                  value={firmQuery}
+                  onChangeText={setFirmQuery}
+                  autoFocus
+                  testID="cs-firm-search"
+                />
+              </View>
+              <FlatList
+                data={filteredFirms}
+                keyExtractor={(c) => c.company_id}
+                style={{ maxHeight: 380 }}
+                keyboardShouldPersistTaps="handled"
+                renderItem={({ item }) => (
+                  <Pressable
+                    onPress={() => {
+                      setScope(item.company_id);
+                      setFirmDdOpen(false);
+                      setFirmQuery("");
+                    }}
+                    style={[styles.ddItem, scope === item.company_id && styles.ddItemActive]}
+                    testID={`cs-scope-${item.company_id}`}
+                  >
+                    <Ionicons
+                      name={scope === item.company_id ? "radio-button-on" : "radio-button-off"}
+                      size={16}
+                      color={scope === item.company_id ? colors.brandPrimary : colors.onSurfaceSecondary}
+                    />
+                    <Text style={styles.ddItemTxt} numberOfLines={1}>{item.name}</Text>
+                  </Pressable>
+                )}
+                ListEmptyComponent={
+                  <Text style={{ color: colors.onSurfaceSecondary, padding: 12, fontSize: 13 }}>
+                    No firms match “{firmQuery}”.
+                  </Text>
+                }
+              />
+            </Pressable>
+          </Pressable>
+        </Modal>
         {scope !== "standard" ? (
           <View style={[styles.roCard, { backgroundColor: hasOverride ? "#EFF6FF" : "#F8FAFC", borderColor: hasOverride ? "#93C5FD" : colors.border }]}>
             <Ionicons name={hasOverride ? "business" : "link-outline"} size={14} color={hasOverride ? "#1D4ED8" : colors.onSurfaceSecondary} />
@@ -387,6 +458,36 @@ const styles = StyleSheet.create({
   },
   roTxt: { flex: 1, fontSize: 12, color: "#92400E" },
   scopeRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
+  // Iter 230 — firm dropdown.
+  ddTrigger: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingVertical: 8, paddingHorizontal: 12,
+    borderRadius: 999, borderWidth: 1, borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  ddBackdrop: {
+    flex: 1, backgroundColor: "rgba(15,23,42,0.45)",
+    justifyContent: "center", alignItems: "center", padding: 20,
+  },
+  ddSheet: {
+    width: "100%", maxWidth: 440, backgroundColor: colors.surface,
+    borderRadius: radius.lg, padding: 14,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  ddTitle: { fontSize: 15, fontWeight: "800", color: colors.onSurface, marginBottom: 10 },
+  ddSearchRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
+    paddingHorizontal: 10, marginBottom: 8, backgroundColor: colors.background,
+  },
+  ddSearchInput: { flex: 1, paddingVertical: 9, fontSize: 13, color: colors.onSurface },
+  ddItem: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    paddingVertical: 11, paddingHorizontal: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
+  },
+  ddItemActive: { backgroundColor: colors.brandTertiary, borderRadius: radius.sm },
+  ddItemTxt: { flex: 1, fontSize: 13, fontWeight: "600", color: colors.onSurface },
   banner: { padding: 10, borderRadius: radius.md, borderWidth: 1, marginBottom: 12 },
   bannerOk: { backgroundColor: "#DCFCE7", borderColor: "#86EFAC" },
   bannerErr: { backgroundColor: "#FEE2E2", borderColor: "#FCA5A5" },

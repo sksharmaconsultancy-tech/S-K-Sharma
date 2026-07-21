@@ -1012,7 +1012,15 @@ export default function ComplianceSalaryRunScreen() {
         const paidMed = fullByHead.medical * ratio;
         const paidSpl = fullByHead.special * ratio;
         const paidOth = fullByHead.others * ratio;
-        const grossPaid = paidBasic + paidHra + paidConv + paidMed + paidSpl + paidOth;
+        // Iter 230 (user bug) — whole-rupee consistency: Gross must equal
+        // the SUM of the displayed (rounded) heads, never ₹1 off.
+        const rHeads = {
+          basic: Math.round(paidBasic), hra: Math.round(paidHra),
+          conveyance: Math.round(paidConv), medical: Math.round(paidMed),
+          special: Math.round(paidSpl), others: Math.round(paidOth),
+        };
+        const grossPaid = rHeads.basic + rHeads.hra + rHeads.conveyance
+          + rHeads.medical + rHeads.special + rHeads.others;
 
         // Statutory wage base — mirrors utils/compliance_salary.py:
         // max(Basic, floor% of Gross Earning) (used by ESIC below).
@@ -1049,14 +1057,14 @@ export default function ComplianceSalaryRunScreen() {
         return {
           ...r,
           present_days: pd,
-          basic: Math.round(paidBasic),
-          hra: Math.round(paidHra),
-          conveyance: Math.round(paidConv),
-          medical: Math.round(paidMed),
-          special: Math.round(paidSpl),
-          others: Math.round(paidOth),
-          monthly_gross: Math.round(grossPaid),
-          gross_paid: Math.round(grossPaid),
+          basic: rHeads.basic,
+          hra: rHeads.hra,
+          conveyance: rHeads.conveyance,
+          medical: rHeads.medical,
+          special: rHeads.special,
+          others: rHeads.others,
+          monthly_gross: grossPaid,
+          gross_paid: grossPaid,
           pf_applicable: pfOn,
           pf_wages: Math.round(pfWagesNew),
           pf_employee: Math.round(pfEmp),
@@ -1525,15 +1533,9 @@ export default function ComplianceSalaryRunScreen() {
             </View>
           </Modal>
 
+          {/* Iter 230 (user request) — "Configure employees" button removed
+              from the Compliance Salary Process screen. */}
           <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-            <Pressable
-              testID="csr-configure-employees"
-              onPress={() => setShowConfig(true)}
-              style={styles.secondaryBtn}
-            >
-              <Ionicons name="people-outline" size={15} color={colors.brandPrimary} />
-              <Text style={styles.secondaryBtnTxt}>Configure employees</Text>
-            </Pressable>
             <Pressable
               testID="csr-generate"
               onPress={generate}

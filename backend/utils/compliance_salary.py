@@ -603,6 +603,36 @@ def compute_compliance_row(
     total_deduction = pf_employee + esic_employee + pt + tds + master_deduction
     net = gross_paid - total_deduction
 
+    # Iter 230 (user bug — "Gross showing ₹1 low of added allowances") —
+    # WHOLE-RUPEE RECONCILIATION: the sheet displays every column as a
+    # whole ₹, so rounding each head separately could make
+    # Basic+HRA+…+Others differ from Gross by ₹1. Round every head to a
+    # whole rupee and absorb the delta into the LARGEST head so the
+    # displayed columns always add up exactly to the displayed Gross.
+    def _reconcile(heads: Dict[str, float], target: float) -> Dict[str, float]:
+        r = {k: float(round(v)) for k, v in heads.items()}
+        delta = float(round(target)) - sum(r.values())
+        if delta and any(v > 0 for v in r.values()):
+            big = max(r, key=lambda k: r[k])
+            r[big] = max(0.0, r[big] + delta)
+        return r
+    _paid = _reconcile(
+        {"basic": basic, "hra": hra, "conveyance": conveyance,
+         "medical": medical, "special": special, "others": others},
+        monthly_gross,
+    )
+    basic, hra, conveyance = _paid["basic"], _paid["hra"], _paid["conveyance"]
+    medical, special, others = _paid["medical"], _paid["special"], _paid["others"]
+    _mast = _reconcile(
+        {"basic": master_structure["basic"], "hra": master_structure["hra"],
+         "conveyance": master_structure["conveyance"],
+         "medical": master_structure["medical"],
+         "special": master_structure["special"],
+         "others": master_structure["others"]},
+        monthly_gross_master,
+    )
+    master_structure = {**master_structure, **_mast}
+
     return {
         "user_id": user.get("user_id"),
         "name": user.get("name"),
