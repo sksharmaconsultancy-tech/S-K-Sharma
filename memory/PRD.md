@@ -1063,3 +1063,9 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Fixes: proposal PDF/Word export company_id param; IKORE halfday_threshold_rule enabled directly on live DB.
 - CAUTION: search_replace on server.py occasionally reports success but does not persist (phantom edits) — ALWAYS re-grep after editing server.py.
 - Deploy flow: /app/deploy_vps_iter207.sh served via GET /api/temp-code-bundle?token=sks-deploy-7391&kind=script (pointer in routes/temp_bundle.py). User runs wget+bash on VPS.
+
+## Iter 216 (June 2026 fork session)
+- Salary Process (Actual) attendance source fix: Biometric → p_days from grid `present_days_policy` (half-days like 26.5 preserved; falls back total_days_computed → total_days_int → present_days), p_hours from `total_extra_hrs` (grid Iter 216 change: per-day policy mode → OT minutes; division mode → remainder). Manual → p_days/p_hours all 0.
+- Salary Process (Compliance) `_compute_compliance_run`: Present Days + OT now fetched from `_compute_monthly_grid_data` (same source as Actual + Attendance Report) via grid_by_user_c override applied AFTER both stats branches (incl. policy_2 firms — that fixed 3 mismatched staff rows). Skipped when compliance_present_8hr sub-point on or use_imported_sheet.
+- Verified via /tmp/test_iter216.py on Kankani 2026-06: Actual biometric 126/126 match grid, Manual 126/126 zero, Compliance 126/126 match report.
+- deploy_vps_iter215.sh created + temp_bundle.py pointer updated (kind=script serves it). Pushed to github main (b13b2a5). DEPLOY COMMAND GIVEN TO USER.
