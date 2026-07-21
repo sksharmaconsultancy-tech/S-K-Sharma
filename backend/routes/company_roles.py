@@ -21,7 +21,11 @@ from server import (  # noqa: E402
     now_iso,
     EMPLOYER_PERMISSION_KEYS,
     _hash_password,
+    _hash_pin,
     _validate_password_strength,
+    _clean_mobile_or_400,
+    _validate_pin_or_400,
+    _normalise_phone,
     sub_admin_can_touch_company,
 )
 
@@ -196,21 +200,38 @@ class StaffCreate(BaseModel):
     name: str
     email: str
     phone: Optional[str] = None
-    password: str
+    # Iter 220 — password optional: when the email belongs to an EXISTING
+    # EMPLOYEE of the firm, the account is LINKED (the employee keeps their
+    # existing User ID + password); leave blank to keep the old password.
+    password: Optional[str] = None
+    pin: Optional[str] = None  # Iter 220 — optional separate 6-digit login PIN
     role_id: str
+
+
+_STAFF_USER_OR = [
+    {"role": "company_staff"},
+    {"role": "employee", "is_company_staff": True},
+]
 
 
 @router.get("/company-staff")
 async def list_staff(company_id: Optional[str] = None, authorization: Optional[str] = Header(None)):
     admin, cid = await _role_manager(authorization, company_id)
     users = await db.users.find(
-        {"role": "company_staff", "company_id": cid},
-        {"_id": 0, "user_id": 1, "name": 1, "email": 1, "phone": 1,
+        {"company_id": cid, "$or": _STAFF_USER_OR},
+        {"_id": 0, "user_id": 1, "name": 1, "email": 1, "phone": 1, "phone_e164": 1,
+         "role": 1, "employee_code": 1,
          "company_role_id": 1, "disabled": 1, "password_last_login_at": 1, "created_at": 1},
     ).sort("name", 1).to_list(200)
     roles = {r["role_id"]: r["name"] async for r in db.company_roles.find({"company_id": cid}, {"_id": 0})}
     for u in users:
         u["role_name"] = roles.get(u.get("company_role_id") or "", "—")
+        u["linked_employee"] = u.get("role") == "employee"
+        # Iter 220 — never surface an email that was wrongly saved in the
+        # mobile field.
+        for k in ("phone", "phone_e164"):
+            if u.get(k) and "@" in str(u[k]):
+                u[k] = None
     return {"staff": users}
 
 
@@ -219,6 +240,8 @@ async def create_staff(payload: StaffCreate, authorization: Optional[str] = Head
     admin, cid = await _role_manager(authorization, payload.company_id)
     email = (payload.email or "").strip().lower()
     name = (payload.name or "").strip()
+    phone = _clean_mobile_or_400(payload.phone)
+    pin = _validate_pin_or_400(payload.pin)
     if not email or "@" not in email:
         raise HTTPException(status_code=400, detail="A valid email is required")
     if not name:
@@ -226,8 +249,51 @@ async def create_staff(payload: StaffCreate, authorization: Optional[str] = Head
     role = await db.company_roles.find_one({"role_id": payload.role_id, "company_id": cid}, {"_id": 0})
     if not role:
         raise HTTPException(status_code=404, detail="Role not found for this firm")
-    if await db.users.find_one({"email": email}):
+
+    existing = await db.users.find_one({"email": email}, {"_id": 0})
+    if existing:
+        # Iter 220 (user request) — LINK AN EXISTING EMPLOYEE: the firm's
+        # employee is granted staff-portal access on their EXISTING account.
+        # They open the portal with their existing User ID + password
+        # (unless a new password is typed here).
+        if existing.get("role") == "employee" and existing.get("company_id") == cid:
+            updates: Dict[str, Any] = {
+                "is_company_staff": True,
+                "company_role_id": payload.role_id,
+                "staff_linked_at": now_iso(),
+                "staff_linked_by": admin["user_id"],
+            }
+            if payload.password:
+                _validate_password_strength(payload.password)
+                updates["password_hash"] = _hash_password(payload.password)
+                updates["password_set_at"] = now_iso()
+            if pin:
+                updates["pin_hash"] = _hash_pin(pin)
+                updates["pin_fail_count"] = 0
+                updates["pin_locked_until"] = None
+            if phone:
+                updates["phone"] = _normalise_phone(phone)
+                updates["phone_e164"] = phone
+            await db.users.update_one({"user_id": existing["user_id"]}, {"$set": updates})
+            return {
+                "ok": True,
+                "linked_employee": True,
+                "staff": {
+                    "user_id": existing["user_id"],
+                    "name": existing.get("name") or name,
+                    "email": email,
+                    "phone": phone or existing.get("phone"),
+                    "company_role_id": payload.role_id,
+                },
+            }
         raise HTTPException(status_code=409, detail="A user with this email already exists")
+
+    if not payload.password:
+        raise HTTPException(
+            status_code=400,
+            detail="Password is required for a new staff user (only existing "
+                   "employees of this firm can be linked without one).",
+        )
     _validate_password_strength(payload.password)
     doc = {
         "user_id": f"user_{uuid.uuid4().hex[:12]}",
@@ -236,13 +302,16 @@ async def create_staff(payload: StaffCreate, authorization: Optional[str] = Head
         "company_role_id": payload.role_id,
         "name": name,
         "email": email,
-        "phone": (payload.phone or "").strip() or None,
+        "phone": _normalise_phone(phone) if phone else None,
+        "phone_e164": phone,
         "password_hash": _hash_password(payload.password),
         "password_set_at": now_iso(),
         "disabled": False,
         "created_at": now_iso(),
         "created_by": admin["user_id"],
     }
+    if pin:
+        doc["pin_hash"] = _hash_pin(pin)
     await db.users.insert_one(doc)
     return {"ok": True, "staff": {k: doc[k] for k in
             ("user_id", "name", "email", "phone", "company_role_id")}}
@@ -254,7 +323,7 @@ async def update_staff(
     payload: Dict[str, Any] = Body(...),
     authorization: Optional[str] = Header(None),
 ):
-    u = await db.users.find_one({"user_id": user_id, "role": "company_staff"}, {"_id": 0})
+    u = await db.users.find_one({"user_id": user_id, "$or": _STAFF_USER_OR}, {"_id": 0})
     if not u:
         raise HTTPException(status_code=404, detail="Staff user not found")
     admin, cid = await _role_manager(authorization, u["company_id"])
@@ -268,6 +337,18 @@ async def update_staff(
         updates["disabled"] = bool(payload["disabled"])
     if "name" in payload and (payload["name"] or "").strip():
         updates["name"] = payload["name"].strip()
+    if "phone" in payload:
+        # Iter 220 — mobile hygiene (no emails) + mirrored fields.
+        p = _clean_mobile_or_400(payload.get("phone"))
+        updates["phone"] = _normalise_phone(p) if p else None
+        updates["phone_e164"] = p
+    if "pin" in payload and payload["pin"]:
+        # Iter 220 — set/replace the separate 6-digit PIN credential.
+        _pin = _validate_pin_or_400(payload["pin"])
+        if _pin:
+            updates["pin_hash"] = _hash_pin(_pin)
+            updates["pin_fail_count"] = 0
+            updates["pin_locked_until"] = None
     if "password" in payload and payload["password"]:
         _validate_password_strength(payload["password"])
         updates["password_hash"] = _hash_password(payload["password"])
@@ -285,10 +366,23 @@ async def update_staff(
 
 @router.delete("/company-staff/{user_id}")
 async def delete_staff(user_id: str, authorization: Optional[str] = Header(None)):
-    u = await db.users.find_one({"user_id": user_id, "role": "company_staff"}, {"_id": 0})
+    u = await db.users.find_one({"user_id": user_id, "$or": _STAFF_USER_OR}, {"_id": 0})
     if not u:
         raise HTTPException(status_code=404, detail="Staff user not found")
     await _role_manager(authorization, u["company_id"])
+    if u.get("role") == "employee":
+        # Iter 220 — LINKED EMPLOYEE: removing the staff login must NOT
+        # delete the employee. Only the portal link + portal sessions go.
+        await db.users.update_one(
+            {"user_id": user_id},
+            {"$set": {"is_company_staff": False},
+             "$unset": {"company_role_id": ""}},
+        )
+        await db.user_sessions.delete_many({
+            "user_id": user_id,
+            "auth_method": {"$regex": "^staff_portal"},
+        })
+        return {"ok": True, "unlinked_employee": True}
     await db.user_sessions.delete_many({"user_id": user_id})
     await db.users.delete_one({"user_id": user_id})
     return {"ok": True}

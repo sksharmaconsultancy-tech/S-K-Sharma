@@ -1084,3 +1084,12 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Half days SHOWN in compliance: compute_compliance_row present_days = round(effective_present*2)/2 (float, .5 steps); grid override + imported-sheet stats keep halves; frontend updatePresentDays clamps input to .5 steps (manual half-day entry allowed).
 - Regression: toggle OFF path still 126/126 (test_iter216.py updated exp to half steps).
 - deploy_vps_iter217.sh created; temp_bundle pointer → deploy217.sh.
+
+## Iter 220 (June 2026 fork session, same day)
+- Sub Admin & Staff Users overhaul (auth playbook consulted via integration_expert):
+  - Mobile hygiene: _clean_mobile_or_400 (rejects "@", digits+, min 10) + _validate_pin_or_400 (6 digits) helpers in server.py (~line 15891). Sub-admin create/patch store phone in BOTH phone_e164 and phone (normalized) so phone logins work. list_staff nulls emails in phone fields; deploy script cleans live DB.
+  - Separate 6-digit PIN: SubAdminCreate/Update + StaffCreate + staff PATCH accept `pin` → pin_hash (bcrypt via _hash_pin). admin-pin-login already role-agnostic lookup.
+  - EMPLOYEE LINKING: create_staff with an existing employee's email (same firm) → sets is_company_staff=True + company_role_id on the EMPLOYEE doc (role stays "employee", password kept unless provided). Portal logins (admin-password-login / admin-pin-login) allow linked employees and issue sessions with auth_method "staff_portal"/"staff_portal_pin"; get_user_from_token normalizes ONLY those sessions to company_admin+staff_permissions (employee app sessions untouched). delete_staff on linked employee = unlink (keeps employee + employee sessions). list_staff includes linked employees with linked_employee flag.
+  - Frontend: roles.tsx staff modal (Mobile always visible/digits-only, PIN field, optional password with linking hint, EMPLOYEE-LINKED pill); sub-admins.tsx (PIN field create+edit, phone digits-only, email-in-phone never prefilled).
+  - CAUTION for future agents: search_replace on server.py may silently apply elsewhere / rollback on lint-block — ALWAYS grep-verify edits landed (one edit had to be re-applied; also fixed stray duplicated shutdown block `de_router(...)` at EOF).
+- Verified via /tmp/test_iter220.py (15 checks all pass). deploy_vps_iter218.sh (incl. live phone-field cleanup step); temp_bundle → deploy218.sh.

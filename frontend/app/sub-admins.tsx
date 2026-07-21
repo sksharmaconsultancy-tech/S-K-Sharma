@@ -332,8 +332,15 @@ function SubAdminEditor({
   const isEdit = !!initial;
   const [name, setName] = useState(initial?.name || "");
   const [email, setEmail] = useState(initial?.email || "");
-  const [phone, setPhone] = useState(initial?.phone_e164 || "");
+  const [phone, setPhone] = useState(
+    // Iter 220 — never prefill an email that was wrongly saved in the
+    // mobile field.
+    initial?.phone_e164 && !String(initial.phone_e164).includes("@")
+      ? String(initial.phone_e164)
+      : "",
+  );
   const [password, setPassword] = useState("");
+  const [pin, setPin] = useState(""); // Iter 220 — optional 6-digit login PIN
   const [scope, setScope] = useState<"all" | "restricted">(
     initial?.sub_admin_company_scope || "all",
   );
@@ -378,6 +385,8 @@ function SubAdminEditor({
     if (!email.trim() || !email.includes("@")) return showMsg("A valid email is required");
     if (!isEdit && (!password || password.length < 6))
       return showMsg("Password must be at least 6 characters");
+    if (pin && !/^\d{6}$/.test(pin))
+      return showMsg("PIN must be exactly 6 digits");
     if (scope === "restricted" && companyIds.length === 0)
       return showMsg("Pick at least one company or switch scope to All");
 
@@ -392,6 +401,7 @@ function SubAdminEditor({
         company_ids: scope === "restricted" ? companyIds : [],
         menu_rights: menuRights,
       };
+      if (pin) body.pin = pin;
       let saved: SubAdmin;
       if (isEdit && initial) {
         const r = await api<{ sub_admin: SubAdmin }>(
@@ -462,17 +472,34 @@ function SubAdminEditor({
             </View>
             <View style={styles.gridRow}>
               <View style={styles.gridCol}>
-                <Text style={styles.label}>Phone (optional, for login)</Text>
+                <Text style={styles.label}>Mobile No. (optional, for login)</Text>
                 <TextInput
                   testID="sub-admin-phone"
                   value={phone}
-                  onChangeText={setPhone}
+                  onChangeText={(v) => setPhone(v.replace(/[^\d+]/g, ""))}
                   style={styles.input}
                   placeholder="+919812345678"
                   placeholderTextColor={colors.onSurfaceTertiary}
                   keyboardType="phone-pad"
                 />
               </View>
+              <View style={styles.gridCol}>
+                <Text style={styles.label}>
+                  {isEdit ? "6-Digit PIN (blank = keep)" : "6-Digit PIN (optional)"}
+                </Text>
+                <TextInput
+                  testID="sub-admin-pin"
+                  value={pin}
+                  onChangeText={(v) => setPin(v.replace(/[^\d]/g, ""))}
+                  style={styles.input}
+                  placeholder="e.g. 123456"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                />
+              </View>
+            </View>
+            <View style={styles.gridRow}>
               {!isEdit ? (
                 <View style={styles.gridCol}>
                   <Text style={styles.label}>Initial password *</Text>

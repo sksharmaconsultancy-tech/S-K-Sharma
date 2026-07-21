@@ -99,21 +99,25 @@ export default function RolesScreen() {
     const f = staffForm;
     if (!f?.name?.trim() || !f?.email?.trim()) return toast("Name and email are required.");
     if (!f.role_id) return toast("Pick a role.");
-    if (!f.user_id && !f.password) return toast("Set a password.");
+    if (f.pin && !/^\d{6}$/.test(f.pin)) return toast("PIN must be exactly 6 digits.");
     setSaving(true);
     try {
       if (f.user_id) {
-        const body: any = { role_id: f.role_id, name: f.name };
+        const body: any = { role_id: f.role_id, name: f.name, phone: f.phone || null };
         if (f.password) body.password = f.password;
+        if (f.pin) body.pin = f.pin;
         await api(`/admin/company-staff/${f.user_id}`, { method: "PATCH", body });
+        toast("Saved. Staff can now log in on the Employer login page.");
       } else {
-        await api("/admin/company-staff", {
+        const r = await api("/admin/company-staff", {
           method: "POST",
-          body: { company_id: companyId, name: f.name, email: f.email, phone: f.phone, password: f.password, role_id: f.role_id },
+          body: { company_id: companyId, name: f.name, email: f.email, phone: f.phone || null, password: f.password || null, pin: f.pin || null, role_id: f.role_id },
         });
+        toast(r?.linked_employee
+          ? "Existing employee linked — they open the portal with their existing User ID & password."
+          : "Saved. Staff can now log in on the Employer login page.");
       }
       setStaffForm(null); await load();
-      toast("Saved. Staff can now log in on the Employer login page.");
     } catch (e: any) { toast(e?.message || "Save failed"); }
     finally { setSaving(false); }
   };
@@ -208,7 +212,7 @@ export default function RolesScreen() {
             {/* Staff users */}
             <View style={[s.secHead, { marginTop: 20 }]}>
               <Text style={s.secTitle}>Staff Users ({staff.length})</Text>
-              <Pressable style={s.seedBtn} onPress={() => setStaffForm({ name: "", email: "", phone: "", password: "", role_id: roles[0]?.role_id || "" })} testID="add-staff">
+              <Pressable style={s.seedBtn} onPress={() => setStaffForm({ name: "", email: "", phone: "", password: "", pin: "", role_id: roles[0]?.role_id || "" })} testID="add-staff">
                 <Ionicons name="person-add-outline" size={14} color={colors.brandPrimary} />
                 <Text style={s.seedTxt}>Add Staff User</Text>
               </Pressable>
@@ -220,12 +224,14 @@ export default function RolesScreen() {
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <Text style={s.staffName}>{u.name}</Text>
                     <View style={s.rolePill}><Text style={s.rolePillTxt}>{u.role_name}</Text></View>
+                    {u.linked_employee ? <View style={[s.rolePill, { backgroundColor: "rgba(5,150,105,0.1)" }]}>
+                      <Text style={[s.rolePillTxt, { color: "#059669" }]}>EMPLOYEE-LINKED</Text></View> : null}
                     {u.disabled ? <View style={[s.rolePill, { backgroundColor: "rgba(220,38,38,0.1)" }]}>
                       <Text style={[s.rolePillTxt, { color: "#DC2626" }]}>LOCKED</Text></View> : null}
                   </View>
-                  <Text style={s.staffMeta}>{u.email}{u.phone ? ` · ${u.phone}` : ""}</Text>
+                  <Text style={s.staffMeta}>{u.email}{(u.phone_e164 || u.phone) ? ` · 📱 ${u.phone_e164 || u.phone}` : ""}</Text>
                 </View>
-                <Pressable hitSlop={8} onPress={() => setStaffForm({ ...u, role_id: u.company_role_id, password: "" })} testID={`edit-staff-${u.email}`}>
+                <Pressable hitSlop={8} onPress={() => setStaffForm({ ...u, role_id: u.company_role_id, phone: u.phone_e164 || u.phone || "", password: "", pin: "" })} testID={`edit-staff-${u.email}`}>
                   <Ionicons name="create-outline" size={18} color={colors.brandPrimary} />
                 </Pressable>
                 <Pressable hitSlop={8} onPress={() => toggleLock(u)} testID={`lock-staff-${u.email}`}>
@@ -304,16 +310,19 @@ export default function RolesScreen() {
                 <TextInput style={[s.input, staffForm.user_id && { opacity: 0.6 }]} value={staffForm.email} editable={!staffForm.user_id}
                   autoCapitalize="none" keyboardType="email-address"
                   onChangeText={(v) => setStaffForm({ ...staffForm, email: v })} testID="staff-email" />
-                {!staffForm.user_id ? (
-                  <>
-                    <Text style={s.lbl}>Mobile (optional)</Text>
-                    <TextInput style={s.input} value={staffForm.phone} keyboardType="phone-pad"
-                      onChangeText={(v) => setStaffForm({ ...staffForm, phone: v })} />
-                  </>
-                ) : null}
-                <Text style={s.lbl}>{staffForm.user_id ? "Reset Password (leave blank to keep)" : "Password"}</Text>
+                {/* Iter 220 — Mobile visible on create AND edit; digits only
+                    (emails were previously getting saved into this field). */}
+                <Text style={s.lbl}>Mobile No. (optional)</Text>
+                <TextInput style={s.input} value={staffForm.phone || ""} keyboardType="phone-pad"
+                  placeholder="10-digit mobile" placeholderTextColor={colors.onSurfaceTertiary}
+                  onChangeText={(v) => setStaffForm({ ...staffForm, phone: v.replace(/[^\d+]/g, "") })} testID="staff-phone" />
+                <Text style={s.lbl}>{staffForm.user_id ? "Reset Password (leave blank to keep)" : "Password (blank = employee keeps existing password)"}</Text>
                 <TextInput style={s.input} value={staffForm.password} secureTextEntry
                   onChangeText={(v) => setStaffForm({ ...staffForm, password: v })} testID="staff-password" />
+                <Text style={s.lbl}>{staffForm.user_id ? "6-Digit PIN (leave blank to keep)" : "6-Digit PIN (optional)"}</Text>
+                <TextInput style={s.input} value={staffForm.pin || ""} keyboardType="number-pad" maxLength={6}
+                  placeholder="e.g. 123456" placeholderTextColor={colors.onSurfaceTertiary}
+                  onChangeText={(v) => setStaffForm({ ...staffForm, pin: v.replace(/[^\d]/g, "") })} testID="staff-pin" />
                 <Text style={s.lbl}>Role</Text>
                 <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                   {roles.map((r) => (
@@ -329,7 +338,10 @@ export default function RolesScreen() {
                     <><Ionicons name="checkmark" size={16} color="#fff" /><Text style={s.saveBtnTxt}>Save Staff User</Text></>}
                 </Pressable>
                 <Text style={[s.muted, { marginTop: 10, textAlign: "center" }]}>
-                  Staff sign in on the same Employer login page with email &amp; password.
+                  Staff sign in on the same Employer login page with email/mobile +
+                  password (or 6-digit PIN). If the email belongs to an existing
+                  employee of this firm, that employee is linked and keeps their
+                  existing User ID &amp; password.
                 </Text>
                 <View style={{ height: 10 }} />
               </ScrollView>

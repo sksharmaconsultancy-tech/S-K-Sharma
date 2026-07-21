@@ -2259,7 +2259,20 @@ async def get_user_from_token(authorization: Optional[str]) -> dict:
         user["staff_role_name"] = (crole or {}).get("name") or "Staff"
         user["staff_permissions"] = (crole or {}).get("permissions") or []
         user["role"] = "company_admin"
-    # Super admins are never blocked (they are the ones who disable others).
+    elif user.get("role") == "employee" and user.get("is_company_staff") \
+            and str(session.get("auth_method") or "").startswith("staff_portal"):
+        # Iter 220 — EMPLOYEE LINKED AS STAFF USER: the employee keeps
+        # their existing account + credentials; when they sign in on the
+        # ADMIN portal (session method staff_portal*) they are normalized
+        # to a firm-scoped company_admin with their staff-role permission
+        # subset. Their employee-app sessions are completely unaffected.
+        crole = await db.company_roles.find_one(
+            {"role_id": user.get("company_role_id") or "", "company_id": user.get("company_id")},
+            {"_id": 0},
+        )
+        user["staff_role_name"] = (crole or {}).get("name") or "Staff"
+        user["staff_permissions"] = (crole or {}).get("permissions") or []
+        user["role"] = "company_admin"
     if user.get("role") != "super_admin":
         if user.get("disabled"):
             raise HTTPException(status_code=403, detail="Your account has been disabled. Please contact your admin.")
@@ -4808,7 +4821,11 @@ async def admin_pin_login(payload: AdminPinLoginRequest):
                     ),
                 )
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    if user.get("role") not in ("company_admin", "super_admin", "sub_admin", "company_staff"):
+    _is_linked_staff = (
+        user.get("role") == "employee" and bool(user.get("is_company_staff"))
+    )
+    if user.get("role") not in ("company_admin", "super_admin", "sub_admin", "company_staff") \
+            and not _is_linked_staff:
         raise HTTPException(status_code=403, detail="This login is only for administrators")
 
     # Disabled-account guard (super admin bypasses)
@@ -4848,9 +4865,21 @@ async def admin_pin_login(payload: AdminPinLoginRequest):
         {"user_id": user["user_id"]},
         {"$set": {"pin_fail_count": 0, "pin_last_login_at": now_iso(), "pin_locked_until": None}},
     )
-    token = await _issue_session(user["user_id"], "pin")
+    token = await _issue_session(
+        user["user_id"],
+        "staff_portal_pin" if _is_linked_staff else "pin",
+    )
     fresh = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
     fresh = await _enrich_user_with_company(fresh)
+    if _is_linked_staff:
+        _crole = await db.company_roles.find_one(
+            {"role_id": fresh.get("company_role_id") or "", "company_id": fresh.get("company_id")},
+            {"_id": 0},
+        )
+        fresh["is_company_staff"] = True
+        fresh["staff_role_name"] = (_crole or {}).get("name") or "Staff"
+        fresh["staff_permissions"] = (_crole or {}).get("permissions") or []
+        fresh["role"] = "company_admin"
     logger.info(f"[PIN admin] login OK for {user.get('email') or user.get('phone')}")
     return {
         "session_token": token,
@@ -4899,7 +4928,10 @@ async def admin_password_login(payload: AdminPasswordLoginRequest):
                 # tolerate saved formats like "+91 96802 73960" / no +91
                 user = await db.users.find_one(
                     {"phone": {"$regex": f"{digits[-10:]}$"},
-                     "role": {"$in": ["company_admin", "super_admin", "sub_admin", "company_staff"]}},
+                     "$or": [
+                         {"role": {"$in": ["company_admin", "super_admin", "sub_admin", "company_staff"]}},
+                         {"role": "employee", "is_company_staff": True},
+                     ]},
                     {"_id": 0},
                 )
         if not user:
@@ -4911,7 +4943,11 @@ async def admin_password_login(payload: AdminPasswordLoginRequest):
     email = ident  # keep var name for the log lines below
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    if user.get("role") not in ("company_admin", "super_admin", "sub_admin", "company_staff"):
+    _is_linked_staff = (
+        user.get("role") == "employee" and bool(user.get("is_company_staff"))
+    )
+    if user.get("role") not in ("company_admin", "super_admin", "sub_admin", "company_staff") \
+            and not _is_linked_staff:
         raise HTTPException(status_code=403, detail="This login is only for administrators")
     if not user.get("password_hash"):
         raise HTTPException(
@@ -4959,12 +4995,15 @@ async def admin_password_login(payload: AdminPasswordLoginRequest):
             "password_locked_until": None,
         }},
     )
-    token = await _issue_session(user["user_id"], "password")
+    token = await _issue_session(
+        user["user_id"],
+        "staff_portal" if _is_linked_staff else "password",
+    )
     fresh = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
     fresh = await _enrich_user_with_company(fresh)
     # RBAC Phase 1 — normalize company_staff in the login response the same
     # way get_user_from_token does, so post-login routing works unchanged.
-    if fresh.get("role") == "company_staff":
+    if fresh.get("role") == "company_staff" or _is_linked_staff:
         crole = await db.company_roles.find_one(
             {"role_id": fresh.get("company_role_id") or "", "company_id": fresh.get("company_id")},
             {"_id": 0},
@@ -15819,6 +15858,7 @@ class SubAdminCreate(BaseModel):
     email: str
     phone: Optional[str] = None
     password: str
+    pin: Optional[str] = None  # Iter 220 — optional separate 6-digit login PIN
     permissions: List[str] = []
     company_scope: Literal["all", "restricted"] = "all"
     company_ids: List[str] = []  # only used when scope=="restricted"
@@ -15831,6 +15871,7 @@ class SubAdminUpdate(BaseModel):
     name: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
+    pin: Optional[str] = None  # Iter 220 — set/replace the 6-digit login PIN
     permissions: Optional[List[str]] = None
     company_scope: Optional[Literal["all", "restricted"]] = None
     company_ids: Optional[List[str]] = None
@@ -15845,6 +15886,34 @@ def _validate_sub_admin_permissions(perms: List[str]) -> List[str]:
         return []
     known = set(SUB_ADMIN_PERMISSION_KEYS)
     return sorted({p for p in perms if p in known})
+
+
+def _clean_mobile_or_400(raw: Optional[str]) -> Optional[str]:
+    """Iter 220 — Mobile-field hygiene: reject emails typed/saved into the
+    Mobile No. box and keep only phone characters."""
+    p = (raw or "").strip()
+    if not p:
+        return None
+    if "@" in p:
+        raise HTTPException(
+            status_code=400,
+            detail="Mobile No. cannot be an email id — enter a phone number "
+                   "(the email goes in the Email field).",
+        )
+    cleaned = re.sub(r"[^\d+]", "", p)
+    if len(re.sub(r"[^\d]", "", cleaned)) < 10:
+        raise HTTPException(status_code=400, detail="Enter a valid 10-digit mobile number")
+    return cleaned
+
+
+def _validate_pin_or_400(raw: Optional[str]) -> Optional[str]:
+    """Iter 220 — 6-digit PIN validation (returns the clean PIN or None)."""
+    p = (raw or "").strip()
+    if not p:
+        return None
+    if not re.fullmatch(r"\d{6}", p):
+        raise HTTPException(status_code=400, detail="PIN must be exactly 6 digits")
+    return p
 
 
 def _sanitise_sub_admin(doc: dict) -> dict:
@@ -15889,7 +15958,8 @@ async def create_sub_admin(
     require_super_admin_strict(admin)
     name = (payload.name or "").strip()
     email = (payload.email or "").strip().lower()
-    phone = (payload.phone or "").strip() or None
+    phone = _clean_mobile_or_400(payload.phone)
+    pin = _validate_pin_or_400(payload.pin)
     if not name:
         raise HTTPException(status_code=400, detail="Name is required")
     if not email or "@" not in email:
@@ -15921,6 +15991,9 @@ async def create_sub_admin(
         "name": name,
         "email": email,
         "phone_e164": phone,
+        # Iter 220 — mirror into ``phone`` (normalized) so phone + PIN /
+        # phone + password logins find the account.
+        "phone": _normalise_phone(phone) if phone else None,
         "password_hash": _hash_password(payload.password),
         "password_must_change": True,
         "sub_admin_permissions": perms,
@@ -15937,6 +16010,9 @@ async def create_sub_admin(
         "onboarded": True,
         "approval_status": "approved",
     }
+    if pin:
+        # Iter 220 — separate 6-digit PIN credential (optional).
+        doc["pin_hash"] = _hash_pin(pin)
     await db.users.insert_one(doc)
 
     from utils.welcome_email import send_admin_welcome_email
@@ -15985,11 +16061,19 @@ async def update_sub_admin(
                 raise HTTPException(status_code=409, detail="Email already used")
         updates["email"] = e or None
     if "phone" in fset:
-        p = (payload.phone or "").strip() or None
+        p = _clean_mobile_or_400(payload.phone)
         if p and p != existing.get("phone_e164"):
             if await db.users.find_one({"phone_e164": p, "user_id": {"$ne": user_id}}):
                 raise HTTPException(status_code=409, detail="Phone already used")
         updates["phone_e164"] = p
+        updates["phone"] = _normalise_phone(p) if p else None
+    if "pin" in fset and payload.pin is not None:
+        # Iter 220 — set/replace the separate 6-digit PIN credential.
+        _pin = _validate_pin_or_400(payload.pin)
+        if _pin:
+            updates["pin_hash"] = _hash_pin(_pin)
+            updates["pin_fail_count"] = 0
+            updates["pin_locked_until"] = None
     if "permissions" in fset and payload.permissions is not None:
         updates["sub_admin_permissions"] = _validate_sub_admin_permissions(payload.permissions)
     if "company_scope" in fset and payload.company_scope is not None:
