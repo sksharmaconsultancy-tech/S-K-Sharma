@@ -44,6 +44,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { useOnRefresh } from "@/src/context/RefreshBusContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import MonthPicker from "@/src/components/MonthPicker";
+import CompanyPicker from "@/src/components/CompanyPicker";
 import ProcessCommandCenter from "@/src/components/salary/ProcessCommandCenter";
 import TotalsFooter from "@/src/components/salary/TotalsFooter";
 import GridFilterChips, { GRID_FILTER_DEFAULT, rowMatchesFilters, type GridFilters } from "@/src/components/GridFilterChips";
@@ -538,27 +539,22 @@ export default function ActualSalaryProcessScreen() {
           refreshKey={(run ? 1 : 0) + (run?.finalized ? 2 : 0)}
         />
 
-        {/* Iter 91 — In-screen firm picker for Super Admin. Shows ALL
-            active firms regardless of attendance source. */}
+        {/* Iter 91 — In-screen firm picker for Super Admin.
+            Iter 217 (user request) — searchable DROPDOWN instead of chips. */}
         {user?.role === "super_admin" || user?.role === "sub_admin" ? (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Select firm</Text>
             <Text style={styles.smallHint}>
               Pick one firm — the salary process runs for its employees only.
             </Text>
-            <View style={styles.chipStrip}>
-              {(allCompanies || []).map((c) => (
-                <TypeChip
-                  key={c.company_id}
-                  label={c.name || c.company_id}
-                  active={selectedCompanyId === c.company_id}
-                  onPress={() => setSelectedCompanyId(c.company_id)}
-                />
-              ))}
-              {(allCompanies || []).length === 0 ? (
-                <Text style={styles.smallHint}>No firms found.</Text>
-              ) : null}
-            </View>
+            <CompanyPicker
+              value={selectedCompanyId || "all"}
+              onChange={(v) => { if (v !== "all") setSelectedCompanyId(v); }}
+              companies={allCompanies}
+              allowAll={false}
+              label="Firm"
+              testID="asp-firm-picker"
+            />
           </View>
         ) : null}
 
@@ -733,7 +729,7 @@ export default function ActualSalaryProcessScreen() {
 /* ------------------------------------------------------------------- */
 
 const BASE_COL_WIDTHS = {
-  sn: 40, code: 80, name: 150, type: 80, roll: 50,
+  sn: 40, name: 150,
   duty: 70, md: 70, pdays: 70, phours: 80,
   basic: 90, bsalary: 100, wbasic: 100, othallo: 90,
   gross: 100, epf: 80, esi: 80, adv: 80, tds: 80, net: 100,
@@ -769,9 +765,7 @@ function ResultGrid({
     };
     return {
       ...BASE_COL_WIDTHS,
-      code: fit(56, "Code", rows.map((r) => r.employee_code)),
       name: fit(110, "Name", rows.map((r) => r.name)),
-      type: fit(56, "Type", rows.map((r) => r.employee_type)),
       duty: fit(56, "Duty HRS", rows.map((r) => fmtNum(r.duty_hrs, 2))),
       pdays: fit(60, "P Days", rows.map((r) => fmtNum(r.p_days, 2))),
       phours: fit(60, "P Hours", rows.map((r) => fmtNum(r.p_hours, 2))),
@@ -906,10 +900,7 @@ function ResultGrid({
           {/* header — Iter 140: frozen on top + SN/Code/Name frozen left */}
           <View style={[styles.tblRow, styles.tblHeader, stickyHeader(colors.brandPrimary)]}>
             <HdrCell w={COL_WIDTHS.sn} frozen={stickyCol(0, colors.brandPrimary)}>SN</HdrCell>
-            <HdrCell w={COL_WIDTHS.code} frozen={stickyCol(COL_WIDTHS.sn, colors.brandPrimary)}>Code</HdrCell>
-            <HdrCell w={COL_WIDTHS.name} align="left" frozen={stickyCol(COL_WIDTHS.sn + COL_WIDTHS.code, colors.brandPrimary)}>Name</HdrCell>
-            <HdrCell w={COL_WIDTHS.type}>Type</HdrCell>
-            <HdrCell w={COL_WIDTHS.roll}>Roll</HdrCell>
+            <HdrCell w={COL_WIDTHS.name} align="left" frozen={stickyCol(COL_WIDTHS.sn, colors.brandPrimary)}>Name</HdrCell>
             <HdrCell w={COL_WIDTHS.duty} bg={GRP.master}>Duty HRS</HdrCell>
             <HdrCell w={COL_WIDTHS.md} bg={GRP.master}>M.Days</HdrCell>
             <HdrCell w={COL_WIDTHS.pdays} bg={GRP.master}>P Days</HdrCell>
@@ -952,18 +943,11 @@ function ResultGrid({
               ]}
             >
               <ReadCell w={COL_WIDTHS.sn} frozen={stickyCol(0, isOdd ? colors.surfaceSecondary : colors.surface)}>{idx + 1}</ReadCell>
-              <View style={[{ width: COL_WIDTHS.code, paddingHorizontal: 6, paddingVertical: 4, justifyContent: "center" }, stickyCol(COL_WIDTHS.sn, isOdd ? colors.surfaceSecondary : colors.surface)]}>
-                <Text style={[styles.readTxt, styles.empIdent, { textAlign: "center" }]} numberOfLines={1}>
-                  {r.employee_code || "—"}
-                </Text>
-              </View>
-              <View style={[{ width: COL_WIDTHS.name, paddingHorizontal: 6, paddingVertical: 4, justifyContent: "center" }, stickyCol(COL_WIDTHS.sn + COL_WIDTHS.code, isOdd ? colors.surfaceSecondary : colors.surface)]}>
+              <View style={[{ width: COL_WIDTHS.name, paddingHorizontal: 6, paddingVertical: 4, justifyContent: "center" }, stickyCol(COL_WIDTHS.sn, isOdd ? colors.surfaceSecondary : colors.surface)]}>
                 <Text style={[styles.readTxt, styles.empIdent, { textAlign: "left" }]} numberOfLines={1}>
                   {r.name || "—"}
                 </Text>
               </View>
-              <ReadCell w={COL_WIDTHS.type}>{r.employee_type || "—"}</ReadCell>
-              <ReadCell w={COL_WIDTHS.roll}>{r.is_onroll ? "On" : "Off"}</ReadCell>
 
               <ReadCell w={COL_WIDTHS.duty} bg={GRP.master}>
                 {fmtNum(r.duty_hrs, 2)}
@@ -986,14 +970,9 @@ function ResultGrid({
                 gridRow={idx} gridCol={2} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.master}
               />
 
-              <EditCell
-                w={COL_WIDTHS.basic}
-                value={r.basic}
-                onChange={(v) => editField(r.user_id, "basic", v)}
-                disabled={readOnly}
-                money
-                gridRow={idx} gridCol={3} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.master}
-              />
+              {/* Iter 217 (user request) — Basic is READ-ONLY: always
+                  fetched from the Employee Master's Actual Salary. */}
+              <ReadCell w={COL_WIDTHS.basic} bg={GRP.master}>{fmtInr(r.basic)}</ReadCell>
               <ReadCell w={COL_WIDTHS.bsalary} bg={GRP.calc}>{fmtInr(r.basic_salary)}</ReadCell>
               <ReadCell w={COL_WIDTHS.wbasic} bg={GRP.calc}>{fmtInr(r.w_basic_salary)}</ReadCell>
               <EditCell
@@ -1002,7 +981,7 @@ function ResultGrid({
                 onChange={(v) => editField(r.user_id, "oth_allo", v)}
                 disabled={readOnly}
                 money
-                gridRow={idx} gridCol={4} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.calc}
+                gridRow={idx} gridCol={3} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.calc}
               />
               <ReadCell w={COL_WIDTHS.gross} bg={GRP.calc}>{fmtInr(r.total_gross)}</ReadCell>
               <ReadCell w={COL_WIDTHS.epf} bg={GRP.ded}>{fmtInr(r.epf)}</ReadCell>
@@ -1013,7 +992,7 @@ function ResultGrid({
                 onChange={(v) => editField(r.user_id, "adv", v)}
                 disabled={readOnly}
                 money
-                gridRow={idx} gridCol={5} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.ded}
+                gridRow={idx} gridCol={4} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.ded}
               />
               <EditCell
                 w={COL_WIDTHS.tds}
@@ -1021,7 +1000,7 @@ function ResultGrid({
                 onChange={(v) => editField(r.user_id, "tds", v)}
                 disabled={readOnly}
                 money
-                gridRow={idx} gridCol={6} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.ded}
+                gridRow={idx} gridCol={5} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.ded}
               />
               <View style={{ width: COL_WIDTHS.net, paddingHorizontal: 6, paddingVertical: 4, justifyContent: "center" }}>
                 <Text style={[styles.readTxt, { textAlign: "right", fontWeight: "700" }]}>
@@ -1042,12 +1021,9 @@ function ResultGrid({
           {/* Totals row */}
           <View style={[styles.tblRow, { backgroundColor: colors.brandTertiary }]}>
             <ReadCell w={COL_WIDTHS.sn}></ReadCell>
-            <ReadCell w={COL_WIDTHS.code}></ReadCell>
             <View style={{ width: COL_WIDTHS.name, paddingHorizontal: 6, paddingVertical: 4 }}>
               <Text style={[styles.readTxt, { fontWeight: "800" }]}>TOTAL</Text>
             </View>
-            <ReadCell w={COL_WIDTHS.type}></ReadCell>
-            <ReadCell w={COL_WIDTHS.roll}></ReadCell>
             <ReadCell w={COL_WIDTHS.duty}></ReadCell>
             <ReadCell w={COL_WIDTHS.md}></ReadCell>
             <ReadCell w={COL_WIDTHS.pdays}></ReadCell>

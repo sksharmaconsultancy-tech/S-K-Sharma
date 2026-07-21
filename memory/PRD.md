@@ -1069,3 +1069,12 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Salary Process (Compliance) `_compute_compliance_run`: Present Days + OT now fetched from `_compute_monthly_grid_data` (same source as Actual + Attendance Report) via grid_by_user_c override applied AFTER both stats branches (incl. policy_2 firms — that fixed 3 mismatched staff rows). Skipped when compliance_present_8hr sub-point on or use_imported_sheet.
 - Verified via /tmp/test_iter216.py on Kankani 2026-06: Actual biometric 126/126 match grid, Manual 126/126 zero, Compliance 126/126 match report.
 - deploy_vps_iter215.sh created + temp_bundle.py pointer updated (kind=script serves it). Pushed to github main (b13b2a5). DEPLOY COMMAND GIVEN TO USER.
+
+## Iter 217/218 (June 2026 fork session, same day)
+- Actual Salary Process: Duty HRS = Employee Master resolution (attendance_policy_override.standard_working_hours → shift duration → firm policy → 8), verified == grid totals.shift_hours 126/126.
+- Actual: Basic READ-ONLY (from Employee Master salary_structure_actual Basic row); `basic` removed from ActualSalaryRowPatchBody + PATCH ignores it; frontend Basic cell → ReadCell.
+- Actual grid: Code/Type/Roll columns removed (header/body/totals + BASE_COL_WIDTHS); Name sticky offset now sn only; gridCol renumbered (othallo 3, adv 4, tds 5).
+- Actual: firm chips → CompanyPicker dropdown (allowAll=false, testID asp-firm-picker).
+- Iter 218 gate: firm policy_master.compliance_present_8hr ON (+salary_allowed includes compliance) → Actual process blocks on-roll (400 on is_onroll=True; excludes on-roll on ALL runs, 400 if none left). On-roll paid via Compliance only (8hr direct sync, pre-existing Iter 202 path — grid override skipped there).
+- Compliance grid fetch hardened: grids resolved for every company_id among scoped employees (super admin without firm filter covered).
+- deploy_vps_iter216.sh created; temp_bundle pointer → deploy216.sh.

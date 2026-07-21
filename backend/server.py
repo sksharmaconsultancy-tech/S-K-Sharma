@@ -14661,13 +14661,17 @@ async def _compute_compliance_run(
     # Process uses) so the compliance run always matches the report.
     # Imported-sheet runs keep their own source.
     grid_by_user_c: Dict[str, Any] = {}
-    if not payload.use_imported_sheet and q.get("company_id"):
-        try:
-            _grid_c = await _compute_monthly_grid_data(q["company_id"], payload.month)
-            for gr in _grid_c.get("employees") or _grid_c.get("rows") or []:
-                grid_by_user_c[gr["user_id"]] = gr
-        except HTTPException:
-            grid_by_user_c = {}
+    if not payload.use_imported_sheet:
+        # Iter 217 — resolve grids for EVERY firm in scope (not just the
+        # payload's company_id) so super-admin runs without an explicit
+        # firm filter still auto-fetch from the Attendance Report.
+        for _cidg in {e.get("company_id") for e in employees if e.get("company_id")}:
+            try:
+                _grid_c = await _compute_monthly_grid_data(_cidg, payload.month)
+                for gr in _grid_c.get("employees") or _grid_c.get("rows") or []:
+                    grid_by_user_c[gr["user_id"]] = gr
+            except HTTPException:
+                continue
 
     # ---- Load company policies (for full_day_hours / half_day_hours) ----
     company_ids = list({e.get("company_id") for e in employees if e.get("company_id")})
@@ -19101,6 +19105,29 @@ async def create_actual_salary_process(
         company_id = payload.company_id
     # Iter 98 — Firm Master gate: Offline Salary must be enabled for the firm.
     await _require_firm_salary_permission(company_id, "offline")
+
+    # Iter 218 (user request) — "Count Present Day @ 8 HRS" firm gate:
+    # when this Attendance Policy sub-point is ON (and Salary Allowed
+    # includes Compliance), ON-ROLL employees are paid via the Compliance
+    # Salary Process ONLY (attendance direct-syncs there @ 8 HRS = 1 day).
+    # The Actual Salary Process is limited to OFF-ROLL employees.
+    _firm_ap_a: dict = {}
+    if company_id:
+        _cdoc_a = await db.companies.find_one(
+            {"company_id": company_id}, {"_id": 0, "attendance_policy": 1})
+        _firm_ap_a = (_cdoc_a or {}).get("attendance_policy") or {}
+    _c8_active = bool(
+        (_firm_ap_a.get("policy_master") or {}).get("compliance_present_8hr")
+        and (_firm_ap_a.get("salary_allowed") or "both") in ("compliance", "both")
+    )
+    if _c8_active and payload.is_onroll is True:
+        raise HTTPException(
+            status_code=400,
+            detail="\"Count Present Day @ 8 HRS\" is ON in this firm's Attendance "
+                   "Policy — On-roll employees are paid via the Compliance Salary "
+                   "Process only (attendance syncs there directly). The Actual "
+                   "Salary Process is allowed for Off-roll employees only.",
+        )
     # Iter 129f (user directive) — a FINALIZED month can never be processed
     # again. Unlock (de-finalize) the run first.
     _fin_q: Dict[str, Any] = {"month": payload.month, "finalized": True}
@@ -19173,6 +19200,19 @@ async def create_actual_salary_process(
             return True
     employees = [e for e in employees if _still_active(e)]
 
+    # Iter 218 — 8-HR compliance-counting firms: Actual Salary Process
+    # excludes ON-ROLL employees (they are paid via Compliance only).
+    if _c8_active:
+        employees = [e for e in employees if e.get("is_onroll") is False]
+        if not employees:
+            raise HTTPException(
+                status_code=400,
+                detail="\"Count Present Day @ 8 HRS\" is ON in this firm's "
+                       "Attendance Policy — On-roll employees are paid via the "
+                       "Compliance Salary Process only. No Off-roll employees "
+                       "matched this filter for the Actual Salary Process.",
+            )
+
     # Group filter (optional)
     if payload.group_id:
         grp_uids = await _resolve_group_employee_ids(company_id or "", payload.group_id)
@@ -19222,17 +19262,28 @@ async def create_actual_salary_process(
             if amt > 0:
                 extra_amt_by_user[en["user_id"]] = extra_amt_by_user.get(en["user_id"], 0.0) + amt
 
+    # Iter 217 (user request) — Duty HRS = the EMPLOYEE MASTER's per-day
+    # Daily Working HRS. Same resolution as the Attendance Report grid:
+    # employee override → assigned shift's length → firm policy → 8.
+    # (``_firm_ap_a`` was loaded above for the Iter 218 8-HR gate.)
+    _shifts_by_id_a, _ = await load_shift_masters_map()
+    _firm_daily_a = float(
+        _firm_ap_a.get("standard_working_hours")
+        or _firm_ap_a.get("full_day_hours")
+        or 8.0
+    )
+
     rows: List[dict] = []
     for emp in employees:
         pol = emp.get("employee_policy") or {}
-        # Daily working hours — priority: emp policy → emp field → default 8.
-        emp_daily_hrs = float(
-            pol.get("full_day_hrs")
-            or pol.get("fullday_hours")
-            or pol.get("standard_working_hours")
-            or emp.get("full_day_hrs")
-            or 8.0
-        )
+        # Iter 217 — Duty HRS from the Employee Master (attendance policy
+        # override), falling back to the assigned shift, then the firm.
+        _ov_ap = emp.get("attendance_policy_override") or {}
+        emp_daily_hrs = float(_ov_ap.get("standard_working_hours") or 0)
+        if emp_daily_hrs <= 0:
+            _sh_a = _shifts_by_id_a.get(_ov_ap.get("shift_id")) if _ov_ap.get("shift_id") else None
+            _sh_hrs_a = _shift_duration_hours(_sh_a) if _sh_a else None
+            emp_daily_hrs = float(_sh_hrs_a or _firm_daily_a or 8.0)
         basic = float(emp.get("salary_monthly") or pol.get("salary") or 0.0)
         emp_salary_mode = emp.get("salary_mode") or "monthly"
         # Iter 91 — Basic Salary comes from the UPDATED Employee Master
@@ -19412,8 +19463,9 @@ async def patch_actual_salary_row(
         raise HTTPException(status_code=404, detail="Employee row not found in run")
     row = dict(rows[idx])
 
-    if body.basic is not None:
-        row["basic"] = float(body.basic)
+    # Iter 217 (user request) — Basic Salary is NOT editable in the Actual
+    # Salary Process; it is always fetched from the Employee Master's
+    # Actual Salary (Basic row). ``basic`` was removed from the PATCH body.
     if body.duty_hrs is not None:
         row["duty_hrs"] = float(body.duty_hrs)
     if body.oth_allo is not None:
