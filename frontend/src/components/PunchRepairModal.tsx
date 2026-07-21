@@ -52,11 +52,13 @@ export default function PunchRepairModal({
   empName,
   dateIso,
   onClose,
+  onSaved,
 }: {
   userId: string;
   empName: string;
   dateIso: string; // YYYY-MM-DD
   onClose: (changed: boolean) => void;
+  onSaved?: () => void; // live grid refresh after every save/delete
 }) {
   const [punches, setPunches] = useState<Punch[]>([]);
   const [loading, setLoading] = useState(true);
@@ -148,6 +150,7 @@ export default function PunchRepairModal({
       setChanged(true);
       setFormOpen(false);
       await load();
+      onSaved?.(); // refresh the grid behind the modal immediately
     } catch (e: any) {
       setErr(e?.message || "Failed to save punch");
     } finally {
@@ -165,6 +168,7 @@ export default function PunchRepairModal({
         );
         setChanged(true);
         await load();
+        onSaved?.(); // refresh the grid behind the modal immediately
       } catch (e: any) {
         const msg = e?.message || "Failed to delete";
         if (Platform.OS === "web") window.alert(msg);
@@ -302,6 +306,18 @@ export default function PunchRepairModal({
               </View>
             </View>
           )}
+
+          {/* Footer — Save & Close (applies changes + refreshes the grid) */}
+          {!formOpen && (
+            <Pressable
+              style={[st.doneBtn, busy && { opacity: 0.6 }]}
+              onPress={() => onClose(changed)}
+              disabled={busy}
+            >
+              <Ionicons name="checkmark" size={18} color="#fff" />
+              <Text style={st.doneTxt}>{changed ? "Save & Close" : "Close"}</Text>
+            </Pressable>
+          )}
         </View>
       </View>
     </Modal>
@@ -414,4 +430,10 @@ const st = StyleSheet.create({
     alignItems: "center",
   },
   saveTxt: { fontSize: 13, fontWeight: "800", color: "#fff" },
+  doneBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    marginTop: spacing.lg, backgroundColor: "#15803D", borderRadius: radius.md,
+    paddingVertical: 12,
+  },
+  doneTxt: { fontSize: 14, fontWeight: "800", color: "#fff" },
 });

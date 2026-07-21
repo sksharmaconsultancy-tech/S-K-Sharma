@@ -794,7 +794,7 @@ const st = StyleSheet.create({
   errTxt: { color: "#DC2626", fontSize: 13, fontWeight: "700", marginTop: spacing.md },
   startBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-    backgroundColor: colors.primary, borderRadius: radius.md, paddingVertical: 13,
+    backgroundColor: "#15803D", borderRadius: radius.md, paddingVertical: 13,
     marginTop: spacing.md,
   },
   startTxt: { fontSize: 15, fontWeight: "800", color: "#fff" },

@@ -964,6 +964,7 @@ export default function AttendanceGridScreen() {
           userId={repair.userId}
           empName={repair.name}
           dateIso={repair.date}
+          onSaved={() => load()}
           onClose={(changed) => {
             setRepair(null);
             if (changed) load();
