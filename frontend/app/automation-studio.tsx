@@ -87,7 +87,7 @@ export default function AutomationStudioScreen() {
   const { user } = useAuth();
   const router = useRouter();
   const isSuper = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
-  const { selectedCompanyId } = useSelectedCompany() as any;
+  const { selectedCompanyId, setSelectedCompanyId } = useSelectedCompany() as any;
   const companyId = isSuper ? selectedCompanyId : user?.company_id;
 
   const [flows, setFlows] = useState<Flow[]>([]);
@@ -300,7 +300,12 @@ export default function AutomationStudioScreen() {
 
       {isSuper && (
         <View style={st.pickerWrap}>
-          <CompanyPicker />
+          <CompanyPicker
+            value={selectedCompanyId || "all"}
+            onChange={(v) => setSelectedCompanyId(v === "all" ? null : v)}
+            allowAll={false}
+            label="Firm (required)"
+          />
         </View>
       )}
 
@@ -354,8 +359,19 @@ export default function AutomationStudioScreen() {
         </ScrollView>
       ) : (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.lg }}>
+          {/* Firm selection is MANDATORY before any automation can be set up. */}
+          {!companyId && (
+            <View style={st.gate}>
+              <Ionicons name="business-outline" size={40} color={colors.onSurfaceTertiary} />
+              <Text style={st.gateTitle}>Select a firm to continue</Text>
+              <Text style={st.gateBody}>
+                Choose the firm you want to run the government-portal automation for
+                using the “Firm (required)” selector above.
+              </Text>
+            </View>
+          )}
           {/* --- Configuration (hidden while live) --- */}
-          {!isLive && (
+          {!!companyId && !isLive && (
             <View style={st.card}>
               <Text style={st.cardTitle}>1. Choose Portal</Text>
               <View style={st.chipRow}>
@@ -383,9 +399,9 @@ export default function AutomationStudioScreen() {
                     <Ionicons
                       name={flow === f.key ? "radio-button-on" : "radio-button-off"}
                       size={18}
-                      color={flow === f.key ? colors.primary : colors.onSurfaceTertiary}
+                      color={flow === f.key ? "#8B5E34" : colors.onSurfaceTertiary}
                     />
-                    <Text style={[st.flowTxt, flow === f.key && { color: colors.onSurface, fontWeight: "700" }]}>
+                    <Text style={[st.flowTxt, flow === f.key && { color: "#7A4A18", fontWeight: "700" }]}>
                       {f.label}
                     </Text>
                   </Pressable>
@@ -409,12 +425,12 @@ export default function AutomationStudioScreen() {
                         onPress={() => setEmpId(e.user_id)}
                         style={[st.empItem, empId === e.user_id && st.empItemActive]}
                       >
-                        <Text style={st.empTxt} numberOfLines={1}>
+                        <Text style={[st.empTxt, empId === e.user_id && { color: "#7A4A18", fontWeight: "700" }]} numberOfLines={1}>
                           {e.employee_code ? `${e.employee_code} · ` : ""}
                           {e.name}
                         </Text>
                         {empId === e.user_id && (
-                          <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
+                          <Ionicons name="checkmark-circle" size={18} color="#8B5E34" />
                         )}
                       </Pressable>
                     ))}
@@ -749,9 +765,9 @@ const st = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.md,
     borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface,
   },
-  chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipActive: { backgroundColor: "#FBECD6", borderColor: "#8B5E34" },
   chipTxt: { fontSize: 13, fontWeight: "700", color: colors.onSurfaceSecondary, textTransform: "capitalize" },
-  chipTxtActive: { color: "#fff" },
+  chipTxtActive: { color: "#7A4A18" },
   flowList: { gap: 4 },
   flowItem: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 9 },
   flowItemActive: {},
@@ -767,8 +783,11 @@ const st = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 10, borderRadius: radius.md,
     backgroundColor: colors.surfaceSecondary, marginBottom: 4,
   },
-  empItemActive: { backgroundColor: colors.primary + "18" },
+  empItemActive: { backgroundColor: "#FBECD6" },
   empTxt: { fontSize: 13.5, color: colors.onSurface, flex: 1 },
+  gate: { alignItems: "center", paddingVertical: 48, paddingHorizontal: spacing.lg, gap: 10 },
+  gateTitle: { fontSize: 16, fontWeight: "800", color: colors.onSurface },
+  gateBody: { fontSize: 13, color: colors.onSurfaceSecondary, textAlign: "center", lineHeight: 19 },
   valBox: { marginTop: spacing.md, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: spacing.md },
   valTitle: { fontSize: 13, fontWeight: "800", color: colors.onSurface, marginBottom: 6 },
   valRow: { fontSize: 12.5, color: colors.onSurfaceSecondary, marginBottom: 3 },
