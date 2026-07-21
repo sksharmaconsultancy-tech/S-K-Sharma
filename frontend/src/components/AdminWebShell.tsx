@@ -140,6 +140,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/attendance-email", label: "Email Configure / Automation", icon: "mail-outline" },
       { route: "/email-settings", label: "Email SMTP & Notifications", icon: "mail-unread-outline" },
       { route: "/challans", label: "PF / ESIC Challans", icon: "receipt-outline" },
+      { route: "/automation-studio", label: "Compliance Automation Studio", icon: "sparkles-outline" },
       { route: "/portal-automation", label: "WhatsApp Linking", icon: "logo-whatsapp" },
     ],
   },
