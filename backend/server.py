@@ -8001,10 +8001,13 @@ async def admin_create_employee(
 
     phone = _normalise_phone(str(payload.get("phone") or ""))
     email = (str(payload.get("email") or "").strip().lower()) or None
-    # Iter 244 (user directive) — Mobile/Email are OPTIONAL: only the
-    # Employee No. is mandatory (auto-assigned when the firm uses auto
-    # codes). An employee without phone+email simply cannot self-login
-    # until one is added later from the Employee Master.
+    # Iter 246 (user rollback) — Mobile is mandatory again for new
+    # employees so they can log in.
+    if not phone and not email:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide at least a phone number or email so the employee can log in.",
+        )
 
     # Resolve company_id
     if admin["role"] == "company_admin":

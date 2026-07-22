@@ -312,15 +312,14 @@ export default function EmployeeAddScreen() {
   const setField = (k: keyof EmpForm, v: any) =>
     setForm((prev) => ({ ...prev, [k]: v }));
 
-  // Iter 244 (company mandatory-field policy) — Name, Employee No.
-  // (auto counts), Designation, Date of Joining and Salary details are
-  // REQUIRED. Mobile/Email are optional — the employee simply cannot
-  // self-login until one is added later.
+  // Iter 246 (user rollback) — Mobile is MANDATORY; Employee No. is NOT
+  // required (blank = auto-assign). Designation, DOJ and Salary details
+  // stay required.
   const getMandatoryError = (): string | null => {
     if (!form.name.trim()) return "Employee name is required.";
     if (editUserId) return null; // edits of legacy records stay lenient
-    if (!firmHeads.autoCode && !form.employee_code.trim())
-      return "Employee No. (Employee Code) is required.";
+    if (!form.phone.replace(/\D/g, ""))
+      return "Mobile number is required.";
     if (!form.designation.trim())
       return "Designation is required — select it from the list.";
     if (!form.doj.trim())
@@ -588,7 +587,7 @@ export default function EmployeeAddScreen() {
   const checklist: { label: string; done: boolean }[] = [
     { label: "Firm selected", done: !!selectedCompanyId },
     { label: "Name", done: !!form.name.trim() },
-    { label: "Employee No.", done: !!(firmHeads.autoCode || form.employee_code.trim()) },
+    { label: "Mobile number", done: !!form.phone.trim() },
     { label: "Designation", done: !!form.designation.trim() },
     { label: "Date of joining", done: !!form.doj.trim() },
     { label: "Salary details", done: !!(form.basic_salary || form.salary_monthly || form.compliance_gross) },
@@ -980,7 +979,6 @@ export default function EmployeeAddScreen() {
               onChange={(v) => setField("employee_code", v)}
               placeholder={firmHeads.autoCode ? "Auto-assigned by system" : "e.g. 101"}
               editable={!firmHeads.autoCode}
-              required
             />
             <View style={{ flex: 1 }} />
           </TwoCol>
@@ -993,7 +991,8 @@ export default function EmployeeAddScreen() {
           />
           <TwoCol>
             <Field
-              label="Mobile (optional)"
+              label="Mobile"
+              required
               value={form.phone}
               onChange={(v) => setField("phone", v)}
               placeholder="+91 98xxxxxxxx"
