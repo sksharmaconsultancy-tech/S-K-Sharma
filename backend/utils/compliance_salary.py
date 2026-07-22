@@ -509,11 +509,11 @@ def compute_compliance_row(
             )
         else:
             pf_basic_prorated = pf_basic_override
-        # Iter 129b (user directive) — EPF wages = max(PF Basic, floor% of
-        # Gross Earning), same "whichever is higher" rule as ESIC. Capped
-        # at the EPF ceiling — unless the explicitly-set PF Basic itself
-        # exceeds the ceiling (the employer's explicit choice wins).
-        pf_base = max(pf_basic_prorated, gross_paid * (floor_pct / 100.0))
+        # Iter 254 (user directive) — PF is calculated STRICTLY on the
+        # Employee Master's "PF Basic Salary". The 50%-of-gross floor rule
+        # is IGNORED for PF (it previously inflated PF wages above the
+        # entered PF Basic, e.g. PF Basic 15000 with a higher gross).
+        pf_base = pf_basic_prorated
         capped_pf_wages = min(pf_base, max(cfg["pf_wage_cap"], pf_basic_prorated))
         pf_employee = capped_pf_wages * (cfg["pf_percent_employee"] / 100.0)
         pf_employer_epf = capped_pf_wages * (cfg["pf_percent_employer_epf"] / 100.0)
@@ -549,10 +549,17 @@ def compute_compliance_row(
     # the FULL-MONTH Basic Salary (≤ the limit in Standard Compliance
     # Settings), NOT the gross earning. Rates & rounding still come from
     # the Compliance Settings; the wage base rule is unchanged.
+    # Iter 254 (user directive) — ESIC eligibility (≤ limit in Standard
+    # Compliance Settings) is checked against the Employee Master's
+    # "Compliance Basic Salary" field when it is filled; falls back to the
+    # derived full-month Basic otherwise.
+    _esic_elig_basic = _num(user.get("compliance_basic"), 0.0)
+    if _esic_elig_basic <= 0:
+        _esic_elig_basic = master_structure["basic"]
     esic_applicable = (
         firm_esic_enabled
         and user.get("esic_applicable") is not False
-        and master_structure["basic"] <= cfg["esic_gross_threshold"]
+        and _esic_elig_basic <= cfg["esic_gross_threshold"]
     )
     if esic_applicable:
         # Iter 130 (user directive) — ESIC is calculated ON BASIC SALARY

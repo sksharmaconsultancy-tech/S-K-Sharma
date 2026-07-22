@@ -1216,3 +1216,7 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 
 ## Iter 253 (June 2026) — Punch Log firm-change refresh
 - Changing the Firm dropdown now auto-resets machine selection, rows/total/truncated, machine list, and reloads punches for the NEW firm (machines repopulated from its data). Verified: Kankani (526) → City Care (0, machine list reset).
+
+## Iter 254 (June 2026) — PF & ESIC calculation fixes (compliance_salary.py)
+- PF (user bug): 50%-of-gross floor rule REMOVED from PF — PF wages now STRICTLY = Employee Master "PF Basic Salary" (pro-rated by attendance for monthly staff), capped at pf_wage_cap unless explicit PF Basic exceeds it. E.g. PF Basic 15000 + gross 40000 → PF wages 15000 / PF 1800 (was inflated by floor).
+- ESIC eligibility (user directive): checked against Employee Master "Compliance Basic Salary" (compliance_basic) ≤ esic_gross_threshold; falls back to derived full-month basic when blank. Unit-verified 3 cases.
