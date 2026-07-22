@@ -48,9 +48,42 @@ export default function DateField({
   max,
   compact = false,
 }: Props) {
-  // Web: keep a ref so clicking ANYWHERE on the field (icon, label or
-  // input text) opens the browser's calendar popover — previously only
-  // the tiny native indicator was clickable.
+  // Iter 245 (user request) — HYBRID field: the date can be TYPED manually
+  // as DD-MM-YYYY *and* picked from the calendar (calendar icon). Works the
+  // same on desktop web, mobile PWA (employer + employee) and native.
+  const isoToDmy = (iso: string) =>
+    iso && iso.length >= 10
+      ? `${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}`
+      : "";
+  // Accepts: DD-MM-YYYY, D-M-YYYY, DD/MM/YYYY, DD.MM.YYYY, DDMMYYYY, ISO.
+  const parseTyped = (t: string): string | null => {
+    const s = t.trim();
+    if (!s) return "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; // already ISO
+    let m = s.replace(/[/.\s]/g, "-").match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+    if (!m) {
+      const digits = s.replace(/\D/g, "");
+      if (digits.length === 8) {
+        m = ["", digits.slice(0, 2), digits.slice(2, 4), digits.slice(4)] as any;
+      }
+    }
+    if (!m) return null;
+    const dd = Number(m[1]), mm = Number(m[2]), yyyy = Number(m[3]);
+    if (dd < 1 || dd > 31 || mm < 1 || mm > 12 || yyyy < 1900 || yyyy > 2200) return null;
+    return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+  };
+
+  const [text, setText] = React.useState(isoToDmy(value));
+  React.useEffect(() => { setText(isoToDmy(value)); }, [value]);
+
+  const commit = () => {
+    const iso = parseTyped(text);
+    if (iso !== null) onChangeISO(iso);
+    else setText(isoToDmy(value)); // invalid — revert to last good value
+  };
+
+  // Web: hidden native <input type="date"> supplies the calendar popover,
+  // opened from the calendar icon.
   const webRef = React.useRef<any>(null);
   const openPicker = () => {
     try {
@@ -60,43 +93,44 @@ export default function DateField({
       webRef.current?.focus?.();
     }
   };
-  if (Platform.OS === "web") {
-    return (
-      <Pressable
-        onPress={openPicker}
-        style={[styles.wrap, compact && { paddingVertical: 4 }]}
-      >
+
+  return (
+    <View style={[styles.wrap, compact && { paddingVertical: 4 }]}>
+      <Pressable onPress={Platform.OS === "web" ? openPicker : undefined} hitSlop={8}>
         <Ionicons name="calendar-outline" size={16} color={colors.brandPrimary} />
-        {label ? <Text style={styles.label}>{label}</Text> : null}
-        {/* Native browser calendar. Locale = user's system locale, which
-            in India renders as DD-MM-YYYY. */}
+      </Pressable>
+      {label ? <Text style={styles.label}>{label}</Text> : null}
+      <TextInput
+        value={text}
+        onChangeText={setText}
+        onBlur={commit}
+        onSubmitEditing={commit}
+        placeholder={placeholder}
+        placeholderTextColor={colors.onSurfaceTertiary}
+        style={styles.nativeInput}
+        maxLength={10}
+        keyboardType={Platform.OS === "web" ? undefined : "numbers-and-punctuation"}
+        testID={testID}
+      />
+      {Platform.OS === "web" ? (
+        /* Hidden calendar input — the icon opens its picker. */
+        // @ts-ignore web-only element
         <input
           ref={webRef}
           type="date"
           value={value || ""}
           min={min || undefined}
           max={max || undefined}
-          onClick={openPicker}
           onChange={(e) => onChangeISO((e.target as HTMLInputElement).value || "")}
-          data-testid={testID}
-          style={styles.webInput as any}
+          data-testid={testID ? `${testID}-picker` : undefined}
+          tabIndex={-1}
+          style={{
+            position: "absolute", left: 0, bottom: 0, width: 1, height: 1,
+            opacity: 0, border: "none", padding: 0, margin: 0,
+            pointerEvents: "none",
+          } as any}
         />
-      </Pressable>
-    );
-  }
-  return (
-    <View style={[styles.wrap, compact && { paddingVertical: 4 }]}>
-      <Ionicons name="calendar-outline" size={16} color={colors.brandPrimary} />
-      {label ? <Text style={styles.label}>{label}</Text> : null}
-      <TextInput
-        value={value}
-        onChangeText={onChangeISO}
-        placeholder={placeholder}
-        placeholderTextColor={colors.onSurfaceTertiary}
-        style={styles.nativeInput}
-        maxLength={10}
-        testID={testID}
-      />
+      ) : null}
     </View>
   );
 }
@@ -121,17 +155,6 @@ const styles = StyleSheet.create({
     color: colors.onSurfaceSecondary,
     fontWeight: "700",
     letterSpacing: 0.4,
-  },
-  webInput: {
-    fontSize: 13,
-    color: colors.onSurface,
-    border: "none",
-    outline: "none",
-    background: "transparent",
-    fontFamily: "inherit",
-    padding: 0,
-    minWidth: 140,
-    cursor: "pointer",
   },
   nativeInput: {
     fontSize: 13,

@@ -329,6 +329,13 @@ export default function EmployeeAddScreen() {
     // MARRIED FEMALE employee; everyone else may leave it blank.
     if (form.gender === "Female" && form.marital_status === "Married" && !form.spouse_name.trim())
       return "Spouse Name is required for a married female employee.";
+    // Iter 245 (user rule) — OFF-ROLL (offline) employees don't need a
+    // Compliance Salary; only their Actual / Off-line salary is required.
+    if (!form.is_onroll) {
+      if (!form.basic_salary && !form.salary_monthly)
+        return "Salary details are required — enter the Actual / Off-line salary.";
+      return null;
+    }
     if (!form.basic_salary && !form.salary_monthly && !form.compliance_gross)
       return "Salary details are required — enter at least the Basic Salary.";
     return null;
@@ -351,6 +358,19 @@ export default function EmployeeAddScreen() {
   const actualAllowTotal = sumLines(form.actual_allowances);
   const complAllowTotal = sumLines(form.compliance_allowances);
   const complGrossComputed = (Number(form.compliance_basic) || 0) + complAllowTotal;
+  // Iter 245 (user sequence) — Compliance allowance heads always show in
+  // the order HRA → CONV. → OTH. ALLOW. → any other Firm-Master-enabled
+  // heads (stable sort keeps the Firm Master order for the rest).
+  const allowHeadRank = (h: string) => {
+    const u = h.toUpperCase();
+    if (u.includes("HRA")) return 0;
+    if (u.startsWith("CONV")) return 1;
+    if (u.startsWith("OTH")) return 2;
+    return 3;
+  };
+  const orderedAllowHeads = [...firmHeads.allowances].sort(
+    (a, b) => allowHeadRank(a) - allowHeadRank(b),
+  );
   useEffect(() => {
     if (complGrossComputed > 0 && String(complGrossComputed) !== form.compliance_gross) {
       setForm((prev) => ({ ...prev, compliance_gross: String(complGrossComputed) }));
@@ -1367,6 +1387,15 @@ export default function EmployeeAddScreen() {
 
           {/* Iter 94 — COMPLIANCE salary: separate section, own rate basis */}
           <SectionHeader icon="shield-half-outline" title="Compliance Salary (PF / ESI / TDS) — Separate" tint="#B45309" anchorId="sec-compliance" />
+          {/* Iter 245 (user rule) — OFF-ROLL (offline) employees do NOT
+              need a Compliance Salary: the whole PF/ESI/TDS block is
+              skipped and nothing here is mandatory for them. */}
+          {!form.is_onroll ? (
+            <Text style={[styles.smallNote, { fontWeight: "800", color: "#B45309" }]}>
+              Off-roll (offline) employee — Compliance Salary (PF / ESI / TDS)
+              is not required. Fill only the Actual / Off-line salary above.
+            </Text>
+          ) : (<>
           <Text style={styles.lbl}>Rate Basis (Compliance)</Text>
           <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
             {(["monthly", "daily", "hourly"] as const).map((m) => (
@@ -1378,9 +1407,145 @@ export default function EmployeeAddScreen() {
               />
             ))}
           </View>
+          {/* Iter 245 (user sequence) — Compliance Salary field order:
+              Basic Salary → PF Basic Salary → HRA → CONV. → OTH. ALLOW.
+              → (any other Firm-Master-enabled allowances) → Gross Salary
+              (= Basic + HRA + CONV. + allowances). */}
+          <TwoCol>
+            <Field
+              label="Basic Salary (₹)"
+              value={form.compliance_basic}
+              onChange={(v) => {
+                const clean = v.replace(/[^0-9.]/g, "");
+                setField("compliance_basic", clean);
+                const n = Number(clean || 0);
+                if (n > 0 && n < 15000) setField("pf_basic", clean);
+              }}
+              placeholder="e.g. 12000"
+              keyboardType="numeric"
+            />
+            <Field
+              label={
+                Number(form.compliance_basic || 0) > 0 &&
+                Number(form.compliance_basic || 0) < 15000
+                  ? "PF Basic Salary (auto = Basic)"
+                  : "PF Basic Salary (optional)"
+              }
+              value={form.pf_basic}
+              onChange={(v) => setField("pf_basic", v.replace(/[^0-9.]/g, ""))}
+              editable={
+                !(
+                  Number(form.compliance_basic || 0) > 0 &&
+                  Number(form.compliance_basic || 0) < 15000
+                )
+              }
+              placeholder="PF calculated on this"
+              keyboardType="numeric"
+            />
+          </TwoCol>
+          <Text style={styles.smallNote}>
+            Basic below ₹15,000 → PF Basic auto-copies the Basic Salary.
+            Basic ₹15,000 or above → PF Basic is optional; when filled, PF is
+            calculated on the filled amount.
+          </Text>
+
+          {/* Iter 126e/g — Firm-Master-linked salary heads (part of the
+              COMPLIANCE salary). Heads ordered HRA → CONV. → OTH. ALLOW.
+              → rest (Iter 245). */}
+          {firmHeads.allowances.length > 0 ? (
+            <>
+              <Text style={styles.lbl}>Allowances (from Firm Master)</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {orderedAllowHeads.map((h) => (
+                  <View key={h} style={{ minWidth: 150, flexGrow: 1, flexBasis: "30%" }}>
+                    <Field
+                      label={h}
+                      value={lineAmount(form.compliance_allowances, h)}
+                      onChange={(v) => setLineAmount("compliance_allowances", h, v)}
+                      placeholder="0"
+                      keyboardType="numeric"
+                    />
+                  </View>
+                ))}
+              </View>
+            </>
+          ) : null}
+
+          {/* Iter 137 — Total Allowances + LINKED Gross Salary right after
+              the allowances. Gross = Basic + Σ allowances (auto). */}
+          {firmHeads.allowances.length > 0 ? (
+            <Text style={[styles.smallNote, { fontWeight: "800", color: "#B45309" }]}>
+              Total Allowances (Compliance): ₹{complAllowTotal.toLocaleString()}
+            </Text>
+          ) : null}
+          <TwoCol>
+            <Field
+              label={
+                complGrossComputed > 0
+                  ? "Gross Salary (auto = Basic + HRA + CONV. + Allowances)"
+                  : "Gross Salary / month (₹)"
+              }
+              value={form.compliance_gross}
+              onChange={(v) => setField("compliance_gross", v.replace(/[^0-9.]/g, ""))}
+              editable={!(complGrossComputed > 0)}
+              placeholder="For PF / ESIC / TDS"
+              keyboardType="numeric"
+            />
+            <View style={{ flex: 1 }} />
+          </TwoCol>
+
+          {firmHeads.deductions.length > 0 ? (
+            <>
+              <Text style={styles.lbl}>Deductions (from Firm Master)</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {firmHeads.deductions.map((h) => (
+                  <View key={h} style={{ minWidth: 150, flexGrow: 1, flexBasis: "30%" }}>
+                    <Field
+                      label={h}
+                      value={lineAmount(form.compliance_deductions, h)}
+                      onChange={(v) => setLineAmount("compliance_deductions", h, v)}
+                      placeholder="0"
+                      keyboardType="numeric"
+                    />
+                  </View>
+                ))}
+              </View>
+            </>
+          ) : null}
+
+          {/* Iter 126i — VPF (Voluntary PF) — user request. When enabled,
+              the amount is deducted along with the employee's PF deduction
+              in the Compliance salary. */}
+          <Pressable
+            onPress={() => setField("vpf_enabled", !form.vpf_enabled)}
+            style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 }}
+            testID="vpf-toggle"
+          >
+            <Ionicons
+              name={form.vpf_enabled ? "checkbox" : "square-outline"}
+              size={20}
+              color={form.vpf_enabled ? colors.brandPrimary : colors.onSurfaceSecondary}
+            />
+            <Text style={{ fontSize: 13, fontWeight: "700", color: colors.onSurface }}>
+              VPF (Voluntary PF)
+            </Text>
+          </Pressable>
+          {form.vpf_enabled ? (
+            <TwoCol>
+              <Field
+                label="VPF Amount / month (₹)"
+                value={form.vpf_amount}
+                onChange={(v) => setField("vpf_amount", v.replace(/[^0-9.]/g, ""))}
+                placeholder="Deducted with PF"
+                keyboardType="numeric"
+              />
+              <View style={{ flex: 1 }} />
+            </TwoCol>
+          ) : null}
+          </>)}
+
           {/* Iter 200 (user request) — Allowance / Deduction heads (Actual,
-              from Firm Master) moved here, right after Rate Basis
-              (Compliance). Saved as actual_salary_allowances /
+              from Firm Master). Saved as actual_salary_allowances /
               actual_salary_deductions — unchanged storage. */}
           {showActualSalary && firmHeads.allowances.length > 0 ? (
             <>
@@ -1418,141 +1583,6 @@ export default function EmployeeAddScreen() {
               </View>
             </>
           ) : null}
-          {/* Iter 126g — Compliance Basic + PF Basic (user request).
-              EPF ceiling rule: Basic < ₹15,000 → PF Basic auto-copies the
-              Basic; Basic ≥ ₹15,000 → PF Basic is optional (if filled,
-              PF is calculated on it). */}
-          <TwoCol>
-            <Field
-              label="Compliance Basic Salary (₹)"
-              value={form.compliance_basic}
-              onChange={(v) => {
-                const clean = v.replace(/[^0-9.]/g, "");
-                setField("compliance_basic", clean);
-                const n = Number(clean || 0);
-                if (n > 0 && n < 15000) setField("pf_basic", clean);
-              }}
-              placeholder="e.g. 12000"
-              keyboardType="numeric"
-            />
-            <Field
-              label={
-                Number(form.compliance_basic || 0) > 0 &&
-                Number(form.compliance_basic || 0) < 15000
-                  ? "PF Basic Salary (auto = Basic)"
-                  : "PF Basic Salary (optional)"
-              }
-              value={form.pf_basic}
-              onChange={(v) => setField("pf_basic", v.replace(/[^0-9.]/g, ""))}
-              editable={
-                !(
-                  Number(form.compliance_basic || 0) > 0 &&
-                  Number(form.compliance_basic || 0) < 15000
-                )
-              }
-              placeholder="PF calculated on this"
-              keyboardType="numeric"
-            />
-          </TwoCol>
-          <Text style={styles.smallNote}>
-            Basic below ₹15,000 → PF Basic auto-copies the Basic Salary.
-            Basic ₹15,000 or above → PF Basic is optional; when filled, PF is
-            calculated on the filled amount.
-          </Text>
-
-          {/* Iter 126i — VPF (Voluntary PF) — user request. When enabled,
-              the amount is deducted along with the employee's PF deduction
-              in the Compliance salary. */}
-          <Pressable
-            onPress={() => setField("vpf_enabled", !form.vpf_enabled)}
-            style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 }}
-            testID="vpf-toggle"
-          >
-            <Ionicons
-              name={form.vpf_enabled ? "checkbox" : "square-outline"}
-              size={20}
-              color={form.vpf_enabled ? colors.brandPrimary : colors.onSurfaceSecondary}
-            />
-            <Text style={{ fontSize: 13, fontWeight: "700", color: colors.onSurface }}>
-              VPF (Voluntary PF)
-            </Text>
-          </Pressable>
-          {form.vpf_enabled ? (
-            <TwoCol>
-              <Field
-                label="VPF Amount / month (₹)"
-                value={form.vpf_amount}
-                onChange={(v) => setField("vpf_amount", v.replace(/[^0-9.]/g, ""))}
-                placeholder="Deducted with PF"
-                keyboardType="numeric"
-              />
-              <View style={{ flex: 1 }} />
-            </TwoCol>
-          ) : null}
-
-          {/* Iter 126e/g — Firm-Master-linked salary heads (part of the
-              COMPLIANCE salary, per user direction). Every allowance /
-              deduction head toggled ON in Firm Master appears here. */}
-          {firmHeads.allowances.length > 0 ? (
-            <>
-              <Text style={styles.lbl}>Allowances (from Firm Master)</Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {firmHeads.allowances.map((h) => (
-                  <View key={h} style={{ minWidth: 150, flexGrow: 1, flexBasis: "30%" }}>
-                    <Field
-                      label={h}
-                      value={lineAmount(form.compliance_allowances, h)}
-                      onChange={(v) => setLineAmount("compliance_allowances", h, v)}
-                      placeholder="0"
-                      keyboardType="numeric"
-                    />
-                  </View>
-                ))}
-              </View>
-            </>
-          ) : null}
-          {firmHeads.deductions.length > 0 ? (
-            <>
-              <Text style={styles.lbl}>Deductions (from Firm Master)</Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {firmHeads.deductions.map((h) => (
-                  <View key={h} style={{ minWidth: 150, flexGrow: 1, flexBasis: "30%" }}>
-                    <Field
-                      label={h}
-                      value={lineAmount(form.compliance_deductions, h)}
-                      onChange={(v) => setLineAmount("compliance_deductions", h, v)}
-                      placeholder="0"
-                      keyboardType="numeric"
-                    />
-                  </View>
-                ))}
-              </View>
-            </>
-          ) : null}
-
-          {/* Iter 137 (user directive) — Total Allowances + LINKED
-              Compliance Gross shown AFTER the Allowances section.
-              Gross = Compliance Basic + Σ allowances (auto). */}
-          {firmHeads.allowances.length > 0 ? (
-            <Text style={[styles.smallNote, { fontWeight: "800", color: "#B45309" }]}>
-              Total Allowances (Compliance): ₹{complAllowTotal.toLocaleString()}
-            </Text>
-          ) : null}
-          <TwoCol>
-            <Field
-              label={
-                complGrossComputed > 0
-                  ? "Compliance Gross (auto = Basic + Allowances)"
-                  : "Compliance gross / month (₹)"
-              }
-              value={form.compliance_gross}
-              onChange={(v) => setField("compliance_gross", v.replace(/[^0-9.]/g, ""))}
-              editable={!(complGrossComputed > 0)}
-              placeholder="For PF / ESIC / TDS"
-              keyboardType="numeric"
-            />
-            <View style={{ flex: 1 }} />
-          </TwoCol>
 
           {/* Iter 126g — Pay Mode moved into the Compliance Salary section */}
           <Text style={[styles.lbl, { marginTop: 4 }]}>Pay Mode</Text>
