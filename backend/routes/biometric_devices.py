@@ -562,6 +562,54 @@ async def resync_biometric_device(
     }
 
 
+@router.post("/biometric/devices/resync-all")
+async def resync_all_biometric_devices(
+    company_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 252 (user request) — one-tap 'sync machine punches up to date'
+    from the Punch Log Report: opens a re-sync window on EVERY enabled
+    device in scope so each machine re-uploads all stored punches."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    q: dict = {"enabled": {"$ne": False}}
+    if admin["role"] == "company_admin":
+        q["company_id"] = admin["company_id"]
+    elif company_id:
+        q["company_id"] = company_id
+    devices = await db.biometric_devices.find(q, {"_id": 0}).to_list(200)
+    if not devices:
+        raise HTTPException(status_code=404, detail="No biometric machines registered for this scope")
+    until = (datetime.now(timezone.utc) + timedelta(hours=6)).isoformat().replace("+00:00", "Z")
+    now = datetime.now(timezone.utc)
+    online = 0
+    for d in devices:
+        last = d.get("last_seen_at")
+        try:
+            if last and (now - datetime.fromisoformat(str(last).replace("Z", "+00:00"))).total_seconds() < 180:
+                online += 1
+        except Exception:
+            pass
+        await db.biometric_devices.update_one(
+            {"device_id": d["device_id"]},
+            {"$set": {"resync_until": until,
+                      "resync_check_sent": False,
+                      "resync_requested_by": admin["user_id"],
+                      "resync_requested_at": _now_iso_z()}},
+        )
+    return {
+        "ok": True,
+        "devices": len(devices),
+        "online": online,
+        "message": (
+            f"Sync requested on {len(devices)} machine(s) ({online} online now). "
+            "Each ONLINE machine will re-upload every stored punch within a few "
+            "minutes — press Apply to refresh. Offline machines will sync as soon "
+            "as they come online (window open for 6 hours)."
+        ),
+    }
+
+
 @router.get("/biometric/devices")
 async def list_biometric_devices(
     company_id: Optional[str] = Query(None),

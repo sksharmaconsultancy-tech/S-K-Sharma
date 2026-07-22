@@ -116,6 +116,26 @@ export default function PunchLogReportScreen() {
 
   useEffect(() => { fetchLog(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Iter 252 (user request) — pull machine punches UP TO DATE: asks every
+  // connected machine to re-upload all stored punches, then refresh.
+  const [syncing, setSyncing] = useState(false);
+  const syncMachines = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      const params = firmId ? `?company_id=${firmId}` : "";
+      const r = await api<{ ok: boolean; message: string }>(
+        `/biometric/devices/resync-all${params}`,
+        { method: "POST" },
+      );
+      showMsg(r.message);
+    } catch (e: any) {
+      showMsg(e?.message || "Sync request failed");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const downloadXlsx = async () => {
     if (downloading) return;
     setDownloading(true);
@@ -155,6 +175,19 @@ export default function PunchLogReportScreen() {
             Every punch — machine, app, import &amp; manual — by date, machine and firm
           </Text>
         </View>
+        <Pressable
+          onPress={syncMachines}
+          style={[styles.dlBtn, { backgroundColor: "#16a34a" }, syncing && { opacity: 0.6 }]}
+          disabled={syncing}
+          testID="plog-sync-machines"
+        >
+          {syncing ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Ionicons name="sync-outline" size={16} color="#fff" />
+          )}
+          <Text style={styles.dlBtnTxt}>Sync from machines</Text>
+        </Pressable>
         <Pressable
           onPress={downloadXlsx}
           style={[styles.dlBtn, downloading && { opacity: 0.6 }]}

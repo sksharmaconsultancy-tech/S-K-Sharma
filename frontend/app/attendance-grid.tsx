@@ -766,6 +766,16 @@ export default function AttendanceGridScreen() {
           maxLength={10}
           testID="daily-date-input"
         />
+        {/* Iter 252 (user request) — SHOW that single day's report on screen */}
+        <Pressable
+          onPress={() => { setFromDate(dailyDate); setToDate(dailyDate); }}
+          disabled={!isValidDdmmyyyy(dailyDate)}
+          style={[styles.exportBtn, { backgroundColor: "#16a34a" }, !isValidDdmmyyyy(dailyDate) && { opacity: 0.6 }]}
+          testID="daily-show"
+        >
+          <Ionicons name="eye-outline" size={14} color="#fff" />
+          <Text style={styles.exportBtnTxt}>Show</Text>
+        </Pressable>
         <Pressable
           onPress={() => downloadDaily("xlsx")}
           disabled={exporting || !isValidDdmmyyyy(dailyDate)}
