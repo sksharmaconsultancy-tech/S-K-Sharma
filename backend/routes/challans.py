@@ -428,20 +428,24 @@ def _ecr_lines(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> List[Di
 
 
 def _ecr_txt_bytes(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> bytes:
-    """EPFO Contribution file body (6-field #~# format). Raises 400 if no
-    member has a UAN."""
+    """EPFO Contribution file body (6-field #~# format).
+
+    Members WITH a UAN are written normally; PF members WITHOUT a UAN yet
+    (new joiners) are still included with a BLANK UAN field so EPFO can
+    assign one on upload (per user request). Only raises 400 if there are
+    no PF-applicable members at all."""
     members = _ecr_lines(run, extra)
+    if not members:
+        raise HTTPException(
+            status_code=400,
+            detail="No PF-applicable members in this run.",
+        )
     lines = [
         "#~#".join(str(x) for x in (
             m["uan"], m["name"], m["epf_ee"], m["eps_er"], m["diff_er"], m["refund"],
         ))
-        for m in members if m["uan"]
+        for m in members
     ]
-    if not lines:
-        raise HTTPException(
-            status_code=400,
-            detail="No PF members with a UAN in this run — add UAN numbers in the Employee Master first",
-        )
     return ("\r\n".join(lines) + "\r\n").encode("utf-8")
 
 

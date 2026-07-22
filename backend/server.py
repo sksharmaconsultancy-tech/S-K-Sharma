@@ -20219,6 +20219,8 @@ from routes.attendance_doctor import router as attendance_doctor_router  # noqa:
 app.include_router(attendance_doctor_router)
 from routes.portal_rpa import router as portal_rpa_router  # noqa: E402
 app.include_router(portal_rpa_router)
+from routes.uan_esic_import import router as uan_esic_import_router  # noqa: E402
+app.include_router(uan_esic_import_router)
 app.include_router(compliance_settings_router)
 from routes.report_formats import router as report_formats_router  # noqa: E402
 app.include_router(report_formats_router)
