@@ -215,7 +215,16 @@ export default function PunchLogReportScreen() {
               </select>
             ) : null}
           </View>
-          <Pressable onPress={() => fetchLog(true)} style={styles.applyBtn} testID="plog-apply">
+          <Pressable
+            onPress={() => {
+              // Iter 249 (user request) — Apply refreshes the list AND
+              // downloads the FULL Excel for the selected period.
+              fetchLog(true);
+              downloadXlsx();
+            }}
+            style={styles.applyBtn}
+            testID="plog-apply"
+          >
             <Ionicons name="search-outline" size={15} color="#fff" />
             <Text style={styles.applyTxt}>Apply</Text>
           </Pressable>

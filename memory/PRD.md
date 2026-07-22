@@ -1194,3 +1194,6 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 
 ## Iter 248 (June 2026) — New joiners always land in ACTIVE list
 - User bug: newly added OFF-ROLL (offline) employees vanished from the "ACTIVE EMPLOYEE" tab in Employee Master Data (/admin). Root cause: matchesStatus in admin.tsx excluded is_onroll===false from Active. Fix: Active = every working employee (on-roll + off-roll); only disabled/resigned excluded. On-roll/Off-roll sub-filter chips still available.
+
+## Iter 249 (June 2026) — Punch Log Report: Apply auto-downloads full period
+- User request: selecting From/To and clicking Apply now BOTH refreshes the on-screen list AND auto-downloads the full-period Excel (Punch_Log_from_to.xlsx, up to 100k rows; verified 1976/1976 rows match). Top "Download Excel" button unchanged.
