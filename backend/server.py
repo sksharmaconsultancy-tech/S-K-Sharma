@@ -8001,11 +8001,10 @@ async def admin_create_employee(
 
     phone = _normalise_phone(str(payload.get("phone") or ""))
     email = (str(payload.get("email") or "").strip().lower()) or None
-    if not phone and not email:
-        raise HTTPException(
-            status_code=400,
-            detail="Provide at least a phone number or email so the employee can log in.",
-        )
+    # Iter 244 (user directive) — Mobile/Email are OPTIONAL: only the
+    # Employee No. is mandatory (auto-assigned when the firm uses auto
+    # codes). An employee without phone+email simply cannot self-login
+    # until one is added later from the Employee Master.
 
     # Resolve company_id
     if admin["role"] == "company_admin":
@@ -18298,6 +18297,52 @@ async def list_masters(
     elif company_id and company_id != "__global__":
         q["company_id"] = {"$in": [company_id, "__global__", None]}
     # else: super/sub admin without a firm filter -> ALL firms + globals.
+    # Iter 244 (user bug) — INTERLINK: groups that exist only on employee
+    # records (e.g. created during Bulk Employee Import) are auto-registered
+    # into the Group Master here, so they show up in the General Masters
+    # screen and every Group dropdown across the app.
+    if type == "group":
+        try:
+            u_match: Dict[str, Any] = {
+                "role": "employee",
+                "employee_type": {"$exists": True, "$nin": [None, ""]},
+            }
+            if admin["role"] == "company_admin":
+                u_match["company_id"] = admin.get("company_id")
+            elif company_id and company_id != "__global__":
+                u_match["company_id"] = company_id
+            existing_names = {
+                (m.get("name") or "").strip().upper()
+                async for m in db.masters.find({"type": "group"}, {"_id": 0, "name": 1})
+            }
+            async for row in db.users.aggregate([
+                {"$match": u_match},
+                {"$group": {"_id": {
+                    "cid": "$company_id",
+                    "name": {"$toUpper": {"$trim": {"input": "$employee_type"}}},
+                }}},
+                {"$limit": 500},
+            ]):
+                nm = (row["_id"].get("name") or "").strip()
+                u_cid = row["_id"].get("cid")
+                if not nm or not u_cid or nm in existing_names:
+                    continue
+                await db.masters.insert_one({
+                    "master_id": f"mst_{uuid.uuid4().hex[:12]}",
+                    "type": "group",
+                    "company_id": u_cid,
+                    "name": nm,
+                    "member_user_ids": [],
+                    "date": None,
+                    "created_at": now_iso(),
+                    "updated_at": now_iso(),
+                    "created_by": admin["user_id"],
+                    "scope": "firm",
+                    "auto_registered": "bulk_import_interlink",
+                })
+                existing_names.add(nm)
+        except Exception as _e:
+            logging.warning(f"group-master interlink failed: {_e}")
     items = await db.masters.find(q, {"_id": 0}).sort("name", 1).to_list(2000)
     return {"items": items}
 

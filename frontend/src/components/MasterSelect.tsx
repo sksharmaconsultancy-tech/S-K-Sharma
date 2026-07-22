@@ -28,12 +28,14 @@ type Props = {
   placeholder?: string;
   /** Uppercase both typed and picked values (designations). */
   uppercase?: boolean;
+  /** Iter 244 — mandatory-field red star on the label. */
+  required?: boolean;
   testID?: string;
 };
 
 export default function MasterSelect({
   label, masterType, companyId, value, onChange,
-  placeholder = "Tap to select", uppercase = false, testID,
+  placeholder = "Tap to select", uppercase = false, required = false, testID,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<string[]>([]);
@@ -121,7 +123,10 @@ export default function MasterSelect({
 
   return (
     <View ref={wrapRef} style={{ position: "relative", zIndex: open ? 60 : 1 }}>
-      <Text style={styles.lbl}>{label}</Text>
+      <Text style={styles.lbl}>
+        {label}
+        {required ? <Text style={{ color: "#DC2626", fontWeight: "900" }}> *</Text> : null}
+      </Text>
       <Pressable
         onPress={() => setOpen((o) => !o)}
         style={styles.trigger}

@@ -88,7 +88,7 @@ export default function EmployeeAddScreen() {
   const urlParams = useLocalSearchParams<{ user_id?: string }>();
   const editUserId = urlParams.user_id ? String(urlParams.user_id) : null;
   // Iter 189 — enterprise desktop shell
-  const { width: winW } = useWindowDimensions();
+  const { width: winW, height: winH } = useWindowDimensions();
   const isWide = Platform.OS === "web" && winW >= 1024;
   const [activeTab, setActiveTab] = useState<string>("sec-identity");
   const scrollToSection = useCallback((id: string) => {
@@ -306,12 +306,43 @@ export default function EmployeeAddScreen() {
   const canSubmit = useMemo(() => {
     if (!selectedCompanyId) return false;
     if (!form.name.trim()) return false;
-    if (!form.phone.replace(/\D/g, "") && !form.email.trim()) return false;
     return true;
-  }, [selectedCompanyId, form.name, form.phone, form.email]);
+  }, [selectedCompanyId, form.name]);
 
   const setField = (k: keyof EmpForm, v: any) =>
     setForm((prev) => ({ ...prev, [k]: v }));
+
+  // Iter 244 (company mandatory-field policy) — Name, Employee No.
+  // (auto counts), Designation, Date of Joining and Salary details are
+  // REQUIRED. Mobile/Email are optional — the employee simply cannot
+  // self-login until one is added later.
+  const getMandatoryError = (): string | null => {
+    if (!form.name.trim()) return "Employee name is required.";
+    if (editUserId) return null; // edits of legacy records stay lenient
+    if (!firmHeads.autoCode && !form.employee_code.trim())
+      return "Employee No. (Employee Code) is required.";
+    if (!form.designation.trim())
+      return "Designation is required — select it from the list.";
+    if (!form.doj.trim())
+      return "Date of Joining is required.";
+    // Iter 244b (user rule) — Spouse Name is mandatory ONLY for a
+    // MARRIED FEMALE employee; everyone else may leave it blank.
+    if (form.gender === "Female" && form.marital_status === "Married" && !form.spouse_name.trim())
+      return "Spouse Name is required for a married female employee.";
+    if (!form.basic_salary && !form.salary_monthly && !form.compliance_gross)
+      return "Salary details are required — enter at least the Basic Salary.";
+    return null;
+  };
+
+  // "Create employee" first validates the mandatory fields, then opens
+  // the review-before-create modal (so the error is never hidden UNDER
+  // the modal — the PWA draft-create bug).
+  const openReview = () => {
+    const err = getMandatoryError();
+    if (err) { setError(err); return; }
+    setError(null);
+    setReviewOpen(true);
+  };
 
   // Iter 137 (user directive) — allowance totals + LINKED Compliance Gross
   // (= Compliance Basic + Σ compliance allowances).
@@ -386,12 +417,10 @@ export default function EmployeeAddScreen() {
       setError("Select a firm first.");
       return;
     }
-    if (!form.name.trim()) {
-      setError("Employee name is required.");
-      return;
-    }
-    if (!form.phone.replace(/\D/g, "") && !form.email.trim()) {
-      setError("Provide either a phone number or an email.");
+    const mandatoryError = getMandatoryError();
+    if (mandatoryError) {
+      setReviewOpen(false);
+      setError(mandatoryError);
       return;
     }
     setError(null);
@@ -539,12 +568,12 @@ export default function EmployeeAddScreen() {
   const checklist: { label: string; done: boolean }[] = [
     { label: "Firm selected", done: !!selectedCompanyId },
     { label: "Name", done: !!form.name.trim() },
-    { label: "Mobile number", done: !!form.phone.trim() },
+    { label: "Employee No.", done: !!(firmHeads.autoCode || form.employee_code.trim()) },
     { label: "Designation", done: !!form.designation.trim() },
     { label: "Date of joining", done: !!form.doj.trim() },
-    { label: "Salary details", done: !!(form.salary_monthly || form.compliance_gross) },
-    { label: "Bank details", done: !!form.bank_name.trim() },
-    { label: "Aadhaar", done: !!form.aadhaar_no.trim() },
+    { label: "Salary details", done: !!(form.basic_salary || form.salary_monthly || form.compliance_gross) },
+    { label: "Bank details (optional)", done: !!form.bank_name.trim() },
+    { label: "Aadhaar (optional)", done: !!form.aadhaar_no.trim() },
   ];
   const doneCount = checklist.filter((c) => c.done).length;
   const summaryRows: [string, string][] = [
@@ -557,7 +586,7 @@ export default function EmployeeAddScreen() {
   ];
   const enterprisePrimary = (
     <Pressable
-      onPress={editUserId ? submit : () => setReviewOpen(true)}
+      onPress={editUserId ? submit : openReview}
       disabled={!canSubmit || busy}
       style={[styles.entPrimaryBtn, (!canSubmit || busy) && styles.btnDisabled]}
       testID="ent-primary-save"
@@ -931,18 +960,20 @@ export default function EmployeeAddScreen() {
               onChange={(v) => setField("employee_code", v)}
               placeholder={firmHeads.autoCode ? "Auto-assigned by system" : "e.g. 101"}
               editable={!firmHeads.autoCode}
+              required
             />
             <View style={{ flex: 1 }} />
           </TwoCol>
           <Field
-            label="Full name *"
+            label="Full name"
+            required
             value={form.name}
             onChange={(v) => setField("name", v.toUpperCase())}
             placeholder="e.g. RAMESH KUMAR"
           />
           <TwoCol>
             <Field
-              label="Mobile *"
+              label="Mobile (optional)"
               value={form.phone}
               onChange={(v) => setField("phone", v)}
               placeholder="+91 98xxxxxxxx"
@@ -998,6 +1029,7 @@ export default function EmployeeAddScreen() {
           {form.marital_status === "Married" ? (
             <Field
               label="Spouse Name"
+              required={form.gender === "Female"}
               value={form.spouse_name}
               onChange={(v) => setField("spouse_name", v)}
               placeholder="Husband / wife name (shown in reports for married female employees)"
@@ -1094,6 +1126,7 @@ export default function EmployeeAddScreen() {
                   allowed). No more full chip list on the form. */}
               <MasterSelect
                 label="Designation"
+                required
                 masterType="designation"
                 companyId={selectedCompanyId}
                 value={form.designation}
@@ -1131,7 +1164,10 @@ export default function EmployeeAddScreen() {
               />
             </View>
             <View style={{ flex: 1, gap: 4 }}>
-              <Text style={styles.lbl}>Date of joining (pick or type)</Text>
+              <Text style={styles.lbl}>
+                Date of joining (pick or type)
+                <Text style={{ color: "#DC2626", fontWeight: "900" }}> *</Text>
+              </Text>
               <DateField
                 value={ddmmyyyyDashToISO(form.doj) || ""}
                 onChangeISO={(iso) => setField("doj", isoToDDMMDash(iso))}
@@ -1265,6 +1301,7 @@ export default function EmployeeAddScreen() {
           <TwoCol>
             <Field
               label="Basic Salary (₹)"
+              required
               value={form.basic_salary}
               onChange={(v) => setField("basic_salary", v.replace(/[^0-9.]/g, ""))}
               onBlur={() => {
@@ -1781,7 +1818,7 @@ export default function EmployeeAddScreen() {
           ) : null}
 
           <Pressable
-            onPress={editUserId ? submit : () => setReviewOpen(true)}
+            onPress={editUserId ? submit : openReview}
             disabled={!canSubmit || busy}
             style={[
               styles.primaryBtn,
@@ -1851,7 +1888,7 @@ export default function EmployeeAddScreen() {
                 <Ionicons name="close" size={20} color={colors.onSurfaceTertiary} />
               </Pressable>
             </View>
-            <ScrollView style={{ maxHeight: 430 }} testID="review-scroll">
+            <ScrollView style={{ maxHeight: Math.min(430, Math.round(winH * 0.5)) }} testID="review-scroll">
               {[
                 ["Name", form.name], ["Father's Name", form.father_name],
                 ["Gender", form.gender], ["Date of Birth", form.dob],
@@ -1930,10 +1967,15 @@ function Field(props: {
   autoCapitalize?: any;
   onBlur?: () => void;
   editable?: boolean;
+  /** Iter 244 — mandatory-field red star on the label. */
+  required?: boolean;
 }) {
   return (
     <View style={{ flex: 1, gap: 4 }}>
-      <Text style={styles.lbl}>{props.label}</Text>
+      <Text style={styles.lbl}>
+        {props.label}
+        {props.required ? <Text style={{ color: "#DC2626", fontWeight: "900" }}> *</Text> : null}
+      </Text>
       <TextInput
         style={[styles.input, props.editable === false && { opacity: 0.6 }]}
         value={props.value}
