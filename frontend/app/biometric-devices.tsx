@@ -237,8 +237,24 @@ export default function BiometricDevicesScreen() {
     }
   };
 
-  const shareGuide = async () => {
-    const guide = buildSetupGuideText(devices);
+  // Iter 250 (user request) — fetch OLD punches stored inside the machine.
+  const [resyncing, setResyncing] = useState<string | null>(null);
+  const resyncDevice = async (d: Device) => {
+    setResyncing(d.device_id);
+    try {
+      const r = await api<{ ok: boolean; message: string }>(
+        `/biometric/devices/${d.device_id}/resync`,
+        { method: "POST" },
+      );
+      alertUser("Old data fetch started", r.message);
+    } catch (e: any) {
+      alertUser("Failed", e?.message || "Please try again.");
+    } finally {
+      setResyncing(null);
+    }
+  };
+
+  const shareGuide = async () => {    const guide = buildSetupGuideText(devices);
     try {
       if (Platform.OS === "web" && navigator?.clipboard) {
         await navigator.clipboard.writeText(guide);
@@ -358,10 +374,12 @@ export default function BiometricDevicesScreen() {
                 key={d.device_id}
                 device={d}
                 busy={simulating === d.device_id}
+                resyncing={resyncing === d.device_id}
                 companyName={companyName(d.company_id)}
                 onEdit={() => openEdit(d)}
                 onDelete={() => removeDevice(d)}
                 onSimulate={() => simulate(d)}
+                onResync={() => resyncDevice(d)}
               />
             ))
           )}
@@ -633,17 +651,21 @@ function SummaryTile({
 function DeviceCard({
   device,
   busy,
+  resyncing,
   companyName,
   onEdit,
   onDelete,
   onSimulate,
+  onResync,
 }: {
   device: Device;
   busy: boolean;
+  resyncing: boolean;
   companyName: string;
   onEdit: () => void;
   onDelete: () => void;
   onSimulate: () => void;
+  onResync: () => void;
 }) {
   const kindColor = device.kind === "in" ? colors.brandPrimary : colors.accent;
   return (
@@ -682,6 +704,21 @@ function DeviceCard({
       </View>
 
       <View style={styles.actions}>
+        <Pressable
+          onPress={onResync}
+          disabled={resyncing}
+          style={[styles.actBtn, styles.actGhost, resyncing && { opacity: 0.6 }]}
+          testID={`resync-${device.device_id}`}
+        >
+          {resyncing ? (
+            <ActivityIndicator color={colors.brandPrimary} size="small" />
+          ) : (
+            <>
+              <Ionicons name="cloud-download-outline" size={14} color={colors.brandPrimary} />
+              <Text style={styles.actGhostTxt}>Fetch old data</Text>
+            </>
+          )}
+        </Pressable>
         <Pressable
           onPress={onSimulate}
           disabled={busy}

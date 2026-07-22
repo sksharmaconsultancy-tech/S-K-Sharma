@@ -36,6 +36,7 @@ type Row = {
   machine_key: string;
   company_name: string;
   status: string;
+  has_photo?: boolean;
 };
 
 type Machine = { key: string; label: string };
@@ -59,6 +60,7 @@ const COLS: { key: keyof Row; label: string; w: number }[] = [
   { key: "machine", label: "Machine / Source", w: 160 },
   { key: "company_name", label: "Firm", w: 170 },
   { key: "status", label: "Status", w: 90 },
+  { key: "has_photo", label: "Photo", w: 56 },
 ];
 
 export default function PunchLogReportScreen() {
@@ -261,7 +263,11 @@ export default function PunchLogReportScreen() {
                       },
                     ]}
                   >
-                    {c.key === "kind" ? (r.kind || "").toUpperCase() : (r as any)[c.key] || "—"}
+                    {c.key === "kind"
+                      ? (r.kind || "").toUpperCase()
+                      : c.key === "has_photo"
+                        ? (r.has_photo ? "📷" : "—")
+                        : (r as any)[c.key] || "—"}
                   </Text>
                 ))}
               </View>

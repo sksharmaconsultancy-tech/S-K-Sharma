@@ -113,6 +113,11 @@ async def _query_rows(
 
     rows: List[Dict[str, Any]] = []
     machines: Dict[str, str] = {}
+    # Iter 250 — which records carry a punch photo (machine ATTPHOTO or
+    # mobile selfie)? Cheap id-only lookup, photos themselves stay out of
+    # the JSON payload.
+    photo_ids = set(await db.attendance.distinct(
+        "record_id", {**q, "selfie_base64": {"$exists": True, "$nin": [None, ""]}}))
     for r in recs:
         u = users.get(r.get("user_id") or "", {})
         at = str(r.get("at") or "")
@@ -120,6 +125,7 @@ async def _query_rows(
         mlabel = _source_label(r)
         machines.setdefault(mkey, mlabel)
         rows.append({
+            "record_id": r.get("record_id"),
             "date": r.get("date") or at[:10],
             "time": at[11:19] if len(at) >= 19 else at[11:16],
             "kind": r.get("kind"),
@@ -131,6 +137,7 @@ async def _query_rows(
             "company_name": firms.get(r.get("company_id") or "", ""),
             "status": r.get("status") or "",
             "source": r.get("source") or "",
+            "has_photo": r.get("record_id") in photo_ids,
         })
     return {"rows": rows, "machines": machines}
 
@@ -371,18 +378,49 @@ async def punch_logs_xlsx(
     ws = wb.active
     ws.title = "Punch Log"
     headers = ["Sr", "Date", "Time", "IN/OUT", "Emp Code", "Employee Name",
-               "Bio Code", "Machine / Source", "Firm", "Status"]
+               "Bio Code", "Machine / Source", "Firm", "Status", "Photo"]
     ws.append(headers)
     fill = PatternFill("solid", fgColor="1F4E79")
     for col in range(1, len(headers) + 1):
         c = ws.cell(row=1, column=col)
         c.font = Font(bold=True, color="FFFFFF")
         c.fill = fill
+
+    # Iter 250 (user request) — punches WITH PHOTO: embed the actual punch
+    # photo (machine ATTPHOTO / mobile selfie) as a thumbnail in the row.
+    MAX_EMBEDDED_PHOTOS = 2000
+    photo_rows: List[tuple] = []  # (excel_row, record_id)
     for i, r in enumerate(data["rows"], start=1):
         ws.append([i, r["date"], r["time"], (r["kind"] or "").upper(),
                    r["employee_code"], r["name"], r["bio_code"],
-                   r["machine"], r["company_name"], r["status"]])
-    widths = [6, 12, 10, 8, 10, 26, 9, 22, 24, 10]
+                   r["machine"], r["company_name"], r["status"],
+                   "" if r.get("has_photo") else "—"])
+        if r.get("has_photo") and len(photo_rows) < MAX_EMBEDDED_PHOTOS:
+            photo_rows.append((i + 1, r.get("record_id")))
+    if photo_rows:
+        import base64 as _b64
+
+        from openpyxl.drawing.image import Image as XLImage
+        from PIL import Image as PILImage
+        for xl_row, rid in photo_rows:
+            try:
+                rec = await db.attendance.find_one(
+                    {"record_id": rid}, {"_id": 0, "selfie_base64": 1})
+                b64 = (rec or {}).get("selfie_base64") or ""
+                if b64.startswith("data:"):
+                    b64 = b64.split(",", 1)[-1]
+                img_bytes = _b64.b64decode(b64)
+                pim = PILImage.open(BytesIO(img_bytes))
+                pim.thumbnail((72, 54))
+                out = BytesIO()
+                pim.convert("RGB").save(out, format="PNG")
+                out.seek(0)
+                xli = XLImage(out)
+                ws.add_image(xli, f"K{xl_row}")
+                ws.row_dimensions[xl_row].height = 45
+            except Exception:
+                ws.cell(row=xl_row, column=11, value="YES")
+    widths = [6, 12, 10, 8, 10, 26, 9, 22, 24, 10, 12]
     for col, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(col)].width = w
     ws.freeze_panes = "A2"

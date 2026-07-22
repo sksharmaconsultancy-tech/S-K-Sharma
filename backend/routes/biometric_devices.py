@@ -14,6 +14,7 @@ maps /api/* to the backend. When deploying, configure the device with:
   Comm → Cloud Server → Server URL: https://<your-host>/api
   (Some firmwares split into Server Address + URL Path — use both fields.)
 """
+import base64
 import logging
 import re
 import uuid
@@ -193,8 +194,86 @@ async def _ingest_attlog_line(
     # by the company first (Contractor Punch approvals).
     from server import apply_contractual_gate
     await apply_contractual_gate(record)
+    # Iter 250 — attach a parked machine photo (ATTPHOTO that arrived
+    # before this ATTLOG line) to the new punch record.
+    try:
+        ph = await db.biometric_photos.find_one_and_delete({
+            "device_serial": device["serial_number"],
+            "device_user_id": device_user_id,
+            "at": {"$gte": (dt - timedelta(seconds=90)).isoformat(),
+                   "$lte": (dt + timedelta(seconds=90)).isoformat()},
+        })
+        if ph and ph.get("photo_base64"):
+            record["selfie_base64"] = ph["photo_base64"]
+            record["photo_source"] = "zkteco_attphoto"
+    except Exception:
+        pass
     await db.attendance.insert_one(record)
     return True, None
+
+
+def _resync_active(device: dict) -> bool:
+    """True while an admin-triggered 'fetch old data' window is open."""
+    ru = (device or {}).get("resync_until")
+    if not ru:
+        return False
+    try:
+        return datetime.fromisoformat(str(ru).replace("Z", "+00:00")) > datetime.now(timezone.utc)
+    except Exception:
+        return False
+
+
+async def _ingest_attphoto(raw: bytes, device: dict) -> int:
+    """Iter 250 (user request) — ingest a punch PHOTO pushed by the machine
+    (table=ATTPHOTO). Body: text headers (PIN=YYYYMMDDHHMMSS-<pin>.jpg,
+    size=, CMD=uploadphoto) followed by raw JPEG bytes. The photo is
+    attached to the matching attendance record (same employee, punch time
+    within ±90s) as selfie_base64 — the same field mobile selfie punches
+    use, so every existing report/detail view shows it natively."""
+    jpg_at = raw.find(b"\xff\xd8\xff")
+    if jpg_at < 0:
+        return 0
+    header = raw[:jpg_at].decode("utf-8", errors="ignore")
+    m = re.search(r"PIN=(\d{14})-([^.\s&]+)\.jpg", header)
+    if not m:
+        return 0
+    ts_raw, pin = m.group(1), m.group(2)
+    try:
+        dt = datetime.strptime(ts_raw, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return 0
+    photo_b64 = base64.b64encode(raw[jpg_at:]).decode()
+    user = await _match_employee_for_bio(pin, device.get("company_id"))
+    attached = False
+    if user:
+        rec = await db.attendance.find_one(
+            {
+                "user_id": user["user_id"],
+                "device_serial": device["serial_number"],
+                "at": {"$gte": (dt - timedelta(seconds=90)).isoformat(),
+                       "$lte": (dt + timedelta(seconds=90)).isoformat()},
+            },
+            {"_id": 0, "record_id": 1, "selfie_base64": 1},
+            sort=[("at", 1)],
+        )
+        if rec and not rec.get("selfie_base64"):
+            await db.attendance.update_one(
+                {"record_id": rec["record_id"]},
+                {"$set": {"selfie_base64": photo_b64,
+                          "photo_source": "zkteco_attphoto"}},
+            )
+            attached = True
+    if not attached:
+        # Photo arrived before its ATTLOG line (or unmapped user) — park it;
+        # the ATTLOG ingest picks it up right after inserting the punch.
+        await db.biometric_photos.insert_one({
+            "device_serial": device["serial_number"],
+            "device_user_id": pin,
+            "at": dt.isoformat(),
+            "photo_base64": photo_b64,
+            "received_at": _now_iso_z(),
+        })
+    return 1
 
 
 async def _get_device_or_404(sn: str) -> dict:
@@ -227,11 +306,11 @@ async def iclock_handshake(
     PushOptionsFlag: Optional[str] = Query(None),
 ):
     """Initial handshake — device calls this when it comes online. We reply
-    with a plain-text config block telling it how often to push logs, what
+    the config block telling it how often to push logs, what
     tables we accept and what the server clock currently is. This is what
     turns ADMS into a *real-time* channel: the device holds an HTTP long-poll
     open and pushes each new punch within a couple of seconds."""
-    await _get_device_or_404(SN)
+    device = await _get_device_or_404(SN)
     await db.biometric_devices.update_one(
         {"serial_number": SN},
         {"$set": {
@@ -240,12 +319,17 @@ async def iclock_handshake(
             "firmware_pushver": pushver,
         }},
     )
+    # Iter 250 (user bug: old machine data never downloaded) — while a
+    # re-sync window is active we answer ATTLOGStamp=0, which resets the
+    # device's upload cursor so it re-transmits EVERY attendance log stored
+    # in its memory (idempotency guard skips duplicates server-side).
+    att_stamp = "0" if _resync_active(device) else "None"
     # Standard ADMS response — see ZKTeco Push SDK docs
     body_lines = [
         f"GET OPTION FROM: {SN}",
-        "ATTLOGStamp=None",
+        f"ATTLOGStamp={att_stamp}",
         "OPERLOGStamp=9999",
-        "ATTPHOTOStamp=None",
+        f"ATTPHOTOStamp={att_stamp}",
         "ErrorDelay=30",
         "Delay=10",
         "TransTimes=00:00;14:05",
@@ -288,6 +372,12 @@ async def iclock_push(
                 skipped += 1
                 if reason:
                     reasons.append(reason)
+    elif (table or "").upper() == "ATTPHOTO":
+        # Iter 250 — punch photos from the machine (attached to the punch).
+        try:
+            inserted = await _ingest_attphoto(raw_bytes, device)
+        except Exception:
+            logger.warning("[zkteco] ATTPHOTO ingest failed", exc_info=True)
     else:
         # OPERLOG / ATTPHOTO / EnrollUser etc. — just log the receipt.
         await db.biometric_operlog.insert_one({
@@ -336,12 +426,14 @@ async def iclock_getrequest(
     INFO: Optional[str] = Query(None),
 ):
     """Command-request long-poll — the device asks the server if there are
-    any pending commands (enroll user, delete user, sync time, reboot). For
-    the current minimal scope we always reply with "OK" (no commands). Every
+    any pending commands (enroll user, delete user, sync time, reboot).
+    Iter 250: while a re-sync window is active we answer ONE `CHECK`
+    command, which makes the device immediately re-handshake and re-upload
+    its stored attendance logs (combined with ATTLOGStamp=0 above). Every
     successful call still refreshes the device heartbeat so the admin UI can
     show it as online."""
     try:
-        await _get_device_or_404(SN)
+        device = await _get_device_or_404(SN)
     except HTTPException:
         return PlainTextResponse("OK\n")
     await db.biometric_devices.update_one(
@@ -351,6 +443,15 @@ async def iclock_getrequest(
             "last_getrequest_info": INFO,
         }},
     )
+    if _resync_active(device) and not device.get("resync_check_sent"):
+        await db.biometric_devices.update_one(
+            {"serial_number": SN},
+            {"$set": {"resync_check_sent": True,
+                      "resync_check_sent_at": _now_iso_z()}},
+        )
+        cmd_id = int(datetime.now(timezone.utc).timestamp())
+        logger.info("[zkteco] SN=%s issuing CHECK for old-data re-sync", SN)
+        return PlainTextResponse(f"C:{cmd_id}:CHECK\n")
     return PlainTextResponse("OK\n")
 
 
@@ -422,6 +523,43 @@ async def register_biometric_device(
     await db.biometric_devices.insert_one(device)
     device.pop("_id", None)
     return {"ok": True, "device": device}
+
+
+@router.post("/biometric/devices/{device_id}/resync")
+async def resync_biometric_device(
+    device_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 250 (user request) — 'Fetch old data'. Opens a 6-hour re-sync
+    window for the device: the next handshake answers ATTLOGStamp=0 and a
+    one-time CHECK command is issued, making the machine re-upload EVERY
+    attendance log stored in its memory. Duplicates are skipped by the
+    idempotency guard, so this is safe to run any number of times."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    device = await db.biometric_devices.find_one({"device_id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    if admin["role"] == "company_admin" and device.get("company_id") != admin["company_id"]:
+        raise HTTPException(status_code=403, detail="Not authorised for this device")
+    until = (datetime.now(timezone.utc) + timedelta(hours=6)).isoformat().replace("+00:00", "Z")
+    await db.biometric_devices.update_one(
+        {"device_id": device_id},
+        {"$set": {"resync_until": until,
+                  "resync_check_sent": False,
+                  "resync_requested_by": admin["user_id"],
+                  "resync_requested_at": _now_iso_z()}},
+    )
+    return {
+        "ok": True,
+        "resync_until": until,
+        "message": (
+            "Old-data fetch started. Keep the machine powered ON and "
+            "connected to the internet — it will re-upload all stored punches "
+            "within the next few minutes (large logs can take longer). "
+            "Already-imported punches are skipped automatically."
+        ),
+    }
 
 
 @router.get("/biometric/devices")

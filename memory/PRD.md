@@ -1197,3 +1197,11 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 
 ## Iter 249 (June 2026) — Punch Log Report: Apply auto-downloads full period
 - User request: selecting From/To and clicking Apply now BOTH refreshes the on-screen list AND auto-downloads the full-period Excel (Punch_Log_from_to.xlsx, up to 100k rows; verified 1976/1976 rows match). Top "Download Excel" button unchanged.
+
+## Iter 250 (June 2026) — ZKTeco old-data fetch + punch photos
+- User bug: old punches stored inside connected machines never downloaded (handshake ATTLOGStamp=None = new logs only; getrequest never issued commands).
+- Fix: NEW "Fetch old data" button per device card → POST /api/biometric/devices/{device_id}/resync opens a 6h resync window (resync_until, resync_check_sent). While active: handshake answers ATTLOGStamp=0 + ATTPHOTOStamp=0 (device re-uploads ALL stored logs), getrequest issues one C:{id}:CHECK. Duplicates skipped by idempotency guard.
+- Punch PHOTOS (user request "download data with photo"): iclock_push now parses table=ATTPHOTO (PIN=YYYYMMDDHHMMSS-<pin>.jpg headers + JPEG bytes) → attaches to matching attendance record (±90s window) as selfie_base64 (photo_source=zkteco_attphoto); photos arriving before their ATTLOG line are parked in db.biometric_photos and attached at ingest.
+- IN/OUT direction confirmation: punches inherit the machine's registered direction (kind in/out/both alternating) — already working, verified.
+- Punch Log Report: rows now include record_id + has_photo (cheap distinct lookup); on-screen "Photo" column (📷/—); Excel export embeds actual photo thumbnails in the Photo column (PIL thumbnail 72px, row height 45, max 2000 embedded; beyond that "YES").
+- E2E verified: resync→handshake Stamp=0→CHECK→old ATTLOG (kind=in from IN machine)→ATTPHOTO attach→has_photo=true→xlsx embedded image.
