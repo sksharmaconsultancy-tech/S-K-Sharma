@@ -1205,3 +1205,7 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - IN/OUT direction confirmation: punches inherit the machine's registered direction (kind in/out/both alternating) — already working, verified.
 - Punch Log Report: rows now include record_id + has_photo (cheap distinct lookup); on-screen "Photo" column (📷/—); Excel export embeds actual photo thumbnails in the Photo column (PIL thumbnail 72px, row height 45, max 2000 embedded; beyond that "YES").
 - E2E verified: resync→handshake Stamp=0→CHECK→old ATTLOG (kind=in from IN machine)→ATTPHOTO attach→has_photo=true→xlsx embedded image.
+
+## Iter 251 (June 2026) — Blinking status LED + Apply rollback
+- Biometric device cards: BlinkDot (Animated.loop opacity pulse) — BLUE blink when Online, RED blink when Offline; label colored to match. Verified with test online/offline devices (screenshot).
+- Punch Log Report rollback (user): Apply only loads data on screen again — NO auto Excel download (Download Excel button remains for exports).

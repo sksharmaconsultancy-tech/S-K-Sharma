@@ -10,6 +10,7 @@ import {
   Modal,
   ScrollView,
   Alert,
+  Animated,
   Platform,
   Share,
 } from "react-native";
@@ -684,8 +685,10 @@ function DeviceCard({
           <Text style={styles.sn}>SN · {device.serial_number}</Text>
         </View>
         <View style={styles.dot}>
-          <View style={[styles.dotCircle, { backgroundColor: device.online ? "#22C55E" : colors.onSurfaceTertiary }]} />
-          <Text style={styles.dotTxt}>{device.online ? "Online" : "Offline"}</Text>
+          <BlinkDot online={!!device.online} />
+          <Text style={[styles.dotTxt, { color: device.online ? "#2563EB" : "#DC2626", fontWeight: "800" }]}>
+            {device.online ? "Online" : "Offline"}
+          </Text>
         </View>
       </View>
 
@@ -746,8 +749,47 @@ function DeviceCard({
   );
 }
 
-function Fact({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+// Iter 251 (user request) — machine status LED: BLUE blink while online,
+// RED blink while offline.
+function BlinkDot({ online }: { online: boolean }) {
+  const opacity = React.useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 0.15,
+          duration: online ? 600 : 450,
+          useNativeDriver: Platform.OS !== "web",
+        }),
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: online ? 600 : 450,
+          useNativeDriver: Platform.OS !== "web",
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [online, opacity]);
+  const color = online ? "#2563EB" : "#DC2626";
   return (
+    <Animated.View
+      style={[
+        styles.dotCircle,
+        {
+          backgroundColor: color,
+          opacity,
+          shadowColor: color,
+          shadowOpacity: 0.9,
+          shadowRadius: 4,
+          shadowOffset: { width: 0, height: 0 },
+        },
+      ]}
+    />
+  );
+}
+
+function Fact({ label, value, accent }: { label: string; value: string; accent?: boolean }) {  return (
     <View style={styles.fact}>
       <Text style={styles.factLbl}>{label}</Text>
       <Text
@@ -1016,7 +1058,7 @@ const styles = StyleSheet.create({
   sn: { color: colors.onSurfaceTertiary, fontSize: 11, marginTop: 2 },
 
   dot: { flexDirection: "row", alignItems: "center", gap: 4 },
-  dotCircle: { width: 8, height: 8, borderRadius: 4 },
+  dotCircle: { width: 10, height: 10, borderRadius: 5 },
   dotTxt: { color: colors.onSurfaceSecondary, fontSize: 11, fontWeight: "600" },
 
   factGrid: { flexDirection: "row", flexWrap: "wrap" },
