@@ -1228,3 +1228,6 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 ## Iter 256 (June 2026) — Compliance grid keyboard nav + finalize clear
 - Spreadsheet-style Arrow-key navigation across ALL editable cells of the Compliance run grid: Up/Down = same column next/prev row; Left/Right = hop between editable columns in row order pd → others → ot_pay → tds → other_deduction (columns follow Firm-Master-enabled heads via navCols). Implemented with cellRefs registry + handleNavKey; PresentDaysCell got onNav prop (commits before hopping). Verified via Playwright (activeElement coordinates).
 - Finalize & Lock now CLEARS the front page (setRun(null), empType reset) — run moves to Past Runs; message updated. NOTE: Advance is not an editable grid column (auto recovery from Advances module) — nav covers TDS/Other/OT/Others/Present Days.
+
+## Iter 257 (June 2026) — Finalize guard scoped per employee group
+- User bug: after Finalize & Lock of one group's salary, processing ANOTHER group for the same firm+month was blocked. Root cause: finalized-month guard (backend POST /admin/compliance-salary-runs + frontend generate()) matched only firm+month. Fixed: both now scope to the SAME employee_type (case-insensitive; blank = ungrouped runs). Verified: STAFF finalized → LABOUR processes 200; STAFF again → 409.

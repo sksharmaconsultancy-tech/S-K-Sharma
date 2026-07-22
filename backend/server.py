@@ -15319,15 +15319,22 @@ async def create_compliance_salary_run(
     )
     await _require_firm_salary_permission(_gate_cid, "online")
     # Iter 129f (user directive) — a FINALIZED month can never be processed
-    # again. Unlock (de-finalize) the run first.
+    # again. Iter 257 (user bug): the block is scoped to the SAME employee
+    # group — finalizing STAFF must not stop LABOUR from being processed.
+    _grp0 = (payload.employee_type or "").strip()
     _fin_q: Dict[str, Any] = {"month": payload.month, "finalized": True}
     if payload.company_id:
         _fin_q["company_id"] = payload.company_id
+    _fin_q["employee_type"] = (
+        {"$regex": f"^{re.escape(_grp0)}$", "$options": "i"} if _grp0
+        else {"$in": [None, ""]}
+    )
     if await db.compliance_salary_runs.find_one(_fin_q, {"_id": 1}):
         raise HTTPException(
             status_code=409,
-            detail="This month's Compliance salary is already FINALIZED for this firm — "
-                   "it cannot be processed again. Use Unlock Request to de-finalize first.",
+            detail="This month's Compliance salary is already FINALIZED for this "
+                   "employee group — it cannot be processed again. Use Unlock "
+                   "Request to de-finalize first.",
         )
     run = await _compute_compliance_run(admin, payload)
     run["run_id"] = f"csrun_{uuid.uuid4().hex[:12]}"

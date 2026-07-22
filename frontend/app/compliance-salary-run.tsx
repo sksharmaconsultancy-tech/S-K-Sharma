@@ -595,14 +595,20 @@ export default function ComplianceSalaryRunScreen() {
     if (busy) return;
     // Iter 129e (user directive) — if a run for this firm + month already
     // exists, ask before reprocessing. "No" reloads the page unchanged.
+    // Iter 257 (user bug) — the check is scoped to the SAME employee group,
+    // so finalizing one group never blocks processing another.
     const q: any = buildBody();
+    const qGrp = String(q.employee_type || "").trim().toUpperCase();
     const existing = runs.find(
-      (r: any) => r.month === q.month && (!q.company_id || r.company_id === q.company_id),
+      (r: any) =>
+        r.month === q.month &&
+        (!q.company_id || r.company_id === q.company_id) &&
+        String((r as any).employee_type || "").trim().toUpperCase() === qGrp,
     );
     if (existing) {
       if ((existing as any).finalized) {
         showMsg(
-          "This month's salary is already FINALIZED for this firm — it cannot be processed again. Use Unlock Request to de-finalize first.",
+          "This month's salary is already FINALIZED for this employee group — it cannot be processed again. Use Unlock Request to de-finalize first.",
         );
         return;
       }
