@@ -713,9 +713,13 @@ export default function ComplianceSalaryRunScreen() {
         `/admin/compliance-salary-runs/${run.run_id}/finalize`,
         { method: "POST", body: {} },
       );
-      setRun({ ...(run as any), finalized: true, finalized_at: r.finalized_at } as any);
+      void r;
+      // Iter 256 (user request) — after Finalize & Lock the front page is
+      // CLEARED so the next batch starts fresh (run stays in Past Runs).
+      setRun(null);
+      setEmpType("all");
       await loadRuns();
-      showMsg("Run finalized ✓ — locked. Challans can now be uploaded for this month.");
+      showMsg("Run finalized ✓ — locked & moved to Past Runs. Page cleared for the next batch.");
     } catch (e: any) {
       showMsg(e?.message || "Finalize failed");
     } finally { setFinalizing(false); }
@@ -982,6 +986,42 @@ export default function ComplianceSalaryRunScreen() {
   // Refs to each editable "Present Days" input so Arrow-Up/Down can
   // move focus between rows on the web portal.
   const pdRefs = useRef<Record<number, any>>({});
+  // Iter 256 (user request) — spreadsheet-style Arrow key navigation
+  // across ALL editable cells (Present Days → Others → OT Amt → TDS →
+  // Other), following the Firm Master's enabled heads.
+  const cellRefs = useRef<Record<string, any>>({});
+  const navCols = useMemo(() => {
+    const r0: any = run?.rows?.[0] || {};
+    const en = r0.enabled_allowances as string[] | undefined;
+    const ed = r0.enabled_deductions as string[] | undefined;
+    const cols: string[] = ["pd"];
+    if (!en || en.includes("others")) cols.push("others");
+    cols.push("ot_pay");
+    if (!ed || ed.includes("tds")) cols.push("tds");
+    cols.push("other_deduction");
+    return cols;
+  }, [run]);
+  const focusCell = (col: string, idx: number) => {
+    const el: any = col === "pd" ? pdRefs.current[idx] : cellRefs.current[`${col}:${idx}`];
+    if (el && typeof el.focus === "function") el.focus();
+  };
+  const handleNavKey = (e: any, col: string, idx: number) => {
+    const key = e?.nativeEvent?.key;
+    if (key === "Enter") {
+      e.preventDefault?.();
+      (e?.target as any)?.blur?.();
+      return;
+    }
+    if (key === "ArrowUp" || key === "ArrowDown") {
+      e.preventDefault?.();
+      focusCell(col, idx + (key === "ArrowDown" ? 1 : -1));
+    } else if (key === "ArrowLeft" || key === "ArrowRight") {
+      e.preventDefault?.();
+      const ci = navCols.indexOf(col);
+      const next = navCols[ci + (key === "ArrowRight" ? 1 : -1)];
+      if (next) focusCell(next, idx);
+    }
+  };
 
   // Client-side setter for individual row fields (Others allowance,
   // Other deduction, OT Amount, TDS — Iter 230). Recomputes Gross + Net
@@ -1831,6 +1871,12 @@ export default function ComplianceSalaryRunScreen() {
                       value={r.present_days ?? 0}
                       pdRefs={pdRefs}
                       onCommit={(n) => updatePresentDays(r.user_id, n)}
+                      onNav={(key) => {
+                        // Iter 256 — ArrowRight jumps to the next editable
+                        // column of the same row (Others / OT / TDS / Other).
+                        const next = navCols[navCols.indexOf("pd") + (key === "ArrowRight" ? 1 : -1)];
+                        if (next) focusCell(next, idx);
+                      }}
                     />
                     {/* Iter 85 pt 1 — Master (full-month) heads,
                         conditionally rendered per firm allowance mask. */}
@@ -1854,11 +1900,13 @@ export default function ComplianceSalaryRunScreen() {
                           {has("special") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.special)}</Text> : null}
                           {has("others") ? (
                             <TextInput
+                              ref={(el) => { cellRefs.current[`others:${idx}`] = el; }}
                               value={String(Math.round(r.others || 0))}
                               onChangeText={(v) => {
                                 const n = Number(v.replace(/[^0-9.]/g, ""));
                                 if (!Number.isNaN(n)) updateRowField(r.user_id, "others", n);
                               }}
+                              onKeyPress={(e: any) => handleNavKey(e, "others", idx)}
                               keyboardType="decimal-pad"
                               selectTextOnFocus
                               style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
@@ -1870,11 +1918,13 @@ export default function ComplianceSalaryRunScreen() {
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.gross_paid)}</Text>
                     {/* Iter 230 (user request) — editable OT Amount. */}
                     <TextInput
+                      ref={(el) => { cellRefs.current[`ot_pay:${idx}`] = el; }}
                       value={String(Math.round(r.ot_pay || 0))}
                       onChangeText={(v) => {
                         const n = Number(v.replace(/[^0-9.]/g, ""));
                         if (!Number.isNaN(n)) updateRowField(r.user_id, "ot_pay", n);
                       }}
+                      onKeyPress={(e: any) => handleNavKey(e, "ot_pay", idx)}
                       keyboardType="decimal-pad"
                       selectTextOnFocus
                       style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
@@ -1894,11 +1944,13 @@ export default function ComplianceSalaryRunScreen() {
                           {/* Iter 230 (user request) — editable TDS. */}
                           {hasDed("tds") ? (
                             <TextInput
+                              ref={(el) => { cellRefs.current[`tds:${idx}`] = el; }}
                               value={String(Math.round(r.tds || 0))}
                               onChangeText={(v) => {
                                 const n = Number(v.replace(/[^0-9.]/g, ""));
                                 if (!Number.isNaN(n)) updateRowField(r.user_id, "tds", n);
                               }}
+                              onKeyPress={(e: any) => handleNavKey(e, "tds", idx)}
                               keyboardType="decimal-pad"
                               selectTextOnFocus
                               style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
@@ -1909,11 +1961,13 @@ export default function ComplianceSalaryRunScreen() {
                     })()}
                     {/* Iter 85 — Editable "Other" deduction. */}
                     <TextInput
+                      ref={(el) => { cellRefs.current[`other_deduction:${idx}`] = el; }}
                       value={String(Math.round((r as any).other_deduction || 0))}
                       onChangeText={(v) => {
                         const n = Number(v.replace(/[^0-9.]/g, ""));
                         if (!Number.isNaN(n)) updateRowField(r.user_id, "other_deduction", n);
                       }}
+                      onKeyPress={(e: any) => handleNavKey(e, "other_deduction", idx)}
                       keyboardType="decimal-pad"
                       selectTextOnFocus
                       style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
@@ -2092,12 +2146,13 @@ export default function ComplianceSalaryRunScreen() {
 // month days still happens in updatePresentDays() on COMMIT (blur/Enter).
 // ---------------------------------------------------------------------------
 function PresentDaysCell({
-  idx, value, pdRefs, onCommit,
+  idx, value, pdRefs, onCommit, onNav,
 }: {
   idx: number;
   value: number;
   pdRefs: React.MutableRefObject<(TextInput | null)[]>;
   onCommit: (n: number) => void;
+  onNav?: (key: "ArrowLeft" | "ArrowRight") => void;
 }) {
   const [txt, setTxt] = useState<string>(String(value ?? 0));
   const focusedRef = useRef(false);
@@ -2131,6 +2186,11 @@ function PresentDaysCell({
           if (target && typeof (target as any).focus === "function") {
             (target as any).focus();
           }
+        } else if ((key === "ArrowLeft" || key === "ArrowRight") && onNav) {
+          // Iter 256 — spreadsheet-style column hop
+          e.preventDefault?.();
+          commit();
+          onNav(key);
         } else if (key === "Enter") {
           e.preventDefault?.();
           if (typeof (e?.target as any)?.blur === "function") {
