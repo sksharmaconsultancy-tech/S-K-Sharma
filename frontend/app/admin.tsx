@@ -89,8 +89,9 @@ export default function AdminScreen() {
   const matchesStatus = (e: any) => {
     if (statusFilter === "resigned") return isResigned(e);
     if (statusFilter === "all") return true;
-    // active (default) — keep the pre-Iter-166 behaviour
-    if (e.is_onroll === false) return false;
+    // Iter 248 (user bug) — ACTIVE = every working employee, INCLUDING
+    // Off-roll (offline) staff. Only disabled/resigned are excluded, so
+    // every new joiner lands straight in the Active list.
     if (e.disabled === true) return false;
     return !isResigned(e);
   };
