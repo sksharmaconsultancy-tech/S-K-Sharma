@@ -1031,7 +1031,6 @@ export default function ComplianceSalaryRunScreen() {
     const pfErEpfRate = Number(stat.pf_percent_employer_epf ?? 3.67) / 100;
     const pfErEpsRate = Number(stat.pf_percent_employer_eps ?? 8.33) / 100;
     const pfCap = Number(stat.pf_wage_cap ?? 15000);
-    const floorPct = Number(stat.stat_wage_floor_pct ?? 50) / 100;
     const esiEmpRate = Number(stat.esic_percent_employee ?? stat.esic_employee_rate ?? 0.75) / 100;
     const esiErRate  = Number(stat.esic_percent_employer ?? stat.esic_employer_rate ?? 3.25) / 100;
     const esiThresh  = Number(stat.esic_gross_threshold ?? stat.esic_wage_threshold ?? 21000);
@@ -1082,27 +1081,27 @@ export default function ComplianceSalaryRunScreen() {
           + rHeads.medical + rHeads.special + rHeads.others;
 
         // Statutory wage base — mirrors utils/compliance_salary.py:
-        // max(Basic, floor% of Gross Earning) (used by ESIC below).
-        const statWageBase = Math.max(paidBasic, grossPaid * floorPct);
-        // Iter 129 (user directive) — PF ONLY when the Employee Master's
-        // "PF Basic Salary" (pf_basic) is filled. Wages = max(PF Basic,
-        // floor% of Gross), capped at the EPF ceiling unless the explicit
+        // Iter 254 (user directive) — PF is calculated STRICTLY on the
+        // Employee Master's "PF Basic Salary". The 50%-of-gross floor is
+        // IGNORED for PF. Capped at the EPF ceiling unless the explicit
         // PF Basic exceeds it.
         const pfBasicFull = Number((r as any).pf_basic || 0);
         const pfOn = r.pf_applicable !== false && pfBasicFull > 0;
         const pfBasicPro = (r as any).salary_mode === "monthly" ? pfBasicFull * ratio : pfBasicFull;
         const pfWagesNew = pfOn
-          ? Math.min(Math.max(pfBasicPro, grossPaid * floorPct), Math.max(pfCap, pfBasicPro))
+          ? Math.min(pfBasicPro, Math.max(pfCap, pfBasicPro))
           : 0;
         const pfEmp = pfWagesNew * pfEmpRate;
         const pfErEpf = pfWagesNew * pfErEpfRate;
         const pfErEps = pfWagesNew * pfErEpsRate;
         const pfErTot = pfErEpf + pfErEps;
 
-        // ESIC (Iter 130 user directive): calculated ON BASIC salary (earned
-        // basic). Eligibility is by FULL-MONTH Basic ≤ the Compliance
-        // Settings limit (not gross).
-        const esiApplicable = r.esic_applicable !== false && grossPaid > 0 && fullByHead.basic <= esiThresh;
+        // ESIC (Iter 254 user directive): eligibility by the Employee
+        // Master's Compliance Basic Salary ≤ the Compliance Settings limit
+        // (falls back to full-month Basic when blank). Calculated ON
+        // earned basic.
+        const esiEligBasic = Number((r as any).compliance_basic || 0) || fullByHead.basic;
+        const esiApplicable = r.esic_applicable !== false && grossPaid > 0 && esiEligBasic <= esiThresh;
         const esiBase = esiApplicable ? paidBasic : 0;
         const esiEmp = esiApplicable ? Math.ceil(esiBase * esiEmpRate) : 0;
         const esiEr  = esiApplicable ? Math.ceil(esiBase * esiErRate)  : 0;
@@ -1351,24 +1350,41 @@ export default function ComplianceSalaryRunScreen() {
                 maxLength={2}
               />
             </View>
-          </View>
-
-          <View style={styles.gridRow}>
             <View style={styles.gridCol}>
+              {/* Iter 255 (user request) — Employee Group DROPDOWN placed
+                  right after Month days (override). */}
               <Text style={styles.label}>Employee group</Text>
-              <View style={styles.chipStrip}>
-                {/* Iter 85 pt 2 — "All" chip removed from Compliance Salary
-                    Process. Reports keep an "All" filter but processing
-                    must always target ONE employee type. */}
-                {types.map((t) => (
-                  <TypeChip
-                    key={t.name}
-                    label={`${t.name} (${t.count})`}
-                    active={empType === t.name}
-                    onPress={() => setEmpType(t.name)}
-                  />
-                ))}
-              </View>
+              {Platform.OS === "web" ? (
+                // @ts-ignore web-only element
+                <select
+                  data-testid="csr-group-select"
+                  value={empType}
+                  onChange={(e: any) => setEmpType(e.target.value)}
+                  style={{
+                    height: 40, borderRadius: 10, border: `1px solid ${colors.divider}`,
+                    background: colors.surface, color: colors.onSurface,
+                    fontSize: 13, fontWeight: 600, padding: "0 10px", width: "100%",
+                  } as any}
+                >
+                  <option value="all">— Select group —</option>
+                  {types.map((t) => (
+                    <option key={t.name} value={t.name}>
+                      {t.name} ({t.count})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <View style={styles.chipStrip}>
+                  {types.map((t) => (
+                    <TypeChip
+                      key={t.name}
+                      label={`${t.name} (${t.count})`}
+                      active={empType === t.name}
+                      onPress={() => setEmpType(t.name)}
+                    />
+                  ))}
+                </View>
+              )}
             </View>
           </View>
 
@@ -1382,74 +1398,8 @@ export default function ComplianceSalaryRunScreen() {
               values on the Compliance Policy page, so showing them again
               here was redundant. */}
 
-          {/* Iter 101 — Imported Salary Sheet (email / manual file).
-              Replaces the old Attendance Master link per user request. */}
-          <View
-            style={{
-              marginTop: 10, borderWidth: 1, borderColor: colors.divider,
-              borderRadius: 10, padding: 12, gap: 8, backgroundColor: colors.surface,
-            }}
-          >
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <Ionicons name="document-attach-outline" size={16} color={colors.brandPrimary} />
-              <Text style={{ color: colors.onSurface, fontSize: 12.5, fontWeight: "700", flex: 1 }}>
-                Import Salary Sheet — {month}
-              </Text>
-              {importBusy ? <ActivityIndicator size="small" color={colors.brandPrimary} /> : null}
-            </View>
-            <Text style={{ color: colors.onSurfaceTertiary, fontSize: 11 }}>
-              Same column format as the Attendance Master sheet: PF No, UAN, ESIC No,
-              Emp ID, Name, Present Days, Deduction Head, Deduction Amount, Gross Earning.
-            </Text>
-            <Text
-              testID="csr-import-status"
-              style={{
-                fontSize: 11.5, fontWeight: "700",
-                color: importStatus?.count ? "#166534" : colors.onSurfaceTertiary,
-              }}
-            >
-              {importStatus?.count
-                ? `✓ ${importStatus.count} employee(s) imported — ${importStatus.source === "email" ? "from email" : "uploaded file"}${importStatus.filename ? `: ${importStatus.filename}` : ""}`
-                : "No sheet imported for this month yet."}
-            </Text>
-            <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-              <Pressable
-                testID="csr-import-upload"
-                onPress={pickAndUpload}
-                disabled={importBusy}
-                style={styles.secondaryBtn}
-              >
-                <Ionicons name="cloud-upload-outline" size={15} color={colors.brandPrimary} />
-                <Text style={styles.secondaryBtnTxt}>Upload File (Excel / CSV)</Text>
-              </Pressable>
-              {user?.role === "super_admin" ? (
-                <Pressable
-                  testID="csr-import-gmail"
-                  onPress={openMailPicker}
-                  disabled={importBusy}
-                  style={styles.secondaryBtn}
-                >
-                  <Ionicons name="mail-open-outline" size={15} color={colors.brandPrimary} />
-                  <Text style={styles.secondaryBtnTxt}>Import from Email</Text>
-                </Pressable>
-              ) : null}
-            </View>
-            <Pressable
-              testID="csr-use-imported-sheet"
-              onPress={() => setUseImportedSheet((v) => !v)}
-              style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}
-            >
-              <Ionicons
-                name={useImportedSheet ? "checkbox" : "square-outline"}
-                size={18}
-                color={useImportedSheet ? colors.brandPrimary : colors.onSurfaceTertiary}
-              />
-              <Text style={{ color: colors.onSurface, fontSize: 12, fontWeight: "600", flex: 1 }}>
-                Use imported sheet for this run — Present Days + Other Deductions
-                replace biometric attendance.
-              </Text>
-            </Pressable>
-          </View>
+          {/* Iter 255 (user request) — Import Salary Sheet moved to the
+              BOTTOM of the page (see below, before the footer). */}
 
           {/* Iter 182 — Audit Log modal */}
           <Modal
@@ -1738,8 +1688,9 @@ export default function ComplianceSalaryRunScreen() {
               ))}
             </View>
 
-            {/* Iter 183 — Branch / Dept / Contractor filter chips */}
-            <GridFilterChips rows={run.rows} filters={gridFilters} onChange={setGridFilters} testPrefix="comp" />
+            {/* Iter 255 (user request) — Dept chips hidden on the
+                Compliance Salary Process (Branch/Contractor remain). */}
+            <GridFilterChips rows={run.rows} filters={gridFilters} onChange={setGridFilters} testPrefix="comp" hide={["dept"]} />
 
             <GridScroller>
                 {/* Iter 85 pt 1 — Column-hide by firm's enabled_allowances.
@@ -2037,6 +1988,70 @@ export default function ComplianceSalaryRunScreen() {
           </View>
           <Ionicons name="chevron-forward" size={16} color={colors.onSurfaceTertiary} />
         </Pressable>
+        {/* Iter 101 / Iter 255 — Imported Salary Sheet (email / manual
+            file), moved to the BOTTOM of the page per user request. */}
+        <View style={[styles.card, { marginTop: 12 }]}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Ionicons name="document-attach-outline" size={16} color={colors.brandPrimary} />
+            <Text style={{ color: colors.onSurface, fontSize: 12.5, fontWeight: "700", flex: 1 }}>
+              Import Salary Sheet — {month}
+            </Text>
+            {importBusy ? <ActivityIndicator size="small" color={colors.brandPrimary} /> : null}
+          </View>
+          <Text style={{ color: colors.onSurfaceTertiary, fontSize: 11 }}>
+            Same column format as the Attendance Master sheet: PF No, UAN, ESIC No,
+            Emp ID, Name, Present Days, Deduction Head, Deduction Amount, Gross Earning.
+          </Text>
+          <Text
+            testID="csr-import-status"
+            style={{
+              fontSize: 11.5, fontWeight: "700",
+              color: importStatus?.count ? "#166534" : colors.onSurfaceTertiary,
+            }}
+          >
+            {importStatus?.count
+              ? `✓ ${importStatus.count} employee(s) imported — ${importStatus.source === "email" ? "from email" : "uploaded file"}${importStatus.filename ? `: ${importStatus.filename}` : ""}`
+              : "No sheet imported for this month yet."}
+          </Text>
+          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+            <Pressable
+              testID="csr-import-upload"
+              onPress={pickAndUpload}
+              disabled={importBusy}
+              style={styles.secondaryBtn}
+            >
+              <Ionicons name="cloud-upload-outline" size={15} color={colors.brandPrimary} />
+              <Text style={styles.secondaryBtnTxt}>Upload File (Excel / CSV)</Text>
+            </Pressable>
+            {user?.role === "super_admin" ? (
+              <Pressable
+                testID="csr-import-gmail"
+                onPress={openMailPicker}
+                disabled={importBusy}
+                style={styles.secondaryBtn}
+              >
+                <Ionicons name="mail-open-outline" size={15} color={colors.brandPrimary} />
+                <Text style={styles.secondaryBtnTxt}>Import from Email</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          <Pressable
+            testID="csr-use-imported-sheet"
+            onPress={() => setUseImportedSheet((v) => !v)}
+            style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}
+          >
+            <Ionicons
+              name={useImportedSheet ? "checkbox" : "square-outline"}
+              size={18}
+              color={useImportedSheet ? colors.brandPrimary : colors.onSurfaceTertiary}
+            />
+            <Text style={{ color: colors.onSurface, fontSize: 12, fontWeight: "600", flex: 1 }}>
+              Use imported sheet for this run — Present Days + Other Deductions
+              replace biometric attendance.
+            </Text>
+          </Pressable>
+        </View>
+
         {/* Iter 181 — payroll punch line (user request) */}
         <Text style={{
           color: colors.brandPrimary, fontSize: 12.5, fontWeight: "700",

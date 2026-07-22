@@ -42,15 +42,19 @@ export default function GridFilterChips({
   filters,
   onChange,
   testPrefix,
+  hide = [],
 }: {
   rows: any[];
   filters: GridFilters;
   onChange: (f: GridFilters) => void;
   testPrefix: string;
+  /** Iter 255 — keys ("branch" | "dept" | "contractor") to hide. */
+  hide?: string[];
 }) {
+  const GROUPS_SHOWN = GROUPS.filter((g) => !hide.includes(g.key));
   const options = useMemo(() => {
     const out: Record<string, string[]> = {};
-    for (const g of GROUPS) {
+    for (const g of GROUPS_SHOWN) {
       const set = new Set<string>();
       for (const r of rows || []) {
         const v = String((r as any)?.[g.rowField] || "").trim();
@@ -59,16 +63,16 @@ export default function GridFilterChips({
       out[g.key] = [...set].sort((a, b) => a.localeCompare(b));
     }
     return out;
-  }, [rows]);
+  }, [rows, hide]);  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const anyGroup = GROUPS.some((g) => (options[g.key] || []).length > 0);
+  const anyGroup = GROUPS_SHOWN.some((g) => (options[g.key] || []).length > 0);
   if (!anyGroup) return null;
 
-  const active = GROUPS.filter((g) => filters[g.key] !== "all").length;
+  const active = GROUPS_SHOWN.filter((g) => filters[g.key] !== "all").length;
 
   return (
     <View style={styles.wrap} testID={`${testPrefix}-filter-chips`}>
-      {GROUPS.map((g) => {
+      {GROUPS_SHOWN.map((g) => {
         const vals = options[g.key] || [];
         if (vals.length === 0) return null;
         return (

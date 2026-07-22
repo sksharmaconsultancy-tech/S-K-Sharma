@@ -1220,3 +1220,7 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 ## Iter 254 (June 2026) — PF & ESIC calculation fixes (compliance_salary.py)
 - PF (user bug): 50%-of-gross floor rule REMOVED from PF — PF wages now STRICTLY = Employee Master "PF Basic Salary" (pro-rated by attendance for monthly staff), capped at pf_wage_cap unless explicit PF Basic exceeds it. E.g. PF Basic 15000 + gross 40000 → PF wages 15000 / PF 1800 (was inflated by floor).
 - ESIC eligibility (user directive): checked against Employee Master "Compliance Basic Salary" (compliance_basic) ≤ esic_gross_threshold; falls back to derived full-month basic when blank. Unit-verified 3 cases.
+
+## Iter 255 (June 2026) — Compliance Salary Process fixes (PF formula + UI)
+- PF STILL-wrong root cause: the run screen's CLIENT-side recompute (compliance-salary-run.tsx, on row edits) still used max(PF Basic, 50% gross). Fixed: pfWagesNew = min(pfBasicPro, max(pfCap, pfBasicPro)) — strictly PF Basic; floorPct removed. ESIC eligibility client-side now uses row.compliance_basic (new field emitted by compute_compliance_row) ≤ threshold, fallback full-month basic.
+- UI (user requests): 1) Dept chips hidden on Compliance run grid (GridFilterChips new hide=["dept"] prop; Branch/Contractor remain). 2) Employee Group is now a DROPDOWN right after Month days (override) (testID csr-group-select; native <select> on web, chips fallback native). 3) Import Salary Sheet card moved to BOTTOM of page (after Past runs). All verified via screenshot.

@@ -689,6 +689,8 @@ def compute_compliance_row(
         # Iter 129 — full-month PF Basic Salary from the Employee Master
         # (0 → no PF). Used by the grid's client-side recompute.
         "pf_basic": round(pf_basic_override, 2),
+        # Iter 254 — Employee Master Compliance Basic (ESIC eligibility).
+        "compliance_basic": round(_num(user.get("compliance_basic"), 0.0), 2),
         "stat_wage_base": round(stat_wage_base, 2),
         "pf_wages": round(capped_pf_wages, 2),
         "pf_employee": round(pf_employee, 2),
