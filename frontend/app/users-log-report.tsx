@@ -24,7 +24,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 
-import { api } from "@/src/api/client";
+import { api, apiBinary } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors, radius, spacing, type } from "@/src/theme";
@@ -88,6 +88,31 @@ export default function UsersLogReportScreen() {
   };
 
   useEffect(() => { fetchLog(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Iter 247 — full Excel report (same filters).
+  const [exporting, setExporting] = useState(false);
+  const exportXlsx = async () => {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams();
+      if (fromDate) params.set("from_date", fromDate);
+      if (toDate)   params.set("to_date", toDate);
+      if (firmId)   params.set("company_id", firmId);
+      if (actorId)  params.set("user_id", actorId);
+      const res = await apiBinary(`/admin/users-log.xlsx?${params.toString()}`);
+      if (Platform.OS === "web" && res.webBlobUrl) {
+        const a = document.createElement("a");
+        a.href = res.webBlobUrl;
+        a.download = `users-log-${fromDate}-to-${toDate}.xlsx`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 30000);
+      }
+    } catch (e: any) {
+      showMsg(e?.message || "Export failed");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const actors = useMemo(() => {
     const map = new Map<string, { name: string; role: string }>();
@@ -241,21 +266,38 @@ export default function UsersLogReportScreen() {
             </View>
           ) : null}
 
-          <Pressable
-            onPress={fetchLog}
-            disabled={loading}
-            style={[styles.primaryBtn, loading && { opacity: 0.6 }]}
-            testID="ulr-show"
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <>
-                <Ionicons name="eye-outline" size={14} color="#fff" />
-                <Text style={styles.primaryBtnTxt}>Show</Text>
-              </>
-            )}
-          </Pressable>
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <Pressable
+              onPress={fetchLog}
+              disabled={loading}
+              style={[styles.primaryBtn, { flex: 1 }, loading && { opacity: 0.6 }]}
+              testID="ulr-show"
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="eye-outline" size={14} color="#fff" />
+                  <Text style={styles.primaryBtnTxt}>Show</Text>
+                </>
+              )}
+            </Pressable>
+            <Pressable
+              onPress={exportXlsx}
+              disabled={exporting}
+              style={[styles.primaryBtn, { flex: 1, backgroundColor: "#16a34a" }, exporting && { opacity: 0.6 }]}
+              testID="ulr-export-xlsx"
+            >
+              {exporting ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="download-outline" size={14} color="#fff" />
+                  <Text style={styles.primaryBtnTxt}>Excel Report</Text>
+                </>
+              )}
+            </Pressable>
+          </View>
         </View>
 
         {/* ── Sub Admin Performance Chart ─────────────────────────── */}

@@ -76,6 +76,20 @@ async def users_log_report(
 
     events: List[dict] = []
 
+    # 0) activity_log — the FULL automatic action trail (Iter 247): every
+    #    create/update/delete + report download by any logged-in user.
+    async for e in db.activity_log.find(_apply({}, "at"), {"_id": 0}).sort("at", -1).limit(3000):
+        st = e.get("status")
+        extra = f" [FAILED {st}]" if isinstance(st, int) and st >= 400 else ""
+        events.append({
+            "at": e.get("at"),
+            "actor_id": e.get("actor_id"),
+            "action": e.get("action") or f"{e.get('method')} {e.get('path')}",
+            "company_id": e.get("company_id"),
+            "details": ((e.get("details") or "") + extra).strip(),
+            "source": "activity_log",
+        })
+
     # 1) company_audit_log - generic admin actions
     async for e in db.company_audit_log.find(_apply({}, "at"), {"_id": 0}).sort("at", -1).limit(1000):
         events.append({
@@ -170,3 +184,51 @@ async def users_log_report(
     events.sort(key=lambda ev: (ev.get("at") or ""), reverse=True)
     events = events[:2000]
     return {"events": events, "count": len(events)}
+
+
+# Iter 247 — Excel export of the SAME filtered log (full report with
+# date and time, one row per action).
+@router.get("/admin/users-log.xlsx")
+async def users_log_report_xlsx(
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+    company_id: Optional[str] = Query(None),
+    user_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    data = await users_log_report(from_date, to_date, company_id, user_id, authorization)
+    import io
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    from fastapi.responses import Response
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Users Log"
+    ws.append(["Date", "Time", "User", "Role", "Firm", "Action", "Details", "Source"])
+    for c in ws[1]:
+        c.font = Font(bold=True)
+    for ev in data["events"]:
+        at = ev.get("at") or ""
+        d = f"{at[8:10]}-{at[5:7]}-{at[0:4]}" if len(at) >= 10 else ""
+        t = at[11:19] if len(at) >= 19 else ""
+        ws.append([
+            d, t,
+            ev.get("actor_name") or "-",
+            ev.get("actor_role") or "",
+            ev.get("company_name") or "-",
+            ev.get("action") or "",
+            (ev.get("details") or "")[:500],
+            ev.get("source") or "",
+        ])
+    for col, w in zip("ABCDEFGH", (12, 10, 22, 15, 26, 42, 60, 20)):
+        ws.column_dimensions[col].width = w
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f"users-log-{from_date or 'all'}-to-{to_date or 'all'}.xlsx"
+    return Response(
+        content=buf.read(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )

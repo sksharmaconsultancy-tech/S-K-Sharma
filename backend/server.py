@@ -2629,6 +2629,10 @@ async def _create_core_indexes():
     await db.user_sessions.create_index("session_token", unique=True)
     await db.user_sessions.create_index("user_id")
     await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
+    # Iter 247 — activity_log (full user action trail)
+    await db.activity_log.create_index([("at", -1)])
+    await db.activity_log.create_index("actor_id")
+    await db.activity_log.create_index("company_id")
     await db.attendance.create_index([("user_id", 1), ("date", -1)])
     await db.leaves.create_index("user_id")
     await db.payslips.create_index([("employee_user_id", 1), ("month", -1)])
@@ -20158,6 +20162,111 @@ async def _audit_lock_guard(request: Request, call_next):
                         )},
                     )
     return await call_next(request)
+
+
+# ---------------------------------------------------------------------------
+# Iter 247 (user request) — FULL user activity log. Every WRITE action
+# (create/update/delete), login and report download by ANY logged-in user
+# (super/sub/company admin or employee) is recorded in `activity_log`
+# with date + time, actor, action and a sanitized payload summary.
+# The Users Log Report reads this collection.
+# ---------------------------------------------------------------------------
+_ACT_SKIP = ("/temp-code-bundle", "/portal-rpa/frame", "/health", "/db-viewer")
+_ACT_SENSITIVE = ("pin", "password", "token", "otp", "captcha", "secret")
+_ACT_VERB = {"POST": "CREATE", "PUT": "UPDATE", "PATCH": "UPDATE", "DELETE": "DELETE"}
+
+
+@app.middleware("http")
+async def _activity_logger(request: Request, call_next):
+    path = request.url.path
+    method = request.method
+    is_mut = method in ("POST", "PUT", "PATCH", "DELETE")
+    is_dl = method == "GET" and any(
+        s in path for s in (".xlsx", ".pdf", ".csv", ".txt", "/export", "/download"))
+    should = path.startswith("/api") and (is_mut or is_dl) \
+        and not any(s in path for s in _ACT_SKIP)
+    raw = b""
+    if should and is_mut:
+        try:
+            # Starlette caches the body and replays it downstream — safe.
+            raw = await request.body()
+        except Exception:
+            raw = b""
+    response = await call_next(request)
+    if not should:
+        return response
+    try:
+        actor = None
+        auth = request.headers.get("authorization") or ""
+        if auth.lower().startswith("bearer "):
+            tok = auth.split(" ", 1)[1].strip()
+            sess = await db.user_sessions.find_one(
+                {"session_token": tok}, {"_id": 0, "user_id": 1})
+            if sess:
+                actor = await db.users.find_one(
+                    {"user_id": sess["user_id"]},
+                    {"_id": 0, "user_id": 1, "name": 1, "role": 1, "company_id": 1})
+        # Anonymous calls are only logged for login/auth endpoints.
+        if not actor and "/auth/" not in path:
+            return response
+        # Login has no token yet — resolve the actor from the email/phone
+        # in the (already-read) body so LOGIN rows show WHO logged in.
+        if not actor and raw:
+            try:
+                _d = json.loads(raw)
+                _ors = []
+                if _d.get("email"):
+                    _ors.append({"email": str(_d["email"]).strip().lower()})
+                if _d.get("phone"):
+                    _ors.append({"phone": str(_d["phone"]).strip()})
+                if _ors:
+                    actor = await db.users.find_one(
+                        {"$or": _ors},
+                        {"_id": 0, "user_id": 1, "name": 1, "role": 1, "company_id": 1})
+            except (ValueError, UnicodeDecodeError):
+                pass
+        cid = request.query_params.get("company_id")
+        summary = ""
+        if raw and len(raw) < 200_000:
+            try:
+                data = json.loads(raw)
+                if isinstance(data, dict):
+                    cid = cid or data.get("company_id")
+                    parts = []
+                    for k, v in data.items():
+                        if any(s in k.lower() for s in _ACT_SENSITIVE):
+                            continue
+                        if isinstance(v, (str, int, float, bool)) and str(v).strip():
+                            parts.append(f"{k}={str(v)[:40]}")
+                        if len(parts) >= 8:
+                            break
+                    summary = ", ".join(parts)
+            except (ValueError, UnicodeDecodeError):
+                pass
+        if is_dl:
+            verb = "DOWNLOAD"
+        elif "/auth/" in path:
+            verb = "LOGIN" if "login" in path.lower() else "AUTH"
+        else:
+            verb = _ACT_VERB.get(method, method)
+        await db.activity_log.insert_one({
+            "at": now_iso(),
+            "actor_id": (actor or {}).get("user_id"),
+            "actor_name": (actor or {}).get("name"),
+            "actor_role": (actor or {}).get("role"),
+            "company_id": cid or (actor or {}).get("company_id"),
+            "method": method,
+            "path": path[:300],
+            "action": f"{verb} {path[4:][:200]}",
+            "status": response.status_code,
+            "details": summary[:400],
+            "ip": ((request.headers.get("x-forwarded-for")
+                    or (request.client.host if request.client else "") or "")
+                   .split(",")[0].strip()),
+        })
+    except Exception:
+        logger.warning("[activity-log] failed to record", exc_info=True)
+    return response
 
 
 # Iter 85 (fix) — register the API router LAST so every @api.* decorator

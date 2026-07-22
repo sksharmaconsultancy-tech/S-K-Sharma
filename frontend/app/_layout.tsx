@@ -14,6 +14,7 @@ import { AutoPunchProvider } from "@/src/context/AutoPunchContext";
 import { RefreshBusProvider } from "@/src/context/RefreshBusContext";
 import BiometricLockOverlay from "@/src/components/BiometricLockOverlay";
 import AdminWebShell from "@/src/components/AdminWebShell";
+import IdleLogout from "@/src/components/IdleLogout";
 import { refreshRemindersOnBoot } from "@/src/utils/punchReminders";
 import { setupPWA } from "@/src/utils/pwa";
 import { ThemeProvider, useTheme } from "@/src/context/ThemeContext";
@@ -87,9 +88,11 @@ function ThemedTree() {
         <RefreshBusProvider>
           <AutoPunchProvider>
             <StatusBar style="dark" />
-            <AdminWebShell>
-              <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#FAFAF9" } }} />
-            </AdminWebShell>
+            <IdleLogout>
+              <AdminWebShell>
+                <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#FAFAF9" } }} />
+              </AdminWebShell>
+            </IdleLogout>
             <BiometricLockOverlay />
           </AutoPunchProvider>
         </RefreshBusProvider>
