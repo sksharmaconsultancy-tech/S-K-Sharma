@@ -21,6 +21,7 @@ import { useRouter } from "expo-router";
 import { api } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
+import WebDateField from "@/src/components/WebDateField";
 import { colors, radius, spacing, type } from "@/src/theme";
 
 type CatItem = { key: string; label: string; group: string };
@@ -208,8 +209,7 @@ export default function LabourReportsScreen() {
             {isSingleDay ? (
               <View style={st.field}>
                 <Text style={st.fieldLbl}>Report Date (single day)</Text>
-                <TextInput value={reportDate} onChangeText={setReportDate} style={st.input}
-                  placeholder="YYYY-MM-DD" placeholderTextColor={colors.onSurfaceTertiary} testID="lr-report-date" />
+                <WebDateField value={reportDate} onChange={setReportDate} testID="lr-report-date" />
               </View>
             ) : (
               <>
@@ -220,13 +220,11 @@ export default function LabourReportsScreen() {
                 </View>
                 <View style={st.field}>
                   <Text style={st.fieldLbl}>From (optional)</Text>
-                  <TextInput value={fromDate} onChangeText={setFromDate} style={st.input}
-                    placeholder="YYYY-MM-DD" placeholderTextColor={colors.onSurfaceTertiary} testID="lr-from" />
+                  <WebDateField value={fromDate} onChange={setFromDate} testID="lr-from" />
                 </View>
                 <View style={st.field}>
                   <Text style={st.fieldLbl}>To (optional)</Text>
-                  <TextInput value={toDate} onChangeText={setToDate} style={st.input}
-                    placeholder="YYYY-MM-DD" placeholderTextColor={colors.onSurfaceTertiary} testID="lr-to" />
+                  <WebDateField value={toDate} onChange={setToDate} testID="lr-to" />
                 </View>
               </>
             )}
