@@ -5,7 +5,7 @@
  * app, imports and admin manual entries. Filters: date range, firm and
  * machine. One-click Excel download of the filtered log.
  */
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -115,6 +115,19 @@ export default function PunchLogReportScreen() {
   };
 
   useEffect(() => { fetchLog(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Iter 253 (user request) — changing the Firm refreshes the Machine list
+  // for THAT firm and resets the on-screen data / download state.
+  const firmFirstRun = useRef(true);
+  useEffect(() => {
+    if (firmFirstRun.current) { firmFirstRun.current = false; return; }
+    setMachine("");
+    setRows([]);
+    setTotal(0);
+    setTruncated(false);
+    setMachines([]);
+    fetchLog(false); // reload for the new firm; repopulates its machines
+  }, [firmId]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Iter 252 (user request) — pull machine punches UP TO DATE: asks every
   // connected machine to re-upload all stored punches, then refresh.

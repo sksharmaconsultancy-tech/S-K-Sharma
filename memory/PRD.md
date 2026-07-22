@@ -1213,3 +1213,6 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 ## Iter 252 (June 2026) — Machine sync from Punch Log + daily Show
 - Punch Log Report: NEW green "Sync from machines" button (testID plog-sync-machines) → POST /api/biometric/devices/resync-all[?company_id] opens 6h resync window on ALL enabled devices in scope (returns devices/online counts + guidance). Machines re-upload all stored punches; press Apply after to refresh. 404 when no machines registered.
 - Attendance Report (attendance-grid): NEW green "Show" button beside Daily basis date (testID daily-show) → sets custom range from=to=dailyDate so the grid shows ONLY that day's column on screen (Clear resets). Verified via screenshot (15-06-2026 single-day view).
+
+## Iter 253 (June 2026) — Punch Log firm-change refresh
+- Changing the Firm dropdown now auto-resets machine selection, rows/total/truncated, machine list, and reloads punches for the NEW firm (machines repopulated from its data). Verified: Kankani (526) → City Care (0, machine list reset).
