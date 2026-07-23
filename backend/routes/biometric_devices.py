@@ -14,6 +14,7 @@ maps /api/* to the backend. When deploying, configure the device with:
   Comm → Cloud Server → Server URL: https://<your-host>/api
   (Some firmwares split into Server Address + URL Path — use both fields.)
 """
+import asyncio
 import base64
 import logging
 import re
@@ -556,6 +557,14 @@ _REMOTE_ACTIONS = {
 }
 
 
+def _zk_datetime_now() -> int:
+    """ZKTeco option-encoding of the CURRENT IST wall-clock time:
+    ((y-2000)*12*31 + (m-1)*31 + (d-1)) * 86400 + h*3600 + min*60 + s."""
+    ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
+    return (((ist.year - 2000) * 12 * 31 + (ist.month - 1) * 31 + (ist.day - 1)) * 86400
+            + ist.hour * 3600 + ist.minute * 60 + ist.second)
+
+
 @router.post("/biometric/devices/{device_id}/command")
 async def send_device_command(
     device_id: str,
@@ -568,14 +577,20 @@ async def send_device_command(
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     action = str(payload.get("action") or "")
-    if action not in _REMOTE_ACTIONS:
+    if action not in _REMOTE_ACTIONS and action != "sync_time":
         raise HTTPException(status_code=400, detail=f"Unknown action '{action}'")
     device = await db.biometric_devices.find_one({"device_id": device_id}, {"_id": 0})
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     if admin["role"] == "company_admin" and device.get("company_id") != admin["company_id"]:
         raise HTTPException(status_code=403, detail="Not authorised for this device")
-    cmd, label = _REMOTE_ACTIONS[action]
+    if action == "sync_time":
+        # Iter 259 (user request) — set the machine's DATE & TIME to the
+        # current Indian (IST) wall-clock time.
+        cmd = f"SET OPTION DateTime={_zk_datetime_now()}"
+        label = "Set device date & time (IST)"
+    else:
+        cmd, label = _REMOTE_ACTIONS[action]
     cmd_id = await _queue_cmd(device["serial_number"], cmd, admin["user_id"], label)
     return {
         "ok": True, "cmd_id": cmd_id,
@@ -1078,3 +1093,126 @@ async def biometric_system_health(
         "last_punch_created_at": (last_punch or {}).get("created_at"),
         "devices_registered": await db.biometric_devices.count_documents(dev_q),
     }
+
+
+# ---------------------------------------------------------------------------
+# Iter 259 — Device OFFLINE alerts + Device Health Report (Excel).
+# ---------------------------------------------------------------------------
+OFFLINE_ALERT_AFTER_MIN = 15
+
+
+async def device_offline_alert_loop():
+    """Background loop (every 5 min): a device silent > 15 min raises ONE
+    admin notification (company admins + super admins); coming back online
+    resets the flag so a future outage alerts again."""
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            async for d in db.biometric_devices.find(
+                {"enabled": {"$ne": False}}, {"_id": 0}
+            ):
+                last = d.get("last_seen_at")
+                offline = True
+                if last:
+                    try:
+                        dt = datetime.fromisoformat(str(last).replace("Z", "+00:00"))
+                        offline = (now - dt).total_seconds() > OFFLINE_ALERT_AFTER_MIN * 60
+                    except ValueError:
+                        pass
+                if offline and last and not d.get("offline_alerted"):
+                    await db.biometric_devices.update_one(
+                        {"device_id": d["device_id"]},
+                        {"$set": {"offline_alerted": True,
+                                  "offline_alerted_at": _now_iso_z()}},
+                    )
+                    for audience, cid in (("admins", d.get("company_id")),
+                                          ("super_admins", None)):
+                        await db.notifications.insert_one({
+                            "notification_id": f"n_{uuid.uuid4().hex[:10]}",
+                            "company_id": cid,
+                            "audience": audience,
+                            "type": "device.offline",
+                            "title": f"⚠️ Machine OFFLINE — {d.get('name') or d.get('serial_number')}",
+                            "body": (
+                                f"Biometric machine '{d.get('name')}' (SN {d.get('serial_number')}) "
+                                f"has been offline for over {OFFLINE_ALERT_AFTER_MIN} minutes. "
+                                "Punches are NOT syncing — check its power and internet."
+                            ),
+                            "created_at": _now_iso_z(),
+                            "created_by": "system",
+                        })
+                    logger.warning("[zkteco] OFFLINE alert raised for %s", d.get("serial_number"))
+                elif not offline and d.get("offline_alerted"):
+                    await db.biometric_devices.update_one(
+                        {"device_id": d["device_id"]},
+                        {"$set": {"offline_alerted": False}},
+                    )
+        except Exception:
+            logger.warning("[zkteco] offline alert loop error", exc_info=True)
+        await asyncio.sleep(300)
+
+
+@router.get("/biometric/devices/health-report.xlsx")
+async def device_health_report_xlsx(
+    company_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Device Health Report — one row per machine with status, heartbeat,
+    firmware, counters and last command result."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    q: dict = {}
+    if admin["role"] == "company_admin":
+        q["company_id"] = admin["company_id"]
+    elif company_id:
+        q["company_id"] = company_id
+    devices = await db.biometric_devices.find(q, {"_id": 0}).to_list(200)
+    firms = {c["company_id"]: c.get("name", "")
+             async for c in db.companies.find({}, {"_id": 0, "company_id": 1, "name": 1})}
+    import io
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    from fastapi.responses import Response
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Device Health"
+    ws.append(["Firm", "Device", "Serial No", "Direction", "Location",
+               "Status", "Last Heartbeat", "Firmware", "Users", "Fingerprints",
+               "Logs on Device", "Device IP", "Punches Synced", "Enabled"])
+    fill = PatternFill("solid", fgColor="1F4E79")
+    for c in ws[1]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = fill
+    now = datetime.now(timezone.utc)
+    for d in devices:
+        last = d.get("last_seen_at")
+        online = False
+        if last:
+            try:
+                online = (now - datetime.fromisoformat(str(last).replace("Z", "+00:00"))).total_seconds() < 180
+            except ValueError:
+                pass
+        ws.append([
+            firms.get(d.get("company_id") or "", ""),
+            d.get("name") or "", d.get("serial_number") or "",
+            (d.get("kind") or "").upper(), d.get("location") or "",
+            "ONLINE" if online else "OFFLINE",
+            (str(last).replace("T", " ")[:19] if last else "Never"),
+            d.get("firmware") or "", d.get("user_count", ""),
+            d.get("fp_count", ""), d.get("att_log_count", ""),
+            d.get("device_ip") or "",
+            d.get("total_punches_ingested", 0),
+            "YES" if d.get("enabled", True) else "NO",
+        ])
+        ws.cell(row=ws.max_row, column=6).font = Font(
+            bold=True, color="16A34A" if online else "DC2626")
+    for col, w in zip("ABCDEFGHIJKLMN", (22, 18, 14, 10, 14, 10, 20, 18, 8, 12, 13, 14, 14, 8)):
+        ws.column_dimensions[col].width = w
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="device-health-report.xlsx"'},
+    )

@@ -1241,3 +1241,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Employee Master (admin.tsx preview modal): NEW "Push Name to Biometric Machine" button (testID push-emp-to-machine) using the endpoint; shows the not-registered message.
 - E2E verified: queue→deliver→result, INFO parse, single push (PIN=72 SURENDRA SINGH), no-device message; UI screenshot OK.
 - DEFERRED (spec backlog): alerts (offline/memory), device health/sync reports + exports, WebSocket live dashboard, interactive map, dark mode, fingerprint/face template sync, lock/unlock & clear-log UI.
+
+## Iter 259 (June 2026) — Machine date/time sync + offline alerts + health report
+- "Set date & time" button per device card → POST command action sync_time → queues `SET OPTION DateTime={zk_encoded}` with CURRENT IST wall-clock (ZK encoding ((y-2000)*372+(m-1)*31+(d-1))*86400+h*3600+m*60+s; verified decode 22-Jul-2026 06:18 IST).
+- Device OFFLINE alerts: device_offline_alert_loop (5-min poll, started in server startup) — silent >15 min → ONE notification to company admins + super_admins (type device.offline); flag resets when back online.
+- Device Health Report: GET /api/biometric/devices/health-report.xlsx (Firm/Device/SN/Direction/Location/Status colored/Heartbeat/Firmware/Users/FP/Logs/IP/Punches/Enabled) + green "Health Report (Excel)" button beside Register new device.

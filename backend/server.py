@@ -2553,6 +2553,13 @@ async def startup():
     except Exception:
         logger.exception("[startup] sub-admin inactivity loop failed to start")
 
+    # Iter 259 — biometric machine OFFLINE alerts (admins + super admins).
+    try:
+        from routes.biometric_devices import device_offline_alert_loop
+        asyncio.create_task(device_offline_alert_loop())
+    except Exception:
+        logger.exception("[startup] device offline alert loop failed to start")
+
 
 async def _bg_enforce_geofence_defaults():
     """Iter 68 — Enforce the new default: geofence ON + strict rejection

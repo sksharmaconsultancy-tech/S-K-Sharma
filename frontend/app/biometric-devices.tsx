@@ -19,7 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
-import { api } from "@/src/api/client";
+import { api, apiBinary } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
 
@@ -385,10 +385,33 @@ export default function BiometricDevicesScreen() {
             </View>
           ) : null}
 
-          <Pressable testID="add-device-btn" style={styles.addBtn} onPress={openCreate}>
-            <Ionicons name="add-circle" size={18} color={colors.onCta} />
-            <Text style={styles.addBtnTxt}>Register new device</Text>
-          </Pressable>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <Pressable testID="add-device-btn" style={[styles.addBtn, { flex: 1 }]} onPress={openCreate}>
+              <Ionicons name="add-circle" size={18} color={colors.onCta} />
+              <Text style={styles.addBtnTxt}>Register new device</Text>
+            </Pressable>
+            {/* Iter 259 — Device Health Report (Excel) */}
+            <Pressable
+              testID="device-health-xlsx"
+              style={[styles.addBtn, { flex: 1, backgroundColor: "#16a34a" }]}
+              onPress={async () => {
+                try {
+                  const res = await apiBinary("/biometric/devices/health-report.xlsx");
+                  if (Platform.OS === "web" && res.webBlobUrl) {
+                    const a = document.createElement("a");
+                    a.href = res.webBlobUrl;
+                    a.download = "device-health-report.xlsx";
+                    a.click();
+                  }
+                } catch (e: any) {
+                  alertUser("Failed", e?.message || "Could not download the report.");
+                }
+              }}
+            >
+              <Ionicons name="download-outline" size={18} color={colors.onCta} />
+              <Text style={styles.addBtnTxt}>Health Report (Excel)</Text>
+            </Pressable>
+          </View>
 
           {devices.length === 0 ? (
             <View style={styles.emptyBox}>
@@ -757,6 +780,7 @@ function DeviceCard({
         {([
           ["sync_data", "sync-outline", "Sync data"],
           ["refresh_info", "information-circle-outline", "Refresh info"],
+          ["sync_time", "time-outline", "Set date & time"],
           ["restart", "power-outline", "Restart"],
         ] as [string, any, string][]).map(([action, icon, label]) => (
           <Pressable
