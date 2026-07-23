@@ -1346,3 +1346,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - New "Photo & Attachments (Optional)" section in employee-add.tsx: Attach Photo (JPEG) with preview; up to 3 OPTIONAL attachments (Document Name + file, JPEG/PDF only, 10MB cap); uses existing routes/employee_documents.py API (category "photo"/"other"); files held locally, uploaded via uploadPendingDocs(uid) after Save (create & edit); edit mode lists existing docs + delete; "Photo on file ✓" indicator.
 - Statutory/Bank section reordered per user: UAN|EPF, ESIC|UPI, PAN|Name-as-PAN, Aadhaar|Name-as-Aadhaar (NEW field aadhaar_name — create endpoint + _STR_FIELDS), Bank A/C|IFSC, Bank Name|Branch.
 - E2E: photo + PDF doc upload/list/delete via API OK; UI verified via Playwright screenshots.
+
+## Iter 276 (June 2026) — Rapid punch dedup (user request)
+- New server.py `dedupe_rapid_punches(punches, 30)`: drops ANY punch (any kind/source) within 30s of the previously kept punch (keeps FIRST of burst). Wired BEFORE dedupe_same_machine_punches at all 3 pipelines: monthly grid (~17667), OT report (~18223), Iter-202 compliance path (~14963).
+- E2E: burst IN 08:00:00/IN+3s/OUT+7s + OUT 17:00/+5s → clean IN 08:00, OUT 17:00, punches=2, 9h, no anomaly.
+- RECURRING TOOL ISSUE: search_replace on server.py/employee-add.tsx sometimes reports success but does NOT persist ("phantom edit") — ALWAYS grep-verify after editing these large files.

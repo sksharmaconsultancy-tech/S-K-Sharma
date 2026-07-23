@@ -1586,6 +1586,39 @@ async def load_shift_masters_map() -> Tuple[Dict[str, dict], List[dict]]:
     return by_id, docs
 
 
+def dedupe_rapid_punches(
+    punches: List[dict],
+    window_seconds: int = 30,
+) -> List[dict]:
+    """Iter 276 (user request) — "multiple punches within seconds":
+    a worker double/triple-scanning the finger registers 2-3 punches a few
+    seconds apart (sometimes with different IN/OUT direction), which breaks
+    the IN/OUT sheet. Drop ANY punch — regardless of kind or source — that
+    lands within ``window_seconds`` of the previously KEPT punch, keeping
+    the FIRST punch of the burst (auto-rectify)."""
+    if not punches:
+        return []
+    from datetime import timedelta as _td
+    ordered = sorted(
+        (p for p in punches if p.get("at")),
+        key=lambda p: p["at"],
+    )
+    kept: List[dict] = []
+    last_at: Optional[datetime] = None
+    win = _td(seconds=max(1, int(window_seconds)))
+    for p in ordered:
+        try:
+            at = datetime.fromisoformat(str(p["at"]).replace("Z", "+00:00"))
+        except Exception:
+            kept.append(p)
+            continue
+        if last_at is not None and (at - last_at) <= win:
+            continue  # rapid duplicate — ignore
+        last_at = at
+        kept.append(p)
+    return kept
+
+
 def dedupe_same_machine_punches(
     punches: List[dict],
     threshold_min: int = 15,
@@ -14927,6 +14960,7 @@ def _policy2_biometric_stats(att_rows: List[dict], policy: dict, emp_full: dict)
             wd = datetime.strptime(date_key, "%Y-%m-%d").weekday()
         except (ValueError, TypeError):
             continue
+        punches = dedupe_rapid_punches(punches, 30)
         punches = dedupe_same_machine_punches(punches, 15)
         punches = merge_out_in_bounces(punches, 60)
         if has_unpaired_punches(punches):
@@ -17628,6 +17662,9 @@ async def _compute_monthly_grid_data(
             date_key_iso = f"{yy:04d}-{mm:02d}-{dd:02d}"
             key = day_labels[idx]  # what the frontend uses as dict key
             day_punches = by_day.get(date_key_iso) or []
+            # Iter 276 (user request) — ignore multiple punches within
+            # seconds (double-scans) and auto-rectify before any pairing.
+            day_punches = dedupe_rapid_punches(day_punches, 30)
             # Iter 77s — Drop same-machine same-kind duplicate punches
             # within 15 minutes so double-taps on the biometric device
             # don't inflate the hour count.
@@ -18182,6 +18219,8 @@ async def _build_ot_report_rows(
         for (yy, mm, dd) in day_iter:
             date_key_iso = f"{yy:04d}-{mm:02d}-{dd:02d}"
             day_punches = by_day.get(date_key_iso) or []
+            # Iter 276 — ignore multiple punches within seconds (double-scans).
+            day_punches = dedupe_rapid_punches(day_punches, 30)
             # Iter 77s — same 15-min dedup for the OT report so numbers match.
             day_punches = dedupe_same_machine_punches(day_punches, 15)
             # Iter 77w — Bounce-merge OUT→IN within 60s (device stutter)
