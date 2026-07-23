@@ -61,6 +61,7 @@ export type EmpForm = {
   esi_ip_no: string;
   pan_no: string;
   pan_name: string;
+  aadhaar_name: string;
   aadhaar_no: string;
   bank_name: string;
   bank_branch: string;
@@ -122,6 +123,7 @@ export const EMPTY_FORM: EmpForm = {
   esi_ip_no: "",
   pan_no: "",
   pan_name: "",
+  aadhaar_name: "",
   aadhaar_no: "",
   bank_name: "",
   bank_branch: "",

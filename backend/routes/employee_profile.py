@@ -37,6 +37,7 @@ _STR_FIELDS = [
     "pincode", "district", "state",
     # Extra master fields: blood group, marital status, PAN name, UPI
     "blood_group", "marital_status", "pan_name", "upi_id", "spouse_name",
+    "aadhaar_name",
     # Iter 109 — was missing: Pay Mode (Bank / Cash / Cheque) never saved
     # from the one-page edit form.
     "pay_mode",

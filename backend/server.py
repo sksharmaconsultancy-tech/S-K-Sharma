@@ -8237,6 +8237,8 @@ async def admin_create_employee(
         "esi_ip_no": payload.get("esi_ip_no") or None,
         "pan_no": payload.get("pan_no") or None,
         "pan_name": payload.get("pan_name") or None,
+        # Iter 275 — Name as printed on the Aadhaar card.
+        "aadhaar_name": (str(payload.get("aadhaar_name") or "").strip().upper() or None),
         "aadhaar_no": payload.get("aadhaar_no") or None,
         "bank_name": payload.get("bank_name") or None,
         # Iter 272 — Branch Name (auto-filled from IFSC lookup, editable).

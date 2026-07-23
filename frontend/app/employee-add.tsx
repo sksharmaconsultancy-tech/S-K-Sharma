@@ -27,6 +27,7 @@ import {
   Platform,
   ScrollView,
   Modal,
+  Image,
   useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -34,6 +35,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import DateField from "@/src/components/DateField";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystemNS from "expo-file-system";
 
 import { api } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
@@ -159,6 +162,7 @@ export default function EmployeeAddScreen() {
           esi_ip_no: p.esi_ip_no || "",
           pan_no: p.pan_no || "",
           pan_name: p.pan_name || "",
+          aadhaar_name: p.aadhaar_name || "",
           aadhaar_no: p.aadhaar_no || "",
           bank_name: p.bank_name || "",
           bank_branch: p.bank_branch || "",
@@ -414,6 +418,94 @@ export default function EmployeeAddScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCompanyId, editUserId]);
 
+  // ---- Iter 275 (user request) — Photo + optional attachments ----------
+  // Photo (JPEG) + up to 3 optional documents (JPEG/PDF) with a
+  // "Document Name" column. NOT mandatory — uploaded after Save/Create.
+  type PendingFile = { name: string; mime: string; b64: string };
+  const [photoFile, setPhotoFile] = useState<PendingFile | null>(null);
+  const [attachments, setAttachments] = useState<{ doc_name: string; file: PendingFile | null }[]>([]);
+  const [existingDocs, setExistingDocs] = useState<
+    { doc_id: string; custom_label: string | null; filename: string | null; category: string }[]
+  >([]);
+  const existingPhoto = existingDocs.some((d) => d.category === "photo");
+  const existingOther = existingDocs.filter((d) => d.category !== "photo");
+
+  useEffect(() => {
+    if (!editUserId) return;
+    (async () => {
+      try {
+        const r = await api<{ documents: any[] }>(`/admin/employees/${editUserId}/documents`);
+        setExistingDocs((r.documents || []).map((d: any) => ({
+          doc_id: d.doc_id, custom_label: d.custom_label || null,
+          filename: d.filename || null, category: d.category || "other",
+        })));
+      } catch { /* attachments are optional */ }
+    })();
+  }, [editUserId]);
+
+  const pickFile = async (accept: string[]): Promise<PendingFile | null> => {
+    const res = await DocumentPicker.getDocumentAsync({
+      type: accept, multiple: false, copyToCacheDirectory: true,
+    });
+    if (res.canceled || !res.assets?.[0]) return null;
+    const f = res.assets[0];
+    const mime = f.mimeType
+      || (f.name?.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg");
+    if (!accept.includes(mime)) {
+      if (Platform.OS === "web") window.alert("Only JPEG images and PDF files are allowed.");
+      return null;
+    }
+    if (f.size && f.size > 10 * 1024 * 1024) {
+      if (Platform.OS === "web") window.alert("File is too large. Max 10 MB per document.");
+      return null;
+    }
+    let b64: string;
+    if (Platform.OS === "web") {
+      const resp = await fetch(f.uri);
+      const blob = await resp.blob();
+      b64 = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => {
+          const s = String(r.result || "");
+          resolve(s.includes(",") ? s.split(",", 2)[1] : s);
+        };
+        r.onerror = reject;
+        r.readAsDataURL(blob);
+      });
+    } else {
+      b64 = await (FileSystemNS as any).readAsStringAsync(f.uri, { encoding: "base64" });
+    }
+    return { name: f.name || "file", mime, b64 };
+  };
+
+  const uploadPendingDocs = async (uid: string) => {
+    const failed: string[] = [];
+    if (photoFile) {
+      try {
+        await api(`/admin/employees/${uid}/documents`, {
+          method: "POST",
+          body: { category: "photo", custom_label: "Employee Photo",
+                  filename: photoFile.name, mime_type: photoFile.mime, base64: photoFile.b64 },
+        });
+      } catch { failed.push("Photo"); }
+    }
+    for (const a of attachments) {
+      if (!a.file) continue;
+      try {
+        await api(`/admin/employees/${uid}/documents`, {
+          method: "POST",
+          body: { category: "other", custom_label: a.doc_name.trim() || a.file.name,
+                  filename: a.file.name, mime_type: a.file.mime, base64: a.file.b64 },
+        });
+      } catch { failed.push(a.doc_name || a.file.name); }
+    }
+    setPhotoFile(null);
+    setAttachments([]);
+    if (failed.length && Platform.OS === "web") {
+      window.alert(`Some attachments failed to upload: ${failed.join(", ")}`);
+    }
+  };
+
   const saveDraft = async () => {
     if (!selectedCompanyId) { setError("Pick a firm first."); return; }
     setDraftBusy(true);
@@ -552,6 +644,7 @@ export default function EmployeeAddScreen() {
           method: "PATCH",
           body: payload,
         });
+        await uploadPendingDocs(editUserId);
         if (Platform.OS === "web") window.alert("Employee details updated ✓");
         router.back();
         return;
@@ -562,6 +655,8 @@ export default function EmployeeAddScreen() {
         employee_code: string | null;
         temp_pin: string;
       }>("/admin/employees", { method: "POST", body: payload });
+      // Iter 275 — upload the optional photo/attachments for the new hire.
+      if (r.user_id) await uploadPendingDocs(r.user_id);
       setResult({
         temp_pin: r.temp_pin,
         employee_code: r.employee_code,
@@ -1729,22 +1824,6 @@ export default function EmployeeAddScreen() {
               </Pressable>
             </View>
             <Field
-              label="PAN"
-              value={form.pan_no}
-              onChange={(v) => setField("pan_no", v.toUpperCase())}
-              placeholder="ABCDE1234F"
-              autoCapitalize="characters"
-            />
-          </TwoCol>
-          <TwoCol>
-            <Field
-              label="Name As Per PAN Card"
-              value={form.pan_name}
-              onChange={(v) => setField("pan_name", v.toUpperCase())}
-              placeholder="NAME AS PRINTED ON PAN"
-              autoCapitalize="characters"
-            />
-            <Field
               label="UPI ID"
               value={form.upi_id}
               onChange={(v) => setField("upi_id", v.toLowerCase().replace(/\s/g, ""))}
@@ -1754,29 +1833,46 @@ export default function EmployeeAddScreen() {
           </TwoCol>
           <TwoCol>
             <Field
-              label="Aadhaar"
+              label="PAN"
+              value={form.pan_no}
+              onChange={(v) => setField("pan_no", v.toUpperCase())}
+              placeholder="ABCDE1234F"
+              autoCapitalize="characters"
+            />
+            <Field
+              label="Name As Per PAN Card"
+              value={form.pan_name}
+              onChange={(v) => setField("pan_name", v.toUpperCase())}
+              placeholder="NAME AS PRINTED ON PAN"
+              autoCapitalize="characters"
+            />
+          </TwoCol>
+          <TwoCol>
+            <Field
+              label="Aadhaar No."
               value={form.aadhaar_no}
               onChange={(v) => setField("aadhaar_no", v.replace(/\D/g, "").slice(0, 12))}
               placeholder="12-digit Aadhaar"
               keyboardType="numeric"
             />
             <Field
-              label="Bank name"
-              value={form.bank_name}
-              onChange={(v) => setField("bank_name", v)}
-              placeholder="e.g. HDFC Bank"
+              label="Name As Per Aadhaar"
+              value={form.aadhaar_name}
+              onChange={(v) => setField("aadhaar_name", v.toUpperCase())}
+              placeholder="NAME AS PRINTED ON AADHAAR"
+              autoCapitalize="characters"
             />
           </TwoCol>
           <TwoCol>
             <Field
-              label="Bank A/C"
+              label="Bank Account No."
               value={form.bank_account}
               onChange={(v) => setField("bank_account", v.replace(/\s/g, ""))}
               placeholder="Account number"
               keyboardType="numeric"
             />
             <Field
-              label={ifscBusy ? "IFSC (looking up…)" : "IFSC (auto-fills Bank & Branch)"}
+              label={ifscBusy ? "IFSC Code (looking up…)" : "IFSC Code (auto-fills Bank & Branch)"}
               value={form.bank_ifsc}
               onChange={(v) => {
                 const c = v.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11);
@@ -1789,16 +1885,145 @@ export default function EmployeeAddScreen() {
           </TwoCol>
           <TwoCol>
             <Field
-              label="Branch Name"
+              label="Bank Name"
+              value={form.bank_name}
+              onChange={(v) => setField("bank_name", v)}
+              placeholder="e.g. HDFC Bank"
+            />
+            <Field
+              label="Branch"
               value={form.bank_branch}
               onChange={(v) => setField("bank_branch", v)}
               placeholder="Auto from IFSC (editable)"
             />
-            <View style={{ flex: 1 }} />
           </TwoCol>
 
           {/* Iter 126g — Family Details moved to the END of the form
               (user-requested flow) */}
+          {/* Iter 275 (user request) — Photo + optional attachments
+              (max 3, JPEG/PDF, Document Name + file + upload on Save). */}
+          <SectionHeader icon="attach-outline" title="Photo & Attachments (Optional)" tint="#0891B2" anchorId="sec-attach" />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginTop: 6 }}>
+            {photoFile ? (
+              <Image
+                source={{ uri: `data:${photoFile.mime};base64,${photoFile.b64}` }}
+                style={{ width: 64, height: 64, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}
+              />
+            ) : (
+              <View style={{
+                width: 64, height: 64, borderRadius: 8, borderWidth: 1,
+                borderColor: colors.border, alignItems: "center", justifyContent: "center",
+                backgroundColor: "#F1F5F9",
+              }}>
+                <Ionicons name="person-outline" size={26} color={colors.onSurfaceTertiary} />
+              </View>
+            )}
+            <View style={{ gap: 4 }}>
+              <Pressable
+                onPress={async () => {
+                  const f = await pickFile(["image/jpeg", "image/jpg"]);
+                  if (f) setPhotoFile(f);
+                }}
+                style={styles.attachBtn}
+                testID="attach-photo"
+              >
+                <Ionicons name="camera-outline" size={15} color={colors.brandPrimary} />
+                <Text style={styles.attachBtnTxt}>
+                  {photoFile ? "Change Photo" : existingPhoto ? "Replace Photo" : "Attach Photo (JPEG)"}
+                </Text>
+              </Pressable>
+              {existingPhoto && !photoFile ? (
+                <Text style={{ fontSize: 11, color: "#15803D" }}>Photo on file ✓</Text>
+              ) : null}
+              {photoFile ? (
+                <Text style={{ fontSize: 11, color: colors.onSurfaceSecondary }}>
+                  {photoFile.name} (uploads on Save)
+                </Text>
+              ) : null}
+            </View>
+          </View>
+
+          {existingOther.length > 0 ? (
+            <View style={{ marginTop: 10, gap: 6 }}>
+              {existingOther.map((d) => (
+                <View key={d.doc_id} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Ionicons name="document-attach-outline" size={15} color={colors.onSurfaceSecondary} />
+                  <Text style={{ flex: 1, fontSize: 12, color: colors.onSurface }}>
+                    {d.custom_label || d.filename || d.doc_id}
+                  </Text>
+                  <Pressable
+                    onPress={async () => {
+                      try {
+                        await api(`/admin/employees/${editUserId}/documents/${d.doc_id}`, { method: "DELETE" });
+                        setExistingDocs((prev) => prev.filter((x) => x.doc_id !== d.doc_id));
+                      } catch { /* keep row on failure */ }
+                    }}
+                    hitSlop={8}
+                    testID={`existing-doc-del-${d.doc_id}`}
+                  >
+                    <Ionicons name="trash-outline" size={15} color="#B0002B" />
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
+          {attachments.map((a, idx) => (
+            <View key={idx} style={{ flexDirection: "row", gap: 8, alignItems: "flex-end", marginTop: 8 }}>
+              <Field
+                label={idx === 0 ? "Document Name" : ""}
+                value={a.doc_name}
+                onChange={(v) => {
+                  const list = [...attachments]; list[idx] = { ...a, doc_name: v };
+                  setAttachments(list);
+                }}
+                placeholder="e.g. Aadhaar Card, Marksheet…"
+              />
+              <View style={{ flex: 1, gap: 4 }}>
+                {idx === 0 ? <Text style={styles.lbl}>Attachment (JPEG / PDF)</Text> : null}
+                <Pressable
+                  onPress={async () => {
+                    const f = await pickFile(["image/jpeg", "image/jpg", "application/pdf"]);
+                    if (f) {
+                      const list = [...attachments]; list[idx] = { ...a, file: f };
+                      setAttachments(list);
+                    }
+                  }}
+                  style={[styles.input, { justifyContent: "center" }]}
+                  testID={`attach-file-${idx}`}
+                >
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Ionicons name="cloud-upload-outline" size={14} color={colors.brandPrimary} />
+                    <Text style={{ fontSize: 12, color: a.file ? colors.onSurface : colors.onSurfaceTertiary }} numberOfLines={1}>
+                      {a.file ? a.file.name : "Choose file…"}
+                    </Text>
+                  </View>
+                </Pressable>
+              </View>
+              <Pressable
+                onPress={() => setAttachments(attachments.filter((_, i) => i !== idx))}
+                style={{ paddingBottom: 12 }}
+                testID={`attach-del-${idx}`}
+              >
+                <Ionicons name="trash-outline" size={18} color="#B0002B" />
+              </Pressable>
+            </View>
+          ))}
+          {existingOther.length + attachments.length < 3 ? (
+            <Pressable
+              onPress={() => setAttachments([...attachments, { doc_name: "", file: null }])}
+              style={[styles.attachBtn, { marginTop: 8, alignSelf: "flex-start" }]}
+              testID="attach-add"
+            >
+              <Ionicons name="add" size={15} color={colors.brandPrimary} />
+              <Text style={styles.attachBtnTxt}>Add Attachment ({existingOther.length + attachments.length}/3)</Text>
+            </Pressable>
+          ) : (
+            <Text style={{ fontSize: 11, color: colors.onSurfaceSecondary, marginTop: 8 }}>
+              Maximum 3 attachments reached.
+            </Text>
+          )}
+
           <SectionHeader icon="people-outline" title="Family Details" tint="#DB2777" anchorId="sec-family" />
           {form.family_members.map((fm, idx) => (
             <View key={idx} style={{ flexDirection: "row", gap: 8, alignItems: "flex-end", marginTop: 6 }}>
@@ -2489,6 +2714,23 @@ const styles = StyleSheet.create({
     ...type.caption,
     color: colors.onSurfaceSecondary,
     fontWeight: "600",
+  },
+  // Iter 275 — Photo & Attachments buttons
+  attachBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.brandPrimary,
+    backgroundColor: "#F0FDFA",
+  },
+  attachBtnTxt: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.brandPrimary,
   },
   smallNote: {
     fontSize: 11,
