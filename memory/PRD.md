@@ -1309,3 +1309,9 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Phase 3: Manual sync — "Sync All Employees" + filtered sync (department/group/branch) calling POST /sync/all; full Admin Settings tab (auto-sync, fingerprints, face, card, password, photos, attendance, retry, max_retry_count, sync_interval) via GET/PUT /sync/settings.
 - Phase 4: "Report" button → GET /sync/report.xlsx (3 sheets: Summary status counts, Device-wise, Jobs). Notifications: worker inserts notifications (type sync.failed, audience admins) when a job fails after max retries. Conflicts tab: approve(Keep)/reject(Ignore) → POST /sync/conflicts/{id}/resolve.
 - Verified: all endpoints 200, Excel 3-sheet report generates, UI Dashboard/Settings/Queue tabs render & function (Playwright).
+
+## Iter 269 (June 2026) — SSL / HTTPS on production VPS
+- User asked to secure the portal (browsers showed "Not Secure"). Created /app/setup_ssl_iter236_v2.sh, served via /api/temp-code-bundle?kind=ssl (temp_bundle.py updated; kind=script now serves deploy_vps_iter235.sh).
+- v1 failed on VPS: Ubuntu 24.04 apt certbot 2.9.0 broken (pyOpenSSL "module 'lib' has no attribute 'GEN_EMAIL'"). v2 removed apt certbot, installed official snap certbot 5.7.0.
+- RESULT: https://smartpayrolling.com + www LIVE with Let's Encrypt cert, HTTP→HTTPS redirect enabled in /etc/nginx/sites-enabled/sksharma, auto-renewal (snap timer) dry-run passed. Verified HTTP 200.
+- STILL PENDING: SEC-003 (encrypt portal_logins passwords) and SEC-004 (server-side 12h session expiry with auto-extend — user chose option a).
