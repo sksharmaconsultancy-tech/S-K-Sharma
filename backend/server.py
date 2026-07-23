@@ -1846,6 +1846,77 @@ def split_regular_ot_times(
     return reg_in, reg_out, None, None
 
 
+def compute_day_punch_metrics(
+    day_punches: List[dict],
+    shift_start: Optional[str] = None,
+    shift_end: Optional[str] = None,
+    grace_minutes: int = 0,
+) -> dict:
+    """Iter 236 — Attendance Engine Overhaul metrics for ONE employee-day.
+
+    Returns a dict with:
+      * ``break_minutes`` — total gap time between an OUT punch and the
+        NEXT IN punch (time spent outside between paired sessions).
+      * ``late_minutes``  — minutes the FIRST IN arrived after the shift
+        start. 0 when arrival is within ``grace_minutes``; beyond grace
+        the FULL lateness (from shift start) is counted.
+      * ``early_minutes`` — minutes the LAST OUT left before shift end.
+
+    Night shifts crossing midnight are handled with circular (±12 h)
+    time-of-day distance so a 22:00–06:00 shift computes correctly.
+    """
+    ps = sorted(
+        (p for p in day_punches if p.get("at") and (p.get("kind") in ("in", "out"))),
+        key=lambda p: p["at"],
+    )
+    sessions: List[Tuple[datetime, datetime]] = []
+    open_in: Optional[datetime] = None
+    for p in ps:
+        try:
+            at = datetime.fromisoformat((p["at"] or "").replace("Z", "+00:00"))
+        except Exception:
+            continue
+        kind = (p.get("kind") or "").lower()
+        if kind == "in":
+            if open_in is None:
+                open_in = at
+        elif kind == "out":
+            if open_in is not None and at > open_in:
+                sessions.append((open_in, at))
+            open_in = None
+    out = {"break_minutes": 0, "late_minutes": 0, "early_minutes": 0}
+    if not sessions:
+        return out
+    # Break HRS = sum of OUT → next-IN gaps between consecutive sessions.
+    br = 0.0
+    for i in range(1, len(sessions)):
+        gap = (sessions[i][0] - sessions[i - 1][1]).total_seconds() / 60.0
+        if gap > 0:
+            br += gap
+    out["break_minutes"] = int(round(br))
+
+    def _circ(diff: int) -> int:
+        if diff > 720:
+            diff -= 1440
+        elif diff < -720:
+            diff += 1440
+        return diff
+
+    st = _hhmm_to_min(shift_start)
+    en = _hhmm_to_min(shift_end)
+    first_in = sessions[0][0]
+    last_out = sessions[-1][1]
+    if st is not None:
+        d = _circ((first_in.hour * 60 + first_in.minute) - st)
+        if d > max(0, int(grace_minutes or 0)):
+            out["late_minutes"] = d
+    if en is not None:
+        d = _circ(en - (last_out.hour * 60 + last_out.minute))
+        if d > 0:
+            out["early_minutes"] = d
+    return out
+
+
 def compute_textile_day(
     punches: List[dict],
     policy: dict,
@@ -17424,6 +17495,12 @@ async def _compute_monthly_grid_data(
         total_hours_min = 0
         total_ot_min = 0
         total_duty_only_min = 0   # Iter 77s — duty excluding OT
+        # Iter 236 — Attendance Engine Overhaul summary accumulators.
+        total_punches_cnt = 0
+        total_break_min = 0
+        total_net_min = 0
+        total_late_min = 0
+        total_early_min = 0
         # ---- Iter 94 — day-wise salary (mirrors _actual_salary_row_compute
         # rate resolution: Basic row on salary_structure_actual overrides
         # salary_monthly; rate_type overrides salary_mode). ---------------
@@ -17457,6 +17534,8 @@ async def _compute_monthly_grid_data(
                     "in": None, "out": None, "ot_in": None, "ot_out": None,
                     "hours": 0.0, "duty_hours": 0.0, "raw_hours": 0.0, "ot_hours": 0.0,
                     "sources": [], "punches": 0,
+                    "break_hours": 0.0, "net_hours": 0.0,
+                    "late_min": 0, "early_min": 0,
                 }
                 continue
             # Iter 77z-fix — Skip days with UNPAIRED punches (user rule:
@@ -17485,9 +17564,12 @@ async def _compute_monthly_grid_data(
                     "hours": 0.0, "duty_hours": 0.0, "raw_hours": 0.0, "ot_hours": 0.0,
                     "sources": list({_classify_punch_source(p.get("source")) for p in day_punches}),
                     "punches": len(day_punches),
+                    "break_hours": 0.0, "net_hours": 0.0,
+                    "late_min": 0, "early_min": 0,
                     "anomaly": True,
                     "anomaly_reason": "missing_punch",
                 }
+                total_punches_cnt += len(day_punches)
                 continue
             day_min, in_dt, out_dt = _pair_punches(day_punches)
             raw_hrs = round(day_min / 60.0, 2)
@@ -17506,6 +17588,26 @@ async def _compute_monthly_grid_data(
             # settings (e.g. one employee running a 12h shift while the
             # firm default is 8h).
             eff_policy = apply_employee_policy_override(eff_policy, emp_full)
+            # Iter 236 — Attendance Engine Overhaul: per-day punch metrics
+            # (Break gaps between OUT→IN pairs, Late arrival vs shift
+            # start with grace, Early Going vs shift end). Shift source
+            # priority: daily override / resolved shift → the firm shift
+            # whose START is nearest to the day's first IN punch (so
+            # night-shift workers are measured against the night shift).
+            _shift_src = resolved_shift or resolve_shift_for_user(
+                emp_full, day_punches, None,
+                pol.get("shifts") or [], firm_shift_open=True,
+            ) or {}
+            try:
+                _grace_min = int(float(eff_policy.get("grace_minutes_late") or 0))
+            except (TypeError, ValueError):
+                _grace_min = 0
+            _dm = compute_day_punch_metrics(
+                day_punches,
+                shift_start=(_shift_src or {}).get("start"),
+                shift_end=(_shift_src or {}).get("end"),
+                grace_minutes=_grace_min,
+            )
             weekday = datetime(yy, mm, dd).weekday()
             _is_holiday_day = date_key_iso in _holiday_dates
             summary = compute_textile_day(
@@ -17715,6 +17817,11 @@ async def _compute_monthly_grid_data(
                 "raw_hours": raw_hrs,   # actual worked (IN/OUT view)
                 "ot_hours": ot_hrs,     # separate OT (for OT report)
                 "punches": len(day_punches),
+                # Iter 236 — Attendance Engine Overhaul per-day metrics.
+                "break_hours": round(_dm["break_minutes"] / 60.0, 2),
+                "net_hours": raw_hrs,
+                "late_min": _dm["late_minutes"],
+                "early_min": _dm["early_minutes"],
                 "sources": seen,
                 "present": _day_present,
                 "weekly_off": bool(summary.get("is_weekly_off")),
@@ -17722,6 +17829,12 @@ async def _compute_monthly_grid_data(
                 # Iter 94 — day-wise earned salary (basic-rate based).
                 "salary": day_sal,
             }
+            # Iter 236 — accumulate overhaul totals for the row summary.
+            total_punches_cnt += len(day_punches)
+            total_net_min += day_min
+            total_break_min += _dm["break_minutes"]
+            total_late_min += _dm["late_minutes"]
+            total_early_min += _dm["early_minutes"]
             if day_sal > 0:
                 total_salary += day_sal
                 day_salary_totals[key] = round(day_salary_totals.get(key, 0.0) + day_sal, 2)
@@ -17808,6 +17921,14 @@ async def _compute_monthly_grid_data(
                     else int(total_present_policy)
                 ),
                 "total_extra_hrs": round(_extra_min / 60.0, 4),
+                # Iter 236 — Attendance Engine Overhaul summary columns:
+                # Total Punches, Break HRS, Net Working HRS (paired IN→OUT
+                # time excluding breaks), Late Minutes, Early Going.
+                "total_punches": total_punches_cnt,
+                "break_hours": round(total_break_min / 60.0, 4),
+                "net_hours": round(total_net_min / 60.0, 4),
+                "late_minutes": total_late_min,
+                "early_minutes": total_early_min,
                 "shift_hours": emp_daily_hrs,
                 # Iter 94 — employee-wise earned salary for the window.
                 "salary_total": round(total_salary, 2),
@@ -20455,3 +20576,4 @@ maybe_start_rpa_worker(app, db)
 @app.on_event("shutdown")
 async def shutdown():
     client.close()
+

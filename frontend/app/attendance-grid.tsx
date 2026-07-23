@@ -47,6 +47,10 @@ type Cell = {
   raw_hours?: number;          // Iter 77e — actual worked hours (IN/OUT view)
   ot_hours?: number;           // Iter 77f — SEPARATE OT hours
   punches?: number;
+  break_hours?: number;        // Iter 236 — OUT→IN gap time (hrs)
+  net_hours?: number;          // Iter 236 — net working (paired, excl. breaks)
+  late_min?: number;           // Iter 236 — late arrival vs shift start
+  early_min?: number;          // Iter 236 — early going vs shift end
   sources?: string[]; // ["bio","app","sys"] — provenance badges for the day
   present?: number;            // Iter 77e — 0 / 0.5 / 1 present-day credit
   weekly_off?: boolean;        // Iter 77e — cell falls on a weekly-off day
@@ -73,6 +77,12 @@ type EmpRow = {
     total_days_computed?: number;
     shift_hours?: number;
     salary_total?: number;     // Iter 94 — employee-wise earned salary (₹)
+    // Iter 236 — Attendance Engine Overhaul summary totals.
+    total_punches?: number;
+    break_hours?: number;
+    net_hours?: number;
+    late_minutes?: number;
+    early_minutes?: number;
   };
 };
 
@@ -1107,6 +1117,12 @@ function GridHeader({
       <View style={[styles.hcell, styles.sumCell, { width: COL.sum }]}>
         <Text style={styles.hcellTxt}>Extra HRS</Text>
       </View>
+      {/* Iter 236 — Attendance Engine Overhaul summary columns. */}
+      {["Punches", "Break HRS", "Net HRS", "Late Min", "Early Go"].map((lab) => (
+        <View key={lab} style={[styles.hcell, styles.sumCell, { width: COL.sum }]}>
+          <Text style={styles.hcellTxt}>{lab}</Text>
+        </View>
+      ))}
     </View>
   );
 }
@@ -1202,6 +1218,27 @@ function GridRow({
       <View style={[styles.cell, styles.sumCellLight, { width: COL.sum }]}>
         <Text style={styles.sumTxt}>
           {fmtHoursHM((emp.totals as any).total_extra_hrs ?? 0)}
+        </Text>
+      </View>
+      {/* Iter 236 — Attendance Engine Overhaul summary cells:
+          Punches | Break HRS | Net HRS | Late Min | Early Go. */}
+      <View style={[styles.cell, styles.sumCellLight, { width: COL.sum }]}>
+        <Text style={styles.sumTxt}>{emp.totals.total_punches ?? 0}</Text>
+      </View>
+      <View style={[styles.cell, styles.sumCellLight, { width: COL.sum }]}>
+        <Text style={styles.sumTxt}>{fmtHoursHM(emp.totals.break_hours ?? 0)}</Text>
+      </View>
+      <View style={[styles.cell, styles.sumCellLight, { width: COL.sum }]}>
+        <Text style={styles.sumTxt}>{fmtHoursHM(emp.totals.net_hours ?? 0)}</Text>
+      </View>
+      <View style={[styles.cell, styles.sumCellLight, { width: COL.sum }]}>
+        <Text style={[styles.sumTxt, (emp.totals.late_minutes ?? 0) > 0 && { color: "#b45309" }]}>
+          {(emp.totals.late_minutes ?? 0) > 0 ? `${emp.totals.late_minutes}m` : "—"}
+        </Text>
+      </View>
+      <View style={[styles.cell, styles.sumCellLight, { width: COL.sum }]}>
+        <Text style={[styles.sumTxt, (emp.totals.early_minutes ?? 0) > 0 && { color: "#b45309" }]}>
+          {(emp.totals.early_minutes ?? 0) > 0 ? `${emp.totals.early_minutes}m` : "—"}
         </Text>
       </View>
     </View>
@@ -1349,6 +1386,16 @@ function DayCell({
       <Text style={[styles.dayHoursSm, isOt && styles.dayHoursOt]}>
         {displayHours > 0 ? fmtHoursHM(displayHours) : "—"}
       </Text>
+      {/* Iter 236 — per-day detail: Late / Early-Go / Break metrics. */}
+      {(() => {
+        const bits: string[] = [];
+        if ((cell.late_min ?? 0) > 0) bits.push(`L${cell.late_min}m`);
+        if ((cell.early_min ?? 0) > 0) bits.push(`E${cell.early_min}m`);
+        if ((cell.break_hours ?? 0) > 0) bits.push(`B${fmtHoursHM(cell.break_hours!)}`);
+        return bits.length ? (
+          <Text style={styles.dayMetricTxt}>{bits.join(" ")}</Text>
+        ) : null;
+      })()}
       {cell.sources && cell.sources.length > 0 && (
         <View style={styles.badgeRow}>
           {cell.sources.map((s) => (
@@ -1648,6 +1695,8 @@ const styles = StyleSheet.create({
   dayIn: { color: colors.success || "#0F5132", fontWeight: "700", fontSize: 10 },
   dayOut: { color: colors.error || "#8A1F1F", fontWeight: "700", fontSize: 10 },
   dayHoursSm: { color: colors.onSurface, fontSize: 10, marginTop: 1 },
+  // Iter 236 — per-day Late/Early/Break metrics line.
+  dayMetricTxt: { color: "#b45309", fontSize: 7.5, fontWeight: "700", marginTop: 1 },
   dayHours: { color: colors.onSurface, fontWeight: "700", fontSize: 12 },
   dayHoursOt: { color: colors.accent, fontWeight: "800" },
   // Iter 77g — OT tag (small pill under total hrs) + 4-row IN/OUT layout

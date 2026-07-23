@@ -1246,3 +1246,12 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - "Set date & time" button per device card → POST command action sync_time → queues `SET OPTION DateTime={zk_encoded}` with CURRENT IST wall-clock (ZK encoding ((y-2000)*372+(m-1)*31+(d-1))*86400+h*3600+m*60+s; verified decode 22-Jul-2026 06:18 IST).
 - Device OFFLINE alerts: device_offline_alert_loop (5-min poll, started in server startup) — silent >15 min → ONE notification to company admins + super_admins (type device.offline); flag resets when back online.
 - Device Health Report: GET /api/biometric/devices/health-report.xlsx (Firm/Device/SN/Direction/Location/Status colored/Heartbeat/Firmware/Users/FP/Logs/IP/Punches/Enabled) + green "Health Report (Excel)" button beside Register new device.
+
+## Iter 260 (June 2026) — Attendance Engine Overhaul: new report columns
+- User confirmed: Break = OUT→next-IN gap; Late/Early vs configured shift timings (per employee/group); show in BOTH monthly grid and daily detail.
+- Backend (server.py): new `compute_day_punch_metrics()` (near split_regular_ot_times) — pairs sessions, computes break_minutes (OUT→IN gaps), late_minutes (first IN vs shift start, honors grace_minutes_late, full lateness beyond grace), early_minutes (last OUT vs shift end); night shifts handled with circular ±12h distance.
+- Shift source for late/early: daily override / resolved shift → else nearest firm-policy shift by first-IN (resolve_shift_for_user with firm_shift_open=True) so night workers measure against the night shift.
+- `_compute_monthly_grid_data`: each day cell now carries punches (existing), break_hours, net_hours (paired IN→OUT time excl. breaks), late_min, early_min; row totals carry total_punches, break_hours, net_hours, late_minutes, early_minutes.
+- Daily report (utils/daily_attendance.py): XLSX + PDF now include Punches | Break HRS | Late Min | Early Go columns with footer totals.
+- Frontend (attendance-grid.tsx): 5 new summary columns after Extra HRS (Punches, Break HRS, Net HRS, Late Min, Early Go — late/early amber when >0); IN/OUT day cells show compact "L{m} E{m} B{hh:mm}" metrics line.
+- Verified with live Kankani July-2026 data (night-shift VINIT: late/early 0; SATISH day-out 17:05 vs 20:00 → early 175m; break 00:35 detected from 4-punch day) + Playwright screenshot of grid.

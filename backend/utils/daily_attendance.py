@@ -28,7 +28,8 @@ from reportlab.lib.enums import TA_CENTER
 
 _HEADERS = [
     "S.No", "Bio Code", "Emp Code", "Name", "Father Name", "Designation",
-    "In", "Out", "OT In", "OT Out", "Duty HRS", "OT HRS", "Total HRS", "Status",
+    "In", "Out", "OT In", "OT Out", "Duty HRS", "OT HRS", "Total HRS",
+    "Punches", "Break HRS", "Late Min", "Early Go", "Status",
 ]
 
 
@@ -48,6 +49,9 @@ def _daily_rows(grid: Dict[str, Any]) -> Tuple[List[List[Any]], Dict[str, Any]]:
     rows: List[List[Any]] = []
     present = absent = anomalies = 0
     tot_duty = tot_ot = 0.0
+    # Iter 236 — Attendance Engine Overhaul columns.
+    tot_punch = tot_late = tot_early = 0
+    tot_break = 0.0
     for i, emp in enumerate(grid.get("employees") or [], start=1):
         d = (emp.get("days") or {}).get(label) or {}
         duty = float(d.get("duty_hours") or 0.0)
@@ -64,6 +68,15 @@ def _daily_rows(grid: Dict[str, Any]) -> Tuple[List[List[Any]], Dict[str, Any]]:
             absent += 1
         tot_duty += duty
         tot_ot += ot
+        # Iter 236 — punch metrics for the day.
+        punches = int(d.get("punches") or 0)
+        brk = float(d.get("break_hours") or 0.0)
+        late = int(d.get("late_min") or 0)
+        early = int(d.get("early_min") or 0)
+        tot_punch += punches
+        tot_break += brk
+        tot_late += late
+        tot_early += early
         bio = emp.get("bio_code")
         rows.append([
             i,
@@ -79,11 +92,17 @@ def _daily_rows(grid: Dict[str, Any]) -> Tuple[List[List[Any]], Dict[str, Any]]:
             _hhmm(duty) if duty > 0 else "00:00",
             _hhmm(ot) if ot > 0 else "",
             _hhmm(total) if total > 0 else "00:00",
+            punches if punches > 0 else "",
+            _hhmm(brk) if brk > 0 else "",
+            late if late > 0 else "",
+            early if early > 0 else "",
             status,
         ])
     summary = {
         "present": present, "absent": absent, "anomalies": anomalies,
         "tot_duty": round(tot_duty, 2), "tot_ot": round(tot_ot, 2),
+        "tot_punch": tot_punch, "tot_break": round(tot_break, 2),
+        "tot_late": tot_late, "tot_early": tot_early,
     }
     return rows, summary
 
@@ -138,7 +157,7 @@ def build_daily_xlsx(grid: Dict[str, Any], date_s: str) -> bytes:
         c.border = border
     ws.row_dimensions[header_row].height = 22
 
-    widths = [6, 10, 10, 26, 24, 18, 8, 8, 8, 8, 10, 9, 10, 12]
+    widths = [6, 10, 10, 26, 24, 18, 8, 8, 8, 8, 10, 9, 10, 8, 9, 8, 8, 12]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = f"A{header_row + 1}"
@@ -152,7 +171,7 @@ def build_daily_xlsx(grid: Dict[str, Any], date_s: str) -> bytes:
             c.alignment = left if c_i in (4, 5, 6) else center
             if idx % 2 == 1:
                 c.fill = zebra_b
-            if c_i == 14:
+            if c_i == len(_HEADERS):
                 if val == "P":
                     c.font = Font(size=9, bold=True, color="15803D")
                 elif val == "A":
@@ -170,8 +189,13 @@ def build_daily_xlsx(grid: Dict[str, Any], date_s: str) -> bytes:
             row=r, column=13,
             value=_hhmm(summary["tot_duty"] + summary["tot_ot"]),
         ).font = total_font
+        # Iter 236 — overhaul column footers.
+        ws.cell(row=r, column=14, value=summary["tot_punch"]).font = total_font
+        ws.cell(row=r, column=15, value=_hhmm(summary["tot_break"])).font = total_font
+        ws.cell(row=r, column=16, value=summary["tot_late"]).font = total_font
+        ws.cell(row=r, column=17, value=summary["tot_early"]).font = total_font
         ws.cell(
-            row=r, column=14,
+            row=r, column=len(_HEADERS),
             value=f"P:{summary['present']} A:{summary['absent']}",
         ).font = total_font
         for c_i in range(1, n_cols + 1):
@@ -223,12 +247,15 @@ def build_daily_pdf(grid: Dict[str, Any], date_s: str) -> bytes:
         f"Employees: {len(rows)}", "", "", "", "", "", "", "", "", "",
         _hhmm(summary["tot_duty"]), _hhmm(summary["tot_ot"]),
         _hhmm(summary["tot_duty"] + summary["tot_ot"]),
+        str(summary["tot_punch"]), _hhmm(summary["tot_break"]),
+        str(summary["tot_late"]), str(summary["tot_early"]),
         f"P:{summary['present']} A:{summary['absent']}",
     ])
 
     col_w = [
-        10 * mm, 13 * mm, 13 * mm, 42 * mm, 38 * mm, 26 * mm,
-        13 * mm, 13 * mm, 13 * mm, 13 * mm, 15 * mm, 13 * mm, 15 * mm, 20 * mm,
+        10 * mm, 13 * mm, 13 * mm, 34 * mm, 30 * mm, 24 * mm,
+        13 * mm, 13 * mm, 13 * mm, 13 * mm, 15 * mm, 13 * mm, 15 * mm,
+        11 * mm, 13 * mm, 11 * mm, 11 * mm, 14 * mm,
     ]
     style = [
         ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor("#1F5254")),
