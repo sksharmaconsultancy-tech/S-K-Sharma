@@ -35,6 +35,9 @@ type Device = {
   online?: boolean;
   locked?: boolean;            // Iter 261 — portal-side lock
   gmt_offset?: string;         // Iter 263 — machine time zone (e.g. +05:30)
+  last_source_ip?: string;     // SEC-002 — last IP the machine pushed from
+  ip_lock?: boolean;           // SEC-002 — reject other IPs when true
+  ip_allowlist?: string[];     // SEC-002 — allowed source IPs
   templates_captured?: number; // Iter 261 — FP/Face templates captured
   last_seen_at?: string | null;
   last_push_at?: string | null;
@@ -421,6 +424,37 @@ export default function BiometricDevicesScreen() {
       alertUser("Failed", e?.message || "Please try again.");
     }
   };
+  // SEC-002 — lock a device to its current source IP (or unlock).
+  const toggleIpLock = async (d: Device) => {
+    const locking = !d.ip_lock;
+    if (locking && !d.last_source_ip) {
+      alertUser(
+        "No IP seen yet",
+        "Wait until this machine has pushed at least once, then lock it to that IP.",
+      );
+      return;
+    }
+    const ok = Platform.OS === "web"
+      ? window.confirm(
+          locking
+            ? `Lock "${d.name}" to IP ${d.last_source_ip}?\n\nPunches/commands from any other IP will be rejected. Use this once you've confirmed this is your machine's stable IP.`
+            : `Remove the IP lock on "${d.name}" and accept punches from any IP again?`,
+        )
+      : true;
+    if (!ok) return;
+    try {
+      const r = await api<{ message: string }>(
+        `/biometric/devices/${d.device_id}/ip-lock`,
+        { method: "POST", body: { mode: locking ? "lock" : "unlock" } },
+      );
+      alertUser(locking ? "IP locked" : "IP unlocked", r.message);
+      load();
+    } catch (e: any) {
+      alertUser("Failed", e?.message || "Please try again.");
+    }
+  };
+
+
   const toggleLock = async (d: Device) => {
     const locking = !d.locked;
     const ok = Platform.OS === "web"
@@ -646,6 +680,7 @@ export default function BiometricDevicesScreen() {
                 onFetchTemplates={() => fetchTemplates(d)}
                 onSyncTemplates={() => syncTemplates(d)}
                 onToggleLock={() => toggleLock(d)}
+                onToggleIpLock={() => toggleIpLock(d)}
               />
             ))
           )}
@@ -996,6 +1031,7 @@ function DeviceCard({
   onFetchTemplates,
   onSyncTemplates,
   onToggleLock,
+  onToggleIpLock,
 }: {
   device: Device;
   busy: boolean;
@@ -1010,6 +1046,7 @@ function DeviceCard({
   onFetchTemplates: () => void;
   onSyncTemplates: () => void;
   onToggleLock: () => void;
+  onToggleIpLock: () => void;
 }) {
   const kindColor = device.kind === "in" ? colors.brandPrimary : colors.accent;
   return (
@@ -1045,6 +1082,10 @@ function DeviceCard({
         <Fact label="COMPANY" value={companyName} />
         <Fact label="LOCATION" value={device.location || "—"} />
         <Fact label="GMT" value={device.gmt_offset || "+05:30"} />
+        <Fact
+          label="SOURCE IP"
+          value={device.ip_lock ? `${device.last_source_ip || "—"} 🔒` : (device.last_source_ip || "—")}
+        />
         <Fact
           label="LAST SEEN"
           value={device.last_seen_at ? fmtRelative(device.last_seen_at) : "Never"}
@@ -1128,6 +1169,20 @@ function DeviceCard({
           />
           <Text style={device.locked ? styles.actGhostTxt : styles.actDangerTxt}>
             {device.locked ? "Unlock device" : "Lock device"}
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={onToggleIpLock}
+          style={[styles.actBtn, styles.actGhost]}
+          testID={`cmd-ip-lock-${device.device_id}`}
+        >
+          <Ionicons
+            name={device.ip_lock ? "shield-checkmark" : "shield-outline"}
+            size={14}
+            color={device.ip_lock ? "#16A34A" : colors.brandPrimary}
+          />
+          <Text style={styles.actGhostTxt}>
+            {device.ip_lock ? "Unlock IP" : "Lock to IP"}
           </Text>
         </Pressable>
       </View>

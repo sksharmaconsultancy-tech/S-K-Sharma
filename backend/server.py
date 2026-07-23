@@ -4280,9 +4280,14 @@ import random as _random
 import hashlib as _hashlib
 
 OTP_TTL_MINUTES = 10
-# DEV mode: return the OTP in the API response so users can test without
-# Twilio / email provider. In production, swap to real SMS/email send.
-OTP_DEV_MODE = os.getenv("OTP_DEV_MODE", "1") == "1"
+# SEC-001 fix (Iter 264): the one-time code must NEVER be returned in the
+# API response — doing so let anyone request a code for any email (incl.
+# super-admin) and log in. Dev echo now defaults OFF and, even when on,
+# only a masked hint is ever returned (see otp_request). Set OTP_DEV_MODE=1
+# in the environment ONLY for local testing.
+OTP_DEV_MODE = os.getenv("OTP_DEV_MODE", "0") == "1"
+# SEC-001: minimum seconds between OTP requests for the same identifier.
+OTP_RESEND_COOLDOWN_SEC = 45
 
 
 def _hash_otp(code: str) -> str:
@@ -4396,6 +4401,25 @@ async def otp_request(payload: OtpRequest):
 
     code = f"{_random.randint(0, 999999):06d}"
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=OTP_TTL_MINUTES)
+    # SEC-001 fix: throttle resends per identifier to blunt code-guessing
+    # and email/SMS flooding.
+    prev = await db.otp_codes.find_one({"identifier": ident, "channel": payload.channel})
+    if prev and prev.get("created_at"):
+        prev_at = prev["created_at"]
+        if isinstance(prev_at, str):
+            try:
+                prev_at = datetime.fromisoformat(prev_at)
+            except ValueError:
+                prev_at = None
+        if prev_at is not None:
+            if prev_at.tzinfo is None:
+                prev_at = prev_at.replace(tzinfo=timezone.utc)
+            wait = OTP_RESEND_COOLDOWN_SEC - (datetime.now(timezone.utc) - prev_at).total_seconds()
+            if wait > 0:
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Please wait {int(wait) + 1}s before requesting another code.",
+                )
     await db.otp_codes.update_one(
         {"identifier": ident, "channel": payload.channel},
         {"$set": {
@@ -4408,7 +4432,8 @@ async def otp_request(payload: OtpRequest):
         }},
         upsert=True,
     )
-    logger.info(f"[OTP] {payload.channel} {ident} -> {code} (expires {expires_at.isoformat()})")
+    # SEC-001 fix: never log the plaintext code.
+    logger.info(f"[OTP] issued {payload.channel} code for {ident} (expires {expires_at.isoformat()})")
 
     resp: dict = {"ok": True, "expires_in": OTP_TTL_MINUTES * 60}
 
@@ -4417,8 +4442,6 @@ async def otp_request(payload: OtpRequest):
     if payload.channel == "email":
         delivery = await _send_otp_email(ident, code)
     else:
-        # SMS delivery not wired yet — keep it in logs so ops can trace,
-        # and rely on dev_code in the response.
         delivery["error"] = "sms_not_configured"
 
     resp["delivered"] = delivery["delivered"]
@@ -4427,16 +4450,11 @@ async def otp_request(payload: OtpRequest):
     if delivery.get("error"):
         resp["delivery_error"] = delivery["error"]
 
-    # In DEV mode (or if delivery failed) we still return the code so testing
-    # can proceed without being locked out. Once you verify a custom domain
-    # in Resend and set OTP_DEV_MODE=0, this fallback disappears.
-    if OTP_DEV_MODE or not delivery["delivered"]:
-        resp["dev_code"] = code
-        resp["dev_note"] = (
-            "Delivered via email"
-            if delivery["delivered"]
-            else "Email delivery failed — showing code here so you can still sign in. Check /var/log for details."
-        )
+    # SEC-001 fix: the code is NEVER returned in the response. In opt-in
+    # local dev mode we return only a masked hint (last 2 digits) so a
+    # developer can cross-check the logs — never the full code.
+    if OTP_DEV_MODE:
+        resp["dev_hint"] = f"code ends in ...{code[-2:]}"
     return resp
 
 
@@ -4491,6 +4509,16 @@ async def otp_verify(payload: OtpVerify):
     else:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
         role = _resolve_role_on_signup(ident if payload.channel == "email" else "")
+        # SEC-001 fix: never auto-create a privileged account through an
+        # unauthenticated OTP flow. Admin accounts must be provisioned
+        # explicitly. Only self-service employee accounts may be created.
+        if role != "employee":
+            logger.warning(
+                f"[OTP verify] blocked privileged auto-provision for {ident} (role={role})")
+            raise HTTPException(
+                status_code=403,
+                detail="This account must be set up by an administrator.",
+            )
         display_name = ident if payload.channel == "email" else f"User {ident[-4:]}"
         user_doc = {
             "user_id": user_id,

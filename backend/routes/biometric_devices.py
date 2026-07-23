@@ -447,11 +447,47 @@ async def _get_device_or_404(sn: str) -> dict:
     return device
 
 
+def _client_ip(request: Request) -> Optional[str]:
+    """Best-effort real client IP behind the k8s / nginx proxy."""
+    xff = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
+    if xff:
+        return xff.split(",")[0].strip()
+    xr = request.headers.get("x-real-ip")
+    if xr:
+        return xr.strip()
+    return request.client.host if request.client else None
+
+
+async def _record_source_ip(sn: str, ip: Optional[str]) -> None:
+    """SEC-002 — remember where a device's traffic comes from, for the
+    admin's visibility and the optional per-device IP lock."""
+    if not ip:
+        return
+    await db.biometric_devices.update_one(
+        {"serial_number": sn},
+        {"$set": {"last_source_ip": ip},
+         "$addToSet": {"seen_ips": ip}},
+    )
+
+
+def _ip_blocked(device: dict, ip: Optional[str]) -> bool:
+    """SEC-002 — when the admin has locked a device to specific IP(s),
+    reject traffic from anywhere else. Default (no lock) allows all, so
+    existing live machines keep working untouched."""
+    if not device.get("ip_lock"):
+        return False
+    allow = device.get("ip_allowlist") or []
+    if not allow:
+        return False
+    return ip not in allow
+
+
 # ---------------------------------------------------------------------------
 # iClock endpoints (called by the ZKTeco firmware — no auth header)
 # ---------------------------------------------------------------------------
 @router.get("/iclock/cdata")
 async def iclock_handshake(
+    request: Request,
     SN: str = Query(..., description="Device serial number"),
     options: Optional[str] = Query(None),
     pushver: Optional[str] = Query(None),
@@ -464,6 +500,7 @@ async def iclock_handshake(
     turns ADMS into a *real-time* channel: the device holds an HTTP long-poll
     open and pushes each new punch within a couple of seconds."""
     device = await _get_device_or_404(SN)
+    await _record_source_ip(SN, _client_ip(request))
     await db.biometric_devices.update_one(
         {"serial_number": SN},
         {"$set": {
@@ -510,11 +547,27 @@ async def iclock_push(
     `attendance` collection the mobile app writes to — so reports blend both
     sources natively."""
     device = await _get_device_or_404(SN)
+    src_ip = _client_ip(request)
+    await _record_source_ip(SN, src_ip)
     raw_bytes = await request.body()
     raw = raw_bytes.decode("utf-8", errors="ignore")
     inserted = 0
     skipped = 0
     reasons: List[str] = []
+    # SEC-002 — reject payloads from unauthorized IPs when the device is
+    # IP-locked (park for audit, never ingest into attendance/payroll).
+    if _ip_blocked(device, src_ip):
+        logger.warning(
+            "[zkteco][SEC] push from unauthorized IP %s for SN=%s — parked, not ingested",
+            src_ip, SN)
+        await db.biometric_locked_punches.insert_one({
+            "device_serial": SN,
+            "raw": raw[:8000],
+            "source_ip": src_ip,
+            "reason": "ip_blocked",
+            "received_at": _now_iso_z(),
+        })
+        return PlainTextResponse("OK: 0\n")
     if (table or "").upper() == "ATTLOG":
         if device.get("locked"):
             # Iter 261 — device is LOCKED from the portal: punches are
@@ -595,6 +648,7 @@ async def iclock_push(
 
 @router.get("/iclock/getrequest")
 async def iclock_getrequest(
+    request: Request,
     SN: str = Query(...),
     INFO: Optional[str] = Query(None),
 ):
@@ -608,6 +662,15 @@ async def iclock_getrequest(
     try:
         device = await _get_device_or_404(SN)
     except HTTPException:
+        return PlainTextResponse("OK\n")
+    src_ip = _client_ip(request)
+    await _record_source_ip(SN, src_ip)
+    # SEC-002 — if the device is IP-locked, never hand queued commands
+    # (which can include template/PII sync) to a caller from a foreign IP.
+    if _ip_blocked(device, src_ip):
+        logger.warning(
+            "[zkteco][SEC] getrequest from unauthorized IP %s for SN=%s — withholding commands",
+            src_ip, SN)
         return PlainTextResponse("OK\n")
     await db.biometric_devices.update_one(
         {"serial_number": SN},
@@ -1034,6 +1097,53 @@ async def biometric_templates_summary(
         r["name"] = names.get(key)
         out.append(r)
     return {"templates": out, "total_templates": sum(r["fp"] + r["face"] for r in out)}
+
+
+@router.post("/biometric/devices/{device_id}/ip-lock")
+async def biometric_ip_lock(
+    device_id: str,
+    payload: Optional[dict] = Body(None),
+    authorization: Optional[str] = Header(None),
+):
+    """SEC-002 — lock a device so ONLY its current source IP (or a
+    supplied allowlist) may push punches / receive commands; or unlock it.
+    Body: { mode: 'lock'|'unlock', ips?: ["1.2.3.4", ...] }."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    device = await db.biometric_devices.find_one({"device_id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    if admin["role"] == "company_admin" and device.get("company_id") != admin["company_id"]:
+        raise HTTPException(status_code=403, detail="Not authorised for this device")
+    payload = payload or {}
+    mode = str(payload.get("mode") or "lock")
+    if mode == "unlock":
+        await db.biometric_devices.update_one(
+            {"device_id": device_id},
+            {"$set": {"ip_lock": False}},
+        )
+        return {"ok": True, "ip_lock": False,
+                "message": "IP lock removed — punches accepted from any IP again."}
+    ips = payload.get("ips") or []
+    if not ips:
+        cur = device.get("last_source_ip")
+        if not cur:
+            raise HTTPException(
+                status_code=400,
+                detail="No source IP seen yet — let the machine push once, "
+                       "then lock it to that IP.")
+        ips = [cur]
+    await db.biometric_devices.update_one(
+        {"device_id": device_id},
+        {"$set": {"ip_lock": True, "ip_allowlist": ips}},
+    )
+    return {
+        "ok": True, "ip_lock": True, "ip_allowlist": ips,
+        "message": (
+            f"Device locked to {', '.join(ips)} — punches/commands from any "
+            "other IP are now rejected."
+        ),
+    }
 
 
 @router.get("/biometric/live-feed")
