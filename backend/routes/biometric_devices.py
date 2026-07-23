@@ -17,6 +17,7 @@ maps /api/* to the backend. When deploying, configure the device with:
 import asyncio
 import base64
 import logging
+import random
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -277,6 +278,119 @@ async def _ingest_attphoto(raw: bytes, device: dict) -> int:
     return 1
 
 
+# ---------------------------------------------------------------------------
+# Iter 261 — Phase 2: fingerprint / face template capture & cross-device sync.
+# ---------------------------------------------------------------------------
+_TMPL_LINE_RE = re.compile(r"^(FP|FACE|BIODATA)\s+", re.IGNORECASE)
+
+
+def _kv_parse(chunk: str) -> dict:
+    """Parse 'K=V<TAB>K=V…' (or '&'-separated) into a lower-cased dict."""
+    out: dict = {}
+    parts = re.split(r"[\t&]", chunk)
+    for p in parts:
+        if "=" not in p:
+            continue
+        k, v = p.split("=", 1)
+        out[k.strip().lower()] = v.strip()
+    return out
+
+
+async def _ingest_templates(raw: str, device: dict) -> int:
+    """Capture fingerprint (FP / FINGERTMP), face (FACE) and unified
+    bio-data (BIODATA — newer firmware, Type 1=FP, 2/8/9=Face) templates
+    pushed by the machine, so admins can re-push ("sync") them to any
+    other machine of the firm. Upserts into ``db.biometric_templates``
+    keyed by (company_id, pin, kind, slot)."""
+    saved = 0
+    for line in (raw or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = _TMPL_LINE_RE.match(line)
+        if m:
+            prefix = m.group(1).upper()
+            fields = _kv_parse(line[m.end():])
+        elif line.lower().startswith("pin=") and "tmp=" in line.lower():
+            # table=BIODATA bodies sometimes omit the leading keyword.
+            prefix = "BIODATA"
+            fields = _kv_parse(line)
+        else:
+            continue
+        pin = fields.get("pin")
+        tmp = fields.get("tmp")
+        if not pin or not tmp:
+            continue
+        if prefix == "FP":
+            kind, slot = "fp", fields.get("fid") or "0"
+        elif prefix == "FACE":
+            kind, slot = "face", fields.get("fid") or "0"
+        else:  # BIODATA
+            btype = fields.get("type") or ""
+            kind = "fp" if btype == "1" else "face"
+            slot = f"{fields.get('no') or '0'}:{fields.get('index') or '0'}"
+        doc = {
+            "company_id": device.get("company_id"),
+            "pin": pin,
+            "kind": kind,
+            "slot": slot,
+            "wire": prefix.lower(),          # fp / face / biodata push format
+            "size": fields.get("size"),
+            "valid": fields.get("valid") or "1",
+            "tmp": tmp,
+            # BIODATA extras (needed to re-push in the same wire format)
+            "no": fields.get("no"),
+            "index": fields.get("index"),
+            "duress": fields.get("duress") or "0",
+            "bio_type": fields.get("type"),
+            "major_ver": fields.get("majorver"),
+            "minor_ver": fields.get("minorver"),
+            "format": fields.get("format") or "0",
+            "device_serial": device.get("serial_number"),
+            "captured_at": _now_iso_z(),
+        }
+        await db.biometric_templates.update_one(
+            {"company_id": doc["company_id"], "pin": pin,
+             "kind": kind, "slot": slot},
+            {"$set": doc},
+            upsert=True,
+        )
+        saved += 1
+    if saved:
+        await db.biometric_devices.update_one(
+            {"serial_number": device["serial_number"]},
+            {"$set": {"last_template_at": _now_iso_z()},
+             "$inc": {"templates_captured": saved}},
+        )
+        logger.info("[zkteco] SN=%s captured %d template(s)",
+                    device.get("serial_number"), saved)
+    return saved
+
+
+def _template_to_cmd(t: dict) -> str:
+    """Rebuild the exact DATA UPDATE wire command for a stored template."""
+    if t.get("wire") == "biodata":
+        return (
+            "DATA UPDATE BIODATA "
+            f"Pin={t['pin']}\tNo={t.get('no') or '0'}\tIndex={t.get('index') or '0'}"
+            f"\tValid={t.get('valid') or '1'}\tDuress={t.get('duress') or '0'}"
+            f"\tType={t.get('bio_type') or ('1' if t.get('kind') == 'fp' else '9')}"
+            f"\tMajorVer={t.get('major_ver') or '0'}\tMinorVer={t.get('minor_ver') or '0'}"
+            f"\tFormat={t.get('format') or '0'}\tTmp={t['tmp']}"
+        )
+    if t.get("kind") == "face":
+        return (
+            "DATA UPDATE FACE "
+            f"PIN={t['pin']}\tFID={t.get('slot') or '0'}\tSIZE={t.get('size') or len(t['tmp'])}"
+            f"\tVALID={t.get('valid') or '1'}\tTMP={t['tmp']}"
+        )
+    return (
+        "DATA UPDATE FINGERTMP "
+        f"PIN={t['pin']}\tFID={t.get('slot') or '0'}\tSize={t.get('size') or len(t['tmp'])}"
+        f"\tValid={t.get('valid') or '1'}\tTMP={t['tmp']}"
+    )
+
+
 async def _get_device_or_404(sn: str) -> dict:
     device = await db.biometric_devices.find_one(
         {"serial_number": sn}, {"_id": 0}
@@ -362,17 +476,28 @@ async def iclock_push(
     skipped = 0
     reasons: List[str] = []
     if (table or "").upper() == "ATTLOG":
-        for line in raw.splitlines():
-            ok, reason = await _ingest_attlog_line(line, device)
-            if ok:
-                if reason == "duplicate_ignored":
-                    skipped += 1
+        if device.get("locked"):
+            # Iter 261 — device is LOCKED from the portal: punches are
+            # parked for audit and NOT ingested into attendance.
+            await db.biometric_locked_punches.insert_one({
+                "device_serial": SN,
+                "raw": raw[:8000],
+                "received_at": _now_iso_z(),
+            })
+            skipped = len([ln for ln in raw.splitlines() if ln.strip()])
+            reasons.append("device_locked")
+        else:
+            for line in raw.splitlines():
+                ok, reason = await _ingest_attlog_line(line, device)
+                if ok:
+                    if reason == "duplicate_ignored":
+                        skipped += 1
+                    else:
+                        inserted += 1
                 else:
-                    inserted += 1
-            else:
-                skipped += 1
-                if reason:
-                    reasons.append(reason)
+                    skipped += 1
+                    if reason:
+                        reasons.append(reason)
     elif (table or "").upper() == "ATTPHOTO":
         # Iter 250 — punch photos from the machine (attached to the punch).
         try:
@@ -380,7 +505,14 @@ async def iclock_push(
         except Exception:
             logger.warning("[zkteco] ATTPHOTO ingest failed", exc_info=True)
     else:
-        # OPERLOG / ATTPHOTO / EnrollUser etc. — just log the receipt.
+        # Iter 261 — Phase 2: OPERLOG / BIODATA pushes may carry enrolled
+        # fingerprint / face templates — capture them for cross-device sync.
+        if (table or "").upper() in ("OPERLOG", "BIODATA"):
+            try:
+                await _ingest_templates(raw, device)
+            except Exception:
+                logger.warning("[zkteco] template ingest failed", exc_info=True)
+        # OPERLOG / EnrollUser etc. — log the receipt.
         await db.biometric_operlog.insert_one({
             "device_serial": SN,
             "table": table,
@@ -536,7 +668,11 @@ async def iclock_devicecmd(request: Request, SN: str = Query(...)):
 # Iter 258 — Centralized device management: remote commands + employee push.
 # ---------------------------------------------------------------------------
 async def _queue_cmd(serial: str, command: str, queued_by: str, label: str) -> str:
-    cmd_id = str(int(datetime.now(timezone.utc).timestamp() * 1000))[-9:]
+    # Iter 261 fix — ms-timestamp alone collides when many commands are
+    # queued in the same millisecond (template sync); add a random suffix
+    # so every command gets a UNIQUE numeric ID for devicecmd correlation.
+    cmd_id = (str(int(datetime.now(timezone.utc).timestamp() * 1000))[-9:]
+              + str(random.randint(100, 999)))
     await db.biometric_device_cmds.insert_one({
         "cmd_id": cmd_id,
         "device_serial": serial,
@@ -554,15 +690,22 @@ _REMOTE_ACTIONS = {
     "sync_data": ("CHECK", "Synchronize data"),
     "refresh_info": ("INFO", "Refresh device information"),
     "clear_attlog": ("CLEAR LOG", "Clear attendance logs on device"),
+    # Iter 261 — Phase 2: remote door unlock (access-control relay).
+    "unlock_door": ("AC_UNLOCK", "Unlock door (relay)"),
 }
 
 
-def _zk_datetime_now() -> int:
-    """ZKTeco option-encoding of the CURRENT IST wall-clock time:
+def _zk_encode_datetime(dt: datetime) -> int:
+    """ZKTeco option-encoding of a wall-clock datetime:
     ((y-2000)*12*31 + (m-1)*31 + (d-1)) * 86400 + h*3600 + min*60 + s."""
+    return (((dt.year - 2000) * 12 * 31 + (dt.month - 1) * 31 + (dt.day - 1)) * 86400
+            + dt.hour * 3600 + dt.minute * 60 + dt.second)
+
+
+def _zk_datetime_now() -> int:
+    """Encoding of the CURRENT IST wall-clock time."""
     ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
-    return (((ist.year - 2000) * 12 * 31 + (ist.month - 1) * 31 + (ist.day - 1)) * 86400
-            + ist.hour * 3600 + ist.minute * 60 + ist.second)
+    return _zk_encode_datetime(ist)
 
 
 @router.post("/biometric/devices/{device_id}/command")
@@ -577,18 +720,62 @@ async def send_device_command(
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     action = str(payload.get("action") or "")
-    if action not in _REMOTE_ACTIONS and action != "sync_time":
+    if action not in _REMOTE_ACTIONS and action not in ("sync_time", "lock", "unlock"):
         raise HTTPException(status_code=400, detail=f"Unknown action '{action}'")
     device = await db.biometric_devices.find_one({"device_id": device_id}, {"_id": 0})
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     if admin["role"] == "company_admin" and device.get("company_id") != admin["company_id"]:
         raise HTTPException(status_code=403, detail="Not authorised for this device")
+    if action in ("lock", "unlock"):
+        # Iter 261 — Phase 2: portal-side device LOCK. While locked, every
+        # punch the machine pushes is parked (audit trail) instead of
+        # entering attendance — effectively taking the machine out of
+        # service without touching the hardware.
+        locked = action == "lock"
+        await db.biometric_devices.update_one(
+            {"device_id": device_id},
+            {"$set": {"locked": locked,
+                      "locked_by": admin["user_id"] if locked else None,
+                      "locked_at": _now_iso_z() if locked else None}},
+        )
+        return {
+            "ok": True, "locked": locked,
+            "message": (
+                "Device LOCKED — punches from this machine are parked and "
+                "will NOT enter attendance until you unlock it."
+                if locked else
+                "Device UNLOCKED — punches flow into attendance again."
+            ),
+        }
     if action == "sync_time":
-        # Iter 259 (user request) — set the machine's DATE & TIME to the
-        # current Indian (IST) wall-clock time.
-        cmd = f"SET OPTION DateTime={_zk_datetime_now()}"
-        label = "Set device date & time (IST)"
+        # Iter 259 — set the machine's DATE & TIME. Iter 262 (user
+        # request): the admin can EDIT the exact date & time in the portal
+        # dialog before applying; when no date/time is supplied we fall
+        # back to the current Indian (IST) wall-clock time.
+        d_raw = str(payload.get("date") or "").strip()   # DD-MM-YYYY
+        t_raw = str(payload.get("time") or "").strip()   # HH:MM[:SS]
+        target = None
+        if d_raw or t_raw:
+            for dfmt in ("%d-%m-%Y", "%Y-%m-%d"):
+                for tfmt in ("%H:%M:%S", "%H:%M"):
+                    try:
+                        target = datetime.strptime(f"{d_raw} {t_raw}", f"{dfmt} {tfmt}")
+                        break
+                    except ValueError:
+                        continue
+                if target:
+                    break
+            if target is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid date/time — use DD-MM-YYYY and HH:MM (24h)")
+        if target is not None:
+            cmd = f"SET OPTION DateTime={_zk_encode_datetime(target)}"
+            label = f"Set device date & time to {target.strftime('%d-%b-%Y %H:%M:%S')}"
+        else:
+            cmd = f"SET OPTION DateTime={_zk_datetime_now()}"
+            label = "Set device date & time (current IST)"
     else:
         cmd, label = _REMOTE_ACTIONS[action]
     cmd_id = await _queue_cmd(device["serial_number"], cmd, admin["user_id"], label)
@@ -659,6 +846,193 @@ async def push_employees_to_devices(
             "Names appear on the device within a minute while it is online."
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# Iter 261 — Phase 2: fingerprint / face template sync + live dashboard.
+# ---------------------------------------------------------------------------
+@router.post("/biometric/devices/{device_id}/fetch-templates")
+async def fetch_templates_from_device(
+    device_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Ask the machine to upload its user database + fingerprint / face
+    templates to the portal (DATA QUERY commands). Captured templates are
+    stored per employee PIN and can then be synced to any other machine."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    device = await db.biometric_devices.find_one({"device_id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    if admin["role"] == "company_admin" and device.get("company_id") != admin["company_id"]:
+        raise HTTPException(status_code=403, detail="Not authorised for this device")
+    sn = device["serial_number"]
+    for cmd, label in (
+        ("DATA QUERY USERINFO", "Query user database"),
+        ("DATA QUERY FINGERTMP", "Query fingerprint templates"),
+        ("DATA QUERY BIODATA", "Query face / bio-data templates"),
+    ):
+        await _queue_cmd(sn, cmd, admin["user_id"], label)
+    return {
+        "ok": True,
+        "message": (
+            "Template fetch queued — the machine uploads its users, "
+            "fingerprints and face data within a minute while online. "
+            "Then use 'Sync FP/Face' on another machine to copy them over."
+        ),
+    }
+
+
+@router.post("/biometric/devices/{device_id}/sync-templates")
+async def sync_templates_to_device(
+    device_id: str,
+    payload: Optional[dict] = Body(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Push ALL stored fingerprint / face templates of the firm to this
+    machine (skipping ones originally captured from it). Optional body:
+    { user_id } to sync a single employee only."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    device = await db.biometric_devices.find_one({"device_id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    if admin["role"] == "company_admin" and device.get("company_id") != admin["company_id"]:
+        raise HTTPException(status_code=403, detail="Not authorised for this device")
+    company_id = device.get("company_id")
+    tq: dict = {"company_id": company_id}
+    payload = payload or {}
+    if payload.get("user_id"):
+        u = await db.users.find_one(
+            {"user_id": payload["user_id"]}, {"_id": 0, "bio_code": 1})
+        pin = str((u or {}).get("bio_code") or "").strip()
+        if not pin:
+            raise HTTPException(
+                status_code=400,
+                detail="This employee has no Bio Code — set it in the "
+                       "Employee Master first.")
+        tq["pin"] = pin
+    templates = await db.biometric_templates.find(tq, {"_id": 0}).to_list(20000)
+    templates = [t for t in templates
+                 if t.get("device_serial") != device["serial_number"]]
+    if not templates:
+        raise HTTPException(
+            status_code=404,
+            detail="No stored templates to sync — first press 'Fetch "
+                   "FP/Face' on the machine where employees are enrolled.",
+        )
+    sn = device["serial_number"]
+    # Push USERINFO (name) once per PIN so the template lands on a user.
+    pins = sorted({t["pin"] for t in templates})
+    emp_by_pin = {}
+    async for u in db.users.find(
+            {"company_id": company_id, "bio_code": {"$in": pins}},
+            {"_id": 0, "bio_code": 1, "name": 1}):
+        emp_by_pin[str(u["bio_code"]).strip()] = (u.get("name") or "")[:24].replace("\t", " ")
+    queued = 0
+    for pin in pins:
+        nm = emp_by_pin.get(pin, "")
+        await _queue_cmd(
+            sn, f"DATA UPDATE USERINFO PIN={pin}\tName={nm}\tPri=0",
+            admin["user_id"], f"Sync user {nm or pin}")
+        queued += 1
+    for t in templates:
+        await _queue_cmd(
+            sn, _template_to_cmd(t), admin["user_id"],
+            f"Sync {t.get('kind')} template PIN {t.get('pin')}")
+        queued += 1
+    return {
+        "ok": True, "queued": queued,
+        "employees": len(pins), "templates": len(templates),
+        "message": (
+            f"{len(templates)} template(s) for {len(pins)} employee(s) "
+            f"queued to '{device.get('name')}' — they install within a "
+            "minute while the machine is online."
+        ),
+    }
+
+
+@router.get("/biometric/templates-summary")
+async def biometric_templates_summary(
+    company_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Per-employee count of stored fingerprint / face templates."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    q: dict = {}
+    if admin["role"] == "company_admin":
+        q["company_id"] = admin["company_id"]
+    elif company_id:
+        q["company_id"] = company_id
+    rows: dict = {}
+    async for t in db.biometric_templates.find(q, {"_id": 0, "tmp": 0}):
+        key = (t.get("company_id"), t.get("pin"))
+        r = rows.setdefault(key, {
+            "company_id": t.get("company_id"), "pin": t.get("pin"),
+            "fp": 0, "face": 0, "devices": set(), "last_captured": "",
+        })
+        r["fp" if t.get("kind") == "fp" else "face"] += 1
+        if t.get("device_serial"):
+            r["devices"].add(t["device_serial"])
+        if (t.get("captured_at") or "") > r["last_captured"]:
+            r["last_captured"] = t.get("captured_at") or ""
+    out = []
+    pins = [r["pin"] for r in rows.values()]
+    names = {}
+    if pins:
+        async for u in db.users.find(
+                {"bio_code": {"$in": pins}}, {"_id": 0, "bio_code": 1, "name": 1, "company_id": 1}):
+            names[(u.get("company_id"), str(u.get("bio_code")).strip())] = u.get("name")
+    for key, r in sorted(rows.items(), key=lambda kv: kv[0][1] or ""):
+        r["devices"] = sorted(r["devices"])
+        r["name"] = names.get(key)
+        out.append(r)
+    return {"templates": out, "total_templates": sum(r["fp"] + r["face"] for r in out)}
+
+
+@router.get("/biometric/live-feed")
+async def biometric_live_feed(
+    company_id: Optional[str] = Query(None),
+    limit: int = Query(30, ge=1, le=100),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 261 — Live Dashboard feed: the most recent machine punches
+    (joined with employee + device names). The frontend refreshes this on
+    every `attendance.zk-pushed` WebSocket event + a polling fallback."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    q: dict = {"source": {"$regex": "^zkteco:"}}
+    if admin["role"] == "company_admin":
+        q["company_id"] = admin["company_id"]
+    elif company_id:
+        q["company_id"] = company_id
+    recs = await db.attendance.find(
+        q,
+        {"_id": 0, "user_id": 1, "company_id": 1, "date": 1, "kind": 1,
+         "at": 1, "device_serial": 1, "status": 1},
+    ).sort("at", -1).to_list(limit)
+    uids = list({r["user_id"] for r in recs})
+    names = {}
+    if uids:
+        async for u in db.users.find(
+                {"user_id": {"$in": uids}},
+                {"_id": 0, "user_id": 1, "name": 1, "bio_code": 1}):
+            names[u["user_id"]] = u
+    dev_names = {}
+    async for d in db.biometric_devices.find({}, {"_id": 0, "serial_number": 1, "name": 1}):
+        dev_names[d["serial_number"]] = d.get("name")
+    feed = []
+    for r in recs:
+        u = names.get(r["user_id"]) or {}
+        feed.append({
+            "at": r.get("at"), "date": r.get("date"), "kind": r.get("kind"),
+            "status": r.get("status"),
+            "name": u.get("name") or r["user_id"],
+            "bio_code": u.get("bio_code"),
+            "device": dev_names.get(r.get("device_serial")) or r.get("device_serial"),
+        })
+    return {"feed": feed}
 
 
 # ---------------------------------------------------------------------------

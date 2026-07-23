@@ -20,6 +20,7 @@ import { useRouter } from "expo-router";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 import { api, apiBinary } from "@/src/api/client";
+import { useLiveSync } from "@/src/api/live-sync";
 import { useAuth } from "@/src/context/AuthContext";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
 
@@ -32,11 +33,24 @@ type Device = {
   location?: string | null;
   enabled: boolean;
   online?: boolean;
+  locked?: boolean;            // Iter 261 — portal-side lock
+  templates_captured?: number; // Iter 261 — FP/Face templates captured
   last_seen_at?: string | null;
   last_push_at?: string | null;
   model?: string;
   total_pushes?: number;
   total_punches_ingested?: number;
+};
+
+// Iter 261 — Live Dashboard punch feed row.
+type FeedRow = {
+  at: string;
+  date: string;
+  kind: "in" | "out";
+  status?: string;
+  name: string;
+  bio_code?: string | null;
+  device?: string | null;
 };
 
 type Company = { company_id: string; name: string };
@@ -97,6 +111,32 @@ export default function BiometricDevicesScreen() {
     if (!canManage) return;
     load();
   }, [canManage, load]);
+
+  // ---- Iter 261 — Live Dashboard: real-time punch feed + auto status ----
+  const [feed, setFeed] = useState<FeedRow[]>([]);
+  const [feedOpen, setFeedOpen] = useState(true);
+  const loadFeed = useCallback(async () => {
+    try {
+      const r = await api<{ feed: FeedRow[] }>("/biometric/live-feed?limit=25");
+      setFeed(r.feed || []);
+    } catch {}
+  }, []);
+  useEffect(() => {
+    if (!canManage) return;
+    loadFeed();
+    // Polling fallback (15 s) — WS below refreshes instantly on pushes.
+    const t = setInterval(() => {
+      loadFeed();
+      load();
+    }, 15000);
+    return () => clearInterval(t);
+  }, [canManage, loadFeed, load]);
+  useLiveSync(user?.company_id || null, (ev) => {
+    if (ev.type === "attendance.zk-pushed" || ev.type === "punch.created") {
+      loadFeed();
+      load();
+    }
+  });
 
   const openCreate = () => {
     setEditing(null);
@@ -256,7 +296,54 @@ export default function BiometricDevicesScreen() {
   };
 
   // Iter 258 — remote device controls + employee push.
+  // Iter 262 (user request) — "Set date & time" opens an editable dialog;
+  // Apply syncs the chosen date/time to the machine.
+  const [timeDlg, setTimeDlg] = useState<Device | null>(null);
+  const [dlgDate, setDlgDate] = useState("");
+  const [dlgTime, setDlgTime] = useState("");
+  const fillNow = () => {
+    const n = new Date();
+    setDlgDate(
+      `${String(n.getDate()).padStart(2, "0")}-${String(n.getMonth() + 1).padStart(2, "0")}-${n.getFullYear()}`,
+    );
+    setDlgTime(
+      `${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}:${String(n.getSeconds()).padStart(2, "0")}`,
+    );
+  };
+  const openTimeDlg = (d: Device) => {
+    fillNow();
+    setTimeDlg(d);
+  };
+  const applyTime = async () => {
+    if (!timeDlg) return;
+    if (!/^\d{2}-\d{2}-\d{4}$/.test(dlgDate.trim())) {
+      alertUser("Invalid date", "Enter the date as DD-MM-YYYY (e.g. 23-06-2026).");
+      return;
+    }
+    if (!/^\d{2}:\d{2}(:\d{2})?$/.test(dlgTime.trim())) {
+      alertUser("Invalid time", "Enter the time as HH:MM or HH:MM:SS (24-hour).");
+      return;
+    }
+    try {
+      const r = await api<{ message: string }>(
+        `/biometric/devices/${timeDlg.device_id}/command`,
+        {
+          method: "POST",
+          body: { action: "sync_time", date: dlgDate.trim(), time: dlgTime.trim() },
+        },
+      );
+      setTimeDlg(null);
+      alertUser("Date & time queued", r.message);
+    } catch (e: any) {
+      alertUser("Failed", e?.message || "Please try again.");
+    }
+  };
+
   const sendCommand = async (d: Device, action: string) => {
+    if (action === "sync_time") {
+      openTimeDlg(d);
+      return;
+    }
     if (action === "restart") {
       const ok = Platform.OS === "web"
         ? window.confirm(`Restart machine "${d.name}" now?`)
@@ -284,6 +371,58 @@ export default function BiometricDevicesScreen() {
         { method: "POST", body: { company_id: d.company_id, device_id: d.device_id } },
       );
       alertUser("Employee push", r.message);
+    } catch (e: any) {
+      alertUser("Failed", e?.message || "Please try again.");
+    }
+  };
+
+  // ---- Iter 261 — Phase 2: FP/Face template sync + lock/unlock ----------
+  const fetchTemplates = async (d: Device) => {
+    try {
+      const r = await api<{ message: string }>(
+        `/biometric/devices/${d.device_id}/fetch-templates`,
+        { method: "POST", body: {} },
+      );
+      alertUser("Fetch FP/Face", r.message);
+    } catch (e: any) {
+      alertUser("Failed", e?.message || "Please try again.");
+    }
+  };
+  const syncTemplates = async (d: Device) => {
+    const ok = Platform.OS === "web"
+      ? window.confirm(
+          `Install ALL stored fingerprint / face templates of this firm onto "${d.name}"?\n\n` +
+          "Tip: first press 'Fetch FP/Face' on the machine where employees are enrolled.",
+        )
+      : true;
+    if (!ok) return;
+    try {
+      const r = await api<{ message: string }>(
+        `/biometric/devices/${d.device_id}/sync-templates`,
+        { method: "POST", body: {} },
+      );
+      alertUser("Sync FP/Face", r.message);
+    } catch (e: any) {
+      alertUser("Failed", e?.message || "Please try again.");
+    }
+  };
+  const toggleLock = async (d: Device) => {
+    const locking = !d.locked;
+    const ok = Platform.OS === "web"
+      ? window.confirm(
+          locking
+            ? `LOCK "${d.name}"?\n\nPunches from this machine will be parked and will NOT enter attendance until unlocked.`
+            : `Unlock "${d.name}" and accept its punches again?`,
+        )
+      : true;
+    if (!ok) return;
+    try {
+      const r = await api<{ message: string }>(
+        `/biometric/devices/${d.device_id}/command`,
+        { method: "POST", body: { action: locking ? "lock" : "unlock" } },
+      );
+      alertUser(locking ? "Device locked" : "Device unlocked", r.message);
+      load();
     } catch (e: any) {
       alertUser("Failed", e?.message || "Please try again.");
     }
@@ -378,6 +517,55 @@ export default function BiometricDevicesScreen() {
             />
           </View>
 
+          {/* Iter 261 — Live Dashboard: real-time punch feed */}
+          <View style={styles.liveCard} testID="live-dashboard">
+            <Pressable style={styles.liveHead} onPress={() => setFeedOpen(!feedOpen)}>
+              <View style={styles.liveDot} />
+              <Text style={styles.liveTitle}>Live punch feed</Text>
+              <Text style={styles.liveSub}>
+                {devices.filter((d) => d.online).length}/{devices.length} machines online
+              </Text>
+              <Ionicons
+                name={feedOpen ? "chevron-up" : "chevron-down"}
+                size={16}
+                color={colors.onSurfaceTertiary}
+              />
+            </Pressable>
+            {feedOpen && (
+              feed.length === 0 ? (
+                <Text style={styles.liveEmpty}>
+                  No machine punches yet — they appear here in real time.
+                </Text>
+              ) : (
+                feed.slice(0, 12).map((f, i) => (
+                  <View key={`${f.at}-${i}`} style={styles.liveRow}>
+                    <Text style={styles.liveTime}>{fmtFeedTime(f.at)}</Text>
+                    <View
+                      style={[
+                        styles.livePill,
+                        { backgroundColor: f.kind === "in" ? "#DBEAFE" : "#FEF3C7" },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.livePillTxt,
+                          { color: f.kind === "in" ? "#1D4ED8" : "#B45309" },
+                        ]}
+                      >
+                        {f.kind === "in" ? "IN" : "OUT"}
+                      </Text>
+                    </View>
+                    <Text style={styles.liveName} numberOfLines={1}>
+                      {f.name}
+                      {f.bio_code ? `  ·  ${f.bio_code}` : ""}
+                    </Text>
+                    <Text style={styles.liveDevice} numberOfLines={1}>{f.device || "—"}</Text>
+                  </View>
+                ))
+              )
+            )}
+          </View>
+
           {error ? (
             <View style={styles.errBox}>
               <Ionicons name="alert-circle" size={16} color="#fff" />
@@ -440,6 +628,9 @@ export default function BiometricDevicesScreen() {
                 onResync={() => resyncDevice(d)}
                 onCommand={(action) => sendCommand(d, action)}
                 onPushEmployees={() => pushEmployees(d)}
+                onFetchTemplates={() => fetchTemplates(d)}
+                onSyncTemplates={() => syncTemplates(d)}
+                onToggleLock={() => toggleLock(d)}
               />
             ))
           )}
@@ -662,6 +853,59 @@ export default function BiometricDevicesScreen() {
           </ScrollView>
         </View>
       </Modal>
+
+      {/* Iter 262 — Set machine date & time (editable) */}
+      <Modal transparent animationType="fade" visible={!!timeDlg} onRequestClose={() => setTimeDlg(null)}>
+        <Pressable style={styles.backdrop} onPress={() => setTimeDlg(null)} />
+        <View style={styles.timeDlgWrap} pointerEvents="box-none">
+          <View style={styles.timeDlgCard} testID="time-dialog">
+            <View style={styles.guideHead}>
+              <Text style={styles.sheetTitle}>Set machine date & time</Text>
+              <Pressable onPress={() => setTimeDlg(null)} hitSlop={8}>
+                <Ionicons name="close" size={22} color={colors.onSurface} />
+              </Pressable>
+            </View>
+            <Text style={styles.timeDlgSub}>
+              {timeDlg?.name} · SN {timeDlg?.serial_number}. Edit the values below and press
+              Apply — the machine clock updates within seconds while it is online.
+            </Text>
+            <Text style={styles.timeDlgLabel}>Date (DD-MM-YYYY)</Text>
+            <TextInput
+              value={dlgDate}
+              onChangeText={setDlgDate}
+              placeholder="23-06-2026"
+              placeholderTextColor={colors.onSurfaceTertiary}
+              style={styles.timeDlgInput}
+              keyboardType={Platform.OS === "web" ? undefined : "numbers-and-punctuation"}
+              testID="time-dialog-date"
+            />
+            <Text style={styles.timeDlgLabel}>Time (HH:MM:SS — 24 hour)</Text>
+            <TextInput
+              value={dlgTime}
+              onChangeText={setDlgTime}
+              placeholder="09:30:00"
+              placeholderTextColor={colors.onSurfaceTertiary}
+              style={styles.timeDlgInput}
+              keyboardType={Platform.OS === "web" ? undefined : "numbers-and-punctuation"}
+              testID="time-dialog-time"
+            />
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 14 }}>
+              <Pressable onPress={fillNow} style={[styles.actBtn, styles.actGhost, { flex: 1 }]}>
+                <Ionicons name="time-outline" size={14} color={colors.brandPrimary} />
+                <Text style={styles.actGhostTxt}>Use current time</Text>
+              </Pressable>
+              <Pressable
+                onPress={applyTime}
+                style={[styles.addBtn, { flex: 1, marginTop: 0 }]}
+                testID="time-dialog-apply"
+              >
+                <Ionicons name="checkmark-circle" size={16} color={colors.onCta} />
+                <Text style={styles.addBtnTxt}>Apply to machine</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -719,6 +963,9 @@ function DeviceCard({
   onResync,
   onCommand,
   onPushEmployees,
+  onFetchTemplates,
+  onSyncTemplates,
+  onToggleLock,
 }: {
   device: Device;
   busy: boolean;
@@ -730,6 +977,9 @@ function DeviceCard({
   onResync: () => void;
   onCommand: (action: string) => void;
   onPushEmployees: () => void;
+  onFetchTemplates: () => void;
+  onSyncTemplates: () => void;
+  onToggleLock: () => void;
 }) {
   const kindColor = device.kind === "in" ? colors.brandPrimary : colors.accent;
   return (
@@ -748,6 +998,12 @@ function DeviceCard({
           <Text style={styles.sn}>SN · {device.serial_number}</Text>
         </View>
         <View style={styles.dot}>
+          {device.locked ? (
+            <View style={styles.lockedBadge}>
+              <Ionicons name="lock-closed" size={10} color="#fff" />
+              <Text style={styles.lockedBadgeTxt}>LOCKED</Text>
+            </View>
+          ) : null}
           <BlinkDot online={!!device.online} />
           <Text style={[styles.dotTxt, { color: device.online ? "#2563EB" : "#DC2626", fontWeight: "800" }]}>
             {device.online ? "Online" : "Offline"}
@@ -800,6 +1056,48 @@ function DeviceCard({
         >
           <Ionicons name="people-outline" size={14} color={colors.brandPrimary} />
           <Text style={styles.actGhostTxt}>Push employees</Text>
+        </Pressable>
+      </View>
+
+      {/* Iter 261 — Phase 2: FP/Face template sync + lock/unlock + door. */}
+      <View style={styles.actions}>
+        <Pressable
+          onPress={onFetchTemplates}
+          style={[styles.actBtn, styles.actGhost]}
+          testID={`cmd-fetch-tmpl-${device.device_id}`}
+        >
+          <Ionicons name="finger-print-outline" size={14} color={colors.brandPrimary} />
+          <Text style={styles.actGhostTxt}>Fetch FP/Face</Text>
+        </Pressable>
+        <Pressable
+          onPress={onSyncTemplates}
+          style={[styles.actBtn, styles.actGhost]}
+          testID={`cmd-sync-tmpl-${device.device_id}`}
+        >
+          <Ionicons name="cloud-upload-outline" size={14} color={colors.brandPrimary} />
+          <Text style={styles.actGhostTxt}>Sync FP/Face</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => onCommand("unlock_door")}
+          style={[styles.actBtn, styles.actGhost]}
+          testID={`cmd-unlock-door-${device.device_id}`}
+        >
+          <Ionicons name="key-outline" size={14} color={colors.brandPrimary} />
+          <Text style={styles.actGhostTxt}>Unlock door</Text>
+        </Pressable>
+        <Pressable
+          onPress={onToggleLock}
+          style={[styles.actBtn, device.locked ? styles.actGhost : styles.actDanger]}
+          testID={`cmd-lock-${device.device_id}`}
+        >
+          <Ionicons
+            name={device.locked ? "lock-open-outline" : "lock-closed-outline"}
+            size={14}
+            color={device.locked ? colors.brandPrimary : colors.error}
+          />
+          <Text style={device.locked ? styles.actGhostTxt : styles.actDangerTxt}>
+            {device.locked ? "Unlock device" : "Lock device"}
+          </Text>
         </Pressable>
       </View>
 
@@ -999,6 +1297,19 @@ function GuideStep({ n, title, children }: { n: number; title: string; children:
 }
 
 // ---------------------------- helpers ----------------------------
+// Iter 261 — live feed timestamp: "DD-MMM HH:MM" (today → "HH:MM").
+function fmtFeedTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    const today = new Date();
+    if (d.toDateString() === today.toDateString()) return hm;
+    return `${String(d.getDate()).padStart(2, "0")}-${d.toLocaleString("en", { month: "short" })} ${hm}`;
+  } catch {
+    return iso;
+  }
+}
+
 function fmtRelative(iso: string): string {
   try {
     const now = Date.now();
@@ -1130,6 +1441,92 @@ const styles = StyleSheet.create({
   },
   emptyLink: { marginTop: 6 },
   emptyLinkTxt: { color: colors.brandPrimary, fontWeight: "700" },
+
+  // Iter 261 — Live Dashboard styles.
+  liveCard: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+    ...shadow.card,
+  },
+  liveHead: { flexDirection: "row", alignItems: "center", gap: 8 },
+  liveDot: {
+    width: 8, height: 8, borderRadius: 4, backgroundColor: "#16A34A",
+  },
+  liveTitle: { fontWeight: "800", color: colors.onSurface, fontSize: type.md },
+  liveSub: { flex: 1, textAlign: "right", color: colors.onSurfaceTertiary, fontSize: type.xs },
+  liveEmpty: { color: colors.onSurfaceTertiary, fontSize: type.sm, paddingVertical: 10 },
+  liveRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 5,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+  },
+  liveTime: { width: 86, color: colors.onSurfaceSecondary, fontSize: type.xs, fontVariant: ["tabular-nums"] },
+  livePill: { paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: 6 },
+  livePillTxt: { fontSize: 9.5, fontWeight: "800" },
+  liveName: { flex: 1, color: colors.onSurface, fontSize: type.sm, fontWeight: "600" },
+  liveDevice: { maxWidth: 130, color: colors.onSurfaceTertiary, fontSize: type.xs },
+  lockedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "#DC2626",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginBottom: 3,
+  },
+  lockedBadgeTxt: { color: "#fff", fontSize: 9, fontWeight: "800" },
+
+  // Iter 262 — Set date & time dialog.
+  timeDlgWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: spacing.lg,
+  },
+  timeDlgCard: {
+    width: "100%",
+    maxWidth: 440,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    ...shadow.card,
+  },
+  timeDlgSub: {
+    color: colors.onSurfaceSecondary,
+    fontSize: type.sm,
+    marginBottom: 10,
+    lineHeight: 18,
+  },
+  timeDlgLabel: {
+    color: colors.onSurfaceTertiary,
+    fontSize: type.xs,
+    fontWeight: "800",
+    marginTop: 8,
+    marginBottom: 4,
+    textTransform: "uppercase",
+  },
+  timeDlgInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: type.md,
+    color: colors.onSurface,
+    backgroundColor: colors.surfaceSecondary,
+    fontVariant: ["tabular-nums"],
+  },
 
   card: {
     padding: spacing.md,

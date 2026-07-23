@@ -1255,3 +1255,17 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Daily report (utils/daily_attendance.py): XLSX + PDF now include Punches | Break HRS | Late Min | Early Go columns with footer totals.
 - Frontend (attendance-grid.tsx): 5 new summary columns after Extra HRS (Punches, Break HRS, Net HRS, Late Min, Early Go — late/early amber when >0); IN/OUT day cells show compact "L{m} E{m} B{hh:mm}" metrics line.
 - Verified with live Kankani July-2026 data (night-shift VINIT: late/early 0; SATISH day-out 17:05 vs 20:00 → early 175m; break 00:35 detected from 4-punch day) + Playwright screenshot of grid.
+
+## Iter 261 (June 2026) — ZKTeco Device Management Phase 2
+- **FP/Face template sync**: OPERLOG/BIODATA pushes now parsed (`_ingest_templates`) — FP (FID/Size/Valid/TMP), FACE, and unified BIODATA (Type 1=fp, 2/8/9=face) templates upserted into `db.biometric_templates` keyed (company, pin, kind, slot). Wire-format preserved so re-push is exact (`_template_to_cmd`).
+- New endpoints: POST `/biometric/devices/{id}/fetch-templates` (queues DATA QUERY USERINFO/FINGERTMP/BIODATA), POST `/biometric/devices/{id}/sync-templates` (pushes USERINFO + all stored firm templates to target, skips source device; optional {user_id}), GET `/biometric/templates-summary`.
+- **Lock/Unlock device**: portal-side lock (action lock/unlock on the command endpoint) — while locked, ATTLOG pushes are parked into `db.biometric_locked_punches` (audit) and NOT ingested; card shows red LOCKED badge. **Unlock door** button → AC_UNLOCK relay command.
+- **Live Dashboard**: GET `/biometric/live-feed` (recent zkteco punches joined with employee + device names, source ^zkteco: only); frontend "Live punch feed" collapsible panel with IN/OUT pills, live-updating via useLiveSync (attendance.zk-pushed) + 15s polling; "N/N machines online" counter.
+- **Bug fix**: `_queue_cmd` cmd_id collided when many commands queued in the same millisecond (all shared one ID → broken devicecmd correlation). Now ms-timestamp + 3 random digits.
+- E2E verified with simulated devices (TESTSN-A/B): template capture → summary → sync queue → getrequest delivery, lock parks punches / unlock ingests, AC_UNLOCK queued, live feed OK. Test artifacts cleaned from dev DB.
+
+## Iter 262 (June 2026) — Editable "Set date & time" for machines
+- User: clicking Set date & time should OPEN the date/time details to edit; Apply syncs the edited value to the machine.
+- Frontend (biometric-devices.tsx): "Set date & time" now opens a centered dialog (testIDs time-dialog/-date/-time/-apply) pre-filled with current time; inputs DD-MM-YYYY + HH:MM:SS, "Use current time" refill, "Apply to machine" queues the command.
+- Backend: sync_time action accepts optional {date, time} (DD-MM-YYYY / YYYY-MM-DD, HH:MM[:SS]); encodes via _zk_encode_datetime; 400 on invalid; falls back to current IST when omitted.
+- Verified: UI apply queued `SET OPTION DateTime=851165100` which decodes exactly to 25-Jun-2026 10:45:00; bad date rejected 400.
