@@ -7162,18 +7162,14 @@ async def get_company(authorization: Optional[str] = Header(None)):
     company = await db.companies.find_one({"company_id": user["company_id"]}, {"_id": 0})
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
-    # Iter 114 — process-flow gate: employee app punching is allowed only
-    # when the firm's Bio Matrix Attendance is ON. Firms that have never
-    # configured their Salary Process (both toggles off / no firm master)
-    # keep legacy behaviour (punching allowed).
-    fm = await db.firm_masters.find_one(
-        {"company_id": user["company_id"]}, {"_id": 0, "salary_process": 1},
-    )
-    sp = (fm or {}).get("salary_process") or {}
-    configured = bool(sp.get("online_salary")) or bool(sp.get("offline_salary"))
-    company["attendance_punching_enabled"] = (
-        True if not configured else bool(sp.get("bio_matrix_attendance"))
-    )
+    # Iter 265 — USER RULE: attendance punching in the employee PWA is
+    # ALWAYS enabled, regardless of the firm's Bio Matrix Attendance /
+    # Salary-Process configuration. (Previously this was gated so that
+    # firms with Bio Matrix OFF disabled app punching; the owner wants
+    # employees to always be able to punch from the app.) The actual
+    # /attendance/punch endpoint still enforces GPS / geofence / biometric
+    # rules, so this only controls whether the punch UI is shown.
+    company["attendance_punching_enabled"] = True
     return company
 
 
