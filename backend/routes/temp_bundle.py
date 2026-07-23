@@ -55,7 +55,7 @@ async def temp_code_bundle(token: str = Query(...), kind: str = Query("tar")):
                             media_type="text/x-shellscript")
     if kind == "ssl":
         # One-time HTTPS / Let's Encrypt setup script for the VPS.
-        path = "/app/setup_ssl_iter236.sh"
+        path = "/app/setup_ssl_iter236_v2.sh"
         if not os.path.exists(path):
             raise HTTPException(status_code=404, detail="SSL script not found")
         return FileResponse(path, filename="setup_ssl.sh",
