@@ -1321,3 +1321,9 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - YES → OT Duty HRS paid inside Compliance Salary (ot_pay in gross_paid — existing behaviour). NO → _compute_compliance_run zeroes stats.ot_hours (no OT pay in compliance) and OT HRS auto-import into the OT Salary Process.
 - OT Salary Process gate widened (routes/ot_salary.py _ot_process_enabled + /firms $or query): policy_2 OR (compliance_present_8hr=true AND compliance_ot_include=false). Error text + ot-salary-run.tsx notes updated.
 - E2E verified (emp 50, 10-hr day 2026-06-10): include=YES → ot_hours 2.0, ot_pay 187.5 in gross_paid; include=NO → compliance ot 0/0, OT Salary run shows 2 OT duty hrs (÷2=1 recorded, ₹93, ESIC deducted). Test punches/runs/flags cleaned/restored.
+
+## Iter 271 (June 2026) — Employee Master form updates (user requests)
+- Present + Permanent Address now EACH have a PIN Code: existing `pincode` relabelled "Present Address PIN Code" (keeps District/State auto-lookup); NEW `permanent_pincode` field (copied+locked by the "Same as Present Address" tick). Backend: create /admin/employees + employee_profile.py _STR_FIELDS + employee_pdf.py rows.
+- "Emergency Contact Name" field REMOVED from the form UI (kept in DB/API for old data); only "Emergency Contact No." remains.
+- Family Details: Relation is now a dropdown (RelationSelect component; Father/Mother/Husband/Wife/Son/Daughter/Brother/Sister/Grandfather/Grandmother/Other); NEW "Aadhaar No." column (12-digit hard limit, digits only — backend also trims via regex); NEW "Nominee" checkbox per member (is_nominee). Review modal shows "— Nominee ✓"; Employee Master PDF shows "(Nominee)" + Aadhaar.
+- E2E: create/edit/GET/PDF all verified; Aadhaar 15-digit input trimmed to 12; UI smoke-tested via Playwright (both sections render, dropdown selection works).

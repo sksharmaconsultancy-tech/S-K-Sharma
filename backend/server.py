@@ -486,6 +486,9 @@ class FamilyMember(BaseModel):
     dob: Optional[str] = None  # YYYY-MM-DD (optional)
     occupation: Optional[str] = None
     contact: Optional[str] = None
+    # Iter 271 (user request) — per-member Aadhaar No. + Nominee tick.
+    aadhaar_no: Optional[str] = None
+    is_nominee: Optional[bool] = None
     aadhaar_no: Optional[str] = None  # Iter 151 — captured via Aadhaar OCR scan
     scan_doc_id: Optional[str] = None  # Iter 151b — stored scan copy reference
 
@@ -8250,12 +8253,17 @@ async def admin_create_employee(
         "state": (str(payload.get("state") or "").strip() or None),
         # Iter 109 — extra master fields: addresses, emergency & family
         "permanent_address": (str(payload.get("permanent_address") or "").strip() or None),
+        # Iter 271 (user request) — separate PIN Code for the Permanent Address.
+        "permanent_pincode": (str(payload.get("permanent_pincode") or "").strip() or None),
         "emergency_contact_name": (str(payload.get("emergency_contact_name") or "").strip() or None),
         "emergency_contact_phone": (str(payload.get("emergency_contact_phone") or "").strip() or None),
         "family_members": [
             {"name": str(f.get("name") or "").strip(),
              "relation": str(f.get("relation") or "").strip(),
-             "dob": str(f.get("dob") or "").strip()}
+             "dob": str(f.get("dob") or "").strip(),
+             # Iter 271 — per-member Aadhaar No. (12 digits) + Nominee tick.
+             "aadhaar_no": re.sub(r"\D", "", str(f.get("aadhaar_no") or ""))[:12] or None,
+             "is_nominee": bool(f.get("is_nominee"))}
             for f in (payload.get("family_members") or [])
             if isinstance(f, dict) and str(f.get("name") or "").strip()
         ],

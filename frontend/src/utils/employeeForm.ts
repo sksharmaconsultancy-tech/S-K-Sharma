@@ -49,12 +49,13 @@ export type EmpForm = {
   compliance_allowances: SalaryLine[];
   compliance_deductions: SalaryLine[];
   permanent_address: string;
+  permanent_pincode: string;
   pincode: string;
   district: string;
   state: string;
   emergency_contact_name: string;
   emergency_contact_phone: string;
-  family_members: { name: string; relation: string; dob: string }[];
+  family_members: { name: string; relation: string; dob: string; aadhaar_no: string; is_nominee: boolean }[];
   uan_no: string;
   pf_no: string;
   esi_ip_no: string;
@@ -128,6 +129,7 @@ export const EMPTY_FORM: EmpForm = {
   upi_id: "",
   address: "",
   permanent_address: "",
+  permanent_pincode: "",
   pincode: "",
   district: "",
   state: "",

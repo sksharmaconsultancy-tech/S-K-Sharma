@@ -167,13 +167,15 @@ export default function EmployeeAddScreen() {
           upi_id: p.upi_id || "",
           address: p.address || "",
           permanent_address: p.permanent_address || "",
+          permanent_pincode: p.permanent_pincode || "",
           pincode: p.pincode || "",
           district: p.district || "",
           state: p.state || "",
           emergency_contact_name: p.emergency_contact_name || "",
           emergency_contact_phone: p.emergency_contact_phone || "",
           family_members: (p.family_members || []).map((f: any) => ({
-            name: f.name || "", relation: f.relation || "", dob: f.dob || "" })),
+            name: f.name || "", relation: f.relation || "", dob: f.dob || "",
+            aadhaar_no: f.aadhaar_no || "", is_nominee: !!f.is_nominee })),
           // Iter 109 — prefill salary line-items so editing doesn't wipe them
           actual_allowances: (p.actual_salary_allowances || []).map((l: any) => ({
             head: l.head || "", amount: l.amount != null ? String(l.amount) : "" })),
@@ -522,6 +524,7 @@ export default function EmployeeAddScreen() {
         upi_id: form.upi_id.trim() || undefined,
         address: form.address.trim() || undefined,
         permanent_address: form.permanent_address.trim() || undefined,
+        permanent_pincode: form.permanent_pincode.trim() || undefined,
         pincode: form.pincode.trim() || undefined,
         district: form.district.trim() || undefined,
         state: form.state.trim() || undefined,
@@ -1071,7 +1074,10 @@ export default function EmployeeAddScreen() {
                 onPress={() => {
                   const next = !sameAsPresent;
                   setSameAsPresent(next);
-                  if (next) setField("permanent_address", form.address);
+                  if (next) {
+                    setField("permanent_address", form.address);
+                    setField("permanent_pincode", form.pincode);
+                  }
                 }}
                 style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
                 testID="same-as-present"
@@ -1092,42 +1098,46 @@ export default function EmployeeAddScreen() {
               />
             </View>
           </TwoCol>
-          {/* Iter 159 — PIN Code auto-lookup fills District + State. */}
+          {/* Iter 159 — PIN Code auto-lookup fills District + State.
+              Iter 271 (user request) — separate PIN Code for BOTH the
+              Present Address and the Permanent Address. */}
           <TwoCol>
             <Field
-              label={pinBusy ? "PIN Code (looking up…)" : "PIN Code (auto-fills District & State)"}
+              label={pinBusy ? "Present Address PIN Code (looking up…)" : "Present Address PIN Code (auto-fills District & State)"}
               value={form.pincode}
               onChange={(v) => {
                 const p = v.replace(/\D/g, "").slice(0, 6);
                 setField("pincode", p);
+                if (sameAsPresent) setField("permanent_pincode", p);
                 if (p.length === 6) void lookupPin(p);
               }}
               placeholder="e.g. 311001"
               keyboardType="numeric"
             />
             <Field
+              label="Permanent Address PIN Code"
+              value={form.permanent_pincode}
+              onChange={(v) => setField("permanent_pincode", v.replace(/\D/g, "").slice(0, 6))}
+              placeholder="e.g. 311001"
+              keyboardType="numeric"
+              editable={!sameAsPresent}
+            />
+          </TwoCol>
+          <TwoCol>
+            <Field
               label="District"
               value={form.district}
               onChange={(v) => setField("district", v)}
               placeholder="Auto from PIN (editable)"
             />
-          </TwoCol>
-          <TwoCol>
             <Field
               label="State"
               value={form.state}
               onChange={(v) => setField("state", v)}
               placeholder="Auto from PIN (editable)"
             />
-            <View style={{ flex: 1 }} />
           </TwoCol>
           <TwoCol>
-            <Field
-              label="Emergency Contact Name"
-              value={form.emergency_contact_name}
-              onChange={(v) => setField("emergency_contact_name", v)}
-              placeholder="Contact person"
-            />
             <Field
               label="Emergency Contact No."
               value={form.emergency_contact_phone}
@@ -1135,6 +1145,7 @@ export default function EmployeeAddScreen() {
               placeholder="Phone number"
               keyboardType="phone-pad"
             />
+            <View style={{ flex: 1 }} />
           </TwoCol>
 
           <SectionHeader icon="briefcase-outline" title="Employment" tint="#4338CA" anchorId="sec-employment" />
@@ -1769,11 +1780,17 @@ export default function EmployeeAddScreen() {
                   const list = [...form.family_members]; list[idx] = { ...fm, name: v };
                   setField("family_members", list);
                 }} placeholder="Name" />
-              <Field label={idx === 0 ? "Relation" : ""} value={fm.relation}
+              {/* Iter 271 (user request) — Relation is a dropdown of the
+                  default relations instead of free text. */}
+              <RelationSelect
+                label={idx === 0 ? "Relation" : ""}
+                value={fm.relation}
                 onChange={(v) => {
                   const list = [...form.family_members]; list[idx] = { ...fm, relation: v };
                   setField("family_members", list);
-                }} placeholder="Wife / Son / Father…" />
+                }}
+                testID={`family-relation-${idx}`}
+              />
               {/* Iter 170 — Family DOB uses DD-MM-YYYY + calendar picker */}
               <View style={{ flex: 1 }}>
                 <DateField
@@ -1786,6 +1803,29 @@ export default function EmployeeAddScreen() {
                   testID={`family-dob-${idx}`}
                 />
               </View>
+              {/* Iter 271 (user request) — per-member Aadhaar No. (12 digits). */}
+              <Field label={idx === 0 ? "Aadhaar No." : ""} value={fm.aadhaar_no}
+                onChange={(v) => {
+                  const a = v.replace(/\D/g, "").slice(0, 12);
+                  const list = [...form.family_members]; list[idx] = { ...fm, aadhaar_no: a };
+                  setField("family_members", list);
+                }} placeholder="12-digit Aadhaar" keyboardType="numeric" />
+              {/* Iter 271 (user request) — Nominee tick per family member. */}
+              <View style={{ alignItems: "center", gap: 4 }}>
+                {idx === 0 ? <Text style={styles.lbl}>Nominee</Text> : null}
+                <Pressable
+                  onPress={() => {
+                    const list = [...form.family_members]; list[idx] = { ...fm, is_nominee: !fm.is_nominee };
+                    setField("family_members", list);
+                  }}
+                  style={{ paddingBottom: 12 }} testID={`family-nominee-${idx}`}>
+                  <Ionicons
+                    name={fm.is_nominee ? "checkbox" : "square-outline"}
+                    size={20}
+                    color={fm.is_nominee ? colors.brandPrimary : colors.onSurfaceTertiary}
+                  />
+                </Pressable>
+              </View>
               <Pressable
                 onPress={() => setField("family_members", form.family_members.filter((_, i) => i !== idx))}
                 style={{ paddingBottom: 12 }} testID={`family-del-${idx}`}>
@@ -1794,7 +1834,7 @@ export default function EmployeeAddScreen() {
             </View>
           ))}
           <Pressable
-            onPress={() => setField("family_members", [...form.family_members, { name: "", relation: "", dob: "" }])}
+            onPress={() => setField("family_members", [...form.family_members, { name: "", relation: "", dob: "", aadhaar_no: "", is_nominee: false }])}
             style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8 }}
             testID="family-add">
             <Ionicons name="add-circle-outline" size={18} color={colors.brandPrimary} />
@@ -1934,11 +1974,12 @@ export default function EmployeeAddScreen() {
                 ["Pay Mode", form.pay_mode], ["Bank", form.bank_name],
                 ["Account No.", form.bank_account], ["IFSC", form.bank_ifsc],
                 ["Address", form.address],
+                ["Present PIN Code", form.pincode],
                 ["Permanent Address", form.permanent_address],
-                ["Emergency Contact", form.emergency_contact_name],
+                ["Permanent PIN Code", form.permanent_pincode],
                 ["Emergency No.", form.emergency_contact_phone],
                 ["Family Members", form.family_members.filter((f) => f.name.trim())
-                  .map((f) => `${f.name} (${f.relation || "-"})`).join(", ")],
+                  .map((f) => `${f.name} (${f.relation || "-"})${f.is_nominee ? " — Nominee ✓" : ""}`).join(", ")],
               ].map(([k, v]) => (
                 <View key={k as string} style={styles.reviewRow}>
                   <Text style={styles.reviewKey}>{k}</Text>
@@ -2023,6 +2064,59 @@ function Field(props: {
 /** Two-column row that stacks to one column on narrow screens. */
 // Iter 108 — Gender is a fixed choice (no free text).
 const GENDER_OPTIONS = ["Male", "Female", "Transgender"];
+
+// Iter 271 (user request) — Family Details "Relation" default dropdown list.
+const RELATION_OPTIONS = [
+  "Father", "Mother", "Husband", "Wife", "Son", "Daughter",
+  "Brother", "Sister", "Grandfather", "Grandmother", "Other",
+];
+
+/** Compact dropdown for the Family Details Relation column. */
+function RelationSelect({
+  label, value, onChange, testID,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  testID?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <View style={{ flex: 1, gap: 4 }}>
+      <Text style={styles.lbl}>{label}</Text>
+      <Pressable
+        style={[styles.input, { justifyContent: "center" }]}
+        onPress={() => setOpen((o) => !o)}
+        testID={testID}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <Text style={{ color: value ? colors.onSurface : colors.onSurfaceTertiary, fontSize: 13 }}>
+            {value || "Select relation"}
+          </Text>
+          <Ionicons name={open ? "chevron-up" : "chevron-down"} size={14} color={colors.onSurfaceSecondary} />
+        </View>
+      </Pressable>
+      {open ? (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, paddingVertical: 4 }}>
+          {RELATION_OPTIONS.map((o) => {
+            const on = value.trim().toLowerCase() === o.toLowerCase();
+            return (
+              <Pressable
+                key={o}
+                onPress={() => { onChange(on ? "" : o); setOpen(false); }}
+                style={[genderStyles.chip, on && genderStyles.chipOn]}
+                testID={`${testID || "relation"}-${o.toLowerCase()}`}
+              >
+                <Text style={[genderStyles.chipTxt, on && { color: "#fff" }]}>{o}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 
 function ChipRowSelect({
   label, options, value, onChange, testIDPrefix,

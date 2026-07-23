@@ -424,8 +424,9 @@ def build_employee_master_pdf(
         ("Mobile", user.get("phone")),
         ("Email", user.get("email")),
         ("Address", user.get("address") or user.get("current_address")),
+        ("Present PIN Code", user.get("pincode")),
         ("Permanent Address", user.get("permanent_address")),
-        ("Emergency Contact", user.get("emergency_contact_name")),
+        ("Permanent PIN Code", user.get("permanent_pincode")),
         ("Emergency Phone", user.get("emergency_contact_phone")),
     ], styles))
 
@@ -434,8 +435,11 @@ def build_employee_master_pdf(
     if fam:
         story.append(_section_header(styles, "FAMILY DETAILS"))
         story.append(_kv_table([
-            (f"{(f.get('relation') or 'Member').title()}",
-             f"{f.get('name')}{('  ·  DOB: ' + f['dob']) if f.get('dob') else ''}")
+            (f"{(f.get('relation') or 'Member').title()}"
+             f"{' (Nominee)' if f.get('is_nominee') else ''}",
+             f"{f.get('name')}"
+             f"{('  ·  DOB: ' + f['dob']) if f.get('dob') else ''}"
+             f"{('  ·  Aadhaar: ' + str(f['aadhaar_no'])) if f.get('aadhaar_no') else ''}")
             for f in fam
         ], styles))
 

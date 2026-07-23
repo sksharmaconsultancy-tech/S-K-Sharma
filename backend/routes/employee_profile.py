@@ -39,6 +39,8 @@ _STR_FIELDS = [
     # from the one-page edit form.
     "pay_mode",
     "permanent_address", "emergency_contact_name", "emergency_contact_phone",
+    # Iter 271 — separate PIN Code for the Permanent Address.
+    "permanent_pincode",
 ]
 _NUM_FIELDS = [
     "salary_monthly", "compliance_gross",
