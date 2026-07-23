@@ -1231,3 +1231,13 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 
 ## Iter 257 (June 2026) — Finalize guard scoped per employee group
 - User bug: after Finalize & Lock of one group's salary, processing ANOTHER group for the same firm+month was blocked. Root cause: finalized-month guard (backend POST /admin/compliance-salary-runs + frontend generate()) matched only firm+month. Fixed: both now scope to the SAME employee_type (case-insensitive; blank = ungrouped runs). Verified: STAFF finalized → LABOUR processes 200; STAFF again → 409.
+
+## Iter 258 (June 2026) — Centralized ZKTeco Device Management (phase 1)
+- User pasted an enterprise spec (React/Node/Postgres) but instructed: keep the ADMS connect process unchanged, build INSIDE the existing ZKTeco Device Setup window. Implemented within Expo/FastAPI/Mongo stack:
+- Command queue: db.biometric_device_cmds (+ getrequest delivers up to 5 pending as C:{id}:{cmd}; devicecmd parses ID=/Return= to mark done/failed).
+- INFO parsing from getrequest (_parse_info): firmware, user_count, fp_count, att_log_count, device_ip persisted on device doc; shown on card (FIRMWARE / USERS ON DEVICE / FINGERPRINTS / LOGS ON DEVICE / DEVICE IP).
+- Remote controls per card: Sync data (CHECK), Refresh info (INFO), Restart (REBOOT, web confirm), Push employees (DATA UPDATE USERINFO PIN\tName per employee with bio_code). Endpoint POST /api/biometric/devices/{id}/command (actions: restart, sync_data, refresh_info, clear_attlog[api-only]).
+- POST /api/biometric/devices/push-employees {company_id, user_id?, device_id?} — pushes names by Bio Code to firm machines; 404 message "No biometric machine is registered for this company — register the device first in ZKTeco Device Setup" when none; 400 when employee lacks bio_code.
+- Employee Master (admin.tsx preview modal): NEW "Push Name to Biometric Machine" button (testID push-emp-to-machine) using the endpoint; shows the not-registered message.
+- E2E verified: queue→deliver→result, INFO parse, single push (PIN=72 SURENDRA SINGH), no-device message; UI screenshot OK.
+- DEFERRED (spec backlog): alerts (offline/memory), device health/sync reports + exports, WebSocket live dashboard, interactive map, dark mode, fingerprint/face template sync, lock/unlock & clear-log UI.

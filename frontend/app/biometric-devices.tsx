@@ -255,6 +255,40 @@ export default function BiometricDevicesScreen() {
     }
   };
 
+  // Iter 258 — remote device controls + employee push.
+  const sendCommand = async (d: Device, action: string) => {
+    if (action === "restart") {
+      const ok = Platform.OS === "web"
+        ? window.confirm(`Restart machine "${d.name}" now?`)
+        : true;
+      if (!ok) return;
+    }
+    try {
+      const r = await api<{ message: string }>(
+        `/biometric/devices/${d.device_id}/command`,
+        { method: "POST", body: { action } },
+      );
+      alertUser("Command queued", r.message);
+    } catch (e: any) {
+      alertUser("Failed", e?.message || "Please try again.");
+    }
+  };
+  const pushEmployees = async (d: Device) => {
+    const ok = Platform.OS === "web"
+      ? window.confirm(`Push ALL employees (with Bio Code) of this firm to "${d.name}"?`)
+      : true;
+    if (!ok) return;
+    try {
+      const r = await api<{ message: string }>(
+        "/biometric/devices/push-employees",
+        { method: "POST", body: { company_id: d.company_id, device_id: d.device_id } },
+      );
+      alertUser("Employee push", r.message);
+    } catch (e: any) {
+      alertUser("Failed", e?.message || "Please try again.");
+    }
+  };
+
   const shareGuide = async () => {    const guide = buildSetupGuideText(devices);
     try {
       if (Platform.OS === "web" && navigator?.clipboard) {
@@ -381,6 +415,8 @@ export default function BiometricDevicesScreen() {
                 onDelete={() => removeDevice(d)}
                 onSimulate={() => simulate(d)}
                 onResync={() => resyncDevice(d)}
+                onCommand={(action) => sendCommand(d, action)}
+                onPushEmployees={() => pushEmployees(d)}
               />
             ))
           )}
@@ -658,6 +694,8 @@ function DeviceCard({
   onDelete,
   onSimulate,
   onResync,
+  onCommand,
+  onPushEmployees,
 }: {
   device: Device;
   busy: boolean;
@@ -667,6 +705,8 @@ function DeviceCard({
   onDelete: () => void;
   onSimulate: () => void;
   onResync: () => void;
+  onCommand: (action: string) => void;
+  onPushEmployees: () => void;
 }) {
   const kindColor = device.kind === "in" ? colors.brandPrimary : colors.accent;
   return (
@@ -704,6 +744,39 @@ function DeviceCard({
           value={String(device.total_punches_ingested || 0)}
           accent
         />
+        <Fact label="FIRMWARE" value={(device as any).firmware || "—"} />
+        <Fact label="USERS ON DEVICE" value={(device as any).user_count != null ? String((device as any).user_count) : "—"} />
+        <Fact label="FINGERPRINTS" value={(device as any).fp_count != null ? String((device as any).fp_count) : "—"} />
+        <Fact label="LOGS ON DEVICE" value={(device as any).att_log_count != null ? String((device as any).att_log_count) : "—"} />
+        <Fact label="DEVICE IP" value={(device as any).device_ip || "—"} />
+      </View>
+
+      {/* Iter 258 — remote device controls (executed within seconds while
+          the machine is online; queued until it connects otherwise). */}
+      <View style={styles.actions}>
+        {([
+          ["sync_data", "sync-outline", "Sync data"],
+          ["refresh_info", "information-circle-outline", "Refresh info"],
+          ["restart", "power-outline", "Restart"],
+        ] as [string, any, string][]).map(([action, icon, label]) => (
+          <Pressable
+            key={action}
+            onPress={() => onCommand(action)}
+            style={[styles.actBtn, styles.actGhost]}
+            testID={`cmd-${action}-${device.device_id}`}
+          >
+            <Ionicons name={icon} size={14} color={colors.brandPrimary} />
+            <Text style={styles.actGhostTxt}>{label}</Text>
+          </Pressable>
+        ))}
+        <Pressable
+          onPress={onPushEmployees}
+          style={[styles.actBtn, styles.actGhost]}
+          testID={`cmd-push-emps-${device.device_id}`}
+        >
+          <Ionicons name="people-outline" size={14} color={colors.brandPrimary} />
+          <Text style={styles.actGhostTxt}>Push employees</Text>
+        </Pressable>
       </View>
 
       <View style={styles.actions}>

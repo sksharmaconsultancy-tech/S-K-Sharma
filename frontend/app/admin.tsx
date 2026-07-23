@@ -919,6 +919,40 @@ export default function AdminScreen() {
                 </Text>
                 <Ionicons name="chevron-forward" size={16} color="#fff" />
               </Pressable>
+              {/* Iter 258 (user request) — push this employee's name to the
+                  firm's biometric machine(s) by Bio Code. Shows a clear
+                  message when no machine is registered for the company. */}
+              <Pressable
+                style={styles.masterLinkBtn}
+                testID="push-emp-to-machine"
+                onPress={async () => {
+                  const say = (m: string) => {
+                    if (Platform.OS === "web") window.alert(m);
+                    else Alert.alert("Biometric machine", m);
+                  };
+                  try {
+                    const r = await api<{ message: string }>(
+                      "/biometric/devices/push-employees",
+                      {
+                        method: "POST",
+                        body: {
+                          company_id: (selected as any)?.company_id,
+                          user_id: selected?.user_id,
+                        },
+                      },
+                    );
+                    say(r.message);
+                  } catch (e: any) {
+                    say(e?.message || "Failed to queue the machine update.");
+                  }
+                }}
+              >
+                <Ionicons name="finger-print-outline" size={16} color={colors.brand} />
+                <Text style={styles.masterLinkTxt}>
+                  Push Name to Biometric Machine
+                </Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.brand} />
+              </Pressable>
               <Pressable
                 style={styles.masterLinkBtn}
                 testID="open-emp-attendance-policy"

@@ -441,6 +441,7 @@ async def iclock_getrequest(
         {"$set": {
             "last_seen_at": _now_iso_z(),
             "last_getrequest_info": INFO,
+            **_parse_info(INFO),
         }},
     )
     if _resync_active(device) and not device.get("resync_check_sent"):
@@ -452,7 +453,40 @@ async def iclock_getrequest(
         cmd_id = int(datetime.now(timezone.utc).timestamp())
         logger.info("[zkteco] SN=%s issuing CHECK for old-data re-sync", SN)
         return PlainTextResponse(f"C:{cmd_id}:CHECK\n")
+    # Iter 258 — centralized device management: deliver queued remote
+    # commands (restart / sync / clear-log / push-employee ...) to the
+    # device, oldest first, max 5 per poll.
+    pending = await db.biometric_device_cmds.find(
+        {"device_serial": SN, "status": "pending"}, {"_id": 0}
+    ).sort("created_at", 1).to_list(5)
+    if pending:
+        lines = []
+        for c in pending:
+            lines.append(f"C:{c['cmd_id']}:{c['command']}")
+            await db.biometric_device_cmds.update_one(
+                {"cmd_id": c["cmd_id"]},
+                {"$set": {"status": "sent", "sent_at": _now_iso_z()}},
+            )
+        logger.info("[zkteco] SN=%s delivering %d command(s)", SN, len(lines))
+        return PlainTextResponse("\n".join(lines) + "\n")
     return PlainTextResponse("OK\n")
+
+
+def _parse_info(info: Optional[str]) -> dict:
+    """Best-effort parse of the getrequest INFO param:
+    'FWVer,UserCount,FpCount,AttLogCount,DeviceIP[,...]'."""
+    if not info:
+        return {}
+    parts = [p.strip() for p in str(info).split(",")]
+    out: dict = {}
+    if parts and parts[0]:
+        out["firmware"] = parts[0][:60]
+    for idx, key in ((1, "user_count"), (2, "fp_count"), (3, "att_log_count")):
+        if len(parts) > idx and parts[idx].isdigit():
+            out[key] = int(parts[idx])
+    if len(parts) > 4 and re.match(r"^\d{1,3}(\.\d{1,3}){3}$", parts[4]):
+        out["device_ip"] = parts[4]
+    return out
 
 
 @router.get("/iclock/ping")
@@ -480,7 +514,136 @@ async def iclock_devicecmd(request: Request, SN: str = Query(...)):
         "raw": raw[:4000],
         "received_at": _now_iso_z(),
     })
+    # Iter 258 — mark queued commands done/failed: body like "ID=123&Return=0&CMD=DATA"
+    try:
+        m_id = re.search(r"ID=(\d+)", raw)
+        m_ret = re.search(r"Return=(-?\d+)", raw)
+        if m_id:
+            ok = (m_ret and m_ret.group(1) == "0")
+            await db.biometric_device_cmds.update_one(
+                {"cmd_id": m_id.group(1)},
+                {"$set": {"status": "done" if ok else "failed",
+                          "result_return": m_ret.group(1) if m_ret else None,
+                          "result_at": _now_iso_z()}},
+            )
+    except Exception:
+        pass
     return PlainTextResponse("OK\n")
+
+
+# ---------------------------------------------------------------------------
+# Iter 258 — Centralized device management: remote commands + employee push.
+# ---------------------------------------------------------------------------
+async def _queue_cmd(serial: str, command: str, queued_by: str, label: str) -> str:
+    cmd_id = str(int(datetime.now(timezone.utc).timestamp() * 1000))[-9:]
+    await db.biometric_device_cmds.insert_one({
+        "cmd_id": cmd_id,
+        "device_serial": serial,
+        "command": command,
+        "label": label,
+        "status": "pending",
+        "queued_by": queued_by,
+        "created_at": _now_iso_z(),
+    })
+    return cmd_id
+
+
+_REMOTE_ACTIONS = {
+    "restart": ("REBOOT", "Restart device"),
+    "sync_data": ("CHECK", "Synchronize data"),
+    "refresh_info": ("INFO", "Refresh device information"),
+    "clear_attlog": ("CLEAR LOG", "Clear attendance logs on device"),
+}
+
+
+@router.post("/biometric/devices/{device_id}/command")
+async def send_device_command(
+    device_id: str,
+    payload: dict,
+    authorization: Optional[str] = Header(None),
+):
+    """Queue a remote control command; the device picks it up on its next
+    getrequest poll (seconds when online). Supported: restart, sync_data,
+    refresh_info, clear_attlog."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    action = str(payload.get("action") or "")
+    if action not in _REMOTE_ACTIONS:
+        raise HTTPException(status_code=400, detail=f"Unknown action '{action}'")
+    device = await db.biometric_devices.find_one({"device_id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    if admin["role"] == "company_admin" and device.get("company_id") != admin["company_id"]:
+        raise HTTPException(status_code=403, detail="Not authorised for this device")
+    cmd, label = _REMOTE_ACTIONS[action]
+    cmd_id = await _queue_cmd(device["serial_number"], cmd, admin["user_id"], label)
+    return {
+        "ok": True, "cmd_id": cmd_id,
+        "message": f"{label} queued — the machine executes it within seconds while online.",
+    }
+
+
+@router.post("/biometric/devices/push-employees")
+async def push_employees_to_devices(
+    payload: dict,
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 258 (user request) — push employee names (by Bio Code) INTO the
+    machines so the device display shows the correct name. Body:
+    { company_id, user_id? , device_id? }. Without user_id pushes ALL
+    employees that have a bio_code. Errors clearly when the firm has no
+    registered machine."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    company_id = admin["company_id"] if admin["role"] == "company_admin" else payload.get("company_id")
+    if not company_id:
+        raise HTTPException(status_code=400, detail="company_id is required")
+    dev_q: dict = {"company_id": company_id, "enabled": {"$ne": False}}
+    if payload.get("device_id"):
+        dev_q = {"device_id": payload["device_id"]}
+    devices = await db.biometric_devices.find(dev_q, {"_id": 0}).to_list(50)
+    if not devices:
+        raise HTTPException(
+            status_code=404,
+            detail="No biometric machine is registered for this company — "
+                   "register the device first in ZKTeco Device Setup "
+                   "(Biometric Devices screen).",
+        )
+    emp_q: dict = {"role": "employee", "company_id": company_id,
+                   "bio_code": {"$exists": True, "$nin": [None, ""]}}
+    if payload.get("user_id"):
+        emp_q = {"user_id": payload["user_id"]}
+    emps = await db.users.find(
+        emp_q, {"_id": 0, "user_id": 1, "name": 1, "bio_code": 1}).to_list(3000)
+    if payload.get("user_id") and emps and not (emps[0].get("bio_code") or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="This employee has no Bio Code — set the machine punch "
+                   "number (Bio Code) in the Employee Master first.",
+        )
+    if not emps:
+        raise HTTPException(status_code=404, detail="No employees with a Bio Code found")
+    queued = 0
+    for d in devices:
+        for e in emps:
+            pin = str(e.get("bio_code") or "").strip()
+            if not pin:
+                continue
+            nm = (e.get("name") or "")[:24].replace("\t", " ")
+            await _queue_cmd(
+                d["serial_number"],
+                f"DATA UPDATE USERINFO PIN={pin}\tName={nm}\tPri=0",
+                admin["user_id"],
+                f"Push employee {nm} ({pin})",
+            )
+            queued += 1
+    return {
+        "ok": True, "queued": queued, "devices": len(devices),
+        "message": (
+            f"{queued} update(s) queued for {len(devices)} machine(s). "
+            "Names appear on the device within a minute while it is online."
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
