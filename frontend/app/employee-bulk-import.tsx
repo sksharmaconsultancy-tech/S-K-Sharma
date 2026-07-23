@@ -250,6 +250,24 @@ export default function EmployeeBulkImportScreen() {
 
   const runImport = async () => {
     if (!selectedCompanyId || rows.length === 0) return;
+    // Iter 266 (user directive) — DOUBLE confirmation before creating
+    // employee records, so a bulk import is never triggered accidentally.
+    if (Platform.OS === "web") {
+      const firmName =
+        companies.find((c) => c.company_id === selectedCompanyId)?.name ||
+        "the selected firm";
+      const first = window.confirm(
+        `You are about to import ${rows.length} employee(s) into "${firmName}".\n\n` +
+          `Please confirm the firm and the number of rows are correct.\n\nContinue?`,
+      );
+      if (!first) return;
+      const second = window.confirm(
+        `FINAL CONFIRMATION\n\nThis will CREATE ${rows.length} new employee record(s) ` +
+          `in "${firmName}". This action cannot be undone in bulk.\n\n` +
+          `Are you absolutely sure you want to import now?`,
+      );
+      if (!second) return;
+    }
     setImporting(true);
     setResult(null);
     try {
@@ -448,6 +466,9 @@ export default function EmployeeBulkImportScreen() {
         {/* Step 4 — import */}
         <View style={styles.card}>
           <Text style={styles.section}>4 · Import</Text>
+          <Text style={styles.importHint}>
+            You&apos;ll be asked to confirm twice before any records are created.
+          </Text>
           <Pressable
             onPress={runImport}
             disabled={!canImport}
@@ -517,6 +538,7 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   section: { ...type.body, fontWeight: "800", color: colors.onSurface },
+  importHint: { ...type.caption, color: colors.onSurfaceSecondary, marginTop: 4, marginBottom: 10 },
   hint: { ...type.caption, color: colors.onSurfaceSecondary },
   firmCard: {
     flexDirection: "row",

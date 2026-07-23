@@ -1287,3 +1287,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Root cause: GET /api/company set attendance_punching_enabled from firm_masters.salary_process.bio_matrix_attendance (Iter 114 gate) — firms with Bio Matrix OFF disabled app punching.
 - Fix: server.py /api/company now always sets attendance_punching_enabled = True. The /attendance/punch endpoint still enforces GPS/geofence/biometric rules, so only the punch UI visibility changed.
 - Verified: employee TEST50 (SURENDRA, Kankani) /company returns True; PWA dashboard + attendance tab show active "Punch In" (disabled card gone).
+
+## Iter 266 (June 2026) — Bulk Import City/State/PinCode + double-confirm; per-role idle logout
+- Bulk Employee Import: added City, State, Pin Code columns to the .xlsx template + sample row; aliases (city/town, state, pin code/pincode/pin_code/postal code/zip) map them; bulk-import stores city, district(=city), state, pincode. Verified: import stores Jaipur/Rajasthan/302001.
+- Double confirmation before import (web): two sequential window.confirm dialogs (firm+row-count, then final CREATE confirmation) in employee-bulk-import.tsx runImport(); hint text added under step 4.
+- Idle auto-logout (IdleLogout.tsx): per-role — super_admin & sub_admin = 30 min, company_admin = 10 min (unchanged). Alert message now dynamic. NOTE: still CLIENT-side only (SEC-004 server-side expiry still open).

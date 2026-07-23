@@ -8393,6 +8393,10 @@ async def admin_employees_bulk_import(
         "gross pay": "compliance_gross",
         "present add": "present_address", "present address": "present_address",
         "permanent add": "permanent_address", "permanent address": "permanent_address",
+        # Iter 266 — City / State / Pin Code column aliases.
+        "city": "city", "town": "city",
+        "pin code": "pincode", "pincode": "pincode", "pin_code": "pincode",
+        "postal code": "pincode", "zip": "pincode", "zip code": "pincode",
         "panno": "pan_no", "pan no": "pan_no", "pan": "pan_no",
         "name as per pan card": "name_as_per_pan", "name as per pan": "name_as_per_pan",
         "aadhar card no": "aadhaar_no", "aadhaar no": "aadhaar_no", "aadhar no": "aadhaar_no",
@@ -8549,6 +8553,13 @@ async def admin_employees_bulk_import(
                 "over_time": _num(r.get("over_time")),
                 "present_address": r.get("present_address") or None,
                 "permanent_address": r.get("permanent_address") or None,
+                # Iter 266 (user directive) — City / State / Pin Code.
+                # ``district`` mirrors City to match the single Add-Employee
+                # form + profile which read the district field.
+                "city": r.get("city") or None,
+                "district": r.get("city") or r.get("district") or None,
+                "state": r.get("state") or None,
+                "pincode": r.get("pincode") or None,
                 "name_as_per_pan": r.get("name_as_per_pan") or None,
                 "name_as_per_aadhar": r.get("name_as_per_aadhar") or None,
                 "bank_address": r.get("bank_address") or None,
@@ -8677,6 +8688,7 @@ async def admin_bulk_import_template(
         "DOB", "DOJ",
         "EMPLOYEE BASIC", "PF_BASIC", "HRA", "CONV", "OVER_TIME", "Gross Pay",
         "Present Add", "Permanent Add",
+        "City", "State", "Pin Code",
         "PANNo", "Name As Per Pan Card",
         "Aadhar Card No", "Name On Aadhar Card",
         "Bank Name", "Bank Address", "Account No", "Name On Bank Ac", "IFSC Code",
@@ -8691,6 +8703,7 @@ async def admin_bulk_import_template(
         "1990-05-14", "2024-04-01",
         "12000", "12000", "3000", "1500", "0", "18000",
         "House 12 Karol Bagh New Delhi", "Village Rampur UP",
+        "New Delhi", "Delhi", "110005",
         "ABCDE1234F", "RAMESH KUMAR",
         "123412341234", "RAMESH KUMAR",
         "HDFC Bank", "Karol Bagh Branch New Delhi", "1234567890", "RAMESH KUMAR", "HDFC0001234",
