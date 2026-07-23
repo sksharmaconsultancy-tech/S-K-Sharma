@@ -1269,3 +1269,9 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Frontend (biometric-devices.tsx): "Set date & time" now opens a centered dialog (testIDs time-dialog/-date/-time/-apply) pre-filled with current time; inputs DD-MM-YYYY + HH:MM:SS, "Use current time" refill, "Apply to machine" queues the command.
 - Backend: sync_time action accepts optional {date, time} (DD-MM-YYYY / YYYY-MM-DD, HH:MM[:SS]); encodes via _zk_encode_datetime; 400 on invalid; falls back to current IST when omitted.
 - Verified: UI apply queued `SET OPTION DateTime=851165100` which decodes exactly to 25-Jun-2026 10:45:00; bad date rejected 400.
+
+## Iter 263 (June 2026) — GMT / time-zone setting per machine
+- User asked "GMT setting available or not" → found handshake hardcoded TimeZone=8 (China!). Fixed.
+- Backend: gmt_offset field on device (create/update models; default "+05:30"); `_parse_gmt_offset_minutes` accepts +05:30 / 5:30 / -04:00 / +8 / 5.5 (invalid → 330); handshake now sends `TimeZone=<hours or signed minutes>` (whole hours plain, half zones in minutes e.g. 330 for IST per Push SDK); `_zk_datetime_now(device)` and sync_time fallback use the device's zone. Legacy devices without the field default to India.
+- Frontend: "GMT offset (time zone)" input in Register/Edit form (testID d-gmt, default +05:30, hint text), GMT fact on card, "Set date & time" dialog prefills current time in the machine's configured zone (parseGmtMinutes helper).
+- Verified: register with +04:00, handshake TimeZone updates on PATCH (330 for +05:30), sync_time label shows zone; UI field renders with default.

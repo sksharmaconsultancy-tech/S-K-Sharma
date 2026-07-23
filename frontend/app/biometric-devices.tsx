@@ -34,6 +34,7 @@ type Device = {
   enabled: boolean;
   online?: boolean;
   locked?: boolean;            // Iter 261 — portal-side lock
+  gmt_offset?: string;         // Iter 263 — machine time zone (e.g. +05:30)
   templates_captured?: number; // Iter 261 — FP/Face templates captured
   last_seen_at?: string | null;
   last_push_at?: string | null;
@@ -61,8 +62,20 @@ const emptyDraft = {
   kind: "in" as "in" | "out" | "both",
   company_id: "",
   location: "",
+  gmt_offset: "+05:30", // Iter 263 — machine time zone (India default)
   enabled: true,
 };
+
+// Iter 263 — parse '+05:30' / '5:30' / '-4' / '5.5' into signed minutes.
+function parseGmtMinutes(raw?: string | null): number {
+  const s = String(raw || "").trim().toUpperCase().replace(/GMT|UTC/g, "").trim();
+  const m = /^([+-]?)(\d{1,2})(?::(\d{2})|\.(\d+))?$/.exec(s);
+  if (!m) return 330;
+  const sign = m[1] === "-" ? -1 : 1;
+  const mins = m[3] ? parseInt(m[3], 10) : m[4] ? Math.round(parseFloat(`0.${m[4]}`) * 60) : 0;
+  const total = sign * (parseInt(m[2], 10) * 60 + mins);
+  return total < -720 || total > 840 ? 330 : total;
+}
 
 export default function BiometricDevicesScreen() {
   const router = useRouter();
@@ -152,6 +165,7 @@ export default function BiometricDevicesScreen() {
       kind: d.kind,
       company_id: d.company_id || "",
       location: d.location || "",
+      gmt_offset: d.gmt_offset || "+05:30",
       enabled: d.enabled,
     });
     setEditorOpen(true);
@@ -176,6 +190,7 @@ export default function BiometricDevicesScreen() {
             kind: draft.kind,
             company_id: isSuper ? draft.company_id : undefined,
             location: draft.location.trim() || undefined,
+            gmt_offset: draft.gmt_offset.trim() || "+05:30",
             enabled: draft.enabled,
           },
         });
@@ -188,6 +203,7 @@ export default function BiometricDevicesScreen() {
             kind: draft.kind,
             company_id: draft.company_id || undefined,
             location: draft.location.trim() || undefined,
+            gmt_offset: draft.gmt_offset.trim() || "+05:30",
             enabled: draft.enabled,
           },
         });
@@ -301,17 +317,16 @@ export default function BiometricDevicesScreen() {
   const [timeDlg, setTimeDlg] = useState<Device | null>(null);
   const [dlgDate, setDlgDate] = useState("");
   const [dlgTime, setDlgTime] = useState("");
-  const fillNow = () => {
-    const n = new Date();
-    setDlgDate(
-      `${String(n.getDate()).padStart(2, "0")}-${String(n.getMonth() + 1).padStart(2, "0")}-${n.getFullYear()}`,
-    );
-    setDlgTime(
-      `${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}:${String(n.getSeconds()).padStart(2, "0")}`,
-    );
+  const fillNow = (dev?: Device | null) => {
+    // Iter 263 — current time in the MACHINE's configured GMT zone.
+    const mins = parseGmtMinutes((dev ?? timeDlg)?.gmt_offset);
+    const zoned = new Date(Date.now() + mins * 60000);
+    const g = (x: number) => String(x).padStart(2, "0");
+    setDlgDate(`${g(zoned.getUTCDate())}-${g(zoned.getUTCMonth() + 1)}-${zoned.getUTCFullYear()}`);
+    setDlgTime(`${g(zoned.getUTCHours())}:${g(zoned.getUTCMinutes())}:${g(zoned.getUTCSeconds())}`);
   };
   const openTimeDlg = (d: Device) => {
-    fillNow();
+    fillNow(d);
     setTimeDlg(d);
   };
   const applyTime = async () => {
@@ -765,6 +780,21 @@ export default function BiometricDevicesScreen() {
               style={styles.input}
             />
 
+            {/* Iter 263 — machine GMT / time-zone setting. */}
+            <Text style={styles.lbl}>GMT offset (time zone)</Text>
+            <TextInput
+              testID="d-gmt"
+              value={draft.gmt_offset}
+              onChangeText={(t) => setDraft({ ...draft, gmt_offset: t })}
+              placeholder="+05:30"
+              placeholderTextColor={colors.onSurfaceTertiary}
+              style={styles.input}
+            />
+            <Text style={styles.hint}>
+              Sent to the machine on every handshake. India = +05:30 (default).
+              Examples: +05:30, +04:00, -05:00.
+            </Text>
+
             <Pressable
               onPress={() => setDraft({ ...draft, enabled: !draft.enabled })}
               style={styles.enableRow}
@@ -890,7 +920,7 @@ export default function BiometricDevicesScreen() {
               testID="time-dialog-time"
             />
             <View style={{ flexDirection: "row", gap: 8, marginTop: 14 }}>
-              <Pressable onPress={fillNow} style={[styles.actBtn, styles.actGhost, { flex: 1 }]}>
+              <Pressable onPress={() => fillNow()} style={[styles.actBtn, styles.actGhost, { flex: 1 }]}>
                 <Ionicons name="time-outline" size={14} color={colors.brandPrimary} />
                 <Text style={styles.actGhostTxt}>Use current time</Text>
               </Pressable>
@@ -1014,6 +1044,7 @@ function DeviceCard({
       <View style={styles.factGrid}>
         <Fact label="COMPANY" value={companyName} />
         <Fact label="LOCATION" value={device.location || "—"} />
+        <Fact label="GMT" value={device.gmt_offset || "+05:30"} />
         <Fact
           label="LAST SEEN"
           value={device.last_seen_at ? fmtRelative(device.last_seen_at) : "Never"}
@@ -1515,6 +1546,13 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 4,
     textTransform: "uppercase",
+  },
+  // Iter 263 — small helper text under form fields.
+  hint: {
+    color: colors.onSurfaceTertiary,
+    fontSize: type.xs,
+    marginTop: 4,
+    lineHeight: 15,
   },
   timeDlgInput: {
     borderWidth: 1,

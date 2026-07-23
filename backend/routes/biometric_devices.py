@@ -44,6 +44,7 @@ class BiometricDeviceCreate(BaseModel):
     company_id: Optional[str] = None
     location: Optional[str] = None
     enabled: bool = True
+    gmt_offset: Optional[str] = "+05:30"   # Iter 263 — machine time zone
 
 
 class BiometricDeviceUpdate(BaseModel):
@@ -52,6 +53,43 @@ class BiometricDeviceUpdate(BaseModel):
     company_id: Optional[str] = None
     location: Optional[str] = None
     enabled: Optional[bool] = None
+    gmt_offset: Optional[str] = None       # Iter 263 — machine time zone
+
+
+# Iter 263 — GMT / time-zone handling for machines.
+_GMT_RE = re.compile(r"^([+-]?)(\d{1,2})(?::(\d{2})|\.(\d+))?$")
+
+
+def _parse_gmt_offset_minutes(raw: Optional[str]) -> int:
+    """Parse a GMT offset like '+05:30', '5:30', '-04:00', '+8' or '5.5'
+    into signed MINUTES. Defaults to India (+05:30 → 330) when blank or
+    invalid."""
+    s = str(raw or "").strip().upper().replace("GMT", "").replace("UTC", "").strip()
+    m = _GMT_RE.match(s)
+    if not m:
+        return 330
+    sign = -1 if m.group(1) == "-" else 1
+    hours = int(m.group(2))
+    if m.group(3) is not None:
+        mins = int(m.group(3))
+    elif m.group(4) is not None:
+        mins = int(round(float(f"0.{m.group(4)}") * 60))
+    else:
+        mins = 0
+    total = sign * (hours * 60 + mins)
+    if total < -12 * 60 or total > 14 * 60:
+        return 330
+    return total
+
+
+def _zk_timezone_value(device: dict) -> str:
+    """ZKTeco handshake TimeZone value: whole hours as plain hours
+    (e.g. '8'), half/quarter zones as signed MINUTES (e.g. '330' for
+    GMT+5:30, '-270' for GMT-4:30) per the Push SDK convention."""
+    mins = _parse_gmt_offset_minutes((device or {}).get("gmt_offset"))
+    if mins % 60 == 0:
+        return str(mins // 60)
+    return str(mins)
 
 
 def _now_iso_z() -> str:
@@ -450,7 +488,9 @@ async def iclock_handshake(
         "TransTimes=00:00;14:05",
         "TransInterval=1",
         "TransFlag=TransData AttLog OpLog AttPhoto EnrollUser ChgUser EnrollFP ChgFP UserPic FvFingerVein",
-        "TimeZone=8",
+        # Iter 263 — per-device GMT setting (default India GMT+5:30).
+        # Previously hardcoded TimeZone=8 (China) which could drift clocks.
+        f"TimeZone={_zk_timezone_value(device)}",
         "Realtime=1",
         "Encrypt=None",
         "ServerVer=SKSharma-1.0",
@@ -702,10 +742,12 @@ def _zk_encode_datetime(dt: datetime) -> int:
             + dt.hour * 3600 + dt.minute * 60 + dt.second)
 
 
-def _zk_datetime_now() -> int:
-    """Encoding of the CURRENT IST wall-clock time."""
-    ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
-    return _zk_encode_datetime(ist)
+def _zk_datetime_now(device: Optional[dict] = None) -> int:
+    """Encoding of the CURRENT wall-clock time in the device's configured
+    GMT zone (default India +05:30)."""
+    mins = _parse_gmt_offset_minutes((device or {}).get("gmt_offset") if device else None)
+    local = datetime.now(timezone.utc) + timedelta(minutes=mins)
+    return _zk_encode_datetime(local)
 
 
 @router.post("/biometric/devices/{device_id}/command")
@@ -774,8 +816,11 @@ async def send_device_command(
             cmd = f"SET OPTION DateTime={_zk_encode_datetime(target)}"
             label = f"Set device date & time to {target.strftime('%d-%b-%Y %H:%M:%S')}"
         else:
-            cmd = f"SET OPTION DateTime={_zk_datetime_now()}"
-            label = "Set device date & time (current IST)"
+            cmd = f"SET OPTION DateTime={_zk_datetime_now(device)}"
+            label = (
+                "Set device date & time (current, GMT"
+                f"{device.get('gmt_offset') or '+05:30'})"
+            )
     else:
         cmd, label = _REMOTE_ACTIONS[action]
     cmd_id = await _queue_cmd(device["serial_number"], cmd, admin["user_id"], label)
@@ -1065,6 +1110,8 @@ async def register_biometric_device(
         "company_id": company_id,
         "location": (payload.location or "").strip() or None,
         "enabled": payload.enabled,
+        # Iter 263 — machine time zone (validated; default India +05:30).
+        "gmt_offset": (payload.gmt_offset or "+05:30").strip() or "+05:30",
         "created_at": _now_iso_z(),
         "created_by": admin["user_id"],
         "model": "ZKTeco AC Mini Plus",  # locked to the client's hardware
