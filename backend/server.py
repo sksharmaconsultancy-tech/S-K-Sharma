@@ -1214,6 +1214,12 @@ def _validate_policy(raw: dict) -> dict:
         # working hrs counts as 1 Present Day (extra hrs → OT per policy).
         # Applies only when the firm's Salary Allowed includes Compliance.
         "compliance_present_8hr": _flag("compliance_present_8hr"),
+        # Iter 270 (user request) — "OT Include in Existing Compliance
+        # Salary" (Yes/No). Yes (default) → OT Duty HRS are paid inside the
+        # Compliance Salary (OT pay in gross). No → OT HRS are kept OUT of
+        # the Compliance Salary and auto-import into the separate OT Salary
+        # Process instead (no double payment).
+        "compliance_ot_include": _flag("compliance_ot_include", True),
         # Iter 203 (user request) — Half-Day Threshold Rule: worked hrs
         # below the half-day threshold → ALL hrs to OT (0 Present); between
         # threshold and full day → ½ Present Day + remaining hrs to OT.
@@ -6034,6 +6040,9 @@ async def get_attendance_policy(
                    "holiday_present_add_ot", "compliance_present_8hr",
                    "halfday_threshold_rule"):
             _pm_bf.setdefault(_k, False)
+        # Iter 270 — OT Include in Existing Compliance Salary defaults to
+        # YES (current behaviour) for firms saved before the option existed.
+        _pm_bf.setdefault("compliance_ot_include", True)
     # "Default preset" here means: no admin has explicitly saved / overridden
     # the policy yet. Because we auto-attach a preset on company creation,
     # the presence of `attendance_policy` alone isn't a good signal — we
@@ -15256,6 +15265,13 @@ async def _compute_compliance_run(
                 "duty_hours": round(_pd * _fdh, 2),
                 "ot_hours": 0.0,
             }
+        # Iter 270 (user request) — "OT Include in Existing Compliance
+        # Salary" (Yes/No). When NO, OT Duty HRS are kept OUT of the
+        # Compliance Salary (no OT pay in gross) — they auto-import into
+        # the separate OT Salary Process instead (no double payment).
+        if not _pm_202.get("compliance_ot_include", True):
+            stats = dict(stats)
+            stats["ot_hours"] = 0.0
         _ff = firm_stat_flags.get(emp.get("company_id")) or {"pf": False, "esic": False}
         # Iter 178 — state-wise PT from the firm's compliance policy.
         _fcp = (company_doc.get("compliance_policy") or {}) if company_doc else {}

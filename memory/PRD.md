@@ -1315,3 +1315,9 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - v1 failed on VPS: Ubuntu 24.04 apt certbot 2.9.0 broken (pyOpenSSL "module 'lib' has no attribute 'GEN_EMAIL'"). v2 removed apt certbot, installed official snap certbot 5.7.0.
 - RESULT: https://smartpayrolling.com + www LIVE with Let's Encrypt cert, HTTP→HTTPS redirect enabled in /etc/nginx/sites-enabled/sksharma, auto-renewal (snap timer) dry-run passed. Verified HTTP 200.
 - STILL PENDING: SEC-003 (encrypt portal_logins passwords) and SEC-004 (server-side 12h session expiry with auto-extend — user chose option a).
+
+## Iter 270 (June 2026) — "OT Include in Existing Compliance Salary" (Yes/No)
+- New Policy Master sub-point `compliance_ot_include` (default YES) shown under "Count Present Day @ 8 HRS" in Attendance Policy → Sub Points (attendance-policy.tsx PM_FLAGS; default-true handled in dflt line + server.py _flag(...,True) + backfill setdefault True).
+- YES → OT Duty HRS paid inside Compliance Salary (ot_pay in gross_paid — existing behaviour). NO → _compute_compliance_run zeroes stats.ot_hours (no OT pay in compliance) and OT HRS auto-import into the OT Salary Process.
+- OT Salary Process gate widened (routes/ot_salary.py _ot_process_enabled + /firms $or query): policy_2 OR (compliance_present_8hr=true AND compliance_ot_include=false). Error text + ot-salary-run.tsx notes updated.
+- E2E verified (emp 50, 10-hr day 2026-06-10): include=YES → ot_hours 2.0, ot_pay 187.5 in gross_paid; include=NO → compliance ot 0/0, OT Salary run shows 2 OT duty hrs (÷2=1 recorded, ₹93, ESIC deducted). Test punches/runs/flags cleaned/restored.

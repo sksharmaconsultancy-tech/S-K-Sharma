@@ -151,15 +151,20 @@ export default function OtSalaryRunScreen() {
       </View>
       <ScrollView contentContainerStyle={{ padding: 14, paddingBottom: 60 }}>
         <Text style={styles.note}>
-          Separate overtime payout for Textile Policy 2 firms. OT hours come from approved
-          biometric punches (same as the OT Report). Compliance / Actual salary are not affected.
+          Separate overtime payout. OT hours come from approved biometric punches (same as
+          the OT Report). Available for Textile Policy 2 firms, and for firms where
+          &quot;OT Include in Existing Compliance Salary&quot; is set to No (their OT HRS auto-import
+          here). Compliance / Actual salary are not affected.
         </Text>
 
         {/* Firm chips */}
-        <Text style={styles.label}>Firm (Textile Policy 2 only)</Text>
+        <Text style={styles.label}>Firm</Text>
         <View style={styles.chipsRow}>
           {firms.length === 0 ? (
-            <Text style={styles.sub}>No firms have Policy 2 selected in Firm Master.</Text>
+            <Text style={styles.sub}>
+              No eligible firms. Enable Policy 2, or set &quot;OT Include in Existing Compliance
+              Salary&quot; to No in Attendance Policy → Policy Master Sub Points.
+            </Text>
           ) : firms.map((f) => (
             <Pressable
               key={f.company_id}

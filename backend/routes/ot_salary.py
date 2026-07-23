@@ -53,9 +53,18 @@ async def _require_admin(authorization: Optional[str], company_id: Optional[str]
     return admin
 
 
-def _is_policy2(company: dict) -> bool:
+def _ot_process_enabled(company: dict) -> bool:
+    """OT Salary Process eligibility:
+      • Textile Policy 2 firms (OT always tracked separately), OR
+      • Iter 270 — firms with "Count Present Day @ 8 HRS" ON and
+        "OT Include in Existing Compliance Salary" set to NO (their OT
+        HRS auto-import here instead of the Compliance Salary run)."""
     pol = company.get("attendance_policy") or {}
-    return (pol.get("policy_variant") or "").strip() == "policy_2"
+    if (pol.get("policy_variant") or "").strip() == "policy_2":
+        return True
+    pm = pol.get("policy_master") or {}
+    return bool(pm.get("compliance_present_8hr")) and \
+        pm.get("compliance_ot_include", True) is False
 
 
 def _per_day_pay(emp: dict, month_days: int) -> tuple:
@@ -103,11 +112,13 @@ async def _compute(company_id: str, month: str, admin: dict,
     )
     if company is None:
         raise HTTPException(status_code=404, detail="Company not found")
-    if not _is_policy2(company):
+    if not _ot_process_enabled(company):
         raise HTTPException(
             status_code=400,
-            detail="OT Salary Process is only available for firms on Textile Policy 2 "
-                   "(set it in Firm Master → Attendance Policy).",
+            detail="OT Salary Process is only available for firms on Textile Policy 2, "
+                   "or firms with \"Count Present Day @ 8 HRS\" ON and "
+                   "\"OT Include in Existing Compliance Salary\" set to No "
+                   "(Attendance Policy → Policy Master Sub Points).",
         )
     try:
         y, m = [int(x) for x in month.split("-")]
@@ -235,9 +246,16 @@ async def _compute(company_id: str, month: str, admin: dict,
 
 @router.get("/firms")
 async def ot_salary_firms(authorization: Optional[str] = Header(None)):
-    """Firms eligible for the OT Salary Process (Textile Policy 2 only)."""
+    """Firms eligible for the OT Salary Process (Textile Policy 2, or
+    8-HR-present firms with OT excluded from the Compliance Salary)."""
     admin = await _require_admin(authorization)
-    q: Dict[str, Any] = {"attendance_policy.policy_variant": "policy_2"}
+    q: Dict[str, Any] = {"$or": [
+        {"attendance_policy.policy_variant": "policy_2"},
+        # Iter 270 — "Count Present Day @ 8 HRS" ON + "OT Include in
+        # Existing Compliance Salary" = No.
+        {"attendance_policy.policy_master.compliance_present_8hr": True,
+         "attendance_policy.policy_master.compliance_ot_include": False},
+    ]}
     if admin.get("role") == "company_admin":
         q["company_id"] = admin.get("company_id")
     firms = []
