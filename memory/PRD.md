@@ -1302,3 +1302,10 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - APIs: GET/PUT /sync/settings, POST /sync/employee, POST /sync/all (dept/group/branch filter), GET /sync/status (dashboard aggregates), GET /queue, GET /sync/logs, GET /sync/conflicts, POST /sync/conflicts/{id}/resolve.
 - E2E verified: manual sync job pending→processing→success after simulated device ack; dashboard/logs/queue correct. Test artifacts cleaned.
 - PENDING (future phases): Phase 2 Sync Dashboard/Queue Monitor/History UI (WebSocket live); Phase 3 manual sync buttons UI + settings screen; Phase 4 reports (device-wise/employee/failed/attendance/health/performance) + live notifications.
+
+## Iter 268 (June 2026) — Sync Engine Phases 2-4 (UI + reports + notifications)
+- New screen /app/frontend/app/sync-engine.tsx (nav "Device Sync Engine" added to AdminWebShell sidebar + route perms). Super-admin firm picker; company_admin auto-scoped.
+- Phase 2: Dashboard (8 stat tiles: total/online/offline devices, pending, synced, failed, in-queue, conflicts + last-sync), Queue Monitor (live job list w/ status pills), History (sync_log rows). Live via 10s status polling + useLiveSync on sync.*/attendance.* events.
+- Phase 3: Manual sync — "Sync All Employees" + filtered sync (department/group/branch) calling POST /sync/all; full Admin Settings tab (auto-sync, fingerprints, face, card, password, photos, attendance, retry, max_retry_count, sync_interval) via GET/PUT /sync/settings.
+- Phase 4: "Report" button → GET /sync/report.xlsx (3 sheets: Summary status counts, Device-wise, Jobs). Notifications: worker inserts notifications (type sync.failed, audience admins) when a job fails after max retries. Conflicts tab: approve(Keep)/reject(Ignore) → POST /sync/conflicts/{id}/resolve.
+- Verified: all endpoints 200, Excel 3-sheet report generates, UI Dashboard/Settings/Queue tabs render & function (Playwright).

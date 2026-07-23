@@ -214,6 +214,7 @@ const NAV_PERMISSION_MAP: Record<string, string[]> = {
   "/location-audit": ["punch_approvals:read", "punch_approvals:write"],
   "/geofence-monitor": ["punch_approvals:read", "punch_approvals:write"],
   "/biometric-devices": ["biometric_devices:read", "biometric_devices:write"],
+  "/sync-engine": ["biometric_devices:read", "biometric_devices:write"],
   "/attendance-review": ["attendance_review:read", "attendance_review:write"],
   "/salary-run": ["salary_process:read", "salary_process:write"],
   "/arrear-salary-run": ["salary_process:read", "salary_process:write"],
@@ -417,6 +418,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
   { route: "/geofence-monitor", label: "Geofence Monitor", icon: "navigate-circle-outline" },
   { route: "/location-audit", label: "Location Audit", icon: "navigate-outline" },
   { route: "/biometric-devices", label: "Biometric Devices", icon: "finger-print-outline" },
+  { route: "/sync-engine", label: "Device Sync Engine", icon: "sync-outline" },
   { route: "/messages", label: "Messages", icon: "chatbubbles-outline" },
   { route: "/tickets", label: "Tickets", icon: "ticket-outline" },
   // Iter 85 — Appearance / Theme is intentionally omitted from the

@@ -341,6 +341,24 @@ async def _reconcile_job(job: dict) -> None:
             {"$set": {"status": "failed", "updated_at": _now(),
                       "error": "device sync failed after max retries"}},
         )
+        # Phase 4 — notify admins of a permanently failed sync.
+        try:
+            await db.notifications.insert_one({
+                "notification_id": f"n_{uuid.uuid4().hex[:10]}",
+                "company_id": job.get("company_id"),
+                "audience": "admins",
+                "type": "sync.failed",
+                "title": "❌ Employee sync failed",
+                "body": (
+                    f"Sync for {job.get('name') or job.get('pin')} failed on one "
+                    "or more machines after retries. Open Device Sync Engine → "
+                    "History to review."
+                ),
+                "created_at": _now(),
+                "created_by": "system",
+            })
+        except Exception:
+            pass
 
 
 async def process_sync_queue() -> Dict[str, int]:
@@ -610,3 +628,89 @@ async def resolve_conflict_api(conflict_id: str, payload: dict = Body(None),
                   "resolved_by": admin["user_id"], "resolved_at": _now()}},
     )
     return {"ok": True, "decision": decision}
+
+
+@router.get("/sync/report.xlsx")
+async def sync_report_xlsx(company_id: Optional[str] = Query(None),
+                           authorization: Optional[str] = Header(None)):
+    """Phase 4 — consolidated Sync Report: per-device counts, per-status
+    totals and the most recent jobs (incl. failures)."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    q: dict = {}
+    if admin["role"] == "company_admin":
+        q["company_id"] = admin["company_id"]
+    elif company_id:
+        q["company_id"] = company_id
+    from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+
+    jobs = await db.sync_jobs.find(q, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    logs = await db.sync_log.find(q, {"_id": 0}).to_list(20000)
+
+    wb = Workbook()
+    hf = Font(bold=True, color="FFFFFF")
+    hfill = PatternFill("solid", fgColor="1D4ED8")
+
+    def _hdr(ws, cols):
+        for i, c in enumerate(cols, 1):
+            cell = ws.cell(row=1, column=i, value=c)
+            cell.font = hf
+            cell.fill = hfill
+
+    # Sheet 1 — status summary
+    ws1 = wb.active
+    ws1.title = "Summary"
+    _hdr(ws1, ["Status", "Jobs"])
+    counts: Dict[str, int] = {}
+    for j in jobs:
+        counts[j.get("status", "?")] = counts.get(j.get("status", "?"), 0) + 1
+    r = 2
+    for k in ("pending", "processing", "retry", "success", "failed", "cancelled"):
+        ws1.cell(row=r, column=1, value=k)
+        ws1.cell(row=r, column=2, value=counts.get(k, 0))
+        r += 1
+
+    # Sheet 2 — per-device
+    ws2 = wb.create_sheet("Device-wise")
+    _hdr(ws2, ["Device Serial", "Total", "Success", "Failed", "Queued"])
+    dev: Dict[str, Dict[str, int]] = {}
+    for lg in logs:
+        d = dev.setdefault(lg.get("device_serial", "?"),
+                           {"total": 0, "success": 0, "failed": 0, "queued": 0})
+        d["total"] += 1
+        d[lg.get("status", "queued") if lg.get("status") in ("success", "failed", "queued") else "queued"] += 1
+    r = 2
+    for serial, d in sorted(dev.items()):
+        ws2.cell(row=r, column=1, value=serial)
+        ws2.cell(row=r, column=2, value=d["total"])
+        ws2.cell(row=r, column=3, value=d["success"])
+        ws2.cell(row=r, column=4, value=d["failed"])
+        ws2.cell(row=r, column=5, value=d["queued"])
+        r += 1
+
+    # Sheet 3 — recent jobs
+    ws3 = wb.create_sheet("Jobs")
+    _hdr(ws3, ["Job ID", "Employee", "PIN", "Action", "Status", "Attempts",
+               "Devices", "Created", "Updated", "Error"])
+    for i, j in enumerate(jobs[:2000], start=2):
+        vals = [j.get("job_id"), j.get("name"), j.get("pin"), j.get("action"),
+                j.get("status"), j.get("attempts"), len(j.get("targets") or []),
+                j.get("created_at"), j.get("updated_at"), j.get("error")]
+        for c, v in enumerate(vals, 1):
+            ws3.cell(row=i, column=c, value=v)
+
+    for ws in (ws1, ws2, ws3):
+        for col in ws.columns:
+            width = max((len(str(c.value)) for c in col if c.value is not None), default=10)
+            ws.column_dimensions[col[0].column_letter].width = min(width + 2, 45)
+
+    buf = BytesIO()
+    wb.save(buf)
+    from fastapi.responses import Response
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=sync-report.xlsx"},
+    )
