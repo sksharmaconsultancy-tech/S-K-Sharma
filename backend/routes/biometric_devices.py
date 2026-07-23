@@ -394,6 +394,14 @@ async def _ingest_templates(raw: str, device: dict) -> int:
             upsert=True,
         )
         saved += 1
+        # Iter 267 — Sync Engine conflict: a machine holding biometric data
+        # the portal has nowhere else is logged for admin review.
+        try:
+            from routes.sync_engine import log_template_conflict
+            await log_template_conflict(
+                doc["company_id"], pin, device.get("serial_number"), kind)
+        except Exception:
+            pass
     if saved:
         await db.biometric_devices.update_one(
             {"serial_number": device["serial_number"]},
@@ -1220,6 +1228,8 @@ async def register_biometric_device(
         "company_id": company_id,
         "location": (payload.location or "").strip() or None,
         "enabled": payload.enabled,
+        # Iter 267 — participates in the multi-device sync engine by default.
+        "sync_enabled": True,
         # Iter 263 — machine time zone (validated; default India +05:30).
         "gmt_offset": (payload.gmt_offset or "+05:30").strip() or "+05:30",
         "created_at": _now_iso_z(),

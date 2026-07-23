@@ -193,6 +193,15 @@ async def patch_employee_profile(
     await db.users.update_one({"user_id": user_id}, {"$set": updates})
     logger.info("[profile] %s updated %s fields=%s",
                 admin["user_id"], user_id, sorted(updates.keys()))
+    # Iter 267 — Sync Engine: re-push the updated employee to machines.
+    try:
+        from routes.sync_engine import enqueue_employee_sync
+        emp = await db.users.find_one({"user_id": user_id}, {"_id": 0, "company_id": 1})
+        if emp and emp.get("company_id"):
+            await enqueue_employee_sync(emp["company_id"], user_id, "update",
+                                        actor=admin.get("user_id", "system"))
+    except Exception:
+        pass
     fresh = await _get_emp(user_id, admin)
     return {"ok": True, "employee": {k: fresh.get(k) for k in
                                      ["user_id", "name", "employee_code"] + _STR_FIELDS}}

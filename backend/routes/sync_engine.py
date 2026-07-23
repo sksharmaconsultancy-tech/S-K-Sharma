@@ -197,6 +197,50 @@ async def enqueue_employee_sync(
         return None
 
 
+async def enqueue_employee_removal(
+    company_id: str,
+    user_id: str,
+    pin: str,
+    name: Optional[str] = None,
+    actor: str = "system",
+) -> Optional[str]:
+    """Queue a 'delete' job from an ALREADY-removed employee (the user row is
+    gone, so we take the PIN directly). Respects the auto-sync toggle."""
+    try:
+        settings = await get_sync_settings(company_id)
+        if not settings.get("enable_auto_sync"):
+            return None
+        devices = await _sync_enabled_devices(company_id)
+        pin = str(pin or "").strip()
+        if not devices or not pin:
+            return None
+        job_id = f"sj_{uuid.uuid4().hex[:12]}"
+        await db.sync_jobs.insert_one({
+            "job_id": job_id,
+            "company_id": company_id,
+            "user_id": user_id,
+            "pin": pin,
+            "name": name,
+            "action": "delete",
+            "status": "pending",
+            "attempts": 0,
+            "max_attempts": int(settings.get("max_retry_count") or 3),
+            "targets": [d["serial_number"] for d in devices],
+            "cmd_ids": [],
+            "created_by": actor,
+            "created_at": _now(),
+            "updated_at": _now(),
+            "error": None,
+        })
+        logger.info("[sync] enqueued delete job=%s pin=%s -> %d device(s)",
+                    job_id, pin, len(devices))
+        return job_id
+    except Exception:
+        logger.warning("[sync] removal enqueue failed for %s", company_id,
+                       exc_info=True)
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Worker (Queue drain + retry + reconcile)
 # ---------------------------------------------------------------------------

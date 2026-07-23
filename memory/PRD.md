@@ -1292,3 +1292,13 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Bulk Employee Import: added City, State, Pin Code columns to the .xlsx template + sample row; aliases (city/town, state, pin code/pincode/pin_code/postal code/zip) map them; bulk-import stores city, district(=city), state, pincode. Verified: import stores Jaipur/Rajasthan/302001.
 - Double confirmation before import (web): two sequential window.confirm dialogs (firm+row-count, then final CREATE confirmation) in employee-bulk-import.tsx runImport(); hint text added under step 4.
 - Idle auto-logout (IdleLogout.tsx): per-role — super_admin & sub_admin = 30 min, company_admin = 10 min (unchanged). Alert message now dynamic. NOTE: still CLIENT-side only (SEC-004 server-side expiry still open).
+
+## Iter 267 (June 2026) — ZKTeco Multi-Device Sync Engine (Phase 1)
+- New module /app/backend/routes/sync_engine.py (repository→service→worker→API layers) on MongoDB + ADMS push. User approved: MongoDB (not SQL), ADMS command-queue model, portal-as-source-of-truth conflicts.
+- Collections: sync_settings, sync_jobs (queue: pending/processing/success/failed/retry/cancelled), sync_log (per-device execution), sync_conflicts. Devices got sync_enabled=true default.
+- Auto-sync hooks: employee CREATE (server.py add), UPDATE (employee_profile.py patch), DELETE (server.py delete → enqueue_employee_removal using pre-captured pin). All wrapped so sync never breaks employee ops.
+- Worker sync_engine_loop() every 30s: _dispatch_job builds ADMS commands (DATA UPDATE USERINFO + card/passwd per settings + FP/FACE/BIODATA templates via _template_to_cmd; DELETE USERINFO for delete/disable), queues via _queue_cmd, opens sync_log rows → status processing; _reconcile_job reads biometric_device_cmds terminal states (done/failed via /iclock/devicecmd ack) → success / retry (up to max_retry_count) / failed. Offline devices auto-catch-up on reconnect (inherent to ADMS pull).
+- Conflict logging hooked into _ingest_templates: machine-only template → sync_conflicts (open) for admin approve/reject.
+- APIs: GET/PUT /sync/settings, POST /sync/employee, POST /sync/all (dept/group/branch filter), GET /sync/status (dashboard aggregates), GET /queue, GET /sync/logs, GET /sync/conflicts, POST /sync/conflicts/{id}/resolve.
+- E2E verified: manual sync job pending→processing→success after simulated device ack; dashboard/logs/queue correct. Test artifacts cleaned.
+- PENDING (future phases): Phase 2 Sync Dashboard/Queue Monitor/History UI (WebSocket live); Phase 3 manual sync buttons UI + settings screen; Phase 4 reports (device-wise/employee/failed/attendance/health/performance) + live notifications.

@@ -2631,6 +2631,13 @@ async def startup():
     except Exception:
         logger.exception("[startup] device offline alert loop failed to start")
 
+    # Iter 267 — ZKTeco multi-device sync engine worker (30s cadence).
+    try:
+        from routes.sync_engine import sync_engine_loop
+        asyncio.create_task(sync_engine_loop())
+    except Exception:
+        logger.exception("[startup] sync engine loop failed to start")
+
 
 async def _bg_enforce_geofence_defaults():
     """Iter 68 — Enforce the new default: geofence ON + strict rejection
@@ -8310,6 +8317,13 @@ async def admin_create_employee(
                                details=f"Employee code {doc.get('employee_code') or ''}")
     except Exception:
         pass
+    # Iter 267 — Sync Engine: push new employee to all sync-enabled machines.
+    try:
+        from routes.sync_engine import enqueue_employee_sync
+        await enqueue_employee_sync(cid, doc["user_id"], "create",
+                                    actor=admin.get("user_id", "system"))
+    except Exception:
+        pass
     return {
         "ok": True,
         "user_id": doc["user_id"],
@@ -8829,6 +8843,18 @@ async def delete_employee(user_id: str,
         cascade[col] = r.deleted_count
     await db.users.delete_one({"user_id": user_id})
     logger.info(f"[DELETE employee] {user_id} by {admin.get('email')} cascade={cascade}")
+    # Iter 267 — Sync Engine: remove the employee from all machines. The
+    # target's PIN/company are captured before deletion so the removal
+    # command can be built even though the user record is gone.
+    try:
+        pin = str(target.get("bio_code") or "").strip()
+        if pin and target.get("company_id"):
+            from routes.sync_engine import enqueue_employee_removal
+            await enqueue_employee_removal(
+                target["company_id"], user_id, pin, target.get("name"),
+                actor=admin.get("user_id", "system"))
+    except Exception:
+        pass
     return {"ok": True, "cascade": cascade}
 
 
@@ -20604,6 +20630,10 @@ from routes.shift_change_v2 import router as shift_change_v2_router  # noqa: E40
 app.include_router(shift_change_v2_router)
 from routes.comp_off import router as comp_off_router  # noqa: E402
 app.include_router(comp_off_router)
+
+# Iter 267 — Real-Time ZKTeco Multi-Device Synchronization Engine (Phase 1).
+from routes.sync_engine import router as sync_engine_router  # noqa: E402
+app.include_router(sync_engine_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
