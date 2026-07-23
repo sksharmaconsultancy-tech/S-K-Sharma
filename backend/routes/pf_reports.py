@@ -162,7 +162,9 @@ def _challan_pdf(firm: Dict[str, Any], months: List[Dict[str, Any]],
     from utils.salary_register_pdf import _num_to_words_inr
     fmt = fmt or {}
     fs = float(fmt.get("font_size") or 8)
-    pagesize = landscape(A4) if (fmt.get("orientation") == "landscape") else A4
+    # Iter 274 (user request) — PF Challan is LANDSCAPE by default; a saved
+    # "portrait" format still wins.
+    pagesize = A4 if (fmt.get("orientation") == "portrait") else landscape(A4)
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=pagesize, leftMargin=10 * mm,
                             rightMargin=10 * mm, topMargin=10 * mm,

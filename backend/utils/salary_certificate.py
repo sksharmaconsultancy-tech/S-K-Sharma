@@ -147,6 +147,7 @@ def build_salary_certificate_pdf(
     signatory_name: Optional[str] = None,
     signatory_role: Optional[str] = None,
     certificate_id: Optional[str] = None,
+    title: str = "SALARY CERTIFICATE",
 ) -> bytes:
     """Return the PDF bytes for a one-page Salary Certificate."""
     reg, bold = _register_fonts()
@@ -233,7 +234,7 @@ def build_salary_certificate_pdf(
 
     # Title + meta
     cert_id = certificate_id or f"SC-{uuid.uuid4().hex[:8].upper()}"
-    flow.append(Paragraph("SALARY CERTIFICATE", styles["title"]))
+    flow.append(Paragraph(title, styles["title"]))
     flow.append(Paragraph(
         f"Certificate No. <b>{cert_id}</b>  ·  Issued on {date.today().strftime('%d-%b-%Y')}"
         f"  ·  Reference month {month}",

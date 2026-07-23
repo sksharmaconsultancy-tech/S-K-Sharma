@@ -132,6 +132,7 @@ def _flow_for_employee(
     styles: Dict[str, ParagraphStyle],
     reg: str,
     bold: str,
+    title: str = "PAYSLIP",
 ) -> list:
     """Return the reportlab flowables for one employee (one page)."""
     flow = []
@@ -185,7 +186,7 @@ def _flow_for_employee(
     flow.append(Spacer(1, 4 * mm))
 
     # Title
-    flow.append(Paragraph("PAYSLIP", styles["title"]))
+    flow.append(Paragraph(title, styles["title"]))
     flow.append(Paragraph(
         f"For the month of <b>{_month_label(month)}</b>  ·  Issued {date.today().strftime('%d-%b-%Y')}",
         styles["muted_c"],
@@ -437,6 +438,7 @@ def build_payslip_pdf(
     company: Dict[str, Any],
     row: Dict[str, Any],
     month: str,
+    title: str = "PAYSLIP",
 ) -> bytes:
     """Single-page PDF for one employee."""
     reg, bold = _register_fonts()
@@ -459,6 +461,7 @@ def build_payslip_pdf(
         styles=styles,
         reg=reg,
         bold=bold,
+        title=title,
     )
     doc.build(flow)
     return buf.getvalue()
@@ -469,6 +472,7 @@ def build_bulk_payslip_pdf(
     company: Dict[str, Any],
     month: str,
     entries: list[Dict[str, Any]],
+    title: str = "PAYSLIP",
 ) -> bytes:
     """Combined multi-page PDF, one page per employee.
 
@@ -497,6 +501,7 @@ def build_bulk_payslip_pdf(
             styles=styles,
             reg=reg,
             bold=bold,
+            title=title,
         )
         flow.append(KeepTogether(page_flow))
         if idx < len(entries) - 1:

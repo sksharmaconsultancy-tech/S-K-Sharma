@@ -99,8 +99,9 @@ async def clra_form_xii(
     location = ", ".join([p for p in [company.get("city"), company.get("state")] if p]) or "-"
 
     pdf = _new_pdf(landscape=True)
+    from routes.report_formats import title_for
     _pdf_header(
-        pdf, "FORM XII",
+        pdf, await title_for("clra_form_xii", "FORM XII"),
         "[See Rule 74] Register of Contractors — Contract Labour (R&A) Central Rules, 1971",
         company,
     )
@@ -136,8 +137,9 @@ async def clra_form_xiii(
     groups = _by_contractor(await _workmen(company_id))
 
     pdf = _new_pdf(landscape=True)
+    from routes.report_formats import title_for
     _pdf_header(
-        pdf, "FORM XIII",
+        pdf, await title_for("clra_form_xiii", "FORM XIII"),
         "[See Rule 75] Register of Workmen employed by Contractor — Contract Labour (R&A) Central Rules, 1971",
         company,
     )
@@ -185,8 +187,10 @@ async def clra_form_xiv(
                                       company.get("state")] if p])
 
     pdf = _new_pdf(landscape=False)
+    from routes.report_formats import title_for
+    _xiv_title = await title_for("clra_form_xiv", "FORM XIV")
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 7, _s("FORM XIV"), align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 7, _s(_xiv_title), align="C", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 9)
     pdf.cell(0, 5, _s("[See Rule 76] Employment Card — Contract Labour (R&A) Central Rules, 1971"),
              align="C", new_x="LMARGIN", new_y="NEXT")
@@ -249,8 +253,9 @@ async def clra_form_xv(
     emps = {e["user_id"]: e for e in await _workmen(company_id)}
 
     pdf = _new_pdf(landscape=True)
+    from routes.report_formats import title_for
     _pdf_header(
-        pdf, "FORM XV",
+        pdf, await title_for("clra_form_xv", "FORM XV"),
         f"[See Rule 78(1)(a)(i)] Register of Wages — wage period {month} — Contract Labour (R&A) Central Rules, 1971",
         company,
     )

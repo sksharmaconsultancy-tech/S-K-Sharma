@@ -32,6 +32,18 @@ _HEADERS = [
     "Punches", "Break HRS", "Late Min", "Early Go", "Status",
 ]
 
+# Iter 274 — editable column catalog for the Daily PDF (Utilities → PDF
+# Report Formats): (key, default heading, default width mm) — order matches
+# ``_HEADERS`` / ``_daily_rows``.
+DAILY_PDF_COLUMNS = [
+    ("sno", "S.No", 10), ("bio_code", "Bio Code", 13), ("emp_code", "Emp Code", 13),
+    ("name", "Name", 34), ("father_name", "Father Name", 30), ("designation", "Designation", 24),
+    ("in", "In", 13), ("out", "Out", 13), ("ot_in", "OT In", 13), ("ot_out", "OT Out", 13),
+    ("duty_hrs", "Duty HRS", 15), ("ot_hrs", "OT HRS", 13), ("total_hrs", "Total HRS", 15),
+    ("punches", "Punches", 11), ("break_hrs", "Break HRS", 13), ("late_min", "Late Min", 11),
+    ("early_go", "Early Go", 11), ("status", "Status", 14),
+]
+
 
 def _hhmm(hrs: float) -> str:
     h = int(hrs)
@@ -208,13 +220,41 @@ def build_daily_xlsx(grid: Dict[str, Any], date_s: str) -> bytes:
     return buf.getvalue()
 
 
-def build_daily_pdf(grid: Dict[str, Any], date_s: str) -> bytes:
+def build_daily_pdf(grid: Dict[str, Any], date_s: str,
+                    fmt: Dict[str, Any] | None = None) -> bytes:
     company_name = ((grid or {}).get("company") or {}).get("name") or ""
     rows, summary = _daily_rows(grid)
 
+    # Iter 274 — saved PDF Report Format (title / orientation / font size /
+    # column show-hide-rename-reorder-width).
+    fmt = fmt or {}
+    keys = [k for k, _h, _w in DAILY_PDF_COLUMNS]
+    cat = {k: (h, w) for k, h, w in DAILY_PDF_COLUMNS}
+    spec = [c for c in (fmt.get("columns") or [])
+            if isinstance(c, dict) and c.get("key") in cat]
+    if not spec:
+        spec = [{"key": k} for k in keys]
+    sel = []
+    for c in spec:
+        k = c["key"]
+        h, w = cat[k]
+        try:
+            width = float(c.get("width") or w)
+        except Exception:
+            width = w
+        sel.append({"key": k, "idx": keys.index(k),
+                    "heading": str(c.get("heading") or h), "width": width})
+    is_land = (fmt.get("orientation") or "landscape") != "portrait"
+    pagesize = landscape(A4) if is_land else A4
+    try:
+        body_fs = float(fmt.get("font_size") or 0) or 7.0
+    except Exception:
+        body_fs = 7.0
+    title_ov = str(fmt.get("title") or "").strip() or "Daily Attendance Report"
+
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
-        buf, pagesize=landscape(A4),
+        buf, pagesize=pagesize,
         leftMargin=8 * mm, rightMargin=8 * mm,
         topMargin=8 * mm, bottomMargin=8 * mm,
     )
@@ -232,7 +272,7 @@ def build_daily_pdf(grid: Dict[str, Any], date_s: str) -> bytes:
         pretty = date_s
     now_ist = datetime.now(timezone(timedelta(hours=5, minutes=30)))
     story: List[Any] = [
-        Paragraph(f"{company_name} — Daily Attendance Report", title),
+        Paragraph(f"{company_name} — {title_ov}", title),
         Paragraph(
             f"Date: {pretty} · Present: {summary['present']} · Absent: {summary['absent']}"
             f" · Miss Punch: {summary['anomalies']} · Generated: "
@@ -241,32 +281,35 @@ def build_daily_pdf(grid: Dict[str, Any], date_s: str) -> bytes:
         ),
     ]
 
-    data = [_HEADERS] + [[str(v) for v in row] for row in rows]
-    # Footer
-    data.append([
+    footer_full = [
         f"Employees: {len(rows)}", "", "", "", "", "", "", "", "", "",
         _hhmm(summary["tot_duty"]), _hhmm(summary["tot_ot"]),
         _hhmm(summary["tot_duty"] + summary["tot_ot"]),
         str(summary["tot_punch"]), _hhmm(summary["tot_break"]),
         str(summary["tot_late"]), str(summary["tot_early"]),
         f"P:{summary['present']} A:{summary['absent']}",
-    ])
-
-    col_w = [
-        10 * mm, 13 * mm, 13 * mm, 34 * mm, 30 * mm, 24 * mm,
-        13 * mm, 13 * mm, 13 * mm, 13 * mm, 15 * mm, 13 * mm, 15 * mm,
-        11 * mm, 13 * mm, 11 * mm, 11 * mm, 14 * mm,
     ]
+    data = [[s["heading"] for s in sel]]
+    data += [[str(row[s["idx"]]) for s in sel] for row in rows]
+    data.append([footer_full[s["idx"]] for s in sel])
+
+    # Column widths — scale to the usable page width when they overflow.
+    col_w = [s["width"] * mm for s in sel]
+    usable = pagesize[0] - 16 * mm
+    if sum(col_w) > usable and sum(col_w) > 0:
+        col_w = [w * usable / sum(col_w) for w in col_w]
+
+    left_cols = [i for i, s in enumerate(sel)
+                 if s["key"] in ("name", "father_name", "designation")]
+    status_pos = next((i for i, s in enumerate(sel) if s["key"] == "status"), None)
     style = [
         ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor("#1F5254")),
         ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 7),
-        ("FONTSIZE", (0, 1), (-1, -1), 7),
+        ("FONTSIZE", (0, 0), (-1, 0), body_fs),
+        ("FONTSIZE", (0, 1), (-1, -1), body_fs),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-        ("ALIGN", (0, 1), (2, -1), "CENTER"),
-        ("ALIGN", (6, 1), (-1, -1), "CENTER"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("GRID", (0, 0), (-1, -1), 0.25, rl_colors.HexColor("#D6DCDC")),
         ("LEFTPADDING", (0, 0), (-1, -1), 2),
         ("RIGHTPADDING", (0, 0), (-1, -1), 2),
@@ -275,14 +318,19 @@ def build_daily_pdf(grid: Dict[str, Any], date_s: str) -> bytes:
         ("BACKGROUND", (0, len(data) - 1), (-1, len(data) - 1), rl_colors.HexColor("#E6EDED")),
         ("FONTNAME", (0, len(data) - 1), (-1, len(data) - 1), "Helvetica-Bold"),
     ]
+    for ci in left_cols:
+        style.append(("ALIGN", (ci, 1), (ci, -1), "LEFT"))
     for r_i in range(1, len(data) - 1):
         if r_i % 2 == 0:
             style.append(("BACKGROUND", (0, r_i), (-1, r_i), rl_colors.HexColor("#F5F7F8")))
-        status = data[r_i][-1]
-        color = {"P": "#15803D", "A": "#B91C1C", "MISS PUNCH": "#B45309"}.get(status)
-        if color:
-            style.append(("TEXTCOLOR", (-1, r_i), (-1, r_i), rl_colors.HexColor(color)))
-            style.append(("FONTNAME", (-1, r_i), (-1, r_i), "Helvetica-Bold"))
+        if status_pos is not None:
+            status = data[r_i][status_pos]
+            color = {"P": "#15803D", "A": "#B91C1C", "MISS PUNCH": "#B45309"}.get(status)
+            if color:
+                style.append(("TEXTCOLOR", (status_pos, r_i), (status_pos, r_i),
+                              rl_colors.HexColor(color)))
+                style.append(("FONTNAME", (status_pos, r_i), (status_pos, r_i),
+                              "Helvetica-Bold"))
 
     table = Table(data, colWidths=col_w, repeatRows=1)
     table.setStyle(TableStyle(style))

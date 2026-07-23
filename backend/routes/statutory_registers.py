@@ -234,8 +234,9 @@ async def bonus_form_a(
     allocable = round(available * pct / 100.0, 2)
 
     pdf = _new_pdf(landscape=True)
+    from routes.report_formats import title_for
     _pdf_header(
-        pdf, "FORM A",
+        pdf, await title_for("bonus_form_a", "FORM A"),
         f"[See Rule 4(a), Payment of Bonus Rules, 1975] — Computation of the Allocable Surplus — Accounting Year {fy}",
         company,
     )
@@ -275,8 +276,9 @@ async def bonus_form_b(
     fy = _fy_label(fy_start_year)
 
     pdf = _new_pdf(landscape=True)
+    from routes.report_formats import title_for
     _pdf_header(
-        pdf, "FORM B",
+        pdf, await title_for("bonus_form_b", "FORM B"),
         f"[See Rule 4(b), Payment of Bonus Rules, 1975] — Set-on and Set-off of Allocable Surplus (Sec 15) — Accounting Year {fy}",
         company,
     )
@@ -328,8 +330,9 @@ async def bonus_form_c(
     ).to_list(5000)}
 
     pdf = _new_pdf(landscape=True)
+    from routes.report_formats import title_for
     _pdf_header(
-        pdf, "FORM C",
+        pdf, await title_for("bonus_form_c", "FORM C"),
         f"[See Rule 4(c), Payment of Bonus Rules, 1975] — Bonus paid to employees for the Accounting Year {fy}",
         company,
     )
@@ -384,8 +387,9 @@ async def bonus_form_d(
     rate = float((run.get("policy_used") or {}).get("rate_percent") or 8.33)
 
     pdf = _new_pdf(landscape=False)
+    from routes.report_formats import title_for
     _pdf_header(
-        pdf, "FORM D",
+        pdf, await title_for("bonus_form_d", "FORM D"),
         f"[See Rule 5, Payment of Bonus Rules, 1975] — Annual Return: Bonus paid to employees for the Accounting Year {fy}",
         company,
     )

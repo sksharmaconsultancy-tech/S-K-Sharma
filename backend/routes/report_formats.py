@@ -53,6 +53,11 @@ ESIC_COLUMNS: List[Any] = [
     ("reason", "Reason", 22, False),
 ]
 
+# Iter 274 — catalogs from the generators (4-tuple: key/heading/width/numeric)
+from utils.daily_attendance import DAILY_PDF_COLUMNS as _DAILY3  # noqa: E402
+from utils.salary_run import SALARY_REGISTER_COLUMNS as _SALARY_REG_COLUMNS  # noqa: E402
+_DAILY_COLUMNS = [(k, h, w, False) for k, h, w in _DAILY3]
+
 REPORTS: Dict[str, Dict[str, Any]] = {
     "pf_ecr": {
         "label": "PF ECR — Return Statement (PDF)",
@@ -65,7 +70,8 @@ REPORTS: Dict[str, Dict[str, Any]] = {
         "label": "PF Challan (PDF)",
         "group": "PF Reports",
         "columns": None,  # fixed statutory grid
-        "defaults": {"orientation": "portrait", "font_size": 8,
+        # Iter 274 (user request) — PF Challan defaults to LANDSCAPE.
+        "defaults": {"orientation": "landscape", "font_size": 8,
                      "title": "EMPLOYEES' PROVIDENT FUND ORGANISATION"},
     },
     "esic_contribution": {
@@ -82,9 +88,121 @@ REPORTS: Dict[str, Dict[str, Any]] = {
         "defaults": {"orientation": "portrait", "font_size": 9,
                      "title": "EMPLOYEE STATE INSURANCE CORPORATION"},
     },
+    # ---- Iter 274 — all major PDF reports are format-editable ----------
+    "attendance_inout": {
+        "label": "Attendance — Monthly IN/OUT + Hours (PDF)",
+        "group": "Attendance Reports",
+        "columns": None,  # day-wise grid (columns fixed by the month)
+        "defaults": {"orientation": "landscape", "font_size": 6,
+                     "title": "Monthly Attendance IN / OUT + Working Hours"},
+    },
+    "attendance_ot": {
+        "label": "Attendance — Monthly OT Duty HRS (PDF)",
+        "group": "Attendance Reports",
+        "columns": None,
+        "defaults": {"orientation": "landscape", "font_size": 6,
+                     "title": "Monthly Attendance Data (OT Duty HRS)"},
+    },
+    "attendance_hours": {
+        "label": "Attendance — Monthly Working Hours (PDF)",
+        "group": "Attendance Reports",
+        "columns": None,
+        "defaults": {"orientation": "landscape", "font_size": 6,
+                     "title": "Monthly Attendance Data (Working Hours)"},
+    },
+    "daily_present": {
+        "label": "Daily Attendance Report (PDF)",
+        "group": "Attendance Reports",
+        "columns": _DAILY_COLUMNS,
+        "defaults": {"orientation": "landscape", "font_size": 7,
+                     "title": "Daily Attendance Report"},
+    },
+    "salary_register": {
+        "label": "Salary Register — Actual (PDF)",
+        "group": "Salary Reports",
+        "columns": _SALARY_REG_COLUMNS,
+        "defaults": {"orientation": "landscape", "font_size": 7.5,
+                     "title": "Salary Register"},
+    },
+    "payslips": {
+        "label": "Payslips (PDF) — title only",
+        "group": "Salary Reports",
+        "columns": None,
+        "defaults": {"orientation": "portrait", "font_size": 9,
+                     "title": "PAYSLIP"},
+    },
+    "salary_certificate": {
+        "label": "Salary Certificate (PDF) — title only",
+        "group": "Salary Reports",
+        "columns": None,
+        "defaults": {"orientation": "portrait", "font_size": 9,
+                     "title": "SALARY CERTIFICATE"},
+    },
+    "clra_form_xii": {
+        "label": "CLRA Form XII — Register of Contractors (PDF) — title only",
+        "group": "CLRA Registers",
+        "columns": None,
+        "defaults": {"orientation": "landscape", "font_size": 8.5,
+                     "title": "FORM XII"},
+    },
+    "clra_form_xiii": {
+        "label": "CLRA Form XIII — Register of Workmen (PDF) — title only",
+        "group": "CLRA Registers",
+        "columns": None,
+        "defaults": {"orientation": "landscape", "font_size": 8.5,
+                     "title": "FORM XIII"},
+    },
+    "clra_form_xiv": {
+        "label": "CLRA Form XIV — Employment Card (PDF) — title only",
+        "group": "CLRA Registers",
+        "columns": None,
+        "defaults": {"orientation": "portrait", "font_size": 8.5,
+                     "title": "FORM XIV"},
+    },
+    "clra_form_xv": {
+        "label": "CLRA Form XV — Service Certificate (PDF) — title only",
+        "group": "CLRA Registers",
+        "columns": None,
+        "defaults": {"orientation": "landscape", "font_size": 8.5,
+                     "title": "FORM XV"},
+    },
+    "bonus_form_a": {
+        "label": "Bonus Form A — Allocable Surplus (PDF) — title only",
+        "group": "Bonus Registers",
+        "columns": None,
+        "defaults": {"orientation": "landscape", "font_size": 8.5,
+                     "title": "FORM A"},
+    },
+    "bonus_form_b": {
+        "label": "Bonus Form B — Set-on / Set-off (PDF) — title only",
+        "group": "Bonus Registers",
+        "columns": None,
+        "defaults": {"orientation": "landscape", "font_size": 8.5,
+                     "title": "FORM B"},
+    },
+    "bonus_form_c": {
+        "label": "Bonus Form C — Bonus Paid (PDF) — title only",
+        "group": "Bonus Registers",
+        "columns": None,
+        "defaults": {"orientation": "landscape", "font_size": 8.5,
+                     "title": "FORM C"},
+    },
+    "bonus_form_d": {
+        "label": "Bonus Form D — Annual Return (PDF) — title only",
+        "group": "Bonus Registers",
+        "columns": None,
+        "defaults": {"orientation": "landscape", "font_size": 8.5,
+                     "title": "FORM D"},
+    },
 }
 
 _ORIENTATIONS = ("portrait", "landscape")
+
+
+async def title_for(report_id: str, default: str) -> str:
+    """Iter 274 — saved title override for fixed-layout reports."""
+    fmt = await get_report_format(report_id)
+    return str(fmt.get("title") or "").strip() or default
 
 
 def _key(report_id: str) -> Dict[str, str]:

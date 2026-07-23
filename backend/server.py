@@ -14107,6 +14107,7 @@ async def download_salary_certificate_pdf(
 ):
     from fastapi.responses import Response
     from utils.salary_certificate import build_salary_certificate_pdf
+    from routes.report_formats import title_for as _title_for_report
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "sub_admin", "company_admin"])
     emp = await db.users.find_one({"user_id": user_id, "role": "employee"}, {"_id": 0})
@@ -14126,6 +14127,7 @@ async def download_salary_certificate_pdf(
         month=ref_month,
         signatory_name=signatory_name,
         signatory_role=signatory_role,
+        title=await _title_for_report("salary_certificate", "SALARY CERTIFICATE"),
     )
     fname = f"SalaryCertificate_{(emp.get('name') or 'employee').replace(' ', '_')}_{ref_month}.pdf"
     return Response(
@@ -14305,7 +14307,10 @@ async def export_salary_register_pdf(
         c = await db.companies.find_one({"company_id": run["company_id"]}, {"_id": 0, "name": 1})
         if c and c.get("name"):
             company_name = c["name"]
-    pdf_bytes = build_salary_register_pdf(run, company_name=company_name)
+    from routes.report_formats import get_report_format
+    pdf_bytes = build_salary_register_pdf(
+        run, company_name=company_name,
+        fmt=await get_report_format("salary_register"))
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -14356,8 +14361,10 @@ async def download_bulk_payslips_pdf(
     for r in rows:
         emp = emps_map.get(r.get("user_id") or "") or {"name": r.get("name")}
         entries.append({"employee": emp, "row": {**r, "month_days": run.get("month_days")}})
+    from routes.report_formats import title_for
     pdf_bytes = build_bulk_payslip_pdf(
         company=company, month=run.get("month") or "", entries=entries,
+        title=await title_for("payslips", "PAYSLIP"),
     )
     fname = (
         f"Payslips_{(company.get('name') or 'firm').replace(' ', '_')}_"
@@ -16942,7 +16949,9 @@ async def _monthly_report_impl(
             from_date=None,
             to_date=None,
         )
-        pdf_bytes = build_monthly_inout_pdf(grid)
+        from routes.report_formats import get_report_format
+        pdf_bytes = build_monthly_inout_pdf(
+            grid, fmt=await get_report_format("attendance_inout"))
         company_slug = (company.get("name") or "company").replace(" ", "_")
         filename = f"MonthlyAttendance_InOut_{company_slug}_{month}.pdf"
         return Response(
@@ -16971,7 +16980,9 @@ async def _monthly_report_impl(
             from_date=None,
             to_date=None,
         )
-        pdf_bytes = build_monthly_ot_pdf(grid)
+        from routes.report_formats import get_report_format
+        pdf_bytes = build_monthly_ot_pdf(
+            grid, fmt=await get_report_format("attendance_ot"))
         company_slug = (company.get("name") or "company").replace(" ", "_")
         filename = f"MonthlyAttendance_OTDutyHRS_{company_slug}_{month}.pdf"
         return Response(
@@ -16988,7 +16999,9 @@ async def _monthly_report_impl(
             from_date=None,
             to_date=None,
         )
-        pdf_bytes = build_monthly_hours_pdf(grid)
+        from routes.report_formats import get_report_format
+        pdf_bytes = build_monthly_hours_pdf(
+            grid, fmt=await get_report_format("attendance_hours"))
         company_slug = (company.get("name") or "company").replace(" ", "_")
         filename = f"MonthlyAttendance_Hours_{company_slug}_{month}.pdf"
         return Response(
@@ -17117,7 +17130,9 @@ async def _daily_report_impl(company_id: str, date_s: str, admin: dict, fmt: str
     company_slug = (((grid.get("company") or {}).get("name")) or "company").replace(" ", "_")
     if fmt == "pdf":
         from utils.daily_attendance import build_daily_pdf
-        content = build_daily_pdf(grid, date_s)
+        from routes.report_formats import get_report_format
+        content = build_daily_pdf(grid, date_s,
+                                  fmt=await get_report_format("daily_present"))
         media = "application/pdf"
     else:
         from utils.daily_attendance import build_daily_xlsx

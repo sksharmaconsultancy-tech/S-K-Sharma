@@ -343,9 +343,22 @@ def to_csv(rows: List[Dict[str, Any]]) -> str:
     return buf.getvalue()
 
 
+# Iter 274 — editable column catalog for the Actual Salary Register PDF
+# (Utilities → PDF Report Formats): (key, default heading, width mm, numeric).
+SALARY_REGISTER_COLUMNS = [
+    ("sno", "S.No", 8, False), ("code", "Code", 16, False), ("name", "Name", 48, False),
+    ("type", "Type", 18, False), ("roll", "Roll", 11, False), ("mode", "Mode", 11, False),
+    ("rate", "Rate", 15, True), ("pd", "PD", 9, True), ("hd", "HD", 9, True),
+    ("ot_h", "OT h", 11, True), ("base", "Base", 18, True), ("bonus", "Bonus", 15, True),
+    ("ot_pay", "OT Pay", 15, True), ("gross", "Gross", 18, True), ("adv", "Adv", 15, True),
+    ("ded", "Ded", 16, True), ("net", "Net", 20, True),
+]
+
+
 def build_salary_register_pdf(
     run: Dict[str, Any],
     company_name: str = "S.K. Sharma & Co.",
+    fmt: Dict[str, Any] | None = None,
 ) -> bytes:
     """Return a printable PDF salary register for the batch."""
     from reportlab.lib import colors
@@ -356,6 +369,32 @@ def build_salary_register_pdf(
         BaseDocTemplate, Frame, PageTemplate,
         Paragraph, Spacer, Table, TableStyle,
     )
+
+    # Iter 274 — saved PDF Report Format (title / orientation / font size /
+    # column show-hide-rename-reorder-width).
+    fmt = fmt or {}
+    is_land = (fmt.get("orientation") or "landscape") != "portrait"
+    pagesize = landscape(A4) if is_land else A4
+    try:
+        body_fs = float(fmt.get("font_size") or 0) or 7.5
+    except Exception:
+        body_fs = 7.5
+    title_ov = str(fmt.get("title") or "").strip() or "Salary Register"
+    cat = {k: (h, w, n) for k, h, w, n in SALARY_REGISTER_COLUMNS}
+    spec = [c for c in (fmt.get("columns") or [])
+            if isinstance(c, dict) and c.get("key") in cat]
+    if not spec:
+        spec = [{"key": k} for k, _h, _w, _n in SALARY_REGISTER_COLUMNS]
+    sel = []
+    for c in spec:
+        k = c["key"]
+        h, w, n = cat[k]
+        try:
+            width = float(c.get("width") or w)
+        except Exception:
+            width = w
+        sel.append({"key": k, "heading": str(c.get("heading") or h),
+                    "width": width, "numeric": n})
 
     BRAND = colors.HexColor("#1F4E4E")
     ACCENT = colors.HexColor("#C89B3C")
@@ -375,14 +414,14 @@ def build_salary_register_pdf(
     )
 
     doc = BaseDocTemplate(
-        buf, pagesize=landscape(A4),
+        buf, pagesize=pagesize,
         leftMargin=10 * mm, rightMargin=10 * mm,
         topMargin=28 * mm, bottomMargin=14 * mm,
-        title=f"Salary Register — {run.get('month')}",
+        title=f"{title_ov} — {run.get('month')}",
     )
 
     def _header(canvas, d):
-        W, H = landscape(A4)
+        W, H = pagesize
         c = canvas
         c.saveState()
         c.setFillColor(BRAND)
@@ -396,7 +435,7 @@ def build_salary_register_pdf(
         c.setFillColor(colors.HexColor("#DDEDED"))
         c.drawString(
             12 * mm, H - 18 * mm,
-            f"Salary Register  —  {run.get('month')}  ·  "
+            f"{title_ov}  —  {run.get('month')}  ·  "
             f"{len(run.get('rows') or [])} employees  ·  "
             f"month_days={run.get('month_days')}",
         )
@@ -414,63 +453,62 @@ def build_salary_register_pdf(
     doc.addPageTemplates([PageTemplate(id="main", frames=[frame], onPage=_header)])
 
     story = []
-    header = [
-        "Code", "Name", "Type", "Roll",
-        "Mode", "Rate", "PD", "HD", "OT h",
-        "Base", "Bonus", "OT₹", "Gross",
-        "Adv", "Ded", "Net",
-    ]
-    data = [header]
+    data = [[s["heading"] for s in sel]]
     totals = {k: 0.0 for k in ("base_pay", "bonus", "ot_pay", "gross", "advance", "total_deduction", "net")}
-    for r in (run.get("rows") or []):
-        data.append([
-            r.get("employee_code") or "—",
-            (r.get("name") or "")[:28],
-            r.get("employee_type") or "—",
-            "On" if r.get("is_onroll") else "Off",
-            (r.get("salary_mode") or "M")[:1].upper(),
-            f"{_num(r.get('rate')):.0f}",
-            r.get("present_days") or 0,
-            r.get("half_days") or 0,
-            f"{_num(r.get('ot_hours')):.1f}",
-            f"{_num(r.get('base_pay')):.0f}",
-            f"{_num(r.get('bonus')):.0f}",
-            f"{_num(r.get('ot_pay')):.0f}",
-            f"{_num(r.get('gross')):.0f}",
-            f"{_num(r.get('advance')):.0f}",
-            f"{_num(r.get('total_deduction')):.0f}",
-            f"{_num(r.get('net')):.0f}",
-        ])
+    for sn, r in enumerate((run.get("rows") or []), start=1):
+        vals = {
+            "sno": str(sn),
+            "code": r.get("employee_code") or "—",
+            "name": (r.get("name") or "")[:28],
+            "type": r.get("employee_type") or "—",
+            "roll": "On" if r.get("is_onroll") else "Off",
+            "mode": (r.get("salary_mode") or "M")[:1].upper(),
+            "rate": f"{_num(r.get('rate')):.0f}",
+            "pd": str(r.get("present_days") or 0),
+            "hd": str(r.get("half_days") or 0),
+            "ot_h": f"{_num(r.get('ot_hours')):.1f}",
+            "base": f"{_num(r.get('base_pay')):.0f}",
+            "bonus": f"{_num(r.get('bonus')):.0f}",
+            "ot_pay": f"{_num(r.get('ot_pay')):.0f}",
+            "gross": f"{_num(r.get('gross')):.0f}",
+            "adv": f"{_num(r.get('advance')):.0f}",
+            "ded": f"{_num(r.get('total_deduction')):.0f}",
+            "net": f"{_num(r.get('net')):.0f}",
+        }
+        data.append([vals[s["key"]] for s in sel])
         for k in totals:
             totals[k] += _num(r.get(k))
-    # Totals row
-    data.append([
-        "", Paragraph("<b>TOTAL</b>", small), "", "", "", "", "", "", "",
-        f"{totals['base_pay']:.0f}", f"{totals['bonus']:.0f}", f"{totals['ot_pay']:.0f}",
-        f"{totals['gross']:.0f}",
-        f"{totals['advance']:.0f}", f"{totals['total_deduction']:.0f}", f"{totals['net']:.0f}",
-    ])
+    tot_vals = {
+        "sno": "", "code": "", "name": Paragraph("<b>TOTAL</b>", small),
+        "type": "", "roll": "", "mode": "", "rate": "", "pd": "", "hd": "", "ot_h": "",
+        "base": f"{totals['base_pay']:.0f}", "bonus": f"{totals['bonus']:.0f}",
+        "ot_pay": f"{totals['ot_pay']:.0f}", "gross": f"{totals['gross']:.0f}",
+        "adv": f"{totals['advance']:.0f}", "ded": f"{totals['total_deduction']:.0f}",
+        "net": f"{totals['net']:.0f}",
+    }
+    data.append([tot_vals[s["key"]] for s in sel])
 
-    col_widths = [
-        18 * mm, 55 * mm, 20 * mm, 12 * mm,  # code / name / type / roll
-        12 * mm, 16 * mm, 10 * mm, 10 * mm, 12 * mm,  # mode/rate/PD/HD/OTh
-        20 * mm, 16 * mm, 16 * mm, 20 * mm,  # base/bonus/ot/gross
-        16 * mm, 18 * mm, 22 * mm,  # adv / ded / net
-    ]
+    col_widths = [s["width"] * mm for s in sel]
+    usable = pagesize[0] - 20 * mm
+    if sum(col_widths) > usable and sum(col_widths) > 0:
+        col_widths = [w * usable / sum(col_widths) for w in col_widths]
 
     t = Table(data, colWidths=col_widths, repeatRows=1)
-    t.setStyle(TableStyle([
+    style = [
         ("BACKGROUND", (0, 0), (-1, 0), BRAND),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("FONTSIZE", (0, 0), (-1, -1), body_fs),
         ("LINEBELOW", (0, 0), (-1, -1), 0.25, LINE),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("BACKGROUND", (0, -1), (-1, -1), BG_SOFT),
         ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
         ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, BG_SOFT]),
-        ("ALIGN", (5, 0), (-1, -1), "RIGHT"),
-    ]))
+    ]
+    for ci, s in enumerate(sel):
+        if s["numeric"]:
+            style.append(("ALIGN", (ci, 0), (ci, -1), "RIGHT"))
+    t.setStyle(TableStyle(style))
     story.append(Paragraph(
         f"<b>Salary run summary</b> — month: {run.get('month')}  ·  "
         f"employees: {len(run.get('rows') or [])}  ·  "

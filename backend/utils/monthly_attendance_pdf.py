@@ -89,7 +89,7 @@ def _header_top_row(
 ) -> List[str]:
     """Header cells: identity columns + selected day columns."""
     return (
-        ["Name", "Code", "Bio", "Father", "Dept", "Design."]
+        ["S.No", "Name", "Code", "Bio", "Father", "Dept", "Design."]
         + [
             f"{day_labels[i]}\n{weekday_labels[i] if i < len(weekday_labels) else ''}"
             for i in idxs
@@ -97,18 +97,18 @@ def _header_top_row(
     )
 
 
-def _table_style(rows_count: int, day_cols_count: int) -> TableStyle:
-    identity_cols = 6
+def _table_style(rows_count: int, day_cols_count: int, body_fs: float = 6.0) -> TableStyle:
+    identity_cols = 7
     style = [
         ("BACKGROUND", (0, 0), (-1, 0), _HDR_BG),
         ("TEXTCOLOR", (0, 0), (-1, 0), _HDR_FG),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 7),
+        ("FONTSIZE", (0, 0), (-1, 0), body_fs + 1),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("ALIGN", (0, 0), (-1, 0), "CENTER"),
         ("ALIGN", (identity_cols, 1), (-1, -1), "CENTER"),
         ("ALIGN", (0, 1), (identity_cols - 1, -1), "LEFT"),
-        ("FONTSIZE", (0, 1), (-1, -1), 6),
+        ("FONTSIZE", (0, 1), (-1, -1), body_fs),
         ("GRID", (0, 0), (-1, -1), 0.25, _BORDER),
         ("LEFTPADDING", (0, 0), (-1, -1), 2),
         ("RIGHTPADDING", (0, 0), (-1, -1), 2),
@@ -122,11 +122,34 @@ def _table_style(rows_count: int, day_cols_count: int) -> TableStyle:
     return TableStyle(style)
 
 
+def _fmt_opts(fmt: Dict[str, Any] | None, default_font: float = 6.0):
+    """Iter 274 — saved PDF Report Format (Utilities → PDF Report Formats):
+    returns (pagesize, is_landscape, body_font_size, title_override)."""
+    fmt = fmt or {}
+    is_land = (fmt.get("orientation") or "landscape") != "portrait"
+    pagesize = landscape(A4) if is_land else A4
+    try:
+        fs = float(fmt.get("font_size") or 0)
+    except Exception:
+        fs = 0
+    body_fs = fs if fs > 0 else default_font
+    title = str(fmt.get("title") or "").strip() or None
+    return pagesize, is_land, body_fs, title
+
+
+def _scaled_widths(col_widths: List[float], usable: float) -> List[float]:
+    total = sum(col_widths)
+    if total <= usable or total <= 0:
+        return col_widths
+    k = usable / total
+    return [w * k for w in col_widths]
+
+
 # ---------------------------------------------------------------------------
 # IN / OUT + Hours PDF
 # ---------------------------------------------------------------------------
 
-def build_monthly_inout_pdf(grid: Dict[str, Any]) -> bytes:
+def build_monthly_inout_pdf(grid: Dict[str, Any], fmt: Dict[str, Any] | None = None) -> bytes:
     """Landscape A4 PDF - IN / OUT + working hours per day.
 
     ``grid`` is the policy-computed payload from
@@ -139,16 +162,18 @@ def build_monthly_inout_pdf(grid: Dict[str, Any]) -> bytes:
     weekday_labels: List[str] = list(grid.get("weekday_labels") or [])
     employees: List[Dict[str, Any]] = list(grid.get("employees") or [])
     days_n = len(day_labels)
+    pagesize, is_land, body_fs, title_ov = _fmt_opts(fmt, 6.0)
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
-        buf, pagesize=landscape(A4),
+        buf, pagesize=pagesize,
         leftMargin=6 * mm, rightMargin=6 * mm,
         topMargin=8 * mm, bottomMargin=8 * mm,
     )
     story: List[Any] = []
     story.append(Paragraph(
-        f"{company_name} &mdash; Monthly Attendance IN / OUT + Working Hours",
+        f"{company_name} &mdash; "
+        f"{title_ov or 'Monthly Attendance IN / OUT + Working Hours'}",
         _TITLE,
     ))
     now_ist = datetime.now(timezone(timedelta(hours=5, minutes=30)))
@@ -158,8 +183,8 @@ def build_monthly_inout_pdf(grid: Dict[str, Any]) -> bytes:
         _SUB,
     ))
 
-    # Split day columns into pages that fit landscape A4
-    idx_pages = _iter_pages_by_days(days_n, chunk=11)
+    # Split day columns into pages that fit the page width
+    idx_pages = _iter_pages_by_days(days_n, chunk=11 if is_land else 6)
 
     for page_idx, day_idx_1based in enumerate(idx_pages):
         idxs = [i - 1 for i in day_idx_1based]
@@ -170,9 +195,10 @@ def build_monthly_inout_pdf(grid: Dict[str, Any]) -> bytes:
             header += _TRAIL_LABELS
         rows: List[List[str]] = [header]
 
-        for emp in employees:
+        for sn, emp in enumerate(employees, start=1):
             days_cell = emp.get("days") or {}
             row: List[str] = [
+                str(sn),
                 (emp.get("name") or "")[:24],
                 (emp.get("employee_code") or "")[:10],
                 ("" if emp.get("bio_code") in (None, "") else str(emp.get("bio_code")))[:8],
@@ -196,14 +222,15 @@ def build_monthly_inout_pdf(grid: Dict[str, Any]) -> bytes:
                 row += _emp_trailing_row(emp.get("totals") or {})
             rows.append(row)
 
-        # Column widths (landscape A4 usable ~ 285mm)
-        identity_w = [28 * mm, 11 * mm, 9 * mm, 20 * mm, 16 * mm, 16 * mm]
+        # Column widths (scaled to the usable page width)
+        identity_w = [8 * mm, 28 * mm, 11 * mm, 9 * mm, 20 * mm, 16 * mm, 16 * mm]
         day_w = [14 * mm] * len(idxs)
         summary_w = [13 * mm] * len(_TRAIL_LABELS) if is_last_page else []
-        col_widths = identity_w + day_w + summary_w
+        col_widths = _scaled_widths(identity_w + day_w + summary_w,
+                                    pagesize[0] - 12 * mm)
 
         table = Table(rows, colWidths=col_widths, repeatRows=1)
-        table.setStyle(_table_style(len(employees), len(idxs)))
+        table.setStyle(_table_style(len(employees), len(idxs), body_fs))
         story.append(table)
         if not is_last_page:
             story.append(PageBreak())
@@ -218,10 +245,10 @@ def build_monthly_inout_pdf(grid: Dict[str, Any]) -> bytes:
 # Hours-only PDF
 # ---------------------------------------------------------------------------
 
-def build_monthly_ot_pdf(grid: Dict[str, Any]) -> bytes:
+def build_monthly_ot_pdf(grid: Dict[str, Any], fmt: Dict[str, Any] | None = None) -> bytes:
     """Iter 203 — OT Duty HRS report (PDF): one cell per day showing ONLY
     the policy-computed OT hours."""
-    return build_monthly_hours_pdf(grid, field="ot_hours", title="OT Duty HRS")
+    return build_monthly_hours_pdf(grid, field="ot_hours", title="OT Duty HRS", fmt=fmt)
 
 
 def build_monthly_hours_pdf(
@@ -229,6 +256,7 @@ def build_monthly_hours_pdf(
     *,
     field: str = "hours",
     title: str = "Working Hours",
+    fmt: Dict[str, Any] | None = None,
 ) -> bytes:
     """Landscape A4 PDF - one cell per day, working hours (duty + OT) in
     HH:MM. Consumes the policy-computed grid so numbers match the Grid View
@@ -239,16 +267,17 @@ def build_monthly_hours_pdf(
     weekday_labels: List[str] = list(grid.get("weekday_labels") or [])
     employees: List[Dict[str, Any]] = list(grid.get("employees") or [])
     days_n = len(day_labels)
+    pagesize, is_land, body_fs, title_ov = _fmt_opts(fmt, 6.0)
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
-        buf, pagesize=landscape(A4),
+        buf, pagesize=pagesize,
         leftMargin=6 * mm, rightMargin=6 * mm,
         topMargin=8 * mm, bottomMargin=8 * mm,
     )
     story: List[Any] = []
     story.append(Paragraph(
-        f"{company_name} &mdash; Monthly Attendance Data ({title})",
+        f"{company_name} &mdash; {title_ov or f'Monthly Attendance Data ({title})'}",
         _TITLE,
     ))
     now_ist = datetime.now(timezone(timedelta(hours=5, minutes=30)))
@@ -259,7 +288,7 @@ def build_monthly_hours_pdf(
     ))
 
     # Days-per-page - can fit more when each cell is 1 line
-    idx_pages = _iter_pages_by_days(days_n, chunk=18)
+    idx_pages = _iter_pages_by_days(days_n, chunk=18 if is_land else 10)
 
     for page_idx, day_idx_1based in enumerate(idx_pages):
         idxs = [i - 1 for i in day_idx_1based]
@@ -269,9 +298,10 @@ def build_monthly_hours_pdf(
             header += _TRAIL_LABELS
         rows: List[List[str]] = [header]
 
-        for emp in employees:
+        for sn, emp in enumerate(employees, start=1):
             days_cell = emp.get("days") or {}
             row: List[str] = [
+                str(sn),
                 (emp.get("name") or "")[:24],
                 (emp.get("employee_code") or "")[:10],
                 ("" if emp.get("bio_code") in (None, "") else str(emp.get("bio_code")))[:8],
@@ -289,13 +319,14 @@ def build_monthly_hours_pdf(
                 row += _emp_trailing_row(emp.get("totals") or {})
             rows.append(row)
 
-        identity_w = [28 * mm, 11 * mm, 9 * mm, 20 * mm, 16 * mm, 16 * mm]
+        identity_w = [8 * mm, 28 * mm, 11 * mm, 9 * mm, 20 * mm, 16 * mm, 16 * mm]
         day_w = [10 * mm] * len(idxs)
         summary_w = [13 * mm] * len(_TRAIL_LABELS) if is_last_page else []
-        col_widths = identity_w + day_w + summary_w
+        col_widths = _scaled_widths(identity_w + day_w + summary_w,
+                                    pagesize[0] - 12 * mm)
 
         table = Table(rows, colWidths=col_widths, repeatRows=1)
-        table.setStyle(_table_style(len(employees), len(idxs)))
+        table.setStyle(_table_style(len(employees), len(idxs), body_fs))
         story.append(table)
         if not is_last_page:
             story.append(PageBreak())

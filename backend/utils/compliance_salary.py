@@ -93,17 +93,19 @@ _ROUNDING_KEYS = ("pf_rounding", "esic_rounding")
 
 # Iter 162 — column catalog for the customisable v2 register PDF.
 # key -> (default heading, default width unit, numeric?)
+# Iter 273 (user request) — Format 2: Employee Code + UAN/ESI columns
+# removed; name shows Father/Spouse; Basic/HRA/Conv. come from the MASTER
+# (full-month) salary; Days sits after the earning heads, then GROSS and
+# the deductions part; Signature column at the end.
 V2_REGISTER_COLUMNS: List[Any] = [
     ("sno", "S.No", 7, False),
-    ("code", "Code", 12, False),
-    ("name", "Employee / Father Name", 40, False),
-    ("uan_esi", "UAN / ESI No.", 24, False),
+    ("name", "Employee / Father-Spouse Name", 44, False),
     ("desig", "Desig.", 18, False),
-    ("days", "Days", 8, True),
     ("basic", "Basic", 13, True),
     ("hra", "HRA", 12, True),
     ("conv", "Conv.", 12, True),
     ("other_earn", "Other", 12, True),
+    ("days", "Days", 8, True),
     ("gross", "GROSS", 15, True),
     ("pf", "PF", 12, True),
     ("esi", "ESI", 11, True),
@@ -111,6 +113,7 @@ V2_REGISTER_COLUMNS: List[Any] = [
     ("tds", "TDS", 11, True),
     ("total_ded", "TOTAL DED.", 15, True),
     ("net", "NET PAY", 15, True),
+    ("sign", "Signature", 18, False),
 ]
 
 
@@ -1073,6 +1076,12 @@ def build_compliance_register_pdf_v2(
     except Exception:
         month_label = month
     group = (run.get("employee_type") or "All Employees").upper()
+    # Iter 273 (user request) — header shows the Salary Month Days used by
+    # the Compliance Salary process (the pro-ration divisor).
+    try:
+        month_days_hdr = int(run.get("month_days") or 0)
+    except Exception:
+        month_days_hdr = 0
     pf_code = str(firm.get("pf_code") or "")
     esi_code = str(firm.get("esi_code") or "")
     address = str(firm.get("address") or "")
@@ -1130,6 +1139,10 @@ def build_compliance_register_pdf_v2(
         c.drawRightString(W - 8 * mm, H - 9 * mm, "SALARY REGISTER (COMPLIANCE)")
         c.setFont("Helvetica-Bold", 9)
         c.drawRightString(W - 8 * mm, H - 14.5 * mm, month_label)
+        if month_days_hdr:
+            c.setFont("Helvetica", 7.5)
+            c.drawRightString(W - 8 * mm, H - 18.5 * mm,
+                              f"Salary Month Days: {month_days_hdr}")
         c.restoreState()
 
     buf = io.BytesIO()
@@ -1161,8 +1174,10 @@ def build_compliance_register_pdf_v2(
     data: List[List[Any]] = [header]
 
     def other_earn(r):
-        return (float(r.get("medical") or 0) + float(r.get("special") or 0)
-                + float(r.get("others") or 0) + float(r.get("ot_pay") or 0))
+        # Iter 273 (user directive) — earning heads come from the MASTER
+        # (full-month) salary structure, not the pro-rated earned values.
+        return (float(r.get("medical_master") or 0) + float(r.get("special_master") or 0)
+                + float(r.get("others_master") or 0))
 
     def other_ded(r):
         return (float(r.get("other_deduction") or 0)
@@ -1170,16 +1185,19 @@ def build_compliance_register_pdf_v2(
                 + float(r.get("pt") or 0))
 
     tot = {k: 0.0 for k in ("days", "basic", "hra", "conv", "oth", "gross",
-                            "pf", "esi", "othd", "tds", "ded", "net")}
+                            "pf", "esi", "othd", "tds", "ded", "net",
+                            "hrs", "sal", "hra_e", "conv_e", "oth_e",
+                            "pf_wages", "gross_pf", "gross_nonpf",
+                            "esi_base", "nonesi_base")}
     for i, r in enumerate(rows, start=1):
         days = float(r.get("present_days") or 0)
         oth_e = other_earn(r)
         pf_v = float(r.get("pf_employee") or 0) + float(r.get("vpf_amount") or 0)
         oth_d = other_ded(r)
         tot["days"] += days
-        tot["basic"] += float(r.get("basic") or 0)
-        tot["hra"] += float(r.get("hra") or 0)
-        tot["conv"] += float(r.get("conveyance") or 0)
+        tot["basic"] += float(r.get("basic_master") or 0)
+        tot["hra"] += float(r.get("hra_master") or 0)
+        tot["conv"] += float(r.get("conveyance_master") or 0)
         tot["oth"] += oth_e
         tot["gross"] += float(r.get("gross_paid") or 0)
         tot["pf"] += pf_v
@@ -1188,30 +1206,46 @@ def build_compliance_register_pdf_v2(
         tot["tds"] += float(r.get("tds") or 0)
         tot["ded"] += float(r.get("total_deduction") or 0)
         tot["net"] += float(r.get("net") or 0)
+        # Iter 273 — Format-1-style last-page summary aggregates (EARNED values).
+        tot["hrs"] += float(r.get("ot_hours") or 0)
+        tot["sal"] += float(r.get("basic") or 0)
+        tot["hra_e"] += float(r.get("hra") or 0)
+        tot["conv_e"] += float(r.get("conveyance") or 0)
+        tot["oth_e"] += (float(r.get("medical") or 0) + float(r.get("special") or 0)
+                         + float(r.get("others") or 0) + float(r.get("ot_pay") or 0))
+        _gross_r = float(r.get("gross_paid") or 0)
+        if r.get("pf_applicable"):
+            tot["pf_wages"] += float(r.get("pf_wages") or 0)
+            tot["gross_pf"] += _gross_r
+        else:
+            tot["gross_nonpf"] += _gross_r
+        if r.get("esic_applicable"):
+            tot["esi_base"] += float(r.get("esic_wage_base") or _gross_r)
+        else:
+            tot["nonesi_base"] += _gross_r
         vals = {
             "sno": str(i),
-            "code": str(r.get("employee_code") or ""),
             "name": Paragraph(
                 f"<b>{(r.get('name') or '').upper()}</b><br/>{(r.get('father_name') or '').upper()}",
                 cell),
-            "uan_esi": Paragraph(
-                f"{r.get('uan_no') or '-'}<br/>{r.get('esi_ip_no') or '-'}", cell),
             "desig": Paragraph((r.get("designation") or "").upper(), cell),
             "days": f"{days:g}",
-            "basic": A(r.get("basic")), "hra": A(r.get("hra")),
-            "conv": A(r.get("conveyance")), "other_earn": A(oth_e),
+            "basic": A(r.get("basic_master")), "hra": A(r.get("hra_master")),
+            "conv": A(r.get("conveyance_master")), "other_earn": A(oth_e),
             "gross": A(r.get("gross_paid")), "pf": A(pf_v),
             "esi": A(r.get("esic_employee")), "other_ded": A(oth_d),
             "tds": A(r.get("tds")), "total_ded": A(r.get("total_deduction")),
             "net": A(r.get("net")),
+            "sign": "",
         }
         data.append([vals[k] for k in col_keys])
     tot_vals = {
-        "sno": "", "code": "", "name": "GRAND TOTAL", "uan_esi": "", "desig": "",
+        "sno": "", "name": "GRAND TOTAL", "desig": "",
         "days": f"{tot['days']:g}", "basic": A(tot["basic"]), "hra": A(tot["hra"]),
         "conv": A(tot["conv"]), "other_earn": A(tot["oth"]), "gross": A(tot["gross"]),
         "pf": A(tot["pf"]), "esi": A(tot["esi"]), "other_ded": A(tot["othd"]),
         "tds": A(tot["tds"]), "total_ded": A(tot["ded"]), "net": A(tot["net"]),
+        "sign": "",
     }
     if "name" not in col_keys and col_keys:
         tot_vals[col_keys[0]] = "GRAND TOTAL"
@@ -1278,19 +1312,21 @@ def build_compliance_register_pdf_v2(
     lbl = ParagraphStyle("lbl", fontName="Helvetica", fontSize=8.5, leading=12)
     lblb = ParagraphStyle("lblb", fontName="Helvetica-Bold", fontSize=8.5, leading=12)
 
-    summary = Table([[
-        Paragraph(f"Employees: <b>{len(rows)}</b>", lbl),
-        Paragraph(f"Gross: <b>Rs. {tot['gross']:,.2f}</b>", lbl),
-        Paragraph(f"Total Deductions: <b>Rs. {tot['ded']:,.2f}</b>", lbl),
-        Paragraph(f"Net Payable: <b>Rs. {tot['net']:,.2f}</b>", lbl),
-    ]], colWidths=[(W - 12 * mm) / 4.0] * 4)
-    summary.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), BAND),
-        ("BOX", (0, 0), (-1, -1), 0.5, BRAND),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]))
+    # Iter 273 (user request) — Format 2 now shows the SAME detailed
+    # last-page summary as Format Option 1.
+    def sec(pairs, bold_last=True):
+        d = [[Paragraph(k, lblb if (bold_last and i == len(pairs) - 1) else lbl),
+              Paragraph(v, lblb if (bold_last and i == len(pairs) - 1) else lbl)]
+             for i, (k, v) in enumerate(pairs)]
+        t = Table(d, colWidths=[62 * mm, 32 * mm])
+        t.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.5, rl_colors.black),
+            ("INNERGRID", (0, 0), (-1, -1), 0.25, rl_colors.HexColor("#999999")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3), ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ]))
+        return t
 
     foot = Table([
         [Paragraph("Checked by ____________________", lbl),
@@ -1304,18 +1340,49 @@ def build_compliance_register_pdf_v2(
     ]))
 
     story: List[Any] = []
-    for ci, t in enumerate(page_tables):
+    for t in page_tables:
         story.append(t)
-        if ci < len(page_tables) - 1:
-            story.append(PageBreak())
-    story += [
-        Spacer(1, 4 * mm),
-        summary,
-        Spacer(1, 3 * mm),
-        Paragraph(f"RUPEES: {_num_to_words_inr(int(round(tot['net'])))} (NET PAYABLE)", lblb),
-        Spacer(1, 8 * mm),
-        foot,
-    ]
+        story.append(PageBreak())
+    story.append(sec([
+        ("No. Of Emp", str(len(rows))),
+        ("Total Salary Amount", A(tot["sal"])),
+        ("Total H.R.A Amount", A(tot["hra_e"])),
+        ("Total Conveyance Amount", A(tot["conv_e"])),
+        ("Total Other Amount", A(tot["oth_e"])),
+        ("Total Bonus Amount", "0.00"),
+        ("Total Gross Amount", A(tot["gross"])),
+    ]))
+    story.append(Spacer(1, 4 * mm))
+    story.append(sec([
+        ("P.F. Deduction Amount", A(tot["pf"])),
+        ("ABRY P.F. Benifit", "0.00"),
+        ("E.S.I. Deduction Amount", A(tot["esi"])),
+        ("Advance Deduction Amount", "0.00"),
+        ("Other Deduction Amount", A(tot["othd"])),
+        ("TDS Deduction Amount", A(tot["tds"])),
+        ("Total Deduction Amount", A(tot["ded"])),
+    ]))
+    story.append(Spacer(1, 4 * mm))
+    story.append(sec([
+        ("Total Salary of P.F.", A(tot["pf_wages"])),
+        ("Total Less Salary on PF", A(max(0.0, tot["gross_pf"] - tot["pf_wages"]))),
+        ("Total Salary of non-P.F", A(tot["gross_nonpf"])),
+        ("Total Salary+HRA+CONV(ESI)", A(tot["esi_base"])),
+        ("Total Salary+HRA+CONV(NON-ESI)", A(tot["nonesi_base"])),
+    ], bold_last=False))
+    story.append(Spacer(1, 4 * mm))
+    story.append(sec([
+        ("Total Days ->", f"{tot['days']:g}"),
+        ("Total Hours ->", f"{tot['hrs']:g}"),
+        ("Net Payable Amount", A(tot["net"])),
+    ]))
+    story.append(Spacer(1, 5 * mm))
+    story.append(Paragraph(
+        f"RUPEES: {_num_to_words_inr(int(round(tot['gross'])))} (GROSS)", lblb))
+    story.append(Paragraph(
+        f"RUPEES: {_num_to_words_inr(int(round(tot['net'])))} (NET PAYABLE)", lblb))
+    story.append(Spacer(1, 10 * mm))
+    story.append(foot)
     from utils.pdf_branding import punchline_flowables
     story.extend(punchline_flowables())
     doc.build(story, canvasmaker=_NumberedCanvas)
