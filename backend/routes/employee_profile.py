@@ -31,6 +31,8 @@ _STR_FIELDS = [
     "shift_start", "shift_end", "salary_mode", "compliance_salary_mode",
     "uan_no", "pf_no", "esi_ip_no", "pan_no", "aadhaar_no",
     "bank_name", "bank_account", "bank_ifsc", "address",
+    # Iter 272 — Branch Name (auto-filled from IFSC lookup).
+    "bank_branch",
     # Iter 159 — structured location (PIN Code auto-lookup)
     "pincode", "district", "state",
     # Extra master fields: blood group, marital status, PAN name, UPI

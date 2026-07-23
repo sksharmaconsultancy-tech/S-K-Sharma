@@ -74,3 +74,38 @@ async def pincode_lookup(pin: str, authorization: Optional[str] = Header(None)):
     }
     await db.pincode_cache.update_one({"pincode": pin}, {"$set": doc}, upsert=True)
     return doc
+
+
+@router.get("/ifsc/{code}")
+async def ifsc_lookup(code: str, authorization: Optional[str] = Header(None)):
+    """Iter 272 (user request) — IFSC → Bank + Branch auto-fill on the
+    Employee Master. Uses the free Razorpay IFSC API with a Mongo cache."""
+    await get_user_from_token(authorization)
+    code = (code or "").strip().upper()
+    if not re.fullmatch(r"[A-Z]{4}0[A-Z0-9]{6}", code):
+        raise HTTPException(status_code=400,
+                            detail="IFSC must be 11 characters (e.g. HDFC0001234)")
+    cached = await db.ifsc_cache.find_one({"ifsc": code}, {"_id": 0})
+    if cached:
+        return cached
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(f"https://ifsc.razorpay.com/{code}")
+    except Exception:
+        logger.warning("[LOCATIONS] IFSC lookup failed for %s", code)
+        raise HTTPException(status_code=503,
+                            detail="IFSC lookup service unavailable — enter Bank/Branch manually")
+    if r.status_code == 404:
+        raise HTTPException(status_code=404, detail="IFSC code not found")
+    payload = r.json() if r.status_code == 200 else {}
+    doc = {
+        "ifsc": code,
+        "bank": payload.get("BANK") or "",
+        "branch": payload.get("BRANCH") or "",
+        "address": payload.get("ADDRESS") or "",
+        "city": payload.get("CITY") or "",
+        "state": payload.get("STATE") or "",
+        "cached_at": now_iso(),
+    }
+    await db.ifsc_cache.update_one({"ifsc": code}, {"$set": doc}, upsert=True)
+    return doc

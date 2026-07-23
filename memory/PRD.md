@@ -1327,3 +1327,9 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - "Emergency Contact Name" field REMOVED from the form UI (kept in DB/API for old data); only "Emergency Contact No." remains.
 - Family Details: Relation is now a dropdown (RelationSelect component; Father/Mother/Husband/Wife/Son/Daughter/Brother/Sister/Grandfather/Grandmother/Other); NEW "Aadhaar No." column (12-digit hard limit, digits only — backend also trims via regex); NEW "Nominee" checkbox per member (is_nominee). Review modal shows "— Nominee ✓"; Employee Master PDF shows "(Nominee)" + Aadhaar.
 - E2E: create/edit/GET/PDF all verified; Aadhaar 15-digit input trimmed to 12; UI smoke-tested via Playwright (both sections render, dropdown selection works).
+
+## Iter 272 (June 2026) — IFSC → Bank + Branch auto-lookup (Employee Master)
+- New endpoint GET /api/locations/ifsc/{code} (routes/locations.py) — Razorpay IFSC API + ifsc_cache Mongo cache; validates ^[A-Z]{4}0[A-Z0-9]{6}$.
+- Employee Master form: IFSC field now uppercases/strips to 11 chars and on complete code auto-fills Bank name + NEW "Branch Name" field (editable). New user field bank_branch: create endpoint + employee_profile _STR_FIELDS + Employee Master PDF ("Branch Name" row) + review modal.
+- NOTE: two search_replace edits reported success but did not persist (IFSC field UI + review row) — had to re-apply. Verify greps after batched edits on employee-add.tsx.
+- Verified: API 200 for HDFC/SBIN codes + 400 bad code + cache hit; Playwright confirmed typing SBIN0031825 auto-fills "State Bank of India" + "GANPATI PLAZA, JAIPUR".

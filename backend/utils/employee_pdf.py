@@ -486,6 +486,7 @@ def build_employee_master_pdf(
     story.append(_section_header(styles, "BANK DETAILS"))
     story.append(_kv_table([
         ("Bank Name", user.get("bank_name")),
+        ("Branch Name", user.get("bank_branch")),
         ("Account Number", user.get("bank_account_number") or user.get("bank_account")),
         ("IFSC Code", user.get("ifsc_code") or user.get("bank_ifsc")),
         ("Name (as per Bank)", user.get("name_as_per_bank")),

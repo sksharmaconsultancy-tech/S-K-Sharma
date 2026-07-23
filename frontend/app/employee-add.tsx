@@ -161,6 +161,7 @@ export default function EmployeeAddScreen() {
           pan_name: p.pan_name || "",
           aadhaar_no: p.aadhaar_no || "",
           bank_name: p.bank_name || "",
+          bank_branch: p.bank_branch || "",
           pay_mode: p.pay_mode || "Bank",
           bank_account: p.bank_account || "",
           bank_ifsc: p.bank_ifsc || "",
@@ -228,6 +229,18 @@ export default function EmployeeAddScreen() {
       if (r.state) setField("state", r.state);
     } catch { /* manual entry stays possible */ }
     finally { setPinBusy(false); }
+  };
+  // Iter 272 (user request) — IFSC auto-lookup fills Bank + Branch Name.
+  const [ifscBusy, setIfscBusy] = useState(false);
+  const lookupIfsc = async (code: string) => {
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(code)) return;
+    setIfscBusy(true);
+    try {
+      const r = await api<{ bank: string; branch: string }>(`/locations/ifsc/${code}`);
+      if (r.bank) setField("bank_name", r.bank);
+      if (r.branch) setField("bank_branch", r.branch);
+    } catch { /* manual entry stays possible */ }
+    finally { setIfscBusy(false); }
   };
   const [firmHeads, setFirmHeads] = useState<{
     allowances: string[];
@@ -518,6 +531,7 @@ export default function EmployeeAddScreen() {
         pan_name: form.pan_name.trim().toUpperCase() || undefined,
         aadhaar_no: form.aadhaar_no.trim() || undefined,
         bank_name: form.bank_name.trim() || undefined,
+        bank_branch: form.bank_branch.trim() || undefined,
         pay_mode: form.pay_mode || "Bank",
         bank_account: form.bank_account.trim() || undefined,
         bank_ifsc: form.bank_ifsc.trim() || undefined,
@@ -1762,12 +1776,25 @@ export default function EmployeeAddScreen() {
               keyboardType="numeric"
             />
             <Field
-              label="IFSC"
+              label={ifscBusy ? "IFSC (looking up…)" : "IFSC (auto-fills Bank & Branch)"}
               value={form.bank_ifsc}
-              onChange={(v) => setField("bank_ifsc", v.toUpperCase())}
+              onChange={(v) => {
+                const c = v.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11);
+                setField("bank_ifsc", c);
+                if (c.length === 11) void lookupIfsc(c);
+              }}
               placeholder="e.g. HDFC0001234"
               autoCapitalize="characters"
             />
+          </TwoCol>
+          <TwoCol>
+            <Field
+              label="Branch Name"
+              value={form.bank_branch}
+              onChange={(v) => setField("bank_branch", v)}
+              placeholder="Auto from IFSC (editable)"
+            />
+            <View style={{ flex: 1 }} />
           </TwoCol>
 
           {/* Iter 126g — Family Details moved to the END of the form
@@ -1972,6 +1999,7 @@ export default function EmployeeAddScreen() {
                 ["UAN", form.uan_no], ["PF No.", form.pf_no], ["ESI IP No.", form.esi_ip_no],
                 ["PAN", form.pan_no], ["Aadhaar", form.aadhaar_no],
                 ["Pay Mode", form.pay_mode], ["Bank", form.bank_name],
+                ["Branch", form.bank_branch],
                 ["Account No.", form.bank_account], ["IFSC", form.bank_ifsc],
                 ["Address", form.address],
                 ["Present PIN Code", form.pincode],
