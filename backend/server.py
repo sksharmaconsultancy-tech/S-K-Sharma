@@ -17930,9 +17930,11 @@ async def _compute_monthly_grid_data(
             # If OT is disabled for this employee OR firm-wide, don't surface OT.
             if not eff_policy.get("ot_allowed", True) or eff_policy.get("firm_ot_allowed") is False:
                 ot_hrs = 0.0
-            # Minimum-OT grace: < 1 hour rounds to 0.
-            if ot_hrs > 0 and ot_hrs < 1.0:
-                ot_hrs = 0.0
+            # Iter 289 (user request) — OT counts in 30-minute slabs
+            # (rounded DOWN): 8:34 worked → 8:00 duty + 0:30 OT; extra
+            # under 30 min → 0. (Replaces the old "<1 hour ignored" grace.)
+            if ot_hrs > 0:
+                ot_hrs = int(ot_hrs * 2) / 2.0
             # Iter 77h — Daily Duty HRS on grid ALWAYS includes OT.
             hrs = round(duty_only_hrs + ot_hrs, 2)
             # Iter 94 — Additional Duty HRS granted from Punch Approvals.
@@ -18398,9 +18400,10 @@ async def _build_ot_report_rows(
             # Honor per-employee AND firm-wide OT-allowed flags.
             if not eff_policy.get("ot_allowed", True) or eff_policy.get("firm_ot_allowed") is False:
                 ot = 0.0
-            # Minimum OT grace (< 1h ignored).
-            if 0 < ot < 1.0:
-                ot = 0.0
+            # Iter 289 (user request) — OT in 30-minute slabs (floor);
+            # replaces the old "<1h ignored" grace.
+            if ot > 0:
+                ot = int(ot * 2) / 2.0
             if ot <= 0:
                 continue  # only OT days
             ot_rows.append({

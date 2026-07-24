@@ -1414,3 +1414,6 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 
 ## Iter 289b — Removed Late Min / Early Go columns (user request)
 - attendance-grid.tsx: removed "Late Min" and "Early Go" summary columns (header + row cells). Punches / Break HRS / Net HRS retained. Backend fields untouched.
+
+## Iter 289c — OT 30-minute slabs (user request)
+- server.py (grid compute + OT report): replaced "<1 hour OT ignored" grace with 30-min slab FLOOR: ot = int(ot*2)/2. Example 07:56-16:30 (8:34) → 8.0 duty + 0.5 OT (verified via synthetic test). Extra <30min → 0. Compliance sync inherits via day-cell hours.
