@@ -17756,6 +17756,9 @@ async def _compute_monthly_grid_data(
         total_punches_cnt = 0
         total_break_min = 0
         total_net_min = 0
+        # Iter 289 (user request) — exact punch-schedule minutes for the
+        # "Total Duty HRS" grand total (includes extra-duty grants).
+        total_sched_min = 0.0
         total_late_min = 0
         total_early_min = 0
         # ---- Iter 94 — day-wise salary (mirrors _actual_salary_row_compute
@@ -18110,6 +18113,10 @@ async def _compute_monthly_grid_data(
             # Iter 236 — accumulate overhaul totals for the row summary.
             total_punches_cnt += len(day_punches)
             total_net_min += day_min
+            # Iter 289 (user request) — "Total Duty HRS as per Time
+            # Schedule": exact punch-time minutes (+ granted extra duty),
+            # NOT the sum of rounded/capped day figures.
+            total_sched_min += day_min + (_extra_h * 60.0 if _extra_h else 0.0)
             total_break_min += _dm["break_minutes"]
             total_late_min += _dm["late_minutes"]
             total_early_min += _dm["early_minutes"]
@@ -18129,7 +18136,10 @@ async def _compute_monthly_grid_data(
         # exact HH:MM sums; division-mode "Present Days" is the WHOLE day
         # count (Total Duty HRS ÷ Daily HRS) with the remainder shown in
         # Extra HRS — never a decimal like 13.58.
-        total_hours = round(total_hours_min / 60.0, 4)
+        # Iter 289 (user request) — the "Total Duty HRS" grand total shows
+        # the exact punch-schedule sum (e.g. 89:55), not the Excel-style
+        # sum of processed day cells (89:30).
+        total_hours = round(total_sched_min / 60.0, 4)
         total_ot_hours = round(total_ot_min / 60.0, 4)
         total_duty_only = round(total_duty_only_min / 60.0, 4)
         _div_min = int(round((8.0 if _pm_8hr_reports else emp_daily_hrs) * 60))
