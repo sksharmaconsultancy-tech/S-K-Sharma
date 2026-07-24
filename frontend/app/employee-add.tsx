@@ -356,8 +356,10 @@ export default function EmployeeAddScreen() {
         return "Salary details are required — enter the Actual / Off-line salary.";
       return null;
     }
-    if (!form.basic_salary && !form.salary_monthly && !form.compliance_gross)
-      return "Salary details are required — enter at least the Basic Salary.";
+    // Iter 288 (user rule) — ON-ROLL employees MUST have a Compliance
+    // Salary: the Compliance Basic (or Gross) is mandatory.
+    if (!form.compliance_basic && !form.compliance_gross)
+      return "Compliance Salary is mandatory for On-roll employees — enter the Basic Salary in the Compliance Salary section.";
     return null;
   };
 
@@ -1656,6 +1658,7 @@ export default function EmployeeAddScreen() {
           <TwoCol>
             <Field
               label="Basic Salary (₹)"
+              required
               value={form.compliance_basic}
               onChange={(v) => {
                 const clean = v.replace(/[^0-9.]/g, "");

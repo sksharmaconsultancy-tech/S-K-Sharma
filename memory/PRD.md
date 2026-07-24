@@ -1402,3 +1402,7 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   * FIX: mergeHeads() union (firm-enabled heads + saved employee heads, case-insensitive dedupe) in both editors. employee-add.tsx render conditions switched from firmHeads.* to merged lists; lineAmount/setLineAmount now case-insensitive so "Hra" prefills "HRA".
   * Verified E2E: seeded emp 50 with OTH. ALLOW. 1500 (firm-disabled) + WASHING ALLOW. 500 (custom) → both visible w/ amounts in Update Salary modal AND employee edit form; Gross ₹16,000 correct. Seed reverted after test.
 - SEC-003 (EPFO/ESIC password encryption) STILL PENDING — user chose Theme Pack priority; encryption not yet started.
+
+## Iter 288b — On-roll Compliance Salary Mandatory (user rule)
+- New Employee Add (employee-add.tsx): clarified user rule — Off-roll hides ALL Compliance Salary heads (already worked, Iter 245); On-roll now REQUIRES Compliance Salary: getMandatoryError checks compliance_basic/compliance_gross → error "Compliance Salary is mandatory for On-roll employees...". Compliance Basic Salary field marked required (*).
+- Verified E2E: off-roll → block hidden w/ note; on-roll → fields show w/ *; on-roll create without compliance basic → blocked with red error banner.
