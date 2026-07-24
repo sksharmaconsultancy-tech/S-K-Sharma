@@ -58,18 +58,34 @@ export default function ApprovalInbox() {
     const confirmMsg: Record<string, string> = {
       approve: `Approve "${r.title}"?`, reject: `Reject "${r.title}"?`,
       hold: `Put "${r.title}" on hold?`, return: `Return "${r.title}" to the requester?`,
+      escalate: `Escalate "${r.title}" to the next level immediately?`,
     };
     if (!(await confirmYesNo(confirmMsg[action]))) return;
     let remarks: string | undefined;
+    const body: any = { action };
     if (action === "reject" || action === "return") {
       remarks = Platform.OS === "web" ? window.prompt("Remarks (mandatory):") || "" : "";
       if (!remarks) { toast("Remarks are mandatory."); return; }
+    } else if (action === "delegate") {
+      // Phase B — pick a staff user by email/name (simple prompt on web).
+      const staff = await api<any>(`/admin/company-staff?company_id=${r.company_id}`).catch(() => null);
+      const list = (staff?.staff || []).filter((u: any) => !u.disabled);
+      if (!list.length) { toast("No staff users in this firm to delegate to."); return; }
+      const names = list.map((u: any, i: number) => `${i + 1}. ${u.name} (${u.email || "—"})`).join("\n");
+      const pick = Platform.OS === "web"
+        ? window.prompt(`Delegate to which user? Enter the number:\n${names}`) || ""
+        : "";
+      const idx = parseInt(pick, 10) - 1;
+      if (Number.isNaN(idx) || !list[idx]) { toast("Cancelled."); return; }
+      body.to_user_id = list[idx].user_id;
+      remarks = Platform.OS === "web" ? window.prompt("Remarks (optional):") || undefined : undefined;
     } else if (Platform.OS === "web") {
       remarks = window.prompt("Remarks (optional):") || undefined;
     }
+    body.remarks = remarks;
     setBusy(true);
     try {
-      await api(`/admin/approval-requests/${r.request_id}/action`, { method: "POST", body: { action, remarks } });
+      await api(`/admin/approval-requests/${r.request_id}/action`, { method: "POST", body });
       toast("Done.");
       await load();
     } catch (e: any) { toast(e?.message || "Action failed"); }
@@ -133,6 +149,16 @@ export default function ApprovalInbox() {
                 <View style={[s.stPill, { backgroundColor: `${c}18` }]}>
                   <Text style={[s.stPillTxt, { color: c }]}>{r.status.replace("_", " ").toUpperCase()}</Text>
                 </View>
+                {r.escalated ? (
+                  <View style={[s.stPill, { backgroundColor: "#FEF3C7" }]}>
+                    <Text style={[s.stPillTxt, { color: "#B45309" }]}>⚡ ESCALATED</Text>
+                  </View>
+                ) : null}
+                {r.sla_breached ? (
+                  <View style={[s.stPill, { backgroundColor: "#FEE2E2" }]}>
+                    <Text style={[s.stPillTxt, { color: "#B91C1C" }]}>⏰ SLA BREACHED</Text>
+                  </View>
+                ) : null}
               </View>
               <Text style={s.meta}>
                 By {r.requested_by_name} · {(r.created_at || "").slice(0, 16).replace("T", " ")}
@@ -155,6 +181,11 @@ export default function ApprovalInbox() {
                       <Text style={s.actTxtO}>Hold</Text></Pressable>
                     <Pressable style={[s.actBtnO]} disabled={busy} onPress={() => act(r, "return")}>
                       <Text style={s.actTxtO}>Return</Text></Pressable>
+                    {/* Phase B — Delegate / Escalate */}
+                    <Pressable style={[s.actBtnO]} disabled={busy} onPress={() => act(r, "delegate")} testID={`delegate-${r.request_id}`}>
+                      <Text style={s.actTxtO}>Delegate</Text></Pressable>
+                    <Pressable style={[s.actBtnO]} disabled={busy} onPress={() => act(r, "escalate")} testID={`escalate-${r.request_id}`}>
+                      <Text style={s.actTxtO}>Escalate ↑</Text></Pressable>
                   </>
                 ) : r.status === "pending" || r.status === "on_hold" ? (
                   <Text style={s.muted}>

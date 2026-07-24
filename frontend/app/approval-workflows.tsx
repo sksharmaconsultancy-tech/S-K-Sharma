@@ -5,7 +5,7 @@
  */
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform, Alert, Switch,
+  View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform, Alert, Switch, TextInput,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -34,6 +34,9 @@ export default function ApprovalWorkflows() {
   const [wfs, setWfs] = useState<Record<string, any>>({});
   const [addingFor, setAddingFor] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
+  // Phase B — per-level SLA + condition editor.
+  const [settingsFor, setSettingsFor] = useState<string | null>(null);
+  const [draft, setDraft] = useState<any[]>([]);
 
   // Follow the global active-firm picker.
   useEffect(() => {
@@ -50,6 +53,12 @@ export default function ApprovalWorkflows() {
   }, [companyId]);
   useEffect(() => { load(); }, [load]);
 
+  // Phase B — preserve SLA + condition when (re)saving level arrays.
+  const strip = (ls: any[]) => ls.map((l: any) => ({
+    approver_type: l.approver_type, role_id: l.role_id,
+    sla_hours: l.sla_hours, condition: l.condition,
+  }));
+
   const save = async (moduleKey: string, levels: any[], enabled: boolean) => {
     setSaving(moduleKey);
     try {
@@ -59,7 +68,7 @@ export default function ApprovalWorkflows() {
       });
       await load();
     } catch (e: any) { toast(e?.message || "Save failed"); }
-    finally { setSaving(null); setAddingFor(null); }
+    finally { setSaving(null); setAddingFor(null); setSettingsFor(null); }
   };
 
   if (authLoading) return null;
@@ -105,7 +114,7 @@ export default function ApprovalWorkflows() {
                   <Text style={s.muted}>{wf.enabled ? "Enabled" : "Off"}</Text>
                   <Switch
                     value={!!wf.enabled}
-                    onValueChange={(v) => save(m.key, levels.map((l: any) => ({ approver_type: l.approver_type, role_id: l.role_id })), v)}
+                    onValueChange={(v) => save(m.key, strip(levels), v)}
                     trackColor={{ true: colors.brandPrimary, false: colors.surfaceTertiary }}
                     testID={`wf-toggle-${m.key}`}
                   />
@@ -121,9 +130,13 @@ export default function ApprovalWorkflows() {
                   <React.Fragment key={i}>
                     <Ionicons name="arrow-forward" size={14} color={colors.onSurfaceTertiary} />
                     <View style={s.node}>
-                      <Text style={s.nodeTxt}>L{l.level} · {l.role_name || "Company Admin"}</Text>
+                      <Text style={s.nodeTxt}>
+                        L{l.level} · {l.role_name || "Company Admin"}
+                        {l.sla_hours ? ` · ⏱${l.sla_hours}h` : ""}
+                        {l.condition?.field ? ` · IF ${l.condition.field} ${l.condition.op} ${l.condition.value}` : ""}
+                      </Text>
                       <Pressable hitSlop={8} onPress={() => save(m.key,
-                        levels.filter((_: any, j: number) => j !== i).map((x: any) => ({ approver_type: x.approver_type, role_id: x.role_id })),
+                        strip(levels.filter((_: any, j: number) => j !== i)),
                         wf.enabled)} testID={`wf-remove-${m.key}-${i}`}>
                         <Ionicons name="close-circle" size={15} color="#DC2626" />
                       </Pressable>
@@ -142,12 +155,12 @@ export default function ApprovalWorkflows() {
                   <Text style={s.muted}>Add approver level:</Text>
                   <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
                     <Pressable style={s.chip} testID={`wf-add-admin-${m.key}`}
-                      onPress={() => save(m.key, [...levels.map((x: any) => ({ approver_type: x.approver_type, role_id: x.role_id })), { approver_type: "company_admin" }], true)}>
+                      onPress={() => save(m.key, [...strip(levels), { approver_type: "company_admin" }], true)}>
                       <Text style={s.chipTxt}>Company Admin</Text>
                     </Pressable>
                     {roles.map((r) => (
                       <Pressable key={r.role_id} style={s.chip} testID={`wf-add-${m.key}-${r.name.replace(/\s+/g, "-")}`}
-                        onPress={() => save(m.key, [...levels.map((x: any) => ({ approver_type: x.approver_type, role_id: x.role_id })), { approver_type: "company_role", role_id: r.role_id }], true)}>
+                        onPress={() => save(m.key, [...strip(levels), { approver_type: "company_role", role_id: r.role_id }], true)}>
                         <Text style={s.chipTxt}>{r.name}</Text>
                       </Pressable>
                     ))}
@@ -160,6 +173,85 @@ export default function ApprovalWorkflows() {
                       <Text style={s.addTxt}>Add Approval Level</Text></>)}
                 </Pressable>
               )}
+              {/* Phase B — per-level SLA + condition rules */}
+              {levels.length > 0 ? (
+                settingsFor === m.key ? (
+                  <View style={s.pickWrap}>
+                    <Text style={[s.muted, { fontWeight: "700" }]}>
+                      Level Settings — SLA (hours) auto-escalates overdue requests to the next
+                      level; a condition means the level only applies when it matches
+                      (e.g. amount &gt; 50000).
+                    </Text>
+                    {draft.map((l: any, i: number) => (
+                      <View key={i} style={s.setRow}>
+                        <Text style={s.setLbl}>L{i + 1} · {l.role_name || "Company Admin"}</Text>
+                        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                          <Text style={s.muted}>SLA</Text>
+                          <TextInput
+                            value={String(l.sla_hours || "")}
+                            onChangeText={(v) => setDraft((d) => d.map((x, j) =>
+                              j === i ? { ...x, sla_hours: v.replace(/[^0-9]/g, "") } : x))}
+                            placeholder="0" keyboardType="numeric"
+                            style={[s.setInput, { width: 54 }]}
+                            testID={`wf-sla-${m.key}-${i}`}
+                          />
+                          <Text style={s.muted}>h · IF</Text>
+                          <TextInput
+                            value={l.condition?.field || ""}
+                            onChangeText={(v) => setDraft((d) => d.map((x, j) =>
+                              j === i ? { ...x, condition: { ...(x.condition || { op: ">" }), field: v } } : x))}
+                            placeholder="field (e.g. amount)"
+                            style={[s.setInput, { width: 140 }]}
+                            testID={`wf-cf-${m.key}-${i}`}
+                          />
+                          {Platform.OS === "web" ? (
+                            <select
+                              value={l.condition?.op || ">"}
+                              onChange={(e) => {
+                                const v = (e.target as HTMLSelectElement).value;
+                                setDraft((d) => d.map((x, j) =>
+                                  j === i ? { ...x, condition: { ...(x.condition || {}), op: v } } : x));
+                              }}
+                              style={s.setSelect as any}
+                            >
+                              {[">", ">=", "<", "<=", "==", "!=", "contains"].map((o) => (
+                                <option key={o} value={o}>{o}</option>
+                              ))}
+                            </select>
+                          ) : null}
+                          <TextInput
+                            value={String(l.condition?.value ?? "")}
+                            onChangeText={(v) => setDraft((d) => d.map((x, j) =>
+                              j === i ? { ...x, condition: { ...(x.condition || { op: ">" }), value: v } } : x))}
+                            placeholder="value"
+                            style={[s.setInput, { width: 100 }]}
+                            testID={`wf-cv-${m.key}-${i}`}
+                          />
+                        </View>
+                      </View>
+                    ))}
+                    <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                      <Pressable style={s.saveBtn} testID={`wf-save-settings-${m.key}`}
+                        onPress={() => save(m.key, draft.map((l: any) => ({
+                          approver_type: l.approver_type, role_id: l.role_id,
+                          sla_hours: parseInt(l.sla_hours || "0", 10) || 0,
+                          condition: l.condition?.field?.trim() ? l.condition : undefined,
+                        })), wf.enabled)}>
+                        <Text style={s.saveBtnTxt}>Save Settings</Text>
+                      </Pressable>
+                      <Pressable style={s.addBtn} onPress={() => setSettingsFor(null)}>
+                        <Text style={s.addTxt}>Cancel</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : (
+                  <Pressable style={s.addBtn} testID={`wf-settings-${m.key}`}
+                    onPress={() => { setSettingsFor(m.key); setDraft(levels.map((l: any) => ({ ...l }))); }}>
+                    <Ionicons name="options-outline" size={14} color={colors.brandPrimary} />
+                    <Text style={s.addTxt}>Level Settings (SLA & Conditions)</Text>
+                  </Pressable>
+                )
+              ) : null}
               {m.key !== "advance" ? (
                 <Text style={[s.muted, { marginTop: 8 }]}>Currently enforced for Advance issuance; other modules coming next.</Text>
               ) : null}
@@ -208,4 +300,20 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center",
   },
   chipTxt: { fontSize: 12, fontWeight: "600", color: colors.onSurfaceSecondary },
+  setRow: { marginTop: 10, gap: 4 },
+  setLbl: { fontSize: 12, fontWeight: "800", color: colors.onSurface },
+  setInput: {
+    borderWidth: 1, borderColor: colors.border, borderRadius: 8,
+    paddingHorizontal: 8, paddingVertical: 6, fontSize: 12.5,
+    color: colors.onSurface, backgroundColor: colors.surfaceSecondary,
+  },
+  setSelect: {
+    padding: 6, borderRadius: 8, borderColor: colors.border, borderWidth: 1,
+    fontSize: 12.5, backgroundColor: colors.surfaceSecondary, color: colors.onSurface,
+  },
+  saveBtn: {
+    backgroundColor: colors.brandPrimary, borderRadius: 10,
+    paddingHorizontal: 14, height: 32, alignItems: "center", justifyContent: "center",
+  },
+  saveBtnTxt: { color: "#fff", fontWeight: "800", fontSize: 12 },
 });
