@@ -259,9 +259,17 @@ async def _match_rows(company_id: str, raw: List[Dict[str, Any]]) -> List[Dict[s
 async def _auth(authorization: Optional[str], company_id: str = ""):
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "company_admin", "sub_admin"])
-    if (company_id and admin.get("role") != "super_admin"
-            and admin.get("company_id") != company_id):
-        raise HTTPException(status_code=403, detail="Not authorised for this firm")
+    # Iter 290 (user request) — sub-admins are scoped via their company
+    # scope list, not a single company_id; the old equality check always
+    # 403'd them.
+    if company_id:
+        if admin.get("role") == "sub_admin":
+            from server import sub_admin_can_touch_company
+            if not sub_admin_can_touch_company(admin, company_id):
+                raise HTTPException(status_code=403, detail="Firm not in your scope")
+        elif (admin.get("role") == "company_admin"
+                and admin.get("company_id") != company_id):
+            raise HTTPException(status_code=403, detail="Not authorised for this firm")
     return admin
 
 

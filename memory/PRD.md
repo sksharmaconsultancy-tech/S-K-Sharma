@@ -1436,3 +1436,7 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - New backend: routes/policy_simulator.py — POST /api/admin/attendance-policy/simulate (policy dict + in/out HH:MM → worked/duty/ot/present + notes). Mirrors day rules: duty rounding, 8-HR sub-point, halfday threshold, OT slab, policy_2/default. Registered in server.py.
 - attendance-policy.tsx: PolicySimulator card under Policy Master Sub Points (IN/OUT inputs + Simulate → result boxes). Gotcha fixed: api client auto-stringifies body (double JSON.stringify caused 422).
 - Verified E2E via curl + UI screenshot (07:56-16:30 → 8:30 worked, 8:00 duty, 0:30 OT, present 1).
+
+## Iter 290b — Sub-admin punch import fix (user request)
+- routes/punch_import.py _auth: sub_admins were always 403'd (checked admin.company_id equality — sub-admins have a scope list, not company_id). Now uses sub_admin_can_touch_company. Verified: scoped firm 200, out-of-scope 403, template 200.
+- Also clarified earlier: sub-admin attendance Excel download already works (scope + menu rights are portal settings).
