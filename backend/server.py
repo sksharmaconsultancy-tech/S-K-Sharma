@@ -20756,6 +20756,8 @@ from routes.compliance_settings import router as compliance_settings_router  # n
 from utils.rpa_worker import maybe_start as maybe_start_rpa_worker  # noqa: E402
 
 app.include_router(reports_extra_router)
+from routes.policy_simulator import router as policy_simulator_router  # noqa: E402
+app.include_router(policy_simulator_router)
 app.include_router(tickets_router)
 app.include_router(notifications_router)
 app.include_router(gmail_mailbox_router)

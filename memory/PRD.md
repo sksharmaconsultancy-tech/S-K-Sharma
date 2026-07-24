@@ -1431,3 +1431,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 ## Iter 289f — Rollback + rename (user request)
 - ROLLED BACK: Total Duty HRS grand total back to sum of processed day figures (total_hours_min); total_sched_min removed.
 - RENAMED: "Total Duty HRS" → "Total Working HRS" in web grid header, PDF _TRAIL_LABELS, XLSX trail_labels, OT report xlsx.
+
+## Iter 290 — Attendance Policy Simulator (user approved)
+- New backend: routes/policy_simulator.py — POST /api/admin/attendance-policy/simulate (policy dict + in/out HH:MM → worked/duty/ot/present + notes). Mirrors day rules: duty rounding, 8-HR sub-point, halfday threshold, OT slab, policy_2/default. Registered in server.py.
+- attendance-policy.tsx: PolicySimulator card under Policy Master Sub Points (IN/OUT inputs + Simulate → result boxes). Gotcha fixed: api client auto-stringifies body (double JSON.stringify caused 422).
+- Verified E2E via curl + UI screenshot (07:56-16:30 → 8:30 worked, 8:00 duty, 0:30 OT, present 1).

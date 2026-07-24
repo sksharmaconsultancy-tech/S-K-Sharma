@@ -582,6 +582,13 @@ export default function AttendancePolicyScreen() {
             onChange={(pm) => setPolicy({ ...policy, policy_master: pm })}
           />
 
+          {/* Iter 290 (user request) — Policy Simulator. */}
+          <SectionTitle
+            title="Policy Simulator"
+            hint="Enter a sample IN/OUT time and instantly preview how the CURRENT settings above would compute Duty, OT and Present credit — before saving."
+          />
+          <PolicySimulator policy={policy} />
+
           {/* Iter 204 — Employee Shift Change Management */}
           <SectionTitle
             title="Employee Shift Change"
@@ -1325,6 +1332,105 @@ const PM_FLAGS: { key: string; label: string }[] = [
   { key: "compliance_ot_include", label: "OT Include in Existing Compliance Salary — Yes: all OT Duty HRS are imported into the existing Compliance Salary (OT pay in Gross). No: OT HRS auto-import into the separate OT Salary Process (Prepare Salary → OT Salary) instead" },
   { key: "halfday_threshold_rule", label: "Half-Day Threshold Rule — worked hrs BELOW Half-Day Threshold → all hrs to OT (0 Present); above threshold but below Full Day → ½ Present Day + remaining hrs to OT. Duty HRS counts ONLY Present-Day hrs (OT never included in Duty HRS)" },
 ];
+
+// ---------------------------------------------------------------------------
+// Iter 290 (user request) — Policy Simulator: preview Duty / OT / Present for
+// a sample IN/OUT under the CURRENT (unsaved) policy settings.
+// ---------------------------------------------------------------------------
+function PolicySimulator({ policy }: { policy: any }) {
+  const [inT, setInT] = useState("09:00");
+  const [outT, setOutT] = useState("17:34");
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<any>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const run = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await api<any>("/admin/attendance-policy/simulate", {
+        method: "POST",
+        body: { policy, in_time: inT, out_time: outT },
+      });
+      setRes(r);
+    } catch (e: any) {
+      setErr(e?.message || "Simulation failed");
+      setRes(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const fmtHM = (h: number) => {
+    const m = Math.round((h || 0) * 60);
+    return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
+  };
+
+  return (
+    <View style={pmStyles.card}>
+      <View style={{ flexDirection: "row", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+        {[{ l: "IN time", v: inT, s: setInT }, { l: "OUT time", v: outT, s: setOutT }].map((f) => (
+          <View key={f.l} style={{ minWidth: 110 }}>
+            <Text style={simStyles.lbl}>{f.l}</Text>
+            <TextInput
+              value={f.v}
+              onChangeText={f.s}
+              placeholder="HH:MM"
+              style={simStyles.input}
+              testID={`sim-${f.l.split(" ")[0].toLowerCase()}`}
+            />
+          </View>
+        ))}
+        <Pressable onPress={run} disabled={busy} style={simStyles.btn} testID="sim-run">
+          <Text style={{ color: "#fff", fontWeight: "800" }}>
+            {busy ? "..." : "Simulate"}
+          </Text>
+        </Pressable>
+      </View>
+      {err ? <Text style={{ color: colors.error, marginTop: 8, fontSize: 12 }}>{err}</Text> : null}
+      {res ? (
+        <View style={simStyles.resRow}>
+          {[
+            ["Worked", fmtHM(res.worked_hours)],
+            ["Duty HRS", fmtHM(res.duty_hours)],
+            ["OT HRS", fmtHM(res.ot_hours)],
+            ["Present", String(res.present)],
+          ].map(([l, v]) => (
+            <View key={l} style={simStyles.resBox}>
+              <Text style={simStyles.resLbl}>{l}</Text>
+              <Text style={simStyles.resVal}>{v}</Text>
+            </View>
+          ))}
+          {(res.notes || []).map((n: string) => (
+            <Text key={n} style={simStyles.note}>• {n}</Text>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+const simStyles = StyleSheet.create({
+  lbl: { fontSize: 11, fontWeight: "700", color: colors.onSurfaceSecondary, marginBottom: 4 },
+  input: {
+    borderWidth: 1, borderColor: colors.border, borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 8, fontSize: 14,
+    color: colors.onSurface, backgroundColor: colors.surface, minWidth: 100,
+  },
+  btn: {
+    backgroundColor: colors.brandPrimary, borderRadius: 8,
+    paddingHorizontal: 18, paddingVertical: 10, minHeight: 40,
+    alignItems: "center", justifyContent: "center",
+  },
+  resRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 12 },
+  resBox: {
+    backgroundColor: colors.surfaceSecondary, borderRadius: 8,
+    paddingHorizontal: 14, paddingVertical: 8, alignItems: "center", minWidth: 84,
+  },
+  resLbl: { fontSize: 10, fontWeight: "700", color: colors.onSurfaceTertiary },
+  resVal: { fontSize: 16, fontWeight: "900", color: colors.onSurface, marginTop: 2 },
+  note: { width: "100%", fontSize: 11, color: colors.onSurfaceSecondary },
+});
 
 function PolicyMasterSubPoints({
   value,
