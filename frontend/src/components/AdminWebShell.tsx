@@ -165,7 +165,7 @@ export const NAV_SUPER: NavItem[] = [
   },
   { route: "/employee-bulk-import", label: "Bulk Import (Excel)", icon: "cloud-upload-outline" },
   { route: "/uan-esic-import", label: "Import UAN / ESIC No", icon: "id-card-outline" },
-  { route: "/attendance-policy", label: "Attendance Policy", icon: "time-outline" },
+  // Iter 284 — Attendance Policy moved into the Utility group (user request).
   { route: "/geofence-policy", label: "Geofence Policy", icon: "location-outline" },
   { route: "/geofence-monitor", label: "Geofence Monitor", icon: "navigate-circle-outline" },
   // Iter 85 — Utility group. Users Log Report is a new audit view;
@@ -176,6 +176,11 @@ export const NAV_SUPER: NavItem[] = [
     label: "Utility",
     icon: "construct-outline",
     children: [
+      // Iter 284 (user request) — Company Policies tiles moved here from
+      // the Dashboard page.
+      { route: "/attendance-policy", label: "Attendance Policy", icon: "time-outline" },
+      { route: "/biometric-devices", label: "Biometric Devices (ZKTeco)", icon: "finger-print-outline" },
+      { route: "/backdate-punches", label: "Back-date Punches", icon: "calendar-clear-outline" },
       // Merged from the old "Utilities" group (user request — one group).
       { route: "/past-salary-runs", label: "Past Salary Runs", icon: "albums-outline" },
       { route: "/zk-dat-import", label: "Import Biometric .dat", icon: "finger-print-outline" },
