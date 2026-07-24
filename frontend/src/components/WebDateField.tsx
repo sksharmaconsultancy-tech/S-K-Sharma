@@ -31,6 +31,19 @@ export default function WebDateField({
   placeholder?: string;
 }) {
   const display = isoToDmy(value);
+  const inputRef = React.useRef<any>(null);
+
+  const openPicker = React.useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    try {
+      // Chrome/Edge/Safari 16+ — programmatically opens the calendar.
+      if (typeof el.showPicker === "function") el.showPicker();
+      else el.focus();
+    } catch {
+      el.focus();
+    }
+  }, []);
 
   if (Platform.OS === "web") {
     return (
@@ -39,12 +52,25 @@ export default function WebDateField({
           {display || placeholder}
         </Text>
         <Ionicons name="calendar-outline" size={18} color={colors.onSurfaceSecondary} />
+        {/* Fallback CSS — stretch the webkit picker indicator over the whole
+            field so a plain click opens the calendar even without showPicker. */}
+        {/* @ts-ignore web-only element */}
+        <style>{`
+          .wdf-input::-webkit-calendar-picker-indicator {
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%;
+            margin: 0; padding: 0; cursor: pointer;
+          }
+        `}</style>
         {/* Transparent native date input overlay → opens the calendar. */}
         {/* @ts-ignore web-only element */}
         <input
+          ref={inputRef}
           type="date"
+          className="wdf-input"
           value={value || ""}
           onChange={(e: any) => onChange(e.target.value)}
+          onClick={openPicker}
           data-testid={testID}
           style={{
             position: "absolute",

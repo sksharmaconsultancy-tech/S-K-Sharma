@@ -1440,3 +1440,9 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 ## Iter 290b — Sub-admin punch import fix (user request)
 - routes/punch_import.py _auth: sub_admins were always 403'd (checked admin.company_id equality — sub-admins have a scope list, not company_id). Now uses sub_admin_can_touch_company. Verified: scoped firm 200, out-of-scope 403, template 200.
 - Also clarified earlier: sub-admin attendance Excel download already works (scope + menu rights are portal settings).
+
+## Iter 289 (fork) — Labour Reports date picker fix (user bug)
+- WebDateField.tsx: transparent <input type=date> overlay only opened the calendar when the invisible webkit picker-indicator icon was hit. Fixed: onClick calls input.showPicker() (with focus fallback) + CSS stretches ::-webkit-calendar-picker-indicator across the full field. Applies portal-wide (all WebDateField usages).
+- Verified via automated screenshot: From/To fields in Daily Attendance Register now open calendar and accept values.
+- temp_bundle.py now serves deploy_vps_iter289.sh (kind=script).
+- SEC-003 (plaintext EPFO/ESIC passwords) still PENDING.
