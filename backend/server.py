@@ -4776,6 +4776,9 @@ async def emp_code_login(payload: EmpCodeLoginPayload):
     # Success -> reset the rate-limit counter
     await db.emp_login_attempts.delete_many({"code": code, "last4": last4})
 
+    # Iter 285 — onboarding approval gate (pending/hold/rejected staff).
+    await _onboarding_login_gate(user)
+
     token = f"emp_{uuid.uuid4().hex}{uuid.uuid4().hex}"
     expires = datetime.now(timezone.utc) + timedelta(hours=SESSION_TTL_HOURS)
     await db.user_sessions.insert_one({
@@ -5531,6 +5534,9 @@ async def pin_login(payload: PinLoginRequest):
         {"user_id": user["user_id"]},
         {"$set": {"pin_fail_count": 0, "pin_last_login_at": now_iso(), "pin_locked_until": None}},
     )
+
+    # Iter 285 — onboarding approval gate (pending/hold/rejected staff).
+    await _onboarding_login_gate(user)
 
     token = await _issue_session(user["user_id"], "pin")
     await _maybe_first_login_punch(user)
@@ -8378,6 +8384,13 @@ async def admin_create_employee(
             if merged.get("halfday_hours") is not None and doc.get("half_day_hrs") is None:
                 doc["half_day_hrs"] = float(merged["halfday_hours"])
 
+    # Iter 285 — Onboarding Approval Workflow: when the firm policy is
+    # enabled, new employees start as PENDING APPROVAL instead of active.
+    _ob_cfg = (company.get("onboarding_approval") or {})
+    if _ob_cfg.get("enabled"):
+        doc["onboarding_status"] = "pending_approval"
+        doc["onboarding_pending_since"] = now_iso()
+
     await db.users.insert_one(doc)
     logger.info(
         f"[ADMIN CREATE EMPLOYEE] {name} ({phone or email}) → company={cid} by {admin.get('email')}"
@@ -9010,6 +9023,82 @@ async def my_worksites(authorization: Optional[str] = Header(None)):
     return {"worksites": sites}
 
 
+# ---------------------------------------------------------------------------
+# Iter 285 — Employee Onboarding Approval Workflow (Phase 1) gates.
+# Settings live at companies.onboarding_approval (routes/onboarding_approval).
+ONBOARDING_BLOCKED_STATUSES = ["draft", "pending_approval", "hold", "rejected"]
+
+
+async def _onboarding_cfg(company_id: Optional[str]) -> dict:
+    if not company_id:
+        return {}
+    c = await db.companies.find_one(
+        {"company_id": company_id}, {"_id": 0, "onboarding_approval": 1})
+    return (c or {}).get("onboarding_approval") or {}
+
+
+async def _onboarding_login_gate(user: dict) -> None:
+    """Block employee logins while onboarding is unapproved (per firm policy).
+
+    Login is allowed when EITHER mobile or web login is permitted before
+    approval (the PWA can't reliably distinguish the two channels).
+    """
+    if (user or {}).get("role") != "employee":
+        return
+    st = user.get("onboarding_status")
+    if not st or st in ("approved", "active"):
+        return
+    if st == "rejected":
+        raise HTTPException(
+            status_code=403,
+            detail="Your registration was rejected. Please contact HR.")
+    cfg = await _onboarding_cfg(user.get("company_id"))
+    if not cfg.get("enabled"):
+        return
+    if st == "hold":
+        raise HTTPException(
+            status_code=403,
+            detail="Your account is on hold pending HR review. Contact HR.")
+    if not (cfg.get("allow_mobile_login", True) or cfg.get("allow_web_login", True)):
+        raise HTTPException(
+            status_code=403,
+            detail="Your account is awaiting HR approval. Please try again once approved.")
+
+
+def _onboarding_punch_gate(user: dict, company: dict) -> None:
+    """Reject punches from unapproved employees per firm policy. When
+    'store attendance' is on, punches are accepted (stored) but the
+    employee stays excluded from payroll until approval."""
+    if (user or {}).get("role") != "employee":
+        return
+    st = user.get("onboarding_status")
+    if not st or st in ("approved", "active"):
+        return
+    if st == "rejected":
+        raise HTTPException(
+            status_code=403,
+            detail="Registration rejected — punching is disabled. Contact HR.")
+    cfg = (company or {}).get("onboarding_approval") or {}
+    if not cfg.get("enabled"):
+        return
+    if not cfg.get("allow_punch", True) and not cfg.get("store_attendance", True):
+        raise HTTPException(
+            status_code=403,
+            detail="Punching is disabled until HR approves your registration.")
+
+
+async def _onboarding_payroll_exclusion(q: dict, company_id: Optional[str],
+                                        allow_keys: list) -> None:
+    """Exclude not-yet-approved employees from payroll runs unless the
+    firm policy explicitly allows ALL the given processing types before
+    approval. Employees without an onboarding_status are unaffected."""
+    cfg = await _onboarding_cfg(company_id)
+    if cfg.get("enabled") and all(bool(cfg.get(k)) for k in allow_keys):
+        return
+    q.setdefault("$and", []).append(
+        {"onboarding_status": {"$nin": ONBOARDING_BLOCKED_STATUSES}})
+
+
 @api.post("/attendance/punch")
 async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
@@ -9018,6 +9107,10 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
     company = await db.companies.find_one({"company_id": user["company_id"]}, {"_id": 0})
     if not company:
         raise HTTPException(status_code=400, detail="Company not found")
+
+    # Iter 285 — onboarding approval gate (may 403 for unapproved staff).
+    _onboarding_punch_gate(user, company)
+
 
     # Offline-sync idempotency (Phase 2): if this exact queued punch was
     # already accepted (same client_dedupe_id), return it instead of making
@@ -15080,6 +15173,11 @@ async def _compute_compliance_run(
             ]
         })
 
+    # Iter 285 — exclude unapproved (onboarding) employees unless the firm
+    # policy allows statutory processing before approval.
+    await _onboarding_payroll_exclusion(
+        q, payload.company_id, ["allow_pf", "allow_esic", "allow_tds"])
+
     employees = await db.users.find(q, {"_id": 0}).to_list(2000)
 
     # Iter 167 — "Resigned this month" summary: capture who gets auto-
@@ -20731,6 +20829,10 @@ from routes.shift_change_v2 import router as shift_change_v2_router  # noqa: E40
 app.include_router(shift_change_v2_router)
 from routes.comp_off import router as comp_off_router  # noqa: E402
 app.include_router(comp_off_router)
+
+# Iter 285 — Employee Onboarding Approval Workflow (Phase 1).
+from routes.onboarding_approval import router as onboarding_approval_router  # noqa: E402
+app.include_router(onboarding_approval_router)
 
 # Iter 267 — Real-Time ZKTeco Multi-Device Synchronization Engine (Phase 1).
 from routes.sync_engine import router as sync_engine_router  # noqa: E402

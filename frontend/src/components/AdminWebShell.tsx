@@ -89,6 +89,8 @@ export const NAV_SUPER: NavItem[] = [
     icon: "checkmark-done-circle-outline",
     children: [
       { route: "/approval-inbox", label: "Approval Inbox", icon: "file-tray-full-outline" },
+      // Iter 285 — Onboarding Approval Workflow (Phase 1).
+      { route: "/employee-approvals", label: "Pending Employee Approval", icon: "person-add-outline" },
       { route: "/approval-workflows", label: "Workflow Builder", icon: "git-branch-outline" },
       { route: "/company-requests", label: "Company Requests", icon: "mail-open-outline" },
       { route: "/punch-approvals", label: "Punch Approvals", icon: "checkmark-circle-outline" },
