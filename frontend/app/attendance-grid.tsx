@@ -1124,7 +1124,7 @@ function GridHeader({
         onPress={tap("duty")}
         style={[styles.hcell, styles.sumCell, { width: COL.sum }]}
       >
-        <Text style={styles.hcellTxt}>Total Duty HRS{arrow("duty")}</Text>
+        <Text style={styles.hcellTxt}>Total Working HRS{arrow("duty")}</Text>
       </Pressable>
       <Pressable
         onPress={tap("days")}

@@ -1427,3 +1427,7 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - policy_master.ot_slab_minutes: 0 (exact) / 30 (default) / 60. Validator + backfill in get_attendance_policy. Applied in grid compute (_pm_firm) + OT report (pol.policy_master). Verified per-slab: 8:34 → OT 0.5/0.5/0.0 (Exact still passes through firm duty_hours_rounding first).
 - attendance-policy.tsx: "OT Rounding" chip row (Exact / 30 min slab / 1 hour slab) added under Policy Master Sub Points; verified via screenshot.
 - NOTE: earlier grid slab edit silently didn't persist despite success msg — re-applied and re-verified.
+
+## Iter 289f — Rollback + rename (user request)
+- ROLLED BACK: Total Duty HRS grand total back to sum of processed day figures (total_hours_min); total_sched_min removed.
+- RENAMED: "Total Duty HRS" → "Total Working HRS" in web grid header, PDF _TRAIL_LABELS, XLSX trail_labels, OT report xlsx.

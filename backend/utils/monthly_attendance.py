@@ -799,7 +799,7 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
     # Layout (Iter 202 — user request): A=Bio Code, B=Name, C=Father,
     # D=Designation, E=Type (Duty HRS / OT HRS — one row EACH per employee,
     # day-wise, per the attendance policy), F..=days, then trailing totals.
-    trail_labels = ["Duty HRS", "OT HRS", "Total Duty HRS", "Present Days", "Extra HRS"]
+    trail_labels = ["Duty HRS", "OT HRS", "Total Working HRS", "Present Days", "Extra HRS"]
     total_cols = 5 + days_n + len(trail_labels)
 
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_cols)

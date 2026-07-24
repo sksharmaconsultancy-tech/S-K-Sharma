@@ -79,7 +79,7 @@ def build_ot_report_xlsx(
         "Emp Code", "Name", "Designation", "Bio",
         "Date", "Day", "In Punch", "Out Punch",
         "OT In", "OT Out",
-        "Duty HRS", "OT HRS", "Total Duty HRS",
+        "Duty HRS", "OT HRS", "Total Working HRS",
     ]
     for idx, h in enumerate(headers, start=1):
         c = ws.cell(row=4, column=idx)

@@ -56,7 +56,7 @@ def _iter_pages_by_days(days: int, chunk: int) -> List[List[int]]:
     return pages
 
 
-_TRAIL_LABELS = ["Duty HRS", "OT HRS", "Total Duty HRS", "Days", "Extra HRS"]
+_TRAIL_LABELS = ["Duty HRS", "OT HRS", "Total Working HRS", "Days", "Extra HRS"]
 
 
 def _fmt_hhmm(hrs: float) -> str:
