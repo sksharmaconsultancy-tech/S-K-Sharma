@@ -888,19 +888,20 @@ export default function AttendanceGridScreen() {
           </Text>
         </Pressable>
 
-        {/* Source badge legend */}
+        {/* Source badge legend — Iter 283 (user request): spell out what
+            each punch source means. */}
         <View style={styles.legendRow}>
           <View style={styles.legendItem}>
             <View style={[styles.badge, styles.badgeBio]}><Text style={styles.badgeTxt}>B</Text></View>
-            <Text style={styles.legendTxt}>Biometric</Text>
+            <Text style={styles.legendTxt}>Biometric — Punch from Biometric Machine</Text>
           </View>
           <View style={styles.legendItem}>
             <View style={[styles.badge, styles.badgeApp]}><Text style={styles.badgeTxt}>M</Text></View>
-            <Text style={styles.legendTxt}>Mobile</Text>
+            <Text style={styles.legendTxt}>Mobile — Punch from PWA App</Text>
           </View>
           <View style={styles.legendItem}>
             <View style={[styles.badge, styles.badgeSys]}><Text style={styles.badgeTxt}>S</Text></View>
-            <Text style={styles.legendTxt}>System</Text>
+            <Text style={styles.legendTxt}>System — Manual Punching</Text>
           </View>
         </View>
       </View>
@@ -1267,6 +1268,22 @@ function DayCell({
       : view === "ot"
       ? (cell?.ot_hours ?? 0)
       : ((cell?.raw_hours ?? cell?.hours) ?? 0);
+  // Iter 283 (user request) — the IN/OUT sheet shows TOTAL DUTY HRS as the
+  // plain IN-time → OUT-time span (overnight-safe), NOT the policy /
+  // break-adjusted figure.
+  const spanHours = (() => {
+    if (!cell?.in || !cell?.out) return 0;
+    const parse = (s: string) => {
+      const m = /^(\d{1,2}):(\d{2})/.exec(s.trim());
+      return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : null;
+    };
+    const a = parse(cell.in);
+    const b = parse(cell.out);
+    if (a == null || b == null) return 0;
+    let mins = b - a;
+    if (mins < 0) mins += 24 * 60; // overnight shift wraps past midnight
+    return mins / 60;
+  })();
   // Iter 94 — user rules:
   //  • "⚠ rectify" ONLY when a punch is genuinely one-sided (IN xor OUT).
   //    Both punches present must NEVER show an error even if computed
@@ -1378,24 +1395,15 @@ function DayCell({
       </View>
     );
   }
-  // Iter 77h — IN/OUT view: compact 2-line In/Out + total hrs.
+  // Iter 77h — IN/OUT view: compact 2-line In/Out + total duty hrs.
+  // Iter 283 (user request) — hours = IN→OUT span; L/E/B metric line removed.
   return (
     <View style={[styles.cell, { width, alignItems: "center", paddingVertical: 4 }]}>
       <Text style={styles.dayIn}>{cell.in || "—"}</Text>
       <Text style={styles.dayOut}>{cell.out || "—"}</Text>
-      <Text style={[styles.dayHoursSm, isOt && styles.dayHoursOt]}>
-        {displayHours > 0 ? fmtHoursHM(displayHours) : "—"}
+      <Text style={[styles.dayHoursSm, spanHours > fullDay && styles.dayHoursOt]}>
+        {spanHours > 0 ? fmtHoursHM(spanHours) : "—"}
       </Text>
-      {/* Iter 236 — per-day detail: Late / Early-Go / Break metrics. */}
-      {(() => {
-        const bits: string[] = [];
-        if ((cell.late_min ?? 0) > 0) bits.push(`L${cell.late_min}m`);
-        if ((cell.early_min ?? 0) > 0) bits.push(`E${cell.early_min}m`);
-        if ((cell.break_hours ?? 0) > 0) bits.push(`B${fmtHoursHM(cell.break_hours!)}`);
-        return bits.length ? (
-          <Text style={styles.dayMetricTxt}>{bits.join(" ")}</Text>
-        ) : null;
-      })()}
       {cell.sources && cell.sources.length > 0 && (
         <View style={styles.badgeRow}>
           {cell.sources.map((s) => (

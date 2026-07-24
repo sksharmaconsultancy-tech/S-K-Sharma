@@ -277,20 +277,35 @@ export default function ShiftMasterScreen() {
               Tick the shifts that apply to the selected firm. Employee-wise
               shift dropdowns for that firm will show ONLY these shifts.
             </Text>
-            <View style={styles.firmChips}>
-              {firms.map((f) => (
-                <Pressable
-                  key={f.company_id}
-                  onPress={() => setSelFirm(f.company_id)}
-                  style={[styles.firmChip, selFirm === f.company_id && styles.firmChipOn]}
-                  testID={`shm-firm-${f.company_id}`}
-                >
-                  <Text style={[styles.firmChipTxt, selFirm === f.company_id && { color: "#fff" }]}>
-                    {f.name}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
+            {/* Iter 283 (user request) — firm picker is a DROPDOWN list. */}
+            {Platform.OS === "web" ? (
+              <select
+                value={selFirm}
+                onChange={(e) => setSelFirm((e.target as HTMLSelectElement).value)}
+                style={styles.firmSelect as any}
+                data-testid="shm-firm-select"
+              >
+                <option value="">— pick a firm —</option>
+                {firms.map((f) => (
+                  <option key={f.company_id} value={f.company_id}>{f.name}</option>
+                ))}
+              </select>
+            ) : (
+              <View style={styles.firmChips}>
+                {firms.map((f) => (
+                  <Pressable
+                    key={f.company_id}
+                    onPress={() => setSelFirm(f.company_id)}
+                    style={[styles.firmChip, selFirm === f.company_id && styles.firmChipOn]}
+                    testID={`shm-firm-${f.company_id}`}
+                  >
+                    <Text style={[styles.firmChipTxt, selFirm === f.company_id && { color: "#fff" }]}>
+                      {f.name}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
             {assignLoading ? (
               <ActivityIndicator color={colors.brandPrimary} style={{ marginVertical: 10 }} />
             ) : (
@@ -494,6 +509,18 @@ const styles = StyleSheet.create({
   assignTitle: { fontSize: 15, fontWeight: "700", color: colors.onSurface },
   assignNote: { fontSize: 12, color: colors.onSurfaceSecondary, marginTop: 4, marginBottom: 10 },
   firmChips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 },
+  firmSelect: {
+    padding: 10,
+    borderRadius: 8,
+    borderColor: colors.divider,
+    borderWidth: 1,
+    fontSize: 14,
+    width: "100%",
+    maxWidth: 420,
+    backgroundColor: colors.surface,
+    color: colors.onSurface,
+    marginBottom: 10,
+  },
   firmChip: {
     paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16,
     borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface,

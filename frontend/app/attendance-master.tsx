@@ -207,20 +207,35 @@ export default function AttendanceMasterScreen() {
       <ScrollView contentContainerStyle={styles.body}>
         {/* Filters */}
         <View style={styles.filterRow}>
-          <View style={styles.chipWrap}>
-            {companies.map((c) => (
-              <Pressable
-                key={c.company_id}
-                onPress={() => setCompanyId(c.company_id)}
-                style={[styles.chip, companyId === c.company_id && styles.chipActive]}
-                testID={`am-firm-${c.company_id}`}
-              >
-                <Text style={[styles.chipTxt, companyId === c.company_id && styles.chipTxtActive]}>
-                  {c.name}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
+          {/* Iter 283 (user request) — firm picker is a DROPDOWN list. */}
+          {Platform.OS === "web" ? (
+            <select
+              value={companyId}
+              onChange={(e) => setCompanyId((e.target as HTMLSelectElement).value)}
+              style={styles.firmSelect as any}
+              data-testid="am-firm-select"
+            >
+              <option value="">— pick a firm —</option>
+              {companies.map((c) => (
+                <option key={c.company_id} value={c.company_id}>{c.name}</option>
+              ))}
+            </select>
+          ) : (
+            <View style={styles.chipWrap}>
+              {companies.map((c) => (
+                <Pressable
+                  key={c.company_id}
+                  onPress={() => setCompanyId(c.company_id)}
+                  style={[styles.chip, companyId === c.company_id && styles.chipActive]}
+                  testID={`am-firm-${c.company_id}`}
+                >
+                  <Text style={[styles.chipTxt, companyId === c.company_id && styles.chipTxtActive]}>
+                    {c.name}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
         </View>
         <View style={styles.filterRow}>
           <View style={styles.inpBox}>
@@ -358,6 +373,17 @@ const styles = StyleSheet.create({
   hint: { color: colors.onSurfaceTertiary, fontSize: type.sm, marginVertical: 20, textAlign: "center" },
   filterRow: { flexDirection: "row", alignItems: "flex-end", gap: 10, marginBottom: spacing.sm, flexWrap: "wrap" },
   chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  firmSelect: {
+    padding: 10,
+    borderRadius: 8,
+    borderColor: colors.border,
+    borderWidth: 1,
+    fontSize: 14,
+    width: "100%",
+    maxWidth: 420,
+    backgroundColor: colors.surface,
+    color: colors.onSurface,
+  },
   chip: {
     paddingHorizontal: 14,
     paddingVertical: 8,

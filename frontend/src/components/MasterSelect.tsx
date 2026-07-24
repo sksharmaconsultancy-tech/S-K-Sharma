@@ -121,6 +121,13 @@ export default function MasterSelect({
     pick(v);
   };
 
+  // Iter 283 (user request) — typing in the box FILTERS the option list
+  // live (Designation / Department / Group type-ahead).
+  const q = custom.trim().toLowerCase();
+  const shownOptions = q
+    ? options.filter((o) => o.toLowerCase().includes(q))
+    : options;
+
   return (
     <View ref={wrapRef} style={{ position: "relative", zIndex: open ? 60 : 1 }}>
       <Text style={styles.lbl}>
@@ -155,7 +162,7 @@ export default function MasterSelect({
             <TextInput
               value={custom}
               onChangeText={(v) => setCustom(uppercase ? v.toUpperCase() : v)}
-              placeholder="Type a custom value…"
+              placeholder="Type to search / add new…"
               placeholderTextColor={colors.onSurfaceTertiary}
               style={styles.customInput}
               autoCapitalize={uppercase ? "characters" : "words"}
@@ -170,12 +177,13 @@ export default function MasterSelect({
             </Pressable>
           </View>
           <ScrollView style={{ maxHeight: 220 }} keyboardShouldPersistTaps="handled">
-            {options.length === 0 ? (
+            {shownOptions.length === 0 ? (
               <Text style={styles.emptyTxt}>
-                Nothing in this master yet — type a custom value above, or add
-                entries on the Masters screen.
+                {q
+                  ? `No match for "${custom.trim()}" — press ✓ to add it as a new entry.`
+                  : "Nothing in this master yet — type a custom value above, or add entries on the Masters screen."}
               </Text>
-            ) : options.map((name) => {
+            ) : shownOptions.map((name) => {
               const active = value.trim().toLowerCase() === name.toLowerCase();
               return (
                 <Pressable

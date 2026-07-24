@@ -23,7 +23,13 @@ export type ThemeId =
   | "ocean_breeze"
   | "crimson_regal"
   | "slate_mint"
-  | "midnight_dark";
+  | "sunset_saffron"
+  | "forest_olive"
+  | "rose_gold"
+  | "steel_sky"
+  | "graphite_lime"
+  | "midnight_dark"
+  | "obsidian_teal";
 
 export type ThemeColors = {
   surface: string;
@@ -239,6 +245,77 @@ export const THEME_PRESETS: PresetDef[] = [
       "#F8FAFC", "#EEF2F6",
     ),
   },
+  // Iter 283 (user request) — extra theme pack: 5 new light palettes.
+  {
+    id: "sunset_saffron",
+    name: "Sunset Saffron",
+    vibe: "Indian Festive",
+    description: "Warm saffron orange with deep plum — festive Indian energy.",
+    primary: "#C2410C",
+    secondary: "#9A3412",
+    accent: "#7C2D8E",
+    colors: buildPalette(
+      "#C2410C", "#9A3412", "#FFEDD5", "#9A3412",
+      "#7C2D8E", "#F3E8FF", "#6B21A8",
+      "#FFFBF7", "#F6EDE4",
+    ),
+  },
+  {
+    id: "forest_olive",
+    name: "Forest Olive",
+    vibe: "Earthy Calm",
+    description: "Deep forest green with mustard gold — natural and steady.",
+    primary: "#3F6212",
+    secondary: "#4D7C0F",
+    accent: "#CA8A04",
+    colors: buildPalette(
+      "#3F6212", "#4D7C0F", "#ECFCCB", "#365314",
+      "#CA8A04", "#FEF9C3", "#854D0E",
+      "#FAFBF7", "#EFF1E8",
+    ),
+  },
+  {
+    id: "rose_gold",
+    name: "Rose Gold",
+    vibe: "Elegant Warm",
+    description: "Dusty rose with soft gold — graceful, warm and refined.",
+    primary: "#9F1256",
+    secondary: "#BE185D",
+    accent: "#B45309",
+    colors: buildPalette(
+      "#9F1256", "#BE185D", "#FCE7F3", "#9D174D",
+      "#B45309", "#FEF3C7", "#92400E",
+      "#FDFAFB", "#F6EDF1",
+    ),
+  },
+  {
+    id: "steel_sky",
+    name: "Steel Sky",
+    vibe: "Cool Industrial",
+    description: "Steel blue-grey with bright sky — crisp factory-floor clarity.",
+    primary: "#37506D",
+    secondary: "#475F7C",
+    accent: "#0284C7",
+    colors: buildPalette(
+      "#37506D", "#475F7C", "#DBEAFE", "#1E3A5F",
+      "#0284C7", "#E0F2FE", "#075985",
+      "#F8FAFC", "#EAEFF4",
+    ),
+  },
+  {
+    id: "graphite_lime",
+    name: "Graphite Lime",
+    vibe: "High-Contrast Modern",
+    description: "Charcoal graphite with electric lime — sharp and energetic.",
+    primary: "#27272A",
+    secondary: "#3F3F46",
+    accent: "#65A30D",
+    colors: buildPalette(
+      "#27272A", "#3F3F46", "#E4E4E7", "#18181B",
+      "#65A30D", "#ECFCCB", "#3F6212",
+      "#FAFAFA", "#EFEFEF",
+    ),
+  },
   // Iter 89 — True Dark Mode preset. Inverts every surface + text token
   // so the whole portal (both admin web shell and employee mobile app)
   // adopts a proper night palette. Accent stays a soft indigo so CTAs
@@ -291,6 +368,53 @@ export const THEME_PRESETS: PresetDef[] = [
       divider: "rgba(226,232,240,0.08)",
     },
   },
+  // Iter 283 (user request) — second dark preset for the theme pack.
+  {
+    id: "obsidian_teal",
+    name: "Obsidian Teal",
+    vibe: "Dark Teal",
+    description: "Near-black obsidian with luminous teal — calm night mode.",
+    primary: "#2DD4BF",
+    secondary: "#5EEAD4",
+    accent: "#FB923C",
+    colors: {
+      surface: "#0A1214",
+      onSurface: "#E7ECEB",
+      surfaceSecondary: "#101B1E",
+      onSurfaceSecondary: "#C2CFCC",
+      surfaceTertiary: "#1B2A2E",
+      onSurfaceTertiary: "#8FA6A1",
+      surfaceInverse: "#F0FDFA",
+      onSurfaceInverse: "#0F172A",
+
+      brand: "#2DD4BF",
+      brandPrimary: "#2DD4BF",
+      onBrandPrimary: "#0A1214",
+      brandSecondary: "#14B8A6",
+      onBrandSecondary: "#FFFFFF",
+      brandTertiary: "#134E4A",
+      onBrandTertiary: "#CCFBF1",
+
+      cta: "#FB923C",
+      onCta: "#0A1214",
+      ctaTint: "#7C2D12",
+      onCtaTint: "#FFEDD5",
+
+      accent: "#FB923C",
+      onAccent: "#0A1214",
+      accentTint: "#7C2D12",
+      onAccentTint: "#FFEDD5",
+
+      success: "#34D399", onSuccess: "#0A1214",
+      warning: "#FBBF24", onWarning: "#0A1214",
+      error: "#F87171",   onError:   "#0A1214",
+      info: "#38BDF8",    onInfo:    "#0A1214",
+
+      border: "rgba(231,236,235,0.14)",
+      borderStrong: "#2E4247",
+      divider: "rgba(231,236,235,0.08)",
+    },
+  },
 ];
 
 export const DEFAULT_THEME_ID: ThemeId = "azure_light";
@@ -299,7 +423,7 @@ export const DEFAULT_THEME_ID: ThemeId = "azure_light";
  *  dark presets while any other explicitly-picked preset stays put. */
 export const DARK_THEME_ID: ThemeId = "midnight_dark";
 export function isDarkTheme(id: ThemeId): boolean {
-  return id === "midnight_dark";
+  return id === "midnight_dark" || id === "obsidian_teal";
 }
 
 /**

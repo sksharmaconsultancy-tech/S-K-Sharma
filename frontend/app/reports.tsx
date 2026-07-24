@@ -60,6 +60,13 @@ type ComplianceRun = SalaryRun & {
   total_pf?: number;
   total_esic?: number;
   total_tds?: number;
+  employee_type?: string | null; // Iter 283 — group the run was made for
+  employees_count?: number;
+  totals?: {
+    gross_paid?: number; monthly_gross?: number;
+    pf_employee?: number; esic_employee?: number;
+    tds?: number; net?: number;
+  } | null;
 };
 
 type BonusRun = {
@@ -593,14 +600,28 @@ export default function ReportsHubScreen() {
             {visComplianceRuns.length === 0 ? (
               <Text style={styles.smallHint}>No runs match the selected filters.</Text>
             ) : (
-              visComplianceRuns.map((r) => (
+              visComplianceRuns.map((r) => {
+                // Iter 283 (user request) — surface the REAL run figures:
+                // group, employee count, gross, PF/ESI deduction, net pay.
+                const t = r.totals || {};
+                return (
                 <View key={r.run_id} style={styles.row}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.rowName}>
                       {r.month} · {r.company_name || companyName(r.company_id)}
+                      {" · "}
+                      {(r.employee_type || "ALL").toUpperCase()}
                     </Text>
                     <Text style={styles.smallHint}>
-                      PF {inr(r.total_pf)} · ESIC {inr(r.total_esic)} · TDS {inr(r.total_tds)}
+                      Group: {(r.employee_type || "All Employees").toUpperCase()} ·
+                      {" "}Employees: {r.employees_count ?? r.row_count ?? "—"}
+                    </Text>
+                    <Text style={styles.smallHint}>
+                      Gross {inr(t.gross_paid ?? t.monthly_gross)} ·
+                      {" "}PF {inr(t.pf_employee ?? r.total_pf)} ·
+                      {" "}ESI {inr(t.esic_employee ?? r.total_esic)} ·
+                      {" "}TDS {inr(t.tds ?? r.total_tds)} ·
+                      {" "}Net {inr(t.net)}
                     </Text>
                   </View>
                   <Pressable
@@ -664,7 +685,8 @@ export default function ReportsHubScreen() {
                     <Text style={styles.linkBtnGhostTxt}>CSV</Text>
                   </Pressable>
                 </View>
-              ))
+                );
+              })
             )}
           </View>
         ) : (
