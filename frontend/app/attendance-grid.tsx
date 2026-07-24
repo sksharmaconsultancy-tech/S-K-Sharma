@@ -1136,8 +1136,9 @@ function GridHeader({
       <View style={[styles.hcell, styles.sumCell, { width: COL.sum }]}>
         <Text style={styles.hcellTxt}>Extra HRS</Text>
       </View>
-      {/* Iter 236 — Attendance Engine Overhaul summary columns. */}
-      {["Punches", "Break HRS", "Net HRS", "Late Min", "Early Go"].map((lab) => (
+      {/* Iter 236 — Attendance Engine Overhaul summary columns.
+          Iter 289 (user request) — Late Min / Early Go columns removed. */}
+      {["Punches", "Break HRS", "Net HRS"].map((lab) => (
         <View key={lab} style={[styles.hcell, styles.sumCell, { width: COL.sum }]}>
           <Text style={styles.hcellTxt}>{lab}</Text>
         </View>
@@ -1245,7 +1246,8 @@ function GridRow({
         </Text>
       </View>
       {/* Iter 236 — Attendance Engine Overhaul summary cells:
-          Punches | Break HRS | Net HRS | Late Min | Early Go. */}
+          Punches | Break HRS | Net HRS. (Iter 289 — Late Min / Early Go
+          columns removed per user request.) */}
       <View style={[styles.cell, styles.sumCellLight, { width: COL.sum }]}>
         <Text style={styles.sumTxt}>{emp.totals.total_punches ?? 0}</Text>
       </View>
@@ -1254,16 +1256,6 @@ function GridRow({
       </View>
       <View style={[styles.cell, styles.sumCellLight, { width: COL.sum }]}>
         <Text style={styles.sumTxt}>{fmtHoursHM(emp.totals.net_hours ?? 0)}</Text>
-      </View>
-      <View style={[styles.cell, styles.sumCellLight, { width: COL.sum }]}>
-        <Text style={[styles.sumTxt, (emp.totals.late_minutes ?? 0) > 0 && { color: "#b45309" }]}>
-          {(emp.totals.late_minutes ?? 0) > 0 ? `${emp.totals.late_minutes}m` : "—"}
-        </Text>
-      </View>
-      <View style={[styles.cell, styles.sumCellLight, { width: COL.sum }]}>
-        <Text style={[styles.sumTxt, (emp.totals.early_minutes ?? 0) > 0 && { color: "#b45309" }]}>
-          {(emp.totals.early_minutes ?? 0) > 0 ? `${emp.totals.early_minutes}m` : "—"}
-        </Text>
       </View>
     </View>
   );
