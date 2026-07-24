@@ -138,3 +138,76 @@ async def delete_shift_master(
     if r.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Shift not found")
     return {"ok": True, "deleted_shift_id": shift_id}
+
+
+# ---------------------------------------------------------------------------
+# Iter 278 (user request) — Company-wise shift assignment from Shift Master.
+# The firm picks WHICH master shifts apply to it; employee-wise shift
+# dropdowns then only offer the firm's selected shifts. Saving also syncs
+# ``attendance_policy.shifts`` so the attendance engine keeps working.
+# ---------------------------------------------------------------------------
+@router.get("/companies/{company_id}/assigned-shifts")
+async def get_company_shifts(
+    company_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    user = await get_user_from_token(authorization)
+    require_role(user, ["company_admin", "super_admin", "sub_admin"])
+    if user.get("role") == "company_admin" and user.get("company_id") != company_id:
+        raise HTTPException(status_code=403, detail="Not authorised for this firm")
+    company = await db.companies.find_one(
+        {"company_id": company_id},
+        {"_id": 0, "assigned_shift_ids": 1, "name": 1},
+    )
+    if not company:
+        raise HTTPException(status_code=404, detail="Firm not found")
+    ids = company.get("assigned_shift_ids") or []
+    shifts = await db.shift_masters.find(
+        {"shift_id": {"$in": ids}}, {"_id": 0},
+    ).sort("name", 1).to_list(200)
+    return {"company_id": company_id, "shift_ids": ids, "shifts": shifts}
+
+
+@router.put("/companies/{company_id}/assigned-shifts")
+async def set_company_shifts(
+    company_id: str,
+    payload: dict,
+    authorization: Optional[str] = Header(None),
+):
+    user = await get_user_from_token(authorization)
+    require_role(user, ["super_admin", "sub_admin"])
+    company = await db.companies.find_one(
+        {"company_id": company_id}, {"_id": 0, "company_id": 1},
+    )
+    if not company:
+        raise HTTPException(status_code=404, detail="Firm not found")
+    raw_ids = payload.get("shift_ids")
+    if not isinstance(raw_ids, list):
+        raise HTTPException(status_code=400, detail="shift_ids must be a list")
+    ids = [str(i) for i in raw_ids if str(i).strip()]
+    shifts = await db.shift_masters.find(
+        {"shift_id": {"$in": ids}}, {"_id": 0},
+    ).to_list(200)
+    found = {s["shift_id"] for s in shifts}
+    missing = [i for i in ids if i not in found]
+    if missing:
+        raise HTTPException(status_code=400,
+                            detail=f"Unknown shift_ids: {', '.join(missing)}")
+    # Preserve the order the admin selected.
+    by_id = {s["shift_id"]: s for s in shifts}
+    ordered = [by_id[i] for i in ids]
+    await db.companies.update_one(
+        {"company_id": company_id},
+        {"$set": {
+            "assigned_shift_ids": ids,
+            # Keep the attendance engine + Employee Master shift pickers in
+            # sync: the firm policy's shift list mirrors the selection.
+            "attendance_policy.shifts": [
+                {"name": s["name"], "start": s["start"], "end": s["end"]}
+                for s in ordered
+            ],
+            "updated_at": now_iso(),
+        }},
+    )
+    return {"ok": True, "company_id": company_id,
+            "shift_ids": ids, "shifts": ordered}

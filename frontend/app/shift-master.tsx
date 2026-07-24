@@ -81,6 +81,13 @@ export default function ShiftMasterScreen() {
   const [err, setErr] = useState<string | null>(null);
   const [editing, setEditing] = useState<Shift | null>(null);
   const [creating, setCreating] = useState(false);
+  // Iter 278 (user request) — Company-wise shift assignment.
+  const canAssign = user?.role === "super_admin" || user?.role === "sub_admin";
+  const [firms, setFirms] = useState<{ company_id: string; name: string }[]>([]);
+  const [selFirm, setSelFirm] = useState<string>("");
+  const [assigned, setAssigned] = useState<string[]>([]);
+  const [assignBusy, setAssignBusy] = useState(false);
+  const [assignLoading, setAssignLoading] = useState(false);
 
   const load = useCallback(async () => {
     if (!canView) return;
@@ -97,6 +104,56 @@ export default function ShiftMasterScreen() {
   }, [canView]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Iter 278 — firms list + selected firm's assigned shifts.
+  useEffect(() => {
+    if (!canAssign) return;
+    (async () => {
+      try {
+        const r = await api<{ companies: any[] }>("/companies");
+        const list = (r.companies || []).map((c: any) => ({
+          company_id: c.company_id, name: c.name || c.company_id,
+        }));
+        setFirms(list);
+        if (list.length) setSelFirm(list[0].company_id);
+      } catch { /* section hidden on failure */ }
+    })();
+  }, [canAssign]);
+
+  useEffect(() => {
+    if (!selFirm) return;
+    (async () => {
+      setAssignLoading(true);
+      try {
+        const r = await api<{ shift_ids: string[] }>(`/companies/${selFirm}/assigned-shifts`);
+        setAssigned(r.shift_ids || []);
+      } catch {
+        setAssigned([]);
+      } finally {
+        setAssignLoading(false);
+      }
+    })();
+  }, [selFirm]);
+
+  const toggleAssigned = (sid: string) => {
+    setAssigned((prev) =>
+      prev.includes(sid) ? prev.filter((x) => x !== sid) : [...prev, sid]);
+  };
+
+  const saveAssigned = async () => {
+    if (!selFirm) return;
+    setAssignBusy(true);
+    try {
+      await api(`/companies/${selFirm}/assigned-shifts`, {
+        method: "PUT", body: { shift_ids: assigned },
+      });
+      showMsg("Firm shift selection saved ✓ Employee-wise shift dropdowns will now show only these shifts.");
+    } catch (e: any) {
+      showMsg(e?.message || "Failed to save");
+    } finally {
+      setAssignBusy(false);
+    }
+  };
 
   const remove = async (s: Shift) => {
     const ok = Platform.OS === "web"
@@ -211,6 +268,68 @@ export default function ShiftMasterScreen() {
             </View>
           ))
         )}
+
+        {/* Iter 278 — Company-wise shift assignment from the master. */}
+        {canAssign && shifts.length > 0 ? (
+          <View style={styles.assignCard}>
+            <Text style={styles.assignTitle}>Assign Shifts to Firm (Company-wise)</Text>
+            <Text style={styles.assignNote}>
+              Tick the shifts that apply to the selected firm. Employee-wise
+              shift dropdowns for that firm will show ONLY these shifts.
+            </Text>
+            <View style={styles.firmChips}>
+              {firms.map((f) => (
+                <Pressable
+                  key={f.company_id}
+                  onPress={() => setSelFirm(f.company_id)}
+                  style={[styles.firmChip, selFirm === f.company_id && styles.firmChipOn]}
+                  testID={`shm-firm-${f.company_id}`}
+                >
+                  <Text style={[styles.firmChipTxt, selFirm === f.company_id && { color: "#fff" }]}>
+                    {f.name}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            {assignLoading ? (
+              <ActivityIndicator color={colors.brandPrimary} style={{ marginVertical: 10 }} />
+            ) : (
+              shifts.map((s) => {
+                const on = assigned.includes(s.shift_id);
+                return (
+                  <Pressable
+                    key={s.shift_id}
+                    onPress={() => toggleAssigned(s.shift_id)}
+                    style={styles.assignRow}
+                    testID={`shm-assign-${s.name}`}
+                  >
+                    <Ionicons
+                      name={on ? "checkbox" : "square-outline"}
+                      size={20}
+                      color={on ? colors.brandPrimary : colors.onSurfaceTertiary}
+                    />
+                    <Text style={styles.assignRowTxt}>
+                      {s.name}  ·  {s.start} – {s.end}
+                    </Text>
+                  </Pressable>
+                );
+              })
+            )}
+            <Pressable
+              onPress={saveAssigned}
+              disabled={assignBusy || !selFirm}
+              style={[styles.assignSave, (assignBusy || !selFirm) && { opacity: 0.6 }]}
+              testID="shm-assign-save"
+            >
+              {assignBusy
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <Ionicons name="save-outline" size={15} color="#fff" />}
+              <Text style={styles.assignSaveTxt}>
+                Save Firm Shifts ({assigned.length} selected)
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
       </ScrollView>
 
       <ShiftEditor
@@ -363,6 +482,36 @@ function ShiftEditor({
 }
 
 const styles = StyleSheet.create({
+  // Iter 278 — Company-wise shift assignment card
+  assignCard: {
+    marginTop: 20,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 14,
+  },
+  assignTitle: { fontSize: 15, fontWeight: "700", color: colors.onSurface },
+  assignNote: { fontSize: 12, color: colors.onSurfaceSecondary, marginTop: 4, marginBottom: 10 },
+  firmChips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 },
+  firmChip: {
+    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16,
+    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface,
+  },
+  firmChipOn: { backgroundColor: colors.brand, borderColor: colors.brand },
+  firmChipTxt: { fontSize: 12.5, color: colors.onSurface, fontWeight: "600" },
+  assignRow: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  assignRowTxt: { fontSize: 13.5, color: colors.onSurface, fontWeight: "600" },
+  assignSave: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: colors.brand, borderRadius: radius.md,
+    paddingVertical: 11, marginTop: 14,
+  },
+  assignSaveTxt: { color: "#fff", fontSize: 13.5, fontWeight: "700" },
   wrap: { flex: 1, backgroundColor: colors.surface },
   centerScreen: {
     flex: 1,

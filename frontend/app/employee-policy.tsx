@@ -131,6 +131,8 @@ function EmployeePolicyScreen() {
   // Iter 85 — Firm's compliance policy (percentages + toggle). Loaded
   // once so the Compliance Salary section can show inherited defaults
   // and gate the "% bifurcation" vs "manual amounts" UI.
+  // Iter 278 — firm's Shift-Master selection drives the shift dropdowns.
+  const [shiftOpts, setShiftOpts] = useState<string[]>(SHIFT_OPTIONS);
   const [firmComp, setFirmComp] = useState<{
     basic_pct?: number; hra_pct?: number; conveyance_pct?: number;
     medical_pct?: number; special_pct?: number; others_pct?: number;
@@ -158,6 +160,16 @@ function EmployeePolicyScreen() {
         try {
           const cp = await api<{ policy: any }>(`/admin/companies/${cid}/compliance-policy`);
           setFirmComp(cp?.policy || {});
+        } catch { /* non-fatal */ }
+        // Iter 278 — employee-wise shift options come from the shifts the
+        // firm selected out of the Shift Master (fallback: generic list).
+        try {
+          const cs = await api<{ shifts: { name: string; start: string; end: string }[] }>(
+            `/companies/${cid}/assigned-shifts`,
+          );
+          if ((cs.shifts || []).length) {
+            setShiftOpts(cs.shifts.map((s) => s.name));
+          }
         } catch { /* non-fatal */ }
       }
     } catch (e: any) {
@@ -391,13 +403,13 @@ function EmployeePolicyScreen() {
               <SelectField
                 label="Shift name"
                 value={form.shift_name}
-                options={SHIFT_OPTIONS}
+                options={shiftOpts}
                 onChange={(v) => setForm({ ...form, shift_name: v })}
               />
               <SelectField
                 label="Shift name (dummy / alternate)"
                 value={form.shift_dummy}
-                options={SHIFT_OPTIONS}
+                options={shiftOpts}
                 onChange={(v) => setForm({ ...form, shift_dummy: v })}
                 clearable
               />

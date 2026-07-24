@@ -1356,3 +1356,9 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - New GET /api/admin/attendance/rectified-punches/{company_id}/{month} (routes/punch_logs.py): re-runs the 3-stage dedup (rapid 30s / same-machine 15m / OUT-IN bounce 60s) per employee-day and reports dropped scans with IST time + reason + kept punches.
 - New screen /rectified-punches (frontend/app/rectified-punches.tsx): firm chips (/companies), month prev/next, summary card, per-day cards. Sidebar: Utility → "Rectified Punches Audit" (AdminWebShell).
 - E2E: 4-scan burst → 4 received / 2 kept with reasons; UI screenshot PASS.
+
+## Iter 278 (June 2026) — Company-wise shift assignment from Shift Master
+- routes/shift_masters.py: GET/PUT /api/companies/{cid}/assigned-shifts — stores companies.assigned_shift_ids AND syncs attendance_policy.shifts (name/start/end) so the attendance engine + existing pickers keep working. PUT = super/sub admin only; GET also company_admin (own firm).
+- shift-master.tsx: new "Assign Shifts to Firm (Company-wise)" card — firm chips + checkbox list of master shifts + Save.
+- employee-policy.tsx: Shift name + dummy dropdowns now load the firm's assigned shifts (fallback to generic SHIFT_OPTIONS when firm has none selected).
+- E2E: assign Day/Night to Kankani → GET reflects, attendance_policy.shifts synced; UI screenshot PASS.
