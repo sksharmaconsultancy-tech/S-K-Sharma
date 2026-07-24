@@ -17,7 +17,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List
 
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.pagesizes import A4, legal, landscape
 from reportlab.lib.units import mm
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, PageBreak,
@@ -97,7 +97,8 @@ def _header_top_row(
     )
 
 
-def _table_style(rows_count: int, day_cols_count: int, body_fs: float = 6.0) -> TableStyle:
+def _table_style(rows_count: int, day_cols_count: int, body_fs: float = 6.0,
+                 pad: int = 2) -> TableStyle:
     identity_cols = 7
     style = [
         ("BACKGROUND", (0, 0), (-1, 0), _HDR_BG),
@@ -110,8 +111,8 @@ def _table_style(rows_count: int, day_cols_count: int, body_fs: float = 6.0) -> 
         ("ALIGN", (0, 1), (identity_cols - 1, -1), "LEFT"),
         ("FONTSIZE", (0, 1), (-1, -1), body_fs),
         ("GRID", (0, 0), (-1, -1), 0.25, _BORDER),
-        ("LEFTPADDING", (0, 0), (-1, -1), 2),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+        ("LEFTPADDING", (0, 0), (-1, -1), pad),
+        ("RIGHTPADDING", (0, 0), (-1, -1), pad),
         ("TOPPADDING", (0, 0), (-1, -1), 1),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
     ]
@@ -162,7 +163,10 @@ def build_monthly_inout_pdf(grid: Dict[str, Any], fmt: Dict[str, Any] | None = N
     weekday_labels: List[str] = list(grid.get("weekday_labels") or [])
     employees: List[Dict[str, Any]] = list(grid.get("employees") or [])
     days_n = len(day_labels)
-    pagesize, is_land, body_fs, title_ov = _fmt_opts(fmt, 6.0)
+    # Iter 288 (user request) — IN/OUT report on LEGAL paper (8.5" × 14")
+    # with ALL days (1–31) on a SINGLE page instead of the 11-day A4 split.
+    pagesize, is_land, body_fs, title_ov = _fmt_opts(fmt, 5.0)
+    pagesize = landscape(legal) if is_land else legal
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -183,8 +187,9 @@ def build_monthly_inout_pdf(grid: Dict[str, Any], fmt: Dict[str, Any] | None = N
         _SUB,
     ))
 
-    # Split day columns into pages that fit the page width
-    idx_pages = _iter_pages_by_days(days_n, chunk=11 if is_land else 6)
+    # Landscape legal fits the whole month on one page; portrait (saved
+    # Report-Format override) still chunks.
+    idx_pages = _iter_pages_by_days(days_n, chunk=days_n if is_land else 6)
 
     for page_idx, day_idx_1based in enumerate(idx_pages):
         idxs = [i - 1 for i in day_idx_1based]
@@ -222,15 +227,16 @@ def build_monthly_inout_pdf(grid: Dict[str, Any], fmt: Dict[str, Any] | None = N
                 row += _emp_trailing_row(emp.get("totals") or {})
             rows.append(row)
 
-        # Column widths (scaled to the usable page width)
-        identity_w = [8 * mm, 28 * mm, 11 * mm, 9 * mm, 20 * mm, 16 * mm, 16 * mm]
-        day_w = [14 * mm] * len(idxs)
-        summary_w = [13 * mm] * len(_TRAIL_LABELS) if is_last_page else []
+        # Column widths — tightened so 31 day columns + identity + summary
+        # all fit the landscape-legal usable width (~343 mm).
+        identity_w = [6 * mm, 26 * mm, 8 * mm, 8 * mm, 18 * mm, 13 * mm, 13 * mm]
+        day_w = [(8 if is_land else 14) * mm] * len(idxs)
+        summary_w = [10 * mm] * len(_TRAIL_LABELS) if is_last_page else []
         col_widths = _scaled_widths(identity_w + day_w + summary_w,
                                     pagesize[0] - 12 * mm)
 
         table = Table(rows, colWidths=col_widths, repeatRows=1)
-        table.setStyle(_table_style(len(employees), len(idxs), body_fs))
+        table.setStyle(_table_style(len(employees), len(idxs), body_fs, pad=1))
         story.append(table)
         if not is_last_page:
             story.append(PageBreak())

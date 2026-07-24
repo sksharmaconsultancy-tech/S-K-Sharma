@@ -417,13 +417,20 @@ export default function AttendanceGridScreen() {
 
   // Learn which groups actually have employees whenever an UNFILTERED
   // grid load completes (a group-filtered load only contains that group).
+  // Iter 288 (user request) — also capture group-wise employee COUNTS so
+  // the filter chips can show "GROUP (n)".
+  const [groupCounts, setGroupCounts] = useState<Record<string, number>>({});
+  const [allEmpCount, setAllEmpCount] = useState<number>(0);
   useEffect(() => {
     if (!data || groupId) return;
-    setActiveGroupNames(new Set(
-      (data.employees || [])
-        .map((e) => String(e.employee_group || "").trim().toLowerCase())
-        .filter(Boolean),
-    ));
+    const counts: Record<string, number> = {};
+    (data.employees || []).forEach((e) => {
+      const g = String(e.employee_group || "").trim().toLowerCase();
+      if (g) counts[g] = (counts[g] || 0) + 1;
+    });
+    setGroupCounts(counts);
+    setAllEmpCount((data.employees || []).length);
+    setActiveGroupNames(new Set(Object.keys(counts)));
   }, [data, groupId]);
 
   const activeGroups = useMemo(
@@ -830,7 +837,7 @@ export default function AttendanceGridScreen() {
               testID="group-all"
             >
               <Text style={[styles.groupChipTxt, groupId === null && styles.groupChipTxtOn]}>
-                All
+                All{allEmpCount > 0 ? ` (${allEmpCount})` : ""}
               </Text>
             </Pressable>
             {activeGroups.map((g) => (
@@ -842,6 +849,9 @@ export default function AttendanceGridScreen() {
               >
                 <Text style={[styles.groupChipTxt, groupId === g.group_id && styles.groupChipTxtOn]}>
                   {g.name}
+                  {groupCounts[(g.name || "").trim().toLowerCase()]
+                    ? ` (${groupCounts[(g.name || "").trim().toLowerCase()]})`
+                    : ""}
                 </Text>
               </Pressable>
             ))}
@@ -944,6 +954,7 @@ export default function AttendanceGridScreen() {
               <GridRow
                 key={e.user_id}
                 emp={e}
+                sno={idx + 1}
                 data={data}
                 view={view}
                 hideDays={hideDays}
@@ -969,6 +980,7 @@ export default function AttendanceGridScreen() {
                 <GridRow
                   key={e.user_id}
                   emp={e}
+                  sno={idx + 1}
                   data={data}
                   view={view}
                   hideDays={hideDays}
@@ -1000,6 +1012,7 @@ export default function AttendanceGridScreen() {
 // Grid header / row
 // ---------------------------------------------------------------------------
 const COL = {
+  sno: 44,
   name: 190,
   father: 130,
   dept: 110,
@@ -1014,10 +1027,11 @@ const COL = {
 // and Bio stay pinned while the day columns scroll horizontally; the
 // header row stays pinned while scrolling down.
 const LEFT = {
-  name: 0,
-  father: COL.name,
-  dept: COL.name + COL.father,
-  bio: COL.name + COL.father + COL.dept,
+  sno: 0,
+  name: COL.sno,
+  father: COL.sno + COL.name,
+  dept: COL.sno + COL.name + COL.father,
+  bio: COL.sno + COL.name + COL.father + COL.dept,
 };
 const stickyCol = (left: number, z = 5): any =>
   Platform.OS === "web" ? { position: "sticky", left, zIndex: z } : null;
@@ -1056,6 +1070,10 @@ function GridHeader({
   };
   return (
     <View style={[styles.headerRow, STICKY_TOP, ROW_FIT]}>
+      {/* Iter 288 (user request) — S.No. before Employee Name */}
+      <View style={[styles.hcell, styles.hcellFrozen, { width: COL.sno }, stickyCol(LEFT.sno, 30)]}>
+        <Text style={styles.hcellTxt}>S.No.</Text>
+      </View>
       <Pressable
         onPress={tap("name")}
         style={[styles.hcell, styles.hcellFrozen, { width: COL.name }, stickyCol(LEFT.name, 30)]}
@@ -1130,6 +1148,7 @@ function GridHeader({
 
 function GridRow({
   emp,
+  sno,
   data,
   view,
   hideDays,
@@ -1137,6 +1156,7 @@ function GridRow({
   onCellPress,
 }: {
   emp: EmpRow;
+  sno: number;
   data: GridResp;
   view: GridView;
   hideDays?: boolean;
@@ -1152,6 +1172,9 @@ function GridRow({
   const frozenBg = { backgroundColor: zebra ? colors.surfaceSecondary : colors.surface };
   return (
     <View style={[styles.row, zebra && styles.rowZebra, ROW_FIT]}>
+      <View style={[styles.cell, { width: COL.sno }, stickyCol(LEFT.sno), frozenBg]}>
+        <Text style={styles.deptTxt}>{sno}</Text>
+      </View>
       <View style={[styles.cell, { width: COL.name }, stickyCol(LEFT.name), frozenBg]}>
         <Text style={styles.nameTxt} numberOfLines={1}>{emp.name}</Text>
         {emp.employee_group ? (

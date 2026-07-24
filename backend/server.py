@@ -17892,8 +17892,11 @@ async def _compute_monthly_grid_data(
                 or 8.0
             )
             # Iter 202 — 8-HR present-day sub-point: reports split at 8 hrs.
+            # Iter 288 (user bug) — split at EXACTLY 8: firms whose full-day
+            # hours are UNDER 8 were splitting duty/OT too early, so OT and
+            # Present Days disagreed with the Compliance Salary run.
             if _pm_8hr_reports:
-                standard_h = min(standard_h, 8.0)
+                standard_h = 8.0
             # Iter 77z-fix — PAIR-BASED time & hour derivation.
             #   • Regular duty comes from the FIRST paired IN→OUT.
             #   • OT comes from the SECOND paired IN→OUT (or arithmetic
@@ -17976,8 +17979,21 @@ async def _compute_monthly_grid_data(
             _holiday_present_credit = False
             # Iter 202 — policy-based per-day Present credit.
             _day_present = float(summary.get("present_days") or 0.0)
-            if _pm_8hr_reports and (duty_only_hrs + ot_hrs) >= 8.0:
-                _day_present = max(_day_present, 1.0)
+            # Iter 288 (user bug — "present days showing wrong" with the
+            # 8-HR sub-point ON): the rule now FULLY decides the day —
+            # 8+ worked hrs = 1 Present Day; under 8 = ½ (≥ half-day
+            # threshold) or 0 — exactly matching the Compliance Salary run
+            # (Iter 219 sync) so the report and the salary always agree.
+            if _pm_8hr_reports:
+                _w8 = round(duty_only_hrs + ot_hrs, 2)
+                if _w8 >= 8.0:
+                    _day_present = 1.0
+                elif _pm_flags.get("halfday_threshold_rule"):
+                    pass  # the Half-Day Threshold block below decides ½ / 0
+                elif _w8 >= float(eff_policy.get("half_day_hours") or 4.0):
+                    _day_present = 0.5
+                elif _w8 > 0:
+                    _day_present = 0.0
             # Iter 203 — "Half-Day Threshold Rule" sub-point (user request):
             #   worked < half-day threshold  → 0 Present, ALL hrs → OT
             #   threshold ≤ worked < full    → ½ Present, duty = threshold
