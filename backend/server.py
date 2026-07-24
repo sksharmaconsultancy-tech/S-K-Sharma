@@ -1231,6 +1231,14 @@ def _validate_policy(raw: dict) -> dict:
         # threshold and full day → ½ Present Day + remaining hrs to OT.
         # Duty HRS counts ONLY present-day hours.
         "halfday_threshold_rule": _flag("halfday_threshold_rule"),
+        # Iter 289 (user request) — per-firm OT rounding slab:
+        # 0 = exact minutes, 30 = half-hour slabs (floor), 60 = full-hour
+        # slabs (floor). Default 30.
+        "ot_slab_minutes": (
+            int(pm_raw.get("ot_slab_minutes"))
+            if pm_raw.get("ot_slab_minutes") in (0, 30, 60, "0", "30", "60")
+            else 30
+        ),
     }
 
     # Iter 204 (user request) — Employee Shift Change Management config.
@@ -6104,6 +6112,8 @@ async def get_attendance_policy(
         # Iter 270 — OT Include in Existing Compliance Salary defaults to
         # YES (current behaviour) for firms saved before the option existed.
         _pm_bf.setdefault("compliance_ot_include", True)
+        # Iter 289 — per-firm OT slab (30-min default).
+        _pm_bf.setdefault("ot_slab_minutes", 30)
     # "Default preset" here means: no admin has explicitly saved / overridden
     # the policy yet. Because we auto-attach a preset on company creation,
     # the presence of `attendance_policy` alone isn't a good signal — we
@@ -17933,11 +17943,14 @@ async def _compute_monthly_grid_data(
             # If OT is disabled for this employee OR firm-wide, don't surface OT.
             if not eff_policy.get("ot_allowed", True) or eff_policy.get("firm_ot_allowed") is False:
                 ot_hrs = 0.0
-            # Iter 289 (user request) — OT counts in 30-minute slabs
-            # (rounded DOWN): 8:34 worked → 8:00 duty + 0:30 OT; extra
-            # under 30 min → 0. (Replaces the old "<1 hour ignored" grace.)
+            # Iter 289 (user request) — OT rounding per the firm's OT slab
+            # setting: 0 = exact, 30 = half-hour slabs (floor), 60 = hour
+            # slabs (floor). Example (slab 30): 8:34 → 8:00 duty + 0:30 OT.
             if ot_hrs > 0:
-                ot_hrs = int(ot_hrs * 2) / 2.0
+                _slab = _pm_firm.get("ot_slab_minutes")
+                _slab = int(_slab) if _slab in (0, 30, 60) else 30
+                if _slab:
+                    ot_hrs = (int(round(ot_hrs * 60)) // _slab) * _slab / 60.0
             # Iter 77h — Daily Duty HRS on grid ALWAYS includes OT.
             hrs = round(duty_only_hrs + ot_hrs, 2)
             # Iter 94 — Additional Duty HRS granted from Punch Approvals.
@@ -18410,10 +18423,13 @@ async def _build_ot_report_rows(
             # Honor per-employee AND firm-wide OT-allowed flags.
             if not eff_policy.get("ot_allowed", True) or eff_policy.get("firm_ot_allowed") is False:
                 ot = 0.0
-            # Iter 289 (user request) — OT in 30-minute slabs (floor);
-            # replaces the old "<1h ignored" grace.
+            # Iter 289 (user request) — OT rounding per the firm's OT slab
+            # setting (0 = exact / 30 / 60-minute slabs, floor).
             if ot > 0:
-                ot = int(ot * 2) / 2.0
+                _slab = (pol.get("policy_master") or {}).get("ot_slab_minutes")
+                _slab = int(_slab) if _slab in (0, 30, 60) else 30
+                if _slab:
+                    ot = (int(round(ot * 60)) // _slab) * _slab / 60.0
             if ot <= 0:
                 continue  # only OT days
             ot_rows.append({

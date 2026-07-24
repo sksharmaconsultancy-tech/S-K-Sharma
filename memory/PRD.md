@@ -1422,3 +1422,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - server.py: totals.hours ("Total Duty HRS") now = exact punch-schedule sum (total_sched_min = day_min + extra grants), e.g. 89:55 not the Excel-style 89:30 sum of processed cells. Division-mode math still uses total_hours_min. Verified: 8:34+10:31 → 19.0833 (19:05).
 - attendance-grid.tsx: removed Break HRS + Net HRS summary columns (Late Min/Early Go removed earlier); only Punches retained.
 - DEFERRED: per-firm OT slab setting (exact/30min/1h) — current global default 30-min slab.
+
+## Iter 289e — Per-firm OT Rounding slab setting (user confirmed)
+- policy_master.ot_slab_minutes: 0 (exact) / 30 (default) / 60. Validator + backfill in get_attendance_policy. Applied in grid compute (_pm_firm) + OT report (pol.policy_master). Verified per-slab: 8:34 → OT 0.5/0.5/0.0 (Exact still passes through firm duty_hours_rounding first).
+- attendance-policy.tsx: "OT Rounding" chip row (Exact / 30 min slab / 1 hour slab) added under Policy Master Sub Points; verified via screenshot.
+- NOTE: earlier grid slab edit silently didn't persist despite success msg — re-applied and re-verified.

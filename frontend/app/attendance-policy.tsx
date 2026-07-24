@@ -1395,6 +1395,26 @@ function PolicyMasterSubPoints({
           </View>
         );
       })}
+      {/* Iter 289 (user request) — per-firm OT rounding slab. */}
+      <View style={pmStyles.row}>
+        <Text style={pmStyles.lbl}>
+          OT Rounding — how extra hours beyond duty count as OT. Exact: 8:34
+          worked → 0:34 OT · 30 min slab: 8:34 → 0:30 OT · 1 hour slab: 8:34
+          → 0:00 OT (only full hours count)
+        </Text>
+        <View style={pmStyles.chips}>
+          {[{ v: 0, l: "Exact" }, { v: 30, l: "30 min slab" }, { v: 60, l: "1 hour slab" }].map((o) => {
+            const cur = value.ot_slab_minutes === undefined ? 30 : Number(value.ot_slab_minutes);
+            const on = cur === o.v;
+            return (
+              <Pressable key={o.v} onPress={() => set({ ot_slab_minutes: o.v })}
+                style={[pmStyles.chip, on && pmStyles.chipOn]} testID={`pm-ot-slab-${o.v}`}>
+                <Text style={[pmStyles.chipTxt, on && { color: "#fff" }]}>{o.l}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
       <Text style={pmStyles.note}>
         These sub-points are saved with the Attendance Policy and shown in the
         Firm Master (linked). Grace Time, Late Mark, Half-Day, OT, Weekly Off
