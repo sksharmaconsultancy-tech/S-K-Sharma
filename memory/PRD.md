@@ -1362,3 +1362,29 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - shift-master.tsx: new "Assign Shifts to Firm (Company-wise)" card — firm chips + checkbox list of master shifts + Save.
 - employee-policy.tsx: Shift name + dummy dropdowns now load the firm's assigned shifts (fallback to generic SHIFT_OPTIONS when firm has none selected).
 - E2E: assign Day/Night to Kankani → GET reflects, attendance_policy.shifts synced; UI screenshot PASS.
+
+## Iter 282-286 (July 2026, fork) — Security + UX batch + Onboarding Approval + Access & Workflow Mgmt
+- SEC-004 FIXED: sessions now 12h sliding expiry (server.py SESSION_TTL_HOURS=12, SESSION_SLIDE_THROTTLE_MINUTES=30; get_user_from_token extends conditionally; legacy 10y sessions clamped in DB + on first use). E2E: fresh TTL 12h, auto-extend, throttle, clamp, 401 expired. VPS migration included in /app/deploy_vps_iter282.sh (temp_bundle kind=script now serves deploy282).
+- SEC-003 (encrypt EPFO/ESIC portal passwords) still PENDING — user said "process later".
+- Employee avatar photo Upload/Change/Remove buttons on employee-add.tsx (pickPhoto/removePhoto; edit mode = instant replace via employee_documents API; new mode = uploads on Save; uploadPendingDocs now deletes old photo before POST).
+- Employee Master Identity field order (user): Code→Name→Father→Gender→Marital→DOB→DOJ→Mobile→Email (DOJ moved from Employment section).
+- Attendance IN/OUT grid: legend spells out Biometric=Machine / Mobile=PWA / System=Manual; cells show RAW IN→OUT span hours (spanHours, overnight-safe) and L/E/B metric codes REMOVED (attendance-grid.tsx DayCell).
+- Firm pickers now DROPDOWNS (web <select>, chips on native): shift-master.tsx (shm-firm-select), attendance-master.tsx (am-firm-select).
+- Theme pack: +6 presets in src/theme.ts (sunset_saffron, forest_olive, rose_gold, steel_sky, graphite_lime, obsidian_teal dark; isDarkTheme covers both darks). 15 total.
+- MasterSelect.tsx: typing filters options live (Designation/Department/Group type-ahead).
+- Reports Hub compliance runs rows: show Group, Employees count, Gross/PF/ESI/TDS/Net from run.totals (was reading non-existent total_pf fields → "—").
+- Dashboard "Company Policies" tile section REMOVED from admin.tsx; routes moved to sidebar Utility group (attendance-policy, biometric-devices, backdate-punches added; standalone attendance-policy top-level entry removed) — super-admin NAV only.
+- ONBOARDING APPROVAL WORKFLOW Phase 1 (routes/onboarding_approval.py + frontend/app/employee-approvals.tsx, sidebar Approvals group):
+  * companies.onboarding_approval settings (17 toggles + approval_expiry_days 0/1/3/7), GET/PUT /api/admin/companies/{cid}/onboarding-approval
+  * users.onboarding_status: pending_approval/hold/rejected/approved/active; admin_create_employee sets pending when enabled
+  * server.py gates: _onboarding_login_gate (pin-login + emp-code-login), _onboarding_punch_gate (attendance/punch), _onboarding_payroll_exclusion (salary run @13855 allow_salary; compliance run @15083 allow_pf/esic/tds)
+  * GET /api/admin/onboarding-approvals (enriched: photo_doc_id, today's punches, doc flags, expiry) + POST .../{uid}/decide (approve/reject/hold + remarks) → onboarding_audit + employee notification; approvers respect Workflow Builder 'employee_creation' chain (_user_can_action_level)
+  * Expiry = flag ⏰ EXPIRED only (user choice C). Full backend E2E (10 steps) + testing_agent frontend PASS (iteration_285.json).
+- ACCESS & WORKFLOW MANAGEMENT Phase A (user spec merge of Roles & Permissions + Workflow Builder):
+  * routes/access_management.py: GET /api/admin/access-management/stats + /audit; write_access_audit() shared helper
+  * audit hooks: company_roles.py (role create/update/delete), approvals_engine.py (workflow save); MODULES expanded (+shift_change, overtime, loan, salary_revision, exit)
+  * frontend/app/access-management.tsx: tabs Dashboard (stat cards + recents) / Roles (create, seed defaults, delete) / Users (staff CRUD + role dropdown + enable/disable) / Permission Matrix (modules × roles R/W instant-save grid) / Workflow Builder (module chains overview + open builder) / Audit Logs (access + onboarding merged)
+  * Sidebar: "/roles" entry replaced by "/access-management" (Access & Workflow Mgmt); Workflow Builder child removed from Approvals group (super-admin NAV). Old /roles & /approval-workflows routes still work.
+  * Phase B pending: Return/Forward/Delegate/Escalate, conditional rules, SLA/auto-escalation; Phase C: drag-drop canvas, versioning, live monitor, notif rules, IP/Geo/2FA.
+- Labour Law Reports: NEW "Shift Deployment Report" (key shift_deployment, Shift Reports group) in routes/labour_reports.py — shift name from Shift Master (timing via policy["_shift_masters"] map loaded in generate()), father name, contractor, in/out, hours, OT, Machine/Device classification (Biometric Machine / Mobile-PWA / System-Manual), status + per-shift TOTAL strength rows. JSON+PDF E2E OK; appears automatically in labour-reports.tsx catalogue.
+- User pending choices: SEC-003 encryption go-ahead; GitHub push via platform "Save to GitHub" (fallback push_github_main.sh).

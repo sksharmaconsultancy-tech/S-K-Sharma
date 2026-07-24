@@ -38,9 +38,16 @@ router = APIRouter(prefix="/api/admin", tags=["approval-engine"])
 
 MODULES = [
     {"key": "advance", "label": "Advance Issuance"},
-    {"key": "employee_creation", "label": "Employee Creation"},
+    {"key": "employee_creation", "label": "Employee Creation / Onboarding"},
     {"key": "salary_lock", "label": "Salary Lock"},
     {"key": "leave", "label": "Leave"},
+    # Iter 286 — Access & Workflow Management Phase A: configurable chains
+    # for upcoming payroll workflows (engine wiring lands per-module).
+    {"key": "shift_change", "label": "Shift Change"},
+    {"key": "overtime", "label": "Overtime Approval"},
+    {"key": "loan", "label": "Loan"},
+    {"key": "salary_revision", "label": "Salary Revision"},
+    {"key": "exit", "label": "Exit / Full & Final"},
 ]
 MODULE_KEYS = {m["key"] for m in MODULES}
 
@@ -190,6 +197,11 @@ async def save_workflow(payload: WorkflowSave, authorization: Optional[str] = He
         doc["workflow_id"] = f"wf_{uuid.uuid4().hex[:12]}"
         doc["created_at"] = now_iso()
         await db.approval_workflows.insert_one(dict(doc))
+    from routes.access_management import write_access_audit
+    await write_access_audit(
+        admin, cid, "workflow_saved",
+        f"Workflow '{payload.module}' saved — {len(levels)} level(s), "
+        f"{'ENABLED' if doc['enabled'] else 'disabled'}")
     return {"ok": True, "workflow": {k: v for k, v in doc.items() if k != "_id"}}
 
 

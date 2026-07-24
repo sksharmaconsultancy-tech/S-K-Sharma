@@ -20834,6 +20834,10 @@ app.include_router(comp_off_router)
 from routes.onboarding_approval import router as onboarding_approval_router  # noqa: E402
 app.include_router(onboarding_approval_router)
 
+# Iter 286 — Access & Workflow Management (Phase A).
+from routes.access_management import router as access_management_router  # noqa: E402
+app.include_router(access_management_router)
+
 # Iter 267 — Real-Time ZKTeco Multi-Device Synchronization Engine (Phase 1).
 from routes.sync_engine import router as sync_engine_router  # noqa: E402
 app.include_router(sync_engine_router)

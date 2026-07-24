@@ -67,7 +67,9 @@ export const NAV_SUPER: NavItem[] = [
   // KYC & Document Expiry Tracker — enterprise module (Aadhaar/PAN/Bank
   // completeness + DL/Passport validity reminders).
   { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
-  { route: "/roles", label: "Roles & Permissions", icon: "key-outline" },
+  // Iter 286 — Roles & Permissions + Workflow Builder merged into one
+  // module (user request): Access & Workflow Management.
+  { route: "/access-management", label: "Access & Workflow Mgmt", icon: "key-outline" },
   { route: "/proposals", label: "Sales · Proposals", icon: "document-text-outline" },
   {
     label: "Salary Process",
@@ -91,7 +93,6 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/approval-inbox", label: "Approval Inbox", icon: "file-tray-full-outline" },
       // Iter 285 — Onboarding Approval Workflow (Phase 1).
       { route: "/employee-approvals", label: "Pending Employee Approval", icon: "person-add-outline" },
-      { route: "/approval-workflows", label: "Workflow Builder", icon: "git-branch-outline" },
       { route: "/company-requests", label: "Company Requests", icon: "mail-open-outline" },
       { route: "/punch-approvals", label: "Punch Approvals", icon: "checkmark-circle-outline" },
       { route: "/contractor-punches", label: "Contractor Punches", icon: "briefcase-outline" },

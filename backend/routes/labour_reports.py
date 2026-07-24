@@ -48,6 +48,7 @@ CATALOGUE: List[Dict[str, str]] = [
     {"key": "in_out_punch", "label": "In-Out Punch Report", "group": "Daily Reports"},
     {"key": "half_day", "label": "Half Day Report", "group": "Daily Reports"},
     {"key": "shift_report", "label": "Shift Report", "group": "Shift Reports"},
+    {"key": "shift_deployment", "label": "Shift Deployment Report", "group": "Shift Reports"},
     {"key": "dummy_shift", "label": "Dummy Shift Report", "group": "Shift Reports"},
     {"key": "night_shift", "label": "Night Shift Report", "group": "Shift Reports"},
     {"key": "double_shift", "label": "Double Shift Report", "group": "Shift Reports"},
@@ -418,6 +419,67 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
         rows.sort(key=lambda r: (r[0], r[1], r[2]) if multi else (r[0], r[1]))
         return cols, rows
 
+    if key == "shift_deployment":
+        # Iter 286 (user request) — Statutory Shift Deployment Register.
+        # No new masters: shift comes from the Shift Master assignment on
+        # the Employee Master, contractor from the employee record, punch
+        # machine/device from the attendance source, hours/OT follow the
+        # payroll attendance policy.
+        multi = len(dates) > 1
+        sm_map = policy.get("_shift_masters") or {}
+
+        def _machine(recs):
+            out = set()
+            for r in recs:
+                src = (r.get("source") or "").lower()
+                if any(t in src for t in ("zk", "device", "import", "biometric")):
+                    out.add("Biometric Machine")
+                elif "manual_admin" in src or src.startswith("manual"):
+                    out.add("System (Manual)")
+                else:
+                    out.add("Mobile / PWA")
+            return ", ".join(sorted(out))
+
+        cols = ((["Date"] if multi else [])
+                + ["Shift", "Shift Timing", "Code", "Employee Name",
+                   "Father Name", "Department", "Designation", "Contractor",
+                   "In", "Out", "Hours", "OT Hrs", "Machine / Device", "Status"])
+        rows = []
+        for d in dates:
+            for e in emps:
+                recs = recs_by.get((e["user_id"], d))
+                if not recs:
+                    continue
+                s = _day_summary(recs, policy, e)
+                shift_name = (e.get("shift_name") or "").strip() or "— Unassigned —"
+                sm = sm_map.get(shift_name)
+                timing = (f"{sm['start']} – {sm['end']}" if sm
+                          else (f"{e.get('shift_start')} – {e.get('shift_end')}"
+                                if e.get("shift_start") and e.get("shift_end") else ""))
+                rows.append(([d] if multi else []) + [
+                    shift_name, timing,
+                    str(e.get("employee_code") or ""), e.get("name") or "",
+                    e.get("father_name") or "",
+                    e.get("department") or "", e.get("designation") or "",
+                    e.get("contractor_name") or "",
+                    s["first_in"], s["last_out"], s["hours"], s["ot_hours"],
+                    _machine(recs), s["status"],
+                ])
+        rows.sort(key=(lambda r: (r[0], r[1], r[3])) if multi
+                  else (lambda r: (r[0], r[2])))
+        # Deployment strength summary per shift at the end.
+        strength: Dict[str, set] = defaultdict(set)
+        i_shift = 1 if multi else 0
+        i_code = 3 if multi else 2
+        for r in rows:
+            strength[r[i_shift]].add(r[i_code])
+        for g in sorted(strength):
+            total_row = [""] * len(cols)
+            total_row[i_shift] = f"TOTAL — {g}"
+            total_row[i_code + 1] = f"{len(strength[g])} deployed"
+            rows.append(total_row)
+        return cols, rows
+
     if key == "dummy_shift":
         # Iter 215 — live-muster layout grouped by the fixed DUMMY shifts
         # assigned per employee in the Employee Master (report-only,
@@ -774,6 +836,15 @@ async def generate(payload: Dict[str, Any] = Body(...),
                         "'Dummy Shift Allowed' in the Attendance Policy first."))
 
     emps, recs_by, policy, dates, from_date, to_date = await _load_dataset(company_id, filters)
+    # Iter 286 — Shift Deployment: shift timings come straight from the
+    # Shift Master (fallback: the timing mirrored on the employee).
+    if key == "shift_deployment":
+        policy["_shift_masters"] = {
+            s["name"]: {"start": s.get("start") or "", "end": s.get("end") or ""}
+            async for s in db.shift_masters.find(
+                {}, {"_id": 0, "name": 1, "start": 1, "end": 1})
+            if s.get("name")
+        }
     columns, rows = build_report(key, emps, recs_by, policy, dates)
     label = next(c["label"] for c in CATALOGUE if c["key"] == key)
 

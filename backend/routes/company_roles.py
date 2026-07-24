@@ -149,6 +149,9 @@ async def create_company_role(payload: RoleCreate, authorization: Optional[str] 
         "is_default": False, "created_at": now_iso(), "created_by": admin["user_id"],
     }
     await db.company_roles.insert_one(doc)
+    from routes.access_management import write_access_audit
+    await write_access_audit(admin, cid, "role_created",
+                             f"Role '{name}' created ({len(doc['permissions'])} permissions)")
     return {"ok": True, "role": {k: v for k, v in doc.items() if k != "_id"}}
 
 
@@ -176,6 +179,14 @@ async def update_company_role(
     updates["updated_by"] = admin["user_id"]
     await db.company_roles.update_one({"role_id": role_id}, {"$set": updates})
     fresh = await db.company_roles.find_one({"role_id": role_id}, {"_id": 0})
+    from routes.access_management import write_access_audit
+    await write_access_audit(
+        admin, cid, "role_updated",
+        f"Role '{fresh.get('name')}' updated"
+        + (f" — {len(updates.get('permissions') or [])} permissions"
+           if "permissions" in updates else ""),
+        {"old_permissions": r.get("permissions"), "new_permissions": updates.get("permissions")}
+        if "permissions" in updates else None)
     return {"ok": True, "role": fresh}
 
 
@@ -184,11 +195,13 @@ async def delete_company_role(role_id: str, authorization: Optional[str] = Heade
     r = await db.company_roles.find_one({"role_id": role_id}, {"_id": 0})
     if not r:
         raise HTTPException(status_code=404, detail="Role not found")
-    await _role_manager(authorization, r["company_id"])
+    admin, cid = await _role_manager(authorization, r["company_id"])
     n = await db.users.count_documents({"role": "company_staff", "company_role_id": role_id})
     if n:
         raise HTTPException(status_code=400, detail=f"{n} staff user(s) still assigned to this role")
     await db.company_roles.delete_one({"role_id": role_id})
+    from routes.access_management import write_access_audit
+    await write_access_audit(admin, cid, "role_deleted", f"Role '{r.get('name')}' deleted")
     return {"ok": True}
 
 
