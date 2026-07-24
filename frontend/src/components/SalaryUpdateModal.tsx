@@ -120,17 +120,32 @@ export default function SalaryUpdateModal({
         return { amount: String(row?.amount ?? 0), days: String(row?.working_days ?? 0) };
       }));
 
-      // Firm-Master-linked heads: show every ENABLED head; carry over any
-      // previously saved amount (matched by head, case-insensitive).
+      // Firm-Master-linked heads: show every ENABLED head PLUS any head
+      // already saved on the employee — legacy/imported earning heads must
+      // never disappear (Iter 288 bug fix — user report: "Compliance Salary
+      // earning heads not showing for some employees"). Amounts are matched
+      // by head, case-insensitive.
+      const mergeHeads = (firmList: string[], ...savedLists: { head?: string }[][]) => {
+        const out = [...firmList];
+        const seen = new Set(firmList.map((h) => h.toLowerCase()));
+        savedLists.flat().forEach((row) => {
+          const h = (row.head || "").trim();
+          if (h && !seen.has(h.toLowerCase())) {
+            seen.add(h.toLowerCase());
+            out.push(h);
+          }
+        });
+        return out;
+      };
       const savedAllow = r.actual_salary_allowances || [];
-      setAllowances((r.firm_allowance_heads || []).map((h) => ({
+      setAllowances(mergeHeads(r.firm_allowance_heads || [], savedAllow).map((h) => ({
         head: h,
         amount: String(
           savedAllow.find((a) => (a.head || "").toLowerCase() === h.toLowerCase())?.amount || 0,
         ),
       })));
       const savedDed = r.actual_salary_deductions || [];
-      setDeductions((r.firm_deduction_heads || []).map((h) => ({
+      setDeductions(mergeHeads(r.firm_deduction_heads || [], savedDed).map((h) => ({
         head: h,
         amount: String(
           savedDed.find((d) => (d.head || "").toLowerCase() === h.toLowerCase())?.amount || 0,
@@ -144,7 +159,10 @@ export default function SalaryUpdateModal({
       const structBasic = structRows.find((x) => /^basic/i.test((x.head || "").trim()));
       setComplBasic(String(r.compliance_basic || structBasic?.amount || 0));
       const savedCompl = r.compliance_salary_allowances || [];
-      setComplAllow((r.firm_allowance_heads || []).map((h) => ({
+      const structAllowRows = structRows.filter(
+        (x) => !/^basic/i.test((x.head || "").trim()),
+      );
+      setComplAllow(mergeHeads(r.firm_allowance_heads || [], savedCompl, structAllowRows).map((h) => ({
         head: h,
         amount: String(
           savedCompl.find((a) => (a.head || "").toLowerCase() === h.toLowerCase())?.amount

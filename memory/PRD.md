@@ -1394,3 +1394,11 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Frontend: approval-workflows.tsx "Level Settings (SLA & Conditions)" editor per module (draft state, save preserves sla/condition via strip()); chain nodes show ⏱h + IF badges. approval-inbox.tsx: Delegate (numbered staff prompt) + Escalate buttons, ⚡ESCALATED / ⏰SLA BREACHED pills.
 - E2E verified: condition skip (10k vs 90k advance), delegate 200, escalate→L2, auto-escalate fired once (idempotent), maker-checker preserved. Test advances/requests cleaned; advance workflow restored to plain HR→Admin chain.
 - Deploy: /app/deploy_vps_iter287.sh (temp_bundle kind=script now serves 287; includes SEC-004 session clamp step).
+
+## Iter 288 — Theme Pack Completion + Earning Heads Bug Fix
+- THEME PACK (user P2): +4 presets in src/theme.ts → lavender_mist, mocha_espresso, arctic_ice (light) + deep_space (3rd dark; isDarkTheme covers all 3 darks). 18 total presets. Verified rendering on /appearance.
+- BUG FIX (user report: "Compliance Salary Earning Head not showing for some employees in Employee Master"):
+  * ROOT CAUSE: SalaryUpdateModal.tsx + employee-add.tsx built allowance/deduction rows ONLY from firm-enabled heads (firm_allowance_heads). Employees with saved heads NOT in the firm list (firm-disabled e.g. "OTH. ALLOW.", legacy/imported custom heads, or missing firm_master doc) had those earning heads INVISIBLE — and saving would silently DROP them.
+  * FIX: mergeHeads() union (firm-enabled heads + saved employee heads, case-insensitive dedupe) in both editors. employee-add.tsx render conditions switched from firmHeads.* to merged lists; lineAmount/setLineAmount now case-insensitive so "Hra" prefills "HRA".
+  * Verified E2E: seeded emp 50 with OTH. ALLOW. 1500 (firm-disabled) + WASHING ALLOW. 500 (custom) → both visible w/ amounts in Update Salary modal AND employee edit form; Gross ₹16,000 correct. Seed reverted after test.
+- SEC-003 (EPFO/ESIC password encryption) STILL PENDING — user chose Theme Pack priority; encryption not yet started.

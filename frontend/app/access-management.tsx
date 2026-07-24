@@ -17,7 +17,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "../src/api/client";
 import { colors } from "../src/theme";
 
-type Tab = "dashboard" | "roles" | "users" | "matrix" | "workflows" | "audit";
+type Tab = "dashboard" | "roles" | "users" | "matrix" | "workflows" | "activity" | "audit";
 type Company = { company_id: string; name: string };
 type Role = { role_id: string; name: string; permissions: string[]; staff_count?: number };
 type CatalogRow = { module: string; read: string; write: string };
@@ -33,6 +33,7 @@ const TABS: { key: Tab; label: string; icon: any }[] = [
   { key: "users", label: "Users", icon: "people-outline" },
   { key: "matrix", label: "Permission Matrix", icon: "grid-outline" },
   { key: "workflows", label: "Workflow Builder", icon: "git-branch-outline" },
+  { key: "activity", label: "Activity Monitor", icon: "pulse-outline" },
   { key: "audit", label: "Audit Logs", icon: "document-text-outline" },
 ];
 
@@ -60,6 +61,22 @@ export default function AccessManagementScreen() {
   const [newRole, setNewRole] = useState("");
   const [newStaff, setNewStaff] = useState({ name: "", email: "", password: "", role_id: "" });
   const [showAddStaff, setShowAddStaff] = useState(false);
+  // Phase C — live activity monitor (auto-refresh every 10s while open).
+  const [activity, setActivity] = useState<any>(null);
+
+  useEffect(() => {
+    if (tab !== "activity" || !companyId) return;
+    let alive = true;
+    const tick = async () => {
+      try {
+        const r = await api<any>(`/admin/access-management/activity?company_id=${companyId}`);
+        if (alive) setActivity(r);
+      } catch { /* transient */ }
+    };
+    void tick();
+    const iv = setInterval(tick, 10000);
+    return () => { alive = false; clearInterval(iv); };
+  }, [tab, companyId]);
 
   useEffect(() => {
     api<{ companies: Company[] }>("/companies").then((r) => {
@@ -422,6 +439,47 @@ export default function AccessManagementScreen() {
               );
             })}
           </View>
+        ) : null}
+
+        {/* ── ACTIVITY MONITOR (Phase C) ────────────────────────────── */}
+        {tab === "activity" ? (
+          <>
+            <View style={st.statGrid}>
+              <StatCard label="Users Online (45 min)" value={activity?.online_count} tone="#16A34A" />
+              <StatCard label="Pending Approvals" value={activity?.pending_approvals} tone="#D97706" />
+              <StatCard label="Escalated (pending)" value={activity?.escalated_pending} tone="#DC2626" />
+              <StatCard label="SLA Breached" value={activity?.sla_breached_pending} tone="#B91C1C" />
+              <StatCard label="Running Workflows" value={activity?.running_workflows} tone="#2563EB" />
+            </View>
+            <View style={st.card}>
+              <Text style={st.cardTitle}>
+                Live — logged-in users {activity?.as_of ? `(as of ${String(activity.as_of).slice(11, 19)} UTC, refreshes every 10s)` : ""}
+              </Text>
+              {!activity ? (
+                <ActivityIndicator color={colors.brandPrimary} />
+              ) : (activity.online_users || []).length === 0 ? (
+                <Text style={st.hint}>No users active in the last 45 minutes.</Text>
+              ) : activity.online_users.map((u: any) => (
+                <View key={u.user_id} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}>
+                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#16A34A" }} />
+                  <Text style={st.listLine}>
+                    {u.name}{u.employee_code ? ` (#${u.employee_code})` : ""} — {u.is_company_staff ? "staff" : u.role}
+                    {" · last active "}{String(u.last_active || "").slice(11, 16)} UTC
+                  </Text>
+                </View>
+              ))}
+            </View>
+            <View style={st.card}>
+              <Text style={st.cardTitle}>Recent Permission Changes</Text>
+              {(activity?.recent_permission_changes || []).length === 0 ? (
+                <Text style={st.hint}>No recent changes.</Text>
+              ) : activity.recent_permission_changes.map((a: any) => (
+                <Text key={a.audit_id} style={st.listLine}>
+                  • {a.detail} — {a.by_name || a.by} · {String(a.at || "").slice(0, 16).replace("T", " ")}
+                </Text>
+              ))}
+            </View>
+          </>
         ) : null}
 
         {/* ── AUDIT LOGS ────────────────────────────────────────────── */}

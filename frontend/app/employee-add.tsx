@@ -298,8 +298,10 @@ export default function EmployeeAddScreen() {
     !firmHeads.loaded || (!firmHeads.online && !firmHeads.offline) || firmHeads.offline;
 
   // Read/write a head amount inside a SalaryLine[] form field.
+  // Iter 288 (bug fix) — match heads case-insensitively so saved rows like
+  // "Hra" still prefill the firm's "HRA" field.
   const lineAmount = (lines: SalaryLine[], head: string) =>
-    lines.find((l) => l.head === head)?.amount || "";
+    lines.find((l) => (l.head || "").toLowerCase() === head.toLowerCase())?.amount || "";
   const setLineAmount = (
     key: "actual_allowances" | "actual_deductions" | "compliance_allowances" | "compliance_deductions",
     head: string,
@@ -307,7 +309,7 @@ export default function EmployeeAddScreen() {
   ) => {
     const clean = amount.replace(/[^0-9.]/g, "");
     setForm((f) => {
-      const rest = f[key].filter((l) => l.head !== head);
+      const rest = f[key].filter((l) => (l.head || "").toLowerCase() !== head.toLowerCase());
       return { ...f, [key]: clean ? [...rest, { head, amount: clean }] : rest };
     });
   };
@@ -386,9 +388,28 @@ export default function EmployeeAddScreen() {
     if (u.startsWith("OTH")) return 2;
     return 3;
   };
-  const orderedAllowHeads = [...firmHeads.allowances].sort(
-    (a, b) => allowHeadRank(a) - allowHeadRank(b),
+  // Iter 288 (bug fix — user report: "Compliance Salary earning heads not
+  // showing for some employees") — merge SAVED employee heads into the
+  // firm-enabled list so legacy/imported earning heads never disappear,
+  // even when the firm master has them disabled or unset.
+  const mergeHeads = (firmList: string[], ...savedLists: SalaryLine[][]) => {
+    const out = [...firmList];
+    const seen = new Set(firmList.map((h) => h.toLowerCase()));
+    savedLists.flat().forEach((l) => {
+      const h = (l.head || "").trim();
+      if (h && !seen.has(h.toLowerCase())) {
+        seen.add(h.toLowerCase());
+        out.push(h);
+      }
+    });
+    return out;
+  };
+  const allDeductionHeads = mergeHeads(
+    firmHeads.deductions, form.compliance_deductions, form.actual_deductions,
   );
+  const orderedAllowHeads = mergeHeads(
+    firmHeads.allowances, form.compliance_allowances, form.actual_allowances,
+  ).sort((a, b) => allowHeadRank(a) - allowHeadRank(b));
   useEffect(() => {
     if (complGrossComputed > 0 && String(complGrossComputed) !== form.compliance_gross) {
       setForm((prev) => ({ ...prev, compliance_gross: String(complGrossComputed) }));
@@ -1582,7 +1603,7 @@ export default function EmployeeAddScreen() {
           {/* Iter 137 (user directive) — Total of allowances + gross moved
               AFTER the Allowances section. (Allowance/Deduction heads moved
               below Rate Basis (Compliance) per user request.) */}
-          {firmHeads.allowances.length > 0 ? (
+          {orderedAllowHeads.length > 0 ? (
             <Text style={[styles.smallNote, { fontWeight: "800" }]}>
               Total Allowances (Actual): ₹{actualAllowTotal.toLocaleString()}
             </Text>
@@ -1673,7 +1694,7 @@ export default function EmployeeAddScreen() {
           {/* Iter 126e/g — Firm-Master-linked salary heads (part of the
               COMPLIANCE salary). Heads ordered HRA → CONV. → OTH. ALLOW.
               → rest (Iter 245). */}
-          {firmHeads.allowances.length > 0 ? (
+          {orderedAllowHeads.length > 0 ? (
             <>
               <Text style={styles.lbl}>Allowances (from Firm Master)</Text>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
@@ -1694,7 +1715,7 @@ export default function EmployeeAddScreen() {
 
           {/* Iter 137 — Total Allowances + LINKED Gross Salary right after
               the allowances. Gross = Basic + Σ allowances (auto). */}
-          {firmHeads.allowances.length > 0 ? (
+          {orderedAllowHeads.length > 0 ? (
             <Text style={[styles.smallNote, { fontWeight: "800", color: "#B45309" }]}>
               Total Allowances (Compliance): ₹{complAllowTotal.toLocaleString()}
             </Text>
@@ -1715,11 +1736,11 @@ export default function EmployeeAddScreen() {
             <View style={{ flex: 1 }} />
           </TwoCol>
 
-          {firmHeads.deductions.length > 0 ? (
+          {allDeductionHeads.length > 0 ? (
             <>
               <Text style={styles.lbl}>Deductions (from Firm Master)</Text>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {firmHeads.deductions.map((h) => (
+                {allDeductionHeads.map((h) => (
                   <View key={h} style={{ minWidth: 150, flexGrow: 1, flexBasis: "30%" }}>
                     <Field
                       label={h}
@@ -1768,11 +1789,11 @@ export default function EmployeeAddScreen() {
           {/* Iter 200 (user request) — Allowance / Deduction heads (Actual,
               from Firm Master). Saved as actual_salary_allowances /
               actual_salary_deductions — unchanged storage. */}
-          {showActualSalary && firmHeads.allowances.length > 0 ? (
+          {showActualSalary && orderedAllowHeads.length > 0 ? (
             <>
               <Text style={styles.lbl}>Allowances — Actual Salary (from Firm Master)</Text>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {firmHeads.allowances.map((h) => (
+                {orderedAllowHeads.map((h) => (
                   <View key={h} style={{ minWidth: 150, flexGrow: 1, flexBasis: "30%" }}>
                     <Field
                       label={h}
@@ -1786,11 +1807,11 @@ export default function EmployeeAddScreen() {
               </View>
             </>
           ) : null}
-          {showActualSalary && firmHeads.deductions.length > 0 ? (
+          {showActualSalary && allDeductionHeads.length > 0 ? (
             <>
               <Text style={styles.lbl}>Deductions — Actual Salary (from Firm Master)</Text>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {firmHeads.deductions.map((h) => (
+                {allDeductionHeads.map((h) => (
                   <View key={h} style={{ minWidth: 150, flexGrow: 1, flexBasis: "30%" }}>
                     <Field
                       label={h}

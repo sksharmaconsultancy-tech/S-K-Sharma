@@ -157,6 +157,8 @@ async def _auto_escalate_overdue(company_id: str) -> int:
         await db.approval_requests.update_one(
             {"request_id": r["request_id"], "status": "pending"},
             {"$set": upd, "$push": {"history": hist}})
+        await _wf_notify(r["company_id"], r["module"], "escalated", r,
+                         f"SLA of {sla}h breached — auto-escalated")
         n += 1
     return n
 
@@ -221,7 +223,11 @@ async def create_approval_request(
         "created_at": now_iso(),
     }
     await db.approval_requests.insert_one(req)
-    return {k: v for k, v in req.items() if k != "_id"}
+    out = {k: v for k, v in req.items() if k != "_id"}
+    # Phase C — notify firm admins per workflow notification rules.
+    await _wf_notify(company_id, module, "created", out,
+                     f"Requested by {out.get('requested_by_name') or '—'}")
+    return out
 
 
 async def _finalize(module: str, record_id: str, approved: bool, actor: dict):
@@ -270,6 +276,10 @@ class WorkflowSave(BaseModel):
     module: str
     enabled: bool = True
     levels: List[Dict[str, Any]] = []
+    # Phase C — notification rules (dashboard bell to the requester /
+    # firm admins). Keys: on_created, on_approved, on_rejected,
+    # on_returned, on_escalated.
+    notify: Optional[Dict[str, bool]] = None
 
 
 @router.post("/approval-workflows")
@@ -311,19 +321,37 @@ async def save_workflow(payload: WorkflowSave, authorization: Optional[str] = He
                 "value": cond.get("value"),
             }
         levels.append(entry)
+    # Phase C — notification rules (defaults: all on when omitted).
+    notify_defaults = {"on_created": True, "on_approved": True, "on_rejected": True,
+                       "on_returned": True, "on_escalated": True}
+    notify_cfg = {k: bool((payload.notify or {}).get(k, v)) for k, v in notify_defaults.items()}
     doc = {
         "company_id": cid, "module": payload.module,
         "enabled": bool(payload.enabled) and len(levels) > 0,
         "levels": levels,
+        "notify": notify_cfg,
         "updated_at": now_iso(), "updated_by": admin["user_id"],
     }
     existing = await db.approval_workflows.find_one({"company_id": cid, "module": payload.module})
     if existing:
+        # Phase C — versioning: snapshot the outgoing config before update.
+        prev = {k: v for k, v in existing.items() if k != "_id"}
+        version_no = int(existing.get("version") or 1)
+        await db.workflow_versions.insert_one({
+            "version_id": f"wfv_{uuid.uuid4().hex[:10]}",
+            "company_id": cid, "module": payload.module,
+            "version": version_no,
+            "snapshot": prev,
+            "saved_by": admin.get("user_id"), "saved_by_name": admin.get("name"),
+            "saved_at": now_iso(),
+        })
+        doc["version"] = version_no + 1
         await db.approval_workflows.update_one({"_id": existing["_id"]}, {"$set": doc})
         doc["workflow_id"] = existing.get("workflow_id")
     else:
         doc["workflow_id"] = f"wf_{uuid.uuid4().hex[:12]}"
         doc["created_at"] = now_iso()
+        doc["version"] = 1
         await db.approval_workflows.insert_one(dict(doc))
     from routes.access_management import write_access_audit
     await write_access_audit(
@@ -331,6 +359,96 @@ async def save_workflow(payload: WorkflowSave, authorization: Optional[str] = He
         f"Workflow '{payload.module}' saved — {len(levels)} level(s), "
         f"{'ENABLED' if doc['enabled'] else 'disabled'}")
     return {"ok": True, "workflow": {k: v for k, v in doc.items() if k != "_id"}}
+
+
+# ---------------------------------------------------------------------------
+# Phase C — workflow versioning + notification helper
+# ---------------------------------------------------------------------------
+@router.get("/approval-workflows/{module}/versions")
+async def workflow_versions(module: str, company_id: Optional[str] = Query(None),
+                            authorization: Optional[str] = Header(None)):
+    _admin, cid = await _admin_scoped(authorization, company_id)
+    versions = await db.workflow_versions.find(
+        {"company_id": cid, "module": module}, {"_id": 0}
+    ).sort("version", -1).to_list(25)
+    return {"versions": [
+        {"version": v["version"], "saved_at": v.get("saved_at"),
+         "saved_by_name": v.get("saved_by_name"),
+         "enabled": (v.get("snapshot") or {}).get("enabled"),
+         "levels": [
+             {"level": l.get("level"),
+              "role_name": l.get("role_name") or "Company Admin",
+              "sla_hours": l.get("sla_hours"),
+              "condition": l.get("condition")}
+             for l in (v.get("snapshot") or {}).get("levels") or []],
+         } for v in versions]}
+
+
+@router.post("/approval-workflows/{module}/restore")
+async def workflow_restore(module: str, payload: Dict[str, Any] = Body(...),
+                           authorization: Optional[str] = Header(None)):
+    admin, cid = await _admin_scoped(authorization, payload.get("company_id"))
+    if admin.get("is_company_staff"):
+        raise HTTPException(status_code=403, detail="Staff accounts cannot manage workflows")
+    try:
+        version = int(payload.get("version"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="version is required")
+    v = await db.workflow_versions.find_one(
+        {"company_id": cid, "module": module, "version": version}, {"_id": 0})
+    if not v:
+        raise HTTPException(status_code=404, detail="Version not found")
+    snap = v.get("snapshot") or {}
+    # Restore goes through save so the current config is itself versioned.
+    save_payload = WorkflowSave(
+        company_id=cid, module=module, enabled=bool(snap.get("enabled")),
+        levels=[{"approver_type": l.get("approver_type"), "role_id": l.get("role_id"),
+                 "sla_hours": l.get("sla_hours"), "condition": l.get("condition")}
+                for l in snap.get("levels") or []],
+        notify=snap.get("notify"))
+    return await save_workflow(save_payload, authorization)
+
+
+async def _wf_notify(company_id: str, module: str, event: str, req: dict,
+                     extra: str = "") -> None:
+    """Phase C — dashboard-bell notifications per workflow notify rules.
+    on_created → firm admins; other events → the requester."""
+    wf = await db.approval_workflows.find_one(
+        {"company_id": company_id, "module": module},
+        {"_id": 0, "notify": 1})
+    rules = (wf or {}).get("notify") or {}
+    if not rules.get(f"on_{event}", True):
+        return
+    titles = {
+        "created": f"New approval request: {req.get('title')}",
+        "approved": f"Approved ✅ — {req.get('title')}",
+        "rejected": f"Rejected ✖ — {req.get('title')}",
+        "returned": f"Returned ↩ — {req.get('title')}",
+        "escalated": f"Escalated ⚡ — {req.get('title')}",
+    }
+    targets: List[str] = []
+    if event == "created":
+        async for u in db.users.find(
+                {"company_id": company_id, "role": "company_admin"},
+                {"_id": 0, "user_id": 1}).limit(10):
+            targets.append(u["user_id"])
+    elif req.get("requested_by"):
+        targets.append(req["requested_by"])
+    for uid in targets:
+        try:
+            await db.notifications.insert_one({
+                "notification_id": f"n_{uuid.uuid4().hex[:10]}",
+                "company_id": company_id,
+                "audience": "user",
+                "target_user_id": uid,
+                "type": f"workflow.{module}.{event}",
+                "title": titles.get(event, req.get("title")),
+                "body": (extra or f"Module: {module}").strip(),
+                "created_at": now_iso(),
+            })
+        except Exception:
+            pass
+
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +566,8 @@ async def action_request(
             upd_e["sla_breached"] = True  # final level — flagged for the firm owner
         await db.approval_requests.update_one(
             {"request_id": request_id}, {"$set": upd_e, "$push": {"history": hist_e}})
+        await _wf_notify(r["company_id"], r["module"], "escalated", r,
+                         remarks or "Escalated manually")
         fresh = await db.approval_requests.find_one({"request_id": request_id}, {"_id": 0})
         return {"ok": True, "request": fresh}
 
@@ -479,6 +599,9 @@ async def action_request(
     if updates.get("status") in ("approved", "rejected", "returned"):
         await _finalize(r["module"], r["record_id"],
                         approved=updates["status"] == "approved", actor=admin)
+        # Phase C — notify the requester per workflow notification rules.
+        await _wf_notify(r["company_id"], r["module"], updates["status"], r,
+                         remarks or "")
 
     fresh = await db.approval_requests.find_one({"request_id": request_id}, {"_id": 0})
     return {"ok": True, "request": fresh}

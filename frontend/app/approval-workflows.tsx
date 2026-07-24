@@ -37,6 +37,32 @@ export default function ApprovalWorkflows() {
   // Phase B — per-level SLA + condition editor.
   const [settingsFor, setSettingsFor] = useState<string | null>(null);
   const [draft, setDraft] = useState<any[]>([]);
+  // Phase C — notification rules + version history state.
+  const [notifyDraft, setNotifyDraft] = useState<any>({});
+  const [historyFor, setHistoryFor] = useState<string | null>(null);
+  const [versions, setVersions] = useState<any[]>([]);
+
+  const openHistory = async (moduleKey: string) => {
+    if (historyFor === moduleKey) { setHistoryFor(null); return; }
+    try {
+      const r = await api<{ versions: any[] }>(
+        `/admin/approval-workflows/${moduleKey}/versions?company_id=${companyId}`);
+      setVersions(r.versions || []);
+      setHistoryFor(moduleKey);
+    } catch (e: any) { toast(e?.message || "Failed to load history"); }
+  };
+
+  const restoreVersion = async (moduleKey: string, version: number) => {
+    if (Platform.OS === "web" && !window.confirm(`Restore version ${version}? The current setup is saved as a new version first.`)) return;
+    try {
+      await api(`/admin/approval-workflows/${moduleKey}/restore`, {
+        method: "POST", body: { company_id: companyId, version },
+      });
+      toast(`Version ${version} restored.`);
+      setHistoryFor(null);
+      await load();
+    } catch (e: any) { toast(e?.message || "Restore failed"); }
+  };
 
   // Follow the global active-firm picker.
   useEffect(() => {
@@ -59,12 +85,13 @@ export default function ApprovalWorkflows() {
     sla_hours: l.sla_hours, condition: l.condition,
   }));
 
-  const save = async (moduleKey: string, levels: any[], enabled: boolean) => {
+  const save = async (moduleKey: string, levels: any[], enabled: boolean, notify?: any) => {
     setSaving(moduleKey);
     try {
       await api("/admin/approval-workflows", {
         method: "POST",
-        body: { company_id: companyId, module: moduleKey, enabled, levels },
+        body: { company_id: companyId, module: moduleKey, enabled, levels,
+                ...(notify ? { notify } : {}) },
       });
       await load();
     } catch (e: any) { toast(e?.message || "Save failed"); }
@@ -121,15 +148,18 @@ export default function ApprovalWorkflows() {
                 </View>
               </View>
 
-              {/* Chain visual */}
+              {/* Chain visual — Phase C: drag & drop level cards to
+                  reorder the approval sequence (web canvas). */}
               <View style={s.chain}>
                 <View style={[s.node, { backgroundColor: "rgba(100,116,139,0.12)" }]}>
                   <Text style={[s.nodeTxt, { color: "#475569" }]}>Request</Text>
                 </View>
-                {levels.map((l: any, i: number) => (
-                  <React.Fragment key={i}>
-                    <Ionicons name="arrow-forward" size={14} color={colors.onSurfaceTertiary} />
+                {levels.map((l: any, i: number) => {
+                  const nodeInner = (
                     <View style={s.node}>
+                      {Platform.OS === "web" ? (
+                        <Ionicons name="reorder-three-outline" size={15} color={colors.onSurfaceTertiary} />
+                      ) : null}
                       <Text style={s.nodeTxt}>
                         L{l.level} · {l.role_name || "Company Admin"}
                         {l.sla_hours ? ` · ⏱${l.sla_hours}h` : ""}
@@ -141,8 +171,33 @@ export default function ApprovalWorkflows() {
                         <Ionicons name="close-circle" size={15} color="#DC2626" />
                       </Pressable>
                     </View>
-                  </React.Fragment>
-                ))}
+                  );
+                  return (
+                    <React.Fragment key={i}>
+                      <Ionicons name="arrow-forward" size={14} color={colors.onSurfaceTertiary} />
+                      {Platform.OS === "web" ? (
+                        <div
+                          draggable
+                          style={{ cursor: "grab", display: "inline-flex" }}
+                          data-testid={`wf-node-${m.key}-${i}`}
+                          onDragStart={(e: any) => e.dataTransfer.setData("text/plain", String(i))}
+                          onDragOver={(e: any) => e.preventDefault()}
+                          onDrop={(e: any) => {
+                            e.preventDefault();
+                            const from = parseInt(e.dataTransfer.getData("text/plain"), 10);
+                            if (Number.isNaN(from) || from === i) return;
+                            const arr = strip(levels);
+                            const [mv] = arr.splice(from, 1);
+                            arr.splice(i, 0, mv);
+                            save(m.key, arr, wf.enabled);
+                          }}
+                        >
+                          {nodeInner}
+                        </div>
+                      ) : nodeInner}
+                    </React.Fragment>
+                  );
+                })}
                 <Ionicons name="arrow-forward" size={14} color={colors.onSurfaceTertiary} />
                 <View style={[s.node, { backgroundColor: "rgba(5,150,105,0.12)" }]}>
                   <Text style={[s.nodeTxt, { color: "#059669" }]}>Approved</Text>
@@ -230,13 +285,33 @@ export default function ApprovalWorkflows() {
                         </View>
                       </View>
                     ))}
+                    {/* Phase C — notification rules */}
+                    <Text style={[s.muted, { fontWeight: "700", marginTop: 10 }]}>
+                      Notification Rules (dashboard bell):
+                    </Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 4 }}>
+                      {[["on_created", "Created → admins"], ["on_approved", "Approved → requester"],
+                        ["on_rejected", "Rejected → requester"], ["on_returned", "Returned → requester"],
+                        ["on_escalated", "Escalated → requester"]].map(([k, lbl]) => (
+                        <Pressable key={k} testID={`wf-nf-${m.key}-${k}`}
+                          onPress={() => setNotifyDraft((n: any) => ({ ...n, [k]: !(n[k] ?? true) }))}
+                          style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                          <Ionicons
+                            name={(notifyDraft[k] ?? true) ? "checkbox" : "square-outline"}
+                            size={16}
+                            color={(notifyDraft[k] ?? true) ? colors.brandPrimary : colors.onSurfaceTertiary}
+                          />
+                          <Text style={s.muted}>{lbl}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
                     <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
                       <Pressable style={s.saveBtn} testID={`wf-save-settings-${m.key}`}
                         onPress={() => save(m.key, draft.map((l: any) => ({
                           approver_type: l.approver_type, role_id: l.role_id,
                           sla_hours: parseInt(l.sla_hours || "0", 10) || 0,
                           condition: l.condition?.field?.trim() ? l.condition : undefined,
-                        })), wf.enabled)}>
+                        })), wf.enabled, notifyDraft)}>
                         <Text style={s.saveBtnTxt}>Save Settings</Text>
                       </Pressable>
                       <Pressable style={s.addBtn} onPress={() => setSettingsFor(null)}>
@@ -245,12 +320,45 @@ export default function ApprovalWorkflows() {
                     </View>
                   </View>
                 ) : (
-                  <Pressable style={s.addBtn} testID={`wf-settings-${m.key}`}
-                    onPress={() => { setSettingsFor(m.key); setDraft(levels.map((l: any) => ({ ...l }))); }}>
-                    <Ionicons name="options-outline" size={14} color={colors.brandPrimary} />
-                    <Text style={s.addTxt}>Level Settings (SLA & Conditions)</Text>
-                  </Pressable>
+                  <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                    <Pressable style={s.addBtn} testID={`wf-settings-${m.key}`}
+                      onPress={() => {
+                        setSettingsFor(m.key);
+                        setDraft(levels.map((l: any) => ({ ...l })));
+                        setNotifyDraft({ ...(wf.notify || {}) });
+                      }}>
+                      <Ionicons name="options-outline" size={14} color={colors.brandPrimary} />
+                      <Text style={s.addTxt}>Level Settings (SLA · Conditions · Notifications)</Text>
+                    </Pressable>
+                    <Pressable style={s.addBtn} testID={`wf-history-${m.key}`}
+                      onPress={() => openHistory(m.key)}>
+                      <Ionicons name="time-outline" size={14} color={colors.brandPrimary} />
+                      <Text style={s.addTxt}>History{wf.version ? ` (v${wf.version})` : ""}</Text>
+                    </Pressable>
+                  </View>
                 )
+              ) : null}
+              {/* Phase C — version history + restore */}
+              {historyFor === m.key ? (
+                <View style={s.pickWrap}>
+                  <Text style={[s.muted, { fontWeight: "700" }]}>Saved versions (newest first):</Text>
+                  {versions.length === 0 ? (
+                    <Text style={s.muted}>No earlier versions yet — versions are saved every time the workflow changes.</Text>
+                  ) : versions.map((v) => (
+                    <View key={v.version} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 }}>
+                      <Text style={[s.muted, { flex: 1 }]}>
+                        v{v.version} · {(v.levels || []).map((l: any) =>
+                          `${l.role_name}${l.sla_hours ? ` ⏱${l.sla_hours}h` : ""}`).join(" → ") || "no levels"}
+                        {" · "}{String(v.saved_at || "").slice(0, 16).replace("T", " ")}
+                        {v.saved_by_name ? ` by ${v.saved_by_name}` : ""}
+                      </Text>
+                      <Pressable style={s.saveBtn} testID={`wf-restore-${m.key}-${v.version}`}
+                        onPress={() => restoreVersion(m.key, v.version)}>
+                        <Text style={s.saveBtnTxt}>Restore</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
               ) : null}
               {m.key !== "advance" ? (
                 <Text style={[s.muted, { marginTop: 8 }]}>Currently enforced for Advance issuance; other modules coming next.</Text>

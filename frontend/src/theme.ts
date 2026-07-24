@@ -28,8 +28,12 @@ export type ThemeId =
   | "rose_gold"
   | "steel_sky"
   | "graphite_lime"
+  | "lavender_mist"
+  | "mocha_espresso"
+  | "arctic_ice"
   | "midnight_dark"
-  | "obsidian_teal";
+  | "obsidian_teal"
+  | "deep_space";
 
 export type ThemeColors = {
   surface: string;
@@ -316,6 +320,49 @@ export const THEME_PRESETS: PresetDef[] = [
       "#FAFAFA", "#EFEFEF",
     ),
   },
+  // Iter 288 (user request) — extended theme pack: 3 more light palettes.
+  {
+    id: "lavender_mist",
+    name: "Lavender Mist",
+    vibe: "Soft Serene",
+    description: "Gentle lavender violet with soft teal — calm and airy.",
+    primary: "#6D5BD0",
+    secondary: "#8B7BE8",
+    accent: "#0D9488",
+    colors: buildPalette(
+      "#6D5BD0", "#8B7BE8", "#EDE9FE", "#5B4BC4",
+      "#0D9488", "#CCFBF1", "#115E59",
+      "#FBFAFE", "#F1EEF9",
+    ),
+  },
+  {
+    id: "mocha_espresso",
+    name: "Mocha Espresso",
+    vibe: "Warm Classic",
+    description: "Rich coffee brown with caramel gold — cozy and grounded.",
+    primary: "#6B4226",
+    secondary: "#8B5E3C",
+    accent: "#D97706",
+    colors: buildPalette(
+      "#6B4226", "#8B5E3C", "#F3E8DC", "#5C3A20",
+      "#D97706", "#FEF3C7", "#92400E",
+      "#FDFBF8", "#F4EEE7",
+    ),
+  },
+  {
+    id: "arctic_ice",
+    name: "Arctic Ice",
+    vibe: "Cool Crisp",
+    description: "Icy cool blue with frosted navy — ultra clean and crisp.",
+    primary: "#0369A1",
+    secondary: "#0284C7",
+    accent: "#1E40AF",
+    colors: buildPalette(
+      "#0369A1", "#0284C7", "#E0F2FE", "#075985",
+      "#1E40AF", "#DBEAFE", "#1E3A8A",
+      "#F6FAFD", "#E9F1F7",
+    ),
+  },
   // Iter 89 — True Dark Mode preset. Inverts every surface + text token
   // so the whole portal (both admin web shell and employee mobile app)
   // adopts a proper night palette. Accent stays a soft indigo so CTAs
@@ -415,6 +462,53 @@ export const THEME_PRESETS: PresetDef[] = [
       divider: "rgba(231,236,235,0.08)",
     },
   },
+  // Iter 288 (user request) — third dark preset: deep space violet.
+  {
+    id: "deep_space",
+    name: "Deep Space",
+    vibe: "Dark Violet",
+    description: "Deep space navy with violet glow and pink accent — bold night mode.",
+    primary: "#A78BFA",
+    secondary: "#C4B5FD",
+    accent: "#F472B6",
+    colors: {
+      surface: "#0D0B1E",
+      onSurface: "#E9E7F2",
+      surfaceSecondary: "#161230",
+      onSurfaceSecondary: "#C9C4DE",
+      surfaceTertiary: "#231D45",
+      onSurfaceTertiary: "#9A93B8",
+      surfaceInverse: "#F5F3FF",
+      onSurfaceInverse: "#1E1B4B",
+
+      brand: "#A78BFA",
+      brandPrimary: "#A78BFA",
+      onBrandPrimary: "#0D0B1E",
+      brandSecondary: "#8B5CF6",
+      onBrandSecondary: "#FFFFFF",
+      brandTertiary: "#3B2E6E",
+      onBrandTertiary: "#EDE9FE",
+
+      cta: "#F472B6",
+      onCta: "#0D0B1E",
+      ctaTint: "#831843",
+      onCtaTint: "#FCE7F3",
+
+      accent: "#F472B6",
+      onAccent: "#0D0B1E",
+      accentTint: "#831843",
+      onAccentTint: "#FCE7F3",
+
+      success: "#34D399", onSuccess: "#0D0B1E",
+      warning: "#FBBF24", onWarning: "#0D0B1E",
+      error: "#F87171",   onError:   "#0D0B1E",
+      info: "#818CF8",    onInfo:    "#0D0B1E",
+
+      border: "rgba(233,231,242,0.14)",
+      borderStrong: "#3B3560",
+      divider: "rgba(233,231,242,0.08)",
+    },
+  },
 ];
 
 export const DEFAULT_THEME_ID: ThemeId = "azure_light";
@@ -423,7 +517,7 @@ export const DEFAULT_THEME_ID: ThemeId = "azure_light";
  *  dark presets while any other explicitly-picked preset stays put. */
 export const DARK_THEME_ID: ThemeId = "midnight_dark";
 export function isDarkTheme(id: ThemeId): boolean {
-  return id === "midnight_dark" || id === "obsidian_teal";
+  return id === "midnight_dark" || id === "obsidian_teal" || id === "deep_space";
 }
 
 /**

@@ -8,6 +8,7 @@ overview stats + a shared ``access_audit`` trail.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Header, HTTPException
@@ -89,6 +90,58 @@ async def access_stats(company_id: Optional[str] = None,
             for w in recent_wf
         ],
         "recent_audit": recent_audit,
+    }
+
+
+@router.get("/admin/access-management/activity")
+async def access_activity(company_id: Optional[str] = None,
+                          authorization: Optional[str] = Header(None)):
+    """Phase C — Live Activity Monitor. Sliding 12h sessions mean
+    last-activity ≈ expires_at − 12h (throttled ±30 min), so 'online' =
+    expiry within the last 45 minutes of a fresh extension."""
+    _admin, cid = await _scoped(authorization, company_id)
+    now = datetime.now(timezone.utc)
+    online_cut = now + timedelta(hours=12) - timedelta(minutes=45)
+    firm_uids = [u["user_id"] async for u in db.users.find(
+        {"company_id": cid}, {"_id": 0, "user_id": 1})]
+    sess = await db.user_sessions.find(
+        {"user_id": {"$in": firm_uids}, "expires_at": {"$gt": online_cut}},
+        {"_id": 0, "user_id": 1, "expires_at": 1},
+    ).to_list(300)
+    seen: Dict[str, Any] = {}
+    for s in sess:
+        prev = seen.get(s["user_id"])
+        if not prev or s["expires_at"] > prev:
+            seen[s["user_id"]] = s["expires_at"]
+    users = []
+    if seen:
+        async for u in db.users.find(
+                {"user_id": {"$in": list(seen.keys())}},
+                {"_id": 0, "user_id": 1, "name": 1, "role": 1,
+                 "employee_code": 1, "is_company_staff": 1}):
+            exp = seen[u["user_id"]]
+            if hasattr(exp, "tzinfo") and exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            last_active = exp - timedelta(hours=12)
+            users.append({**u, "last_active": last_active.isoformat()})
+        users.sort(key=lambda x: x["last_active"], reverse=True)
+    pending = await db.approval_requests.count_documents({"company_id": cid, "status": "pending"})
+    escalated = await db.approval_requests.count_documents(
+        {"company_id": cid, "status": "pending", "escalated": True})
+    breached = await db.approval_requests.count_documents(
+        {"company_id": cid, "status": "pending", "sla_breached": True})
+    running = await db.approval_workflows.count_documents({"company_id": cid, "enabled": True})
+    recent_perm = await db.access_audit.find(
+        {"company_id": cid}, {"_id": 0}).sort("at", -1).to_list(5)
+    return {
+        "online_users": users[:50],
+        "online_count": len(users),
+        "pending_approvals": pending,
+        "escalated_pending": escalated,
+        "sla_breached_pending": breached,
+        "running_workflows": running,
+        "recent_permission_changes": recent_perm,
+        "as_of": now.isoformat(),
     }
 
 
