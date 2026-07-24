@@ -247,10 +247,24 @@ export default function BulkOperationsScreen() {
   }, [cid, loadEmps]);
 
   useEffect(() => {
-    if (tab === "shift" && shifts.length === 0) {
-      api<any>("/shift-masters")
-        .then((r) => setShifts(Array.isArray(r) ? r : r.shifts || r.rows || []))
-        .catch(() => {});
+    if (tab === "shift" && cid) {
+      // Iter 279 — offer ONLY the shifts assigned to this firm from the
+      // Shift Master (company-wise selection); fallback: full master list.
+      (async () => {
+        try {
+          const r = await api<{ shifts: any[] }>(`/companies/${cid}/assigned-shifts`);
+          if ((r.shifts || []).length) {
+            setShifts(r.shifts);
+            setShiftId("");
+            return;
+          }
+        } catch { /* fall through to full master list */ }
+        try {
+          const r = await api<any>("/shift-masters");
+          setShifts(Array.isArray(r) ? r : r.shifts || r.rows || []);
+          setShiftId("");
+        } catch { /* ignore */ }
+      })();
     }
     if (tab === "history") {
       api<{ rows: any[] }>(
@@ -259,7 +273,7 @@ export default function BulkOperationsScreen() {
         .then((r) => setHistory(r.rows || []))
         .catch(() => {});
     }
-  }, [tab, cid, shifts.length]);
+  }, [tab, cid]);
 
   const toggle = (id: string) =>
     setSelected((prev) => {

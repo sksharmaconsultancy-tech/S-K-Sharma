@@ -430,18 +430,39 @@ export default function EmployeeAddScreen() {
   const existingPhoto = existingDocs.some((d) => d.category === "photo");
   const existingOther = existingDocs.filter((d) => d.category !== "photo");
 
-  useEffect(() => {
+  // Iter 281 (user request) — photo preview + Upload/Change/Remove buttons
+  // right on the avatar of the New Employee / Edit screen.
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+
+  const loadDocs = useCallback(async () => {
     if (!editUserId) return;
-    (async () => {
-      try {
-        const r = await api<{ documents: any[] }>(`/admin/employees/${editUserId}/documents`);
-        setExistingDocs((r.documents || []).map((d: any) => ({
-          doc_id: d.doc_id, custom_label: d.custom_label || null,
-          filename: d.filename || null, category: d.category || "other",
-        })));
-      } catch { /* attachments are optional */ }
-    })();
+    try {
+      const r = await api<{ documents: any[] }>(`/admin/employees/${editUserId}/documents`);
+      const docs = (r.documents || []).map((d: any) => ({
+        doc_id: d.doc_id, custom_label: d.custom_label || null,
+        filename: d.filename || null, category: d.category || "other",
+      }));
+      setExistingDocs(docs);
+      const ph = docs.find((d) => d.category === "photo");
+      if (ph) {
+        try {
+          const dr = await api<{ document: any }>(
+            `/admin/employees/${editUserId}/documents/${ph.doc_id}`,
+          );
+          if (dr.document?.base64) {
+            setPhotoPreview(
+              `data:${dr.document.mime_type || "image/jpeg"};base64,${dr.document.base64}`,
+            );
+          }
+        } catch { /* preview is best-effort */ }
+      } else {
+        setPhotoPreview(null);
+      }
+    } catch { /* attachments are optional */ }
   }, [editUserId]);
+
+  useEffect(() => { void loadDocs(); }, [loadDocs]);
 
   const pickFile = async (accept: string[]): Promise<PendingFile | null> => {
     const res = await DocumentPicker.getDocumentAsync({
@@ -478,10 +499,59 @@ export default function EmployeeAddScreen() {
     return { name: f.name || "file", mime, b64 };
   };
 
+  // Iter 281 — pick a photo. New employee: kept pending, uploads on Save.
+  // Edit mode: uploaded IMMEDIATELY (old photo replaced).
+  const pickPhoto = async () => {
+    const f = await pickFile(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
+    if (!f) return;
+    if (!editUserId) { setPhotoFile(f); return; }
+    setPhotoBusy(true);
+    try {
+      for (const d of existingDocs.filter((x) => x.category === "photo")) {
+        try {
+          await api(`/admin/employees/${editUserId}/documents/${d.doc_id}`, { method: "DELETE" });
+        } catch { /* stale doc — ignore */ }
+      }
+      await api(`/admin/employees/${editUserId}/documents`, {
+        method: "POST",
+        body: { category: "photo", custom_label: "Employee Photo",
+                filename: f.name, mime_type: f.mime, base64: f.b64 },
+      });
+      setPhotoFile(null);
+      setPhotoPreview(`data:${f.mime};base64,${f.b64}`);
+      void loadDocs();
+    } catch (e: any) {
+      if (Platform.OS === "web") window.alert(e?.message || "Photo upload failed.");
+    } finally { setPhotoBusy(false); }
+  };
+
+  // Iter 281 — remove the photo (pending selection or the stored one).
+  const removePhoto = async () => {
+    if (photoFile) { setPhotoFile(null); return; }
+    if (!editUserId || !existingPhoto) return;
+    if (Platform.OS === "web" && !window.confirm("Remove the employee photo?")) return;
+    setPhotoBusy(true);
+    try {
+      for (const d of existingDocs.filter((x) => x.category === "photo")) {
+        await api(`/admin/employees/${editUserId}/documents/${d.doc_id}`, { method: "DELETE" });
+      }
+      setPhotoPreview(null);
+      void loadDocs();
+    } catch (e: any) {
+      if (Platform.OS === "web") window.alert(e?.message || "Could not remove photo.");
+    } finally { setPhotoBusy(false); }
+  };
+
   const uploadPendingDocs = async (uid: string) => {
     const failed: string[] = [];
     if (photoFile) {
       try {
+        // Replace, never duplicate: clear any stored photo first.
+        for (const d of existingDocs.filter((x) => x.category === "photo")) {
+          try {
+            await api(`/admin/employees/${uid}/documents/${d.doc_id}`, { method: "DELETE" });
+          } catch { /* stale doc — ignore */ }
+        }
         await api(`/admin/employees/${uid}/documents`, {
           method: "POST",
           body: { category: "photo", custom_label: "Employee Photo",
@@ -696,6 +766,10 @@ export default function EmployeeAddScreen() {
     .slice(0, 2)
     .map((w) => w[0]?.toUpperCase() || "")
     .join("") || "?";
+  // Iter 281 — pending selection wins over the stored photo.
+  const avatarUri = photoFile
+    ? `data:${photoFile.mime};base64,${photoFile.b64}`
+    : photoPreview;
   const checklist: { label: string; done: boolean }[] = [
     { label: "Firm selected", done: !!selectedCompanyId },
     { label: "Name", done: !!form.name.trim() },
@@ -826,13 +900,38 @@ export default function EmployeeAddScreen() {
           <View style={styles.entPanel}>
             {/* Left summary card */}
             <View style={styles.entAvatarWrap}>
-              <LinearGradient
-                colors={["#2563EB", "#4338CA"]}
-                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-                style={styles.entAvatar}
-              >
-                <Text style={styles.entAvatarTxt}>{initials}</Text>
-              </LinearGradient>
+              {avatarUri ? (
+                <Image source={{ uri: avatarUri }} style={styles.entAvatarImg} />
+              ) : (
+                <LinearGradient
+                  colors={["#2563EB", "#4338CA"]}
+                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                  style={styles.entAvatar}
+                >
+                  <Text style={styles.entAvatarTxt}>{initials}</Text>
+                </LinearGradient>
+              )}
+              {/* Iter 281 (user request) — photo Upload / Change / Remove
+                  buttons directly on the New Employee avatar. */}
+              {photoBusy ? (
+                <ActivityIndicator size="small" color={colors.brandPrimary} style={{ marginTop: 8 }} />
+              ) : (
+                <View style={styles.photoBtnRow}>
+                  <Pressable onPress={pickPhoto} style={styles.photoBtn} testID="avatar-photo-upload">
+                    <Ionicons name="camera-outline" size={14} color={colors.brandPrimary} />
+                    <Text style={styles.photoBtnTxt}>{avatarUri ? "Change" : "Upload Photo"}</Text>
+                  </Pressable>
+                  {avatarUri ? (
+                    <Pressable onPress={removePhoto} style={[styles.photoBtn, styles.photoBtnDanger]} testID="avatar-photo-remove">
+                      <Ionicons name="trash-outline" size={14} color="#DC2626" />
+                      <Text style={[styles.photoBtnTxt, { color: "#DC2626" }]}>Remove</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              )}
+              {photoFile && !editUserId ? (
+                <Text style={styles.photoPendingTxt}>uploads on Save</Text>
+              ) : null}
               <Text style={styles.entName} numberOfLines={1}>{form.name || "New Employee"}</Text>
               <View style={[styles.entStatus, { backgroundColor: editUserId ? "#DCFCE7" : "#FEF9C3" }]}>
                 <View style={[styles.entStatusDot, { backgroundColor: editUserId ? "#16A34A" : "#F59E0B" }]} />
@@ -1101,6 +1200,57 @@ export default function EmployeeAddScreen() {
             onChange={(v) => setField("name", v.toUpperCase())}
             placeholder="e.g. RAMESH KUMAR"
           />
+          {/* Iter 282 (user request) — field order: Code → Name → Father →
+              Gender → Marital → DOB → DOJ → Mobile → Email. */}
+          <TwoCol>
+            <Field
+              label="Father's name"
+              value={form.father_name}
+              onChange={(v) => setField("father_name", v.toUpperCase())}
+              placeholder="FATHER'S NAME"
+            />
+            <GenderSelect
+              value={form.gender}
+              onChange={(v) => setField("gender", v)}
+            />
+          </TwoCol>
+          <ChipRowSelect
+            label="Marital Status"
+            options={["Unmarried", "Married", "Widowed", "Divorced"]}
+            value={form.marital_status}
+            onChange={(v) => setField("marital_status", v)}
+            testIDPrefix="marital"
+          />
+          {form.marital_status === "Married" ? (
+            <Field
+              label="Spouse Name"
+              required={form.gender === "Female"}
+              value={form.spouse_name}
+              onChange={(v) => setField("spouse_name", v)}
+              placeholder="Husband / wife name (shown in reports for married female employees)"
+            />
+          ) : null}
+          <TwoCol>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={styles.lbl}>Date of birth (pick or type)</Text>
+              <DateField
+                value={ddmmyyyyDashToISO(form.dob) || ""}
+                onChangeISO={(iso) => setField("dob", isoToDDMMDash(iso))}
+                testID="emp-dob"
+              />
+            </View>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={styles.lbl}>
+                Date of joining (pick or type)
+                <Text style={{ color: "#DC2626", fontWeight: "900" }}> *</Text>
+              </Text>
+              <DateField
+                value={ddmmyyyyDashToISO(form.doj) || ""}
+                onChangeISO={(iso) => setField("doj", isoToDDMMDash(iso))}
+                testID="emp-doj"
+              />
+            </View>
+          </TwoCol>
           <TwoCol>
             <Field
               label="Mobile"
@@ -1119,30 +1269,6 @@ export default function EmployeeAddScreen() {
               keyboardType="email-address"
             />
           </TwoCol>
-          <TwoCol>
-            <Field
-              label="Father's name"
-              value={form.father_name}
-              onChange={(v) => setField("father_name", v.toUpperCase())}
-              placeholder="FATHER'S NAME"
-            />
-            <GenderSelect
-              value={form.gender}
-              onChange={(v) => setField("gender", v)}
-            />
-          </TwoCol>
-          <TwoCol>
-            <View style={{ flex: 1, gap: 4 }}>
-              <Text style={styles.lbl}>Date of birth (pick or type)</Text>
-              <DateField
-                value={ddmmyyyyDashToISO(form.dob) || ""}
-                onChangeISO={(iso) => setField("dob", isoToDDMMDash(iso))}
-                testID="emp-dob"
-              />
-            </View>
-            <View style={{ flex: 1 }} />
-          </TwoCol>
-          {/* Blood Group + Marital Status (chip pickers) */}
           <ChipRowSelect
             label="Blood Group"
             options={["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]}
@@ -1150,22 +1276,6 @@ export default function EmployeeAddScreen() {
             onChange={(v) => setField("blood_group", v)}
             testIDPrefix="blood"
           />
-          <ChipRowSelect
-            label="Marital Status"
-            options={["Unmarried", "Married", "Widowed", "Divorced"]}
-            value={form.marital_status}
-            onChange={(v) => setField("marital_status", v)}
-            testIDPrefix="marital"
-          />
-          {form.marital_status === "Married" ? (
-            <Field
-              label="Spouse Name"
-              required={form.gender === "Female"}
-              value={form.spouse_name}
-              onChange={(v) => setField("spouse_name", v)}
-              placeholder="Husband / wife name (shown in reports for married female employees)"
-            />
-          ) : null}
           {/* Iter 158 — Present + Permanent address grouped, with a
               "Same as Present Address" tick that copies & locks. */}
           <TwoCol>
@@ -1302,17 +1412,9 @@ export default function EmployeeAddScreen() {
                 testID="emp-add-type-group"
               />
             </View>
-            <View style={{ flex: 1, gap: 4 }}>
-              <Text style={styles.lbl}>
-                Date of joining (pick or type)
-                <Text style={{ color: "#DC2626", fontWeight: "900" }}> *</Text>
-              </Text>
-              <DateField
-                value={ddmmyyyyDashToISO(form.doj) || ""}
-                onChangeISO={(iso) => setField("doj", isoToDDMMDash(iso))}
-                testID="emp-doj"
-              />
-            </View>
+            {/* Iter 282 — Date of Joining moved to the Identity section
+                (user-requested field order). */}
+            <View style={{ flex: 1 }} />
           </TwoCol>
           <TwoCol>
             <View style={{ flex: 1, gap: 4 }}>
@@ -1904,9 +2006,9 @@ export default function EmployeeAddScreen() {
               (max 3, JPEG/PDF, Document Name + file + upload on Save). */}
           <SectionHeader icon="attach-outline" title="Photo & Attachments (Optional)" tint="#0891B2" anchorId="sec-attach" />
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginTop: 6 }}>
-            {photoFile ? (
+            {avatarUri ? (
               <Image
-                source={{ uri: `data:${photoFile.mime};base64,${photoFile.b64}` }}
+                source={{ uri: avatarUri }}
                 style={{ width: 64, height: 64, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}
               />
             ) : (
@@ -1919,25 +2021,30 @@ export default function EmployeeAddScreen() {
               </View>
             )}
             <View style={{ gap: 4 }}>
-              <Pressable
-                onPress={async () => {
-                  const f = await pickFile(["image/jpeg", "image/jpg"]);
-                  if (f) setPhotoFile(f);
-                }}
-                style={styles.attachBtn}
-                testID="attach-photo"
-              >
-                <Ionicons name="camera-outline" size={15} color={colors.brandPrimary} />
-                <Text style={styles.attachBtnTxt}>
-                  {photoFile ? "Change Photo" : existingPhoto ? "Replace Photo" : "Attach Photo (JPEG)"}
-                </Text>
-              </Pressable>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <Pressable
+                  onPress={pickPhoto}
+                  style={styles.attachBtn}
+                  testID="attach-photo"
+                >
+                  <Ionicons name="camera-outline" size={15} color={colors.brandPrimary} />
+                  <Text style={styles.attachBtnTxt}>
+                    {avatarUri ? "Change Photo" : "Upload Photo"}
+                  </Text>
+                </Pressable>
+                {avatarUri ? (
+                  <Pressable onPress={removePhoto} style={[styles.attachBtn, { borderColor: "#FECACA" }]} testID="attach-photo-remove">
+                    <Ionicons name="trash-outline" size={15} color="#DC2626" />
+                    <Text style={[styles.attachBtnTxt, { color: "#DC2626" }]}>Remove</Text>
+                  </Pressable>
+                ) : null}
+              </View>
               {existingPhoto && !photoFile ? (
                 <Text style={{ fontSize: 11, color: "#15803D" }}>Photo on file ✓</Text>
               ) : null}
               {photoFile ? (
                 <Text style={{ fontSize: 11, color: colors.onSurfaceSecondary }}>
-                  {photoFile.name} (uploads on Save)
+                  {photoFile.name}{editUserId ? "" : " (uploads on Save)"}
                 </Text>
               ) : null}
             </View>
@@ -2489,6 +2596,19 @@ const styles = StyleSheet.create({
     padding: 18,
   },
   entAvatarWrap: { alignItems: "center" },
+  entAvatarImg: {
+    width: 84, height: 84, borderRadius: 20,
+    borderWidth: 2, borderColor: "#C7D2FE",
+  },
+  photoBtnRow: { flexDirection: "row", gap: 8, marginTop: 8 },
+  photoBtn: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+    borderWidth: 1, borderColor: "#C7D2FE", backgroundColor: "#EEF2FF",
+  },
+  photoBtnDanger: { borderColor: "#FECACA", backgroundColor: "#FEF2F2" },
+  photoBtnTxt: { fontSize: 12, fontWeight: "700", color: colors.brandPrimary },
+  photoPendingTxt: { fontSize: 10, color: colors.onSurfaceTertiary, marginTop: 4 },
   entAvatar: {
     width: 72, height: 72, borderRadius: 24,
     alignItems: "center", justifyContent: "center",

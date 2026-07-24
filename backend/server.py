@@ -54,9 +54,12 @@ async def _root_healthz():
 
 
 EMERGENT_SESSION_DATA_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
-# Session lifetime: effectively "never expires" so users stay signed in
-# across app opens. If a user wants to sign out they can tap "Sign out".
-SESSION_TTL_DAYS = 3650
+# SEC-004 — Session lifetime: sessions expire after 12 hours of INACTIVITY.
+# Every authenticated request slides the expiry forward another 12 hours
+# (auto-extend while active), throttled to at most one DB write per
+# 30 minutes per session to avoid write amplification.
+SESSION_TTL_HOURS = 12
+SESSION_SLIDE_THROTTLE_MINUTES = 30
 
 # Only these emails can hold the super_admin role.
 SUPER_ADMIN_EMAILS = {
@@ -2377,8 +2380,24 @@ async def get_user_from_token(authorization: Optional[str]) -> dict:
         exp_dt = expires_at
     if exp_dt.tzinfo is None:
         exp_dt = exp_dt.replace(tzinfo=timezone.utc)
-    if exp_dt < datetime.now(timezone.utc):
+    now_utc = datetime.now(timezone.utc)
+    if exp_dt < now_utc:
         raise HTTPException(status_code=401, detail="Session expired")
+    # SEC-004 — SLIDING EXPIRY: any authenticated request extends the
+    # session another SESSION_TTL_HOURS (auto-extend while active). Writes
+    # are throttled: only when the stored expiry has aged more than
+    # SESSION_SLIDE_THROTTLE_MINUTES. Legacy long-lived sessions (expiry
+    # further out than the full TTL) are clamped to the 12-hour window on
+    # first use. Conditional filter on the old expires_at prevents
+    # duplicate writes from concurrent requests.
+    _full_ttl = timedelta(hours=SESSION_TTL_HOURS)
+    _remaining = exp_dt - now_utc
+    if (_remaining < _full_ttl - timedelta(minutes=SESSION_SLIDE_THROTTLE_MINUTES)
+            or _remaining > _full_ttl):
+        await db.user_sessions.update_one(
+            {"session_token": token, "expires_at": expires_at},
+            {"$set": {"expires_at": now_utc + _full_ttl}},
+        )
     user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
@@ -2961,7 +2980,7 @@ async def auth_session(payload: SessionExchange):
         await db.users.insert_one(user_doc)
 
     token = data["session_token"]
-    expires_at = datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=SESSION_TTL_HOURS)
     await db.user_sessions.update_one(
         {"session_token": token},
         {"$set": {
@@ -4594,7 +4613,7 @@ async def otp_verify(payload: OtpVerify):
         await db.users.insert_one(user_doc)
 
     token = f"otp_{uuid.uuid4().hex}{uuid.uuid4().hex}"
-    expires = datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS)
+    expires = datetime.now(timezone.utc) + timedelta(hours=SESSION_TTL_HOURS)
     await db.user_sessions.insert_one({
         "session_token": token,
         "user_id": user_id,
@@ -4758,7 +4777,7 @@ async def emp_code_login(payload: EmpCodeLoginPayload):
     await db.emp_login_attempts.delete_many({"code": code, "last4": last4})
 
     token = f"emp_{uuid.uuid4().hex}{uuid.uuid4().hex}"
-    expires = datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS)
+    expires = datetime.now(timezone.utc) + timedelta(hours=SESSION_TTL_HOURS)
     await db.user_sessions.insert_one({
         "session_token": token,
         "user_id": user_id,
@@ -4893,7 +4912,7 @@ def _validate_pin_format(pin: str) -> None:
 
 async def _issue_session(user_id: str, method: str) -> str:
     token = f"{method}_{uuid.uuid4().hex}{uuid.uuid4().hex}"
-    expires = datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS)
+    expires = datetime.now(timezone.utc) + timedelta(hours=SESSION_TTL_HOURS)
     await db.user_sessions.insert_one({
         "session_token": token,
         "user_id": user_id,
