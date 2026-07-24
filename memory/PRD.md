@@ -1351,3 +1351,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - New server.py `dedupe_rapid_punches(punches, 30)`: drops ANY punch (any kind/source) within 30s of the previously kept punch (keeps FIRST of burst). Wired BEFORE dedupe_same_machine_punches at all 3 pipelines: monthly grid (~17667), OT report (~18223), Iter-202 compliance path (~14963).
 - E2E: burst IN 08:00:00/IN+3s/OUT+7s + OUT 17:00/+5s → clean IN 08:00, OUT 17:00, punches=2, 9h, no anomaly.
 - RECURRING TOOL ISSUE: search_replace on server.py/employee-add.tsx sometimes reports success but does NOT persist ("phantom edit") — ALWAYS grep-verify after editing these large files.
+
+## Iter 277 (June 2026) — Rectified Punches Audit
+- New GET /api/admin/attendance/rectified-punches/{company_id}/{month} (routes/punch_logs.py): re-runs the 3-stage dedup (rapid 30s / same-machine 15m / OUT-IN bounce 60s) per employee-day and reports dropped scans with IST time + reason + kept punches.
+- New screen /rectified-punches (frontend/app/rectified-punches.tsx): firm chips (/companies), month prev/next, summary card, per-day cards. Sidebar: Utility → "Rectified Punches Audit" (AdminWebShell).
+- E2E: 4-scan burst → 4 received / 2 kept with reasons; UI screenshot PASS.

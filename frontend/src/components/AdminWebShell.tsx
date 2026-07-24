@@ -183,6 +183,8 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/users-log-report", label: "Users Log Report", icon: "document-text-outline" },
       // Iter 145 (user spec) — full punch audit trail with Excel download.
       { route: "/punch-log-report", label: "Punch Log Report", icon: "finger-print-outline" },
+      // Iter 277 — duplicate scans auto-ignored by the attendance engine.
+      { route: "/rectified-punches", label: "Rectified Punches Audit", icon: "shield-checkmark-outline" },
       // Iter 153 — handwritten sheet OCR reconciliation (MIS).
       { route: "/sheet-verification", label: "Sheet Verification (OCR)", icon: "document-attach-outline" },
       // Iter 155 — full DB backup (screen itself is super-admin gated).

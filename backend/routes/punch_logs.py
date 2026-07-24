@@ -434,3 +434,97 @@ async def punch_logs_xlsx(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+# ---------------------------------------------------------------------------
+# Iter 277 (user request) — "Rectified Punches" audit: which duplicate /
+# rapid scans were auto-ignored per employee per day, and why.
+# ---------------------------------------------------------------------------
+@router.get("/attendance/rectified-punches/{company_id}/{month}")
+async def rectified_punches(
+    company_id: str,
+    month: str,
+    authorization: Optional[str] = Header(None),
+):
+    from datetime import datetime, timedelta
+
+    from server import (
+        dedupe_rapid_punches,
+        dedupe_same_machine_punches,
+        merge_out_in_bounces,
+    )
+
+    admin = await get_user_from_token(authorization)
+    if admin.get("role") not in ("super_admin", "sub_admin", "company_admin"):
+        raise HTTPException(403, "Admin only")
+    if admin.get("role") == "company_admin":
+        company_id = admin.get("company_id")
+    if admin.get("role") == "sub_admin" and not sub_admin_can_touch_company(admin, company_id):
+        raise HTTPException(403, "Not authorised for this firm")
+
+    emp_map: Dict[str, Dict[str, Any]] = {}
+    async for u in db.users.find(
+        {"company_id": company_id, "role": "employee"},
+        {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1},
+    ):
+        emp_map[u["user_id"]] = u
+
+    by_user_day: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+    async for r in db.attendance.find(
+        {"user_id": {"$in": list(emp_map.keys())},
+         "date": {"$gte": f"{month}-01", "$lte": f"{month}-31"},
+         "status": "approved"},
+        {"_id": 0, "user_id": 1, "date": 1, "kind": 1, "at": 1, "source": 1},
+    ).sort([("user_id", 1), ("at", 1)]):
+        by_user_day.setdefault(r["user_id"], {}).setdefault(r["date"], []).append(r)
+
+    def _ist(at: Any) -> str:
+        try:
+            dt = datetime.fromisoformat(str(at).replace("Z", "+00:00"))
+            return (dt + timedelta(hours=5, minutes=30)).strftime("%H:%M:%S")
+        except Exception:
+            return str(at or "")
+
+    def _stage(punches, fn, args, reason, dropped):
+        kept = fn(punches, *args)
+        kept_ids = {id(p) for p in kept}
+        for p in punches:
+            if id(p) not in kept_ids:
+                dropped.append({
+                    "time": _ist(p.get("at")),
+                    "kind": (p.get("kind") or "").upper(),
+                    "source": p.get("source") or "",
+                    "reason": reason,
+                })
+        return kept
+
+    rows: List[Dict[str, Any]] = []
+    total_dropped = 0
+    for uid, days in by_user_day.items():
+        emp = emp_map.get(uid) or {}
+        for date_s in sorted(days.keys()):
+            raw = days[date_s]
+            dropped: List[Dict[str, Any]] = []
+            kept = _stage(raw, dedupe_rapid_punches, (30,),
+                          "Double-scan within 30 seconds", dropped)
+            kept = _stage(kept, dedupe_same_machine_punches, (15,),
+                          "Duplicate same-direction punch within 15 min", dropped)
+            kept = _stage(kept, merge_out_in_bounces, (60,),
+                          "OUT-IN bounce within 60 seconds (device stutter)", dropped)
+            if not dropped:
+                continue
+            total_dropped += len(dropped)
+            rows.append({
+                "user_id": uid,
+                "name": emp.get("name") or "",
+                "employee_code": emp.get("employee_code") or "",
+                "date": date_s,
+                "raw_count": len(raw),
+                "kept_count": len(kept),
+                "kept": [{"time": _ist(p.get("at")),
+                          "kind": (p.get("kind") or "").upper()} for p in kept],
+                "dropped": dropped,
+            })
+    rows.sort(key=lambda r: (r["date"], r["name"]))
+    return {"month": month, "days_affected": len(rows),
+            "punches_ignored": total_dropped, "rows": rows}
