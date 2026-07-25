@@ -15263,6 +15263,7 @@ class ComplianceSalaryRunCreate(BaseModel):
 async def _compute_compliance_run(
     admin: dict,
     payload: ComplianceSalaryRunCreate,
+    prev_rows: Optional[Dict[str, dict]] = None,
 ) -> dict:
     """Shared compute path for compliance salary runs. Mirrors the base
     salary run pipeline (same attendance stats + policy merge) but uses
@@ -15585,6 +15586,22 @@ async def _compute_compliance_run(
         if not _pm_202.get("compliance_ot_include", True):
             stats = dict(stats)
             stats["ot_hours"] = 0.0
+        # Iter 297 (user directive) — NON-DESTRUCTIVE REPROCESS: when the
+        # month was already processed, the admin's previously ENTERED
+        # days are KEPT (never reset to zero). The money fields are
+        # recalculated from those preserved days with the current
+        # parameters. Imported-sheet runs keep the sheet as the source.
+        _prev = (prev_rows or {}).get(emp["user_id"]) \
+            if not payload.use_imported_sheet else None
+        if _prev is not None:
+            _ppd = float(_prev.get("present_days") or 0.0)
+            stats = dict(stats)
+            stats["present_days"] = round(_ppd * 2) / 2.0
+            stats["effective_present"] = _ppd
+            stats["half_days"] = 0
+            stats["ot_hours"] = float(_prev.get("ot_hours") or 0.0)
+            if _prev.get("duty_hours") is not None:
+                stats["duty_hours"] = float(_prev.get("duty_hours") or 0.0)
         _ff = firm_stat_flags.get(emp.get("company_id")) or {"pf": False, "esic": False}
         # Iter 178 — state-wise PT from the firm's compliance policy.
         _fcp = (company_doc.get("compliance_policy") or {}) if company_doc else {}
@@ -15603,6 +15620,18 @@ async def _compute_compliance_run(
             row["other_deduction"] = _ded
             row["total_deduction"] = round(float(row.get("total_deduction") or 0) + _ded, 2)
             row["net"] = round(float(row.get("net") or 0) - _ded, 2)
+        # Iter 297 — reprocess also keeps the manually ENTERED "Other
+        # Deduction" from the previous run (default is 0 → any value was
+        # typed by the admin).
+        if _prev is not None and not _am and \
+                float(_prev.get("other_deduction") or 0) > 0:
+            _pod = round(float(_prev.get("other_deduction") or 0), 2)
+            row["other_deduction_head"] = (
+                _prev.get("other_deduction_head") or "Other")
+            row["other_deduction"] = _pod
+            row["total_deduction"] = round(
+                float(row.get("total_deduction") or 0) + _pod, 2)
+            row["net"] = round(float(row.get("net") or 0) - _pod, 2)
         row["company_id"] = emp.get("company_id")
         row["company_name"] = company_doc.get("name")
         # Iter 85 — Apply the firm's Compliance-Allowances toggles.
@@ -15806,8 +15835,30 @@ async def create_compliance_salary_run(
                    "employee group — it cannot be processed again. Use Unlock "
                    "Request to de-finalize first.",
         )
-    run = await _compute_compliance_run(admin, payload)
+    # Iter 297 (user directive) — NON-DESTRUCTIVE REPROCESS: when a draft
+    # run already exists for this firm + month + group, its rows are
+    # passed into the compute so the previously ENTERED days / manual
+    # deductions are KEPT (updated in place — never reset to zero).
+    _prev_run = await db.compliance_salary_runs.find_one(
+        {
+            "month": payload.month,
+            "company_id": _gate_cid,
+            "employee_type": (
+                {"$regex": f"^{re.escape(_grp0)}$", "$options": "i"} if _grp0
+                else {"$in": [None, ""]}
+            ),
+            "finalized": {"$ne": True},
+        },
+        {"_id": 0, "rows": 1},
+        sort=[("generated_at", -1)],
+    )
+    _prev_rows: Dict[str, dict] = {
+        r.get("user_id"): r for r in ((_prev_run or {}).get("rows") or [])
+    }
+    run = await _compute_compliance_run(admin, payload, prev_rows=_prev_rows)
     run["run_id"] = f"csrun_{uuid.uuid4().hex[:12]}"
+    if _prev_rows:
+        run["reprocessed"] = True
     # Advance Management — auto-deduct active advance EMIs / single-shot
     # recoveries into the rows (idempotent per month+process).
     from routes.advances import apply_advance_recovery
@@ -15826,7 +15877,9 @@ async def create_compliance_salary_run(
     _grp = (payload.employee_type or "").strip()
     await db.compliance_salary_runs.delete_many({
         "month": payload.month,
-        "company_id": payload.company_id,
+        # Iter 297 — scope by the EFFECTIVE firm (company_admin's own firm
+        # when the payload omits company_id) so old drafts never pile up.
+        "company_id": _gate_cid,
         "employee_type": (
             {"$regex": f"^{re.escape(_grp)}$", "$options": "i"} if _grp
             else {"$in": [None, ""]}
@@ -20154,6 +20207,25 @@ async def create_actual_salary_process(
                    "it cannot be processed again. Unlock (de-finalize) it first.",
         )
 
+    # Iter 297 (user directive) — NON-DESTRUCTIVE REPROCESS: when the
+    # month was already processed for this firm, the newest draft run's
+    # ENTERED data (P Days / P Hours / Adv / TDS / manual OT amount) is
+    # carried into the new run — reprocess updates the existing data
+    # instead of starting from zero.
+    _prev_run_a = await db.salary_runs.find_one(
+        {
+            "run_type": "actual",
+            "month": payload.month,
+            "company_id": company_id,
+            "finalized": {"$ne": True},
+        },
+        {"_id": 0, "rows": 1},
+        sort=[("generated_at", -1)],
+    )
+    _prev_rows_a: Dict[str, dict] = {
+        r.get("user_id"): r for r in ((_prev_run_a or {}).get("rows") or [])
+    }
+
     # Iter 98 — OT calculation basis (basic | gross) from Firm Master →
     # Salary Process Settings. Stored on the run so row edits re-compute
     # with the same basis.
@@ -20367,6 +20439,16 @@ async def create_actual_salary_process(
         # Iter 93 — P Days only in half-day steps (.0 or .5), no other decimals.
         p_days = round(p_days * 2) / 2
 
+        # Iter 297 — reprocess KEEPS the previously entered days & manual
+        # edits from the old run's row for this employee.
+        _prev_a = _prev_rows_a.get(emp["user_id"])
+        if _prev_a is not None:
+            p_days = min(
+                round(float(_prev_a.get("p_days") or 0.0) * 2) / 2,
+                float(max_days),
+            )
+            p_hours = float(_prev_a.get("p_hours") or 0.0)
+
         row = {
             "user_id": emp["user_id"],
             "employee_code": emp.get("employee_code"),
@@ -20393,6 +20475,13 @@ async def create_actual_salary_process(
             "epf": (compliance_by_user.get(emp["user_id"]) or {}).get("epf", 0.0),
             "esi": (compliance_by_user.get(emp["user_id"]) or {}).get("esi", 0.0),
         }
+        # Iter 297 — manual money edits carried over (defaults are 0, so
+        # any non-zero value was typed by the admin in the grid).
+        if _prev_a is not None:
+            row["adv"] = float(_prev_a.get("adv") or 0.0)
+            row["tds"] = float(_prev_a.get("tds") or 0.0)
+            if _prev_a.get("w_basic_override") is not None:
+                row["w_basic_override"] = float(_prev_a["w_basic_override"])
         rows.append(_actual_salary_row_compute(row, month_days, ot_basis=_ot_basis))
 
     # Advance Management — auto-deduct active advance EMIs / single-shot

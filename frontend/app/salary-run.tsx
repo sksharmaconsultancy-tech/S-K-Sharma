@@ -293,7 +293,9 @@ export default function ActualSalaryProcessScreen() {
             return;
           }
           const ok = await confirmYesNo(
-            "This salary was already processed for this firm & month.\nDo you want to REPROCESS this salary again?",
+            "Do you want to REPROCESS the salary for this month?\n\n" +
+            "YES → your previously ENTERED days & edits are KEPT — the " +
+            "existing data is updated, not reset to zero.",
           );
           if (!ok) {
             setBusy(false);

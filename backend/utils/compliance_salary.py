@@ -476,6 +476,14 @@ def compute_compliance_row(
     floor_pct = _num(cfg.get("stat_wage_floor_pct"), 50.0)
     stat_wage_base = max(basic, gross_paid * (floor_pct / 100.0))
 
+    # Iter 297 (user bug) — ZERO-DAY GUARD: an employee with NO payable
+    # days / hours / gross this month must have NO statutory deductions
+    # at all (previously the master salary structure leaked a full-month
+    # Basic into the ESIC calc, showing ESIC amounts on 0-day rows).
+    _zero_pay = (
+        effective_present <= 0 and duty_hours <= 0 and gross_paid <= 0
+    )
+
     # Iter 85 — Master (full-month) values.
     # These are the FULL monthly figures ignoring present days — used
     # to populate the "Master Salary" columns in the Compliance grid so
@@ -504,6 +512,7 @@ def compute_compliance_row(
         firm_pf_enabled
         and user.get("pf_applicable") is not False
         and pf_basic_override > 0
+        and not _zero_pay  # Iter 297 — no PF on a zero-day / zero-pay month
     )
     if pf_applicable:
         if salary_mode == "monthly":
@@ -563,6 +572,8 @@ def compute_compliance_row(
         firm_esic_enabled
         and user.get("esic_applicable") is not False
         and _esic_elig_basic <= cfg["esic_gross_threshold"]
+        # Iter 297 (user bug) — days ZERO in the front window ⇒ ESIC = 0.
+        and not _zero_pay
     )
     if esic_applicable:
         # Iter 130 (user directive) — ESIC is calculated ON BASIC SALARY
@@ -609,6 +620,12 @@ def compute_compliance_row(
         if "pf" in s or "esi" in s or "provident" in s:
             continue
         master_deduction += _num(r.get("amount"), 0.0)
+
+    # Iter 297 — zero-day / zero-pay month ⇒ every deduction is 0.
+    if _zero_pay:
+        pt = 0.0
+        tds = 0.0
+        master_deduction = 0.0
 
     total_deduction = pf_employee + esic_employee + pt + tds + master_deduction
     net = gross_paid - total_deduction

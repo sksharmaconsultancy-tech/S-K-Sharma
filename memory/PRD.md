@@ -1468,3 +1468,13 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Iter 295 fixes: employee sessions 90d sliding (EMPLOYEE_SESSION_TTL_HOURS, _session_ttl_hours_for_role in server.py; admins stay 12h), bulk-import double-confirm modals, bulk-import Resign Date → exit_date+employment_status interlink, sync-engine CompanyPicker dropdown, Recently Opened moved to Dashboard (OverviewPremium), Auto Shift Detection flag honored in _is_shift_open, geofence GPS-accuracy buffer (client getAccurateFix watch-based fix in src/utils/accurateLocation.ts + server cap 100m via gps_accuracy_m), PWA blank-page fix (deploy keeps old bundles; nginx already had no-cache index.html), repair-punches show punch date.
 - Deploys: deploy_vps_iter294.sh (served via /api/temp-code-bundle?kind=script). User deployed 294 and 295 successfully to smartpayrolling.com.
 - Pending: WhatsApp API integration, legacy payroll DB import, SQL sync, server.py refactor.
+
+## Session Iter 297 (2026-06 fork) — Salary Reprocess + ESIC zero-day fixes
+- NON-DESTRUCTIVE REPROCESS (user directive "reprocess = update, not start from zero"):
+  - POST /admin/compliance-salary-runs: fetches newest non-finalized draft for month+firm+group and passes rows into _compute_compliance_run(prev_rows=...). Per employee: preserved present_days/ot_hours/duty_hours drive the recompute; manual other_deduction(+head) carried over. delete_many now scoped by _gate_cid (company_admin fix). run["reprocessed"]=True flag.
+  - POST /admin/actual-salary-process: fetches newest non-finalized draft for month+firm; preserves p_days (capped at max_p_days), p_hours, adv, tds, w_basic_override per row; money recomputed via _actual_salary_row_compute.
+  - Frontend confirm text updated on salary-run.tsx + compliance-salary-run.tsx: "Do you want to REPROCESS... YES → entered days & edits are KEPT".
+- ESIC ZERO-DAY FIX (utils/compliance_salary.py): _zero_pay guard (effective_present<=0 & duty_hours<=0 & gross_paid<=0) → pf_applicable/esic_applicable False + pt/tds/master_deduction zeroed. Root cause: salary_structure_compliance master rows returned full-month basic regardless of days → ESIC on 0-day rows.
+- E2E verified on live backend (Kankani, 2026-05): compliance days 7.5 + ded ₹111 preserved on reprocess, 108 zero-day rows all ESIC=0, actual p_days 9.5/adv 222/tds 33 preserved. Test runs cleaned from DB.
+- deploy_vps_iter297.sh created; temp_bundle.py kind=script now serves deploy297.sh.
+- Pending: WhatsApp API integration, legacy payroll DB import, SQL sync, server.py refactor.
