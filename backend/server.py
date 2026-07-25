@@ -1434,15 +1434,18 @@ def _shift_duration_hours(shift: Optional[dict]) -> Optional[float]:
 
 def _is_shift_open(policy: Optional[dict]) -> bool:
     """Iter 227 — True when the firm runs OPEN / ROTATIONAL shifts (daily
-    shift auto-detected from the first IN punch). Honours BOTH controls:
-    the top-level ``shift_mode`` and the Policy Master sub-point
-    ``shift_type`` (rotational / open)."""
+    shift auto-detected from the first IN punch). Honours the top-level
+    ``shift_mode``, the Policy Master sub-point ``shift_type``
+    (rotational / open) AND — Iter 295 (user bug: toggle had no effect) —
+    the Policy Master ``auto_shift_detection`` switch, so turning it ON in
+    the Attendance Master enables detection even with a fixed shift type."""
     p = policy or {}
     if str(p.get("shift_mode") or "").lower() == "open":
         return True
-    return str(
-        (p.get("policy_master") or {}).get("shift_type") or ""
-    ).lower() in ("rotational", "open")
+    pm = p.get("policy_master") or {}
+    if pm.get("auto_shift_detection") is True:
+        return True
+    return str(pm.get("shift_type") or "").lower() in ("rotational", "open")
 
 
 def resolve_shift_for_user(
