@@ -22,6 +22,23 @@ import { useUnreadNotifications } from "@/src/hooks/useUnreadNotifications";
 import { usePrimaryInbox } from "@/src/hooks/usePrimaryInbox";
 import { useTheme } from "@/src/context/ThemeContext";
 import { colors, radius, spacing, type, isDarkTheme, DARK_THEME_ID } from "@/src/theme";
+import AiAssistant from "@/src/components/AiAssistant";
+import { useT, useLang, setLang } from "@/src/i18n";
+
+// Iter 294 — Pinned favourites + recently-opened screens (web localStorage).
+const FAV_KEY = "sksharma.nav.favs.v1";
+const RECENT_KEY = "sksharma.nav.recent.v1";
+function readNavList(k: string): string[] {
+  if (Platform.OS !== "web" || typeof localStorage === "undefined") return [];
+  try {
+    const v = JSON.parse(localStorage.getItem(k) || "[]");
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  } catch { return []; }
+}
+function writeNavList(k: string, v: string[]) {
+  if (Platform.OS !== "web" || typeof localStorage === "undefined") return;
+  try { localStorage.setItem(k, JSON.stringify(v.slice(0, 8))); } catch { /* noop */ }
+}
 
 /**
  * Formats an ISO timestamp as a "Xs / Xm / Xh ago" chip.  Used by the
@@ -126,6 +143,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/reports?tab=salary", label: "Actual Salary Report", icon: "cash-outline" },
       { route: "/reports?tab=compliance", label: "Compliance Report", icon: "shield-checkmark-outline" },
       { route: "/bank-sheet", label: "Bank Sheet Format", icon: "card-outline" },
+      { route: "/bank-transfer", label: "Bank Transfer Files", icon: "business-outline" },
       { route: "/leave-report", label: "Leave Report", icon: "calendar-number-outline" },
       { route: "/comp-off-ledger", label: "Comp-Off Ledger", icon: "time-outline" },
       { route: "/statutory-reports", label: "Full & Final Settlement", icon: "receipt-outline" },
@@ -172,6 +190,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/statutory-reports", label: "MIS Reports", icon: "receipt-outline" },
       { route: "/master-data-report", label: "Master Data Report", icon: "server-outline" },
       { route: "/hr-letters", label: "HR Letters", icon: "document-text-outline" },
+      { route: "/split-view", label: "Split View Compare", icon: "browsers-outline" },
       { route: "/report-formats", label: "PDF Report Formats", icon: "options-outline" },
     ],
   },
@@ -211,6 +230,7 @@ export const NAV_SUPER: NavItem[] = [
     children: [
       { route: "/biometric-devices", label: "Biometric Devices (ZKTeco)", icon: "finger-print-outline" },
       { route: "/sync-engine", label: "Device Sync", icon: "sync-outline" },
+      { route: "/bi-feed", label: "BI & Data Feed (Power BI / Excel)", icon: "bar-chart-outline" },
       { route: "/database-viewer", label: "Database Viewer / Editor", icon: "server-outline" },
       { route: "/portal-automation", label: "WhatsApp Linking", icon: "logo-whatsapp" },
       { route: "/attendance-email", label: "Email Automation", icon: "mail-outline" },
@@ -275,6 +295,8 @@ function NavRow({
   fullPath,
   onNavigate,
   depth = 0,
+  favSet,
+  onToggleFav,
 }: {
   item: NavItem;
   activeRoute: string;
@@ -282,7 +304,10 @@ function NavRow({
   fullPath: string;
   onNavigate: (route: string) => void;
   depth?: number;
+  favSet?: Set<string>;
+  onToggleFav?: (route: string) => void;
 }) {
+  const tr = useT();
   const hasChildren = !!(item.children && item.children.length > 0);
   // Iter 83-fix — Match FULL route (including ``?tab=xxx``) so sibling
   // sub-items that share the same base path (e.g. /reports?tab=salary vs
@@ -350,8 +375,21 @@ function NavRow({
             textTransform: "none",
           }}
         >
-          {item.label}
+          {tr(item.label)}
         </Text>
+        {!hasChildren && item.route && onToggleFav ? (
+          <Pressable
+            hitSlop={6}
+            onPress={(e: any) => { e?.stopPropagation?.(); onToggleFav(item.route!); }}
+            testID={`fav-${testId}`}
+          >
+            <Ionicons
+              name={favSet?.has(item.route) ? "star" : "star-outline"}
+              size={13}
+              color={favSet?.has(item.route) ? "#F59E0B" : "rgba(148,163,184,0.4)"}
+            />
+          </Pressable>
+        ) : null}
         {hasChildren ? (
           <Ionicons
             name={open ? "chevron-down" : "chevron-forward"}
@@ -368,8 +406,11 @@ function NavRow({
               item={child}
               activeRoute={activeRoute}
               pathname={pathname}
+              fullPath={fullPath}
               onNavigate={onNavigate}
               depth={depth + 1}
+              favSet={favSet}
+              onToggleFav={onToggleFav}
             />
           ))}
         </View>
@@ -427,6 +468,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
       { route: "/reports?tab=salary", label: "Actual Salary Report", icon: "cash-outline" },
       { route: "/reports?tab=compliance", label: "Compliance Report", icon: "shield-checkmark-outline" },
       { route: "/bank-sheet", label: "Bank Sheet Format", icon: "card-outline" },
+      { route: "/bank-transfer", label: "Bank Transfer Files", icon: "business-outline" },
       { route: "/leave-report", label: "Leave Report", icon: "calendar-number-outline" },
       { route: "/comp-off-ledger", label: "Comp-Off Ledger", icon: "time-outline" },
       { route: "/statutory-reports", label: "Full & Final Settlement", icon: "receipt-outline" },
@@ -555,10 +597,29 @@ export default function AdminWebShell({ children }: Props) {
   // without re-entering credentials).
   const [logoutModal, setLogoutModal] = React.useState(false);
   // Iter 89 — Notifications bell + unread badge for the admin header.
-  const { unreadCount: unreadNotifCount } = useUnreadNotifications();
+  const { unreadCount: unreadNotifCount, items: notifItems, markAllSeen } = useUnreadNotifications();
   // Iter 180 — global menu search + dark mode toggle.
   const [navQuery, setNavQuery] = React.useState("");
   const { themeId, setThemeId } = useTheme();
+  // Iter 294 — productivity suite: favourites, recent screens, AI panel,
+  // notification centre, keyboard shortcuts, language + data-wide search.
+  const tr = useT();
+  const lang = useLang();
+  const [favs, setFavs] = React.useState<string[]>(() => readNavList(FAV_KEY));
+  const [recent, setRecent] = React.useState<string[]>(() => readNavList(RECENT_KEY));
+  const [aiOpen, setAiOpen] = React.useState(false);
+  const [notifOpen, setNotifOpen] = React.useState(false);
+  const [helpOpen, setHelpOpen] = React.useState(false);
+  const [gsData, setGsData] = React.useState<{ employees: any[]; companies: any[] } | null>(null);
+  const searchInputRef = React.useRef<TextInput | null>(null);
+  const favSet = React.useMemo(() => new Set(favs), [favs]);
+  const toggleFav = React.useCallback((route: string) => {
+    setFavs((prev) => {
+      const next = prev.includes(route) ? prev.filter((r) => r !== route) : [route, ...prev];
+      writeNavList(FAV_KEY, next);
+      return next;
+    });
+  }, []);
 
   // Show the desktop portal shell ONLY on a wide web viewport (≥ 960px).
   // On a phone-sized web viewport (mobile browser / installed PWA on a
@@ -795,13 +856,83 @@ export default function AdminWebShell({ children }: Props) {
     return !allowed.has(hit);
   }, [role, nav, pathname]);
 
+  // Iter 294 — track recently-opened screens (web desktop only).
+  useEffect(() => {
+    if (Platform.OS !== "web" || !isWebDesktop) return;
+    if (!pathname || pathname === "/" || pathname === "/firm-select" || pathname === "/portal-dashboard") return;
+    const hit = flatNav.find((n) => (n.route || "").split("?")[0] === pathname);
+    if (!hit?.route) return;
+    setRecent((prev) => {
+      const next = [hit.route!, ...prev.filter((r) => r !== hit.route)].slice(0, 6);
+      writeNavList(RECENT_KEY, next);
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname, isWebDesktop]);
+
+  // Iter 294 — ERP keyboard shortcuts (web only). Ctrl+K search,
+  // Ctrl+Shift+A AI assistant, ? help, g-then-key navigation.
+  useEffect(() => {
+    if (Platform.OS !== "web" || !isWebDesktop) return;
+    let lastG = 0;
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (document.activeElement?.tagName || "").toLowerCase();
+      const typing = tag === "input" || tag === "textarea" || tag === "select";
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        (searchInputRef.current as any)?.focus?.();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        setAiOpen((v) => !v);
+        return;
+      }
+      if (typing) return;
+      if (e.key === "?") { setHelpOpen((v) => !v); return; }
+      if (e.key === "Escape") { setHelpOpen(false); setNotifOpen(false); return; }
+      if (e.key.toLowerCase() === "g") { lastG = Date.now(); return; }
+      if (Date.now() - lastG < 1500) {
+        const map: Record<string, string> = {
+          d: "/portal-dashboard", e: "/admin", a: "/attendance-grid",
+          p: "/salary-run", r: "/reports?tab=salary", c: "/compliance-reports",
+          b: "/bank-transfer", m: "/masters",
+        };
+        const r = map[e.key.toLowerCase()];
+        if (r) router.push(r as any);
+        lastG = 0;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isWebDesktop]);
+
+  // Iter 294 — data-wide global search (employees + firms) with debounce.
+  useEffect(() => {
+    const q = navQuery.trim();
+    if (q.length < 2) { setGsData(null); return; }
+    const t = setTimeout(() => {
+      api<{ employees: any[]; companies: any[] }>(
+        `/admin/global-search?q=${encodeURIComponent(q)}`)
+        .then(setGsData)
+        .catch(() => setGsData(null));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [navQuery]);
+
+  // Iter 294 — embed mode (?embed=1): bare children for Split View iframes.
+  const isEmbed =
+    Platform.OS === "web" && typeof window !== "undefined" &&
+    window.location.search.includes("embed=1");
+
   // IMPORTANT (Iter 197) — the Stack navigator lives inside {children}. If
   // we return it bare in one branch and nested inside shell chrome in
   // another, React REMOUNTS the navigator when auth finishes bootstrapping,
   // which RESETS navigation state to the index route and clobbers direct
   // URLs (deep links like /salary-run bounced to /portal-dashboard). Render
   // a skeleton with IDENTICAL nesting positions so children never remount.
-  if (!isWebDesktop || !user || isBareRoute) {
+  if (!isWebDesktop || !user || isBareRoute || isEmbed) {
     return (
       <View style={{ flex: 1 }}>
         {null}
@@ -828,6 +959,15 @@ export default function AdminWebShell({ children }: Props) {
       const r = (item.route || "").split("?")[0];
       return pathname === r || pathname.startsWith(`${r}/`);
     })?.route || "/(tabs)";
+
+  const fullPath =
+    Platform.OS === "web" && typeof window !== "undefined"
+      ? pathname + (window.location.search || "").replace(/[?&]embed=1/, "")
+      : pathname;
+
+  const navigateTo = (route: string) => {
+    router.push((route === "/(tabs)" ? "/" : route) as any);
+  };
 
   return (
     <View style={styles.shell} testID="admin-web-shell">
@@ -897,18 +1037,61 @@ export default function AdminWebShell({ children }: Props) {
           showsVerticalScrollIndicator={true}
           persistentScrollbar={true}
         >
+          {/* Iter 294 — Pinned favourites + recently-opened sections. */}
+          {favs.length > 0 ? (
+            <>
+              <Text style={styles.navSection}>★ {tr("Favourites")}</Text>
+              {favs.map((r) => {
+                const item = flatNav.find((n) => n.route === r);
+                if (!item) return null;
+                return (
+                  <NavRow
+                    key={`fav-${r}`}
+                    item={item}
+                    activeRoute={activeRoute}
+                    pathname={pathname}
+                    fullPath={fullPath}
+                    onNavigate={navigateTo}
+                    favSet={favSet}
+                    onToggleFav={toggleFav}
+                  />
+                );
+              })}
+              <View style={styles.divider} />
+            </>
+          ) : null}
+          {recent.length > 0 ? (
+            <>
+              <Text style={styles.navSection}>🕘 {tr("Recently Opened")}</Text>
+              {recent.slice(0, 4).map((r) => {
+                const item = flatNav.find((n) => n.route === r);
+                if (!item) return null;
+                return (
+                  <NavRow
+                    key={`rec-${r}`}
+                    item={item}
+                    activeRoute={activeRoute}
+                    pathname={pathname}
+                    fullPath={fullPath}
+                    onNavigate={navigateTo}
+                    favSet={favSet}
+                    onToggleFav={toggleFav}
+                  />
+                );
+              })}
+              <View style={styles.divider} />
+            </>
+          ) : null}
           {gatedNav.map((item, idx) => (
             <NavRow
               key={item.route || `${item.label}-${idx}`}
               item={item}
               activeRoute={activeRoute}
               pathname={pathname}
-              onNavigate={(route) => {
-                // Iter 126d — "/(tabs)" group push is flaky on static web
-                // exports (REPLACE not handled). Route via "/" — index
-                // redirects logged-in admins to the dashboard reliably.
-                router.push((route === "/(tabs)" ? "/" : route) as any);
-              }}
+              fullPath={fullPath}
+              onNavigate={navigateTo}
+              favSet={favSet}
+              onToggleFav={toggleFav}
             />
           ))}
         </ScrollView>
@@ -946,8 +1129,9 @@ export default function AdminWebShell({ children }: Props) {
             <View style={styles.gsBox}>
               <Ionicons name="search-outline" size={14} color={colors.onSurfaceTertiary} />
               <TextInput
+                ref={searchInputRef as any}
                 style={styles.gsInput}
-                placeholder="Search menu… (clients, payroll, reports)"
+                placeholder={tr("Search menu… (clients, payroll, reports)")}
                 placeholderTextColor={colors.onSurfaceTertiary}
                 value={navQuery}
                 onChangeText={setNavQuery}
@@ -977,7 +1161,48 @@ export default function AdminWebShell({ children }: Props) {
                       <Text style={styles.gsItemTxt}>{n.label}</Text>
                     </Pressable>
                   ))}
-                {flatNav.filter((n) => n.label.toLowerCase().includes(navQuery.trim().toLowerCase())).length === 0 ? (
+                {/* Iter 294 — data-wide results: employees + firms. */}
+                {gsData?.employees?.length ? (
+                  <>
+                    <Text style={styles.gsSection}>EMPLOYEES</Text>
+                    {gsData.employees.map((e: any) => (
+                      <Pressable
+                        key={e.user_id}
+                        onPress={() => { setNavQuery(""); router.push("/admin" as any); }}
+                        style={({ hovered }: any) => [
+                          styles.gsItem, hovered && { backgroundColor: colors.surfaceTertiary }]}
+                        testID={`gs-emp-${e.employee_code}`}
+                      >
+                        <Ionicons name="person-outline" size={14} color="#22C55E" />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.gsItemTxt}>{e.name} · {e.employee_code}</Text>
+                          <Text style={styles.gsItemSub}>
+                            {[e.designation, e.firm_name].filter(Boolean).join(" — ")}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    ))}
+                  </>
+                ) : null}
+                {gsData?.companies?.length ? (
+                  <>
+                    <Text style={styles.gsSection}>FIRMS</Text>
+                    {gsData.companies.map((c: any) => (
+                      <Pressable
+                        key={c.company_id}
+                        onPress={() => { setNavQuery(""); router.push("/companies" as any); }}
+                        style={({ hovered }: any) => [
+                          styles.gsItem, hovered && { backgroundColor: colors.surfaceTertiary }]}
+                        testID={`gs-firm-${c.company_id}`}
+                      >
+                        <Ionicons name="business-outline" size={14} color="#F59E0B" />
+                        <Text style={styles.gsItemTxt}>{c.name}{c.code ? ` (${c.code})` : ""}</Text>
+                      </Pressable>
+                    ))}
+                  </>
+                ) : null}
+                {flatNav.filter((n) => n.label.toLowerCase().includes(navQuery.trim().toLowerCase())).length === 0 &&
+                 !gsData?.employees?.length && !gsData?.companies?.length ? (
                   <Text style={styles.gsEmpty}>No screens match “{navQuery.trim()}”</Text>
                 ) : null}
               </View>
@@ -1042,9 +1267,10 @@ export default function AdminWebShell({ children }: Props) {
                 ) : null}
               </Pressable>
             ) : null}
-            {/* Iter 89 — Notifications bell with unread badge. */}
+            {/* Iter 89 — Notifications bell — Iter 294: opens the
+                Notification Centre dropdown panel. */}
             <Pressable
-              onPress={() => router.push("/notifications" as any)}
+              onPress={() => setNotifOpen((v) => !v)}
               style={({ pressed }) => [
                 styles.notifBellBtn,
                 pressed && { opacity: 0.85 },
@@ -1064,6 +1290,15 @@ export default function AdminWebShell({ children }: Props) {
                   </Text>
                 </View>
               ) : null}
+            </Pressable>
+            {/* Iter 294 — Language toggle (English / हिंदी). */}
+            <Pressable
+              onPress={() => setLang(lang === "en" ? "hi" : "en")}
+              style={({ pressed }) => [styles.notifBellBtn, pressed && { opacity: 0.85 }]}
+              testID="web-lang-toggle"
+              hitSlop={6}
+            >
+              <Text style={styles.langTxt}>{lang === "en" ? "हिं" : "EN"}</Text>
             </Pressable>
             {/* Iter 180 — Dark / light mode toggle. */}
             <Pressable
@@ -1135,6 +1370,82 @@ export default function AdminWebShell({ children }: Props) {
           ) : null}
         </View>
       </View>
+
+      {/* Iter 294 — Notification Centre dropdown panel. */}
+      {notifOpen ? (
+        <View style={styles.notifPanel} testID="notif-panel">
+          <View style={styles.notifPanelHead}>
+            <Text style={styles.notifPanelTitle}>Notifications</Text>
+            <View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}>
+              <Pressable onPress={markAllSeen} hitSlop={6} testID="notif-mark-all">
+                <Text style={styles.notifPanelLink}>Mark all read</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => { setNotifOpen(false); router.push("/notifications" as any); }}
+                hitSlop={6}
+                testID="notif-view-all"
+              >
+                <Text style={styles.notifPanelLink}>View all</Text>
+              </Pressable>
+              <Pressable onPress={() => setNotifOpen(false)} hitSlop={6}>
+                <Ionicons name="close" size={16} color={colors.onSurfaceTertiary} />
+              </Pressable>
+            </View>
+          </View>
+          <ScrollView style={{ maxHeight: 360 }}>
+            {(notifItems || []).slice(0, 12).map((n: any, i: number) => (
+              <View key={n.notification_id || i} style={styles.notifRow}>
+                <Ionicons name="notifications-outline" size={15} color={colors.brandPrimary} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.notifRowTitle} numberOfLines={1}>
+                    {n.title || n.message || "Notification"}
+                  </Text>
+                  {n.title && n.message ? (
+                    <Text style={styles.notifRowMsg} numberOfLines={2}>{n.message}</Text>
+                  ) : null}
+                  <Text style={styles.notifRowAt}>
+                    {(n.created_at || "").slice(0, 16).replace("T", " ")}
+                  </Text>
+                </View>
+              </View>
+            ))}
+            {(notifItems || []).length === 0 ? (
+              <Text style={styles.gsEmpty}>No notifications yet.</Text>
+            ) : null}
+          </ScrollView>
+        </View>
+      ) : null}
+
+      {/* Iter 294 — Keyboard-shortcut help overlay ("?" to toggle). */}
+      {helpOpen ? (
+        <View style={styles.logoutOverlay} testID="shortcuts-modal">
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setHelpOpen(false)} />
+          <View style={styles.logoutModal}>
+            <Text style={styles.logoutModalTitle}>⌨️ {tr("Keyboard Shortcuts")}</Text>
+            {[
+              ["Ctrl + K", "Focus global search"],
+              ["Ctrl + Shift + A", "Toggle AI Assistant"],
+              ["g then d", "Go to Dashboard"],
+              ["g then e", "Go to Employee Master"],
+              ["g then a", "Go to Attendance Report"],
+              ["g then p", "Go to Salary Process"],
+              ["g then r", "Go to Salary Reports"],
+              ["g then b", "Go to Bank Transfer Files"],
+              ["g then m", "Go to Masters"],
+              ["?", "Show / hide this help"],
+              ["Esc", "Close panels"],
+            ].map(([k, d]) => (
+              <View key={k} style={styles.scRow}>
+                <View style={styles.scKey}><Text style={styles.scKeyTxt}>{k}</Text></View>
+                <Text style={styles.scDesc}>{d}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      {/* Iter 294 — AI Payroll Assistant (chat + voice). */}
+      <AiAssistant open={aiOpen} onToggle={setAiOpen} />
 
       {/* Iter 85 — Logout confirmation modal (Super/Sub admin only) */}
       {logoutModal ? (
@@ -1396,7 +1707,49 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 9,
   },
   gsItemTxt: { fontSize: 12.5, fontWeight: "600", color: colors.onSurface },
+  gsItemSub: { fontSize: 10.5, color: colors.onSurfaceTertiary, marginTop: 1 },
+  gsSection: {
+    fontSize: 9.5, fontWeight: "800", color: colors.onSurfaceTertiary,
+    letterSpacing: 0.6, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 3,
+  },
   gsEmpty: { fontSize: 11.5, color: colors.onSurfaceTertiary, padding: 12 },
+  // Iter 294 — sidebar section labels (Favourites / Recent).
+  navSection: {
+    fontSize: 9.5, fontWeight: "800", color: SB.muted, letterSpacing: 0.8,
+    paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4,
+  },
+  // Iter 294 — language toggle.
+  langTxt: { fontSize: 12, fontWeight: "800", color: colors.brandPrimary },
+  // Iter 294 — notification centre dropdown.
+  notifPanel: {
+    position: "absolute", top: 52, right: 120, width: 360,
+    backgroundColor: "#FFFFFF", borderRadius: 14, borderWidth: 1,
+    borderColor: colors.border, zIndex: 9500, paddingBottom: 6,
+    shadowColor: "#0F172A", shadowOpacity: 0.18, shadowRadius: 22,
+    shadowOffset: { width: 0, height: 10 },
+  },
+  notifPanelHead: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: 14, paddingVertical: 11, borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+  },
+  notifPanelTitle: { fontSize: 13.5, fontWeight: "800", color: "#1F2937" },
+  notifPanelLink: { fontSize: 11.5, fontWeight: "700", color: "#2563EB" },
+  notifRow: {
+    flexDirection: "row", gap: 10, paddingHorizontal: 14, paddingVertical: 9,
+    borderBottomWidth: 1, borderBottomColor: "#F1F5F9",
+  },
+  notifRowTitle: { fontSize: 12.5, fontWeight: "700", color: "#1F2937" },
+  notifRowMsg: { fontSize: 11.5, color: "#64748B", marginTop: 1 },
+  notifRowAt: { fontSize: 10, color: "#94A3B8", marginTop: 2 },
+  // Iter 294 — keyboard shortcuts modal rows.
+  scRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 8 },
+  scKey: {
+    minWidth: 120, backgroundColor: "#F1F5F9", borderRadius: 6,
+    paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1, borderColor: "#E2E8F0",
+  },
+  scKeyTxt: { fontSize: 11.5, fontWeight: "800", color: "#334155", textAlign: "center" },
+  scDesc: { fontSize: 12.5, color: "#475569", flex: 1 },
   topRight: { flexDirection: "row", alignItems: "center", gap: 12 },
   envTxt: {
     color: colors.brandPrimary,

@@ -35,6 +35,8 @@ type Device = {
   online?: boolean;
   locked?: boolean;            // Iter 261 — portal-side lock
   gmt_offset?: string;         // Iter 263 — machine time zone (e.g. +05:30)
+  brand?: string;              // Iter 294 — zkteco | essl | matrix | mantra
+  webhook_key?: string;        // Iter 294 — JSON webhook secret (matrix/mantra)
   last_source_ip?: string;     // SEC-002 — last IP the machine pushed from
   ip_lock?: boolean;           // SEC-002 — reject other IPs when true
   ip_allowlist?: string[];     // SEC-002 — allowed source IPs
@@ -66,8 +68,20 @@ const emptyDraft = {
   company_id: "",
   location: "",
   gmt_offset: "+05:30", // Iter 263 — machine time zone (India default)
+  brand: "zkteco",      // Iter 294 — device brand
   enabled: true,
 };
+
+// Iter 294 — supported device brands. ZKTeco & eSSL use the same
+// iClock/ADMS push protocol; Matrix COSEC & Mantra push JSON to a
+// per-device webhook URL (shown after saving).
+const BRANDS: { key: string; label: string; adms: boolean }[] = [
+  { key: "zkteco", label: "ZKTeco", adms: true },
+  { key: "essl", label: "eSSL", adms: true },
+  { key: "matrix", label: "Matrix COSEC", adms: false },
+  { key: "mantra", label: "Mantra", adms: false },
+  { key: "other", label: "Other", adms: false },
+];
 
 // Iter 263 — parse '+05:30' / '5:30' / '-4' / '5.5' into signed minutes.
 function parseGmtMinutes(raw?: string | null): number {
@@ -169,6 +183,7 @@ export default function BiometricDevicesScreen() {
       company_id: d.company_id || "",
       location: d.location || "",
       gmt_offset: d.gmt_offset || "+05:30",
+      brand: d.brand || "zkteco",
       enabled: d.enabled,
     });
     setEditorOpen(true);
@@ -194,6 +209,7 @@ export default function BiometricDevicesScreen() {
             company_id: isSuper ? draft.company_id : undefined,
             location: draft.location.trim() || undefined,
             gmt_offset: draft.gmt_offset.trim() || "+05:30",
+            brand: draft.brand,
             enabled: draft.enabled,
           },
         });
@@ -207,6 +223,7 @@ export default function BiometricDevicesScreen() {
             company_id: draft.company_id || undefined,
             location: draft.location.trim() || undefined,
             gmt_offset: draft.gmt_offset.trim() || "+05:30",
+            brand: draft.brand,
             enabled: draft.enabled,
           },
         });
@@ -805,6 +822,29 @@ export default function BiometricDevicesScreen() {
               </>
             ) : null}
 
+            {/* Iter 294 — device brand. */}
+            <Text style={styles.lbl}>Device Brand</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 4 }}>
+              {BRANDS.map((b) => (
+                <Pressable
+                  key={b.key}
+                  onPress={() => setDraft({ ...draft, brand: b.key })}
+                  style={[styles.field, { paddingVertical: 8, paddingHorizontal: 12, width: undefined },
+                    draft.brand === b.key && { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary }]}
+                  testID={`d-brand-${b.key}`}
+                >
+                  <Text style={[styles.fieldTxt, draft.brand === b.key && { color: colors.brandPrimary, fontWeight: "800" }]}>
+                    {b.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.hint}>
+              {BRANDS.find((b) => b.key === draft.brand)?.adms
+                ? "ZKTeco / eSSL machines connect via the ADMS (iClock) push protocol — point the device's Cloud Server to this portal."
+                : "Matrix / Mantra / other devices push punches as JSON to a per-device Webhook URL — shown on the device card after saving."}
+            </Text>
+
             <Text style={styles.lbl}>Location (optional)</Text>
             <TextInput
               testID="d-loc"
@@ -1062,7 +1102,10 @@ function DeviceCard({
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.name} numberOfLines={1}>{device.name}</Text>
-          <Text style={styles.sn}>SN · {device.serial_number}</Text>
+          <Text style={styles.sn}>
+            SN · {device.serial_number}
+            {device.brand && device.brand !== "zkteco" ? `  ·  ${device.brand.toUpperCase()}` : ""}
+          </Text>
         </View>
         <View style={styles.dot}>
           {device.locked ? (
@@ -1077,6 +1120,27 @@ function DeviceCard({
           </Text>
         </View>
       </View>
+
+      {/* Iter 294 — JSON webhook URL for Matrix / Mantra / other brands. */}
+      {device.webhook_key && device.brand && !["zkteco", "essl"].includes(device.brand) ? (
+        <Pressable
+          onPress={() => {
+            if (Platform.OS === "web" && navigator?.clipboard) {
+              navigator.clipboard.writeText(
+                `${window.location.origin}/api/device-webhook/${device.webhook_key}`);
+              alertUser("Copied", "Webhook URL copied to clipboard. Configure your device middleware to POST JSON punches to it.");
+            }
+          }}
+          style={styles.webhookRow}
+          testID={`webhook-${device.serial_number}`}
+        >
+          <Ionicons name="link-outline" size={13} color="#2563EB" />
+          <Text style={styles.webhookTxt} numberOfLines={1}>
+            Webhook: /api/device-webhook/{device.webhook_key}
+          </Text>
+          <Ionicons name="copy-outline" size={13} color="#2563EB" />
+        </Pressable>
+      ) : null}
 
       <View style={styles.factGrid}>
         <Fact label="COMPANY" value={companyName} />
@@ -1643,6 +1707,13 @@ const styles = StyleSheet.create({
   kindPillTxt: { color: "#fff", fontWeight: "800", fontSize: 10, letterSpacing: 0.6 },
   name: { color: colors.onSurface, fontWeight: "700", fontSize: type.base },
   sn: { color: colors.onSurfaceTertiary, fontSize: 11, marginTop: 2 },
+  // Iter 294 — webhook URL row (Matrix / Mantra JSON push).
+  webhookRow: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: "#EFF6FF", borderWidth: 1, borderColor: "#BFDBFE",
+    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, marginTop: 8,
+  },
+  webhookTxt: { flex: 1, fontSize: 10.5, color: "#2563EB", fontWeight: "600" },
 
   dot: { flexDirection: "row", alignItems: "center", gap: 4 },
   dotCircle: { width: 10, height: 10, borderRadius: 5 },

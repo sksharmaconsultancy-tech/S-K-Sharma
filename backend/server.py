@@ -18795,29 +18795,44 @@ async def list_masters(
     # screen and every Group dropdown across the app.
     if type == "group":
         try:
-            u_match: Dict[str, Any] = {
-                "role": "employee",
-                "employee_type": {"$exists": True, "$nin": [None, ""]},
-            }
+            u_match: Dict[str, Any] = {"role": "employee"}
             if admin["role"] == "company_admin":
                 u_match["company_id"] = admin.get("company_id")
             elif company_id and company_id != "__global__":
                 u_match["company_id"] = company_id
-            existing_names = {
-                (m.get("name") or "").strip().upper()
-                async for m in db.masters.find({"type": "group"}, {"_id": 0, "name": 1})
-            }
-            async for row in db.users.aggregate([
-                {"$match": u_match},
-                {"$group": {"_id": {
-                    "cid": "$company_id",
-                    "name": {"$toUpper": {"$trim": {"input": "$employee_type"}}},
-                }}},
-                {"$limit": 500},
-            ]):
-                nm = (row["_id"].get("name") or "").strip()
-                u_cid = row["_id"].get("cid")
-                if not nm or not u_cid or nm in existing_names:
+            # Iter 294 (user bug: STAFF missing) — the old check collected
+            # names GLOBALLY, so a group registered under firm A blocked
+            # auto-registration for firm B forever. Track (company, name)
+            # pairs instead, honouring __global__ masters for every firm.
+            existing_pairs: set = set()
+            async for m in db.masters.find(
+                {"type": "group"}, {"_id": 0, "name": 1, "company_id": 1}
+            ):
+                nm0 = (m.get("name") or "").strip().upper()
+                existing_pairs.add((m.get("company_id") or "", nm0))
+
+            def _known(cid: str, nm: str) -> bool:
+                return ("__global__", nm) in existing_pairs or (cid, nm) in existing_pairs
+
+            # Collect in-use group names from BOTH employee_type and
+            # employee_group (legacy imports fill either). $type:string
+            # guard prevents $toUpper crashing on non-string legacy values.
+            in_use: Dict[Any, bool] = {}
+            for fld in ("employee_type", "employee_group"):
+                async for row in db.users.aggregate([
+                    {"$match": {**u_match, fld: {"$type": "string", "$nin": [""]}}},
+                    {"$group": {"_id": {
+                        "cid": "$company_id",
+                        "name": {"$toUpper": {"$trim": {"input": f"${fld}"}}},
+                    }}},
+                    {"$limit": 500},
+                ]):
+                    nm = (row["_id"].get("name") or "").strip()
+                    u_cid = row["_id"].get("cid")
+                    if nm and u_cid:
+                        in_use[(u_cid, nm)] = True
+            for (u_cid, nm) in in_use.keys():
+                if _known(u_cid, nm):
                     continue
                 await db.masters.insert_one({
                     "master_id": f"mst_{uuid.uuid4().hex[:12]}",
@@ -18832,7 +18847,7 @@ async def list_masters(
                     "scope": "firm",
                     "auto_registered": "bulk_import_interlink",
                 })
-                existing_names.add(nm)
+                existing_pairs.add((u_cid, nm))
         except Exception as _e:
             logging.warning(f"group-master interlink failed: {_e}")
     items = await db.masters.find(q, {"_id": 0}).sort("name", 1).to_list(2000)
@@ -20943,6 +20958,12 @@ from routes.ai_assistant import router as ai_assistant_router  # noqa: E402
 app.include_router(ai_assistant_router)
 from routes.productivity import router as productivity_router  # noqa: E402
 app.include_router(productivity_router)
+
+# Iter 294 — Bank salary-transfer upload files + Power BI / Excel data feed.
+from routes.bank_transfer_files import router as bank_transfer_router  # noqa: E402
+app.include_router(bank_transfer_router)
+from routes.bi_feed import router as bi_feed_router  # noqa: E402
+app.include_router(bi_feed_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.

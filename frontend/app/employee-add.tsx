@@ -619,6 +619,29 @@ export default function EmployeeAddScreen() {
     } finally { setDraftBusy(false); }
   };
 
+  // Iter 294 — AUTO-SAVE: in create mode, silently save the draft to the
+  // server 3s after the operator stops typing (name required so we don't
+  // park empty drafts). Uses the same draft doc (draftId) each time.
+  const autoSaveRef = React.useRef<any>(null);
+  const [autoSavedAt, setAutoSavedAt] = useState<string | null>(null);
+  useEffect(() => {
+    if (editUserId || !selectedCompanyId) return;           // create mode only
+    if (!(form.name || "").trim()) return;                  // nothing to save yet
+    if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
+    autoSaveRef.current = setTimeout(async () => {
+      try {
+        const r = await api<{ draft_id: string }>("/admin/employee-drafts", {
+          method: "POST",
+          body: { draft_id: draftId || undefined, company_id: selectedCompanyId, form },
+        });
+        setDraftId(r.draft_id);
+        setAutoSavedAt(new Date().toLocaleTimeString());
+      } catch { /* silent — manual save still available */ }
+    }, 3000);
+    return () => { if (autoSaveRef.current) clearTimeout(autoSaveRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, editUserId, selectedCompanyId]);
+
   const resumeDraft = (d: any) => {
     setForm({ ...EMPTY_FORM, ...(d.form || {}) });
     setDraftId(d.draft_id);
@@ -2226,6 +2249,12 @@ export default function EmployeeAddScreen() {
             </Text>
           </Pressable>
 
+          {/* Iter 294 — auto-save indicator (create mode). */}
+          {!editUserId && autoSavedAt ? (
+            <Text style={{ fontSize: 11, color: "#22C55E", fontWeight: "600", marginBottom: 6 }} testID="autosave-indicator">
+              ✓ Draft auto-saved at {autoSavedAt}
+            </Text>
+          ) : null}
           {/* Iter 109 — saved drafts to resume */}
           {!editUserId && drafts.length > 0 ? (
             <View style={styles.draftBox} testID="draft-list">

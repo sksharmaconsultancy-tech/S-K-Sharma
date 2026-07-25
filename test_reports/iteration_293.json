@@ -1,0 +1,57 @@
+{
+  "summary": "Iter 294 feature batch tested end-to-end. Backend: 20/20 pytest cases passing (after a 1-line schema fix). Frontend: dark #0F172A sidebar with 12+ groups renders, AI Assistant floating button visible, global search returns SURENDRA under EMPLOYEES section with firm_name, notification centre dropdown opens, '?' opens keyboard shortcuts modal (Ctrl+K, Ctrl+Shift+A, g-then-* combos listed), Hindi language toggle switches sidebar labels and back, /bank-transfer shows month chips + 6 bank cards (ICICI/HDFC/SBI/Axis/Kotak/Generic) + xlsx/csv/txt/xml chips + friendly 'No Compliance Salary run' banner, /bi-feed shows Rotate Key + 4 copyable dataset URLs, /split-view renders two panes with Attendance vs Salary reports, /biometric-devices loads Register new device button. STAFF group present in Group Master interlink for Kankani. AI Assistant intents (process_payroll → confirm_api, attendance_summary, pending_approvals, navigate) all return correct actions. Global search rejects <2-char queries with 422. Bank transfer CSV downloads a real file for a month with a compliance run. BI feed employees endpoint excludes aadhaar/pan/bank_account PII; invalid key returns 401. Biometric multi-brand Matrix device creation + webhook ingest (bio_code 72 → SURENDRA punch) + duplicate skip + regenerate-webhook-key + delete all pass.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/biometric/devices",
+        "issue": "500 AttributeError: 'BiometricDeviceCreate' object has no attribute 'brand'. The Pydantic model was missing the 'brand' field but the handler read payload.brand (biometric_devices.py L1336). Multi-brand feature was completely broken — every device registration returned 500. FIXED by adding brand: Optional[str] = None to BiometricDeviceCreate model. Verified with pytest after backend restart.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "global",
+        "issues": [
+          "Console: 'Invalid style property of padding. Value is 0 8px but only single values are supported.' — RN Web does not accept shorthand padding strings. Non-blocking but pollutes console on every screen.",
+          "Console: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' — RN 0.76+ deprecation warnings on multiple components."
+        ]
+      },
+      {
+        "screen": "/admin-pin-login",
+        "issues": [
+          "The Sign in Pressable has no testID/role='button' — Playwright get_by_role('button') couldn't find it. Testers must click via coordinates. Adding testID='admin-signin-submit' would make it testable."
+        ]
+      }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter294_features.py",
+    "/app/test_reports/pytest/iter294_results.xml"
+  ],
+  "action_items": [
+    "REVIEW my fix in /app/backend/routes/biometric_devices.py L41-49 — added 'brand: Optional[str] = None' to BiometricDeviceCreate. Confirm no other biometric endpoints assume brand is required.",
+    "Add testID='admin-signin-submit' to the Password-tab Sign in button on /admin-pin-login for reliable UI automation.",
+    "Optional: fix the 'padding: 0 8px' shorthand -> use paddingHorizontal to remove RN Web console error (repeats on every screen).",
+    "Optional: replace shadowColor/shadowOpacity/shadowRadius with boxShadow to silence RN 0.76 deprecation warnings."
+  ],
+  "critical_code_review_comments": [
+    "biometric_devices.py L1336 reads payload.brand while the Pydantic schema at L41 did not declare it. Any usage of a Pydantic model attribute must be backed by a declared field — this could not have worked once at any point without the schema fix. Suggest adding a unit test that instantiates the model with brand='matrix' to prevent regression.",
+    "server.py imports run at module load: cannot invoke 'python -c \"from backend.server import db\"' from /app because 'utils' isn't a top-level package. Not blocking, but scripts must cwd=/app/backend. Consider adding /app to sys.path or using -m."
+  ],
+  "updated_files": [
+    "/app/backend/routes/biometric_devices.py (added brand field to BiometricDeviceCreate model)",
+    "/app/backend/tests/test_iter294_features.py (new — 20 test cases)"
+  ],
+  "success_rate": {"backend": "100% (20/20 after fix)", "frontend": "100% of tested flows"},
+  "seed_data_creation": "Created + deleted 1 test biometric device (serial TEST_MATRIX_<ts>) at Kankani. Injected 1 attendance punch (user 72 / 2026-07-25 09:00 IN) via webhook — CLEANED UP after tests (1 row deleted from db.attendance).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "test_iter294_features.py is a reusable regression suite for the whole Iter 294 feature bundle. It logs in as super admin, exercises AI assistant (5 intents), global search (2 tests), Group Master STAFF fix, bank transfer formats+download, BI feed key rotation+PII exclusion+attendance+invalid-key, and biometric multi-brand webhook full lifecycle with cleanup. LLM calls take 3-8s; whole run finishes in ~8s. Environment: EXPO_PUBLIC_BACKEND_URL (not EXPO_BACKEND_URL).",
+  "rca_of_issue": "RCA — 500 on POST /api/biometric/devices: When the Iter 294 multi-brand feature was added, the handler was updated to read payload.brand + persist device['brand'], but the BiometricDeviceCreate Pydantic model was not updated. Pydantic v2 rejects attribute access for undeclared fields with AttributeError, resulting in FastAPI returning 500 Internal Server Error to any registration call — regardless of whether the client sent brand or not. Reproduction: POST /api/biometric/devices with any valid body → 500. Mitigation: add 'brand: Optional[str] = None' to BiometricDeviceCreate (applied). Verified by re-running TestBiometric class → 6/6 pass, device gets brand='matrix' persisted and webhook_key issued."
+}

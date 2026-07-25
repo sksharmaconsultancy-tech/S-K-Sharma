@@ -46,6 +46,7 @@ class BiometricDeviceCreate(BaseModel):
     location: Optional[str] = None
     enabled: bool = True
     gmt_offset: Optional[str] = "+05:30"   # Iter 263 — machine time zone
+    brand: Optional[str] = None            # Iter 294 — multi-brand (zkteco/essl/matrix/mantra/other)
 
 
 class BiometricDeviceUpdate(BaseModel):
@@ -1865,12 +1866,4 @@ async def device_health_report_xlsx(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="device-health-report.xlsx"'},
     )
-l].width = w
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return Response(
-        content=buf.getvalue(),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="device-health-report.xlsx"'},
-    )
+
