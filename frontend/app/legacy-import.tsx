@@ -185,7 +185,10 @@ export default function LegacyImportScreen() {
   }, []);
 
   const body = () => ({
-    mappings: Object.entries(sel).map(([fn, cid]) => ({ firm_no: Number(fn), company_id: cid })),
+    mappings: Object.entries(sel).map(([fn, cid]) =>
+      cid === "__create__"
+        ? { firm_no: Number(fn), company_id: null, create_new: true }
+        : { firm_no: Number(fn), company_id: cid }),
     import_employees: impEmp,
     employee_fields: groups,
     salary_online: impOn,
@@ -223,6 +226,47 @@ export default function LegacyImportScreen() {
 
   const mappedCount = Object.keys(sel).length;
 
+  // Iter 303 (user, A-ONE MOTOR'S) — undo a wrong import & re-import.
+  const [undoFor, setUndoFor] = useState<any>(null);   // firm object
+  const [undoBusy, setUndoBusy] = useState(false);
+  const [undoMsg, setUndoMsg] = useState("");
+
+  // Iter 303b (user) — preview the new firm BEFORE confirming creation.
+  const [createPrev, setCreatePrev] = useState<any>(null);   // parsed firm settings
+  const [createPrevFor, setCreatePrevFor] = useState<number | null>(null);
+  const [createPrevBusy, setCreatePrevBusy] = useState(false);
+
+  const openCreatePreview = async (firmNo: number) => {
+    setPickFor(null); setCreatePrevBusy(true); setCreatePrevFor(firmNo); setCreatePrev(null);
+    try {
+      const r = await api<any>(`/admin/legacy-import/firm-preview/${firmNo}`);
+      setCreatePrev(r);
+    } catch (e: any) {
+      setErr(e?.message || "Could not read legacy Firm Master");
+      setCreatePrevFor(null);
+    } finally { setCreatePrevBusy(false); }
+  };
+
+  const doUndo = async () => {
+    if (!undoFor) return;
+    setUndoBusy(true); setUndoMsg("");
+    try {
+      const r = await api<any>("/admin/legacy-import/undo", {
+        method: "POST",
+        body: { firm_no: undoFor.firm_no, company_id: undoFor.imported_company_id },
+      });
+      setUndoMsg(
+        `↩️ ${undoFor.firm_name}: ${r.employees_deleted} imported employees, ` +
+        `${r.salary_rows_deleted} salary rows and ${r.published_runs_deleted} published ` +
+        `runs removed — firm unlocked for re-import.`);
+      setUndoFor(null);
+      const fr = await api<any>("/admin/legacy-import/firms");
+      setFirms(fr.firms || []);
+      setPortalFirms(fr.portal_firms || []);
+    } catch (e: any) { setErr(e?.message || "Undo failed"); }
+    finally { setUndoBusy(false); }
+  };
+
   return (
     <SafeAreaView style={st.safe} edges={["bottom"]}>
       <Stack.Screen options={{ title: "Legacy Import Wizard" }} />
@@ -237,12 +281,15 @@ export default function LegacyImportScreen() {
             {/* STEP 1 — firm mapping */}
             <View style={st.card}>
               <Text style={st.cardTitle}>1️⃣  Select old firms &amp; map to portal firms ({mappedCount} selected)</Text>
+              {undoMsg ? (
+                <Text style={[st.firmMeta, { color: "#16a34a", fontWeight: "700", marginBottom: 6 }]}>{undoMsg}</Text>
+              ) : null}
               {firms.map((f) => {
                 const cid = sel[f.firm_no];
                 const pname = portalFirms.find((p) => p.company_id === cid)?.name;
                 if (f.already_imported) {
                   return (
-                    <View key={f.firm_no} style={[st.firmRow, { opacity: 0.75 }]}>
+                    <View key={f.firm_no} style={[st.firmRow, { opacity: 0.9 }]}>
                       <Ionicons name="checkmark-circle" size={20} color="#16a34a" />
                       <View style={{ flex: 1, minWidth: 0 }}>
                         <Text style={st.firmName} numberOfLines={1}>{f.firm_name}</Text>
@@ -251,6 +298,12 @@ export default function LegacyImportScreen() {
                           {f.imported_at ? ` · ${String(f.imported_at).slice(0, 10)}` : ""}
                         </Text>
                       </View>
+                      {f.imported_company_id ? (
+                        <Pressable style={st.undoBtn} onPress={() => setUndoFor(f)} disabled={undoBusy}>
+                          <Ionicons name="arrow-undo-outline" size={12} color="#DC2626" />
+                          <Text style={st.undoBtnTxt}>Undo</Text>
+                        </Pressable>
+                      ) : null}
                     </View>
                   );
                 }
@@ -280,8 +333,11 @@ export default function LegacyImportScreen() {
                     </View>
                     {cid !== undefined ? (
                       <Pressable style={st.mapBtn} onPress={() => setPickFor(f.firm_no)}>
-                        <Text style={st.mapBtnTxt} numberOfLines={1}>
-                          {pname || "→ choose portal firm"}
+                        <Text
+                          style={[st.mapBtnTxt, cid === "__create__" && { color: "#16a34a" }]}
+                          numberOfLines={1}
+                        >
+                          {cid === "__create__" ? "➕ NEW FIRM (will be created)" : (pname || "→ choose portal firm")}
                         </Text>
                         <Ionicons name="chevron-down" size={12} color={colors.brandPrimary} />
                       </Pressable>
@@ -480,12 +536,113 @@ export default function LegacyImportScreen() {
         {err ? <Text style={st.errTxt}>{err}</Text> : null}
       </ScrollView>
 
+      {/* Iter 303b (user) — preview the new firm BEFORE confirming */}
+      <Modal
+        transparent
+        visible={createPrevFor !== null}
+        animationType="fade"
+        onRequestClose={() => { setCreatePrevFor(null); setCreatePrev(null); }}
+      >
+        <Pressable style={st.backdrop} onPress={() => { setCreatePrevFor(null); setCreatePrev(null); }} />
+        <View style={st.pickSheet}>
+          <Text style={st.confTitle}>🏢 New firm — this is what will be created</Text>
+          {createPrevBusy ? <ActivityIndicator style={{ marginVertical: 30 }} color={colors.brandPrimary} /> : createPrev ? (
+            <>
+              <ScrollView style={{ maxHeight: 380 }}>
+                {createPrev.duplicate_company ? (
+                  <Text style={[st.confTxt, { color: "#DC2626", fontWeight: "800" }]}>
+                    ⚠️ A firm named &quot;{createPrev.duplicate_company.name}&quot; already exists — the
+                    import will use that existing firm instead of creating a duplicate.
+                  </Text>
+                ) : null}
+                {([
+                  ["Firm Name", createPrev.name],
+                  ["Address", createPrev.full_address],
+                  ["Email", [createPrev.email_1, createPrev.email_2].filter(Boolean).join(", ")],
+                  ["Start Date", createPrev.start_date],
+                  ["Business Nature", createPrev.business_nature],
+                  ["EPF No (applicable)", createPrev.pf_no],
+                  ["EPF Portal Login", [createPrev.pf_user_id, createPrev.pf_password].filter(Boolean).join(" / ")],
+                  ["ESI No (applicable)", createPrev.esi_no],
+                  ["ESI Portal Login", [createPrev.esi_user_id, createPrev.esi_password].filter(Boolean).join(" / ")],
+                  ["Bank", [createPrev.bank?.bank_name, createPrev.bank?.account_no, createPrev.bank?.ifsc].filter(Boolean).join(" · ")],
+                  ["PAN", createPrev.docs?.PAN],
+                  ["TAN", createPrev.docs?.TAN],
+                  ["GST", createPrev.docs?.GST],
+                  ["Contact / Owner", [createPrev.owner, createPrev.phone].filter(Boolean).join(" · ")],
+                ] as [string, any][]).map(([k, v]) => (
+                  <View key={k} style={{ flexDirection: "row", paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                    <Text style={[st.confTxt, { width: 150, fontWeight: "800", marginTop: 0 }]}>{k}</Text>
+                    <Text style={[st.confTxt, { flex: 1, marginTop: 0, color: v ? colors.onSurface : colors.onSurfaceTertiary }]}>
+                      {v || "— not found in legacy —"}
+                    </Text>
+                  </View>
+                ))}
+                <Text style={st.confTxt}>
+                  These settings go into the new firm&apos;s Firm Master. You can edit anything
+                  there after creation. The firm is created only when you Start Import.
+                </Text>
+              </ScrollView>
+              <Pressable
+                style={[st.actBtn, { backgroundColor: "#16a34a" }]}
+                onPress={() => {
+                  if (createPrevFor !== null) setSel({ ...sel, [createPrevFor]: "__create__" });
+                  setCreatePrevFor(null); setCreatePrev(null);
+                }}
+              >
+                <Ionicons name="checkmark" size={16} color="#fff" />
+                <Text style={st.actTxt}>OK — create this firm on import</Text>
+              </Pressable>
+              <Pressable style={st.cancelBtn} onPress={() => { setCreatePrevFor(null); setCreatePrev(null); }}>
+                <Text style={st.cancelTxt}>Cancel</Text>
+              </Pressable>
+            </>
+          ) : null}
+        </View>
+      </Modal>
+
+      {/* Iter 303 (user) — undo import confirmation */}
+      <Modal transparent visible={undoFor !== null} animationType="fade" onRequestClose={() => setUndoFor(null)}>
+        <Pressable style={st.backdrop} onPress={() => setUndoFor(null)} />
+        <View style={st.pickSheet}>
+          <Text style={st.confTitle}>↩️ Undo import of &quot;{undoFor?.firm_name}&quot;?</Text>
+          <Text style={st.confTxt}>
+            This removes from {undoFor?.imported_into || "the mapped firm"}:
+            {"\n"}• employees CREATED by this import (pre-existing employees are kept)
+            {"\n"}• the imported legacy salary history of this firm
+            {"\n"}• legacy months published into the Compliance Salary Process
+            {"\n"}The old firm is then unlocked so you can re-import it — e.g. into a newly created firm.
+          </Text>
+          <Pressable
+            style={[st.actBtn, { backgroundColor: "#DC2626", opacity: undoBusy ? 0.5 : 1 }]}
+            disabled={undoBusy}
+            onPress={doUndo}
+          >
+            <Ionicons name="arrow-undo" size={16} color="#fff" />
+            <Text style={st.actTxt}>YES — Undo this import</Text>
+          </Pressable>
+          <Pressable style={st.cancelBtn} onPress={() => setUndoFor(null)}>
+            <Text style={st.cancelTxt}>Cancel</Text>
+          </Pressable>
+        </View>
+      </Modal>
+
       {/* portal firm picker */}
       <Modal transparent visible={pickFor !== null} animationType="fade" onRequestClose={() => setPickFor(null)}>
         <Pressable style={st.backdrop} onPress={() => setPickFor(null)} />
         <View style={st.pickSheet}>
           <Text style={st.cardTitle}>Import into which portal firm?</Text>
           <ScrollView style={{ maxHeight: 400 }}>
+            {/* Iter 303 (user) — no match? create the firm with its legacy settings */}
+            <Pressable
+              style={st.pickRow}
+              onPress={() => { if (pickFor !== null) openCreatePreview(pickFor); }}
+            >
+              <Ionicons name="add-circle" size={16} color="#16a34a" />
+              <Text style={[st.tickTxt, { color: "#16a34a", fontWeight: "800" }]}>
+                ➕ Create NEW firm in Firm Master (name, address, PF/ESI &amp; settings from legacy)
+              </Text>
+            </Pressable>
             {portalFirms.map((p) => (
               <Pressable
                 key={p.company_id}
@@ -681,6 +838,12 @@ const st = StyleSheet.create({
   },
   cancelBtn: { alignItems: "center", paddingVertical: 12, marginTop: 4 },
   cancelTxt: { fontSize: 13, fontWeight: "700", color: colors.onSurfaceSecondary },
+  undoBtn: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    borderWidth: 1, borderColor: "#DC2626", borderRadius: 999,
+    paddingHorizontal: 9, paddingVertical: 4,
+  },
+  undoBtnTxt: { fontSize: 10.5, fontWeight: "800", color: "#DC2626" },
   mapRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 3 },
   mapOld: { flex: 1, fontSize: 11, color: colors.onSurfaceSecondary },
   mapNew: { flex: 1.2, fontSize: 11, fontWeight: "700", color: colors.onSurface },

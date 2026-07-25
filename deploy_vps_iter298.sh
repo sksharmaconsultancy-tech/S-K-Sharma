@@ -37,6 +37,21 @@
 #     legacy months" to finalize.
 #     Guard: salary publish/import only allowed for firms whose Employee
 #     Master is already imported.
+#  8. 🧮 MASTER SALARY per month (user request): published months carry the
+#     month's MASTER (full-month) salary too — Basic master taken from the
+#     old software's rate column, other heads pro-rated to a full month —
+#     so calculations/screens show rate vs earned correctly.
+#  9. 🏢 CREATE NEW FIRM from legacy (user request, A-ONE MOTOR'S case):
+#     in the wizard's firm picker choose "➕ Create NEW firm in Firm
+#     Master" — a PREVIEW first shows everything that will be created
+#     (name, address, emails, EPF/ESI numbers + portal LOGIN credentials,
+#     bank, PAN/TAN/GST, owner/contact — all read from the legacy
+#     FirmMaster), then the firm is created during Start Import with all
+#     those settings filled into its Firm Master.
+# 10. ↩️ UNDO IMPORT (user request): imported firms now show an "Undo"
+#     button — removes the employees CREATED by that import, its legacy
+#     salary history and published legacy months, and unlocks the firm so
+#     it can be re-imported into the right (or newly created) firm.
 # Prerequisite: the legacy SQL container (sks-mssql) must be running —
 # it was set up earlier with legacy_setup.sh. Nothing else changes.
 # Run ON THE VPS as root/sksharma.
@@ -136,6 +151,14 @@ echo "    Compliance Salary Process — pick the months (or ALL MONTHS) →"
 echo "    drafts created → check data & reports → 'Lock all published"
 echo "    legacy months'. Salary publish requires the firm's Employee"
 echo "    Master to be imported first."
+echo "  • 🧮 Published months now include MASTER (full-month) salary heads."
+echo "  • 🏢 Firm picker → '➕ Create NEW firm in Firm Master' — preview of"
+echo "    all settings from the legacy FirmMaster (address, EPF/ESI numbers"
+echo "    + portal logins, bank, PAN/GST, owner) before you confirm; firm is"
+echo "    created on Start Import. Fixes the A-ONE MOTOR'S case."
+echo "  • ↩️ 'Undo' button on already-imported firms — removes that import"
+echo "    (created employees, salary history, published months) and unlocks"
+echo "    the firm for re-import."
 echo
 echo "HOW TO IMPORT:"
 echo "  1. Import / Export → Legacy Import Wizard"

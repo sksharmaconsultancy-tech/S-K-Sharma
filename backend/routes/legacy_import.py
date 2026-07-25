@@ -127,6 +127,7 @@ async def legacy_import_firms(authorization: Optional[str] = Header(None)):
             "already_imported": f["firm_no"] in done,
             "imported_at": (done.get(f["firm_no"]) or {}).get("imported_at"),
             "imported_into": (done.get(f["firm_no"]) or {}).get("company_name"),
+            "imported_company_id": (done.get(f["firm_no"]) or {}).get("company_id"),
         })
     # Iter 300b (user) — alphabetical order.
     out.sort(key=lambda x: x["firm_name"].lower())
@@ -138,7 +139,10 @@ async def legacy_import_firms(authorization: Optional[str] = Header(None)):
 # --------------------------------------------------------------------------
 class FirmMap(BaseModel):
     firm_no: int
-    company_id: str
+    # Iter 303 (user) — when the old firm has no match in the portal's Firm
+    # Master, create_new=True creates it (with the legacy PF/ESI settings).
+    company_id: Optional[str] = None
+    create_new: bool = False
 
 
 class ImportBody(BaseModel):
@@ -191,11 +195,15 @@ async def legacy_import_preview(body: ImportBody, authorization: Optional[str] =
     out = []
     for m in body.mappings:
         firm: Dict[str, Any] = {"firm_no": m.firm_no, "company_id": m.company_id}
-        comp = await db.companies.find_one({"company_id": m.company_id}, {"_id": 0, "name": 1})
-        firm["company_name"] = (comp or {}).get("name")
+        if m.create_new and not m.company_id:
+            firm["company_name"] = "➕ NEW FIRM (will be created in Firm Master)"
+            firm["create_new"] = True
+        else:
+            comp = await db.companies.find_one({"company_id": m.company_id}, {"_id": 0, "name": 1})
+            firm["company_name"] = (comp or {}).get("name")
         if body.import_employees:
             emps = await _legacy_employees(dbn, m.firm_no)
-            existing_names = {
+            existing_names = set() if (m.create_new and not m.company_id) else {
                 str(u.get("name") or "").strip().lower()
                 for u in await db.users.find(
                     {"company_id": m.company_id, "role": "employee"},
@@ -224,6 +232,161 @@ async def legacy_import_preview(body: ImportBody, authorization: Optional[str] =
 def _rx(s: Any) -> str:
     import re
     return re.escape(str(s or "").strip())
+
+
+async def _parse_legacy_firm(dbn: str, firm_no: int) -> Dict[str, Any]:
+    """Read the legacy FirmMaster row and normalise it into the portal's
+    Firm-Master shaped settings (used by preview AND create)."""
+    import re as _re
+
+    rows = await _q(
+        dbn,
+        "SELECT TOP 1 * FROM FirmMaster WHERE FrimID = %s ORDER BY FnYear DESC",
+        (firm_no,))
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"Legacy firm {firm_no} not found")
+    raw = rows[0]
+    # normalised column lookup — legacy column names vary (Address/Add1/…).
+    norm = {_re.sub(r"[^A-Z0-9]", "", str(k).upper()): v for k, v in raw.items()}
+
+    def pick(*cands: str) -> Optional[str]:
+        for c in cands:
+            v = norm.get(c)
+            if v is not None and str(v).strip() and str(v).strip().lower() not in ("none", "null", "0"):
+                return str(v).strip()
+        return None
+
+    addr1 = pick("ADDRESS", "ADDRESS1", "ADD1", "FIRMADDRESS", "REGADDRESS")
+    addr2 = pick("ADDRESS2", "ADD2")
+    city = pick("CITY", "DISTRICT")
+    state = pick("STATE")
+    pin = pick("PINCODE", "PIN", "PINNO")
+    return {
+        "firm_no": firm_no,
+        "name": pick("FIRMNAME") or f"Legacy Firm {firm_no}",
+        "short_name": pick("SHORTNAME"),
+        "address1": addr1, "address2": addr2,
+        "city": city, "state": state, "pin_code": pin,
+        "full_address": ", ".join(x for x in [addr1, addr2, city, state, pin] if x) or None,
+        "email_1": pick("EMAIL", "EMAILID", "EMAIL1", "MAILID"),
+        "email_2": pick("EMAIL2"),
+        "start_date": pick("STARTDATE", "ESTDATE", "DOC", "REGDATE"),
+        "business_nature": pick("BUSINESSNATURE", "NATUREOFBUSINESS", "NATURE"),
+        "pf_no": pick("PFNO", "EPFNO", "PFCODE"),
+        "esi_no": pick("ESINO", "ESICNO", "ESICODE"),
+        "bank": {
+            "account_no": pick("ACCOUNTNO", "ACNO", "BANKACNO", "BANKACCOUNTNO"),
+            "account_name": pick("ACCOUNTNAME", "ACNAME", "NAMEONBANKAC"),
+            "bank_name": pick("BANKNAME", "BANK"),
+            "branch_name": pick("BRANCHNAME", "BRANCH", "BANKBRANCH"),
+            "ifsc": pick("IFSCCODE", "IFSC"),
+        },
+        "docs": {"PAN": pick("PANNO", "PAN", "PANCARDNO"),
+                 "TAN": pick("TANNO", "TAN"),
+                 "GST": pick("GSTNO", "GSTIN", "GSTNUMBER"),
+                 "LIN": pick("LINNO", "LIN")},
+        "owner": pick("OWNERNAME", "PROPRIETOR", "CONTACTPERSON", "AUTHORISEDPERSON"),
+        "phone": pick("MOBILENO", "MOBILE", "PHONENO", "PHONE", "CONTACTNO"),
+        # Iter 303c (user) — statutory portal CREDENTIALS from legacy.
+        "pf_user_id": pick("PFUSERID", "EPFUSERID", "PFLOGINID", "PFLOGIN", "PFUSER", "PFUSERNAME"),
+        "pf_password": pick("PFPASSWORD", "EPFPASSWORD", "PFPWD", "PFPASS"),
+        "esi_user_id": pick("ESIUSERID", "ESICUSERID", "ESILOGINID", "ESILOGIN", "ESIUSER", "ESIUSERNAME"),
+        "esi_password": pick("ESIPASSWORD", "ESICPASSWORD", "ESIPWD", "ESIPASS"),
+    }
+
+
+@router.get("/admin/legacy-import/firm-preview/{firm_no}")
+async def legacy_firm_preview(firm_no: int, authorization: Optional[str] = Header(None)):
+    """Iter 303b (user) — 'show first what you get after create firm'."""
+    await _super(authorization)
+    dbn = await _dbname()
+    p = await _parse_legacy_firm(dbn, firm_no)
+    # never expose raw passwords in the preview — masked indicators only.
+    p["pf_password"] = "••••••" if p.get("pf_password") else None
+    p["esi_password"] = "••••••" if p.get("esi_password") else None
+    dup = await db.companies.find_one(
+        {"name": {"$regex": f"^{_rx(p['name'])}$", "$options": "i"}},
+        {"_id": 0, "company_id": 1, "name": 1})
+    p["duplicate_company"] = dup
+    return p
+
+
+async def _create_company_from_legacy(dbn: str, firm_no: int, admin_uid: str) -> str:
+    """Iter 303 (user) — create a NEW portal firm from the legacy FirmMaster
+    row, carrying over its SETTINGS too: name, address, emails, phone,
+    PF/ESI registrations, bank details and PAN/TAN/GST document numbers."""
+    from server import Company, _policy_for_category
+    from routes.firm_master import _empty_master
+
+    p = await _parse_legacy_firm(dbn, firm_no)
+    name = p["name"]
+    dup = await db.companies.find_one(
+        {"name": {"$regex": f"^{_rx(name)}$", "$options": "i"}},
+        {"_id": 0, "company_id": 1})
+    if dup:
+        return dup["company_id"]
+
+    company = Company(
+        name=name, address=p["full_address"], office_lat=0.0, office_lng=0.0,
+        geofence_radius_m=200, compliance_enabled=True,
+    ).model_dump()
+    company["attendance_policy"] = _policy_for_category(None, None)
+    company["created_by"] = admin_uid
+    company["legacy_imported"] = True
+    company["legacy_firm_no"] = firm_no
+    await db.companies.insert_one(company)
+
+    # ---- Firm Master settings from the legacy row ----
+    fm = _empty_master(company["company_id"], name)
+    fm["registered_address"].update(
+        {"address1": p["address1"], "address2": p["address2"], "city": p["city"],
+         "state": p["state"], "pin_code": p["pin_code"]})
+    fm["header"]["email_1"] = p["email_1"]
+    fm["header"]["email_2"] = p["email_2"]
+    fm["header"]["start_date"] = p["start_date"]
+    fm["header"]["business_nature"] = p["business_nature"]
+    if p["pf_no"]:
+        fm["epf"]["epf_no"] = p["pf_no"]
+        fm["epf"]["applicable"] = True
+    if p["esi_no"]:
+        fm["esi"]["esi_no"] = p["esi_no"]
+        fm["esi"]["applicable"] = True
+    # Iter 303c (user) — carry over portal credentials from legacy.
+    if p.get("pf_user_id"):
+        fm["epf"]["epf_user_id"] = p["pf_user_id"]
+    if p.get("pf_password"):
+        fm["epf"]["epf_password"] = p["pf_password"]
+    if p.get("esi_user_id"):
+        fm["esi"]["esi_user_id"] = p["esi_user_id"]
+    if p.get("esi_password"):
+        fm["esi"]["esi_password"] = p["esi_password"]
+    fm["bank"].update(p["bank"])
+    for d in fm.get("compliance_docs") or []:
+        du = str(d.get("description") or "").upper()
+        for key, val in (p["docs"] or {}).items():
+            if val and key in du and not d.get("number"):
+                d["number"] = val
+    # GST has no fixed label in the catalog — append it as its own doc.
+    if (p["docs"] or {}).get("GST"):
+        fm["compliance_docs"].append(
+            {"description": "GST NO.", "number": p["docs"]["GST"],
+             "issue_date": None, "expiry_date": None})
+    # Portal logins list — fill PF / ESI login rows from legacy credentials.
+    for pl in fm.get("portal_logins") or []:
+        lt = str(pl.get("login_type") or "").upper()
+        if "PF" in lt and p.get("pf_user_id"):
+            pl["user_name"] = p["pf_user_id"]
+            pl["password"] = p.get("pf_password")
+        if "ESI" in lt and p.get("esi_user_id"):
+            pl["user_name"] = p["esi_user_id"]
+            pl["password"] = p.get("esi_password")
+    if p["phone"] or p["owner"]:
+        fm["contact_persons"] = [{"name": p["owner"], "mobile": p["phone"], "position": "Owner"}]
+    fm["updated_at"] = _now()
+    fm["updated_by"] = admin_uid
+    await db.firm_masters.update_one(
+        {"company_id": company["company_id"]}, {"$set": fm}, upsert=True)
+    return company["company_id"]
 
 
 def _f(v: Any) -> Optional[float]:
@@ -370,7 +533,7 @@ async def _interlink_masters(company_id: str, values: Dict[str, set]):
             existing.add(nm.upper())
 
 
-async def _run_job(job_id: str, body: ImportBody):
+async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
     dbn = await _dbname()
     heads = await _head_names(dbn)
 
@@ -378,11 +541,17 @@ async def _run_job(job_id: str, body: ImportBody):
         await db.legacy_import_jobs.update_one({"job_id": job_id}, {"$set": {**kw, "updated_at": _now()}})
 
     totals = {"employees_created": 0, "employees_updated": 0, "employees_skipped": 0,
-              "online_rows": 0, "offline_rows": 0}
+              "online_rows": 0, "offline_rows": 0, "firms_created": 0}
     errors: List[str] = []
     try:
         for m in body.mappings:
             await _prog(status="running", current_firm=m.firm_no)
+            # Iter 303 (user) — no matching firm in the portal? create it
+            # from the legacy FirmMaster (name + PF/ESI settings).
+            if m.create_new and not m.company_id:
+                m.company_id = await _create_company_from_legacy(dbn, m.firm_no, admin_uid)
+                totals["firms_created"] += 1
+                await _prog(totals=totals)
             emp_uid: Dict[Any, str] = {}
 
             # ---------------- Employees ----------------
@@ -527,6 +696,10 @@ async def _run_job(job_id: str, body: ImportBody):
                                     ded[heads.get(f"Deduct{i}", f"Deduct{i}")] = v
                             base.update({
                                 "earn_heads": earn, "deduct_heads": ded,
+                                # Iter 302f (user) — month's MASTER rates
+                                # (full-month salary) alongside earned.
+                                "master_basic": _f(r.get("BasicSalary")),
+                                "master_pf_basic": _f(r.get("PFBasicSalary")),
                                 "pf_basic": _f(r.get("T_PFBasicSalary")),
                                 "ee_pf": _f(r.get("EE_EPF")),
                                 "er_pf": (_f(r.get("ER_EPF")) or 0) + (_f(r.get("ER_FPF")) or 0) or None,
@@ -591,6 +764,12 @@ async def legacy_import_run(body: ImportBody, authorization: Optional[str] = Hea
     admin = await _super(authorization)
     if not body.mappings:
         raise HTTPException(status_code=400, detail="Map at least one firm")
+    for m in body.mappings:
+        if not m.company_id and not m.create_new:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Firm {m.firm_no}: map it to a portal firm or choose "
+                       "'Create NEW firm'.")
     # Iter 302d (user) — salary history can only be imported for firms
     # whose Employee Master is imported too (in this run or earlier).
     if (body.salary_online or body.salary_offline) and not body.import_employees:
@@ -623,8 +802,35 @@ async def legacy_import_run(body: ImportBody, authorization: Optional[str] = Hea
         "mappings": [m.model_dump() for m in body.mappings],
         "started_by": admin.get("user_id"), "started_at": _now(),
     })
-    asyncio.get_event_loop().create_task(_run_job(job_id, body))
+    asyncio.get_event_loop().create_task(_run_job(job_id, body, admin.get("user_id") or ""))
     return {"job_id": job_id}
+
+
+# Iter 303 (user, A-ONE MOTOR'S case) — UNDO a firm's import: removes the
+# legacy-created employees, imported salary history and published legacy
+# runs, and unlocks the firm so it can be re-imported (e.g. into a newly
+# created firm). Pre-existing employees that were merely enriched are kept.
+class UndoBody(BaseModel):
+    firm_no: int
+    company_id: str
+
+
+@router.post("/admin/legacy-import/undo")
+async def legacy_import_undo(body: UndoBody, authorization: Optional[str] = Header(None)):
+    await _super(authorization)
+    u = await db.users.delete_many({
+        "company_id": body.company_id, "role": "employee",
+        "legacy_imported": True, "legacy_firm_no": body.firm_no})
+    h = await db.legacy_salary_history.delete_many(
+        {"company_id": body.company_id, "firm_no": body.firm_no})
+    runs = await db.compliance_salary_runs.delete_many(
+        {"company_id": body.company_id, "legacy_imported": True})
+    lock = await db.legacy_imported_firms.delete_many({"firm_no": body.firm_no})
+    return {"ok": True,
+            "employees_deleted": u.deleted_count,
+            "salary_rows_deleted": h.deleted_count,
+            "published_runs_deleted": runs.deleted_count,
+            "unlocked": lock.deleted_count > 0}
 
 
 @router.get("/admin/legacy-import/jobs/{job_id}")
@@ -897,6 +1103,25 @@ def _legacy_row_to_compliance(r: dict, u: dict) -> dict:
     if not pt and "PT" in ded:
         pt = _head_pick(ded, "PT")
     tds = _head_pick(ded, "TDS")
+    # Iter 302f (user) — month's MASTER salary (full-month rate) so the
+    # engine/screens can calculate accordingly: use the legacy master Basic
+    # when the import stored it, otherwise pro-rate earned → full month.
+    md = float(r.get("month_days") or 0)
+    d = float(r.get("present_days") or 0)
+    factor = (md / d) if (d > 0 and md > 0) else 1.0
+
+    def _m(v: float) -> float:
+        return round(v * factor, 2) if v else 0.0
+
+    basic_master = float(r.get("master_basic") or 0) or _m(basic)
+    hra_master = _m(hra)
+    conveyance_master = _m(conv)
+    medical_master = _m(med)
+    special_master = _m(spl)
+    others_master = _m(others)
+    gross_master = round(
+        basic_master + hra_master + conveyance_master
+        + medical_master + special_master + others_master, 2) or _m(gross)
     return {
         "user_id": r.get("user_id"),
         "name": r.get("name"),
@@ -915,7 +1140,11 @@ def _legacy_row_to_compliance(r: dict, u: dict) -> dict:
         "basic": basic,
         "hra": hra, "conveyance": conv, "medical": med,
         "special": spl, "others": others,
-        "monthly_gross": gross, "gross_paid": gross, "ot_pay": ot_pay,
+        "basic_master": basic_master, "hra_master": hra_master,
+        "conveyance_master": conveyance_master, "medical_master": medical_master,
+        "special_master": special_master, "others_master": others_master,
+        "gross_master": gross_master,
+        "monthly_gross": gross_master, "gross_paid": gross, "ot_pay": ot_pay,
         "stat_wage_base": gross,
         "pf_applicable": bool(pf_emp or pf_wages),
         "pf_wages": pf_wages, "pf_employee": pf_emp,
