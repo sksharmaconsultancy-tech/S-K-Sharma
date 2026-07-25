@@ -16,6 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { MiniMap } from "@/src/components/MiniMap";
 import { formatDistance, reverseGeocode } from "@/src/utils/location";
+import { getAccurateFix } from "@/src/utils/accurateLocation";
 import * as LocalAuthentication from "expo-local-authentication";
 import * as Haptics from "expo-haptics";
 import { Redirect, router as navRouter } from "expo-router";
@@ -206,9 +207,9 @@ export default function AttendanceScreen() {
         }
       }
       setLocationEnabled(true);
-      const l = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      const coords = { latitude: l.coords.latitude, longitude: l.coords.longitude };
-      const _acc = typeof l.coords.accuracy === "number" ? Math.round(l.coords.accuracy) : null;
+      const fix = await getAccurateFix();
+      const coords = { latitude: fix.latitude, longitude: fix.longitude };
+      const _acc = fix.accuracy;
       setGpsAcc(_acc);
       setLoc(coords);
       setLastRefresh(Date.now());
@@ -521,11 +522,9 @@ export default function AttendanceScreen() {
       // refreshLocation() updates state which may not have flushed yet;
       // read fresh coords directly so the geofence check is reliable.
       try {
-        const l = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
-        punchLoc = { latitude: l.coords.latitude, longitude: l.coords.longitude };
-        if (typeof l.coords.accuracy === "number") setGpsAcc(Math.round(l.coords.accuracy));
+        const fix = await getAccurateFix();
+        punchLoc = { latitude: fix.latitude, longitude: fix.longitude };
+        if (fix.accuracy != null) setGpsAcc(fix.accuracy);
         setLoc(punchLoc);
       } catch {
         showToast(
@@ -634,11 +633,9 @@ export default function AttendanceScreen() {
     if (!loc && !currentLoc) {
       // React may not have flushed setLoc yet; re-fetch quickly
       try {
-        const l = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
-        currentLoc = { latitude: l.coords.latitude, longitude: l.coords.longitude };
-        if (typeof l.coords.accuracy === "number") setGpsAcc(Math.round(l.coords.accuracy));
+        const fix = await getAccurateFix();
+        currentLoc = { latitude: fix.latitude, longitude: fix.longitude };
+        if (fix.accuracy != null) setGpsAcc(fix.accuracy);
         setLoc(currentLoc);
       } catch {
         showToast("Could not read GPS. Please try again.", "err");

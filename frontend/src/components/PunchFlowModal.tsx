@@ -118,11 +118,11 @@ export default function PunchFlowModal({ visible, kind, user, postPunch, onClose
         setError("Turn on location — geofence verification is mandatory for every punch.");
         return { ok: false, sites };
       }
-      const l = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      const pos = { latitude: l.coords.latitude, longitude: l.coords.longitude };
+      const fix = await getAccurateFix();
+      const pos = { latitude: fix.latitude, longitude: fix.longitude };
       // Phase 3 — fake/mock GPS detection (Android reports `mocked`).
-      mockRef.current = (l as any)?.mocked === true || (l.coords as any)?.mocked === true;
-      accuracyRef.current = typeof l.coords.accuracy === "number" ? Math.round(l.coords.accuracy) : null;
+      mockRef.current = fix.mocked;
+      accuracyRef.current = fix.accuracy;
       setCoords(pos);
       if (!sites.length) {
         setStep("gps", "done", "Location captured (no geofence configured)");
