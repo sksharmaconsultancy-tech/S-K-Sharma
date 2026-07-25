@@ -8677,6 +8677,16 @@ async def admin_employees_bulk_import(
                 })
                 continue
             temp_pin = f"{_secrets.randbelow(1_000_000):06d}"
+            # Iter 295 (user directive) — "Resign Date" in the sheet is the
+            # employee's Exit / Left date. INTERLINK: `exit_date` is the
+            # canonical field the whole system reads (Employee Master
+            # Resigned status, punch blocking, dashboards, salary-run
+            # exclusion, reports) — so normalise the date and set BOTH
+            # fields + employment_status, ensuring imported ex-employees
+            # land as Resigned instead of Active.
+            _resign_raw = r.get("resign_date")
+            _rd_dt = _parse_any_date(_resign_raw) if str(_resign_raw or "").strip() else None
+            _resign_iso = _rd_dt.strftime("%Y-%m-%d") if _rd_dt else None
             doc: Dict[str, Any] = {
                 "user_id": f"user_{uuid.uuid4().hex[:12]}",
                 "email": email,
@@ -8732,7 +8742,9 @@ async def admin_employees_bulk_import(
                 "phone2": (_normalise_phone(str(r.get("phone2") or "")) or None),
                 "pay_mode": r.get("pay_mode") or None,
                 "pay_basis": r.get("pay_basis") or None,
-                "resign_date": r.get("resign_date") or None,
+                "resign_date": _resign_iso or (str(_resign_raw).strip() if str(_resign_raw or "").strip() else None),
+                "exit_date": _resign_iso,
+                "employment_status": ("resigned" if str(_resign_raw or "").strip() else None),
                 "uan_no": r.get("uan_no") or None,
                 "pf_no": r.get("pf_no") or None,
                 "esi_ip_no": r.get("esi_ip_no") or None,
