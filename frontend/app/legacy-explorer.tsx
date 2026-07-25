@@ -35,6 +35,18 @@ export default function LegacyExplorerScreen() {
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const [err, setErr] = useState("");
+  // Iter 299b — smart Firms & Employees discovery.
+  const [disc, setDisc] = useState<any>(null);
+  const [discBusy, setDiscBusy] = useState(false);
+  const runDiscover = async (name: string) => {
+    setDiscBusy(true); setErr("");
+    try {
+      const r = await api<any>(`/admin/legacy/discover?db=${encodeURIComponent(name)}`);
+      setDisc(r);
+    } catch (e: any) {
+      setErr(e?.message || "Scan failed");
+    } finally { setDiscBusy(false); }
+  };
 
   useEffect(() => {
     (async () => {
@@ -49,7 +61,7 @@ export default function LegacyExplorerScreen() {
   }, []);
 
   const selectDb = async (name: string) => {
-    setDb(name); setTable(""); setData(null); setTablesBusy(true); setErr("");
+    setDb(name); setTable(""); setData(null); setDisc(null); setTablesBusy(true); setErr("");
     try {
       const r = await api<{ tables: TableInfo[] }>(`/admin/legacy/tables?db=${encodeURIComponent(name)}`);
       setTables(r.tables || []);
@@ -134,6 +146,73 @@ export default function LegacyExplorerScreen() {
                 ))}
               </View>
             </View>
+
+            {/* Iter 299b — Firms & Employees smart scan */}
+            {db ? (
+              <View style={st.card}>
+                <Text style={st.cardTitle}>Check Firms &amp; Employees</Text>
+                <Text style={st.sub}>
+                  One click — finds the company &amp; employee tables in the old
+                  data and marks which firms already exist in this portal.
+                </Text>
+                <Pressable
+                  onPress={() => runDiscover(db)}
+                  style={st.findBtn}
+                  disabled={discBusy}
+                >
+                  {discBusy ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Ionicons name="search-circle-outline" size={18} color="#fff" />
+                  )}
+                  <Text style={st.findBtnTxt}>Find Firms &amp; Employees</Text>
+                </Pressable>
+                {disc ? (
+                  <>
+                    <Text style={st.secTitle}>
+                      Companies found in old data ({(disc.companies_found || []).length})
+                    </Text>
+                    {(disc.companies_found || []).length === 0 ? (
+                      <Text style={st.sub}>
+                        No company-name column detected automatically — browse the
+                        tables below and tell me which one holds the firm names.
+                      </Text>
+                    ) : (
+                      (disc.companies_found || []).map((c: any) => (
+                        <View key={c.name} style={st.compRow}>
+                          <Ionicons
+                            name={c.in_portal ? "checkmark-circle" : "alert-circle-outline"}
+                            size={15}
+                            color={c.in_portal ? "#16a34a" : "#B45309"}
+                          />
+                          <Text style={st.compName} numberOfLines={1}>{c.name}</Text>
+                          <Text style={[st.compTag, { color: c.in_portal ? "#16a34a" : "#B45309" }]}>
+                            {c.in_portal ? `✓ in portal (${c.portal_firm})` : "not in portal"}
+                          </Text>
+                        </View>
+                      ))
+                    )}
+                    <Text style={st.secTitle}>
+                      Employee tables found ({(disc.employee_tables || []).length}) — tap to open
+                    </Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                      {(disc.employee_tables || []).map((t: any) => (
+                        <Pressable
+                          key={t.table}
+                          onPress={() => { setSearch(""); loadRows(t.table, 0, ""); }}
+                          style={st.tblChip}
+                        >
+                          <Text style={st.chipTxt} numberOfLines={1}>{t.table}</Text>
+                          <Text style={st.cnt}>
+                            {Number(t.row_count || 0).toLocaleString("en-IN")} rows · match {t.score}/9
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </>
+                ) : null}
+              </View>
+            ) : null}
 
             {/* Tables */}
             {db ? (
@@ -278,6 +357,19 @@ const st = StyleSheet.create({
     backgroundColor: colors.brandPrimary, borderRadius: radius.md,
     paddingHorizontal: 12, paddingVertical: 9,
   },
+  findBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: "#B45309", borderRadius: radius.md,
+    paddingVertical: 11, marginTop: 10,
+  },
+  findBtnTxt: { color: "#fff", fontWeight: "800", fontSize: 13 },
+  secTitle: { fontSize: 12.5, fontWeight: "800", color: colors.onSurface, marginTop: 14, marginBottom: 6 },
+  compRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  compName: { flex: 1, fontSize: 12.5, fontWeight: "700", color: colors.onSurface },
+  compTag: { fontSize: 11, fontWeight: "700" },
   tr: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: colors.border },
   trHead: { backgroundColor: colors.brandPrimary, borderTopLeftRadius: 6, borderTopRightRadius: 6 },
   trOdd: { backgroundColor: colors.surfaceSecondary },

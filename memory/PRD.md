@@ -1495,3 +1495,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   - VPS capacity confirmed by user: 15GB RAM / 171GB free / 4 cores.
   - PHASE 2 PENDING: after user checks data → build table→schema mapping + preview + firm-wise import.
   - Verified: status/tables endpoints (unconfigured path), script serving, screen renders. SQL-dependent paths (pymssql queries, restore script) can only be truly tested on the VPS after user uploads backup.
+- Iter 299b — Legacy "Find Firms & Employees" smart scan (user: "how can we check Firms And Employees / hold companies already created"):
+  - GET /api/admin/legacy/discover?db= — scans sys.columns: company-name columns (compname/firmname/clientname etc.) → distinct values (TOP 200, skip >150 distinct) matched against mongo db.companies names (exact/contains/difflib 0.8) → in_portal flag; employee-master tables scored by column hints (empname/father/pf/esi/doj/salary/code + table-name emp/staff/worker, score>=3).
+  - legacy-explorer.tsx: "Find Firms & Employees" amber button per DB → companies list with ✓ in portal / not in portal badges + employee table chips (tap opens rows).
+  - Verified unconfigured path (503) on preview; real scan runs on VPS (SQL restored there: DB PayrollCnslt_NSK_20260725_160823, restore succeeded 2026-07-25).
+  - VPS SSH port is 3052 (user connects via ssh -p 3052 root@165.99.223.52).
