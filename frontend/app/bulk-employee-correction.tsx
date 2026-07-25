@@ -234,6 +234,9 @@ export default function BulkEmployeeCorrectionScreen() {
 
   const isResigned = (e: EmployeeRow) =>
     e.active === false || !!(e.resign_date && String(e.resign_date).trim());
+  // Iter 295 — refs for Excel-style keyboard navigation between grid cells.
+  const cellRefs = React.useRef<Map<string, any>>(new Map());
+
   const rows = useMemo(() => {
     const q = searchQ.trim().toLowerCase();
     const base = allRows
@@ -591,6 +594,31 @@ export default function BulkEmployeeCorrectionScreen() {
       ? ({ position: "sticky", left: FROZEN_LEFT[key], zIndex: 3 } as any)
       : null;
 
+  // Iter 295 (user request) — Excel-style KEYBOARD navigation in the grid:
+  // Enter / ↓ jumps to the same column in the next row, ↑ goes up, and Tab
+  // already moves across columns natively on web.
+  const registerCell = (rowId: string, colKey: string) => (el: any) => {
+    const k = `${rowId}|${colKey}`;
+    if (el) cellRefs.current.set(k, el);
+    else cellRefs.current.delete(k);
+  };
+  const handleCellKey = (e: any, rowId: string, colKey: string) => {
+    if (Platform.OS !== "web") return;
+    const k = e?.nativeEvent?.key || e?.key;
+    if (k !== "Enter" && k !== "ArrowDown" && k !== "ArrowUp") return;
+    const ids = rows.map((r) => r.user_id);
+    const ri = ids.indexOf(rowId);
+    if (ri < 0) return;
+    const ti = k === "ArrowUp" ? ri - 1 : ri + 1;
+    if (ti < 0 || ti >= ids.length) return;
+    e?.preventDefault?.();
+    const el = cellRefs.current.get(`${ids[ti]}|${colKey}`);
+    if (el?.focus) {
+      el.focus();
+      try { el.select?.(); } catch { /* noop */ }
+    }
+  };
+
   const renderCell = (row: EmployeeRow, f: FieldDef) => {
     const w = COL_WIDTHS[f.key] || (f.type === "allowance" ? 110 : 120);
     const val = displayValue(row, f.key);
@@ -680,6 +708,7 @@ export default function BulkEmployeeCorrectionScreen() {
       return (
         <View style={[styles.cellWrap, { width: w }, isDirty && styles.cellDirty]}>
           <TextInput
+            ref={registerCell(row.user_id, f.key)}
             value={cur}
             onChangeText={(v) => {
               if (v === base) clearCell(row.user_id, f.key);
@@ -688,6 +717,8 @@ export default function BulkEmployeeCorrectionScreen() {
                 setCell(row.user_id, f.key, Number.isFinite(n) ? n : v);
               }
             }}
+            onKeyPress={(e: any) => handleCellKey(e, row.user_id, f.key)}
+            blurOnSubmit={false}
             keyboardType="decimal-pad"
             style={styles.cellInput}
             placeholder="0"
@@ -784,6 +815,7 @@ export default function BulkEmployeeCorrectionScreen() {
     return (
       <View style={[styles.cellWrap, { width: w }, isDirty && styles.cellDirty]}>
         <TextInput
+          ref={registerCell(row.user_id, f.key)}
           value={val}
           onChangeText={(v) => {
             const orig = baseValue(row, f.key);
@@ -793,6 +825,8 @@ export default function BulkEmployeeCorrectionScreen() {
               setCell(row.user_id, f.key, Number.isFinite(n) ? n : v);
             } else setCell(row.user_id, f.key, v);
           }}
+          onKeyPress={(e: any) => handleCellKey(e, row.user_id, f.key)}
+          blurOnSubmit={false}
           keyboardType={f.type === "number" ? "decimal-pad" : "default"}
           style={styles.cellInput}
           placeholder=""

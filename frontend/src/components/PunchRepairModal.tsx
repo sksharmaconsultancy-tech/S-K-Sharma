@@ -25,6 +25,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 
 import { api } from "@/src/api/client";
+import WebDateField from "@/src/components/WebDateField";
 import { colors, radius, spacing } from "@/src/theme";
 
 type Punch = {
@@ -71,8 +72,9 @@ export default function PunchRepairModal({
   const [editId, setEditId] = useState<string | null>(null);
   const [kind, setKind] = useState<"in" | "out">("in");
   const [time, setTime] = useState("");
-  // Iter 295 (user request) — punch DATE is editable too (DD-MM-YYYY), so
-  // night-shift/wrong-day punches can be placed on the correct date.
+  // Iter 295 (user request) — punch DATE is editable too (ISO, edited via
+  // the WebDateField calendar picker), so night-shift/wrong-day punches
+  // can be placed on the correct date.
   const [pDate, setPDate] = useState("");
   const [reason, setReason] = useState("");
   const [err, setErr] = useState("");
@@ -106,7 +108,7 @@ export default function PunchRepairModal({
     setEditId(null);
     setKind(k);
     setTime("");
-    setPDate(dateIso.split("-").reverse().join("-"));
+    setPDate(dateIso);
     setReason("Missing punch repair");
     setErr("");
     setFormOpen(true);
@@ -115,7 +117,7 @@ export default function PunchRepairModal({
     setEditId(p.record_id);
     setKind(p.kind);
     setTime((p.at || "").slice(11, 16));
-    setPDate((p.at || "").slice(0, 10).split("-").reverse().join("-"));
+    setPDate((p.at || "").slice(0, 10));
     setReason("Punch correction");
     setErr("");
     setFormOpen(true);
@@ -124,14 +126,6 @@ export default function PunchRepairModal({
   const fmtTimeInput = (raw: string) => {
     const digits = raw.replace(/\D/g, "").slice(0, 4);
     setTime(digits.length > 2 ? `${digits.slice(0, 2)}:${digits.slice(2)}` : digits);
-  };
-
-  const fmtDateInput = (raw: string) => {
-    const d = raw.replace(/\D/g, "").slice(0, 8);
-    let out = d;
-    if (d.length > 4) out = `${d.slice(0, 2)}-${d.slice(2, 4)}-${d.slice(4)}`;
-    else if (d.length > 2) out = `${d.slice(0, 2)}-${d.slice(2)}`;
-    setPDate(out);
   };
 
   const save = async () => {
@@ -144,13 +138,8 @@ export default function PunchRepairModal({
       setErr("Invalid time");
       return;
     }
-    if (!/^\d{2}-\d{2}-\d{4}$/.test(pDate)) {
-      setErr("Enter date as DD-MM-YYYY, e.g. 20-07-2026");
-      return;
-    }
-    const [dd, mo, yyyy] = pDate.split("-").map(Number);
-    if (dd < 1 || dd > 31 || mo < 1 || mo > 12 || yyyy < 2000 || yyyy > 2100) {
-      setErr("Invalid date");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(pDate)) {
+      setErr("Please pick the punch date");
       return;
     }
     if (!reason.trim()) {
@@ -160,8 +149,7 @@ export default function PunchRepairModal({
     setBusy(true);
     setErr("");
     try {
-      const iso = `${yyyy}-${String(mo).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
-      const at = `${iso}T${time}:00`;
+      const at = `${pDate}T${time}:00`;
       if (editId) {
         await api(`/admin/attendance/${editId}`, {
           method: "PATCH",
@@ -328,14 +316,12 @@ export default function PunchRepairModal({
                   maxLength={5}
                   autoFocus
                 />
-                <TextInput
-                  style={[st.timeInput, { minWidth: 118 }]}
+              </View>
+              {/* Iter 295 — punch date (calendar picker; DD-MM-YYYY shown) */}
+              <View style={{ marginTop: 8 }}>
+                <WebDateField
                   value={pDate}
-                  onChangeText={fmtDateInput}
-                  placeholder="DD-MM-YYYY"
-                  placeholderTextColor={colors.onSurfaceTertiary}
-                  keyboardType="number-pad"
-                  maxLength={10}
+                  onChange={setPDate}
                   testID="repair-date-input"
                 />
               </View>
