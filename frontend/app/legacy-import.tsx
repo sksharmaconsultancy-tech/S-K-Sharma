@@ -196,6 +196,7 @@ export default function LegacyImportScreen() {
     field_overrides: overrides,
     salary_online_overrides: ovOn,
     salary_offline_overrides: ovOff,
+    ...(replApplied ? { replace_names: replApplied } : {}),
   });
 
   const runPreview = async () => {
@@ -222,6 +223,40 @@ export default function LegacyImportScreen() {
       if (j.status === "done" || j.status === "failed") { setBusy(false); return; }
     } catch { /* keep polling */ }
     setTimeout(() => pollJob(id), 2500);
+  };
+
+  // Iter 305 (user) — Comparison Record: matched names, Replace-or-Not.
+  const [cmp, setCmp] = useState<any>(null);          // employee-compare response
+  const [cmpOpen, setCmpOpen] = useState(false);
+  const [cmpBusy, setCmpBusy] = useState(false);
+  const [replSel, setReplSel] = useState<Record<string, boolean>>({}); // "firmNo|nameLower" -> replace?
+  const [replApplied, setReplApplied] = useState<Record<string, string[]> | null>(null);
+
+  const openCompare = async () => {
+    setCmpBusy(true);
+    try {
+      const r = await api<any>("/admin/legacy-import/employee-compare", {
+        method: "POST", body: body(),
+      });
+      setCmp(r);
+      const init: Record<string, boolean> = {};
+      (r.firms || []).forEach((f: any) =>
+        (f.matched || []).forEach((mt: any) => { init[`${f.firm_no}|${mt.name.toLowerCase()}`] = true; }));
+      setReplSel(init);
+      setCmpOpen(true);
+    } catch (e: any) { setErr(e?.message || "Compare failed"); }
+    finally { setCmpBusy(false); }
+  };
+
+  const applyReplaceChoices = () => {
+    const out: Record<string, string[]> = {};
+    (cmp?.firms || []).forEach((f: any) => {
+      out[String(f.firm_no)] = (f.matched || [])
+        .filter((mt: any) => replSel[`${f.firm_no}|${mt.name.toLowerCase()}`])
+        .map((mt: any) => mt.name);
+    });
+    setReplApplied(out);
+    setCmpOpen(false);
   };
 
   const mappedCount = Object.keys(sel).length;
@@ -328,7 +363,7 @@ export default function LegacyImportScreen() {
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <Text style={st.firmName} numberOfLines={1}>{f.firm_name}</Text>
                       <Text style={st.firmMeta} numberOfLines={1}>
-                        {f.employees} emp · online {f.online_months} mo · offline {f.offline_months} mo
+                        {f.employees} emp (✅ {f.employees_active ?? "?"} active · 🔻 {f.employees_resigned ?? "?"} resigned) · online {f.online_months} mo · offline {f.offline_months} mo
                       </Text>
                     </View>
                     {cid !== undefined ? (
@@ -500,6 +535,24 @@ export default function LegacyImportScreen() {
                   </Text>
                 </View>
               )) : null}
+              {preview && impEmp ? (
+                <Pressable
+                  style={[st.actBtn, { backgroundColor: "#0E7490", opacity: cmpBusy ? 0.5 : 1 }]}
+                  disabled={cmpBusy}
+                  onPress={openCompare}
+                >
+                  <Ionicons name="git-compare-outline" size={16} color="#fff" />
+                  <Text style={st.actTxt}>
+                    {cmpBusy ? "Comparing…" : "Compare Records — matched names, Replace or Not"}
+                  </Text>
+                </Pressable>
+              ) : null}
+              {replApplied ? (
+                <Text style={[st.firmMeta, { color: "#0E7490", fontWeight: "700" }]}>
+                  ✔ Replace choices applied: {Object.values(replApplied).reduce((a, l) => a + l.length, 0)} matched
+                  name(s) will be REPLACED; other matched names stay untouched. New employees import regardless.
+                </Text>
+              ) : null}
               {preview ? (
                 <Pressable
                   style={[st.actBtn, { backgroundColor: "#B45309", opacity: busy ? 0.5 : 1 }]}
@@ -517,8 +570,9 @@ export default function LegacyImportScreen() {
                       job.status === "failed" ? "❌ Import failed" : "⏳ Importing…"}
                   </Text>
                   <Text style={st.firmMeta}>
-                    Employees: {job.totals?.employees_created || 0} created, {job.totals?.employees_updated || 0} updated ·
+                    Employees: {job.totals?.employees_created || 0} created, {job.totals?.employees_updated || 0} updated{job.totals?.employees_kept ? `, ${job.totals.employees_kept} kept (not replaced)` : ""} ·
                     Online rows: {job.totals?.online_rows || 0} · Offline rows: {job.totals?.offline_rows || 0}
+                    {job.totals?.firms_created ? ` · Firms created: ${job.totals.firms_created}` : ""}
                   </Text>
                   {(job.errors || []).slice(0, 5).map((e: string, i: number) => (
                     <Text key={i} style={st.errTxt}>{e}</Text>
@@ -535,6 +589,93 @@ export default function LegacyImportScreen() {
         )}
         {err ? <Text style={st.errTxt}>{err}</Text> : null}
       </ScrollView>
+
+      {/* Iter 305 (user) — Comparison Record modal, grouped firm-wise */}
+      <Modal transparent visible={cmpOpen} animationType="fade" onRequestClose={() => setCmpOpen(false)}>
+        <Pressable style={st.backdrop} onPress={() => setCmpOpen(false)} />
+        <View style={st.pickSheet}>
+          <Text style={st.confTitle}>🔍 Comparison Record — confirm Replace or Not</Text>
+          <Text style={st.confTxt}>
+            Matched names already exist in the mapped firm. Tick = REPLACE with legacy data;
+            untick = keep the portal record untouched. New employees import regardless.
+          </Text>
+          <ScrollView style={{ maxHeight: 420, marginTop: 6 }}>
+            {(cmp?.firms || []).map((f: any) => {
+              const allOn = (f.matched || []).every((mt: any) => replSel[`${f.firm_no}|${mt.name.toLowerCase()}`]);
+              return (
+                <View key={f.firm_no} style={{ marginBottom: 14 }}>
+                  <Text style={[st.firmName, { color: colors.brandPrimary }]}>
+                    {firms.find((x) => x.firm_no === f.firm_no)?.firm_name || `Firm ${f.firm_no}`} → {f.company_name}
+                  </Text>
+                  <Text style={st.firmMeta}>
+                    Old DB: {f.total} total (✅ {f.active} active · 🔻 {f.resigned} resigned) ·{" "}
+                    {f.new_count} NEW will import · {f.matched_count} matched
+                  </Text>
+                  {(f.matched || []).length ? (
+                    <>
+                      <Pressable
+                        style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 6 }}
+                        onPress={() => {
+                          const c = { ...replSel };
+                          (f.matched || []).forEach((mt: any) => { c[`${f.firm_no}|${mt.name.toLowerCase()}`] = !allOn; });
+                          setReplSel(c);
+                        }}
+                      >
+                        <Ionicons name={allOn ? "checkbox" : "square-outline"} size={18} color={colors.brandPrimary} />
+                        <Text style={[st.tickTxt, { fontWeight: "800" }]}>Replace ALL matched ({f.matched_count})</Text>
+                      </Pressable>
+                      {(f.matched || []).map((mt: any) => {
+                        const k = `${f.firm_no}|${mt.name.toLowerCase()}`;
+                        return (
+                          <Pressable
+                            key={k}
+                            style={{ flexDirection: "row", alignItems: "flex-start", gap: 6, paddingVertical: 4, paddingLeft: 10 }}
+                            onPress={() => setReplSel({ ...replSel, [k]: !replSel[k] })}
+                          >
+                            <Ionicons
+                              name={replSel[k] ? "checkbox" : "square-outline"}
+                              size={17}
+                              color={replSel[k] ? "#B45309" : colors.onSurfaceTertiary}
+                            />
+                            <View style={{ flex: 1, minWidth: 0 }}>
+                              <Text style={st.tickTxt}>
+                                {mt.name}{mt.employee_code ? `  (#${mt.employee_code})` : ""}
+                                {"  "}
+                                <Text style={{ color: mt.change_count ? "#B45309" : "#16a34a", fontSize: 11 }}>
+                                  {mt.change_count ? `${mt.change_count} field(s) differ` : "no difference"}
+                                </Text>
+                              </Text>
+                              {(mt.changes || []).slice(0, 4).map((c: any) => (
+                                <Text key={c.field} style={st.firmMeta} numberOfLines={1}>
+                                  • {c.field}: {String(c.old ?? "—")} → {String(c.new)}
+                                </Text>
+                              ))}
+                            </View>
+                          </Pressable>
+                        );
+                      })}
+                    </>
+                  ) : (
+                    <Text style={[st.firmMeta, { color: "#16a34a" }]}>No matched names — all employees are NEW.</Text>
+                  )}
+                  {f.new_count ? (
+                    <Text style={st.firmMeta} numberOfLines={3}>
+                      NEW ({f.new_count}): {(f.new_names || []).slice(0, 12).join(", ")}{f.new_count > 12 ? "…" : ""}
+                    </Text>
+                  ) : null}
+                </View>
+              );
+            })}
+          </ScrollView>
+          <Pressable style={[st.actBtn, { backgroundColor: colors.brandPrimary }]} onPress={applyReplaceChoices}>
+            <Ionicons name="checkmark" size={16} color="#fff" />
+            <Text style={st.actTxt}>Apply choices</Text>
+          </Pressable>
+          <Pressable style={st.cancelBtn} onPress={() => setCmpOpen(false)}>
+            <Text style={st.cancelTxt}>Cancel</Text>
+          </Pressable>
+        </View>
+      </Modal>
 
       {/* Iter 303b (user) — preview the new firm BEFORE confirming */}
       <Modal

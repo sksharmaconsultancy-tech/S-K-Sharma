@@ -78,8 +78,16 @@ async def legacy_import_firms(authorization: Optional[str] = Header(None)):
     )
     emp_counts = await _q(
         dbn,
-        "SELECT FirmNo AS firm_no, COUNT(DISTINCT CASE WHEN EmpCode > 0 THEN EmpCode ELSE EmpID END) AS n "
-        "FROM EmployeeMaster GROUP BY FirmNo",
+        # Iter 305 (user, "data not match") — count EXACTLY like the import
+        # does: the latest AcYear record per employee (EmpCode else EmpID),
+        # with Active / Resigned split taken from that latest record.
+        "SELECT FirmNo AS firm_no, COUNT(*) AS n, "
+        "SUM(CASE WHEN ISNULL(IsResign, 0) = 1 THEN 1 ELSE 0 END) AS resigned "
+        "FROM (SELECT FirmNo, IsResign, ROW_NUMBER() OVER ("
+        "  PARTITION BY FirmNo, (CASE WHEN ISNULL(EmpCode, 0) > 0 THEN CAST(EmpCode AS VARCHAR(20)) "
+        "                        ELSE 'id_' + CAST(EmpID AS VARCHAR(20)) END) "
+        "  ORDER BY AcYear DESC, UID DESC) AS rn FROM EmployeeMaster) t "
+        "WHERE rn = 1 GROUP BY FirmNo",
     )
     on_counts = await _q(
         dbn, "SELECT FirmNo AS firm_no, COUNT(*) AS n, COUNT(DISTINCT MonthYear) AS months "
@@ -88,6 +96,7 @@ async def legacy_import_firms(authorization: Optional[str] = Header(None)):
         dbn, "SELECT FirmNo AS firm_no, COUNT(*) AS n, COUNT(DISTINCT MonthYear) AS months "
              "FROM SalaryTransoff WHERE DeletedDate IS NULL GROUP BY FirmNo")
     ec = {e["firm_no"]: e["n"] for e in emp_counts}
+    rc = {e["firm_no"]: int(e.get("resigned") or 0) for e in emp_counts}
     oc = {e["firm_no"]: e for e in on_counts}
     fc = {e["firm_no"]: e for e in off_counts}
 
@@ -118,6 +127,8 @@ async def legacy_import_firms(authorization: Optional[str] = Header(None)):
             "esi_no": f.get("esi_no"),
             "fn_year": f.get("fn_year"),
             "employees": ec.get(f["firm_no"], 0),
+            "employees_resigned": rc.get(f["firm_no"], 0),
+            "employees_active": max(0, ec.get(f["firm_no"], 0) - rc.get(f["firm_no"], 0)),
             "online_rows": (oc.get(f["firm_no"]) or {}).get("n", 0),
             "online_months": (oc.get(f["firm_no"]) or {}).get("months", 0),
             "offline_rows": (fc.get(f["firm_no"]) or {}).get("n", 0),
@@ -157,6 +168,10 @@ class ImportBody(BaseModel):
     # Iter 301b (user) — salary-history heads can be remapped/skipped too.
     salary_online_overrides: Dict[str, str] = {}
     salary_offline_overrides: Dict[str, str] = {}
+    # Iter 305 (user) — matched-name confirm: per firm (key = str(firm_no)),
+    # the list of matched employee names to REPLACE (update). Matched names
+    # NOT in the list are left untouched; new employees always import.
+    replace_names: Optional[Dict[str, List[str]]] = None
 
 
 # Identity keys of a history row — never remappable/skippable.
@@ -597,12 +612,18 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                              "name": {"$regex": f"^{_rx(nm)}$", "$options": "i"}}
                         existing = await db.users.find_one(q, {"_id": 0, "user_id": 1})
                         if existing:
-                            fields.pop("phone", None)
-                            fields.pop("email", None)
-                            await db.users.update_one(
-                                {"user_id": existing["user_id"]},
-                                {"$set": {k: v for k, v in fields.items() if v is not None}})
-                            totals["employees_updated"] += 1
+                            # Iter 305 (user) — replace only CONFIRMED names.
+                            repl = (body.replace_names or {}).get(str(m.firm_no))
+                            if repl is not None and nm.strip().lower() not in {
+                                    str(x).strip().lower() for x in repl}:
+                                totals["employees_kept"] = totals.get("employees_kept", 0) + 1
+                            else:
+                                fields.pop("phone", None)
+                                fields.pop("email", None)
+                                await db.users.update_one(
+                                    {"user_id": existing["user_id"]},
+                                    {"$set": {k: v for k, v in fields.items() if v is not None}})
+                                totals["employees_updated"] += 1
                             uid = existing["user_id"]
                         else:
                             doc = {
@@ -757,6 +778,72 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
     except Exception as ex:
         errors.append(str(ex)[:300])
         await _prog(status="failed", totals=totals, errors=errors, finished_at=_now())
+
+
+@router.post("/admin/legacy-import/employee-compare")
+async def legacy_employee_compare(body: ImportBody, authorization: Optional[str] = Header(None)):
+    """Iter 305 (user) — Comparison Record, grouped firm-wise: matched
+    names (with field-level old→new changes) for Replace-or-Not confirm,
+    plus the NEW names that will import regardless."""
+    await _super(authorization)
+    dbn = await _dbname()
+
+    def _neq(old: Any, new: Any) -> bool:
+        if old is None and new is None:
+            return False
+        try:
+            return abs(float(old) - float(new)) > 0.01
+        except (TypeError, ValueError):
+            pass
+        return str(old or "").strip().upper() != str(new or "").strip().upper()
+
+    firms = []
+    for m in body.mappings:
+        emps = await _legacy_employees(dbn, m.firm_no)
+        create_new = bool(m.create_new and not m.company_id)
+        comp = None if create_new else await db.companies.find_one(
+            {"company_id": m.company_id}, {"_id": 0, "name": 1})
+        users: Dict[str, dict] = {}
+        if not create_new:
+            async for u in db.users.find(
+                    {"company_id": m.company_id, "role": "employee"}, {"_id": 0}):
+                users[str(u.get("name") or "").strip().lower()] = u
+        matched, new_names = [], []
+        active = resigned = 0
+        for e in emps:
+            nm = str(e.get("EmpName") or "").strip()
+            if not nm:
+                continue
+            if e.get("IsResign"):
+                resigned += 1
+            else:
+                active += 1
+            u = users.get(nm.lower())
+            if not u:
+                new_names.append(nm)
+                continue
+            doc = _emp_doc_fields(e, body.employee_fields, [],
+                                  overrides=body.field_overrides)
+            doc.pop("compliance_salary_allowances", None)
+            changes = [
+                {"field": k, "old": u.get(k), "new": v}
+                for k, v in doc.items()
+                if v is not None and k not in ("phone", "email") and _neq(u.get(k), v)
+            ]
+            matched.append({"name": nm, "employee_code": u.get("employee_code"),
+                            "changes": changes[:25], "change_count": len(changes)})
+        matched.sort(key=lambda x: x["name"])
+        new_names.sort()
+        firms.append({
+            "firm_no": m.firm_no,
+            "company_id": m.company_id,
+            "company_name": "➕ NEW FIRM (will be created)" if create_new
+                            else (comp or {}).get("name"),
+            "total": len(emps), "active": active, "resigned": resigned,
+            "matched_count": len(matched), "new_count": len(new_names),
+            "matched": matched[:400], "new_names": new_names[:400],
+        })
+    return {"firms": firms}
 
 
 @router.post("/admin/legacy-import/run")
