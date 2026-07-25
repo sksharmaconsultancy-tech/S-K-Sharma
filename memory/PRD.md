@@ -1446,3 +1446,12 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Verified via automated screenshot: From/To fields in Daily Attendance Register now open calendar and accept values.
 - temp_bundle.py now serves deploy_vps_iter289.sh (kind=script).
 - SEC-003 (plaintext EPFO/ESIC passwords) still PENDING.
+
+## Iter 290-292 (fork) — Big user batch, all tested & deployed via deploy290.sh
+- Date picker fix (WebDateField showPicker), staff picker from Employee Master + PWA staff-portal-switch (/auth/staff-portal-switch, backup token helpers in client.ts, AdminWebShell "Employee App" back button), sub-admin scope select/deselect all.
+- Bulk Transfer redesign: resigned-only, new employee code, service_history, global search by Aadhaar/PAN/Mobile/ESI/UAN (routes/bulk_ops.py employee-search + rewritten /transfer).
+- Shift menus merged (shift-change-admin.tsx segments), Compliance Reports CompanyPicker, Salary Day Sheet single-day mode, attendance-grid PresentCountFooter (server day_present_counts), bank-sheet TOTAL row, PF ECR 11-field format (challans.py _ecr_txt_bytes).
+- PWA: sw.js v4 nav 3.5s timeout race + precache "/", deploy script adds nginx gzip.
+- NEW: In/Out & OT Matrix report (routes/inout_ot_matrix.py + app/inout-ot-matrix.tsx, JSON/xlsx/pdf/csv exports, colour-coded, punch-history modal) + Employee Reports hub (routes/employee_reports_hub.py annual-salary-statement + app/employee-reports.tsx) + 3 new HR letter types (experience/relieving/salary_certificate).
+- Testing: iteration_291.json + iteration_292.json all green (13/13 + 6/7 pytest). Deploy290 served via temp_bundle.py kind=script.
+- SEC-003 (plaintext EPFO/ESIC passwords) STILL PENDING.
