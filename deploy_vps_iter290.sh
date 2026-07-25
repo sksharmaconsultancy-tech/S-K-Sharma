@@ -53,6 +53,14 @@ grep -v "^litellm" $APP_DIR/backend/requirements.txt > /tmp/reqs.txt
 $PIP install -r /tmp/reqs.txt --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ -q || \
   echo "   (pip failed — safe to continue if requirements unchanged)"
 
+# SEC-003 — one-time: generate a portal-credentials encryption key and pin
+# it in backend/.env (preserved across deploys). Passwords in Firm Master
+# are encrypted with this key; existing plaintext ones migrate on startup.
+if ! grep -q "^PORTAL_CREDS_KEY=" $APP_DIR/backend/.env; then
+  echo "PORTAL_CREDS_KEY=$(head -c 32 /dev/urandom | base64 | tr -d '=+/' | head -c 43)" >> $APP_DIR/backend/.env
+  echo "   PORTAL_CREDS_KEY generated & saved to backend/.env ✅"
+fi
+
 echo "==> 4/7 Building web frontend (expo export)..."
 cd $APP_DIR/frontend
 yarn install --frozen-lockfile --silent 2>/dev/null || yarn install --silent

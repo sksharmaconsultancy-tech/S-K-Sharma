@@ -2661,6 +2661,12 @@ async def startup():
         # Let uvicorn bind and health-checks succeed before we begin the
         # heavier one-shot work below.
         await asyncio.sleep(2)
+        # SEC-003 — encrypt any legacy plaintext portal passwords (idempotent).
+        try:
+            from routes.firm_master import migrate_portal_secrets
+            await migrate_portal_secrets()
+        except Exception:
+            logger.exception("[startup] SEC-003 portal secret migration failed")
         await _run_startup_backfill()
 
     # Only the small index creation on startup path (should complete in

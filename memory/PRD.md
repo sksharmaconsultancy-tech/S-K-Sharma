@@ -1455,3 +1455,10 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - NEW: In/Out & OT Matrix report (routes/inout_ot_matrix.py + app/inout-ot-matrix.tsx, JSON/xlsx/pdf/csv exports, colour-coded, punch-history modal) + Employee Reports hub (routes/employee_reports_hub.py annual-salary-statement + app/employee-reports.tsx) + 3 new HR letter types (experience/relieving/salary_certificate).
 - Testing: iteration_291.json + iteration_292.json all green (13/13 + 6/7 pytest). Deploy290 served via temp_bundle.py kind=script.
 - SEC-003 (plaintext EPFO/ESIC passwords) STILL PENDING.
+
+## SEC-003 RESOLVED (fork iter 293)
+- utils/secrets_vault.py: Fernet enc (PORTAL_CREDS_KEY env, fallback MONGO_URL-derived; multi-key decrypt, enc:: prefix).
+- firm_master.py: GET/PATCH mask passwords (•••••• + password_set flags), _protect_secrets on save, migrate_portal_secrets() at server startup (idempotent).
+- rpa_worker._fetch_creds + rpa_engine portal scan decrypt transparently. portal_generation truthy checks unaffected.
+- deploy290.sh generates PORTAL_CREDS_KEY into VPS backend/.env if missing.
+- E2E verified: GET masked, PATCH encrypts (enc::gAAA...), mask-echo preserves, decrypts OK, migration encrypted 1 legacy doc.

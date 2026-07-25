@@ -245,6 +245,84 @@ def _ensure_catalogs(doc: Dict[str, Any]) -> Dict[str, Any]:
     return doc
 
 
+# ---------------------------------------------------------------------------
+# SEC-003 — portal credential protection helpers.
+# ---------------------------------------------------------------------------
+_SECRET_SALARY_FIELDS = (("epf", "epf_password"), ("esi", "esi_password"))
+
+
+def _mask_secrets(doc: Dict[str, Any]) -> None:
+    """Replace stored passwords with a mask before returning to the client."""
+    from utils.secrets_vault import MASK
+    for row in doc.get("portal_logins") or []:
+        if row.get("password"):
+            row["password"] = MASK
+            row["password_set"] = True
+        else:
+            row["password_set"] = False
+    for sec_key, field in _SECRET_SALARY_FIELDS:
+        sec = doc.get(sec_key) or {}
+        if sec.get(field):
+            sec[field] = MASK
+            sec[f"{field}_set"] = True
+        elif field in sec:
+            sec[f"{field}_set"] = False
+
+
+def _protect_secrets(merged: Dict[str, Any], existing: Dict[str, Any]) -> None:
+    """Encrypt any NEW plaintext passwords; when the client sends back the
+    mask (unchanged field) keep the previously stored ciphertext."""
+    from utils.secrets_vault import MASK, encrypt_secret
+
+    prev_rows = {str(r.get("login_type") or ""): r
+                 for r in existing.get("portal_logins") or []}
+    for row in merged.get("portal_logins") or []:
+        row.pop("password_set", None)
+        val = row.get("password")
+        if val == MASK:
+            prev = prev_rows.get(str(row.get("login_type") or ""), {})
+            row["password"] = prev.get("password") or None
+        else:
+            row["password"] = encrypt_secret(val) if val else None
+    for sec_key, field in _SECRET_SALARY_FIELDS:
+        sec = merged.get(sec_key)
+        if not isinstance(sec, dict):
+            continue
+        sec.pop(f"{field}_set", None)
+        val = sec.get(field)
+        if val == MASK:
+            sec[field] = (existing.get(sec_key) or {}).get(field) or None
+        else:
+            sec[field] = encrypt_secret(val) if val else None
+
+
+async def migrate_portal_secrets() -> int:
+    """One-time idempotent migration: encrypt any legacy PLAINTEXT portal
+    passwords already sitting in ``firm_masters``. Returns docs updated."""
+    from utils.secrets_vault import encrypt_secret, is_encrypted
+    changed = 0
+    async for doc in db.firm_masters.find(
+            {}, {"_id": 0, "company_id": 1, "portal_logins": 1, "epf": 1, "esi": 1}):
+        upd: Dict[str, Any] = {}
+        rows = doc.get("portal_logins") or []
+        if any(r.get("password") and not is_encrypted(r.get("password")) for r in rows):
+            for r in rows:
+                if r.get("password") and not is_encrypted(r["password"]):
+                    r["password"] = encrypt_secret(r["password"])
+            upd["portal_logins"] = rows
+        for sec_key, field in _SECRET_SALARY_FIELDS:
+            sec = doc.get(sec_key) or {}
+            if sec.get(field) and not is_encrypted(sec[field]):
+                upd[f"{sec_key}.{field}"] = encrypt_secret(sec[field])
+        if upd:
+            await db.firm_masters.update_one(
+                {"company_id": doc["company_id"]}, {"$set": upd})
+            changed += 1
+    if changed:
+        logger.info("[SEC-003] encrypted legacy portal passwords in %s firm master(s)", changed)
+    return changed
+
+
 async def _assert_firm_access(user: Dict[str, Any], company_id: str) -> Dict[str, Any]:
     """Super Admin sees any firm; sub admins any firm in their scope;
     company_admin only their own."""
@@ -276,6 +354,9 @@ async def get_firm_master(
     else:
         doc = _ensure_catalogs(doc)
         doc.setdefault("company_name", company.get("name", ""))
+    # SEC-003 — NEVER return portal passwords (masked; has-password flags
+    # let the UI show the field as filled).
+    _mask_secrets(doc)
 
     # Iter 107 — Firm Category auto-selects from the business category
     # picked when the firm was created (if the master has none yet).
@@ -362,6 +443,9 @@ async def upsert_firm_master(
     merged["company_name"] = company.get("name", "")
     merged["updated_at"] = now_iso()
     merged["updated_by"] = user["user_id"]
+    # SEC-003 — encrypt new passwords / keep existing ones when the client
+    # echoes back the mask.
+    _protect_secrets(merged, existing)
 
     # Iter 98 — CL/PL gate: when "CL PL Applicable" is enabled the allowed
     # number of leaves is MANDATORY.
@@ -406,4 +490,5 @@ async def upsert_firm_master(
         company_id, user["user_id"], user["role"],
     )
     saved = await db.firm_masters.find_one({"company_id": company_id}, {"_id": 0})
+    _mask_secrets(saved)
     return {"ok": True, "master": saved}

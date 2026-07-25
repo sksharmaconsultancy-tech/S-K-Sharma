@@ -73,12 +73,14 @@ async def _fetch_creds(db, company_id: str, portal: str) -> Optional[Dict[str, s
     )
     if not master:
         return None
+    # SEC-003 — passwords are encrypted at rest; decrypt for RPA use only.
+    from utils.secrets_vault import decrypt_secret
     # Iter 98 — PREFER the credentials saved on Firm Master's EPF Detail /
     # ESIC Detail sections (epf_user_id/epf_password, esi_user_id/esi_password).
     if portal == "epfo":
         sec = master.get("epf") or {}
         u = (sec.get("epf_user_id") or "").strip()
-        p = (sec.get("epf_password") or "").strip()
+        p = (decrypt_secret(sec.get("epf_password")) or "").strip()
         if u and p:
             return {
                 "user_name": u, "password": p, "unit_location": None,
@@ -87,7 +89,7 @@ async def _fetch_creds(db, company_id: str, portal: str) -> Optional[Dict[str, s
     elif portal == "esic":
         sec = master.get("esi") or {}
         u = (sec.get("esi_user_id") or "").strip()
-        p = (sec.get("esi_password") or "").strip()
+        p = (decrypt_secret(sec.get("esi_password")) or "").strip()
         if u and p:
             return {
                 "user_name": u, "password": p, "unit_location": None,
@@ -98,7 +100,7 @@ async def _fetch_creds(db, company_id: str, portal: str) -> Optional[Dict[str, s
     for row in (master.get("portal_logins") or []):
         if row.get("login_type") == label:
             u = (row.get("user_name") or "").strip()
-            p = (row.get("password") or "").strip()
+            p = (decrypt_secret(row.get("password")) or "").strip()
             if u and p:
                 return {
                     "user_name": u,

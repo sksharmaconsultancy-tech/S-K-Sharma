@@ -149,8 +149,9 @@ async def fetch_portal_creds(db, company_id: str, portal: str) -> Optional[Dict[
     for row in (master.get("portal_logins") or []):
         lt = str(row.get("login_type") or "").lower()
         if any(k in lt for k in kw):
+            from utils.secrets_vault import decrypt_secret  # SEC-003
             u = (row.get("user_name") or "").strip()
-            p = (row.get("password") or "").strip()
+            p = (decrypt_secret(row.get("password")) or "").strip()
             if u and p:
                 return {"user_name": u, "password": p,
                         "login_url": (row.get("login_url") or "").strip()}
