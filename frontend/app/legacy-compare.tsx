@@ -72,8 +72,9 @@ export default function LegacyCompareScreen() {
         <Text style={st.h1}>Legacy vs Current</Text>
         <Text style={st.sub}>
           Spot-check migrated data — each employee&apos;s old salary history next to the
-          new portal&apos;s master &amp; payroll. Amber flag = master Basic differs from the
-          last legacy Basic.
+          new portal&apos;s master &amp; payroll. ⚠️ = master Basic differs from the last
+          legacy month&apos;s Basic (pro-rated to a full month; zero-day months ignored).
+          It is a review flag, not an error.
         </Text>
 
         <View style={st.card}>
@@ -154,7 +155,7 @@ export default function LegacyCompareScreen() {
                     </Text>
                     {r.mismatch_basic ? (
                       <Text style={[st.meta, { color: "#B45309" }]}>
-                        legacy ₹{money(r.legacy_online?.last_basic)}
+                        legacy ≈ ₹{money(r.legacy_online?.full_basic)}/mo
                       </Text>
                     ) : null}
                   </View>

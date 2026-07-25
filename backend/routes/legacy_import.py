@@ -706,6 +706,7 @@ async def legacy_compare_list(
             "last_gross": {"$last": "$gross"},
             "last_net": {"$last": "$net"},
             "last_days": {"$last": "$present_days"},
+            "last_month_days": {"$last": "$month_days"},
         }},
     ]
     legacy: Dict[str, dict] = {}
@@ -715,6 +716,7 @@ async def legacy_compare_list(
             "months": g["months"], "last_month": g["last_month"],
             "last_basic": g["last_basic"], "last_gross": g["last_gross"],
             "last_net": g["last_net"], "last_days": g["last_days"],
+            "last_month_days": g["last_month_days"],
         }
 
     uq: dict = {"company_id": company_id, "role": "employee",
@@ -740,10 +742,23 @@ async def legacy_compare_list(
         leg = legacy.get(uid, {})
         leg_on = leg.get("online")
         master_basic = u.get("basic_salary")
-        leg_basic = (leg_on or {}).get("last_basic")
+        # Legacy SalaryTrans Basic is the EARNED basic (pro-rated by days
+        # present) — normalise it to a full month before comparing, ignore
+        # zero-day months, and allow a 2% tolerance so only genuine RATE
+        # differences are flagged (user: too many false ⚠️ otherwise).
+        full_basic = None
+        if leg_on and leg_on.get("last_basic"):
+            lb = float(leg_on["last_basic"])
+            ld = float(leg_on.get("last_days") or 0)
+            lmd = float(leg_on.get("last_month_days") or 0)
+            if ld > 0:
+                full_basic = round(lb * lmd / ld, 0) if (lmd > 0 and ld < lmd) else lb
+        if leg_on is not None:
+            leg_on["full_basic"] = full_basic
         mismatch = bool(
-            master_basic and leg_basic
-            and abs(float(master_basic) - float(leg_basic)) > 1)
+            master_basic and full_basic
+            and abs(float(master_basic) - full_basic)
+            / max(float(master_basic), full_basic) > 0.02)
         out.append({
             **u,
             "legacy_online": leg_on,

@@ -1521,3 +1521,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   - frontend legacy-import.tsx: ONLINE_HIST_FIELDS (16: month_days…net incl earn_heads/deduct_heads groups) + OFFLINE_HIST_FIELDS (16 incl rate/w_basic/others/tds); Head Mapping chart renders editable ONLINE/OFFLINE subsections (shown only when that history type ticked); editHead state now {scope: emp|on|off, field} with scoped picker options; ovOn/ovOff states sent in body; confirm-1 lists all changes across 3 scopes ("Online salary: …", "Offline salary: …"); global reset counts all.
   - E2E (Playwright, mocked SQL endpoints): skip Employer ESI (online) + remap TDS→Less Other (offline), confirm-1 listed both, run payload had salary_online_overrides {er_esi:skip} & salary_offline_overrides {tds:less_other} as proper JSON object.
   - deploy_vps_iter298.sh updated (items 5 & 6). USER MUST RE-RUN deploy298.sh on VPS to get the 422 fix + new options.
+- Iter 301c — MISMATCH FLAG REFINED (user on prod: "why show error" — 177/987 flagged after real import of A B Infrasolutions):
+  - Root cause of false flags: legacy SalaryTrans Basic = EARNED basic (pro-rated by present days) while master basic_salary = full-month rate; zero-day months also flagged.
+  - Fix in legacy-compare list endpoint: aggregate also last_month_days; full_basic = last_basic * month_days/days when partial month; skip flag when last_days==0; 2% relative tolerance. leg_on.full_basic returned; frontend shows "legacy ≈ ₹X/mo" and explainer text updated ("review flag, not an error").
+  - Verified with 3 seeded cases (partial-month normalizes to match → no flag; genuine rate diff → flag; zero-day → no flag); seed cleaned.
+  - Ships in deploy298 bundle — user must RE-RUN deploy298.sh on VPS.
