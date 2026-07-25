@@ -70,15 +70,14 @@ sudo cp -r dist/* $WEB_DIR/
 
 echo "==> 5/7 Enabling nginx gzip compression (PWA speed)..."
 sudo tee /etc/nginx/conf.d/sks-gzip.conf > /dev/null << 'NGINX'
-# Iter 290 — gzip for the SPA bundle: cuts first-load size ~70%.
-gzip on;
+# Iter 290 — gzip types for the SPA bundle (main nginx.conf already has
+# "gzip on"): cuts first-load size ~70%.
 gzip_comp_level 6;
 gzip_min_length 1024;
 gzip_vary on;
 gzip_proxied any;
 gzip_types text/plain text/css application/json application/javascript
-           text/javascript application/x-javascript image/svg+xml
-           application/manifest+json font/woff2;
+           text/javascript image/svg+xml application/manifest+json;
 NGINX
 sudo nginx -t && sudo systemctl reload nginx \
   || { echo "   nginx config test failed — removing gzip snippet"; sudo rm -f /etc/nginx/conf.d/sks-gzip.conf; sudo systemctl reload nginx; }
