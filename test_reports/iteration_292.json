@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 292 full-stack review — 2 new features tested end-to-end. BACKEND: 13/13 iter-292 pytest cases PASS (matrix JSON with cell shape, q=SURENDRA filter, status=active filter; xlsx/csv/pdf exports 200 with correct content-types and PDF magic bytes %PDF; annual salary statement JSON with 12 FY-months Apr 2026–Mar 2027 + xlsx; HR letter templates for experience/relieving/salary_certificate/appointment 200; unknown letter type → 400). FRONTEND: All requested testIDs verified. /inout-ot-matrix loads, iom-search 'SURENDRA' filters to 3 employees, iom-emp-334 (SURENDRA KUMAR) card shows all 6 rows (D-In/D-Out/OT-In/OT-Out/Total Hrs/OT Hrs) with coloured cells (yellow=Late, red=Missing, blue=OT visible in screenshot), legend visible, export buttons iom-export-xlsx/pdf/csv/print all present, xlsx click succeeded with no error. /employee-reports shows all 7 cards (emp-report-payslip / salary_certificate / register / annual / appointment / experience / relieving). Clicking Appointment navigates to /hr-letters?type=appointment and the Appointment Letter chip is highlighted blue. Annual Statement modal opens with FY 2025-26 / FY 2026-27 chips, employee search list, and emp-report-download button. HR Letters page shows all 7 letter-type chips (Appointment, Offer, Warning, Termination, Experience, Relieving, Salary Certificate). Sidebar: 'In/Out & OT Matrix' entry visible in Reports section (confirmed via screenshot + AdminWebShell.tsx:118/395); 'Employee Reports Hub' entry present in code (AdminWebShell.tsx:136/414) — may need scroll to see. React-Native issues: pre-existing global shadow*/padding-shorthand warnings only (not iter 292). No deprecated packages introduced.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "shadow* style props", "issue": "Pre-existing global 'shadow*' style props deprecated warning on every screen. Not introduced by iter 292 — noted in iter 291 already. Reference: global StyleSheets"},
+      {"component": "padding shorthand '0 8px'", "issue": "Pre-existing global console error 'Invalid style property of \"padding\". Value is \"0 8px\" but only single values are supported.' Should split into paddingHorizontal/paddingVertical. Reference: global StyleSheets"},
+      {"component": "Image resizeMode", "issue": "Pre-existing warning 'Image: style.resizeMode is deprecated. Please use props.resizeMode.' Reference: not iter 292"}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter292_matrix_hub_letters.py",
+    "/app/test_reports/pytest/iter292.xml"
+  ],
+  "action_items": [
+    "None functional for iter 292 — both features work end-to-end.",
+    "(Optional cleanup, pre-existing) Migrate shadow* → boxShadow, replace padding: '0 8px' with paddingHorizontal/paddingVertical, and switch Image style.resizeMode → props.resizeMode to silence global console noise."
+  ],
+  "critical_code_review_comments": [
+    "routes/inout_ot_matrix.py — auth reuse (_auth) correctly gates super_admin/sub_admin/company_admin and enforces sub_admin_can_touch_company; company_admin's company_id is force-overridden — good. _cell_flag priority (missing > late > ot > leave > holiday > weekly_off) matches the UI legend priority. PDF uses landscape A4 and PageBreak between employees (one employee per page — spec met). XLSX freeze_panes on the header row is a nice touch. Both xlsx and pdf cap employee count (150/300) — protects large firms; document this in the UI later.",
+    "routes/employee_reports_hub.py — _fy_months correctly returns 12 months Apr(fy)–Mar(fy+1); annual xlsx has header, per-month rows, TOTAL row with border/fill — verified 13/14 pass.",
+    "routes/hr_letters.py — LETTER_TYPES map extended with experience/relieving/salary_certificate; templates return non-empty subject+body; unknown type returns 400 as expected. _salary_text falls back to '[SALARY AMOUNT]' when basic missing (safe).",
+    "frontend/app/inout-ot-matrix.tsx — Pressable cell uses onPress={() => onCell(...)} and web hover via {title:...} html tooltip. Good. openDetail correctly fetches /admin/attendance/history with date range. exports use apiBinary + window.open (pdf/print) or download-attribute anchor (xlsx/csv) — standard.",
+    "frontend/app/employee-reports.tsx — 7 cards render, route/letter cards navigate via router.push, modal handles payslip vs annual correctly. currentFy() logic (>=Apr means current calendar year) is correct."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter292_matrix_hub_letters.py"],
+  "success_rate": {"backend": "13/13 iter-292 tests pass", "frontend": "8/8 requested UI flows verified"},
+  "seed_data_creation": "None — read-only against real Kankani cmp_527fecdd7c 2026-07 data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login: /admin-pin-login → mode-password → sksharmaconsultancy@gmail.com / sharma123. Token key llc_session_token. Kankani cmp_527fecdd7c has 127 employees, month 2026-07 has attendance data. Matrix JSON supports q= search (SURENDRA → 3 rows including emp 334 SURENDRA KUMAR), status=active/resigned/all, department/designation/employee_type/contractor/shift filters. Exports .xlsx/.pdf/.csv all live. /employee-reports 7 cards; Appointment/Experience/Relieving pass ?type=X to /hr-letters and chip preselects. Annual Statement modal uses FY chips (2025-26, 2026-27) with employee search. Pre-existing global shadow*/padding-shorthand warnings on every screen — do NOT flag as new issues.",
+  "rca_of_issue": "N/A — no bugs. Everything ordered by user works."
+}

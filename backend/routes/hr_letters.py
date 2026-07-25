@@ -36,8 +36,13 @@ LETTER_TYPES = {
     "offer": "Offer Letter",
     "warning": "Warning Letter",
     "termination": "Termination Letter",
+    # Iter 292 (user request) — Employee Report options.
+    "experience": "Experience Letter",
+    "relieving": "Relieving Letter",
+    "salary_certificate": "Salary Certificate",
 }
-ABBR = {"appointment": "APT", "offer": "OFR", "warning": "WRN", "termination": "TRM"}
+ABBR = {"appointment": "APT", "offer": "OFR", "warning": "WRN", "termination": "TRM",
+        "experience": "EXP", "relieving": "RLV", "salary_certificate": "SAL"}
 
 
 async def _check_scope(admin: dict, company_id: str) -> None:
@@ -147,6 +152,48 @@ def _build_template(letter_type: str, emp: dict, company: dict) -> dict:
             f"You are advised to submit your written explanation, if any, within three (3) "
             f"days of receipt of this letter.\n\n"
             f"This letter is being placed in your service record."
+        )
+    elif letter_type == "experience":
+        subject = "Experience Certificate"
+        body = (
+            f"TO WHOMSOEVER IT MAY CONCERN\n\n"
+            f"This is to certify that {name} was employed with {cname} as \"{desig}\" "
+            f"from {doj} to [LAST WORKING DATE].\n\n"
+            f"During the period of employment, we found him/her to be sincere, hardworking "
+            f"and dedicated to the duties assigned. His/Her conduct and performance remained "
+            f"satisfactory throughout the tenure.\n\n"
+            f"We wish him/her every success in future endeavours.\n\n"
+            f"This certificate is issued at the request of the employee for whatever purpose "
+            f"it may serve."
+        )
+    elif letter_type == "relieving":
+        subject = "Relieving Letter"
+        body = (
+            f"Dear {name},\n\n"
+            f"This is with reference to your resignation from the services of {cname}, "
+            f"where you were employed as \"{desig}\".\n\n"
+            f"We wish to inform you that your resignation has been accepted and you stand "
+            f"relieved from the services of the establishment with effect from the close of "
+            f"working hours on [LAST WORKING DATE].\n\n"
+            f"Your full and final settlement, including salary up to the last working day "
+            f"and other dues (if any), will be processed as per the rules of the "
+            f"establishment. You are requested to return all company property, documents "
+            f"and materials in your possession, if not already handed over.\n\n"
+            f"We thank you for your services and contribution to the organisation and wish "
+            f"you success in your future endeavours."
+        )
+    elif letter_type == "salary_certificate":
+        subject = "Salary Certificate"
+        body = (
+            f"TO WHOMSOEVER IT MAY CONCERN\n\n"
+            f"This is to certify that {name} is employed with {cname} as \"{desig}\" "
+            f"since {doj} and is a bona fide employee of the establishment.\n\n"
+            f"He/She is currently drawing {salary}, subject to statutory deductions "
+            f"(PF / ESI / Professional Tax, as applicable).\n\n"
+            f"This certificate is issued at the specific request of the employee for "
+            f"[PURPOSE — e.g. bank loan / visa / rental agreement] and does not constitute "
+            f"any guarantee or undertaking on the part of the establishment.\n\n"
+            f"For any verification, please contact the undersigned."
         )
     else:  # termination
         subject = "Termination of Employment"

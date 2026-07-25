@@ -115,6 +115,7 @@ export const NAV_SUPER: NavItem[] = [
     icon: "bar-chart-outline",
     children: [
       { route: "/attendance-grid", label: "Attendance Report", icon: "grid-outline" },
+      { route: "/inout-ot-matrix", label: "In/Out & OT Matrix", icon: "apps-outline" },
       { route: "/labour-reports", label: "Labour Law Reports", icon: "library-outline" },
       { route: "/daily-present-report", label: "Day-wise Present Count", icon: "people-outline" },
       { route: "/salary-day-sheet", label: "Day-wise Salary Sheet", icon: "calendar-outline" },
@@ -132,6 +133,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/comp-off-ledger", label: "Comp-Off Ledger", icon: "time-outline" },
       { route: "/hr-letters", label: "HR Letters", icon: "document-text-outline" },
       { route: "/employee-report", label: "Employee Report", icon: "people-outline" },
+      { route: "/employee-reports", label: "Employee Reports Hub", icon: "documents-outline" },
       { route: "/challan-summary", label: "Monthly Challan Summary", icon: "documents-outline" },
     ],
   },
@@ -390,6 +392,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
     icon: "bar-chart-outline",
     children: [
       { route: "/attendance-grid", label: "Attendance Report", icon: "grid-outline" },
+      { route: "/inout-ot-matrix", label: "In/Out & OT Matrix", icon: "apps-outline" },
       { route: "/labour-reports", label: "Labour Law Reports", icon: "library-outline" },
       { route: "/daily-present-report", label: "Day-wise Present Count", icon: "people-outline" },
       { route: "/salary-day-sheet", label: "Day-wise Salary Sheet", icon: "calendar-outline" },
@@ -408,6 +411,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
       { route: "/comp-off-ledger", label: "Comp-Off Ledger", icon: "time-outline" },
       { route: "/hr-letters", label: "HR Letters", icon: "document-text-outline" },
       { route: "/employee-report", label: "Employee Report", icon: "people-outline" },
+      { route: "/employee-reports", label: "Employee Reports Hub", icon: "documents-outline" },
       { route: "/challan-summary", label: "Monthly Challan Summary", icon: "documents-outline" },
     ],
   },

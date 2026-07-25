@@ -23,6 +23,13 @@
 #     for DIRECT upload on the EPFO portal.
 #  9. PWA SPEED — service worker now opens the cached shell instantly when
 #     the network is slow (3.5s timeout) + nginx gzip compression enabled.
+# 10. NEW REPORT: In/Out & OT Matrix (Reports menu) — per-employee monthly
+#     matrix (D-In / D-Out / OT-In / OT-Out / Total / OT Hrs), colour-coded,
+#     hover + click punch history, filters, Excel/PDF/CSV/Print exports
+#     (A4 landscape, one employee per page).
+# 11. EMPLOYEE REPORTS HUB — Pay Slip, Salary Certificate, Salary Register,
+#     Annual Salary Statement (FY Excel), Appointment / Experience /
+#     Relieving letters, all in one place (+ 3 new HR letter templates).
 # Run ON THE VPS as root/sksharma.
 set -e
 
@@ -90,6 +97,7 @@ echo "  • Shift Change Requests & Approvals merged into one menu."
 echo "  • Compliance Reports firm dropdown · Salary Sheet Single-Day mode."
 echo "  • In/Out & HRS reports: Day-wise Present Count footer."
 echo "  • PF ECR .txt: official 11-field portal format."
+echo "  • NEW: In/Out & OT Matrix report + Employee Reports hub."
 echo "  • PWA opens faster & no longer hangs on slow networks."
 echo
 echo "⚠️  IMPORTANT: Everyone must HARD-REFRESH the portal once"

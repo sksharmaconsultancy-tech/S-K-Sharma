@@ -20926,6 +20926,12 @@ app.include_router(access_management_router)
 from routes.sync_engine import router as sync_engine_router  # noqa: E402
 app.include_router(sync_engine_router)
 
+# Iter 292 — Monthly In/Out & OT Matrix report + Employee Reports hub.
+from routes.inout_ot_matrix import router as inout_ot_matrix_router  # noqa: E402
+app.include_router(inout_ot_matrix_router)
+from routes.employee_reports_hub import router as employee_reports_hub_router  # noqa: E402
+app.include_router(employee_reports_hub_router)
+
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
 maybe_start_rpa_worker(app, db)

@@ -19,19 +19,25 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useLocalSearchParams } from "expo-router";
 
 import { api, apiBinary } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors, radius, spacing, type } from "@/src/theme";
 
-type LetterType = "appointment" | "offer" | "warning" | "termination";
+type LetterType = "appointment" | "offer" | "warning" | "termination"
+  | "experience" | "relieving" | "salary_certificate";
 
 const LETTER_TYPES: { key: LetterType; label: string; icon: string }[] = [
   { key: "appointment", label: "Appointment", icon: "document-text-outline" },
   { key: "offer", label: "Offer", icon: "mail-open-outline" },
   { key: "warning", label: "Warning", icon: "warning-outline" },
   { key: "termination", label: "Termination", icon: "close-circle-outline" },
+  // Iter 292 (user request) — Employee Report options.
+  { key: "experience", label: "Experience", icon: "ribbon-outline" },
+  { key: "relieving", label: "Relieving", icon: "exit-outline" },
+  { key: "salary_certificate", label: "Salary Certificate", icon: "cash-outline" },
 ];
 
 type Emp = {
@@ -79,7 +85,9 @@ export default function HrLettersScreen() {
   }, [user, selectedCompanyId]);
 
   const [tab, setTab] = useState<"generate" | "register">("generate");
-  const [ltype, setLtype] = useState<LetterType>("appointment");
+  const [ltype, setLtype] = useState<LetterType>(
+    (useLocalSearchParams<{ type?: string }>().type as LetterType) || "appointment",
+  );
 
   // Employee picker
   const [emps, setEmps] = useState<Emp[]>([]);
