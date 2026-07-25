@@ -150,6 +150,23 @@ class ImportBody(BaseModel):
     # Iter 300e (user) — "change head then import": remap a default portal
     # field to another portal field, or 'skip' to not import that head.
     field_overrides: Dict[str, str] = {}
+    # Iter 301b (user) — salary-history heads can be remapped/skipped too.
+    salary_online_overrides: Dict[str, str] = {}
+    salary_offline_overrides: Dict[str, str] = {}
+
+
+# Identity keys of a history row — never remappable/skippable.
+_HIST_PROTECTED = {"company_id", "firm_no", "kind", "month",
+                   "emp_code", "emp_id", "user_id", "name"}
+
+
+def _apply_hist_overrides(base: Dict[str, Any], ov: Dict[str, str]) -> None:
+    for src, dst in (ov or {}).items():
+        if src in _HIST_PROTECTED or src not in base:
+            continue
+        val = base.pop(src)
+        if dst and str(dst).lower() != "skip" and dst != src and dst not in _HIST_PROTECTED:
+            base[dst] = val
 
 
 async def _legacy_employees(dbn: str, firm_no: int) -> List[dict]:
@@ -534,6 +551,10 @@ async def _run_job(job_id: str, body: ImportBody):
                                 "less_loan": _f(r.get("LessLoan")),
                                 "less_total": _f(r.get("LessTotal")),
                             })
+                        _apply_hist_overrides(
+                            base,
+                            body.salary_online_overrides if kind == "online"
+                            else body.salary_offline_overrides)
                         docs.append(base)
                     if docs:
                         await db.legacy_salary_history.insert_many(docs)

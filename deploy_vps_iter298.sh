@@ -21,6 +21,12 @@
 #     side-by-side with the new portal's master & payroll, amber flag
 #     when master Basic differs from the last legacy Basic, month-wise
 #     drill-down (Legacy Online / Offline / Compliance / Actual).
+#  5. 🐛 IMPORT ERROR FIX: "Input should be a valid dictionary" pydantic
+#     error on Preview/Start Import — request body was double-encoded.
+#  6. 🗂️ SALARY-HISTORY HEADS editable too (user request): the ONLINE
+#     (SalaryTrans) and OFFLINE (SalaryTransoff) sections of the Head
+#     Mapping chart are now row-by-row editable — remap any history head
+#     (Days, Basic, EPF, ESI, TDS, Less heads, Net…) or SKIP it.
 # Prerequisite: the legacy SQL container (sks-mssql) must be running —
 # it was set up earlier with legacy_setup.sh. Nothing else changes.
 # Run ON THE VPS as root/sksharma.
@@ -111,6 +117,10 @@ echo "    so they appear in all dropdowns after import."
 echo "  • 🔍 NEW report: Import/Export → 'Legacy vs Current' — after the"
 echo "    import, spot-check every employee: old salary history next to the"
 echo "    new master & payroll, mismatch flags, month-wise drill-down."
+echo "  • 🐛 FIXED: the 'Input should be a valid dictionary' error when you"
+echo "    pressed Preview / Start Import."
+echo "  • 🗂️ Salary-history heads (Online & Offline) are now editable in the"
+echo "    Head Mapping chart too — remap or SKIP any of them before import."
 echo
 echo "HOW TO IMPORT:"
 echo "  1. Import / Export → Legacy Import Wizard"

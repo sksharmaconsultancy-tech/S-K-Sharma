@@ -59,10 +59,6 @@ const PORTAL_FIELDS: { key: string; label: string }[] = [
   { key: "resign_date", label: "Resign Date" },
   { key: "exit_date", label: "Exit Date" },
 ];
-const fldLabel = (k: string) =>
-  k === "skip" ? "⛔ SKIP — do not import" : (PORTAL_FIELDS.find((f) => f.key === k)?.label || k);
-
-// Old head → default portal field (editable per row before import).
 const HEAD_MAP: { legacy: string; field: string; group: string }[] = [
   { legacy: "EmpName", field: "name", group: "personal" },
   { legacy: "EmpFatherName", field: "father_name", group: "personal" },
@@ -95,6 +91,51 @@ const HEAD_MAP: { legacy: string; field: string; group: string }[] = [
   { legacy: "IsResign + ResignDate", field: "resign_date", group: "status" },
 ];
 
+// Iter 301b (user) — salary-history heads (archive fields) can also be
+// remapped among themselves or skipped entirely.
+const ONLINE_HIST_FIELDS: { key: string; label: string }[] = [
+  { key: "month_days", label: "Month Days" },
+  { key: "present_days", label: "Present Days" },
+  { key: "basic", label: "Basic (TBasicSalary)" },
+  { key: "earn_heads", label: "All Earning heads (Earn1–25)" },
+  { key: "deduct_heads", label: "All Deduction heads (Deduct1–20)" },
+  { key: "gross", label: "Gross Salary" },
+  { key: "pf_basic", label: "PF Basic" },
+  { key: "ee_pf", label: "Employee EPF" },
+  { key: "er_pf", label: "Employer EPF + FPF" },
+  { key: "er_esi", label: "Employer ESI" },
+  { key: "less_adv", label: "Less Advance" },
+  { key: "less_other", label: "Less Other" },
+  { key: "less_loan", label: "Less Loan" },
+  { key: "less_total", label: "Less Total" },
+  { key: "ot_hours", label: "OT Hours" },
+  { key: "net", label: "Net Salary" },
+];
+const OFFLINE_HIST_FIELDS: { key: string; label: string }[] = [
+  { key: "month_days", label: "Month Days" },
+  { key: "present_days", label: "Present Days" },
+  { key: "rate", label: "Salary Rate" },
+  { key: "basic", label: "Basic" },
+  { key: "w_basic", label: "W. Basic" },
+  { key: "others", label: "Others (TOther)" },
+  { key: "gross", label: "Gross Salary" },
+  { key: "tds", label: "TDS" },
+  { key: "work_hours", label: "Work Hours" },
+  { key: "less_epf", label: "Less EPF" },
+  { key: "less_esi", label: "Less ESI" },
+  { key: "less_adv", label: "Less Advance" },
+  { key: "less_other", label: "Less Other" },
+  { key: "less_loan", label: "Less Loan" },
+  { key: "less_total", label: "Less Total" },
+  { key: "net", label: "Net Salary" },
+];
+
+type Scope = "emp" | "on" | "off";
+const scopeFields = (s: Scope) =>
+  s === "emp" ? PORTAL_FIELDS : s === "on" ? ONLINE_HIST_FIELDS : OFFLINE_HIST_FIELDS;
+const scopeLabel = (s: Scope, k: string) =>
+  k === "skip" ? "⛔ SKIP — do not import" : (scopeFields(s).find((f) => f.key === k)?.label || k);
+
 export default function LegacyImportScreen() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -112,8 +153,24 @@ export default function LegacyImportScreen() {
   const [showMap, setShowMap] = useState(false); // mapping chart
   // Iter 300e (user) — manual head overrides + 2-step confirmation.
   const [overrides, setOverrides] = useState<Record<string, string>>({}); // src field -> dst field | 'skip'
-  const [editHead, setEditHead] = useState<string | null>(null);          // field being remapped
+  const [ovOn, setOvOn] = useState<Record<string, string>>({});   // online salary-history overrides
+  const [ovOff, setOvOff] = useState<Record<string, string>>({}); // offline salary-history overrides
+  const [editHead, setEditHead] = useState<{ scope: Scope; field: string } | null>(null);
   const [confirmStep, setConfirmStep] = useState(0);                      // 0 hidden, 1, 2
+
+  const ovFor = (s: Scope) => (s === "emp" ? overrides : s === "on" ? ovOn : ovOff);
+  const setOvFor = (s: Scope, v: Record<string, string>) =>
+    (s === "emp" ? setOverrides(v) : s === "on" ? setOvOn(v) : setOvOff(v));
+  const totalChanges =
+    Object.keys(overrides).length + Object.keys(ovOn).length + Object.keys(ovOff).length;
+  const allChanges: string[] = [
+    ...Object.entries(overrides).map(([s, d]) =>
+      `${HEAD_MAP.find((h) => h.field === s)?.legacy || s} → ${scopeLabel("emp", d)}`),
+    ...Object.entries(ovOn).map(([s, d]) =>
+      `Online salary: ${scopeLabel("on", s)} → ${scopeLabel("on", d)}`),
+    ...Object.entries(ovOff).map(([s, d]) =>
+      `Offline salary: ${scopeLabel("off", s)} → ${scopeLabel("off", d)}`),
+  ];
 
   useEffect(() => {
     (async () => {
@@ -134,12 +191,14 @@ export default function LegacyImportScreen() {
     salary_online: impOn,
     salary_offline: impOff,
     field_overrides: overrides,
+    salary_online_overrides: ovOn,
+    salary_offline_overrides: ovOff,
   });
 
   const runPreview = async () => {
     setBusy(true); setErr(""); setPreview(null);
     try {
-      const r = await api<any>("/admin/legacy-import/preview", { method: "POST", body: JSON.stringify(body()) });
+      const r = await api<any>("/admin/legacy-import/preview", { method: "POST", body: body() });
       setPreview(r.firms || []);
     } catch (e: any) { setErr(e?.message || "Preview failed"); }
     finally { setBusy(false); }
@@ -148,7 +207,7 @@ export default function LegacyImportScreen() {
   const startImport = async () => {
     setBusy(true); setErr("");
     try {
-      const r = await api<any>("/admin/legacy-import/run", { method: "POST", body: JSON.stringify(body()) });
+      const r = await api<any>("/admin/legacy-import/run", { method: "POST", body: body() });
       pollJob(r.job_id);
     } catch (e: any) { setErr(e?.message || "Import failed to start"); setBusy(false); }
   };
@@ -285,7 +344,7 @@ export default function LegacyImportScreen() {
                           const target = overrides[h.field] ?? h.field;
                           const changed = overrides[h.field] !== undefined && overrides[h.field] !== h.field;
                           return (
-                            <Pressable key={h.field} style={st.mapRow} onPress={() => setEditHead(h.field)}>
+                            <Pressable key={h.field} style={st.mapRow} onPress={() => setEditHead({ scope: "emp", field: h.field })}>
                               <Text style={st.mapOld} numberOfLines={2}>{h.legacy}</Text>
                               <Ionicons name="arrow-forward" size={11} color={colors.onSurfaceTertiary} />
                               <View style={{ flex: 1.2, flexDirection: "row", alignItems: "center", gap: 4 }}>
@@ -296,7 +355,7 @@ export default function LegacyImportScreen() {
                                   ]}
                                   numberOfLines={2}
                                 >
-                                  {fldLabel(target)}
+                                  {scopeLabel("emp", target)}
                                 </Text>
                                 {changed ? (
                                   <View style={[st.chgBadge, target === "skip" && { backgroundColor: "#FEE2E2" }]}>
@@ -313,21 +372,50 @@ export default function LegacyImportScreen() {
                       </View>
                     ))}
                   <Text style={st.mapHead}>SALARY HISTORY → &apos;Legacy Salary Records&apos; screen (archive — live payroll untouched)</Text>
-                  <View style={st.mapRow}>
-                    <Text style={st.mapOld}>SalaryTrans (Online)</Text>
-                    <Ionicons name="arrow-forward" size={11} color={colors.onSurfaceTertiary} />
-                    <Text style={st.mapNew}>Online tab: Days, Basic, every Earn/Deduct head with its old name, EPF, ESI, Net</Text>
-                  </View>
-                  <View style={st.mapRow}>
-                    <Text style={st.mapOld}>SalaryTransoff (Offline)</Text>
-                    <Ionicons name="arrow-forward" size={11} color={colors.onSurfaceTertiary} />
-                    <Text style={st.mapNew}>Offline tab: Days, Rate, W.Basic, Others, TDS, Less EPF/ESI/Adv, Net</Text>
-                  </View>
-                  {Object.keys(overrides).length ? (
-                    <Pressable style={st.resetBtn} onPress={() => setOverrides({})}>
+                  {([
+                    ["on", "Salary History — ONLINE (SalaryTrans)", impOn, ONLINE_HIST_FIELDS, ovOn],
+                    ["off", "Salary History — OFFLINE (SalaryTransoff)", impOff, OFFLINE_HIST_FIELDS, ovOff],
+                  ] as [Scope, string, boolean, { key: string; label: string }[], Record<string, string>][])
+                    .filter(([, , on]) => on)
+                    .map(([sc, title, , flds, ov]) => (
+                      <View key={sc}>
+                        <Text style={st.mapHead}>{title}</Text>
+                        {flds.map((f) => {
+                          const target = ov[f.key] ?? f.key;
+                          const changed = ov[f.key] !== undefined && ov[f.key] !== f.key;
+                          return (
+                            <Pressable key={f.key} style={st.mapRow} onPress={() => setEditHead({ scope: sc, field: f.key })}>
+                              <Text style={st.mapOld} numberOfLines={2}>{f.label}</Text>
+                              <Ionicons name="arrow-forward" size={11} color={colors.onSurfaceTertiary} />
+                              <View style={{ flex: 1.2, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                                <Text
+                                  style={[
+                                    st.mapNew,
+                                    changed && (target === "skip" ? { color: "#DC2626" } : { color: "#B45309" }),
+                                  ]}
+                                  numberOfLines={2}
+                                >
+                                  {scopeLabel(sc, target)}
+                                </Text>
+                                {changed ? (
+                                  <View style={[st.chgBadge, target === "skip" && { backgroundColor: "#FEE2E2" }]}>
+                                    <Text style={[st.chgBadgeTxt, target === "skip" && { color: "#DC2626" }]}>
+                                      {target === "skip" ? "SKIPPED" : "CHANGED"}
+                                    </Text>
+                                  </View>
+                                ) : null}
+                                <Ionicons name="create-outline" size={13} color={colors.brandPrimary} />
+                              </View>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    ))}
+                  {totalChanges ? (
+                    <Pressable style={st.resetBtn} onPress={() => { setOverrides({}); setOvOn({}); setOvOff({}); }}>
                       <Ionicons name="refresh" size={13} color="#DC2626" />
                       <Text style={{ color: "#DC2626", fontSize: 11.5, fontWeight: "700" }}>
-                        Reset all {Object.keys(overrides).length} change(s) to default
+                        Reset all {totalChanges} change(s) to default
                       </Text>
                     </Pressable>
                   ) : null}
@@ -414,34 +502,38 @@ export default function LegacyImportScreen() {
           </ScrollView>
         </View>
       </Modal>
-      {/* Iter 300e (user) — head remap picker */}
+      {/* Iter 300e (user) — head remap picker (employee + salary-history) */}
       <Modal transparent visible={editHead !== null} animationType="fade" onRequestClose={() => setEditHead(null)}>
         <Pressable style={st.backdrop} onPress={() => setEditHead(null)} />
         <View style={st.pickSheet}>
           <Text style={st.cardTitle}>
-            Where should &quot;{HEAD_MAP.find((h) => h.field === editHead)?.legacy || editHead}&quot; go?
+            Where should &quot;{editHead
+              ? (editHead.scope === "emp"
+                ? (HEAD_MAP.find((h) => h.field === editHead.field)?.legacy || editHead.field)
+                : scopeLabel(editHead.scope, editHead.field))
+              : ""}&quot; go?
           </Text>
           <ScrollView style={{ maxHeight: 420 }}>
             <Pressable
               style={st.pickRow}
               onPress={() => {
                 if (editHead) {
-                  const c = { ...overrides };
-                  delete c[editHead];
-                  setOverrides(c);
+                  const c = { ...ovFor(editHead.scope) };
+                  delete c[editHead.field];
+                  setOvFor(editHead.scope, c);
                 }
                 setEditHead(null);
               }}
             >
               <Ionicons name="refresh-outline" size={15} color={colors.brandPrimary} />
               <Text style={[st.tickTxt, { fontWeight: "700" }]}>
-                Default — {fldLabel(editHead || "")}
+                Default — {editHead ? scopeLabel(editHead.scope, editHead.field) : ""}
               </Text>
             </Pressable>
             <Pressable
               style={st.pickRow}
               onPress={() => {
-                if (editHead) setOverrides({ ...overrides, [editHead]: "skip" });
+                if (editHead) setOvFor(editHead.scope, { ...ovFor(editHead.scope), [editHead.field]: "skip" });
                 setEditHead(null);
               }}
             >
@@ -450,19 +542,19 @@ export default function LegacyImportScreen() {
                 SKIP — do not import this head
               </Text>
             </Pressable>
-            {PORTAL_FIELDS.filter((p) => p.key !== editHead).map((p) => (
+            {scopeFields(editHead?.scope || "emp").filter((p) => p.key !== editHead?.field).map((p) => (
               <Pressable
                 key={p.key}
                 style={st.pickRow}
                 onPress={() => {
-                  if (editHead) setOverrides({ ...overrides, [editHead]: p.key });
+                  if (editHead) setOvFor(editHead.scope, { ...ovFor(editHead.scope), [editHead.field]: p.key });
                   setEditHead(null);
                 }}
               >
                 <Ionicons
-                  name={overrides[editHead || ""] === p.key ? "radio-button-on" : "radio-button-off"}
+                  name={editHead && ovFor(editHead.scope)[editHead.field] === p.key ? "radio-button-on" : "radio-button-off"}
                   size={15}
-                  color={overrides[editHead || ""] === p.key ? colors.brandPrimary : colors.onSurfaceTertiary}
+                  color={editHead && ovFor(editHead.scope)[editHead.field] === p.key ? colors.brandPrimary : colors.onSurfaceTertiary}
                 />
                 <Text style={st.tickTxt}>{p.label}</Text>
               </Pressable>
@@ -484,15 +576,13 @@ export default function LegacyImportScreen() {
                 {impOn ? " Online salary history." : ""}
                 {impOff ? " Offline salary history." : ""}
               </Text>
-              {Object.keys(overrides).length ? (
+              {allChanges.length ? (
                 <View style={st.confBox}>
                   <Text style={[st.confTxt, { fontWeight: "800", color: "#B45309" }]}>
-                    You changed {Object.keys(overrides).length} head(s):
+                    You changed {allChanges.length} head(s):
                   </Text>
-                  {Object.entries(overrides).map(([src, dst]) => (
-                    <Text key={src} style={st.confTxt}>
-                      • {HEAD_MAP.find((h) => h.field === src)?.legacy || src} → {fldLabel(dst)}
-                    </Text>
+                  {allChanges.map((c) => (
+                    <Text key={c} style={st.confTxt}>• {c}</Text>
                   ))}
                 </View>
               ) : (
