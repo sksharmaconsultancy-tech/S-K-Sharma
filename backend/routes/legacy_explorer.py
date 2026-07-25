@@ -140,6 +140,77 @@ async def legacy_tables(
 
 _TEXT_TYPES = ("varchar", "nvarchar", "char", "nchar", "text", "ntext")
 
+# Iter 299c — token-guarded schema access so the developer can design the
+# import mapping without the admin manually pasting SQL output. Same token
+# as the deploy-bundle endpoint; READ-ONLY.
+_DEV_TOKEN = "sks-deploy-7391"
+
+
+@router.get("/legacy-schema")
+async def legacy_schema_dump(token: str = Query(...)):
+    if token != _DEV_TOKEN:
+        raise HTTPException(status_code=403, detail="Bad token")
+    if not _cfg():
+        raise HTTPException(status_code=503, detail="Legacy SQL Server is not configured yet")
+    dbs = await _q(None, "SELECT name FROM sys.databases WHERE database_id > 4 ORDER BY name")
+    out = []
+    for d in dbs:
+        dbn = d["name"]
+        tables = await _q(
+            dbn,
+            "SELECT t.name AS table_name, "
+            "SUM(CASE WHEN p.index_id IN (0,1) THEN p.rows ELSE 0 END) AS row_count "
+            "FROM sys.tables t JOIN sys.partitions p ON p.object_id = t.object_id "
+            "GROUP BY t.name HAVING SUM(CASE WHEN p.index_id IN (0,1) THEN p.rows ELSE 0 END) > 0 "
+            "ORDER BY t.name",
+        )
+        cols = await _q(
+            dbn,
+            "SELECT t.name AS table_name, c.name AS col_name, ty.name AS type_name "
+            "FROM sys.columns c JOIN sys.tables t ON t.object_id = c.object_id "
+            "JOIN sys.types ty ON ty.user_type_id = c.user_type_id ORDER BY t.name, c.column_id",
+        )
+        colmap: Dict[str, List[str]] = {}
+        for c in cols:
+            colmap.setdefault(c["table_name"], []).append(f"{c['col_name']}:{c['type_name']}")
+        out.append({
+            "db": dbn,
+            "tables": [
+                {"name": t["table_name"], "rows": int(t["row_count"] or 0),
+                 "columns": colmap.get(t["table_name"], [])}
+                for t in tables
+            ],
+        })
+    return {"databases": out}
+
+
+@router.get("/legacy-sample")
+async def legacy_sample_dump(
+    token: str = Query(...),
+    db: str = Query(...),
+    table: str = Query(...),
+    limit: int = Query(5, ge=1, le=20),
+):
+    if token != _DEV_TOKEN:
+        raise HTTPException(status_code=403, detail="Bad token")
+    if not _cfg():
+        raise HTTPException(status_code=503, detail="Legacy SQL Server is not configured yet")
+    _check_ident(db, "database")
+    table = _check_ident(table, "table")
+    known = await _q(
+        db,
+        "SELECT s.name AS schema_name, t.name AS table_name FROM sys.tables t "
+        "JOIN sys.schemas s ON s.schema_id = t.schema_id",
+    )
+    match = next((k for k in known if k["table_name"].lower() == table.lower()), None)
+    if not match:
+        raise HTTPException(status_code=404, detail="Table not found")
+    rows = await _q(
+        db,
+        f"SELECT TOP {int(limit)} * FROM [{match['schema_name']}].[{match['table_name']}]",
+    )
+    return {"db": db, "table": match["table_name"], "rows": rows}
+
 
 @router.get("/admin/legacy/discover")
 async def legacy_discover(
