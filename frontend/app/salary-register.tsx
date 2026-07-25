@@ -491,6 +491,7 @@ export default function SalaryRegisterScreen() {
                   {scrollCols.map((c) => (
                     <Pressable
                       key={c.key}
+                      testID={`col-${c.key}`}
                       onPress={() => onSort(c.key)}
                       style={[styles.headCell, {
                         width: colWidth(c),
