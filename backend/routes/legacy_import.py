@@ -694,29 +694,30 @@ async def legacy_compare_list(
     if admin["role"] == "company_admin":
         company_id = admin["company_id"]
 
-    # legacy history per user+kind
+    # legacy history per user+kind (keep last 3 months for a fair compare)
     pipe = [
         {"$match": {"company_id": company_id, "user_id": {"$ne": None}}},
         {"$sort": {"month": 1}},
         {"$group": {
             "_id": {"u": "$user_id", "k": "$kind"},
             "months": {"$sum": 1},
-            "last_month": {"$last": "$month"},
-            "last_basic": {"$last": "$basic"},
-            "last_gross": {"$last": "$gross"},
-            "last_net": {"$last": "$net"},
-            "last_days": {"$last": "$present_days"},
-            "last_month_days": {"$last": "$month_days"},
+            "recent": {"$push": {
+                "m": "$month", "b": "$basic", "g": "$gross", "n": "$net",
+                "d": "$present_days", "md": "$month_days",
+            }},
         }},
+        {"$project": {"months": 1, "recent": {"$slice": ["$recent", -3]}}},
     ]
     legacy: Dict[str, dict] = {}
     async for g in db.legacy_salary_history.aggregate(pipe):
         u, k = g["_id"]["u"], g["_id"]["k"]
+        last = (g.get("recent") or [{}])[-1]
         legacy.setdefault(u, {})[k] = {
-            "months": g["months"], "last_month": g["last_month"],
-            "last_basic": g["last_basic"], "last_gross": g["last_gross"],
-            "last_net": g["last_net"], "last_days": g["last_days"],
-            "last_month_days": g["last_month_days"],
+            "months": g["months"], "last_month": last.get("m"),
+            "last_basic": last.get("b"), "last_gross": last.get("g"),
+            "last_net": last.get("n"), "last_days": last.get("d"),
+            "last_month_days": last.get("md"),
+            "_recent": g.get("recent") or [],
         }
 
     uq: dict = {"company_id": company_id, "role": "employee",
@@ -736,33 +737,46 @@ async def legacy_compare_list(
     cur_act = await _cur_run_agg(db.salary_runs, company_id, "net_pay", "p_days", "total_gross")
     cur_cmp = await _cur_run_agg(db.compliance_salary_runs, company_id, "net", "present_days", "gross_paid")
 
+    def _full_rate(r: dict) -> Optional[float]:
+        """Earned basic of one month → estimated full-month rate.
+        Scales BOTH directions (partial month up, extra/OT paid days down)."""
+        try:
+            b = float(r.get("b") or 0)
+            d = float(r.get("d") or 0)
+            md = float(r.get("md") or 0)
+        except (TypeError, ValueError):
+            return None
+        if b <= 0 or d <= 0:
+            return None
+        return round(b * md / d, 0) if md > 0 else b
+
     out = []
     for u in users:
         uid = u["user_id"]
         leg = legacy.get(uid, {})
         leg_on = leg.get("online")
         master_basic = u.get("basic_salary")
-        # Legacy SalaryTrans Basic is the EARNED basic (pro-rated by days
-        # present) — normalise it to a full month before comparing, ignore
-        # zero-day months, and allow a 2% tolerance so only genuine RATE
-        # differences are flagged (user: too many false ⚠️ otherwise).
-        full_basic = None
-        if leg_on and leg_on.get("last_basic"):
-            lb = float(leg_on["last_basic"])
-            ld = float(leg_on.get("last_days") or 0)
-            lmd = float(leg_on.get("last_month_days") or 0)
-            if ld > 0:
-                full_basic = round(lb * lmd / ld, 0) if (lmd > 0 and ld < lmd) else lb
-        if leg_on is not None:
-            leg_on["full_basic"] = full_basic
+        # Legacy SalaryTrans Basic is the EARNED basic (pro-rated by paid
+        # days incl. OT/extra days) — normalise each of the LAST 3 months to
+        # a full-month rate and flag only when NONE of them matches the
+        # master within 2.5% (user: genuine rate changes only).
+        candidates: List[float] = []
+        if leg_on:
+            candidates = [c for c in (_full_rate(r) for r in leg_on.pop("_recent", []))
+                          if c is not None]
+            leg_on["full_basic"] = candidates[-1] if candidates else None
         mismatch = bool(
-            master_basic and full_basic
-            and abs(float(master_basic) - full_basic)
-            / max(float(master_basic), full_basic) > 0.02)
+            master_basic and candidates
+            and all(
+                abs(float(master_basic) - c) / max(float(master_basic), c) > 0.025
+                for c in candidates))
+        leg_off = leg.get("offline")
+        if leg_off:
+            leg_off.pop("_recent", None)
         out.append({
             **u,
             "legacy_online": leg_on,
-            "legacy_offline": leg.get("offline"),
+            "legacy_offline": leg_off,
             "current_actual": cur_act.get(uid),
             "current_compliance": cur_cmp.get(uid),
             "mismatch_basic": mismatch,
