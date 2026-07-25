@@ -12,6 +12,66 @@ import { useRouter } from "expo-router";
 
 import { api } from "@/src/api/client";
 import { colors, radius, shadow } from "@/src/theme";
+import { NAV_SUPER, RECENT_KEY, readNavList } from "@/src/components/AdminWebShell";
+
+// Iter 295 (user spec) — "Recently Opened" lives ONLY on the Dashboard
+// (removed from the sidebar). Flatten the nav tree for label/icon lookup.
+function flattenNav(items: any[], out: any[] = []): any[] {
+  for (const it of items) {
+    if (it.route) out.push(it);
+    if (it.children) flattenNav(it.children, out);
+  }
+  return out;
+}
+
+function RecentlyOpened() {
+  const router = useRouter();
+  const [recent, setRecent] = useState<string[]>([]);
+  useEffect(() => {
+    setRecent(readNavList(RECENT_KEY));
+  }, []);
+  if (recent.length === 0) return null;
+  const flat = flattenNav(NAV_SUPER);
+  const items = recent
+    .map((r) => flat.find((n) => n.route === r))
+    .filter(Boolean)
+    .slice(0, 6);
+  if (items.length === 0) return null;
+  return (
+    <View style={ro.wrap} testID="pd-recently-opened">
+      <Text style={ro.title}>🕘 Recently Opened</Text>
+      <View style={ro.row}>
+        {items.map((it: any) => (
+          <Pressable
+            key={it.route}
+            onPress={() => router.push(it.route as any)}
+            style={({ hovered }: any) => [ro.chip, hovered && ro.chipHover]}
+            testID={`pd-recent-${(it.route || "").replace(/[^a-z0-9]/gi, "-")}`}
+          >
+            <Ionicons name={it.icon} size={13} color="#2563EB" />
+            <Text style={ro.chipTxt}>{it.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+const ro = StyleSheet.create({
+  wrap: {
+    backgroundColor: "#FFFFFF", borderRadius: radius.lg, borderWidth: 1,
+    borderColor: "rgba(15,23,42,0.08)", padding: 14, marginBottom: 16,
+  },
+  title: { fontSize: 12, fontWeight: "800", color: "#64748B", letterSpacing: 0.4, marginBottom: 8 },
+  row: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  chip: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: "#EFF6FF", borderWidth: 1, borderColor: "#DBEAFE",
+    borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7,
+  },
+  chipHover: { backgroundColor: "#DBEAFE" },
+  chipTxt: { fontSize: 12, fontWeight: "700", color: "#1F2937" },
+});
 
 /* ------------------------------ helpers ------------------------------ */
 
@@ -146,6 +206,9 @@ export default function OverviewPremium({
           </View>
         ) : null}
       </View>
+
+      {/* Iter 295 — Recently Opened (moved here from the sidebar). */}
+      <RecentlyOpened />
 
       {/* KPI cards */}
       <View style={st.kpiGrid}>

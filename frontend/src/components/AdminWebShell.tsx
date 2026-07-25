@@ -27,8 +27,8 @@ import { useT, useLang, setLang } from "@/src/i18n";
 
 // Iter 294 — Pinned favourites + recently-opened screens (web localStorage).
 const FAV_KEY = "sksharma.nav.favs.v1";
-const RECENT_KEY = "sksharma.nav.recent.v1";
-function readNavList(k: string): string[] {
+export const RECENT_KEY = "sksharma.nav.recent.v1";
+export function readNavList(k: string): string[] {
   if (Platform.OS !== "web" || typeof localStorage === "undefined") return [];
   try {
     const v = JSON.parse(localStorage.getItem(k) || "[]");
@@ -606,7 +606,7 @@ export default function AdminWebShell({ children }: Props) {
   const tr = useT();
   const lang = useLang();
   const [favs, setFavs] = React.useState<string[]>(() => readNavList(FAV_KEY));
-  const [recent, setRecent] = React.useState<string[]>(() => readNavList(RECENT_KEY));
+  const [, setRecent] = React.useState<string[]>(() => readNavList(RECENT_KEY));
   const [aiOpen, setAiOpen] = React.useState(false);
   const [notifOpen, setNotifOpen] = React.useState(false);
   const [helpOpen, setHelpOpen] = React.useState(false);
@@ -1047,28 +1047,6 @@ export default function AdminWebShell({ children }: Props) {
                 return (
                   <NavRow
                     key={`fav-${r}`}
-                    item={item}
-                    activeRoute={activeRoute}
-                    pathname={pathname}
-                    fullPath={fullPath}
-                    onNavigate={navigateTo}
-                    favSet={favSet}
-                    onToggleFav={toggleFav}
-                  />
-                );
-              })}
-              <View style={styles.divider} />
-            </>
-          ) : null}
-          {recent.length > 0 ? (
-            <>
-              <Text style={styles.navSection}>🕘 {tr("Recently Opened")}</Text>
-              {recent.slice(0, 4).map((r) => {
-                const item = flatNav.find((n) => n.route === r);
-                if (!item) return null;
-                return (
-                  <NavRow
-                    key={`rec-${r}`}
                     item={item}
                     activeRoute={activeRoute}
                     pathname={pathname}
