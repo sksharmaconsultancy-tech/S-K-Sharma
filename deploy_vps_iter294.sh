@@ -83,7 +83,7 @@ sudo find $WEB_DIR/_expo/static/js/web -name "entry-*.js" -mtime +30 -delete 2>/
 # Iter 295 — tell browsers to NEVER cache index.html (hashed assets are
 # immutable and cached forever). Applied once, with nginx -t + rollback.
 SITE_CONF=$(grep -rl "root $WEB_DIR" /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null | head -1)
-if [ -n "$SITE_CONF" ] && ! grep -q "sks-cache-fix" "$SITE_CONF"; then
+if [ -n "$SITE_CONF" ] && ! grep -q "sks-cache-fix" "$SITE_CONF" && ! grep -q 'Cache-Control "no-cache' "$SITE_CONF"; then
   sudo cp "$SITE_CONF" "$SITE_CONF.bak-cache"
   sudo sed -i "0,\|root $WEB_DIR;|s||root $WEB_DIR;\n    # sks-cache-fix — never cache the SPA shell; cache hashed assets forever\n    location = /index.html { add_header Cache-Control \"no-store, must-revalidate\"; }\n    location /_expo/static/ { add_header Cache-Control \"public, max-age=31536000, immutable\"; }|" "$SITE_CONF"
   if sudo nginx -t 2>/dev/null; then

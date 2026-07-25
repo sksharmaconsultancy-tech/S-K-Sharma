@@ -1462,3 +1462,9 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - rpa_worker._fetch_creds + rpa_engine portal scan decrypt transparently. portal_generation truthy checks unaffected.
 - deploy290.sh generates PORTAL_CREDS_KEY into VPS backend/.env if missing.
 - E2E verified: GET masked, PATCH encrypts (enc::gAAA...), mask-echo preserves, decrypts OK, migration encrypted 1 legacy doc.
+
+## Session Iter 294-295 (2026-07-25)
+- Iter 294 batch: 12-group dark sidebar (#0F172A/#2563EB approved), AI Payroll Assistant (voice+chat, gpt-5.4, confirm-before-run), global data search, keyboard shortcuts, favourites, notification centre, EN/HI toggle, auto-save employee drafts, split-view compare, bank transfer files (ICICI/HDFC/SBI/Axis/Kotak, xlsx/csv/txt/xml), BI data feed (Power BI/Excel, per-firm key), multi-brand biometrics (eSSL=ADMS, Matrix/Mantra=JSON webhook /api/device-webhook/{key}), STAFF group interlink fix (per-firm scoping in list_masters).
+- Iter 295 fixes: employee sessions 90d sliding (EMPLOYEE_SESSION_TTL_HOURS, _session_ttl_hours_for_role in server.py; admins stay 12h), bulk-import double-confirm modals, bulk-import Resign Date → exit_date+employment_status interlink, sync-engine CompanyPicker dropdown, Recently Opened moved to Dashboard (OverviewPremium), Auto Shift Detection flag honored in _is_shift_open, geofence GPS-accuracy buffer (client getAccurateFix watch-based fix in src/utils/accurateLocation.ts + server cap 100m via gps_accuracy_m), PWA blank-page fix (deploy keeps old bundles; nginx already had no-cache index.html), repair-punches show punch date.
+- Deploys: deploy_vps_iter294.sh (served via /api/temp-code-bundle?kind=script). User deployed 294 and 295 successfully to smartpayrolling.com.
+- Pending: WhatsApp API integration, legacy payroll DB import, SQL sync, server.py refactor.
