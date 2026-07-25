@@ -50,6 +50,10 @@ export default function AttendanceScreen() {
   const [loc, setLoc] = useState<{ latitude: number; longitude: number } | null>(null);
   const [distance, setDistance] = useState<number | null>(null);
   const [inside, setInside] = useState<boolean>(false);
+  // Iter 295 — device-reported GPS accuracy (metres). Browser/PWA
+  // geolocation can be off by 50–500 m; the geofence check gives the
+  // employee the benefit of this accuracy, capped at 100 m (anti-abuse).
+  const [gpsAcc, setGpsAcc] = useState<number | null>(null);
   // Iter 53: location is OFF by default. Flips true only after the user
   // explicitly grants foreground permission (via the banner CTA or the
   // manual Punch button).
@@ -204,6 +208,8 @@ export default function AttendanceScreen() {
       setLocationEnabled(true);
       const l = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       const coords = { latitude: l.coords.latitude, longitude: l.coords.longitude };
+      const _acc = typeof l.coords.accuracy === "number" ? Math.round(l.coords.accuracy) : null;
+      setGpsAcc(_acc);
       setLoc(coords);
       setLastRefresh(Date.now());
       // Silently persist last-known location so employer's "present but not
@@ -224,7 +230,7 @@ export default function AttendanceScreen() {
             Math.sin(dLng / 2) ** 2;
         const d = 2 * R * Math.asin(Math.sqrt(s));
         setDistance(d);
-        setInside(d <= company.geofence_radius_m);
+        setInside(d - Math.min(_acc || 0, 100) <= company.geofence_radius_m);
       }
       // A) reverse-geocode current location to a readable address (fire & forget)
       reverseGeocode(coords.latitude, coords.longitude).then((a) => {
@@ -519,6 +525,7 @@ export default function AttendanceScreen() {
           accuracy: Location.Accuracy.High,
         });
         punchLoc = { latitude: l.coords.latitude, longitude: l.coords.longitude };
+        if (typeof l.coords.accuracy === "number") setGpsAcc(Math.round(l.coords.accuracy));
         setLoc(punchLoc);
       } catch {
         showToast(
@@ -631,6 +638,7 @@ export default function AttendanceScreen() {
           accuracy: Location.Accuracy.High,
         });
         currentLoc = { latitude: l.coords.latitude, longitude: l.coords.longitude };
+        if (typeof l.coords.accuracy === "number") setGpsAcc(Math.round(l.coords.accuracy));
         setLoc(currentLoc);
       } catch {
         showToast("Could not read GPS. Please try again.", "err");
@@ -654,7 +662,7 @@ export default function AttendanceScreen() {
           Math.cos((company.office_lat * Math.PI) / 180) *
           Math.sin(dLng / 2) ** 2;
       const d = 2 * R * Math.asin(Math.sqrt(s));
-      insideNow = d <= company.geofence_radius_m;
+      insideNow = d - Math.min(gpsAcc || 0, 100) <= company.geofence_radius_m;
       setDistance(d);
       setInside(insideNow);
     }
@@ -668,6 +676,7 @@ export default function AttendanceScreen() {
         kind: nextKind,
         latitude: useLoc.latitude,
         longitude: useLoc.longitude,
+        gps_accuracy_m: gpsAcc ?? undefined,
         biometric_method: method,
         selfie_base64,
         device_info: Platform.OS,
@@ -851,7 +860,9 @@ export default function AttendanceScreen() {
             <View style={styles.distRow}>
               <Ionicons name="navigate" size={14} color={colors.onSurfaceSecondary} />
               <Text style={styles.mapDist}>
-                {distance !== null ? `${formatDistance(distance)} from office` : "Locating…"}
+                {distance !== null
+                  ? `${formatDistance(distance)} from office${gpsAcc != null ? ` · GPS ±${gpsAcc}m` : ""}`
+                  : "Locating…"}
               </Text>
               {company ? (
                 <Text style={styles.mapAllowed}>
@@ -1374,3 +1385,4 @@ const photoStyles = StyleSheet.create({
   noPhoto: { alignItems: "center", paddingVertical: 40, gap: 8 },
   noPhotoTxt: { color: colors.onSurfaceTertiary, fontSize: type.sm, textAlign: "center" },
 });
+;

@@ -9275,7 +9275,14 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
             # allow; admins should configure the geofence in Companies.
             outside = False
         else:
-            outside = dist > radius
+            # Iter 295 (user bug: "inside the radius but shows Not in
+            # Range") — phone GPS (especially browser/PWA geolocation on
+            # iOS) can be off by 50–500 m even when the employee is
+            # standing in the office. Give the punch the benefit of the
+            # device-reported GPS accuracy, CAPPED at 100 m so a wildly
+            # inaccurate fix can never be exploited to punch from far away.
+            _acc_allow = min(max(float(payload.gps_accuracy_m or 0.0), 0.0), 100.0)
+            outside = (dist - _acc_allow) > radius
         if is_live_in:
             outside = False  # never treat live-in staff as outside
 

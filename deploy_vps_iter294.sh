@@ -71,8 +71,29 @@ echo "==> 4/6 Building web frontend (expo export)..."
 cd $APP_DIR/frontend
 yarn install --frozen-lockfile --silent 2>/dev/null || yarn install --silent
 npx expo export -p web
-sudo rm -rf $WEB_DIR/*
+# Iter 295 — BLANK-PAGE FIX (iOS/Android PWA): DO NOT wipe old bundles.
+# Installed PWAs cache the old index.html which points at the old hashed
+# entry-*.js; deleting it caused a 404 → blank screen. Keep old bundles
+# alongside the new build (pruned after 30 days) so stale clients still
+# load, then pick up the new version on their next refresh.
+sudo mkdir -p $WEB_DIR
 sudo cp -r dist/* $WEB_DIR/
+sudo find $WEB_DIR/_expo/static/js/web -name "entry-*.js" -mtime +30 -delete 2>/dev/null || true
+
+# Iter 295 — tell browsers to NEVER cache index.html (hashed assets are
+# immutable and cached forever). Applied once, with nginx -t + rollback.
+SITE_CONF=$(grep -rl "root $WEB_DIR" /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null | head -1)
+if [ -n "$SITE_CONF" ] && ! grep -q "sks-cache-fix" "$SITE_CONF"; then
+  sudo cp "$SITE_CONF" "$SITE_CONF.bak-cache"
+  sudo sed -i "0,\|root $WEB_DIR;|s||root $WEB_DIR;\n    # sks-cache-fix — never cache the SPA shell; cache hashed assets forever\n    location = /index.html { add_header Cache-Control \"no-store, must-revalidate\"; }\n    location /_expo/static/ { add_header Cache-Control \"public, max-age=31536000, immutable\"; }|" "$SITE_CONF"
+  if sudo nginx -t 2>/dev/null; then
+    sudo systemctl reload nginx
+    echo "   nginx cache headers applied ✅"
+  else
+    sudo mv "$SITE_CONF.bak-cache" "$SITE_CONF"
+    echo "   nginx patch skipped (config test failed — restored backup)"
+  fi
+fi
 
 echo "==> 5/6 Restarting backend..."
 sudo supervisorctl stop sksharma-backend || true
@@ -89,24 +110,20 @@ for EP in "admin/ai-assistant/history" "admin/bank-transfer/formats" "admin/glob
   echo "   /api/$EP → HTTP $CODE"
 done
 echo
-echo "🎉 Deploy 294 complete."
+echo "🎉 Deploy 295 complete."
 echo
-echo "WHAT'S NEW FOR YOUR TEAM:"
-echo "  • NEW dark sidebar with 12 organised groups (your approved theme)."
-echo "  • 🤖 AI Assistant (✨ button, bottom-right): type or SPEAK commands"
-echo "    like 'Process July payroll' — it asks Confirm before running."
-echo "  • Top search now finds employees & firms too (Ctrl+K)."
-echo "  • Keyboard shortcuts — press ? anywhere for the list."
-echo "  • Star menu items to pin Favourites; Recently Opened auto-lists."
-echo "  • Bell = full Notification Centre. EN/हिंदी toggle in top bar."
-echo "  • Add Employee auto-saves a draft while you type."
-echo "  • Reports → Split View Compare: two screens side-by-side."
-echo "  • Payroll → Bank Transfer Files: ICICI/HDFC/SBI/Axis/Kotak salary"
-echo "    upload files (xlsx/csv/txt/xml) — upload in net-banking to pay."
-echo "  • Devices → BI & Data Feed: live Power BI / Excel dashboards."
-echo "  • Biometric Devices: eSSL / Matrix COSEC / Mantra brands + webhook."
-echo "  • FIXED: STAFF group shows in Group Master & Add-Employee dropdown."
+echo "FIXES IN THIS DEPLOY:"
+echo "  • 📱 BLANK PAGE FIX (iOS + Android PWA): old app bundles are now kept"
+echo "    on the server, so employees with a cached app never see a blank"
+echo "    screen again. index.html is no longer cached by browsers."
+echo "  • 📍 GEOFENCE FIX: punches now allow for phone GPS accuracy (max"
+echo "    100 m benefit) — employees inside the radius are no longer"
+echo "    rejected due to GPS drift. Spoof-safe: far punches still blocked."
+echo "  • 🕐 Employee sessions last 90 days (no auto-logout)."
+echo "  • Bulk Import: Resign Date now sets Exit/Left date + Resigned status."
+echo "  • Bulk Import: double-confirmation before saving."
+echo "  • Device Sync: firm dropdown."
 echo
-echo "⚠️  IMPORTANT: Everyone must HARD-REFRESH the portal once"
-echo "   (Ctrl+Shift+R on desktop / clear PWA cache on mobile)"
-echo "   to load the new build."
+echo "⚠️  Employees whose PWA is CURRENTLY blank: they must clear the app"
+echo "   cache / reinstall the PWA ONE last time (old bundle was already"
+echo "   deleted by previous deploys). After this deploy it never recurs."

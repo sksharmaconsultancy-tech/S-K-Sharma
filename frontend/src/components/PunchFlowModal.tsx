@@ -135,7 +135,7 @@ export default function PunchFlowModal({ visible, kind, user, postPunch, onClose
         const d = haversineM(pos.latitude, pos.longitude, s.office_lat, s.office_lng);
         if (d < bestD) { bestD = d; best = s; }
       }
-      const inside = bestD <= (best.geofence_radius_m || 200);
+      const inside = bestD - Math.min(accuracyRef.current || 0, 100) <= (best.geofence_radius_m || 200);
       if (!inside && !user?.is_live_in) {
         setStep("gps", "failed", `${formatDistance(bestD)} outside ${best.name}`);
         setError(`You're ${formatDistance(bestD - (best.geofence_radius_m || 200))} outside the work zone. Come inside the geofence to punch.`);
