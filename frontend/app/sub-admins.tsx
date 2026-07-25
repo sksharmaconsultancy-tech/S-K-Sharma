@@ -544,6 +544,29 @@ function SubAdminEditor({
                 style={styles.compBox}
                 contentContainerStyle={{ padding: 6 }}
               >
+                {companies.length > 0 ? (
+                  <View style={styles.selAllRow}>
+                    <Pressable
+                      onPress={() => setCompanyIds(companies.map((c) => c.company_id))}
+                      style={styles.selAllBtn}
+                      testID="sub-admin-select-all-companies"
+                    >
+                      <Ionicons name="checkbox-outline" size={14} color={colors.primary} />
+                      <Text style={styles.selAllTxt}>Select all</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setCompanyIds([])}
+                      style={styles.selAllBtn}
+                      testID="sub-admin-deselect-all-companies"
+                    >
+                      <Ionicons name="square-outline" size={14} color={colors.onSurfaceSecondary} />
+                      <Text style={[styles.selAllTxt, { color: colors.onSurfaceSecondary }]}>Deselect all</Text>
+                    </Pressable>
+                    <Text style={styles.selAllCount}>
+                      {companyIds.length}/{companies.length} selected
+                    </Text>
+                  </View>
+                ) : null}
                 {companies.map((c) => {
                   const on = companyIds.includes(c.company_id);
                   return (
@@ -871,6 +894,29 @@ const styles = StyleSheet.create({
   },
   checkBoxOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   compTxt: { color: colors.onSurface, fontSize: 13 },
+  selAllRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    marginBottom: 4,
+  },
+  selAllBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  selAllTxt: { color: colors.primary, fontSize: 12, fontWeight: "600" },
+  selAllCount: { marginLeft: "auto", color: colors.onSurfaceTertiary, fontSize: 12 },
 
   permGroup: {
     backgroundColor: colors.surfaceSecondary,
