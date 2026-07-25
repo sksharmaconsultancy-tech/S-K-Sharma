@@ -16,6 +16,11 @@
 #     front window now show ESIC = 0 (previously the full-month master
 #     Basic leaked into the ESIC calculation). PF / PT / TDS are also
 #     forced to 0 on a zero-day, zero-pay month.
+#  3. 🩺 CONNECTION DOCTOR (Biometric Devices): one-click diagnosis for
+#     machines that won't connect (e.g. JYK8240100297). Shows per-device
+#     ONLINE / OFFLINE / NEVER-CONNECTED verdicts with plain-language
+#     advice, plus any machine that reached the server with an
+#     UNREGISTERED serial (catches serial typos instantly).
 # Run ON THE VPS as root/sksharma.
 set -e
 
@@ -94,3 +99,7 @@ echo "    UPDATES the existing data — your previously entered days, Adv/TDS"
 echo "    and Other Deductions are KEPT, never reset to zero."
 echo "  • 🐛 ESIC fix: employees with ZERO days in the month now show"
 echo "    ESIC = 0 (no more phantom ESIC amounts)."
+echo "  • 🩺 Connection Doctor: Devices & Integration → Biometric Devices →"
+echo "    orange 'Connection Doctor' button — instantly tells you WHY a"
+echo "    machine is not connecting (never reached server / offline /"
+echo "    serial typo) with the exact fix for each case."

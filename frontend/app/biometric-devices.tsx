@@ -115,6 +115,24 @@ export default function BiometricDevicesScreen() {
   const [companyPickerOpen, setCompanyPickerOpen] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
 
+  // Iter 297 — Connection Doctor (per-device online/never-connected
+  // verdicts + unknown serials that reached the server unregistered).
+  const [doctorOpen, setDoctorOpen] = useState(false);
+  const [doctorBusy, setDoctorBusy] = useState(false);
+  const [doctor, setDoctor] = useState<any>(null);
+  const runDoctor = async () => {
+    setDoctorOpen(true);
+    setDoctorBusy(true);
+    try {
+      const r = await api<any>("/biometric/connection-doctor");
+      setDoctor(r);
+    } catch (e: any) {
+      alertUser("Failed", e?.message || "Could not run the connection check.");
+    } finally {
+      setDoctorBusy(false);
+    }
+  };
+
   const load = useCallback(async () => {
     setError(null);
     try {
@@ -666,6 +684,15 @@ export default function BiometricDevicesScreen() {
               <Text style={styles.addBtnTxt}>Health Report (Excel)</Text>
             </Pressable>
           </View>
+          {/* Iter 297 — Connection Doctor */}
+          <Pressable
+            testID="connection-doctor-btn"
+            style={[styles.addBtn, { backgroundColor: "#B45309" }]}
+            onPress={runDoctor}
+          >
+            <Ionicons name="pulse-outline" size={18} color={colors.onCta} />
+            <Text style={styles.addBtnTxt}>Connection Doctor — why is my machine not connecting?</Text>
+          </Pressable>
 
           {devices.length === 0 ? (
             <View style={styles.emptyBox}>
@@ -708,6 +735,79 @@ export default function BiometricDevicesScreen() {
           <View style={{ height: 40 }} />
         </ScrollView>
       )}
+
+      {/* Iter 297 — Connection Doctor modal */}
+      <Modal transparent animationType="slide" visible={doctorOpen} onRequestClose={() => setDoctorOpen(false)}>
+        <Pressable style={styles.backdrop} onPress={() => setDoctorOpen(false)} />
+        <View style={[styles.sheet, { maxHeight: "85%" }]}>
+          <View style={styles.grip} />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Ionicons name="pulse-outline" size={18} color="#B45309" />
+            <Text style={[styles.sheetTitle, { flex: 1 }]}>Connection Doctor</Text>
+            <Pressable onPress={runDoctor} hitSlop={8}>
+              <Ionicons name="refresh" size={18} color={colors.brandPrimary} />
+            </Pressable>
+            <Pressable onPress={() => setDoctorOpen(false)} hitSlop={8}>
+              <Ionicons name="close" size={20} color={colors.onSurfaceTertiary} />
+            </Pressable>
+          </View>
+          {doctorBusy ? (
+            <View style={{ paddingVertical: 40, alignItems: "center" }}>
+              <ActivityIndicator color={colors.brandPrimary} />
+              <Text style={{ marginTop: 8, color: colors.onSurfaceTertiary, fontSize: 12 }}>
+                Checking every machine…
+              </Text>
+            </View>
+          ) : (
+            <ScrollView style={{ marginTop: 10 }}>
+              {(doctor?.devices || []).map((d: any) => {
+                const c = d.verdict === "online" ? "#16a34a" : d.verdict === "offline" ? "#B45309" : "#DC2626";
+                const label = d.verdict === "online" ? "ONLINE" : d.verdict === "offline" ? "OFFLINE" : "NEVER CONNECTED";
+                return (
+                  <View key={d.device_id} style={{ borderWidth: 1, borderColor: "#E5E7EB", borderRadius: 10, padding: 10, marginBottom: 8 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: c }} />
+                      <Text style={{ fontWeight: "700", color: colors.onSurface, flex: 1 }} numberOfLines={1}>
+                        {d.name}  ·  {d.serial_number}
+                      </Text>
+                      <Text style={{ fontWeight: "800", fontSize: 11, color: c }}>{label}</Text>
+                    </View>
+                    <Text style={{ marginTop: 6, fontSize: 12, color: colors.onSurfaceSecondary, lineHeight: 17 }}>
+                      {d.advice}
+                    </Text>
+                    {d.last_seen_at ? (
+                      <Text style={{ marginTop: 4, fontSize: 11, color: colors.onSurfaceTertiary }}>
+                        Last reached server: {String(d.last_seen_at).replace("T", " ").slice(0, 19)}
+                        {d.last_source_ip ? `  ·  from IP ${d.last_source_ip}` : ""}
+                      </Text>
+                    ) : null}
+                  </View>
+                );
+              })}
+              {(doctor?.unknown_devices || []).length > 0 && (
+                <>
+                  <Text style={{ fontWeight: "800", color: "#DC2626", marginTop: 6, marginBottom: 6, fontSize: 13 }}>
+                    ⚠ Machines reaching the server but NOT registered
+                  </Text>
+                  {(doctor?.unknown_devices || []).map((u: any) => (
+                    <View key={u.serial_number} style={{ borderWidth: 1, borderColor: "#FECACA", backgroundColor: "#FEF2F2", borderRadius: 10, padding: 10, marginBottom: 8 }}>
+                      <Text style={{ fontWeight: "700", color: "#991B1B" }}>{u.serial_number}</Text>
+                      <Text style={{ marginTop: 4, fontSize: 12, color: "#7F1D1D", lineHeight: 17 }}>{u.hint}</Text>
+                      <Text style={{ marginTop: 4, fontSize: 11, color: "#B91C1C" }}>
+                        Last attempt: {String(u.last_seen_at || "").replace("T", " ").slice(0, 19)} · {u.hits} attempts
+                      </Text>
+                    </View>
+                  ))}
+                </>
+              )}
+              {!doctorBusy && (doctor?.devices || []).length === 0 && (
+                <Text style={{ color: colors.onSurfaceTertiary, fontSize: 12 }}>No devices registered yet.</Text>
+              )}
+              <View style={{ height: 24 }} />
+            </ScrollView>
+          )}
+        </View>
+      </Modal>
 
       {/* Editor modal */}
       <Modal transparent animationType="slide" visible={editorOpen} onRequestClose={() => setEditorOpen(false)}>

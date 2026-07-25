@@ -1439,6 +1439,103 @@ async def resync_all_biometric_devices(
     }
 
 
+@router.get("/biometric/connection-doctor")
+async def biometric_connection_doctor(
+    company_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 297 (user issue: "machine not connecting") — one-click
+    diagnosis. For every registered device: ONLINE / OFFLINE /
+    NEVER-CONNECTED verdict with plain-language advice. Also lists
+    UNKNOWN serials that DID reach the server but are not registered
+    (catches serial typos instantly, with a fuzzy-match hint)."""
+    import difflib
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    q: dict = {}
+    if admin["role"] == "company_admin":
+        q["company_id"] = admin["company_id"]
+    elif company_id:
+        q["company_id"] = company_id
+    devices = await db.biometric_devices.find(q, {"_id": 0}).to_list(200)
+    now = datetime.now(timezone.utc)
+
+    def _ago(iso: Optional[str]) -> Optional[float]:
+        if not iso:
+            return None
+        try:
+            return (now - datetime.fromisoformat(iso.replace("Z", "+00:00"))).total_seconds()
+        except Exception:
+            return None
+
+    out = []
+    for d in devices:
+        secs = _ago(d.get("last_seen_at"))
+        if secs is None:
+            verdict, advice = "never_connected", (
+                "This machine has NEVER reached the server. The problem is on "
+                "the machine / network side: on the device open COMM → ADMS "
+                "(Cloud Server) and re-check Server Mode=ADMS, Server Address, "
+                "Port 80, Proxy OFF (see Setup Guide), confirm the serial shown "
+                "on the machine (Menu → System Info) matches what you registered, "
+                "make sure the machine has working internet (gateway + DNS), "
+                "then RESTART the machine."
+            )
+        elif secs < 180:
+            verdict, advice = "online", "Connected ✓ — the machine is talking to the server."
+        else:
+            verdict, advice = "offline", (
+                "The machine HAS connected before but is offline now — check "
+                "its power and internet connection, then restart it."
+            )
+        out.append({
+            "device_id": d.get("device_id"),
+            "serial_number": d.get("serial_number"),
+            "name": d.get("name"),
+            "brand": d.get("brand") or "zkteco",
+            "company_id": d.get("company_id"),
+            "enabled": d.get("enabled", True),
+            "verdict": verdict,
+            "advice": advice,
+            "last_seen_at": d.get("last_seen_at"),
+            "last_seen_secs": int(secs) if secs is not None else None,
+            "last_source_ip": d.get("last_source_ip"),
+        })
+
+    # Unknown serials — machines that reached the server but aren't
+    # registered (or were registered with a slightly different serial).
+    registered_sns = [str(d.get("serial_number") or "") for d in devices]
+    all_sns = {
+        str(x.get("serial_number") or "")
+        for x in await db.biometric_devices.find({}, {"_id": 0, "serial_number": 1}).to_list(500)
+    }
+    unknown = []
+    _unk_docs = await db.biometric_unknown.find(
+        {}, {"_id": 0}).sort("last_seen_at", -1).to_list(50)
+    for u in _unk_docs:
+        sn = str(u.get("serial_number") or "")
+        if sn in all_sns:
+            continue  # registered since — no longer a problem
+        hint = None
+        close = difflib.get_close_matches(sn, registered_sns, n=1, cutoff=0.75)
+        if close:
+            hint = (
+                f"Looks like a TYPO: the machine reports '{sn}' but you "
+                f"registered '{close[0]}'. Edit the device and fix the serial."
+            )
+        unknown.append({
+            "serial_number": sn,
+            "first_seen_at": u.get("first_seen_at"),
+            "last_seen_at": u.get("last_seen_at"),
+            "hits": u.get("hits") or 0,
+            "hint": hint or (
+                "This machine IS reaching the server but is NOT registered. "
+                "Register it with this exact serial to start receiving punches."
+            ),
+        })
+    return {"devices": out, "unknown_devices": unknown, "checked_at": _now_iso_z()}
+
+
 @router.get("/biometric/devices")
 async def list_biometric_devices(
     company_id: Optional[str] = Query(None),
