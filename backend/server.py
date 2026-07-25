@@ -8012,7 +8012,17 @@ async def super_admin_update_company_admin(
         if phone and len(phone.lstrip("+")) < 8:
             raise HTTPException(status_code=400, detail="Please enter a valid mobile number")
         if phone:
-            clash = await db.users.find_one({"phone": phone, "user_id": {"$ne": target["user_id"]}}, {"_id": 0, "user_id": 1})
+            clash = await db.users.find_one(
+                {"phone": phone, "user_id": {"$ne": target["user_id"]}},
+                {"_id": 0, "user_id": 1, "role": 1, "exit_date": 1,
+                 "resign_date": 1, "employment_status": 1, "active": 1})
+            # Iter 295 — a resigned/left employee never blocks number reuse.
+            if clash and clash.get("role") == "employee" and _employee_is_resigned(clash):
+                await db.users.update_one(
+                    {"user_id": clash["user_id"]},
+                    {"$set": {"released_phone": phone, "identifier_released_at": now_iso()},
+                     "$unset": {"phone": "", "phone_e164": ""}})
+                clash = None
             if clash:
                 raise HTTPException(status_code=409, detail="That mobile number is already used by another account")
         updates["phone"] = phone
@@ -8180,6 +8190,20 @@ def compliance_gross_total(basic: Any, allowances: Any) -> float:
     return round(total, 2)
 
 
+def _employee_is_resigned(u: Dict[str, Any]) -> bool:
+    """Iter 295 (user directive) — True when the employee has resigned /
+    left (exit_date, resign_date, employment_status or active=False). A
+    resigned employee must NEVER block a re-joining with the same mobile
+    number or email (rehire case)."""
+    status = str(u.get("employment_status") or "").strip().lower()
+    return bool(
+        u.get("exit_date")
+        or u.get("resign_date")
+        or status in ("resigned", "exited", "left", "terminated")
+        or u.get("active") is False
+    )
+
+
 async def _dup_employee_with_orphan_heal(
     phone: Optional[str], email: Optional[str]
 ) -> Optional[Dict[str, Any]]:
@@ -8191,7 +8215,12 @@ async def _dup_employee_with_orphan_heal(
 
     User report (Iter 134): after Force Delete of a firm from Company Master,
     re-importing the same employees said "phone / email already registered"
-    because stale user docs survived on the production DB."""
+    because stale user docs survived on the production DB.
+
+    Iter 295 (user directive) — RESIGNED / LEFT employees never block:
+    the old record RELEASES the matched phone/email (archived to
+    released_phone / released_email) so the rehired person's logins resolve
+    to the NEW record. Applies to Add Employee AND Bulk Import (shared)."""
     or_q: List[Dict[str, Any]] = []
     if phone:
         or_q.append({"phone": phone})
@@ -8200,25 +8229,52 @@ async def _dup_employee_with_orphan_heal(
     if not or_q:
         return None
     stale_ids: List[str] = []
+    release_phone_ids: List[str] = []
+    release_email_ids: List[str] = []
     blocker: Optional[Dict[str, Any]] = None
     async for u in db.users.find(
         {"$or": or_q, "role": "employee"},
-        {"_id": 0, "user_id": 1, "name": 1, "company_id": 1, "employee_code": 1},
+        {"_id": 0, "user_id": 1, "name": 1, "company_id": 1, "employee_code": 1,
+         "phone": 1, "email": 1, "exit_date": 1, "resign_date": 1,
+         "employment_status": 1, "active": 1},
     ):
         live = None
         if u.get("company_id"):
             live = await db.companies.find_one(
                 {"company_id": u["company_id"]}, {"_id": 0, "company_id": 1})
-        if live:
-            blocker = blocker or u
-        else:
+        if not live:
             stale_ids.append(u["user_id"])
+            continue
+        if _employee_is_resigned(u):
+            if phone and u.get("phone") == phone:
+                release_phone_ids.append(u["user_id"])
+            if email and (u.get("email") or "").lower() == (email or "").lower():
+                release_email_ids.append(u["user_id"])
+            continue
+        blocker = blocker or u
     if stale_ids:
         await db.users.delete_many({"user_id": {"$in": stale_ids}})
         await db.user_sessions.delete_many({"user_id": {"$in": stale_ids}})
         logger.info(
             "[dup-heal] removed %d orphan employee record(s) for phone=%s email=%s "
             "(firms already deleted)", len(stale_ids), phone, email)
+    if not blocker:
+        # Free the identifiers held by resigned records so the new joining
+        # owns them exclusively (old value archived for audit).
+        if release_phone_ids:
+            await db.users.update_many(
+                {"user_id": {"$in": release_phone_ids}},
+                {"$set": {"released_phone": phone, "identifier_released_at": now_iso()},
+                 "$unset": {"phone": "", "phone_e164": ""}})
+            logger.info("[dup-heal] released phone %s from %d resigned employee(s) for rehire",
+                        phone, len(release_phone_ids))
+        if release_email_ids:
+            await db.users.update_many(
+                {"user_id": {"$in": release_email_ids}},
+                {"$set": {"released_email": email, "identifier_released_at": now_iso()},
+                 "$unset": {"email": ""}})
+            logger.info("[dup-heal] released email %s from %d resigned employee(s) for rehire",
+                        email, len(release_email_ids))
     return blocker
 
 
