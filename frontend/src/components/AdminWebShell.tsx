@@ -221,6 +221,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/zk-dat-import", label: "Import Biometric (.dat)", icon: "finger-print-outline" },
       { route: "/join-qr", label: "QR Codes (Join / App)", icon: "qr-code-outline" },
       { route: "/sheet-verification", label: "OCR Sheet Verification", icon: "document-attach-outline" },
+      { route: "/legacy-explorer", label: "Legacy SQL Explorer", icon: "server-outline" },
       { route: "/database-backup", label: "Database Backup", icon: "server-outline" },
     ],
   },

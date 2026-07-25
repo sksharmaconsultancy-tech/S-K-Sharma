@@ -53,6 +53,13 @@ async def temp_code_bundle(token: str = Query(...), kind: str = Query("tar")):
             raise HTTPException(status_code=404, detail="Deploy script not found")
         return FileResponse(path, filename="deploy297.sh",
                             media_type="text/x-shellscript")
+    if kind == "legacy":
+        # Iter 299 — SQL Server legacy backup restore + explorer setup.
+        path = "/app/legacy_setup_vps.sh"
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="Legacy script not found")
+        return FileResponse(path, filename="legacy_setup.sh",
+                            media_type="text/x-shellscript")
     if kind == "ssl":
         # One-time HTTPS / Let's Encrypt setup script for the VPS.
         path = "/app/setup_ssl_iter236_v2.sh"

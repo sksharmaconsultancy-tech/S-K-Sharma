@@ -1488,3 +1488,10 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   - E2E verified (Kankani, temp BRANCH-A/B data, cleaned up): guest 2 days @ daily rate, rate edit 700→1400, home run subtracts away days + excludes non-visitors, combined branch_days map, branch-scoped reprocess keeps entered days.
   - NOTE: compliance (PF/ESIC) branch split NOT done — user said manage in Actual salary; phase 2 if requested.
 - Iter 297/298 known tool issue: search_replace sometimes reports success without writing — always grep-verify critical edits.
+- Iter 299 — LEGACY SQL IMPORT PHASE 1 (user: 919MB MS SQL Server .bak ZIP, multiple firms, "check data before import"):
+  - /app/legacy_setup_vps.sh — VPS script: installs docker + SQL Server 2022 Express container (sks-mssql, port 127.0.0.1:14333, SA pass in /home/sksharma/legacy/.sa_pass), unzips backup from /home/sksharma/legacy/, RESTORE FILELISTONLY→MOVE→RESTORE for every .bak, writes LEGACY_MSSQL_* to backend .env, installs pymssql, restarts backend. Served via temp_bundle kind=legacy (filename legacy_setup.sh).
+  - backend/routes/legacy_explorer.py — read-only: GET /admin/legacy/status (dbs+sizes), /admin/legacy/tables?db= (row counts), /admin/legacy/rows?db=&table=&skip&limit&search (identifier validation vs sys.tables, text-col LIKE search, OFFSET/FETCH). pymssql via asyncio.to_thread. Graceful 503 when unconfigured. pymssql==2.3.13 appended to requirements.txt.
+  - frontend/app/legacy-explorer.tsx — DB chips → table chips w/ row counts + search → paginated row grid w/ search. Setup instructions shown when unconfigured. Menu: Import/Export → "Legacy SQL Explorer" (both nav lists in AdminWebShell).
+  - VPS capacity confirmed by user: 15GB RAM / 171GB free / 4 cores.
+  - PHASE 2 PENDING: after user checks data → build table→schema mapping + preview + firm-wise import.
+  - Verified: status/tables endpoints (unconfigured path), script serving, screen renders. SQL-dependent paths (pymssql queries, restore script) can only be truly tested on the VPS after user uploads backup.

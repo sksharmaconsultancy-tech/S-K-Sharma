@@ -21249,6 +21249,10 @@ app.include_router(bank_transfer_router)
 from routes.bi_feed import router as bi_feed_router  # noqa: E402
 app.include_router(bi_feed_router)
 
+# Iter 299 — Legacy SQL Server Explorer (read-only browse before import).
+from routes.legacy_explorer import router as legacy_explorer_router  # noqa: E402
+app.include_router(legacy_explorer_router)
+
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
 maybe_start_rpa_worker(app, db)

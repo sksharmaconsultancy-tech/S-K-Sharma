@@ -30,6 +30,10 @@
 #       (home employees' days here + other-branch GUEST rows with only
 #       their days worked here, at an editable per-day rate) or Combined
 #       (branch-wise day split shown under each employee's name).
+#  5. 🗄️ LEGACY SQL EXPLORER (user request): browse the old payroll
+#     software's SQL Server backup data (read-only) inside the portal
+#     before importing. Restore the backup first with legacy_setup.sh
+#     (kind=legacy from the temp-code-bundle endpoint).
 # Run ON THE VPS as root/sksharma.
 set -e
 
