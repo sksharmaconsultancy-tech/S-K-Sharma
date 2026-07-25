@@ -1479,3 +1479,12 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - deploy_vps_iter297.sh created; temp_bundle.py kind=script now serves deploy297.sh.
 - Pending: WhatsApp API integration, legacy payroll DB import, SQL sync, server.py refactor.
 - Iter 297b — Connection Doctor (user: "JYK8240100297 not able to connect"): GET /api/biometric/connection-doctor (routes/biometric_devices.py) — per-device online/offline/never_connected verdict + advice + last_source_ip; lists db.biometric_unknown serials not yet registered with difflib fuzzy typo hint vs registered serials. Frontend biometric-devices.tsx: orange "Connection Doctor" button + bottom-sheet modal (verdict dots, advice, unknown-serial red cards). E2E verified incl. typo detection + online flip after handshake. Included in deploy297.
+- Iter 298 — TWO-BRANCH SALARY SPLIT (user: one firm, two branches, separate PF/ESIC; manage in Actual Salary):
+  - biometric_devices: new `branch_name` tag (Create/Update models, register doc, editor UI input in biometric-devices.tsx).
+  - server.py create_actual_salary_process: `payload.branch_name`; per-DATE branch attribution via day's FIRST zkteco punch (device serial → branch map); home-branch run subtracts away-days; GUEST rows (other-branch employees) get only days-worked-here, salary_mode forced daily, day-rate derived from master (monthly/md, hourly*duty_hrs) or emp.branch_rates[branch] override; rows carry branch_name/guest_of_branch/branch_days; run doc has branch_name; _fin_q + prev-run merge scoped per branch.
+  - PATCH row: `basic` editable ONLY for guest rows (Iter 217 lock kept for home rows).
+  - GET /api/admin/branches?company_id → distinct users.branch_name (drives selector).
+  - salary-run.tsx: Branch chips (Combined + each branch, shown only when branches exist), GUEST badge + branch-day split under name, editable Basic cell for guest rows, branch in run title & existing-run confirm check.
+  - E2E verified (Kankani, temp BRANCH-A/B data, cleaned up): guest 2 days @ daily rate, rate edit 700→1400, home run subtracts away days + excludes non-visitors, combined branch_days map, branch-scoped reprocess keeps entered days.
+  - NOTE: compliance (PF/ESIC) branch split NOT done — user said manage in Actual salary; phase 2 if requested.
+- Iter 297/298 known tool issue: search_replace sometimes reports success without writing — always grep-verify critical edits.

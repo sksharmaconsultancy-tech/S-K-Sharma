@@ -47,6 +47,7 @@ class BiometricDeviceCreate(BaseModel):
     enabled: bool = True
     gmt_offset: Optional[str] = "+05:30"   # Iter 263 — machine time zone
     brand: Optional[str] = None            # Iter 294 — multi-brand (zkteco/essl/matrix/mantra/other)
+    branch_name: Optional[str] = None      # Iter 298 — two-branch firms: punches from this machine count as this branch's duty
 
 
 class BiometricDeviceUpdate(BaseModel):
@@ -57,6 +58,7 @@ class BiometricDeviceUpdate(BaseModel):
     enabled: Optional[bool] = None
     gmt_offset: Optional[str] = None       # Iter 263 — machine time zone
     brand: Optional[str] = None            # Iter 294 — multi-brand
+    branch_name: Optional[str] = None      # Iter 298 — branch tag
 
 
 # Iter 263 — GMT / time-zone handling for machines.
@@ -1329,6 +1331,8 @@ async def register_biometric_device(
         "kind": payload.kind,
         "company_id": company_id,
         "location": (payload.location or "").strip() or None,
+        # Iter 298 — branch tag for two-branch payroll splits.
+        "branch_name": (payload.branch_name or "").strip() or None,
         "enabled": payload.enabled,
         # Iter 267 — participates in the multi-device sync engine by default.
         "sync_enabled": True,

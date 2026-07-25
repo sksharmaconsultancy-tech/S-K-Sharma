@@ -21,6 +21,15 @@
 #     ONLINE / OFFLINE / NEVER-CONNECTED verdicts with plain-language
 #     advice, plus any machine that reached the server with an
 #     UNREGISTERED serial (catches serial typos instantly).
+#  4. 🏢 TWO-BRANCH SALARY SPLIT (user request): one firm, two branches
+#     with separate PF/ESIC registrations.
+#     • Device Setup → each machine can be tagged with its Branch.
+#     • Every attendance DATE is attributed to ONE branch via the day's
+#       first machine punch.
+#     • Actual Salary Process → new Branch selector: run per-branch
+#       (home employees' days here + other-branch GUEST rows with only
+#       their days worked here, at an editable per-day rate) or Combined
+#       (branch-wise day split shown under each employee's name).
 # Run ON THE VPS as root/sksharma.
 set -e
 
@@ -103,3 +112,8 @@ echo "  • 🩺 Connection Doctor: Devices & Integration → Biometric Devices 
 echo "    orange 'Connection Doctor' button — instantly tells you WHY a"
 echo "    machine is not connecting (never reached server / offline /"
 echo "    serial typo) with the exact fix for each case."
+echo "  • 🏢 Two-branch salary split: tag each machine with its Branch in"
+echo "    Device Setup, put the Branch on each employee's master, then use"
+echo "    the new Branch selector in the Actual Salary Process — each"
+echo "    branch gets its own run (GUEST rows for visiting employees,"
+echo "    day-rate editable) or one Combined sheet with branch-wise days."

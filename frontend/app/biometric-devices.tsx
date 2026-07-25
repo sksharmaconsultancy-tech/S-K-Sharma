@@ -67,6 +67,7 @@ const emptyDraft = {
   kind: "in" as "in" | "out" | "both",
   company_id: "",
   location: "",
+  branch_name: "", // Iter 298 — branch tag for two-branch payroll
   gmt_offset: "+05:30", // Iter 263 — machine time zone (India default)
   brand: "zkteco",      // Iter 294 — device brand
   enabled: true,
@@ -200,6 +201,7 @@ export default function BiometricDevicesScreen() {
       kind: d.kind,
       company_id: d.company_id || "",
       location: d.location || "",
+      branch_name: (d as any).branch_name || "",
       gmt_offset: d.gmt_offset || "+05:30",
       brand: d.brand || "zkteco",
       enabled: d.enabled,
@@ -226,6 +228,7 @@ export default function BiometricDevicesScreen() {
             kind: draft.kind,
             company_id: isSuper ? draft.company_id : undefined,
             location: draft.location.trim() || undefined,
+            branch_name: ((draft as any).branch_name || "").trim(),
             gmt_offset: draft.gmt_offset.trim() || "+05:30",
             brand: draft.brand,
             enabled: draft.enabled,
@@ -240,6 +243,7 @@ export default function BiometricDevicesScreen() {
             kind: draft.kind,
             company_id: draft.company_id || undefined,
             location: draft.location.trim() || undefined,
+            branch_name: ((draft as any).branch_name || "").trim() || undefined,
             gmt_offset: draft.gmt_offset.trim() || "+05:30",
             brand: draft.brand,
             enabled: draft.enabled,
@@ -954,6 +958,22 @@ export default function BiometricDevicesScreen() {
               placeholderTextColor={colors.onSurfaceTertiary}
               style={styles.input}
             />
+
+            {/* Iter 298 — branch tag for two-branch payroll split. */}
+            <Text style={styles.lbl}>Branch (optional — multi-branch firms)</Text>
+            <TextInput
+              testID="d-branch"
+              value={(draft as any).branch_name || ""}
+              onChangeText={(t) => setDraft({ ...draft, branch_name: t } as any)}
+              placeholder="E.g. BRANCH 2 — must match employees' Branch"
+              placeholderTextColor={colors.onSurfaceTertiary}
+              style={styles.input}
+            />
+            <Text style={styles.hint}>
+              Punches from this machine count as duty at this Branch — used by
+              the Actual Salary Process to split an employee&apos;s days between
+              branches. Leave blank for single-branch firms.
+            </Text>
 
             {/* Iter 263 — machine GMT / time-zone setting. */}
             <Text style={styles.lbl}>GMT offset (time zone)</Text>

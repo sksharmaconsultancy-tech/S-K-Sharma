@@ -219,6 +219,21 @@ export default function ActualSalaryProcessScreen() {
   const [attendanceSource, setAttendanceSource] = useState<AttendanceSource>("biometric");
   const [busy, setBusy] = useState(false);
   const [run, setRun] = useState<ActualRun | null>(null);
+  // Iter 298 — two-branch payroll split (branch selector).
+  const [branch, setBranch] = useState<string>("");
+  const [branches, setBranches] = useState<string[]>([]);
+  useEffect(() => {
+    setBranch("");
+    if (!selectedCompanyId) { setBranches([]); return; }
+    (async () => {
+      try {
+        const r = await api<{ branches: string[] }>(
+          `/admin/branches?company_id=${encodeURIComponent(selectedCompanyId)}`,
+        );
+        setBranches(r.branches || []);
+      } catch { setBranches([]); }
+    })();
+  }, [selectedCompanyId]);
 
   // User directive — changing the FIRM must fully reset the form so the
   // previous company's run/employees never linger on screen.
@@ -276,13 +291,16 @@ export default function ActualSalaryProcessScreen() {
       if (monthDaysOverride.trim()) body.month_days = Number(monthDaysOverride);
       if (empType !== "all") body.employee_type = empType;
       if (rollFilter !== "all") body.is_onroll = rollFilter === "on";
+      if (branch) body.branch_name = branch; // Iter 298 — branch run
 
       // Iter 129e (user directive) — if a run for this firm + month already
       // exists, ask before reprocessing. "No" reloads the page unchanged.
       try {
         const prev = await api<{ runs: any[] }>("/admin/salary-runs");
         const existing = (prev.runs || []).find(
-          (r) => r.month === month && (!selectedCompanyId || r.company_id === selectedCompanyId),
+          (r) => r.month === month && (!selectedCompanyId || r.company_id === selectedCompanyId)
+            // Iter 298 — each branch has its own run lifecycle.
+            && (branch ? String((r as any).branch_name || "") === branch : !(r as any).branch_name),
         );
         if (existing) {
           if (existing.finalized) {
@@ -713,6 +731,30 @@ export default function ActualSalaryProcessScreen() {
             </View>
           </View>
 
+          {/* Iter 298 — two-branch payroll split selector. */}
+          {branches.length > 0 ? (
+            <View style={styles.gridRow}>
+              <View style={styles.gridCol}>
+                <Text style={styles.label}>Branch (separate branch payrolls)</Text>
+                <View style={styles.chipStrip}>
+                  <TypeChip
+                    label="Combined (all)"
+                    active={!branch}
+                    onPress={() => setBranch("")}
+                  />
+                  {branches.map((b) => (
+                    <TypeChip key={b} label={b} active={branch === b} onPress={() => setBranch(b)} />
+                  ))}
+                </View>
+                <Text style={styles.chipHint}>
+                  {branch
+                    ? `Run ONLY for ${branch}: its employees' days here + other-branch employees' days worked here (GUEST rows — day-rate editable).`
+                    : "Combined sheet for the whole firm — branch-wise day split shown under each name. Tag each machine with its Branch in Device Setup for automatic splits."}
+                </Text>
+              </View>
+            </View>
+          ) : null}
+
           <Pressable
             testID="asp-generate"
             onPress={generate}
@@ -911,6 +953,7 @@ function ResultGrid({
         <View style={{ flex: 1 }}>
           <Text style={styles.cardTitle}>
             {run.month}  ·  {run.employees_count} employees
+            {(run as any).branch_name ? `  ·  Branch: ${(run as any).branch_name}` : ""}
             {run.finalized ? "  ·  Finalized 🔒" : "  ·  Draft ✏️"}
           </Text>
           <Text style={styles.smallHint}>
@@ -1035,6 +1078,17 @@ function ResultGrid({
                 <Text style={[styles.readTxt, styles.empIdent, { textAlign: "left" }]} numberOfLines={1}>
                   {r.name || "—"}
                 </Text>
+                {/* Iter 298 — branch info: GUEST badge / branch-day split */}
+                {(r as any).guest_of_branch ? (
+                  <Text style={{ fontSize: 9, color: "#B45309", fontWeight: "800", textAlign: "left" }} numberOfLines={1}>
+                    GUEST · from {(r as any).branch_name || "other branch"}
+                  </Text>
+                ) : (r as any).branch_days && Object.keys((r as any).branch_days || {}).length > 0 ? (
+                  <Text style={{ fontSize: 9, color: colors.onSurfaceTertiary, textAlign: "left" }} numberOfLines={1}>
+                    {Object.entries((r as any).branch_days as Record<string, number>)
+                      .map(([b, n]) => `${b}: ${n}d`).join(" · ")}
+                  </Text>
+                ) : null}
               </View>
 
               <ReadCell w={COL_WIDTHS.duty} bg={GRP.master}>
@@ -1059,8 +1113,21 @@ function ResultGrid({
               />
 
               {/* Iter 217 (user request) — Basic is READ-ONLY: always
-                  fetched from the Employee Master's Actual Salary. */}
-              <ReadCell w={COL_WIDTHS.basic} bg={GRP.master}>{fmtInr(r.basic)}</ReadCell>
+                  fetched from the Employee Master's Actual Salary.
+                  Iter 298 — EXCEPTION: GUEST rows (other-branch duty) may
+                  edit their per-day rate. */}
+              {(r as any).guest_of_branch ? (
+                <EditCell
+                  w={COL_WIDTHS.basic}
+                  value={r.basic}
+                  onChange={(v) => editField(r.user_id, "basic" as keyof ActualRow, v)}
+                  disabled={readOnly}
+                  money
+                  gridRow={idx} gridCol={0} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.master}
+                />
+              ) : (
+                <ReadCell w={COL_WIDTHS.basic} bg={GRP.master}>{fmtInr(r.basic)}</ReadCell>
+              )}
               <ReadCell w={COL_WIDTHS.bsalary} bg={GRP.calc}>{fmtInr(r.basic_salary)}</ReadCell>
               {/* Iter 230 (user request) — OT amount (W.Basic) is editable:
                   typing an amount overrides the hours-based computation. */}

@@ -20129,6 +20129,9 @@ class ActualSalaryProcessBody(BaseModel):
     employee_type: Optional[str] = None
     group_id: Optional[str] = None
     is_onroll: Optional[bool] = None
+    # Iter 298 (user request) — two-branch firms: run the process for ONE
+    # branch (its employees' days there + other-branch GUEST days).
+    branch_name: Optional[str] = None
 
 
 class ActualSalaryRowPatchBody(BaseModel):
@@ -20142,6 +20145,23 @@ class ActualSalaryRowPatchBody(BaseModel):
     w_basic: Optional[float] = None
     adv: Optional[float] = None
     tds: Optional[float] = None
+
+
+@api.get("/admin/branches")
+async def list_company_branches(
+    company_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 298 — distinct employee Branch names for a firm. Drives the
+    Actual Salary Process branch selector (two-branch payroll split)."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    cid = admin.get("company_id") if admin["role"] == "company_admin" else company_id
+    q: dict = {"role": "employee", "branch_name": {"$nin": [None, ""]}}
+    if cid:
+        q["company_id"] = cid
+    vals = await db.users.distinct("branch_name", q)
+    return {"branches": sorted({str(v).strip() for v in vals if str(v).strip()})}
 
 
 @api.post("/admin/actual-salary-process")
@@ -20200,6 +20220,9 @@ async def create_actual_salary_process(
     _fin_q: Dict[str, Any] = {"month": payload.month, "finalized": True}
     if company_id:
         _fin_q["company_id"] = company_id
+    # Iter 298 — branch runs are independent lifecycles per branch.
+    _br = (payload.branch_name or "").strip()
+    _fin_q["branch_name"] = _br if _br else {"$in": [None, ""]}
     if await db.salary_runs.find_one(_fin_q, {"_id": 1}):
         raise HTTPException(
             status_code=409,
@@ -20218,6 +20241,8 @@ async def create_actual_salary_process(
             "month": payload.month,
             "company_id": company_id,
             "finalized": {"$ne": True},
+            # Iter 298 — merge only within the SAME branch run.
+            "branch_name": _br if _br else {"$in": [None, ""]},
         },
         {"_id": 0, "rows": 1},
         sort=[("generated_at", -1)],
@@ -20304,6 +20329,38 @@ async def create_actual_salary_process(
         grp_uids = await _resolve_group_employee_ids(company_id or "", payload.group_id)
         if grp_uids is not None:
             employees = [e for e in employees if e.get("user_id") in set(grp_uids)]
+
+    # Iter 298 (user request) — TWO-BRANCH firm support. Machines carry a
+    # Branch tag (Device Setup); every attendance DATE is attributed to
+    # exactly ONE branch via the day's FIRST machine punch, so a month can
+    # be split branch-wise for payroll (separate PF/ESIC registrations).
+    _dev_branch: Dict[str, str] = {}
+    if company_id:
+        async for _bd in db.biometric_devices.find(
+            {"company_id": company_id, "branch_name": {"$nin": [None, ""]}},
+            {"_id": 0, "serial_number": 1, "branch_name": 1},
+        ):
+            _dev_branch[str(_bd["serial_number"])] = str(_bd["branch_name"]).strip()
+    branch_dates_by_user: Dict[str, Dict[str, str]] = {}
+    if _dev_branch and employees:
+        _first_at: Dict[tuple, str] = {}
+        async for _p in db.attendance.find(
+            {
+                "user_id": {"$in": [e["user_id"] for e in employees]},
+                "date": {"$gte": f"{payload.month}-01", "$lte": f"{payload.month}-31"},
+                "source": {"$regex": "^zkteco:"},
+            },
+            {"_id": 0, "user_id": 1, "date": 1, "at": 1, "source": 1},
+        ):
+            _b = _dev_branch.get(str(_p.get("source") or "")[7:])
+            if not _b:
+                continue
+            _key = (_p["user_id"], _p["date"])
+            _at = str(_p.get("at") or "")
+            if _key not in _first_at or _at < _first_at[_key]:
+                _first_at[_key] = _at
+                branch_dates_by_user.setdefault(_p["user_id"], {})[_p["date"]] = _b
+
 
     # Biometric grid data (P Days + P Hours) — only if source=biometric
     grid_by_user: Dict[str, Any] = {}
@@ -20439,6 +20496,42 @@ async def create_actual_salary_process(
         # Iter 93 — P Days only in half-day steps (.0 or .5), no other decimals.
         p_days = round(p_days * 2) / 2
 
+        # Iter 298 — branch split: home run subtracts days worked at the
+        # OTHER branch; a GUEST row pays only the days worked HERE at a
+        # per-day rate (Employee Master branch_rates[branch] override
+        # wins, else derived from the master salary).
+        _home_b = str(emp.get("branch_name") or "").strip()
+        _bcounts: Dict[str, int] = {}
+        for _db_ in (branch_dates_by_user.get(emp["user_id"]) or {}).values():
+            _bcounts[_db_] = _bcounts.get(_db_, 0) + 1
+        _is_guest = False
+        if _br:
+            if _home_b.lower() == _br.lower():
+                _away = sum(
+                    n for b, n in _bcounts.items() if b.lower() != _br.lower())
+                p_days = max(0.0, p_days - float(_away))
+            else:
+                _here = sum(
+                    n for b, n in _bcounts.items() if b.lower() == _br.lower())
+                if _here <= 0 and emp["user_id"] not in _prev_rows_a:
+                    continue  # never worked at this branch this month
+                _is_guest = True
+                p_days = float(min(_here, max_days))
+                p_hours = 0.0
+                _grate = 0.0
+                for _rk, _rv in (emp.get("branch_rates") or {}).items():
+                    if str(_rk).strip().lower() == _br.lower():
+                        _grate = float(_rv or 0)
+                if _grate <= 0:
+                    if emp_salary_mode == "monthly":
+                        _grate = basic / max(1, month_days)
+                    elif emp_salary_mode == "hourly":
+                        _grate = basic * emp_daily_hrs
+                    else:
+                        _grate = basic
+                basic = round(_grate, 2)
+                emp_salary_mode = "daily"
+
         # Iter 297 — reprocess KEEPS the previously entered days & manual
         # edits from the old run's row for this employee.
         _prev_a = _prev_rows_a.get(emp["user_id"])
@@ -20460,6 +20553,10 @@ async def create_actual_salary_process(
             "doj": emp.get("doj"),
             "exit_date": emp.get("exit_date"),
             "is_onroll": bool(emp.get("is_onroll", True)),
+            # Iter 298 — branch metadata for splits / grid filters.
+            "branch_name": _home_b or None,
+            "guest_of_branch": (_br if _is_guest else None),
+            "branch_days": (_bcounts or None),
             "salary_mode": emp_salary_mode,
             "duty_hrs": round(emp_daily_hrs, 2),
             "basic": round(basic, 2),
@@ -20505,6 +20602,8 @@ async def create_actual_salary_process(
         "employee_type": payload.employee_type,
         "is_onroll_filter": payload.is_onroll,
         "group_id": payload.group_id,
+        # Iter 298 — branch-scoped run (None = combined / whole firm).
+        "branch_name": _br or None,
         "rows": rows,
         "totals": totals,
         "employees_count": len(rows),
@@ -20569,6 +20668,11 @@ async def patch_actual_salary_row(
     # Iter 217 (user request) — Basic Salary is NOT editable in the Actual
     # Salary Process; it is always fetched from the Employee Master's
     # Actual Salary (Basic row). ``basic`` was removed from the PATCH body.
+    # Iter 298 — EXCEPTION: GUEST rows (other-branch duty) may have their
+    # per-day rate (Basic) edited, since the other branch can pay a
+    # different rate.
+    if body.basic is not None and row.get("guest_of_branch"):
+        row["basic"] = float(body.basic)
     if body.duty_hrs is not None:
         row["duty_hrs"] = float(body.duty_hrs)
     if body.oth_allo is not None:
