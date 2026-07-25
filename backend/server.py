@@ -60,6 +60,15 @@ EMERGENT_SESSION_DATA_URL = "https://demobackend.emergentagent.com/auth/v1/env/o
 # 30 minutes per session to avoid write amplification.
 SESSION_TTL_HOURS = 12
 SESSION_SLIDE_THROTTLE_MINUTES = 30
+# Iter 295 (user request: "do not auto-logout employee PWA") — EMPLOYEE
+# sessions live 90 days (sliding) so workers stay signed in on their
+# phones between shifts. Admin/staff portals keep the strict 12-hour
+# window (SEC-004).
+EMPLOYEE_SESSION_TTL_HOURS = 24 * 90
+
+
+def _session_ttl_hours_for_role(role: Optional[str]) -> int:
+    return EMPLOYEE_SESSION_TTL_HOURS if role == "employee" else SESSION_TTL_HOURS
 
 # Only these emails can hold the super_admin role.
 SUPER_ADMIN_EMAILS = {
@@ -2391,14 +2400,17 @@ async def get_user_from_token(authorization: Optional[str]) -> dict:
     now_utc = datetime.now(timezone.utc)
     if exp_dt < now_utc:
         raise HTTPException(status_code=401, detail="Session expired")
+    user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
     # SEC-004 — SLIDING EXPIRY: any authenticated request extends the
-    # session another SESSION_TTL_HOURS (auto-extend while active). Writes
-    # are throttled: only when the stored expiry has aged more than
-    # SESSION_SLIDE_THROTTLE_MINUTES. Legacy long-lived sessions (expiry
-    # further out than the full TTL) are clamped to the 12-hour window on
-    # first use. Conditional filter on the old expires_at prevents
-    # duplicate writes from concurrent requests.
-    _full_ttl = timedelta(hours=SESSION_TTL_HOURS)
+    # session (auto-extend while active). Iter 295 — the window is ROLE
+    # BASED: employees slide 90 days (PWA never auto-logs-out in normal
+    # use); admin/staff sessions keep the strict 12-hour window. Writes
+    # are throttled by SESSION_SLIDE_THROTTLE_MINUTES; sessions longer
+    # than their role's TTL are clamped on first use. Conditional filter
+    # on the old expires_at prevents duplicate concurrent writes.
+    _full_ttl = timedelta(hours=_session_ttl_hours_for_role(user.get("role")))
     _remaining = exp_dt - now_utc
     if (_remaining < _full_ttl - timedelta(minutes=SESSION_SLIDE_THROTTLE_MINUTES)
             or _remaining > _full_ttl):
@@ -2406,9 +2418,6 @@ async def get_user_from_token(authorization: Optional[str]) -> dict:
             {"session_token": token, "expires_at": expires_at},
             {"$set": {"expires_at": now_utc + _full_ttl}},
         )
-    user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
     # RBAC Phase 1 — company_staff (HR Manager / Payroll Manager / ...) are
     # NORMALIZED to a firm-scoped company_admin so every existing endpoint
     # keeps its company scoping. Their permission subset (from the
@@ -4805,7 +4814,8 @@ async def emp_code_login(payload: EmpCodeLoginPayload):
     await _onboarding_login_gate(user)
 
     token = f"emp_{uuid.uuid4().hex}{uuid.uuid4().hex}"
-    expires = datetime.now(timezone.utc) + timedelta(hours=SESSION_TTL_HOURS)
+    # Iter 295 — employee PWA sessions live 90 days (no auto-logout).
+    expires = datetime.now(timezone.utc) + timedelta(hours=EMPLOYEE_SESSION_TTL_HOURS)
     await db.user_sessions.insert_one({
         "session_token": token,
         "user_id": user_id,
@@ -4940,7 +4950,10 @@ def _validate_pin_format(pin: str) -> None:
 
 async def _issue_session(user_id: str, method: str) -> str:
     token = f"{method}_{uuid.uuid4().hex}{uuid.uuid4().hex}"
-    expires = datetime.now(timezone.utc) + timedelta(hours=SESSION_TTL_HOURS)
+    # Iter 295 — role-based TTL: employees 90 days, admins 12 hours.
+    _u = await db.users.find_one({"user_id": user_id}, {"_id": 0, "role": 1})
+    expires = datetime.now(timezone.utc) + timedelta(
+        hours=_session_ttl_hours_for_role((_u or {}).get("role")))
     await db.user_sessions.insert_one({
         "session_token": token,
         "user_id": user_id,

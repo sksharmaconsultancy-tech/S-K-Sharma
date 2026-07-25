@@ -155,6 +155,7 @@ export default function EmployeeBulkImportScreen() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [confirmStep, setConfirmStep] = useState<0 | 1 | 2>(0); // Iter 295 — double-confirm
   const [result, setResult] = useState<ImportResult | null>(null);
 
   const canImport = !!selectedCompanyId && rows.length > 0 && !importing;
@@ -250,24 +251,14 @@ export default function EmployeeBulkImportScreen() {
 
   const runImport = async () => {
     if (!selectedCompanyId || rows.length === 0) return;
-    // Iter 266 (user directive) — DOUBLE confirmation before creating
-    // employee records, so a bulk import is never triggered accidentally.
-    if (Platform.OS === "web") {
-      const firmName =
-        companies.find((c) => c.company_id === selectedCompanyId)?.name ||
-        "the selected firm";
-      const first = window.confirm(
-        `You are about to import ${rows.length} employee(s) into "${firmName}".\n\n` +
-          `Please confirm the firm and the number of rows are correct.\n\nContinue?`,
-      );
-      if (!first) return;
-      const second = window.confirm(
-        `FINAL CONFIRMATION\n\nThis will CREATE ${rows.length} new employee record(s) ` +
-          `in "${firmName}". This action cannot be undone in bulk.\n\n` +
-          `Are you absolutely sure you want to import now?`,
-      );
-      if (!second) return;
-    }
+    // Iter 266 + Iter 295 (user directive) — DOUBLE confirmation before
+    // creating employee records. Upgraded from window.confirm to styled
+    // in-app modals (browser popups can be suppressed in installed PWAs).
+    setConfirmStep(1);
+  };
+
+  const doImport = async () => {
+    setConfirmStep(0);
     setImporting(true);
     setResult(null);
     try {
@@ -512,11 +503,80 @@ export default function EmployeeBulkImportScreen() {
           </View>
         ) : null}
       </ScrollView>
+
+      {/* Iter 295 — double-confirmation modals before saving to DB. */}
+      {confirmStep > 0 ? (
+        <View style={styles.cfOverlay} testID="bulk-confirm-overlay">
+          <View style={[styles.cfModal, confirmStep === 2 && styles.cfModalDanger]}>
+            <Text style={styles.cfStep}>
+              {confirmStep === 1 ? "CONFIRMATION 1 of 2" : "⚠️ FINAL CONFIRMATION 2 of 2"}
+            </Text>
+            <Text style={styles.cfTitle}>
+              {confirmStep === 1
+                ? `Import ${rows.length} employee(s)?`
+                : `Save ${rows.length} employee(s) to the database?`}
+            </Text>
+            <Text style={styles.cfBody}>
+              {confirmStep === 1
+                ? `Firm: ${selectedCompany?.name || "—"}\nRows to import: ${rows.length}\n\nPlease verify the firm and row count are correct.`
+                : `This will CREATE ${rows.length} new employee record(s) in "${selectedCompany?.name || "—"}".\nThis action cannot be undone in bulk.\n\nAre you absolutely sure?`}
+            </Text>
+            <View style={styles.cfBtnRow}>
+              <Pressable
+                onPress={() => setConfirmStep(0)}
+                style={styles.cfCancel}
+                testID="bulk-confirm-cancel"
+              >
+                <Text style={styles.cfCancelTxt}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => (confirmStep === 1 ? setConfirmStep(2) : doImport())}
+                style={[styles.cfGo, confirmStep === 2 && styles.cfGoDanger]}
+                testID={confirmStep === 1 ? "bulk-confirm-1" : "bulk-confirm-2"}
+              >
+                <Ionicons
+                  name={confirmStep === 1 ? "arrow-forward" : "cloud-upload"}
+                  size={15} color="#fff" />
+                <Text style={styles.cfGoTxt}>
+                  {confirmStep === 1 ? "Continue" : "YES — Import Now"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // Iter 295 — double-confirm modal.
+  cfOverlay: {
+    position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: "rgba(15,23,42,0.55)", alignItems: "center",
+    justifyContent: "center", zIndex: 9000, padding: 20,
+  },
+  cfModal: {
+    width: "100%", maxWidth: 440, backgroundColor: "#FFFFFF",
+    borderRadius: 16, padding: 20, borderTopWidth: 4, borderTopColor: "#2563EB",
+  },
+  cfModalDanger: { borderTopColor: "#EF4444" },
+  cfStep: { fontSize: 10.5, fontWeight: "800", color: "#64748B", letterSpacing: 0.8 },
+  cfTitle: { fontSize: 17, fontWeight: "800", color: "#1F2937", marginTop: 6 },
+  cfBody: { fontSize: 13, color: "#475569", marginTop: 10, lineHeight: 20 },
+  cfBtnRow: { flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 18 },
+  cfCancel: {
+    paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10,
+    borderWidth: 1, borderColor: "#E2E8F0",
+  },
+  cfCancelTxt: { fontSize: 13, fontWeight: "700", color: "#475569" },
+  cfGo: {
+    flexDirection: "row", alignItems: "center", gap: 7,
+    paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10,
+    backgroundColor: "#2563EB",
+  },
+  cfGoDanger: { backgroundColor: "#EF4444" },
+  cfGoTxt: { fontSize: 13, fontWeight: "800", color: "#fff" },
   root: { flex: 1, backgroundColor: colors.background },
   header: {
     flexDirection: "row",
