@@ -286,20 +286,25 @@ export default function LegacySalaryScreen() {
                 Only the ticked months will be created inside the Compliance Salary Process as
                 UNLOCKED (draft) runs — you check the data first, then lock.
               </Text>
-              <View style={[st.wrap, { marginTop: 10 }]}>
-                <Pressable
-                  style={[st.chip, selCount === months.length && st.chipOn]}
-                  onPress={() => {
-                    const all: Record<string, boolean> = {};
-                    const on = selCount !== months.length;
-                    months.forEach((m) => { all[m] = on; });
-                    setPubSel(all);
-                  }}
-                >
-                  <Text style={[st.chipTxt, selCount === months.length && { color: "#fff" }]}>
-                    ✓ ALL MONTHS
-                  </Text>
-                </Pressable>
+              <Pressable
+                style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 12, paddingVertical: 4 }}
+                onPress={() => {
+                  const all: Record<string, boolean> = {};
+                  const on = selCount !== months.length;
+                  months.forEach((m) => { all[m] = on; });
+                  setPubSel(all);
+                }}
+              >
+                <Ionicons
+                  name={selCount === months.length ? "checkbox" : selCount ? "remove-circle-outline" : "square-outline"}
+                  size={22}
+                  color={selCount ? colors.brandPrimary : colors.onSurfaceTertiary}
+                />
+                <Text style={{ fontSize: 13.5, fontWeight: "800", color: colors.onSurface }}>
+                  Select All Months ({months.length})
+                </Text>
+              </Pressable>
+              <View style={[st.wrap, { marginTop: 8 }]}>
                 {months.map((m) => (
                   <Pressable
                     key={m}

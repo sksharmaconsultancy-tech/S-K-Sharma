@@ -1537,3 +1537,4 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   - PublishBody += months: Optional[List[str]] (filter distinct months); publish confirm modal step 1 now shows per-month tick chips + "ALL MONTHS" toggle (default all selected), Continue disabled at 0.
   - Guards: publish-compliance 400s if firm has no users with legacy_imported=True; legacy-import/run 400s when salary ticked without import_employees and firm has no imported employees.
   - E2E verified: both guards return correct 400s; selective publish created only 2019-02+2019-04 (2019-03 excluded); P.TAX ded head now lands in pt column (150). Seeds cleaned.
+- Iter 302e — "Select All Months" CHECKBOX (user request): publish modal step 1 now has a prominent checkbox row (checkbox/indeterminate/square icons) "Select All Months (N)" toggling all month chips in one tap; verified 5→0→5 selection + Continue disabled at 0.
