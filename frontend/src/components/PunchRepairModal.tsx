@@ -180,7 +180,7 @@ export default function PunchRepairModal({
         setBusy(false);
       }
     };
-    const q = `Delete ${p.kind.toUpperCase()} punch at ${(p.at || "").slice(11, 16)}?`;
+    const q = `Delete ${p.kind.toUpperCase()} punch at ${(p.at || "").slice(11, 16)} on ${(p.at || "").slice(0, 10).split("-").reverse().join("-")}?`;
     if (Platform.OS === "web") {
       if (window.confirm(q)) doDelete();
     } else {
@@ -237,7 +237,21 @@ export default function PunchRepairModal({
                   <View style={[st.kindBadge, p.kind === "in" ? st.kindIn : st.kindOut]}>
                     <Text style={st.kindTxt}>{p.kind.toUpperCase()}</Text>
                   </View>
-                  <Text style={st.timeTxt}>{(p.at || "").slice(11, 16)}</Text>
+                  <View style={{ minWidth: 78 }}>
+                    <Text style={st.timeTxt}>{(p.at || "").slice(11, 16)}</Text>
+                    {/* Iter 295 (user request) — show the punch DATE too so
+                        wrong-day punches (e.g. night-shift OUT on the next
+                        date) are obvious while rectifying. Amber = the punch
+                        date differs from the day being repaired. */}
+                    <Text
+                      style={[
+                        st.dateTxt,
+                        (p.at || "").slice(0, 10) !== dateIso && st.dateTxtDiff,
+                      ]}
+                    >
+                      {(p.at || "").slice(0, 10).split("-").reverse().join("-")}
+                    </Text>
+                  </View>
                   <Text style={st.srcTxt}>{srcLabel(p.source)}</Text>
                   <View style={{ flex: 1 }} />
                   <Pressable onPress={() => openEdit(p)} hitSlop={8} style={st.iconBtn} disabled={busy}>
@@ -377,6 +391,8 @@ const st = StyleSheet.create({
   kindOut: { backgroundColor: "#FEE2E2" },
   kindTxt: { fontSize: 11, fontWeight: "800", color: colors.onSurface },
   timeTxt: { fontSize: 14, fontWeight: "800", color: colors.onSurface, minWidth: 46 },
+  dateTxt: { fontSize: 10, color: colors.onSurfaceTertiary, marginTop: 1 },
+  dateTxtDiff: { color: "#B45309", fontWeight: "800" },
   srcTxt: { fontSize: 11, color: colors.onSurfaceTertiary },
   iconBtn: { padding: 6 },
   addRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md },
