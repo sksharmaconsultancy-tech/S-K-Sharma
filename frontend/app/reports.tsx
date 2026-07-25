@@ -92,7 +92,8 @@ function fyOptions(): { start: number; label: string }[] {
   const y = now.getFullYear();
   const currentStart = now.getMonth() >= 3 ? y : y - 1;
   const out: { start: number; label: string }[] = [];
-  for (let i = -1; i <= 3; i++) {
+  // Iter 304 (user) — reach old FYs too (legacy imported data).
+  for (let i = -1; i <= 20; i++) {
     const s = currentStart - i;
     out.push({ start: s, label: `FY ${s}-${String(s + 1).slice(-2)}` });
   }
@@ -453,12 +454,14 @@ export default function ReportsHubScreen() {
               ) : null}
             </View>
             <View style={styles.gridCol}>
-              <Text style={styles.label}>Month</Text>
+              <Text style={styles.label}>Month (FY-wise)</Text>
               <MonthPicker
                 value={month}
                 onChange={setMonth}
                 allowEmpty={allowAllMonths}
                 emptyLabel="All months"
+                fyMode
+                yearsBack={20}
                 testID="rep-month-picker"
               />
             </View>

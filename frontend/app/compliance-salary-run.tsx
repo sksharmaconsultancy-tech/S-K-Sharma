@@ -1365,11 +1365,13 @@ export default function ComplianceSalaryRunScreen() {
 
           <View style={styles.gridRow}>
             <View style={styles.gridCol}>
-              <Text style={styles.label}>Month</Text>
+              <Text style={styles.label}>Month (FY-wise)</Text>
               <MonthPicker
                 value={month}
                 onChange={setMonth}
                 allowEmpty={false}
+                fyMode
+                yearsBack={20}
                 testID="csr-month"
               />
             </View>

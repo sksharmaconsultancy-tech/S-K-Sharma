@@ -42,7 +42,15 @@ type Props = {
   yearsForward?: number;
   disabled?: boolean;
   testID?: string;
+  // Iter 304 (user) — Financial-Year mode: years shown as "FY 2019-20",
+  // months ordered April → March and mapped to the right calendar year.
+  fyMode?: boolean;
 };
+
+// April-first order for fyMode (index → calendar month number).
+const FY_MONTH_ORDER = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3];
+const fyStartOf = (year: number, month: number) => (month >= 4 ? year : year - 1);
+const fyLabel = (start: number) => `FY ${start}-${String(start + 1).slice(-2)}`;
 
 function parseValue(v: string): { year: number; month: number } | null {
   const m = /^(\d{4})-(\d{2})$/.exec(v || "");
@@ -68,6 +76,7 @@ export default function MonthPicker({
   yearsForward = 1,
   disabled = false,
   testID,
+  fyMode = false,
 }: Props) {
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -76,14 +85,17 @@ export default function MonthPicker({
   const parsed = parseValue(value);
   const selectedYear = parsed?.year ?? currentYear;
   const selectedMonth = parsed?.month ?? 0; // 0 = "all months"
+  const selectedFy = parsed ? fyStartOf(parsed.year, parsed.month)
+    : fyStartOf(currentYear, currentMonth);
 
   const years = useMemo(() => {
     const out: number[] = [];
-    for (let y = currentYear + yearsForward; y >= currentYear - yearsBack; y--) {
+    const base = fyMode ? fyStartOf(currentYear, currentMonth) : currentYear;
+    for (let y = base + yearsForward; y >= base - yearsBack; y--) {
       out.push(y);
     }
     return out;
-  }, [currentYear, yearsBack, yearsForward]);
+  }, [currentYear, currentMonth, yearsBack, yearsForward, fyMode]);
 
   const emit = (y: number, m: number) => {
     if (m === 0) {
@@ -96,6 +108,48 @@ export default function MonthPicker({
 
   // ---------------- Web branch: two native <select> boxes ---------------
   if (Platform.OS === "web") {
+    if (fyMode) {
+      return (
+        <View style={styles.rowWrap} testID={testID}>
+          <select
+            disabled={disabled}
+            value={selectedMonth ? String(selectedMonth) : ""}
+            onChange={(e) => {
+              const m = Number((e.target as HTMLSelectElement).value);
+              if (!Number.isFinite(m) || m === 0) { emit(0, 0); return; }
+              // month picked inside the selected FY → resolve calendar year
+              emit(m >= 4 ? selectedFy : selectedFy + 1, m);
+            }}
+            style={{ ...(styles.selectBase as any), flex: 1.4 }}
+            data-testid={testID ? `${testID}-month` : undefined}
+          >
+            {allowEmpty ? <option value="">{emptyLabel}</option> : null}
+            {FY_MONTH_ORDER.map((m) => (
+              <option key={m} value={String(m)}>
+                {MONTH_NAMES[m - 1]}{m >= 4 ? "" : " (next yr)"}
+              </option>
+            ))}
+          </select>
+          <select
+            disabled={disabled || (allowEmpty && selectedMonth === 0)}
+            value={String(selectedFy)}
+            onChange={(e) => {
+              const fy = Number((e.target as HTMLSelectElement).value);
+              const m = selectedMonth || 4; // default April of that FY
+              emit(m >= 4 ? fy : fy + 1, m);
+            }}
+            style={{ ...(styles.selectBase as any), flex: 1.1 }}
+            data-testid={testID ? `${testID}-year` : undefined}
+          >
+            {years.map((y) => (
+              <option key={y} value={String(y)}>
+                {fyLabel(y)}
+              </option>
+            ))}
+          </select>
+        </View>
+      );
+    }
     return (
       <View style={styles.rowWrap} testID={testID}>
         <select
@@ -145,6 +199,7 @@ export default function MonthPicker({
     years={years}
     disabled={disabled}
     testID={testID}
+    fyMode={fyMode}
   />;
 }
 
@@ -156,6 +211,7 @@ function NativeMonthPicker({
   years,
   disabled,
   testID,
+  fyMode,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -164,11 +220,18 @@ function NativeMonthPicker({
   years: number[];
   disabled?: boolean;
   testID?: string;
+  fyMode?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const parsed = parseValue(value);
-  const [year, setYear] = useState<number>(parsed?.year ?? new Date().getFullYear());
+  const [year, setYear] = useState<number>(
+    parsed
+      ? (fyMode ? fyStartOf(parsed.year, parsed.month) : parsed.year)
+      : (fyMode
+        ? fyStartOf(new Date().getFullYear(), new Date().getMonth() + 1)
+        : new Date().getFullYear()));
   const label = labelFor(value, emptyLabel);
+  const monthOrder = fyMode ? FY_MONTH_ORDER : MONTH_NAMES.map((_, i) => i + 1);
 
   return (
     <>
@@ -214,7 +277,7 @@ function NativeMonthPicker({
                         year === y && styles.yearChipTxtActive,
                       ]}
                     >
-                      {y}
+                      {fyMode ? fyLabel(y) : y}
                     </Text>
                   </Pressable>
                 ))}
@@ -245,9 +308,11 @@ function NativeMonthPicker({
                   </Text>
                 </Pressable>
               ) : null}
-              {MONTH_NAMES.map((name, idx) => {
-                const mm = String(idx + 1).padStart(2, "0");
-                const key = `${year}-${mm}`;
+              {monthOrder.map((mNum) => {
+                const name = MONTH_NAMES[mNum - 1];
+                const calYear = fyMode && mNum < 4 ? year + 1 : year;
+                const mm = String(mNum).padStart(2, "0");
+                const key = `${calYear}-${mm}`;
                 const on = value === key;
                 return (
                   <Pressable

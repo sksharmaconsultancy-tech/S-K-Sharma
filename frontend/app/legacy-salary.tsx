@@ -63,6 +63,11 @@ export default function LegacySalaryScreen() {
         method: "POST", body: { company_id: cid },
       });
       setLockMsg(`🔒 ${r.locked} legacy month(s) are now LOCKED (finalized).`);
+      // refresh firm badges (LOCKED highlight)
+      try {
+        const fr = await api<any>("/admin/legacy-salary/firms");
+        setCompanies(fr.companies || []);
+      } catch { /* ignore */ }
     } catch (e: any) { setErr(e?.message || "Lock failed"); }
     finally { setLockBusy(false); }
   };
@@ -79,9 +84,10 @@ export default function LegacySalaryScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await api<any>("/companies");
-        setCompanies(r.companies || r || []);
-      } catch { /* company admin — endpoint may differ; ignore */ }
+        // Iter 304b (user) — only firms whose legacy data imported successfully.
+        const r = await api<any>("/admin/legacy-salary/firms");
+        setCompanies(r.companies || []);
+      } catch { /* ignore */ }
     })();
   }, []);
 
@@ -132,10 +138,22 @@ export default function LegacySalaryScreen() {
             {companies.map((c: any) => (
               <Pressable
                 key={c.company_id}
-                style={[st.chip, cid === c.company_id && st.chipOn]}
+                style={[st.chip, cid === c.company_id && st.chipOn,
+                  c.fully_locked && { borderColor: "#B45309", borderWidth: 1.5 }]}
                 onPress={() => { setCid(c.company_id); loadMonths(c.company_id, kind); }}
               >
                 <Text style={[st.chipTxt, cid === c.company_id && { color: "#fff" }]}>{c.name}</Text>
+                {c.fully_locked ? (
+                  <View style={[st.badge, { backgroundColor: "#FEF3C7" }]}>
+                    <Text style={[st.badgeTxt, { color: "#B45309" }]}>🔒 LOCKED</Text>
+                  </View>
+                ) : c.published_months ? (
+                  <View style={[st.badge, { backgroundColor: "#DCFCE7" }]}>
+                    <Text style={[st.badgeTxt, { color: "#16a34a" }]}>
+                      ✓ SALARY IMPORTED ({c.published_months})
+                    </Text>
+                  </View>
+                ) : null}
               </Pressable>
             ))}
           </View>
@@ -384,9 +402,12 @@ const st = StyleSheet.create({
   chip: {
     borderWidth: 1, borderColor: colors.border, borderRadius: 999,
     paddingHorizontal: 11, paddingVertical: 6,
+    flexDirection: "row", alignItems: "center", gap: 6,
   },
   chipOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   chipTxt: { fontSize: 12, fontWeight: "700", color: colors.onSurface },
+  badge: { borderRadius: 999, paddingHorizontal: 6, paddingVertical: 2 },
+  badgeTxt: { fontSize: 9, fontWeight: "800" },
   input: {
     borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
     paddingHorizontal: 10, paddingVertical: Platform.OS === "web" ? 7 : 5,

@@ -806,6 +806,28 @@ async def legacy_import_run(body: ImportBody, authorization: Optional[str] = Hea
     return {"job_id": job_id}
 
 
+@router.get("/admin/legacy-salary/firms")
+async def legacy_salary_firms(authorization: Optional[str] = Header(None)):
+    """Iter 304b (user) — only firms whose legacy data was imported
+    successfully, with SALARY IMPORTED / LOCKED status badges."""
+    await _super(authorization)
+    cids = await db.legacy_salary_history.distinct("company_id")
+    comps = await db.companies.find(
+        {"company_id": {"$in": cids}},
+        {"_id": 0, "company_id": 1, "name": 1}).sort("name", 1).to_list(500)
+    # Iter 304c (user) — mark published (salary imported) + locked firms.
+    for c in comps:
+        pub = await db.compliance_salary_runs.count_documents(
+            {"company_id": c["company_id"], "legacy_imported": True})
+        locked = await db.compliance_salary_runs.count_documents(
+            {"company_id": c["company_id"], "legacy_imported": True,
+             "finalized": True})
+        c["published_months"] = pub
+        c["locked_months"] = locked
+        c["fully_locked"] = bool(pub and locked == pub)
+    return {"companies": comps}
+
+
 # Iter 303 (user, A-ONE MOTOR'S case) — UNDO a firm's import: removes the
 # legacy-created employees, imported salary history and published legacy
 # runs, and unlocks the firm so it can be re-imported (e.g. into a newly
