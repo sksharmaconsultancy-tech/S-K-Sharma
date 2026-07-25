@@ -56,157 +56,188 @@ function formatSinceRefresh(iso: string): string {
  */
 export const DESKTOP_MIN = 960;
 
+// Iter 293 (user spec) — fixed dark sidebar palette. Sidebar bg #0F172A,
+// primary/active #2563EB, hover #1D4ED8, light slate text.
+const SB = {
+  bg: "#0F172A",
+  border: "#1E293B",
+  divider: "#1E293B",
+  text: "#CBD5E1",
+  muted: "#94A3B8",
+  active: "#2563EB",
+  hover: "#1D4ED8",
+  activeTint: "rgba(37,99,235,0.18)",
+  linkLight: "#60A5FA",
+};
+
 export const NAV_SUPER: NavItem[] = [
-  // Iter 181 — the premium Portal Dashboard is the ONE default dashboard
-  // on the web portal (old /(tabs) dashboard removed from the sidebar).
-  { route: "/portal-dashboard", label: "Dashboard", icon: "speedometer-outline" },
-  // Iter 89 — Add New Employee shifted to position 2 per user request.
-  { route: "/employee-add", label: "Add New Employee", icon: "person-add-outline" },
-  { route: "/companies", label: "Companies (Firm Master)", icon: "business-outline" },
-  { route: "/admin", label: "Employee Master Data", icon: "people-outline" },
-  // KYC & Document Expiry Tracker — enterprise module (Aadhaar/PAN/Bank
-  // completeness + DL/Passport validity reminders).
-  { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
-  // Iter 286 — Roles & Permissions + Workflow Builder merged into one
-  // module (user request): Access & Workflow Management.
-  { route: "/access-management", label: "Access & Workflow Mgmt", icon: "key-outline" },
-  { route: "/proposals", label: "Sales · Proposals", icon: "document-text-outline" },
+  // Iter 293 (user spec) — 12-module sidebar reorganisation.
+  { route: "/portal-dashboard", label: "Dashboard", icon: "home-outline" },
   {
-    label: "Salary Process",
-    icon: "cash-outline",
+    label: "Employees",
+    icon: "people-outline",
     children: [
-      { route: "/salary-run", label: "Salary Process (Actual)", icon: "cash-outline" },
-      { route: "/compliance-salary-run", label: "Salary Process (Compliance)", icon: "briefcase-outline" },
-      { route: "/ot-salary-run", label: "Salary Process (OT)", icon: "flash-outline" },
-      { route: "/arrear-salary-run", label: "Salary Process (Arrear)", icon: "time-outline" },
-      { route: "/advances", label: "Advance Management", icon: "wallet-outline" },
+      { route: "/companies", label: "Companies (Firm Master)", icon: "business-outline" },
+      { route: "/employee-add", label: "Add New Employee", icon: "person-add-outline" },
+      { route: "/admin", label: "Employee Master Data", icon: "people-outline" },
+      { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
+      { route: "/employee-reports", label: "Employee Reports Hub", icon: "documents-outline" },
+      { route: "/employee-report", label: "Employee Report", icon: "people-outline" },
     ],
   },
-  { route: "/bulk-employee-correction", label: "Bulk Employee Correction", icon: "people-outline" },
-  // Iter 202 — bulk attendance upload / salary revision / transfer /
-  // resignation / shift assignment.
-  { route: "/bulk-operations", label: "Bulk Operations", icon: "layers-outline" },
   {
-    label: "Approvals",
+    label: "Attendance & Shift",
+    icon: "time-outline",
+    children: [
+      { route: "/attendance-policy", label: "Attendance Policy", icon: "time-outline" },
+      { route: "/attendance-grid", label: "Attendance Report", icon: "grid-outline" },
+      { route: "/inout-ot-matrix", label: "In/Out & OT Matrix", icon: "apps-outline" },
+      { route: "/daily-present-report", label: "Day-wise Present Count", icon: "people-outline" },
+      { route: "/backdate-punches", label: "Back-date Punches", icon: "calendar-clear-outline" },
+      { route: "/past-salary-runs", label: "Past Salary Runs", icon: "albums-outline" },
+      { route: "/shift-change-admin", label: "Shift Change Requests", icon: "swap-horizontal" },
+      { route: "/attendance-approvals", label: "Attendance Approvals", icon: "hand-right-outline" },
+      { route: "/punch-approvals", label: "Punch Approvals", icon: "checkmark-circle-outline" },
+      { route: "/contractor-punches", label: "Contractor Punches", icon: "briefcase-outline" },
+      { route: "/geofence-policy", label: "Geofence Policy", icon: "location-outline" },
+      { route: "/geofence-monitor", label: "Geofence Monitor", icon: "navigate-circle-outline" },
+      { route: "/punch-log-report", label: "Punch Log Report", icon: "finger-print-outline" },
+    ],
+  },
+  {
+    label: "Payroll",
+    icon: "cash-outline",
+    children: [
+      {
+        label: "Salary Process",
+        icon: "cash-outline",
+        children: [
+          { route: "/salary-run", label: "Actual Salary", icon: "cash-outline" },
+          { route: "/compliance-salary-run", label: "Compliance Salary", icon: "briefcase-outline" },
+          { route: "/ot-salary-run", label: "OT Salary", icon: "flash-outline" },
+          { route: "/arrear-salary-run", label: "Arrear Salary", icon: "time-outline" },
+        ],
+      },
+      { route: "/advances", label: "Advance Management", icon: "wallet-outline" },
+      { route: "/bonus-run", label: "Bonus Process", icon: "gift-outline" },
+      { route: "/bonus-registers", label: "Bonus Registers (A, B, D)", icon: "albums-outline" },
+      { route: "/bonus-yearly-summary", label: "Bonus Yearly Summary", icon: "calendar-outline" },
+      { route: "/salary-day-sheet", label: "Day-wise Salary Sheet", icon: "calendar-outline" },
+      { route: "/reports?tab=salary", label: "Actual Salary Report", icon: "cash-outline" },
+      { route: "/reports?tab=compliance", label: "Compliance Report", icon: "shield-checkmark-outline" },
+      { route: "/bank-sheet", label: "Bank Sheet Format", icon: "card-outline" },
+      { route: "/leave-report", label: "Leave Report", icon: "calendar-number-outline" },
+      { route: "/comp-off-ledger", label: "Comp-Off Ledger", icon: "time-outline" },
+      { route: "/statutory-reports", label: "Full & Final Settlement", icon: "receipt-outline" },
+    ],
+  },
+  {
+    label: "Compliance",
+    icon: "shield-checkmark-outline",
+    children: [
+      { route: "/pf-reports?kind=pf", label: "PF Reports", icon: "briefcase-outline" },
+      { route: "/pf-reports?kind=esic", label: "ESIC Reports", icon: "medkit-outline" },
+      { route: "/statutory-reports", label: "PT / LWF / Gratuity / MIS", icon: "receipt-outline" },
+      { route: "/clra-registers", label: "CLRA Registers (Form XII\u2013XV)", icon: "documents-outline" },
+      { route: "/labour-reports", label: "Labour Law Reports", icon: "library-outline" },
+      { route: "/challans", label: "PF / ESIC Challans", icon: "receipt-outline" },
+      { route: "/challan-summary", label: "Monthly Challan Summary", icon: "documents-outline" },
+      { route: "/automation-studio", label: "Compliance Automation Studio", icon: "sparkles-outline" },
+    ],
+  },
+  {
+    label: "Approvals & Workflow",
     icon: "checkmark-done-circle-outline",
     children: [
       { route: "/approval-inbox", label: "Approval Inbox", icon: "file-tray-full-outline" },
-      // Iter 285 — Onboarding Approval Workflow (Phase 1).
       { route: "/employee-approvals", label: "Pending Employee Approval", icon: "person-add-outline" },
       { route: "/company-requests", label: "Company Requests", icon: "mail-open-outline" },
-      { route: "/punch-approvals", label: "Punch Approvals", icon: "checkmark-circle-outline" },
-      { route: "/contractor-punches", label: "Contractor Punches", icon: "briefcase-outline" },
-      { route: "/shift-change-admin", label: "Shift Change Requests & Approvals", icon: "swap-horizontal" },
-      { route: "/attendance-approvals", label: "Attendance Approvals", icon: "hand-right-outline" },
-      { route: "/deletion-approvals", label: "Deletion Approvals", icon: "trash-bin-outline" },
-    ],
-  },
-  {
-    label: "Bonus",
-    icon: "gift-outline",
-    children: [
-      { route: "/bonus-run", label: "Bonus Process", icon: "gift-outline" },
-      { route: "/bonus-registers", label: "Bonus Registers (A, B, D) & Returns", icon: "albums-outline" },
-      { route: "/bonus-yearly-summary", label: "Bonus Yearly Summary", icon: "calendar-outline" },
+      { route: "/shift-change-admin", label: "Shift Change Approval", icon: "swap-horizontal" },
+      { route: "/attendance-approvals", label: "Attendance Approval", icon: "hand-right-outline" },
+      { route: "/punch-approvals", label: "Punch Approval", icon: "checkmark-circle-outline" },
+      { route: "/deletion-approvals", label: "Deletion Approval", icon: "trash-bin-outline" },
+      { route: "/access-management", label: "Workflow Management", icon: "git-branch-outline" },
+      { route: "/employer-access-rights", label: "User Rights", icon: "key-outline" },
     ],
   },
   {
     label: "Reports",
     icon: "bar-chart-outline",
     children: [
-      { route: "/attendance-grid", label: "Attendance Report", icon: "grid-outline" },
-      { route: "/inout-ot-matrix", label: "In/Out & OT Matrix", icon: "apps-outline" },
-      { route: "/labour-reports", label: "Labour Law Reports", icon: "library-outline" },
-      { route: "/daily-present-report", label: "Day-wise Present Count", icon: "people-outline" },
-      { route: "/salary-day-sheet", label: "Day-wise Salary Sheet", icon: "calendar-outline" },
-      { route: "/master-data-report", label: "Master Data", icon: "server-outline" },
+      { route: "/attendance-grid", label: "Attendance Reports", icon: "grid-outline" },
+      { route: "/reports?tab=salary", label: "Payroll Reports", icon: "cash-outline" },
+      { route: "/employee-reports", label: "Employee Reports", icon: "documents-outline" },
       { route: "/compliance-reports", label: "Compliance Reports", icon: "shield-checkmark-outline" },
-      { route: "/pf-reports?kind=pf", label: "PF Reports", icon: "briefcase-outline" },
-      { route: "/pf-reports?kind=esic", label: "ESIC Reports", icon: "medkit-outline" },
-      { route: "/clra-registers", label: "CLRA Registers (Form XII–XV)", icon: "documents-outline" },
-      { route: "/statutory-reports", label: "PT / LWF / Gratuity / F&F / MIS", icon: "receipt-outline" },
-      { route: "/bank-sheet", label: "Bank Sheet Format", icon: "card-outline" },
-      { route: "/reports?tab=salary", label: "Actual Salary Report", icon: "cash-outline" },
-      { route: "/reports?tab=compliance", label: "Compliance Report", icon: "shield-checkmark-outline" },
-      { route: "/reports?tab=bonus", label: "Bonus Report", icon: "gift-outline" },
-      { route: "/leave-report", label: "Leave Report", icon: "calendar-number-outline" },
-      { route: "/comp-off-ledger", label: "Comp-Off Ledger", icon: "time-outline" },
+      { route: "/reports?tab=bonus", label: "Bonus Reports", icon: "gift-outline" },
+      { route: "/statutory-reports", label: "MIS Reports", icon: "receipt-outline" },
+      { route: "/master-data-report", label: "Master Data Report", icon: "server-outline" },
       { route: "/hr-letters", label: "HR Letters", icon: "document-text-outline" },
-      { route: "/employee-report", label: "Employee Report", icon: "people-outline" },
-      { route: "/employee-reports", label: "Employee Reports Hub", icon: "documents-outline" },
-      { route: "/challan-summary", label: "Monthly Challan Summary", icon: "documents-outline" },
-    ],
-  },
-  {
-    label: "Automation",
-    icon: "sparkles-outline",
-    children: [
-      { route: "/attendance-email", label: "Email Configure / Automation", icon: "mail-outline" },
-      { route: "/email-settings", label: "Email SMTP & Notifications", icon: "mail-unread-outline" },
-      { route: "/challans", label: "PF / ESIC Challans", icon: "receipt-outline" },
-      { route: "/automation-studio", label: "Compliance Automation Studio", icon: "sparkles-outline" },
-      { route: "/portal-automation", label: "WhatsApp Linking", icon: "logo-whatsapp" },
-    ],
-  },
-  {
-    label: "User Rights",
-    icon: "shield-outline",
-    children: [
-      { route: "/employer-access-rights", label: "Access Rights", icon: "key-outline" },
-      { route: "/sub-admins", label: "Sub Admins", icon: "people-circle-outline" },
-      { route: "/super-admin-access", label: "Super Admin Rights", icon: "star-outline" },
+      { route: "/report-formats", label: "PDF Report Formats", icon: "options-outline" },
     ],
   },
   {
     label: "Masters",
-    icon: "list-outline",
+    icon: "settings-outline",
     children: [
+      { route: "/companies", label: "Company Master", icon: "business-outline" },
+      { route: "/admin", label: "Employee Master", icon: "people-outline" },
       { route: "/masters", label: "General Masters", icon: "layers-outline" },
-      { route: "/compliance-settings", label: "Standard Compliance Settings", icon: "shield-checkmark-outline" },
-      { route: "/attendance-master", label: "Attendance Master", icon: "calendar-outline" },
-      { route: "/masters?tab=shifts", label: "Shifts", icon: "time-outline" },
+      { route: "/masters?tab=department", label: "Department Master", icon: "business-outline" },
+      { route: "/masters?tab=designation", label: "Designation Master", icon: "ribbon-outline" },
+      { route: "/masters?tab=holiday", label: "Holiday Master", icon: "calendar-outline" },
+      { route: "/masters?tab=allowance", label: "Allowance & Deduction Heads", icon: "cash-outline" },
+      { route: "/attendance-master", label: "Shift Master", icon: "time-outline" },
+      { route: "/compliance-settings", label: "Salary Heads / Compliance", icon: "shield-checkmark-outline" },
+      { route: "/sub-admins", label: "User Master (Sub Admins)", icon: "people-circle-outline" },
     ],
   },
-  { route: "/employee-bulk-import", label: "Bulk Import (Excel)", icon: "cloud-upload-outline" },
-  { route: "/uan-esic-import", label: "Import UAN / ESIC No", icon: "id-card-outline" },
-  // Iter 284 — Attendance Policy moved into the Utility group (user request).
-  { route: "/geofence-policy", label: "Geofence Policy", icon: "location-outline" },
-  { route: "/geofence-monitor", label: "Geofence Monitor", icon: "navigate-circle-outline" },
-  // Iter 85 — Utility group. Users Log Report is a new audit view;
-  // Messages + Tickets moved under this umbrella so ops tools live in
-  // one collapsible section.
   {
-    key: "utility",
-    label: "Utility",
-    icon: "construct-outline",
+    label: "Import / Export",
+    icon: "sync-outline",
     children: [
-      // Iter 284 (user request) — Company Policies tiles moved here from
-      // the Dashboard page.
-      { route: "/attendance-policy", label: "Attendance Policy", icon: "time-outline" },
-      { route: "/biometric-devices", label: "Biometric Devices (ZKTeco)", icon: "finger-print-outline" },
-      { route: "/backdate-punches", label: "Back-date Punches", icon: "calendar-clear-outline" },
-      // Merged from the old "Utilities" group (user request — one group).
-      { route: "/past-salary-runs", label: "Past Salary Runs", icon: "albums-outline" },
-      { route: "/zk-dat-import", label: "Import Biometric .dat", icon: "finger-print-outline" },
+      { route: "/bulk-employee-correction", label: "Bulk Employee Correction", icon: "people-outline" },
+      { route: "/bulk-operations", label: "Bulk Operations", icon: "layers-outline" },
+      { route: "/employee-bulk-import", label: "Bulk Import (Excel)", icon: "cloud-upload-outline" },
+      { route: "/uan-esic-import", label: "Import UAN / ESIC No", icon: "id-card-outline" },
+      { route: "/zk-dat-import", label: "Import Biometric (.dat)", icon: "finger-print-outline" },
       { route: "/join-qr", label: "QR Codes (Join / App)", icon: "qr-code-outline" },
-      { route: "/users-log-report", label: "Users Log Report", icon: "document-text-outline" },
-      // Iter 145 (user spec) — full punch audit trail with Excel download.
-      { route: "/punch-log-report", label: "Punch Log Report", icon: "finger-print-outline" },
-      // Iter 277 — duplicate scans auto-ignored by the attendance engine.
-      { route: "/rectified-punches", label: "Rectified Punches Audit", icon: "shield-checkmark-outline" },
-      // Iter 153 — handwritten sheet OCR reconciliation (MIS).
-      { route: "/sheet-verification", label: "Sheet Verification (OCR)", icon: "document-attach-outline" },
-      // Iter 155 — full DB backup (screen itself is super-admin gated).
+      { route: "/sheet-verification", label: "OCR Sheet Verification", icon: "document-attach-outline" },
       { route: "/database-backup", label: "Database Backup", icon: "server-outline" },
-      { route: "/report-formats", label: "PDF Report Formats", icon: "options-outline" },
+    ],
+  },
+  {
+    label: "Devices & Integration",
+    icon: "hardware-chip-outline",
+    children: [
+      { route: "/biometric-devices", label: "Biometric Devices (ZKTeco)", icon: "finger-print-outline" },
+      { route: "/sync-engine", label: "Device Sync", icon: "sync-outline" },
+      { route: "/database-viewer", label: "Database Viewer / Editor", icon: "server-outline" },
+      { route: "/portal-automation", label: "WhatsApp Linking", icon: "logo-whatsapp" },
+      { route: "/attendance-email", label: "Email Automation", icon: "mail-outline" },
+      { route: "/email-settings", label: "Email SMTP & Notifications", icon: "mail-unread-outline" },
+    ],
+  },
+  {
+    label: "Communication",
+    icon: "mail-outline",
+    children: [
+      { route: "/mailbox", label: "Mailbox", icon: "mail-outline" },
       { route: "/messages", label: "Messages", icon: "chatbubbles-outline" },
       { route: "/tickets", label: "Tickets", icon: "ticket-outline" },
-      { route: "/mailbox", label: "Mailbox (Email)", icon: "mail-outline" },
-      { route: "/database-viewer", label: "Database Viewer / Editor", icon: "server-outline" },
     ],
   },
-  // Iter 85 — Portal theme switcher (Appearance).
-  { route: "/appearance", label: "Appearance / Theme", icon: "color-palette-outline" },
+  {
+    label: "Administration",
+    icon: "construct-outline",
+    children: [
+      { route: "/access-management", label: "Access Management", icon: "key-outline" },
+      { route: "/users-log-report", label: "User Log Report", icon: "document-text-outline" },
+      { route: "/rectified-punches", label: "Rectified Punch Audit", icon: "shield-checkmark-outline" },
+      { route: "/super-admin-access", label: "Super Admin Rights", icon: "star-outline" },
+      { route: "/proposals", label: "Sales \u00b7 Proposals", icon: "document-text-outline" },
+      { route: "/appearance", label: "Appearance / Theme", icon: "color-palette-outline" },
+    ],
+  },
   // User directive — AI Insights lives at the very END of the sidebar.
   { route: "/ai-insights", label: "AI Insights", icon: "sparkles-outline" },
 ];
@@ -281,7 +312,7 @@ function NavRow({
             onNavigate(item.route);
           }
         }}
-        style={[
+        style={({ hovered }: any) => [
           {
             flexDirection: "row",
             alignItems: "center",
@@ -290,13 +321,11 @@ function NavRow({
             paddingHorizontal: 16 + depth * 12,
             borderRadius: 8,
             marginBottom: 2,
-            // Iter 83 — use ``brand`` (deep teal) as the active fill.
-            // ``colors.primary`` doesn't exist in the current theme so the
-            // previous version rendered with an invisible background,
-            // making the white text look blurry / unreadable.
-            backgroundColor: active ? colors.brand : "transparent",
+            // Iter 293 (user spec) — dark sidebar: active #2563EB, hover
+            // #1D4ED8, otherwise transparent.
+            backgroundColor: active ? SB.active : hovered ? SB.hover : "transparent",
             borderLeftWidth: active ? 3 : 0,
-            borderLeftColor: active ? colors.accent : "transparent",
+            borderLeftColor: active ? SB.linkLight : "transparent",
           },
         ]}
         testID={testId}
@@ -304,7 +333,7 @@ function NavRow({
         <Ionicons
           name={item.icon}
           size={active ? 20 : 18}
-          color={active ? "#FFFFFF" : colors.onSurfaceSecondary}
+          color={active ? "#FFFFFF" : childActive ? SB.linkLight : SB.muted}
         />
         <Text
           style={{
@@ -317,7 +346,7 @@ function NavRow({
             letterSpacing: 0,
             color: active
               ? "#FFFFFF"
-              : (childActive ? colors.brand : colors.onSurfaceSecondary),
+              : (childActive ? "#FFFFFF" : SB.text),
             textTransform: "none",
           }}
         >
@@ -327,7 +356,7 @@ function NavRow({
           <Ionicons
             name={open ? "chevron-down" : "chevron-forward"}
             size={16}
-            color={colors.onSurfaceSecondary}
+            color={SB.muted}
           />
         ) : null}
       </Pressable>
@@ -351,88 +380,137 @@ function NavRow({
 
 
 export const NAV_COMPANY_ADMIN: NavItem[] = [
-  // Iter 181 — premium Portal Dashboard is the single default dashboard.
-  { route: "/portal-dashboard", label: "Dashboard", icon: "speedometer-outline" },
-  // Iter 89 — Add New Employee shifted to position 2 per user request.
-  { route: "/employee-add", label: "Add New Employee", icon: "person-add-outline" },
-  { route: "/admin", label: "Employee Master Data", icon: "people-outline" },
+  // Iter 293 (user spec) — 12-module sidebar reorganisation (Company Admin
+  // subset; Appearance stays Super-Admin-only).
+  { route: "/portal-dashboard", label: "Dashboard", icon: "home-outline" },
   {
-    label: "Salary Process",
-    icon: "cash-outline",
+    label: "Employees",
+    icon: "people-outline",
     children: [
-      { route: "/salary-run", label: "Salary Process (Actual)", icon: "cash-outline" },
-      { route: "/compliance-salary-run", label: "Salary Process (Compliance)", icon: "briefcase-outline" },
-      { route: "/ot-salary-run", label: "Salary Process (OT)", icon: "flash-outline" },
-      { route: "/arrear-salary-run", label: "Salary Process (Arrear)", icon: "time-outline" },
-      { route: "/advances", label: "Advance Management", icon: "wallet-outline" },
+      { route: "/employee-add", label: "Add New Employee", icon: "person-add-outline" },
+      { route: "/admin", label: "Employee Master Data", icon: "people-outline" },
+      { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
+      { route: "/employee-reports", label: "Employee Reports Hub", icon: "documents-outline" },
+      { route: "/employee-report", label: "Employee Report", icon: "people-outline" },
     ],
   },
-  { route: "/bulk-employee-correction", label: "Bulk Employee Correction", icon: "people-outline" },
   {
-    label: "Approvals",
+    label: "Attendance & Shift",
+    icon: "time-outline",
+    children: [
+      { route: "/attendance-policy", label: "Attendance Policy", icon: "time-outline" },
+      { route: "/attendance-grid", label: "Attendance Report", icon: "grid-outline" },
+      { route: "/inout-ot-matrix", label: "In/Out & OT Matrix", icon: "apps-outline" },
+      { route: "/daily-present-report", label: "Day-wise Present Count", icon: "people-outline" },
+      { route: "/geofence-policy", label: "Geofence Policy", icon: "location-outline" },
+      { route: "/geofence-monitor", label: "Geofence Monitor", icon: "navigate-circle-outline" },
+      { route: "/location-audit", label: "Location Audit", icon: "navigate-outline" },
+    ],
+  },
+  {
+    label: "Payroll",
+    icon: "cash-outline",
+    children: [
+      {
+        label: "Salary Process",
+        icon: "cash-outline",
+        children: [
+          { route: "/salary-run", label: "Actual Salary", icon: "cash-outline" },
+          { route: "/compliance-salary-run", label: "Compliance Salary", icon: "briefcase-outline" },
+          { route: "/ot-salary-run", label: "OT Salary", icon: "flash-outline" },
+          { route: "/arrear-salary-run", label: "Arrear Salary", icon: "time-outline" },
+        ],
+      },
+      { route: "/advances", label: "Advance Management", icon: "wallet-outline" },
+      { route: "/bonus-yearly-summary", label: "Bonus Yearly Summary", icon: "calendar-outline" },
+      { route: "/salary-day-sheet", label: "Day-wise Salary Sheet", icon: "calendar-outline" },
+      { route: "/reports?tab=salary", label: "Actual Salary Report", icon: "cash-outline" },
+      { route: "/reports?tab=compliance", label: "Compliance Report", icon: "shield-checkmark-outline" },
+      { route: "/bank-sheet", label: "Bank Sheet Format", icon: "card-outline" },
+      { route: "/leave-report", label: "Leave Report", icon: "calendar-number-outline" },
+      { route: "/comp-off-ledger", label: "Comp-Off Ledger", icon: "time-outline" },
+      { route: "/statutory-reports", label: "Full & Final Settlement", icon: "receipt-outline" },
+    ],
+  },
+  {
+    label: "Compliance",
+    icon: "shield-checkmark-outline",
+    children: [
+      { route: "/pf-reports?kind=pf", label: "PF Reports", icon: "briefcase-outline" },
+      { route: "/pf-reports?kind=esic", label: "ESIC Reports", icon: "medkit-outline" },
+      { route: "/statutory-reports", label: "PT / LWF / Gratuity / MIS", icon: "receipt-outline" },
+      { route: "/clra-registers", label: "CLRA Registers (Form XII\u2013XV)", icon: "documents-outline" },
+      { route: "/labour-reports", label: "Labour Law Reports", icon: "library-outline" },
+      { route: "/challan-summary", label: "Monthly Challan Summary", icon: "documents-outline" },
+    ],
+  },
+  {
+    label: "Approvals & Workflow",
     icon: "checkmark-done-circle-outline",
     children: [
       { route: "/approval-inbox", label: "Approval Inbox", icon: "file-tray-full-outline" },
       { route: "/approval-workflows", label: "Workflow Builder", icon: "git-branch-outline" },
-      { route: "/punch-approvals", label: "Punch Approvals", icon: "checkmark-circle-outline" },
+      { route: "/shift-change-admin", label: "Shift Change Approval", icon: "swap-horizontal" },
+      { route: "/attendance-approvals", label: "Attendance Approval", icon: "hand-right-outline" },
+      { route: "/punch-approvals", label: "Punch Approval", icon: "checkmark-circle-outline" },
       { route: "/contractor-punches", label: "Contractor Punches", icon: "briefcase-outline" },
-      { route: "/shift-change-admin", label: "Shift Change Requests & Approvals", icon: "swap-horizontal" },
-      { route: "/attendance-approvals", label: "Attendance Approvals", icon: "hand-right-outline" },
-      { route: "/deletion-approvals", label: "Deletion Approvals", icon: "trash-bin-outline" },
+      { route: "/deletion-approvals", label: "Deletion Approval", icon: "trash-bin-outline" },
       { route: "/attendance-review", label: "Attendance Review", icon: "shield-checkmark-outline" },
+      { route: "/roles", label: "User Rights (Roles)", icon: "key-outline" },
     ],
   },
-  { route: "/zk-dat-import", label: "Import Biometric .dat", icon: "finger-print-outline" },
-  { route: "/join-qr", label: "QR Codes (Join / App)", icon: "qr-code-outline" },
-  { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
-  { route: "/roles", label: "Roles & Permissions", icon: "key-outline" },
-  { route: "/proposals", label: "Sales · Proposals", icon: "document-text-outline" },
   {
     label: "Reports",
     icon: "bar-chart-outline",
     children: [
-      { route: "/attendance-grid", label: "Attendance Report", icon: "grid-outline" },
-      { route: "/inout-ot-matrix", label: "In/Out & OT Matrix", icon: "apps-outline" },
-      { route: "/labour-reports", label: "Labour Law Reports", icon: "library-outline" },
-      { route: "/daily-present-report", label: "Day-wise Present Count", icon: "people-outline" },
-      { route: "/salary-day-sheet", label: "Day-wise Salary Sheet", icon: "calendar-outline" },
-      { route: "/master-data-report", label: "Master Data", icon: "server-outline" },
+      { route: "/attendance-grid", label: "Attendance Reports", icon: "grid-outline" },
+      { route: "/reports?tab=salary", label: "Payroll Reports", icon: "cash-outline" },
+      { route: "/employee-reports", label: "Employee Reports", icon: "documents-outline" },
       { route: "/compliance-reports", label: "Compliance Reports", icon: "shield-checkmark-outline" },
-      { route: "/pf-reports?kind=pf", label: "PF Reports", icon: "briefcase-outline" },
-      { route: "/pf-reports?kind=esic", label: "ESIC Reports", icon: "medkit-outline" },
-      { route: "/clra-registers", label: "CLRA Registers (Form XII–XV)", icon: "documents-outline" },
-      { route: "/statutory-reports", label: "PT / LWF / Gratuity / F&F / MIS", icon: "receipt-outline" },
-      { route: "/bank-sheet", label: "Bank Sheet Format", icon: "card-outline" },
-      { route: "/reports?tab=salary", label: "Actual Salary Report", icon: "cash-outline" },
-      { route: "/reports?tab=compliance", label: "Compliance Report", icon: "shield-checkmark-outline" },
-      { route: "/reports?tab=bonus", label: "Bonus Report", icon: "gift-outline" },
-      { route: "/bonus-yearly-summary", label: "Bonus Yearly Summary", icon: "calendar-outline" },
-      { route: "/leave-report", label: "Leave Report", icon: "calendar-number-outline" },
-      { route: "/comp-off-ledger", label: "Comp-Off Ledger", icon: "time-outline" },
+      { route: "/reports?tab=bonus", label: "Bonus Reports", icon: "gift-outline" },
+      { route: "/master-data-report", label: "Master Data Report", icon: "server-outline" },
       { route: "/hr-letters", label: "HR Letters", icon: "document-text-outline" },
-      { route: "/employee-report", label: "Employee Report", icon: "people-outline" },
-      { route: "/employee-reports", label: "Employee Reports Hub", icon: "documents-outline" },
-      { route: "/challan-summary", label: "Monthly Challan Summary", icon: "documents-outline" },
     ],
   },
-  { route: "/attendance-grid", label: "Attendance Grid / Sheet", icon: "grid-outline" },
   {
     label: "Masters",
-    icon: "list-outline",
+    icon: "settings-outline",
     children: [
       { route: "/masters", label: "General Masters", icon: "layers-outline" },
+      { route: "/masters?tab=department", label: "Department Master", icon: "business-outline" },
+      { route: "/masters?tab=designation", label: "Designation Master", icon: "ribbon-outline" },
+      { route: "/masters?tab=holiday", label: "Holiday Master", icon: "calendar-outline" },
+      { route: "/masters?tab=allowance", label: "Allowance & Deduction Heads", icon: "cash-outline" },
     ],
   },
-  { route: "/employee-bulk-import", label: "Bulk Import (Excel)", icon: "cloud-upload-outline" },
-  { route: "/uan-esic-import", label: "Import UAN / ESIC No", icon: "id-card-outline" },
-  { route: "/attendance-policy", label: "Attendance Policy", icon: "time-outline" },
-  { route: "/geofence-policy", label: "Geofence Policy", icon: "location-outline" },
-  { route: "/geofence-monitor", label: "Geofence Monitor", icon: "navigate-circle-outline" },
-  { route: "/location-audit", label: "Location Audit", icon: "navigate-outline" },
-  { route: "/biometric-devices", label: "Biometric Devices", icon: "finger-print-outline" },
-  { route: "/sync-engine", label: "Device Sync Engine", icon: "sync-outline" },
-  { route: "/messages", label: "Messages", icon: "chatbubbles-outline" },
-  { route: "/tickets", label: "Tickets", icon: "ticket-outline" },
+  {
+    label: "Import / Export",
+    icon: "sync-outline",
+    children: [
+      { route: "/bulk-employee-correction", label: "Bulk Employee Correction", icon: "people-outline" },
+      { route: "/employee-bulk-import", label: "Bulk Import (Excel)", icon: "cloud-upload-outline" },
+      { route: "/uan-esic-import", label: "Import UAN / ESIC No", icon: "id-card-outline" },
+      { route: "/zk-dat-import", label: "Import Biometric (.dat)", icon: "finger-print-outline" },
+      { route: "/join-qr", label: "QR Codes (Join / App)", icon: "qr-code-outline" },
+    ],
+  },
+  {
+    label: "Devices & Integration",
+    icon: "hardware-chip-outline",
+    children: [
+      { route: "/biometric-devices", label: "Biometric Devices", icon: "finger-print-outline" },
+      { route: "/sync-engine", label: "Device Sync", icon: "sync-outline" },
+    ],
+  },
+  {
+    label: "Communication",
+    icon: "mail-outline",
+    children: [
+      { route: "/messages", label: "Messages", icon: "chatbubbles-outline" },
+      { route: "/tickets", label: "Tickets", icon: "ticket-outline" },
+    ],
+  },
+  { route: "/proposals", label: "Sales \u00b7 Proposals", icon: "document-text-outline" },
   // Iter 85 — Appearance / Theme is intentionally omitted from the
   // Company Admin nav — theme switching is Super-Admin-only.
 ];
@@ -807,7 +885,7 @@ export default function AdminWebShell({ children }: Props) {
                 {selectedCompany.name}
               </Text>
             </View>
-            <Ionicons name="swap-horizontal" size={14} color={colors.brandPrimary} />
+            <Ionicons name="swap-horizontal" size={14} color={SB.linkLight} />
           </Pressable>
         ) : null}
 
@@ -1179,14 +1257,14 @@ const styles = StyleSheet.create({
   shell: {
     flex: 1,
     flexDirection: "row",
-    backgroundColor: "#F4F7F7",
+    backgroundColor: "#F8FAFC",
     minHeight: "100%" as unknown as number,
   },
   sidebar: {
     width: SIDEBAR_WIDTH,
-    backgroundColor: colors.surface,
+    backgroundColor: SB.bg,
     borderRightWidth: 1,
-    borderRightColor: colors.border,
+    borderRightColor: SB.border,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.sm,
   },
@@ -1211,11 +1289,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: colors.divider,
+    borderColor: SB.border,
   },
-  brand: { color: colors.onSurface, fontWeight: "800", fontSize: 13 },
-  brandSub: { color: colors.onSurfaceTertiary, fontSize: 10, marginTop: 2, fontWeight: "700", letterSpacing: 0.4 },
-  divider: { height: 1, backgroundColor: colors.divider, marginVertical: 4 },
+  brand: { color: "#FFFFFF", fontWeight: "800", fontSize: 13 },
+  brandSub: { color: SB.muted, fontSize: 10, marginTop: 2, fontWeight: "700", letterSpacing: 0.4 },
+  divider: { height: 1, backgroundColor: SB.divider, marginVertical: 4 },
 
   // Iter 85 pt 3 — Active-Firm pill under the sidebar logo.
   firmPill: {
@@ -1227,24 +1305,24 @@ const styles = StyleSheet.create({
     padding: 8,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: colors.brandPrimary,
-    backgroundColor: colors.brandTertiary,
+    borderColor: SB.active,
+    backgroundColor: SB.activeTint,
   },
   firmPillIcon: {
     width: 22, height: 22, borderRadius: 11,
-    backgroundColor: colors.brandPrimary,
+    backgroundColor: SB.active,
     alignItems: "center", justifyContent: "center",
   },
   firmPillLabel: {
     fontSize: 9,
     fontWeight: "800",
-    color: colors.onSurfaceSecondary,
+    color: SB.muted,
     letterSpacing: 0.4,
   },
   firmPillName: {
     fontSize: 12,
     fontWeight: "800",
-    color: colors.onSurface,
+    color: "#FFFFFF",
     marginTop: 1,
   },
   navItem: {
@@ -1270,13 +1348,13 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: colors.brandTertiary,
+    backgroundColor: SB.activeTint,
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarTxt: { color: colors.brandPrimary, fontWeight: "800" },
-  userName: { color: colors.onSurface, fontWeight: "700", fontSize: 12 },
-  userMeta: { color: colors.onSurfaceTertiary, fontSize: 10, marginTop: 2 },
+  avatarTxt: { color: SB.linkLight, fontWeight: "800" },
+  userName: { color: "#FFFFFF", fontWeight: "700", fontSize: 12 },
+  userMeta: { color: SB.muted, fontSize: 10, marginTop: 2 },
 
   mainWrap: { flex: 1, minWidth: 0 },
   topBar: {
@@ -1285,7 +1363,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: spacing.lg,
-    backgroundColor: colors.surface,
+    backgroundColor: "#FFFFFF",
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     // Iter 94 FIX — keep the header (and the firm-picker dropdown inside

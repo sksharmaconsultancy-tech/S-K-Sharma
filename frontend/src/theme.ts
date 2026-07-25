@@ -145,11 +145,19 @@ export const THEME_PRESETS: PresetDef[] = [
     primary: "#2563EB",
     secondary: "#4338CA",
     accent: "#4338CA",
-    colors: buildPalette(
-      "#2563EB", "#4338CA", "#DBEAFE", "#1D4ED8",
-      "#4338CA", "#E0E7FF", "#3730A3",
-      "#F3F4F6", "#E5E7EB",
-    ),
+    colors: {
+      ...buildPalette(
+        "#2563EB", "#4338CA", "#DBEAFE", "#1D4ED8",
+        "#4338CA", "#E0E7FF", "#3730A3",
+        "#F8FAFC", "#EFF3F8",
+      ),
+      // Iter 293 (user spec) — exact palette: Bg #F8FAFC, Card #FFFFFF,
+      // Text #1F2937, Success #22C55E, Warning #F59E0B, Danger #EF4444.
+      onSurface: "#1F2937",
+      success: "#22C55E",
+      warning: "#F59E0B",
+      error: "#EF4444",
+    },
   },
   {
     id: "corporate_sapphire",
