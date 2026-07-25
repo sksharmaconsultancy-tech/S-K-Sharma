@@ -625,3 +625,164 @@ async def legacy_salary_view(
         q["name"] = {"$regex": _rx(search.strip()), "$options": "i"}
     rows = await db.legacy_salary_history.find(q, {"_id": 0}).sort("name", 1).to_list(3000)
     return {"month": month, "kind": kind, "rows": rows, "count": len(rows)}
+
+
+# --------------------------------------------------------------------------
+# Iter 301 — Legacy vs Current comparison (spot-check migrated data)
+# --------------------------------------------------------------------------
+async def _cur_run_agg(coll, company_id: str, net_field: str, days_field: str,
+                       gross_field: str) -> Dict[str, dict]:
+    """Per-user summary of CURRENT payroll runs (months, last month/net)."""
+    pipe = [
+        {"$match": {"company_id": company_id}},
+        {"$unwind": "$rows"},
+        {"$match": {"rows.user_id": {"$ne": None}}},
+        # one run can exist several times per month (reprocess / branch /
+        # type runs) — collapse to user+month first so counts are real.
+        {"$group": {
+            "_id": {"u": "$rows.user_id", "m": "$month"},
+            "net": {"$last": f"$rows.{net_field}"},
+            "days": {"$last": f"$rows.{days_field}"},
+            "gross": {"$last": f"$rows.{gross_field}"},
+        }},
+        {"$sort": {"_id.m": 1}},
+        {"$group": {
+            "_id": "$_id.u",
+            "months": {"$sum": 1},
+            "last_month": {"$last": "$_id.m"},
+            "last_net": {"$last": "$net"},
+            "last_days": {"$last": "$days"},
+            "last_gross": {"$last": "$gross"},
+        }},
+    ]
+    out: Dict[str, dict] = {}
+    async for g in coll.aggregate(pipe):
+        uid = g.pop("_id")
+        out[uid] = g
+    return out
+
+
+@router.get("/admin/legacy-compare")
+async def legacy_compare_list(
+    company_id: str = Query(...),
+    search: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    if admin["role"] == "company_admin":
+        company_id = admin["company_id"]
+
+    # legacy history per user+kind
+    pipe = [
+        {"$match": {"company_id": company_id, "user_id": {"$ne": None}}},
+        {"$sort": {"month": 1}},
+        {"$group": {
+            "_id": {"u": "$user_id", "k": "$kind"},
+            "months": {"$sum": 1},
+            "last_month": {"$last": "$month"},
+            "last_basic": {"$last": "$basic"},
+            "last_gross": {"$last": "$gross"},
+            "last_net": {"$last": "$net"},
+            "last_days": {"$last": "$present_days"},
+        }},
+    ]
+    legacy: Dict[str, dict] = {}
+    async for g in db.legacy_salary_history.aggregate(pipe):
+        u, k = g["_id"]["u"], g["_id"]["k"]
+        legacy.setdefault(u, {})[k] = {
+            "months": g["months"], "last_month": g["last_month"],
+            "last_basic": g["last_basic"], "last_gross": g["last_gross"],
+            "last_net": g["last_net"], "last_days": g["last_days"],
+        }
+
+    uq: dict = {"company_id": company_id, "role": "employee",
+                "$or": [{"legacy_imported": True},
+                        {"user_id": {"$in": list(legacy.keys())}}]}
+    if search and search.strip():
+        uq["$and"] = [{"$or": [
+            {"name": {"$regex": _rx(search.strip()), "$options": "i"}},
+            {"employee_code": {"$regex": _rx(search.strip()), "$options": "i"}},
+        ]}]
+    users = await db.users.find(uq, {
+        "_id": 0, "user_id": 1, "name": 1, "employee_code": 1,
+        "basic_salary": 1, "compliance_gross": 1, "salary_monthly": 1,
+        "salary_mode": 1, "legacy_imported": 1,
+    }).sort("name", 1).to_list(20000)
+
+    cur_act = await _cur_run_agg(db.salary_runs, company_id, "net_pay", "p_days", "total_gross")
+    cur_cmp = await _cur_run_agg(db.compliance_salary_runs, company_id, "net", "present_days", "gross_paid")
+
+    out = []
+    for u in users:
+        uid = u["user_id"]
+        leg = legacy.get(uid, {})
+        leg_on = leg.get("online")
+        master_basic = u.get("basic_salary")
+        leg_basic = (leg_on or {}).get("last_basic")
+        mismatch = bool(
+            master_basic and leg_basic
+            and abs(float(master_basic) - float(leg_basic)) > 1)
+        out.append({
+            **u,
+            "legacy_online": leg_on,
+            "legacy_offline": leg.get("offline"),
+            "current_actual": cur_act.get(uid),
+            "current_compliance": cur_cmp.get(uid),
+            "mismatch_basic": mismatch,
+        })
+    n_leg = sum(1 for r in out if r["legacy_online"] or r["legacy_offline"])
+    n_mis = sum(1 for r in out if r["mismatch_basic"])
+    return {"rows": out, "count": len(out),
+            "with_legacy": n_leg, "mismatches": n_mis}
+
+
+@router.get("/admin/legacy-compare/{user_id}")
+async def legacy_compare_detail(
+    user_id: str, authorization: Optional[str] = Header(None),
+):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    u = await db.users.find_one({"user_id": user_id}, {
+        "_id": 0, "user_id": 1, "name": 1, "employee_code": 1, "company_id": 1,
+        "basic_salary": 1, "compliance_gross": 1, "salary_monthly": 1,
+        "pf_basic": 1, "salary_mode": 1, "doj": 1,
+    })
+    if not u:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if admin["role"] == "company_admin" and u.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not your firm")
+
+    months: Dict[str, dict] = {}
+
+    def _slot(m: str) -> dict:
+        return months.setdefault(m, {"month": m})
+
+    async for r in db.legacy_salary_history.find(
+            {"user_id": user_id}, {"_id": 0}).sort("month", 1):
+        _slot(r["month"])[f"legacy_{r['kind']}"] = {
+            "days": r.get("present_days"), "basic": r.get("basic"),
+            "gross": r.get("gross"), "net": r.get("net"),
+        }
+    async for g in db.salary_runs.aggregate([
+        {"$match": {"company_id": u["company_id"]}},
+        {"$unwind": "$rows"},
+        {"$match": {"rows.user_id": user_id}},
+        {"$project": {"_id": 0, "month": 1, "r": "$rows"}},
+    ]):
+        _slot(g["month"])["actual"] = {
+            "days": g["r"].get("p_days"), "basic": g["r"].get("basic"),
+            "gross": g["r"].get("total_gross"), "net": g["r"].get("net_pay"),
+        }
+    async for g in db.compliance_salary_runs.aggregate([
+        {"$match": {"company_id": u["company_id"]}},
+        {"$unwind": "$rows"},
+        {"$match": {"rows.user_id": user_id}},
+        {"$project": {"_id": 0, "month": 1, "r": "$rows"}},
+    ]):
+        _slot(g["month"])["compliance"] = {
+            "days": g["r"].get("present_days"), "basic": g["r"].get("basic"),
+            "gross": g["r"].get("gross_paid"), "net": g["r"].get("net"),
+        }
+    rows = [months[m] for m in sorted(months.keys(), reverse=True)]
+    return {"employee": u, "months": rows, "count": len(rows)}
