@@ -318,6 +318,15 @@ async def upload_employee_document(
         "uploaded_at": now_iso(),
     }
     await db.employee_documents.insert_one(doc)
+    # Iter 306 (user #2) — when the admin uploads the employee's PHOTO in
+    # the Employee Master, sync it to the login profile so the Employee
+    # PWA shows it on their Profile screen immediately.
+    if category == "photo" and mime.startswith("image/"):
+        await db.users.update_one(
+            {"user_id": user_id},
+            {"$set": {"profile_photo_base64": raw_b64,
+                      "profile_photo_updated_at": now_iso()}},
+        )
     return {"ok": True, "document": _emp_doc_public(doc)}
 
 

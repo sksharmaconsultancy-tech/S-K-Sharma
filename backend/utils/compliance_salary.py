@@ -357,6 +357,21 @@ def compute_compliance_row(
         or user.get("salary_monthly"),
         0.0,
     )
+    # Iter 306 (user bug #7 — "Master Rates not Showing") — employees
+    # imported with ONLY a salary structure (e.g. Kankani daily-rated
+    # workers) have none of the fields above, so every compliance run —
+    # and therefore the Salary Register / register PDF — showed Rate 0.
+    # Fall back to the structure's "Basic …" row and honour its
+    # rate_type (daily / hourly / monthly).
+    if rate <= 0:
+        for _r in (user.get("salary_structure_actual") or []):
+            if isinstance(_r, dict) and str(_r.get("head", "")).strip().lower().startswith("basic"):
+                if _num(_r.get("amount"), 0.0) > 0:
+                    rate = _num(_r.get("amount"), 0.0)
+                    _rt = str(_r.get("rate_type") or "").strip().lower()
+                    if _rt in ("monthly", "daily", "hourly"):
+                        salary_mode = _rt
+                break
 
     effective_present = float(stats.get("effective_present", stats.get("present_days", 0)))
     duty_hours = float(stats.get("duty_hours", 0.0))
@@ -671,6 +686,10 @@ def compute_compliance_row(
         "designation": user.get("designation"),
         "uan_no": user.get("uan_no"),
         "esi_ip_no": user.get("esi_ip_no"),
+        # Iter 306 (user #4) — PF No shown on the Register Format 1.
+        "pf_no": user.get("pf_no"),
+        # Iter 306 (user #20) — ESIC Leave days (admin-editable in the grid).
+        "esic_leave_days": 0.0,
         "employee_type": user.get("employee_type"),
         # Iter 183 — Branch / Department / Contractor for grid filter chips.
         "branch_name": user.get("branch_name"),
@@ -770,6 +789,7 @@ def build_compliance_register_pdf(
     run: Dict[str, Any],
     company_name: str = "S.K. Sharma & Co.",
     firm: Optional[Dict[str, Any]] = None,
+    title_override: str = "",
 ) -> bytes:
     """Statutory SALARY REGISTER — replica of the user's reference format
     (Form No. 27(1) / rule 78(1)(a)(i)) in LANDSCAPE A4 (Iter 137 user
@@ -850,7 +870,7 @@ def build_compliance_register_pdf(
         c.drawString(6 * mm, H - 12 * mm, f"P.F.Code: {pf_code}")
         c.drawString(6 * mm, H - 16 * mm, f"ESI Code: {esi_code}")
         c.setFont("Helvetica-Bold", 9)
-        c.drawCentredString(W / 2, H - 8 * mm, f"SALARY REGISTER ({group})")
+        c.drawCentredString(W / 2, H - 8 * mm, f"{title_override or 'SALARY REGISTER'} ({group})")
         c.setFont("Helvetica-Bold", 9.5)
         c.drawCentredString(W / 2, H - 12.5 * mm, f"M/S. {company_name.upper()}")
         c.setFont("Helvetica", 6.5)
@@ -922,7 +942,8 @@ def build_compliance_register_pdf(
         name_p = Paragraph(
             f"{(r.get('name') or '').upper()}<br/>S/O {(r.get('father_name') or '').upper()}", cell)
         ids_p = Paragraph(
-            f"UAN No. {r.get('uan_no') or '-'}<br/>ESI: {r.get('esi_ip_no') or '-'}", cell)
+            f"UAN No. {r.get('uan_no') or '-'}<br/>P.F.: {r.get('pf_no') or '-'}"
+            f"<br/>ESI: {r.get('esi_ip_no') or '-'}", cell)
         data.append([
             str(i), name_p, ids_p,
             Paragraph((r.get("designation") or "").upper(), cell),
@@ -1066,6 +1087,7 @@ def build_compliance_register_pdf_v2(
     company_name: str = "S.K. Sharma & Co.",
     firm: Optional[Dict[str, Any]] = None,
     layout: Optional[Dict[str, Any]] = None,
+    title_override: str = "",
 ) -> bytes:
     """Iter 137 — OPTION 2 (recommended modern format).
 
@@ -1153,7 +1175,7 @@ def build_compliance_register_pdf_v2(
         ] if x)
         c.drawString(8 * mm, H - 17.5 * mm, codes)
         c.setFont("Helvetica-Bold", 11)
-        c.drawRightString(W - 8 * mm, H - 9 * mm, "SALARY REGISTER (COMPLIANCE)")
+        c.drawRightString(W - 8 * mm, H - 9 * mm, title_override or "SALARY REGISTER (COMPLIANCE)")
         c.setFont("Helvetica-Bold", 9)
         c.drawRightString(W - 8 * mm, H - 14.5 * mm, month_label)
         if month_days_hdr:

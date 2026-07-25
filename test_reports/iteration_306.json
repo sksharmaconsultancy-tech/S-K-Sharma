@@ -1,0 +1,43 @@
+{
+  "summary": "Iter 306 regression: 12/12 backend pytest cases PASS (test_iter306_features.py). Coverage: (1) POST /admin/firm-credentials — wrong PIN 000000 -> 403; correct PIN 246810 as super admin -> firms list containing Kankani with decrypted esi_password (not the mask string); company_admin admin@kankani.local -> 403. (2) DELETE /admin/employees/{uid} as sub_admin returns {approval_required:true, request_id:...} and does NOT delete; employee still listed in /admin/employees. POST /admin/deletion-requests/{id}/reject leaves employee intact; POST /admin/deletion-requests/{id}/approve deletes the employee (cascade). (3) POST /admin/compliance-salary-runs 2026-05 Kankani returns rows; each row has 'pf_no' and 'esic_leave_days'=0; daily-rated code 50 has rate>0; no row has esic_employee>0 with present_days<=0. (4) Punch selfie strip: injected an attendance row with 'data:image/png;base64,XXX' selfie via Mongo; GET /admin/attendance/{rid}/selfie returned raw base64 WITHOUT the data:-prefix; cleaned up. (5) POST /admin/employees/{uid}/documents category='photo' image/png -> GET /admin/users/{uid}/photo returns non-empty photo_base64 (profile-photo sync verified) then cleanup. (6) Register PDFs: /admin/salary-runs/{rid}/register.pdf, /admin/compliance-salary-runs/{rid}/register.pdf?variant=1 and variant=2 all return 200 with %PDF magic bytes. Frontend (super admin logged in via /admin-pin-login password mode): (a) sidebar 'Firms' section EXPANDS to show 3 children — 'Companies (Firm Master)', 'List of Firms', 'Firms ID & Password (PF · ESIC)' — clicking the third routes to /firm-credentials. (b) ACTIVE FIRM pill has testID='sidebar-active-firm' with a lock-closed-outline icon; clicking it does NOT navigate (URL unchanged). (c) sidebar-hide collapses to slim rail exposing sidebar-show; hide state persists in localStorage as 'sks_sidebar_hidden'='1' and survives page reload (verified). (d) /firm-credentials shows Verify-your-PIN card with data-testid='cred-pin-input'; wrong PIN 000000 shows the exact error 'Enter your correct Super Admin PIN to view firm credentials'; PIN 246810 reveals a Kankani Enterprises card with EPF PORTAL / ESIC PORTAL / PF LOGIN rows, each password field masked with visible eye + copy icons, plus a top-right 'Lock' button. (e) /compliance-salary-run opens with NO rows and NO 'ESIC Leave' header — data only appears after Salary Process (fresh-state behaviour confirmed). (f) /salary-run and /bulk-employee-correction load without red-screen errors. (g) /firm-master?company_id=cmp_527fecdd7c renders with 7 password-type inputs (EPF/ESI passwords are password-typed by default = eye toggle in effect).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "global (all admin routes)",
+        "issues": [
+          "Recurring console error 'Invalid style property of padding. Value is \"0 8px\" but only single values are supported.' — React Native Web rejects shorthand padding strings. Non-blocking, noted in iter_299 as well. Fix: replace with paddingHorizontal/paddingVertical.",
+          "Recurring console warning '\"shadow*\" style props are deprecated. Use \"boxShadow\".' — RN 0.76+ deprecation.",
+          "Recurring console warning 'Image: style.resizeMode is deprecated. Please use props.resizeMode.'"
+        ]
+      }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter306_features.py",
+    "/app/test_reports/pytest/iter306.xml"
+  ],
+  "action_items": [
+    "OPTIONAL polish (not blocking): consolidate the eye-toggle testIDs on /firm-credentials and /firm-master (currently the reveal/copy icons have no testID, so automation must find them positionally).",
+    "OPTIONAL: fix the 'padding: 0 8px' RN-Web shorthand + migrate shadow* to boxShadow + resizeMode from style to prop (repeat from iter_299, still open)."
+  ],
+  "critical_code_review_comments": [
+    "/app/backend/routes/firm_master.py::firm_credentials correctly gates on super_admin role AND PIN via _verify_pin; decrypted secrets are ONLY returned inside this route — good.",
+    "/app/backend/routes/deletion_approvals.py::_queue_request is idempotent (returns the existing pending request_id if you re-queue) — prevents duplicate delete requests. Good.",
+    "/app/backend/server.py::delete_employee (~line 9095): correctly branches on admin.role=='sub_admin' to route through the approval queue; super admin still deletes directly. Good.",
+    "/app/backend/routes/employee_documents.py:324-329: category='photo' + image/* mime writes profile_photo_base64 on users doc — verified end-to-end.",
+    "/app/backend/server.py:9271-9272 & 4238-4242: data:-URL prefix is stripped on BOTH write and read of selfie_base64 (belt-and-suspenders); legacy rows are also handled on read. Verified via Mongo-injected row."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter306_features.py (new — 12 regression tests)"
+  ],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100% of tested flows (login, sidebar Firms + hide/show + persistence, ACTIVE FIRM pill read-only lock, /firm-credentials wrong+correct PIN reveal, /compliance-salary-run no-autoload)"},
+  "seed_data_creation": "No persistent seed created. Test created and immediately cleaned up 3 throwaway employees under Kankani (delete-approval flow) + 1 test photo document + 1 injected attendance row with test record_id. A single fresh compliance salary run for Kankani 2026-05 was created and NOT deleted (per main-agent note: legitimate).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "test_iter306_features.py covers firm-credentials PIN gate, sub-admin delete->approval->approve/reject, compliance salary run rate/pf_no/esic_leave_days, punch selfie prefix strip (uses direct Mongo insert), employee photo->profile sync, and register PDF variants 1/2. Runs in ~5s. Uses EXPO_PUBLIC_BACKEND_URL, MONGO_URL, DB_NAME. Super admin login: sksharmaconsultancy@gmail.com / sharma123. Super admin PIN: 246810. Sub admin: testsub@sksharma.co / testsub123.",
+  "rca_of_issue": "N/A — every listed feature works. GPS accurateLocation.ts fix was not tested (headless geolocation not viable) but the punch route loads without errors and the module compiles cleanly."
+}

@@ -252,6 +252,8 @@ export default function ComplianceSalaryRunScreen() {
   const empSearchRef = useRef<TextInput | null>(null);
   // Iter 183 — Branch / Dept / Contractor filter chips.
   const [gridFilters, setGridFilters] = useState<GridFilters>(GRID_FILTER_DEFAULT);
+  // Iter 306 (user #8) — tap a row to HIGHLIGHT it across the wide grid.
+  const [hlRow, setHlRow] = useState<string | null>(null);
   const [auditOpen, setAuditOpen] = useState(false);
   const [auditEntries, setAuditEntries] = useState<any[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
@@ -280,6 +282,7 @@ export default function ComplianceSalaryRunScreen() {
       uan: fit("UAN No.", rows.map((r: any) => r.uan_no), 80),
       esi: fit("ESIC No.", rows.map((r: any) => r.esi_ip_no), 80),
       pd: 72, // PresentDaysCell input is fixed-width
+      el: 72, // Iter 306 (user #20) — ESIC Leave days input
       num: fit("Wage Base", nums, 72, 130),
     };
   }, [run?.rows]);
@@ -955,23 +958,10 @@ export default function ComplianceSalaryRunScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlParams.run_id, isAdmin]);
 
-  // Iter 162 — auto-open the LAST processed run on screen load so the
-  // report is visible without clicking "Process Salary" (user request).
-  const autoOpenedRef = React.useRef(false);
-  useEffect(() => {
-    if (!isAdmin || urlParams.run_id || autoOpenedRef.current || !activeCompanyId) return;
-    autoOpenedRef.current = true;
-    (async () => {
-      try {
-        const j = await api<{ runs: CompRun[] }>(
-          `/admin/compliance-salary-runs?company_id=${encodeURIComponent(activeCompanyId)}`,
-        );
-        const latest = (j.runs || [])[0];
-        if (latest?.run_id) await openPastRun(latest);
-      } catch { /* screen stays on fresh state */ }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin, activeCompanyId]);
+  // Iter 162 auto-opened the LAST processed run on screen load. Iter 306
+  // (user request #6) — REMOVED: the Compliance Salary screen must show
+  // data ONLY after the admin presses "Process" (deep links from Past
+  // Salary Runs still open a specific run via ?run_id=).
 
   /**
    * Iter 85 — Client-side re-computation when the admin edits an
@@ -1036,7 +1026,7 @@ export default function ComplianceSalaryRunScreen() {
   // locally so the grid stays in sync while editing.
   const updateRowField = (
     userId: string,
-    key: "others" | "other_deduction" | "ot_pay" | "tds",
+    key: "others" | "other_deduction" | "ot_pay" | "tds" | "esic_leave_days",
     value: number,
   ) => {
     setRun((prev) => {
@@ -1756,11 +1746,13 @@ export default function ComplianceSalaryRunScreen() {
                   const en = (run.rows[0] as any)?.enabled_allowances as string[] | undefined;
                   const has = (k: string) => !en || en.includes(k) || k === "basic";
                   const CELL_W = colW.num;
-                  const INFO_W = colW.name + colW.father + colW.desg + colW.uan + colW.esi + colW.pd;
+                  const INFO_W = colW.name + colW.father + colW.desg + colW.uan + colW.esi + colW.pd + colW.el;
                   const FROZEN_W = colW.name + colW.father + colW.desg;
                   const optKeys = ["basic","hra","conveyance","medical","special","others"].filter((k) => has(k));
                   const masterCount = optKeys.length + 1; // +M.Gross
-                  const calcCount = optKeys.length + 1;   // +Gross
+                  // Iter 306 — +Gross AND +OT Amt (the band was one cell
+                  // short, so DEDUCTIONS & NET started over the OT column).
+                  const calcCount = optKeys.length + 2;
                   // Iter 171 — deduction columns follow Firm Master Deductions
                   const ed = (run.rows[0] as any)?.enabled_deductions as string[] | undefined;
                   const hasDed = (k: string) => !ed || ed.includes(k);
@@ -1797,6 +1789,8 @@ export default function ComplianceSalaryRunScreen() {
                     { label: "UAN No.", group: "info" },
                     { label: "ESIC No.", group: "info" },
                     { label: "Present Days", group: "info" },
+                    // Iter 306 (user #20) — editable ESIC Leave days.
+                    { label: "ESIC Leave", group: "info" },
                   ];
                   if (has("basic")) headers.push({ label: "M.Basic", group: "master" });
                   if (has("hra")) headers.push({ label: "M.HRA", group: "master" });
@@ -1832,8 +1826,8 @@ export default function ComplianceSalaryRunScreen() {
                           numberOfLines={1}
                           style={[
                             styles.tblCell,
-                            { width: i < 6
-                                ? [colW.name, colW.father, colW.desg, colW.uan, colW.esi, colW.pd][i]
+                            { width: i < 7
+                                ? [colW.name, colW.father, colW.desg, colW.uan, colW.esi, colW.pd, colW.el][i]
                                 : colW.num },
                             styles.tblHeaderTxt,
                             i >= 5 && { textAlign: "right" },
@@ -1853,17 +1847,22 @@ export default function ComplianceSalaryRunScreen() {
                   );
                 })()}
                 </View>
-                {sortRows(run.rows).map((r, idx) => (
-                  <View
+                {sortRows(run.rows).map((r, idx) => {
+                  const isHl = hlRow === r.user_id;
+                  const rowBg = isHl ? "#FEF3C7" : idx % 2 === 0 ? colors.surfaceSecondary : colors.surface;
+                  return (
+                  <Pressable
+                    onPress={() => setHlRow(isHl ? null : r.user_id)}
                     key={r.user_id}
                     style={[
                       styles.tblRow,
-                      idx % 2 === 0 && { backgroundColor: colors.surfaceSecondary },
+                      { backgroundColor: rowBg },
+                      isHl && { borderLeftWidth: 3, borderLeftColor: "#D97706" },
                     ]}
                   >
-                    <Text style={[styles.tblCell, { width: colW.name }, stickyCol(0, idx % 2 === 0 ? colors.surfaceSecondary : colors.surface)]} numberOfLines={1}>{r.name || "—"}</Text>
-                    <Text style={[styles.tblCell, { width: colW.father }, stickyCol(colW.name, idx % 2 === 0 ? colors.surfaceSecondary : colors.surface)]} numberOfLines={1}>{(r as any).father_name || "—"}</Text>
-                    <Text style={[styles.tblCell, { width: colW.desg }, stickyCol(colW.name + colW.father, idx % 2 === 0 ? colors.surfaceSecondary : colors.surface)]} numberOfLines={1}>{(r as any).designation || "—"}</Text>
+                    <Text style={[styles.tblCell, { width: colW.name }, stickyCol(0, rowBg)]} numberOfLines={1}>{r.name || "—"}</Text>
+                    <Text style={[styles.tblCell, { width: colW.father }, stickyCol(colW.name, rowBg)]} numberOfLines={1}>{(r as any).father_name || "—"}</Text>
+                    <Text style={[styles.tblCell, { width: colW.desg }, stickyCol(colW.name + colW.father, rowBg)]} numberOfLines={1}>{(r as any).designation || "—"}</Text>
                     <Text style={[styles.tblCell, { width: colW.uan }]} numberOfLines={1}>{(r as any).uan_no || "—"}</Text>
                     <Text style={[styles.tblCell, { width: colW.esi }]} numberOfLines={1}>{(r as any).esi_ip_no || "—"}</Text>
                     {/* Iter 85 — Editable Present Days. Admin can override
@@ -1887,6 +1886,19 @@ export default function ComplianceSalaryRunScreen() {
                         const next = navCols[navCols.indexOf("pd") + (key === "ArrowRight" ? 1 : -1)];
                         if (next) focusCell(next, idx);
                       }}
+                    />
+                    {/* Iter 306 (user #20) — editable ESIC Leave days
+                        (record-keeping for ESIC sickness-benefit leave;
+                        does not change pay). */}
+                    <TextInput
+                      value={String((r as any).esic_leave_days ?? 0)}
+                      onChangeText={(v) => {
+                        const n = Number(v.replace(/[^0-9.]/g, ""));
+                        if (!Number.isNaN(n)) updateRowField(r.user_id, "esic_leave_days", n);
+                      }}
+                      keyboardType="decimal-pad"
+                      selectTextOnFocus
+                      style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.el }]}
                     />
                     {/* Iter 85 pt 1 — Master (full-month) heads,
                         conditionally rendered per firm allowance mask. */}
@@ -1985,8 +1997,9 @@ export default function ComplianceSalaryRunScreen() {
                     {/* Iter 136 (user request) — Total Deduction before Net Pay */}
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(r.total_deduction)}</Text>
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(r.net)}</Text>
-                  </View>
-                ))}
+                  </Pressable>
+                  );
+                })}
                 <View style={[styles.tblRow, { backgroundColor: colors.brandTertiary }]}>
                   <Text style={[styles.tblCell, { width: colW.name, fontWeight: "700" }, stickyCol(0, colors.brandTertiary)]}>TOTAL</Text>
                   <Text style={[styles.tblCell, { width: colW.father }, stickyCol(colW.name, colors.brandTertiary)]}>—</Text>
@@ -1994,6 +2007,7 @@ export default function ComplianceSalaryRunScreen() {
                   <Text style={[styles.tblCell, { width: colW.uan }]}>—</Text>
                   <Text style={[styles.tblCell, { width: colW.esi }]}>—</Text>
                   <Text style={[styles.tblCell, { width: colW.pd }]}>—</Text>
+                  <Text style={[styles.tblCell, { width: colW.el }]}>—</Text>
                   {/* Iter 171 — totals row follows the same column masks so
                       every figure lands under its own header. */}
                   {(() => {

@@ -110,6 +110,13 @@ const COL_WIDTHS: Record<string, number> = {
   day_3: 90,
 };
 
+// Iter 306 (user #18) — ONE width source for headers AND cells so the
+// columns always line up under their headings (the header previously
+// defaulted to 120 while allowance cells defaulted to 110, shifting
+// every column after the first un-mapped one).
+const colWidthFor = (f: { key: string; type: string }): number =>
+  COL_WIDTHS[f.key] || (f.type === "allowance" ? 110 : 120);
+
 // Iter 134 (user spec) — Only identity columns are locked. Statutory IDs,
 // bank details, salary heads, department/designation/group are editable.
 const LOCKED_FIELDS: Set<string> = new Set([
@@ -275,10 +282,20 @@ export default function BulkEmployeeCorrectionScreen() {
   }, [allRows]);
 
   // Legacy field kept for the single-firm group picker.
+  // Iter 306 (user #19) — only list groups that actually have employees
+  // matching the current Active/Resigned filter.
+  const groupIdsInFilter = useMemo(() => {
+    const s = new Set<string>();
+    for (const e of allRows) {
+      const match = empFilter === "resigned" ? isResigned(e) : !isResigned(e);
+      if (match && e.employee_group_id) s.add(e.employee_group_id);
+    }
+    return s;
+  }, [allRows, empFilter]);
   const groups: GroupOption[] = useMemo(() => {
     if (crossFirmMode) return [];
-    return groupsByCid[companyId] || [];
-  }, [crossFirmMode, groupsByCid, companyId]);
+    return (groupsByCid[companyId] || []).filter((g) => groupIdsInFilter.has(g.master_id));
+  }, [crossFirmMode, groupsByCid, companyId, groupIdsInFilter]);
   const depts: GroupOption[] = useMemo(
     () => (crossFirmMode ? [] : deptsByCid[companyId] || []),
     [crossFirmMode, deptsByCid, companyId],
@@ -620,7 +637,7 @@ export default function BulkEmployeeCorrectionScreen() {
   };
 
   const renderCell = (row: EmployeeRow, f: FieldDef) => {
-    const w = COL_WIDTHS[f.key] || (f.type === "allowance" ? 110 : 120);
+    const w = colWidthFor(f);
     const val = displayValue(row, f.key);
     const isDirty = dirty[row.user_id] ? f.key in dirty[row.user_id] : false;
 
@@ -1129,7 +1146,7 @@ export default function BulkEmployeeCorrectionScreen() {
                         key={f.key}
                         style={[
                           styles.headCell,
-                          { width: COL_WIDTHS[f.key] || 120, backgroundColor: colors.surfaceTertiary },
+                          { width: colWidthFor(f), backgroundColor: colors.surfaceTertiary },
                           frozenStyle(f.key),
                         ]}
                       >
@@ -1157,7 +1174,7 @@ export default function BulkEmployeeCorrectionScreen() {
                     {displayFields.map((f) => (
                       <View
                         key={f.key}
-                        style={[styles.headCell, { width: COL_WIDTHS[f.key] || 120 }]}
+                        style={[styles.headCell, { width: colWidthFor(f) }]}
                       >
                         <Text style={styles.headTxt} numberOfLines={1}>
                           {f.label}

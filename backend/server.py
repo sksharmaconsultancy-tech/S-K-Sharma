@@ -4235,7 +4235,11 @@ async def get_punch_selfie(
         raise HTTPException(status_code=404, detail="Punch not found")
     if user["role"] == "company_admin" and rec.get("company_id") != user.get("company_id"):
         raise HTTPException(status_code=403, detail="Not your company")
-    return {"selfie_base64": rec.get("selfie_base64")}
+    _b64 = rec.get("selfie_base64")
+    # Iter 306 — legacy rows stored with a data-URL prefix render blank.
+    if _b64 and _b64.startswith("data:"):
+        _b64 = _b64.split("base64,", 1)[-1]
+    return {"selfie_base64": _b64}
 
 
 @api.get("/admin/users/{user_id}/photo")
@@ -9037,6 +9041,34 @@ async def admin_bulk_import_parse(
     return {"headers": [h for h in headers if h], "rows": rows, "rows_count": len(rows)}
 
 
+async def delete_employee_record(user_id: str, actor: str = "system") -> Dict[str, Any]:
+    """Cascade-delete one employee (attendance, leaves, tickets, payslips…).
+    Shared by the direct DELETE endpoint and the Super-Admin approval flow
+    (Iter 306 user #1 — sub-admin deletes need approval)."""
+    target = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not target:
+        return {"note": "Employee no longer exists"}
+    cascade = {}
+    for col in ("attendance", "leaves", "tickets", "payslips", "notifications", "user_sessions"):
+        r = await db[col].delete_many({"user_id": user_id})
+        cascade[col] = r.deleted_count
+    await db.users.delete_one({"user_id": user_id})
+    logger.info(f"[DELETE employee] {user_id} by {actor} cascade={cascade}")
+    # Iter 267 — Sync Engine: remove the employee from all machines. The
+    # target's PIN/company are captured before deletion so the removal
+    # command can be built even though the user record is gone.
+    try:
+        pin = str(target.get("bio_code") or "").strip()
+        if pin and target.get("company_id"):
+            from routes.sync_engine import enqueue_employee_removal
+            await enqueue_employee_removal(
+                target["company_id"], user_id, pin, target.get("name"),
+                actor=actor)
+    except Exception:
+        pass
+    return {"cascade": cascade}
+
+
 @api.delete("/admin/employees/{user_id}")
 async def delete_employee(user_id: str,
                           authorization: Optional[str] = Header(None)):
@@ -9044,6 +9076,7 @@ async def delete_employee(user_id: str,
 
     - Super admin can delete any employee.
     - Company admin can only delete employees in their own company.
+    - Sub admin deletions are queued for SUPER ADMIN approval (Iter 306).
     - Super admins cannot be deleted via this endpoint (safety guard).
     """
     admin = await get_user_from_token(authorization)
@@ -9059,25 +9092,18 @@ async def delete_employee(user_id: str,
     if admin.get("user_id") == user_id:
         raise HTTPException(status_code=400, detail="You cannot delete your own account")
 
-    cascade = {}
-    for col in ("attendance", "leaves", "tickets", "payslips", "notifications", "user_sessions"):
-        r = await db[col].delete_many({"user_id": user_id})
-        cascade[col] = r.deleted_count
-    await db.users.delete_one({"user_id": user_id})
-    logger.info(f"[DELETE employee] {user_id} by {admin.get('email')} cascade={cascade}")
-    # Iter 267 — Sync Engine: remove the employee from all machines. The
-    # target's PIN/company are captured before deletion so the removal
-    # command can be built even though the user record is gone.
-    try:
-        pin = str(target.get("bio_code") or "").strip()
-        if pin and target.get("company_id"):
-            from routes.sync_engine import enqueue_employee_removal
-            await enqueue_employee_removal(
-                target["company_id"], user_id, pin, target.get("name"),
-                actor=admin.get("user_id", "system"))
-    except Exception:
-        pass
-    return {"ok": True, "cascade": cascade}
+    if admin["role"] == "sub_admin":
+        # Iter 306 (user #1) — Sub Admin deletes go through Super Admin
+        # approval. Nothing is deleted until approved.
+        from routes.deletion_approvals import _queue_request
+        label = f"Employee · {target.get('name') or user_id}"
+        if target.get("employee_code"):
+            label += f" (code {target['employee_code']})"
+        return await _queue_request(admin, "employee", user_id, label,
+                                    target.get("company_id"))
+
+    result = await delete_employee_record(user_id, actor=admin.get("email") or admin.get("user_id"))
+    return {"ok": True, **result}
 
 
 # ---------------------------------------------------------------------------
@@ -9238,6 +9264,12 @@ async def _onboarding_payroll_exclusion(q: dict, company_id: Optional[str],
 @api.post("/attendance/punch")
 async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
+    # Iter 306 (user bug #3) — on WEB the expo-camera base64 includes a
+    # "data:image/…;base64," prefix. Stored verbatim, every viewer that
+    # builds "data:image/jpeg;base64,<b64>" produced an invalid double
+    # prefix → the punch photo rendered BLANK. Strip it at the door.
+    if payload.selfie_base64 and payload.selfie_base64.startswith("data:"):
+        payload.selfie_base64 = payload.selfie_base64.split("base64,", 1)[-1]
     if not user.get("company_id"):
         raise HTTPException(status_code=400, detail="No company assigned. Contact admin.")
     company = await db.companies.find_one({"company_id": user["company_id"]}, {"_id": 0})
@@ -10090,7 +10122,11 @@ async def get_my_punch_selfie(
         raise HTTPException(status_code=404, detail="Punch not found")
     if rec.get("user_id") != user["user_id"]:
         raise HTTPException(status_code=403, detail="Not your punch")
-    return {"selfie_base64": rec.get("selfie_base64")}
+    _b64 = rec.get("selfie_base64")
+    # Iter 306 — legacy rows stored with a data-URL prefix render blank.
+    if _b64 and _b64.startswith("data:"):
+        _b64 = _b64.split("base64,", 1)[-1]
+    return {"selfie_base64": _b64}
 
 
 @api.get("/attendance/my-month")
@@ -16361,15 +16397,20 @@ async def export_compliance_salary_register_pdf(
         firm_info["pf_code"] = ((fm or {}).get("epf") or {}).get("epf_no") or ""
         firm_info["esi_code"] = ((fm or {}).get("esi") or {}).get("esi_no") or ""
     builder = build_compliance_register_pdf_v2 if int(variant or 1) == 2 else build_compliance_register_pdf
+    # Iter 306 (user #10) — saved title override from the Report Formats editor.
+    from routes.report_formats import get_report_format
+    _fmt_id = "compliance_register_v2" if int(variant or 1) == 2 else "compliance_register_v1"
+    _title_ov = str((await get_report_format(_fmt_id)).get("title") or "").strip()
     if int(variant or 1) == 2:
         # Iter 162 — apply the ONE-TIME saved register layout (columns /
         # order / headings / widths / rows-per-page / row height).
         _lay = await db.app_settings.find_one(
             {"key": "compliance_register_layout"}, {"_id": 0, "layout": 1})
         pdf_bytes = builder(run, company_name=company_name, firm=firm_info,
-                            layout=(_lay or {}).get("layout"))
+                            layout=(_lay or {}).get("layout"), title_override=_title_ov)
     else:
-        pdf_bytes = builder(run, company_name=company_name, firm=firm_info)
+        pdf_bytes = builder(run, company_name=company_name, firm=firm_info,
+                            title_override=_title_ov)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",

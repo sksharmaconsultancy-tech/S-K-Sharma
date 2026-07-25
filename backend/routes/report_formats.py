@@ -124,6 +124,21 @@ REPORTS: Dict[str, Dict[str, Any]] = {
         "defaults": {"orientation": "landscape", "font_size": 7.5,
                      "title": "Salary Register"},
     },
+    # ---- Iter 306 (user #10) — Compliance Register formats editable -----
+    "compliance_register_v1": {
+        "label": "Compliance Salary Register — Format 1 / Form 27 (PDF) — title only",
+        "group": "Salary Reports",
+        "columns": None,  # statutory Form 27(1) fixed grid
+        "defaults": {"orientation": "landscape", "font_size": 6.5,
+                     "title": "SALARY REGISTER"},
+    },
+    "compliance_register_v2": {
+        "label": "Compliance Salary Register — Format 2 / Modern (PDF) — title only",
+        "group": "Salary Reports",
+        "columns": None,
+        "defaults": {"orientation": "landscape", "font_size": 7,
+                     "title": "SALARY REGISTER (COMPLIANCE)"},
+    },
     "payslips": {
         "label": "Payslips (PDF) — title only",
         "group": "Salary Reports",

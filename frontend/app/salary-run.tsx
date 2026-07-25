@@ -929,6 +929,8 @@ function ResultGrid({
   const [empSearch, setEmpSearch] = useState("");
   // Iter 183 — Branch / Dept / Contractor filter chips.
   const [gridFilters, setGridFilters] = useState<GridFilters>(GRID_FILTER_DEFAULT);
+  // Iter 306 (user #8) — tap a row to HIGHLIGHT it across the wide grid.
+  const [hlRow, setHlRow] = useState<string | null>(null);
   const sortRows = (rows: ActualRow[]) => {
     let base = rows.filter((r) => rowMatchesFilters(r, gridFilters));
     const q = empSearch.trim().toLowerCase();
@@ -1054,6 +1056,8 @@ function ResultGrid({
             // + a colored left accent bar + bolded Code/Name make each
             // employee row easy to scan across the 20-column grid.
             const isOdd = idx % 2 === 1;
+            const isHl = hlRow === r.user_id;
+            const rowBg = isHl ? "#FEF3C7" : isOdd ? colors.surfaceSecondary : colors.surface;
             const accentPalette = [
               colors.brandPrimary,
               "#f59e0b", // amber
@@ -1064,17 +1068,19 @@ function ResultGrid({
             ];
             const accent = accentPalette[idx % accentPalette.length];
             return (
-            <View
+            <Pressable
+              onPress={() => setHlRow(isHl ? null : r.user_id)}
               key={r.user_id}
               style={[
                 styles.tblRow,
                 styles.empRow,
                 isOdd ? styles.empRowOdd : styles.empRowEven,
-                { borderLeftWidth: 4, borderLeftColor: accent },
+                { borderLeftWidth: 4, borderLeftColor: isHl ? "#D97706" : accent },
+                isHl && { backgroundColor: "#FEF3C7" },
               ]}
             >
-              <ReadCell w={COL_WIDTHS.sn} frozen={stickyCol(0, isOdd ? colors.surfaceSecondary : colors.surface)}>{idx + 1}</ReadCell>
-              <View style={[{ width: COL_WIDTHS.name, paddingHorizontal: 6, paddingVertical: 4, justifyContent: "center" }, stickyCol(COL_WIDTHS.sn, isOdd ? colors.surfaceSecondary : colors.surface)]}>
+              <ReadCell w={COL_WIDTHS.sn} frozen={stickyCol(0, rowBg)}>{idx + 1}</ReadCell>
+              <View style={[{ width: COL_WIDTHS.name, paddingHorizontal: 6, paddingVertical: 4, justifyContent: "center" }, stickyCol(COL_WIDTHS.sn, rowBg)]}>
                 <Text style={[styles.readTxt, styles.empIdent, { textAlign: "left" }]} numberOfLines={1}>
                   {r.name || "—"}
                 </Text>
@@ -1178,7 +1184,7 @@ function ResultGrid({
                   <Ionicons name="checkmark" size={12} color={colors.onSurfaceTertiary} />
                 )}
               </View>
-            </View>
+            </Pressable>
             );
           })}
 

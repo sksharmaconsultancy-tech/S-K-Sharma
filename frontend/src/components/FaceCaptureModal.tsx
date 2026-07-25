@@ -73,7 +73,11 @@ export default function FaceCaptureModal({
     if (!preview?.base64) return;
     setSubmitting(true);
     try {
-      await onCapture(preview.base64);
+      // Iter 306 (user bug #3) — on web, expo-camera's base64 carries a
+      // "data:image/…;base64," prefix; strip so downstream storage /
+      // viewers always deal with raw base64.
+      const raw = preview.base64.replace(/^data:image\/[a-z]+;base64,/i, "");
+      await onCapture(raw);
     } finally {
       setSubmitting(false);
       setPreview(null);

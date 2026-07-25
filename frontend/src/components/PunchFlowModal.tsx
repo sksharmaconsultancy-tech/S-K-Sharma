@@ -146,7 +146,10 @@ export default function PunchFlowModal({ visible, kind, user, postPunch, onClose
       return { ok: true, sites, pos };
     } catch {
       setStep("gps", "failed", "Could not get your location");
-      setError("Could not fetch GPS location. Check location settings and retry.");
+      setError(
+        "Could not fetch GPS location. Please turn ON device Location " +
+        "(High accuracy mode), move near a window / open area, then tap Retry.",
+      );
       return { ok: false, sites };
     }
   }, [user]);

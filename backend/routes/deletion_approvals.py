@@ -144,6 +144,11 @@ async def approve_deletion_request(
         col, _ = _RUN_KINDS[kind]
         r = await db[col].delete_one({"run_id": req["target_id"]})
         result = {"deleted_count": r.deleted_count}
+    elif kind == "employee":
+        # Iter 306 (user #1) — sub-admin employee deletion approved.
+        from server import delete_employee_record
+        result = await delete_employee_record(
+            req["target_id"], actor=f"approval:{user.get('email') or user['user_id']}")
     else:
         raise HTTPException(status_code=400, detail=f"Unknown request kind '{kind}'")
 

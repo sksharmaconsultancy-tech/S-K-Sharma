@@ -91,10 +91,19 @@ export const NAV_SUPER: NavItem[] = [
   // Iter 293 (user spec) — 12-module sidebar reorganisation.
   { route: "/portal-dashboard", label: "Dashboard", icon: "home-outline" },
   {
+    // Iter 306 (user #14) — dedicated Firms section.
+    label: "Firms",
+    icon: "business-outline",
+    children: [
+      { route: "/companies", label: "Companies (Firm Master)", icon: "business-outline" },
+      { route: "/firm-select", label: "List of Firms", icon: "list-outline" },
+      { route: "/firm-credentials", label: "Firms ID & Password (PF · ESIC)", icon: "key-outline" },
+    ],
+  },
+  {
     label: "Employees",
     icon: "people-outline",
     children: [
-      { route: "/companies", label: "Companies (Firm Master)", icon: "business-outline" },
       { route: "/employee-add", label: "Add New Employee", icon: "person-add-outline" },
       { route: "/admin", label: "Employee Master Data", icon: "people-outline" },
       { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
@@ -271,6 +280,7 @@ export const NAV_SUPER: NavItem[] = [
 // Sub-admins with `read` OR `write` on a permission group see the entry.
 const NAV_PERMISSION_MAP: Record<string, string[]> = {
   "/companies": ["companies:read", "companies:write"],
+  "/firm-credentials": ["companies:read", "companies:write"],
   "/company-requests": ["company_requests:read", "company_requests:write"],
   "/bulk-employee-correction": ["employees:read", "employees:write"],
   "/bulk-operations": ["employees:write", "salary_process:write"],
@@ -621,6 +631,17 @@ export default function AdminWebShell({ children }: Props) {
   const [aiOpen, setAiOpen] = React.useState(false);
   const [notifOpen, setNotifOpen] = React.useState(false);
   const [helpOpen, setHelpOpen] = React.useState(false);
+  // Iter 306 (user #13) — pin/hide the sidebar (persisted per browser).
+  const [sbHidden, setSbHidden] = React.useState<boolean>(() => {
+    try { return (globalThis as any).localStorage?.getItem("sks_sidebar_hidden") === "1"; }
+    catch { return false; }
+  });
+  const toggleSidebar = () => setSbHidden((h) => {
+    const n = !h;
+    try { (globalThis as any).localStorage?.setItem("sks_sidebar_hidden", n ? "1" : "0"); }
+    catch { /* noop */ }
+    return n;
+  });
   const [gsData, setGsData] = React.useState<{ employees: any[]; companies: any[] } | null>(null);
   const searchInputRef = React.useRef<TextInput | null>(null);
   const favSet = React.useMemo(() => new Set(favs), [favs]);
@@ -983,7 +1004,14 @@ export default function AdminWebShell({ children }: Props) {
 
   return (
     <View style={styles.shell} testID="admin-web-shell">
-      {/* Sidebar */}
+      {/* Sidebar — Iter 306 (user #13): collapsible via the pin button. */}
+      {sbHidden ? (
+        <View style={styles.sidebarRail}>
+          <Pressable onPress={toggleSidebar} style={styles.railBtn} testID="sidebar-show">
+            <Ionicons name="menu-outline" size={20} color="#fff" />
+          </Pressable>
+        </View>
+      ) : (
       <View style={styles.sidebar}>
         <View style={styles.logoBlock}>
           {/* Iter 89 — Firm logo synced from Firm Master. Falls back to
@@ -1013,21 +1041,23 @@ export default function AdminWebShell({ children }: Props) {
               {role === "super_admin" ? "Super Admin" : role === "sub_admin" ? "Sub Admin" : "Company Admin"}
             </Text>
           </View>
+          {/* Iter 306 (user #13) — hide the sidebar. */}
+          <Pressable
+            onPress={toggleSidebar}
+            style={styles.railBtnSm}
+            testID="sidebar-hide"
+            hitSlop={6}
+          >
+            <Ionicons name="chevron-back-outline" size={15} color={SB.linkLight} />
+          </Pressable>
         </View>
 
         {/* Iter 85 pt 3 — Active Firm pill. Always visible under the logo
             block so admins never lose sight of the firm scope they're
-            operating in. Tap to switch (clears the lock and opens the
-            firm picker). */}
+            operating in. Iter 306 (user #15) — READ-ONLY: switching firms
+            from here is no longer allowed (use the header firm picker). */}
         {selectedCompany ? (
-          <Pressable
-            onPress={() => {
-              clearLock();
-              router.push("/firm-select" as any);
-            }}
-            style={styles.firmPill}
-            testID="sidebar-active-firm"
-          >
+          <View style={styles.firmPill} testID="sidebar-active-firm">
             <View style={styles.firmPillIcon}>
               <Ionicons name="business-outline" size={12} color="#fff" />
             </View>
@@ -1037,8 +1067,8 @@ export default function AdminWebShell({ children }: Props) {
                 {selectedCompany.name}
               </Text>
             </View>
-            <Ionicons name="swap-horizontal" size={14} color={SB.linkLight} />
-          </Pressable>
+            <Ionicons name="lock-closed-outline" size={13} color={SB.linkLight} />
+          </View>
         ) : null}
 
         <View style={styles.divider} />
@@ -1107,6 +1137,7 @@ export default function AdminWebShell({ children }: Props) {
           </Pressable>
         </View>
       </View>
+      )}
 
       {/* Main pane */}
       <View style={styles.mainWrap}>
@@ -1568,6 +1599,31 @@ const styles = StyleSheet.create({
     borderRightColor: SB.border,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.sm,
+  },
+  // Iter 306 (user #13) — slim rail shown when the sidebar is hidden.
+  sidebarRail: {
+    width: 44,
+    backgroundColor: SB.bg,
+    borderRightWidth: 1,
+    borderRightColor: SB.border,
+    paddingVertical: spacing.md,
+    alignItems: "center",
+  },
+  railBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.12)",
+  },
+  railBtnSm: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.10)",
   },
   navScroll: {
     // Bound the nav list height so it becomes a proper scroll container and

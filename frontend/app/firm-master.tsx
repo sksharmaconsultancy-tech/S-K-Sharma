@@ -54,20 +54,38 @@ function Field({
   maxLength?: number;
   disabled?: boolean;
 }) {
+  // Iter 306 (user #11) — eye toggle on password fields so admins can see
+  // what they typed (stored values stay masked by the server).
+  const [showSecret, setShowSecret] = useState(false);
   return (
     <View style={[styles.field, width ? { width } : { flex: 1, minWidth: 180 }]}>
       <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput
-        value={value ?? ""}
-        onChangeText={onChange}
-        placeholder={placeholder}
-        placeholderTextColor={colors.onSurfaceTertiary}
-        keyboardType={keyboardType || "default"}
-        secureTextEntry={!!secure}
-        maxLength={maxLength}
-        editable={!disabled}
-        style={[styles.input, disabled && { opacity: 0.45, backgroundColor: colors.border }]}
-      />
+      <View style={{ position: "relative" }}>
+        <TextInput
+          value={value ?? ""}
+          onChangeText={onChange}
+          placeholder={placeholder}
+          placeholderTextColor={colors.onSurfaceTertiary}
+          keyboardType={keyboardType || "default"}
+          secureTextEntry={!!secure && !showSecret}
+          maxLength={maxLength}
+          editable={!disabled}
+          style={[styles.input, secure && { paddingRight: 36 }, disabled && { opacity: 0.45, backgroundColor: colors.border }]}
+        />
+        {secure ? (
+          <Pressable
+            onPress={() => setShowSecret((s) => !s)}
+            hitSlop={8}
+            style={{ position: "absolute", right: 10, top: 0, bottom: 0, justifyContent: "center" }}
+          >
+            <Ionicons
+              name={showSecret ? "eye-off-outline" : "eye-outline"}
+              size={17}
+              color={colors.onSurfaceSecondary}
+            />
+          </Pressable>
+        ) : null}
+      </View>
     </View>
   );
 }

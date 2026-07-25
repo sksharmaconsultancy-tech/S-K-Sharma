@@ -347,12 +347,17 @@ def to_csv(rows: List[Dict[str, Any]]) -> str:
 # (Utilities → PDF Report Formats): (key, default heading, width mm, numeric).
 SALARY_REGISTER_COLUMNS = [
     ("sno", "S.No", 8, False), ("code", "Code", 16, False), ("name", "Name", 48, False),
+    ("doj", "DOJ", 18, False),
     ("type", "Type", 18, False), ("roll", "Roll", 11, False), ("mode", "Mode", 11, False),
     ("rate", "Rate", 15, True), ("pd", "PD", 9, True), ("hd", "HD", 9, True),
     ("ot_h", "OT h", 11, True), ("base", "Base", 18, True), ("bonus", "Bonus", 15, True),
     ("ot_pay", "OT Pay", 15, True), ("gross", "Gross", 18, True), ("adv", "Adv", 15, True),
     ("ded", "Ded", 16, True), ("net", "Net", 20, True),
 ]
+
+# Iter 306 (user #12) — DOJ is OPTIONAL: hidden unless the admin enables
+# it in Reports → PDF Report Formats → Salary Register.
+_REGISTER_DEFAULT_HIDDEN = {"doj"}
 
 
 def build_salary_register_pdf(
@@ -384,7 +389,8 @@ def build_salary_register_pdf(
     spec = [c for c in (fmt.get("columns") or [])
             if isinstance(c, dict) and c.get("key") in cat]
     if not spec:
-        spec = [{"key": k} for k, _h, _w, _n in SALARY_REGISTER_COLUMNS]
+        spec = [{"key": k} for k, _h, _w, _n in SALARY_REGISTER_COLUMNS
+                if k not in _REGISTER_DEFAULT_HIDDEN]
     sel = []
     for c in spec:
         k = c["key"]
@@ -460,6 +466,7 @@ def build_salary_register_pdf(
             "sno": str(sn),
             "code": r.get("employee_code") or "—",
             "name": (r.get("name") or "")[:28],
+            "doj": str(r.get("doj") or "—"),
             "type": r.get("employee_type") or "—",
             "roll": "On" if r.get("is_onroll") else "Off",
             "mode": (r.get("salary_mode") or "M")[:1].upper(),
@@ -479,7 +486,7 @@ def build_salary_register_pdf(
         for k in totals:
             totals[k] += _num(r.get(k))
     tot_vals = {
-        "sno": "", "code": "", "name": Paragraph("<b>TOTAL</b>", small),
+        "sno": "", "code": "", "name": Paragraph("<b>TOTAL</b>", small), "doj": "",
         "type": "", "roll": "", "mode": "", "rate": "", "pd": "", "hd": "", "ot_h": "",
         "base": f"{totals['base_pay']:.0f}", "bonus": f"{totals['bonus']:.0f}",
         "ot_pay": f"{totals['ot_pay']:.0f}", "gross": f"{totals['gross']:.0f}",

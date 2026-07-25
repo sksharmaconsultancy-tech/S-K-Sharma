@@ -492,3 +492,64 @@ async def upsert_firm_master(
     saved = await db.firm_masters.find_one({"company_id": company_id}, {"_id": 0})
     _mask_secrets(saved)
     return {"ok": True, "master": saved}
+
+
+# ---------------------------------------------------------------------------
+# Iter 306 (user #14) — Firms ID & Password (PF / ESIC) vault screen.
+# SUPER ADMIN ONLY and gated behind the caller's login PIN: passwords are
+# decrypted from the secrets vault only after the PIN checks out.
+# ---------------------------------------------------------------------------
+
+@router.post("/firm-credentials")
+async def firm_credentials(
+    payload: Dict[str, Any] = Body(default={}),
+    authorization: Optional[str] = Header(None),
+):
+    user = await get_user_from_token(authorization)
+    require_role(user, ["super_admin"])
+    pin = str(payload.get("pin") or "").strip()
+    from server import _verify_pin
+    me = await db.users.find_one({"user_id": user["user_id"]},
+                                 {"_id": 0, "pin_hash": 1})
+    if not pin or not (me or {}).get("pin_hash") or not _verify_pin(pin, me["pin_hash"]):
+        raise HTTPException(
+            status_code=403,
+            detail="Enter your correct Super Admin PIN to view firm credentials")
+
+    from utils.secrets_vault import decrypt_secret
+    names: Dict[str, str] = {}
+    async for c in db.companies.find({}, {"_id": 0, "company_id": 1, "name": 1}):
+        names[c["company_id"]] = c.get("name") or c["company_id"]
+
+    out: List[Dict[str, Any]] = []
+    async for fm in db.firm_masters.find(
+        {}, {"_id": 0, "company_id": 1, "epf": 1, "esi": 1, "portal_logins": 1},
+    ):
+        cid = fm.get("company_id")
+        if cid not in names:
+            continue  # orphaned master — firm was deleted
+        epf = fm.get("epf") or {}
+        esi = fm.get("esi") or {}
+        extras = []
+        for row in fm.get("portal_logins") or []:
+            if row.get("user_name") or row.get("password"):
+                extras.append({
+                    "login_type": row.get("login_type"),
+                    "user_name": row.get("user_name"),
+                    "password": decrypt_secret(row.get("password")),
+                })
+        out.append({
+            "company_id": cid,
+            "firm_name": names.get(cid, cid),
+            "epf_code": epf.get("epf_no"),
+            "epf_user_id": epf.get("epf_user_id"),
+            "epf_password": decrypt_secret(epf.get("epf_password")),
+            "esi_no": esi.get("esi_no"),
+            "esi_user_id": esi.get("esi_user_id"),
+            "esi_password": decrypt_secret(esi.get("esi_password")),
+            "other_logins": extras,
+        })
+    out.sort(key=lambda r: str(r.get("firm_name") or "").lower())
+    logger.info("[firm-credentials] revealed to %s (%d firms)",
+                user["user_id"], len(out))
+    return {"firms": out}

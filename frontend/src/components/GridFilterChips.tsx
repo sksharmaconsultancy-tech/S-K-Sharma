@@ -11,18 +11,20 @@ import { colors } from "@/src/theme";
  * rendered. Rows saved before this iteration (without these fields)
  * simply show no chips.
  */
-export type GridFilters = { branch: string; dept: string; contractor: string };
+export type GridFilters = { branch: string; dept: string; contractor: string; group: string };
 
 export const GRID_FILTER_DEFAULT: GridFilters = {
   branch: "all",
   dept: "all",
   contractor: "all",
+  group: "all",
 };
 
 export function rowMatchesFilters(r: any, f: GridFilters): boolean {
   if (f.branch !== "all" && String(r?.branch_name || "").trim() !== f.branch) return false;
   if (f.dept !== "all" && String(r?.department || "").trim() !== f.dept) return false;
   if (f.contractor !== "all" && String(r?.contractor_name || "").trim() !== f.contractor) return false;
+  if (f.group && f.group !== "all" && String(r?.employee_type || "").trim() !== f.group) return false;
   return true;
 }
 
@@ -32,6 +34,8 @@ const GROUPS: {
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
 }[] = [
+  // Iter 306 (user #9) — Group (employee type) chips on both salary grids.
+  { key: "group", rowField: "employee_type", label: "Group", icon: "people-outline" },
   { key: "branch", rowField: "branch_name", label: "Branch", icon: "git-branch-outline" },
   { key: "dept", rowField: "department", label: "Dept", icon: "layers-outline" },
   { key: "contractor", rowField: "contractor_name", label: "Contractor", icon: "briefcase-outline" },
