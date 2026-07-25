@@ -133,6 +133,7 @@ export const NAV_SUPER: NavItem[] = [
           { route: "/compliance-salary-run", label: "Compliance Salary", icon: "briefcase-outline" },
           { route: "/ot-salary-run", label: "OT Salary", icon: "flash-outline" },
           { route: "/arrear-salary-run", label: "Arrear Salary", icon: "time-outline" },
+          { route: "/salary-register", label: "Salary Register", icon: "grid-outline" },
         ],
       },
       { route: "/advances", label: "Advance Management", icon: "wallet-outline" },
@@ -283,6 +284,7 @@ const NAV_PERMISSION_MAP: Record<string, string[]> = {
   "/sync-engine": ["biometric_devices:read", "biometric_devices:write"],
   "/attendance-review": ["attendance_review:read", "attendance_review:write"],
   "/salary-run": ["salary_process:read", "salary_process:write"],
+  "/salary-register": ["salary_process:read", "salary_process:write"],
   "/arrear-salary-run": ["salary_process:read", "salary_process:write"],
   "/ot-salary-run": ["salary_process:read", "salary_process:write"],
   "/compliance-salary-run": ["compliance_salary:read", "compliance_salary:write"],
@@ -464,6 +466,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
           { route: "/compliance-salary-run", label: "Compliance Salary", icon: "briefcase-outline" },
           { route: "/ot-salary-run", label: "OT Salary", icon: "flash-outline" },
           { route: "/arrear-salary-run", label: "Arrear Salary", icon: "time-outline" },
+          { route: "/salary-register", label: "Salary Register", icon: "grid-outline" },
         ],
       },
       { route: "/advances", label: "Advance Management", icon: "wallet-outline" },
@@ -735,6 +738,7 @@ export default function AdminWebShell({ children }: Props) {
         "/salary-run",
         "/arrear-salary-run",
         "/ot-salary-run",
+        "/salary-register",
       ]);
       const empPerms: string[] = (user as any)?.employer_permissions || [];
       const permSet = new Set(empPerms);

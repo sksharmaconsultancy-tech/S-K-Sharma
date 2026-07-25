@@ -21257,6 +21257,10 @@ app.include_router(legacy_explorer_router)
 from routes.legacy_import import router as legacy_import_router  # noqa: E402
 app.include_router(legacy_import_router)
 
+# Iter 305 — Enterprise Salary Register (dynamic heads, exports).
+from routes.salary_register import router as salary_register_router  # noqa: E402
+app.include_router(salary_register_router)
+
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
 maybe_start_rpa_worker(app, db)
