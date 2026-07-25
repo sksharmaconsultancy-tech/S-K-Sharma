@@ -94,6 +94,12 @@ async def legacy_import_firms(authorization: Optional[str] = Header(None)):
     portal = await db.companies.find({}, {"_id": 0, "company_id": 1, "name": 1}).to_list(300)
     pnames = [p["name"] for p in portal if p.get("name")]
 
+    # Iter 300b (user) — firms already imported are locked (no re-import).
+    done = {
+        d["firm_no"]: d
+        for d in await db.legacy_imported_firms.find({}, {"_id": 0}).to_list(2000)
+    }
+
     out = []
     for f in firms:
         nm = str(f.get("firm_name") or "").strip()
@@ -118,8 +124,12 @@ async def legacy_import_firms(authorization: Optional[str] = Header(None)):
             "offline_months": (fc.get(f["firm_no"]) or {}).get("months", 0),
             "suggested_company_id": (sug or {}).get("company_id"),
             "suggested_company_name": (sug or {}).get("name"),
+            "already_imported": f["firm_no"] in done,
+            "imported_at": (done.get(f["firm_no"]) or {}).get("imported_at"),
+            "imported_into": (done.get(f["firm_no"]) or {}).get("company_name"),
         })
-    out.sort(key=lambda x: (-x["employees"], x["firm_name"]))
+    # Iter 300b (user) — alphabetical order.
+    out.sort(key=lambda x: x["firm_name"].lower())
     return {"db": dbn, "firms": out, "portal_firms": portal}
 
 
@@ -137,6 +147,9 @@ class ImportBody(BaseModel):
     employee_fields: List[str] = FIELD_GROUPS
     salary_online: bool = True
     salary_offline: bool = True
+    # Iter 300e (user) — "change head then import": remap a default portal
+    # field to another portal field, or 'skip' to not import that head.
+    field_overrides: Dict[str, str] = {}
 
 
 async def _legacy_employees(dbn: str, firm_no: int) -> List[dict]:
@@ -209,7 +222,10 @@ def _d(v: Any) -> Optional[str]:
     return s[:10] if len(s) >= 10 and s[4] == "-" else None
 
 
-def _emp_doc_fields(e: dict, groups: List[str], structure: List[dict]) -> Dict[str, Any]:
+def _emp_doc_fields(
+    e: dict, groups: List[str], structure: List[dict],
+    overrides: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     """Legacy EmployeeMaster row → portal user fields, per selected groups."""
     doc: Dict[str, Any] = {}
     if "personal" in groups:
@@ -275,6 +291,13 @@ def _emp_doc_fields(e: dict, groups: List[str], structure: List[dict]) -> Dict[s
                 "exit_date": _d(e.get("ResignDate")),
                 "employment_status": "resigned",
             })
+    # Iter 300e (user) — apply head remaps chosen in the wizard: move a
+    # value from its default portal field into another, or drop it (skip).
+    for src, dst in (overrides or {}).items():
+        if src in doc and dst != src:
+            val = doc.pop(src)
+            if dst and str(dst).lower() != "skip":
+                doc[dst] = val
     return {k: v for k, v in doc.items() if v is not None or k in ("phone", "email")}
 
 
@@ -295,6 +318,41 @@ async def _head_names(dbn: str) -> Dict[str, str]:
     return out
 
 
+# Iter 300d (user) — INTERLINK: Employee Type / Department / Designation
+# values coming from the legacy data are auto-registered into the portal's
+# General Masters for the mapped firm (so they appear in every dropdown).
+async def _interlink_masters(company_id: str, values: Dict[str, set]):
+    for mtype, names in values.items():
+        if not names:
+            continue
+        existing = set()
+        async for mm in db.masters.find(
+            {"type": mtype, "company_id": {"$in": [company_id, "__global__", None]}},
+            {"_id": 0, "name": 1},
+        ):
+            existing.add(str(mm.get("name") or "").strip().upper())
+        for nm in sorted(names):
+            nm = str(nm or "").strip()
+            if not nm or nm.upper() in existing:
+                continue
+            doc = {
+                "master_id": f"mst_{uuid.uuid4().hex[:12]}",
+                "type": mtype,
+                "company_id": company_id,
+                "name": (nm.upper() if mtype == "group" else nm),
+                "date": None,
+                "created_at": _now(),
+                "updated_at": _now(),
+                "created_by": "legacy_import",
+                "scope": "firm",
+                "auto_registered": "legacy_import_interlink",
+            }
+            if mtype == "group":
+                doc["member_user_ids"] = []
+            await db.masters.insert_one(doc)
+            existing.add(nm.upper())
+
+
 async def _run_job(job_id: str, body: ImportBody):
     dbn = await _dbname()
     heads = await _head_names(dbn)
@@ -312,6 +370,7 @@ async def _run_job(job_id: str, body: ImportBody):
 
             # ---------------- Employees ----------------
             if body.import_employees:
+                _ml: Dict[str, set] = {"group": set(), "department": set(), "designation": set()}
                 emps = await _legacy_employees(dbn, m.firm_no)
                 # head-wise structure rows for this firm (salary group)
                 struct_by_emp: Dict[int, List[dict]] = {}
@@ -332,7 +391,15 @@ async def _run_job(job_id: str, body: ImportBody):
                             continue
                         fields = _emp_doc_fields(
                             e, body.employee_fields,
-                            struct_by_emp.get(int(e.get("EmpID") or 0), []))
+                            struct_by_emp.get(int(e.get("EmpID") or 0), []),
+                            overrides=body.field_overrides)
+                        # collect for General Masters interlink
+                        if fields.get("employee_type"):
+                            _ml["group"].add(str(fields["employee_type"]).strip().upper())
+                        if fields.get("department"):
+                            _ml["department"].add(str(fields["department"]).strip())
+                        if fields.get("designation"):
+                            _ml["designation"].add(str(fields["designation"]).strip())
                         # phone conflict → drop phone rather than fail
                         if fields.get("phone"):
                             clash = await db.users.find_one(
@@ -381,6 +448,13 @@ async def _run_job(job_id: str, body: ImportBody):
                         totals["employees_skipped"] += 1
                         if len(errors) < 40:
                             errors.append(f"emp {e.get('EmpName')}: {str(ex)[:120]}")
+                # Iter 300d — register Types/Departments/Designations into
+                # the firm's General Masters (interlink).
+                try:
+                    await _interlink_masters(m.company_id, _ml)
+                except Exception as ex:
+                    if len(errors) < 40:
+                        errors.append(f"masters interlink: {str(ex)[:120]}")
                 await _prog(totals=totals)
 
             # ---------------- Salary history ----------------
@@ -466,6 +540,22 @@ async def _run_job(job_id: str, body: ImportBody):
                         totals[f"{kind}_rows"] += len(docs)
                     skip += 2000
                     await _prog(totals=totals)
+
+            # Iter 300b (user) — mark this firm DONE so it cannot be
+            # imported twice.
+            comp = await db.companies.find_one(
+                {"company_id": m.company_id}, {"_id": 0, "name": 1})
+            await db.legacy_imported_firms.update_one(
+                {"firm_no": m.firm_no},
+                {"$set": {
+                    "firm_no": m.firm_no,
+                    "company_id": m.company_id,
+                    "company_name": (comp or {}).get("name"),
+                    "job_id": job_id,
+                    "imported_at": _now(),
+                }},
+                upsert=True,
+            )
         await db.legacy_salary_history.create_index(
             [("company_id", 1), ("kind", 1), ("month", 1)])
         await db.legacy_salary_history.create_index([("user_id", 1), ("month", 1)])
@@ -480,6 +570,18 @@ async def legacy_import_run(body: ImportBody, authorization: Optional[str] = Hea
     admin = await _super(authorization)
     if not body.mappings:
         raise HTTPException(status_code=400, detail="Map at least one firm")
+    # Iter 300b (user) — block re-import of firms already done.
+    done_nos = {
+        d["firm_no"] for d in await db.legacy_imported_firms.find(
+            {"firm_no": {"$in": [m.firm_no for m in body.mappings]}},
+            {"_id": 0, "firm_no": 1}).to_list(2000)
+    }
+    if done_nos:
+        raise HTTPException(
+            status_code=409,
+            detail=f"These firms are ALREADY IMPORTED and cannot be imported again: "
+                   f"{sorted(done_nos)}. Unselect them to continue.",
+        )
     job_id = f"limp_{uuid.uuid4().hex[:10]}"
     await db.legacy_import_jobs.insert_one({
         "job_id": job_id, "status": "queued", "totals": {}, "errors": [],
