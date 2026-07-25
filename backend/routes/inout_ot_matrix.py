@@ -294,34 +294,27 @@ async def inout_ot_matrix_xlsx(
     _, cid = await _auth(authorization, company_id)
     data = await _build(cid, month, department, designation, employee_type,
                         contractor, shift, q, status)
-    emps = data["employees"][:150]  # keep workbooks manageable
+    emps = data["employees"][:500]
     if not emps:
         raise HTTPException(status_code=404, detail="No employees match the filters")
 
+    # Iter 293 (user request) — ONE sheet with ALL employees stacked in the
+    # on-screen sort order (no per-employee sheets).
     wb = Workbook()
-    wb.remove(wb.active)
+    ws = wb.active
+    ws.title = f"InOut-OT {month}"
+    ws.page_setup.orientation = "landscape"
     thin = Border(*[Side(style="thin", color="CBD5E1")] * 4)
     center = Alignment(horizontal="center", vertical="center")
-    used = set()
+    r = 1
     for emp in emps:
-        base = f"{emp.get('employee_code') or 'E'}"[:24] or "E"
-        title = base
-        n = 1
-        while title in used:
-            n += 1
-            title = f"{base}-{n}"
-        used.add(title)
-        ws = wb.create_sheet(title=title)
-        ws.page_setup.orientation = "landscape"
-        r = 1
-        for line in _header_lines(data, emp):
-            ws.cell(row=r, column=1, value=line).font = Font(bold=(r == 1), size=10)
+        for li, line in enumerate(_header_lines(data, emp)):
+            ws.cell(row=r, column=1, value=line).font = Font(bold=(li == 0), size=10)
             r += 1
-        r += 1
         head_row = r
-        ws.cell(row=head_row, column=1, value="Attendance").font = Font(bold=True)
-        ws.cell(row=head_row, column=1).fill = PatternFill("solid", fgColor="1E3A8A")
-        ws.cell(row=head_row, column=1).font = Font(bold=True, color="FFFFFF")
+        hc = ws.cell(row=head_row, column=1, value="Attendance")
+        hc.fill = PatternFill("solid", fgColor="1E3A8A")
+        hc.font = Font(bold=True, color="FFFFFF")
         for j, dl in enumerate(data["day_labels"], start=2):
             cell = ws.cell(row=head_row, column=j, value=str(dl)[:2])
             cell.fill = PatternFill("solid", fgColor="1E3A8A")
@@ -342,15 +335,15 @@ async def inout_ot_matrix_xlsx(
                 color = FLAG_COLORS.get(d.get("flag") or "")
                 if color:
                     cell.fill = PatternFill("solid", fgColor=color)
-        # summary row
         sr = head_row + 1 + len(ROW_KEYS)
         ws.cell(row=sr, column=1,
                 value=f"Month Totals — Working {emp['month_total']} · OT {emp['month_ot']}"
                       f" · Present Days {emp.get('present_days') or 0}").font = Font(bold=True, size=9)
-        ws.column_dimensions["A"].width = 13
-        for j in range(2, len(data["day_labels"]) + 2):
-            ws.column_dimensions[get_column_letter(j)].width = 6.5
-        ws.freeze_panes = "B" + str(head_row + 1)
+        r = sr + 2  # blank separator row between employees
+    ws.column_dimensions["A"].width = 13
+    for j in range(2, len(data["day_labels"]) + 2):
+        ws.column_dimensions[get_column_letter(j)].width = 6.5
+    ws.freeze_panes = "B1"  # keep the Attendance-type column visible
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -408,41 +401,51 @@ async def inout_ot_matrix_pdf(
     status: str = "all",
     authorization: Optional[str] = Header(None),
 ):
-    """A4 LANDSCAPE — one employee per page, whole month on one page,
-    header repeated per page, colours identical to the screen."""
+    """LEGAL LANDSCAPE (Iter 293, user request) — all employees flow
+    continuously (multiple per page, header above each matrix), whole month
+    on one row-set, colours identical to the screen."""
     from reportlab.lib import colors as rl
-    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.pagesizes import legal, landscape
     from reportlab.lib.units import mm
-    from reportlab.platypus import (PageBreak, Paragraph, SimpleDocTemplate,
+    from reportlab.platypus import (KeepTogether, Paragraph, SimpleDocTemplate,
                                     Spacer, Table, TableStyle)
     from reportlab.lib.styles import ParagraphStyle
 
     _, cid = await _auth(authorization, company_id)
     data = await _build(cid, month, department, designation, employee_type,
                         contractor, shift, q, status)
-    emps = data["employees"][:300]
+    emps = data["employees"][:500]
     if not emps:
         raise HTTPException(status_code=404, detail="No employees match the filters")
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
-        buf, pagesize=landscape(A4),
+        buf, pagesize=landscape(legal),
         leftMargin=8 * mm, rightMargin=8 * mm,
         topMargin=8 * mm, bottomMargin=8 * mm)
-    h1 = ParagraphStyle("h1", fontSize=12, leading=15, spaceAfter=1,
+    h1 = ParagraphStyle("h1", fontSize=11, leading=14, spaceAfter=1,
                         fontName="Helvetica-Bold")
-    h2 = ParagraphStyle("h2", fontSize=8.5, leading=11)
+    h2 = ParagraphStyle("h2", fontSize=8, leading=10)
     flow: List[Any] = []
     ndays = len(data["day_labels"])
-    page_w = landscape(A4)[0] - 16 * mm
+    page_w = landscape(legal)[0] - 16 * mm
     label_w = 20 * mm
     day_w = (page_w - label_w) / max(1, ndays)
 
     flag_fill = {k: rl.HexColor(f"#{v}") for k, v in FLAG_COLORS.items()}
-    for idx, emp in enumerate(emps):
+    flow.append(Paragraph(
+        "Legend: <font backcolor='#DBEAFE'> OT </font> "
+        "<font backcolor='#FEF08A'> Late </font> "
+        "<font backcolor='#FECACA'> Missing punch </font> "
+        "<font backcolor='#E2E8F0'> Holiday </font> "
+        "<font backcolor='#DCFCE7'> Weekly off </font> "
+        "<font backcolor='#FED7AA'> Leave </font>", h2))
+    flow.append(Spacer(1, 2 * mm))
+    for emp in emps:
+        block: List[Any] = []
         for li, line in enumerate(_header_lines(data, emp)):
-            flow.append(Paragraph(line, h1 if li == 0 else h2))
-        flow.append(Spacer(1, 3 * mm))
+            block.append(Paragraph(line, h1 if li == 0 else h2))
+        block.append(Spacer(1, 1.5 * mm))
         head = ["Attendance"] + [str(d)[:2] for d in data["day_labels"]]
         body = []
         styles = [
@@ -450,7 +453,7 @@ async def inout_ot_matrix_pdf(
             ("TEXTCOLOR", (0, 0), (-1, 0), rl.white),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 5.6),
+            ("FONTSIZE", (0, 0), (-1, -1), 6),
             ("ALIGN", (1, 0), (-1, -1), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("GRID", (0, 0), (-1, -1), 0.4, rl.HexColor("#CBD5E1")),
@@ -471,20 +474,14 @@ async def inout_ot_matrix_pdf(
         tbl = Table([head] + body,
                     colWidths=[label_w] + [day_w] * ndays, repeatRows=1)
         tbl.setStyle(TableStyle(styles))
-        flow.append(tbl)
-        flow.append(Spacer(1, 2 * mm))
-        flow.append(Paragraph(
+        block.append(tbl)
+        block.append(Spacer(1, 1.5 * mm))
+        block.append(Paragraph(
             f"Month Totals — Working {emp['month_total']} · OT {emp['month_ot']} · "
             f"Present Days {emp.get('present_days') or 0}", h2))
-        flow.append(Paragraph(
-            "Legend: <font backcolor='#DBEAFE'> OT </font> "
-            "<font backcolor='#FEF08A'> Late </font> "
-            "<font backcolor='#FECACA'> Missing punch </font> "
-            "<font backcolor='#E2E8F0'> Holiday </font> "
-            "<font backcolor='#DCFCE7'> Weekly off </font> "
-            "<font backcolor='#FED7AA'> Leave </font>", h2))
-        if idx < len(emps) - 1:
-            flow.append(PageBreak())
+        block.append(Spacer(1, 4 * mm))
+        # Keep an employee's header + matrix together on one page.
+        flow.append(KeepTogether(block))
     doc.build(flow)
     return Response(
         content=buf.getvalue(), media_type="application/pdf",
