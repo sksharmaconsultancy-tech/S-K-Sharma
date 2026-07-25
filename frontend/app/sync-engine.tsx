@@ -18,6 +18,7 @@ import { useRouter } from "expo-router";
 import { api, apiBinary } from "@/src/api/client";
 import { useLiveSync } from "@/src/api/live-sync";
 import { useAuth } from "@/src/context/AuthContext";
+import CompanyPicker from "@/src/components/CompanyPicker";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
 
 type Company = { company_id: string; name: string };
@@ -274,19 +275,19 @@ export default function SyncEngineScreen() {
         </Pressable>
       </View>
 
-      {/* Super-admin firm picker */}
+      {/* Super-admin firm picker — Iter 295 (user request): dropdown with
+          the full company list instead of horizontal chips. */}
       {isSuper && companies.length > 0 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.firmBar}
-          contentContainerStyle={{ paddingHorizontal: spacing.md, gap: 8 }}>
-          {companies.map((c) => (
-            <Pressable key={c.company_id} onPress={() => setCompanyId(c.company_id)}
-              style={[styles.firmChip, companyId === c.company_id && styles.firmChipOn]}>
-              <Text style={[styles.firmChipTxt, companyId === c.company_id && styles.firmChipTxtOn]}>
-                {c.name}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
+        <View style={styles.firmDdWrap}>
+          <CompanyPicker
+            value={companyId || ""}
+            onChange={(v: any) => { if (v && v !== "all") setCompanyId(v); }}
+            companies={companies}
+            allowAll={false}
+            label="Firm"
+            testID="sync-firm-dd"
+          />
+        </View>
       )}
 
       {/* Tabs */}
@@ -541,6 +542,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 6,
   },
   reportTxt: { color: colors.brandPrimary, fontWeight: "700", fontSize: type.sm },
+  firmDdWrap: {
+    paddingHorizontal: spacing.md, paddingVertical: 8,
+    backgroundColor: colors.surface, borderBottomWidth: 1,
+    borderBottomColor: colors.border, zIndex: 50,
+  },
   firmBar: { maxHeight: 46, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border },
   firmChip: {
     paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999,
