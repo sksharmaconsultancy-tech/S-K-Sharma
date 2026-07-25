@@ -170,25 +170,38 @@ export default function LegacyExplorerScreen() {
                 {disc ? (
                   <>
                     <Text style={st.secTitle}>
-                      Companies found in old data ({(disc.companies_found || []).length})
+                      Possible firm lists found — check which SOURCE shows your real firms
                     </Text>
-                    {(disc.companies_found || []).length === 0 ? (
-                      <Text style={st.sub}>
-                        No company-name column detected automatically — browse the
-                        tables below and tell me which one holds the firm names.
+                    <Text style={st.sub}>
+                      The old software has several name columns (firms, sites,
+                      groups, locations). Each box below shows ONE source table —
+                      find the box with your REAL client firm names and tell us
+                      its table name.
+                    </Text>
+                    {(disc.company_tables || []).length === 0 ? (
+                      <Text style={[st.sub, { marginTop: 8 }]}>
+                        No firm-like columns detected — browse the tables below and
+                        tell me which one holds the firm names.
                       </Text>
                     ) : (
-                      (disc.companies_found || []).map((c: any) => (
-                        <View key={c.name} style={st.compRow}>
-                          <Ionicons
-                            name={c.in_portal ? "checkmark-circle" : "alert-circle-outline"}
-                            size={15}
-                            color={c.in_portal ? "#16a34a" : "#B45309"}
-                          />
-                          <Text style={st.compName} numberOfLines={1}>{c.name}</Text>
-                          <Text style={[st.compTag, { color: c.in_portal ? "#16a34a" : "#B45309" }]}>
-                            {c.in_portal ? `✓ in portal (${c.portal_firm})` : "not in portal"}
+                      (disc.company_tables || []).map((src: any) => (
+                        <View key={`${src.table}.${src.column}`} style={st.srcBox}>
+                          <Text style={st.srcTitle}>
+                            📋 Table: {src.table}  ·  Column: {src.column}  ·  {src.distinct_count} values
                           </Text>
+                          {(src.companies || []).map((c: any) => (
+                            <View key={c.name} style={st.compRow}>
+                              <Ionicons
+                                name={c.in_portal ? "checkmark-circle" : "alert-circle-outline"}
+                                size={15}
+                                color={c.in_portal ? "#16a34a" : "#B45309"}
+                              />
+                              <Text style={st.compName} numberOfLines={1}>{c.name}</Text>
+                              <Text style={[st.compTag, { color: c.in_portal ? "#16a34a" : "#B45309" }]}>
+                                {c.in_portal ? `✓ in portal (${c.portal_firm})` : "not in portal"}
+                              </Text>
+                            </View>
+                          ))}
                         </View>
                       ))
                     )}
@@ -370,6 +383,11 @@ const st = StyleSheet.create({
   },
   compName: { flex: 1, fontSize: 12.5, fontWeight: "700", color: colors.onSurface },
   compTag: { fontSize: 11, fontWeight: "700" },
+  srcBox: {
+    borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
+    padding: 10, marginTop: 10, backgroundColor: colors.surfaceSecondary,
+  },
+  srcTitle: { fontSize: 12, fontWeight: "800", color: colors.brandPrimary, marginBottom: 4 },
   tr: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: colors.border },
   trHead: { backgroundColor: colors.brandPrimary, borderTopLeftRadius: 6, borderTopRightRadius: 6 },
   trOdd: { backgroundColor: colors.surfaceSecondary },

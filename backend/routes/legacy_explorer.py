@@ -207,15 +207,25 @@ async def legacy_discover(
                              "establishmentname", "estname", "unitname", "contractorname")
         ) or (("comp" in c or "firm" in c or "client" in c) and "name" in c)
 
+    def _is_company_table(tbl: str) -> bool:
+        t = tbl.lower().replace("_", "")
+        return any(h in t for h in ("comp", "firm", "client", "estab"))
+
     company_candidates: List[dict] = []
-    seen_names: Dict[str, dict] = {}
     for key, tcols in by_table.items():
         if rowcount.get(key, 0) <= 0:
             continue
+        sch, tbl = key
         for c in tcols:
-            if c["type_name"] not in _TEXT_TYPES or not _is_company_col(c["col_name"]):
+            if c["type_name"] not in _TEXT_TYPES:
                 continue
-            sch, tbl = key
+            _cl = c["col_name"].lower().replace("_", "")
+            # A column qualifies if it is company-named OR it is a plain
+            # "name" column inside a company-named TABLE (e.g. the
+            # CompanyMaster table's Name column).
+            if not (_is_company_col(c["col_name"]) or
+                    (_is_company_table(tbl) and _cl in ("name", "names", "title"))):
+                continue
             try:
                 vals = await _q(
                     db,
@@ -236,13 +246,17 @@ async def legacy_discover(
                     "portal_firm": (pm or {}).get("name"),
                     "portal_company_id": (pm or {}).get("company_id"),
                 })
-                if nm.lower() not in seen_names:
-                    seen_names[nm.lower()] = entry_vals[-1]
             company_candidates.append({
                 "table": tbl, "schema": sch, "column": c["col_name"],
-                "row_count": rowcount.get(key, 0), "companies": entry_vals,
+                "row_count": rowcount.get(key, 0),
+                "distinct_count": len(names),
+                "companies": entry_vals,
             })
             break  # one company column per table is enough
+    # Most likely firm sources first: company-named TABLES, then fewer
+    # distinct values (a real firm master has few rows).
+    company_candidates.sort(
+        key=lambda x: (0 if _is_company_table(x["table"]) else 1, x["distinct_count"]))
 
     # ---- Employee-master candidates (scored) ----
     HINTS = {
@@ -280,7 +294,6 @@ async def legacy_discover(
     return {
         "db": db,
         "portal_firms": [p.get("name") for p in portal],
-        "companies_found": sorted(seen_names.values(), key=lambda x: x["name"].lower()),
         "company_tables": company_candidates[:10],
         "employee_tables": employee_candidates[:15],
     }
