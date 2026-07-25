@@ -19,6 +19,7 @@ import base64
 import logging
 import random
 import re
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import List, Literal, Optional, Tuple
@@ -821,6 +822,105 @@ def _zk_datetime_now(device: Optional[dict] = None) -> int:
     return _zk_encode_datetime(local)
 
 
+# ---------------------------------------------------------------------------
+# Iter 294 — Generic JSON punch webhook (Matrix COSEC / Mantra / middleware).
+#
+# Devices (or their vendor middleware, e.g. Matrix COSEC server event export,
+# Mantra ADMS bridge) POST simple JSON punches here using the per-device
+# secret key generated at registration:
+#
+#   POST /api/device-webhook/{webhook_key}
+#   { "punches": [ {"user_id": "72", "timestamp": "2026-06-25 09:01:00",
+#                   "direction": "in" } ] }
+#
+# Punches flow through the exact same ingest pipeline as ZKTeco ATTLOG lines
+# (bio_code matching, IN/OUT alternation, dedupe, contractual gate).
+# ---------------------------------------------------------------------------
+
+class WebhookPunch(BaseModel):
+    user_id: str
+    timestamp: str                      # ISO 8601 or "YYYY-MM-DD HH:MM:SS"
+    direction: Optional[Literal["in", "out"]] = None
+
+
+class WebhookPushBody(BaseModel):
+    punches: List[WebhookPunch]
+
+
+def _normalize_webhook_ts(raw: str) -> Optional[str]:
+    """Accept ISO ('2026-06-25T09:01:00', with/without Z/offset) or plain
+    'YYYY-MM-DD HH:MM:SS' and return the ZK wall-clock format."""
+    s = (raw or "").strip().replace("T", " ")
+    s = re.sub(r"(Z|[+-]\d{2}:?\d{2})$", "", s).strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%d-%m-%Y %H:%M:%S",
+                "%d/%m/%Y %H:%M:%S"):
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+    return None
+
+
+@router.post("/device-webhook/{webhook_key}")
+async def device_webhook_push(webhook_key: str, body: WebhookPushBody):
+    device = await db.biometric_devices.find_one(
+        {"webhook_key": webhook_key}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Unknown webhook key")
+    if not device.get("enabled", True) or device.get("locked"):
+        raise HTTPException(status_code=403, detail="Device is disabled or locked")
+    inserted = 0
+    skipped = 0
+    reasons: List[str] = []
+    for p in body.punches[:2000]:
+        ts = _normalize_webhook_ts(p.timestamp)
+        if not ts:
+            skipped += 1
+            reasons.append(f"bad_timestamp:{p.timestamp}")
+            continue
+        dev = dict(device)
+        if p.direction in ("in", "out"):
+            dev["kind"] = p.direction
+        ok, reason = await _ingest_attlog_line(f"{p.user_id}\t{ts}", dev)
+        if ok:
+            if reason == "duplicate_ignored":
+                skipped += 1
+            else:
+                inserted += 1
+        else:
+            skipped += 1
+            if reason:
+                reasons.append(reason)
+    await db.biometric_devices.update_one(
+        {"device_id": device["device_id"]},
+        {"$set": {"last_seen_at": _now_iso_z(), "last_push_at": _now_iso_z(),
+                  "last_push_table": "WEBHOOK"},
+         "$inc": {"total_pushes": 1, "total_punches_ingested": inserted}},
+    )
+    logger.info("[webhook] device=%s inserted=%d skipped=%d reasons=%s",
+                device["serial_number"], inserted, skipped, reasons[:5])
+    return {"ok": True, "inserted": inserted, "skipped": skipped,
+            "reasons": reasons[:10]}
+
+
+@router.post("/biometric/devices/{device_id}/regenerate-webhook-key")
+async def regenerate_webhook_key(
+    device_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    device = await db.biometric_devices.find_one({"device_id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    if admin["role"] == "company_admin" and device.get("company_id") != admin["company_id"]:
+        raise HTTPException(status_code=403, detail="Not authorised for this device")
+    key = secrets.token_hex(12)
+    await db.biometric_devices.update_one(
+        {"device_id": device_id}, {"$set": {"webhook_key": key}})
+    return {"ok": True, "webhook_key": key}
+
+
 @router.post("/biometric/devices/{device_id}/command")
 async def send_device_command(
     device_id: str,
@@ -1232,9 +1332,17 @@ async def register_biometric_device(
         "sync_enabled": True,
         # Iter 263 — machine time zone (validated; default India +05:30).
         "gmt_offset": (payload.gmt_offset or "+05:30").strip() or "+05:30",
+        # Iter 294 — multi-brand + JSON webhook key (Matrix / Mantra push).
+        "brand": payload.brand or "zkteco",
+        "webhook_key": secrets.token_hex(12),
         "created_at": _now_iso_z(),
         "created_by": admin["user_id"],
-        "model": "ZKTeco AC Mini Plus",  # locked to the client's hardware
+        "model": {
+            "zkteco": "ZKTeco AC Mini Plus",
+            "essl": "eSSL (iClock/ADMS)",
+            "matrix": "Matrix COSEC",
+            "mantra": "Mantra",
+        }.get(payload.brand or "zkteco", "Generic"),
         "last_seen_at": None,
         "total_pushes": 0,
         "total_punches_ingested": 0,
@@ -1749,6 +1857,15 @@ async def device_health_report_xlsx(
             bold=True, color="16A34A" if online else "DC2626")
     for col, w in zip("ABCDEFGHIJKLMN", (22, 18, 14, 10, 14, 10, 20, 18, 8, 12, 13, 14, 14, 8)):
         ws.column_dimensions[col].width = w
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="device-health-report.xlsx"'},
+    )
+l].width = w
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)

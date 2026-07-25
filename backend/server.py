@@ -20938,6 +20938,12 @@ app.include_router(inout_ot_matrix_router)
 from routes.employee_reports_hub import router as employee_reports_hub_router  # noqa: E402
 app.include_router(employee_reports_hub_router)
 
+# Iter 294 — AI Payroll Assistant (voice/NL commands) + Global Search.
+from routes.ai_assistant import router as ai_assistant_router  # noqa: E402
+app.include_router(ai_assistant_router)
+from routes.productivity import router as productivity_router  # noqa: E402
+app.include_router(productivity_router)
+
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
 maybe_start_rpa_worker(app, db)
