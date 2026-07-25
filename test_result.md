@@ -193,3 +193,10 @@ See `/app/memory/test_credentials.md`. Super admin
 - Policy: new policy_master.compliance_present_8hr sub-point → compliance run present days at 8 hrs (utils/salary_run.py _present_day_hours_override) + grid duty/OT split at 8 hrs; "Days" replaced by policy-based "Present Days" (totals.present_days_policy) in grid JSON, XLSX builders and FnF.
 - Frontend: app/bulk-operations.tsx, app/statutory-reports.tsx, clra-registers.tsx Excel buttons, attendance-grid "Present Days" labels, AdminWebShell nav entries.
 - Testing agent: 32/32 pytest (tests/test_iter202_bulk_ops_reports.py) incl. 8-HR sub-point E2E; fixed advance-loan xlsx sheet-title "/" 500. Frontend bulk-operations page verified; statutory-reports/clra/attendance-grid partially (Playwright session loss, not a user bug). All test data cleaned.
+
+## Iter 299–306 (fork session)
+- Salary Register module: tested by testing_agent → /app/test_reports/iteration_299.json — ALL PASS.
+- 20-point fix bundle + GPS punch fallback: tested → /app/test_reports/iteration_306.json — 12/12 backend pytest
+  (/app/backend/tests/test_iter306_features.py) + frontend flows ALL PASS.
+- Known cosmetic-only console warnings (padding shorthand, shadow*, resizeMode) — non-blocking, pre-existing.
+- Dev DB: super admin PIN=246810; fresh Kankani compliance run for 2026-05 exists with resolved daily rates.

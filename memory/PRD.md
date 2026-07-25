@@ -1557,3 +1557,34 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   - ImportBody.replace_names {str(firm_no): [names]} — in _run_job existing-match branch: names not in list are KEPT (totals.employees_kept) but still linked (uid) for salary import; absent key = replace all (backward compat).
   - frontend legacy-import.tsx: "Compare Records — matched names, Replace or Not" teal button after Preview → modal grouped firm-wise (old-DB counts header, "Replace ALL matched" checkbox, per-name checkboxes w/ field diffs shown, NEW names list) → Apply choices banner; body() sends replace_names only if applied; job summary shows "kept (not replaced)" + firms_created.
   - E2E Playwright (mocked SQL endpoints): counts row, modal, untick AJAB → run body replace_names {'5':['AFZAL HUSSAIN']}, "1 kept (not replaced)" shown. All PASS.
+
+## Iter 299–306 (this session)
+- NEW: Enterprise Salary Register module — /salary-register (frontend) + /app/backend/routes/salary_register.py.
+  Dynamic columns from run rows (registry + catch-all + zero-pruning), Compliance/Actual toggle, FY-wise month,
+  run selector, Group/Branch/Dept/Contractor chips, search, sort, server pagination, PDF(A3)/XLSX/CSV exports.
+  Tested: iteration_299.json (all pass).
+- GPS punch fix: accurateLocation.ts — parallel one-shot seed + timeout fallbacks (current → last-known), 15s budget.
+- 20-point user list DONE (iteration_306.json all pass):
+  1 sub-admin employee delete → super-admin approval (deletion_requests kind "employee")
+  2 Employee Master photo doc (category photo) syncs users.profile_photo_base64
+  3 punch selfie blank fix (data-URL prefix strip on write + read)
+  4 pf_no in compliance rows + Register Format 1 UAN/PF/ESI cell
+  5 ESIC zero-day guard verified (old runs must be reprocessed on VPS)
+  6 compliance-salary-run no longer auto-opens last run
+  7 compliance rate fallback → salary_structure_actual "Basic…" head + rate_type (daily 745 etc.)
+  8 tap-to-highlight rows (amber) in compliance + actual salary grids
+  9 "Group" chip added to GridFilterChips (all consumers)
+  10 compliance_register_v1/v2 in Report Formats editor (title-only), wired into register.pdf endpoint
+  11 eye toggle on secure Fields in firm-master.tsx
+  12 optional DOJ column in Actual Salary Register PDF (hidden by default via _REGISTER_DEFAULT_HIDDEN)
+  13 sidebar hide/show rail (localStorage sks_sidebar_hidden)
+  14 sidebar "Firms" section + NEW /firm-credentials PIN-gated vault (POST /api/admin/firm-credentials)
+  15 ACTIVE FIRM pill read-only (lock icon)
+  16 bulk import City/State/Pin already existed (Iter 266) — informed user
+  17 covered by #6
+  18 bulk-correction header/cell width alignment (shared colWidthFor)
+  19 bulk-correction group filter → only groups with active employees
+  20 editable "ESIC Leave" days column in compliance grid (+ calc band off-by-one fix)
+- Deploy script: /app/deploy_vps_iter299.sh (served as deploy299.sh via /api/temp-code-bundle)
+- Dev super admin PIN reset to 246810 (dev DB only)
+- PENDING: P1 WhatsApp API integration; P2 server.py refactor

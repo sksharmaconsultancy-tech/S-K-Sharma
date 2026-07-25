@@ -1,25 +1,6 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 299)
-# Ships everything since deploy 298:
-#  1. 📊 NEW MODULE: ENTERPRISE SALARY REGISTER (user PRD):
-#     • Payroll → Salary Process → Salary Register
-#     • One dynamic register over BOTH engines: Compliance Salary AND
-#       Actual Salary (toggle at the top right).
-#     • Columns are DYNAMIC — earnings/deductions heads are read from the
-#       processed salary run itself (nothing hardcoded); new heads appear
-#       automatically, all-zero heads are hidden to keep the grid tight.
-#     • Microsoft-365 style grid: colour-banded group headers (Employee /
-#       Attendance / Earnings / Deductions / Employer Contributions / Net),
-#       frozen Sr + Code + Name columns, sticky headers, zebra rows,
-#       TOTAL row pinned at the bottom.
-#     • KPI strip: Employees · Gross · Deductions · Net Payable.
-#     • Filters: Firm, Month (FY-wise picker), Run selector (when a month
-#       was processed more than once), Employee Group, Branch, Department,
-#       Contractor + live employee search (name/code/father/designation).
-#     • Column sorting (tap any header) + server-side pagination
-#       (25/50/100/200 rows per page) — fast even for large firms.
-#     • EXPORTS: PDF (A3 landscape register), Excel (banded colour header,
-#       frozen panes, totals row) and CSV — all honour the active filters.
+# S.K. Sharma & Co. — VPS deploy script (Iter 299 + 306)
+# Ships: Enterprise Salary Register + the 20-point fix list + GPS punch fix.
 # Run ON THE VPS as root/sksharma.
 set -e
 
@@ -89,26 +70,51 @@ CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8001/api/admin/s
 echo "   /api/admin/salary-register → HTTP $CODE (401/403 = alive, auth required)"
 
 echo
-echo "🎉 Deploy 299 complete."
+echo "🎉 Deploy 299+306 complete."
 echo
 echo "WHAT'S NEW IN THIS DEPLOY:"
-echo "  • 📊 NEW: SALARY REGISTER — Payroll → Salary Process → Salary Register"
-echo "    One professional register over BOTH engines (Compliance / Actual"
-echo "    toggle). Columns are DYNAMIC — heads come from the processed run"
-echo "    itself, new heads appear automatically, empty heads are hidden."
-echo "  • 🎨 Enterprise grid: colour-banded group headers (Employee /"
-echo "    Attendance / Earnings / Deductions / Employer / Net), frozen"
-echo "    Sr + Code + Name columns, sticky headers, TOTAL row, KPI strip"
-echo "    (Employees · Gross · Deductions · Net Payable)."
-echo "  • 🔎 Filters: Firm, FY-wise Month, Run selector, Employee Group,"
-echo "    Branch, Department, Contractor + live employee search."
-echo "  • ↕️ Tap any column header to sort; pages of 25/50/100/200 rows"
-echo "    keep it fast for big firms."
-echo "  • 📤 Exports honouring all active filters: PDF (A3 register),"
-echo "    Excel (banded colour header, frozen panes, totals row), CSV."
 echo
-echo "HOW TO USE:"
-echo "  1. Payroll → Salary Process → Salary Register"
-echo "  2. Pick Firm + Month (FY-wise) — the register loads instantly"
-echo "  3. Toggle Compliance / Actual, filter, search, sort as needed"
-echo "  4. Export PDF / Excel / CSV"
+echo "📊 NEW: SALARY REGISTER — Payroll → Salary Process → Salary Register"
+echo "  • One register over BOTH engines (Compliance / Actual toggle)."
+echo "  • DYNAMIC columns from the processed run (new heads auto-appear,"
+echo "    empty heads hidden). Colour-banded headers, frozen Name column,"
+echo "    KPI strip, TOTAL row, sort + 25/50/100/200 paging."
+echo "  • Filters: Firm, FY-wise Month, Run, Group, Branch, Dept,"
+echo "    Contractor + live search. Exports: PDF (A3) / Excel / CSV."
+echo
+echo "🛰️  GPS PUNCH FIX (many employees affected):"
+echo "  • 'Could not fetch GPS location' — the phone's GPS watcher often"
+echo "    returned nothing; the app now also tries an instant fix, a"
+echo "    fallback fix and the last-known location (15 s budget)."
+echo
+echo "✅ YOUR 20-POINT LIST:"
+echo "  1  Sub-Admin employee delete now needs SUPER ADMIN approval"
+echo "  2  Employee Master photo now shows on the employee's PWA profile"
+echo "  3  Punch photo showing blank — FIXED (double data-URL prefix)"
+echo "  4  Compliance Register Format 1 now prints UAN / P.F. / ESI No."
+echo "  5  ESIC no longer calculated when working days are 0"
+echo "     (REPROCESS any old month that showed wrong ESIC)"
+echo "  6  Compliance Salary shows data ONLY after you click Process"
+echo "  7  Master Rates now show (daily-rate employees resolve from the"
+echo "     salary structure — reprocess the month to see rates)"
+echo "  8  Tap any row in Compliance/Actual salary grids to HIGHLIGHT it"
+echo "  9  New 'Group' filter chip on both salary process grids"
+echo "  10 Compliance Register Formats 1 & 2 added to PDF Report Formats"
+echo "  11 Eye icon on EPF/ESI password boxes in Firm Master"
+echo "  12 DOJ column (optional) in Salary Register PDF — enable it in"
+echo "     Reports → PDF Report Formats → Salary Register"
+echo "  13 Sidebar can be hidden — arrow button next to the firm name;"
+echo "     the ☰ button brings it back"
+echo "  14 New 'Firms' sidebar section: Companies (Firm Master), List of"
+echo "     Firms, Firms ID & Password (PF · ESIC) — PIN-protected vault"
+echo "  15 ACTIVE FIRM badge is now read-only (no accidental firm switch)"
+echo "  16 Bulk Import template already has Present Add / City / State /"
+echo "     Pin Code — re-download the template after this deploy"
+echo "  17 Payroll no longer pre-fills attendance from Employee Master"
+echo "  18 Bulk Employee Correction columns now line up with headings"
+echo "  19 Bulk Correction group filter shows only groups with ACTIVE staff"
+echo "  20 New editable 'ESIC Leave' days column in Compliance Salary"
+echo
+echo "HOW TO USE THE REGISTER:"
+echo "  Payroll → Salary Process → Salary Register → pick Firm + Month"
+echo "  → toggle Compliance/Actual → filter/sort → export PDF/Excel/CSV"
