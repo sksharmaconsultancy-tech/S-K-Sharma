@@ -27,6 +27,16 @@
 #     (SalaryTrans) and OFFLINE (SalaryTransoff) sections of the Head
 #     Mapping chart are now row-by-row editable — remap any history head
 #     (Days, Basic, EPF, ESI, TDS, Less heads, Net…) or SKIP it.
+#  7. 📊 PUBLISH OLD MONTHS INTO COMPLIANCE SALARY PROCESS (user request):
+#     Legacy Salary Records → "Publish months to Compliance Salary
+#     Process" — SELECT the months you want (per-month ticks + ALL MONTHS
+#     option); each becomes an UNLOCKED draft compliance run (months
+#     already processed are SKIPPED, never overwritten). Check the data in
+#     Compliance Salary Process + all its reports (register PDF, Excel,
+#     PF ECR, ESIC), then press "Data checked & OK → Lock all published
+#     legacy months" to finalize.
+#     Guard: salary publish/import only allowed for firms whose Employee
+#     Master is already imported.
 # Prerequisite: the legacy SQL container (sks-mssql) must be running —
 # it was set up earlier with legacy_setup.sh. Nothing else changes.
 # Run ON THE VPS as root/sksharma.
@@ -121,6 +131,11 @@ echo "  • 🐛 FIXED: the 'Input should be a valid dictionary' error when you"
 echo "    pressed Preview / Start Import."
 echo "  • 🗂️ Salary-history heads (Online & Offline) are now editable in the"
 echo "    Head Mapping chart too — remap or SKIP any of them before import."
+echo "  • 📊 Legacy Salary Records → PUBLISH old ONLINE months into the"
+echo "    Compliance Salary Process — pick the months (or ALL MONTHS) →"
+echo "    drafts created → check data & reports → 'Lock all published"
+echo "    legacy months'. Salary publish requires the firm's Employee"
+echo "    Master to be imported first."
 echo
 echo "HOW TO IMPORT:"
 echo "  1. Import / Export → Legacy Import Wizard"

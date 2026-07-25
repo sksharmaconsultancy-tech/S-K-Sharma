@@ -5,9 +5,10 @@
  */
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, TextInput, Platform,
+  View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, TextInput, Platform, Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { Stack } from "expo-router";
 
 import { api } from "@/src/api/client";
@@ -23,6 +24,57 @@ export default function LegacySalaryScreen() {
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [err, setErr] = useState("");
+  // Iter 302 (user) — publish legacy ONLINE months into Compliance Salary.
+  const [pubStep, setPubStep] = useState(0);   // 0 hidden, 1, 2
+  const [pubJob, setPubJob] = useState<any>(null);
+  const [pubBusy, setPubBusy] = useState(false);
+  const [lockConfirm, setLockConfirm] = useState(false);
+  const [lockBusy, setLockBusy] = useState(false);
+  const [lockMsg, setLockMsg] = useState("");
+  // Iter 302c (user) — choose WHICH months to publish (Select All option).
+  const [pubSel, setPubSel] = useState<Record<string, boolean>>({});
+
+  const openPublish = () => {
+    const all: Record<string, boolean> = {};
+    months.forEach((m) => { all[m] = true; });
+    setPubSel(all);
+    setPubStep(1);
+  };
+  const selCount = Object.values(pubSel).filter(Boolean).length;
+
+  const startPublish = async () => {
+    setPubStep(0); setPubBusy(true); setPubJob(null);
+    try {
+      const r = await api<any>("/admin/legacy-salary/publish-compliance", {
+        method: "POST",
+        body: {
+          company_id: cid, lock: false,
+          months: Object.keys(pubSel).filter((m) => pubSel[m]),
+        },
+      });
+      pollPub(r.job_id);
+    } catch (e: any) { setErr(e?.message || "Publish failed"); setPubBusy(false); }
+  };
+
+  const lockAll = async () => {
+    setLockConfirm(false); setLockBusy(true); setLockMsg("");
+    try {
+      const r = await api<any>("/admin/legacy-salary/lock-compliance", {
+        method: "POST", body: { company_id: cid },
+      });
+      setLockMsg(`🔒 ${r.locked} legacy month(s) are now LOCKED (finalized).`);
+    } catch (e: any) { setErr(e?.message || "Lock failed"); }
+    finally { setLockBusy(false); }
+  };
+
+  const pollPub = async (id: string) => {
+    try {
+      const j = await api<any>(`/admin/legacy-import/jobs/${id}`);
+      setPubJob(j);
+      if (j.status === "done" || j.status === "failed") { setPubBusy(false); return; }
+    } catch { /* keep polling */ }
+    setTimeout(() => pollPub(id), 2500);
+  };
 
   useEffect(() => {
     (async () => {
@@ -111,6 +163,49 @@ export default function LegacySalaryScreen() {
                   </Pressable>
                 ))}
               </View>
+              {kind === "online" ? (
+                <>
+                  <Pressable
+                    style={[st.pubBtn, pubBusy && { opacity: 0.5 }]}
+                    disabled={pubBusy}
+                    onPress={openPublish}
+                  >
+                    <Ionicons name="cloud-upload-outline" size={15} color="#fff" />
+                    <Text style={st.pubBtnTxt}>
+                      Publish months to Compliance Salary Process (unlocked — check first)
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[st.lockBtn, lockBusy && { opacity: 0.5 }]}
+                    disabled={lockBusy}
+                    onPress={() => setLockConfirm(true)}
+                  >
+                    <Ionicons name="lock-closed-outline" size={15} color="#B45309" />
+                    <Text style={st.lockBtnTxt}>
+                      Data checked &amp; OK → Lock all published legacy months
+                    </Text>
+                  </Pressable>
+                  {lockMsg ? <Text style={[st.sub, { color: "#16a34a", fontWeight: "700" }]}>{lockMsg}</Text> : null}
+                </>
+              ) : null}
+              {pubJob ? (
+                <View style={{ marginTop: 8 }}>
+                  <Text style={[st.lbl, { marginTop: 0 }]}>
+                    {pubJob.status === "done" ? "✅ Publish complete" :
+                      pubJob.status === "failed" ? "❌ Publish failed" : "⏳ Publishing…"}
+                    {"  —  "}{pubJob.totals?.published || 0} published · {pubJob.totals?.skipped || 0} skipped (month already processed)
+                  </Text>
+                  {(pubJob.errors || []).slice(0, 5).map((e: string, i: number) => (
+                    <Text key={i} style={st.errTxt}>{e}</Text>
+                  ))}
+                  {pubJob.status === "done" ? (
+                    <Text style={st.sub}>
+                      Old months now appear in Compliance Salary Process (unlocked).
+                      Check the data there — when everything is OK, press the Lock button above.
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
             </>
           ) : null}
         </View>
@@ -179,6 +274,94 @@ export default function LegacySalaryScreen() {
           </View>
         ) : null}
       </ScrollView>
+
+      {/* Iter 302 (user) — 2-step publish confirmation */}
+      <Modal transparent visible={pubStep > 0} animationType="fade" onRequestClose={() => setPubStep(0)}>
+        <Pressable style={st.backdrop} onPress={() => setPubStep(0)} />
+        <View style={st.sheet}>
+          {pubStep === 1 ? (
+            <>
+              <Text style={st.confTitle}>1️⃣ Select months to publish ({selCount} of {months.length})</Text>
+              <Text style={st.confTxt}>
+                Only the ticked months will be created inside the Compliance Salary Process as
+                UNLOCKED (draft) runs — you check the data first, then lock.
+              </Text>
+              <View style={[st.wrap, { marginTop: 10 }]}>
+                <Pressable
+                  style={[st.chip, selCount === months.length && st.chipOn]}
+                  onPress={() => {
+                    const all: Record<string, boolean> = {};
+                    const on = selCount !== months.length;
+                    months.forEach((m) => { all[m] = on; });
+                    setPubSel(all);
+                  }}
+                >
+                  <Text style={[st.chipTxt, selCount === months.length && { color: "#fff" }]}>
+                    ✓ ALL MONTHS
+                  </Text>
+                </Pressable>
+                {months.map((m) => (
+                  <Pressable
+                    key={m}
+                    style={[st.chip, pubSel[m] && st.chipOn]}
+                    onPress={() => setPubSel({ ...pubSel, [m]: !pubSel[m] })}
+                  >
+                    <Text style={[st.chipTxt, pubSel[m] && { color: "#fff" }]}>{m}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={st.confTxt}>
+                • Months that already have a compliance run are SKIPPED — nothing is ever overwritten.
+              </Text>
+              <Pressable
+                style={[st.confBtn, { backgroundColor: colors.brandPrimary, opacity: selCount ? 1 : 0.5 }]}
+                disabled={!selCount}
+                onPress={() => setPubStep(2)}
+              >
+                <Ionicons name="checkmark" size={16} color="#fff" />
+                <Text style={st.confBtnTxt}>Continue with {selCount} month(s) (1/2)</Text>
+              </Pressable>
+              <Pressable style={st.cancelBtn} onPress={() => setPubStep(0)}>
+                <Text style={st.cancelTxt}>Cancel</Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Text style={st.confTitle}>🔴 Final Confirmation 2 of 2</Text>
+              <Text style={st.confTxt}>
+                Create draft compliance runs for {selCount} legacy month(s) now?
+              </Text>
+              <Pressable style={[st.confBtn, { backgroundColor: "#B45309" }]} onPress={startPublish}>
+                <Ionicons name="cloud-upload-outline" size={16} color="#fff" />
+                <Text style={st.confBtnTxt}>YES — Publish Now (2/2)</Text>
+              </Pressable>
+              <Pressable style={st.cancelBtn} onPress={() => setPubStep(1)}>
+                <Text style={st.cancelTxt}>← Back</Text>
+              </Pressable>
+            </>
+          )}
+        </View>
+      </Modal>
+
+      {/* Lock-all confirmation */}
+      <Modal transparent visible={lockConfirm} animationType="fade" onRequestClose={() => setLockConfirm(false)}>
+        <Pressable style={st.backdrop} onPress={() => setLockConfirm(false)} />
+        <View style={st.sheet}>
+          <Text style={st.confTitle}>🔒 Lock all published legacy months?</Text>
+          <Text style={st.confTxt}>
+            Every legacy month published into the Compliance Salary Process for this firm will
+            be FINALIZED (read-only). Do this only after you have checked the data. Individual
+            months can still be unlocked later via Unlock Request.
+          </Text>
+          <Pressable style={[st.confBtn, { backgroundColor: "#B45309" }]} onPress={lockAll}>
+            <Ionicons name="lock-closed" size={16} color="#fff" />
+            <Text style={st.confBtnTxt}>YES — Lock all legacy months</Text>
+          </Pressable>
+          <Pressable style={st.cancelBtn} onPress={() => setLockConfirm(false)}>
+            <Text style={st.cancelTxt}>Cancel</Text>
+          </Pressable>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -210,4 +393,29 @@ const st = StyleSheet.create({
   th: { color: "#fff", fontWeight: "800" },
   td: { width: 90, fontSize: 11, color: colors.onSurface, paddingHorizontal: 6, paddingVertical: 6, textAlign: "right" },
   errTxt: { color: "#DC2626", fontSize: 12, marginTop: 10 },
+  pubBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: "#B45309", borderRadius: radius.md, paddingVertical: 11, marginTop: 12,
+  },
+  pubBtnTxt: { color: "#fff", fontWeight: "800", fontSize: 12.5 },
+  lockBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    borderWidth: 1.5, borderColor: "#B45309", borderRadius: radius.md,
+    paddingVertical: 10, marginTop: 8,
+  },
+  lockBtnTxt: { color: "#B45309", fontWeight: "800", fontSize: 12.5 },
+  backdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.45)" },
+  sheet: {
+    position: "absolute", left: 20, right: 20, top: "18%",
+    backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.md,
+  },
+  confTitle: { fontSize: 15, fontWeight: "800", color: colors.onSurface, marginBottom: 8 },
+  confTxt: { fontSize: 12.5, color: colors.onSurfaceSecondary, marginTop: 4, lineHeight: 18 },
+  confBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    borderRadius: radius.md, paddingVertical: 12, marginTop: 12,
+  },
+  confBtnTxt: { color: "#fff", fontWeight: "800", fontSize: 13 },
+  cancelBtn: { alignItems: "center", paddingVertical: 12, marginTop: 4 },
+  cancelTxt: { fontSize: 13, fontWeight: "700", color: colors.onSurfaceSecondary },
 });

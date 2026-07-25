@@ -591,6 +591,20 @@ async def legacy_import_run(body: ImportBody, authorization: Optional[str] = Hea
     admin = await _super(authorization)
     if not body.mappings:
         raise HTTPException(status_code=400, detail="Map at least one firm")
+    # Iter 302d (user) — salary history can only be imported for firms
+    # whose Employee Master is imported too (in this run or earlier).
+    if (body.salary_online or body.salary_offline) and not body.import_employees:
+        for m in body.mappings:
+            emp_ok = await db.users.find_one(
+                {"company_id": m.company_id, "role": "employee",
+                 "legacy_imported": True}, {"_id": 1})
+            if not emp_ok:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Salary import is only allowed for firms whose "
+                           "Employee Master is already imported — tick "
+                           "'Employee Master' for this firm or import "
+                           "employees first.")
     # Iter 300b (user) — block re-import of firms already done.
     done_nos = {
         d["firm_no"] for d in await db.legacy_imported_firms.find(
@@ -836,3 +850,228 @@ async def legacy_compare_detail(
         }
     rows = [months[m] for m in sorted(months.keys(), reverse=True)]
     return {"employee": u, "months": rows, "count": len(rows)}
+
+
+# --------------------------------------------------------------------------
+# Iter 302 (user) — PUBLISH legacy ONLINE months into the Compliance Salary
+# Process as FINALIZED (locked) runs, so they appear in the month list and
+# in every report (register, PF ECR, ESIC) like normally processed salary.
+# --------------------------------------------------------------------------
+def _head_pick(heads: Dict[str, Any], *needles: str) -> float:
+    """Sum the values of head names containing any needle (case-insens)."""
+    tot = 0.0
+    for k, v in (heads or {}).items():
+        ku = str(k).upper()
+        if any(n in ku for n in needles):
+            try:
+                tot += float(v or 0)
+            except (TypeError, ValueError):
+                pass
+    return tot
+
+
+def _legacy_row_to_compliance(r: dict, u: dict) -> dict:
+    """One legacy_salary_history ONLINE row → compliance run row."""
+    earn = r.get("earn_heads") or {}
+    ded = r.get("deduct_heads") or {}
+    gross = float(r.get("gross") or 0)
+    net = float(r.get("net") or 0)
+    basic = float(r.get("basic") or 0)
+    hra = _head_pick(earn, "HRA", "HOUSE RENT")
+    conv = _head_pick(earn, "CONV")
+    med = _head_pick(earn, "MED")
+    spl = _head_pick(earn, "SPECIAL", "SPL")
+    ot_pay = _head_pick(earn, "OT ", "OVERTIME", "OVER TIME")
+    others = max(0.0, round(gross - basic - hra - conv - med - spl - ot_pay, 2))
+    pf_wages = float(r.get("pf_basic") or 0)
+    pf_emp = float(r.get("ee_pf") or 0)
+    er_pf = float(r.get("er_pf") or 0)
+    # EPFO split: EPS = 8.33% of capped PF wages, EPF = remainder.
+    eps = round(min(pf_wages, 15000.0) * 0.0833) if er_pf else 0.0
+    eps = min(eps, er_pf)
+    esic_er = float(r.get("er_esi") or 0)
+    esic_ee = _head_pick(ded, "ESI")
+    if not esic_ee and esic_er and gross:
+        esic_ee = round(gross * 0.0075, 2)  # statutory employee share
+    pt = _head_pick(ded, "PROF", "PTAX", "P.TAX", "P TAX")
+    if not pt and "PT" in ded:
+        pt = _head_pick(ded, "PT")
+    tds = _head_pick(ded, "TDS")
+    return {
+        "user_id": r.get("user_id"),
+        "name": r.get("name"),
+        "employee_code": (u or {}).get("employee_code"),
+        "father_name": (u or {}).get("father_name"),
+        "designation": (u or {}).get("designation"),
+        "uan_no": (u or {}).get("uan_no"),
+        "esi_ip_no": (u or {}).get("esi_ip_no"),
+        "employee_type": r.get("employee_type") or (u or {}).get("employee_type"),
+        "is_onroll": True,
+        "salary_mode": (u or {}).get("salary_mode") or "monthly",
+        "month_days": r.get("month_days"),
+        "present_days": float(r.get("present_days") or 0),
+        "half_days": 0,
+        "ot_hours": float(r.get("ot_hours") or 0),
+        "basic": basic,
+        "hra": hra, "conveyance": conv, "medical": med,
+        "special": spl, "others": others,
+        "monthly_gross": gross, "gross_paid": gross, "ot_pay": ot_pay,
+        "stat_wage_base": gross,
+        "pf_applicable": bool(pf_emp or pf_wages),
+        "pf_wages": pf_wages, "pf_employee": pf_emp,
+        "pf_employer_epf": round(er_pf - eps, 2), "pf_employer_eps": eps,
+        "pf_employer_total": er_pf,
+        "esic_applicable": bool(esic_er or esic_ee),
+        "esic_wage_base": (gross if (esic_er or esic_ee) else 0),
+        "esic_employee": esic_ee, "esic_employer": esic_er,
+        "pt_state": None, "pt": pt, "tds": tds,
+        "total_deduction": round(max(0.0, gross - net), 2),
+        "net": net,
+        "legacy_imported": True,
+        "company_id": r.get("company_id"),
+    }
+
+
+_CMP_TOTAL_KEYS = (
+    "basic", "hra", "conveyance", "medical", "special", "others",
+    "monthly_gross", "gross_paid", "ot_pay",
+    "pf_wages", "pf_employee", "pf_employer_epf", "pf_employer_eps", "pf_employer_total",
+    "esic_wage_base", "esic_employee", "esic_employer",
+    "pt", "tds", "total_deduction", "net",
+)
+
+
+async def _publish_compliance_job(job_id: str, company_id: str, admin_uid: str,
+                                  lock: bool = False,
+                                  only_months: Optional[List[str]] = None):
+    async def _prog(**kw):
+        await db.legacy_import_jobs.update_one(
+            {"job_id": job_id}, {"$set": {**kw, "updated_at": _now()}})
+
+    published: List[str] = []
+    skipped: List[str] = []
+    errors: List[str] = []
+    try:
+        months = sorted(await db.legacy_salary_history.distinct(
+            "month", {"company_id": company_id, "kind": "online"}))
+        if only_months:
+            keep = set(only_months)
+            months = [m for m in months if m in keep]
+        users: Dict[str, dict] = {}
+        async for u in db.users.find(
+                {"company_id": company_id, "role": "employee"},
+                {"_id": 0, "user_id": 1, "employee_code": 1, "father_name": 1,
+                 "designation": 1, "uan_no": 1, "esi_ip_no": 1,
+                 "employee_type": 1, "salary_mode": 1}):
+            users[u["user_id"]] = u
+        for mon in months:
+            try:
+                # NEVER overwrite an existing run for that month (real or
+                # previously published) — publishing is strictly additive.
+                if await db.compliance_salary_runs.find_one(
+                        {"company_id": company_id, "month": mon}, {"_id": 1}):
+                    skipped.append(mon)
+                    continue
+                hrows = await db.legacy_salary_history.find(
+                    {"company_id": company_id, "kind": "online", "month": mon},
+                    {"_id": 0}).sort("name", 1).to_list(20000)
+                rows = [_legacy_row_to_compliance(r, users.get(r.get("user_id")) or {})
+                        for r in hrows]
+                totals = {k: round(sum(float(r.get(k) or 0) for r in rows), 2)
+                          for k in _CMP_TOTAL_KEYS}
+                y, mn = int(mon[:4]), int(mon[5:7])
+                run = {
+                    "run_id": f"csrun_{uuid.uuid4().hex[:12]}",
+                    "month": mon, "year": y, "month_number": mn,
+                    "month_days": int(max((r.get("month_days") or 0) for r in hrows) or 30),
+                    "default_month_days": 30,
+                    "company_id": company_id,
+                    "employee_type": None,
+                    "is_onroll_filter": None,
+                    "structure_pct": {}, "statutory_cfg": {},
+                    "employees_count": len(rows),
+                    "rows": rows,
+                    "totals": totals,
+                    "attendance_source": "legacy_import",
+                    "legacy_imported": True,
+                    # Iter 302b (user) — publish UNLOCKED first ("we will
+                    # check, then lock accordingly"); lock-compliance
+                    # endpoint finalizes everything afterwards.
+                    "finalized": bool(lock),
+                    **({"finalized_at": _now(), "finalized_by": admin_uid} if lock else {}),
+                    "generated_by": admin_uid,
+                    "generated_at": _now(),
+                }
+                await db.compliance_salary_runs.insert_one(run)
+                published.append(mon)
+            except Exception as ex:
+                if len(errors) < 40:
+                    errors.append(f"{mon}: {str(ex)[:120]}")
+            await _prog(totals={"published": len(published), "skipped": len(skipped),
+                                "months_total": len(months)})
+        await _prog(status="done", errors=errors, finished_at=_now(),
+                    totals={"published": len(published), "skipped": len(skipped),
+                            "months_total": len(months),
+                            "published_months": published[:60],
+                            "skipped_months": skipped[:60]})
+    except Exception as ex:
+        errors.append(str(ex)[:300])
+        await _prog(status="failed", errors=errors, finished_at=_now())
+
+
+class PublishBody(BaseModel):
+    company_id: str
+    lock: bool = False
+    # Iter 302c (user) — publish only the SELECTED months.
+    months: Optional[List[str]] = None
+
+
+@router.post("/admin/legacy-salary/publish-compliance")
+async def legacy_publish_compliance(
+    body: PublishBody, authorization: Optional[str] = Header(None),
+):
+    admin = await _super(authorization)
+    # Iter 302d (user) — salary publish only for firms whose Employee
+    # Master was already imported (rows must link to portal employees).
+    emp_ok = await db.users.find_one(
+        {"company_id": body.company_id, "role": "employee",
+         "legacy_imported": True}, {"_id": 1})
+    if not emp_ok:
+        raise HTTPException(
+            status_code=400,
+            detail="Employee Master of this firm is NOT imported yet — import "
+                   "employees first (Legacy Import Wizard), then publish salary.")
+    months = await db.legacy_salary_history.distinct(
+        "month", {"company_id": body.company_id, "kind": "online"})
+    if body.months:
+        months = [m for m in months if m in set(body.months)]
+    if not months:
+        raise HTTPException(
+            status_code=404,
+            detail="No imported ONLINE salary months for this firm — run the "
+                   "Legacy Import Wizard first (or select at least one month).")
+    job_id = f"lpub_{uuid.uuid4().hex[:10]}"
+    await db.legacy_import_jobs.insert_one({
+        "job_id": job_id, "type": "publish_compliance", "status": "running",
+        "company_id": body.company_id, "totals": {}, "errors": [],
+        "started_by": admin.get("user_id"), "started_at": _now(),
+    })
+    asyncio.get_event_loop().create_task(
+        _publish_compliance_job(job_id, body.company_id, admin.get("user_id"),
+                                lock=body.lock, only_months=body.months))
+    return {"job_id": job_id, "months": len(months)}
+
+
+@router.post("/admin/legacy-salary/lock-compliance")
+async def legacy_lock_compliance(
+    body: PublishBody, authorization: Optional[str] = Header(None),
+):
+    """Iter 302b (user) — after checking, LOCK all published legacy months
+    (finalize every legacy_imported compliance run of the firm)."""
+    admin = await _super(authorization)
+    r = await db.compliance_salary_runs.update_many(
+        {"company_id": body.company_id, "legacy_imported": True,
+         "finalized": {"$ne": True}},
+        {"$set": {"finalized": True, "finalized_at": _now(),
+                  "finalized_by": admin.get("user_id")}})
+    return {"ok": True, "locked": r.modified_count}
