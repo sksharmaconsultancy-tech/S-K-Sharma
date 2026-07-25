@@ -56,6 +56,7 @@ class BiometricDeviceUpdate(BaseModel):
     location: Optional[str] = None
     enabled: Optional[bool] = None
     gmt_offset: Optional[str] = None       # Iter 263 — machine time zone
+    brand: Optional[str] = None            # Iter 294 — multi-brand
 
 
 # Iter 263 — GMT / time-zone handling for machines.
