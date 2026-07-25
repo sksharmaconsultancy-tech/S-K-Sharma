@@ -191,6 +191,16 @@ export default function BankSheetScreen() {
                     </Text>
                   </View>
                 ))}
+                {/* Iter 291 (user request) — Net Payable TOTAL row at the bottom. */}
+                <View style={[styles.tr, styles.trTotal]} testID="bank-sheet-total-row">
+                  <Text style={[styles.tdTotal, { width: 44 }]} />
+                  <Text style={[styles.tdTotal, { width: 150 + 140 + 140 + 150 + 120 + 140 }]}>
+                    TOTAL NET PAYABLE ({data.count} employees)
+                  </Text>
+                  <Text style={[styles.tdTotal, { width: 100, textAlign: "right" }]}>
+                    ₹{data.total_net.toLocaleString("en-IN")}
+                  </Text>
+                </View>
               </View>
             </ScrollView>
           </View>
@@ -230,6 +240,8 @@ const styles = StyleSheet.create({
   summaryTotal: { fontSize: 15, color: colors.brandPrimary, fontWeight: "800" },
   tr: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: "#EEF2F5", paddingVertical: 9 },
   trHead: { backgroundColor: "#F1F5F9", borderTopLeftRadius: 8, borderTopRightRadius: 8 },
+  trTotal: { backgroundColor: "rgba(37,99,235,0.07)", borderTopWidth: 2, borderTopColor: colors.brandPrimary },
+  tdTotal: { fontSize: 12.5, color: colors.brandPrimary, fontWeight: "800", paddingHorizontal: 6 },
   th: { fontSize: 11.5, fontWeight: "800", color: colors.onSurfaceSecondary, paddingHorizontal: 6 },
   td: { fontSize: 12.5, color: colors.onSurface, paddingHorizontal: 6 },
   err: { color: "#B91C1C", textAlign: "center", marginTop: 24 },

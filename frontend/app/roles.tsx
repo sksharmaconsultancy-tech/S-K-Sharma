@@ -43,7 +43,9 @@ export default function RolesScreen() {
   const [saving, setSaving] = useState(false);
 
   // staff form
-  const [staffForm, setStaffForm] = useState<any>(null); // {name,email,phone,password,role_id}
+  const [staffForm, setStaffForm] = useState<any>(null); // {name,email,phone,password,role_id,employee_user_id}
+  const [empList, setEmpList] = useState<any[]>([]);
+  const [empSearch, setEmpSearch] = useState("");
 
   const q = companyId ? `company_id=${companyId}` : "";
   // Follow the global active-firm picker.
@@ -95,10 +97,20 @@ export default function RolesScreen() {
     catch (e: any) { toast(e?.message || "Delete failed"); }
   };
 
+  const openAddStaff = async () => {
+    setStaffForm({ name: "", email: "", phone: "", password: "", pin: "", role_id: roles[0]?.role_id || "", employee_user_id: null });
+    setEmpSearch("");
+    try {
+      const r = await api(`/admin/company-staff/eligible-employees?${q}`);
+      setEmpList(r.employees || []);
+    } catch { setEmpList([]); }
+  };
+
   const saveStaff = async () => {
     const f = staffForm;
-    if (!f?.name?.trim() || !f?.email?.trim()) return toast("Name and email are required.");
-    if (!f.role_id) return toast("Pick a role.");
+    if (!f?.role_id) return toast("Pick a role.");
+    if (!f?.employee_user_id && (!f?.name?.trim() || !f?.email?.trim()))
+      return toast("Pick an employee from the list, or type name + email manually.");
     if (f.pin && !/^\d{6}$/.test(f.pin)) return toast("PIN must be exactly 6 digits.");
     setSaving(true);
     try {
@@ -111,10 +123,10 @@ export default function RolesScreen() {
       } else {
         const r = await api("/admin/company-staff", {
           method: "POST",
-          body: { company_id: companyId, name: f.name, email: f.email, phone: f.phone || null, password: f.password || null, pin: f.pin || null, role_id: f.role_id },
+          body: { company_id: companyId, name: f.name, email: f.email || null, phone: f.phone || null, password: f.password || null, pin: f.pin || null, role_id: f.role_id, employee_user_id: f.employee_user_id || null },
         });
         toast(r?.linked_employee
-          ? "Existing employee linked — they open the portal with their existing User ID & password."
+          ? "Employee linked! They can open the Staff Portal from their PWA app (Profile → Staff Access) or sign in on the Employer login page with their existing credentials."
           : "Saved. Staff can now log in on the Employer login page.");
       }
       setStaffForm(null); await load();
@@ -212,7 +224,7 @@ export default function RolesScreen() {
             {/* Staff users */}
             <View style={[s.secHead, { marginTop: 20 }]}>
               <Text style={s.secTitle}>Staff Users ({staff.length})</Text>
-              <Pressable style={s.seedBtn} onPress={() => setStaffForm({ name: "", email: "", phone: "", password: "", pin: "", role_id: roles[0]?.role_id || "" })} testID="add-staff">
+              <Pressable style={s.seedBtn} onPress={openAddStaff} testID="add-staff">
                 <Ionicons name="person-add-outline" size={14} color={colors.brandPrimary} />
                 <Text style={s.seedTxt}>Add Staff User</Text>
               </Pressable>
@@ -304,11 +316,65 @@ export default function RolesScreen() {
                   <Text style={s.modalTitle}>{staffForm.user_id ? "Edit Staff User" : "Add Staff User"}</Text>
                   <Pressable onPress={() => setStaffForm(null)} hitSlop={10}><Ionicons name="close" size={22} color={colors.onSurfaceSecondary} /></Pressable>
                 </View>
+                {!staffForm.user_id ? (
+                  <>
+                    <Text style={s.lbl}>Pick from Employee Master</Text>
+                    {staffForm.employee_user_id ? (
+                      <View style={s.pickedRow} testID="picked-employee">
+                        <Ionicons name="person-circle-outline" size={20} color={colors.brandPrimary} />
+                        <Text style={s.pickedTxt} numberOfLines={1}>
+                          {staffForm.name}{staffForm.employee_code ? `  ·  #${staffForm.employee_code}` : ""}
+                        </Text>
+                        <Pressable hitSlop={8} onPress={() => setStaffForm({ ...staffForm, employee_user_id: null, employee_code: null, name: "", email: "", phone: "" })} testID="clear-picked-employee">
+                          <Ionicons name="close-circle" size={20} color={colors.onSurfaceTertiary} />
+                        </Pressable>
+                      </View>
+                    ) : (
+                      <>
+                        <TextInput style={s.input} value={empSearch} onChangeText={setEmpSearch}
+                          placeholder="Search name / code / mobile…" placeholderTextColor={colors.onSurfaceTertiary}
+                          autoCapitalize="none" testID="staff-emp-search" />
+                        <ScrollView style={s.empListBox} nestedScrollEnabled>
+                          {empList.filter((e) => {
+                            const t = empSearch.trim().toLowerCase();
+                            if (!t) return true;
+                            return [e.name, e.employee_code, e.email, e.phone_e164, e.phone, e.login_id]
+                              .some((v) => String(v || "").toLowerCase().includes(t));
+                          }).slice(0, 60).map((e) => (
+                            <Pressable key={e.user_id} style={s.empRow}
+                              onPress={() => e.already_staff ? toast(`${e.name} already has a staff login.`) : setStaffForm({
+                                ...staffForm, employee_user_id: e.user_id, employee_code: e.employee_code,
+                                name: e.name || "", email: e.email || "",
+                                phone: String(e.phone_e164 || e.phone || "").replace(/[^\d+]/g, ""),
+                              })}
+                              testID={`pick-emp-${e.employee_code || e.user_id}`}>
+                              <View style={{ flex: 1, minWidth: 0 }}>
+                                <Text style={s.empName} numberOfLines={1}>{e.name}{e.employee_code ? `  ·  #${e.employee_code}` : ""}</Text>
+                                <Text style={s.empMeta} numberOfLines={1}>
+                                  {e.email || e.phone_e164 || e.phone || e.login_id || "no email — logs in with mobile/User ID"}
+                                  {e.department ? ` · ${e.department}` : ""}
+                                </Text>
+                              </View>
+                              {e.already_staff
+                                ? <View style={s.empStaffTag}><Text style={s.empStaffTagTxt}>STAFF</Text></View>
+                                : <Ionicons name="add-circle-outline" size={18} color={colors.brandPrimary} />}
+                            </Pressable>
+                          ))}
+                          {empList.length === 0 ? <Text style={[s.muted, { padding: 8 }]}>No employees found for this firm.</Text> : null}
+                        </ScrollView>
+                        <Text style={[s.muted, { marginTop: 6 }]}>…or type the details manually below (external staff).</Text>
+                      </>
+                    )}
+                  </>
+                ) : null}
                 <Text style={s.lbl}>Full Name</Text>
                 <TextInput style={s.input} value={staffForm.name} onChangeText={(v) => setStaffForm({ ...staffForm, name: v })} testID="staff-name" />
                 <Text style={s.lbl}>Email (login username)</Text>
-                <TextInput style={[s.input, staffForm.user_id && { opacity: 0.6 }]} value={staffForm.email} editable={!staffForm.user_id}
+                <TextInput style={[s.input, (staffForm.user_id || staffForm.employee_user_id) && { opacity: 0.6 }]} value={staffForm.email}
+                  editable={!staffForm.user_id && !staffForm.employee_user_id}
                   autoCapitalize="none" keyboardType="email-address"
+                  placeholder={staffForm.employee_user_id && !staffForm.email ? "No email — logs in with mobile / User ID" : ""}
+                  placeholderTextColor={colors.onSurfaceTertiary}
                   onChangeText={(v) => setStaffForm({ ...staffForm, email: v })} testID="staff-email" />
                 {/* Iter 220 — Mobile visible on create AND edit; digits only
                     (emails were previously getting saved into this field). */}
@@ -439,4 +505,23 @@ const s = StyleSheet.create({
     backgroundColor: colors.brandPrimary, borderRadius: 14, height: 48, marginTop: 16,
   },
   saveBtnTxt: { fontSize: 14, fontWeight: "800", color: "#fff" },
+
+  pickedRow: {
+    flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1,
+    borderColor: "rgba(37,99,235,0.35)", backgroundColor: "rgba(37,99,235,0.06)",
+    borderRadius: 12, paddingHorizontal: 12, height: 44,
+  },
+  pickedTxt: { flex: 1, fontSize: 13.5, fontWeight: "700", color: colors.onSurface },
+  empListBox: {
+    maxHeight: 200, borderWidth: 1, borderColor: colors.border, borderRadius: 12,
+    backgroundColor: colors.surface, marginTop: 6,
+  },
+  empRow: {
+    flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 9,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
+  },
+  empName: { fontSize: 13, fontWeight: "700", color: colors.onSurface },
+  empMeta: { fontSize: 11, color: colors.onSurfaceTertiary, marginTop: 1 },
+  empStaffTag: { backgroundColor: "rgba(5,150,105,0.1)", borderRadius: 7, paddingHorizontal: 6, paddingVertical: 2 },
+  empStaffTagTxt: { fontSize: 9.5, fontWeight: "800", color: "#059669" },
 });

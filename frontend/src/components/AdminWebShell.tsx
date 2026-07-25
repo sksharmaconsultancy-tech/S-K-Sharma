@@ -13,7 +13,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { usePathname, useRouter } from "expo-router";
 
-import { api } from "@/src/api/client";
+import { api, readEmployeeTokenBackup, clearEmployeeTokenBackup, saveToken } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import GlobalCompanyPicker from "@/src/components/GlobalCompanyPicker";
 import { useRefreshBus } from "@/src/context/RefreshBusContext";
@@ -96,8 +96,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/company-requests", label: "Company Requests", icon: "mail-open-outline" },
       { route: "/punch-approvals", label: "Punch Approvals", icon: "checkmark-circle-outline" },
       { route: "/contractor-punches", label: "Contractor Punches", icon: "briefcase-outline" },
-      { route: "/shift-change-admin", label: "Shift Change Requests", icon: "swap-horizontal" },
-      { route: "/shift-approvals", label: "Shift Change Approvals", icon: "swap-horizontal-outline" },
+      { route: "/shift-change-admin", label: "Shift Change Requests & Approvals", icon: "swap-horizontal" },
       { route: "/attendance-approvals", label: "Attendance Approvals", icon: "hand-right-outline" },
       { route: "/deletion-approvals", label: "Deletion Approvals", icon: "trash-bin-outline" },
     ],
@@ -375,8 +374,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
       { route: "/approval-workflows", label: "Workflow Builder", icon: "git-branch-outline" },
       { route: "/punch-approvals", label: "Punch Approvals", icon: "checkmark-circle-outline" },
       { route: "/contractor-punches", label: "Contractor Punches", icon: "briefcase-outline" },
-      { route: "/shift-change-admin", label: "Shift Change Requests", icon: "swap-horizontal" },
-      { route: "/shift-approvals", label: "Shift Change Approvals", icon: "swap-horizontal-outline" },
+      { route: "/shift-change-admin", label: "Shift Change Requests & Approvals", icon: "swap-horizontal" },
       { route: "/attendance-approvals", label: "Attendance Approvals", icon: "hand-right-outline" },
       { route: "/deletion-approvals", label: "Deletion Approvals", icon: "trash-bin-outline" },
       { route: "/attendance-review", label: "Attendance Review", icon: "shield-checkmark-outline" },
@@ -448,12 +446,27 @@ export type NavItem = {
 type Props = { children: React.ReactNode };
 
 export default function AdminWebShell({ children }: Props) {
-  const { user, logout } = useAuth();
+  const { user, logout, refresh } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const { width } = useWindowDimensions();
   const { refreshedAt, bumpRefresh } = useRefreshBus();
   const { selectedCompany, clearLock } = useSelectedCompany();
+  // Staff-portal switch — when an employee opened the staff portal from
+  // their PWA (Profile → Staff Access), a backup of their employee token
+  // exists; show a "Back to Employee App" button that restores it.
+  const [empBackup, setEmpBackup] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    readEmployeeTokenBackup().then(setEmpBackup).catch(() => {});
+  }, []);
+  const backToEmployeeApp = React.useCallback(async () => {
+    if (!empBackup) return;
+    await saveToken(empBackup);
+    await clearEmployeeTokenBackup();
+    setEmpBackup(null);
+    await refresh();
+    router.replace("/");
+  }, [empBackup, refresh, router]);
   // Iter 85 — Logout button opens a small confirmation modal with TWO
   // choices for super/sub admins: fully sign out, or just switch firm
   // (clear the selection so they can pick another firm from the picker
@@ -984,6 +997,16 @@ export default function AdminWebShell({ children }: Props) {
               />
             </Pressable>
             <Text style={styles.envTxt}>Web portal</Text>
+            {empBackup && (user as any)?.is_company_staff ? (
+              <Pressable
+                onPress={backToEmployeeApp}
+                style={({ pressed }) => [styles.empSwitchBtn, pressed && { opacity: 0.9 }]}
+                testID="back-to-employee-app"
+              >
+                <Ionicons name="phone-portrait-outline" size={14} color="#2563EB" />
+                <Text style={styles.empSwitchBtnTxt}>Employee App</Text>
+              </Pressable>
+            ) : null}
             {/* Iter 85 — Logout button. For Super/Sub admins it opens a
                 two-choice confirmation (User Logout / Switch Firm); for
                 Company admins it logs out immediately. */}
@@ -1381,6 +1404,22 @@ const styles = StyleSheet.create({
     backgroundColor: "#FEF2F2",
     borderWidth: 1,
     borderColor: "#FECACA",
+  },
+  empSwitchBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: radius.pill,
+    backgroundColor: "rgba(37,99,235,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(37,99,235,0.35)",
+  },
+  empSwitchBtnTxt: {
+    color: "#2563EB",
+    fontSize: 12,
+    fontWeight: "700",
   },
   logoutBtnTopTxt: {
     color: "#DC2626",

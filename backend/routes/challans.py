@@ -428,7 +428,11 @@ def _ecr_lines(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> List[Di
 
 
 def _ecr_txt_bytes(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> bytes:
-    """EPFO Contribution file body (6-field #~# format).
+    """EPFO ECR 2.0 upload text file — the OFFICIAL 11-field #~# format the
+    unified portal accepts directly (Iter 291, user request):
+
+      UAN #~# NAME #~# GROSS #~# EPF WAGES #~# EPS WAGES #~# EDLI WAGES
+      #~# EPF EE #~# EPS #~# EPF-EPS DIFF (ER) #~# NCP DAYS #~# REFUND
 
     Members WITH a UAN are written normally; PF members WITHOUT a UAN yet
     (new joiners) are still included with a BLANK UAN field so EPFO can
@@ -442,7 +446,9 @@ def _ecr_txt_bytes(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> byt
         )
     lines = [
         "#~#".join(str(x) for x in (
-            m["uan"], m["name"], m["epf_ee"], m["eps_er"], m["diff_er"], m["refund"],
+            m["uan"], m["name"], m["gross"], m["epf_wages"], m["eps_wages"],
+            m["edli_wages"], m["epf_ee"], m["eps_er"], m["diff_er"],
+            m["ncp"], m["refund"],
         ))
         for m in members
     ]

@@ -38,6 +38,37 @@ export async function clearToken() {
   }
 }
 
+// Staff-portal switch (employee ⇄ staff): the employee token is backed up
+// so "Back to Employee App" can restore it without a re-login.
+const EMP_BACKUP_KEY = "llc_employee_token_backup";
+
+export async function saveEmployeeTokenBackup(token: string) {
+  if (Platform.OS === "web") {
+    globalThis.localStorage?.setItem(EMP_BACKUP_KEY, token);
+  } else {
+    await SecureStore.setItemAsync(EMP_BACKUP_KEY, token);
+  }
+}
+
+export async function readEmployeeTokenBackup(): Promise<string | null> {
+  if (Platform.OS === "web") {
+    try {
+      return globalThis.localStorage?.getItem(EMP_BACKUP_KEY) ?? null;
+    } catch {
+      return null;
+    }
+  }
+  return await SecureStore.getItemAsync(EMP_BACKUP_KEY);
+}
+
+export async function clearEmployeeTokenBackup() {
+  if (Platform.OS === "web") {
+    globalThis.localStorage?.removeItem(EMP_BACKUP_KEY);
+  } else {
+    await SecureStore.deleteItemAsync(EMP_BACKUP_KEY);
+  }
+}
+
 export async function readAuthToken(): Promise<string | null> {
   return await readToken();
 }

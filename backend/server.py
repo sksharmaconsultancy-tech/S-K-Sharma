@@ -2438,6 +2438,17 @@ async def get_user_from_token(authorization: Optional[str]) -> dict:
         user["staff_role_name"] = (crole or {}).get("name") or "Staff"
         user["staff_permissions"] = (crole or {}).get("permissions") or []
         user["role"] = "company_admin"
+    elif user.get("role") == "employee" and user.get("is_company_staff"):
+        # Employee-app (PWA) session of a staff-linked employee — the role
+        # stays "employee" so all PWA flows are unaffected, but the staff
+        # role + permission subset ride along so the app can show the
+        # "Staff Access" entry (Profile tab).
+        crole = await db.company_roles.find_one(
+            {"role_id": user.get("company_role_id") or "", "company_id": user.get("company_id")},
+            {"_id": 0},
+        )
+        user["staff_role_name"] = (crole or {}).get("name") or "Staff"
+        user["staff_permissions"] = (crole or {}).get("permissions") or []
     if user.get("role") != "super_admin":
         if user.get("disabled"):
             raise HTTPException(status_code=403, detail="Your account has been disabled. Please contact your admin.")
@@ -5888,6 +5899,31 @@ async def employee_password_login(payload: EmployeePasswordLoginRequest):
         "user": fresh,
         "password_must_change": bool(fresh.get("password_must_change")),
     }
+
+
+@api.post("/auth/staff-portal-switch")
+async def staff_portal_switch(authorization: Optional[str] = Header(None)):
+    """Employee PWA → Staff portal in one tap. An employee who has been
+    linked as a staff user (Roles & Permissions) exchanges their employee
+    session for a staff-portal session — normalized to a firm-scoped
+    company_admin with their role's permission subset. Their employee
+    session token stays valid on the device so they can switch back."""
+    user = await get_user_from_token(authorization)
+    raw = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not (raw and raw.get("role") == "employee" and raw.get("is_company_staff")):
+        raise HTTPException(status_code=403, detail="Your account has no staff access")
+    token = await _issue_session(raw["user_id"], "staff_portal_switch")
+    fresh = await _enrich_user_with_company(raw)
+    crole = await db.company_roles.find_one(
+        {"role_id": raw.get("company_role_id") or "", "company_id": raw.get("company_id")},
+        {"_id": 0},
+    )
+    fresh["is_company_staff"] = True
+    fresh["staff_role_name"] = (crole or {}).get("name") or "Staff"
+    fresh["staff_permissions"] = (crole or {}).get("permissions") or []
+    fresh["role"] = "company_admin"
+    logger.info(f"[staff-portal-switch] {raw.get('employee_code') or raw['user_id']} switched to staff portal")
+    return {"session_token": token, "user": fresh}
 
 
 # ---------------------------------------------------------------------------
@@ -17715,6 +17751,9 @@ async def _compute_monthly_grid_data(
     # Iter 94 — day-wise salary totals across all employees (bottom row)
     # + monthly divisor for monthly-rate employees.
     day_salary_totals: Dict[str, float] = {}
+    # Iter 291 (user request) — day-wise PRESENT COUNT bottom row for the
+    # In/Out and HRS reports.
+    day_present_counts: Dict[str, int] = {}
     _md_divisor = _cal.monthrange(day_iter[0][0], day_iter[0][1])[1] if day_iter else 30
     # Iter 94 — Additional Duty HRS entries (Punch Approvals) keyed by
     # (user_id, YYYY-MM-DD); the hours merge into that day's duty.
@@ -18129,6 +18168,9 @@ async def _compute_monthly_grid_data(
             if day_sal > 0:
                 total_salary += day_sal
                 day_salary_totals[key] = round(day_salary_totals.get(key, 0.0) + day_sal, 2)
+            # Iter 291 — day-wise Present Count footer (In/Out & HRS reports).
+            if _day_present:
+                day_present_counts[key] = day_present_counts.get(key, 0) + 1
             if hrs > 0:
                 total_present_days += 1 if (duty_only_hrs > 0 or _holiday_present_credit) else 0
                 total_hours_min += round(hrs * 60)
@@ -18244,6 +18286,8 @@ async def _compute_monthly_grid_data(
         # Iter 94 — day-wise salary totals (bottom row) + grand total.
         "day_salary_totals": {k: round(v, 2) for k, v in day_salary_totals.items()},
         "salary_grand_total": round(sum(day_salary_totals.values()), 2),
+        # Iter 291 — day-wise Present Count bottom row.
+        "day_present_counts": day_present_counts,
     }
 
 

@@ -210,8 +210,12 @@ async def delete_company_role(role_id: str, authorization: Optional[str] = Heade
 # ---------------------------------------------------------------------------
 class StaffCreate(BaseModel):
     company_id: Optional[str] = None
-    name: str
-    email: str
+    name: Optional[str] = None
+    email: Optional[str] = None
+    # Pick straight from the Employee Master — links the employee by
+    # user_id so employees WITHOUT an email can also get staff access
+    # (they log in with mobile no. / User ID instead).
+    employee_user_id: Optional[str] = None
     phone: Optional[str] = None
     # Iter 220 — password optional: when the email belongs to an EXISTING
     # EMPLOYEE of the firm, the account is LINKED (the employee keeps their
@@ -225,6 +229,39 @@ _STAFF_USER_OR = [
     {"role": "company_staff"},
     {"role": "employee", "is_company_staff": True},
 ]
+
+
+@router.get("/company-staff/eligible-employees")
+async def eligible_employees(
+    company_id: Optional[str] = None,
+    q: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+):
+    """Active employees of the firm for the 'Add Staff User' picker."""
+    admin, cid = await _role_manager(authorization, company_id)
+    flt: Dict[str, Any] = {
+        "company_id": cid, "role": "employee",
+        "offboarded": {"$ne": True}, "disabled": {"$ne": True},
+    }
+    if q and q.strip():
+        rx = {"$regex": q.strip(), "$options": "i"}
+        flt["$or"] = [{"name": rx}, {"employee_code": rx}, {"email": rx},
+                      {"login_id": rx}, {"phone": rx}]
+    emps = await db.users.find(
+        flt,
+        {"_id": 0, "user_id": 1, "name": 1, "email": 1, "phone": 1,
+         "phone_e164": 1, "employee_code": 1, "department": 1, "position": 1,
+         "login_id": 1, "is_company_staff": 1, "company_role_id": 1,
+         "password_hash": 1, "pin_hash": 1},
+    ).sort("name", 1).to_list(500)
+    for e in emps:
+        e["already_staff"] = bool(e.pop("is_company_staff", False))
+        e["has_password"] = bool(e.pop("password_hash", None))
+        e["has_pin"] = bool(e.pop("pin_hash", None))
+        for k in ("phone", "phone_e164"):
+            if e.get(k) and "@" in str(e[k]):
+                e[k] = None
+    return {"employees": emps}
 
 
 @router.get("/company-staff")
@@ -255,15 +292,27 @@ async def create_staff(payload: StaffCreate, authorization: Optional[str] = Head
     name = (payload.name or "").strip()
     phone = _clean_mobile_or_400(payload.phone)
     pin = _validate_pin_or_400(payload.pin)
-    if not email or "@" not in email:
-        raise HTTPException(status_code=400, detail="A valid email is required")
-    if not name:
-        raise HTTPException(status_code=400, detail="Name is required")
     role = await db.company_roles.find_one({"role_id": payload.role_id, "company_id": cid}, {"_id": 0})
     if not role:
         raise HTTPException(status_code=404, detail="Role not found for this firm")
 
-    existing = await db.users.find_one({"email": email}, {"_id": 0})
+    if payload.employee_user_id:
+        # Picked from the Employee Master list — link by user_id, so an
+        # employee WITHOUT an email can also be granted staff access.
+        existing = await db.users.find_one(
+            {"user_id": payload.employee_user_id, "role": "employee", "company_id": cid},
+            {"_id": 0},
+        )
+        if not existing:
+            raise HTTPException(status_code=404, detail="Employee not found in this firm")
+        email = email or (existing.get("email") or "").strip().lower()
+        name = name or (existing.get("name") or "")
+    else:
+        if not email or "@" not in email:
+            raise HTTPException(status_code=400, detail="A valid email is required")
+        if not name:
+            raise HTTPException(status_code=400, detail="Name is required")
+        existing = await db.users.find_one({"email": email}, {"_id": 0})
     if existing:
         # Iter 220 (user request) — LINK AN EXISTING EMPLOYEE: the firm's
         # employee is granted staff-portal access on their EXISTING account.

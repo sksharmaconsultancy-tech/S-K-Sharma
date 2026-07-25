@@ -15,7 +15,9 @@ import { useRouter, useFocusEffect } from "expo-router";
 
 import { useAuth } from "@/src/context/AuthContext";
 import { useAutoPunch } from "@/src/context/AutoPunchContext";
-import { api } from "@/src/api/client";
+import {
+  api, readAuthToken, saveToken, saveEmployeeTokenBackup,
+} from "@/src/api/client";
 import { colors, radius, spacing, type } from "@/src/theme";
 import {
   areRemindersEnabled,
@@ -53,6 +55,25 @@ export default function ProfileScreen() {
   );
   const [bioBusy, setBioBusy] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
+  const [staffBusy, setStaffBusy] = useState(false);
+
+  // Staff Access — an employee linked as a staff user (Roles & Permissions)
+  // can switch straight into the staff/admin portal without re-login.
+  const openStaffPortal = useCallback(async () => {
+    setStaffBusy(true);
+    try {
+      const cur = await readAuthToken();
+      const r = await api<{ session_token: string }>("/auth/staff-portal-switch", { method: "POST" });
+      if (cur) await saveEmployeeTokenBackup(cur);
+      await saveToken(r.session_token);
+      await refresh();
+      router.replace("/");
+    } catch (e: any) {
+      Alert.alert("Staff Access", e?.message || "Could not open the staff portal");
+    } finally {
+      setStaffBusy(false);
+    }
+  }, [refresh, router]);
   const [remindersOn, setRemindersOn] = useState<boolean>(false);
   const [remindersBusy, setRemindersBusy] = useState(false);
 
@@ -198,6 +219,33 @@ export default function ProfileScreen() {
             <Text style={styles.roleTxt}>{roleLabel(user?.role)}</Text>
           </View>
         </View>
+
+        {(user as any)?.is_company_staff ? (
+          <>
+            <Text style={styles.section}>Staff Access</Text>
+            <Pressable
+              style={styles.staffCard}
+              onPress={openStaffPortal}
+              disabled={staffBusy}
+              testID="open-staff-portal"
+            >
+              <View style={styles.staffIcon}>
+                <Ionicons name="briefcase-outline" size={20} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.staffTitle}>Open Staff Portal</Text>
+                <Text style={styles.staffMeta}>
+                  Role: {(user as any)?.staff_role_name || "Staff"} · manage what your admin permitted
+                </Text>
+              </View>
+              <Ionicons
+                name={staffBusy ? "hourglass-outline" : "chevron-forward"}
+                size={18}
+                color={colors.onSurfaceTertiary}
+              />
+            </Pressable>
+          </>
+        ) : null}
 
         <Text style={styles.section}>Workplace</Text>
 
@@ -820,6 +868,17 @@ const styles = StyleSheet.create({
   },
   roleTxt: { color: colors.onBrandTertiary, fontSize: 11, fontWeight: "500", letterSpacing: 1 },
   section: { fontSize: type.sm, color: colors.onSurfaceTertiary, marginTop: spacing.xl, marginBottom: spacing.md, textTransform: "uppercase", letterSpacing: 1 },
+  staffCard: {
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg,
+    borderWidth: 1, borderColor: "rgba(37,99,235,0.3)", padding: spacing.md,
+  },
+  staffIcon: {
+    width: 40, height: 40, borderRadius: 12, backgroundColor: "#2563EB",
+    alignItems: "center", justifyContent: "center",
+  },
+  staffTitle: { fontSize: 14, fontWeight: "800", color: colors.onSurface },
+  staffMeta: { fontSize: 11.5, color: colors.onSurfaceTertiary, marginTop: 2 },
   row: {
     flexDirection: "row", alignItems: "center", gap: spacing.md,
     backgroundColor: colors.surfaceSecondary, borderRadius: radius.md,

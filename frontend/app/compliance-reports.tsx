@@ -20,6 +20,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api, apiBinary } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
+import CompanyPicker from "@/src/components/CompanyPicker";
 import MasterSelect from "@/src/components/MasterSelect";
 import { colors, radius, spacing } from "@/src/theme";
 
@@ -41,9 +42,8 @@ const PERIODS = [
 
 export default function ComplianceReportsScreen() {
   const { user, loading: authLoading } = useAuth();
-  const { selectedCompanyId, companies } = useSelectedCompany();
+  const { selectedCompanyId } = useSelectedCompany();
   const isAdmin = ["company_admin", "super_admin", "sub_admin"].includes(user?.role || "");
-  const isSuper = user?.role === "super_admin";
 
   const now = new Date();
   const [report, setReport] = useState<"contributions" | "leave" | "gratuity">("contributions");
@@ -167,24 +167,14 @@ export default function ComplianceReportsScreen() {
           ))}
         </View>
 
-        {/* Firm picker (super admin) */}
-        {isSuper ? (
+        {/* Firm picker — dropdown (Iter 291, user request) for super/sub admins */}
+        {user?.role !== "company_admin" ? (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Select firm (single)</Text>
-            <View style={styles.chipRow}>
-              {(companies || []).map((c: any) => (
-                <Pressable
-                  key={c.company_id}
-                  onPress={() => setCid(c.company_id)}
-                  style={[styles.chip, activeCid === c.company_id && styles.chipOn]}
-                  testID={`cr-firm-${c.company_id}`}
-                >
-                  <Text style={[styles.chipTxt, activeCid === c.company_id && styles.chipTxtOn]}>
-                    {c.name || c.company_id}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
+            <Text style={styles.cardTitle}>Select firm</Text>
+            <CompanyPicker
+              value={activeCid || ""}
+              onChange={(v: any) => setCid(!v || v === "all" ? null : v)}
+            />
           </View>
         ) : null}
 

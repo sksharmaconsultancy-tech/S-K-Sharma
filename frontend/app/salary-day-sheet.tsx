@@ -24,6 +24,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { api } from "@/src/api/client";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
+import WebDateField from "@/src/components/WebDateField";
 import { colors, radius, spacing, type } from "@/src/theme";
 
 type Cell = {
@@ -121,6 +122,9 @@ export default function SalaryDaySheetScreen() {
   const [search, setSearch] = useState("");
   // Iter 95 — user-requested date selection + explicit "Show" button.
   // Inputs display DD-MM-YYYY; range is APPLIED only when Show is pressed.
+  // Iter 291 — explicit Single Day mode (user request).
+  const [rangeMode, setRangeMode] = useState<"month" | "day" | "range">("month");
+  const [singleDay, setSingleDay] = useState<string>(""); // ISO YYYY-MM-DD
   const [fromDate, setFromDate] = useState<string>("");
   const [toDate, setToDate] = useState<string>("");
   const [applied, setApplied] = useState<{ from: string; to: string } | null>(null);
@@ -152,6 +156,12 @@ export default function SalaryDaySheetScreen() {
 
   // Iter 95 — "Show" pressed: validate dates and apply the range.
   const onShow = () => {
+    // Iter 291 — Single Day mode: one calendar date → that day only.
+    if (rangeMode === "day") {
+      if (!singleDay) { setApplied(null); return; }
+      setApplied({ from: singleDay, to: singleDay });
+      return;
+    }
     const fromIso = ddmmyyyyToIso(fromDate);
     const toIso = ddmmyyyyToIso(toDate);
     if (!fromIso && !toIso) {
@@ -236,7 +246,30 @@ export default function SalaryDaySheetScreen() {
         <Pressable style={styles.monthBtn} onPress={() => setMonth((m) => shiftMonth(m, 1))} testID="sds-next">
           <Ionicons name="chevron-forward" size={16} color={colors.onSurface} />
         </Pressable>
+        {/* Iter 291 — Full Month / Single Day / Date Range mode (user request) */}
+        <View style={styles.modeWrap}>
+          {([["month", "Full Month"], ["day", "Single Day"], ["range", "Date Range"]] as const).map(([k, lab]) => (
+            <Pressable
+              key={k}
+              onPress={() => {
+                setRangeMode(k);
+                if (k === "month") { setApplied(null); setSingleDay(""); setFromDate(""); setToDate(""); }
+              }}
+              style={[styles.modeBtn, rangeMode === k && styles.modeBtnOn]}
+              testID={`sds-mode-${k}`}
+            >
+              <Text style={[styles.modeTxt, rangeMode === k && styles.modeTxtOn]}>{lab}</Text>
+            </Pressable>
+          ))}
+        </View>
+        {rangeMode === "day" ? (
+          <View style={{ width: 170 }}>
+            <WebDateField value={singleDay} onChange={setSingleDay} testID="sds-single-day" />
+          </View>
+        ) : null}
         {/* Iter 95 — date selection + Show button (user request) */}
+        {rangeMode === "range" ? (
+          <>
         <TextInput
           style={styles.dateInput}
           value={fromDate}
@@ -257,10 +290,14 @@ export default function SalaryDaySheetScreen() {
           maxLength={10}
           testID="sds-to-date"
         />
+          </>
+        ) : null}
+        {rangeMode !== "month" ? (
         <Pressable style={styles.showBtn} onPress={onShow} testID="sds-show">
           <Ionicons name="eye" size={14} color="#fff" />
           <Text style={styles.showTxt}>Show</Text>
         </Pressable>
+        ) : null}
         {applied ? (
           <Pressable
             style={styles.clearBtn}
@@ -386,6 +423,15 @@ const styles = StyleSheet.create({
     borderColor: colors.border, alignItems: "center", justifyContent: "center",
   },
   monthTxt: { fontSize: 13, fontWeight: "800", color: colors.onSurface },
+  // Iter 291 — Full Month / Single Day / Date Range mode chips.
+  modeWrap: {
+    flexDirection: "row", borderWidth: 1, borderColor: colors.border,
+    borderRadius: 8, overflow: "hidden",
+  },
+  modeBtn: { paddingHorizontal: 10, paddingVertical: 7, backgroundColor: colors.surface },
+  modeBtnOn: { backgroundColor: colors.brandPrimary },
+  modeTxt: { fontSize: 11, fontWeight: "700", color: colors.onSurfaceSecondary },
+  modeTxtOn: { color: "#fff" },
   dateInput: {
     borderWidth: 1, borderColor: colors.border, borderRadius: 8,
     paddingHorizontal: 8, paddingVertical: 6, fontSize: 11.5,

@@ -98,6 +98,8 @@ type GridResp = {
   // Iter 94 — day-wise salary bottom row + grand total
   day_salary_totals?: Record<string, number>;
   salary_grand_total?: number;
+  // Iter 291 — day-wise Present Count bottom row.
+  day_present_counts?: Record<string, number>;
 };
 
 const currentMonth = () => {
@@ -988,6 +990,7 @@ export default function AttendanceGridScreen() {
                   onCellPress={(uid, name, date) => setRepair({ userId: uid, name, date })}
                 />
               ))}
+              <PresentCountFooter data={data} view={view} hideDays={hideDays} />
             </View>
           </ScrollView>
         </ScrollView>
@@ -1041,6 +1044,37 @@ const STICKY_TOP: any =
 // to the viewport on web, so their background stopped painting after ~day 25
 // (header turned blank/white past the 25th). Force rows to fit their content.
 const ROW_FIT: any = Platform.OS === "web" ? { minWidth: "max-content" } : null;
+
+// Iter 291 (user request) — Day-wise Present Count footer row for the
+// In/Out and Total-Duty-HRS reports: shows how many employees were present
+// on each day at the bottom of every day column.
+function PresentCountFooter({
+  data, view, hideDays,
+}: { data: GridResp; view: GridView; hideDays?: boolean }) {
+  if (hideDays || (view !== "inout" && view !== "hours")) return null;
+  const counts = data.day_present_counts || {};
+  const dayW = view === "inout" ? COL.day : COL.dayHours;
+  const total = data.day_labels.reduce((s, d) => s + (counts[d] || 0), 0);
+  return (
+    <View style={[styles.row, styles.footRow, ROW_FIT]} testID="present-count-footer">
+      <View style={[styles.cell, styles.footBg, { width: COL.sno }, stickyCol(LEFT.sno)]} />
+      <View style={[styles.cell, styles.footBg, { width: COL.name }, stickyCol(LEFT.name)]}>
+        <Text style={styles.footLbl}>Day-wise Present Count</Text>
+      </View>
+      <View style={[styles.cell, styles.footBg, { width: COL.father }, stickyCol(LEFT.father)]} />
+      <View style={[styles.cell, styles.footBg, { width: COL.dept }, stickyCol(LEFT.dept)]} />
+      <View style={[styles.cell, styles.footBg, { width: COL.bio }, stickyCol(LEFT.bio)]} />
+      {data.day_labels.map((d) => (
+        <View key={d} style={[styles.cell, styles.footBg, { width: dayW, alignItems: "center" }]}>
+          <Text style={styles.footCnt}>{counts[d] || 0}</Text>
+        </View>
+      ))}
+      <View style={[styles.cell, styles.footBg, { width: COL.sum, alignItems: "center" }]}>
+        <Text style={styles.footCnt}>{total}</Text>
+      </View>
+    </View>
+  );
+}
 
 function GridHeader({
   data,
@@ -1696,6 +1730,11 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.divider,
   },
   rowZebra: { backgroundColor: colors.surfaceSecondary },
+  // Iter 291 — Day-wise Present Count footer row.
+  footRow: { borderTopWidth: 2, borderTopColor: colors.brandPrimary },
+  footBg: { backgroundColor: "rgba(37,99,235,0.07)" },
+  footLbl: { color: colors.brandPrimary, fontWeight: "800", fontSize: 11 },
+  footCnt: { color: colors.brandPrimary, fontWeight: "800", fontSize: 11.5, textAlign: "center" },
   cell: {
     paddingVertical: 4,
     paddingHorizontal: 6,

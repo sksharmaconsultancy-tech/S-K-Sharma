@@ -88,6 +88,8 @@ async def _employees(company_id: str) -> List[dict]:
         {"_id": 0, "user_id": 1, "employee_code": 1, "bio_code": 1, "name": 1,
          "father_name": 1, "designation": 1, "department": 1,
          "contractor_name": 1, "employee_type": 1, "doj": 1, "exit_date": 1,
+         "resign_date": 1, "date_of_leaving": 1, "leaving_date": 1,
+         "employment_status": 1,
          "shift_start": 1, "shift_end": 1, "shift_name": 1, "full_day_hrs": 1,
          "salary_structure_actual": 1, "salary_monthly": 1,
          "compliance_gross": 1, "is_onroll": 1},
@@ -124,6 +126,7 @@ async def bulk_employees(
             "contractor_name": u.get("contractor_name"),
             "doj": u.get("doj"),
             "exit_date": u.get("exit_date"),
+            "is_resigned": _is_resigned(u),
             "shift_name": u.get("shift_name"),
             "shift_start": u.get("shift_start"),
             "shift_end": u.get("shift_end"),
@@ -710,16 +713,107 @@ async def salary_apply_excel(
 # ---------------------------------------------------------------------------
 # 3) BULK TRANSFER (between firms)
 # ---------------------------------------------------------------------------
+_EXIT_DATE_FIELDS = ("exit_date", "resign_date", "date_of_leaving", "leaving_date")
+_RESIGNED_STATUSES = {"exited", "resigned", "terminated", "inactive", "left"}
+
+
+def _is_resigned(u: dict) -> bool:
+    if any(u.get(f) for f in _EXIT_DATE_FIELDS):
+        return True
+    return str(u.get("employment_status") or "").strip().lower() in _RESIGNED_STATUSES
+
+
+async def _next_employee_code(company_id: str) -> int:
+    """Highest numeric employee code in the firm (0 if none)."""
+    mx = 0
+    async for r in db.users.find(
+        {"role": "employee", "company_id": company_id},
+        {"_id": 0, "employee_code": 1},
+    ):
+        c = str(r.get("employee_code") or "").strip()
+        if c.isdigit():
+            mx = max(mx, int(c))
+    return mx
+
+
+@router.get("/employee-search")
+async def bulk_employee_search(
+    q: str = Query(...),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 291 (user request) — GLOBAL employee search across all firms by
+    Aadhaar / PAN / Mobile / ESI No. / UAN (name & code also work). Returns
+    each match with its firm + full service record (old companies) so the
+    admin can transfer the employee to a new firm."""
+    import re as _re
+    admin = await _auth(authorization)
+    term = (q or "").strip()
+    if len(term) < 3:
+        raise HTTPException(status_code=400, detail="Type at least 3 characters")
+    rx = {"$regex": _re.escape(term), "$options": "i"}
+    flt: Dict[str, Any] = {"role": "employee", "$or": [
+        {"aadhaar_no": rx}, {"pan_no": rx}, {"uan_no": rx}, {"esi_ip_no": rx},
+        {"phone": rx}, {"phone_e164": rx}, {"name": rx}, {"employee_code": rx},
+    ]}
+    if admin.get("role") == "sub_admin" \
+            and admin.get("sub_admin_company_scope") == "restricted":
+        flt["company_id"] = {"$in": admin.get("sub_admin_company_ids") or []}
+    rows = await db.users.find(flt, {
+        "_id": 0, "user_id": 1, "name": 1, "employee_code": 1, "company_id": 1,
+        "designation": 1, "department": 1, "doj": 1, "exit_date": 1,
+        "resign_date": 1, "date_of_leaving": 1, "leaving_date": 1,
+        "employment_status": 1, "aadhaar_no": 1, "pan_no": 1, "uan_no": 1,
+        "esi_ip_no": 1, "phone": 1, "phone_e164": 1, "service_history": 1,
+    }).to_list(50)
+    cids = {r.get("company_id") for r in rows if r.get("company_id")}
+    for r in rows:
+        for h in (r.get("service_history") or []):
+            if h.get("company_id"):
+                cids.add(h["company_id"])
+    names = {c["company_id"]: c.get("name") async for c in db.companies.find(
+        {"company_id": {"$in": list(cids)}}, {"_id": 0, "company_id": 1, "name": 1})}
+    out = []
+    for r in rows:
+        hist = []
+        for h in (r.get("service_history") or []):
+            hist.append({**h, "company_name": h.get("company_name")
+                         or names.get(h.get("company_id") or "", "—")})
+        out.append({
+            "user_id": r["user_id"], "name": r.get("name"),
+            "employee_code": r.get("employee_code"),
+            "company_id": r.get("company_id"),
+            "company_name": names.get(r.get("company_id") or "", "—"),
+            "designation": r.get("designation"), "department": r.get("department"),
+            "doj": r.get("doj"),
+            "exit_date": r.get("exit_date") or r.get("resign_date")
+                         or r.get("date_of_leaving") or r.get("leaving_date"),
+            "is_resigned": _is_resigned(r),
+            "aadhaar_no": r.get("aadhaar_no"), "pan_no": r.get("pan_no"),
+            "uan_no": r.get("uan_no"), "esi_ip_no": r.get("esi_ip_no"),
+            "phone": r.get("phone_e164") or r.get("phone"),
+            "service_history": hist,
+        })
+    return {"rows": out}
+
+
 @router.post("/transfer")
 async def bulk_transfer(
     payload: Dict[str, Any] = Body(...),
     authorization: Optional[str] = Header(None),
 ):
+    """Iter 291 (user rules) — transfer RESIGNED employees to a new firm:
+      * Only RESIGNED employees may be transferred — active ones error out.
+      * The employee JOINS the destination firm with a NEW employee code
+        (next free numeric code, or an explicit code via ``new_codes``).
+      * The old employment is preserved in ``service_history`` (old firm,
+        old code, DOJ, exit date) — full master data moves with them.
+    """
     from_company = str(payload.get("company_id") or "")
     to_company = str(payload.get("to_company_id") or "")
     user_ids = payload.get("user_ids") or []
     effective_date = str(payload.get("effective_date") or "")
     note = str(payload.get("note") or "")
+    new_codes: Dict[str, Any] = payload.get("new_codes") or {}
     admin = await _auth(authorization, from_company, write=True)
     if admin.get("role") == "sub_admin" and not sub_admin_can_touch_company(admin, to_company):
         raise HTTPException(status_code=403, detail="Destination firm not in your scope")
@@ -730,27 +824,79 @@ async def bulk_transfer(
     dest = await db.companies.find_one({"company_id": to_company}, {"_id": 0, "name": 1})
     if not dest:
         raise HTTPException(status_code=404, detail="Destination firm not found")
+    src = await db.companies.find_one({"company_id": from_company}, {"_id": 0, "name": 1})
 
-    moved = 0
+    dest_codes = {str(r.get("employee_code") or "").strip()
+                  async for r in db.users.find(
+                      {"role": "employee", "company_id": to_company},
+                      {"_id": 0, "employee_code": 1})}
+    next_code = await _next_employee_code(to_company)
+
+    moved, blocked, transfers = 0, [], []
     for uid in user_ids:
         u = await db.users.find_one(
             {"user_id": uid, "company_id": from_company, "role": "employee"},
-            {"_id": 0, "user_id": 1, "employee_code": 1, "name": 1})
+            {"_id": 0})
         if not u:
             continue
-        await db.users.update_one({"user_id": uid}, {"$set": {
-            "company_id": to_company,
-            "transferred_from": from_company,
+        if not _is_resigned(u):
+            blocked.append(f"{u.get('name')} (#{u.get('employee_code')})")
+            continue
+        # New employee code in the destination firm.
+        code = str(new_codes.get(uid) or "").strip()
+        if code and code in dest_codes:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Employee code '{code}' already exists in {dest.get('name')}")
+        if not code:
+            next_code += 1
+            while str(next_code) in dest_codes:
+                next_code += 1
+            code = str(next_code)
+        dest_codes.add(code)
+        # Preserve the old employment as a service record.
+        hist_entry = {
+            "company_id": from_company,
+            "company_name": (src or {}).get("name"),
+            "employee_code": u.get("employee_code"),
+            "doj": u.get("doj"),
+            "exit_date": u.get("exit_date") or u.get("resign_date")
+                         or u.get("date_of_leaving") or u.get("leaving_date"),
+            "exit_reason": u.get("exit_reason"),
             "transferred_at": now_iso(),
-            "transfer_effective_date": effective_date or None,
-            "transfer_note": note or None,
-            "transferred_by": admin["user_id"],
-        }})
+        }
+        await db.users.update_one({"user_id": uid}, {
+            "$set": {
+                "company_id": to_company,
+                "employee_code": code,
+                "doj": effective_date or now_iso()[:10],
+                "employment_status": "active",
+                "exit_date": None, "resign_date": None,
+                "date_of_leaving": None, "leaving_date": None,
+                "exit_reason": None, "offboarded": False,
+                "transferred_from": from_company,
+                "transferred_at": now_iso(),
+                "transfer_effective_date": effective_date or None,
+                "transfer_note": note or None,
+                "transferred_by": admin["user_id"],
+            },
+            "$push": {"service_history": hist_entry},
+        })
+        transfers.append({"name": u.get("name"),
+                          "old_code": u.get("employee_code"), "new_code": code})
         moved += 1
-    await _log(admin, "transfer", from_company, moved,
-               f"Transferred {moved} employees to {dest.get('name')}"
-               f"{' w.e.f. ' + effective_date if effective_date else ''}")
-    return {"ok": True, "moved": moved, "to_company_name": dest.get("name")}
+    if blocked and not moved:
+        raise HTTPException(
+            status_code=400,
+            detail="Only RESIGNED employees can be transferred. Active: "
+                   + ", ".join(blocked[:10]))
+    if moved:
+        await _log(admin, "transfer", from_company, moved,
+                   f"Transferred {moved} employees to {dest.get('name')}"
+                   f"{' w.e.f. ' + effective_date if effective_date else ''}"
+                   + (f" — blocked (active): {', '.join(blocked[:5])}" if blocked else ""))
+    return {"ok": True, "moved": moved, "blocked": blocked,
+            "transfers": transfers, "to_company_name": dest.get("name")}
 
 
 # ---------------------------------------------------------------------------

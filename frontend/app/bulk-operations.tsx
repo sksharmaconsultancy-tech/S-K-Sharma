@@ -30,6 +30,7 @@ import { api } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import MonthPicker from "@/src/components/MonthPicker";
+import CompanyPicker from "@/src/components/CompanyPicker";
 import { colors, radius } from "@/src/theme";
 
 type Tab = "attendance" | "salary" | "transfer" | "resign" | "shift" | "history";
@@ -217,6 +218,17 @@ export default function BulkOperationsScreen() {
   const [destCompany, setDestCompany] = useState("");
   const [transferDate, setTransferDate] = useState("");
   const [transferNote, setTransferNote] = useState("");
+  // Iter 291 (user request) — Transfer redesign: pick OLD firm → employee
+  // list (Active/Resigned filter) → NEW firm; only RESIGNED employees can
+  // move; plus a GLOBAL search by Aadhaar / PAN / Mobile / ESI / UAN.
+  const [trMode, setTrMode] = useState<"firm" | "search">("firm");
+  const [srcCompany, setSrcCompany] = useState("");
+  const [srcEmps, setSrcEmps] = useState<any[]>([]);
+  const [srcFilter, setSrcFilter] = useState<"all" | "active" | "resigned">("all");
+  const [trSel, setTrSel] = useState<Set<string>>(new Set());
+  const [trSearchQ, setTrSearchQ] = useState("");
+  const [trResults, setTrResults] = useState<any[]>([]);
+  const [trPicked, setTrPicked] = useState<any | null>(null);
   const [exitDate, setExitDate] = useState("");
   const [exitReason, setExitReason] = useState("");
   const [shifts, setShifts] = useState<any[]>([]);
@@ -408,26 +420,88 @@ export default function BulkOperationsScreen() {
     });
 
   // ------------------------- transfer / resign / shift -------------------------
+  // Iter 291 — load the OLD firm's employees for the transfer picker.
+  useEffect(() => {
+    if (!srcCompany) { setSrcEmps([]); setTrSel(new Set()); return; }
+    (async () => {
+      try {
+        const r = await api<{ rows: any[] }>(
+          `/admin/bulk-ops/employees?company_id=${encodeURIComponent(srcCompany)}`);
+        setSrcEmps(r.rows || []);
+        setTrSel(new Set());
+      } catch (e: any) {
+        setMsg({ kind: "err", text: e?.message || "Failed to load employees" });
+      }
+    })();
+  }, [srcCompany]);
+
+  const toggleTransferEmp = (e: any) => {
+    if (!e.is_resigned) {
+      setMsg({
+        kind: "err",
+        text: `${e.name} is ACTIVE — only RESIGNED employees can be transferred. Set their exit date first (Resignation tab).`,
+      });
+      return;
+    }
+    setMsg(null);
+    setTrSel((prev) => {
+      const n = new Set(prev);
+      if (n.has(e.user_id)) n.delete(e.user_id); else n.add(e.user_id);
+      return n;
+    });
+  };
+
+  const searchEmployees = () =>
+    run(async () => {
+      if (trSearchQ.trim().length < 3) {
+        setMsg({ kind: "err", text: "Type at least 3 characters (Aadhaar / PAN / Mobile / ESI / UAN / name)." });
+        return;
+      }
+      setTrPicked(null);
+      const r = await api<{ rows: any[] }>(
+        `/admin/bulk-ops/employee-search?q=${encodeURIComponent(trSearchQ.trim())}`);
+      setTrResults(r.rows || []);
+      if ((r.rows || []).length === 0) setMsg({ kind: "err", text: "No employee matched." });
+    });
+
   const applyTransfer = () =>
     run(async () => {
-      if (!guardFirm()) return;
-      if (selected.size === 0 || !destCompany) {
-        setMsg({ kind: "err", text: "Select employees and a destination firm." });
+      const fromCid = trMode === "firm" ? srcCompany : trPicked?.company_id;
+      const ids = trMode === "firm" ? Array.from(trSel) : trPicked ? [trPicked.user_id] : [];
+      if (!fromCid || ids.length === 0 || !destCompany) {
+        setMsg({ kind: "err", text: "Pick the old firm, employee(s) and the new firm." });
+        return;
+      }
+      if (destCompany === fromCid) {
+        setMsg({ kind: "err", text: "New firm must be different from the old firm." });
         return;
       }
       const r = await api<any>("/admin/bulk-ops/transfer", {
         method: "POST",
         body: {
-          company_id: cid,
+          company_id: fromCid,
           to_company_id: destCompany,
-          user_ids: Array.from(selected),
+          user_ids: ids,
           effective_date: transferDate,
           note: transferNote,
         },
       });
-      setSelected(new Set());
-      loadEmps();
-      setMsg({ kind: "ok", text: `${r.moved} employees transferred to ${r.to_company_name}.` });
+      setTrSel(new Set());
+      setTrPicked(null);
+      setTrResults([]);
+      if (srcCompany) {
+        const rr = await api<{ rows: any[] }>(
+          `/admin/bulk-ops/employees?company_id=${encodeURIComponent(srcCompany)}`).catch(() => null);
+        if (rr) setSrcEmps(rr.rows || []);
+      }
+      const codes = (r.transfers || [])
+        .map((t: any) => `${t.name}: #${t.old_code} → #${t.new_code}`).join(", ");
+      const blockedTxt = (r.blocked || []).length
+        ? ` Blocked (active): ${r.blocked.join(", ")}.` : "";
+      setMsg({
+        kind: "ok",
+        text: `${r.moved} employee(s) joined ${r.to_company_name} with new code(s) — ${codes}.${blockedTxt}`,
+      });
     });
 
   const applyResign = () =>
@@ -473,7 +547,7 @@ export default function BulkOperationsScreen() {
     return <Redirect href="/" />;
   }
 
-  const needsPicker = ["salary", "transfer", "resign", "shift"].includes(tab)
+  const needsPicker = ["salary", "resign", "shift"].includes(tab)
     && !(tab === "salary" && salMode === "excel");
 
   return (
@@ -689,42 +763,162 @@ export default function BulkOperationsScreen() {
 
         {/* ------------------- TRANSFER ------------------- */}
         {tab === "transfer" ? (
-          <View style={st.card}>
-            <Text style={st.section}>Destination firm</Text>
-            <View style={st.rowWrap}>
-              {companies
-                .filter((c: any) => c.company_id !== cid)
-                .map((c: any) => (
-                  <Chip
-                    key={c.company_id}
-                    label={c.name}
-                    on={destCompany === c.company_id}
-                    onPress={() => setDestCompany(c.company_id)}
-                  />
-                ))}
-            </View>
-            <View style={st.rowWrap}>
-              <TextInput
-                style={st.input}
-                placeholder="Effective date YYYY-MM-DD (optional)"
-                placeholderTextColor="#94A3B8"
-                value={transferDate}
-                onChangeText={setTransferDate}
-              />
-              <TextInput
-                style={[st.input, { flex: 1 }]}
-                placeholder="Note (optional)"
-                placeholderTextColor="#94A3B8"
-                value={transferNote}
-                onChangeText={setTransferNote}
-              />
-            </View>
-            <Pressable style={st.primaryBtn} onPress={applyTransfer} disabled={busy}>
-              {busy ? <ActivityIndicator color="#fff" size="small" /> : (
-                <Text style={st.primaryBtnTxt}>Transfer {selected.size} employees</Text>
+          <>
+            <View style={st.card}>
+              <View style={st.rowWrap}>
+                <Chip label="From Firm (list)" on={trMode === "firm"} onPress={() => { setTrMode("firm"); setMsg(null); }} />
+                <Chip label="Search Employee (Aadhaar / PAN / Mobile / ESI / UAN)" on={trMode === "search"} onPress={() => { setTrMode("search"); setMsg(null); }} />
+              </View>
+
+              {trMode === "firm" ? (
+                <>
+                  <Text style={st.section}>1 · Old Company (transfer FROM)</Text>
+                  <CompanyPicker value={srcCompany} onChange={(v: any) => setSrcCompany(!v || v === "all" ? "" : v)} />
+                  {srcCompany ? (
+                    <>
+                      <View style={[st.rowWrap, { marginTop: 10 }]}>
+                        <Chip label={`All (${srcEmps.length})`} on={srcFilter === "all"} onPress={() => setSrcFilter("all")} />
+                        <Chip label={`Active (${srcEmps.filter((e) => !e.is_resigned).length})`} on={srcFilter === "active"} onPress={() => setSrcFilter("active")} />
+                        <Chip label={`Resigned (${srcEmps.filter((e) => e.is_resigned).length})`} on={srcFilter === "resigned"} onPress={() => setSrcFilter("resigned")} />
+                      </View>
+                      <Text style={st.hint}>
+                        Only RESIGNED employees can be transferred — tapping an active
+                        employee shows an error. Set exit dates in the Resignation tab first.
+                      </Text>
+                      <View style={st.pickerList}>
+                        <ScrollView nestedScrollEnabled style={{ maxHeight: 320 }}>
+                          {srcEmps
+                            .filter((e) => srcFilter === "all" ? true : srcFilter === "resigned" ? e.is_resigned : !e.is_resigned)
+                            .map((e) => {
+                              const on = trSel.has(e.user_id);
+                              return (
+                                <Pressable key={e.user_id} style={[st.empRow, on && st.empRowOn]}
+                                  onPress={() => toggleTransferEmp(e)} testID={`tr-emp-${e.employee_code}`}>
+                                  <Ionicons
+                                    name={on ? "checkbox" : e.is_resigned ? "square-outline" : "close-circle-outline"}
+                                    size={18}
+                                    color={on ? colors.brandPrimary : e.is_resigned ? "#94A3B8" : "#DC2626"}
+                                  />
+                                  <Text style={st.empCode}>{e.employee_code || "—"}</Text>
+                                  <Text style={st.empName} numberOfLines={1}>{e.name}</Text>
+                                  <Text style={st.empMeta} numberOfLines={1}>{e.designation || e.department || ""}</Text>
+                                  <View style={[st.statusPill, e.is_resigned ? st.pillResigned : st.pillActive]}>
+                                    <Text style={[st.statusPillTxt, { color: e.is_resigned ? "#991B1B" : "#065F46" }]}>
+                                      {e.is_resigned ? `RESIGNED${e.exit_date ? ` ${e.exit_date}` : ""}` : "ACTIVE"}
+                                    </Text>
+                                  </View>
+                                </Pressable>
+                              );
+                            })}
+                          {srcEmps.length === 0 ? <Text style={[st.hint, { padding: 10 }]}>No employees in this firm.</Text> : null}
+                        </ScrollView>
+                      </View>
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <Text style={st.section}>1 · Search the old employee record</Text>
+                  <View style={st.rowWrap}>
+                    <TextInput
+                      style={[st.input, { flex: 1 }]}
+                      placeholder="Aadhaar / PAN / Mobile / ESI No. / UAN / name…"
+                      placeholderTextColor="#94A3B8"
+                      value={trSearchQ}
+                      onChangeText={setTrSearchQ}
+                      autoCapitalize="none"
+                      testID="tr-search-input"
+                    />
+                    <Pressable style={[st.primaryBtn, { marginTop: 0, paddingHorizontal: 16 }]} onPress={searchEmployees} disabled={busy} testID="tr-search-btn">
+                      {busy ? <ActivityIndicator color="#fff" size="small" /> : <Text style={st.primaryBtnTxt}>Search</Text>}
+                    </Pressable>
+                  </View>
+                  {trResults.map((e) => {
+                    const picked = trPicked?.user_id === e.user_id;
+                    return (
+                      <Pressable key={e.user_id}
+                        style={[st.searchCard, picked && st.searchCardOn]}
+                        onPress={() => {
+                          if (!e.is_resigned) {
+                            setMsg({ kind: "err", text: `${e.name} is ACTIVE in ${e.company_name} — only RESIGNED employees can be transferred.` });
+                            return;
+                          }
+                          setMsg(null);
+                          setTrPicked(picked ? null : e);
+                        }}
+                        testID={`tr-result-${e.employee_code}`}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <Text style={[st.empName, { flex: 0, fontWeight: "700" }]}>{e.name} · #{e.employee_code}</Text>
+                          <View style={[st.statusPill, e.is_resigned ? st.pillResigned : st.pillActive]}>
+                            <Text style={[st.statusPillTxt, { color: e.is_resigned ? "#991B1B" : "#065F46" }]}>
+                              {e.is_resigned ? "RESIGNED" : "ACTIVE"}
+                            </Text>
+                          </View>
+                          {picked ? <Ionicons name="checkmark-circle" size={18} color={colors.brandPrimary} /> : null}
+                        </View>
+                        <Text style={st.hint}>
+                          Current firm: {e.company_name} · DOJ {e.doj || "—"}{e.exit_date ? ` · Exit ${e.exit_date}` : ""}
+                        </Text>
+                        <Text style={st.hint}>
+                          {[e.aadhaar_no && `Aadhaar ${e.aadhaar_no}`, e.pan_no && `PAN ${e.pan_no}`,
+                            e.uan_no && `UAN ${e.uan_no}`, e.esi_ip_no && `ESI ${e.esi_ip_no}`,
+                            e.phone && `Mob ${e.phone}`].filter(Boolean).join(" · ") || "No ID numbers on file"}
+                        </Text>
+                        {(e.service_history || []).length > 0 ? (
+                          <View style={st.histBox}>
+                            <Text style={[st.hint, { fontWeight: "700", color: "#334155" }]}>Service record (old companies):</Text>
+                            {e.service_history.map((h: any, i: number) => (
+                              <Text key={i} style={st.hint}>
+                                • {h.company_name} — code #{h.employee_code || "—"} · {h.doj || "?"} → {h.exit_date || "?"}
+                              </Text>
+                            ))}
+                          </View>
+                        ) : null}
+                      </Pressable>
+                    );
+                  })}
+                </>
               )}
-            </Pressable>
-          </View>
+            </View>
+
+            <View style={st.card}>
+              <Text style={st.section}>2 · New Company (transfer TO)</Text>
+              <CompanyPicker value={destCompany} onChange={(v: any) => setDestCompany(!v || v === "all" ? "" : v)} />
+              <View style={[st.rowWrap, { marginTop: 10 }]}>
+                <TextInput
+                  style={st.input}
+                  placeholder="Joining date YYYY-MM-DD (optional)"
+                  placeholderTextColor="#94A3B8"
+                  value={transferDate}
+                  onChangeText={setTransferDate}
+                />
+                <TextInput
+                  style={[st.input, { flex: 1 }]}
+                  placeholder="Note (optional)"
+                  placeholderTextColor="#94A3B8"
+                  value={transferNote}
+                  onChangeText={setTransferNote}
+                />
+              </View>
+              <Text style={st.hint}>
+                The employee JOINS the new company with the NEXT FREE employee code —
+                their whole master data moves, and the old employment stays in their
+                service record.
+              </Text>
+              <Pressable
+                style={[st.primaryBtn,
+                  ((trMode === "firm" ? trSel.size === 0 : !trPicked) || !destCompany) && { opacity: 0.5 }]}
+                onPress={applyTransfer}
+                disabled={busy || (trMode === "firm" ? trSel.size === 0 : !trPicked) || !destCompany}
+                testID="tr-apply">
+                {busy ? <ActivityIndicator color="#fff" size="small" /> : (
+                  <Text style={st.primaryBtnTxt}>
+                    Transfer {trMode === "firm" ? trSel.size : trPicked ? 1 : 0} employee(s)
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          </>
         ) : null}
 
         {/* ------------------- RESIGNATION ------------------- */}
@@ -907,4 +1101,17 @@ const st = StyleSheet.create({
   },
   histDetail: { fontSize: 13, color: "#0F172A" },
   histMeta: { fontSize: 11.5, color: "#94A3B8", marginTop: 2 },
+  // Iter 291 — transfer redesign.
+  statusPill: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  pillActive: { backgroundColor: "#D1FAE5" },
+  pillResigned: { backgroundColor: "#FEE2E2" },
+  statusPillTxt: { fontSize: 10, fontWeight: "800" },
+  searchCard: {
+    borderWidth: 1, borderColor: "#E2E8F0", borderRadius: 10,
+    padding: 12, marginTop: 10, backgroundColor: "#fff",
+  },
+  searchCardOn: { borderColor: colors.brandPrimary, backgroundColor: "#F0F7FF" },
+  histBox: {
+    marginTop: 6, borderTopWidth: 1, borderTopColor: "#F1F5F9", paddingTop: 6,
+  },
 });

@@ -2,16 +2,18 @@
  *
  * Strategy (deliberately conservative so fresh deploys always show up):
  *   • /api/* and non-GET requests  → network only, NEVER cached.
- *   • navigations (HTML)           → network first, cached copy only when offline.
+ *   • navigations (HTML)           → network first WITH A 3.5s TIMEOUT —
+ *     if the network is slow/stalled the cached shell opens instantly
+ *     (Iter 291: fixes "PWA sometimes won't open" on weak connections).
  *   • static assets (js/css/img)   → stale-while-revalidate.
  */
-const CACHE = "sks-pwa-v3";
+const CACHE = "sks-pwa-v4";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE).then((c) =>
-      c.addAll(["/manifest.json", "/icons/icon-192.png", "/icons/icon-512.png"]).catch(() => {}),
+      c.addAll(["/", "/manifest.json", "/icons/icon-192.png", "/icons/icon-512.png"]).catch(() => {}),
     ),
   );
 });
@@ -36,16 +38,30 @@ self.addEventListener("fetch", (event) => {
 
   // Navigations: network first (BYPASSING the HTTP cache — mobile PWAs
   // otherwise resurrect a stale index.html pointing at an old JS bundle)
-  // so new deploys are picked up immediately.
+  // so new deploys are picked up immediately. Iter 291 — a 3.5 second
+  // TIMEOUT races the network: on slow/stalled connections the cached
+  // shell opens instantly instead of hanging on a white screen (the
+  // network fetch still completes in the background and refreshes the
+  // cache for the next open).
   if (req.mode === "navigate") {
+    const networkFetch = fetch(req, { cache: "no-store" })
+      .then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+        return res;
+      });
     event.respondWith(
-      fetch(req, { cache: "no-store" })
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
-          return res;
-        })
-        .catch(() => caches.match(req).then((hit) => hit || caches.match("/"))),
+      Promise.race([
+        networkFetch.catch(() => null),
+        new Promise((resolve) => setTimeout(() => resolve(null), 3500)),
+      ]).then((res) => {
+        if (res) return res;
+        // Slow or offline → serve the cached shell immediately; keep the
+        // network fetch alive so the cache refreshes for next time.
+        return caches.match(req).then((hit) =>
+          hit || caches.match("/").then((root) => root || networkFetch),
+        );
+      }),
     );
     return;
   }

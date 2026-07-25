@@ -24,6 +24,7 @@ import { api, apiBinary } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import MonthPicker from "@/src/components/MonthPicker";
+import ShiftApprovalsScreen from "./shift-approvals";
 import { colors } from "@/src/theme";
 
 const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
@@ -35,7 +36,47 @@ const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
   cancelled: { bg: "#F1F5F9", fg: "#475569" },
 };
 
+// Iter 291 (user request) — MERGED screen: "Shift Change Requests" and
+// "Shift Change Approvals" are now ONE menu option with a segment switch.
 export default function ShiftChangeAdminScreen() {
+  const [seg, setSeg] = useState<"requests" | "approvals">("requests");
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.surface }}>
+      <View style={segSt.bar}>
+        {([["requests", "Change Requests", "swap-horizontal"],
+           ["approvals", "Swap Approvals", "people-outline"]] as const).map(([k, lab, icon]) => (
+          <Pressable
+            key={k}
+            onPress={() => setSeg(k)}
+            style={[segSt.btn, seg === k && segSt.btnOn]}
+            testID={`shift-seg-${k}`}
+          >
+            <Ionicons name={icon as any} size={14} color={seg === k ? "#fff" : colors.brandPrimary} />
+            <Text style={[segSt.txt, seg === k && segSt.txtOn]}>{lab}</Text>
+          </Pressable>
+        ))}
+      </View>
+      {seg === "requests" ? <ShiftChangeRequestsView /> : <ShiftApprovalsScreen />}
+    </View>
+  );
+}
+
+const segSt = StyleSheet.create({
+  bar: {
+    flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingTop: 10,
+    paddingBottom: 4, backgroundColor: colors.surface,
+  },
+  btn: {
+    flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14,
+    paddingVertical: 8, borderRadius: 10, borderWidth: 1,
+    borderColor: "rgba(37,99,235,0.35)", backgroundColor: "rgba(37,99,235,0.05)",
+  },
+  btnOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  txt: { fontSize: 12.5, fontWeight: "700", color: colors.brandPrimary },
+  txtOn: { color: "#fff" },
+});
+
+function ShiftChangeRequestsView() {
   const { user, loading } = useAuth();
   const { selectedCompanyId } = useSelectedCompany();
   const [rows, setRows] = useState<any[]>([]);
