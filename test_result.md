@@ -213,3 +213,8 @@ See `/app/memory/test_credentials.md`. Super admin
 - Frontend E2E pass: /employee-detail-slip (sections, "—" placeholders, FYTD, nav 1/127, exports, email input);
   /compliance-salary-run frozen badge + FREEZE band columns + totals.
 - Test data cleaned by testing agent; ot_allowed restored true. No bugs found.
+
+## Iter 311 — PWA speed (code splitting + gzip)
+- Static+asyncRoutes production export verified with local SPA server + API proxy: root page,
+  deep link /admin-pin-login, password login, /employee-detail-slip and /salary-register lazy
+  chunks all load, no console/page errors. Dev preview (Metro) verified after app.json change.

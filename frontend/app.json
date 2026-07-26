@@ -47,7 +47,14 @@
     "newArchEnabled": true,
     "orientation": "portrait",
     "plugins": [
-      "expo-router",
+      [
+        "expo-router",
+        {
+          "asyncRoutes": {
+            "web": "production"
+          }
+        }
+      ],
       "expo-secure-store",
       "expo-local-authentication",
       [
@@ -85,7 +92,7 @@
     "web": {
       "bundler": "metro",
       "favicon": "./assets/images/favicon.png",
-      "output": "single"
+      "output": "static"
     }
   }
 }

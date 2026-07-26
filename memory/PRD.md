@@ -1653,3 +1653,16 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - deps: qrcode==8.2 added (requirements.txt). Deploy script: /app/deploy_vps_iter310.sh (installs qrcode).
 - Tested: 10/10 pytest (tests/test_iter310_freeze_and_slip.py) + web E2E — ALL PASS, data cleaned.
 - Phase 2 backlog: add missing master fields + barcode/timeline/audit/dark mode; WhatsApp API integration.
+
+## Iter 311 — PWA Speed Upgrade (user: "PWA employee and Employer working Slow")
+- Root cause: web export was a SINGLE 5.5 MB JS bundle (1.34 MB gz) + VPS nginx had no gzip.
+- app.json: web.output "single" → "static"; expo-router plugin asyncRoutes {"web":"production"}
+  → per-route code splitting in production export (158 chunks; initial = entry 272KB gz +
+  __common 463KB gz + _layout 58KB gz ≈ 790KB gz, screens lazy-load 5–25KB gz chunks;
+  after deploys unchanged chunks stay browser-cached).
+- Dev preview (Metro) unaffected (asyncRoutes production-only). Verified prod build E2E via local
+  SPA server: login → portal-dashboard → employee-detail-slip → salary-register, zero page errors.
+- /app/deploy_vps_iter311.sh: exports split build, precompresses assets (gzip -9 .gz kept alongside),
+  patches nginx idempotently (sks-gzip-fix marker: gzip on + gzip_static on + gzip_types) with
+  nginx -t rollback safety; keeps iter295 no-cache index.html / immutable hashed assets.
+- temp_bundle.py kind=script now serves deploy_vps_iter311.sh.
