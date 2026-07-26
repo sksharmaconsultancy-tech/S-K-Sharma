@@ -1609,3 +1609,12 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Legacy Salary Records: firm SEARCH box + "Bulk lock firms" multi-select mode
   ("Select all unlocked", per-chip checkboxes, Lock N selected firms with confirm).
   Backend lock-compliance now accepts company_ids[] (BulkLockBody) and returns per_firm counts.
+
+## Iter 308b
+- report-formats.tsx now renders ALL report groups dynamically (was hardcoded to PF+ESIC only) —
+  fixes "Salary Report Format 1 not showing for edit".
+- Added "salary_register_module" (dynamic Salary Register) to Report Formats (title-only), wired
+  title override into export.pdf + email.
+- Salary Register PDF now has a LAST-PAGE SUMMARY in the Option-2 style: boxed head-wise totals
+  (earnings/deductions/employer), days/net, RUPEES in words (gross+net), Checked-by/Authorised
+  Signatory strip (_summary_flowables in routes/salary_register.py). Verified: 4-page PDF, summary text extracted.

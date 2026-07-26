@@ -24,9 +24,20 @@ type ReportItem = {
 };
 
 const GROUP_ICONS: Record<string, any> = {
+  "Salary Reports": "cash-outline",
   "PF Reports": "shield-checkmark-outline",
   "ESIC Reports": "medkit-outline",
+  "Attendance Reports": "time-outline",
+  "CLRA Registers": "book-outline",
+  "Bonus Registers": "gift-outline",
 };
+
+// Iter 308 (user) — show EVERY report group (Salary / PF / ESIC /
+// Attendance / CLRA / Bonus…), not just PF + ESIC.
+const GROUP_PREF = [
+  "Salary Reports", "PF Reports", "ESIC Reports",
+  "Attendance Reports", "CLRA Registers", "Bonus Registers",
+];
 
 export default function ReportFormatsScreen() {
   const router = useRouter();
@@ -86,7 +97,14 @@ export default function ReportFormatsScreen() {
         {listLoading ? (
           <ActivityIndicator style={{ marginTop: 24 }} color={colors.brandPrimary} />
         ) : (
-          ["PF Reports", "ESIC Reports"].map((grp) => {
+          (() => {
+            const present = new Set(reports.map((r) => r.group));
+            const ordered = [
+              ...GROUP_PREF.filter((g) => present.has(g)),
+              ...[...present].filter((g) => !GROUP_PREF.includes(g)).sort(),
+            ];
+            return ordered;
+          })().map((grp) => {
             const items = reports.filter((r) => r.group === grp);
             if (!items.length) return null;
             return (

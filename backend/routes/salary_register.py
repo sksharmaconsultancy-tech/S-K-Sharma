@@ -609,13 +609,13 @@ async def export_xlsx(
 
 def _pdf_bytes(comp: str, source: str, month: str,
                rows: List[Dict[str, Any]], columns: List[Dict[str, Any]],
-               filt_bits: List[str]) -> bytes:
+               filt_bits: List[str], title_override: str = "") -> bytes:
     """A3-landscape Salary Register PDF (shared by download + email)."""
     from reportlab.lib import colors as rl_colors
     from reportlab.lib.pagesizes import A3, landscape
     from reportlab.lib.units import mm
     from reportlab.platypus import (
-        Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+        PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
     )
     from reportlab.lib.styles import getSampleStyleSheet
 
@@ -626,7 +626,7 @@ def _pdf_bytes(comp: str, source: str, month: str,
     )
     styles = getSampleStyleSheet()
     title = Paragraph(
-        f"<b>{comp}</b> — Salary Register ({source.title()}) — {month}",
+        f"<b>{comp}</b> — {title_override or 'Salary Register'} ({source.title()}) — {month}",
         styles["Title"],
     )
     sub_bits = list(filt_bits)
@@ -691,8 +691,105 @@ def _pdf_bytes(comp: str, source: str, month: str,
             style.append(("ALIGN", (idx, 1), (idx, -1), "LEFT"))
     tbl.setStyle(TableStyle(style))
 
-    doc.build([title, sub, Spacer(1, 4 * mm), tbl])
+    doc.build([title, sub, Spacer(1, 4 * mm), tbl, PageBreak(),
+               *_summary_flowables(comp, rows, columns)])
     return buf.getvalue()
+
+
+def _summary_flowables(comp: str, rows: List[Dict[str, Any]],
+                       columns: List[Dict[str, Any]]) -> List[Any]:
+    """Iter 308 (user) — last-page summary in the same style as the
+    Compliance Salary Register (PDF Option 2): boxed sections with
+    head-wise totals, days/net, amounts in words + signature strip."""
+    from reportlab.lib import colors as rl_colors
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
+    from utils.salary_register_pdf import _num_to_words_inr
+
+    lbl = ParagraphStyle("srs_lbl", fontName="Helvetica", fontSize=8.5, leading=11)
+    lblb = ParagraphStyle("srs_lblb", fontName="Helvetica-Bold", fontSize=8.5, leading=11)
+
+    def amt(v: Any) -> str:
+        return f"{float(v or 0):,.2f}"
+
+    tot = _totals(rows, columns)
+
+    def sec(pairs: List[Tuple[str, str]], bold_last: bool = True) -> Table:
+        d = [[Paragraph(k, lblb if (bold_last and i == len(pairs) - 1) else lbl),
+              Paragraph(v, lblb if (bold_last and i == len(pairs) - 1) else lbl)]
+             for i, (k, v) in enumerate(pairs)]
+        t = Table(d, colWidths=[70 * mm, 36 * mm])
+        t.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.5, rl_colors.black),
+            ("INNERGRID", (0, 0), (-1, -1), 0.25, rl_colors.HexColor("#999999")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ]))
+        return t
+
+    earn_cols = [c for c in columns if c["group"] == "earnings"]
+    ded_cols = [c for c in columns if c["group"] == "deductions"]
+    er_cols = [c for c in columns if c["group"] == "employer"]
+    net_col = next((c for c in columns if c["group"] == "net"), None)
+
+    gross_key = next((k for k in ("gross_paid", "total_gross", "monthly_gross")
+                      if k in tot), None)
+    days_key = next((k for k in ("present_days", "p_days") if k in tot), None)
+    hrs_key = next((k for k in ("ot_hours", "p_hours") if k in tot), None)
+
+    def head_label(c: Dict[str, Any]) -> str:
+        lbl_txt = str(c["label"])
+        return lbl_txt if lbl_txt.lower().startswith("total") else f"Total {lbl_txt}"
+
+    out: List[Any] = []
+    out.append(Paragraph(f"SUMMARY — {comp}", ParagraphStyle(
+        "srs_h", fontName="Helvetica-Bold", fontSize=11, leading=14)))
+    out.append(Spacer(1, 3 * mm))
+    out.append(sec(
+        [("No. Of Emp", str(len(rows)))]
+        + [(head_label(c), amt(tot.get(c["key"]))) for c in earn_cols],
+    ))
+    if ded_cols:
+        out.append(Spacer(1, 4 * mm))
+        out.append(sec([(head_label(c), amt(tot.get(c["key"])))
+                        for c in ded_cols]))
+    if er_cols:
+        out.append(Spacer(1, 4 * mm))
+        out.append(sec([(head_label(c), amt(tot.get(c["key"])))
+                        for c in er_cols], bold_last=False))
+    tail: List[Tuple[str, str]] = []
+    if days_key:
+        tail.append(("Total Days ->", f"{tot.get(days_key, 0):g}"))
+    if hrs_key:
+        tail.append(("Total Hours ->", f"{tot.get(hrs_key, 0):g}"))
+    if net_col:
+        tail.append(("Net Payable Amount", amt(tot.get(net_col["key"]))))
+    if tail:
+        out.append(Spacer(1, 4 * mm))
+        out.append(sec(tail))
+    out.append(Spacer(1, 5 * mm))
+    if gross_key:
+        out.append(Paragraph(
+            f"RUPEES: {_num_to_words_inr(int(round(tot.get(gross_key, 0))))} (GROSS)", lblb))
+    if net_col:
+        out.append(Paragraph(
+            f"RUPEES: {_num_to_words_inr(int(round(tot.get(net_col['key'], 0))))} (NET PAYABLE)", lblb))
+    out.append(Spacer(1, 10 * mm))
+    foot = Table([
+        [Paragraph("Checked by ____________________", lbl),
+         Paragraph(f"For {comp.upper()}", lblb)],
+        [Paragraph("Payment Date ____________________", lbl),
+         Paragraph("AUTHORISED SIGNATORY / MANAGER", lblb)],
+    ], colWidths=[150 * mm, 150 * mm])
+    foot.setStyle(TableStyle([
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("TOPPADDING", (0, 1), (-1, 1), 14),
+    ]))
+    out.append(foot)
+    return out
 
 
 def _filt_bits(employee_type: Optional[str], branch: Optional[str],
@@ -733,13 +830,25 @@ async def export_pdf(
     if not prep["run"]:
         raise HTTPException(status_code=404, detail="No salary run found for this month")
     comp = await _company_name(prep["company_id"])
+    title_ov = await _module_title()
     data = _pdf_bytes(comp, source, month, prep["rows"], prep["columns"],
-                      _filt_bits(employee_type, branch, department, contractor))
+                      _filt_bits(employee_type, branch, department, contractor),
+                      title_override=title_ov)
     return StreamingResponse(
         io.BytesIO(data), media_type="application/pdf",
         headers={"Content-Disposition":
                  f'attachment; filename="{_export_filename(source, month, "pdf")}"'},
     )
+
+
+async def _module_title() -> str:
+    """Saved title from Reports → PDF Report Formats → Salary Register
+    (Dynamic Module)."""
+    try:
+        from routes.report_formats import get_report_format
+        return str((await get_report_format("salary_register_module")).get("title") or "").strip()
+    except Exception:
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -789,7 +898,8 @@ async def email_register(
     attachments: List[Dict[str, str]] = []
     if "pdf" in formats:
         pdf = _pdf_bytes(comp, source, month, rows, columns,
-                         _filt_bits(employee_type, branch, department, contractor))
+                         _filt_bits(employee_type, branch, department, contractor),
+                         title_override=await _module_title())
         attachments.append({
             "filename": _export_filename(source, month, "pdf"),
             "content": base64.b64encode(pdf).decode(),

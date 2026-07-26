@@ -139,6 +139,16 @@ REPORTS: Dict[str, Dict[str, Any]] = {
         "defaults": {"orientation": "landscape", "font_size": 7,
                      "title": "SALARY REGISTER (COMPLIANCE)"},
     },
+    # Iter 308 (user) — the NEW dynamic Salary Register module (Payroll →
+    # Salary Process → Salary Register). Columns are dynamic per run, so
+    # the editable part is the printed TITLE.
+    "salary_register_module": {
+        "label": "Salary Register — Dynamic Module, Compliance+Actual (PDF) — title only",
+        "group": "Salary Reports",
+        "columns": None,
+        "defaults": {"orientation": "landscape", "font_size": 6.5,
+                     "title": "Salary Register"},
+    },
     "payslips": {
         "label": "Payslips (PDF) — title only",
         "group": "Salary Reports",
