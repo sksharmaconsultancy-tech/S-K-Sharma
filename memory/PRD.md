@@ -1666,3 +1666,28 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   patches nginx idempotently (sks-gzip-fix marker: gzip on + gzip_static on + gzip_types) with
   nginx -t rollback safety; keeps iter295 no-cache index.html / immutable hashed assets.
 - temp_bundle.py kind=script now serves deploy_vps_iter311.sh.
+
+## Iter 312-314 — Attachments · ESIC Leave Module · RPA Chrome Test Button
+- Iter 312 also: email/export attachments renamed to Reportname_Group_MonthYear
+  (salary_register._export_filename + all call sites w/ employee_type; detail slip
+  EmployeeDetailSlip_{code}_{MonthYear}; iter60 AttendanceSheet_{Firm}_{MonthYear}).
+  Detail Slip Phase 2 shipped (fields+edit modal+audit+timeline+barcode+dark mode+splash) — tested ALL PASS (iteration_312/313 reports).
+- Iter 313 ESIC LEAVE MODULE: routes/esic_leave.py + app/esic-leave.tsx (menu:
+  Compliance Salary → ESIC Leave, perm compliance_salary:*). Per-firm settings in
+  db.esic_leave_settings (defaults all ON, max_backdate_days=30). Entries in db.esic_leaves
+  (certificate base64, status pending/approved/rejected). Approve → creates approved
+  db.leaves (leave_type "esic", source esic_leave_module). Compliance run auto-fills
+  row.esic_leave_days via esic_leave_days_map (honours enabled+link_compliance).
+  Salary Register has esic_leave_days column ("ESIC Leave"), removed when firm toggle
+  show_separate_register OFF. Freeze lock: create/approve/reject/delete blocked (409)
+  when compliance_salary_runs.frozen=True overlaps months and lock_after_freeze ON.
+  Backend curl-verified + frontend testing agent ALL PASS (iteration_313.json).
+- Iter 314 RPA: FLOWS["epfo_ecr_autoupload_test"] "Auto-Upload ECR — TEST (Open Portal
+  + Close Alert)" (needs_creds False bypass in start validation). Steps: open EPFO →
+  click #btnCloseModal OK → screenshot. Engine now launches REAL Google Chrome
+  (executable_path detection: RPA_CHROME_BIN env / /opt/google/chrome/chrome /
+  google-chrome-stable / google-chrome / chromium, with --no-sandbox) falling back to
+  bundled Chromium; RPA_USE_CHROME=0 disables. Verified: session completed, all 3 steps done.
+  NOTE: pod needed `playwright install chromium` (headless_shell-1228); deploy script installs
+  Chrome + playwright browsers on VPS. USER WILL GUIDE NEXT STEPS of the ECR auto-upload flow.
+- Deploy: /app/deploy_vps_iter314.sh (temp_bundle kind=script serves it).

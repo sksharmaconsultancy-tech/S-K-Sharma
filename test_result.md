@@ -218,3 +218,10 @@ See `/app/memory/test_credentials.md`. Super admin
 - Static+asyncRoutes production export verified with local SPA server + API proxy: root page,
   deep link /admin-pin-login, password login, /employee-detail-slip and /salary-register lazy
   chunks all load, no console/page errors. Dev preview (Metro) verified after app.json change.
+
+## Iter 313-314
+- ESIC Leave: backend curl E2E (settings, cert-required 400, backdate 400, freeze 409,
+  compliance auto-import 5 days, register column) + frontend testing agent ALL PASS
+  (/app/test_reports/iteration_313.json). Test data cleaned.
+- RPA test flow: 2 live runs completed (bundled Chromium + system Chrome via executable_path);
+  EPFO portal opened, #btnCloseModal clicked, screenshot captured.

@@ -77,6 +77,13 @@ FLOWS: Dict[str, Dict[str, Any]] = {
                                           "Contribution Details"]},
     "esic_dashboard": {"label": "Employer Dashboard (assisted)",
                        "portals": ["esic"], "needs_employee": False, "nav": []},
+    # Iter 314 (user guide) — Auto-Upload EPF ECR → EPFO: TEST button.
+    # Opens the EPFO employer portal in server-side Chrome automation and
+    # clicks the alert popup's OK button (#btnCloseModal). No login yet —
+    # the user will guide the next steps of the auto-upload flow.
+    "epfo_ecr_autoupload_test": {
+        "label": "Auto-Upload ECR — TEST (Open Portal + Close Alert)",
+        "portals": ["epfo"], "needs_employee": False, "needs_creds": False},
 }
 
 # HARD SAFETY RAIL — automation stops at challan finalisation and NEVER
@@ -268,8 +275,12 @@ async def start_session(
                           "upload. Fix missing UAN / IP numbers first.")
     creds = await fetch_portal_creds(db, company_id, portal)
     if not creds:
-        return None, (f"No {portal.upper()} User ID / Password saved on the Firm "
-                      "Master. Add them under Firm Master → Portal Logins first.")
+        # Iter 314 — the ECR auto-upload TEST flow needs no portal login.
+        if FLOWS[flow].get("needs_creds") is False:
+            creds = {}
+        else:
+            return None, (f"No {portal.upper()} User ID / Password saved on the Firm "
+                          "Master. Add them under Firm Master → Portal Logins first.")
     # Security layer — Session Manager + Rate Limiter: portals are processed
     # SEQUENTIALLY per company and the same employer account never has two
     # concurrent login sessions.
@@ -649,6 +660,14 @@ class Ctx:
 
 
 def _flow_steps(flow: str) -> List[Tuple[str, Callable]]:
+    # Iter 314 (user guide) — TEST flow: open EPFO + click OK on the alert
+    # modal. No credential / captcha steps.
+    if flow == "epfo_ecr_autoupload_test":
+        return [
+            ("Open EPFO Portal", _step_open_portal),
+            ("Click OK on Alert Popup", _step_epfo_close_alert),
+            ("Capture Portal Screenshot", _step_dashboard),
+        ]
     base: List[Tuple[str, Callable]] = [
         ("Open Portal", _step_open_portal),
         ("Enter User ID & Password", _step_fill_credentials),
@@ -866,6 +885,30 @@ async def _step_dashboard(ctx: Ctx) -> None:
     await ctx.sleep(1.5)
     await ctx.snap("dashboard")
     ctx.log("📸 Dashboard captured")
+
+
+async def _step_epfo_close_alert(ctx: Ctx) -> None:
+    """Iter 314 (user guide) — the EPFO employer portal shows an alert
+    modal on load; click its OK button:
+    <button class="btn btn-danger" data-bs-dismiss="modal"
+            id="btnCloseModal">OK</button>."""
+    await ctx.sleep(2.0)
+    for sel in ("#btnCloseModal",
+                "button.btn-danger[data-bs-dismiss='modal']",
+                "button[data-bs-dismiss='modal']"):
+        try:
+            loc = ctx.page.locator(sel).first
+            await loc.wait_for(state="visible", timeout=8000)
+            await ctx.click(loc, "OK (close alert popup)")
+            await ctx.sleep(1.0)
+            await ctx.snap("alert_closed")
+            ctx.log(f"✅ Alert popup closed via OK button ({sel})")
+            await ctx.audit("epfo_alert_closed", sel)
+            return
+        except Exception:
+            continue
+    ctx.log("No alert popup appeared — nothing to close", "warn")
+    await ctx.snap("no_alert_popup")
 
 
 async def _step_review_confirm(ctx: Ctx) -> None:
@@ -1353,7 +1396,35 @@ async def _run_session(db, sid: str) -> None:
             proxy_url = (os.environ.get("PORTAL_PROXY_URL") or "").strip()
             if proxy_url:
                 launch_kw["proxy"] = {"server": proxy_url}
-            browser = await pw.chromium.launch(**launch_kw)
+            # Iter 314 (user directive) — drive REAL Google Chrome when it
+            # is installed (same browser ChromeDriver targets). Detects the
+            # system Chrome binary and launches Playwright against it with
+            # container-safe flags. Falls back to bundled Chromium.
+            browser = None
+            if (os.environ.get("RPA_USE_CHROME") or "1").strip() != "0":
+                _chrome_bin = next(
+                    (p for p in (
+                        os.environ.get("RPA_CHROME_BIN") or "",
+                        "/opt/google/chrome/chrome",
+                        shutil.which("google-chrome-stable") or "",
+                        shutil.which("google-chrome") or "",
+                        shutil.which("chromium") or "",
+                        shutil.which("chromium-browser") or "",
+                    ) if p and os.path.exists(p)), None)
+                if _chrome_bin:
+                    try:
+                        browser = await pw.chromium.launch(**{
+                            **launch_kw,
+                            "executable_path": _chrome_bin,
+                            "args": launch_kw["args"] + [
+                                "--no-sandbox", "--disable-dev-shm-usage"],
+                        })
+                        _log(sid, f"🌐 Using Google Chrome ({_chrome_bin})")
+                    except Exception:
+                        browser = None
+            if browser is None:
+                browser = await pw.chromium.launch(**launch_kw)
+                _log(sid, "🌐 Using bundled Chromium (Google Chrome not installed)")
             c["browser"] = browser
             media_dir = MEDIA_ROOT / s["job_id"]
             media_dir.mkdir(parents=True, exist_ok=True)

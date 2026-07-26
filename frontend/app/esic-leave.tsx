@@ -190,7 +190,7 @@ export default function EsicLeaveScreen() {
       flash(action === "approve" ? "Approved — attendance auto-marked"
         : action === "reject" ? "Rejected" : "Deleted");
       loadAll();
-    } catch (e: any) { flash(null, e?.message); } finally { setBusyId(null); }
+    } catch (e: any) { flash(null, e?.detail || e?.message); } finally { setBusyId(null); }
   };
 
   const viewCert = async (id: string) => {
