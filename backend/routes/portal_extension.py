@@ -148,8 +148,10 @@ async def _resolve_company(admin: Dict[str, Any], company_id: Optional[str]) -> 
         from server import sub_admin_can_touch_company
         if not sub_admin_can_touch_company(admin, company_id):
             raise HTTPException(status_code=403, detail="Firm is outside your assigned scope")
-    if not company_id:
-        raise HTTPException(status_code=400, detail="company_id is required")
+    if not company_id or company_id == "all":
+        raise HTTPException(
+            status_code=400,
+            detail="Firm selection is mandatory — select a specific firm first.")
     return company_id
 
 
@@ -250,7 +252,7 @@ async def ext_solve_captcha(payload: Dict[str, Any] = Body(...)):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "4"
+RUNNER_VERSION = "5"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -463,13 +465,35 @@ def run(API_BASE, TOKEN, portal):
 
         # Step 4 — click Sign In (only when the captcha got filled).
         if captcha_text and cap_in is not None:
+            # Iter 316 — the EPFO home-page alert modal
+            # (#mainHomePageAlertModal, static backdrop) intercepts the
+            # Sign In click; close it + strip any lingering modal first.
+            try:
+                for msel in ("#btnCloseModal",
+                             "#mainHomePageAlertModal button.btn-danger"):
+                    for el in driver.find_elements(By.CSS_SELECTOR, msel):
+                        if el.is_displayed():
+                            el.click(); break
+                driver.execute_script(
+                    "document.querySelectorAll("
+                    "'#mainHomePageAlertModal,.modal.show,.modal-backdrop')"
+                    ".forEach(function(e){e.classList.remove('show');"
+                    "e.style.display='none';if(e.remove)e.remove();});"
+                    "document.body.classList.remove('modal-open');"
+                    "document.body.style.overflow='';")
+            except Exception:
+                pass
             signed = False
             for sel in ("#loginbtn", "button#login", "input[type=submit]",
                         "button[type=submit]"):
                 for el in driver.find_elements(By.CSS_SELECTOR, sel):
                     try:
                         if el.is_displayed():
-                            el.click(); signed = True; break
+                            try:
+                                el.click()
+                            except Exception:
+                                driver.execute_script("arguments[0].click();", el)
+                            signed = True; break
                     except Exception:
                         continue
                 if signed:

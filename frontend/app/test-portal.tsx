@@ -54,12 +54,24 @@ export default function TestPortalScreen() {
 
 function AutomationCard() {
   const { selectedCompanyId } = useSelectedCompany();
+  const isSuper = role === "super_admin" || role === "sub_admin";
+  // Iter 317 — firm selection is MANDATORY before any process.
+  const firmId =
+    isSuper
+      ? (selectedCompanyId && selectedCompanyId !== "all" ? selectedCompanyId : "")
+      : (user?.company_id || "");
   const [busy, setBusy] = useState<"runner" | "ext" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const download = useCallback(
     async (kind: "runner" | "ext") => {
       setError(null);
+      if (!firmId) {
+        setError(
+          "Firm selection is mandatory. Please select a firm from the top “Firm” selector before downloading or starting any process.",
+        );
+        return;
+      }
       setBusy(kind);
       try {
         if (Platform.OS !== "web") {
@@ -73,9 +85,7 @@ function AutomationCard() {
           kind === "runner"
             ? "/admin/portal-automation/runner-download"
             : "/admin/portal-automation/extension-download";
-        const qs = `?api_base=${encodeURIComponent(origin)}${
-          selectedCompanyId ? `&company_id=${selectedCompanyId}` : ""
-        }`;
+        const qs = `?api_base=${encodeURIComponent(origin)}&company_id=${encodeURIComponent(firmId)}`;
         const { webBlobUrl } = await apiBinary(`${ep}${qs}`);
         if (Platform.OS === "web" && webBlobUrl) {
           const a = document.createElement("a");
@@ -94,7 +104,7 @@ function AutomationCard() {
         setBusy(null);
       }
     },
-    [selectedCompanyId],
+    [firmId],
   );
 
   return (

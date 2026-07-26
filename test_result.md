@@ -230,3 +230,7 @@ See `/app/memory/test_credentials.md`. Super admin
 - Runner zip verified: contains run_ecr_test.bat; embedded runner code compiles; runner-script
   self-update endpoint serves version 2 with ecr_test. Selenium cannot execute in this ARM64 pod —
   final click validated earlier via Playwright against live EPFO (#btnCloseModal).
+
+## Iter 316b-317
+- Firm-mandatory guards curl-verified: /rpa/start + runner-download reject "all"/empty (400),
+  accept real firm (200). EPFO modal-dismiss + Angular send_keys typing + runner v5 compile-checked.

@@ -88,7 +88,10 @@ export default function AutomationStudioScreen() {
   const router = useRouter();
   const isSuper = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
   const { selectedCompanyId, setSelectedCompanyId } = useSelectedCompany() as any;
-  const companyId = isSuper ? selectedCompanyId : user?.company_id;
+  // Iter 317 — firm selection is MANDATORY: treat "all"/empty as NO firm so
+  // no automation (server RPA or PC-runner) can start without a real firm.
+  const rawCid = isSuper ? selectedCompanyId : user?.company_id;
+  const companyId = rawCid && rawCid !== "all" ? rawCid : "";
 
   const [flows, setFlows] = useState<Flow[]>([]);
   const [portals, setPortals] = useState<Portal[]>([]);
@@ -191,7 +194,7 @@ export default function AutomationStudioScreen() {
 
   const start = async () => {
     if (!companyId) {
-      setErr("Select a firm first.");
+      setErr("Firm selection is mandatory. Please select a firm from the “Firm (required)” selector above before starting any process.");
       return;
     }
     setErr("");

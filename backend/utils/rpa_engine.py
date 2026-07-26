@@ -812,6 +812,35 @@ async def _step_fill_credentials(ctx: Ctx) -> None:
     ctx.log("✅ Credentials entered")
 
 
+async def _dismiss_epfo_modals(ctx: Ctx) -> None:
+    """Iter 316 — the EPFO home page shows a Bootstrap alert modal
+    (#mainHomePageAlertModal, static backdrop) that intercepts pointer
+    events and blocks the Sign In / Submit click. Click its OK button,
+    then force-hide any lingering modal + backdrop via JS."""
+    for sel in ("#btnCloseModal",
+                "#mainHomePageAlertModal button.btn-danger",
+                "#mainHomePageAlertModal button[data-bs-dismiss='modal']",
+                "button.btn-danger[data-bs-dismiss='modal']"):
+        try:
+            loc = ctx.page.locator(sel).first
+            if await loc.is_visible(timeout=1200):
+                await loc.click(timeout=3000)
+                await ctx.sleep(0.5)
+        except Exception:
+            continue
+    # Force-remove any modal still covering the form (blocks the click).
+    try:
+        await ctx.page.evaluate(
+            "document.querySelectorAll("
+            "'#mainHomePageAlertModal, .modal.show, .modal-backdrop')"
+            ".forEach(function(e){e.classList.remove('show');"
+            "e.style.display='none';e.remove&&e.remove();});"
+            "document.body.classList.remove('modal-open');"
+            "document.body.style.overflow='';")
+    except Exception:
+        pass
+
+
 async def _step_captcha_and_login(ctx: Ctx) -> None:
     from utils.rpa_worker import (
         _find_captcha_image_b64, _fill_captcha_input, _click_login_submit,
@@ -857,8 +886,16 @@ async def _step_captcha_and_login(ctx: Ctx) -> None:
             "button:has-text('Sign')", "button:has-text('Login')",
             "a:has-text('Login')",
         ])
+        # Iter 316 — clear the EPFO home-page alert modal that intercepts
+        # the Sign In click, then click (force-through as a fallback).
+        await _dismiss_epfo_modals(ctx)
         if submit_loc:
-            await ctx.click(submit_loc, "Sign In")
+            try:
+                await ctx.click(submit_loc, "Sign In")
+            except Exception:
+                await _dismiss_epfo_modals(ctx)
+                await submit_loc.click(force=True, timeout=8000)
+                ctx.log("🖱 Sign In clicked (force, modal bypassed)")
         else:
             await _click_login_submit(ctx.page)
         await ctx.sleep(3.2)

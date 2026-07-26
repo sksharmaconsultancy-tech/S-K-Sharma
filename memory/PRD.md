@@ -1717,3 +1717,17 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   RUNNER_VERSION=3 (self-update verified). Runner code compile-checked; Selenium cannot
   run in ARM64 pod — user validates on their PC. NEXT: user will guide post-login ECR
   upload steps.
+
+## Iter 316b-317 — EPFO modal-intercept fix + MANDATORY firm selection
+- Iter 316b: Sign In/Submit click was blocked by EPFO home-page alert modal
+  (#mainHomePageAlertModal, static backdrop) intercepting pointer events. Fix:
+  _dismiss_epfo_modals(ctx) in rpa_engine (click #btnCloseModal + JS-strip .modal.show /
+  .modal-backdrop / body.modal-open) called before submit, with force-click fallback.
+  Same JS-strip + JS click() fallback added to the Selenium ecr_test runner.
+  Also fixed EPFO login not filling: Angular ng-model needs REAL typing — runner now waits
+  for #username clickable and uses send_keys (native-setter+input/change/blur fallback). RUNNER_VERSION=5.
+- Iter 317 (user directive) — FIRM SELECTION MANDATORY, no process starts without a real firm:
+  automation-studio.tsx treats selectedCompanyId "all"/empty as no firm (companyId="") →
+  start blocked with clear message; test-portal.tsx firmId gate blocks runner/extension download.
+  Server: /rpa/start and portal-automation download (_resolve_company) reject "" and "all" (400).
+  Verified via curl (all/empty→400, real firm→200).

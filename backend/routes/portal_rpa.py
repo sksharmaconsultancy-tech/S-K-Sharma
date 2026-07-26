@@ -98,8 +98,10 @@ async def rpa_start(
     authorization: Optional[str] = Header(None),
 ):
     company_id = payload.get("company_id") or ""
-    if not company_id:
-        raise HTTPException(status_code=400, detail="company_id is required")
+    if not company_id or company_id == "all":
+        raise HTTPException(
+            status_code=400,
+            detail="Firm selection is mandatory — select a specific firm before starting any process.")
     admin = await _admin(authorization, company_id)
     sid, err = await rpa_engine.start_session(
         db,
