@@ -234,3 +234,7 @@ See `/app/memory/test_credentials.md`. Super admin
 ## Iter 316b-317
 - Firm-mandatory guards curl-verified: /rpa/start + runner-download reject "all"/empty (400),
   accept real firm (200). EPFO modal-dismiss + Angular send_keys typing + runner v5 compile-checked.
+
+## Iter 318
+- EPFO Login & Dashboard flow live E2E: Open Portal → Close Alert → Enter User ID & Password
+  (from Firm Master, auto-detected) all done; flow paused at captcha prompt as designed.

@@ -1731,3 +1731,17 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   start blocked with clear message; test-portal.tsx firmId gate blocks runner/extension download.
   Server: /rpa/start and portal-automation download (_resolve_company) reject "" and "all" (400).
   Verified via curl (all/empty→400, real firm→200).
+
+## Iter 318 — EPFO Login & Dashboard flow: close alert → fill creds → captcha
+- User directive: apply the ecr_test "open + close alert" logic to the standard
+  Login & Dashboard (base) flow BEFORE filling ID/Password, then show captcha.
+- rpa_engine _flow_steps base is now: Open Portal → Close Alert Popup
+  (_step_close_alert_if_epfo — runs _step_epfo_close_alert only for portal==epfo, instant
+  skip for ESIC) → Enter User ID & Password → Solve Captcha & Sign In → Verify → Dashboard.
+- _step_fill_credentials hardened: dismiss lingering EPFO modal, AUTO-DETECT username
+  (#username/name/formcontrolname/text fallback) + password fields with retry waits for the
+  Angular form to render, type via press_sequentially (real keys), then VERIFY input_value
+  and re-type if a box didn't retain the value (Angular ng-model). Creds pulled from Firm Master.
+- Verified live E2E: session reached waiting_captcha with steps Open/Close Alert/Enter Creds done,
+  logs show "User ID & Password filled from Firm Master" then captcha prompt. Session stopped after.
+- Deploy: /app/deploy_vps_iter314.sh (updated blurb; still latest script served by temp_bundle kind=script).

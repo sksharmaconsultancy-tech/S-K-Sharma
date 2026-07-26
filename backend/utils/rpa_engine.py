@@ -659,6 +659,16 @@ class Ctx:
         return c["input_value"] or ""
 
 
+async def _step_close_alert_if_epfo(ctx: Ctx) -> None:
+    """Iter 318 (user guide) — in the standard Login & Dashboard flow (and
+    every credential flow), the EPFO portal opens with a home-page alert
+    modal. Close it (click OK) BEFORE filling the User ID / Password.
+    Skips instantly for non-EPFO portals (ESIC has no such popup)."""
+    if ctx.s.get("portal") != "epfo":
+        return
+    await _step_epfo_close_alert(ctx)
+
+
 def _flow_steps(flow: str) -> List[Tuple[str, Callable]]:
     # Iter 314 (user guide) — TEST flow: open EPFO + click OK on the alert
     # modal. No credential / captcha steps.
@@ -668,8 +678,11 @@ def _flow_steps(flow: str) -> List[Tuple[str, Callable]]:
             ("Click OK on Alert Popup", _step_epfo_close_alert),
             ("Capture Portal Screenshot", _step_dashboard),
         ]
+    # Iter 318 — order: Open → Close Alert (EPFO) → Fill ID/Password →
+    # Show Captcha & Sign In → Verify → Dashboard.
     base: List[Tuple[str, Callable]] = [
         ("Open Portal", _step_open_portal),
+        ("Close Alert Popup", _step_close_alert_if_epfo),
         ("Enter User ID & Password", _step_fill_credentials),
         ("Solve Captcha & Sign In", _step_captcha_and_login),
         ("Verify Login", _step_verify_login),
@@ -795,21 +808,61 @@ async def _esic_goto_employer_login(ctx: Ctx) -> None:
 
 
 async def _step_fill_credentials(ctx: Ctx) -> None:
-    user_loc = await ctx.first_visible([
-        "input[name*='user' i]:not([type='password'])", "input[id*='user' i]:not([type='password'])",
-        "input[name='username']", "input#username",
-        "input[type='text']:not([id*='captcha' i]):not([name*='captcha' i])",
-    ])
+    # Iter 318 (user guide) — AUTO-DETECT where to fill User ID / Password
+    # on the (Angular) portal and fill them from the Firm Master. The EPFO
+    # login form renders only after the alert modal is closed, so wait for
+    # the fields to appear first, and dismiss any lingering modal.
+    if ctx.s.get("portal") == "epfo":
+        await _dismiss_epfo_modals(ctx)
+    user_selectors = [
+        "input#username", "input[name='username']",
+        "input[name*='user' i]:not([type='password'])",
+        "input[id*='user' i]:not([type='password'])",
+        "input[formcontrolname*='user' i]",
+        "input[type='text']:not([id*='captcha' i]):not([name*='captcha' i])"
+        ":not([id*='search' i])",
+    ]
+    user_loc = None
+    for attempt in range(3):
+        user_loc = await ctx.first_visible(user_selectors)
+        if user_loc:
+            break
+        ctx.log("Waiting for the login form to render…")
+        await ctx.sleep(1.5)
     if not user_loc:
-        raise RuntimeError("Could not find the User ID field — portal layout may have changed.")
-    await ctx.type(user_loc, ctx.creds["user_name"], "User ID")
+        raise RuntimeError(
+            "Could not find the User ID field — the portal login form did "
+            "not render (an alert popup may still be open).")
+    await ctx.type(user_loc, ctx.creds["user_name"], "User ID (from Firm Master)")
+
     pass_loc = await ctx.first_visible([
-        "input[type='password']", "input[name*='pass' i]", "input[id*='pass' i]",
+        "input#password", "input[type='password']",
+        "input[name*='pass' i]", "input[id*='pass' i]",
+        "input[formcontrolname*='pass' i]",
     ])
     if not pass_loc:
         raise RuntimeError("Could not find the Password field.")
-    await ctx.type(pass_loc, ctx.creds["password"], "Password", secret=True)
-    ctx.log("✅ Credentials entered")
+    await ctx.type(pass_loc, ctx.creds["password"], "Password (from Firm Master)",
+                   secret=True)
+
+    # Verify the values actually stuck (Angular ng-model can reject JS-set
+    # values); if a box reads blank, re-type it directly.
+    for loc, val, label, secret in (
+        (user_loc, ctx.creds["user_name"], "User ID", False),
+        (pass_loc, ctx.creds["password"], "Password", True),
+    ):
+        try:
+            cur = await loc.input_value(timeout=2000)
+        except Exception:
+            cur = ""
+        if (cur or "").strip() != str(val).strip():
+            ctx.log(f"Re-entering {label} (field did not retain the value)…", "warn")
+            try:
+                await loc.fill("", timeout=2000)
+            except Exception:
+                pass
+            await loc.press_sequentially(str(val), delay=60)
+    ctx.log("✅ User ID & Password filled from Firm Master")
 
 
 async def _dismiss_epfo_modals(ctx: Ctx) -> None:
