@@ -153,6 +153,21 @@ async def rpa_input(
     return {"ok": True}
 
 
+@router.post("/session/{sid}/interact")
+async def rpa_interact(
+    sid: str,
+    payload: dict = Body(...),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 320 — manual override: forward the admin's own mouse click /
+    keyboard input from the live view into the automated browser."""
+    await _admin(authorization)
+    ok, msg = await rpa_engine.interact_session(sid, payload)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"ok": True}
+
+
 @router.get("/history")
 async def rpa_history(
     company_id: Optional[str] = Query(None),

@@ -22,7 +22,6 @@ import asyncio
 import base64
 import logging
 import os
-import random
 import re
 import shutil
 import uuid
@@ -37,13 +36,15 @@ logger = logging.getLogger("rpa_engine")
 MEDIA_ROOT = Path("/app/backend/rpa_media")
 MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
 
-SPEED_MULT = {"very_slow": 3.0, "slow": 2.0, "normal": 1.0, "fast": 0.5}
+# Iter 320 (user request) — FAST is the ONLY speed. All other options
+# removed; artificial human-pace delays stripped for maximum speed.
+SPEED_MULT = {"fast": 0.05}
 
 PORTALS: Dict[str, Dict[str, str]] = {
     "epfo": {"label": "EPFO — Employer Portal",
              "url": "https://unifiedportal-emp.epfindia.gov.in/epfo/"},
     "esic": {"label": "ESIC — Employer Portal",
-             "url": "https://www.esic.gov.in/"},
+             "url": "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx"},
     "shram_suvidha": {"label": "Shram Suvidha Portal",
                       "url": "https://shramsuvidha.gov.in/user/login"},
     "ptax": {"label": "Professional Tax Portal", "url": ""},
@@ -110,7 +111,8 @@ def _now_iso() -> str:
 async def get_settings(db) -> Dict[str, Any]:
     doc = await db.rpa_settings.find_one({"_id": "global"}) or {}
     return {
-        "speed": doc.get("speed") or "normal",
+        # Iter 320 — only FAST exists now; stored legacy speeds are ignored.
+        "speed": "fast",
         "timeout_sec": int(doc.get("timeout_sec") or 25),
         # Security requirement #5 — never more than 3 retries.
         "retry_count": min(3, int(doc.get("retry_count") or 2)),
@@ -408,6 +410,49 @@ def submit_input(sid: str, value: str) -> Tuple[bool, str]:
     return True, "ok"
 
 
+async def interact_session(sid: str, payload: Dict[str, Any]) -> Tuple[bool, str]:
+    """Iter 320 (user request) — MANUAL OVERRIDE. Forwards the user's own
+    mouse clicks / keyboard input from the live view straight into the
+    automated browser page, so they can do ANY work on the portal
+    themselves (works while running, paused or waiting for input)."""
+    s, c = _SESSIONS.get(sid), _CTRL.get(sid)
+    if not s or not c:
+        return False, "Session not found"
+    page = c.get("page")
+    if page is None:
+        return False, "Browser not ready yet"
+    kind = str(payload.get("kind") or "")
+    try:
+        vp = page.viewport_size or {"width": 1280, "height": 800}
+        if kind == "click":
+            # x / y arrive normalised (0–1) relative to the streamed frame.
+            x = max(0.0, min(1.0, float(payload.get("x") or 0))) * vp["width"]
+            y = max(0.0, min(1.0, float(payload.get("y") or 0))) * vp["height"]
+            await page.mouse.click(x, y)
+            _log(sid, f"🖱 Manual click at ({int(x)}, {int(y)})")
+        elif kind == "type":
+            text = str(payload.get("text") or "")
+            if not text:
+                return False, "No text to type"
+            await page.keyboard.type(text, delay=15)
+            _log(sid, f"⌨ Manual typing: {text}")
+        elif kind == "key":
+            key = str(payload.get("key") or "")
+            if not key:
+                return False, "No key given"
+            await page.keyboard.press(key)
+            _log(sid, f"⌨ Manual key: {key}")
+        elif kind == "scroll":
+            dy = float(payload.get("dy") or 0)
+            await page.mouse.wheel(0, dy)
+            _log(sid, f"🖱 Manual scroll ({int(dy)}px)")
+        else:
+            return False, f"Unknown interaction '{kind}'"
+        return True, "ok"
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+
+
 def list_active() -> List[Dict[str, Any]]:
     return [
         {"session_id": s["session_id"], "portal": s["portal"], "flow": s["flow"],
@@ -442,13 +487,9 @@ class Ctx:
         self.c = _CTRL[sid]
         self.creds = self.c["creds"]
         self.settings = self.c["settings"]
-        self.mult = SPEED_MULT.get(self.s["speed"], 1.0)
-        if self.settings.get("training_mode"):
-            self.mult = max(self.mult, 3.0)
-        # Compliance mode (security req #13) — stability over speed: never
-        # run faster than 1.5× human pace.
-        if self.settings.get("compliance_mode", True):
-            self.mult = max(self.mult, 1.5)
+        # Iter 320 — MAX SPEED always (user request): no training/compliance
+        # slow-down floors, no human-pace multipliers.
+        self.mult = SPEED_MULT.get(self.s["speed"], 0.05)
         self.timeout_ms = self.settings["timeout_sec"] * 1000
 
     def switch_page(self, new_page) -> None:
@@ -516,7 +557,7 @@ class Ctx:
                     c.id='__rpa_cursor';
                     c.style.cssText='position:fixed;z-index:2147483647;width:18px;height:18px;'+
                       'border-radius:50%;background:rgba(239,68,68,.85);border:2px solid #fff;'+
-                      'pointer-events:none;transition:all .45s ease;top:10px;left:10px;'+
+                      'pointer-events:none;transition:all .1s ease;top:10px;left:10px;'+
                       'box-shadow:0 1px 6px rgba(0,0,0,.4)';
                     document.body.appendChild(c);
                   }
@@ -546,7 +587,7 @@ class Ctx:
                 )
         except Exception:
             pass
-        await self.sleep(0.8)
+        await self.sleep(0.05)
 
     async def _unhighlight(self, locator) -> None:
         try:
@@ -558,8 +599,7 @@ class Ctx:
         await self.highlight(locator)
         if desc:
             self.log(f"🖱 Clicking {desc}")
-        # Security req #4 — human click cadence: 500–1500 ms before the click.
-        await self.sleep(random.uniform(0.5, 1.5) / max(self.mult, 0.01))
+        # Iter 320 — click immediately, no artificial human-cadence delay.
         await locator.click(timeout=self.timeout_ms)
         await self._unhighlight(locator)
         # Wait for the page to settle before the next action.
@@ -567,7 +607,7 @@ class Ctx:
             await self.page.wait_for_load_state("domcontentloaded", timeout=8000)
         except Exception:
             pass
-        await self.sleep(0.4)
+        await self.sleep(0.05)
 
     async def type(self, locator, text: str, desc: str = "", secret: bool = False) -> None:
         await self.highlight(locator)
@@ -581,11 +621,12 @@ class Ctx:
             await locator.fill("", timeout=3000)
         except Exception:
             pass
-        # Security req #4 — human typing: 50–150 ms per character.
-        delay = int(random.uniform(50, 150) * max(self.mult, 1.0))
+        # Iter 320 — fast keyboard emulation (20 ms/char). Real key events
+        # are still required so Angular ng-model bindings update correctly.
+        delay = 20
         await locator.press_sequentially(str(text), delay=delay, timeout=max(self.timeout_ms, len(str(text)) * delay + 8000))
         await self._unhighlight(locator)
-        await self.sleep(0.3)
+        await self.sleep(0.05)
 
     async def paste(self, locator, text: str, desc: str = "") -> None:
         """Enter text INSTANTLY (paste-style) — used for the captcha so
@@ -606,9 +647,9 @@ class Ctx:
                 await locator.fill("", timeout=3000)
             except Exception:
                 pass
-            await locator.press_sequentially(str(text), delay=15)
+            await locator.press_sequentially(str(text), delay=10)
         await self._unhighlight(locator)
-        await self.sleep(0.3)
+        await self.sleep(0.05)
 
     async def first_visible(self, selectors: List[str]):
         for sel in selectors:
@@ -1469,7 +1510,7 @@ async def _frame_loop(sid: str) -> None:
                 s["network"] = "online"
             except Exception:
                 pass
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(0.5)
         s = _SESSIONS.get(sid)
 
 

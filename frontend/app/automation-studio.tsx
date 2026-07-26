@@ -11,12 +11,14 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -102,7 +104,6 @@ export default function AutomationStudioScreen() {
   const [empSearch, setEmpSearch] = useState("");
   const [runs, setRuns] = useState<Run[]>([]);
   const [runId, setRunId] = useState<string>("");
-  const [speed, setSpeed] = useState<string>("normal");
   const [validation, setValidation] = useState<any>(null);
 
   const [session, setSession] = useState<Session | null>(null);
@@ -114,6 +115,11 @@ export default function AutomationStudioScreen() {
   const [history, setHistory] = useState<any[]>([]);
   const [baseUrl, setBaseUrl] = useState("");
   const [token, setToken] = useState("");
+  // Iter 320 — manual override (mouse + keyboard on the portal) + fullscreen.
+  const [manual, setManual] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [kbVal, setKbVal] = useState("");
+  const { width: winW, height: winH } = useWindowDimensions();
 
   const pollRef = useRef<any>(null);
 
@@ -209,12 +215,12 @@ export default function AutomationStudioScreen() {
           flow,
           employee_id: activeFlow?.needs_employee ? empId : undefined,
           run_id: activeFlow?.needs_run ? runId : undefined,
-          speed,
+          speed: "fast",
         },
       });
       setSid(r.session_id);
       await poll(r.session_id);
-      pollRef.current = setInterval(() => poll(r.session_id), 1200);
+      pollRef.current = setInterval(() => poll(r.session_id), 900);
     } catch (e: any) {
       setErr(e?.message || "Failed to start automation");
     } finally {
@@ -229,7 +235,7 @@ export default function AutomationStudioScreen() {
       if (action === "stop" || action === "emergency_stop") {
         // keep polling; runner flips to stopped
       } else if (!pollRef.current && !["completed", "failed", "stopped"].includes(session?.status || "")) {
-        pollRef.current = setInterval(() => poll(sid), 1200);
+        pollRef.current = setInterval(() => poll(sid), 900);
       }
     } catch (e: any) {
       setErr(e?.message || "Control failed");
@@ -246,6 +252,48 @@ export default function AutomationStudioScreen() {
       setInputVal("");
     } catch (e: any) {
       setErr(e?.message || "Failed to submit");
+    }
+  };
+
+  // Iter 320 — MANUAL OVERRIDE: forward the user's own clicks / typing on
+  // the live view into the automated browser (mouse + keyboard on portal).
+  const sendTap = async (x: number, y: number) => {
+    if (!sid) return;
+    try {
+      await api(`/rpa/session/${sid}/interact`, {
+        method: "POST",
+        body: { kind: "click", x, y },
+      });
+      setTimeout(() => poll(sid), 350);
+    } catch (e: any) {
+      setErr(e?.message || "Manual click failed");
+    }
+  };
+
+  const sendType = async () => {
+    if (!sid || !kbVal) return;
+    try {
+      await api(`/rpa/session/${sid}/interact`, {
+        method: "POST",
+        body: { kind: "type", text: kbVal },
+      });
+      setKbVal("");
+      setTimeout(() => poll(sid), 350);
+    } catch (e: any) {
+      setErr(e?.message || "Manual typing failed");
+    }
+  };
+
+  const sendKey = async (key: string) => {
+    if (!sid) return;
+    try {
+      await api(`/rpa/session/${sid}/interact`, {
+        method: "POST",
+        body: { kind: "key", key },
+      });
+      setTimeout(() => poll(sid), 350);
+    } catch (e: any) {
+      setErr(e?.message || "Manual key failed");
     }
   };
 
@@ -487,17 +535,9 @@ export default function AutomationStudioScreen() {
 
               <Text style={[st.cardTitle, { marginTop: spacing.md }]}>Speed</Text>
               <View style={st.chipRow}>
-                {["very_slow", "slow", "normal", "fast"].map((sp) => (
-                  <Pressable
-                    key={sp}
-                    onPress={() => setSpeed(sp)}
-                    style={[st.chip, speed === sp && st.chipActive]}
-                  >
-                    <Text style={[st.chipTxt, speed === sp && st.chipTxtActive]}>
-                      {sp.replace("_", " ")}
-                    </Text>
-                  </Pressable>
-                ))}
+                <View style={[st.chip, st.chipActive]}>
+                  <Text style={[st.chipTxt, st.chipTxtActive]}>⚡ Fast (maximum speed)</Text>
+                </View>
               </View>
 
               {err ? <Text style={st.errTxt}>{err}</Text> : null}
@@ -568,21 +608,125 @@ export default function AutomationStudioScreen() {
               </View>
               <Text style={st.currentMsg}>{session.message}</Text>
 
-              {/* Live frame */}
+              {/* Live frame — clickable when Manual Control is ON */}
               <View style={st.frameWrap}>
-                {session.frame_b64 ? (
-                  <Image
-                    source={{ uri: `data:image/jpeg;base64,${session.frame_b64}` }}
-                    style={st.frame}
-                    resizeMode="contain"
-                  />
-                ) : (
-                  <View style={[st.frame, st.frameEmpty]}>
-                    <ActivityIndicator color={colors.primary} />
-                    <Text style={st.muted}>Waiting for the live view…</Text>
-                  </View>
-                )}
+                <InteractiveFrame
+                  b64={session.frame_b64}
+                  manual={manual}
+                  onTap={sendTap}
+                  style={st.frame}
+                />
               </View>
+              <View style={st.frameBar}>
+                <Pressable
+                  style={[st.frameBarBtn, manual && st.frameBarBtnOn]}
+                  onPress={() => setManual(!manual)}
+                >
+                  <Ionicons name="hand-left" size={14} color={manual ? "#fff" : colors.primary} />
+                  <Text style={[st.frameBarTxt, manual && { color: "#fff" }]}>
+                    {manual ? "Manual Control ON" : "Manual Control"}
+                  </Text>
+                </Pressable>
+                <Pressable style={st.frameBarBtn} onPress={() => setFullscreen(true)}>
+                  <Ionicons name="expand" size={14} color={colors.primary} />
+                  <Text style={st.frameBarTxt}>Full Screen</Text>
+                </Pressable>
+              </View>
+              {manual && (
+                <View style={st.kbBox}>
+                  <Text style={st.kbHint}>
+                    🖱 Click directly on the live view above to click on the portal.
+                    Use the box below to type on the portal.
+                  </Text>
+                  <View style={st.inputRow}>
+                    <TextInput
+                      style={st.kbInput}
+                      value={kbVal}
+                      onChangeText={setKbVal}
+                      placeholder="Type text to send to the portal…"
+                      placeholderTextColor={colors.onSurfaceTertiary}
+                      onSubmitEditing={sendType}
+                    />
+                    <Pressable style={st.kbSendBtn} onPress={sendType}>
+                      <Text style={st.inputBtnTxt}>Type</Text>
+                    </Pressable>
+                  </View>
+                  <View style={st.kbKeys}>
+                    {([
+                      ["Enter", "⏎ Enter"],
+                      ["Tab", "⇥ Tab"],
+                      ["Backspace", "⌫ Back"],
+                      ["Escape", "Esc"],
+                      ["ArrowUp", "↑"],
+                      ["ArrowDown", "↓"],
+                    ] as const).map(([k, label]) => (
+                      <Pressable key={k} style={st.kbKey} onPress={() => sendKey(k)}>
+                        <Text style={st.kbKeyTxt}>{label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {/* Fullscreen live portal view */}
+              <Modal
+                visible={fullscreen}
+                animationType="fade"
+                onRequestClose={() => setFullscreen(false)}
+              >
+                <View style={st.fsRoot}>
+                  <View style={st.fsHead}>
+                    <Text style={st.fsTitle} numberOfLines={1}>
+                      {session.portal_label} — Live Portal
+                    </Text>
+                    <Pressable
+                      style={[st.frameBarBtn, st.fsBarBtn, manual && st.frameBarBtnOn]}
+                      onPress={() => setManual(!manual)}
+                    >
+                      <Ionicons name="hand-left" size={14} color={manual ? "#fff" : "#93C5FD"} />
+                      <Text style={[st.frameBarTxt, { color: manual ? "#fff" : "#93C5FD" }]}>
+                        {manual ? "Manual ON" : "Manual"}
+                      </Text>
+                    </Pressable>
+                    <Pressable style={st.fsClose} onPress={() => setFullscreen(false)}>
+                      <Ionicons name="contract" size={16} color="#fff" />
+                      <Text style={st.fsCloseTxt}>Exit Full Screen</Text>
+                    </Pressable>
+                  </View>
+                  <View style={st.fsBody}>
+                    <InteractiveFrame
+                      b64={session.frame_b64}
+                      manual={manual}
+                      onTap={sendTap}
+                      style={{
+                        width: Math.min(winW - 8, (winH - (manual ? 190 : 110)) * 1.6),
+                        aspectRatio: 1280 / 800,
+                        backgroundColor: "#000",
+                      }}
+                    />
+                  </View>
+                  {manual && (
+                    <View style={st.fsKb}>
+                      <TextInput
+                        style={[st.kbInput, { backgroundColor: "#1E293B", color: "#fff", borderColor: "#334155" }]}
+                        value={kbVal}
+                        onChangeText={setKbVal}
+                        placeholder="Type text to send to the portal…"
+                        placeholderTextColor="#64748B"
+                        onSubmitEditing={sendType}
+                      />
+                      <Pressable style={st.kbSendBtn} onPress={sendType}>
+                        <Text style={st.inputBtnTxt}>Type</Text>
+                      </Pressable>
+                      {([["Enter", "⏎"], ["Tab", "⇥"], ["Backspace", "⌫"]] as const).map(([k, label]) => (
+                        <Pressable key={k} style={[st.kbKey, { borderColor: "#334155" }]} onPress={() => sendKey(k)}>
+                          <Text style={[st.kbKeyTxt, { color: "#93C5FD" }]}>{label}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              </Modal>
               {session.current_url ? (
                 <Text style={st.urlTxt} numberOfLines={1}>
                   🌐 {session.current_url}
@@ -723,6 +867,52 @@ export default function AutomationStudioScreen() {
   );
 }
 
+/**
+ * Iter 320 — Interactive live frame. When manual mode is ON, taps on the
+ * streamed image are converted to normalised (0–1) coordinates and sent
+ * to the automated browser so the user can click anywhere on the portal.
+ */
+function InteractiveFrame({
+  b64, manual, onTap, style,
+}: {
+  b64?: string | null;
+  manual: boolean;
+  onTap: (x: number, y: number) => void;
+  style?: any;
+}) {
+  const [dim, setDim] = useState({ w: 0, h: 0 });
+  return (
+    <Pressable
+      disabled={!manual || !b64}
+      onLayout={(e) =>
+        setDim({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })
+      }
+      onPress={(e: any) => {
+        const ne = e?.nativeEvent || {};
+        const lx = ne.locationX ?? ne.offsetX;
+        const ly = ne.locationY ?? ne.offsetY;
+        if (dim.w > 0 && dim.h > 0 && lx != null && ly != null) {
+          onTap(lx / dim.w, ly / dim.h);
+        }
+      }}
+      style={[style, manual && b64 ? st.frameManual : null]}
+    >
+      {b64 ? (
+        <Image
+          source={{ uri: `data:image/jpeg;base64,${b64}` }}
+          style={{ width: "100%", height: "100%" }}
+          resizeMode="stretch"
+        />
+      ) : (
+        <View style={[{ width: "100%", height: "100%" }, st.frameEmpty]}>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={st.muted}>Waiting for the live view…</Text>
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
 function CtrlBtn({
   icon, label, color, onPress, disabled,
 }: {
@@ -829,7 +1019,51 @@ const st = StyleSheet.create({
     backgroundColor: "#111", borderWidth: 1, borderColor: colors.border,
   },
   frame: { width: "100%", aspectRatio: 1280 / 800, backgroundColor: "#000" },
+  frameManual: Platform.OS === "web" ? ({ cursor: "crosshair" } as any) : {},
   frameEmpty: { alignItems: "center", justifyContent: "center", gap: 8 },
+  frameBar: { flexDirection: "row", gap: 8, marginTop: 8, flexWrap: "wrap" },
+  frameBarBtn: {
+    flexDirection: "row", alignItems: "center", gap: 5, borderWidth: 1.5,
+    borderColor: colors.primary, borderRadius: radius.md,
+    paddingHorizontal: 12, paddingVertical: 7,
+  },
+  frameBarBtnOn: { backgroundColor: "#15803D", borderColor: "#15803D" },
+  frameBarTxt: { fontSize: 12.5, fontWeight: "800", color: colors.primary },
+  kbBox: {
+    marginTop: spacing.sm, backgroundColor: "#EFF6FF", borderRadius: radius.md,
+    padding: spacing.md, borderWidth: 1, borderColor: "#93C5FD",
+  },
+  kbHint: { fontSize: 12, color: "#1D4ED8", fontWeight: "600", marginBottom: 8, lineHeight: 17 },
+  kbInput: {
+    flex: 1, borderWidth: 1, borderColor: "#93C5FD", borderRadius: radius.md,
+    paddingHorizontal: 12, paddingVertical: 9, fontSize: 14, color: "#111",
+    backgroundColor: "#fff",
+  },
+  kbSendBtn: { backgroundColor: "#1D4ED8", borderRadius: radius.md, paddingHorizontal: 16, justifyContent: "center" },
+  kbKeys: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
+  kbKey: {
+    borderWidth: 1, borderColor: "#93C5FD", borderRadius: radius.sm,
+    paddingHorizontal: 12, paddingVertical: 7, backgroundColor: "#fff",
+  },
+  kbKeyTxt: { fontSize: 12.5, fontWeight: "800", color: "#1D4ED8" },
+  fsRoot: { flex: 1, backgroundColor: "#0B1120" },
+  fsHead: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    paddingHorizontal: 14, paddingVertical: 10,
+  },
+  fsTitle: { flex: 1, fontSize: 14, fontWeight: "800", color: "#fff" },
+  fsBarBtn: { borderColor: "#334155" },
+  fsClose: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: "#DC2626", borderRadius: radius.md,
+    paddingHorizontal: 14, paddingVertical: 8,
+  },
+  fsCloseTxt: { fontSize: 13, fontWeight: "800", color: "#fff" },
+  fsBody: { flex: 1, alignItems: "center", justifyContent: "center", padding: 4 },
+  fsKb: {
+    flexDirection: "row", gap: 8, paddingHorizontal: 14, paddingVertical: 10,
+    alignItems: "center",
+  },
   urlTxt: { fontSize: 11.5, color: colors.onSurfaceTertiary, marginTop: 6 },
   inputBox: {
     marginTop: spacing.md, backgroundColor: "#FEF9C3", borderRadius: radius.md,
