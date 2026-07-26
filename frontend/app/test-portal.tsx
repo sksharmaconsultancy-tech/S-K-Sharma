@@ -127,6 +127,28 @@ function AutomationCard() {
         <Text style={st.dlBtnTxt}>Get Automated Chrome Login</Text>
       </Pressable>
 
+      {/* Iter 315 (user guide) — ECR TEST: opens EPFO in a NEW visible
+          Google Chrome window on YOUR PC (ChromeDriver) and clicks the
+          alert popup's OK button. Same runner zip → run_ecr_test.bat */}
+      <Pressable
+        style={[st.dlBtn, { backgroundColor: "#B45309", marginTop: 8 }, busy === "runner" && st.disabled]}
+        onPress={() => download("runner")}
+        disabled={busy !== null}
+        testID="btn-ecr-test-chrome"
+      >
+        <Ionicons name="flask-outline" size={18} color="#fff" />
+        <Text style={st.dlBtnTxt}>Auto-Upload ECR — TEST (Chrome Window)</Text>
+      </Pressable>
+      <Text style={st.step}>
+        ECR TEST: download the same runner zip above, then double-click{" "}
+        <Text style={st.mono}>run_ecr_test.bat</Text> (Mac/Linux:{" "}
+        <Text style={st.mono}>./run.sh ecr_test</Text>). A new Google Chrome
+        window opens the EPFO portal and the automation clicks the alert&apos;s
+        OK button — no login needed. Already have the folder? Just run{" "}
+        <Text style={st.mono}>python sks_launcher.py ecr_test</Text> — it
+        self-updates to the latest script automatically.
+      </Text>
+
       <Text style={st.step}>
         1. Download the zip, then unzip and MOVE the folder to a fixed
         location (see below) — needs Chrome + Python.{"\n"}

@@ -1691,3 +1691,18 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   NOTE: pod needed `playwright install chromium` (headless_shell-1228); deploy script installs
   Chrome + playwright browsers on VPS. USER WILL GUIDE NEXT STEPS of the ECR auto-upload flow.
 - Deploy: /app/deploy_vps_iter314.sh (temp_bundle kind=script serves it).
+
+## Iter 315 — ECR Test in USER'S OWN Chrome window (no server automation)
+- User directive: "Do not use [server] automation — just open the page in a new Google
+  Chrome window controlled by automation." Implemented via the existing PC Runner
+  (Selenium ChromeDriver on the user's desktop): portal_extension.py RUNNER_VERSION=2,
+  run() supports mode "ecr_test" (also epfo_test/ecr) → opens EPFO in a NEW visible
+  Chrome window (detach=True, maximized), waits up to 20s for #btnCloseModal
+  (fallback button.btn-danger[data-bs-dismiss=modal]) and clicks OK; no credentials.
+  Zip now includes run_ecr_test.bat + README lines; existing installs self-update
+  (runner-script endpoint serves v2 — verified by simulating launcher update fetch).
+- Frontend: test-portal.tsx new amber button "Auto-Upload ECR — TEST (Chrome Window)"
+  (testID btn-ecr-test-chrome) downloads the runner zip + instructions.
+- NOTE: pod is linux/aarch64 → Selenium can't run here (Selenium Manager unsupported);
+  logic mirrors the Playwright flow verified live against EPFO. Server-side RPA flow
+  from Iter 314 remains available in Automation Studio.

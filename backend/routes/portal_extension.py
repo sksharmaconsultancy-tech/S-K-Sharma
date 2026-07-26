@@ -250,7 +250,7 @@ async def ext_solve_captcha(payload: Dict[str, Any] = Body(...)):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "1"
+RUNNER_VERSION = "2"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -268,8 +268,44 @@ PORTALS = {
 
 def run(API_BASE, TOKEN, portal):
     portal = (portal or "esic").lower()
+
+    # Iter 315 (user guide) — "ecr_test": open the EPFO portal in a NEW
+    # visible Google Chrome window (ChromeDriver) and click the alert
+    # popup's OK button (#btnCloseModal). No login, no credentials.
+    if portal in ("ecr_test", "epfo_test", "ecr"):
+        from selenium import webdriver
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.chrome.options import Options
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+
+        opts = Options()
+        opts.add_experimental_option("detach", True)
+        opts.add_argument("--start-maximized")
+        print("Launching Google Chrome (auto-managed ChromeDriver)...")
+        driver = webdriver.Chrome(options=opts)
+        print("Opening EPFO employer portal...")
+        driver.get(PORTALS["epfo"])
+        try:
+            btn = WebDriverWait(driver, 20).until(
+                EC.element_to_be_clickable((By.ID, "btnCloseModal")))
+            btn.click()
+            print("OK button clicked - alert popup closed.")
+        except Exception:
+            try:
+                btn = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable((
+                        By.CSS_SELECTOR,
+                        "button.btn-danger[data-bs-dismiss='modal']")))
+                btn.click()
+                print("OK button clicked - alert popup closed.")
+            except Exception:
+                print("No alert popup appeared - nothing to close.")
+        print("\nECR TEST DONE. Chrome stays open - close it when finished.")
+        return
+
     if portal not in PORTALS:
-        print("Unknown portal. Use 'esic' or 'epfo'."); return
+        print("Unknown portal. Use 'esic', 'epfo' or 'ecr_test'."); return
 
     def _get(url):
         with urllib.request.urlopen(url, timeout=30) as r:
@@ -445,6 +481,13 @@ _RUNNER_BAT_PF = (
     "pause\r\n"
 )
 
+# Iter 315 — ECR TEST: real Chrome window, open EPFO + close alert (OK).
+_RUNNER_BAT_ECR_TEST = (
+    "@echo off\r\n"
+    "python sks_launcher.py ecr_test\r\n"
+    "pause\r\n"
+)
+
 _RUNNER_SH = (
     "#!/bin/sh\n"
     "python3 sks_launcher.py \"${1:-esic}\"\n"
@@ -467,8 +510,12 @@ _RUNNER_README = (
     "  - Your User ID/Password are fetched live each run.\n"
     "So you never need to download again.\n\n"
     "WINDOWS:  open the folder, double-click run_esic.bat  (or run_pf.bat)\n"
+    "          ECR TEST: double-click run_ecr_test.bat - a new Chrome\n"
+    "          window opens the EPFO portal and clicks the alert's OK\n"
+    "          button automatically (no login).\n"
     "MAC/LINUX: open a terminal in the folder,\n"
-    "           chmod +x run.sh ; ./run.sh esic   (or ./run.sh epfo)\n\n"
+    "           chmod +x run.sh ; ./run.sh esic   (or ./run.sh epfo)\n"
+    "           ECR TEST: ./run.sh ecr_test\n\n"
     "A controlled Chrome window opens the portal and fills your login +\n"
     "captcha automatically. Verify the captcha, then click the portal's\n"
     "Login button.\n"
@@ -515,6 +562,7 @@ async def runner_download(
         z.writestr("requirements.txt", _RUNNER_REQ)
         z.writestr("run_esic.bat", _RUNNER_BAT)
         z.writestr("run_pf.bat", _RUNNER_BAT_PF)
+        z.writestr("run_ecr_test.bat", _RUNNER_BAT_ECR_TEST)
         z.writestr("run.sh", _RUNNER_SH)
         z.writestr("README.txt", _RUNNER_README)
     buf.seek(0)

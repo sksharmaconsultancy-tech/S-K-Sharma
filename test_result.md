@@ -225,3 +225,8 @@ See `/app/memory/test_credentials.md`. Super admin
   (/app/test_reports/iteration_313.json). Test data cleaned.
 - RPA test flow: 2 live runs completed (bundled Chromium + system Chrome via executable_path);
   EPFO portal opened, #btnCloseModal clicked, screenshot captured.
+
+## Iter 315
+- Runner zip verified: contains run_ecr_test.bat; embedded runner code compiles; runner-script
+  self-update endpoint serves version 2 with ecr_test. Selenium cannot execute in this ARM64 pod —
+  final click validated earlier via Playwright against live EPFO (#btnCloseModal).
