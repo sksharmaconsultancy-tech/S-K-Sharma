@@ -11295,6 +11295,16 @@ def _month_is_after_exit(user: dict, month_str: str) -> bool:
         return True
 
 
+def _employee_inactive_for_report(user: dict, month_str: str) -> bool:
+    """Iter 321 (user request) — attendance reports show ACTIVE employees
+    only. Excluded when flagged disabled / active=False, or resigned/exited
+    BEFORE the report month. An exit DURING the report month still shows
+    (they worked part of it)."""
+    if user.get("disabled") is True or user.get("active") is False:
+        return True
+    return _month_is_after_exit(user, month_str)
+
+
 def _month_is_before_doj(user: dict, month_str: str) -> bool:
     """Return True when the given 'YYYY-MM' precedes the employee's DOJ.
 
@@ -17982,9 +17992,15 @@ async def _compute_monthly_grid_data(
             "father_name": 1, "department": 1, "position": 1,
             "designation": 1, "doj": 1,
             "bio_code": 1, "employee_group": 1,
+            "exit_date": 1, "resign_date": 1, "date_of_leaving": 1,
+            "leaving_date": 1, "employment_status": 1, "disabled": 1, "active": 1,
         },
     ).sort([("employee_code", 1), ("name", 1)]).to_list(4000)
     employees = [e for e in employees if not _month_is_before_doj(e, month)]
+    # Iter 321 (user request) — ACTIVE employees only on attendance reports
+    # (grid + all XLSX/PDF exports). Self-view is exempt.
+    if not only_user_id:
+        employees = [e for e in employees if not _employee_inactive_for_report(e, month)]
 
     # ----- Punches for those employees in the target window -------------
     punches_by_user_day: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
@@ -18688,8 +18704,13 @@ async def _build_ot_report_rows(
         {
             "_id": 0, "user_id": 1, "employee_code": 1, "name": 1,
             "designation": 1, "department": 1, "bio_code": 1,
+            "exit_date": 1, "resign_date": 1, "date_of_leaving": 1,
+            "leaving_date": 1, "employment_status": 1, "disabled": 1, "active": 1,
         },
     ).sort([("employee_code", 1), ("name", 1)]).to_list(4000)
+    # Iter 321 — ACTIVE employees only (OT report window's from-month).
+    employees = [e for e in employees
+                 if not _employee_inactive_for_report(e, date_from[:7])]
 
     if not employees:
         return company, []
@@ -18886,10 +18907,14 @@ async def _generate_attendance_sheet_impl(
 
     employees = await db.users.find(
         query,
-        {"_id": 0, "user_id": 1, "employee_code": 1, "name": 1, "doj": 1, "department": 1},
+        {"_id": 0, "user_id": 1, "employee_code": 1, "name": 1, "doj": 1, "department": 1,
+         "exit_date": 1, "resign_date": 1, "date_of_leaving": 1,
+         "leaving_date": 1, "employment_status": 1, "disabled": 1, "active": 1},
     ).to_list(2000)
     # Skip pre-DOJ (Iter 57 rule) so the master sheet mirrors the compliance run.
     employees = [e for e in employees if not _month_is_before_doj(e, month)]
+    # Iter 321 — ACTIVE employees only on the Attendance Sheet.
+    employees = [e for e in employees if not _employee_inactive_for_report(e, month)]
 
     # Present-days snapshot for reference
     try:

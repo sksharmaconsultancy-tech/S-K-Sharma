@@ -1777,3 +1777,18 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   edits — apply same-file edits sequentially and re-grep to verify.
 - Deploy: /app/deploy_vps_iter320.sh served via /api/temp-code-bundle?token=sks-deploy-7391&kind=script.
 - Pushed to GitHub (commit 2133c73, main).
+
+## Iter 321 — Attendance reports: ACTIVE employees only
+- New helper server.py::_employee_inactive_for_report(user, month) — excludes disabled=True /
+  active=False, plus _month_is_after_exit rule (exit BEFORE report month → excluded; exit
+  DURING month → still included; resigned-without-date → excluded).
+- Applied in 3 places: _compute_monthly_grid_data (covers grid JSON, Grid-View/Hours/OT/InOut
+  XLSX+PDF, daily reports; self-view only_user_id exempt), _build_ot_report_rows, and
+  _generate_attendance_sheet_impl (Attendance Sheet template).
+- Group-wise filter ALREADY existed on both Attendance Grid (chips) and Attendance Sheet
+  (dropdown) via ?group_id= → _resolve_group_employee_ids (masters type=group by master_id,
+  name-match fallback, employee_group_policies fallback). Note: /admin/employee-groups returns
+  groups WITHOUT group_id key for this firm (name/member_count only); masters groups carry ids.
+- Verified live: flagged 3 test employees (exit before month → excluded; exit mid-month →
+  included; disabled → excluded), grid 127→125, May report still shows mid-May leaver,
+  group_id=mst_820470a644 (LABOUR) → 108 rows, all XLSX endpoints 200. Flags reverted.
