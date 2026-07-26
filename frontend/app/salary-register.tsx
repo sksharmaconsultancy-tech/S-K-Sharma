@@ -55,6 +55,9 @@ const fmtNum = (v: any) => {
 const fmtMoney = (v: any) => `₹${fmtNum(v)}`;
 
 function colWidth(c: Col): number {
+  // Iter 309 — saved layout width (mm-ish units from the editor → px).
+  const w = (c as any).width;
+  if (w && Number(w) > 0) return Math.round(Number(w) * 4);
   if (c.key === "name") return 170;
   if (c.key === "father_name" || c.key === "designation" || c.key === "contractor_name") return 130;
   if (c.type === "text") return 100;

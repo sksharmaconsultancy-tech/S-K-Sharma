@@ -16,7 +16,16 @@ import { colors, radius } from "@/src/theme";
 
 type Col = { key: string; heading: string; width: string; include: boolean; defHeading: string; defWidth: number };
 
-export default function RegisterLayoutEditor({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+export default function RegisterLayoutEditor({
+  visible, onClose,
+  endpoint = "/admin/compliance-register-layout",
+  savedNote = "Saved ✓ — every 'PDF (Option 2)' download now uses this layout.",
+}: {
+  visible: boolean; onClose: () => void;
+  /** Iter 309 — reusable for other registers (e.g. dynamic Salary Register). */
+  endpoint?: string;
+  savedNote?: string;
+}) {
   const [cols, setCols] = useState<Col[]>([]);
   const [perPage, setPerPage] = useState("10");
   const [rowHeight, setRowHeight] = useState("");
@@ -29,7 +38,7 @@ export default function RegisterLayoutEditor({ visible, onClose }: { visible: bo
     setLoading(true); setMsg("");
     (async () => {
       try {
-        const r = await api<any>("/admin/compliance-register-layout");
+        const r = await api<any>(endpoint);
         const saved: any[] = r.layout?.columns || [];
         const savedKeys = saved.map((c) => c.key);
         const catalog: any[] = r.catalog || [];
@@ -66,7 +75,7 @@ export default function RegisterLayoutEditor({ visible, onClose }: { visible: bo
     if (!chosen.length) { setMsg("Select at least one column"); return; }
     setSaving(true); setMsg("");
     try {
-      await api("/admin/compliance-register-layout", {
+      await api(endpoint, {
         method: "PUT",
         body: {
           columns: chosen.map((c) => ({
@@ -77,7 +86,7 @@ export default function RegisterLayoutEditor({ visible, onClose }: { visible: bo
           row_height: Number(rowHeight) > 0 ? Number(rowHeight) : undefined,
         },
       });
-      setMsg("Saved ✓ — every 'PDF (Option 2)' download now uses this layout.");
+      setMsg(savedNote);
     } catch (e: any) { setMsg(e?.message || "Save failed"); }
     finally { setSaving(false); }
   };
@@ -85,7 +94,7 @@ export default function RegisterLayoutEditor({ visible, onClose }: { visible: bo
   const reset = async () => {
     setSaving(true); setMsg("");
     try {
-      await api("/admin/compliance-register-layout", { method: "DELETE" });
+      await api(endpoint, { method: "DELETE" });
       setCols(cols.map((c) => ({ ...c, include: true, heading: c.defHeading, width: String(c.defWidth) })));
       setPerPage("10"); setRowHeight("");
       setMsg("Reset to default layout ✓");

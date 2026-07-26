@@ -43,6 +43,8 @@ export default function ReportFormatsScreen() {
   const router = useRouter();
   const { user, loading } = useAuth();
   const [openRegister, setOpenRegister] = useState(false);
+  // Iter 309 — layout editor for the dynamic Salary Register module.
+  const [openModuleLayout, setOpenModuleLayout] = useState(false);
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [editing, setEditing] = useState<ReportItem | null>(null);
@@ -112,13 +114,20 @@ export default function ReportFormatsScreen() {
                 <Text style={styles.group}>{grp.toUpperCase()}</Text>
                 {items.map((r) => (
                   <Pressable key={r.report_id} style={styles.card}
-                    onPress={() => setEditing(r)} testID={`rf-${r.report_id}`}>
+                    onPress={() => {
+                      // Iter 309 — dynamic Salary Register gets the FULL
+                      // layout editor (columns/order/rename/width/per-page/row height).
+                      if (r.report_id === "salary_register_module") setOpenModuleLayout(true);
+                      else setEditing(r);
+                    }} testID={`rf-${r.report_id}`}>
                     <Ionicons name={GROUP_ICONS[grp] || "document-text-outline"}
                       size={22} color={colors.brandPrimary} />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.cardTitle}>{r.label}</Text>
                       <Text style={styles.cardSub}>
-                        {r.has_columns
+                        {r.report_id === "salary_register_module"
+                          ? "Choose columns · order · rename headings · widths · employees per page · row height"
+                          : r.has_columns
                           ? "Columns · order · headings · widths · title · orientation · font size"
                           : "Fixed statutory layout — title · orientation · font size"}
                       </Text>
@@ -145,6 +154,12 @@ export default function ReportFormatsScreen() {
       </ScrollView>
 
       <RegisterLayoutEditor visible={openRegister} onClose={() => setOpenRegister(false)} />
+      <RegisterLayoutEditor
+        visible={openModuleLayout}
+        onClose={() => setOpenModuleLayout(false)}
+        endpoint="/admin/salary-register/layout"
+        savedNote="Saved ✓ — the Salary Register grid, PDF, Excel and Email now use this layout."
+      />
       {editing ? (
         <ReportFormatEditor
           visible={!!editing}

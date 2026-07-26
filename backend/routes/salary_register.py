@@ -124,7 +124,7 @@ _EXCLUDE_KEYS = {
     "basic_master", "hra_master", "conveyance_master", "medical_master",
     "special_master", "others_master", "gross_master",
     "pf_basic", "stat_wage_base", "esic_wage_base", "pf_employer_total",
-    "duty_hours",
+    "duty_hours", "compliance_basic",
 }
 
 # Columns always kept even if all-zero.
@@ -137,6 +137,121 @@ _ALWAYS_KEEP = {
 
 def _registry(source: str) -> List[Tuple[str, str, str, str]]:
     return _COMPLIANCE_REGISTRY if source == "compliance" else _ACTUAL_REGISTRY
+
+
+# ---------------------------------------------------------------------------
+# Iter 309 (user) — full layout editing for the dynamic Salary Register:
+# choose columns · order · rename headings · widths · employees per page ·
+# row height. Saved once in app_settings; applied to the GRID, Excel, CSV,
+# PDF and Email exports alike.
+# ---------------------------------------------------------------------------
+
+_LAYOUT_KEY = {"key": "salary_register_module_layout"}
+
+
+def _layout_catalog() -> List[Dict[str, Any]]:
+    """Union of both source registries (key → default heading/width)."""
+    seen: Dict[str, Dict[str, Any]] = {}
+    for reg in (_COMPLIANCE_REGISTRY, _ACTUAL_REGISTRY):
+        for k, lbl, _g, t in reg:
+            if k not in seen:
+                seen[k] = {"key": k, "heading": lbl,
+                           "width": 28 if k == "name" else (22 if t == "text" else 16),
+                           "numeric": t != "text"}
+    return list(seen.values())
+
+
+async def _saved_layout() -> Optional[Dict[str, Any]]:
+    doc = await db.app_settings.find_one(_LAYOUT_KEY, {"_id": 0, "layout": 1})
+    return (doc or {}).get("layout") or None
+
+
+def _apply_layout(columns: List[Dict[str, Any]],
+                  layout: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Select/order/rename/size the run's columns per the saved layout.
+    Dynamic heads not in the catalog stay visible (appended at the end)."""
+    if not layout or not layout.get("columns"):
+        return columns
+    by_key = {c["key"]: c for c in columns}
+    catalog_keys = {c["key"] for c in _layout_catalog()}
+    out: List[Dict[str, Any]] = []
+    for item in layout["columns"]:
+        c = by_key.get(item.get("key"))
+        if not c:
+            continue
+        c = dict(c)
+        if item.get("heading"):
+            c["label"] = str(item["heading"])
+        if item.get("width"):
+            c["width"] = float(item["width"])
+        out.append(c)
+    chosen = {c["key"] for c in out}
+    # dynamic extras (not configurable in the catalog) remain visible
+    out.extend(c for c in columns
+               if c["key"] not in chosen and c["key"] not in catalog_keys)
+    return out
+
+
+@router.get("/layout")
+async def get_module_layout(authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    doc = await db.app_settings.find_one(_LAYOUT_KEY, {"_id": 0}) or {}
+    return {"layout": doc.get("layout") or None, "catalog": _layout_catalog(),
+            "updated_at": doc.get("updated_at"),
+            "updated_by_name": doc.get("updated_by_name")}
+
+
+@router.put("/layout")
+async def put_module_layout(payload: Dict[str, Any] = Body(...),
+                            authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin"])
+    valid = {c["key"] for c in _layout_catalog()}
+    cols: List[Dict[str, Any]] = []
+    for c in payload.get("columns") or []:
+        if not isinstance(c, dict) or c.get("key") not in valid:
+            continue
+        item: Dict[str, Any] = {"key": c["key"]}
+        if str(c.get("heading") or "").strip():
+            item["heading"] = str(c["heading"]).strip()[:40]
+        try:
+            w = float(c.get("width") or 0)
+            if w > 0:
+                item["width"] = max(4.0, min(80.0, w))
+        except (TypeError, ValueError):
+            pass
+        cols.append(item)
+    if not cols:
+        raise HTTPException(status_code=400, detail="Select at least one column")
+    layout: Dict[str, Any] = {"columns": cols}
+    try:
+        pp = int(payload.get("per_page") or 0)
+        if pp > 0:
+            layout["per_page"] = max(1, min(100, pp))
+    except (TypeError, ValueError):
+        pass
+    try:
+        rh = float(payload.get("row_height") or 0)
+        if rh > 0:
+            layout["row_height"] = max(3.0, min(20.0, rh))
+    except (TypeError, ValueError):
+        pass
+    from datetime import datetime, timezone
+    await db.app_settings.update_one(_LAYOUT_KEY, {"$set": {
+        **_LAYOUT_KEY, "layout": layout,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_by_name": admin.get("name") or admin.get("email"),
+    }}, upsert=True)
+    return {"ok": True, "layout": layout}
+
+
+@router.delete("/layout")
+async def delete_module_layout(authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin"])
+    await db.app_settings.delete_one(_LAYOUT_KEY)
+    return {"ok": True}
 
 
 def _build_columns(source: str, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -287,11 +402,16 @@ async def _prepare(
         run.get("rows") or [], employee_type, branch, department, contractor, search,
     )
     columns = _build_columns(source, rows)
+    # Iter 309 — saved layout (columns/order/headings/widths) applies to
+    # the grid AND every export.
+    layout = await _saved_layout()
+    columns = _apply_layout(columns, layout)
     if sort_by:
         rows = _sort_rows(rows, sort_by, sort_dir)
     else:
         rows = _sort_rows(rows, "employee_code", "asc")
-    return {"run": run, "rows": rows, "columns": columns, "company_id": cid}
+    return {"run": run, "rows": rows, "columns": columns,
+            "company_id": cid, "layout": layout}
 
 
 # ---------------------------------------------------------------------------
@@ -569,6 +689,85 @@ def _xlsx_bytes(comp: str, source: str, month: str,
     name_col = next((i for i, c in enumerate(columns, 2) if c["key"] == "name"), 3)
     ws.freeze_panes = ws.cell(row=4, column=name_col + 1)
 
+    # ---- Iter 308c (user) — second "Summary" sheet (same as the PDF's
+    # last page: head-wise totals, days/net, rupees in words, signatures).
+    from utils.salary_register_pdf import _num_to_words_inr
+    tot = _totals(rows, columns)
+    s2 = wb.create_sheet("Summary")
+    sec_head_fill = PatternFill("solid", fgColor="1F4E79")
+    box = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    def head_label(c: Dict[str, Any]) -> str:
+        lbl_txt = str(c["label"])
+        return lbl_txt if lbl_txt.lower().startswith("total") else f"Total {lbl_txt}"
+
+    s2.append([f"SUMMARY — {comp} — {month} ({source.title()})"])
+    s2.merge_cells(start_row=1, start_column=1, end_row=1, end_column=2)
+    s2.cell(row=1, column=1).font = Font(bold=True, size=12)
+
+    def sec_rows(title_txt: str, pairs, bold_last=True):
+        s2.append([])
+        s2.append([title_txt])
+        hc = s2.cell(row=s2.max_row, column=1)
+        hc.fill = sec_head_fill
+        hc.font = Font(bold=True, color="FFFFFF", size=10)
+        s2.merge_cells(start_row=s2.max_row, start_column=1,
+                       end_row=s2.max_row, end_column=2)
+        for i, (k, v) in enumerate(pairs):
+            s2.append([k, v])
+            r_i = s2.max_row
+            bold = bold_last and i == len(pairs) - 1
+            for ci in (1, 2):
+                cell = s2.cell(row=r_i, column=ci)
+                cell.border = box
+                if bold:
+                    cell.font = Font(bold=True, size=10)
+                if ci == 2 and isinstance(v, (int, float)):
+                    cell.number_format = "#,##0.00"
+
+    earn_cols = [c for c in columns if c["group"] == "earnings"]
+    ded_cols = [c for c in columns if c["group"] == "deductions"]
+    er_cols = [c for c in columns if c["group"] == "employer"]
+    net_col = next((c for c in columns if c["group"] == "net"), None)
+    gross_key = next((k for k in ("gross_paid", "total_gross", "monthly_gross")
+                      if k in tot), None)
+    days_key = next((k for k in ("present_days", "p_days") if k in tot), None)
+    hrs_key = next((k for k in ("ot_hours", "p_hours") if k in tot), None)
+
+    sec_rows("EARNINGS",
+             [("No. Of Emp", len(rows))]
+             + [(head_label(c), tot.get(c["key"], 0)) for c in earn_cols])
+    if ded_cols:
+        sec_rows("DEDUCTIONS", [(head_label(c), tot.get(c["key"], 0)) for c in ded_cols])
+    if er_cols:
+        sec_rows("EMPLOYER CONTRIBUTIONS",
+                 [(head_label(c), tot.get(c["key"], 0)) for c in er_cols],
+                 bold_last=False)
+    tail = []
+    if days_key:
+        tail.append(("Total Days ->", tot.get(days_key, 0)))
+    if hrs_key:
+        tail.append(("Total Hours ->", tot.get(hrs_key, 0)))
+    if net_col:
+        tail.append(("Net Payable Amount", tot.get(net_col["key"], 0)))
+    if tail:
+        sec_rows("NET", tail)
+    s2.append([])
+    if gross_key:
+        s2.append([f"RUPEES: {_num_to_words_inr(int(round(tot.get(gross_key, 0))))} (GROSS)"])
+        s2.cell(row=s2.max_row, column=1).font = Font(bold=True, size=10)
+    if net_col:
+        s2.append([f"RUPEES: {_num_to_words_inr(int(round(tot.get(net_col['key'], 0))))} (NET PAYABLE)"])
+        s2.cell(row=s2.max_row, column=1).font = Font(bold=True, size=10)
+    s2.append([])
+    s2.append(["Checked by ____________________", f"For {comp.upper()}"])
+    s2.append(["Payment Date ____________________", "AUTHORISED SIGNATORY / MANAGER"])
+    for r_i in (s2.max_row - 1, s2.max_row):
+        s2.cell(row=r_i, column=2).font = Font(bold=True, size=10)
+        s2.cell(row=r_i, column=2).alignment = Alignment(horizontal="right")
+    s2.column_dimensions["A"].width = 42
+    s2.column_dimensions["B"].width = 34
+
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()
@@ -609,8 +808,10 @@ async def export_xlsx(
 
 def _pdf_bytes(comp: str, source: str, month: str,
                rows: List[Dict[str, Any]], columns: List[Dict[str, Any]],
-               filt_bits: List[str], title_override: str = "") -> bytes:
-    """A3-landscape Salary Register PDF (shared by download + email)."""
+               filt_bits: List[str], title_override: str = "",
+               layout: Optional[Dict[str, Any]] = None) -> bytes:
+    """A3-landscape Salary Register PDF (shared by download + email).
+    Iter 309 — honours the saved layout's employees-per-page + row height."""
     from reportlab.lib import colors as rl_colors
     from reportlab.lib.pagesizes import A3, landscape
     from reportlab.lib.units import mm
@@ -637,62 +838,88 @@ def _pdf_bytes(comp: str, source: str, month: str,
     for c in columns:
         band.append(next((g["label"] for g in GROUPS if g["key"] == c["group"]), ""))
     header = ["Sr"] + [c["label"] for c in columns]
-    data: List[List[Any]] = [band, header]
-    for i, r in enumerate(rows, 1):
-        data.append([i] + [
+    t = _totals(rows, columns)
+    totals_row = ["", "TOTAL"] + [
+        t.get(c["key"], "") if c["type"] != "text" else "" for c in columns[1:]
+    ]
+
+    def row_cells(i: int, r: Dict[str, Any]) -> List[Any]:
+        return [i] + [
             _fmt_cell(r.get(c["key"]), c["type"]) if c["type"] != "text"
             else (str(r.get(c["key"]) or ""))[:22]
             for c in columns
-        ])
-    t = _totals(rows, columns)
-    data.append(["", "TOTAL"] + [
-        t.get(c["key"], "") if c["type"] != "text" else "" for c in columns[1:]
-    ])
+        ]
 
     n_cols = len(columns) + 1
     font_size = 6.5 if n_cols <= 28 else (5.5 if n_cols <= 36 else 4.8)
-    tbl = Table(data, repeatRows=2)
-    style = [
-        ("FONTSIZE", (0, 0), (-1, -1), font_size),
-        ("FONTNAME", (0, 0), (-1, 1), "Helvetica-Bold"),
-        ("BACKGROUND", (0, 1), (-1, 1), rl_colors.HexColor("#1F4E79")),
-        ("TEXTCOLOR", (0, 1), (-1, 1), rl_colors.white),
-        ("GRID", (0, 1), (-1, -1), 0.25, rl_colors.HexColor("#C8C8C8")),
-        ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("ROWBACKGROUNDS", (0, 2), (-1, -2),
-         [rl_colors.white, rl_colors.HexColor("#F2F6FA")]),
-        ("BACKGROUND", (0, -1), (-1, -1), rl_colors.HexColor("#FFF3CD")),
-        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("TOPPADDING", (0, 0), (-1, -1), 1.5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
-        ("LEFTPADDING", (0, 0), (-1, -1), 2),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
-    ]
     band_colors = {
         "info": "#44546A", "attendance": "#7F7F7F", "earnings": "#2E7D32",
         "deductions": "#B71C1C", "employer": "#6A1B9A", "net": "#1F4E79",
     }
-    # band cell colors + spans + left-align text cols
-    ci = 1
-    while ci <= len(columns):
-        grp = columns[ci - 1]["group"]
-        j = ci
-        while j + 1 <= len(columns) and columns[j]["group"] == grp:
-            j += 1
-        style.append(("SPAN", (ci, 0), (j, 0)))
-        style.append(("BACKGROUND", (ci, 0), (j, 0),
-                      rl_colors.HexColor(band_colors.get(grp, "#1F4E79"))))
-        style.append(("TEXTCOLOR", (ci, 0), (j, 0), rl_colors.white))
-        style.append(("ALIGN", (ci, 0), (j, 0), "CENTER"))
-        ci = j + 1
-    for idx, c in enumerate(columns, 1):
-        if c["type"] == "text":
-            style.append(("ALIGN", (idx, 1), (idx, -1), "LEFT"))
-    tbl.setStyle(TableStyle(style))
+    row_h = float((layout or {}).get("row_height") or 0)
+    per_page = int((layout or {}).get("per_page") or 0)
 
-    doc.build([title, sub, Spacer(1, 4 * mm), tbl, PageBreak(),
-               *_summary_flowables(comp, rows, columns)])
+    def make_table(chunk: List[Dict[str, Any]], start: int, with_totals: bool) -> Table:
+        data: List[List[Any]] = [band, header]
+        for off, r in enumerate(chunk):
+            data.append(row_cells(start + off + 1, r))
+        if with_totals:
+            data.append(totals_row)
+        heights = None
+        if row_h > 0:
+            heights = [None, None] + [row_h * mm] * len(chunk)
+            if with_totals:
+                heights.append(None)
+        tbl = Table(data, repeatRows=2, rowHeights=heights)
+        style = [
+            ("FONTSIZE", (0, 0), (-1, -1), font_size),
+            ("FONTNAME", (0, 0), (-1, 1), "Helvetica-Bold"),
+            ("BACKGROUND", (0, 1), (-1, 1), rl_colors.HexColor("#1F4E79")),
+            ("TEXTCOLOR", (0, 1), (-1, 1), rl_colors.white),
+            ("GRID", (0, 1), (-1, -1), 0.25, rl_colors.HexColor("#C8C8C8")),
+            ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ROWBACKGROUNDS", (0, 2), (-1, -2 if with_totals else -1),
+             [rl_colors.white, rl_colors.HexColor("#F2F6FA")]),
+            ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 2),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+        ]
+        if with_totals:
+            style.append(("BACKGROUND", (0, -1), (-1, -1), rl_colors.HexColor("#FFF3CD")))
+            style.append(("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"))
+        ci = 1
+        while ci <= len(columns):
+            grp = columns[ci - 1]["group"]
+            j = ci
+            while j + 1 <= len(columns) and columns[j]["group"] == grp:
+                j += 1
+            style.append(("SPAN", (ci, 0), (j, 0)))
+            style.append(("BACKGROUND", (ci, 0), (j, 0),
+                          rl_colors.HexColor(band_colors.get(grp, "#1F4E79"))))
+            style.append(("TEXTCOLOR", (ci, 0), (j, 0), rl_colors.white))
+            style.append(("ALIGN", (ci, 0), (j, 0), "CENTER"))
+            ci = j + 1
+        for idx, c in enumerate(columns, 1):
+            if c["type"] == "text":
+                style.append(("ALIGN", (idx, 1), (idx, -1), "LEFT"))
+        tbl.setStyle(TableStyle(style))
+        return tbl
+
+    flow: List[Any] = [title, sub, Spacer(1, 4 * mm)]
+    if per_page > 0 and rows:
+        for start in range(0, len(rows), per_page):
+            chunk = rows[start:start + per_page]
+            last = start + per_page >= len(rows)
+            flow.append(make_table(chunk, start, last))
+            if not last:
+                flow.append(PageBreak())
+    else:
+        flow.append(make_table(rows, 0, True))
+    flow.append(PageBreak())
+    flow.extend(_summary_flowables(comp, rows, columns))
+    doc.build(flow)
     return buf.getvalue()
 
 
@@ -833,7 +1060,7 @@ async def export_pdf(
     title_ov = await _module_title()
     data = _pdf_bytes(comp, source, month, prep["rows"], prep["columns"],
                       _filt_bits(employee_type, branch, department, contractor),
-                      title_override=title_ov)
+                      title_override=title_ov, layout=prep.get("layout"))
     return StreamingResponse(
         io.BytesIO(data), media_type="application/pdf",
         headers={"Content-Disposition":
@@ -899,7 +1126,8 @@ async def email_register(
     if "pdf" in formats:
         pdf = _pdf_bytes(comp, source, month, rows, columns,
                          _filt_bits(employee_type, branch, department, contractor),
-                         title_override=await _module_title())
+                         title_override=await _module_title(),
+                         layout=prep.get("layout"))
         attachments.append({
             "filename": _export_filename(source, month, "pdf"),
             "content": base64.b64encode(pdf).decode(),

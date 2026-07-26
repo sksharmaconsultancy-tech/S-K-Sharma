@@ -1618,3 +1618,16 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Salary Register PDF now has a LAST-PAGE SUMMARY in the Option-2 style: boxed head-wise totals
   (earnings/deductions/employer), days/net, RUPEES in words (gross+net), Checked-by/Authorised
   Signatory strip (_summary_flowables in routes/salary_register.py). Verified: 4-page PDF, summary text extracted.
+
+## Iter 308c
+- Excel export of the Salary Register now includes a second "Summary" sheet (same content as the
+  PDF last page: head-wise totals, days/net, rupees in words, signature lines). Email attachments
+  carry it too (shared _xlsx_bytes). Verified: sheets = [Salary Register, Summary].
+
+## Iter 309
+- Full layout editor for the dynamic Salary Register: /api/admin/salary-register/layout (GET/PUT/DELETE,
+  app_settings key salary_register_module_layout). Choose columns/order/rename/width/per-page/row-height.
+  Applied in _prepare (grid+CSV+XLSX+Email) and _pdf_bytes (chunked pages + rowHeights).
+  RegisterLayoutEditor generalized with endpoint prop; report-formats card salary_register_module opens it.
+  Verified via curl: renamed headings, 7-column selection, per_page=40 -> 5-page PDF. compliance_basic added to _EXCLUDE_KEYS.
+- NOTE: fixed statutory layouts (Form 27 Format 1, challans, ECR, payslips) remain title-only by design.
