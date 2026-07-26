@@ -1631,3 +1631,25 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   RegisterLayoutEditor generalized with endpoint prop; report-formats card salary_register_module opens it.
   Verified via curl: renamed headings, 7-column selection, per_page=40 -> 5-page PDF. compliance_basic added to _EXCLUDE_KEYS.
 - NOTE: fixed statutory layouts (Form 27 Format 1, challans, ECR, payslips) remain title-only by design.
+
+## Iter 310 — Freeze Salary + Employee Master Detail Slip (Phase 1)
+- FREEZE SALARY (Compliance Salary Process, user directive): imported-sheet runs
+  (use_imported_sheet=true) freeze the exact imported attendance/earnings.
+  Difference engine: imported_gross vs calculated_gross (master rate × imported days);
+  if imported > calculated the diff routes to OVERTIME when firm_masters.salary_process.ot_allowed
+  is true, else to OTHER ALLOWANCES (others head + monthly_gross). gross_paid=imported, net recalcs.
+  Row fields: imported_gross / calculated_gross / difference / difference_allocation_head;
+  totals include the 3 comparison sums. Run doc: frozen=true, frozen_at, freeze_snapshot_id;
+  immutable audit snapshot in db.freeze_salary_snapshots. Negative diff = non-destructive (recorded only).
+  Frontend: purple FREEZE SALARY (IMPORTED) grid band (Imp. Gross/Calc. Gross/Difference/Diff. Alloc.),
+  header badge, TOTAL row. Code: server.py 'Iter 310' blocks + compliance-salary-run.tsx.
+- EMPLOYEE MASTER DETAIL SLIP Phase 1: routes/employee_detail_slip.py + app/employee-detail-slip.tsx
+  (menu: Employees → Employee Detail Slip, perm employees:read).
+  Endpoints: /employees (search list), /{user_id} (sections JSON), /slip.pdf (A4, QR via qrcode lib),
+  /slip.xlsx, /email (Resend attachment). Sections: Personal/Employment/Statutory-KYC/Bank/Salary/Other(Phase 2).
+  FYTD (April-start) attendance summary (distinct punch dates + by-month) & approved-leave days.
+  Profile completion % from 21-slot checklist. Missing Phase-2 fields (Mother Name, Grade, Cost Centre,
+  Confirmation Date, Nominee, Education, Experience, Company Assets) render "—".
+- deps: qrcode==8.2 added (requirements.txt). Deploy script: /app/deploy_vps_iter310.sh (installs qrcode).
+- Tested: 10/10 pytest (tests/test_iter310_freeze_and_slip.py) + web E2E — ALL PASS, data cleaned.
+- Phase 2 backlog: add missing master fields + barcode/timeline/audit/dark mode; WhatsApp API integration.

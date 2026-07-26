@@ -205,3 +205,11 @@ See `/app/memory/test_credentials.md`. Super admin
 - Email register: verified e2e via Playwright (real Resend email with PDF+XLSX attachments delivered).
 - Perf: verified /companies excludes logo_base64, /companies/{id}/logo works, gzip content-encoding
   active on register payloads, /auth/me still returns profile_photo_base64, new indexes present.
+
+## Iter 310 — Freeze Salary + Employee Detail Slip
+- Backend: 10/10 pytest (/app/backend/tests/test_iter310_freeze_and_slip.py, report /app/test_reports/pytest/iter310.xml):
+  freeze happy path (Overtime alloc), OT-off branch (Other Allowances), negative-diff non-destructive,
+  snapshot persisted, slip endpoints (list/detail/pdf/xlsx/email 200, bad email 400).
+- Frontend E2E pass: /employee-detail-slip (sections, "—" placeholders, FYTD, nav 1/127, exports, email input);
+  /compliance-salary-run frozen badge + FREEZE band columns + totals.
+- Test data cleaned by testing agent; ot_allowed restored true. No bugs found.
