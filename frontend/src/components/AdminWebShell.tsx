@@ -106,6 +106,7 @@ export const NAV_SUPER: NavItem[] = [
     children: [
       { route: "/employee-add", label: "Add New Employee", icon: "person-add-outline" },
       { route: "/admin", label: "Employee Master Data", icon: "people-outline" },
+      { route: "/employee-detail-slip", label: "Employee Detail Slip", icon: "id-card-outline" },
       { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
       { route: "/employee-reports", label: "Employee Reports Hub", icon: "documents-outline" },
       { route: "/employee-report", label: "Employee Report", icon: "people-outline" },
@@ -285,6 +286,7 @@ const NAV_PERMISSION_MAP: Record<string, string[]> = {
   "/bulk-employee-correction": ["employees:read", "employees:write"],
   "/bulk-operations": ["employees:write", "salary_process:write"],
   "/kyc-tracker": ["employees:read", "employees:write"],
+  "/employee-detail-slip": ["employees:read"],
   "/advances": ["salary_process:read", "salary_process:write"],
   "/attendance-policy": ["attendance_policy:read", "attendance_policy:write"],
   "/punch-approvals": ["punch_approvals:read", "punch_approvals:write"],
@@ -446,6 +448,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
     children: [
       { route: "/employee-add", label: "Add New Employee", icon: "person-add-outline" },
       { route: "/admin", label: "Employee Master Data", icon: "people-outline" },
+      { route: "/employee-detail-slip", label: "Employee Detail Slip", icon: "id-card-outline" },
       { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
       { route: "/employee-reports", label: "Employee Reports Hub", icon: "documents-outline" },
       { route: "/employee-report", label: "Employee Report", icon: "people-outline" },

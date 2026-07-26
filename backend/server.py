@@ -15533,6 +15533,8 @@ async def _compute_compliance_run(
                 "esic": bool((fm.get("esi") or {}).get("applicable")),
                 "allow_mask": allow_mask if allow_mask else None,
                 "ded_mask": ded_mask if any(bool(v) for v in _fm_ded.values()) else None,
+                # Iter 310 — Freeze Salary difference allocation gate.
+                "ot_allowed": bool((fm.get("salary_process") or {}).get("ot_allowed")),
             }
             # Iter 142 — Firm Master OT gate for compliance-salary rows.
             _v = (fm.get("salary_process") or {}).get("ot_allowed")
@@ -15794,6 +15796,39 @@ async def _compute_compliance_run(
             row["max_p_days"] = cap
         except (ValueError, IndexError):
             row.setdefault("max_p_days", int(month_days))
+        # Iter 310 — FREEZE SALARY (user directive): when the run is driven
+        # by the IMPORTED sheet, the sheet's Gross Earning is authoritative
+        # and gets FROZEN on the run. If Imported Gross > the gross
+        # calculated from the Employee Master, the DIFFERENCE is routed to
+        # OVERTIME when the Firm Master allows OT
+        # (salary_process.ot_allowed) — otherwise to OTHER ALLOWANCES.
+        # Runs AFTER the allowance/deduction masks + DOJ cap so nothing
+        # later can trim the allocated difference.
+        if payload.use_imported_sheet and _am is not None:
+            _imp_g = round(float(_am.get("gross_earning") or 0), 2)
+            if _imp_g > 0:
+                _calc_g = round(float(row.get("gross_paid") or 0), 2)
+                _diff_g = round(_imp_g - _calc_g, 2)
+                row["imported_gross"] = _imp_g
+                row["calculated_gross"] = _calc_g
+                row["difference"] = _diff_g
+                row["difference_allocation_head"] = ""
+                if _diff_g > 0:
+                    _frz_ot = (firm_stat_flags.get(emp.get("company_id"))
+                               or {}).get("ot_allowed")
+                    if _frz_ot:
+                        row["ot_pay"] = round(
+                            float(row.get("ot_pay") or 0) + _diff_g, 2)
+                        row["difference_allocation_head"] = "Overtime"
+                    else:
+                        row["others"] = round(
+                            float(row.get("others") or 0) + _diff_g, 2)
+                        row["monthly_gross"] = round(
+                            float(row.get("monthly_gross") or 0) + _diff_g, 2)
+                        row["difference_allocation_head"] = "Other Allowances"
+                    row["gross_paid"] = _imp_g
+                    row["net"] = round(
+                        _imp_g - float(row.get("total_deduction") or 0), 2)
         rows.append(row)
 
     totals = {
@@ -15805,6 +15840,8 @@ async def _compute_compliance_run(
             "esic_wage_base", "esic_employee", "esic_employer",
             "pt", "tds",
             "total_deduction", "net",
+            # Iter 310 — Freeze Salary comparison totals.
+            "imported_gross", "calculated_gross", "difference",
         )
     }
 
@@ -15825,6 +15862,9 @@ async def _compute_compliance_run(
         "excluded_resigned": excluded_resigned,
         "excluded_resigned_count": len(excluded_resigned),
         "attendance_source": "imported_sheet" if payload.use_imported_sheet else "biometric",
+        # Iter 310 — imported-sheet runs are FROZEN (immutable snapshot
+        # is written alongside the run — see freeze_salary_snapshots).
+        "frozen": bool(payload.use_imported_sheet),
 
         "totals": totals,
         "generated_by": admin["user_id"],
@@ -15946,6 +15986,12 @@ async def create_compliance_salary_run(
     run["run_id"] = f"csrun_{uuid.uuid4().hex[:12]}"
     if _prev_rows:
         run["reprocessed"] = True
+    # Iter 310 — FREEZE SALARY: imported-sheet runs freeze the exact
+    # imported attendance/earnings at process time.
+    if payload.use_imported_sheet:
+        run["frozen"] = True
+        run["frozen_at"] = now_iso()
+        run["freeze_snapshot_id"] = f"frz_{uuid.uuid4().hex[:12]}"
     # Advance Management — auto-deduct active advance EMIs / single-shot
     # recoveries into the rows (idempotent per month+process).
     from routes.advances import apply_advance_recovery
@@ -15974,6 +16020,28 @@ async def create_compliance_salary_run(
         "finalized": {"$ne": True},
     })
     await db.compliance_salary_runs.insert_one(run)
+    # Iter 310 — immutable Freeze Salary snapshot (never edited by
+    # save-rows / reprocess — kept as the audit copy of what was imported
+    # and how the difference was allocated).
+    if payload.use_imported_sheet:
+        await db.freeze_salary_snapshots.insert_one({
+            "snapshot_id": run["freeze_snapshot_id"],
+            "run_id": run["run_id"],
+            "month": payload.month,
+            "company_id": _gate_cid,
+            "employee_type": _grp or None,
+            "source": "imported_sheet",
+            "frozen_at": run["frozen_at"],
+            "frozen_by": admin["user_id"],
+            "rows": [
+                {k: r.get(k) for k in (
+                    "user_id", "name", "employee_code", "present_days",
+                    "imported_gross", "calculated_gross", "difference",
+                    "difference_allocation_head", "ot_pay", "others",
+                    "monthly_gross", "gross_paid", "total_deduction", "net",
+                )} for r in run.get("rows") or []
+            ],
+        })
     # Iter 182 — audit trail
     from routes.salary_audit import write_salary_audit
     await write_salary_audit(admin, "process", run,
@@ -21358,6 +21426,10 @@ app.include_router(legacy_import_router)
 # Iter 305 — Enterprise Salary Register (dynamic heads, exports).
 from routes.salary_register import router as salary_register_router  # noqa: E402
 app.include_router(salary_register_router)
+
+# Iter 310 — Employee Master Detail Slip (A4 slip, PDF/Excel/Email, QR).
+from routes.employee_detail_slip import router as employee_detail_slip_router  # noqa: E402
+app.include_router(employee_detail_slip_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.

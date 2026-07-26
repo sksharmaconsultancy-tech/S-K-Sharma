@@ -286,6 +286,10 @@ export default function ComplianceSalaryRunScreen() {
       num: fit("Wage Base", nums, 72, 130),
     };
   }, [run?.rows]);
+  // Iter 310 — Freeze Salary columns are shown only for imported-sheet
+  // (frozen) runs where at least one row carries the imported gross.
+  const hasFrz = !!run && (run.rows || []).some((r: any) => r.imported_gross != null);
+
   const sortRows = (rows: CompRow[]) => {
     // Iter 183 — branch/dept/contractor chips filter first…
     let base = rows.filter((r) => rowMatchesFilters(r, gridFilters));
@@ -1622,6 +1626,12 @@ export default function ComplianceSalaryRunScreen() {
                 </Text>
               </View>
               <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
+                {(run as any).frozen ? (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "#EDE9FE", borderRadius: 999 }}>
+                    <Ionicons name="snow-outline" size={12} color="#5B21B6" />
+                    <Text style={{ fontSize: 11, fontWeight: "800", color: "#5B21B6" }}>FREEZE SALARY · IMPORTED</Text>
+                  </View>
+                ) : null}
                 {(run as any).finalized ? (
                   <>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "#DCFCE7", borderRadius: 999 }}>
@@ -1772,6 +1782,12 @@ export default function ComplianceSalaryRunScreen() {
                       <View style={[styles.groupHdrCell, styles.groupHdrDed, { width: dedCount * CELL_W }]}>
                         <Text style={styles.groupHdrTxt}>DEDUCTIONS & NET</Text>
                       </View>
+                      {/* Iter 310 — Freeze Salary band (imported runs). */}
+                      {hasFrz ? (
+                        <View style={[styles.groupHdrCell, { backgroundColor: "#5B21B6", width: 3 * CELL_W + 120 }]}>
+                          <Text style={styles.groupHdrTxt}>FREEZE SALARY (IMPORTED)</Text>
+                        </View>
+                      ) : null}
                     </View>
                   );
                 })()}
@@ -1843,6 +1859,15 @@ export default function ComplianceSalaryRunScreen() {
                           {h.label}
                         </Text>
                       ))}
+                      {/* Iter 310 — Freeze Salary column headers. */}
+                      {hasFrz ? (
+                        <>
+                          {["Imp. Gross", "Calc. Gross", "Difference"].map((l) => (
+                            <Text key={l} numberOfLines={1} style={[styles.tblCell, { width: colW.num }, styles.tblHeaderTxt, { textAlign: "right", backgroundColor: "#5B21B6" }]}>{l}</Text>
+                          ))}
+                          <Text numberOfLines={1} style={[styles.tblCell, { width: 120 }, styles.tblHeaderTxt, { backgroundColor: "#5B21B6" }]}>Diff. Alloc.</Text>
+                        </>
+                      ) : null}
                     </View>
                   );
                 })()}
@@ -1997,6 +2022,15 @@ export default function ComplianceSalaryRunScreen() {
                     {/* Iter 136 (user request) — Total Deduction before Net Pay */}
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(r.total_deduction)}</Text>
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(r.net)}</Text>
+                    {/* Iter 310 — Freeze Salary cells (imported runs). */}
+                    {hasFrz ? (
+                      <>
+                        <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{(r as any).imported_gross != null ? fmtInr((r as any).imported_gross) : "—"}</Text>
+                        <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{(r as any).calculated_gross != null ? fmtInr((r as any).calculated_gross) : "—"}</Text>
+                        <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700", color: Number((r as any).difference || 0) > 0 ? "#B45309" : colors.onSurfaceSecondary }]}>{(r as any).difference != null ? fmtInr((r as any).difference) : "—"}</Text>
+                        <Text style={[styles.tblCell, { width: 120, fontWeight: "700", color: "#5B21B6" }]} numberOfLines={1}>{(r as any).difference_allocation_head || "—"}</Text>
+                      </>
+                    ) : null}
                   </Pressable>
                   );
                 })}
@@ -2040,6 +2074,15 @@ export default function ComplianceSalaryRunScreen() {
                         {num((run.rows || []).reduce((s, r) => s + (Number((r as any).other_deduction) || 0), 0))}
                         {num(run.totals?.total_deduction)}
                         {num(run.totals?.net)}
+                        {/* Iter 310 — Freeze Salary totals. */}
+                        {hasFrz ? (
+                          <>
+                            {num((run.totals as any)?.imported_gross)}
+                            {num((run.totals as any)?.calculated_gross)}
+                            {num((run.totals as any)?.difference)}
+                            <Text style={[styles.tblCell, { width: 120 }]}>—</Text>
+                          </>
+                        ) : null}
                       </>
                     );
                   })()}
