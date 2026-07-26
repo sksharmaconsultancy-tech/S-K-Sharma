@@ -250,7 +250,7 @@ async def ext_solve_captcha(payload: Dict[str, Any] = Body(...)):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "3"
+RUNNER_VERSION = "4"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -329,20 +329,58 @@ def run(API_BASE, TOKEN, portal):
                 print("No alert popup appeared - nothing to close.")
 
         # Step 2 — paste Username (EPFO Login ID) + Password from firm.
-        def set_val(el, val):
-            driver.execute_script(
-                "arguments[0].value=arguments[1];"
-                "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));"
-                "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));",
-                el, val)
+        # NOTE: the EPFO portal is an ANGULAR app — fields are bound with
+        # ng-model, so injecting el.value via JS does NOT update Angular's
+        # model (the box stays blank on submit). We type like a real
+        # keyboard (send_keys) which fires the events Angular listens to,
+        # with a native-setter JS fallback.
+        from selenium.webdriver.common.keys import Keys
+
+        def type_val(el, val):
+            try:
+                el.click()
+            except Exception:
+                pass
+            try:
+                el.send_keys(Keys.CONTROL, "a")
+                el.send_keys(Keys.DELETE)
+            except Exception:
+                pass
+            try:
+                el.clear()
+            except Exception:
+                pass
+            el.send_keys(val)
+            # Fallback: if real typing did not stick, use the native value
+            # setter + fire input/change/blur so Angular's ngModel updates.
+            try:
+                if (el.get_attribute("value") or "") != val:
+                    driver.execute_script(
+                        "var s=Object.getOwnPropertyDescriptor("
+                        "window.HTMLInputElement.prototype,'value').set;"
+                        "s.call(arguments[0],arguments[1]);"
+                        "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));"
+                        "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));"
+                        "arguments[0].dispatchEvent(new Event('blur',{bubbles:true}));",
+                        el, val)
+            except Exception:
+                pass
 
         if creds.get("user_id"):
+            # Wait for Angular to render the login form after the modal
+            # closes (fields are not interactable immediately).
             user_el = None
-            for sel in ("#username", "input[name='username']", "#userName",
-                        "input[name='userName']"):
-                els = driver.find_elements(By.CSS_SELECTOR, sel)
-                if els and els[0].is_displayed():
-                    user_el = els[0]; break
+            try:
+                user_el = WebDriverWait(driver, 15).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, "#username")))
+            except Exception:
+                user_el = None
+            if user_el is None:
+                for sel in ("input[name='username']", "#userName",
+                            "input[name='userName']"):
+                    els = driver.find_elements(By.CSS_SELECTOR, sel)
+                    if els and els[0].is_displayed():
+                        user_el = els[0]; break
             if user_el is None:
                 for el in driver.find_elements(
                         By.CSS_SELECTOR, "input[type=text], input:not([type])"):
@@ -363,13 +401,13 @@ def run(API_BASE, TOKEN, portal):
                 if els and els[0].is_displayed():
                     pass_el = els[0]; break
             if user_el is not None:
-                set_val(user_el, creds["user_id"])
-                print("Username pasted (EPFO Login ID from selected firm).")
+                type_val(user_el, creds["user_id"])
+                print("Username typed (EPFO Login ID from selected firm).")
             else:
                 print("Username field not found - paste it manually.")
             if pass_el is not None:
-                set_val(pass_el, creds["password"])
-                print("Password pasted (EPFO Password from selected firm).")
+                type_val(pass_el, creds["password"])
+                print("Password typed (EPFO Password from selected firm).")
             else:
                 print("Password field not found - paste it manually.")
         else:
@@ -405,7 +443,7 @@ def run(API_BASE, TOKEN, portal):
         if captcha_text:
             print("CAPTCHA READ: %s" % captcha_text)
             if cap_in is not None:
-                set_val(cap_in, captcha_text)
+                type_val(cap_in, captcha_text)
                 print("Captcha filled.")
             # Show the read captcha ON SCREEN inside the Chrome window.
             try:
