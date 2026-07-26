@@ -1745,3 +1745,14 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Verified live E2E: session reached waiting_captcha with steps Open/Close Alert/Enter Creds done,
   logs show "User ID & Password filled from Firm Master" then captcha prompt. Session stopped after.
 - Deploy: /app/deploy_vps_iter314.sh (updated blurb; still latest script served by temp_bundle kind=script).
+
+## Iter 319 — Dashboard "Employee Enrollment Campaign" warning + all Choose-Action flows
+- After login the EPFO dashboard shows an "Employee Enrollment Campaign" warning modal.
+  _step_dashboard now runs _dismiss_epfo_modals for portal==epfo before capturing.
+- _dismiss_epfo_modals hardened with a generic catch-all: clicks OK/Close/I-Agree/footer
+  buttons inside any .modal.show (in addition to #btnCloseModal / #mainHomePageAlertModal),
+  then JS-strips leftover modals — handles both the login-page alert and the dashboard warning.
+- Confirmed the shared pre-login sequence (Open → Close Alert → Fill Creds from Firm Master →
+  Captcha → Verify → Dashboard-with-warning-close) is inherited by ALL Choose-Action flows:
+  login, epfo_generate_uan, epfo_ecr_upload, epfo_member_search (nav), epfo_establishment (nav).
+- Live E2E re-verified flow reaches waiting_captcha with Open/Close Alert/Enter Creds done.

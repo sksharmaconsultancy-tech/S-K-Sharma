@@ -866,22 +866,32 @@ async def _step_fill_credentials(ctx: Ctx) -> None:
 
 
 async def _dismiss_epfo_modals(ctx: Ctx) -> None:
-    """Iter 316 — the EPFO home page shows a Bootstrap alert modal
-    (#mainHomePageAlertModal, static backdrop) that intercepts pointer
-    events and blocks the Sign In / Submit click. Click its OK button,
-    then force-hide any lingering modal + backdrop via JS."""
+    """Iter 316/319 — the EPFO portal shows Bootstrap alert modals that
+    intercept pointer events and block clicks: the home-page alert on the
+    login page, and the "Employee Enrollment Campaign" warning on the
+    dashboard after login. Click OK / Close on any of them, then
+    force-hide anything still covering the page via JS."""
+    # Known OK/close buttons + a generic "visible OK button inside a shown
+    # modal" catch-all for warnings whose button id we don't know.
     for sel in ("#btnCloseModal",
                 "#mainHomePageAlertModal button.btn-danger",
                 "#mainHomePageAlertModal button[data-bs-dismiss='modal']",
-                "button.btn-danger[data-bs-dismiss='modal']"):
+                "button.btn-danger[data-bs-dismiss='modal']",
+                ".modal.show button[data-bs-dismiss='modal']",
+                ".modal.show .modal-footer button",
+                ".modal.show button:has-text('OK')",
+                ".modal.show button:has-text('Ok')",
+                ".modal.show button:has-text('Close')",
+                ".modal.show button:has-text('I Agree')"):
         try:
             loc = ctx.page.locator(sel).first
-            if await loc.is_visible(timeout=1200):
+            if await loc.is_visible(timeout=1000):
                 await loc.click(timeout=3000)
+                ctx.log(f"🖱 Closed warning popup (OK) — {sel}")
                 await ctx.sleep(0.5)
         except Exception:
             continue
-    # Force-remove any modal still covering the form (blocks the click).
+    # Force-remove any modal still covering the page (blocks the click).
     try:
         await ctx.page.evaluate(
             "document.querySelectorAll("
@@ -972,6 +982,12 @@ async def _step_verify_login(ctx: Ctx) -> None:
 
 
 async def _step_dashboard(ctx: Ctx) -> None:
+    # Iter 319 (user guide) — after login the EPFO dashboard shows another
+    # warning modal ("Employee Enrollment Campaign"); click its OK button
+    # before capturing the dashboard.
+    if ctx.s.get("portal") == "epfo":
+        await ctx.sleep(1.5)
+        await _dismiss_epfo_modals(ctx)
     await ctx.sleep(1.5)
     await ctx.snap("dashboard")
     ctx.log("📸 Dashboard captured")
