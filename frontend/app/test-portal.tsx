@@ -143,8 +143,10 @@ function AutomationCard() {
         ECR TEST: download the same runner zip above, then double-click{" "}
         <Text style={st.mono}>run_ecr_test.bat</Text> (Mac/Linux:{" "}
         <Text style={st.mono}>./run.sh ecr_test</Text>). A new Google Chrome
-        window opens the EPFO portal and the automation clicks the alert&apos;s
-        OK button — no login needed. Already have the folder? Just run{" "}
+        window opens EPFO, clicks the alert&apos;s OK button, pastes the
+        selected firm&apos;s EPFO Login ID &amp; Password, reads the captcha
+        with AI (shown on screen), and clicks Sign In. Already have the
+        folder? Just run{" "}
         <Text style={st.mono}>python sks_launcher.py ecr_test</Text> — it
         self-updates to the latest script automatically.
       </Text>

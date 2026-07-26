@@ -250,7 +250,7 @@ async def ext_solve_captcha(payload: Dict[str, Any] = Body(...)):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "2"
+RUNNER_VERSION = "3"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -269,10 +269,34 @@ PORTALS = {
 def run(API_BASE, TOKEN, portal):
     portal = (portal or "esic").lower()
 
-    # Iter 315 (user guide) — "ecr_test": open the EPFO portal in a NEW
-    # visible Google Chrome window (ChromeDriver) and click the alert
-    # popup's OK button (#btnCloseModal). No login, no credentials.
+    def _get(url):
+        with urllib.request.urlopen(url, timeout=30) as r:
+            return json.load(r)
+
+    def _post(url, data):
+        req = urllib.request.Request(
+            url, data=json.dumps(data).encode(),
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.load(r)
+
+    # Iter 315-316 (user guide) — "ecr_test": open the EPFO portal in a
+    # NEW visible Google Chrome window (ChromeDriver), click the alert
+    # popup's OK button (#btnCloseModal), then PASTE the selected firm's
+    # EPFO Login ID + Password into the Username / Password fields.
     if portal in ("ecr_test", "epfo_test", "ecr"):
+        print("Fetching your firm's EPFO login from the SKS app...")
+        creds = {}
+        try:
+            resp = _get("%s/api/portal-ext/creds?token=%s&portal=epfo" % (API_BASE, TOKEN))
+            if resp.get("ok"):
+                creds = resp
+            else:
+                print("NOTE:", resp.get("detail") or resp)
+        except Exception as e:
+            print("NOTE: could not fetch EPFO credentials (%s)." % e)
+            print("Save them under Firm Master -> Portal Logins, then re-run.")
+
         from selenium import webdriver
         from selenium.webdriver.common.by import By
         from selenium.webdriver.chrome.options import Options
@@ -286,6 +310,8 @@ def run(API_BASE, TOKEN, portal):
         driver = webdriver.Chrome(options=opts)
         print("Opening EPFO employer portal...")
         driver.get(PORTALS["epfo"])
+
+        # Step 1 — close the alert popup (OK).
         try:
             btn = WebDriverWait(driver, 20).until(
                 EC.element_to_be_clickable((By.ID, "btnCloseModal")))
@@ -301,6 +327,131 @@ def run(API_BASE, TOKEN, portal):
                 print("OK button clicked - alert popup closed.")
             except Exception:
                 print("No alert popup appeared - nothing to close.")
+
+        # Step 2 — paste Username (EPFO Login ID) + Password from firm.
+        def set_val(el, val):
+            driver.execute_script(
+                "arguments[0].value=arguments[1];"
+                "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));"
+                "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));",
+                el, val)
+
+        if creds.get("user_id"):
+            user_el = None
+            for sel in ("#username", "input[name='username']", "#userName",
+                        "input[name='userName']"):
+                els = driver.find_elements(By.CSS_SELECTOR, sel)
+                if els and els[0].is_displayed():
+                    user_el = els[0]; break
+            if user_el is None:
+                for el in driver.find_elements(
+                        By.CSS_SELECTOR, "input[type=text], input:not([type])"):
+                    try:
+                        nm = ((el.get_attribute("name") or "") +
+                              (el.get_attribute("id") or "") +
+                              (el.get_attribute("placeholder") or ""))
+                        if el.is_displayed() and not any(
+                                k in nm.lower() for k in
+                                ("captcha", "code", "otp", "search")):
+                            user_el = el; break
+                    except Exception:
+                        continue
+            pass_el = None
+            for sel in ("#password", "input[name='password']",
+                        "input[type=password]"):
+                els = driver.find_elements(By.CSS_SELECTOR, sel)
+                if els and els[0].is_displayed():
+                    pass_el = els[0]; break
+            if user_el is not None:
+                set_val(user_el, creds["user_id"])
+                print("Username pasted (EPFO Login ID from selected firm).")
+            else:
+                print("Username field not found - paste it manually.")
+            if pass_el is not None:
+                set_val(pass_el, creds["password"])
+                print("Password pasted (EPFO Password from selected firm).")
+            else:
+                print("Password field not found - paste it manually.")
+        else:
+            print("No EPFO User ID/Password saved for this firm - "
+                  "add them under Firm Master -> Portal Logins.")
+
+        # Step 3 — read the captcha with AI and SHOW IT ON SCREEN.
+        captcha_text = None
+        cap_img = None
+        for sel in ("img#capImg", "img#captcha_id", "img[id*=cap i]",
+                    "img[src*=captcha i]", "img[alt*=captcha i]",
+                    "img[title*=captcha i]"):
+            els = driver.find_elements(By.CSS_SELECTOR, sel)
+            if els and els[0].is_displayed():
+                cap_img = els[0]; break
+        cap_in = None
+        for sel in ("#captcha", "input[name*=captcha i]", "input[id*=captcha i]",
+                    "input[placeholder*=captcha i]", "input[name*=code i]"):
+            els = driver.find_elements(By.CSS_SELECTOR, sel)
+            if els and els[0].is_displayed():
+                cap_in = els[0]; break
+        if cap_img is not None:
+            try:
+                b64 = base64.b64encode(cap_img.screenshot_as_png).decode("ascii")
+                print("Reading captcha with AI...")
+                sol = _post("%s/api/portal-ext/solve-captcha" % API_BASE,
+                            {"token": TOKEN, "image_base64": b64,
+                             "numeric_only": False})
+                if sol.get("ok") and sol.get("text"):
+                    captcha_text = str(sol["text"]).strip()
+            except Exception as e:
+                print("Captcha read failed:", e)
+        if captcha_text:
+            print("CAPTCHA READ: %s" % captcha_text)
+            if cap_in is not None:
+                set_val(cap_in, captcha_text)
+                print("Captcha filled.")
+            # Show the read captcha ON SCREEN inside the Chrome window.
+            try:
+                driver.execute_script(
+                    "var d=document.createElement('div');"
+                    "d.id='sks-captcha-banner';"
+                    "d.textContent='SKS AI read captcha: '+arguments[0];"
+                    "d.style.cssText='position:fixed;top:12px;right:12px;"
+                    "z-index:2147483647;background:#0F3B5C;color:#fff;"
+                    "font:700 18px sans-serif;padding:10px 16px;"
+                    "border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.45)';"
+                    "document.body.appendChild(d);", captcha_text)
+            except Exception:
+                pass
+        else:
+            print("Captcha could not be read - type it manually.")
+
+        # Step 4 — click Sign In (only when the captcha got filled).
+        if captcha_text and cap_in is not None:
+            signed = False
+            for sel in ("#loginbtn", "button#login", "input[type=submit]",
+                        "button[type=submit]"):
+                for el in driver.find_elements(By.CSS_SELECTOR, sel):
+                    try:
+                        if el.is_displayed():
+                            el.click(); signed = True; break
+                    except Exception:
+                        continue
+                if signed:
+                    break
+            if not signed:
+                try:
+                    els = driver.find_elements(
+                        By.XPATH,
+                        "//button[contains(translate(.,'SIGN','sign'),'sign')]"
+                        " | //input[contains(translate(@value,'SIGN','sign'),'sign')]")
+                    for el in els:
+                        if el.is_displayed():
+                            el.click(); signed = True; break
+                except Exception:
+                    pass
+            print("Sign In clicked." if signed
+                  else "Sign In button not found - click it manually.")
+        else:
+            print("Sign In NOT clicked - fill the captcha and click it manually.")
+
         print("\nECR TEST DONE. Chrome stays open - close it when finished.")
         return
 
