@@ -1604,3 +1604,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
      compliance_salary_runs & salary_runs(company_id+month+generated_at), notifications(user_id+created_at),
      leaves(company_id+status), employee_documents, firm_masters(company_id unique),
      deletion_requests(status), legacy_salary_history, punch_logs, device_commands
+
+## Iter 308
+- Legacy Salary Records: firm SEARCH box + "Bulk lock firms" multi-select mode
+  ("Select all unlocked", per-chip checkboxes, Lock N selected firms with confirm).
+  Backend lock-compliance now accepts company_ids[] (BulkLockBody) and returns per_firm counts.

@@ -31,6 +31,11 @@ export default function LegacySalaryScreen() {
   const [lockConfirm, setLockConfirm] = useState(false);
   const [lockBusy, setLockBusy] = useState(false);
   const [lockMsg, setLockMsg] = useState("");
+  // Iter 308 (user) — quickly LOCK many firms: firm search + multi-select.
+  const [firmSearch, setFirmSearch] = useState("");
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkSel, setBulkSel] = useState<Record<string, boolean>>({});
+  const bulkCount = Object.values(bulkSel).filter(Boolean).length;
   // Iter 302c (user) — choose WHICH months to publish (Select All option).
   const [pubSel, setPubSel] = useState<Record<string, boolean>>({});
 
@@ -59,10 +64,16 @@ export default function LegacySalaryScreen() {
   const lockAll = async () => {
     setLockConfirm(false); setLockBusy(true); setLockMsg("");
     try {
+      const ids = bulkMode
+        ? Object.keys(bulkSel).filter((k) => bulkSel[k])
+        : (cid ? [cid] : []);
       const r = await api<any>("/admin/legacy-salary/lock-compliance", {
-        method: "POST", body: { company_id: cid },
+        method: "POST", body: { company_ids: ids },
       });
-      setLockMsg(`🔒 ${r.locked} legacy month(s) are now LOCKED (finalized).`);
+      setLockMsg(
+        `🔒 ${r.locked} legacy month(s) LOCKED across ${r.firms} firm(s).`,
+      );
+      setBulkSel({}); setBulkMode(false);
       // refresh firm badges (LOCKED highlight)
       try {
         const fr = await api<any>("/admin/legacy-salary/firms");
@@ -134,15 +145,89 @@ export default function LegacySalaryScreen() {
 
         <View style={st.card}>
           <Text style={st.lbl}>Firm</Text>
+          {/* Iter 308 (user) — search + multi-select bulk lock. */}
+          <View style={st.firmToolRow}>
+            <View style={st.firmSearchBox}>
+              <Ionicons name="search-outline" size={14} color="#64748b" />
+              <TextInput
+                style={st.firmSearchInput}
+                placeholder="Search firm…"
+                placeholderTextColor="#94a3b8"
+                value={firmSearch}
+                onChangeText={setFirmSearch}
+              />
+            </View>
+            <Pressable
+              style={[st.bulkBtn, bulkMode && st.bulkBtnOn]}
+              onPress={() => { setBulkMode((b) => !b); setBulkSel({}); }}
+            >
+              <Ionicons name="checkbox-outline" size={14} color={bulkMode ? "#fff" : "#B45309"} />
+              <Text style={[st.bulkBtnTxt, bulkMode && { color: "#fff" }]}>
+                {bulkMode ? "Exit bulk lock" : "Bulk lock firms"}
+              </Text>
+            </Pressable>
+          </View>
+          {bulkMode ? (
+            <View style={st.firmToolRow}>
+              <Pressable
+                style={st.miniBtn}
+                onPress={() => {
+                  const all: Record<string, boolean> = {};
+                  companies.forEach((c: any) => {
+                    if (!c.fully_locked && c.published_months) all[c.company_id] = true;
+                  });
+                  setBulkSel(all);
+                }}
+              >
+                <Text style={st.miniBtnTxt}>Select all unlocked</Text>
+              </Pressable>
+              <Pressable style={st.miniBtn} onPress={() => setBulkSel({})}>
+                <Text style={st.miniBtnTxt}>Clear</Text>
+              </Pressable>
+              <Pressable
+                style={[st.lockBtn, { marginTop: 0, flexGrow: 1 },
+                  (lockBusy || !bulkCount) && { opacity: 0.5 }]}
+                disabled={lockBusy || !bulkCount}
+                onPress={() => setLockConfirm(true)}
+              >
+                <Ionicons name="lock-closed-outline" size={15} color="#B45309" />
+                <Text style={st.lockBtnTxt}>Lock {bulkCount} selected firm(s)</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {bulkMode && lockMsg ? (
+            <Text style={[st.sub, { color: "#16a34a", fontWeight: "700" }]}>{lockMsg}</Text>
+          ) : null}
           <View style={st.wrap}>
-            {companies.map((c: any) => (
+            {companies
+              .filter((c: any) => !firmSearch.trim()
+                || String(c.name || "").toLowerCase().includes(firmSearch.trim().toLowerCase()))
+              .map((c: any) => (
               <Pressable
                 key={c.company_id}
-                style={[st.chip, cid === c.company_id && st.chipOn,
+                style={[st.chip,
+                  (bulkMode ? !!bulkSel[c.company_id] : cid === c.company_id) && st.chipOn,
                   c.fully_locked && { borderColor: "#B45309", borderWidth: 1.5 }]}
-                onPress={() => { setCid(c.company_id); loadMonths(c.company_id, kind); }}
+                onPress={() => {
+                  if (bulkMode) {
+                    if (c.fully_locked) return; // nothing left to lock
+                    setBulkSel((s) => ({ ...s, [c.company_id]: !s[c.company_id] }));
+                  } else {
+                    setCid(c.company_id); loadMonths(c.company_id, kind);
+                  }
+                }}
               >
-                <Text style={[st.chipTxt, cid === c.company_id && { color: "#fff" }]}>{c.name}</Text>
+                {bulkMode ? (
+                  <Ionicons
+                    name={c.fully_locked ? "lock-closed" : bulkSel[c.company_id] ? "checkbox" : "square-outline"}
+                    size={15}
+                    color={bulkSel[c.company_id] ? "#fff" : c.fully_locked ? "#B45309" : "#64748b"}
+                  />
+                ) : null}
+                <Text style={[st.chipTxt,
+                  (bulkMode ? !!bulkSel[c.company_id] : cid === c.company_id) && { color: "#fff" }]}>
+                  {c.name}
+                </Text>
                 {c.fully_locked ? (
                   <View style={[st.badge, { backgroundColor: "#FEF3C7" }]}>
                     <Text style={[st.badgeTxt, { color: "#B45309" }]}>🔒 LOCKED</Text>
@@ -370,15 +455,22 @@ export default function LegacySalaryScreen() {
       <Modal transparent visible={lockConfirm} animationType="fade" onRequestClose={() => setLockConfirm(false)}>
         <Pressable style={st.backdrop} onPress={() => setLockConfirm(false)} />
         <View style={st.sheet}>
-          <Text style={st.confTitle}>🔒 Lock all published legacy months?</Text>
+          <Text style={st.confTitle}>
+            {bulkMode
+              ? `🔒 Lock ${bulkCount} selected firm(s)?`
+              : "🔒 Lock all published legacy months?"}
+          </Text>
           <Text style={st.confTxt}>
-            Every legacy month published into the Compliance Salary Process for this firm will
+            Every legacy month published into the Compliance Salary Process for
+            {bulkMode ? " the selected firms" : " this firm"} will
             be FINALIZED (read-only). Do this only after you have checked the data. Individual
             months can still be unlocked later via Unlock Request.
           </Text>
           <Pressable style={[st.confBtn, { backgroundColor: "#B45309" }]} onPress={lockAll}>
             <Ionicons name="lock-closed" size={16} color="#fff" />
-            <Text style={st.confBtnTxt}>YES — Lock all legacy months</Text>
+            <Text style={st.confBtnTxt}>
+              {bulkMode ? `YES — Lock ${bulkCount} firm(s)` : "YES — Lock all legacy months"}
+            </Text>
           </Pressable>
           <Pressable style={st.cancelBtn} onPress={() => setLockConfirm(false)}>
             <Text style={st.cancelTxt}>Cancel</Text>
@@ -405,6 +497,32 @@ const st = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 6,
   },
   chipOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  // Iter 308 — firm search + bulk lock toolbar
+  firmToolRow: {
+    flexDirection: "row", alignItems: "center", flexWrap: "wrap",
+    gap: 8, marginTop: 6, marginBottom: 4,
+  },
+  firmSearchBox: {
+    flexDirection: "row", alignItems: "center", gap: 6, height: 38,
+    borderWidth: 1, borderColor: colors.border, borderRadius: 9,
+    paddingHorizontal: 9, flexGrow: 1, minWidth: 180, backgroundColor: colors.surface,
+  },
+  firmSearchInput: {
+    flex: 1, fontSize: 13, color: colors.onSurface,
+    ...(Platform.OS === "web" ? { outlineStyle: "none" } as any : null),
+  },
+  bulkBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    borderWidth: 1.2, borderColor: "#B45309", borderRadius: 9,
+    paddingHorizontal: 12, paddingVertical: 9,
+  },
+  bulkBtnOn: { backgroundColor: "#B45309" },
+  bulkBtnTxt: { fontSize: 12, fontWeight: "700", color: "#B45309" },
+  miniBtn: {
+    borderWidth: 1, borderColor: colors.border, borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 8,
+  },
+  miniBtnTxt: { fontSize: 12, fontWeight: "600", color: colors.onSurfaceSecondary },
   chipTxt: { fontSize: 12, fontWeight: "700", color: colors.onSurface },
   badge: { borderRadius: 999, paddingHorizontal: 6, paddingVertical: 2 },
   badgeTxt: { fontSize: 9, fontWeight: "800" },

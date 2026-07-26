@@ -1364,6 +1364,12 @@ class PublishBody(BaseModel):
     months: Optional[List[str]] = None
 
 
+class BulkLockBody(BaseModel):
+    # Iter 308 (user) — lock MANY firms in one go from Legacy Salary Records.
+    company_id: Optional[str] = None
+    company_ids: Optional[List[str]] = None
+
+
 @router.post("/admin/legacy-salary/publish-compliance")
 async def legacy_publish_compliance(
     body: PublishBody, authorization: Optional[str] = Header(None),
@@ -1402,14 +1408,26 @@ async def legacy_publish_compliance(
 
 @router.post("/admin/legacy-salary/lock-compliance")
 async def legacy_lock_compliance(
-    body: PublishBody, authorization: Optional[str] = Header(None),
+    body: BulkLockBody, authorization: Optional[str] = Header(None),
 ):
     """Iter 302b (user) — after checking, LOCK all published legacy months
-    (finalize every legacy_imported compliance run of the firm)."""
+    (finalize every legacy_imported compliance run of the firm).
+    Iter 308 (user) — accepts ``company_ids`` to lock MANY firms at once."""
     admin = await _super(authorization)
-    r = await db.compliance_salary_runs.update_many(
-        {"company_id": body.company_id, "legacy_imported": True,
-         "finalized": {"$ne": True}},
-        {"$set": {"finalized": True, "finalized_at": _now(),
-                  "finalized_by": admin.get("user_id")}})
-    return {"ok": True, "locked": r.modified_count}
+    cids = [c for c in (body.company_ids or []) if c]
+    if body.company_id:
+        cids.append(body.company_id)
+    cids = list(dict.fromkeys(cids))
+    if not cids:
+        raise HTTPException(status_code=400, detail="Pick at least one firm to lock")
+    total = 0
+    per_firm: Dict[str, int] = {}
+    for cid in cids:
+        r = await db.compliance_salary_runs.update_many(
+            {"company_id": cid, "legacy_imported": True,
+             "finalized": {"$ne": True}},
+            {"$set": {"finalized": True, "finalized_at": _now(),
+                      "finalized_by": admin.get("user_id")}})
+        per_firm[cid] = r.modified_count
+        total += r.modified_count
+    return {"ok": True, "locked": total, "firms": len(cids), "per_firm": per_firm}
