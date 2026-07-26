@@ -1588,3 +1588,19 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Deploy script: /app/deploy_vps_iter299.sh (served as deploy299.sh via /api/temp-code-bundle)
 - Dev super admin PIN reset to 246810 (dev DB only)
 - PENDING: P1 WhatsApp API integration; P2 server.py refactor
+
+## Iter 307 (this session, continued)
+- "Email register to firm": POST /api/admin/salary-register/email (PDF+XLSX attachments via Resend
+  _send_email_with_attachment from utils/iter60_features.py). Export builders refactored into
+  _xlsx_bytes/_pdf_bytes helpers. /filters returns firm_email (firm_masters.header.email_1/2 →
+  companies.email fallback). Frontend: Email button + inline panel on salary-register.tsx. VERIFIED e2e (real email sent).
+- PERFORMANCE package (user: "portal slow, lots of data"):
+  1. gzip middleware (GZipMiddleware min 1KB) — ~10x smaller JSON payloads
+  2. get_user_from_token no longer fetches profile_photo_base64 (was dragged on EVERY request);
+     /auth/me re-attaches it via targeted query
+  3. /companies list excludes logo_base64; new GET /companies/{id}/logo; SelectedCompanyContext
+     lazily fetches only the selected firm's logo
+  4. Startup indexes added: users(company_id+role / +employee_code), attendance(company_id+date),
+     compliance_salary_runs & salary_runs(company_id+month+generated_at), notifications(user_id+created_at),
+     leaves(company_id+status), employee_documents, firm_masters(company_id unique),
+     deletion_requests(status), legacy_salary_history, punch_logs, device_commands

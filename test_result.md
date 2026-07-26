@@ -200,3 +200,8 @@ See `/app/memory/test_credentials.md`. Super admin
   (/app/backend/tests/test_iter306_features.py) + frontend flows ALL PASS.
 - Known cosmetic-only console warnings (padding shorthand, shadow*, resizeMode) — non-blocking, pre-existing.
 - Dev DB: super admin PIN=246810; fresh Kankani compliance run for 2026-05 exists with resolved daily rates.
+
+## Iter 307
+- Email register: verified e2e via Playwright (real Resend email with PDF+XLSX attachments delivered).
+- Perf: verified /companies excludes logo_base64, /companies/{id}/logo works, gzip content-encoding
+  active on register payloads, /auth/me still returns profile_photo_base64, new indexes present.

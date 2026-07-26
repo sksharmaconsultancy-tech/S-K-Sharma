@@ -183,6 +183,26 @@ export function SelectedCompanyProvider({ children }: { children: React.ReactNod
     if (tick > 0) void reloadCompanies();
   }, [tick, reloadCompanies]);
 
+  // Iter 307 (perf) — /companies no longer carries base64 logos. Fetch
+  // ONLY the selected firm's logo on demand for the sidebar.
+  useEffect(() => {
+    if (!selectedCompanyId) return;
+    const c = companies.find((x) => x.company_id === selectedCompanyId);
+    if (!c || c.logo_base64 !== undefined) return;
+    void (async () => {
+      try {
+        const r = await api<{ logo_base64?: string | null }>(
+          `/companies/${encodeURIComponent(selectedCompanyId)}/logo`,
+        );
+        setCompanies((prev) => prev.map((x) =>
+          x.company_id === selectedCompanyId
+            ? { ...x, logo_base64: r.logo_base64 || "" }
+            : x,
+        ));
+      } catch { /* logo is cosmetic */ }
+    })();
+  }, [selectedCompanyId, companies]);
+
   // Restore last selection from localStorage on web
   useEffect(() => {
     if (Platform.OS !== "web") return;

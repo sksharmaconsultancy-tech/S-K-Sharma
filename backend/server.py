@@ -2403,7 +2403,13 @@ async def get_user_from_token(authorization: Optional[str]) -> dict:
     now_utc = datetime.now(timezone.utc)
     if exp_dt < now_utc:
         raise HTTPException(status_code=401, detail="Session expired")
-    user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
+    user = await db.users.find_one(
+        {"user_id": session["user_id"]},
+        # Iter 307 (perf) — NEVER drag the base64 profile photo through
+        # every authenticated request; endpoints that need it fetch it
+        # explicitly (/auth/me, punch face-compare, photo endpoints).
+        {"_id": 0, "profile_photo_base64": 0},
+    )
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     # SEC-004 — SLIDING EXPIRY: any authenticated request extends the
@@ -2821,6 +2827,28 @@ async def _create_core_indexes():
     await db.payslips.create_index([("employee_user_id", 1), ("month", -1)])
     await db.tickets.create_index("user_id")
     await db.notifications.create_index("created_at")
+    # Iter 307 (user: "portal slow, lots of data") — indexes for every hot
+    # query pattern. All idempotent; wrapped so a bad legacy collection
+    # never blocks startup.
+    try:
+        await db.users.create_index([("company_id", 1), ("role", 1)])
+        await db.users.create_index([("company_id", 1), ("employee_code", 1)])
+        await db.attendance.create_index([("company_id", 1), ("date", -1)])
+        await db.compliance_salary_runs.create_index(
+            [("company_id", 1), ("month", -1), ("generated_at", -1)])
+        await db.salary_runs.create_index(
+            [("company_id", 1), ("month", -1), ("generated_at", -1)])
+        await db.notifications.create_index([("user_id", 1), ("created_at", -1)])
+        await db.leaves.create_index([("company_id", 1), ("status", 1)])
+        await db.employee_documents.create_index("user_id")
+        await db.employee_documents.create_index([("company_id", 1), ("category", 1)])
+        await db.firm_masters.create_index("company_id", unique=True)
+        await db.deletion_requests.create_index([("status", 1), ("requested_at", -1)])
+        await db.legacy_salary_history.create_index([("company_id", 1), ("month", 1)])
+        await db.punch_logs.create_index([("company_id", 1), ("punched_at", -1)])
+        await db.device_commands.create_index([("device_id", 1), ("status", 1)])
+    except Exception as _idx_err:  # noqa: BLE001
+        logger.warning(f"[startup] index creation warning: {_idx_err}")
 
 
 async def _run_startup_backfill():
@@ -3199,6 +3227,11 @@ def _redact_user(user: dict) -> dict:
 @api.get("/auth/me")
 async def auth_me(authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
+    # Iter 307 (perf) — the auth helper strips the heavy photo field;
+    # /auth/me is the one place the PWA needs it (Profile screen).
+    photo_doc = await db.users.find_one(
+        {"user_id": user["user_id"]}, {"_id": 0, "profile_photo_base64": 1})
+    user["profile_photo_base64"] = (photo_doc or {}).get("profile_photo_base64")
     user = await _enrich_user_with_company(user)
     return {"user": user}
 
@@ -7463,6 +7496,19 @@ async def delete_branch(
     return {"ok": True}
 
 
+@api.get("/companies/{company_id}/logo")
+async def company_logo(company_id: str, authorization: Optional[str] = Header(None)):
+    """Iter 307 (perf) — on-demand firm logo (excluded from the list)."""
+    user = await get_user_from_token(authorization)
+    if user["role"] == "company_admin" and user.get("company_id") != company_id:
+        raise HTTPException(status_code=403, detail="Not your company")
+    c = await db.companies.find_one(
+        {"company_id": company_id}, {"_id": 0, "logo_base64": 1})
+    if not c:
+        raise HTTPException(status_code=404, detail="Company not found")
+    return {"logo_base64": c.get("logo_base64")}
+
+
 @api.get("/companies")
 async def list_companies(authorization: Optional[str] = Header(None)):
     """List all companies with quick stats.
@@ -7487,7 +7533,12 @@ async def list_companies(authorization: Optional[str] = Header(None)):
             if not allowed:
                 return {"companies": []}
             query["company_id"] = {"$in": allowed}
-    companies = await db.companies.find(query, {"_id": 0}).to_list(500)
+    companies = await db.companies.find(
+        # Iter 307 (perf) — the list is fetched by every picker/sidebar;
+        # firm logos (base64, can be MBs across firms) are excluded here
+        # and served on demand via GET /companies/{id}/logo.
+        query, {"_id": 0, "logo_base64": 0},
+    ).to_list(500)
     # Firm Master list is ALWAYS alphabetical by firm name (user directive).
     companies.sort(key=lambda c: (c.get("name") or "").strip().upper())
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -20799,6 +20850,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Iter 307 (perf) — gzip every JSON response above 1 KB. Salary run /
+# register payloads shrink ~10×, which is the single biggest win for the
+# "portal feels slow with lots of data" report on slower connections.
+from starlette.middleware.gzip import GZipMiddleware  # noqa: E402
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 

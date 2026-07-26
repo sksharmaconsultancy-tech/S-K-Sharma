@@ -38,6 +38,7 @@ type Filters = {
   months: string[];
   runs: { run_id?: string; generated_at?: string; employees_count?: number; employee_type_filter?: string }[];
   branches: string[]; departments: string[]; employee_types: string[]; contractors: string[];
+  firm_email?: string | null;
 };
 
 const GROUP_COLORS: Record<string, string> = {
@@ -92,6 +93,11 @@ export default function SalaryRegisterScreen() {
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
   const [err, setErr] = useState("");
+  // Iter 307 — Email register to firm.
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [emailTo, setEmailTo] = useState("");
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailMsg, setEmailMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const cid = isSuper ? (companyId === "all" ? "" : companyId) : (user?.company_id || "");
   const searchTimer = useRef<any>(null);
@@ -194,6 +200,26 @@ export default function SalaryRegisterScreen() {
     } catch (e: any) {
       setErr(e?.message || "Export failed");
     } finally { setExporting(null); }
+  };
+
+  const sendEmail = async () => {
+    if (!cid || !month) return;
+    setEmailBusy(true); setEmailMsg(null);
+    try {
+      const r = await api<{ ok: boolean; to: string }>("/admin/salary-register/email", {
+        method: "POST",
+        body: {
+          source, company_id: cid, month, run_id: runId || undefined,
+          employee_type: empType || undefined, branch: branch || undefined,
+          department: department || undefined, contractor: contractor || undefined,
+          search: search || undefined,
+          to: emailTo.trim() || undefined,
+        },
+      });
+      setEmailMsg({ ok: true, text: `Register emailed to ${r.to} (PDF + Excel)` });
+    } catch (e: any) {
+      setEmailMsg({ ok: false, text: e?.message || "Email failed" });
+    } finally { setEmailBusy(false); }
   };
 
   // ---- grid geometry ------------------------------------------------------
@@ -435,8 +461,54 @@ export default function SalaryRegisterScreen() {
                     <Text style={[styles.expTxt, { color: c }]}>{lbl}</Text>
                   </Pressable>
                 ))}
+                {/* Iter 307 — Email register to firm. */}
+                <Pressable
+                  testID="email-register"
+                  onPress={() => {
+                    setEmailTo(filters?.firm_email || "");
+                    setEmailMsg(null);
+                    setEmailOpen((o) => !o);
+                  }}
+                  style={[styles.expBtn, { borderColor: colors.brandPrimary, backgroundColor: emailOpen ? colors.brandPrimary : colors.surface }]}
+                >
+                  <Ionicons name="mail-outline" size={14} color={emailOpen ? colors.onBrandPrimary : colors.brandPrimary} />
+                  <Text style={[styles.expTxt, { color: emailOpen ? colors.onBrandPrimary : colors.brandPrimary }]}>Email</Text>
+                </Pressable>
               </View>
             </View>
+
+            {/* Iter 307 — email panel */}
+            {emailOpen && (
+              <View style={styles.emailPanel}>
+                <Ionicons name="mail-outline" size={16} color={colors.brandPrimary} />
+                <TextInput
+                  style={styles.emailInput}
+                  placeholder="firm@email.com"
+                  placeholderTextColor={colors.onSurfaceSecondary}
+                  value={emailTo}
+                  onChangeText={setEmailTo}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  testID="email-to-input"
+                />
+                <Pressable
+                  onPress={sendEmail}
+                  disabled={emailBusy}
+                  style={styles.emailSendBtn}
+                  testID="email-send"
+                >
+                  {emailBusy
+                    ? <ActivityIndicator size="small" color={colors.onBrandPrimary} />
+                    : <Ionicons name="send-outline" size={13} color={colors.onBrandPrimary} />}
+                  <Text style={styles.emailSendTxt}>Send PDF + Excel</Text>
+                </Pressable>
+                {emailMsg && (
+                  <Text style={{ fontSize: 12, fontWeight: "600", color: emailMsg.ok ? "#2E7D32" : colors.error }}>
+                    {emailMsg.text}
+                  </Text>
+                )}
+              </View>
+            )}
 
             {!!err && <Text style={styles.errTxt}>{err}</Text>}
 
@@ -690,6 +762,21 @@ const styles = StyleSheet.create({
     paddingVertical: 8, borderRadius: 8, borderWidth: 1.2, backgroundColor: colors.surface,
   },
   expTxt: { fontSize: 12, fontWeight: "700" },
+  emailPanel: {
+    flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 10,
+    backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1,
+    borderColor: colors.border, padding: 10, marginBottom: 10,
+  },
+  emailInput: {
+    flexGrow: 1, minWidth: 220, height: 40, borderWidth: 1, borderColor: colors.border,
+    borderRadius: 8, paddingHorizontal: 10, fontSize: 13, color: colors.onSurface,
+    ...(Platform.OS === "web" ? { outlineStyle: "none" } as any : null),
+  },
+  emailSendBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.brandPrimary,
+    paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8,
+  },
+  emailSendTxt: { color: colors.onBrandPrimary, fontSize: 12, fontWeight: "700" },
   errTxt: { color: colors.error, fontSize: 12, marginBottom: 8 },
   gridCard: {
     backgroundColor: colors.surface, borderRadius: radius.lg,

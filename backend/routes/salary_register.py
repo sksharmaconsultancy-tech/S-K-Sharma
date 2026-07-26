@@ -19,11 +19,12 @@ Endpoints (super_admin / sub_admin / company_admin):
   GET /api/admin/salary-register/export.xlsx?...
   GET /api/admin/salary-register/export.pdf?...
 """
+import base64
 import csv
 import io
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Body, Header, HTTPException
 from fastapi.responses import StreamingResponse
 
 from server import (  # noqa: E402
@@ -353,6 +354,8 @@ async def register_filters(
         "departments": sorted(departments),
         "employee_types": sorted(types),
         "contractors": sorted(contractors),
+        # Iter 307 — default recipient for "Email register to firm".
+        "firm_email": await _firm_email(cid),
     }
 
 
@@ -482,31 +485,9 @@ async def export_csv(
     )
 
 
-@router.get("/export.xlsx")
-async def export_xlsx(
-    source: str = "compliance",
-    company_id: Optional[str] = None,
-    month: Optional[str] = None,
-    run_id: Optional[str] = None,
-    employee_type: Optional[str] = None,
-    branch: Optional[str] = None,
-    department: Optional[str] = None,
-    contractor: Optional[str] = None,
-    search: Optional[str] = None,
-    sort_by: Optional[str] = None,
-    sort_dir: str = "asc",
-    authorization: Optional[str] = Header(None),
-):
-    admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
-    prep = await _prepare(
-        admin, source, company_id, month, run_id, employee_type,
-        branch, department, contractor, search, sort_by, sort_dir,
-    )
-    rows, columns = prep["rows"], prep["columns"]
-    if not prep["run"]:
-        raise HTTPException(status_code=404, detail="No salary run found for this month")
-
+def _xlsx_bytes(comp: str, source: str, month: str,
+                rows: List[Dict[str, Any]], columns: List[Dict[str, Any]]) -> bytes:
+    """Styled Salary Register workbook (shared by download + email)."""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
@@ -529,7 +510,6 @@ async def export_xlsx(
     white_bold = Font(bold=True, color="FFFFFF", size=9)
     center = Alignment(horizontal="center", vertical="center")
 
-    comp = await _company_name(prep["company_id"])
     ws.append([f"{comp} — Salary Register ({source.title()}) — {month}"])
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(columns) + 1)
     ws.cell(row=1, column=1).font = Font(bold=True, size=13)
@@ -591,17 +571,11 @@ async def export_xlsx(
 
     out = io.BytesIO()
     wb.save(out)
-    out.seek(0)
-    return StreamingResponse(
-        out,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition":
-                 f'attachment; filename="{_export_filename(source, month, "xlsx")}"'},
-    )
+    return out.getvalue()
 
 
-@router.get("/export.pdf")
-async def export_pdf(
+@router.get("/export.xlsx")
+async def export_xlsx(
     source: str = "compliance",
     company_id: Optional[str] = None,
     month: Optional[str] = None,
@@ -621,10 +595,22 @@ async def export_pdf(
         admin, source, company_id, month, run_id, employee_type,
         branch, department, contractor, search, sort_by, sort_dir,
     )
-    rows, columns = prep["rows"], prep["columns"]
     if not prep["run"]:
         raise HTTPException(status_code=404, detail="No salary run found for this month")
+    comp = await _company_name(prep["company_id"])
+    data = _xlsx_bytes(comp, source, month, prep["rows"], prep["columns"])
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition":
+                 f'attachment; filename="{_export_filename(source, month, "xlsx")}"'},
+    )
 
+
+def _pdf_bytes(comp: str, source: str, month: str,
+               rows: List[Dict[str, Any]], columns: List[Dict[str, Any]],
+               filt_bits: List[str]) -> bytes:
+    """A3-landscape Salary Register PDF (shared by download + email)."""
     from reportlab.lib import colors as rl_colors
     from reportlab.lib.pagesizes import A3, landscape
     from reportlab.lib.units import mm
@@ -633,7 +619,6 @@ async def export_pdf(
     )
     from reportlab.lib.styles import getSampleStyleSheet
 
-    comp = await _company_name(prep["company_id"])
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=landscape(A3),
@@ -644,15 +629,7 @@ async def export_pdf(
         f"<b>{comp}</b> — Salary Register ({source.title()}) — {month}",
         styles["Title"],
     )
-    sub_bits = []
-    if employee_type:
-        sub_bits.append(f"Group: {employee_type}")
-    if branch:
-        sub_bits.append(f"Branch: {branch}")
-    if department:
-        sub_bits.append(f"Dept: {department}")
-    if contractor:
-        sub_bits.append(f"Contractor: {contractor}")
+    sub_bits = list(filt_bits)
     sub_bits.append(f"Employees: {len(rows)}")
     sub = Paragraph(" | ".join(sub_bits), styles["Normal"])
 
@@ -715,9 +692,151 @@ async def export_pdf(
     tbl.setStyle(TableStyle(style))
 
     doc.build([title, sub, Spacer(1, 4 * mm), tbl])
-    buf.seek(0)
+    return buf.getvalue()
+
+
+def _filt_bits(employee_type: Optional[str], branch: Optional[str],
+               department: Optional[str], contractor: Optional[str]) -> List[str]:
+    bits = []
+    if employee_type:
+        bits.append(f"Group: {employee_type}")
+    if branch:
+        bits.append(f"Branch: {branch}")
+    if department:
+        bits.append(f"Dept: {department}")
+    if contractor:
+        bits.append(f"Contractor: {contractor}")
+    return bits
+
+
+@router.get("/export.pdf")
+async def export_pdf(
+    source: str = "compliance",
+    company_id: Optional[str] = None,
+    month: Optional[str] = None,
+    run_id: Optional[str] = None,
+    employee_type: Optional[str] = None,
+    branch: Optional[str] = None,
+    department: Optional[str] = None,
+    contractor: Optional[str] = None,
+    search: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    sort_dir: str = "asc",
+    authorization: Optional[str] = Header(None),
+):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    prep = await _prepare(
+        admin, source, company_id, month, run_id, employee_type,
+        branch, department, contractor, search, sort_by, sort_dir,
+    )
+    if not prep["run"]:
+        raise HTTPException(status_code=404, detail="No salary run found for this month")
+    comp = await _company_name(prep["company_id"])
+    data = _pdf_bytes(comp, source, month, prep["rows"], prep["columns"],
+                      _filt_bits(employee_type, branch, department, contractor))
     return StreamingResponse(
-        buf, media_type="application/pdf",
+        io.BytesIO(data), media_type="application/pdf",
         headers={"Content-Disposition":
                  f'attachment; filename="{_export_filename(source, month, "pdf")}"'},
     )
+
+
+# ---------------------------------------------------------------------------
+# Iter 307 — one-click "Email register to firm" (Resend, with attachments).
+# ---------------------------------------------------------------------------
+
+@router.post("/email")
+async def email_register(
+    payload: Dict[str, Any] = Body(default={}),
+    authorization: Optional[str] = Header(None),
+):
+    """Email the filtered register (PDF + Excel) to the firm.
+
+    Body: same filter keys as the grid (source, company_id, month, run_id,
+    employee_type, branch, department, contractor, search) plus:
+      * ``to``      — recipient email (defaults to the firm's email)
+      * ``formats`` — subset of ["pdf", "xlsx"] (default both)
+    """
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    source = str(payload.get("source") or "compliance")
+    month = payload.get("month")
+    employee_type = payload.get("employee_type") or None
+    branch = payload.get("branch") or None
+    department = payload.get("department") or None
+    contractor = payload.get("contractor") or None
+    prep = await _prepare(
+        admin, source, payload.get("company_id"), month, payload.get("run_id") or None,
+        employee_type, branch, department, contractor,
+        payload.get("search") or None, payload.get("sort_by") or None,
+        str(payload.get("sort_dir") or "asc"),
+    )
+    if not prep["run"]:
+        raise HTTPException(status_code=404, detail="No salary run found for this month")
+    rows, columns = prep["rows"], prep["columns"]
+    comp = await _company_name(prep["company_id"])
+
+    to = str(payload.get("to") or "").strip()
+    if not to:
+        to = await _firm_email(prep["company_id"]) or ""
+    if not to or "@" not in to:
+        raise HTTPException(
+            status_code=400,
+            detail="No recipient email — enter one or add the firm's email in Firm Master (Header → Email 1)")
+
+    formats = payload.get("formats") or ["pdf", "xlsx"]
+    attachments: List[Dict[str, str]] = []
+    if "pdf" in formats:
+        pdf = _pdf_bytes(comp, source, month, rows, columns,
+                         _filt_bits(employee_type, branch, department, contractor))
+        attachments.append({
+            "filename": _export_filename(source, month, "pdf"),
+            "content": base64.b64encode(pdf).decode(),
+        })
+    if "xlsx" in formats:
+        xlsx = _xlsx_bytes(comp, source, month, rows, columns)
+        attachments.append({
+            "filename": _export_filename(source, month, "xlsx"),
+            "content": base64.b64encode(xlsx).decode(),
+        })
+    if not attachments:
+        raise HTTPException(status_code=400, detail="Pick at least one format (pdf / xlsx)")
+
+    t = _totals(rows, columns)
+    gross_key = "gross_paid" if source == "compliance" else "total_gross"
+    net_key = "net" if source == "compliance" else "net_pay"
+    summary = (
+        f"Salary Register — {comp}\n"
+        f"Month: {month}  ·  Engine: {source.title()}\n"
+        f"Employees: {len(rows)}\n"
+        f"Gross: ₹{t.get(gross_key, 0):,.2f}\n"
+        f"Net Payable: ₹{t.get(net_key, 0):,.2f}\n\n"
+        "The detailed register is attached (PDF + Excel).\n\n"
+        "— Sent from the S.K. Sharma & Co. portal"
+    )
+    from utils.iter60_features import _send_email_with_attachment
+    result = await _send_email_with_attachment(
+        [to],
+        subject=f"Salary Register · {comp} · {month} ({source.title()})",
+        text_body=summary,
+        attachments=attachments,
+    )
+    if not result.get("delivered"):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Email could not be sent ({result.get('error') or 'unknown error'})")
+    return {"ok": True, "to": to, "email_id": result.get("email_id"),
+            "attachments": [a["filename"] for a in attachments]}
+
+
+async def _firm_email(company_id: str) -> Optional[str]:
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "header.email_1": 1, "header.email_2": 1})
+    hdr = (fm or {}).get("header") or {}
+    email = (hdr.get("email_1") or hdr.get("email_2") or "").strip()
+    if email:
+        return email
+    c = await db.companies.find_one({"company_id": company_id},
+                                    {"_id": 0, "email": 1, "contact_email": 1})
+    return ((c or {}).get("email") or (c or {}).get("contact_email") or "").strip() or None
