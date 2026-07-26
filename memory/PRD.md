@@ -1756,3 +1756,24 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   Captcha → Verify → Dashboard-with-warning-close) is inherited by ALL Choose-Action flows:
   login, epfo_generate_uan, epfo_ecr_upload, epfo_member_search (nav), epfo_establishment (nav).
 - Live E2E re-verified flow reaches waiting_captcha with Open/Close Alert/Enter Creds done.
+
+## Iter 320 — RPA MAX SPEED + Manual Control + Full Screen (deployed script 320)
+- SPEED_MULT reduced to {"fast": 0.05} — FAST is the ONLY speed. get_settings always
+  returns "fast"; frontend speed selector removed (shows a single "⚡ Fast" chip);
+  start payload hardcodes speed:"fast".
+- All artificial human-pace delays REMOVED: click cadence (500–1500ms) gone, typing now
+  fixed 20ms/char (still real key events for Angular ng-model), highlight pause 0.8→0.05s,
+  post-action sleeps 0.3-0.4→0.05s, cursor CSS transition .45s→.1s, frame loop 1.0→0.5s.
+  Training/compliance-mode speed floors removed from Ctx.
+- MANUAL OVERRIDE: new rpa_engine.interact_session(sid, payload) + route
+  POST /api/rpa/session/{sid}/interact — kinds: click (normalised x/y 0-1 → page.mouse.click),
+  type (page.keyboard.type), key (page.keyboard.press), scroll (mouse.wheel). Works while
+  running/paused/waiting. Frontend: "Manual Control" toggle under live frame; clicks on the
+  frame map via InteractiveFrame (onLayout dims + locationX/offsetX → normalised) ; keyboard
+  bar (text + Enter/Tab/Backspace/Esc/arrows quick keys).
+- FULL SCREEN: "Full Screen" button opens RN Modal with the live frame sized to the window
+  (winW/winH), Manual toggle + keyboard bar inside, "Exit Full Screen" closes.
+- CAUTION learned: parallel search_replace calls on the SAME file can race and silently drop
+  edits — apply same-file edits sequentially and re-grep to verify.
+- Deploy: /app/deploy_vps_iter320.sh served via /api/temp-code-bundle?token=sks-deploy-7391&kind=script.
+- Pushed to GitHub (commit 2133c73, main).
