@@ -15548,6 +15548,12 @@ async def _compute_compliance_run(
     _holidays_by_cid: Dict[str, list] = {}
     for _cid_ in {e.get("company_id") for e in employees if e.get("company_id")}:
         _holidays_by_cid[_cid_] = sorted(await holiday_dates_for_company(_cid_))
+    # Iter 313 — ESIC Leave Module: auto-import APPROVED ESIC leave days
+    # into the run (per firm, honours enabled + link_compliance settings).
+    from routes.esic_leave import esic_leave_days_map as _esic_map_fn
+    _esic_maps: Dict[str, Dict[str, float]] = {}
+    for _cid_ in {e.get("company_id") for e in employees if e.get("company_id")}:
+        _esic_maps[_cid_] = await _esic_map_fn(_cid_, payload.month)
     for emp in employees:
         emp = dict(emp)
         emp.pop("pin_hash", None)
@@ -15829,6 +15835,11 @@ async def _compute_compliance_run(
                     row["gross_paid"] = _imp_g
                     row["net"] = round(
                         _imp_g - float(row.get("total_deduction") or 0), 2)
+        # Iter 313 — ESIC Leave Module auto-import (fills the editable
+        # esic_leave_days column when approved entries exist this month).
+        _esic_d = (_esic_maps.get(emp.get("company_id")) or {}).get(emp.get("user_id"))
+        if _esic_d:
+            row["esic_leave_days"] = round(float(_esic_d), 1)
         rows.append(row)
 
     totals = {
@@ -21430,6 +21441,10 @@ app.include_router(salary_register_router)
 # Iter 310 — Employee Master Detail Slip (A4 slip, PDF/Excel/Email, QR).
 from routes.employee_detail_slip import router as employee_detail_slip_router  # noqa: E402
 app.include_router(employee_detail_slip_router)
+
+# Iter 313 — ESIC Leave Module (certificates, approval, payroll link).
+from routes.esic_leave import router as esic_leave_router  # noqa: E402
+app.include_router(esic_leave_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.

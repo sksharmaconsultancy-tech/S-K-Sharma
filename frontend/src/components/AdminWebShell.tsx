@@ -141,6 +141,7 @@ export const NAV_SUPER: NavItem[] = [
         children: [
           { route: "/salary-run", label: "Actual Salary", icon: "cash-outline" },
           { route: "/compliance-salary-run", label: "Compliance Salary", icon: "briefcase-outline" },
+          { route: "/esic-leave", label: "ESIC Leave", icon: "medkit-outline" },
           { route: "/ot-salary-run", label: "OT Salary", icon: "flash-outline" },
           { route: "/arrear-salary-run", label: "Arrear Salary", icon: "time-outline" },
           { route: "/salary-register", label: "Salary Register", icon: "grid-outline" },
@@ -300,6 +301,7 @@ const NAV_PERMISSION_MAP: Record<string, string[]> = {
   "/arrear-salary-run": ["salary_process:read", "salary_process:write"],
   "/ot-salary-run": ["salary_process:read", "salary_process:write"],
   "/compliance-salary-run": ["compliance_salary:read", "compliance_salary:write"],
+  "/esic-leave": ["compliance_salary:read", "compliance_salary:write"],
   "/messages": ["messages:read", "messages:write"],
   "/tickets": ["tickets:read", "tickets:write"],
 };
@@ -477,6 +479,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
         children: [
           { route: "/salary-run", label: "Actual Salary", icon: "cash-outline" },
           { route: "/compliance-salary-run", label: "Compliance Salary", icon: "briefcase-outline" },
+          { route: "/esic-leave", label: "ESIC Leave", icon: "medkit-outline" },
           { route: "/ot-salary-run", label: "OT Salary", icon: "flash-outline" },
           { route: "/arrear-salary-run", label: "Arrear Salary", icon: "time-outline" },
           { route: "/salary-register", label: "Salary Register", icon: "grid-outline" },

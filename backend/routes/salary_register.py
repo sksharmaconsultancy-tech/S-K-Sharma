@@ -67,6 +67,7 @@ _COMPLIANCE_REGISTRY: List[Tuple[str, str, str, str]] = [
     ("month_days", "Month Days", "attendance", "int"),
     ("present_days", "Present", "attendance", "num"),
     ("half_days", "Half Days", "attendance", "num"),
+    ("esic_leave_days", "ESIC Leave", "attendance", "num"),
     ("ot_hours", "OT Hrs", "attendance", "num"),
     ("basic", "Basic", "earnings", "num"),
     ("hra", "HRA", "earnings", "num"),
@@ -403,6 +404,13 @@ async def _prepare(
         run.get("rows") or [], employee_type, branch, department, contractor, search,
     )
     columns = _build_columns(source, rows)
+    # Iter 313 — ESIC Leave Module: firm toggle "Show ESIC Leave
+    # Separately on Salary Register" removes the column when OFF.
+    if source == "compliance" and cid:
+        from routes.esic_leave import get_esic_settings
+        _est = await get_esic_settings(cid)
+        if not (_est.get("enabled") and _est.get("show_separate_register")):
+            columns = [c for c in columns if c["key"] != "esic_leave_days"]
     # Iter 309 — saved layout (columns/order/headings/widths) applies to
     # the grid AND every export.
     layout = await _saved_layout()

@@ -1,0 +1,41 @@
+{
+  "summary": "ESIC Leave Module (Iter 313) frontend-only test: full end-to-end HAPPY PATH works. Login → /esic-leave loads with Kankani preselected. Settings panel: 7 switches + max_backdate_days=30 render; toggle+save (toast 'Settings saved') and reload persistence verified. Entry creation (emp 50 SURENDRA SINGH, 2026-07-10 → 2026-07-12) appears with PENDING chip and red 'No cert' badge. Approve-without-cert is BLOCKED (backend returns 400; approval does NOT succeed). Certificate upload via API (POST /api/admin/esic-leave/{id}/certificate) returns 200, badge switches to blue 'Certificate' after reload, clicking it opens a blob: URL in a new tab. Approve after cert succeeds: chip → APPROVED and toast 'attendance auto-marked' fires. Status filter chips ALL/PENDING/APPROVED/REJECTED work. Month filter: 2026-07 lists the entry, 2026-01 hides it. Delete empties the register. Regression: /compliance-salary-run and /salary-register both load with zero pageerrors. Two minor console warnings and one style warning noted (non-blocking).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "esic-leave Approve error toast", "issue": "When approving without certificate, backend returns 400 correctly but the surfaced error message on screen does not clearly contain the phrase 'Medical certificate required before approval' — the flash(null, e?.message) shows the raw API message, which may be truncated/generic. Approval IS blocked (verified via 400 + status stays PENDING) but the user-facing text is not the exact PRD wording.", "testID": "esic-approve-{id}", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global (AdminWebShell / theme)", "issues": [
+        "Console warning: 'shadow*' style props are deprecated. Use 'boxShadow'.",
+        "Console error: Invalid style property of 'padding'. Value is '0 8px' but only single values are supported. (shorthand padding not supported in RN Web — should split into paddingHorizontal/Vertical)"
+      ]}
+    ],
+    "react_native_issues": [
+      {"component": "AdminWebShell / theme", "issue": "Deprecated shadow* style props still in use — migrate to boxShadow for RN Web. Non-blocking warning."},
+      {"component": "AdminWebShell / theme", "issue": "Shorthand padding '0 8px' is not supported by RN StyleSheet on web (throws console error). Reference: repeated across screens (fires on esic-leave, compliance-salary-run, salary-register). Refactor to paddingVertical/paddingHorizontal."}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "(Optional) Refine the approve-without-cert error message so the toast surfaces 'Medical certificate required before approval' verbatim — currently API returns 400 but toast text is the raw fallback.",
+    "Fix RN-Web style warnings globally: (a) replace 'shadow*' props with 'boxShadow', (b) split any 'padding: 0 8px' shorthand into paddingVertical/paddingHorizontal. Not blocking Iter 313 sign-off but they fire on every screen."
+  ],
+  "critical_code_review_comments": [
+    "/app/frontend/app/esic-leave.tsx uses expo-document-picker + FileReader base64 → good; correctly wired to POST /admin/esic-leave with certificate_base64.",
+    "loadAll() correctly reloads after every action; Promise.all fetches settings + list + employees in parallel.",
+    "Type guard: settings state gated on `settings.allow_backdated` to conditionally render maxdays input — correct.",
+    "viewCert uses window.open blob URL and revokes after 30s — correct."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only per request)", "frontend": "~95% — all 9 PRD steps pass; only the toast wording on cert-required rejection is generic instead of PRD-exact"},
+  "seed_data_creation": "None — created 1 test entry (emp 50, 2026-07-10..12, remarks 'TEST iter313 auto'), deleted via UI at end. Verified db.leaves has 0 stray esic_leave_module docs (mongo cleanup script ran, 0 deleted → nothing left behind).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "ESIC Leave module fully wired end-to-end. testIDs used: esic-settings-toggle, esic-set-{key}, esic-set-maxdays, esic-settings-save, esic-emp-search, esic-emp-{code}, esic-from, esic-to, esic-remarks, esic-attach, esic-submit, esic-cert-{id}, esic-approve-{id}, esic-reject-{id}, esic-delete-{id}, esic-month, esic-filter-{status}. Note: RN Switch on web does NOT expose aria-checked reliably — use screenshot + click + persistence check instead of aria state. Cert upload via native picker cannot be automated; use direct API POST /api/admin/esic-leave/{id}/certificate with {certificate_base64, certificate_name} — verified 200.",
+  "rca_of_issue": "No blocking bugs. Only cosmetic finding: approve-without-cert 400 message routed to generic flash — not user-visibly obvious that it is the cert requirement. Suggest backend/frontend to surface `detail` from HTTPException in the toast (e.g. `flash(null, e?.detail || e?.message)`)."
+}
