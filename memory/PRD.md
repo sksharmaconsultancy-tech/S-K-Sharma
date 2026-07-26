@@ -1706,3 +1706,14 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - NOTE: pod is linux/aarch64 → Selenium can't run here (Selenium Manager unsupported);
   logic mirrors the Playwright flow verified live against EPFO. Server-side RPA flow
   from Iter 314 remains available in Automation Studio.
+
+## Iter 316 — ecr_test runner v3 (user-guided ECR flow, steps 2-4)
+- After closing the EPFO alert, the PC runner now: fetches the SELECTED FIRM's EPFO
+  creds (/api/portal-ext/creds?portal=epfo, token-gated), pastes Username (#username
+  et al + generic fallback) and Password, screenshots the captcha and solves it via
+  /api/portal-ext/solve-captcha (numeric_only False), fills it, SHOWS the read captcha
+  on screen (fixed banner div #sks-captcha-banner injected into the page + console),
+  then clicks Sign In (#loginbtn/submit/XPath text fallback) — only when captcha filled.
+  RUNNER_VERSION=3 (self-update verified). Runner code compile-checked; Selenium cannot
+  run in ARM64 pod — user validates on their PC. NEXT: user will guide post-login ECR
+  upload steps.
