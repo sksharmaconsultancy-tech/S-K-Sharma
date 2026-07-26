@@ -111,6 +111,18 @@ export default function Root({ children }: PropsWithChildren) {
               @media (pointer: coarse) {
                 input, textarea, select { font-size: 16px !important; }
               }
+              /* Iter 312 — app-shell splash while the first JS chunk loads */
+              #sks-splash {
+                position: fixed; inset: 0; z-index: 99999;
+                display: flex; flex-direction: column; align-items: center;
+                justify-content: center; background: #0F2E3D;
+                transition: opacity .3s ease;
+              }
+              #sks-splash .t { color: #fff; font: 700 22px/1.3 -apple-system, "Segoe UI", Roboto, sans-serif; letter-spacing: .3px; }
+              #sks-splash .s { color: #9DB8C6; font: 400 12.5px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif; margin-top: 6px; }
+              #sks-splash .bar { width: 180px; height: 4px; border-radius: 999px; background: rgba(255,255,255,.14); overflow: hidden; margin-top: 20px; }
+              #sks-splash .fill { width: 40%; height: 100%; border-radius: 999px; background: #4FC3F7; animation: sksload 1.1s ease-in-out infinite; }
+              @keyframes sksload { 0% { transform: translateX(-100%); } 100% { transform: translateX(320%); } }
             `,
           }}
         />
@@ -124,6 +136,14 @@ export default function Root({ children }: PropsWithChildren) {
           flexDirection: "column",
         }}
       >
+        {/* Iter 312 — app-shell splash: paints INSTANTLY from the cached
+            HTML while the first JS chunk downloads/parses on slow
+            networks. Removed by RootLayout's mount effect. */}
+        <div id="sks-splash">
+          <div className="t">S.K. Sharma &amp; Co.</div>
+          <div className="s">Loading your workspace…</div>
+          <div className="bar"><div className="fill" /></div>
+        </div>
         {children}
       </body>
     </html>

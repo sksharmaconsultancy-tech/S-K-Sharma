@@ -42,6 +42,15 @@ export default function RootLayout() {
   useEffect(() => {
     refreshRemindersOnBoot();
     setupPWA();
+    // Iter 312 — dismiss the app-shell splash (app/+html.tsx) once React
+    // has mounted (web only).
+    if (typeof document !== "undefined") {
+      const el = document.getElementById("sks-splash");
+      if (el) {
+        el.style.opacity = "0";
+        setTimeout(() => el.remove(), 320);
+      }
+    }
   }, []);
 
   // Iter 93 — Web only: silence the LogBox "Uncaught Error" overlay for

@@ -44,6 +44,9 @@ _STR_FIELDS = [
     "permanent_address", "emergency_contact_name", "emergency_contact_phone",
     # Iter 271 — separate PIN Code for the Permanent Address.
     "permanent_pincode",
+    # Iter 312 — Employee Detail Slip Phase 2 master fields.
+    "grade", "cost_centre", "confirmation_date", "education", "experience",
+    "company_assets", "nominee_name", "nominee_relation",
 ]
 _NUM_FIELDS = [
     "salary_monthly", "compliance_gross",
@@ -195,6 +198,25 @@ async def patch_employee_profile(
 
     updates["profile_updated_at"] = now_iso()
     updates["profile_updated_by"] = admin["user_id"]
+    # Iter 312 — field-level AUDIT TRAIL for every Employee Master edit
+    # (shown on the Employee Detail Slip's Audit Log section).
+    _changes: Dict[str, Any] = {}
+    for _k, _v in updates.items():
+        if _k in ("profile_updated_at", "profile_updated_by",
+                  "attendance_policy_override"):
+            continue
+        _old = emp.get(_k)
+        if _old != _v:
+            _changes[_k] = {"from": _old, "to": _v}
+    if _changes:
+        await db.employee_audit_logs.insert_one({
+            "user_id": user_id,
+            "company_id": emp.get("company_id"),
+            "changed_by": admin["user_id"],
+            "changed_by_name": admin.get("name") or admin.get("email"),
+            "at": updates["profile_updated_at"],
+            "changes": _changes,
+        })
     await db.users.update_one({"user_id": user_id}, {"$set": updates})
     logger.info("[profile] %s updated %s fields=%s",
                 admin["user_id"], user_id, sorted(updates.keys()))

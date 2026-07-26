@@ -1,0 +1,35 @@
+{
+  "summary": "Iter 312 Phase-2 Employee Detail Slip + splash + export filename — ALL VERIFIED. P0 login regression NOT confirmed: /admin-pin-login → mode-password → sksharmaconsultancy@gmail.com/sharma123 → POST /api/auth/admin-password-login 200 → redirect to /portal-dashboard, token stored in localStorage llc_session_token. Main agent's earlier failure was Playwright automation flakiness (they used get_by_text('Sign in') which does not land on the underlying Pressable — correct selector is [data-testid=\"admin-pin-submit\"]). #sks-splash removes cleanly on RootLayout mount (splash element absent by the time the login screen paints). Frontend /employee-detail-slip for code 50 SURENDRA SINGH renders all Phase-2 fields: Mother Kamla Devi, Grade G2, Cost Centre CC-WEAVING, Confirmation 01-06-2019, Nominee Sunita Devi (Wife), Education 10th Pass, Experience 8 years, Company Assets ID Card+Uniform. Employment Timeline section shows 7 dated events (Joined→Confirmed→Added→KYC→Salary Revised→Shift→Profile Updated). Audit Log — Recent Master Changes shows entry by 'S.K. Sharma & Co. Admin' listing all Phase-2 keys. Dark-toggle (eds-dark-toggle): label flips Dark↔Light, slip card turns dark navy, localStorage eds_dark=1 persists after full page reload. Edit modal (eds-edit): all 9 fields prefilled with current values, PATCH /api/admin/employees/user_44cd6f561da0/profile with experience=9 years returned 200, slip auto-reloaded showing '9 years' and a NEW audit-log timestamp (count went 1→2), then experience restored to '8 years' with a second PATCH 200. Backend curls: GET /api/admin/salary-register/export.pdf?...month=2026-05&employee_type=worker → 200, Content-Disposition filename=SalaryRegister_Worker_May2026.pdf ✓, valid PDF (1247 chars, correct title/columns/summary). GET /api/admin/employee-detail-slip/user_44cd6f561da0/slip.pdf → 200, valid PDF (9414 B, 7 image XObjects incl. Code128 barcode below name, Employment Timeline section with dated events, all Phase-2 fields present in text).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": ["(carried from Iter 310, non-blocking) Console warning: 'shadow*' style props deprecated → use boxShadow (RN Web)."]},
+      {"screen": "global", "issues": ["(carried from Iter 310, non-blocking) Console error: Invalid style property padding value '0 8px' (RN Web needs single value or paddingVertical/paddingHorizontal). Fires on every page load."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_312.json",
+    "/tmp/slip_load.png",
+    "/tmp/after_edit.png",
+    "/tmp/dark_after_reload.png"
+  ],
+  "action_items": [
+    "None blocking. Optional cleanup: fix the two pre-existing RN-Web console noises (shadow* → boxShadow; padding '0 8px' → paddingVertical/paddingHorizontal). Same items flagged in Iter 310 — still not addressed."
+  ],
+  "critical_code_review_comments": [
+    "app/+html.tsx #sks-splash + inline <style> is well-scoped (z-index 99999, fixed inset:0) and _layout.tsx removes it on mount via getElementById→opacity 0→remove after 320ms. No login-blocking side effects observed.",
+    "employee-detail-slip.tsx EDIT_FIELDS list matches the 9 backend PATCH keys 1:1 — good. Save handler nulls empty strings and reloads the slip payload in-place.",
+    "PATCH /api/admin/employees/{user_id}/profile writes to employee_audit_logs with actor name from session — verified end-to-end in UI (audit entry appeared immediately after save).",
+    "Slip PDF renders Code128 as an image XObject (7 total on page); pdfplumber cannot extract barcode text but visual barcode block is present in the PDF right below the employee name (verified via image count and structure)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (2/2 curls)", "frontend": "100% (4/4 flows: login, slip render, dark toggle+persist, edit modal PATCH+audit+restore)"},
+  "seed_data_creation": "None. Experience field toggled 8→9→8 via UI (final state = 8 years, matches iter 311 seed). Audit log now has 2 entries for user_44cd6f561da0 — expected side effect of the edit-save test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Admin login on preview: use testIDs [data-testid=\"mode-password\"] → fill [data-testid=\"admin-identifier-input\"] + [data-testid=\"admin-password-input\"] → click [data-testid=\"admin-pin-submit\"]. DO NOT use get_by_text('Sign in') — the visual button is a Pressable and the text node is not the click target on RN-Web (this bit main agent's Playwright in Iter 312). Token key = llc_session_token. Employee Detail Slip menu is Employees → Employee Detail Slip. All Phase-2 testIDs prefixed eds-* (eds-edit, eds-dark-toggle, eds-edit-<field_key>, eds-edit-save).",
+  "rca_of_issue": "P0 login 'stays on /admin-pin-login' RCA: the earlier Playwright script targeted the 'Sign in' text node rather than the Pressable that owns onPress={submit}. RN-Web renders the Pressable as a <div role=\"button\"> and the child <Text>Sign in</Text> as a separate node; clicking the Text node does not bubble to a synthetic onPress event on RN-Web (only clicks on the outer Pressable/role=button fire onPress). Fix for future automation: always target the [data-testid=\"admin-pin-submit\"] Pressable, not the label. No application-side regression — real users clicking the visible button work fine (hit-testing on real pointer input dispatches from the outer Pressable)."
+}

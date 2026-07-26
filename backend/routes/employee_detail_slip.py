@@ -68,12 +68,13 @@ def _company_scope(admin: Dict[str, Any], company_id: Optional[str]) -> Optional
     return company_id or None
 
 
-# Profile-completion checklist (Phase 1 — existing master fields only).
+# Profile-completion checklist (Phase 2 — includes the new master fields).
 _COMPLETION_FIELDS = [
-    "name", "father_name", "dob", "gender", "phone", "email", "address",
-    "employee_code", "designation", "department", "employee_type", "doj",
-    "uan_no", "pf_no", "esi_ip_no", "pan_no", "aadhaar_no",
+    "name", "father_name", "mother_name", "dob", "gender", "phone", "email",
+    "address", "employee_code", "designation", "department", "employee_type",
+    "doj", "uan_no", "pf_no", "esi_ip_no", "pan_no", "aadhaar_no",
     "bank_name", "bank_account", "bank_ifsc",
+    "grade", "cost_centre", "confirmation_date", "education", "experience",
 ]
 
 
@@ -175,11 +176,25 @@ async def _slip_data(admin: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     def F(label: str, value: Any) -> Dict[str, Any]:
         return {"label": label, "value": value}
 
+    # Iter 312 (Phase 2) — nominee from the KYC family list (is_nominee)
+    # with a fallback to the simple nominee_name/relation master fields.
+    nominee = None
+    for fmem in (u.get("family_members") or []):
+        if isinstance(fmem, dict) and fmem.get("is_nominee") and fmem.get("name"):
+            nominee = str(fmem["name"]).strip()
+            if fmem.get("relation"):
+                nominee += f" ({fmem['relation']})"
+            break
+    if not nominee and _s(u.get("nominee_name")):
+        nominee = u["nominee_name"].strip()
+        if _s(u.get("nominee_relation")):
+            nominee += f" ({u['nominee_relation'].strip()})"
+
     sections: List[Dict[str, Any]] = [
         {"title": "Personal Information", "fields": [
             F("Full Name", _s(u.get("name"))),
             F("Father / Spouse Name", _s(u.get("father_name"))),
-            F("Mother Name", None),
+            F("Mother Name", _s(u.get("mother_name"))),
             F("Date of Birth", _dmy(u.get("dob"))),
             F("Gender", _s(u.get("gender"))),
             F("Phone", _s(u.get("phone"))),
@@ -194,10 +209,10 @@ async def _slip_data(admin: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             F("Department", _s(u.get("department"))),
             F("Branch", _s(u.get("branch_name"))),
             F("Employee Group", _s(u.get("employee_type"))),
-            F("Grade", None),
-            F("Cost Centre", None),
+            F("Grade", _s(u.get("grade"))),
+            F("Cost Centre", _s(u.get("cost_centre"))),
             F("Date of Joining", _dmy(u.get("doj"))),
-            F("Confirmation Date", None),
+            F("Confirmation Date", _dmy(u.get("confirmation_date"))),
             F("Employment Status", _s(u.get("employment_status")) or "Active"),
             F("On-roll / Off-roll",
               "Off-roll" if u.get("is_onroll") is False else "On-roll"),
@@ -221,13 +236,51 @@ async def _slip_data(admin: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             [{"label": r["label"], "value": r["value"]}
              for r in _salary_summary(u)] or [F("Salary Structure", None)]
         )},
-        {"title": "Other (Phase 2)", "fields": [
-            F("Nominee", None),
-            F("Education", None),
-            F("Experience", None),
-            F("Company Assets", None),
+        {"title": "Additional Details", "fields": [
+            F("Nominee", nominee),
+            F("Education", _s(u.get("education"))),
+            F("Experience", _s(u.get("experience"))),
+            F("Company Assets", _s(u.get("company_assets"))),
         ]},
     ]
+
+    # ---- Iter 312 — employment TIMELINE from the master's date stamps ----
+    import re as _re
+    timeline: List[Dict[str, str]] = []
+
+    def _iso_date(v: Any) -> Optional[str]:
+        s = _s(v)
+        if not s:
+            return None
+        s = s[:10]
+        m = _re.match(r"^(\d{2})-(\d{2})-(\d{4})$", s)
+        return f"{m.group(3)}-{m.group(2)}-{m.group(1)}" if m else s
+
+    def T(v: Any, label: str) -> None:
+        d = _iso_date(v)
+        if d:
+            timeline.append({"date": d, "date_dmy": _dmy(d) or d, "label": label})
+
+    T(u.get("created_at"), "Added to Employee Master")
+    T(u.get("doj"), "Date of Joining")
+    T(u.get("confirmation_date"), "Confirmed")
+    T(u.get("salary_revised_at"), "Salary Revised")
+    T(u.get("kyc_updated_at"), "KYC Updated")
+    T(u.get("shift_assigned_at"), "Shift Assigned")
+    T(u.get("profile_updated_at"), "Profile Updated")
+    T(u.get("exit_date") or u.get("resign_date"), "Exit / Resignation")
+    timeline.sort(key=lambda x: x["date"])
+
+    # ---- Iter 312 — recent AUDIT LOG (Employee Master edits) ----
+    audit_log: List[Dict[str, Any]] = []
+    async for a in db.employee_audit_logs.find(
+        {"user_id": user_id}, {"_id": 0},
+    ).sort("at", -1).limit(10):
+        audit_log.append({
+            "at": str(a.get("at") or "")[:16].replace("T", " "),
+            "by": a.get("changed_by_name") or a.get("changed_by"),
+            "fields": sorted((a.get("changes") or {}).keys()),
+        })
 
     return {
         "user_id": user_id,
@@ -246,6 +299,8 @@ async def _slip_data(admin: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         "sections": sections,
         "attendance_fytd": attendance_fytd,
         "leaves_fytd": leaves_fytd,
+        "timeline": timeline,
+        "audit_log": audit_log,
         "profile_completion": _profile_completion(u),
         "generated_at": datetime.utcnow().isoformat() + "Z",
     }
@@ -383,8 +438,18 @@ def _slip_pdf(data: Dict[str, Any], qr_url: str) -> bytes:
         Paragraph(f"{(emp.get('name') or '').upper()}"
                   f"  ·  Code: {emp.get('employee_code') or '—'}", h1),
         Paragraph(emp.get("designation") or "—", sub),
-        Spacer(1, 3 * mm),
     ]
+    # Iter 312 — Code128 barcode of the Employee Code.
+    if emp.get("employee_code"):
+        try:
+            from reportlab.graphics.barcode import code128
+            story.append(Spacer(1, 1.5 * mm))
+            story.append(code128.Code128(str(emp["employee_code"]),
+                                         barHeight=7 * mm, barWidth=0.3 * mm,
+                                         humanReadable=True))
+        except Exception:  # noqa: BLE001
+            pass
+    story.append(Spacer(1, 3 * mm))
 
     def section_table(title: str, fields: List[Dict[str, Any]]) -> Table:
         # 2 field-pairs per row → 4 columns
@@ -438,7 +503,15 @@ def _slip_pdf(data: Dict[str, Any], qr_url: str) -> bytes:
                  or [{"label": "Approved Leaves (FYTD)", "value": None}])
     story.append(section_table(
         f"Leave Information — {att.get('fy_label') or 'FYTD'}", lv_fields))
-    story.append(Spacer(1, 8 * mm))
+    story.append(Spacer(1, 3 * mm))
+    # Iter 312 — employment timeline.
+    tl = data.get("timeline") or []
+    if tl:
+        tl_fields = [{"label": x.get("date_dmy") or x.get("date"),
+                      "value": x.get("label")} for x in tl]
+        story.append(section_table("Employment Timeline", tl_fields))
+        story.append(Spacer(1, 3 * mm))
+    story.append(Spacer(1, 5 * mm))
 
     foot = Table([
         [Paragraph("Employee Signature", lbl),
@@ -546,8 +619,9 @@ def _qr_link(request: Request, user_id: str) -> str:
 
 
 def _fname(emp: Dict[str, Any], ext: str) -> str:
+    # Iter 312 (user directive) — Reportname_Group_MonthYear.ext
     code = str(emp.get("employee_code") or "emp").replace(" ", "")
-    return f"Employee_Detail_Slip_{code}.{ext}"
+    return f"EmployeeDetailSlip_{code}_{datetime.now().strftime('%B%Y')}.{ext}"
 
 
 @router.get("/{user_id}/slip.pdf")

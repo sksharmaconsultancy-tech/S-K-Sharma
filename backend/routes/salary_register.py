@@ -22,6 +22,7 @@ Endpoints (super_admin / sub_admin / company_admin):
 import base64
 import csv
 import io
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Body, Header, HTTPException
@@ -559,8 +560,17 @@ async def _company_name(company_id: str) -> str:
     return (c or {}).get("name") or company_id
 
 
-def _export_filename(source: str, month: str, ext: str) -> str:
-    return f"salary_register_{source}_{month}.{ext}"
+def _export_filename(source: str, month: str, ext: str,
+                     employee_type: Optional[str] = None) -> str:
+    """Iter 312 (user directive) — ``Reportname_Group_MonthYear.ext``
+    e.g. ``SalaryRegister_Worker_June2026.pdf``."""
+    try:
+        my = datetime.strptime((month or "")[:7], "%Y-%m").strftime("%B%Y")
+    except ValueError:
+        my = (month or "month").replace("-", "")
+    grp = "".join(w.capitalize() for w in str(employee_type).split()) \
+        if employee_type else "All"
+    return f"SalaryRegister_{grp}_{my}.{ext}"
 
 
 @router.get("/export.csv")
@@ -601,7 +611,7 @@ async def export_csv(
     return StreamingResponse(
         io.BytesIO(data), media_type="text/csv",
         headers={"Content-Disposition":
-                 f'attachment; filename="{_export_filename(source, month, "csv")}"'},
+                 f'attachment; filename="{_export_filename(source, month, "csv", employee_type)}"'},
     )
 
 
@@ -802,7 +812,7 @@ async def export_xlsx(
         io.BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition":
-                 f'attachment; filename="{_export_filename(source, month, "xlsx")}"'},
+                 f'attachment; filename="{_export_filename(source, month, "xlsx", employee_type)}"'},
     )
 
 
@@ -1064,7 +1074,7 @@ async def export_pdf(
     return StreamingResponse(
         io.BytesIO(data), media_type="application/pdf",
         headers={"Content-Disposition":
-                 f'attachment; filename="{_export_filename(source, month, "pdf")}"'},
+                 f'attachment; filename="{_export_filename(source, month, "pdf", employee_type)}"'},
     )
 
 
@@ -1129,13 +1139,13 @@ async def email_register(
                          title_override=await _module_title(),
                          layout=prep.get("layout"))
         attachments.append({
-            "filename": _export_filename(source, month, "pdf"),
+            "filename": _export_filename(source, month, "pdf", employee_type),
             "content": base64.b64encode(pdf).decode(),
         })
     if "xlsx" in formats:
         xlsx = _xlsx_bytes(comp, source, month, rows, columns)
         attachments.append({
-            "filename": _export_filename(source, month, "xlsx"),
+            "filename": _export_filename(source, month, "xlsx", employee_type),
             "content": base64.b64encode(xlsx).decode(),
         })
     if not attachments:

@@ -278,7 +278,13 @@ async def _run_attendance_email_batch(
             employees=employees,
             attendance_days_by_user=days_by_user,
         )
-        filename = f"AttendanceSheet_{(c.get('name') or 'company').replace(' ', '_')}_{target_month}.xlsx"
+        # Iter 312 (user directive) — Reportname_Group_MonthYear.ext
+        try:
+            _my = datetime.strptime(target_month[:7], "%Y-%m").strftime("%B%Y")
+        except ValueError:
+            _my = target_month
+        filename = (f"AttendanceSheet_"
+                    f"{(c.get('name') or 'company').replace(' ', '_')}_{_my}.xlsx")
 
         if dry_run:
             results.append({
