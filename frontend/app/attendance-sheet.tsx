@@ -339,7 +339,7 @@ export default function AttendanceSheetScreen() {
       <SafeAreaView style={styles.root} edges={["top"]}>
         <View style={styles.forb}>
           <Ionicons name="lock-closed-outline" size={40} color={colors.onSurfaceTertiary} />
-          <Text style={styles.forbT}>Only the Super Admin can access the Attendance Sheet automation.</Text>
+          <Text style={styles.forbT}>Only the Super Admin / Sub Super Admin can access the Attendance Sheet automation.</Text>
         </View>
       </SafeAreaView>
     );

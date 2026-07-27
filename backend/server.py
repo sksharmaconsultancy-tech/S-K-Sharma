@@ -9138,6 +9138,14 @@ async def delete_employee(user_id: str,
         raise HTTPException(status_code=404, detail="Employee not found")
     if target.get("role") == "super_admin":
         raise HTTPException(status_code=403, detail="Super admin accounts cannot be deleted")
+    # Iter 332 (user request) — employees locked by Legacy Salary Records
+    # can NEVER be deleted until the firm's legacy import is UNDONE.
+    if target.get("legacy_locked"):
+        raise HTTPException(
+            status_code=403,
+            detail=("This employee is LOCKED — the firm's Legacy Salary "
+                    "Records are locked. Click UNDO on the Legacy Import "
+                    "first to unlock, then delete."))
     if admin["role"] == "company_admin":
         if not admin.get("company_id") or target.get("company_id") != admin["company_id"]:
             raise HTTPException(status_code=403, detail="Not allowed to delete employees outside your company")
@@ -19092,7 +19100,9 @@ async def _generate_attendance_sheet_impl(
 ):
     from utils.master_sheet import build_master_sheet_xlsx
     from fastapi.responses import Response
-    require_super_admin_strict(admin)
+    # Iter 332 (user request) — Sub Super Admins can use the Attendance
+    # Master Sheet too.
+    require_role(admin, ["super_admin", "sub_admin"])
     company = await db.companies.find_one({"company_id": company_id}, {"_id": 0, "name": 1})
     if company is None:
         raise HTTPException(status_code=404, detail="Company not found")
@@ -19190,7 +19200,7 @@ async def generate_master_sheet_legacy(
 
 async def _upload_attendance_sheet_impl(file: UploadFile, admin: dict):
     from utils.master_sheet import parse_uploaded_xlsx, match_columns
-    require_super_admin_strict(admin)
+    require_role(admin, ["super_admin", "sub_admin"])  # Iter 332
     if not file.filename.lower().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Only .xlsx files are accepted")
     content = await file.read()
@@ -19236,7 +19246,7 @@ async def upload_master_sheet_legacy(
 
 async def _apply_mapping_impl(payload: MasterSheetMap, admin: dict):
     from utils.master_sheet import import_rows_via_mapping
-    require_super_admin_strict(admin)
+    require_role(admin, ["super_admin", "sub_admin"])  # Iter 332
     company = await db.companies.find_one({"company_id": payload.company_id}, {"_id": 0, "name": 1})
     if company is None:
         raise HTTPException(status_code=404, detail="Company not found")

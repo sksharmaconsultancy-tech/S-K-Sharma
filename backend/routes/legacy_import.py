@@ -218,15 +218,24 @@ async def legacy_import_preview(body: ImportBody, authorization: Optional[str] =
             firm["company_name"] = (comp or {}).get("name")
         if body.import_employees:
             emps = await _legacy_employees(dbn, m.firm_no)
-            existing_names = set() if (m.create_new and not m.company_id) else {
-                str(u.get("name") or "").strip().lower()
+            existing_names = set()
+            existing_codes = set()
+            if not (m.create_new and not m.company_id):
                 for u in await db.users.find(
-                    {"company_id": m.company_id, "role": "employee"},
-                    {"_id": 0, "name": 1}).to_list(20000)
-            }
-            existing = sum(
-                1 for e in emps
-                if str(e.get("EmpName") or "").strip().lower() in existing_names)
+                        {"company_id": m.company_id, "role": "employee"},
+                        {"_id": 0, "name": 1, "employee_code": 1}).to_list(20000):
+                    if u.get("employee_code"):
+                        existing_codes.add(str(u["employee_code"]).strip())
+                    else:
+                        existing_names.add(str(u.get("name") or "").strip().lower())
+            # Iter 332 — count like the import: code-first matching.
+            existing = 0
+            for e in emps:
+                code = e.get("EmpCode") if (e.get("EmpCode") or 0) > 0 else None
+                if code is not None and str(code) in existing_codes:
+                    existing += 1
+                elif str(e.get("EmpName") or "").strip().lower() in existing_names:
+                    existing += 1
             firm["employees_total"] = len(emps)
             firm["employees_existing"] = existing
             firm["employees_new"] = len(emps) - existing
@@ -728,9 +737,31 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                             if clash:
                                 fields["phone"] = None
                         code = e.get("EmpCode") if (e.get("EmpCode") or 0) > 0 else None
-                        q = {"company_id": m.company_id, "role": "employee",
-                             "name": {"$regex": f"^{_rx(nm)}$", "$options": "i"}}
-                        existing = await db.users.find_one(q, {"_id": 0, "user_id": 1})
+                        # Iter 332 (user bug: SUVIDHI RAYONS — 2548 emp
+                        # imported as ~1000) — match by EMPLOYEE CODE first.
+                        # Name-only matching merged every duplicate name
+                        # into one record. Name fallback only applies when
+                        # the legacy row has no code, or to enrich a portal
+                        # employee that has no code yet.
+                        existing = None
+                        if code is not None:
+                            existing = await db.users.find_one(
+                                {"company_id": m.company_id, "role": "employee",
+                                 "employee_code": str(code)},
+                                {"_id": 0, "user_id": 1})
+                        if existing is None:
+                            q = {"company_id": m.company_id, "role": "employee",
+                                 "name": {"$regex": f"^{_rx(nm)}$", "$options": "i"}}
+                            if code is not None:
+                                # legacy row HAS a code → only enrich a
+                                # same-name portal employee without a code
+                                # (never merge two coded employees).
+                                q["$or"] = [
+                                    {"employee_code": None},
+                                    {"employee_code": ""},
+                                    {"employee_code": {"$exists": False}},
+                                ]
+                            existing = await db.users.find_one(q, {"_id": 0, "user_id": 1})
                         if existing:
                             # Iter 305 (user) — replace only CONFIRMED names.
                             repl = (body.replace_names or {}).get(str(m.firm_no))
@@ -740,6 +771,11 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                             else:
                                 fields.pop("phone", None)
                                 fields.pop("email", None)
+                                if code is not None:
+                                    # backfill the code on a name-matched
+                                    # portal employee so future imports
+                                    # match by code directly.
+                                    fields.setdefault("employee_code", str(code))
                                 await db.users.update_one(
                                     {"user_id": existing["user_id"]},
                                     {"$set": {k: v for k, v in fields.items() if v is not None}})
@@ -955,10 +991,13 @@ async def legacy_employee_compare(body: ImportBody, authorization: Optional[str]
         comp = None if create_new else await db.companies.find_one(
             {"company_id": m.company_id}, {"_id": 0, "name": 1})
         users: Dict[str, dict] = {}
+        by_code: Dict[str, dict] = {}
         if not create_new:
             async for u in db.users.find(
                     {"company_id": m.company_id, "role": "employee"}, {"_id": 0}):
                 users[str(u.get("name") or "").strip().lower()] = u
+                if u.get("employee_code"):
+                    by_code[str(u["employee_code"]).strip()] = u
         matched, new_names = [], []
         active = resigned = 0
         for e in emps:
@@ -969,7 +1008,14 @@ async def legacy_employee_compare(body: ImportBody, authorization: Optional[str]
                 resigned += 1
             else:
                 active += 1
-            u = users.get(nm.lower())
+            # Iter 332 — same matching as the import: code first, then a
+            # name-match only against a portal employee without a code.
+            code = e.get("EmpCode") if (e.get("EmpCode") or 0) > 0 else None
+            u = by_code.get(str(code)) if code is not None else None
+            if u is None:
+                u = users.get(nm.lower())
+                if u is not None and code is not None and u.get("employee_code"):
+                    u = None
             if not u:
                 new_names.append(nm)
                 continue
@@ -1081,6 +1127,13 @@ async def legacy_import_undo(body: UndoBody, authorization: Optional[str] = Head
     u = await db.users.delete_many({
         "company_id": body.company_id, "role": "employee",
         "legacy_imported": True, "legacy_firm_no": body.firm_no})
+    # Iter 332 (user request) — UNDO also releases the employee lock on any
+    # remaining employees of this firm (delete/update allowed again).
+    unlocked = await db.users.update_many(
+        {"company_id": body.company_id, "role": "employee",
+         "legacy_locked": True},
+        {"$unset": {"legacy_locked": "", "legacy_locked_at": "",
+                    "legacy_locked_by": ""}})
     h = await db.legacy_salary_history.delete_many(
         {"company_id": body.company_id, "firm_no": body.firm_no})
     runs = await db.compliance_salary_runs.delete_many(
@@ -1088,6 +1141,7 @@ async def legacy_import_undo(body: UndoBody, authorization: Optional[str] = Head
     lock = await db.legacy_imported_firms.delete_many({"firm_no": body.firm_no})
     return {"ok": True,
             "employees_deleted": u.deleted_count,
+            "employees_unlocked": unlocked.modified_count,
             "salary_rows_deleted": h.deleted_count,
             "published_runs_deleted": runs.deleted_count,
             "unlocked": lock.deleted_count > 0}
@@ -1573,6 +1627,7 @@ async def legacy_lock_compliance(
         raise HTTPException(status_code=400, detail="Pick at least one firm to lock")
     total = 0
     per_firm: Dict[str, int] = {}
+    emp_locked = 0
     for cid in cids:
         r = await db.compliance_salary_runs.update_many(
             {"company_id": cid, "legacy_imported": True,
@@ -1581,4 +1636,15 @@ async def legacy_lock_compliance(
                       "finalized_by": admin.get("user_id")}})
         per_firm[cid] = r.modified_count
         total += r.modified_count
-    return {"ok": True, "locked": total, "firms": len(cids), "per_firm": per_firm}
+        # Iter 332 (user request) — locking the legacy salary records ALSO
+        # locks the firm's legacy-imported employees: master data can only
+        # be updated with Resign/Exit data and NOTHING can be deleted until
+        # the firm's legacy import is UNDONE.
+        e = await db.users.update_many(
+            {"company_id": cid, "role": "employee", "legacy_imported": True},
+            {"$set": {"legacy_locked": True,
+                      "legacy_locked_at": _now(),
+                      "legacy_locked_by": admin.get("user_id")}})
+        emp_locked += e.modified_count
+    return {"ok": True, "locked": total, "firms": len(cids),
+            "employees_locked": emp_locked, "per_firm": per_firm}

@@ -1132,9 +1132,9 @@ def register_iter60_features(
         dry_run: bool = False,
         authorization: Optional[str] = Header(None),
     ):
-        """Manually trigger the attendance-sheet email batch. Super admin only."""
+        """Manually trigger the attendance-sheet email batch."""
         admin = await get_user_from_token(authorization)
-        require_super_admin_strict(admin)
+        require_role(admin, ["super_admin", "sub_admin"])  # Iter 332
         return await _run_attendance_email_batch(
             db, month=month, company_id_filter=company_id, dry_run=dry_run,
         )

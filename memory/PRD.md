@@ -1899,3 +1899,19 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   ("salary" group); preview endpoint returns firm.allowance_heads [{head,label,action,bucket}];
   wizard shows chips (enable=purple, create=amber) + job totals allowance_labels_enabled/created.
 - Deploy script deploy_vps_iter331.sh (temp_bundle kind=script serves 331).
+
+## Iter 332 — Legacy lock + import code-match fix + renames, deploy 332
+- LEGACY SALARY LOCK (user request): lock-compliance also sets legacy_locked on the firm's
+  legacy_imported employees; undo $unsets it (and deletes legacy-created emps as before).
+  Guards: DELETE /admin/employees blocked (403) for legacy_locked; PATCH profile allows ONLY
+  resign fields (resign_date/exit_date/date_of_leaving/leaving_date/employment_status/
+  exit_reason/exit_remarks) — other CHANGED fields → 403 listing blocked; bulk salary-revision
+  skips locked employees. E2E curl-verified (lock→403 delete→403 designation→exit_date ok→undo).
+- LEGACY IMPORT BUG (SUVIDHI RAYONS 2548→1000): name-only matching merged duplicate names.
+  Fixed to EMPLOYEE-CODE-first matching in _run_job, employee-compare and preview counts;
+  name fallback only when the row has no code or portal emp has no code (code backfilled).
+  User must UNDO + re-import affected firms after deploying.
+- Renames: "Employee Master Data"→"All Employee Data" (Employees menu, home, i18n);
+  "Master Data Report"→"Employee Master Report" (Reports menu + screen title).
+- Firms ID & Password: sub_admin allowed (own PIN); test sub admin testsub@sksharma.co PIN 135790.
+- Deploy script deploy_vps_iter332.sh (temp_bundle kind=script serves 332).

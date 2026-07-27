@@ -187,7 +187,7 @@ export default function MasterDataReportScreen() {
             <Ionicons name="chevron-back" size={26} color={colors.onSurface} />
           </Pressable>
           <View style={{ flex: 1, alignItems: "center" }}>
-            <Text style={styles.h1}>Master Data</Text>
+            <Text style={styles.h1}>Employee Master Report</Text>
             <Text style={styles.hsub}>Employee Master · read-only · click a column header to sort</Text>
           </View>
           <Pressable onPress={exportXlsx} style={styles.exportBtn} testID="mdr-export">

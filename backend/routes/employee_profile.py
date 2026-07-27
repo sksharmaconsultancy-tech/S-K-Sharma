@@ -196,6 +196,30 @@ async def patch_employee_profile(
     if not updates:
         raise HTTPException(status_code=400, detail="Nothing to update")
 
+    # Iter 332 (user request) — LEGACY LOCK: when the firm's Legacy Salary
+    # Records were locked, the Employee Master is frozen — ONLY Resign /
+    # Exit data may still be updated. Everything else requires clicking
+    # UNDO on the Legacy Import first.
+    if emp.get("legacy_locked"):
+        _RESIGN_FIELDS = {
+            "resign_date", "exit_date", "date_of_leaving", "leaving_date",
+            "employment_status", "exit_reason", "exit_remarks",
+        }
+        _blocked = [
+            k for k, v in updates.items()
+            if k not in _RESIGN_FIELDS and emp.get(k) != v
+        ]
+        if _blocked:
+            raise HTTPException(
+                status_code=403,
+                detail=("This employee is LOCKED — the firm's Legacy Salary "
+                        "Records are locked. Only Resign/Exit data can be "
+                        "updated. Click UNDO on the Legacy Import to unlock "
+                        f"other fields. Blocked: {', '.join(sorted(_blocked)[:8])}"))
+        updates = {k: v for k, v in updates.items() if k in _RESIGN_FIELDS}
+        if not updates:
+            raise HTTPException(status_code=400, detail="Nothing to update")
+
     updates["profile_updated_at"] = now_iso()
     updates["profile_updated_by"] = admin["user_id"]
     # Iter 312 — field-level AUDIT TRAIL for every Employee Master edit

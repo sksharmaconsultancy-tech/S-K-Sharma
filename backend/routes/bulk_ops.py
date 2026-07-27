@@ -517,8 +517,15 @@ async def salary_revision(
         u = await db.users.find_one(
             {"user_id": uid, "company_id": company_id, "role": "employee"},
             {"_id": 0, "user_id": 1, "employee_code": 1, "name": 1,
-             "salary_structure_actual": 1, "salary_monthly": 1, "compliance_gross": 1})
+             "salary_structure_actual": 1, "salary_monthly": 1,
+             "compliance_gross": 1, "legacy_locked": 1})
         if not u:
+            continue
+        # Iter 332 (user request) — LEGACY LOCK: salary master is frozen.
+        if u.get("legacy_locked"):
+            results.append({"user_id": uid, "employee_code": u.get("employee_code"),
+                            "name": u.get("name"),
+                            "skipped": "LOCKED (Legacy Salary Records) — Undo the legacy import first"})
             continue
         updates: Dict[str, Any] = {}
         detail: Dict[str, Any] = {"user_id": uid, "employee_code": u.get("employee_code"),
