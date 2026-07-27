@@ -883,21 +883,22 @@ def build_compliance_register_pdf(
     def _header(c, d):
         c.saveState()
         c.setFillColor(rl_colors.black)
-        c.setFont("Helvetica", 6.5)
-        c.drawString(6 * mm, H - 8 * mm, "[rule 78 (1) (a) (i)]")
-        c.setFont("Helvetica-Bold", 7)
-        c.drawString(6 * mm, H - 12 * mm, f"P.F.Code: {pf_code}")
-        c.drawString(6 * mm, H - 16 * mm, f"ESI Code: {esi_code}")
+        # Iter 330 (user request) — larger report header fonts.
+        c.setFont("Helvetica", 8)
+        c.drawString(6 * mm, H - 7.5 * mm, "[rule 78 (1) (a) (i)]")
         c.setFont("Helvetica-Bold", 9)
-        c.drawCentredString(W / 2, H - 8 * mm, f"{title_override or 'SALARY REGISTER'} ({group})")
-        c.setFont("Helvetica-Bold", 9.5)
-        c.drawCentredString(W / 2, H - 12.5 * mm, f"M/S. {company_name.upper()}")
-        c.setFont("Helvetica", 6.5)
-        c.drawCentredString(W / 2, H - 16.5 * mm, address)
-        c.setFont("Helvetica", 7)
-        c.drawRightString(W - 6 * mm, H - 9.5 * mm, "Register of Wages Form No. 27 (1)")
-        c.setFont("Helvetica-Bold", 7)
-        c.drawRightString(W - 6 * mm, H - 13 * mm, f"Month Days {month_days}")
+        c.drawString(6 * mm, H - 12 * mm, f"P.F.Code: {pf_code}")
+        c.drawString(6 * mm, H - 16.5 * mm, f"ESI Code: {esi_code}")
+        c.setFont("Helvetica-Bold", 12)
+        c.drawCentredString(W / 2, H - 7.5 * mm, f"{title_override or 'SALARY REGISTER'} ({group})")
+        c.setFont("Helvetica-Bold", 13)
+        c.drawCentredString(W / 2, H - 13 * mm, f"M/S. {company_name.upper()}")
+        c.setFont("Helvetica", 8)
+        c.drawCentredString(W / 2, H - 17.5 * mm, address)
+        c.setFont("Helvetica", 9)
+        c.drawRightString(W - 6 * mm, H - 8.5 * mm, "Register of Wages Form No. 27 (1)")
+        c.setFont("Helvetica-Bold", 9)
+        c.drawRightString(W - 6 * mm, H - 12.5 * mm, f"Month Days {month_days}")
         c.drawRightString(W - 6 * mm, H - 16.5 * mm, f"FOR THE MONTH {month_label}")
         c.restoreState()
 
@@ -933,7 +934,7 @@ def build_compliance_register_pdf(
     ]
     data: List[List[Any]] = [hdr_top, hdr_sub]
 
-    cell = ParagraphStyle("cell", fontName="Helvetica", fontSize=5.5, leading=6.5)
+    cell = ParagraphStyle("cell", fontName="Helvetica", fontSize=6.5, leading=7.5)
     tot = {k: 0.0 for k in (
         "days", "hrs", "sal", "hra", "conv", "oth", "gross",
         "m_sal", "m_hra", "m_conv", "m_oth", "m_tot",
@@ -1278,24 +1279,25 @@ def build_compliance_register_pdf_v2(
         c.setFillColor(BRAND)
         c.rect(0, H - 20 * mm, W, 20 * mm, stroke=0, fill=1)
         c.setFillColor(rl_colors.white)
-        c.setFont("Helvetica-Bold", 13)
+        # Iter 330 (user request) — larger report header fonts.
+        c.setFont("Helvetica-Bold", 15)
         c.drawString(8 * mm, H - 9 * mm, company_name.upper())
-        c.setFont("Helvetica", 7.5)
+        c.setFont("Helvetica", 9)
         if address:
-            c.drawString(8 * mm, H - 13.5 * mm, address[:140])
-        c.setFont("Helvetica", 7.5)
+            c.drawString(8 * mm, H - 14 * mm, address[:140])
+        c.setFont("Helvetica", 9)
         codes = "   ·   ".join(x for x in [
             f"PF Code: {pf_code}" if pf_code else "",
             f"ESI Code: {esi_code}" if esi_code else "",
             f"Group: {group}",
         ] if x)
-        c.drawString(8 * mm, H - 17.5 * mm, codes)
-        c.setFont("Helvetica-Bold", 11)
+        c.drawString(8 * mm, H - 18.2 * mm, codes)
+        c.setFont("Helvetica-Bold", 13)
         c.drawRightString(W - 8 * mm, H - 9 * mm, title_override or "SALARY REGISTER (COMPLIANCE)")
-        c.setFont("Helvetica-Bold", 9)
+        c.setFont("Helvetica-Bold", 11)
         c.drawRightString(W - 8 * mm, H - 14.5 * mm, month_label)
         if month_days_hdr:
-            c.setFont("Helvetica", 7.5)
+            c.setFont("Helvetica", 9)
             c.drawRightString(W - 8 * mm, H - 18.5 * mm,
                               f"Salary Month Days: {month_days_hdr}")
         c.restoreState()
@@ -1311,7 +1313,7 @@ def build_compliance_register_pdf_v2(
                   H - doc.topMargin - doc.bottomMargin, id="f")
     doc.addPageTemplates([PageTemplate(id="pg", frames=[frame], onPage=_header)])
 
-    cell = ParagraphStyle("cell", fontName="Helvetica", fontSize=6.8, leading=8)
+    cell = ParagraphStyle("cell", fontName="Helvetica", fontSize=7.8, leading=9)
 
     # Iter 162 — layout-driven columns (choose / order / rename / widths),
     # saved ONE TIME in Settings and applied on every download.
@@ -1486,9 +1488,9 @@ def build_compliance_register_pdf_v2(
             ("BACKGROUND", (0, 0), (-1, 0), BRAND),
             ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, 0), 7),
+            ("FONTSIZE", (0, 0), (-1, 0), 8),
             ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-            ("FONTSIZE", (0, 1), (-1, -1), 6.8),
+            ("FONTSIZE", (0, 1), (-1, -1), 7.8),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("GRID", (0, 0), (-1, -1), 0.35, rl_colors.HexColor("#B9C4CE")),
             ("LEFTPADDING", (0, 0), (-1, -1), 2.5),
