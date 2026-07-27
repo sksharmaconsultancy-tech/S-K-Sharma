@@ -228,6 +228,27 @@ async def _store_import(admin: dict, company_id: str, month: str,
             m.update(stamp)
         await db.compliance_import_entries.insert_many(matched)
 
+    # Iter 335 (user request) — AUTO-REPROCESS right after the import:
+    # the month is processed with the imported sheet (Freeze Salary) —
+    # days + gross from the sheet, statutory recalculated, and any
+    # difference between Imported Gross and Master Gross allocated to
+    # Overtime / Other Allowances per the Firm Master settings.
+    auto_run = None
+    if matched:
+        try:
+            from server import (_create_compliance_salary_run_core,
+                                ComplianceSalaryRunCreate)
+            resp = await _create_compliance_salary_run_core(
+                ComplianceSalaryRunCreate(
+                    month=month, company_id=company_id,
+                    use_imported_sheet=True),
+                admin)
+            auto_run = {"ok": True, "run": resp.get("run")}
+        except HTTPException as ex:
+            auto_run = {"ok": False, "error": ex.detail}
+        except Exception as ex:  # noqa: BLE001 — never fail the import
+            auto_run = {"ok": False, "error": str(ex)[:200]}
+
     return {
         "ok": True,
         "company_name": company.get("name"),
@@ -237,6 +258,7 @@ async def _store_import(admin: dict, company_id: str, month: str,
         "unmatched_count": len(unmatched),
         "source": source,
         "filename": filename,
+        "auto_run": auto_run,
     }
 
 

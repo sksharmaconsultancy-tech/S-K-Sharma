@@ -556,10 +556,25 @@ export default function ComplianceSalaryRunScreen() {
       });
       setUseImportedSheet(true);
       await loadImportStatus();
-      showMsg(
-        `Imported ${r.matched} of ${r.total_rows} rows` +
-        (r.unmatched_count ? ` — ${r.unmatched_count} row(s) had no matching employee.` : "."),
-      );
+      // Iter 335 (user request) — the month is AUTO-REPROCESSED right
+      // after the import (Freeze Salary): show the fresh run directly.
+      if (r.auto_run?.ok && r.auto_run.run) {
+        setRun(r.auto_run.run);
+        await loadRuns();
+        const t = r.auto_run.run.totals || {};
+        showMsg(
+          `Imported ${r.matched} of ${r.total_rows} rows` +
+          (r.unmatched_count ? ` (${r.unmatched_count} unmatched)` : "") +
+          ` — salary auto-processed: Net ${fmtInr(t.net)}, PF ${fmtInr(t.pf_employee)}, ESIC ${fmtInr(t.esic_employee)}.` +
+          (t.difference ? ` Freeze difference ${fmtInr(t.difference)} allocated to OT/Other Allowances.` : ""),
+        );
+      } else {
+        showMsg(
+          `Imported ${r.matched} of ${r.total_rows} rows` +
+          (r.unmatched_count ? ` — ${r.unmatched_count} row(s) had no matching employee.` : ".") +
+          (r.auto_run?.error ? ` Auto-process failed: ${r.auto_run.error}` : ""),
+        );
+      }
     } catch (e: any) {
       showMsg(e?.message || "Import failed");
     } finally { setImportBusy(false); }
@@ -592,10 +607,22 @@ export default function ComplianceSalaryRunScreen() {
       });
       setUseImportedSheet(true);
       await loadImportStatus();
-      showMsg(
-        `Imported ${r.matched} of ${r.total_rows} rows from "${att.filename}"` +
-        (r.unmatched_count ? ` — ${r.unmatched_count} row(s) had no matching employee.` : "."),
-      );
+      // Iter 335 — auto-reprocessed after Gmail import too.
+      if (r.auto_run?.ok && r.auto_run.run) {
+        setRun(r.auto_run.run);
+        await loadRuns();
+        const t = r.auto_run.run.totals || {};
+        showMsg(
+          `Imported ${r.matched} of ${r.total_rows} rows from "${att.filename}"` +
+          ` — salary auto-processed: Net ${fmtInr(t.net)}, PF ${fmtInr(t.pf_employee)}, ESIC ${fmtInr(t.esic_employee)}.`,
+        );
+      } else {
+        showMsg(
+          `Imported ${r.matched} of ${r.total_rows} rows from "${att.filename}"` +
+          (r.unmatched_count ? ` — ${r.unmatched_count} row(s) had no matching employee.` : ".") +
+          (r.auto_run?.error ? ` Auto-process failed: ${r.auto_run.error}` : ""),
+        );
+      }
     } catch (e: any) {
       showMsg(e?.message || "Import failed");
     } finally { setImportBusy(false); }
@@ -1879,7 +1906,9 @@ export default function ComplianceSalaryRunScreen() {
                   const masterCount = optKeys.length + 1; // +M.Gross
                   // Iter 306 — +Gross AND +OT Amt (the band was one cell
                   // short, so DEDUCTIONS & NET started over the OT column).
-                  const calcCount = optKeys.length + 2;
+                  // Iter 335 — +Freeze Salary column beside Gross on
+                  // imported (frozen) runs.
+                  const calcCount = optKeys.length + 2 + (hasFrz ? 1 : 0);
                   // Iter 171 — deduction columns follow Firm Master Deductions
                   const ed = (run.rows[0] as any)?.enabled_deductions as string[] | undefined;
                   const hasDed = (k: string) => !ed || ed.includes(k);
@@ -1939,6 +1968,9 @@ export default function ComplianceSalaryRunScreen() {
                   if (has("special")) headers.push({ label: "Spl", group: "calc" });
                   if (has("others")) headers.push({ label: "Others*", group: "calc" });
                   headers.push({ label: "Gross", group: "calc" });
+                  // Iter 335 (user request) — Freeze Salary column right
+                  // next to Gross (imported/frozen gross per employee).
+                  if (hasFrz) headers.push({ label: "Freeze Salary", group: "calc" });
                   // Iter 230 (user request) — editable OT Amount column.
                   headers.push({ label: "OT Amt*", group: "calc" });
                   const dedLabels = [
@@ -2080,6 +2112,13 @@ export default function ComplianceSalaryRunScreen() {
                       );
                     })()}
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.gross_paid)}</Text>
+                    {/* Iter 335 (user request) — Freeze Salary shown right
+                        NEXT TO the Gross column. */}
+                    {hasFrz ? (
+                      <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700", color: "#5B21B6", backgroundColor: "#F5F3FF" }]}>
+                        {(r as any).imported_gross != null ? fmtInr((r as any).imported_gross) : "—"}
+                      </Text>
+                    ) : null}
                     {/* Iter 230 (user request) — editable OT Amount. */}
                     <TextInput
                       ref={(el) => { cellRefs.current[`ot_pay:${idx}`] = el; }}
@@ -2179,6 +2218,8 @@ export default function ComplianceSalaryRunScreen() {
                         {/* Calculated group totals (+Gross) */}
                         {opt.map((k) => <React.Fragment key={`tc-${k}`}>{num((run.totals as any)?.[k])}</React.Fragment>)}
                         {num(run.totals?.gross_paid)}
+                        {/* Iter 335 — Freeze Salary total next to Gross. */}
+                        {hasFrz ? num((run.totals as any)?.imported_gross) : null}
                         {num(run.totals?.ot_pay)}
                         {/* Deductions group */}
                         {dash()}

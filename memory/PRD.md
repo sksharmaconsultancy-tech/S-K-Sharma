@@ -1961,3 +1961,16 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   delivered — opens natively on Windows). Frontend attendance-sheet.tsx: "All groups" → zip.
 - Verified: headers + master rates correct (Kankani 745/750 daily), zip has LABOUR/STAFF/
   UNGROUPED files, mapping gross→Employee Salary.
+
+## Iter 336 — Import auto-reprocess (Freeze), PF/ESIC gate fix, Freeze column, deploy 336
+- server.py: create_compliance_salary_run endpoint split → _create_compliance_salary_run_core
+  (payload, admin) reused by compliance_import._store_import: after storing entries the month
+  is AUTO-PROCESSED with use_imported_sheet=True (Freeze); response carries auto_run{ok,run|error}.
+  E2E verified (Kankani 2026-07: frozen run, diff 1630 → Overtime, gross=imported, ESIC computed).
+- firm_stat_flags pf/esic gates broadened: epf/esi.applicable OR Firm Master Deductions PF/ESI
+  toggle (user bug: PF (Emp) 0 · ESIC (Emp) 0 on imported runs).
+- compliance-salary-run.tsx: upload + Gmail import handlers show auto-processed run (setRun);
+  "Freeze Salary" column inserted right AFTER Gross (purple, per-row imported_gross + total);
+  calc band width +1 when frozen. Trailing Imp/Calc/Diff/Alloc columns unchanged.
+- month_days note: 26 came from the UI field the admin set; auto-run uses default month days.
+- Deploy script deploy_vps_iter336.sh.

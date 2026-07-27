@@ -15552,8 +15552,12 @@ async def _compute_compliance_run(
             if _fm_ded.get("TDS") or _fm_ded.get("I. TAX"):
                 ded_mask.add("tds")
             firm_stat_flags[fm["company_id"]] = {
-                "pf": bool((fm.get("epf") or {}).get("applicable")),
-                "esic": bool((fm.get("esi") or {}).get("applicable")),
+                # Iter 335 (user bug: PF/ESIC showing 0 on imported runs) —
+                # PF/ESIC also count as enabled when the Firm Master
+                # Deductions catalog has PF / ESI toggled ON (not only the
+                # EPF/ESI "Applicable" flag).
+                "pf": bool((fm.get("epf") or {}).get("applicable")) or bool(_fm_ded.get("PF")),
+                "esic": bool((fm.get("esi") or {}).get("applicable")) or bool(_fm_ded.get("ESI")),
                 "allow_mask": allow_mask if allow_mask else None,
                 "ded_mask": ded_mask if any(bool(v) for v in _fm_ded.values()) else None,
                 # Iter 310 — Freeze Salary difference allocation gate.
@@ -16078,6 +16082,14 @@ async def create_compliance_salary_run(
     # Iter 62 — Compliance is OPT-IN for company admins. Super Admin must
     # explicitly enable compliance_salary:write on the firm's access rights.
     await require_employer_permission(admin, "compliance_salary:write", db)
+    return await _create_compliance_salary_run_core(payload, admin)
+
+
+async def _create_compliance_salary_run_core(
+    payload: ComplianceSalaryRunCreate, admin: dict,
+) -> dict:
+    """Iter 335 — shared core so the sheet import can auto-reprocess the
+    month right after importing (user request)."""
     # Iter 98 — Firm Master gate: Online Salary must be enabled for the firm.
     _gate_cid = (
         admin.get("company_id") if admin["role"] == "company_admin"
