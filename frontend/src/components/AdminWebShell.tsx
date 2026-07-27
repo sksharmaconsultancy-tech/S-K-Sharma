@@ -354,6 +354,15 @@ function NavRow({
         onPress={() => {
           if (hasChildren) {
             setOpen((v) => !v);
+          } else if (item.disabled) {
+            // Iter 333 (user request) — locked for the current firm.
+            const msg =
+              "This feature is not available for the current firm.\n\n" +
+              "First enable this function (Firm Master / Access Rights) " +
+              "or change the firm.";
+            if (Platform.OS === "web" && typeof window !== "undefined") {
+              window.alert(msg);
+            }
           } else if (item.route) {
             onNavigate(item.route);
           }
@@ -367,6 +376,7 @@ function NavRow({
             paddingHorizontal: 16 + depth * 12,
             borderRadius: 8,
             marginBottom: 2,
+            opacity: item.disabled ? 0.45 : 1,
             // Iter 293 (user spec) — dark sidebar: active #2563EB, hover
             // #1D4ED8, otherwise transparent.
             backgroundColor: active ? SB.active : hovered ? SB.hover : "transparent",
@@ -398,7 +408,10 @@ function NavRow({
         >
           {tr(item.label)}
         </Text>
-        {!hasChildren && item.route && onToggleFav ? (
+        {!hasChildren && item.disabled ? (
+          <Ionicons name="lock-closed" size={12} color="rgba(148,163,184,0.7)" />
+        ) : null}
+        {!hasChildren && !item.disabled && item.route && onToggleFav ? (
           <Pressable
             hitSlop={6}
             onPress={(e: any) => { e?.stopPropagation?.(); onToggleFav(item.route!); }}
@@ -593,6 +606,10 @@ export type NavItem = {
   // Automation, User Rights, Masters). When ``children`` is present the
   // parent renders as an expander instead of a link.
   children?: NavItem[];
+  // Iter 333 (user request) — feature not enabled for the CURRENT firm:
+  // the entry stays visible but locked; clicking shows a message instead
+  // of navigating.
+  disabled?: boolean;
 };
 
 type Props = { children: React.ReactNode };
@@ -797,27 +814,34 @@ export default function AdminWebShell({ children }: Props) {
       const hasSalaryGrant =
         permSet.has("salary_process:read") ||
         permSet.has("salary_process:write");
-      if (empPerms.length === 0) {
-        return filterNav(NAV_COMPANY_ADMIN, (item) => {
-          if (!menuAllowed(item)) return false;
-          if (!staffAllowed(item)) return false;
-          const r = (item.route || "").split("?")[0];
-          if (COMPLIANCE_ROUTES.has(r)) return hasComplianceGrant;
-          if (SALARY_ROUTES.has(r)) return hasSalaryGrant;
-          return true;
-        });
-      }
-      return filterNav(NAV_COMPANY_ADMIN, (item) => {
-        if (!menuAllowed(item)) return false;
-        if (!staffAllowed(item)) return false;
+      // Iter 333 (user request) — features the FIRM doesn't have are no
+      // longer HIDDEN: they stay in the sidebar as LOCKED entries and
+      // clicking shows "not available for the current firm" instead.
+      const firmAllowed = (item: NavItem) => {
         const r = (item.route || "").split("?")[0];
         if (r === "/(tabs)") return true;
-        const gates = NAV_PERMISSION_MAP[r];
-        if (!gates || gates.length === 0) return true;
         if (COMPLIANCE_ROUTES.has(r)) return hasComplianceGrant;
         if (SALARY_ROUTES.has(r)) return hasSalaryGrant;
+        if (empPerms.length === 0) return true;
+        const gates = NAV_PERMISSION_MAP[r];
+        if (!gates || gates.length === 0) return true;
         return gates.some((g) => permSet.has(g));
-      });
+      };
+      const mark = (items: NavItem[]): NavItem[] => {
+        const out: NavItem[] = [];
+        for (const it of items) {
+          if (it.children && it.children.length > 0) {
+            const kids = mark(it.children);
+            if (kids.length > 0) out.push({ ...it, children: kids });
+            continue;
+          }
+          // Explicit per-button rights / staff RBAC still HIDE entries.
+          if (!menuAllowed(it) || !staffAllowed(it)) continue;
+          out.push(firmAllowed(it) ? it : { ...it, disabled: true });
+        }
+        return out;
+      };
+      return mark(NAV_COMPANY_ADMIN);
     }
     return NAV_COMPANY_ADMIN;
   }, [role, user]);
@@ -834,19 +858,24 @@ export default function AdminWebShell({ children }: Props) {
     // firms running Off-roll (Offline/Actual) salary from biometrics.
     if (!salaryFlags.offline) HIDE.add("/attendance-policy");
     if (HIDE.size === 0) return nav;
-    const prune = (items: NavItem[]): NavItem[] => {
+    // Iter 333 (user request) — LOCK instead of hide: the entry stays in
+    // the sidebar; clicking shows "not available for the current firm".
+    const mark = (items: NavItem[]): NavItem[] => {
       const out: NavItem[] = [];
       for (const it of items) {
         if (it.children && it.children.length > 0) {
-          const kids = prune(it.children);
-          if (kids.length > 0) out.push({ ...it, children: kids });
+          out.push({ ...it, children: mark(it.children) });
           continue;
         }
-        if (!HIDE.has((it.route || "").split("?")[0])) out.push(it);
+        if (HIDE.has((it.route || "").split("?")[0])) {
+          out.push({ ...it, disabled: true });
+        } else {
+          out.push(it);
+        }
       }
       return out;
     };
-    return prune(nav);
+    return mark(nav);
   }, [nav, salaryFlags]);
 
   // Iter 83 — flatten the nav tree (parents + children) so activeRoute /
@@ -869,12 +898,12 @@ export default function AdminWebShell({ children }: Props) {
   // route that exists in the master nav universe but is NOT in this user's
   // permission-filtered nav is denied. Super admins are never gated.
   const routeDenied = useMemo(() => {
-    if (role === "super_admin") return false;
+    if (role === "super_admin") return false as false | "denied" | "firm";
     const base = (r?: string) => (r || "").split("?")[0];
-    const collect = (items: NavItem[], into: Set<string>) => {
+    const collect = (items: NavItem[], into: Set<string>, skipDisabled = false) => {
       for (const it of items) {
-        if (it.route) into.add(base(it.route));
-        if (it.children) collect(it.children, into);
+        if (it.route && !(skipDisabled && it.disabled)) into.add(base(it.route));
+        if (it.children) collect(it.children, into, skipDisabled);
       }
     };
     const universe = new Set<string>();
@@ -892,8 +921,12 @@ export default function AdminWebShell({ children }: Props) {
     const allowed = new Set<string>();
     // Guard on the permission-filtered nav (`nav`), not the business-flow
     // pruned `gatedNav`, so firm salary toggles never lock admins out.
-    collect(nav, allowed);
-    return !allowed.has(hit);
+    collect(nav, allowed, true);
+    if (allowed.has(hit)) return false;
+    // Iter 333 — present in the nav but LOCKED for the current firm?
+    const present = new Set<string>();
+    collect(nav, present, false);
+    return present.has(hit) ? "firm" : "denied";
   }, [role, nav, pathname]);
 
   // Iter 294 — track recently-opened screens (web desktop only).
@@ -1174,7 +1207,7 @@ export default function AdminWebShell({ children }: Props) {
             {navQuery.trim() ? (
               <View style={styles.gsResults}>
                 {flatNav
-                  .filter((n) => n.label.toLowerCase().includes(navQuery.trim().toLowerCase()))
+                  .filter((n) => !n.disabled && n.label.toLowerCase().includes(navQuery.trim().toLowerCase()))
                   .slice(0, 8)
                   .map((n) => (
                     <Pressable
@@ -1381,10 +1414,13 @@ export default function AdminWebShell({ children }: Props) {
           {routeDenied ? (
             <View style={styles.deniedWrap} testID="route-access-denied">
               <Ionicons name="lock-closed-outline" size={52} color="#B91C1C" />
-              <Text style={styles.deniedTitle}>Access Denied</Text>
+              <Text style={styles.deniedTitle}>
+                {routeDenied === "firm" ? "Feature not available" : "Access Denied"}
+              </Text>
               <Text style={styles.deniedTxt}>
-                You do not have permission to view this page.{"\n"}
-                Contact your administrator if you believe this is a mistake.
+                {routeDenied === "firm"
+                  ? "This feature is not available for the current firm.\nFirst enable this function (Firm Master / Access Rights) or change the firm."
+                  : "You do not have permission to view this page.\nContact your administrator if you believe this is a mistake."}
               </Text>
               <Pressable
                 onPress={() => router.replace("/portal-dashboard" as any)}

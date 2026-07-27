@@ -11984,7 +11984,9 @@ async def list_employees(
     # (which surfaced on the Bulk Employee Correction screen as "Sharma
     # Associates Admin" etc.).
     q["role"] = "employee"
-    users = await db.users.find(q, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    # Iter 333 (user bug: SUVIDHI RAYONS 2548 emp) — the old 1000-row cap
+    # cut off active employees for big firms.
+    users = await db.users.find(q, {"_id": 0}).sort("created_at", -1).to_list(30000)
     users = [_redact_user(u) for u in users]
     return {"employees": users}
 

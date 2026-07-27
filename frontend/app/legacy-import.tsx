@@ -8,6 +8,7 @@
 import React, { useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Modal,
+  TextInput, Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -143,6 +144,7 @@ export default function LegacyImportScreen() {
   const [portalFirms, setPortalFirms] = useState<any[]>([]);
   const [sel, setSel] = useState<Record<number, string>>({});   // firm_no -> company_id
   const [pickFor, setPickFor] = useState<number | null>(null);  // modal
+  const [pickQuery, setPickQuery] = useState("");  // Iter 333 — firm filter
   const [groups, setGroups] = useState<string[]>(FIELD_GROUPS.map((g) => g.key));
   const [impEmp, setImpEmp] = useState(true);
   const [impOn, setImpOn] = useState(true);
@@ -603,6 +605,8 @@ export default function LegacyImportScreen() {
                   <Text style={st.firmMeta}>
                     Employees: {job.totals?.employees_created || 0} created, {job.totals?.employees_updated || 0} updated{job.totals?.employees_kept ? `, ${job.totals.employees_kept} kept (not replaced)` : ""} ·
                     Online rows: {job.totals?.online_rows || 0} · Offline rows: {job.totals?.offline_rows || 0}
+                    {job.totals?.offroll_created ? ` · Off-roll employees created: ${job.totals.offroll_created}` : ""}
+                    {job.totals?.offroll_rate_backfilled ? ` · Off-roll rates backfilled: ${job.totals.offroll_rate_backfilled}` : ""}
                     {job.totals?.firms_created ? ` · Firms created: ${job.totals.firms_created}` : ""}
                     {job.totals?.allowance_labels_enabled ? ` · Allowances enabled on Firm Master: ${job.totals.allowance_labels_enabled}` : ""}
                     {job.totals?.allowance_heads_created ? ` · New allowance heads created: ${job.totals.allowance_heads_created}` : ""}
@@ -806,6 +810,29 @@ export default function LegacyImportScreen() {
         <Pressable style={st.backdrop} onPress={() => setPickFor(null)} />
         <View style={st.pickSheet}>
           <Text style={st.cardTitle}>Import into which portal firm?</Text>
+          {/* Iter 333 (user request) — alphabetic sort + type-to-filter */}
+          <View style={{
+            flexDirection: "row", alignItems: "center", gap: 6,
+            borderWidth: 1, borderColor: colors.border, borderRadius: 8,
+            paddingHorizontal: 10, height: 38, marginBottom: 8,
+            backgroundColor: colors.surface,
+          }}>
+            <Ionicons name="search" size={14} color={colors.onSurfaceTertiary} />
+            <TextInput
+              value={pickQuery}
+              onChangeText={setPickQuery}
+              placeholder="Search firm…"
+              placeholderTextColor={colors.onSurfaceTertiary}
+              style={{ flex: 1, fontSize: 13, color: colors.onSurface }}
+              autoFocus={Platform.OS === "web"}
+              testID="li-pick-search"
+            />
+            {pickQuery ? (
+              <Pressable onPress={() => setPickQuery("")} hitSlop={6}>
+                <Ionicons name="close-circle" size={15} color={colors.onSurfaceTertiary} />
+              </Pressable>
+            ) : null}
+          </View>
           <ScrollView style={{ maxHeight: 400 }}>
             {/* Iter 303 (user) — no match? create the firm with its legacy settings */}
             <Pressable
@@ -817,13 +844,18 @@ export default function LegacyImportScreen() {
                 ➕ Create NEW firm in Firm Master (name, address, PF/ESI &amp; settings from legacy)
               </Text>
             </Pressable>
-            {portalFirms.map((p) => (
+            {[...portalFirms]
+              .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" }))
+              .filter((p) => !pickQuery.trim()
+                || String(p.name || "").toLowerCase().includes(pickQuery.trim().toLowerCase()))
+              .map((p) => (
               <Pressable
                 key={p.company_id}
                 style={st.pickRow}
                 onPress={() => {
                   if (pickFor !== null) setSel({ ...sel, [pickFor]: p.company_id });
                   setPickFor(null);
+                  setPickQuery("");
                 }}
               >
                 <Ionicons name="business-outline" size={15} color={colors.brandPrimary} />

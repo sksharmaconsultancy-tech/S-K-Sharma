@@ -1915,3 +1915,26 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   "Master Data Report"→"Employee Master Report" (Reports menu + screen title).
 - Firms ID & Password: sub_admin allowed (own PIN); test sub admin testsub@sksharma.co PIN 135790.
 - Deploy script deploy_vps_iter332.sh (temp_bundle kind=script serves 332).
+
+## Iter 333 — Sidebar firm-lock UX, 1000-cap fix, allowance fetch fix, deploy 333
+- AdminWebShell: NavItem.disabled — company_admin firm-feature filtering + salaryFlags pruning
+  now MARK entries disabled (visible, dimmed, lock icon) instead of hiding; click shows
+  "not available for the current firm — enable this function or change the firm" (web alert);
+  routeDenied returns false|"denied"|"firm" with firm-specific denied page; global search skips
+  disabled. menu_rights / staff RBAC still HIDE entries.
+- GET /admin/employees: to_list(1000) → to_list(30000) (SUVIDHI 2548 emp cut-off; active missing).
+- Legacy import allowances fix: SalHeadType match loosened to startswith("ALLOW") everywhere
+  (_emp_doc_fields, head-sync gather, preview SQL LIKE 'ALLOW%%'); struct lookup falls back
+  across AcYears via EmpCode→EmpIDs map (_struct_for); diagnostic error lists actual
+  SalHeadType values when nothing matches. User must UNDO+re-import to backfill allowances.
+- Legacy import firm picker: alphabetic sort + search filter (pickQuery, testID li-pick-search).
+- Attendance Master Sheet: sub_admin allowed on generate/upload/apply-mapping/email endpoints.
+- Deploy script deploy_vps_iter333.sh (temp_bundle serves 333).
+
+## Iter 333b — Off-roll employee import
+- Offline history loop collects off_latest (latest SalaryTransoff row per worker: code/emp_id/
+  name/type/SalaryRate). After history import (import_employees && salary_offline): match portal
+  (emp_uid → code → name); missing workers CREATED with is_onroll=False, salary_mode daily,
+  salary_structure_actual [{Basic Salary, rate, rate_type daily}], legacy_offroll=True; existing
+  employees get salary_structure_actual backfilled when empty; offline history rows user_id linked.
+  Totals: offroll_created / offroll_rate_backfilled (shown in wizard summary).

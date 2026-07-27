@@ -256,7 +256,7 @@ async def legacy_import_preview(body: ImportBody, authorization: Optional[str] =
                 srows = await _q(
                     dbn,
                     "SELECT DISTINCT SalHeadName FROM EmployeeSalaryStructureDtl "
-                    "WHERE FirmID_FK = %s AND UPPER(SalHeadType) = 'ALLOWANCE' "
+                    "WHERE FirmID_FK = %s AND UPPER(SalHeadType) LIKE 'ALLOW%%' "
                     "AND Amount > 0",
                     (m.firm_no,))
                 heads_info = []
@@ -508,10 +508,13 @@ def _emp_doc_fields(
             "bank_address": (str(e.get("BankAddress") or "").strip() or None),
         })
     if "salary" in groups:
+        # Iter 333 (user bug: allowances not fetching) — match the head
+        # type loosely: ALLOWANCE / ALLOWANCES / Allow… all count.
         allow = [
             {"head": str(s.get("SalHeadName") or "").strip(), "amount": float(s.get("Amount") or 0)}
             for s in structure
-            if str(s.get("SalHeadType") or "").upper() == "ALLOWANCE" and _f(s.get("Amount"))
+            if str(s.get("SalHeadType") or "").strip().upper().startswith("ALLOW")
+            and _f(s.get("Amount"))
         ]
         doc.update({
             "basic_salary": _f(e.get("BasicSalary")),
@@ -704,6 +707,7 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                 emps = await _legacy_employees(dbn, m.firm_no)
                 # head-wise structure rows for this firm (salary group)
                 struct_by_emp: Dict[int, List[dict]] = {}
+                emp_ids_by_code: Dict[int, List[int]] = {}
                 if "salary" in body.employee_fields:
                     srows = await _q(
                         dbn,
@@ -713,6 +717,42 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                     )
                     for s in srows:
                         struct_by_emp.setdefault(int(s.get("EmpID_FK") or 0), []).append(s)
+                    # Iter 333 (user bug: allowances not fetching) — the
+                    # structure may only exist under an OLDER AcYear's
+                    # EmpID for the same EmpCode. Build code → EmpIDs
+                    # (latest year first) so we can fall back.
+                    id_rows = await _q(
+                        dbn,
+                        "SELECT EmpID, EmpCode FROM EmployeeMaster "
+                        "WHERE FirmNo = %s ORDER BY AcYear DESC, UID DESC",
+                        (m.firm_no,))
+                    for r0 in id_rows:
+                        c0 = r0.get("EmpCode") if (r0.get("EmpCode") or 0) > 0 else None
+                        if c0 is not None:
+                            emp_ids_by_code.setdefault(
+                                int(c0), []).append(int(r0.get("EmpID") or 0))
+                    # Diagnostic — structure exists but nothing looks like
+                    # an allowance? Surface the real type names.
+                    if srows and not any(
+                            str(s.get("SalHeadType") or "").strip().upper().startswith("ALLOW")
+                            for s in srows):
+                        _types = sorted({str(s.get("SalHeadType") or "").strip()
+                                         for s in srows})[:8]
+                        errors.append(
+                            f"firm {m.firm_no}: salary structure has no "
+                            f"ALLOWANCE-type heads; types present: {_types}")
+
+                def _struct_for(e0: dict) -> List[dict]:
+                    rows_ = struct_by_emp.get(int(e0.get("EmpID") or 0), [])
+                    if rows_:
+                        return rows_
+                    c0 = e0.get("EmpCode") if (e0.get("EmpCode") or 0) > 0 else None
+                    if c0 is not None:
+                        for eid in emp_ids_by_code.get(int(c0), []):
+                            rows_ = struct_by_emp.get(eid, [])
+                            if rows_:
+                                return rows_
+                    return []
                 for e in emps:
                     try:
                         nm = str(e.get("EmpName") or "").strip()
@@ -721,7 +761,7 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                             continue
                         fields = _emp_doc_fields(
                             e, body.employee_fields,
-                            struct_by_emp.get(int(e.get("EmpID") or 0), []),
+                            _struct_for(e),
                             overrides=body.field_overrides)
                         # collect for General Masters interlink
                         if fields.get("employee_type"):
@@ -827,7 +867,7 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                         _heads = {
                             str(s.get("SalHeadName") or "").strip()
                             for rows_ in struct_by_emp.values() for s in rows_
-                            if str(s.get("SalHeadType") or "").upper() == "ALLOWANCE"
+                            if str(s.get("SalHeadType") or "").strip().upper().startswith("ALLOW")
                             and _f(s.get("Amount"))
                         }
                         _sync = await _sync_firm_allowances(
@@ -852,6 +892,7 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                 await _prog(totals=totals)
 
             # ---------------- Salary history ----------------
+            off_latest: Dict[Any, dict] = {}   # Iter 333 — off-roll workers
             for kind, table in (("online", "SalaryTrans"), ("offline", "SalaryTransoff")):
                 if kind == "online" and not body.salary_online:
                     continue
@@ -932,6 +973,21 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                                 "less_loan": _f(r.get("LessLoan")),
                                 "less_total": _f(r.get("LessTotal")),
                             })
+                            # Iter 333 (user request) — remember the LATEST
+                            # off-roll row per worker so we can create the
+                            # missing OFF-ROLL employees with their master
+                            # salary rate after the history import.
+                            _okey = int(code) if code else f"id_{r.get('EmpID')}"
+                            _prev = off_latest.get(_okey)
+                            if _prev is None or mon > _prev["month"]:
+                                off_latest[_okey] = {
+                                    "month": mon,
+                                    "code": code,
+                                    "emp_id": r.get("EmpID"),
+                                    "name": str(r.get("EmpName") or "").strip(),
+                                    "employee_type": (str(r.get("EmpType") or "").strip() or None),
+                                    "rate": _f(r.get("SalaryRate")) or 0,
+                                }
                         _apply_hist_overrides(
                             base,
                             body.salary_online_overrides if kind == "online"
@@ -942,6 +998,87 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                         totals[f"{kind}_rows"] += len(docs)
                     skip += 2000
                     await _prog(totals=totals)
+
+            # Iter 333 (user request) — CREATE the OFF-ROLL employees found
+            # in the offline salary history (SalaryTransoff) that are not
+            # in the portal yet, with their master salary rate. Existing
+            # employees only get the rate backfilled when they have none.
+            if body.import_employees and body.salary_offline and off_latest:
+                for okey, w in off_latest.items():
+                    try:
+                        nm = w["name"]
+                        if not nm:
+                            continue
+                        code = w["code"]
+                        uid = emp_uid.get(int(code)) if code else emp_uid.get(f"id_{w['emp_id']}")
+                        existing = None
+                        if uid:
+                            existing = await db.users.find_one(
+                                {"user_id": uid},
+                                {"_id": 0, "user_id": 1, "salary_structure_actual": 1})
+                        if existing is None and code is not None:
+                            existing = await db.users.find_one(
+                                {"company_id": m.company_id, "role": "employee",
+                                 "employee_code": str(code)},
+                                {"_id": 0, "user_id": 1, "salary_structure_actual": 1})
+                        if existing is None:
+                            existing = await db.users.find_one(
+                                {"company_id": m.company_id, "role": "employee",
+                                 "name": {"$regex": f"^{_rx(nm)}$", "$options": "i"}},
+                                {"_id": 0, "user_id": 1, "salary_structure_actual": 1})
+                        rate_struct = ([{"head": "Basic Salary", "amount": w["rate"],
+                                         "rate_type": "daily"}] if w["rate"] else None)
+                        if existing:
+                            if rate_struct and not existing.get("salary_structure_actual"):
+                                await db.users.update_one(
+                                    {"user_id": existing["user_id"]},
+                                    {"$set": {"salary_structure_actual": rate_struct}})
+                                totals["offroll_rate_backfilled"] = (
+                                    totals.get("offroll_rate_backfilled", 0) + 1)
+                            uid = existing["user_id"]
+                        else:
+                            doc = {
+                                "user_id": f"user_{uuid.uuid4().hex[:12]}",
+                                "role": "employee",
+                                "company_id": m.company_id,
+                                "name": nm,
+                                "employee_code": (str(code) if code else None),
+                                "employee_type": w["employee_type"],
+                                "employee_group": w["employee_type"],
+                                "is_onroll": False,
+                                "salary_mode": "daily",
+                                "onboarded": True,
+                                "approval_status": "approved",
+                                "has_pin": False,
+                                "picture": None,
+                                "phone": None,
+                                "email": None,
+                                "created_at": _now(),
+                                "legacy_imported": True,
+                                "legacy_firm_no": m.firm_no,
+                                "legacy_emp_id": w["emp_id"],
+                                "legacy_offroll": True,
+                            }
+                            if rate_struct:
+                                doc["salary_structure_actual"] = rate_struct
+                            await db.users.insert_one(doc)
+                            totals["offroll_created"] = (
+                                totals.get("offroll_created", 0) + 1)
+                            uid = doc["user_id"]
+                        # link their offline history rows
+                        _hq: Dict[str, Any] = {
+                            "company_id": m.company_id, "kind": "offline",
+                            "firm_no": m.firm_no, "user_id": None}
+                        if code:
+                            _hq["emp_code"] = code
+                        else:
+                            _hq["emp_id"] = w["emp_id"]
+                        await db.legacy_salary_history.update_many(
+                            _hq, {"$set": {"user_id": uid}})
+                    except Exception as ex:
+                        if len(errors) < 40:
+                            errors.append(f"off-roll {w.get('name')}: {str(ex)[:120]}")
+                await _prog(totals=totals)
 
             # Iter 300b (user) — mark this firm DONE so it cannot be
             # imported twice.
