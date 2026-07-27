@@ -19074,26 +19074,91 @@ async def ot_report_xlsx(
     )
 
 
-async def _compliance_rates_by_user(company_id: str) -> Dict[str, Dict[str, float]]:
-    """Iter 328 — master rates (Basic/HRA/Conv/Other) per employee from the
-    latest compliance run of the firm, for prefilling the client sheet."""
-    rates: Dict[str, Dict[str, float]] = {}
-    _lr = await db.compliance_salary_runs.find_one(
-        {"company_id": company_id}, {"_id": 0, "rows": 1},
-        sort=[("created_at", -1)])
-    for _r in (_lr or {}).get("rows") or []:
-        uid = _r.get("user_id")
-        if not uid:
-            continue
-        rates[uid] = {
-            "basic": float(_r.get("basic_master") or 0),
-            "hra": float(_r.get("hra_master") or 0),
-            "conv": float(_r.get("conveyance_master") or 0),
-            "other": (float(_r.get("medical_master") or 0)
-                      + float(_r.get("special_master") or 0)
-                      + float(_r.get("others_master") or 0)),
-        }
-    return rates
+async def _master_rates_by_user(company_id: str):
+    """Iter 334 (user request) — master salary per employee straight from
+    the EMPLOYEE MASTER: Basic, HRA, Conv., every allowance enabled on the
+    Firm Master (dynamic columns) and Gross. Returns (labels, rates)."""
+    from routes.firm_master import ALLOWANCE_LABELS
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "allowances": 1})
+    enabled = {k for k, v in ((fm or {}).get("allowances") or {}).items() if v}
+    skip = {"HRA", "CONV.", "OVER TIME"}
+    # Fixed catalog order first, then custom heads alphabetically.
+    labels = [x for x in ALLOWANCE_LABELS if x in enabled and x not in skip]
+    labels += sorted(x for x in enabled
+                     if x not in set(ALLOWANCE_LABELS) and x not in skip)
+    label_by_lower = {x.lower(): x for x in labels}
+
+    def _n(v) -> float:
+        try:
+            return float(v or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    rates: Dict[str, Dict[str, Any]] = {}
+    async for u in db.users.find(
+        {"company_id": company_id, "role": "employee"},
+        {"_id": 0, "user_id": 1, "compliance_basic": 1, "basic_salary": 1,
+         "basic_amount": 1, "hra_amount": 1, "conv_amount": 1,
+         "compliance_salary_allowances": 1, "salary_structure_compliance": 1,
+         "salary_structure_actual": 1, "compliance_gross": 1,
+         "salary_monthly": 1},
+    ):
+        basic = _n(u.get("compliance_basic")) or _n(u.get("basic_salary")) \
+            or _n(u.get("basic_amount"))
+        hra = _n(u.get("hra_amount"))
+        conv = _n(u.get("conv_amount"))
+        extra: Dict[str, float] = {}
+        misc = 0.0
+        allow_rows = list(u.get("compliance_salary_allowances") or [])
+        for r0 in (u.get("salary_structure_compliance") or []):
+            if not isinstance(r0, dict):
+                continue
+            h0 = str(r0.get("head") or "").strip()
+            if "employer" in h0.lower():
+                continue
+            if h0.lower().startswith("basic"):
+                if basic <= 0:
+                    basic += _n(r0.get("amount"))
+            else:
+                allow_rows.append(r0)
+        if basic <= 0:
+            for r0 in (u.get("salary_structure_actual") or []):
+                if isinstance(r0, dict) and str(r0.get("head") or "").strip().lower().startswith("basic"):
+                    basic += _n(r0.get("amount"))
+        for r0 in allow_rows:
+            if not isinstance(r0, dict):
+                continue
+            head = str(r0.get("head") or "").strip()
+            amt = _n(r0.get("amount"))
+            if not head or amt <= 0:
+                continue
+            s = head.lower()
+            if "hra" in s or "house" in s:
+                hra += amt
+            elif s.startswith("conv") or "travel" in s:
+                conv += amt
+            elif s in label_by_lower:
+                lb = label_by_lower[s]
+                extra[lb] = extra.get(lb, 0.0) + amt
+            elif "medic" in s and "MEDICAL ALLOWANCES" in labels:
+                extra["MEDICAL ALLOWANCES"] = extra.get("MEDICAL ALLOWANCES", 0.0) + amt
+            elif "special" in s and "OTH. ALLOW." in labels:
+                extra["OTH. ALLOW."] = extra.get("OTH. ALLOW.", 0.0) + amt
+            elif "OTHER MISC.ALLOWANCE" in labels:
+                extra["OTHER MISC.ALLOWANCE"] = extra.get("OTHER MISC.ALLOWANCE", 0.0) + amt
+            else:
+                misc += amt
+        gross = _n(u.get("compliance_gross"))
+        total = basic + hra + conv + sum(extra.values()) + misc
+        if gross <= 0:
+            gross = total if total > 0 else _n(u.get("salary_monthly"))
+        if total > 0 or gross > 0:
+            rates[u["user_id"]] = {
+                "basic": basic, "hra": hra, "conv": conv,
+                "extra": extra, "gross": round(gross, 2),
+            }
+    return labels, rates
 
 
 async def _generate_attendance_sheet_impl(
@@ -19131,9 +19196,9 @@ async def _generate_attendance_sheet_impl(
     # Iter 321 — ACTIVE employees only on the Attendance Sheet.
     employees = [e for e in employees if not _employee_inactive_for_report(e, month)]
 
-    # Iter 328 (client format) — master rate columns (EM_RATEM / EM_HRA /
-    # EM_CONV / EM_TOT) prefilled from the latest compliance run.
-    rates_by_user = await _compliance_rates_by_user(company_id)
+    # Iter 334 (user request) — master salary columns (Basic / HRA / Conv. /
+    # firm-enabled allowances / Gross Salary) from the EMPLOYEE MASTER.
+    allowance_labels, rates_by_user = await _master_rates_by_user(company_id)
 
     # Present-days snapshot for reference
     try:
@@ -19161,6 +19226,7 @@ async def _generate_attendance_sheet_impl(
         employees=employees,
         attendance_days_by_user=days_by_user,
         rates_by_user=rates_by_user,
+        allowance_labels=allowance_labels,
     )
     company_slug = (company.get("name") or "company").replace(" ", "_")
     grp_slug = ("_" + grp_name.replace(" ", "-")) if grp_name else ""
@@ -19185,6 +19251,86 @@ async def generate_attendance_sheet(
     optionally filtered by Employee Group."""
     admin = await get_user_from_token(authorization)
     return await _generate_attendance_sheet_impl(company_id, month, admin, group_id)
+
+
+@api.get("/admin/attendance-sheet/{company_id}/{month}/groups.zip")
+async def generate_attendance_sheet_groups_zip(
+    company_id: str,
+    month: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 334 (user request) — "All groups" download: one attendance
+    sheet Excel PER GROUP, bundled into a single archive."""
+    import zipfile
+    from io import BytesIO
+    from utils.master_sheet import build_master_sheet_xlsx
+    from fastapi.responses import Response
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin"])
+    company = await db.companies.find_one(
+        {"company_id": company_id}, {"_id": 0, "name": 1})
+    if company is None:
+        raise HTTPException(status_code=404, detail="Company not found")
+    try:
+        y, m = int(month[:4]), int(month[5:7])
+    except ValueError:
+        raise HTTPException(status_code=400, detail="month must be YYYY-MM")
+
+    employees = await db.users.find(
+        {"role": "employee", "company_id": company_id},
+        {"_id": 0, "user_id": 1, "employee_code": 1, "name": 1, "doj": 1, "department": 1,
+         "designation": 1, "position": 1, "employee_group": 1, "employee_type": 1,
+         "pf_no": 1, "uan_no": 1, "esi_ip_no": 1, "father_name": 1,
+         "exit_date": 1, "resign_date": 1, "date_of_leaving": 1,
+         "leaving_date": 1, "employment_status": 1, "disabled": 1, "active": 1},
+    ).to_list(20000)
+    employees = [e for e in employees if not _month_is_before_doj(e, month)]
+    # ACTIVE employees only (Iter 321 rule).
+    employees = [e for e in employees if not _employee_inactive_for_report(e, month)]
+
+    allowance_labels, rates_by_user = await _master_rates_by_user(company_id)
+
+    from utils.salary_run import actual_days_in_month
+    days_in_month = actual_days_in_month(y, m)
+    days_by_user: Dict[str, int] = {}
+    if employees:
+        async for r in db.attendance.find(
+            {"user_id": {"$in": [e["user_id"] for e in employees]},
+             "date": {"$gte": f"{y:04d}-{m:02d}-01",
+                      "$lte": f"{y:04d}-{m:02d}-{days_in_month:02d}"},
+             "kind": "in"},
+            {"_id": 0, "user_id": 1},
+        ):
+            days_by_user[r["user_id"]] = days_by_user.get(r["user_id"], 0) + 1
+
+    # Split by Employee Group (Type); blanks land in UNGROUPED.
+    groups: Dict[str, List[dict]] = {}
+    for e in employees:
+        g = str(e.get("employee_type") or e.get("employee_group") or "").strip().upper() or "UNGROUPED"
+        groups.setdefault(g, []).append(e)
+
+    company_name = company.get("name") or "S.K. Sharma & Co."
+    company_slug = company_name.replace(" ", "_")
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for g in sorted(groups):
+            xb = build_master_sheet_xlsx(
+                company_name=f"{company_name}  ·  {g}",
+                month=month,
+                employees=sorted(groups[g], key=lambda x: str(x.get("name") or "")),
+                attendance_days_by_user=days_by_user,
+                rates_by_user=rates_by_user,
+                allowance_labels=allowance_labels,
+            )
+            zf.writestr(
+                f"AttendanceSheet_{company_slug}_{month}_{g.replace(' ', '-')}.xlsx",
+                xb)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition":
+                 f'attachment; filename="AttendanceSheets_{company_slug}_{month}_AllGroups.zip"'},
+    )
 
 
 @api.get("/admin/master-sheet/{company_id}/{month}.xlsx")

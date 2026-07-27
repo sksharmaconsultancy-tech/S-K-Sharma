@@ -159,16 +159,30 @@ export default function AttendanceSheetScreen() {
     if (downloading) return;
     setDownloading(true);
     try {
-      const qs = groupId ? `?group_id=${encodeURIComponent(groupId)}` : "";
+      // Iter 334 (user request) — "All groups" selected → download ONE
+      // Excel per group bundled in a single archive (.zip).
+      if (!groupId) {
+        const res = await apiBinary(
+          `/admin/attendance-sheet/${companyId}/${month}/groups.zip`,
+        );
+        if (Platform.OS === "web" && res.webBlobUrl) {
+          const a = document.createElement("a");
+          a.href = res.webBlobUrl;
+          a.download = `AttendanceSheets_${month}_AllGroups.zip`;
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 30000);
+        }
+        return;
+      }
+      const qs = `?group_id=${encodeURIComponent(groupId)}`;
       const res = await apiBinary(
         `/admin/attendance-sheet/${companyId}/${month}.xlsx${qs}`,
       );
       if (Platform.OS === "web" && res.webBlobUrl) {
         const a = document.createElement("a");
         a.href = res.webBlobUrl;
-        const grpLabel = groupId
-          ? "_" + (groups.find((g) => g.master_id === groupId)?.name || "group").replace(/\s+/g, "-")
-          : "";
+        const grpLabel =
+          "_" + (groups.find((g) => g.master_id === groupId)?.name || "group").replace(/\s+/g, "-");
         a.download = `AttendanceSheet_${month}${grpLabel}.xlsx`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 30000);

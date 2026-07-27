@@ -271,21 +271,10 @@ async def _run_attendance_email_batch(
                     ("exited", "resigned", "terminated", "inactive", "left"))
         employees = [e for e in employees if not _left_before(e)]
 
-        # Iter 328 — master rates from the latest compliance run.
-        rates_by_user: Dict[str, Dict[str, float]] = {}
-        _lr = await db.compliance_salary_runs.find_one(
-            {"company_id": c["company_id"]}, {"_id": 0, "rows": 1},
-            sort=[("created_at", -1)])
-        for _r in (_lr or {}).get("rows") or []:
-            if _r.get("user_id"):
-                rates_by_user[_r["user_id"]] = {
-                    "basic": float(_r.get("basic_master") or 0),
-                    "hra": float(_r.get("hra_master") or 0),
-                    "conv": float(_r.get("conveyance_master") or 0),
-                    "other": (float(_r.get("medical_master") or 0)
-                              + float(_r.get("special_master") or 0)
-                              + float(_r.get("others_master") or 0)),
-                }
+        # Iter 334 (user request) — master salary from the EMPLOYEE MASTER
+        # (Basic / HRA / Conv. / firm-enabled allowances / Gross Salary).
+        from server import _master_rates_by_user
+        allowance_labels, rates_by_user = await _master_rates_by_user(c["company_id"])
         # Attendance snapshot
         try:
             y, m = int(target_month[:4]), int(target_month[5:7])
@@ -311,6 +300,7 @@ async def _run_attendance_email_batch(
             employees=employees,
             attendance_days_by_user=days_by_user,
             rates_by_user=rates_by_user,
+            allowance_labels=allowance_labels,
         )
         # Iter 312 (user directive) — Reportname_Group_MonthYear.ext
         try:

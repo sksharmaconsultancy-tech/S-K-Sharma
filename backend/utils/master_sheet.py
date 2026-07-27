@@ -151,23 +151,23 @@ def build_master_sheet_xlsx(
     month: str,   # "YYYY-MM"
     employees: List[Dict[str, Any]],
     attendance_days_by_user: Optional[Dict[str, int]] = None,
-    rates_by_user: Optional[Dict[str, Dict[str, float]]] = None,
+    rates_by_user: Optional[Dict[str, Dict[str, Any]]] = None,
+    allowance_labels: Optional[List[str]] = None,
 ) -> bytes:
     """Return XLSX bytes for the client attendance sheet.
 
-    Iter 328 (user request) — EXACT client format so the returned sheet
-    imports straight into the Compliance Salary process:
-    EM_PFNO · UAN_NO · EM_ESINO · EM_CODE · EM_NAME · EM_FNAME · EM_DESG ·
-    EM_DOJ · EM_RESINGDATE · EM_RATEM · EM_HRA · EM_CONV · EM_TOT ·
-    Present Days · OVER_TIME · Adv · TDS · Other Less · Employee Salary.
+    Iter 334 (user request) — master salary columns come straight from the
+    Employee Master: Basic · HRA · Conv. · <every allowance enabled on the
+    Firm Master> · Gross Salary (replaced EM_RATEM/EM_HRA/EM_CONV/EM_TOT).
     Client fills: Present Days, OVER_TIME, Adv, TDS, Other Less,
     Employee Salary.
     """
+    labels = list(allowance_labels or [])
     wb = Workbook()
     ws = wb.active
     ws.title = "Attendance"
 
-    N_COLS = 19
+    N_COLS = 19 + len(labels)
     # Title band
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=N_COLS)
     cell = ws["A1"]
@@ -188,11 +188,12 @@ def build_master_sheet_xlsx(
     sub.fill = PatternFill("solid", fgColor=BG_SOFT)
     sub.alignment = Alignment(horizontal="center", vertical="center")
 
-    # Header row — exact client format (Iter 328).
+    # Header row — Iter 334 (user request) — Employee-Master salary heads.
     headers = [
         "EM_PFNO", "UAN_NO", "EM_ESINO", "EM_CODE", "EM_NAME", "EM_FNAME",
-        "EM_DESG", "EM_DOJ", "EM_RESINGDATE", "EM_RATEM", "EM_HRA",
-        "EM_CONV", "EM_TOT", "Present Days", "OVER_TIME", "Adv", "TDS",
+        "EM_DESG", "EM_DOJ", "EM_RESINGDATE", "Basic", "HRA", "Conv.",
+        *labels, "Gross Salary",
+        "Present Days", "OVER_TIME", "Adv", "TDS",
         "Other Less", "Employee Salary",
     ]
     thin = Side(border_style="thin", color=LINE)
@@ -218,8 +219,9 @@ def build_master_sheet_xlsx(
         basic = float(rt.get("basic") or 0)
         hra = float(rt.get("hra") or 0)
         conv = float(rt.get("conv") or 0)
-        other = float(rt.get("other") or 0)
-        tot = round(basic + hra + conv + other, 2)
+        extra = rt.get("extra") or {}
+        gross = float(rt.get("gross") or 0) or round(
+            basic + hra + conv + sum(float(v or 0) for v in extra.values()), 2)
         row = [
             emp.get("pf_no") or "",
             emp.get("uan_no") or "",
@@ -233,7 +235,8 @@ def build_master_sheet_xlsx(
             basic or "",
             hra or "",
             conv or "",
-            tot or "",
+            *[(float(extra.get(lb) or 0) or "") for lb in labels],
+            gross or "",
             days_worked if days_worked is not None else "",
             "",  # OVER_TIME — client fills
             "",  # Adv — client fills
@@ -250,7 +253,8 @@ def build_master_sheet_xlsx(
                 c.fill = PatternFill("solid", fgColor=BG_SOFT)
 
     # Column widths
-    widths = [14, 14, 14, 10, 26, 22, 16, 12, 14, 10, 10, 10, 10, 11, 11, 9, 9, 11, 14]
+    widths = [14, 14, 14, 10, 26, 22, 16, 12, 14, 10, 10, 10,
+              *([12] * len(labels)), 12, 11, 11, 9, 9, 11, 14]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -322,9 +326,30 @@ def match_columns(headers: List[str]) -> Dict[str, Any]:
     lower = [h.lower() for h in normalised]
     used_indices: set = set()
 
+    # Iter 334 — the generated sheet carries BOTH a master "Gross Salary"
+    # column and the client-filled "Employee Salary". The earned gross must
+    # ALWAYS map to "Employee Salary" (and no other canonical may take it).
+    forced: Dict[str, int] = {}
+    for i, h in enumerate(lower):
+        if h == "employee salary":
+            forced["gross_salary"] = i
+            used_indices.add(i)
+            break
+
     matches = []
     unmatched_required: List[str] = []
     for canonical, cfg in CANONICAL_FIELDS.items():
+        if canonical in forced:
+            fi = forced[canonical]
+            matches.append({
+                "canonical": canonical,
+                "canonical_label": cfg["label"],
+                "required": cfg["required"],
+                "matched_header": normalised[fi],
+                "matched_index": fi,
+                "confidence": 100,
+            })
+            continue
         synonyms = cfg["synonyms"]
         best_score = 0
         best_idx: Optional[int] = None

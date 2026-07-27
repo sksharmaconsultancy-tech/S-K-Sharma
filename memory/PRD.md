@@ -1945,3 +1945,19 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Legacy heads in hra/conv/medical/special buckets map to the standard label (CONV., HRA, …)
   instead of creating duplicate custom heads; custom heads only for "others"-bucket unknowns.
 - /admin/employees cap set to 20000 per user request. Deploy script deploy_vps_iter334.sh.
+
+## Iter 335 — Attendance sheet salary columns + All-groups ZIP, deploy 335
+- master_sheet.py build_master_sheet_xlsx: EM_RATEM/EM_HRA/EM_CONV/EM_TOT → Basic/HRA/Conv./
+  <allowance_labels param (firm-enabled, dynamic)>/Gross Salary; rates dict now
+  {basic,hra,conv,extra{label:amt},gross}; dynamic N_COLS/widths.
+- server.py: _compliance_rates_by_user → _master_rates_by_user(company_id) -> (labels, rates)
+  from EMPLOYEE MASTER (compliance_basic/basic_salary/struct rows; allowances from
+  compliance_salary_allowances + salary_structure_compliance mapped to firm-enabled labels;
+  gross = compliance_gross|sum|salary_monthly). iter60 email batch uses same.
+- match_columns: exact "Employee Salary" header FORCED to canonical gross_salary and marked
+  used first (employee_group was stealing it at 66 confidence).
+- NEW GET /admin/attendance-sheet/{cid}/{month}/groups.zip — one xlsx per employee group
+  (employee_type/employee_group, blanks=UNGROUPED), active-only, zipped (user asked .rar; ZIP
+  delivered — opens natively on Windows). Frontend attendance-sheet.tsx: "All groups" → zip.
+- Verified: headers + master rates correct (Kankani 745/750 daily), zip has LABOUR/STAFF/
+  UNGROUPED files, mapping gross→Employee Salary.
