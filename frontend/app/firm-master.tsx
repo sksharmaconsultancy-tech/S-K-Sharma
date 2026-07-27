@@ -953,7 +953,10 @@ export default function FirmMasterScreen() {
                 edit its linked Process Days.
               </Text>
               {/* Iter 337 (user request) — Days Calculation Method for the
-                  Compliance Salary import (Freeze Salary workflow). */}
+                  Compliance Salary import (Freeze Salary workflow).
+                  Iter 339 (user request) — points show only when "Online
+                  Salary → Compliance Salary Process" is ENABLED. */}
+              {sp.online_salary ? (<>
               <Text style={{ fontSize: 13, fontWeight: "800", color: "#1E3A8A", marginTop: 14, marginBottom: 6 }}>
                 Days Calculation Method (Salary Import / Freeze)
               </Text>
@@ -1098,6 +1101,7 @@ export default function FirmMasterScreen() {
                   testID="fm-freeze-to-actual"
                 />
               </View>
+              </>) : null}
               {/* Iter 98 — OT rate basis for Salary Process (Actual) */}
               <Text style={styles.subLbl}>OT Calculation On</Text>
               <View style={{ flexDirection: "row", gap: 8 }}>
