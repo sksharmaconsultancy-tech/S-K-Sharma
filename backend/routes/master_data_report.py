@@ -28,11 +28,14 @@ from server import (  # noqa: E402
 router = APIRouter(prefix="/api/admin/reports", tags=["master-data-report"])
 
 _COLUMNS = [
+    # Iter 331 (user request) — exact column sequence.
+    ("uan_no", "UAN"),
+    ("pf_no", "EPFO No."),
+    ("esi_ip_no", "ESIC No"),
     ("employee_code", "Emp Code"),
     ("name", "Name"),
     ("father_name", "Father / Spouse Name"),
     ("gender", "Gender"),
-    ("blood_group", "Blood Group"),
     ("marital_status", "Marital Status"),
     ("phone", "Phone"),
     ("designation", "Designation"),
@@ -40,20 +43,43 @@ _COLUMNS = [
     ("employee_type", "Type / Group"),
     ("is_onroll", "On-roll"),
     ("doj", "DOJ"),
-    ("exit_date", "Exit / Resign Date"),
-    ("salary_monthly", "Monthly Gross"),
-    ("uan_no", "UAN"),
-    ("esi_ip_no", "ESIC IP"),
+    ("exit_date", "Exit / Resign Date"),   # hidden on the Active tab
+    ("basic", "Basic"),
+    ("pf_basic", "PF Basic"),
+    ("hra", "HRA"),
+    ("conveyance", "Conv."),
+    # ← dynamic allowance heads (from the Employee Master) inserted here
+    ("monthly_gross", "Monthly Gross"),
     ("pan_no", "PAN"),
     ("pan_name", "Name As Per PAN"),
     ("aadhaar_no", "Aadhaar"),
+    ("aadhaar_name", "Name As Per Aadhaar"),
     ("bank_name", "Bank"),
     ("bank_account", "Account No"),
     ("bank_ifsc", "IFSC"),
     ("upi_id", "UPI ID"),
-    ("address", "Address"),
+    ("present_address", "Present Address"),
+    ("district", "City"),
+    ("state", "State"),
+    ("pincode", "PIN"),
+    ("permanent_address", "Permanent Address"),
+    ("permanent_district", "Perm. City"),
+    ("permanent_state", "Perm. State"),
+    ("permanent_pincode", "Perm. PIN"),
     ("company_name", "Firm"),
 ]
+
+
+def _num0(v) -> float:
+    try:
+        return float(v or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _allow_key(head: str) -> str:
+    import re as _re
+    return "al_" + _re.sub(r"[^a-z0-9]+", "_", head.strip().lower()).strip("_")
 
 
 async def _fetch_rows(
@@ -63,7 +89,7 @@ async def _fetch_rows(
     employee_type: Optional[str],
     company_id: Optional[str],
     is_onroll: Optional[str],
-) -> list:
+) -> tuple:
     query: Dict[str, Any] = {"role": "employee"}
     if admin["role"] == "company_admin":
         query["company_id"] = admin.get("company_id")
@@ -107,20 +133,92 @@ async def _fetch_rows(
         ):
             names[c["company_id"]] = c.get("name") or c["company_id"]
 
+    # Iter 331 (user request) — salary heads from the Employee Master.
+    # HRA / Conv. are fixed columns; every OTHER allowance head that is
+    # set on any employee's master becomes its own dynamic column.
+    def _split_allowances(u: Dict[str, Any]) -> Dict[str, Any]:
+        hra = _num0(u.get("hra_amount"))
+        conv = _num0(u.get("conv_amount"))
+        extra: Dict[str, float] = {}
+        struct_basic = 0.0
+        allow_rows = list(u.get("compliance_salary_allowances") or [])
+        # Employee Master structure rows (Salary Update modal) hold the
+        # heads too — Basic feeds the Basic column, the rest are allowances.
+        for r in (u.get("salary_structure_compliance") or []):
+            if not isinstance(r, dict):
+                continue
+            h = str(r.get("head") or "").strip()
+            if "employer" in h.lower():
+                continue
+            if h.lower().startswith("basic"):
+                struct_basic += _num0(r.get("amount"))
+            else:
+                allow_rows.append(r)
+        if struct_basic <= 0:
+            for r in (u.get("salary_structure_actual") or []):
+                if isinstance(r, dict) and str(r.get("head") or "").strip().lower().startswith("basic"):
+                    struct_basic += _num0(r.get("amount"))
+        for r in allow_rows:
+            if not isinstance(r, dict):
+                continue
+            head = str(r.get("head") or "").strip()
+            amt = _num0(r.get("amount"))
+            if not head or amt <= 0:
+                continue
+            s = head.lower()
+            if "hra" in s or "house" in s:
+                hra += amt
+            elif s.startswith("conv") or "travel" in s:
+                conv += amt
+            else:
+                extra[head.upper()] = extra.get(head.upper(), 0.0) + amt
+        return {"hra": hra, "conv": conv, "extra": extra, "struct_basic": struct_basic}
+
+    extra_heads: Dict[str, str] = {}   # key → label (insertion sorted later)
     rows = []
     from utils.relation import father_or_spouse_display
     for u in users:
-        rows.append({
+        al = _split_allowances(u)
+        basic = _num0(u.get("compliance_basic")) or _num0(u.get("basic_salary")) \
+            or _num0(u.get("basic_amount")) or al["struct_basic"]
+        allow_sum = al["hra"] + al["conv"] + sum(al["extra"].values())
+        gross = _num0(u.get("compliance_gross")) or (
+            (basic + allow_sum) if (basic or allow_sum) else _num0(u.get("salary_monthly")))
+        row = {
             **{k: u.get(k) for k, _ in _COLUMNS if k != "company_name"},
             # User directive — Female+Unmarried shows "D/O father", Female+
             # Married shows spouse name only.
             "father_name": father_or_spouse_display(u),
             "aadhaar_no": u.get("aadhaar_no") or u.get("aadhar_number"),
             "pan_no": u.get("pan_no") or u.get("pan_number"),
+            "exit_date": (u.get("exit_date") or u.get("resign_date")
+                          or u.get("date_of_leaving") or u.get("leaving_date")),
+            "basic": basic or None,
+            "pf_basic": _num0(u.get("pf_basic")) or None,
+            "hra": al["hra"] or None,
+            "conveyance": al["conv"] or None,
+            "monthly_gross": round(gross, 2) or None,
+            "present_address": u.get("present_address") or u.get("address"),
             "company_name": names.get(u.get("company_id") or "", u.get("company_id")),
             "user_id": u.get("user_id"),
-        })
-    return rows
+        }
+        for head, amt in al["extra"].items():
+            k = _allow_key(head)
+            extra_heads[k] = head
+            row[k] = round(amt, 2)
+        rows.append(row)
+
+    # Assemble the final column list: fixed sequence with dynamic heads
+    # inserted after Conv. — the Exit/Resign column is DROPPED on Active.
+    columns = []
+    for k, lbl in _COLUMNS:
+        if k == "exit_date" and status == "active":
+            continue
+        columns.append({"key": k, "label": lbl})
+        if k == "conveyance":
+            for ek in sorted(extra_heads, key=lambda x: extra_heads[x]):
+                columns.append({"key": ek, "label": extra_heads[ek].title()})
+    return columns, rows
 
 
 def _parse_common(status: str) -> str:
@@ -142,16 +240,16 @@ async def master_data_report(
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     s = _parse_common(status)
-    rows = await _fetch_rows(admin, s, q, employee_type, company_id, is_onroll)
+    columns, rows = await _fetch_rows(admin, s, q, employee_type, company_id, is_onroll)
     return {
         "status": s,
         "count": len(rows),
-        "columns": [{"key": k, "label": lbl} for k, lbl in _COLUMNS],
+        "columns": columns,
         "rows": rows,
     }
 
 
-def _build_xlsx(rows: list, s: str) -> BytesIO:
+def _build_xlsx(rows: list, s: str, columns: list) -> BytesIO:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
 
@@ -161,17 +259,20 @@ def _build_xlsx(rows: list, s: str) -> BytesIO:
 
     hdr_font = Font(bold=True, color="FFFFFF")
     hdr_fill = PatternFill("solid", fgColor="1E3A8A")
-    for ci, (_, lbl) in enumerate(_COLUMNS, start=1):
-        cell = ws.cell(row=1, column=ci, value=lbl)
+    ws.cell(row=1, column=1, value="SN").font = hdr_font
+    ws.cell(row=1, column=1).fill = hdr_fill
+    for ci, c in enumerate(columns, start=2):
+        cell = ws.cell(row=1, column=ci, value=c["label"])
         cell.font = hdr_font
         cell.fill = hdr_fill
     for ri, r in enumerate(rows, start=2):
-        for ci, (k, _) in enumerate(_COLUMNS, start=1):
-            v = r.get(k)
-            if k == "is_onroll":
+        ws.cell(row=ri, column=1, value=ri - 1)
+        for ci, c in enumerate(columns, start=2):
+            v = r.get(c["key"])
+            if c["key"] == "is_onroll":
                 v = "On-roll" if v is not False else "Off-roll"
             ws.cell(row=ri, column=ci, value=v if v is not None else "")
-    for ci in range(1, len(_COLUMNS) + 1):
+    for ci in range(1, len(columns) + 2):
         ws.column_dimensions[ws.cell(row=1, column=ci).column_letter].width = 16
 
     buf = BytesIO()
@@ -192,8 +293,8 @@ async def master_data_report_xlsx(
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     s = _parse_common(status)
-    rows = await _fetch_rows(admin, s, q, employee_type, company_id, is_onroll)
-    buf = _build_xlsx(rows, s)
+    columns, rows = await _fetch_rows(admin, s, q, employee_type, company_id, is_onroll)
+    buf = _build_xlsx(rows, s, columns)
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -214,10 +315,10 @@ async def _email_master_data_for_firm(company_id: str, month_label: str) -> dict
     from utils.iter60_features import _send_email_with_attachment
 
     fake_admin = {"role": "super_admin"}
-    rows = await _fetch_rows(fake_admin, "all", None, None, company_id, None)
+    columns, rows = await _fetch_rows(fake_admin, "all", None, None, company_id, None)
     if not rows:
         return {"delivered": False, "error": "no_employees"}
-    buf = _build_xlsx(rows, "all")
+    buf = _build_xlsx(rows, "all", columns)
 
     admins = await db.users.find(
         {"role": "company_admin", "company_id": company_id, "email": {"$nin": [None, ""]}},

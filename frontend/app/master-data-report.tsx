@@ -7,7 +7,7 @@
  * master) and All. Filters: name/code/phone search, Employee Type /
  * Group, firm (super admin), On-roll / Off-roll.
  */
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, TextInput,
   ActivityIndicator, Platform,
@@ -43,6 +43,79 @@ export default function MasterDataReportScreen() {
   const [exporting, setExporting] = useState(false);
   const [cols, setCols] = useState<Col[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
+  // Iter 331 (user request) — click a column header to sort ↑ / ↓ / off.
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  // Iter 331 (user request) — per-column filters + keyboard row cursor.
+  const [filters, setFilters] = useState<Record<string, string>>({});
+  const [activeRow, setActiveRow] = useState<number>(-1);
+  const rowRefs = useRef<Record<number, any>>({});
+
+  const toggleSort = (key: string) => {
+    if (sortKey !== key) { setSortKey(key); setSortDir("asc"); return; }
+    if (sortDir === "asc") { setSortDir("desc"); return; }
+    setSortKey(null);
+  };
+
+  const sortedRows = useMemo(() => {
+    // Per-column filters first (case-insensitive "contains").
+    let out = rows;
+    const active = Object.entries(filters).filter(([, v]) => v.trim() !== "");
+    if (active.length) {
+      out = out.filter((r) =>
+        active.every(([k, v]) => {
+          const cell = k === "is_onroll"
+            ? (r[k] === false ? "off-roll" : "on-roll")
+            : String(r[k] ?? "");
+          return cell.toLowerCase().includes(v.trim().toLowerCase());
+        }),
+      );
+    }
+    if (!sortKey) return out;
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...out].sort((a, b) => {
+      const av = a[sortKey];
+      const bv = b[sortKey];
+      const aEmpty = av === null || av === undefined || av === "";
+      const bEmpty = bv === null || bv === undefined || bv === "";
+      if (aEmpty && bEmpty) return 0;
+      if (aEmpty) return 1;   // blanks always last
+      if (bEmpty) return -1;
+      const an = Number(av);
+      const bn = Number(bv);
+      if (!Number.isNaN(an) && !Number.isNaN(bn)) return (an - bn) * dir;
+      return String(av).localeCompare(String(bv), undefined, { sensitivity: "base", numeric: true }) * dir;
+    });
+  }, [rows, sortKey, sortDir, filters]);
+
+  // Iter 331 (user request) — keyboard navigation: ↑ ↓ PageUp PageDown
+  // Home End move the row cursor; the current row stays highlighted.
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    const onKey = (e: KeyboardEvent) => {
+      const tag = String((e.target as any)?.tagName || "").toUpperCase();
+      if (tag === "INPUT" || tag === "TEXTAREA") return; // typing in a filter
+      const n = sortedRows.length;
+      if (!n) return;
+      let next = activeRow;
+      if (e.key === "ArrowDown") next = Math.min(n - 1, activeRow + 1);
+      else if (e.key === "ArrowUp") next = Math.max(0, activeRow - 1);
+      else if (e.key === "PageDown") next = Math.min(n - 1, activeRow + 15);
+      else if (e.key === "PageUp") next = Math.max(0, activeRow - 15);
+      else if (e.key === "Home") next = 0;
+      else if (e.key === "End") next = n - 1;
+      else if (e.key === "Escape") { setActiveRow(-1); return; }
+      else return;
+      e.preventDefault();
+      setActiveRow(next);
+      const node = rowRefs.current[next];
+      if (node?.scrollIntoView) node.scrollIntoView({ block: "nearest" });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeRow, sortedRows.length]);
+
+  useEffect(() => { setActiveRow(-1); }, [rows, filters, sortKey, sortDir]);
 
   const buildQs = useCallback(() => {
     const p = new URLSearchParams();
@@ -115,7 +188,7 @@ export default function MasterDataReportScreen() {
           </Pressable>
           <View style={{ flex: 1, alignItems: "center" }}>
             <Text style={styles.h1}>Master Data</Text>
-            <Text style={styles.hsub}>Employee Master · read-only · export to Excel</Text>
+            <Text style={styles.hsub}>Employee Master · read-only · click a column header to sort</Text>
           </View>
           <Pressable onPress={exportXlsx} style={styles.exportBtn} testID="mdr-export">
             {exporting ? (
@@ -200,22 +273,59 @@ export default function MasterDataReportScreen() {
             <View style={styles.gridHead}>
               <Text style={[styles.hCell, { width: 44 }]}>SN</Text>
               {cols.map((c) => (
-                <Text key={c.key} style={[styles.hCell, { width: colWidth(c.key) }]}>
-                  {c.label}
-                </Text>
+                <Pressable
+                  key={c.key}
+                  onPress={() => toggleSort(c.key)}
+                  style={{ width: colWidth(c.key), flexDirection: "row", alignItems: "center" }}
+                  testID={`mdr-sort-${c.key}`}
+                >
+                  <Text style={[styles.hCell, sortKey === c.key && { color: "#FDE68A" }]} numberOfLines={1}>
+                    {c.label}{sortKey === c.key ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                  </Text>
+                </Pressable>
               ))}
             </View>
-            {rows.map((r, i) => (
-              <View key={r.user_id || i} style={[styles.gridRow, i % 2 === 1 && { backgroundColor: "#F8FAFC" }]}>
-                <Text style={[styles.cell, { width: 44 }]}>{i + 1}</Text>
+            {/* Iter 331 (user request) — per-column filter row */}
+            <View style={styles.filterRow}>
+              <View style={{ width: 44 }} />
+              {cols.map((c) => (
+                <View key={c.key} style={{ width: colWidth(c.key), paddingHorizontal: 3 }}>
+                  <TextInput
+                    value={filters[c.key] || ""}
+                    onChangeText={(v) => setFilters((f) => ({ ...f, [c.key]: v }))}
+                    placeholder="Filter…"
+                    placeholderTextColor="#94A3B8"
+                    style={styles.filterInput}
+                    testID={`mdr-filter-${c.key}`}
+                  />
+                </View>
+              ))}
+            </View>
+            {sortedRows.map((r, i) => (
+              <Pressable
+                key={r.user_id || i}
+                ref={(node: any) => { rowRefs.current[i] = node; }}
+                onPress={() => setActiveRow(i)}
+                style={[
+                  styles.gridRow,
+                  i % 2 === 1 && { backgroundColor: "#F8FAFC" },
+                  i === activeRow && styles.gridRowActive,
+                ]}
+                testID={`mdr-row-${i}`}
+              >
+                <Text style={[styles.cell, { width: 44 }, i === activeRow && styles.cellActive]}>{i + 1}</Text>
                 {cols.map((c) => (
-                  <Text key={c.key} style={[styles.cell, { width: colWidth(c.key) }]} numberOfLines={2}>
+                  <Text
+                    key={c.key}
+                    style={[styles.cell, { width: colWidth(c.key) }, i === activeRow && styles.cellActive]}
+                    numberOfLines={2}
+                  >
                     {c.key === "is_onroll"
                       ? (r[c.key] === false ? "Off-roll" : "On-roll")
                       : String(r[c.key] ?? "—")}
                   </Text>
                 ))}
-              </View>
+              </Pressable>
             ))}
             {rows.length === 0 ? (
               <View style={styles.center}>
@@ -227,7 +337,9 @@ export default function MasterDataReportScreen() {
         </ScrollView>
       )}
       <View style={styles.footer}>
-        <Text style={styles.footTxt}>{rows.length} record(s) · data locked (view &amp; export only)</Text>
+        <Text style={styles.footTxt}>
+          {sortedRows.length}{sortedRows.length !== rows.length ? ` of ${rows.length}` : ""} record(s) · sort: click header · filter: type below header · keyboard: ↑ ↓ PgUp PgDn Home End
+        </Text>
       </View>
     </View>
   );
@@ -237,12 +349,17 @@ function colWidth(key: string): number {
   switch (key) {
     case "name": return 170;
     case "father_name": return 150;
-    case "address": return 220;
+    case "present_address": case "permanent_address": return 220;
     case "company_name": return 150;
     case "designation": case "department": return 130;
     case "bank_name": return 130;
     case "bank_account": return 140;
     case "aadhaar_no": case "uan_no": return 130;
+    case "pan_name": case "aadhaar_name": return 150;
+    case "pf_no": case "esi_ip_no": return 130;
+    case "gender": case "pincode": case "permanent_pincode": return 80;
+    case "basic": case "pf_basic": case "hra": case "conveyance":
+    case "monthly_gross": return 95;
     default: return 110;
   }
 }
@@ -322,7 +439,24 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.divider,
     backgroundColor: colors.surface,
   },
+  gridRowActive: {
+    backgroundColor: "#DBEAFE",
+    borderLeftWidth: 3, borderLeftColor: "#1D4ED8",
+  },
   cell: { fontSize: 11, color: colors.onSurface, paddingHorizontal: 6 },
+  cellActive: { fontWeight: "700", color: "#1E3A8A" },
+  filterRow: {
+    flexDirection: "row",
+    paddingVertical: 4, paddingHorizontal: spacing.md,
+    backgroundColor: "#EFF6FF",
+    borderBottomWidth: 1, borderBottomColor: colors.divider,
+  },
+  filterInput: {
+    height: 26, fontSize: 10.5, color: colors.onSurface,
+    borderWidth: 1, borderColor: "#CBD5E1", borderRadius: 6,
+    paddingHorizontal: 6, paddingVertical: 0,
+    backgroundColor: colors.surface,
+  },
   center: { alignItems: "center", gap: 8, padding: 40 },
   dimTxt: { color: colors.onSurfaceTertiary, fontSize: 13 },
   footer: {

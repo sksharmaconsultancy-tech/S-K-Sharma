@@ -533,6 +533,37 @@ export default function LegacyImportScreen() {
                     {impOn ? `Online: ${p.online_rows ?? 0} rows / ${p.online_months ?? 0} months · ` : ""}
                     {impOff ? `Offline: ${p.offline_rows ?? 0} rows / ${p.offline_months ?? 0} months` : ""}
                   </Text>
+                  {/* Iter 331 (user) — allowance heads found in the old DB:
+                      matching Firm Master labels are ENABLED, missing ones
+                      are CREATED as custom heads. */}
+                  {(p.allowance_heads || []).length ? (
+                    <View style={{ marginTop: 4 }}>
+                      <Text style={[st.firmMeta, { fontWeight: "800", color: "#5B21B6" }]}>
+                        Allowances (auto-set on Firm Master):
+                      </Text>
+                      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 3 }}>
+                        {p.allowance_heads.map((h: any) => (
+                          <View
+                            key={h.head}
+                            style={{
+                              flexDirection: "row", alignItems: "center", gap: 3,
+                              paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999,
+                              backgroundColor: h.action === "create" ? "#FEF3C7" : "#EDE9FE",
+                            }}
+                          >
+                            <Ionicons
+                              name={h.action === "create" ? "add-circle-outline" : "checkmark-circle-outline"}
+                              size={11}
+                              color={h.action === "create" ? "#92400E" : "#5B21B6"}
+                            />
+                            <Text style={{ fontSize: 10, fontWeight: "700", color: h.action === "create" ? "#92400E" : "#5B21B6" }}>
+                              {h.head}{h.action === "create" ? " (new)" : ""}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  ) : null}
                 </View>
               )) : null}
               {preview && impEmp ? (
@@ -573,6 +604,8 @@ export default function LegacyImportScreen() {
                     Employees: {job.totals?.employees_created || 0} created, {job.totals?.employees_updated || 0} updated{job.totals?.employees_kept ? `, ${job.totals.employees_kept} kept (not replaced)` : ""} ·
                     Online rows: {job.totals?.online_rows || 0} · Offline rows: {job.totals?.offline_rows || 0}
                     {job.totals?.firms_created ? ` · Firms created: ${job.totals.firms_created}` : ""}
+                    {job.totals?.allowance_labels_enabled ? ` · Allowances enabled on Firm Master: ${job.totals.allowance_labels_enabled}` : ""}
+                    {job.totals?.allowance_heads_created ? ` · New allowance heads created: ${job.totals.allowance_heads_created}` : ""}
                   </Text>
                   {(job.errors || []).slice(0, 5).map((e: string, i: number) => (
                     <Text key={i} style={st.errTxt}>{e}</Text>

@@ -1879,3 +1879,23 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   csr-copy-last-month) next to Salary Process with confirm dialog; "COPIED FROM YYYY-MM" chip on run.
 - E2E verified via curl: May→June copy carried exact gross/ded/net; adv EMI stripped correctly.
 - Deploy script deploy_vps_iter330.sh (temp_bundle kind=script now serves 330).
+
+## Iter 331 — Master Data Report upgrade + Legacy allowances sync, deploy 331
+- master_data_report.py: exact user column sequence (UAN/EPFO/ESIC/EmpCode/Name/.../Firm),
+  Exit-Resign column HIDDEN on Active tab, Basic (compliance_basic|basic_salary|basic_amount|
+  salary_structure_compliance/actual Basic head), PF Basic, HRA/Conv (hra_amount/conv_amount +
+  compliance_salary_allowances + salary_structure_compliance buckets), dynamic allowance columns
+  (al_<head> keys inserted after Conv.), Monthly Gross (compliance_gross|basic+allows|salary_monthly),
+  pan_name/aadhaar_name/upi_id, Present addr (present_address|address)+district/state/pincode,
+  Permanent addr+permanent_pincode. _fetch_rows returns (columns, rows); xlsx/email updated (SN col).
+- master-data-report.tsx: click-header sort ▲▼ (numeric-aware, blanks last), per-column filter row
+  (contains, testID mdr-filter-<key>), keyboard nav web (↑↓ PgUp/PgDn/Home/End/Esc, skips when typing
+  in inputs) with row highlight (#DBEAFE + left border) + click-to-select, scrollIntoView on move.
+- legacy_import.py: _sync_firm_allowances — legacy allowance heads (EmployeeSalaryStructureDtl,
+  ALLOWANCE, amount>0) matched to Firm Master catalog (fixed labels + custom masters), enabled via
+  firm_masters.allowances.$label=True; unmatched heads CREATED in db.masters (type=allowance) then
+  enabled; bucket label (HRA/CONV./MEDICAL ALLOWANCES/OTH. ALLOW./OTHER MISC.ALLOWANCE) ALWAYS also
+  enabled so the run's allow_mask keeps the column. Hooked in _run_job after employee loop
+  ("salary" group); preview endpoint returns firm.allowance_heads [{head,label,action,bucket}];
+  wizard shows chips (enable=purple, create=amber) + job totals allowance_labels_enabled/created.
+- Deploy script deploy_vps_iter331.sh (temp_bundle kind=script serves 331).

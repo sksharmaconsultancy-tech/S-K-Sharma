@@ -230,6 +230,40 @@ async def legacy_import_preview(body: ImportBody, authorization: Optional[str] =
             firm["employees_total"] = len(emps)
             firm["employees_existing"] = existing
             firm["employees_new"] = len(emps) - existing
+            # Iter 331 (user request) — show which legacy allowance heads
+            # will be set on the Firm Master (enabled or created).
+            if "salary" in body.employee_fields:
+                from routes.firm_master import ALLOWANCE_LABELS
+                catalog = {x.strip().lower(): x for x in ALLOWANCE_LABELS}
+                if m.company_id:
+                    async for mm in db.masters.find(
+                        {"type": "allowance",
+                         "company_id": {"$in": [m.company_id, "__global__", None]}},
+                        {"_id": 0, "name": 1},
+                    ):
+                        n_ = str(mm.get("name") or "").strip()
+                        if n_:
+                            catalog.setdefault(n_.lower(), n_)
+                srows = await _q(
+                    dbn,
+                    "SELECT DISTINCT SalHeadName FROM EmployeeSalaryStructureDtl "
+                    "WHERE FirmID_FK = %s AND UPPER(SalHeadType) = 'ALLOWANCE' "
+                    "AND Amount > 0",
+                    (m.firm_no,))
+                heads_info = []
+                for s in srows or []:
+                    h = str(s.get("SalHeadName") or "").strip()
+                    if not h:
+                        continue
+                    label = catalog.get(h.lower())
+                    heads_info.append({
+                        "head": h,
+                        "label": label or h,
+                        "action": "enable" if label else "create",
+                        "bucket": _BUCKET_LABEL[_allow_bucket(h)],
+                    })
+                firm["allowance_heads"] = sorted(
+                    heads_info, key=lambda x: x["head"].lower())
         if body.salary_online:
             n = await _q(dbn, "SELECT COUNT(*) AS n, COUNT(DISTINCT MonthYear) AS m FROM SalaryTrans "
                               "WHERE FirmNo = %s AND DeletedDate IS NULL", (m.firm_no,))
@@ -548,6 +582,92 @@ async def _interlink_masters(company_id: str, values: Dict[str, set]):
             existing.add(nm.upper())
 
 
+# Iter 331 (user request) — legacy allowance heads AUTO-SET on the Firm
+# Master. Every allowance head found in the old database (per firm) is
+# matched against the Firm Master Allowances catalog and switched ON; a
+# head with no matching label is CREATED as a custom allowance master and
+# then enabled — so the imported employee allowances flow into the
+# Compliance Salary under the same heads.
+_BUCKET_LABEL = {
+    "hra": "HRA",
+    "conveyance": "CONV.",
+    "medical": "MEDICAL ALLOWANCES",
+    "special": "OTH. ALLOW.",
+    "others": "OTHER MISC.ALLOWANCE",
+}
+
+
+def _allow_bucket(head: str) -> str:
+    """Mirror utils.compliance_salary head→column mapping."""
+    s = str(head or "").strip().lower()
+    if "hra" in s or "house" in s:
+        return "hra"
+    if s.startswith("conv") or "travel" in s:
+        return "conveyance"
+    if "medic" in s:
+        return "medical"
+    if "special" in s:
+        return "special"
+    return "others"
+
+
+async def _sync_firm_allowances(
+    company_id: str, heads: set, admin_uid: str = "",
+) -> Dict[str, list]:
+    """Enable legacy allowance heads on the Firm Master (create custom
+    heads that don't exist in the catalog). Returns what was done."""
+    from routes.firm_master import ALLOWANCE_LABELS
+    if not heads:
+        return {"enabled": [], "created": []}
+    # Catalog = fixed labels + custom allowance masters for this firm.
+    catalog: Dict[str, str] = {x.strip().lower(): x for x in ALLOWANCE_LABELS}
+    async for mm in db.masters.find(
+        {"type": "allowance",
+         "company_id": {"$in": [company_id, "__global__", None]}},
+        {"_id": 0, "name": 1},
+    ):
+        n = str(mm.get("name") or "").strip()
+        if n:
+            catalog.setdefault(n.lower(), n)
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "allowances": 1})
+    current = dict((fm or {}).get("allowances") or {})
+    to_enable: set = set()
+    created: List[str] = []
+    for head in sorted({str(h or "").strip() for h in heads} - {""}):
+        label = catalog.get(head.lower())
+        if not label:
+            # No matching label — create a custom allowance head.
+            await db.masters.insert_one({
+                "master_id": f"mst_{uuid.uuid4().hex[:12]}",
+                "type": "allowance",
+                "company_id": company_id,
+                "name": head,
+                "date": None,
+                "created_at": _now(),
+                "updated_at": _now(),
+                "created_by": admin_uid or "legacy_import",
+                "scope": "firm",
+                "auto_registered": "legacy_import_allowances",
+            })
+            catalog[head.lower()] = head
+            created.append(head)
+            label = head
+        to_enable.add(label)
+        # Always ALSO enable the compliance bucket label so the run's
+        # allowance mask keeps this head's column (HRA / CONV. / etc.).
+        to_enable.add(_BUCKET_LABEL[_allow_bucket(head)])
+    newly = sorted(lb for lb in to_enable if current.get(lb) is not True)
+    if newly:
+        await db.firm_masters.update_one(
+            {"company_id": company_id},
+            {"$set": {**{f"allowances.{lb}": True for lb in newly},
+                      "updated_at": _now()}},
+            upsert=True,
+        )
+    return {"enabled": newly, "created": created}
+
+
 async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
     dbn = await _dbname()
     heads = await _head_names(dbn)
@@ -662,6 +782,37 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                 except Exception as ex:
                     if len(errors) < 40:
                         errors.append(f"masters interlink: {str(ex)[:120]}")
+                # Iter 331 (user request) — auto-set the legacy allowance
+                # heads on the Firm Master (enable matching labels, create
+                # missing ones) so imported allowances land in Compliance
+                # Salary under the same heads.
+                if "salary" in body.employee_fields:
+                    try:
+                        _heads = {
+                            str(s.get("SalHeadName") or "").strip()
+                            for rows_ in struct_by_emp.values() for s in rows_
+                            if str(s.get("SalHeadType") or "").upper() == "ALLOWANCE"
+                            and _f(s.get("Amount"))
+                        }
+                        _sync = await _sync_firm_allowances(
+                            m.company_id, _heads, admin_uid)
+                        if _sync["enabled"] or _sync["created"]:
+                            totals["allowance_labels_enabled"] = (
+                                totals.get("allowance_labels_enabled", 0)
+                                + len(_sync["enabled"]))
+                            totals["allowance_heads_created"] = (
+                                totals.get("allowance_heads_created", 0)
+                                + len(_sync["created"]))
+                            await db.legacy_import_jobs.update_one(
+                                {"job_id": job_id},
+                                {"$push": {"allowance_sync": {
+                                    "firm_no": m.firm_no,
+                                    "company_id": m.company_id,
+                                    **_sync,
+                                }}})
+                    except Exception as ex:
+                        if len(errors) < 40:
+                            errors.append(f"allowance sync: {str(ex)[:120]}")
                 await _prog(totals=totals)
 
             # ---------------- Salary history ----------------
