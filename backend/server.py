@@ -15757,7 +15757,8 @@ async def _compute_compliance_run(
                 if row["attendance_days"] > 0 or _imp_g0 > 0:
                     _new_days = float(_dcm.get("days_calc_fixed") or 26)
             elif _method in ("gross_based", "freeze_based",
-                             "attendance_gross_validation") and _imp_g0 > 0:
+                             "attendance_gross_validation",
+                             "freeze_actual_gross") and _imp_g0 > 0:
                 # Per-Day Gross — from the first pass (exact for both
                 # daily-rated and monthly-rated employees); falls back to
                 # Master Monthly Gross ÷ Month Days.
@@ -15768,13 +15769,21 @@ async def _compute_compliance_run(
                     (_mg0 / float(month_days or 1)) if _mg0 > 0 else 0.0)
                 if _per_day > 0:
                     _rawd = _imp_g0 / _per_day
-                    try:
-                        _step = float(_dcm.get("days_calc_rounding") or 0.5)
-                    except (TypeError, ValueError):
-                        _step = 0.5
-                    # User directive — days land on HALF or FULL days only.
-                    _step = 1.0 if _step >= 1 else 0.5
-                    _new_days = round(_rawd / _step) * _step
+                    if _method == "freeze_actual_gross":
+                        # Iter 337b (user request) — Freeze Salary taken
+                        # AS-IS as the Actual Gross: exact fractional days
+                        # (no half/full rounding) so the calculated gross
+                        # equals the imported gross to the rupee; statutory
+                        # is computed on that gross.
+                        _new_days = round(_rawd, 2)
+                    else:
+                        try:
+                            _step = float(_dcm.get("days_calc_rounding") or 0.5)
+                        except (TypeError, ValueError):
+                            _step = 0.5
+                        # User directive — days land on HALF or FULL days only.
+                        _step = 1.0 if _step >= 1 else 0.5
+                        _new_days = round(_rawd / _step) * _step
             if _new_days is not None:
                 _new_days = max(0.0, min(round(_new_days, 2), float(month_days)))
                 if abs(_new_days - float(row.get("present_days") or 0)) > 1e-9:
