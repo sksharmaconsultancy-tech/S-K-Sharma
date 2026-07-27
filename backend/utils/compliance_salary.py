@@ -822,15 +822,21 @@ def build_compliance_register_pdf(
     group = (run.get("employee_type") or "ALL").upper()
 
     def A(v: Any) -> str:
+        # Iter 323 (user request) — whole rupees only, no ".00".
         try:
-            return f"{float(v or 0):.2f}"
+            return str(int(round(float(v or 0))))
         except Exception:
-            return "0.00"
+            return "0"
 
     # ---- per-row derived values -----------------------------------------
     def other_earn(r: Dict[str, Any]) -> float:
         return (float(r.get("medical") or 0) + float(r.get("special") or 0)
                 + float(r.get("others") or 0) + float(r.get("ot_pay") or 0))
+
+    def other_master(r: Dict[str, Any]) -> float:
+        return (float(r.get("medical_master") or 0)
+                + float(r.get("special_master") or 0)
+                + float(r.get("others_master") or 0))
 
     def pf_ded(r: Dict[str, Any]) -> float:
         return float(r.get("pf_employee") or 0) + float(r.get("vpf_amount") or 0)
@@ -898,15 +904,20 @@ def build_compliance_register_pdf(
     doc.addPageTemplates([PageTemplate(id="pg", frames=[frame], onPage=_header)])
 
     # ---- table ------------------------------------------------------------
+    # Iter 323 (user request) — MASTER SALARY & ALLOWANCES band inserted
+    # between DESIG. and DAYS/HRS, figures centre-aligned, wider SIGN column.
     hdr_top = [
         "S.No", "NAME /\nFATHER NAME", "P.F.NO. /\nESI NO.", "DESIG.",
+        "-------- MASTER SALARY & ALLOWANCES --------", "", "", "", "",
         "DAYS\n/HRS",
-        "----------------- EARNINGS -----------------", "", "", "", "",
-        "------------------- DEDUCTIONS -------------------", "", "", "", "", "",
+        "-------------- EARNINGS --------------", "", "", "", "",
+        "------------- DEDUCTIONS -------------", "", "", "", "", "",
         "NET\nPAYABLE", "SIGN. /\nBANK",
     ]
     hdr_sub = [
-        "", "", "", "", "",
+        "", "", "", "",
+        "SALARY", "H.R.A", "CONV.", "OTHER", "TOTAL",
+        "",
         "SALARY", "H.R.A", "CONV.", "OTHER", "TOTAL",
         "P.F.", "E.S.I.", "ADVANCE", "OTHER", "TDS", "TOTAL",
         "AMOUNT", "DATE OF\nPAYMENT",
@@ -916,6 +927,7 @@ def build_compliance_register_pdf(
     cell = ParagraphStyle("cell", fontName="Helvetica", fontSize=5.5, leading=6.5)
     tot = {k: 0.0 for k in (
         "days", "hrs", "sal", "hra", "conv", "oth", "gross",
+        "m_sal", "m_hra", "m_conv", "m_oth", "m_tot",
         "pf", "esi", "adv", "othd", "tds", "ded", "net",
         "pf_wages", "gross_pf", "gross_nonpf", "esi_base", "nonesi_base",
     )}
@@ -926,7 +938,14 @@ def build_compliance_register_pdf(
         pf_v = pf_ded(r)
         oth_d = other_ded(r)
         gross = float(r.get("gross_paid") or 0)
+        m_sal = float(r.get("basic_master") or 0)
+        m_hra = float(r.get("hra_master") or 0)
+        m_conv = float(r.get("conveyance_master") or 0)
+        m_oth = other_master(r)
+        m_tot = m_sal + m_hra + m_conv + m_oth
         tot["days"] += days; tot["hrs"] += hrs
+        tot["m_sal"] += m_sal; tot["m_hra"] += m_hra
+        tot["m_conv"] += m_conv; tot["m_oth"] += m_oth; tot["m_tot"] += m_tot
         tot["sal"] += float(r.get("basic") or 0); tot["hra"] += float(r.get("hra") or 0)
         tot["conv"] += float(r.get("conveyance") or 0); tot["oth"] += oth_e
         tot["gross"] += gross
@@ -951,37 +970,50 @@ def build_compliance_register_pdf(
         data.append([
             str(i), name_p, ids_p,
             Paragraph((r.get("designation") or "").upper(), cell),
+            A(m_sal), A(m_hra), A(m_conv), A(m_oth), A(m_tot),
             f"{days:g}/{('%g' % hrs) if hrs else ''}",
             A(r.get("basic")), A(r.get("hra")), A(r.get("conveyance")),
             A(oth_e), A(gross),
-            A(pf_v), A(r.get("esic_employee")), "0.00", A(oth_d),
+            A(pf_v), A(r.get("esic_employee")), "0", A(oth_d),
             A(r.get("tds")), A(r.get("total_deduction")),
             A(r.get("net")), "",
         ])
     data.append([
-        "", "GRAND TOTAL", "", "", f"{tot['days']:g}/{tot['hrs']:g}",
+        "", "GRAND TOTAL", "", "",
+        A(tot["m_sal"]), A(tot["m_hra"]), A(tot["m_conv"]), A(tot["m_oth"]), A(tot["m_tot"]),
+        f"{tot['days']:g}/{tot['hrs']:g}",
         A(tot["sal"]), A(tot["hra"]), A(tot["conv"]), A(tot["oth"]), A(tot["gross"]),
-        A(tot["pf"]), A(tot["esi"]), "0.00", A(tot["othd"]), A(tot["tds"]), A(tot["ded"]),
+        A(tot["pf"]), A(tot["esi"]), "0", A(tot["othd"]), A(tot["tds"]), A(tot["ded"]),
         A(tot["net"]), "",
     ])
 
-    widths = [6, 26, 23, 13, 8, 11, 9, 9, 9, 11, 9, 8, 8, 9, 8, 11, 12, 10]
+    # Iter 323 — wider SIGN column for physical signatures.
+    widths = [5, 20, 18, 10,
+              8, 7, 7, 7, 9,
+              7,
+              8, 7, 7, 7, 9,
+              7, 7, 7, 7, 6, 9,
+              10, 18]
     # Landscape — stretch the reference column ratios to the full width.
     _scale = (W - 12 * mm) / (sum(widths) * mm)
     col_widths = [wmm * mm * _scale for wmm in widths]
 
     def _base_style() -> list:
         return [
-            ("SPAN", (5, 0), (9, 0)), ("SPAN", (10, 0), (15, 0)),
+            ("SPAN", (4, 0), (8, 0)),    # MASTER SALARY & ALLOWANCES band
+            ("SPAN", (10, 0), (14, 0)),  # EARNINGS band
+            ("SPAN", (15, 0), (20, 0)),  # DEDUCTIONS band
             ("SPAN", (0, 0), (0, 1)), ("SPAN", (1, 0), (1, 1)), ("SPAN", (2, 0), (2, 1)),
-            ("SPAN", (3, 0), (3, 1)), ("SPAN", (4, 0), (4, 1)),
-            ("SPAN", (16, 0), (16, 1)), ("SPAN", (17, 0), (17, 1)),
+            ("SPAN", (3, 0), (3, 1)), ("SPAN", (9, 0), (9, 1)),
+            ("SPAN", (21, 0), (21, 1)), ("SPAN", (22, 0), (22, 1)),
+            ("BACKGROUND", (4, 0), (8, 1), rl_colors.HexColor("#EAF1F7")),
             ("FONTNAME", (0, 0), (-1, 1), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, 1), 6.5),
+            ("FONTSIZE", (0, 0), (-1, 1), 6),
             ("FONTNAME", (0, 2), (-1, -1), "Helvetica"),
-            ("FONTSIZE", (0, 2), (-1, -1), 6.5),
+            ("FONTSIZE", (0, 2), (-1, -1), 6),
             ("ALIGN", (0, 0), (-1, 1), "CENTER"),
-            ("ALIGN", (4, 2), (-1, -1), "RIGHT"),
+            # Iter 323 (user request) — figures centre-aligned.
+            ("ALIGN", (4, 2), (-1, -1), "CENTER"),
             ("ALIGN", (0, 2), (0, -1), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("GRID", (0, 0), (-1, -1), 0.4, rl_colors.black),
@@ -1038,15 +1070,15 @@ def build_compliance_register_pdf(
         ("Total H.R.A Amount", A(tot["hra"])),
         ("Total Conveyance Amount", A(tot["conv"])),
         ("Total Other Amount", A(tot["oth"])),
-        ("Total Bonus Amount", "0.00"),
+        ("Total Bonus Amount", "0"),
         ("Total Gross Amount", A(tot["gross"])),
     ]))
     story.append(Spacer(1, 4 * mm))
     story.append(sec([
         ("P.F. Deduction Amount", A(tot["pf"])),
-        ("ABRY P.F. Benifit", "0.00"),
+        ("ABRY P.F. Benifit", "0"),
         ("E.S.I. Deduction Amount", A(tot["esi"])),
-        ("Advance Deduction Amount", "0.00"),
+        ("Advance Deduction Amount", "0"),
         ("Other Deduction Amount", A(tot["othd"])),
         ("TDS Deduction Amount", A(tot["tds"])),
         ("Total Deduction Amount", A(tot["ded"])),
@@ -1138,10 +1170,11 @@ def build_compliance_register_pdf_v2(
     W, H = landscape(A4)
 
     def A(v: Any) -> str:
+        # Iter 323 (user request) — whole rupees only, no ".00".
         try:
-            return f"{float(v or 0):,.2f}"
+            return f"{int(round(float(v or 0))):,}"
         except Exception:
-            return "0.00"
+            return "0"
 
     class _NumberedCanvas(rl_canvas.Canvas):
         def __init__(self, *a, **kw):
@@ -1415,15 +1448,15 @@ def build_compliance_register_pdf_v2(
         ("Total H.R.A Amount", A(tot["hra_e"])),
         ("Total Conveyance Amount", A(tot["conv_e"])),
         ("Total Other Amount", A(tot["oth_e"])),
-        ("Total Bonus Amount", "0.00"),
+        ("Total Bonus Amount", "0"),
         ("Total Gross Amount", A(tot["gross"])),
     ]))
     summary.append(Spacer(1, 4 * mm))
     summary.append(sec([
         ("P.F. Deduction Amount", A(tot["pf"])),
-        ("ABRY P.F. Benifit", "0.00"),
+        ("ABRY P.F. Benifit", "0"),
         ("E.S.I. Deduction Amount", A(tot["esi"])),
-        ("Advance Deduction Amount", "0.00"),
+        ("Advance Deduction Amount", "0"),
         ("Other Deduction Amount", A(tot["othd"])),
         ("TDS Deduction Amount", A(tot["tds"])),
         ("Total Deduction Amount", A(tot["ded"])),

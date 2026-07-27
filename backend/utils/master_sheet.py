@@ -159,7 +159,7 @@ def build_master_sheet_xlsx(
     ws.title = "Master Sheet"
 
     # Title band
-    ws.merge_cells("A1:I1")
+    ws.merge_cells("A1:K1")
     cell = ws["A1"]
     cell.value = f"{company_name}  ·  Master Salary Sheet  ·  {month}"
     cell.font = Font(name="Calibri", size=14, bold=True, color="FFFFFF")
@@ -167,7 +167,7 @@ def build_master_sheet_xlsx(
     cell.alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 32
 
-    ws.merge_cells("A2:I2")
+    ws.merge_cells("A2:K2")
     sub = ws["A2"]
     sub.value = (
         "Please fill Gross Salary, Advance and TDS columns for each employee, "
@@ -178,8 +178,11 @@ def build_master_sheet_xlsx(
     sub.alignment = Alignment(horizontal="center", vertical="center")
 
     # Header row
+    # Iter 323 (user feedback) — Attendance Master Sheet must carry the
+    # exact columns the Salary Compliance / Salary Actual import expects.
     headers = [
         "Employee Code", "Employee Name", "Date of Joining", "Department",
+        "Designation", "Employee Group",
         "Days Worked", "Gross Salary", "Advance", "TDS", "Notes",
     ]
     thin = Side(border_style="thin", color=LINE)
@@ -199,6 +202,8 @@ def build_master_sheet_xlsx(
             emp.get("name") or "",
             (emp.get("doj") or "")[:10],
             emp.get("department") or "",
+            emp.get("designation") or emp.get("position") or "",
+            emp.get("employee_group") or emp.get("employee_type") or "",
             days_worked if days_worked is not None else "",
             "",  # Gross Salary — blank
             "",  # Advance — blank
@@ -207,20 +212,20 @@ def build_master_sheet_xlsx(
         ]
         for cidx, val in enumerate(row, start=1):
             c = ws.cell(row=r, column=cidx, value=val)
-            c.alignment = Alignment(horizontal="left" if cidx <= 4 else "right",
+            c.alignment = Alignment(horizontal="left" if cidx <= 6 else "right",
                                     vertical="center")
             c.border = Border(top=thin, bottom=thin, left=thin, right=thin)
             if r % 2 == 0:
                 c.fill = PatternFill("solid", fgColor=BG_SOFT)
 
     # Column widths
-    widths = [16, 30, 14, 18, 12, 14, 12, 12, 26]
+    widths = [16, 30, 14, 18, 18, 14, 12, 14, 12, 12, 26]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
     # Footer band
     footer_row = 4 + len(employees) + 1
-    ws.merge_cells(start_row=footer_row, start_column=1, end_row=footer_row, end_column=9)
+    ws.merge_cells(start_row=footer_row, start_column=1, end_row=footer_row, end_column=11)
     fc = ws.cell(row=footer_row, column=1)
     fc.value = f"Generated on {datetime.now(timezone.utc).strftime('%d %b %Y')}  ·  {len(employees)} employees"
     fc.font = Font(size=8, italic=True, color=BRAND_INK)

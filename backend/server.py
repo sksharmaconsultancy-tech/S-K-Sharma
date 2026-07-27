@@ -18908,6 +18908,7 @@ async def _generate_attendance_sheet_impl(
     employees = await db.users.find(
         query,
         {"_id": 0, "user_id": 1, "employee_code": 1, "name": 1, "doj": 1, "department": 1,
+         "designation": 1, "position": 1, "employee_group": 1, "employee_type": 1,
          "exit_date": 1, "resign_date": 1, "date_of_leaving": 1,
          "leaving_date": 1, "employment_status": 1, "disabled": 1, "active": 1},
     ).to_list(2000)

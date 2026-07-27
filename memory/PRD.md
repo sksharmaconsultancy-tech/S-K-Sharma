@@ -1809,3 +1809,18 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   "Shift Master" under Masters — left as-is.
 - Verified via PDF render (pymupdf) + Playwright screenshots (firm filter, 127 active/0 resigned
   chips, LABOUR group → 108, sidebar entry).
+
+## Iter 323 — Format-1 Master Salary band + report polish + Master Sheet import format
+- Format 1 (build_compliance_register_pdf): inserted shaded "MASTER SALARY & ALLOWANCES"
+  band (SALARY/HRA/CONV./OTHER/TOTAL from basic_master/hra_master/conveyance_master/
+  medical+special+others_master) between DESIG. and DAYS/HRS → 23 columns; all figures
+  CENTRE-aligned; amounts are WHOLE RUPEES (no .00) in both Format 1 AND Format 2 (incl.
+  summary pages, literals "0.00"→"0"); SIGN./BANK column widened (w=18) for signatures.
+  Was developed as a demo first (user approved via "Develop and Make Corrections as Discussed").
+- Attendance Master Sheet (build_master_sheet_xlsx): added Designation + Employee Group
+  columns (prefilled) so the sheet round-trips into Salary Compliance / Salary Actual import
+  (CANONICAL_FIELDS already had designation/employee_group synonyms). Active-only employees
+  guaranteed by Iter 321 filter. Projection in _generate_attendance_sheet_impl extended.
+- Verified live: register.pdf v1 (14 pages, master band shaded, centred ints, wide sign col),
+  v2 unchanged apart from ints, sheet headers = Code/Name/DOJ/Dept/Desig/Group/Days/Gross/
+  Advance/TDS/Notes with values populated.
