@@ -515,7 +515,9 @@ async def firm_credentials(
     authorization: Optional[str] = Header(None),
 ):
     user = await get_user_from_token(authorization)
-    require_role(user, ["super_admin"])
+    # Iter 331 (user request) — Sub Super Admins can view firm credentials
+    # too (verified against their OWN login PIN).
+    require_role(user, ["super_admin", "sub_admin"])
     pin = str(payload.get("pin") or "").strip()
     from server import _verify_pin
     me = await db.users.find_one({"user_id": user["user_id"]},
@@ -523,7 +525,7 @@ async def firm_credentials(
     if not pin or not (me or {}).get("pin_hash") or not _verify_pin(pin, me["pin_hash"]):
         raise HTTPException(
             status_code=403,
-            detail="Enter your correct Super Admin PIN to view firm credentials")
+            detail="Enter your correct Admin PIN to view firm credentials")
 
     from utils.secrets_vault import decrypt_secret
     names: Dict[str, str] = {}

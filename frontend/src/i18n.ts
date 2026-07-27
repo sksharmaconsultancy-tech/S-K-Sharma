@@ -67,7 +67,7 @@ const HI: Record<string, string> = {
   "Ask AI — e.g. \"Process July payroll\"": "AI से पूछें — जैसे \"जुलाई पेरोल प्रोसेस करें\"",
   "Keyboard Shortcuts": "कीबोर्ड शॉर्टकट",
   "Add New Employee": "नया कर्मचारी जोड़ें",
-  "Employee Master Data": "कर्मचारी मास्टर डेटा",
+  "All Employee Data": "सभी कर्मचारी डेटा",
   "Attendance Report": "उपस्थिति रिपोर्ट",
   "Bank Transfer Files": "बैंक ट्रांसफर फ़ाइलें",
   "BI & Data Feed (Power BI / Excel)": "BI और डेटा फ़ीड (Power BI / Excel)",

@@ -105,7 +105,7 @@ export const NAV_SUPER: NavItem[] = [
     icon: "people-outline",
     children: [
       { route: "/employee-add", label: "Add New Employee", icon: "person-add-outline" },
-      { route: "/admin", label: "Employee Master Data", icon: "people-outline" },
+      { route: "/admin", label: "All Employee Data", icon: "people-outline" },
       { route: "/employee-detail-slip", label: "Employee Detail Slip", icon: "id-card-outline" },
       { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
       { route: "/employee-reports", label: "Employee Reports Hub", icon: "documents-outline" },
@@ -450,7 +450,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
     icon: "people-outline",
     children: [
       { route: "/employee-add", label: "Add New Employee", icon: "person-add-outline" },
-      { route: "/admin", label: "Employee Master Data", icon: "people-outline" },
+      { route: "/admin", label: "All Employee Data", icon: "people-outline" },
       { route: "/employee-detail-slip", label: "Employee Detail Slip", icon: "id-card-outline" },
       { route: "/kyc-tracker", label: "KYC & Doc Expiry Tracker", icon: "id-card-outline" },
       { route: "/employee-reports", label: "Employee Reports Hub", icon: "documents-outline" },

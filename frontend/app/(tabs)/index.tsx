@@ -657,7 +657,7 @@ export default function Dashboard() {
                 <ActionRow
                   testID="row-employee-master"
                   icon="people-outline"
-                  label="Employee Master Data"
+                  label="All Employee Data"
                   onPress={() => router.push({ pathname: "/admin", params: { section: "employees" } } as any)}
                 />
               )}

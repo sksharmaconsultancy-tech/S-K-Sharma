@@ -77,12 +77,12 @@ export default function FirmCredentialsScreen() {
     setTimeout(() => setCopied((c) => (c === key ? "" : c)), 1200);
   };
 
-  if (user && user.role !== "super_admin") {
+  if (user && user.role !== "super_admin" && user.role !== "sub_admin") {
     return (
       <SafeAreaView style={styles.safe} edges={["top"]}>
         <View style={styles.lockBox}>
           <Ionicons name="lock-closed-outline" size={34} color={colors.onSurfaceSecondary} />
-          <Text style={styles.lockTitle}>Super Admin only</Text>
+          <Text style={styles.lockTitle}>Super Admin / Sub Super Admin only</Text>
           <Text style={styles.mutedTxt}>Firm portal credentials are restricted.</Text>
         </View>
       </SafeAreaView>
@@ -90,7 +90,7 @@ export default function FirmCredentialsScreen() {
   }
 
   const unlock = async () => {
-    if (!pin.trim()) { setErr("Enter your Super Admin PIN"); return; }
+    if (!pin.trim()) { setErr("Enter your Admin PIN"); return; }
     setLoading(true); setErr("");
     try {
       const r = await api<{ firms: FirmCred[] }>("/admin/firm-credentials", {
@@ -131,7 +131,7 @@ export default function FirmCredentialsScreen() {
             <Ionicons name="shield-checkmark-outline" size={30} color={colors.brandPrimary} />
             <Text style={styles.pinTitle}>Verify your PIN</Text>
             <Text style={styles.mutedTxt}>
-              Enter your Super Admin login PIN to reveal firm portal credentials.
+              Enter your login PIN to reveal firm portal credentials.
             </Text>
             <TextInput
               style={styles.pinInput}

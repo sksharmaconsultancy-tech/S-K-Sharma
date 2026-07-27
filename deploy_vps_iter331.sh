@@ -11,6 +11,9 @@
 #     AUTO-SET on the Firm Master (matching labels enabled, missing heads
 #     created) so imported employee allowances flow into Compliance Salary
 #     under the same heads. Preview shows the heads before import.
+#   • FIRMS ID & PASSWORD — Sub Super Admins can now open it too
+#     (verified with their OWN login PIN).
+#   • RENAME — "Employee Master Data" → "All Employee Data" (sidebar/home).
 #   • Copy Last Month Salary + PDF font +1 (if not yet deployed via 330).
 # Run ON THE VPS as root/sksharma.
 set -e
