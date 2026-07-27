@@ -1051,7 +1051,10 @@ def build_compliance_register_pdf(
             ("SPAN", (0, 0), (0, 1)), ("SPAN", (1, 0), (1, 1)), ("SPAN", (2, 0), (2, 1)),
             ("SPAN", (3, 0), (3, 1)), ("SPAN", (9, 0), (9, 1)),
             ("SPAN", (21, 0), (21, 1)), ("SPAN", (22, 0), (22, 1)),
-            ("BACKGROUND", (4, 0), (8, 1), rl_colors.HexColor("#EAF1F7")),
+            # Iter 326 (user request) — heading highlighted like Format 2.
+            ("BACKGROUND", (0, 0), (-1, 1), rl_colors.HexColor("#0F3B5C")),
+            ("TEXTCOLOR", (0, 0), (-1, 1), rl_colors.white),
+            ("BACKGROUND", (4, 0), (8, 1), rl_colors.HexColor("#1B5480")),
             ("FONTNAME", (0, 0), (-1, 1), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, 1), 6),
             ("FONTNAME", (0, 2), (-1, -1), "Helvetica"),
@@ -1321,6 +1324,10 @@ def build_compliance_register_pdf_v2(
                          if cols_spec[i]["key"] in ("desig", "name")), 1)
             cols_spec[_pos:_pos] = [{"key": "uan"}, {"key": "pf_no"},
                                     {"key": "esi_no"}]
+        # Iter 326 (user request) — Signature column always present (at the
+        # end) even on layouts saved before it existed.
+        if "sign" not in {c["key"] for c in cols_spec}:
+            cols_spec.append({"key": "sign"})
     col_keys = [c["key"] for c in cols_spec]
     header = [str(c.get("heading") or _defaults[c["key"]][0]) for c in cols_spec]
     widths = [max(4.0, float(c.get("width") or _defaults[c["key"]][1]))

@@ -1840,3 +1840,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Bulk import: "state" alias added (template already had Present Add/City/State/Pin Code).
 - Dev super-admin PIN reset to 246810 (pin_hash bcrypt r10) for firm-credentials testing.
 - Deploy script deploy_vps_iter325.sh; temp_bundle kind=script now serves it.
+
+## Iter 326 — Format-1 heading highlight + Format-2 Signature column
+- Format 1 header rows now navy #0F3B5C + white text (like Format 2); MASTER band uses
+  lighter #1B5480 for distinction.
+- Format 2: "sign" column injected at end of saved layouts when missing (defaults had it).
