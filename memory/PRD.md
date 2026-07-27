@@ -1974,3 +1974,22 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   calc band width +1 when frozen. Trailing Imp/Calc/Diff/Alloc columns unchanged.
 - month_days note: 26 came from the UI field the admin set; auto-run uses default month days.
 - Deploy script deploy_vps_iter336.sh.
+
+## Iter 337 — Days Calculation Method (Freeze workflow), deploy 337
+- Firm Master salary_process: days_calc_method (attendance|gross_based|freeze_based|fixed|
+  attendance_gross_validation, default attendance), days_calc_fixed (26/30/31),
+  days_calc_rounding (0.5 half-day | 1 full-day ONLY — user directive).
+- server.py firm_stat_flags projection widened to full salary_process (was ot_allowed only —
+  caused method invisible); carries days_calc_* per firm.
+- _compute_compliance_run (use_imported_sheet): after first pass, row.attendance_days = sheet
+  days; non-attendance methods derive Compliance Days = Imported Gross ÷ Per-Day Gross where
+  Per-Day = first-pass gross_paid/present_days (exact for daily+monthly rated; fallback
+  monthly_gross/month_days), rounded half/full, clamped [0, month_days]; row recomputed via
+  compute_compliance_row with new days; row.compliance_days set; freeze diff block then
+  allocates remainder (OT/Other) and sets row.freeze_status matched|diff (|diff|<1).
+- firm-master.tsx: radio group + Fixed Days chips + rounding chips (Half/Full) with formula hint.
+- compliance-salary-run.tsx frozen grid: Att. Days · Comp. Days · Imp. Gross · Calc. Gross ·
+  Difference · Status (✓ Matched / ≠ Diff) · Diff. Alloc. columns + totals row cells.
+- E2E verified (Kankani, validation method): 21000@750/day → comp 28.0 ✓ Matched diff 0;
+  745/day → 28.0, diff 140 → Overtime; monthly 39000 → 14.0 ✓ Matched. Test data cleaned,
+  firm method restored to attendance. Deploy script deploy_vps_iter337.sh.

@@ -952,6 +952,76 @@ export default function FirmMasterScreen() {
                 Salary controls the Actual Salary Process. Turn a toggle ON to
                 edit its linked Process Days.
               </Text>
+              {/* Iter 337 (user request) — Days Calculation Method for the
+                  Compliance Salary import (Freeze Salary workflow). */}
+              <Text style={{ fontSize: 13, fontWeight: "800", color: "#1E3A8A", marginTop: 14, marginBottom: 6 }}>
+                Days Calculation Method (Salary Import / Freeze)
+              </Text>
+              <View style={{ gap: 6 }}>
+                {[
+                  { k: "attendance", l: "Attendance Days (from imported sheet — default)" },
+                  { k: "gross_based", l: "Gross Salary Based (days derived from imported gross)" },
+                  { k: "freeze_based", l: "Freeze Salary Based (days derived from frozen gross)" },
+                  { k: "fixed", l: "Fixed Days (26 / 30 / 31)" },
+                  { k: "attendance_gross_validation", l: "Attendance + Gross Validation (Recommended)" },
+                ].map((o) => {
+                  const on = (sp.days_calc_method || "attendance") === o.k;
+                  return (
+                    <Pressable
+                      key={o.k}
+                      onPress={() => updateSection("salary_process", { days_calc_method: o.k })}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                      testID={`fm-days-calc-${o.k}`}
+                    >
+                      <Ionicons name={on ? "radio-button-on" : "radio-button-off"} size={18} color={on ? "#2563EB" : "#94A3B8"} />
+                      <Text style={{ fontSize: 13, color: on ? "#1E3A8A" : "#334155", fontWeight: on ? "700" : "400" }}>{o.l}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <View style={{ flexDirection: "row", gap: 18, marginTop: 10, flexWrap: "wrap" }}>
+                {(sp.days_calc_method || "attendance") === "fixed" ? (
+                  <View>
+                    <Text style={{ fontSize: 12, color: "#64748B", marginBottom: 4 }}>Fixed Days</Text>
+                    <View style={{ flexDirection: "row", gap: 6 }}>
+                      {[26, 30, 31].map((d) => {
+                        const on = Number(sp.days_calc_fixed || 26) === d;
+                        return (
+                          <Pressable key={d} onPress={() => updateSection("salary_process", { days_calc_fixed: d })}
+                            style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, borderWidth: 1,
+                                     borderColor: on ? "#2563EB" : "#CBD5E1", backgroundColor: on ? "#DBEAFE" : "#fff" }}>
+                            <Text style={{ fontSize: 13, fontWeight: "700", color: on ? "#1D4ED8" : "#334155" }}>{d}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ) : null}
+                {(sp.days_calc_method || "attendance") !== "attendance" ? (
+                  <View>
+                    <Text style={{ fontSize: 12, color: "#64748B", marginBottom: 4 }}>Round Compliance Days to</Text>
+                    <View style={{ flexDirection: "row", gap: 6 }}>
+                      {[{ v: 0.5, l: "Half Day (0.50)" }, { v: 1, l: "Full Day (1)" }].map((o) => {
+                        const on = Number(sp.days_calc_rounding ?? 0.5) === o.v;
+                        return (
+                          <Pressable key={o.l} onPress={() => updateSection("salary_process", { days_calc_rounding: o.v })}
+                            style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, borderWidth: 1,
+                                     borderColor: on ? "#2563EB" : "#CBD5E1", backgroundColor: on ? "#DBEAFE" : "#fff" }}>
+                            <Text style={{ fontSize: 13, fontWeight: "700", color: on ? "#1D4ED8" : "#334155" }}>{o.l}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ) : null}
+              </View>
+              {(sp.days_calc_method || "attendance") !== "attendance" ? (
+                <Text style={styles.linkHint}>
+                  Compliance Days = Imported Gross ÷ (Master Monthly Gross ÷ Month Days).
+                  Statutory (PF/ESIC/PT) is recalculated on the derived days; any remaining
+                  difference vs the imported gross goes to Overtime / Other Allowance.
+                </Text>
+              ) : null}
               {/* Iter 98 — OT rate basis for Salary Process (Actual) */}
               <Text style={styles.subLbl}>OT Calculation On</Text>
               <View style={{ flexDirection: "row", gap: 8 }}>

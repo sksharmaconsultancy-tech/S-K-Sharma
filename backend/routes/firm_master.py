@@ -150,6 +150,14 @@ def _empty_master(company_id: str, company_name: str = "") -> Dict[str, Any]:
             "ot_allowed": True,
             "online_process_days": 0,
             "offline_process_days": 0,
+            # Iter 337 (user request) — Days Calculation Method for the
+            # Compliance Salary import: attendance | gross_based |
+            # freeze_based | fixed | attendance_gross_validation.
+            "days_calc_method": "attendance",
+            "days_calc_fixed": 26,       # used when method = fixed
+            # Iter 337 (user) — Compliance Days round to HALF day (0.5) or
+            # FULL day (1) only.
+            "days_calc_rounding": 0.5,
         },
         "leave_policy": {
             "cl_pl_applicable": False,

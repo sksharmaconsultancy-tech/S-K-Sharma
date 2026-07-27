@@ -2011,9 +2011,11 @@ export default function ComplianceSalaryRunScreen() {
                       {/* Iter 310 — Freeze Salary column headers. */}
                       {hasFrz ? (
                         <>
-                          {["Imp. Gross", "Calc. Gross", "Difference"].map((l) => (
+                          {/* Iter 337 — Attendance vs Compliance Days + Status */}
+                          {["Att. Days", "Comp. Days", "Imp. Gross", "Calc. Gross", "Difference"].map((l) => (
                             <Text key={l} numberOfLines={1} style={[styles.tblCell, { width: colW.num }, styles.tblHeaderTxt, { textAlign: "right", backgroundColor: "#5B21B6" }]}>{l}</Text>
                           ))}
+                          <Text numberOfLines={1} style={[styles.tblCell, { width: 90 }, styles.tblHeaderTxt, { backgroundColor: "#5B21B6" }]}>Status</Text>
                           <Text numberOfLines={1} style={[styles.tblCell, { width: 120 }, styles.tblHeaderTxt, { backgroundColor: "#5B21B6" }]}>Diff. Alloc.</Text>
                         </>
                       ) : null}
@@ -2181,9 +2183,15 @@ export default function ComplianceSalaryRunScreen() {
                     {/* Iter 310 — Freeze Salary cells (imported runs). */}
                     {hasFrz ? (
                       <>
+                        {/* Iter 337 — Attendance vs Compliance Days + Status */}
+                        <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{(r as any).attendance_days != null ? String((r as any).attendance_days) : "—"}</Text>
+                        <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700", color: "#5B21B6" }]}>{(r as any).compliance_days != null ? String((r as any).compliance_days) : "—"}</Text>
                         <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{(r as any).imported_gross != null ? fmtInr((r as any).imported_gross) : "—"}</Text>
                         <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{(r as any).calculated_gross != null ? fmtInr((r as any).calculated_gross) : "—"}</Text>
                         <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700", color: Number((r as any).difference || 0) > 0 ? "#B45309" : colors.onSurfaceSecondary }]}>{(r as any).difference != null ? fmtInr((r as any).difference) : "—"}</Text>
+                        <Text style={[styles.tblCell, { width: 90, fontWeight: "800", color: (r as any).freeze_status === "matched" ? "#15803D" : ((r as any).imported_gross != null ? "#B45309" : colors.onSurfaceTertiary) }]} numberOfLines={1}>
+                          {(r as any).imported_gross == null ? "—" : ((r as any).freeze_status === "matched" ? "✓ Matched" : "≠ Diff")}
+                        </Text>
                         <Text style={[styles.tblCell, { width: 120, fontWeight: "700", color: "#5B21B6" }]} numberOfLines={1}>{(r as any).difference_allocation_head || "—"}</Text>
                       </>
                     ) : null}
@@ -2235,9 +2243,12 @@ export default function ComplianceSalaryRunScreen() {
                         {/* Iter 310 — Freeze Salary totals. */}
                         {hasFrz ? (
                           <>
+                            {num((run.rows || []).reduce((s, r) => s + (Number((r as any).attendance_days) || 0), 0))}
+                            {num((run.rows || []).reduce((s, r) => s + (Number((r as any).compliance_days) || 0), 0))}
                             {num((run.totals as any)?.imported_gross)}
                             {num((run.totals as any)?.calculated_gross)}
                             {num((run.totals as any)?.difference)}
+                            <Text style={[styles.tblCell, { width: 90 }]}>—</Text>
                             <Text style={[styles.tblCell, { width: 120 }]}>—</Text>
                           </>
                         ) : null}

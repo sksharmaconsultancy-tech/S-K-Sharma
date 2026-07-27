@@ -15529,7 +15529,7 @@ async def _compute_compliance_run(
         async for fm in db.firm_masters.find(
             {"company_id": {"$in": company_ids}},
             {"_id": 0, "company_id": 1, "epf": 1, "esi": 1,
-             "salary_process.ot_allowed": 1, "allowances": 1, "deductions": 1},
+             "salary_process": 1, "allowances": 1, "deductions": 1},
         ):
             _fm_allow = fm.get("allowances") or {}
             _fm_ded = fm.get("deductions") or {}
@@ -15562,6 +15562,10 @@ async def _compute_compliance_run(
                 "ded_mask": ded_mask if any(bool(v) for v in _fm_ded.values()) else None,
                 # Iter 310 — Freeze Salary difference allocation gate.
                 "ot_allowed": bool((fm.get("salary_process") or {}).get("ot_allowed")),
+                # Iter 337 (user request) — Days Calculation Method.
+                "days_calc_method": str((fm.get("salary_process") or {}).get("days_calc_method") or "attendance"),
+                "days_calc_fixed": (fm.get("salary_process") or {}).get("days_calc_fixed") or 26,
+                "days_calc_rounding": (fm.get("salary_process") or {}).get("days_calc_rounding", 0.5),
             }
             # Iter 142 — Firm Master OT gate for compliance-salary rows.
             _v = (fm.get("salary_process") or {}).get("ot_allowed")
@@ -15735,6 +15739,65 @@ async def _compute_compliance_run(
             firm_esic_enabled=_ff["esic"],
             firm_pt={"state": _fcp.get("pt_state"), "slabs": _fcp.get("pt_slabs")},
         )
+        # Iter 337 (user request) — DAYS CALCULATION METHOD (Firm Master →
+        # Payroll Settings). For imported (Freeze) runs the Compliance Days
+        # can be DERIVED from the imported gross:
+        #   Per-Day Gross = Master Monthly Gross ÷ Month Days
+        #   Compliance Days = Imported Gross ÷ Per-Day Gross (rounded to
+        #   0.50 / 0.25 per firm policy) — statutory is then recalculated
+        #   on those days; the remaining difference lands in OT / Other
+        #   Allowance via the Freeze block below.
+        if payload.use_imported_sheet and _am is not None:
+            row["attendance_days"] = round(float(_am.get("present_days") or 0), 2)
+            _dcm = firm_stat_flags.get(emp.get("company_id")) or {}
+            _method = str(_dcm.get("days_calc_method") or "attendance")
+            _imp_g0 = round(float(_am.get("gross_earning") or 0), 2)
+            _new_days = None
+            if _method == "fixed":
+                if row["attendance_days"] > 0 or _imp_g0 > 0:
+                    _new_days = float(_dcm.get("days_calc_fixed") or 26)
+            elif _method in ("gross_based", "freeze_based",
+                             "attendance_gross_validation") and _imp_g0 > 0:
+                # Per-Day Gross — from the first pass (exact for both
+                # daily-rated and monthly-rated employees); falls back to
+                # Master Monthly Gross ÷ Month Days.
+                _g0 = float(row.get("gross_paid") or 0)
+                _pd0 = float(row.get("present_days") or 0)
+                _mg0 = float(row.get("monthly_gross") or 0)
+                _per_day = (_g0 / _pd0) if (_g0 > 0 and _pd0 > 0) else (
+                    (_mg0 / float(month_days or 1)) if _mg0 > 0 else 0.0)
+                if _per_day > 0:
+                    _rawd = _imp_g0 / _per_day
+                    try:
+                        _step = float(_dcm.get("days_calc_rounding") or 0.5)
+                    except (TypeError, ValueError):
+                        _step = 0.5
+                    # User directive — days land on HALF or FULL days only.
+                    _step = 1.0 if _step >= 1 else 0.5
+                    _new_days = round(_rawd / _step) * _step
+            if _new_days is not None:
+                _new_days = max(0.0, min(round(_new_days, 2), float(month_days)))
+                if abs(_new_days - float(row.get("present_days") or 0)) > 1e-9:
+                    _st2 = dict(stats)
+                    _st2["present_days"] = _new_days
+                    _st2["effective_present"] = _new_days
+                    _st2["half_days"] = 0
+                    _st2["duty_hours"] = round(
+                        _new_days * float(merged_pol.get("full_day_hours") or 8.0), 2)
+                    row = compute_compliance_row(
+                        emp, merged_pol, int(month_days), _st2,
+                        company_structure_pct=payload.structure_pct,
+                        statutory_cfg=effective_statutory,
+                        firm_pf_enabled=_ff["pf"],
+                        firm_esic_enabled=_ff["esic"],
+                        firm_pt={"state": _fcp.get("pt_state"),
+                                 "slabs": _fcp.get("pt_slabs")},
+                    )
+                    row["attendance_days"] = round(
+                        float(_am.get("present_days") or 0), 2)
+                row["compliance_days"] = _new_days
+            else:
+                row["compliance_days"] = round(float(row.get("present_days") or 0), 2)
         # Iter 100 — Attendance Master "Other Deduction" (Advance/TDS etc.)
         # Iter 328 — client sheet's Adv + "Other Less" combine into Other
         # Deduction; sheet TDS overrides the master TDS.
@@ -15860,6 +15923,8 @@ async def _compute_compliance_run(
                 row["calculated_gross"] = _calc_g
                 row["difference"] = _diff_g
                 row["difference_allocation_head"] = ""
+                # Iter 337 — validation status for the grid (✓ Matched).
+                row["freeze_status"] = "matched" if abs(_diff_g) < 1 else "diff"
                 if _diff_g > 0:
                     _frz_ot = (firm_stat_flags.get(emp.get("company_id"))
                                or {}).get("ot_allowed")
