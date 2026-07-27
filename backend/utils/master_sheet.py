@@ -40,6 +40,7 @@ CANONICAL_FIELDS: Dict[str, Dict[str, Any]] = {
         "synonyms": [
             "employee code", "emp code", "emp_code", "empcode", "employee id",
             "emp id", "empno", "code", "emp no", "employee number",
+            "em_code", "em code",
         ],
     },
     "name": {
@@ -47,6 +48,7 @@ CANONICAL_FIELDS: Dict[str, Dict[str, Any]] = {
         "required": True,
         "synonyms": [
             "name", "employee name", "emp name", "full name", "employee",
+            "em_name", "em name",
         ],
     },
     "doj": {
@@ -105,7 +107,7 @@ CANONICAL_FIELDS: Dict[str, Dict[str, Any]] = {
         "required": True,
         "synonyms": [
             "gross salary", "gross", "salary", "monthly salary", "ctc",
-            "gross pay", "gross amount", "monthly gross",
+            "gross pay", "gross amount", "monthly gross", "employee salary",
         ],
     },
     "advance": {
@@ -149,41 +151,49 @@ def build_master_sheet_xlsx(
     month: str,   # "YYYY-MM"
     employees: List[Dict[str, Any]],
     attendance_days_by_user: Optional[Dict[str, int]] = None,
+    rates_by_user: Optional[Dict[str, Dict[str, float]]] = None,
 ) -> bytes:
-    """Return XLSX bytes for a pre-populated master sheet.
+    """Return XLSX bytes for the client attendance sheet.
 
-    Blank (client-fill) columns: Gross Salary, Advance, TDS, Notes.
+    Iter 328 (user request) — EXACT client format so the returned sheet
+    imports straight into the Compliance Salary process:
+    EM_PFNO · UAN_NO · EM_ESINO · EM_CODE · EM_NAME · EM_FNAME · EM_DESG ·
+    EM_DOJ · EM_RESINGDATE · EM_RATEM · EM_HRA · EM_CONV · EM_TOT ·
+    Present Days · OVER_TIME · Adv · TDS · Other Less · Employee Salary.
+    Client fills: Present Days, OVER_TIME, Adv, TDS, Other Less,
+    Employee Salary.
     """
     wb = Workbook()
     ws = wb.active
-    ws.title = "Master Sheet"
+    ws.title = "Attendance"
 
+    N_COLS = 19
     # Title band
-    ws.merge_cells("A1:K1")
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=N_COLS)
     cell = ws["A1"]
-    cell.value = f"{company_name}  ·  Master Salary Sheet  ·  {month}"
+    cell.value = f"{company_name}  ·  Attendance / Salary Sheet  ·  {month}"
     cell.font = Font(name="Calibri", size=14, bold=True, color="FFFFFF")
     cell.fill = PatternFill("solid", fgColor=BRAND_TEAL)
     cell.alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 32
 
-    ws.merge_cells("A2:K2")
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=N_COLS)
     sub = ws["A2"]
     sub.value = (
-        "Please fill Gross Salary, Advance and TDS columns for each employee, "
-        "then email the completed sheet back to us for processing."
+        "Please fill Present Days, OVER_TIME, Adv, TDS, Other Less and "
+        "Employee Salary for each employee, then email the completed sheet "
+        "back to us for processing."
     )
     sub.font = Font(name="Calibri", size=9, italic=True, color=BRAND_INK)
     sub.fill = PatternFill("solid", fgColor=BG_SOFT)
     sub.alignment = Alignment(horizontal="center", vertical="center")
 
-    # Header row
-    # Iter 323 (user feedback) — Attendance Master Sheet must carry the
-    # exact columns the Salary Compliance / Salary Actual import expects.
+    # Header row — exact client format (Iter 328).
     headers = [
-        "Employee Code", "Employee Name", "Date of Joining", "Department",
-        "Designation", "Employee Group",
-        "Days Worked", "Gross Salary", "Advance", "TDS", "Notes",
+        "EM_PFNO", "UAN_NO", "EM_ESINO", "EM_CODE", "EM_NAME", "EM_FNAME",
+        "EM_DESG", "EM_DOJ", "EM_RESINGDATE", "EM_RATEM", "EM_HRA",
+        "EM_CONV", "EM_TOT", "Present Days", "OVER_TIME", "Adv", "TDS",
+        "Other Less", "Employee Salary",
     ]
     thin = Side(border_style="thin", color=LINE)
     for idx, h in enumerate(headers, start=1):
@@ -194,38 +204,59 @@ def build_master_sheet_xlsx(
         c.border = Border(top=thin, bottom=thin, left=thin, right=thin)
     ws.row_dimensions[3].height = 28
 
+    def _resign_date(emp: Dict[str, Any]) -> str:
+        for k in ("exit_date", "resign_date", "date_of_leaving", "leaving_date"):
+            v = str(emp.get(k) or "").strip()
+            if v:
+                return v[:10]
+        return ""
+
     # Data rows
     for r, emp in enumerate(employees, start=4):
         days_worked = (attendance_days_by_user or {}).get(emp.get("user_id"))
+        rt = (rates_by_user or {}).get(emp.get("user_id")) or {}
+        basic = float(rt.get("basic") or 0)
+        hra = float(rt.get("hra") or 0)
+        conv = float(rt.get("conv") or 0)
+        other = float(rt.get("other") or 0)
+        tot = round(basic + hra + conv + other, 2)
         row = [
+            emp.get("pf_no") or "",
+            emp.get("uan_no") or "",
+            emp.get("esi_ip_no") or "",
             emp.get("employee_code") or "",
             emp.get("name") or "",
-            (emp.get("doj") or "")[:10],
-            emp.get("department") or "",
+            emp.get("father_name") or "",
             emp.get("designation") or emp.get("position") or "",
-            emp.get("employee_group") or emp.get("employee_type") or "",
+            (emp.get("doj") or "")[:10],
+            _resign_date(emp),
+            basic or "",
+            hra or "",
+            conv or "",
+            tot or "",
             days_worked if days_worked is not None else "",
-            "",  # Gross Salary — blank
-            "",  # Advance — blank
-            "",  # TDS — blank
-            "",  # Notes — blank
+            "",  # OVER_TIME — client fills
+            "",  # Adv — client fills
+            "",  # TDS — client fills
+            "",  # Other Less — client fills
+            "",  # Employee Salary — client fills
         ]
         for cidx, val in enumerate(row, start=1):
             c = ws.cell(row=r, column=cidx, value=val)
-            c.alignment = Alignment(horizontal="left" if cidx <= 6 else "right",
+            c.alignment = Alignment(horizontal="left" if cidx <= 9 else "right",
                                     vertical="center")
             c.border = Border(top=thin, bottom=thin, left=thin, right=thin)
             if r % 2 == 0:
                 c.fill = PatternFill("solid", fgColor=BG_SOFT)
 
     # Column widths
-    widths = [16, 30, 14, 18, 18, 14, 12, 14, 12, 12, 26]
+    widths = [14, 14, 14, 10, 26, 22, 16, 12, 14, 10, 10, 10, 10, 11, 11, 9, 9, 11, 14]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
     # Footer band
     footer_row = 4 + len(employees) + 1
-    ws.merge_cells(start_row=footer_row, start_column=1, end_row=footer_row, end_column=11)
+    ws.merge_cells(start_row=footer_row, start_column=1, end_row=footer_row, end_column=N_COLS)
     fc = ws.cell(row=footer_row, column=1)
     fc.value = f"Generated on {datetime.now(timezone.utc).strftime('%d %b %Y')}  ·  {len(employees)} employees"
     fc.font = Font(size=8, italic=True, color=BRAND_INK)

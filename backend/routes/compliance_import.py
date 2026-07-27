@@ -47,15 +47,19 @@ def _norm_header(h) -> str:
 
 
 HEADER_MAP = {
-    "code": {"empid", "employeecode", "empcode", "code", "empno", "employeeid", "employeeno"},
-    "pf_no": {"pfno", "pfnumber"},
+    "code": {"empid", "employeecode", "empcode", "code", "empno", "employeeid", "employeeno", "emcode"},
+    "pf_no": {"pfno", "pfnumber", "empfno"},
     "uan_no": {"uan", "uanno", "uannumber"},
-    "esic_no": {"esicno", "esic", "esiipno", "ipno", "esino", "esicipno"},
-    "name": {"name", "employeename", "empname"},
+    "esic_no": {"esicno", "esic", "esiipno", "ipno", "esino", "esicipno", "emesino"},
+    "name": {"name", "employeename", "empname", "emname"},
     "present_days": {"presentdays", "present", "presentday", "payabledays", "days", "presentdaysmanual"},
     "deduction_head": {"deductionhead", "otherdeductionhead", "dedhead", "deductionshead"},
-    "deduction_amount": {"deductionamount", "advancededuction", "otherdeduction", "dedamount", "advance", "deduction"},
-    "gross_earning": {"grossearning", "gross", "grossearnings", "grossearned"},
+    "deduction_amount": {"deductionamount", "advancededuction", "dedamount", "advance", "deduction", "adv"},
+    "gross_earning": {"grossearning", "gross", "grossearnings", "grossearned", "employeesalary"},
+    # Iter 328 (user format) — extra columns on the client attendance sheet.
+    "tds": {"tds", "tdsamount"},
+    "other_less": {"otherless", "otherdeduction", "othded"},
+    "ot_hours": {"overtime", "othours", "ot", "otwork", "overtimehours"},
 }
 
 
@@ -127,7 +131,8 @@ def _parse_sheet(content: bytes, filename: str) -> list:
         row = {}
         for field, j in col_idx.items():
             v = r.iloc[j] if j < len(r) else None
-            if field in ("present_days", "deduction_amount", "gross_earning"):
+            if field in ("present_days", "deduction_amount", "gross_earning",
+                         "tds", "other_less", "ot_hours"):
                 row[field] = _to_num(v)
             else:
                 row[field] = _cell_str(v)
@@ -208,6 +213,10 @@ async def _store_import(admin: dict, company_id: str, month: str,
             "deduction_head": row.get("deduction_head") or "",
             "deduction_amount": float(row.get("deduction_amount") or 0),
             "gross_earning": float(row.get("gross_earning") or 0),
+            # Iter 328 (client attendance sheet) — extra fill-in columns.
+            "tds": float(row.get("tds") or 0),
+            "other_less": float(row.get("other_less") or 0),
+            "ot_hours": float(row.get("ot_hours") or 0),
         })
 
     # Replace the whole (firm, month) set on every import.

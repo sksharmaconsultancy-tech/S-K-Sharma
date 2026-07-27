@@ -65,9 +65,13 @@ export default function FirmCredentialsScreen() {
   // Iter 325 (user request) — Excel-sheet view with tap-to-copy cells.
   const [copied, setCopied] = useState("");
   const [showPw, setShowPw] = useState(false);
+  // Iter 328 (user report) — opening this page from the search menu could
+  // "click through" onto a cell and copy an email/value unintentionally.
+  // Ignore any copy in the first moments after the sheet mounts.
+  const mountedAt = React.useRef(Date.now());
 
   const copyCell = (key: string, v: string) => {
-    if (!v) return;
+    if (!v || Date.now() - mountedAt.current < 900) return;
     copyText(v);
     setCopied(key);
     setTimeout(() => setCopied((c) => (c === key ? "" : c)), 1200);
@@ -169,43 +173,44 @@ export default function FirmCredentialsScreen() {
               </Pressable>
               <Text style={styles.mutedTxt}>Tap any cell to copy its value</Text>
             </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator>
-              <View>
-                <View style={styles.shRow}>
-                  {[
-                    ["S.No", 46], ["Firm Name", 230], ["City", 100],
-                    ["PF Code", 145], ["PF Login Id", 130], ["PF Password", 130],
-                    ["ESIC Code", 150], ["ESIC Login Id", 130], ["ESIC Password", 130],
-                  ].map(([h, w]) => (
-                    <Text key={h as string} style={[styles.shCell, { width: w as number }]}>{h}</Text>
-                  ))}
-                </View>
+            {/* Iter 328 (user request) — ONE PAGE: flexible columns, no
+                left/right scrolling. */}
+            <View>
+              <View style={styles.shRow}>
+                {[
+                  ["S.No", 0.5], ["Firm Name", 2.2], ["City", 1],
+                  ["PF Code", 1.4], ["PF Login Id", 1.3], ["PF Password", 1.3],
+                  ["ESIC Code", 1.5], ["ESIC Login Id", 1.3], ["ESIC Password", 1.3],
+                ].map(([h, f]) => (
+                  <Text key={h as string} style={[styles.shCell, { flex: f as number }]}>{h}</Text>
+                ))}
+              </View>
                 {visible.map((f, i) => {
                   const cells: [string, string, number, boolean][] = [
-                    ["name", f.firm_name || "", 230, false],
-                    ["city", f.city || "", 100, false],
-                    ["pfc", f.epf_code || "", 145, false],
-                    ["pfu", f.epf_user_id || "", 130, false],
-                    ["pfp", f.epf_password || "", 130, true],
-                    ["esc", f.esi_no || "", 150, false],
-                    ["esu", f.esi_user_id || "", 130, false],
-                    ["esp", f.esi_password || "", 130, true],
+                    ["name", f.firm_name || "", 2.2, false],
+                    ["city", f.city || "", 1, false],
+                    ["pfc", f.epf_code || "", 1.4, false],
+                    ["pfu", f.epf_user_id || "", 1.3, false],
+                    ["pfp", f.epf_password || "", 1.3, true],
+                    ["esc", f.esi_no || "", 1.5, false],
+                    ["esu", f.esi_user_id || "", 1.3, false],
+                    ["esp", f.esi_password || "", 1.3, true],
                   ];
                   return (
                     <View key={f.company_id} style={[styles.sdRow, i % 2 === 1 && styles.sdRowAlt]}>
-                      <Text style={[styles.sdTxt, { width: 46, textAlign: "center", paddingVertical: 8 }]}>{i + 1}</Text>
-                      {cells.map(([k, v, w, secret]) => {
+                      <Text style={[styles.sdTxt, { flex: 0.5, textAlign: "center", paddingVertical: 8 }]}>{i + 1}</Text>
+                      {cells.map(([k, v, fx, secret]) => {
                         const ck = `${f.company_id}:${k}`;
                         return (
                           <Pressable
                             key={k}
-                            style={[styles.sdCell, { width: w }]}
+                            style={[styles.sdCell, { flex: fx }]}
                             onPress={() => copyCell(ck, v)}
                           >
                             {copied === ck ? (
                               <Text style={styles.copiedTxt}>✓ Copied</Text>
                             ) : (
-                              <Text style={styles.sdTxt} numberOfLines={1}>
+                              <Text style={styles.sdTxt} numberOfLines={2}>
                                 {!v ? "—" : secret && !showPw ? "••••••••" : v}
                               </Text>
                             )}
@@ -215,8 +220,7 @@ export default function FirmCredentialsScreen() {
                     </View>
                   );
                 })}
-              </View>
-            </ScrollView>
+            </View>
             {/* Extra portal logins (non EPF/ESIC) kept below the sheet */}
             {visible.some((f) => (f.other_logins || []).length) ? (
               <View style={{ marginTop: 14 }}>

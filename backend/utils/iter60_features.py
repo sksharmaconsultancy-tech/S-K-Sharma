@@ -251,8 +251,41 @@ async def _run_attendance_email_batch(
         # Build XLSX
         employees = await db.users.find(
             {"role": "employee", "company_id": c["company_id"]},
-            {"_id": 0, "user_id": 1, "employee_code": 1, "name": 1, "doj": 1, "department": 1},
+            {"_id": 0, "user_id": 1, "employee_code": 1, "name": 1, "doj": 1, "department": 1,
+             "designation": 1, "position": 1, "pf_no": 1, "uan_no": 1,
+             "esi_ip_no": 1, "father_name": 1,
+             "exit_date": 1, "resign_date": 1, "date_of_leaving": 1,
+             "leaving_date": 1, "employment_status": 1, "disabled": 1, "active": 1},
         ).to_list(2000)
+
+        # Iter 328 — ACTIVE employees only (exit before target month, or
+        # flagged disabled/inactive without a date, are excluded).
+        def _left_before(e: dict) -> bool:
+            dates = [str(e.get(k) or "").strip()[:7] for k in
+                     ("exit_date", "resign_date", "date_of_leaving", "leaving_date")]
+            dates = [d for d in dates if len(d) == 7 and d[4] == "-"]
+            if dates:
+                return min(dates) < target_month
+            return (e.get("disabled") is True or e.get("active") is False
+                    or str(e.get("employment_status") or "").lower() in
+                    ("exited", "resigned", "terminated", "inactive", "left"))
+        employees = [e for e in employees if not _left_before(e)]
+
+        # Iter 328 — master rates from the latest compliance run.
+        rates_by_user: Dict[str, Dict[str, float]] = {}
+        _lr = await db.compliance_salary_runs.find_one(
+            {"company_id": c["company_id"]}, {"_id": 0, "rows": 1},
+            sort=[("created_at", -1)])
+        for _r in (_lr or {}).get("rows") or []:
+            if _r.get("user_id"):
+                rates_by_user[_r["user_id"]] = {
+                    "basic": float(_r.get("basic_master") or 0),
+                    "hra": float(_r.get("hra_master") or 0),
+                    "conv": float(_r.get("conveyance_master") or 0),
+                    "other": (float(_r.get("medical_master") or 0)
+                              + float(_r.get("special_master") or 0)
+                              + float(_r.get("others_master") or 0)),
+                }
         # Attendance snapshot
         try:
             y, m = int(target_month[:4]), int(target_month[5:7])
@@ -277,6 +310,7 @@ async def _run_attendance_email_batch(
             month=target_month,
             employees=employees,
             attendance_days_by_user=days_by_user,
+            rates_by_user=rates_by_user,
         )
         # Iter 312 (user directive) — Reportname_Group_MonthYear.ext
         try:

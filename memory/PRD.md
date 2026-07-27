@@ -1845,3 +1845,23 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Format 1 header rows now navy #0F3B5C + white text (like Format 2); MASTER band uses
   lighter #1B5480 for distinction.
 - Format 2: "sign" column injected at end of saved layouts when missing (defaults had it).
+
+## Iter 328-329 — Client attendance sheet format, calc audit, workspace sync, deploy 329
+- build_master_sheet_xlsx → CLIENT FORMAT (EM_PFNO/UAN_NO/EM_ESINO/EM_CODE/EM_NAME/EM_FNAME/
+  EM_DESG/EM_DOJ/EM_RESINGDATE/EM_RATEM/EM_HRA/EM_CONV/EM_TOT/Present Days/OVER_TIME/Adv/TDS/
+  Other Less/Employee Salary), rates_by_user prefilled via server._compliance_rates_by_user
+  (latest compliance run *_master). Email batch (iter60_features) enriched + active-only.
+- compliance_import HEADER_MAP: EM_* aliases + new fields tds/other_less/ot_hours stored on
+  compliance_import_entries. Run consumption: Adv+other_less → other_deduction ("Advance/Other");
+  imported TDS overrides master TDS AFTER firm ded_mask (mask used to zero it). E2E verified
+  (upload base64 JSON — NOT multipart — /admin/compliance-import/upload; run row: days 25,
+  other_ded 600, tds 200).
+- CALC AUDIT (user request): compute_compliance_row ZERO-DAY GUARD — 0 present + 0 duty + 0 OT
+  → all earned heads and monthly_gross forced 0 (fixed hra_amount leaked before). Format-2
+  earnings columns switched from *_master to EARNED so columns sum to TOTAL. All 127 rows
+  verified: earnings=gross, ded=total, net=gross-ded.
+- firm-credentials: one-page flex table (no horizontal scroll) + 900ms mount guard against
+  click-through copy from the search menu.
+- firm-select gate now uses switchCompany (lock-override) so the workspace firm always lands
+  in the global header picker; sign-out modal "Select Another Firm" already opens /firm-select.
+- Deploy script deploy_vps_iter329.sh (temp_bundle kind=script).

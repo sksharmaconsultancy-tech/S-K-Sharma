@@ -33,7 +33,7 @@ import { radius, spacing } from "@/src/theme";
 export default function FirmSelectScreen() {
   const router = useRouter();
   const { user, loading, logout } = useAuth();
-  const { companies, companiesLoading, setSelectedCompanyId, selectedCompanyId } =
+  const { companies, companiesLoading, switchCompany, selectedCompanyId } =
     useSelectedCompany();
   const [query, setQuery] = useState("");
   const { width } = useWindowDimensions();
@@ -80,7 +80,11 @@ export default function FirmSelectScreen() {
 
   const handleSelect = (cid: string) => {
     manualPickRef.current = true;
-    setSelectedCompanyId(cid);
+    // Iter 329 (user request) — the firm picked on this workspace gate must
+    // ALWAYS land in the global Firm Selection (header picker), even when a
+    // previous session lock exists. switchCompany overrides the lock and
+    // persists the firm for the next login.
+    switchCompany(cid);
     router.replace("/");
   };
 

@@ -15720,12 +15720,16 @@ async def _compute_compliance_run(
             firm_pt={"state": _fcp.get("pt_state"), "slabs": _fcp.get("pt_slabs")},
         )
         # Iter 100 — Attendance Master "Other Deduction" (Advance/TDS etc.)
-        if _am and float(_am.get("deduction_amount") or 0) > 0:
-            _ded = round(float(_am.get("deduction_amount") or 0), 2)
-            row["other_deduction_head"] = _am.get("deduction_head") or "Other"
-            row["other_deduction"] = _ded
-            row["total_deduction"] = round(float(row.get("total_deduction") or 0) + _ded, 2)
-            row["net"] = round(float(row.get("net") or 0) - _ded, 2)
+        # Iter 328 — client sheet's Adv + "Other Less" combine into Other
+        # Deduction; sheet TDS overrides the master TDS.
+        _am_ded = round(float((_am or {}).get("deduction_amount") or 0)
+                        + float((_am or {}).get("other_less") or 0), 2)
+        if _am and _am_ded > 0:
+            row["other_deduction_head"] = _am.get("deduction_head") or (
+                "Advance/Other" if float(_am.get("other_less") or 0) > 0 else "Advance")
+            row["other_deduction"] = _am_ded
+            row["total_deduction"] = round(float(row.get("total_deduction") or 0) + _am_ded, 2)
+            row["net"] = round(float(row.get("net") or 0) - _am_ded, 2)
         # Iter 297 — reprocess also keeps the manually ENTERED "Other
         # Deduction" from the previous run (default is 0 → any value was
         # typed by the admin).
@@ -15793,6 +15797,16 @@ async def _compute_compliance_run(
                     float(row.get("total_deduction") or 0) - _removed, 2)
                 row["net"] = round(float(row.get("net") or 0) + _removed, 2)
             row["enabled_deductions"] = sorted(_ded_set)
+
+        # Iter 328 — imported sheet TDS is authoritative: applied AFTER the
+        # firm deduction mask so an explicit TDS on the client sheet always
+        # lands on the run.
+        if _am and float(_am.get("tds") or 0) > 0:
+            _tds_new = round(float(_am.get("tds") or 0), 2)
+            _tds_delta = round(_tds_new - float(row.get("tds") or 0), 2)
+            row["tds"] = _tds_new
+            row["total_deduction"] = round(float(row.get("total_deduction") or 0) + _tds_delta, 2)
+            row["net"] = round(float(row.get("net") or 0) - _tds_delta, 2)
 
         # Iter 85 — DOJ / Exit-date cap for Compliance Salary. Same idea
         # as Actual Salary: cap present_days at the number of days the
@@ -18944,6 +18958,28 @@ async def ot_report_xlsx(
     )
 
 
+async def _compliance_rates_by_user(company_id: str) -> Dict[str, Dict[str, float]]:
+    """Iter 328 — master rates (Basic/HRA/Conv/Other) per employee from the
+    latest compliance run of the firm, for prefilling the client sheet."""
+    rates: Dict[str, Dict[str, float]] = {}
+    _lr = await db.compliance_salary_runs.find_one(
+        {"company_id": company_id}, {"_id": 0, "rows": 1},
+        sort=[("created_at", -1)])
+    for _r in (_lr or {}).get("rows") or []:
+        uid = _r.get("user_id")
+        if not uid:
+            continue
+        rates[uid] = {
+            "basic": float(_r.get("basic_master") or 0),
+            "hra": float(_r.get("hra_master") or 0),
+            "conv": float(_r.get("conveyance_master") or 0),
+            "other": (float(_r.get("medical_master") or 0)
+                      + float(_r.get("special_master") or 0)
+                      + float(_r.get("others_master") or 0)),
+        }
+    return rates
+
+
 async def _generate_attendance_sheet_impl(
     company_id: str, month: str, admin: dict, group_id: Optional[str] = None,
 ):
@@ -18968,6 +19004,7 @@ async def _generate_attendance_sheet_impl(
         query,
         {"_id": 0, "user_id": 1, "employee_code": 1, "name": 1, "doj": 1, "department": 1,
          "designation": 1, "position": 1, "employee_group": 1, "employee_type": 1,
+         "pf_no": 1, "uan_no": 1, "esi_ip_no": 1, "father_name": 1,
          "exit_date": 1, "resign_date": 1, "date_of_leaving": 1,
          "leaving_date": 1, "employment_status": 1, "disabled": 1, "active": 1},
     ).to_list(2000)
@@ -18975,6 +19012,10 @@ async def _generate_attendance_sheet_impl(
     employees = [e for e in employees if not _month_is_before_doj(e, month)]
     # Iter 321 — ACTIVE employees only on the Attendance Sheet.
     employees = [e for e in employees if not _employee_inactive_for_report(e, month)]
+
+    # Iter 328 (client format) — master rate columns (EM_RATEM / EM_HRA /
+    # EM_CONV / EM_TOT) prefilled from the latest compliance run.
+    rates_by_user = await _compliance_rates_by_user(company_id)
 
     # Present-days snapshot for reference
     try:
@@ -19001,6 +19042,7 @@ async def _generate_attendance_sheet_impl(
         month=month,
         employees=employees,
         attendance_days_by_user=days_by_user,
+        rates_by_user=rates_by_user,
     )
     company_slug = (company.get("name") or "company").replace(" ", "_")
     grp_slug = ("_" + grp_name.replace(" ", "-")) if grp_name else ""

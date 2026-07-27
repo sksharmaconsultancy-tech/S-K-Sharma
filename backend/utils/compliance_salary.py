@@ -486,6 +486,14 @@ def compute_compliance_row(
     special = structure["special"]
     others = structure["others"]
 
+    # Iter 329 (user check) — ZERO-DAY EARNINGS GUARD: with no present days,
+    # no duty hours and no OT this month, ALL earned heads must be 0.
+    # (Fixed-amount heads like a flat HRA used to leak a full month into
+    # 0-day rows, breaking Earnings vs Gross totals on the registers.)
+    if effective_present <= 0 and duty_hours <= 0 and ot_pay <= 0:
+        basic = hra = conveyance = medical = special = others = 0.0
+        monthly_gross = 0.0
+
     # Gross for statutory purposes:
     # Under new labour code (per client policy), the WAGE BASE for both
     # PF and ESIC is: max(Basic, floor_pct% of Gross Earning).
@@ -1398,9 +1406,11 @@ def build_compliance_register_pdf_v2(
         oth_d = other_ded(r)
         _pairs = (
             ("days", days),
-            ("basic", float(r.get("basic_master") or 0)),
-            ("hra", float(r.get("hra_master") or 0)),
-            ("conv", float(r.get("conveyance_master") or 0)),
+            # Iter 329 (user check) — EARNED figures so the earnings columns
+            # always add up to the TOTAL (gross earning) column.
+            ("basic", float(r.get("basic") or 0)),
+            ("hra", float(r.get("hra") or 0)),
+            ("conv", float(r.get("conveyance") or 0)),
             ("oth", oth_e),
             ("gross", float(r.get("gross_paid") or 0)),
             ("pf", pf_v),
@@ -1441,8 +1451,8 @@ def build_compliance_register_pdf_v2(
             "pf_no": str(r.get("pf_no") or "-"),
             "esi_no": str(r.get("esi_ip_no") or "-"),
             "days": f"{days:g}",
-            "basic": A(r.get("basic_master")), "hra": A(r.get("hra_master")),
-            "conv": A(r.get("conveyance_master")), "other_earn": A(oth_e),
+            "basic": A(r.get("basic")), "hra": A(r.get("hra")),
+            "conv": A(r.get("conveyance")), "other_earn": A(oth_e),
             "gross": A(r.get("gross_paid")), "pf": A(pf_v),
             "esi": A(r.get("esic_employee")), "other_ded": A(oth_d),
             "tds": A(r.get("tds")), "total_ded": A(r.get("total_deduction")),
