@@ -229,6 +229,8 @@ export default function BulkEmployeeCorrectionScreen() {
   const [empFilter, setEmpFilter] = useState<"active" | "resigned">("active");
   // Iter 138 (user request) — filter the grid by Employee Group.
   const [groupFilter, setGroupFilter] = useState<string>("");
+  // Iter 322 (user request) — type-to-filter for the firm dropdown.
+  const [firmSearch, setFirmSearch] = useState("");
   const [dirty, setDirty] = useState<Record<string, Record<string, any>>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -239,8 +241,23 @@ export default function BulkEmployeeCorrectionScreen() {
 
   useEffect(() => { setGroupFilter(""); setMode("compliance"); }, [companyId]);
 
-  const isResigned = (e: EmployeeRow) =>
-    e.active === false || !!(e.resign_date && String(e.resign_date).trim());
+  // Iter 322 (user request) — resigned detection must match the backend
+  // definition: any exit marker date, employment_status or disabled flag.
+  const isResigned = (e: EmployeeRow) => {
+    const any = e as any;
+    const hasDate = (v: any) => !!(v && String(v).trim());
+    return (
+      e.active === false ||
+      any.disabled === true ||
+      hasDate(e.resign_date) ||
+      hasDate(any.exit_date) ||
+      hasDate(any.date_of_leaving) ||
+      hasDate(any.leaving_date) ||
+      /^(exited|resigned|terminated|inactive|left)$/i.test(
+        String(any.employment_status || "").trim(),
+      )
+    );
+  };
   // Iter 295 — refs for Excel-style keyboard navigation between grid cells.
   const cellRefs = React.useRef<Map<string, any>>(new Map());
 
@@ -294,7 +311,12 @@ export default function BulkEmployeeCorrectionScreen() {
   }, [allRows, empFilter]);
   const groups: GroupOption[] = useMemo(() => {
     if (crossFirmMode) return [];
-    return (groupsByCid[companyId] || []).filter((g) => groupIdsInFilter.has(g.master_id));
+    const all = groupsByCid[companyId] || [];
+    const withEmp = all.filter((g) => groupIdsInFilter.has(g.master_id));
+    // Iter 322 — if no group could be matched to an employee (member lists
+    // empty and names not linked), still show ALL firm groups so the
+    // Group-wise filter is always available.
+    return withEmp.length > 0 ? withEmp : all;
   }, [crossFirmMode, groupsByCid, companyId, groupIdsInFilter]);
   const depts: GroupOption[] = useMemo(
     () => (crossFirmMode ? [] : deptsByCid[companyId] || []),
@@ -877,19 +899,37 @@ export default function BulkEmployeeCorrectionScreen() {
 
           <Text style={styles.label}>Company (Firm)</Text>
           {Platform.OS === "web" ? (
-            <select
-              data-testid="bc-company"
-              value={companyId}
-              onChange={(e) => setCompanyId((e.target as HTMLSelectElement).value)}
-              style={styles.selectStyle as any}
-            >
-              <option value="">— select —</option>
-              {companies.map((c) => (
-                <option key={c.company_id} value={c.company_id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+            <>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Type any firm name to filter the list…"
+                placeholderTextColor="#94A3B8"
+                value={firmSearch}
+                onChangeText={setFirmSearch}
+                testID="bc-firm-search"
+              />
+              <select
+                data-testid="bc-company"
+                value={companyId}
+                onChange={(e) => setCompanyId((e.target as HTMLSelectElement).value)}
+                style={styles.selectStyle as any}
+              >
+                <option value="">— select —</option>
+                {companies
+                  .filter(
+                    (c) =>
+                      !firmSearch.trim() ||
+                      (c.name || "")
+                        .toLowerCase()
+                        .includes(firmSearch.trim().toLowerCase()),
+                  )
+                  .map((c) => (
+                    <option key={c.company_id} value={c.company_id}>
+                      {c.name}
+                    </option>
+                  ))}
+              </select>
+            </>
           ) : (
             <Text style={styles.smallHint}>Best used on desktop web.</Text>
           )}

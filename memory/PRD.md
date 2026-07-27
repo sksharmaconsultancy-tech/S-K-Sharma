@@ -1792,3 +1792,20 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Verified live: flagged 3 test employees (exit before month → excluded; exit mid-month →
   included; disabled → excluded), grid 127→125, May report still shows mid-May leaver,
   group_id=mst_820470a644 (LABOUR) → 108 rows, all XLSX endpoints 200. Flags reverted.
+
+## Iter 322 — Register PDFs + Bulk Correction filters + Attendance Master Sheet menu
+- Format 2 (build_compliance_register_pdf_v2): added UAN No. / EPF No. / ESIC No. columns
+  (V2_REGISTER_COLUMNS after desig; values from uan_no/pf_no/esi_ip_no; centred; injected
+  into pre-existing saved layouts when none of the 3 keys present).
+- Format 2 blank last page FIX: whole summary+foot+punchline now built inside
+  KeepInFrame(shrink) sized to the frame — always exactly ONE final page (verified 14 pages
+  for 127 emp @10/page, last page has summary text).
+- Format 1 (build_compliance_register_pdf): fixed 15 mm employee row height (user request).
+- Bulk Employee Correction: isResigned broadened (exit_date/date_of_leaving/leaving_date/
+  employment_status/disabled — matches backend), Group dropdown falls back to ALL firm groups
+  when member-matching finds none, firm dropdown got a type-to-filter TextInput (bc-firm-search).
+- Sidebar (NAV_SUPER → Attendance & Shift): added "Attendance Master Sheet" → /attendance-sheet
+  (screen existed since Iter 68 but had NO menu entry). Note: /attendance-master is labelled
+  "Shift Master" under Masters — left as-is.
+- Verified via PDF render (pymupdf) + Playwright screenshots (firm filter, 127 active/0 resigned
+  chips, LABOUR group → 108, sidebar entry).

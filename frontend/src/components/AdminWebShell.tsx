@@ -118,6 +118,7 @@ export const NAV_SUPER: NavItem[] = [
     children: [
       { route: "/attendance-policy", label: "Attendance Policy", icon: "time-outline" },
       { route: "/attendance-grid", label: "Attendance Report", icon: "grid-outline" },
+      { route: "/attendance-sheet", label: "Attendance Master Sheet", icon: "document-text-outline" },
       { route: "/inout-ot-matrix", label: "In/Out & OT Matrix", icon: "apps-outline" },
       { route: "/daily-present-report", label: "Day-wise Present Count", icon: "people-outline" },
       { route: "/backdate-punches", label: "Back-date Punches", icon: "calendar-clear-outline" },

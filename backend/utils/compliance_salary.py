@@ -101,6 +101,10 @@ V2_REGISTER_COLUMNS: List[Any] = [
     ("sno", "S.No", 7, False),
     ("name", "Employee / Father-Spouse Name", 44, False),
     ("desig", "Desig.", 18, False),
+    # Iter 322 (user request) — statutory ID columns on Format 2.
+    ("uan", "UAN No.", 15, False),
+    ("pf_no", "EPF No.", 14, False),
+    ("esi_no", "ESIC No.", 14, False),
     ("basic", "Basic", 13, True),
     ("hra", "HRA", 12, True),
     ("conv", "Conv.", 12, True),
@@ -997,7 +1001,9 @@ def build_compliance_register_pdf(
     for ci, ch in enumerate(chunks):
         is_final = ci == len(chunks) - 1
         d = [hdr_top, hdr_sub] + ch + ([grand_row] if is_final else [])
-        t = Table(d, colWidths=col_widths, repeatRows=2)
+        # Iter 322 (user request) — fixed 15 mm height for employee rows.
+        row_heights = [None, None] + [15 * mm] * len(ch) + ([None] if is_final else [])
+        t = Table(d, colWidths=col_widths, repeatRows=2, rowHeights=row_heights)
         st = _base_style()
         if is_final:
             st.append(("FONTNAME", (0, len(d) - 1), (-1, len(d) - 1), "Helvetica-Bold"))
@@ -1206,6 +1212,16 @@ def build_compliance_register_pdf_v2(
                  if isinstance(c, dict) and c.get("key") in _defaults]
     if not cols_spec:
         cols_spec = [{"key": k} for k, _h, _w, _n in V2_REGISTER_COLUMNS]
+    else:
+        # Iter 322 (user request) — the statutory ID columns (UAN / EPF /
+        # ESIC No.) must appear even on layouts saved BEFORE they existed:
+        # inject them right after Desig. (or Name).
+        _have = {c["key"] for c in cols_spec}
+        if not _have & {"uan", "pf_no", "esi_no"}:
+            _pos = next((i + 1 for i in range(len(cols_spec) - 1, -1, -1)
+                         if cols_spec[i]["key"] in ("desig", "name")), 1)
+            cols_spec[_pos:_pos] = [{"key": "uan"}, {"key": "pf_no"},
+                                    {"key": "esi_no"}]
     col_keys = [c["key"] for c in cols_spec]
     header = [str(c.get("heading") or _defaults[c["key"]][0]) for c in cols_spec]
     widths = [max(4.0, float(c.get("width") or _defaults[c["key"]][1]))
@@ -1268,6 +1284,10 @@ def build_compliance_register_pdf_v2(
                 f"<b>{(r.get('name') or '').upper()}</b><br/>{(r.get('father_name') or '').upper()}",
                 cell),
             "desig": Paragraph((r.get("designation") or "").upper(), cell),
+            # Iter 322 (user request) — statutory ID columns.
+            "uan": str(r.get("uan_no") or "-"),
+            "pf_no": str(r.get("pf_no") or "-"),
+            "esi_no": str(r.get("esi_ip_no") or "-"),
             "days": f"{days:g}",
             "basic": A(r.get("basic_master")), "hra": A(r.get("hra_master")),
             "conv": A(r.get("conveyance_master")), "other_earn": A(oth_e),
@@ -1280,6 +1300,7 @@ def build_compliance_register_pdf_v2(
         data.append([vals[k] for k in col_keys])
     tot_vals = {
         "sno": "", "name": "GRAND TOTAL", "desig": "",
+        "uan": "", "pf_no": "", "esi_no": "",
         "days": f"{tot['days']:g}", "basic": A(tot["basic"]), "hra": A(tot["hra"]),
         "conv": A(tot["conv"]), "other_earn": A(tot["oth"]), "gross": A(tot["gross"]),
         "pf": A(tot["pf"]), "esi": A(tot["esi"]), "other_ded": A(tot["othd"]),
@@ -1313,7 +1334,7 @@ def build_compliance_register_pdf_v2(
         for ci_ in _num_idx:
             style.append(("ALIGN", (ci_, 0), (ci_, -1), "RIGHT"))
         for ci_, k in enumerate(col_keys):
-            if k in ("sno", "code"):
+            if k in ("sno", "code", "uan", "pf_no", "esi_no"):
                 style.append(("ALIGN", (ci_, 0), (ci_, -1), "CENTER"))
         if is_final:
             style.append(("FONTNAME", (0, last), (-1, last), "Helvetica-Bold"))
@@ -1382,7 +1403,13 @@ def build_compliance_register_pdf_v2(
     for t in page_tables:
         story.append(t)
         story.append(PageBreak())
-    story.append(sec([
+    # Iter 322 (user report) — the summary page occasionally overflowed by a
+    # few mm (long company names / wrapped amount-in-words) leaving a
+    # nearly-blank trailing page. Building the summary inside
+    # KeepInFrame(shrink) guarantees it always fits on ONE final page.
+    from reportlab.platypus import KeepInFrame
+    summary: List[Any] = []
+    summary.append(sec([
         ("No. Of Emp", str(len(rows))),
         ("Total Salary Amount", A(tot["sal"])),
         ("Total H.R.A Amount", A(tot["hra_e"])),
@@ -1391,8 +1418,8 @@ def build_compliance_register_pdf_v2(
         ("Total Bonus Amount", "0.00"),
         ("Total Gross Amount", A(tot["gross"])),
     ]))
-    story.append(Spacer(1, 4 * mm))
-    story.append(sec([
+    summary.append(Spacer(1, 4 * mm))
+    summary.append(sec([
         ("P.F. Deduction Amount", A(tot["pf"])),
         ("ABRY P.F. Benifit", "0.00"),
         ("E.S.I. Deduction Amount", A(tot["esi"])),
@@ -1401,29 +1428,32 @@ def build_compliance_register_pdf_v2(
         ("TDS Deduction Amount", A(tot["tds"])),
         ("Total Deduction Amount", A(tot["ded"])),
     ]))
-    story.append(Spacer(1, 4 * mm))
-    story.append(sec([
+    summary.append(Spacer(1, 4 * mm))
+    summary.append(sec([
         ("Total Salary of P.F.", A(tot["pf_wages"])),
         ("Total Less Salary on PF", A(max(0.0, tot["gross_pf"] - tot["pf_wages"]))),
         ("Total Salary of non-P.F", A(tot["gross_nonpf"])),
         ("Total Salary+HRA+CONV(ESI)", A(tot["esi_base"])),
         ("Total Salary+HRA+CONV(NON-ESI)", A(tot["nonesi_base"])),
     ], bold_last=False))
-    story.append(Spacer(1, 4 * mm))
-    story.append(sec([
+    summary.append(Spacer(1, 4 * mm))
+    summary.append(sec([
         ("Total Days ->", f"{tot['days']:g}"),
         ("Total Hours ->", f"{tot['hrs']:g}"),
         ("Net Payable Amount", A(tot["net"])),
     ]))
-    story.append(Spacer(1, 5 * mm))
-    story.append(Paragraph(
+    summary.append(Spacer(1, 5 * mm))
+    summary.append(Paragraph(
         f"RUPEES: {_num_to_words_inr(int(round(tot['gross'])))} (GROSS)", lblb))
-    story.append(Paragraph(
+    summary.append(Paragraph(
         f"RUPEES: {_num_to_words_inr(int(round(tot['net'])))} (NET PAYABLE)", lblb))
-    story.append(Spacer(1, 10 * mm))
-    story.append(foot)
+    summary.append(Spacer(1, 10 * mm))
+    summary.append(foot)
     from utils.pdf_branding import punchline_flowables
-    story.extend(punchline_flowables())
+    summary.extend(punchline_flowables())
+    story.append(KeepInFrame(
+        W - 12 * mm, H - doc.topMargin - doc.bottomMargin - 2 * mm,
+        summary, mode="shrink"))
     doc.build(story, canvasmaker=_NumberedCanvas)
     return buf.getvalue()
 
