@@ -647,7 +647,13 @@ async def _sync_firm_allowances(
     to_enable: set = set()
     created: List[str] = []
     for head in sorted({str(h or "").strip() for h in heads} - {""}):
+        bucket = _allow_bucket(head)
         label = catalog.get(head.lower())
+        if not label and bucket != "others":
+            # HRA / Conveyance / Medical / Special heads map into the
+            # standard Firm Master label (e.g. "Conveyance" → "CONV.") —
+            # no duplicate custom head is created.
+            label = _BUCKET_LABEL[bucket]
         if not label:
             # No matching label — create a custom allowance head.
             await db.masters.insert_one({
@@ -668,13 +674,18 @@ async def _sync_firm_allowances(
         to_enable.add(label)
         # Always ALSO enable the compliance bucket label so the run's
         # allowance mask keeps this head's column (HRA / CONV. / etc.).
-        to_enable.add(_BUCKET_LABEL[_allow_bucket(head)])
+        to_enable.add(_BUCKET_LABEL[bucket])
     newly = sorted(lb for lb in to_enable if current.get(lb) is not True)
     if newly:
+        # NOTE: labels like "CONV." / "OTH. ALLOW." contain dots — a dotted
+        # $set path ("allowances.CONV.") is invalid in MongoDB. Merge and
+        # write the whole allowances object instead.
+        merged = dict(current)
+        for lb in newly:
+            merged[lb] = True
         await db.firm_masters.update_one(
             {"company_id": company_id},
-            {"$set": {**{f"allowances.{lb}": True for lb in newly},
-                      "updated_at": _now()}},
+            {"$set": {"allowances": merged, "updated_at": _now()}},
             upsert=True,
         )
     return {"enabled": newly, "created": created}

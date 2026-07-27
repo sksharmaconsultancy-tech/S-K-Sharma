@@ -1938,3 +1938,10 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   salary_structure_actual [{Basic Salary, rate, rate_type daily}], legacy_offroll=True; existing
   employees get salary_structure_actual backfilled when empty; offline history rows user_id linked.
   Totals: offroll_created / offroll_rate_backfilled (shown in wizard summary).
+
+## Iter 334 — Allowance sync dotted-label fix, deploy 334
+- _sync_firm_allowances: $set with dotted label paths ("allowances.CONV.") is invalid in Mongo
+  (trailing dot = empty field) — now merges and writes the WHOLE allowances object.
+- Legacy heads in hra/conv/medical/special buckets map to the standard label (CONV., HRA, …)
+  instead of creating duplicate custom heads; custom heads only for "others"-bucket unknowns.
+- /admin/employees cap set to 20000 per user request. Deploy script deploy_vps_iter334.sh.
