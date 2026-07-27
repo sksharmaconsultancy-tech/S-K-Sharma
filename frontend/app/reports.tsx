@@ -181,8 +181,10 @@ export default function ReportsHubScreen() {
     [salaryRuns, finalizedOnly, month],
   );
   const visComplianceRuns = useMemo(
-    () => complianceRuns.filter((r) => (!finalizedOnly || r.finalized) && (!month || r.month === month)),
-    [complianceRuns, finalizedOnly, month],
+    // Iter 327 (user request) — Compliance report shows ONLY finalized
+    // salaries: draft / default runs are always hidden.
+    () => complianceRuns.filter((r) => !!r.finalized && (!month || r.month === month)),
+    [complianceRuns, month],
   );
   // User directive — "All months" option only appears when every run is
   // finalized, so aggregate data never includes unfinalized (draft) months.
@@ -525,14 +527,21 @@ export default function ReportsHubScreen() {
                 <Text style={[styles.sortChipTxt, sortBy === val && styles.sortChipTxtActive]}>{lab}</Text>
               </Pressable>
             ))}
-            <Pressable
-              onPress={() => setFinalizedOnly((v) => !v)}
-              style={[styles.sortChip, finalizedOnly && styles.sortChipActive]}
-              testID="rep-finalized-only"
-            >
-              <Ionicons name={finalizedOnly ? "lock-closed" : "lock-open-outline"} size={12} color={finalizedOnly ? "#fff" : colors.onSurfaceSecondary} />
-              <Text style={[styles.sortChipTxt, finalizedOnly && styles.sortChipTxtActive]}>Finalized only</Text>
-            </Pressable>
+            {tab === "compliance" ? (
+              <View style={[styles.sortChip, styles.sortChipActive]}>
+                <Ionicons name="lock-closed" size={12} color="#fff" />
+                <Text style={[styles.sortChipTxt, styles.sortChipTxtActive]}>Finalized only</Text>
+              </View>
+            ) : (
+              <Pressable
+                onPress={() => setFinalizedOnly((v) => !v)}
+                style={[styles.sortChip, finalizedOnly && styles.sortChipActive]}
+                testID="rep-finalized-only"
+              >
+                <Ionicons name={finalizedOnly ? "lock-closed" : "lock-open-outline"} size={12} color={finalizedOnly ? "#fff" : colors.onSurfaceSecondary} />
+                <Text style={[styles.sortChipTxt, finalizedOnly && styles.sortChipTxtActive]}>Finalized only</Text>
+              </Pressable>
+            )}
           </View>
         ) : null}
 
