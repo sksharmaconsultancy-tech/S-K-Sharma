@@ -1993,3 +1993,19 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - E2E verified (Kankani, validation method): 21000@750/day → comp 28.0 ✓ Matched diff 0;
   745/day → 28.0, diff 140 → Overtime; monthly 39000 → 14.0 ✓ Matched. Test data cleaned,
   firm method restored to attendance. Deploy script deploy_vps_iter337.sh.
+
+## Iter 338 — Import Freeze gross into Actual Salary, deploy 338
+- Firm Master salary_process.freeze_to_actual toggle (firm-master.tsx switch; default False
+  in routes/firm_master.py).
+- ACTUAL Salary Process (POST /admin/actual-salary-process, server.py ~21295): when toggle ON,
+  frozen compliance run's rows.imported_gross override each ON-ROLL row's total_gross.
+  diff = imported − calculated: |diff|<1 → snap into basic_salary, status "matched";
+  diff>0 → w_basic_override (+w_basic_salary) if salary_process.ot_allowed else oth_allo;
+  diff<0 → basic_salary reduction ("Base Adjustment"). Heads always sum to frozen gross.
+  net_pay = gross − (epf+esi+adv+tds). Row flags: freeze_gross_imported, imported_gross,
+  calculated_gross, difference, freeze_actual_status, difference_allocation_head.
+- Same override also in legacy _compute_salary_run (~line 14320) for /admin/salary-runs.
+- salary-run.tsx: Total Gross cell shows "❄ Freeze" badge (+✓ when matched) on overridden rows.
+- E2E verified on Kankani 2026-07 (frozen run, 5 employees @21000): OT allocation, sums, net all
+  PASS; draft run deleted after test. Toggle left ENABLED on Kankani firm.
+- temp_bundle.py kind=script now serves deploy_vps_iter338.sh.

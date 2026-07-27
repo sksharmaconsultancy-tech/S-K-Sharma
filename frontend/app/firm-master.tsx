@@ -964,6 +964,7 @@ export default function FirmMasterScreen() {
                   { k: "freeze_based", l: "Freeze Salary Based (days derived from frozen gross)" },
                   { k: "fixed", l: "Fixed Days (26 / 30 / 31)" },
                   { k: "attendance_gross_validation", l: "Attendance + Gross Validation (Recommended)" },
+                  { k: "freeze_actual_gross", l: "Freeze as Actual Gross (imported gross taken AS-IS)" },
                 ].map((o) => {
                   const on = (sp.days_calc_method || "attendance") === o.k;
                   return (
@@ -1022,6 +1023,81 @@ export default function FirmMasterScreen() {
                   difference vs the imported gross goes to Overtime / Other Allowance.
                 </Text>
               ) : null}
+              {/* Iter 338 (user request) — WORKFLOW of the selected method. */}
+              <View style={{ marginTop: 10, backgroundColor: "#EFF6FF", borderRadius: 10, padding: 12, borderWidth: 1, borderColor: "#BFDBFE" }}>
+                <Text style={{ fontSize: 12, fontWeight: "800", color: "#1D4ED8", marginBottom: 6 }}>
+                  ⚙ Workflow — {({
+                    attendance: "Attendance Days",
+                    gross_based: "Gross Salary Based",
+                    freeze_based: "Freeze Salary Based",
+                    fixed: "Fixed Days",
+                    attendance_gross_validation: "Attendance + Gross Validation",
+                    freeze_actual_gross: "Freeze as Actual Gross",
+                  } as any)[sp.days_calc_method || "attendance"]}
+                </Text>
+                {(({
+                  attendance: [
+                    "1. Salary Import → Present Days taken AS-IS from the sheet",
+                    "2. Salary = Master rates × Present Days",
+                    "3. PF / ESIC / LWF / PT calculated on that gross",
+                    "4. Imported vs Calculated gross difference → Overtime / Other Allowance",
+                  ],
+                  gross_based: [
+                    "1. Salary Import → Per-Day Gross = Master Gross ÷ Month Days",
+                    "2. Compliance Days = Imported Gross ÷ Per-Day Gross (rounded Half/Full day)",
+                    "3. Salary recalculated on the derived days · Basic per wage definition",
+                    "4. PF / ESIC / LWF / PT recalculated automatically",
+                    "5. Remaining difference → Overtime / Other Allowance",
+                  ],
+                  freeze_based: [
+                    "1. Salary Import → Freeze Salary (imported gross) is authoritative",
+                    "2. Compliance Days derived from the frozen gross (Half/Full day)",
+                    "3. Salary recalculated on the derived days · Basic per wage definition",
+                    "4. PF / ESIC / LWF / PT recalculated automatically",
+                    "5. Remaining difference → Overtime / Other Allowance",
+                  ],
+                  fixed: [
+                    "1. Salary Import → every employee in the sheet gets the Fixed Days",
+                    "2. Salary = Master rates × Fixed Days",
+                    "3. PF / ESIC / LWF / PT calculated on that gross",
+                    "4. Imported vs Calculated difference → Overtime / Other Allowance",
+                  ],
+                  attendance_gross_validation: [
+                    "1. Salary Import → Attendance Days AND Imported Gross both read",
+                    "2. System derives Compliance Days from gross and compares with attendance",
+                    "3. Salary recalculated on Compliance Days · Basic per wage definition",
+                    "4. PF / ESIC / LWF / PT recalculated automatically",
+                    "5. Grid shows Att. Days · Comp. Days · ✓ Matched / ≠ Diff per employee",
+                    "6. Remaining difference → Overtime / Other Allowance",
+                  ],
+                  freeze_actual_gross: [
+                    "1. Salary Import → Imported Gross taken AS-IS as the final gross",
+                    "2. Exact fractional days derived (no rounding) so Calc = Imported to the rupee",
+                    "3. PF / ESIC / LWF / PT calculated on the imported gross",
+                    "4. Difference ≈ 0 → every row shows ✓ Matched",
+                  ],
+                } as any)[sp.days_calc_method || "attendance"] as string[]).map((step: string) => (
+                  <Text key={step} style={{ fontSize: 12, color: "#334155", lineHeight: 19 }}>{step}</Text>
+                ))}
+                <Text style={{ fontSize: 11, color: "#64748B", marginTop: 6 }}>
+                  Attendance Master → Salary Import → Freeze Salary → Auto Compliance Days → PF · ESIC · LWF · PT · Bonus · Gratuity → Salary Register
+                </Text>
+              </View>
+              {/* Iter 338 (user request) — push frozen gross into the
+                  ACTUAL Salary Process for On-Roll employees. */}
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
+                <View style={{ flex: 1, paddingRight: 10 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "700", color: "#1E3A8A" }}>Import Freeze gross into Actual Salary</Text>
+                  <Text style={{ fontSize: 11.5, color: "#64748B", marginTop: 2 }}>
+                    On-Roll employees take the FROZEN gross from the processed Compliance run as their Actual Salary gross for the month.
+                  </Text>
+                </View>
+                <Switch
+                  value={!!sp.freeze_to_actual}
+                  onValueChange={(v) => updateSection("salary_process", { freeze_to_actual: v })}
+                  testID="fm-freeze-to-actual"
+                />
+              </View>
               {/* Iter 98 — OT rate basis for Salary Process (Actual) */}
               <Text style={styles.subLbl}>OT Calculation On</Text>
               <View style={{ flexDirection: "row", gap: 8 }}>

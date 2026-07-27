@@ -14197,6 +14197,23 @@ async def _compute_salary_run(
 
     employees = await db.users.find(q, {"_id": 0}).to_list(2000)
 
+    # Iter 338 (user request) — Firm Master toggle "Import Freeze gross
+    # into Actual Salary": pull the frozen gross per On-Roll employee from
+    # the month's processed (imported) Compliance run.
+    _freeze_actual_overrides: dict = {}
+    _fm_sp = await db.firm_masters.find_one(
+        {"company_id": payload.company_id},
+        {"_id": 0, "salary_process.freeze_to_actual": 1})
+    if bool(((_fm_sp or {}).get("salary_process") or {}).get("freeze_to_actual")):
+        _frun = await db.compliance_salary_runs.find_one(
+            {"company_id": payload.company_id, "month": payload.month,
+             "frozen": True},
+            {"_id": 0, "rows.user_id": 1, "rows.imported_gross": 1},
+            sort=[("generated_at", -1)])
+        for _r in (_frun or {}).get("rows") or []:
+            if _r.get("user_id") and _r.get("imported_gross") is not None:
+                _freeze_actual_overrides[_r["user_id"]] = _r["imported_gross"]
+
     # Iter 57 — Exclude employees whose date-of-joining is AFTER the run's
     # month end. Payslips must never be generated for pre-DOJ months.
     employees = [e for e in employees if not _month_is_before_doj(e, payload.month)
@@ -14297,6 +14314,48 @@ async def _compute_salary_run(
             row["run_type"] = "compliance"
         row["company_id"] = emp.get("company_id")
         row["company_name"] = company_doc.get("name")
+        # Iter 338 (user request) — Firm Master toggle "Import Freeze gross
+        # into Actual Salary": On-Roll employees take the FROZEN gross from
+        # the processed Compliance run as their Actual gross for the month.
+        _fga = _freeze_actual_overrides.get(emp["user_id"]) if _freeze_actual_overrides else None
+        if _fga is not None and emp.get("is_onroll") is not False:
+            _imp_g = round(float(_fga), 2)
+            _calc_g = round(float(row.get("gross") or 0), 2)
+            _diff_g = round(_imp_g - _calc_g, 2)
+            row["imported_gross"] = _imp_g
+            row["calculated_gross"] = _calc_g
+            row["difference"] = _diff_g
+            row["difference_allocation_head"] = ""
+            # Status flag for the grid: ✓ Matched when the frozen gross is
+            # within ₹1 of the calculated gross, otherwise "diff".
+            row["freeze_actual_status"] = (
+                "matched" if abs(_diff_g) < 1.0 else "diff")
+            if abs(_diff_g) < 1.0:
+                # Snap tiny rounding remainders (paise noise) into Base Pay
+                # so the heads still sum to the frozen gross exactly.
+                if _diff_g != 0.0:
+                    row["base_pay"] = round(
+                        float(row.get("base_pay") or 0) + _diff_g, 2)
+            elif _diff_g > 0:
+                # Imported gross ABOVE master gross → route the difference
+                # to OT when the Firm Master allows OT, else to Allowances.
+                if att_pol.get("firm_ot_allowed"):
+                    row["ot_pay"] = round(
+                        float(row.get("ot_pay") or 0) + _diff_g, 2)
+                    row["difference_allocation_head"] = "Overtime"
+                else:
+                    row["allowances"] = round(
+                        float(row.get("allowances") or 0) + _diff_g, 2)
+                    row["difference_allocation_head"] = "Other Allowances"
+            else:
+                # Imported gross BELOW master gross → the shortfall comes
+                # off Base Pay so the row still sums to the frozen gross.
+                row["base_pay"] = round(
+                    float(row.get("base_pay") or 0) + _diff_g, 2)
+                row["difference_allocation_head"] = "Base Adjustment"
+            row["gross"] = _imp_g
+            row["net"] = round(_imp_g - float(row.get("total_deduction") or 0), 2)
+            row["freeze_gross_imported"] = True
         rows.append(row)
 
     totals = {
@@ -21234,6 +21293,66 @@ async def create_actual_salary_process(
     _actual_run_id = f"asal_{uuid.uuid4().hex[:12]}"
     from routes.advances import apply_advance_recovery
     await apply_advance_recovery(company_id, payload.month, "actual", _actual_run_id, rows)
+
+    # Iter 338 (user request) — Firm Master → Salary Process → "Import
+    # Freeze gross into Actual Salary": ON-ROLL employees take the month's
+    # FROZEN (imported) Compliance gross as their Actual Total Gross.
+    # Difference vs the calculated gross routes to OT (W.Basic) when the
+    # Firm Master allows OT, else to Oth.Allo. Tiny paise remainders (<₹1)
+    # snap into Basic Salary so heads always sum to the frozen gross.
+    _sp_cfg = ((_fm_sp or {}).get("salary_process") or {}) if company_id else {}
+    if bool(_sp_cfg.get("freeze_to_actual")) and rows:
+        _frz_run = await db.compliance_salary_runs.find_one(
+            {"company_id": company_id, "month": payload.month, "frozen": True},
+            {"_id": 0, "rows.user_id": 1, "rows.imported_gross": 1},
+            sort=[("generated_at", -1)],
+        )
+        _frz_g = {
+            r["user_id"]: float(r["imported_gross"])
+            for r in ((_frz_run or {}).get("rows") or [])
+            if r.get("user_id") and r.get("imported_gross") is not None
+        }
+        _frz_ot_ok = bool(_sp_cfg.get("ot_allowed"))
+        for row in rows:
+            _ig = _frz_g.get(row.get("user_id"))
+            if _ig is None or row.get("is_onroll") is False:
+                continue
+            _ig = round(_ig, 2)
+            _cg = round(float(row.get("total_gross") or 0), 2)
+            _dg = round(_ig - _cg, 2)
+            row["imported_gross"] = _ig
+            row["calculated_gross"] = _cg
+            row["difference"] = _dg
+            row["difference_allocation_head"] = ""
+            # Status flag for the grid: ✓ Matched within ₹1, else "diff".
+            row["freeze_actual_status"] = (
+                "matched" if abs(_dg) < 1.0 else "diff")
+            if abs(_dg) < 1.0:
+                # Snap tiny rounding remainders into Basic Salary.
+                if _dg != 0.0:
+                    row["basic_salary"] = round(
+                        float(row.get("basic_salary") or 0) + _dg, 2)
+            elif _dg > 0:
+                if _frz_ot_ok:
+                    # Persist via w_basic_override so inline edits keep it.
+                    row["w_basic_override"] = round(
+                        float(row.get("w_basic_salary") or 0) + _dg, 2)
+                    row["w_basic_salary"] = row["w_basic_override"]
+                    row["difference_allocation_head"] = "Overtime (W.Basic)"
+                else:
+                    row["oth_allo"] = round(
+                        float(row.get("oth_allo") or 0) + _dg, 2)
+                    row["difference_allocation_head"] = "Other Allowances"
+            else:
+                # Imported gross BELOW calculated → shortfall off Basic Sal.
+                row["basic_salary"] = round(
+                    float(row.get("basic_salary") or 0) + _dg, 2)
+                row["difference_allocation_head"] = "Base Adjustment"
+            row["total_gross"] = _ig
+            row["net_pay"] = round(_ig - (
+                float(row.get("epf") or 0) + float(row.get("esi") or 0)
+                + float(row.get("adv") or 0) + float(row.get("tds") or 0)), 2)
+            row["freeze_gross_imported"] = True
 
     totals = _actual_salary_totals(rows)
 

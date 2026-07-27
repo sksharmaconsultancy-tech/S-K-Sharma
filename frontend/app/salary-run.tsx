@@ -1153,7 +1153,17 @@ function ResultGrid({
                 money
                 gridRow={idx} gridCol={4} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.calc}
               />
-              <ReadCell w={COL_WIDTHS.gross} bg={GRP.calc}>{fmtInr(r.total_gross)}</ReadCell>
+              {/* Iter 338 — Freeze gross imported into Actual Salary badge */}
+              <View style={{ width: COL_WIDTHS.gross, paddingHorizontal: 6, paddingVertical: 4, justifyContent: "center", backgroundColor: GRP.calc }}>
+                <Text style={[styles.readTxt, styles.alignRight]} numberOfLines={1}>
+                  {fmtInr(r.total_gross)}
+                </Text>
+                {(r as any).freeze_gross_imported ? (
+                  <Text style={{ fontSize: 8, color: "#0284c7", textAlign: "right" }} numberOfLines={1}>
+                    ❄ Freeze{(r as any).freeze_actual_status === "matched" ? " ✓" : ""}
+                  </Text>
+                ) : null}
+              </View>
               <ReadCell w={COL_WIDTHS.epf} bg={GRP.ded}>{fmtInr(r.epf)}</ReadCell>
               <ReadCell w={COL_WIDTHS.esi} bg={GRP.ded}>{fmtInr(r.esi)}</ReadCell>
               <EditCell

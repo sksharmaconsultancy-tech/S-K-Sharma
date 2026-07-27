@@ -158,6 +158,9 @@ def _empty_master(company_id: str, company_name: str = "") -> Dict[str, Any]:
             # Iter 337 (user) — Compliance Days round to HALF day (0.5) or
             # FULL day (1) only.
             "days_calc_rounding": 0.5,
+            # Iter 338 (user) — frozen Compliance gross becomes the ACTUAL
+            # Salary gross for On-Roll employees.
+            "freeze_to_actual": False,
         },
         "leave_policy": {
             "cl_pl_applicable": False,
