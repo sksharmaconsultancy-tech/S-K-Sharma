@@ -1824,3 +1824,19 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Verified live: register.pdf v1 (14 pages, master band shaded, centred ints, wide sign col),
   v2 unchanged apart from ints, sheet headers = Code/Name/DOJ/Dept/Desig/Group/Days/Gross/
   Advance/TDS/Notes with values populated.
+
+## Iter 324-325 — Register sort/group, signature right-align, Firms Excel views, deploy 325
+- register.pdf endpoint: ?sort_by=(name|code|designation|department) & ?group_by=
+  (employee_group|department|designation). Rows enriched from users (dept/group/code) then
+  sorted; builders (both formats) take group_by → group header band + "TOTAL — X" sub-total
+  rows via body_items[{kind:hdr|emp|sub}] chunking (hdr/sub rows 9mm F1 / auto F2).
+- compliance-salary-run.tsx: "PDF Sort by" + "Group by" selects (web) feeding both PDF buttons.
+- Signature blocks right-aligned (TA_RIGHT paragraph styles) on both formats' summary pages.
+- firm_master.py: /admin/firm-credentials now returns city; NEW /admin/firms-master-list (+
+  /export.xlsx) with 20 firm-master columns. firm-list.tsx = Excel grid, tap-to-copy, Export
+  Excel; sidebar "List of Firms" now → /firm-list (was sub-admin gate /firm-select).
+- firm-credentials.tsx → Excel-sheet view (S.No/Firm/City/PF Code/PF Login/PF Pw/ESIC Code/
+  ESIC Login/ESIC Pw), tap-to-copy any cell, global show/hide passwords toggle.
+- Bulk import: "state" alias added (template already had Present Add/City/State/Pin Code).
+- Dev super-admin PIN reset to 246810 (pin_hash bcrypt r10) for firm-credentials testing.
+- Deploy script deploy_vps_iter325.sh; temp_bundle kind=script now serves it.

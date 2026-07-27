@@ -96,7 +96,7 @@ export const NAV_SUPER: NavItem[] = [
     icon: "business-outline",
     children: [
       { route: "/companies", label: "Companies (Firm Master)", icon: "business-outline" },
-      { route: "/firm-select", label: "List of Firms", icon: "list-outline" },
+      { route: "/firm-list", label: "List of Firms", icon: "list-outline" },
       { route: "/firm-credentials", label: "Firms ID & Password (PF · ESIC)", icon: "key-outline" },
     ],
   },

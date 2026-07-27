@@ -794,6 +794,7 @@ def build_compliance_register_pdf(
     company_name: str = "S.K. Sharma & Co.",
     firm: Optional[Dict[str, Any]] = None,
     title_override: str = "",
+    group_by: str = "",
 ) -> bytes:
     """Statutory SALARY REGISTER — replica of the user's reference format
     (Form No. 27(1) / rule 78(1)(a)(i)) in LANDSCAPE A4 (Iter 137 user
@@ -931,7 +932,43 @@ def build_compliance_register_pdf(
         "pf", "esi", "adv", "othd", "tds", "ded", "net",
         "pf_wages", "gross_pf", "gross_nonpf", "esi_base", "nonesi_base",
     )}
+    # Iter 324 (user request) — optional GROUPING with per-group sub-totals.
+    body_items: List[Dict[str, Any]] = []
+    g_tot = {k: 0.0 for k in tot}
+    cur_g: Optional[str] = None
+    _grp_head = {"employee_group": "GROUP", "department": "DEPARTMENT",
+                 "designation": "DESIGNATION"}.get(group_by, "GROUP")
+
+    def _grp_val(r: Dict[str, Any]) -> str:
+        if group_by == "employee_group":
+            return str(r.get("employee_group") or r.get("employee_type") or "No Group").upper()
+        if group_by == "department":
+            return str(r.get("department") or "No Department").upper()
+        if group_by == "designation":
+            return str(r.get("designation") or "No Designation").upper()
+        return ""
+
+    def _sub_cells(gname: str, g: Dict[str, float]) -> List[Any]:
+        return [
+            "", f"TOTAL — {gname}", "", "",
+            A(g["m_sal"]), A(g["m_hra"]), A(g["m_conv"]), A(g["m_oth"]), A(g["m_tot"]),
+            f"{g['days']:g}/{g['hrs']:g}",
+            A(g["sal"]), A(g["hra"]), A(g["conv"]), A(g["oth"]), A(g["gross"]),
+            A(g["pf"]), A(g["esi"]), "0", A(g["othd"]), A(g["tds"]), A(g["ded"]),
+            A(g["net"]), "",
+        ]
+
     for i, r in enumerate(rows, start=1):
+        if group_by:
+            gv = _grp_val(r)
+            if gv != cur_g:
+                if cur_g is not None:
+                    body_items.append({"kind": "sub", "cells": _sub_cells(cur_g, g_tot)})
+                cur_g = gv
+                for _k in g_tot:
+                    g_tot[_k] = 0.0
+                body_items.append({"kind": "hdr",
+                                   "cells": [f"{_grp_head}: {gv}"] + [""] * 22})
         days = float(r.get("present_days") or 0)
         hrs = float(r.get("ot_hours") or 0)
         oth_e = other_earn(r)
@@ -943,16 +980,21 @@ def build_compliance_register_pdf(
         m_conv = float(r.get("conveyance_master") or 0)
         m_oth = other_master(r)
         m_tot = m_sal + m_hra + m_conv + m_oth
-        tot["days"] += days; tot["hrs"] += hrs
-        tot["m_sal"] += m_sal; tot["m_hra"] += m_hra
-        tot["m_conv"] += m_conv; tot["m_oth"] += m_oth; tot["m_tot"] += m_tot
-        tot["sal"] += float(r.get("basic") or 0); tot["hra"] += float(r.get("hra") or 0)
-        tot["conv"] += float(r.get("conveyance") or 0); tot["oth"] += oth_e
-        tot["gross"] += gross
-        tot["pf"] += pf_v; tot["esi"] += float(r.get("esic_employee") or 0)
-        tot["othd"] += oth_d; tot["tds"] += float(r.get("tds") or 0)
-        tot["ded"] += float(r.get("total_deduction") or 0)
-        tot["net"] += float(r.get("net") or 0)
+        _pairs = (
+            ("days", days), ("hrs", hrs),
+            ("m_sal", m_sal), ("m_hra", m_hra), ("m_conv", m_conv),
+            ("m_oth", m_oth), ("m_tot", m_tot),
+            ("sal", float(r.get("basic") or 0)), ("hra", float(r.get("hra") or 0)),
+            ("conv", float(r.get("conveyance") or 0)), ("oth", oth_e),
+            ("gross", gross),
+            ("pf", pf_v), ("esi", float(r.get("esic_employee") or 0)),
+            ("othd", oth_d), ("tds", float(r.get("tds") or 0)),
+            ("ded", float(r.get("total_deduction") or 0)),
+            ("net", float(r.get("net") or 0)),
+        )
+        for _k, _v in _pairs:
+            tot[_k] += _v
+            g_tot[_k] += _v
         if r.get("pf_applicable"):
             tot["pf_wages"] += float(r.get("pf_wages") or 0)
             tot["gross_pf"] += gross
@@ -978,14 +1020,17 @@ def build_compliance_register_pdf(
             A(r.get("tds")), A(r.get("total_deduction")),
             A(r.get("net")), "",
         ])
-    data.append([
+        body_items.append({"kind": "emp", "cells": data[-1]})
+    if group_by and cur_g is not None:
+        body_items.append({"kind": "sub", "cells": _sub_cells(cur_g, g_tot)})
+    grand_row = [
         "", "GRAND TOTAL", "", "",
         A(tot["m_sal"]), A(tot["m_hra"]), A(tot["m_conv"]), A(tot["m_oth"]), A(tot["m_tot"]),
         f"{tot['days']:g}/{tot['hrs']:g}",
         A(tot["sal"]), A(tot["hra"]), A(tot["conv"]), A(tot["oth"]), A(tot["gross"]),
         A(tot["pf"]), A(tot["esi"]), "0", A(tot["othd"]), A(tot["tds"]), A(tot["ded"]),
         A(tot["net"]), "",
-    ])
+    ]
 
     # Iter 323 — wider SIGN column for physical signatures.
     widths = [5, 20, 18, 10,
@@ -1025,18 +1070,34 @@ def build_compliance_register_pdf(
 
     # Iter 157 (user request) — fixed 10 employees per A4-landscape page.
     PER_PAGE = 10
-    body_rows = data[2:-1]  # employee rows (skip the 2 header rows + total)
-    grand_row = data[-1]
-    chunks = [body_rows[i:i + PER_PAGE]
-              for i in range(0, len(body_rows), PER_PAGE)] or [[]]
+    chunks = [body_items[i:i + PER_PAGE]
+              for i in range(0, len(body_items), PER_PAGE)] or [[]]
     page_tables: List[Any] = []
     for ci, ch in enumerate(chunks):
         is_final = ci == len(chunks) - 1
-        d = [hdr_top, hdr_sub] + ch + ([grand_row] if is_final else [])
-        # Iter 322 (user request) — fixed 15 mm height for employee rows.
-        row_heights = [None, None] + [15 * mm] * len(ch) + ([None] if is_final else [])
+        d = [hdr_top, hdr_sub] + [it["cells"] for it in ch] + ([grand_row] if is_final else [])
+        # Iter 322 — fixed 15 mm employee rows; group header / sub-total 9 mm.
+        row_heights = [None, None] + [
+            (15 * mm if it["kind"] == "emp" else 9 * mm) for it in ch
+        ] + ([None] if is_final else [])
         t = Table(d, colWidths=col_widths, repeatRows=2, rowHeights=row_heights)
         st = _base_style()
+        # Iter 324 — group header / sub-total styling.
+        for j, it in enumerate(ch):
+            ri = 2 + j
+            if it["kind"] == "hdr":
+                st += [
+                    ("SPAN", (0, ri), (-1, ri)),
+                    ("BACKGROUND", (0, ri), (-1, ri), rl_colors.HexColor("#DCE6EE")),
+                    ("FONTNAME", (0, ri), (-1, ri), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, ri), (-1, ri), 7),
+                    ("ALIGN", (0, ri), (-1, ri), "LEFT"),
+                ]
+            elif it["kind"] == "sub":
+                st += [
+                    ("FONTNAME", (0, ri), (-1, ri), "Helvetica-Bold"),
+                    ("BACKGROUND", (0, ri), (-1, ri), rl_colors.HexColor("#F2F2F2")),
+                ]
         if is_final:
             st.append(("FONTNAME", (0, len(d) - 1), (-1, len(d) - 1), "Helvetica-Bold"))
         t.setStyle(TableStyle(st))
@@ -1103,10 +1164,14 @@ def build_compliance_register_pdf(
     story.append(Paragraph(
         f"RUPEES: {_num_to_words_inr(int(round(tot['net'])))} (NET PAYABLE)", lblb))
     story.append(Spacer(1, 14 * mm))
+    # Iter 324 (user request) — signature block aligned to the RIGHT side
+    # of the summary page.
+    lblr = ParagraphStyle("lblr", parent=lbl, alignment=2)
+    lblbr = ParagraphStyle("lblbr", parent=lblb, alignment=2)
     foot = Table([
-        [Paragraph("Checked by", lblb), Paragraph(f"For {company_name.upper()}", lblb)],
+        [Paragraph("Checked by", lblb), Paragraph(f"For {company_name.upper()}", lblbr)],
         [Paragraph("Payment Date ______________", lbl),
-         Paragraph("AUTHORISED SIGNATORY/MANAGER", lblb)],
+         Paragraph("AUTHORISED SIGNATORY/MANAGER", lblbr)],
     ], colWidths=[95 * mm, 95 * mm])
     foot.setStyle(TableStyle([
         ("ALIGN", (1, 0), (1, -1), "RIGHT"),
@@ -1126,6 +1191,7 @@ def build_compliance_register_pdf_v2(
     firm: Optional[Dict[str, Any]] = None,
     layout: Optional[Dict[str, Any]] = None,
     title_override: str = "",
+    group_by: str = "",
 ) -> bytes:
     """Iter 137 — OPTION 2 (recommended modern format).
 
@@ -1277,23 +1343,69 @@ def build_compliance_register_pdf_v2(
                             "hrs", "sal", "hra_e", "conv_e", "oth_e",
                             "pf_wages", "gross_pf", "gross_nonpf",
                             "esi_base", "nonesi_base")}
+    # Iter 324 (user request) — optional GROUPING with per-group sub-totals.
+    body_items: List[Dict[str, Any]] = []
+    g_tot = {k: 0.0 for k in tot}
+    cur_g: Optional[str] = None
+    _grp_head = {"employee_group": "GROUP", "department": "DEPARTMENT",
+                 "designation": "DESIGNATION"}.get(group_by, "GROUP")
+
+    def _grp_val(r: Dict[str, Any]) -> str:
+        if group_by == "employee_group":
+            return str(r.get("employee_group") or r.get("employee_type") or "No Group").upper()
+        if group_by == "department":
+            return str(r.get("department") or "No Department").upper()
+        if group_by == "designation":
+            return str(r.get("designation") or "No Designation").upper()
+        return ""
+
+    def _sub_cells(gname: str, g: Dict[str, float]) -> List[Any]:
+        sv = {
+            "sno": "", "name": f"TOTAL — {gname}", "desig": "",
+            "uan": "", "pf_no": "", "esi_no": "",
+            "days": f"{g['days']:g}", "basic": A(g["basic"]), "hra": A(g["hra"]),
+            "conv": A(g["conv"]), "other_earn": A(g["oth"]), "gross": A(g["gross"]),
+            "pf": A(g["pf"]), "esi": A(g["esi"]), "other_ded": A(g["othd"]),
+            "tds": A(g["tds"]), "total_ded": A(g["ded"]), "net": A(g["net"]),
+            "sign": "",
+        }
+        if "name" not in col_keys and col_keys:
+            sv[col_keys[0]] = f"TOTAL — {gname}"
+        return [sv.get(k, "") for k in col_keys]
+
     for i, r in enumerate(rows, start=1):
+        if group_by:
+            gv = _grp_val(r)
+            if gv != cur_g:
+                if cur_g is not None:
+                    body_items.append({"kind": "sub", "cells": _sub_cells(cur_g, g_tot)})
+                cur_g = gv
+                for _k in g_tot:
+                    g_tot[_k] = 0.0
+                body_items.append({"kind": "hdr",
+                                   "cells": [f"{_grp_head}: {gv}"]
+                                   + [""] * (len(col_keys) - 1)})
         days = float(r.get("present_days") or 0)
         oth_e = other_earn(r)
         pf_v = float(r.get("pf_employee") or 0) + float(r.get("vpf_amount") or 0)
         oth_d = other_ded(r)
-        tot["days"] += days
-        tot["basic"] += float(r.get("basic_master") or 0)
-        tot["hra"] += float(r.get("hra_master") or 0)
-        tot["conv"] += float(r.get("conveyance_master") or 0)
-        tot["oth"] += oth_e
-        tot["gross"] += float(r.get("gross_paid") or 0)
-        tot["pf"] += pf_v
-        tot["esi"] += float(r.get("esic_employee") or 0)
-        tot["othd"] += oth_d
-        tot["tds"] += float(r.get("tds") or 0)
-        tot["ded"] += float(r.get("total_deduction") or 0)
-        tot["net"] += float(r.get("net") or 0)
+        _pairs = (
+            ("days", days),
+            ("basic", float(r.get("basic_master") or 0)),
+            ("hra", float(r.get("hra_master") or 0)),
+            ("conv", float(r.get("conveyance_master") or 0)),
+            ("oth", oth_e),
+            ("gross", float(r.get("gross_paid") or 0)),
+            ("pf", pf_v),
+            ("esi", float(r.get("esic_employee") or 0)),
+            ("othd", oth_d),
+            ("tds", float(r.get("tds") or 0)),
+            ("ded", float(r.get("total_deduction") or 0)),
+            ("net", float(r.get("net") or 0)),
+        )
+        for _k, _v in _pairs:
+            tot[_k] += _v
+            g_tot[_k] += _v
         # Iter 273 — Format-1-style last-page summary aggregates (EARNED values).
         tot["hrs"] += float(r.get("ot_hours") or 0)
         tot["sal"] += float(r.get("basic") or 0)
@@ -1331,6 +1443,9 @@ def build_compliance_register_pdf_v2(
             "sign": "",
         }
         data.append([vals[k] for k in col_keys])
+        body_items.append({"kind": "emp", "cells": data[-1]})
+    if group_by and cur_g is not None:
+        body_items.append({"kind": "sub", "cells": _sub_cells(cur_g, g_tot)})
     tot_vals = {
         "sno": "", "name": "GRAND TOTAL", "desig": "",
         "uan": "", "pf_no": "", "esi_no": "",
@@ -1387,19 +1502,41 @@ def build_compliance_register_pdf_v2(
         _rh = float(layout.get("row_height") or 0)  # mm; 0 = auto
     except Exception:
         _rh = 0
-    body_rows = data[1:-1]
     grand_row = data[-1]
-    chunks = [body_rows[i:i + PER_PAGE]
-              for i in range(0, len(body_rows), PER_PAGE)] or [[]]
+    item_chunks = [body_items[i:i + PER_PAGE]
+                   for i in range(0, len(body_items), PER_PAGE)] or [[]]
     page_tables: List[Any] = []
-    for ci, ch in enumerate(chunks):
-        is_final = ci == len(chunks) - 1
+    for ci, ich in enumerate(item_chunks):
+        is_final = ci == len(item_chunks) - 1
+        ch = [it["cells"] for it in ich]
         d = [header] + ch + ([grand_row] if is_final else [])
         row_heights = None
         if _rh > 0:
-            row_heights = [None] + [_rh * mm] * len(ch) + ([None] if is_final else [])
+            row_heights = [None] + [
+                (_rh * mm if it["kind"] == "emp" else None) for it in ich
+            ] + ([None] if is_final else [])
         t = Table(d, colWidths=col_widths, repeatRows=1, rowHeights=row_heights)
         t.setStyle(_v2_style(len(ch), ci * PER_PAGE, is_final))
+        # Iter 324 — group header / sub-total styling overrides.
+        extra: List[Any] = []
+        for j, it in enumerate(ich):
+            ri = 1 + j
+            if it["kind"] == "hdr":
+                extra += [
+                    ("SPAN", (0, ri), (-1, ri)),
+                    ("BACKGROUND", (0, ri), (-1, ri), rl_colors.HexColor("#D5E3F0")),
+                    ("TEXTCOLOR", (0, ri), (-1, ri), BRAND),
+                    ("FONTNAME", (0, ri), (-1, ri), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, ri), (-1, ri), 7.5),
+                    ("ALIGN", (0, ri), (-1, ri), "LEFT"),
+                ]
+            elif it["kind"] == "sub":
+                extra += [
+                    ("FONTNAME", (0, ri), (-1, ri), "Helvetica-Bold"),
+                    ("BACKGROUND", (0, ri), (-1, ri), rl_colors.HexColor("#EFEFEF")),
+                ]
+        if extra:
+            t.setStyle(TableStyle(extra))
         page_tables.append(t)
 
     lbl = ParagraphStyle("lbl", fontName="Helvetica", fontSize=8.5, leading=12)
@@ -1421,11 +1558,13 @@ def build_compliance_register_pdf_v2(
         ]))
         return t
 
+    # Iter 324 (user request) — signature block aligned to the RIGHT side.
+    lblr = ParagraphStyle("lblr2", parent=lblb, alignment=2)
     foot = Table([
         [Paragraph("Checked by ____________________", lbl),
-         Paragraph(f"For {company_name.upper()}", lblb)],
+         Paragraph(f"For {company_name.upper()}", lblr)],
         [Paragraph("Payment Date ____________________", lbl),
-         Paragraph("AUTHORISED SIGNATORY / MANAGER", lblb)],
+         Paragraph("AUTHORISED SIGNATORY / MANAGER", lblr)],
     ], colWidths=[(W - 12 * mm) / 2.0] * 2)
     foot.setStyle(TableStyle([
         ("ALIGN", (1, 0), (1, -1), "RIGHT"),

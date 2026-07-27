@@ -500,6 +500,15 @@ async def upsert_firm_master(
 # decrypted from the secrets vault only after the PIN checks out.
 # ---------------------------------------------------------------------------
 
+def _fm_city(fm: Dict[str, Any]) -> str:
+    """Best-effort city from registered → office → factory address."""
+    for k in ("registered_address", "office_address", "factory_address"):
+        c = str(((fm.get(k) or {}).get("city")) or "").strip()
+        if c:
+            return c
+    return ""
+
+
 @router.post("/firm-credentials")
 async def firm_credentials(
     payload: Dict[str, Any] = Body(default={}),
@@ -523,7 +532,8 @@ async def firm_credentials(
 
     out: List[Dict[str, Any]] = []
     async for fm in db.firm_masters.find(
-        {}, {"_id": 0, "company_id": 1, "epf": 1, "esi": 1, "portal_logins": 1},
+        {}, {"_id": 0, "company_id": 1, "epf": 1, "esi": 1, "portal_logins": 1,
+             "registered_address": 1, "office_address": 1, "factory_address": 1},
     ):
         cid = fm.get("company_id")
         if cid not in names:
@@ -541,6 +551,7 @@ async def firm_credentials(
         out.append({
             "company_id": cid,
             "firm_name": names.get(cid, cid),
+            "city": _fm_city(fm),
             "epf_code": epf.get("epf_no"),
             "epf_user_id": epf.get("epf_user_id"),
             "epf_password": decrypt_secret(epf.get("epf_password")),
@@ -553,3 +564,120 @@ async def firm_credentials(
     logger.info("[firm-credentials] revealed to %s (%d firms)",
                 user["user_id"], len(out))
     return {"firms": out}
+
+
+# ---------------------------------------------------------------------------
+# Iter 325 (user request) — LIST OF FIRMS: full Firm Master data as an
+# Excel-style grid + downloadable XLSX.
+# ---------------------------------------------------------------------------
+_FIRM_LIST_COLUMNS: List[tuple] = [
+    ("firm_name", "Firm Name"), ("category", "Category"),
+    ("business_nature", "Business Nature"), ("start_date", "Start Date"),
+    ("city", "City"), ("state", "State"), ("pin_code", "Pin Code"),
+    ("address", "Registered Address"), ("email_1", "Email 1"),
+    ("email_2", "Email 2"),
+    ("epf_no", "PF Code"), ("epf_applicable", "PF Applicable"),
+    ("esi_no", "ESIC Code"), ("esi_applicable", "ESI Applicable"),
+    ("bank_name", "Bank Name"), ("account_no", "Account No"),
+    ("ifsc", "IFSC"),
+    ("contact_person", "Contact Person"), ("contact_phone", "Contact Phone"),
+    ("firm_active", "Active"),
+]
+
+
+async def _firms_master_rows() -> List[Dict[str, Any]]:
+    names: Dict[str, str] = {}
+    async for c in db.companies.find({}, {"_id": 0, "company_id": 1, "name": 1}):
+        names[c["company_id"]] = c.get("name") or c["company_id"]
+    rows: List[Dict[str, Any]] = []
+    seen: set = set()
+    async for fm in db.firm_masters.find({}, {"_id": 0}):
+        cid = fm.get("company_id")
+        if cid not in names:
+            continue
+        seen.add(cid)
+        ra = fm.get("registered_address") or {}
+        hdr = fm.get("header") or {}
+        epf = fm.get("epf") or {}
+        esi = fm.get("esi") or {}
+        bank = fm.get("bank") or {}
+        cps = fm.get("contact_persons") or []
+        cp = cps[0] if cps else {}
+        addr = ", ".join(str(x).strip() for x in [ra.get("address1"), ra.get("address2")]
+                         if x and str(x).strip())
+        rows.append({
+            "company_id": cid,
+            "firm_name": names[cid],
+            "category": hdr.get("category") or "",
+            "business_nature": hdr.get("business_nature") or "",
+            "start_date": hdr.get("start_date") or "",
+            "city": _fm_city(fm),
+            "state": ra.get("state") or "",
+            "pin_code": ra.get("pin_code") or "",
+            "address": addr,
+            "email_1": hdr.get("email_1") or "",
+            "email_2": hdr.get("email_2") or "",
+            "epf_no": epf.get("epf_no") or "",
+            "epf_applicable": "Yes" if epf.get("applicable") else "No",
+            "esi_no": esi.get("esi_no") or "",
+            "esi_applicable": "Yes" if esi.get("applicable") else "No",
+            "bank_name": bank.get("bank_name") or "",
+            "account_no": bank.get("account_no") or "",
+            "ifsc": bank.get("ifsc") or "",
+            "contact_person": (cp.get("name") or "") if isinstance(cp, dict) else "",
+            "contact_phone": (cp.get("phone") or cp.get("mobile") or "") if isinstance(cp, dict) else "",
+            "firm_active": "Yes" if (fm.get("settings") or {}).get("firm_active", True) else "No",
+        })
+    # Firms without a saved Firm Master still appear (name only).
+    for cid, nm in names.items():
+        if cid not in seen:
+            rows.append({"company_id": cid, "firm_name": nm,
+                         **{k: "" for k, _l in _FIRM_LIST_COLUMNS
+                            if k not in ("firm_name",)}})
+    rows.sort(key=lambda r: str(r.get("firm_name") or "").lower())
+    return rows
+
+
+@router.get("/firms-master-list")
+async def firms_master_list(authorization: Optional[str] = Header(None)):
+    user = await get_user_from_token(authorization)
+    require_role(user, ["super_admin", "sub_admin"])
+    rows = await _firms_master_rows()
+    return {"columns": [{"key": k, "label": l} for k, l in _FIRM_LIST_COLUMNS],
+            "firms": rows}
+
+
+@router.get("/firms-master-list/export.xlsx")
+async def firms_master_list_xlsx(authorization: Optional[str] = Header(None)):
+    import io as _io
+    from fastapi.responses import Response
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    user = await get_user_from_token(authorization)
+    require_role(user, ["super_admin", "sub_admin"])
+    rows = await _firms_master_rows()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Firms Master"
+    heads = ["S.No"] + [l for _k, l in _FIRM_LIST_COLUMNS]
+    for i, h in enumerate(heads, 1):
+        c = ws.cell(row=1, column=i, value=h)
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="0F3B5C")
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for r, row in enumerate(rows, 2):
+        ws.cell(row=r, column=1, value=r - 1)
+        for i, (k, _l) in enumerate(_FIRM_LIST_COLUMNS, 2):
+            ws.cell(row=r, column=i, value=row.get(k) or "")
+    for i, w in enumerate([6, 32, 14, 18, 12, 14, 14, 10, 34, 24, 24,
+                           18, 12, 18, 12, 18, 18, 14, 20, 14, 8], 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = "C2"
+    buf = _io.BytesIO()
+    wb.save(buf)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="Firms_Master_List.xlsx"',
+                 "Cache-Control": "no-store"})

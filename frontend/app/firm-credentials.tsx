@@ -21,6 +21,7 @@ import { colors, radius, shadow, spacing } from "@/src/theme";
 type FirmCred = {
   company_id: string;
   firm_name: string;
+  city?: string | null;
   epf_code?: string | null;
   epf_user_id?: string | null;
   epf_password?: string | null;
@@ -61,6 +62,16 @@ export default function FirmCredentialsScreen() {
   const [err, setErr] = useState("");
   const [firms, setFirms] = useState<FirmCred[] | null>(null);
   const [search, setSearch] = useState("");
+  // Iter 325 (user request) — Excel-sheet view with tap-to-copy cells.
+  const [copied, setCopied] = useState("");
+  const [showPw, setShowPw] = useState(false);
+
+  const copyCell = (key: string, v: string) => {
+    if (!v) return;
+    copyText(v);
+    setCopied(key);
+    setTimeout(() => setCopied((c) => (c === key ? "" : c)), 1200);
+  };
 
   if (user && user.role !== "super_admin") {
     return (
@@ -150,61 +161,79 @@ export default function FirmCredentialsScreen() {
                 onChangeText={setSearch}
               />
             </View>
-            {visible.map((f) => (
-              <View key={f.company_id} style={styles.firmCard}>
-                <View style={styles.firmHead}>
-                  <Ionicons name="business-outline" size={15} color={colors.brandPrimary} />
-                  <Text style={styles.firmName}>{f.firm_name}</Text>
-                </View>
-                <View style={styles.credGrid}>
-                  <View style={styles.credCol}>
-                    <Text style={styles.credColTitle}>EPF PORTAL</Text>
-                    <View style={styles.credRow}>
-                      <Text style={styles.credLabel}>Code</Text>
-                      <Text style={styles.credTxt}>{f.epf_code || "—"}</Text>
-                    </View>
-                    <View style={styles.credRow}>
-                      <Text style={styles.credLabel}>User ID</Text>
-                      <Text style={styles.credTxt} selectable>{f.epf_user_id || "—"}</Text>
-                    </View>
-                    <View style={styles.credRow}>
-                      <Text style={styles.credLabel}>Password</Text>
-                      <SecretCell value={f.epf_password} />
-                    </View>
-                  </View>
-                  <View style={styles.credCol}>
-                    <Text style={styles.credColTitle}>ESIC PORTAL</Text>
-                    <View style={styles.credRow}>
-                      <Text style={styles.credLabel}>ESI No</Text>
-                      <Text style={styles.credTxt} selectable>{f.esi_no || "—"}</Text>
-                    </View>
-                    <View style={styles.credRow}>
-                      <Text style={styles.credLabel}>User ID</Text>
-                      <Text style={styles.credTxt} selectable>{f.esi_user_id || "—"}</Text>
-                    </View>
-                    <View style={styles.credRow}>
-                      <Text style={styles.credLabel}>Password</Text>
-                      <SecretCell value={f.esi_password} />
-                    </View>
-                  </View>
-                  {(f.other_logins || []).map((o, i) => (
-                    <View key={i} style={styles.credCol}>
-                      <Text style={styles.credColTitle}>
-                        {(o.login_type || "OTHER").toUpperCase()}
-                      </Text>
-                      <View style={styles.credRow}>
-                        <Text style={styles.credLabel}>User ID</Text>
-                        <Text style={styles.credTxt} selectable>{o.user_name || "—"}</Text>
-                      </View>
-                      <View style={styles.credRow}>
-                        <Text style={styles.credLabel}>Password</Text>
-                        <SecretCell value={o.password} />
-                      </View>
-                    </View>
+            {/* Iter 325 (user request) — Excel-sheet view, tap any cell to copy */}
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 }}>
+              <Pressable style={styles.pwToggle} onPress={() => setShowPw((s) => !s)} testID="cred-showpw">
+                <Ionicons name={showPw ? "eye-off-outline" : "eye-outline"} size={14} color={colors.brandPrimary} />
+                <Text style={styles.pwToggleTxt}>{showPw ? "Hide passwords" : "Show passwords"}</Text>
+              </Pressable>
+              <Text style={styles.mutedTxt}>Tap any cell to copy its value</Text>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator>
+              <View>
+                <View style={styles.shRow}>
+                  {[
+                    ["S.No", 46], ["Firm Name", 230], ["City", 100],
+                    ["PF Code", 145], ["PF Login Id", 130], ["PF Password", 130],
+                    ["ESIC Code", 150], ["ESIC Login Id", 130], ["ESIC Password", 130],
+                  ].map(([h, w]) => (
+                    <Text key={h as string} style={[styles.shCell, { width: w as number }]}>{h}</Text>
                   ))}
                 </View>
+                {visible.map((f, i) => {
+                  const cells: [string, string, number, boolean][] = [
+                    ["name", f.firm_name || "", 230, false],
+                    ["city", f.city || "", 100, false],
+                    ["pfc", f.epf_code || "", 145, false],
+                    ["pfu", f.epf_user_id || "", 130, false],
+                    ["pfp", f.epf_password || "", 130, true],
+                    ["esc", f.esi_no || "", 150, false],
+                    ["esu", f.esi_user_id || "", 130, false],
+                    ["esp", f.esi_password || "", 130, true],
+                  ];
+                  return (
+                    <View key={f.company_id} style={[styles.sdRow, i % 2 === 1 && styles.sdRowAlt]}>
+                      <Text style={[styles.sdTxt, { width: 46, textAlign: "center", paddingVertical: 8 }]}>{i + 1}</Text>
+                      {cells.map(([k, v, w, secret]) => {
+                        const ck = `${f.company_id}:${k}`;
+                        return (
+                          <Pressable
+                            key={k}
+                            style={[styles.sdCell, { width: w }]}
+                            onPress={() => copyCell(ck, v)}
+                          >
+                            {copied === ck ? (
+                              <Text style={styles.copiedTxt}>✓ Copied</Text>
+                            ) : (
+                              <Text style={styles.sdTxt} numberOfLines={1}>
+                                {!v ? "—" : secret && !showPw ? "••••••••" : v}
+                              </Text>
+                            )}
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  );
+                })}
               </View>
-            ))}
+            </ScrollView>
+            {/* Extra portal logins (non EPF/ESIC) kept below the sheet */}
+            {visible.some((f) => (f.other_logins || []).length) ? (
+              <View style={{ marginTop: 14 }}>
+                <Text style={styles.credColTitle}>OTHER PORTAL LOGINS</Text>
+                {visible.map((f) =>
+                  (f.other_logins || []).map((o, i) => (
+                    <View key={`${f.company_id}-${i}`} style={styles.credRow}>
+                      <Text style={[styles.credLabel, { width: 200 }]} numberOfLines={1}>
+                        {f.firm_name} · {(o.login_type || "OTHER").toUpperCase()}
+                      </Text>
+                      <Text style={styles.credTxt} selectable>{o.user_name || "—"}</Text>
+                      <SecretCell value={o.password} />
+                    </View>
+                  )),
+                )}
+              </View>
+            ) : null}
             {!visible.length && (
               <Text style={[styles.mutedTxt, { textAlign: "center", padding: 24 }]}>
                 No firms found.
@@ -275,4 +304,24 @@ const styles = StyleSheet.create({
   credRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   credLabel: { width: 70, fontSize: 11.5, color: colors.onSurfaceSecondary, fontWeight: "600" },
   credTxt: { fontSize: 12.5, color: colors.onSurface, fontWeight: "600", flexShrink: 1 },
+  // Iter 325 — Excel-sheet view
+  pwToggle: {
+    flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1.5,
+    borderColor: colors.brandPrimary, borderRadius: 8, paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  pwToggleTxt: { fontSize: 11.5, fontWeight: "800", color: colors.brandPrimary },
+  shRow: { flexDirection: "row", backgroundColor: "#0F3B5C" },
+  shCell: {
+    color: "#fff", fontSize: 11, fontWeight: "800", paddingVertical: 9,
+    paddingHorizontal: 8, borderRightWidth: 1, borderRightColor: "#2C567A",
+  },
+  sdRow: { flexDirection: "row", backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border },
+  sdRowAlt: { backgroundColor: "#F6F8FA" },
+  sdCell: {
+    paddingVertical: 8, paddingHorizontal: 8, justifyContent: "center",
+    borderRightWidth: 1, borderRightColor: colors.border, minHeight: 36,
+  },
+  sdTxt: { fontSize: 12, color: colors.onSurface, fontWeight: "600" },
+  copiedTxt: { fontSize: 11, color: "#15803D", fontWeight: "800" },
 });

@@ -220,6 +220,9 @@ export default function ComplianceSalaryRunScreen() {
   const [run, setRun] = useState<CompRun | null>(null);
   const [runs, setRuns] = useState<CompRun[]>([]);
   const [downloading, setDownloading] = useState(false);
+  // Iter 324 (user request) — PDF sorting & grouping choices.
+  const [pdfSort, setPdfSort] = useState("");
+  const [pdfGroup, setPdfGroup] = useState("");
   const [layoutOpen, setLayoutOpen] = useState(false); // Iter 162 — PDF layout editor
   const [pushing, setPushing] = useState(false);
   const [reprocessing, setReprocessing] = useState(false);
@@ -879,15 +882,16 @@ export default function ComplianceSalaryRunScreen() {
     if (!run || downloading) return;
     setDownloading(true);
     try {
+      const _pg = `sort_by=${pdfSort}&group_by=${pdfGroup}`;
       const url =
         kind === "csv"
           ? `/admin/compliance-salary-runs/${run.run_id}/export.csv`
           : kind === "xlsx"
             ? `/admin/compliance-salary-runs/${run.run_id}/export.xlsx`
             : kind === "pdf"
-              ? `/admin/compliance-salary-runs/${run.run_id}/register.pdf`
+              ? `/admin/compliance-salary-runs/${run.run_id}/register.pdf?${_pg}`
               : kind === "pdf2"
-                ? `/admin/compliance-salary-runs/${run.run_id}/register.pdf?variant=2`
+                ? `/admin/compliance-salary-runs/${run.run_id}/register.pdf?variant=2&${_pg}`
                 : kind === "ecr"
                   ? `/admin/compliance-salary-runs/${run.run_id}/pf-ecr.txt`
                   : kind === "esic-mc"
@@ -1690,6 +1694,53 @@ export default function ComplianceSalaryRunScreen() {
                 ) : null}
                 <ActionBtn icon="paper-plane-outline" label="Push payslips" busy={pushing} onPress={pushToPayslips} primary />
               </View>
+              {/* Iter 324 (user request) — PDF Sorting & Grouping */}
+              {Platform.OS === "web" ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                  <Text style={{ fontSize: 11.5, fontWeight: "800", color: colors.onSurfaceSecondary }}>
+                    📄 PDF Sort by:
+                  </Text>
+                  <select
+                    data-testid="pdf-sort"
+                    value={pdfSort}
+                    onChange={(e) => setPdfSort((e.target as HTMLSelectElement).value)}
+                    style={{
+                      padding: "5px 8px", borderRadius: 8, fontSize: 12,
+                      border: `1px solid ${colors.border}`, background: colors.surface,
+                      color: colors.onSurface,
+                    } as any}
+                  >
+                    <option value="">Default order</option>
+                    <option value="name">Employee Name (A–Z)</option>
+                    <option value="code">Employee Code</option>
+                    <option value="designation">Designation</option>
+                    <option value="department">Department</option>
+                  </select>
+                  <Text style={{ fontSize: 11.5, fontWeight: "800", color: colors.onSurfaceSecondary }}>
+                    Group by:
+                  </Text>
+                  <select
+                    data-testid="pdf-group"
+                    value={pdfGroup}
+                    onChange={(e) => setPdfGroup((e.target as HTMLSelectElement).value)}
+                    style={{
+                      padding: "5px 8px", borderRadius: 8, fontSize: 12,
+                      border: `1px solid ${colors.border}`, background: colors.surface,
+                      color: colors.onSurface,
+                    } as any}
+                  >
+                    <option value="">No grouping</option>
+                    <option value="employee_group">Employee Group</option>
+                    <option value="department">Department</option>
+                    <option value="designation">Designation</option>
+                  </select>
+                  {pdfGroup ? (
+                    <Text style={{ fontSize: 10.5, color: colors.onSurfaceTertiary }}>
+                      Sections with sub-totals per {pdfGroup.replace("_", " ")} · applies to PDF & PDF (Option 2)
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
             </View>
 
             {/* Iter 98 — sort chips + Iter 182 instant search */}

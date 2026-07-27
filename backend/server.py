@@ -8674,6 +8674,7 @@ async def admin_employees_bulk_import(
         "permanent add": "permanent_address", "permanent address": "permanent_address",
         # Iter 266 — City / State / Pin Code column aliases.
         "city": "city", "town": "city",
+        "state": "state", "province": "state",
         "pin code": "pincode", "pincode": "pincode", "pin_code": "pincode",
         "postal code": "pincode", "zip": "pincode", "zip code": "pincode",
         "panno": "pan_no", "pan no": "pan_no", "pan": "pan_no",
@@ -16496,6 +16497,8 @@ async def export_compliance_salary_run_xlsx(
 async def export_compliance_salary_register_pdf(
     run_id: str,
     variant: int = 1,
+    sort_by: str = "",
+    group_by: str = "",
     authorization: Optional[str] = Header(None),
 ):
     from utils.compliance_salary import (
@@ -16511,6 +16514,61 @@ async def export_compliance_salary_register_pdf(
         raise HTTPException(status_code=404, detail="Compliance salary run not found")
     if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
         raise HTTPException(status_code=403, detail="Not authorised for this run")
+
+    # Iter 324 (user request) — SORTING + GROUPING on the register PDF.
+    sort_by = str(sort_by or "").strip().lower()
+    group_by = str(group_by or "").strip().lower()
+    if sort_by not in ("", "name", "code", "designation", "department"):
+        sort_by = ""
+    if group_by not in ("", "employee_group", "department", "designation"):
+        group_by = ""
+    _rows = list(run.get("rows") or [])
+    if sort_by or group_by:
+        # Enrich rows with department / employee group from the Employee
+        # Master (older runs may not carry these fields on the row).
+        _uids = [r.get("user_id") for r in _rows if r.get("user_id")]
+        _umap = {u["user_id"]: u async for u in db.users.find(
+            {"user_id": {"$in": _uids}},
+            {"_id": 0, "user_id": 1, "employee_code": 1, "department": 1,
+             "employee_group": 1, "employee_type": 1, "designation": 1})}
+        for r in _rows:
+            u = _umap.get(r.get("user_id")) or {}
+            r.setdefault("department", u.get("department") or "")
+            r.setdefault("employee_code", u.get("employee_code") or "")
+            if not r.get("employee_group"):
+                r["employee_group"] = (u.get("employee_group")
+                                       or u.get("employee_type") or "")
+
+        def _code_key(r):
+            c = str(r.get("employee_code") or "").strip()
+            try:
+                return (0, float(c), "")
+            except ValueError:
+                return (1, 0.0, c.upper())
+
+        def _sort_key(r):
+            if sort_by == "code":
+                return _code_key(r)
+            if sort_by == "designation":
+                return (str(r.get("designation") or "").upper(), str(r.get("name") or "").upper())
+            if sort_by == "department":
+                return (str(r.get("department") or "").upper(), str(r.get("name") or "").upper())
+            return (str(r.get("name") or "").upper(),)
+
+        def _grp_val(r):
+            if group_by == "employee_group":
+                return str(r.get("employee_group") or "No Group").upper()
+            if group_by == "department":
+                return str(r.get("department") or "No Department").upper()
+            if group_by == "designation":
+                return str(r.get("designation") or "No Designation").upper()
+            return ""
+
+        if group_by:
+            _rows.sort(key=lambda r: (_grp_val(r),) + tuple(_sort_key(r)))
+        elif sort_by:
+            _rows.sort(key=_sort_key)
+        run = {**run, "rows": _rows}
 
     company_name = "S.K. Sharma & Co."
     firm_info: Dict[str, Any] = {}
@@ -16547,10 +16605,11 @@ async def export_compliance_salary_register_pdf(
         _lay = await db.app_settings.find_one(
             {"key": "compliance_register_layout"}, {"_id": 0, "layout": 1})
         pdf_bytes = builder(run, company_name=company_name, firm=firm_info,
-                            layout=(_lay or {}).get("layout"), title_override=_title_ov)
+                            layout=(_lay or {}).get("layout"), title_override=_title_ov,
+                            group_by=group_by)
     else:
         pdf_bytes = builder(run, company_name=company_name, firm=firm_info,
-                            title_override=_title_ov)
+                            title_override=_title_ov, group_by=group_by)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
