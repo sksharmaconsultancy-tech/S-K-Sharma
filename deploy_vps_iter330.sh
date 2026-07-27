@@ -59,7 +59,10 @@ sudo cp -r dist/* $WEB_DIR/
 sudo find $WEB_DIR/_expo/static/js/web -name "*.js" -mtime +30 -delete 2>/dev/null || true
 
 echo "==> 6/8 Restarting backend service..."
-sudo systemctl restart sksharma-backend || sudo supervisorctl restart backend || true
+sudo supervisorctl stop sksharma-backend || true
+sudo fuser -k 8001/tcp 2>/dev/null || true
+sleep 2
+sudo supervisorctl start sksharma-backend
 
 echo "==> 7/8 Reloading nginx..."
 sudo nginx -t && sudo systemctl reload nginx
