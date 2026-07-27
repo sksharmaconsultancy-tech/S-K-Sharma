@@ -15356,6 +15356,9 @@ class ComplianceSalaryRunCreate(BaseModel):
     # Iter 101 — import Present Days + Other Deductions from the imported
     # salary sheet (file upload / Gmail attachment) instead of biometric.
     use_imported_sheet: Optional[bool] = False
+    # Iter 330 (user request) — copy LAST MONTH's salary into this month
+    # exactly as it was (same Present Days / Gross / PF / ESIC / Net).
+    copy_last_month: Optional[bool] = False
 
 
 async def _compute_compliance_run(
@@ -15908,6 +15911,98 @@ async def _compute_compliance_run(
     }
 
 
+async def _copy_last_month_compliance_run(
+    admin: dict,
+    payload: ComplianceSalaryRunCreate,
+    gate_cid: Optional[str],
+    group: str,
+) -> dict:
+    """Iter 330 (user request) — 'Copy Last Month Salary': builds the new
+    month's run by copying LAST MONTH's rows exactly as they were (same
+    Present Days, Gross, PF/ESIC/PT/TDS, Net). Employees who exited before
+    the new month (or were disabled) are dropped. The copied run is a
+    normal editable DRAFT — it can be edited, saved and finalized."""
+    from utils.salary_run import actual_days_in_month
+    y, m = int(payload.month[:4]), int(payload.month[5:7])
+    prev_month = f"{y - 1}-12" if m == 1 else f"{y:04d}-{m - 1:02d}"
+    _grp_q = (
+        {"$regex": f"^{re.escape(group)}$", "$options": "i"} if group
+        else {"$in": [None, ""]}
+    )
+    src = await db.compliance_salary_runs.find_one(
+        {"month": prev_month, "company_id": gate_cid, "employee_type": _grp_q},
+        {"_id": 0},
+        sort=[("finalized", -1), ("generated_at", -1)],
+    )
+    if not src or not (src.get("rows") or []):
+        raise HTTPException(
+            status_code=404,
+            detail=f"No Compliance Salary found for {prev_month} (this firm/"
+                   "group) — process last month first, then copy it.",
+        )
+    # Drop employees who exited before the new month or were disabled.
+    src_rows = src.get("rows") or []
+    uids = [r.get("user_id") for r in src_rows if r.get("user_id")]
+    users_by_id: Dict[str, dict] = {}
+    if uids:
+        async for u in db.users.find(
+            {"user_id": {"$in": uids}},
+            {"_id": 0, "user_id": 1, "exit_date": 1, "resign_date": 1,
+             "disabled": 1},
+        ):
+            users_by_id[u["user_id"]] = u
+    rows = []
+    skipped = []
+    for r in src_rows:
+        u = users_by_id.get(r.get("user_id")) or {}
+        if u.get("disabled") is True or _month_is_after_exit(u, payload.month):
+            skipped.append({"user_id": r.get("user_id"), "name": r.get("name")})
+            continue
+        nr = dict(r)
+        # Last month's advance EMI must not be carried verbatim — the
+        # endpoint re-applies the CURRENT month's advance recovery after
+        # this copy (keeps the advance ledger correct).
+        _adv = round(float(nr.get("advance_recovery") or 0), 2)
+        if _adv:
+            nr["advance_recovery"] = 0.0
+            nr["total_deduction"] = round(
+                float(nr.get("total_deduction") or 0) - _adv, 2)
+            nr["net"] = round(float(nr.get("net") or 0) + _adv, 2)
+        rows.append(nr)
+    totals = {
+        k: round(sum(float(r.get(k) or 0.0) for r in rows), 2)
+        for k in (
+            "basic", "hra", "conveyance", "medical", "special", "others",
+            "monthly_gross", "gross_paid", "ot_pay",
+            "pf_wages", "pf_employee", "pf_employer_epf", "pf_employer_eps",
+            "pf_employer_total",
+            "esic_wage_base", "esic_employee", "esic_employer",
+            "pt", "tds", "total_deduction", "net",
+        )
+    }
+    return {
+        "month": payload.month,
+        "year": y,
+        "month_number": m,
+        "month_days": int(src.get("month_days") or actual_days_in_month(y, m)),
+        "default_month_days": actual_days_in_month(y, m),
+        "company_id": gate_cid,
+        "employee_type": payload.employee_type,
+        "structure_pct": src.get("structure_pct") or {},
+        "statutory_cfg": src.get("statutory_cfg") or {},
+        "employees_count": len(rows),
+        "rows": rows,
+        "totals": totals,
+        "attendance_source": "copied_last_month",
+        "copied_from_month": prev_month,
+        "copied_from_run_id": src.get("run_id"),
+        "copied_skipped": skipped,
+        "frozen": False,
+        "generated_by": admin["user_id"],
+        "generated_at": now_iso(),
+    }
+
+
 async def _firm_offline_salary_enabled(company_id: Optional[str]) -> bool:
     """Iter 164 — True when the firm's Firm Master has 'Offline Salary'
     (salary_process.offline_salary) enabled. Off-roll employees are only
@@ -16018,9 +16113,16 @@ async def create_compliance_salary_run(
     _prev_rows: Dict[str, dict] = {
         r.get("user_id"): r for r in ((_prev_run or {}).get("rows") or [])
     }
-    run = await _compute_compliance_run(admin, payload, prev_rows=_prev_rows)
+    # Iter 330 (user request) — "Copy Last Month Salary": build this
+    # month's run as an EXACT copy of last month's rows instead of
+    # recomputing from attendance / master.
+    if payload.copy_last_month:
+        run = await _copy_last_month_compliance_run(
+            admin, payload, _gate_cid, _grp0)
+    else:
+        run = await _compute_compliance_run(admin, payload, prev_rows=_prev_rows)
     run["run_id"] = f"csrun_{uuid.uuid4().hex[:12]}"
-    if _prev_rows:
+    if _prev_rows and not payload.copy_last_month:
         run["reprocessed"] = True
     # Iter 310 — FREEZE SALARY: imported-sheet runs freeze the exact
     # imported attendance/earnings at process time.
@@ -16080,8 +16182,13 @@ async def create_compliance_salary_run(
         })
     # Iter 182 — audit trail
     from routes.salary_audit import write_salary_audit
-    await write_salary_audit(admin, "process", run,
-                             f"Processed {len(run.get('rows') or [])} employees")
+    _audit_msg = (
+        f"Copied {len(run.get('rows') or [])} employees from "
+        f"{run.get('copied_from_month')} (Copy Last Month Salary)"
+        if payload.copy_last_month
+        else f"Processed {len(run.get('rows') or [])} employees"
+    )
+    await write_salary_audit(admin, "process", run, _audit_msg)
     return {"ok": True, "run": {k: v for k, v in run.items() if k != "_id"}}
 
 

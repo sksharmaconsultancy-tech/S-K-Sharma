@@ -1865,3 +1865,17 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - firm-select gate now uses switchCompany (lock-override) so the workspace firm always lands
   in the global header picker; sign-out modal "Select Another Firm" already opens /firm-select.
 - Deploy script deploy_vps_iter329.sh (temp_bundle kind=script).
+
+## Iter 330 — Copy Last Month Salary + PDF font bump, deploy 330
+- Compliance PDF Format 1 & 2: header font +1 and data font +1 (compliance_salary.py, prior session).
+- COPY LAST MONTH SALARY (user request, choices: exact copy / skip new joiners / editable draft):
+  ComplianceSalaryRunCreate.copy_last_month → _copy_last_month_compliance_run(server.py):
+  finds prev-month run (same firm+group, prefer finalized then latest), copies rows VERBATIM,
+  drops exited-before-month/disabled employees (copied_skipped), strips last month's
+  advance_recovery from rows (endpoint re-applies current month via apply_advance_recovery),
+  recomputes totals. Run fields: attendance_source=copied_last_month, copied_from_month/_run_id.
+  Normal draft semantics: finalized block + replace-old-drafts + audit "Copied N employees from M".
+- Frontend compliance-salary-run.tsx: purple "Copy Last Month Salary" button (testID
+  csr-copy-last-month) next to Salary Process with confirm dialog; "COPIED FROM YYYY-MM" chip on run.
+- E2E verified via curl: May→June copy carried exact gross/ded/net; adv EMI stripped correctly.
+- Deploy script deploy_vps_iter330.sh (temp_bundle kind=script now serves 330).

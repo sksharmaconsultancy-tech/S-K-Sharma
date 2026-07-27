@@ -648,6 +648,53 @@ export default function ComplianceSalaryRunScreen() {
     } finally { setBusy(false); }
   };
 
+  // Iter 330 (user request) — Copy Last Month Salary into this month.
+  const copyLastMonth = async () => {
+    if (busy) return;
+    const q: any = buildBody();
+    const [yy, mm] = String(q.month || "").split("-").map(Number);
+    const prevMonth = mm === 1
+      ? `${yy - 1}-12`
+      : `${yy}-${String(mm - 1).padStart(2, "0")}`;
+    const qGrp = String(q.employee_type || "").trim().toUpperCase();
+    const existing = runs.find(
+      (r: any) =>
+        r.month === q.month &&
+        (!q.company_id || r.company_id === q.company_id) &&
+        String((r as any).employee_type || "").trim().toUpperCase() === qGrp,
+    );
+    if (existing && (existing as any).finalized) {
+      showMsg(
+        "This month's salary is already FINALIZED for this employee group — it cannot be processed again. Use Unlock Request to de-finalize first.",
+      );
+      return;
+    }
+    const ok = await confirmYesNo(
+      `Copy LAST MONTH's salary (${prevMonth}) into ${q.month}?\n\n` +
+      "• Present Days, Gross, PF/ESIC/PT/TDS and Net are copied EXACTLY as last month.\n" +
+      "• Employees who exited before this month are dropped; new joiners are not added.\n" +
+      "• The copied run is a normal editable draft — you can edit, save and finalize it." +
+      (existing ? "\n\n⚠ The existing draft for this month will be REPLACED." : ""),
+    );
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const r = await api<{ run: CompRun }>("/admin/compliance-salary-runs", {
+        method: "POST",
+        body: { ...q, copy_last_month: true },
+      });
+      setRun(r.run);
+      await loadRuns();
+      const skipped = ((r.run as any).copied_skipped || []).length;
+      showMsg(
+        `Copied ${prevMonth} → ${q.month} for ${r.run.employees_count} employees. Net payout: ${fmtInr(r.run.totals?.net)}.` +
+        (skipped ? ` ${skipped} exited/disabled employee(s) were dropped.` : ""),
+      );
+    } catch (e: any) {
+      showMsg(e?.message || "Copy Last Month failed");
+    } finally { setBusy(false); }
+  };
+
   const reprocess = async () => {
     if (!run || reprocessing) return;
     if ((run as any).finalized) {
@@ -1608,6 +1655,19 @@ export default function ComplianceSalaryRunScreen() {
                 </>
               )}
             </Pressable>
+            {/* Iter 330 (user request) — Copy Last Month Salary */}
+            <Pressable
+              testID="csr-copy-last-month"
+              onPress={copyLastMonth}
+              disabled={busy}
+              style={[
+                styles.primaryBtn, busy && { opacity: 0.6 },
+                { flex: 1, backgroundColor: "#7C3AED" },
+              ]}
+            >
+              <Ionicons name="copy-outline" size={16} color="#fff" />
+              <Text style={styles.primaryBtnTxt}>Copy Last Month Salary</Text>
+            </Pressable>
           </View>
         </View>
 
@@ -1634,6 +1694,12 @@ export default function ComplianceSalaryRunScreen() {
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "#EDE9FE", borderRadius: 999 }}>
                     <Ionicons name="snow-outline" size={12} color="#5B21B6" />
                     <Text style={{ fontSize: 11, fontWeight: "800", color: "#5B21B6" }}>FREEZE SALARY · IMPORTED</Text>
+                  </View>
+                ) : null}
+                {(run as any).copied_from_month ? (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "#F3E8FF", borderRadius: 999 }}>
+                    <Ionicons name="copy-outline" size={12} color="#7C3AED" />
+                    <Text style={{ fontSize: 11, fontWeight: "800", color: "#7C3AED" }}>COPIED FROM {(run as any).copied_from_month}</Text>
                   </View>
                 ) : null}
                 {(run as any).finalized ? (
