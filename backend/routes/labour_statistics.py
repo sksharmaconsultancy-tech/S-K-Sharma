@@ -156,7 +156,7 @@ async def _dept_register(company_id: str, month: str):
         for u in act:
             buckets[_bucket(u)] = buckets.get(_bucket(u), 0) + 1
             genders[_gender(u)] = genders.get(_gender(u), 0) + 1
-        avg_str = (len(act) + len(act) + exits - joins) / 2 or 1
+        avg_str = max(1.0, (len(act) + len(act) + exits - joins) / 2)
         out.append({
             "department": dname, "present_strength": len(act),
             "male": genders.get("Male", 0), "female": genders.get("Female", 0),

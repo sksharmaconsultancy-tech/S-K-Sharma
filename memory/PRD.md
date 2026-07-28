@@ -2190,3 +2190,21 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   (needs NEW masters first: licenses/boilers/accidents/PPE/medical, then registers + dashboard).
   Full specs are in the user messages of this session (2026-07-28). P1 WhatsApp integration
   still pending. VPS deploys served via kind=script (currently deploy_vps_iter356.sh).
+- Iter 357 (Phases B/C/D, all tested 33/33 + UI, iteration_357.json):
+  B) LABOUR STATISTICS (routes/labour_statistics.py + app/labour-statistics.tsx):
+     /api/admin/labour-stats/{dashboard,department,category,monthly-return,welfare,turnover}
+     [+.xlsx/.pdf via suffix-delegation in /{kind}]. Auto-calc from users/attendance/
+     compliance_salary_runs. Rule-based AI insights (attrition, OT, ghosts, dups, anomalies).
+  C) ANNUAL RETURNS (routes/annual_returns.py + app/annual-returns.tsx):
+     /api/admin/annual-returns/{list,dashboard,minimum-wages,payment-of-wages,bonus,
+     equal-remuneration,employment-statistics,social-security,lwf,pt}[.xlsx/.pdf].
+  D) FACTORY & BOILERS (routes/factory_compliance.py + app/factory-compliance.tsx):
+     factory_records collection (kind+data dict); 14 master kinds (_MASTER_KINDS) + computed
+     registers daily-attendance/present-absent/muster-roll/working-hours/strength;
+     /api/admin/factory/{kinds,records CRUD,register/{kind}[.xlsx/.pdf],dashboard} with 45-day
+     due alerts (_DUE_FIELDS) + compliance/risk scores.
+  Shared: utils/register_export.py (register_xlsx/register_pdf A3 landscape) and
+  src/components/RegisterTable.tsx (table + ExportButtons + shared styles).
+  Sidebar (AdminWebShell 2 places): Labour Statistics & HR Analytics / Annual Returns /
+  Factory & Boilers. Present & Absent employee-wise report added on user request.
+  Deploy script: deploy_vps_iter357.sh (served via temp_bundle kind=script).
