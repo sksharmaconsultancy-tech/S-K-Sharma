@@ -2027,3 +2027,18 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   days from the gross too (freeze authoritative) → Difference always ≥ 0, remainder → OT/Other.
 - Verified: full Kankani imported run has 0 negative-difference rows (incl. monthly-rated 39000
   master vs 21000 imported → days shrink, diff positive).
+
+## Iter 340 — Compliance grid OT columns + clamps + Punch Approvals H:MM, deploy 340
+- Grid: OT Amt* moved BEFORE Gross; NEW OT Hrs column (auto = ot_pay ÷ ot_hourly_rate, live).
+- Backend rows carry ot_hourly_rate (basis Firm Master ot_calc_basis basic|gross; full-month
+  Basic/Gross ÷ month_days ÷ full_day_hours × ot_multiplier default 2.0) + firm_ot_allowed.
+- OT Hrs LOCKED on imported (hasFrz) runs; editable (OTHoursCell commit-on-blur → ot_pay =
+  hrs × rate) on normal runs when firm_ot_allowed.
+- Trailing FREEZE SALARY (IMPORTED) band/cols REMOVED; rows with freeze_status!=="matched"
+  highlighted (#FEE2E2 + red left border).
+- Present Days clamps ≤ month_days: sheet _pd, reprocess _ppd, attendance_days (2 spots).
+- freeze_actual_gross days floored at 2 decimals (no −1.55 overshoot). 0 negative diffs verified.
+- punch-approvals.tsx: Extra Duty ± input now TIME (H:MM) via formatHHMM; decToHM/hmToDec
+  helpers; unit HRS/MIN toggle removed; save parses H:MM.
+- NOTE: stray duplicated "down\")..." fragment at server.py EOF removed (was breaking startup).
+- Verified via screenshots: grid order + highlight + HH:MM header; API compute: 0 neg, 0 over-days.

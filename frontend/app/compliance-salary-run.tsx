@@ -1907,8 +1907,8 @@ export default function ComplianceSalaryRunScreen() {
                   // Iter 306 — +Gross AND +OT Amt (the band was one cell
                   // short, so DEDUCTIONS & NET started over the OT column).
                   // Iter 335 — +Freeze Salary column beside Gross on
-                  // imported (frozen) runs.
-                  const calcCount = optKeys.length + 2 + (hasFrz ? 1 : 0);
+                  // imported (frozen) runs. Iter 340 — +OT Hrs column.
+                  const calcCount = optKeys.length + 3 + (hasFrz ? 1 : 0);
                   // Iter 171 — deduction columns follow Firm Master Deductions
                   const ed = (run.rows[0] as any)?.enabled_deductions as string[] | undefined;
                   const hasDed = (k: string) => !ed || ed.includes(k);
@@ -1928,12 +1928,9 @@ export default function ComplianceSalaryRunScreen() {
                       <View style={[styles.groupHdrCell, styles.groupHdrDed, { width: dedCount * CELL_W }]}>
                         <Text style={styles.groupHdrTxt}>DEDUCTIONS & NET</Text>
                       </View>
-                      {/* Iter 310 — Freeze Salary band (imported runs). */}
-                      {hasFrz ? (
-                        <View style={[styles.groupHdrCell, { backgroundColor: "#5B21B6", width: 3 * CELL_W + 120 }]}>
-                          <Text style={styles.groupHdrTxt}>FREEZE SALARY (IMPORTED)</Text>
-                        </View>
-                      ) : null}
+                      {/* Iter 339c (user request) — trailing FREEZE SALARY
+                          (IMPORTED) band removed; diff rows are HIGHLIGHTED
+                          in the grid instead. */}
                     </View>
                   );
                 })()}
@@ -1967,12 +1964,15 @@ export default function ComplianceSalaryRunScreen() {
                   if (has("medical")) headers.push({ label: "Med", group: "calc" });
                   if (has("special")) headers.push({ label: "Spl", group: "calc" });
                   if (has("others")) headers.push({ label: "Others*", group: "calc" });
+                  // Iter 230 (user request) — editable OT Amount column.
+                  // Iter 339c (user request) — OT Amt* moved BEFORE Gross.
+                  headers.push({ label: "OT Amt*", group: "calc" });
+                  // Iter 340 (user request) — OT Hours derived from OT Amt.
+                  headers.push({ label: "OT Hrs", group: "calc" });
                   headers.push({ label: "Gross", group: "calc" });
                   // Iter 335 (user request) — Freeze Salary column right
                   // next to Gross (imported/frozen gross per employee).
                   if (hasFrz) headers.push({ label: "Freeze Salary", group: "calc" });
-                  // Iter 230 (user request) — editable OT Amount column.
-                  headers.push({ label: "OT Amt*", group: "calc" });
                   const dedLabels = [
                     "Wage Base",
                     // Iter 171 — deduction columns follow Firm Master Deductions
@@ -2008,24 +2008,18 @@ export default function ComplianceSalaryRunScreen() {
                           {h.label}
                         </Text>
                       ))}
-                      {/* Iter 310 — Freeze Salary column headers. */}
-                      {hasFrz ? (
-                        <>
-                          {/* Iter 337 — Attendance vs Compliance Days + Status */}
-                          {["Att. Days", "Comp. Days", "Imp. Gross", "Calc. Gross", "Difference"].map((l) => (
-                            <Text key={l} numberOfLines={1} style={[styles.tblCell, { width: colW.num }, styles.tblHeaderTxt, { textAlign: "right", backgroundColor: "#5B21B6" }]}>{l}</Text>
-                          ))}
-                          <Text numberOfLines={1} style={[styles.tblCell, { width: 90 }, styles.tblHeaderTxt, { backgroundColor: "#5B21B6" }]}>Status</Text>
-                          <Text numberOfLines={1} style={[styles.tblCell, { width: 120 }, styles.tblHeaderTxt, { backgroundColor: "#5B21B6" }]}>Diff. Alloc.</Text>
-                        </>
-                      ) : null}
                     </View>
                   );
                 })()}
                 </View>
                 {sortRows(run.rows).map((r, idx) => {
                   const isHl = hlRow === r.user_id;
-                  const rowBg = isHl ? "#FEF3C7" : idx % 2 === 0 ? colors.surfaceSecondary : colors.surface;
+                  // Iter 339c (user request) — Gross vs Freeze mismatch
+                  // highlights the whole row in the "difference" colour.
+                  const frzDiff = hasFrz && (r as any).imported_gross != null
+                    && (r as any).freeze_status !== "matched";
+                  const rowBg = isHl ? "#FEF3C7" : frzDiff ? "#FEE2E2"
+                    : idx % 2 === 0 ? colors.surfaceSecondary : colors.surface;
                   return (
                   <Pressable
                     onPress={() => setHlRow(isHl ? null : r.user_id)}
@@ -2034,6 +2028,7 @@ export default function ComplianceSalaryRunScreen() {
                       styles.tblRow,
                       { backgroundColor: rowBg },
                       isHl && { borderLeftWidth: 3, borderLeftColor: "#D97706" },
+                      !isHl && frzDiff && { borderLeftWidth: 3, borderLeftColor: "#DC2626" },
                     ]}
                   >
                     <Text style={[styles.tblCell, { width: colW.name }, stickyCol(0, rowBg)]} numberOfLines={1}>{r.name || "—"}</Text>
@@ -2113,15 +2108,8 @@ export default function ComplianceSalaryRunScreen() {
                         </>
                       );
                     })()}
-                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.gross_paid)}</Text>
-                    {/* Iter 335 (user request) — Freeze Salary shown right
-                        NEXT TO the Gross column. */}
-                    {hasFrz ? (
-                      <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700", color: "#5B21B6", backgroundColor: "#F5F3FF" }]}>
-                        {(r as any).imported_gross != null ? fmtInr((r as any).imported_gross) : "—"}
-                      </Text>
-                    ) : null}
-                    {/* Iter 230 (user request) — editable OT Amount. */}
+                    {/* Iter 230 (user request) — editable OT Amount.
+                        Iter 339c (user request) — shown BEFORE Gross. */}
                     <TextInput
                       ref={(el) => { cellRefs.current[`ot_pay:${idx}`] = el; }}
                       value={String(Math.round(r.ot_pay || 0))}
@@ -2134,6 +2122,41 @@ export default function ComplianceSalaryRunScreen() {
                       selectTextOnFocus
                       style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
                     />
+                    {/* Iter 340 (user request) — OT Hours: READ-ONLY on
+                        imported (Freeze) runs (auto: OT Amt ÷ per-hour OT
+                        rate); MANUALLY editable on normal runs when Firm
+                        Master Overtime is allowed (hours × rate → OT Amt). */}
+                    {(() => {
+                      const hrRate = Number((r as any).ot_hourly_rate) || 0;
+                      const otHrs = hrRate > 0
+                        ? (Number(r.ot_pay) || 0) / hrRate
+                        : Number((r as any).ot_hours) || 0;
+                      const canEditHrs = !hasFrz && !!(r as any).firm_ot_allowed && hrRate > 0;
+                      if (canEditHrs) {
+                        return (
+                          <OTHoursCell
+                            width={colW.num}
+                            value={Math.round(otHrs * 100) / 100}
+                            onCommit={(n) => updateRowField(
+                              r.user_id, "ot_pay",
+                              Math.round(n * hrRate * 100) / 100)}
+                          />
+                        );
+                      }
+                      return (
+                        <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, color: "#5B21B6", fontWeight: "600" }]}>
+                          {otHrs > 0 ? otHrs.toFixed(1) : "0"}
+                        </Text>
+                      );
+                    })()}
+                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.gross_paid)}</Text>
+                    {/* Iter 335 (user request) — Freeze Salary shown right
+                        NEXT TO the Gross column. */}
+                    {hasFrz ? (
+                      <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700", color: "#5B21B6", backgroundColor: "#F5F3FF" }]}>
+                        {(r as any).imported_gross != null ? fmtInr((r as any).imported_gross) : "—"}
+                      </Text>
+                    ) : null}
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.stat_wage_base)}</Text>
                     {/* Iter 171 — deduction cells follow Firm Master Deductions */}
                     {(() => {
@@ -2180,21 +2203,6 @@ export default function ComplianceSalaryRunScreen() {
                     {/* Iter 136 (user request) — Total Deduction before Net Pay */}
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(r.total_deduction)}</Text>
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(r.net)}</Text>
-                    {/* Iter 310 — Freeze Salary cells (imported runs). */}
-                    {hasFrz ? (
-                      <>
-                        {/* Iter 337 — Attendance vs Compliance Days + Status */}
-                        <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{(r as any).attendance_days != null ? String((r as any).attendance_days) : "—"}</Text>
-                        <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700", color: "#5B21B6" }]}>{(r as any).compliance_days != null ? String((r as any).compliance_days) : "—"}</Text>
-                        <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{(r as any).imported_gross != null ? fmtInr((r as any).imported_gross) : "—"}</Text>
-                        <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{(r as any).calculated_gross != null ? fmtInr((r as any).calculated_gross) : "—"}</Text>
-                        <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700", color: Number((r as any).difference || 0) > 0 ? "#B45309" : colors.onSurfaceSecondary }]}>{(r as any).difference != null ? fmtInr((r as any).difference) : "—"}</Text>
-                        <Text style={[styles.tblCell, { width: 90, fontWeight: "800", color: (r as any).freeze_status === "matched" ? "#15803D" : ((r as any).imported_gross != null ? "#B45309" : colors.onSurfaceTertiary) }]} numberOfLines={1}>
-                          {(r as any).imported_gross == null ? "—" : ((r as any).freeze_status === "matched" ? "✓ Matched" : "≠ Diff")}
-                        </Text>
-                        <Text style={[styles.tblCell, { width: 120, fontWeight: "700", color: "#5B21B6" }]} numberOfLines={1}>{(r as any).difference_allocation_head || "—"}</Text>
-                      </>
-                    ) : null}
                   </Pressable>
                   );
                 })}
@@ -2225,10 +2233,18 @@ export default function ComplianceSalaryRunScreen() {
                         {dash()}
                         {/* Calculated group totals (+Gross) */}
                         {opt.map((k) => <React.Fragment key={`tc-${k}`}>{num((run.totals as any)?.[k])}</React.Fragment>)}
+                        {/* Iter 339c — OT Amt total BEFORE Gross. */}
+                        {num(run.totals?.ot_pay)}
+                        {/* Iter 340 — OT Hours total. */}
+                        <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>
+                          {(run.rows || []).reduce((s, r) => {
+                            const hr = Number((r as any).ot_hourly_rate) || 0;
+                            return s + (hr > 0 ? (Number(r.ot_pay) || 0) / hr : Number((r as any).ot_hours) || 0);
+                          }, 0).toFixed(1)}
+                        </Text>
                         {num(run.totals?.gross_paid)}
                         {/* Iter 335 — Freeze Salary total next to Gross. */}
                         {hasFrz ? num((run.totals as any)?.imported_gross) : null}
-                        {num(run.totals?.ot_pay)}
                         {/* Deductions group */}
                         {dash()}
                         {hasDed("pf") ? num(run.totals?.pf_employee) : null}
@@ -2240,18 +2256,6 @@ export default function ComplianceSalaryRunScreen() {
                         {num((run.rows || []).reduce((s, r) => s + (Number((r as any).other_deduction) || 0), 0))}
                         {num(run.totals?.total_deduction)}
                         {num(run.totals?.net)}
-                        {/* Iter 310 — Freeze Salary totals. */}
-                        {hasFrz ? (
-                          <>
-                            {num((run.rows || []).reduce((s, r) => s + (Number((r as any).attendance_days) || 0), 0))}
-                            {num((run.rows || []).reduce((s, r) => s + (Number((r as any).compliance_days) || 0), 0))}
-                            {num((run.totals as any)?.imported_gross)}
-                            {num((run.totals as any)?.calculated_gross)}
-                            {num((run.totals as any)?.difference)}
-                            <Text style={[styles.tblCell, { width: 90 }]}>—</Text>
-                            <Text style={[styles.tblCell, { width: 120 }]}>—</Text>
-                          </>
-                        ) : null}
                       </>
                     );
                   })()}
@@ -2381,6 +2385,37 @@ export default function ComplianceSalaryRunScreen() {
 // 3+ keystroke value) isn't clamped/re-rendered mid-edit. Clamping to
 // month days still happens in updatePresentDays() on COMMIT (blur/Enter).
 // ---------------------------------------------------------------------------
+/* Iter 340 (user request) — manual OT HOURS cell (commit on blur/Enter):
+   hours × per-hour OT rate lands in the OT Amt column. */
+function OTHoursCell({ width, value, onCommit }: {
+  width: number; value: number; onCommit: (n: number) => void;
+}) {
+  const [txt, setTxt] = useState<string>(String(value ?? 0));
+  const focusedRef = useRef(false);
+  useEffect(() => {
+    if (!focusedRef.current) setTxt(String(value ?? 0));
+  }, [value]);
+  const commit = () => {
+    const n = Number(txt.replace(/[^0-9.]/g, ""));
+    if (!Number.isNaN(n) && n >= 0) onCommit(n);
+    else setTxt(String(value ?? 0));
+  };
+  return (
+    <TextInput
+      value={txt}
+      onChangeText={(v) => setTxt(v.replace(/[^0-9.]/g, ""))}
+      onFocus={() => { focusedRef.current = true; }}
+      onBlur={() => { focusedRef.current = false; commit(); }}
+      onKeyPress={(e: any) => {
+        if (e?.nativeEvent?.key === "Enter") { e.preventDefault?.(); (e?.target as any)?.blur?.(); }
+      }}
+      keyboardType="decimal-pad"
+      selectTextOnFocus
+      style={[styles.tblCell, styles.rightCell, styles.editableCell, { width }]}
+    />
+  );
+}
+
 function PresentDaysCell({
   idx, value, pdRefs, onCommit, onNav,
 }: {

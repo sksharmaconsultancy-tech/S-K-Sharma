@@ -15755,7 +15755,9 @@ async def _compute_compliance_run(
             # Imported sheet wins: present days from the uploaded/email
             # salary sheet (0 when the employee has no row).
             # Iter 219 — half days (e.g. 18.5) are kept, not truncated.
-            _pd = float((_am or {}).get("present_days") or 0)
+            # Iter 340 (user request) — NEVER above the month's days.
+            _pd = min(float((_am or {}).get("present_days") or 0),
+                      float(month_days))
             _fdh = float(merged_pol.get("full_day_hours") or 8.0)
             stats = {
                 "present_days": round(_pd * 2) / 2.0,
@@ -15779,7 +15781,9 @@ async def _compute_compliance_run(
         _prev = (prev_rows or {}).get(emp["user_id"]) \
             if not payload.use_imported_sheet else None
         if _prev is not None:
-            _ppd = float(_prev.get("present_days") or 0.0)
+            # Iter 340 (user request) — kept days also clamp to month days.
+            _ppd = min(float(_prev.get("present_days") or 0.0),
+                       float(month_days))
             stats = dict(stats)
             stats["present_days"] = round(_ppd * 2) / 2.0
             stats["effective_present"] = _ppd
@@ -15807,7 +15811,8 @@ async def _compute_compliance_run(
         #   on those days; the remaining difference lands in OT / Other
         #   Allowance via the Freeze block below.
         if payload.use_imported_sheet and _am is not None:
-            row["attendance_days"] = round(float(_am.get("present_days") or 0), 2)
+            row["attendance_days"] = round(
+                min(float(_am.get("present_days") or 0), float(month_days)), 2)
             _dcm = firm_stat_flags.get(emp.get("company_id")) or {}
             _method = str(_dcm.get("days_calc_method") or "attendance")
             _imp_g0 = round(float(_am.get("gross_earning") or 0), 2)
@@ -15872,8 +15877,10 @@ async def _compute_compliance_run(
                         # AS-IS as the Actual Gross: exact fractional days
                         # (no half/full rounding) so the calculated gross
                         # equals the imported gross to the rupee; statutory
-                        # is computed on that gross.
-                        _new_days = round(_rawd, 2)
+                        # is computed on that gross. Iter 340 — FLOOR at 2
+                        # decimals so the calc can never overshoot the
+                        # imported gross (no negative Difference).
+                        _new_days = math.floor(_rawd * 100 + 1e-9) / 100
                     else:
                         try:
                             _step = float(_dcm.get("days_calc_rounding") or 0.5)
@@ -15907,7 +15914,8 @@ async def _compute_compliance_run(
                                  "slabs": _fcp.get("pt_slabs")},
                     )
                     row["attendance_days"] = round(
-                        float(_am.get("present_days") or 0), 2)
+                        min(float(_am.get("present_days") or 0),
+                            float(month_days)), 2)
                 row["compliance_days"] = _new_days
             else:
                 row["compliance_days"] = round(float(row.get("present_days") or 0), 2)
@@ -16054,6 +16062,26 @@ async def _compute_compliance_run(
                     row["gross_paid"] = _imp_g
                     row["net"] = round(
                         _imp_g - float(row.get("total_deduction") or 0), 2)
+        # Iter 340 (user request) — OT HOURS derived from the OT AMOUNT:
+        # OT Hrs = OT Amt ÷ (per-hour rate × OT multiplier). Per-hour rate
+        # follows Firm Master "OT Calculation On" (basic | gross):
+        # full-month Basic/Gross ÷ Month Days ÷ Daily HRS. Computed for
+        # every row so manual OT-hours entry works on normal runs too.
+        _fsf_row = firm_stat_flags.get(emp.get("company_id")) or {}
+        row["firm_ot_allowed"] = bool(_fsf_row.get("ot_allowed"))
+        _fdh3 = float(merged_pol.get("full_day_hours") or 8.0)
+        _otm3 = float(merged_pol.get("ot_multiplier") or 2.0)
+        _basis3 = str(_fsf_row.get("ot_calc_basis") or "basic")
+        _full3 = (float(row.get("gross_master") or 0) if _basis3 == "gross"
+                  else float(row.get("basic_master") or 0))
+        if _full3 <= 0:
+            _full3 = float(row.get("gross_master") or 0)
+        _oth_rate = ((_full3 / float(month_days or 26) / _fdh3) * _otm3
+                     if _full3 > 0 and _fdh3 > 0 else 0.0)
+        row["ot_hourly_rate"] = round(_oth_rate, 4)
+        if (_oth_rate > 0 and float(row.get("ot_pay") or 0) > 0
+                and float(row.get("ot_hours") or 0) <= 0):
+            row["ot_hours"] = round(float(row["ot_pay"]) / _oth_rate, 2)
         # Iter 313 — ESIC Leave Module auto-import (fills the editable
         # esic_leave_days column when approved entries exist this month).
         _esic_d = (_esic_maps.get(emp.get("company_id")) or {}).get(emp.get("user_id"))

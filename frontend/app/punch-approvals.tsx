@@ -463,24 +463,23 @@ export default function PunchApprovalsScreen() {
       rowMatch(r.name, r.father_name, r.designation, r.employee_code));
   }, [dayRows, tab, rowMatch]);
 
-  // Save one Additional Duty row (extra HRS and/or ₹ amount).
-  // Iter 111 — value can be entered in HRS or MIN, and can be NEGATIVE
-  // ("Less" sign) to reduce that day's duty hours.
+  // Save one Additional Duty row (extra time and/or ₹ amount).
+  // Iter 340 (user request) — value is entered as TIME (H:MM); it can be
+  // NEGATIVE ("Less" sign) to reduce that day's duty hours.
   const saveExtraRow = async (r: DayRow) => {
     const cur = extraMap[r.key];
     const e = extraEdits[r.key] || {};
     const curH = Number(cur?.extra_hours || 0);
-    const hours = e.hours !== undefined ? e.hours : curH ? String(Math.abs(curH)) : "";
+    const hours = e.hours !== undefined ? e.hours : curH ? decToHM(curH) : "";
     const amount = e.amount !== undefined ? e.amount : String(cur?.extra_amount || "");
-    const unit = e.unit || "hrs";
     const sign = e.sign || (curH < 0 ? "-" : "+");
-    const rawVal = hours.trim() === "" ? 0 : Number(hours);
+    const rawVal = hmToDec(hours);
     const a = amount.trim() === "" ? 0 : Number(amount);
-    if (Number.isNaN(rawVal) || Number.isNaN(a) || rawVal < 0 || a < 0) {
-      showAlert("Invalid value", "Enter a positive number — use the +/− toggle to add or reduce duty.");
+    if (Number.isNaN(a) || rawVal < 0 || a < 0) {
+      showAlert("Invalid value", "Enter time as H:MM — use the +/− toggle to add or reduce duty.");
       return;
     }
-    let h = unit === "min" ? rawVal / 60 : rawVal;
+    let h = rawVal;
     if (sign === "-") h = -h;
     h = Math.round(h * 100) / 100;
     setSavingRow(r.key);
@@ -497,7 +496,7 @@ export default function PunchApprovalsScreen() {
       showAlert(
         "Additional Duty saved",
         h !== 0 || a > 0
-          ? `${h !== 0 ? `${Math.abs(h)} HRS ${h > 0 ? "added to" : "reduced from"} duty` : ""}${h !== 0 && a > 0 ? " and " : ""}${a > 0 ? `₹${a} will be paid via Oth.Allo in Actual Salary Process` : ""}.`
+          ? `${h !== 0 ? `${decToHM(h)} HRS ${h > 0 ? "added to" : "reduced from"} duty` : ""}${h !== 0 && a > 0 ? " and " : ""}${a > 0 ? `₹${a} will be paid via Oth.Allo in Actual Salary Process` : ""}.`
           : "Entry cleared.",
       );
     } catch (err: any) {
@@ -519,6 +518,22 @@ export default function PunchApprovalsScreen() {
     if (d.length === 3 && Number(d[2]) > 5) d = `${d.slice(0, 2)}0${d[2]}`;
     if (d.length >= 4 && Number(d.slice(2, 4)) > 59) d = `${d.slice(0, 2)}59`;
     return d.length > 2 ? `${d.slice(0, 2)}:${d.slice(2)}` : d;
+  };
+
+  // Iter 340 (user request) — Extra Duty is entered as TIME (H:MM),
+  // not a decimal number.
+  const decToHM = (h: number): string => {
+    const t = Math.round(Math.abs(h) * 60);
+    return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+  };
+  const hmToDec = (s: string): number => {
+    const t = (s || "").trim();
+    if (!t) return 0;
+    if (t.includes(":")) {
+      const [hh, mm] = t.split(":");
+      return (Number(hh) || 0) + (Number(mm) || 0) / 60;
+    }
+    return Number(t) || 0;
   };
 
   const setEdit = (key: string, field: "in" | "out" | "ot_in" | "ot_out", v: string) => {
@@ -1116,9 +1131,9 @@ export default function PunchApprovalsScreen() {
             <Ionicons name="information-circle-outline" size={14} color={colors.brandPrimary} />
             <Text style={upStyles.hintTxt}>
               Additional Duty — only employees whose BOTH punches are complete.
-              Add extra Duty (or press the +/− toggle to REDUCE duty) in HRS or
-              MIN — merged into that day&apos;s attendance — and/or a ₹ Amount
-              (paid via Oth.Allo in the Actual Salary Process).
+              Add extra Duty (or press the +/− toggle to REDUCE duty) as TIME
+              (H:MM, e.g. 1:30) — merged into that day&apos;s attendance — and/or
+              a ₹ Amount (paid via Oth.Allo in the Actual Salary Process).
             </Text>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={true}>
@@ -1133,7 +1148,7 @@ export default function PunchApprovalsScreen() {
                   { w: 86, txt: "OT In / Date" },
                   { w: 86, txt: "OT Out / Date" },
                   { w: 66, txt: "Duty HRS" },
-                  { w: 160, txt: "Extra Duty ± (HRS/MIN)" },
+                  { w: 160, txt: "Extra Duty ± (HH:MM)" },
                   { w: 74, txt: "Total HRS" },
                   { w: 90, txt: "Amount ₹" },
                   ...(canAct ? [{ w: 70, txt: "Action" }] : []),
@@ -1154,16 +1169,16 @@ export default function PunchApprovalsScreen() {
                   const cur = extraMap[r.key];
                   const e = extraEdits[r.key] || {};
                   const curH = Number(cur?.extra_hours || 0);
+                  // Iter 340 — Extra Duty shown/entered as TIME (H:MM).
                   const hoursVal = e.hours !== undefined
                     ? e.hours
-                    : curH ? String(Math.abs(curH)) : "";
+                    : curH ? decToHM(curH) : "";
                   const amountVal = e.amount !== undefined
                     ? e.amount
                     : cur?.extra_amount ? String(cur.extra_amount) : "";
-                  const unit = e.unit || "hrs";
                   const sign = e.sign || (curH < 0 ? "-" : "+");
                   const dirty = e.hours !== undefined || e.amount !== undefined ||
-                    e.unit !== undefined || e.sign !== undefined;
+                    e.sign !== undefined;
                   // Base Duty HRS from the day's punches (wraps midnight
                   // for night shifts); Total = base + signed extra.
                   const baseDuty = (() => {
@@ -1178,8 +1193,7 @@ export default function PunchApprovalsScreen() {
                     return mins / 60;
                   })();
                   const signedExtra = (() => {
-                    const v = Number(hoursVal) || 0;
-                    const hh = unit === "min" ? v / 60 : v;
+                    const hh = hmToDec(hoursVal);
                     return sign === "-" ? -hh : hh;
                   })();
                   // Iter 210 — OT window (second punch pair) counts into
@@ -1224,7 +1238,7 @@ export default function PunchApprovalsScreen() {
                       <Text style={[upStyles.cell, upStyles.num, { width: 66 }]}>
                         {fmtHoursHM(baseDuty)}
                       </Text>
-                      {/* Iter 111 — Add/Less toggle + value + HRS/MIN unit */}
+                      {/* Iter 340 — Add/Less toggle + TIME (H:MM) input */}
                       <View style={{ width: 160, paddingHorizontal: 3, flexDirection: "row", alignItems: "center", gap: 3 }}>
                         <Pressable
                           onPress={() =>
@@ -1245,28 +1259,17 @@ export default function PunchApprovalsScreen() {
                           onChangeText={(v) =>
                             setExtraEdits((prev) => ({
                               ...prev,
-                              [r.key]: { ...prev[r.key], hours: v.replace(/[^0-9.]/g, "") },
+                              [r.key]: { ...prev[r.key], hours: formatHHMM(v) },
                             }))
                           }
-                          placeholder="0"
+                          placeholder="0:00"
                           placeholderTextColor={colors.onSurfaceTertiary}
                           keyboardType="numeric"
                           selectTextOnFocus
                           style={[upStyles.timeInput, { flex: 1 }]}
                           testID={`xd-hrs-${r.key}`}
                         />
-                        <Pressable
-                          onPress={() =>
-                            setExtraEdits((prev) => ({
-                              ...prev,
-                              [r.key]: { ...prev[r.key], unit: unit === "hrs" ? "min" : "hrs" },
-                            }))
-                          }
-                          style={upStyles.unitBtn}
-                          testID={`xd-unit-${r.key}`}
-                        >
-                          <Text style={upStyles.unitBtnTxt}>{unit === "hrs" ? "HRS" : "MIN"}</Text>
-                        </Pressable>
+                        <Text style={upStyles.unitBtnTxt}>H:MM</Text>
                       </View>
                       {/* Total = punches duty + extra (live preview) */}
                       <Text
