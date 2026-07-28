@@ -2009,3 +2009,13 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - E2E verified on Kankani 2026-07 (frozen run, 5 employees @21000): OT allocation, sums, net all
   PASS; draft run deleted after test. Toggle left ENABLED on Kankani firm.
 - temp_bundle.py kind=script now serves deploy_vps_iter338.sh.
+
+## Iter 339 — One-time Freeze import (auto days derivation), deploy 339
+- _compute_compliance_run: sheet has gross but attendance_days<=0 and firm method="attendance" →
+  method auto-falls back to attendance_gross_validation (single import fills days/statutory/match).
+- Daily-rated fix: when per-day gross can't come from first-pass gross_paid/present_days nor
+  monthly_gross (both 0 with a 0-days sheet), a FULL-MONTH probe compute_compliance_row derives
+  per-day gross so days derive for daily-rated workers.
+- firm-master.tsx: Days Calc Method points + freeze_to_actual toggle now gated on sp.online_salary.
+- Verified: Kankani 0-days entries → 28/31 days derived, calc≈imported, remainder→OT, ✓ Matched.
+- temp_bundle.py kind=script serves deploy_vps_iter339.sh (adds post-deploy verification lines).

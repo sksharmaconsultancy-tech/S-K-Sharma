@@ -15811,6 +15811,16 @@ async def _compute_compliance_run(
             _dcm = firm_stat_flags.get(emp.get("company_id")) or {}
             _method = str(_dcm.get("days_calc_method") or "attendance")
             _imp_g0 = round(float(_am.get("gross_earning") or 0), 2)
+            # Iter 339 (user request) — ONE-TIME freeze import: when the
+            # imported sheet carries a GROSS but NO attendance days, the
+            # Compliance Days are auto-derived from that gross (Attendance
+            # + Gross Validation behaviour) even when the firm hasn't
+            # picked a Days Calculation Method yet — a single import fills
+            # the days, recalculates salary/statutory and matches Freeze
+            # vs Gross without any reprocess.
+            if (_method == "attendance" and _imp_g0 > 0
+                    and row["attendance_days"] <= 0):
+                _method = "attendance_gross_validation"
             _new_days = None
             if _method == "fixed":
                 if row["attendance_days"] > 0 or _imp_g0 > 0:
@@ -15826,6 +15836,30 @@ async def _compute_compliance_run(
                 _mg0 = float(row.get("monthly_gross") or 0)
                 _per_day = (_g0 / _pd0) if (_g0 > 0 and _pd0 > 0) else (
                     (_mg0 / float(month_days or 1)) if _mg0 > 0 else 0.0)
+                if _per_day <= 0:
+                    # Iter 339 — DAILY-RATED employees with a gross-only
+                    # sheet (0 days): both fallbacks above are 0. Probe a
+                    # FULL-MONTH compute to learn the true per-day gross
+                    # (rate + allowances) so days can still be derived.
+                    _stF = dict(stats)
+                    _stF["present_days"] = float(month_days)
+                    _stF["effective_present"] = float(month_days)
+                    _stF["half_days"] = 0
+                    _stF["duty_hours"] = round(
+                        float(month_days)
+                        * float(merged_pol.get("full_day_hours") or 8.0), 2)
+                    _rowF = compute_compliance_row(
+                        emp, merged_pol, int(month_days), _stF,
+                        company_structure_pct=payload.structure_pct,
+                        statutory_cfg=effective_statutory,
+                        firm_pf_enabled=_ff["pf"],
+                        firm_esic_enabled=_ff["esic"],
+                        firm_pt={"state": _fcp.get("pt_state"),
+                                 "slabs": _fcp.get("pt_slabs")},
+                    )
+                    _gF = float(_rowF.get("gross_paid") or 0)
+                    if _gF > 0:
+                        _per_day = _gF / float(month_days or 1)
                 if _per_day > 0:
                     _rawd = _imp_g0 / _per_day
                     if _method == "freeze_actual_gross":
