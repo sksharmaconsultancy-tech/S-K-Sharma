@@ -158,6 +158,9 @@ export default function AttendanceSheetScreen() {
     if (!companyId) return showMsg("Pick a company first.");
     if (downloading) return;
     setDownloading(true);
+    // Iter 342 (user request) — Excel/ZIP file names carry the FIRM NAME.
+    const coSlug = (companies.find((c) => c.company_id === companyId)?.name || "company")
+      .trim().replace(/\s+/g, "_");
     try {
       // Iter 334 (user request) — "All groups" selected → download ONE
       // Excel per group bundled in a single archive (.zip).
@@ -168,7 +171,7 @@ export default function AttendanceSheetScreen() {
         if (Platform.OS === "web" && res.webBlobUrl) {
           const a = document.createElement("a");
           a.href = res.webBlobUrl;
-          a.download = `AttendanceSheets_${month}_AllGroups.zip`;
+          a.download = `AttendanceSheets_${coSlug}_${month}_AllGroups.zip`;
           a.click();
           setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 30000);
         }
@@ -183,7 +186,7 @@ export default function AttendanceSheetScreen() {
         a.href = res.webBlobUrl;
         const grpLabel =
           "_" + (groups.find((g) => g.master_id === groupId)?.name || "group").replace(/\s+/g, "-");
-        a.download = `AttendanceSheet_${month}${grpLabel}.xlsx`;
+        a.download = `AttendanceSheet_${coSlug}_${month}${grpLabel}.xlsx`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 30000);
       }
@@ -214,7 +217,10 @@ export default function AttendanceSheetScreen() {
             ? "_" + (groups.find((g) => g.master_id === groupId)?.name || "group").replace(/\s+/g, "-")
             : "";
           const kind = variant === "hours" ? "WorkingHours" : "InOut";
-          a.download = `MonthlyAttendance_${kind}_${month}${grpLabel}.xlsx`;
+          // Iter 342 (user request) — file name carries the FIRM NAME.
+          const coSlug2 = (companies.find((c) => c.company_id === companyId)?.name || "company")
+            .trim().replace(/\s+/g, "_");
+          a.download = `MonthlyAttendance_${kind}_${coSlug2}_${month}${grpLabel}.xlsx`;
           a.click();
           setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 30000);
         }
@@ -224,7 +230,7 @@ export default function AttendanceSheetScreen() {
         setDownloading(false);
       }
     },
-    [companyId, month, groupId, downloading, groups],
+    [companyId, month, groupId, downloading, groups, companies],
   );
 
   const pickAndUpload = useCallback(async () => {

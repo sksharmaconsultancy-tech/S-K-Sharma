@@ -100,7 +100,10 @@ async def legacy_import_firms(authorization: Optional[str] = Header(None)):
     oc = {e["firm_no"]: e for e in on_counts}
     fc = {e["firm_no"]: e for e in off_counts}
 
-    portal = await db.companies.find({}, {"_id": 0, "company_id": 1, "name": 1}).to_list(300)
+    # Iter 342 (user bug — firm created then undo → "not showing in list"):
+    # the portal list was capped at 300 firms, so newer firms fell off the
+    # mapping dropdown while the duplicate-name check still found them.
+    portal = await db.companies.find({}, {"_id": 0, "company_id": 1, "name": 1}).to_list(5000)
     pnames = [p["name"] for p in portal if p.get("name")]
 
     # Iter 300b (user) — firms already imported are locked (no re-import).
@@ -1275,7 +1278,7 @@ async def legacy_salary_firms(authorization: Optional[str] = Header(None)):
     cids = await db.legacy_salary_history.distinct("company_id")
     comps = await db.companies.find(
         {"company_id": {"$in": cids}},
-        {"_id": 0, "company_id": 1, "name": 1}).sort("name", 1).to_list(500)
+        {"_id": 0, "company_id": 1, "name": 1}).sort("name", 1).to_list(5000)
     # Iter 304c (user) — mark published (salary imported) + locked firms.
     for c in comps:
         pub = await db.compliance_salary_runs.count_documents(

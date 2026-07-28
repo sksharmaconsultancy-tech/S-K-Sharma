@@ -2097,3 +2097,11 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - attendance-email.tsx: isSuper now includes sub_admin (Send now / Dry-run card + trigger guard);
   isAdminish extended to company_admin (unchanged read access). Backend endpoints already
   allowed sub_admin since Iter 332; sidebar already shows the menu.
+
+## Iter 342c — Undo/create-firm list bug + attendance sheet file names
+- legacy_import.py: portal firm list caps raised 300→5000 (firms endpoint) and 500→5000
+  (legacy-salary firms) — firms beyond the cap vanished from the wizard dropdown while the
+  duplicate-name check still found them ("not showing in list" + "already created" bug).
+- attendance-sheet.tsx: browser download names now include FIRM NAME slug:
+  AttendanceSheets_{Firm}_{month}_AllGroups.zip, AttendanceSheet_{Firm}_{month}_{grp}.xlsx,
+  MonthlyAttendance_{kind}_{Firm}_{month}.xlsx (a.download overrides server header on web).
