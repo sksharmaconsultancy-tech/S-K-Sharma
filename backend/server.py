@@ -22234,6 +22234,14 @@ app.include_router(esic_leave_router)
 from routes.payroll_register import router as payroll_register_router  # noqa: E402
 app.include_router(payroll_register_router)
 
+# Iter 357 — Phase B/C/D: Labour Statistics, Annual Returns, Factory & Boilers.
+from routes.labour_statistics import router as labour_stats_router  # noqa: E402
+app.include_router(labour_stats_router)
+from routes.annual_returns import router as annual_returns_router  # noqa: E402
+app.include_router(annual_returns_router)
+from routes.factory_compliance import router as factory_router  # noqa: E402
+app.include_router(factory_router)
+
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
 maybe_start_rpa_worker(app, db)
