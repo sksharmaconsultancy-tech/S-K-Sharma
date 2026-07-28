@@ -2224,3 +2224,19 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   holiday/double OT + OT approvals (needs shift & approval masters), Form A-Z state-wise
   government formats, Contractor/BOCW/Apprenticeship registers, succession planning.
   Deploy: deploy_vps_iter358.sh (temp_bundle kind=script).
+- Iter 359 (tested 14/14 pytest + full UI, iteration_359.json): PF & ESIC CLAIMS MANAGEMENT
+  SYSTEM. Backend routes/claims_management.py (router /api/admin/claims, collection
+  pf_esic_claims): 16 PF + 11 ESIC claim types, per-kind statuses, DOC_CHECKLIST per kind,
+  claim_no CLM-{PF|ESIC}-NNNNN, status timeline[], employee auto-fill from users master by
+  employee_code, EXTERNAL company claims (company_id="external" + data.company_name free
+  text). Smart AI on save: _ai_checks (eligibility rules Form-10C>10yrs→10D, <6mo, <5yrs TDS,
+  ESIC 9-month contribution scan from compliance_salary_runs, UAN/IP format, missing docs,
+  duplicate open-claim detection), _doc_score 0-100%, _expected_settlement (avg from settled
+  history). Endpoints: meta, dashboard, list w/ filters, POST create/update, DELETE,
+  /reminders (follow-up engine, auto +7d), /report/{pf-register,esic-register,pending,
+  approved,rejected,settlement}[.xlsx|.pdf]. Frontend app/claims-management.tsx: 5 tabs
+  (Dashboard stat cards, Claims Register w/ PF-ESIC toggle + filters + expandable cards w/
+  timeline/docs/AI + edit/delete, New/Edit Claim form w/ company select incl External +
+  doc-checklist chips + Smart AI Analysis panel, Follow-up Reminders, Reports w/ exports).
+  Sidebar (AdminWebShell x2): Compliance → "PF & ESIC Claims". Deploy: deploy_vps_iter359.sh
+  (temp_bundle kind=script updated to 359).
