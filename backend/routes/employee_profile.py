@@ -56,7 +56,9 @@ _NUM_FIELDS = [
     # Iter 126i — VPF (Voluntary PF) amount, deducted with employee PF.
     "vpf_amount",
 ]
-_BOOL_FIELDS = ["is_onroll", "vpf_enabled"]
+_BOOL_FIELDS = ["is_onroll", "vpf_enabled",
+                # Iter 341 — EPS Disable (not eligible for Pension).
+                "eps_disabled"]
 _LIST_FIELDS = [
     "salary_structure_actual",
     "actual_salary_allowances", "actual_salary_deductions",

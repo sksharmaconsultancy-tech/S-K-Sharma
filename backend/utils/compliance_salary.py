@@ -557,6 +557,12 @@ def compute_compliance_row(
         pf_employee = capped_pf_wages * (cfg["pf_percent_employee"] / 100.0)
         pf_employer_epf = capped_pf_wages * (cfg["pf_percent_employer_epf"] / 100.0)
         pf_employer_eps = capped_pf_wages * (cfg["pf_percent_employer_eps"] / 100.0)
+        # Iter 341 (user request) — Employee Master "EPS Disable": the
+        # employee is NOT eligible for Pension, so the entire employer
+        # share goes to EPF and EPS is 0 (ECR prints EPS as 0).
+        if user.get("eps_disabled"):
+            pf_employer_epf += pf_employer_eps
+            pf_employer_eps = 0.0
         pf_employer_total = pf_employer_epf + pf_employer_eps
         # Iter 126i — VPF (Voluntary PF): extra EMPLOYEE-side deduction on
         # top of the statutory PF (employer share unchanged). Pro-rated by
@@ -747,6 +753,8 @@ def compute_compliance_row(
         "pf_employee": round(pf_employee, 2),
         "vpf_amount": round(vpf, 2),
         "pf_employer_epf": round(pf_employer_epf, 2),
+        # Iter 341 — EPS Disable flag carried on the row (ECR prints 0).
+        "eps_disabled": bool(user.get("eps_disabled")),
         "pf_employer_eps": round(pf_employer_eps, 2),
         "pf_employer_total": round(pf_employer_total, 2),
         # ESIC

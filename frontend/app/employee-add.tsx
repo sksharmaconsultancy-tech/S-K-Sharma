@@ -151,6 +151,7 @@ export default function EmployeeAddScreen() {
           compliance_basic: p.compliance_basic != null ? String(p.compliance_basic) : "",
           pf_basic: p.pf_basic != null ? String(p.pf_basic) : "",
           vpf_enabled: !!p.vpf_enabled,
+          eps_disabled: !!p.eps_disabled,
           vpf_amount: p.vpf_amount != null ? String(p.vpf_amount) : "",
           compliance_salary_mode: p.compliance_salary_mode || "monthly",
           basic_salary: basicRow?.amount != null && basicRow.amount > 0 ? String(basicRow.amount) : "",
@@ -704,6 +705,7 @@ export default function EmployeeAddScreen() {
         pf_basic: form.pf_basic ? Number(form.pf_basic) : undefined,
         // Iter 126i — VPF (Voluntary PF)
         vpf_enabled: form.vpf_enabled,
+        eps_disabled: form.eps_disabled,
         vpf_amount: form.vpf_enabled && form.vpf_amount ? Number(form.vpf_amount) : undefined,
         compliance_salary_mode: form.compliance_salary_mode || undefined,
         // Iter 91 — fixed Actual structure (Basic + rate basis, Salary
@@ -1809,6 +1811,30 @@ export default function EmployeeAddScreen() {
               />
               <View style={{ flex: 1 }} />
             </TwoCol>
+          ) : null}
+
+          {/* Iter 341 (user request) — EPS Disable: employee is NOT
+              eligible for Pension — the whole employer PF share goes to
+              EPF; the ECR file prints EPS wages/contribution as 0. */}
+          <Pressable
+            onPress={() => setField("eps_disabled", !form.eps_disabled)}
+            style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 }}
+            testID="eps-disable-toggle"
+          >
+            <Ionicons
+              name={form.eps_disabled ? "checkbox" : "square-outline"}
+              size={20}
+              color={form.eps_disabled ? "#B91C1C" : colors.onSurfaceSecondary}
+            />
+            <Text style={{ fontSize: 13, fontWeight: "700", color: colors.onSurface }}>
+              EPS Disable (not eligible for Pension)
+            </Text>
+          </Pressable>
+          {form.eps_disabled ? (
+            <Text style={{ fontSize: 11, color: colors.onSurfaceSecondary, marginTop: 2, marginLeft: 28 }}>
+              EPS contribution will be 0 in the ECR file — the full employer
+              share goes to EPF for this employee.
+            </Text>
           ) : null}
           </>)}
 

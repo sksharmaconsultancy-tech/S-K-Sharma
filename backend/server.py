@@ -8453,6 +8453,8 @@ async def admin_create_employee(
         # Iter 126i — VPF (Voluntary PF)
         "vpf_enabled": bool(payload.get("vpf_enabled") or False),
         "vpf_amount": payload.get("vpf_amount"),
+        # Iter 341 — EPS Disable (not eligible for Pension; ECR EPS = 0).
+        "eps_disabled": bool(payload.get("eps_disabled") or False),
         "actual_salary_allowances": payload.get("actual_salary_allowances") or [],
         "actual_salary_deductions": payload.get("actual_salary_deductions") or [],
         # Iter 91 — fixed Actual structure saved from the Add form
@@ -20040,6 +20042,18 @@ async def download_ecr_file(run_id: str, authorization: Optional[str] = Header(N
         raise HTTPException(status_code=404, detail="Compliance salary run not found")
     if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
         raise HTTPException(status_code=403, detail="Not authorised")
+    # Iter 341 — stamp the Employee Master "EPS Disable" flag on rows
+    # (works for runs generated before the flag existed too).
+    _rows_e = run.get("rows") or []
+    _uids_e = [r.get("user_id") for r in _rows_e if r.get("user_id")]
+    if _uids_e:
+        async for u in db.users.find(
+            {"user_id": {"$in": _uids_e}, "eps_disabled": True},
+            {"_id": 0, "user_id": 1},
+        ):
+            for r in _rows_e:
+                if r.get("user_id") == u["user_id"]:
+                    r["eps_disabled"] = True
     txt = build_ecr_text(run)
     return Response(
         content=txt,

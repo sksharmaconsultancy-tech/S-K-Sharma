@@ -72,15 +72,21 @@ def build_pf_ecr_txt(rows: List[Dict[str, Any]]) -> bytes:
         name = _clean_name(r.get("name") or "")
         gross = _to_int_rupees(r.get("gross_paid") or r.get("monthly_gross"))
         pf_wages = min(_to_int_rupees(r.get("pf_wages")), _PF_CAP)
-        eps_wages = pf_wages
+        # Iter 341 (user request) — Employee Master "EPS Disable": not
+        # eligible for Pension → EPS wages/contribution print 0; the EPS
+        # portion moves into the employer EPF diff column.
+        _eps_off = bool(r.get("eps_disabled"))
+        eps_wages = 0 if _eps_off else pf_wages
         edli_wages = pf_wages
         epf_contrib = _to_int_rupees(r.get("pf_employee"))
-        eps_contrib = _to_int_rupees(r.get("pf_employer_eps"))
+        eps_contrib = 0 if _eps_off else _to_int_rupees(r.get("pf_employer_eps"))
         # EPFO expects the employer's EPF contribution net of the EPS
         # portion (i.e. the "EPF_EPS_DIFF" column).  If the compliance
         # engine stored the total employer contribution separately we
         # compute the diff on the fly.
         empr_epf = _to_int_rupees(r.get("pf_employer_epf"))
+        if _eps_off:
+            empr_epf += _to_int_rupees(r.get("pf_employer_eps"))
         epf_eps_diff = max(empr_epf, 0)
         ncp_days = _to_int_rupees(
             (r.get("month_days") or 0)

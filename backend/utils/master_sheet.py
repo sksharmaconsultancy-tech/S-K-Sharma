@@ -451,11 +451,17 @@ def build_ecr_text(compliance_run: Dict[str, Any]) -> bytes:
         name = (r.get("name") or "").upper()[:60]
         gross = round(r.get("gross_paid") or 0)
         epf_wages = round(r.get("pf_wages") or 0)
-        eps_wages = epf_wages  # same base under new labour code
+        # Iter 341 (user request) — Employee Master "EPS Disable": not
+        # eligible for Pension → EPS wages/contribution print 0; the EPS
+        # portion moves into the employer EPF share.
+        _eps_off = bool(r.get("eps_disabled"))
+        eps_wages = 0 if _eps_off else epf_wages  # same base under new labour code
         edli_wages = epf_wages
-        epf_contrib = round(r.get("pf_employee") or 0) + round(r.get("pf_employer_epf") or 0)
-        eps_contrib = round(r.get("pf_employer_eps") or 0)
-        epf_eps_diff = max(0, round(r.get("pf_employer_epf") or 0) - eps_contrib)
+        _er_epf = round(r.get("pf_employer_epf") or 0) + (
+            round(r.get("pf_employer_eps") or 0) if _eps_off else 0)
+        epf_contrib = round(r.get("pf_employee") or 0) + _er_epf
+        eps_contrib = 0 if _eps_off else round(r.get("pf_employer_eps") or 0)
+        epf_eps_diff = max(0, _er_epf - eps_contrib)
         ncp_days = max(0, int(r.get("month_days") or 30) - int(r.get("present_days") or 0))
         refund = 0
         lines.append(

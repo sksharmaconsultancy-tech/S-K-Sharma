@@ -2061,3 +2061,13 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   inline list firm-wise; green "No differences" note when all imported.
 - Endpoint verified E2E (returns 503 'Legacy SQL Server is not configured yet' in dev — real data
   only exists on the user's VPS).
+
+## Iter 341 — EPS Disable (Employee Master) + ECR EPS = 0
+- users.eps_disabled bool: employee-add.tsx checkbox after VPF (create + edit; employeeForm.ts
+  EMPTY_FORM/type), server.py create doc, employee_profile.py _BOOL_FIELDS.
+- compliance_salary.py compute: eps_disabled → pf_employer_epf += eps; eps = 0; row carries
+  eps_disabled flag.
+- ECR builders (statutory_bulk.build_pf_ecr_txt + master_sheet.build_ecr_text): EPS wages 0,
+  EPS contrib 0, EPS portion moved into EPF_EPS_DIFF/employer share.
+- Both ECR download endpoints stamp users.eps_disabled on rows (covers runs generated earlier).
+- Verified: NORMAL 3041/253/112 vs EPSOFF 0/0/365 (both builders).

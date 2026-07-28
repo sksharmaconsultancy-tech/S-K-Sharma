@@ -33,6 +33,9 @@ export type EmpForm = {
   pf_basic: string;
   // Iter 126i — VPF (Voluntary PF) — extra employee-side PF deduction.
   vpf_enabled: boolean;
+  // Iter 341 (user request) — EPS Disabled: employee not eligible for
+  // Pension contribution (ECR prints EPS wages/contribution as 0).
+  eps_disabled: boolean;
   vpf_amount: string;
   // Iter 94 — SEPARATE rate basis for the Compliance salary part.
   compliance_salary_mode: string;
@@ -108,6 +111,7 @@ export const EMPTY_FORM: EmpForm = {
   compliance_basic: "",
   pf_basic: "",
   vpf_enabled: false,
+  eps_disabled: false,
   vpf_amount: "",
   compliance_salary_mode: "monthly",
   basic_salary: "",
