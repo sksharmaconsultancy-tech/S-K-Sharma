@@ -787,10 +787,17 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                 struct_by_emp: Dict[int, List[dict]] = {}
                 emp_ids_by_code: Dict[int, List[int]] = {}
                 if "salary" in body.employee_fields:
+                    # Iter 348 (user: "Still showing old salary structure")
+                    # — EmployeeSalaryStructureDtl.FirmID_FK does NOT always
+                    # equal our firm_no (per-year FirmMaster ids). Join via
+                    # EmpID_FK → EmployeeMaster.FirmNo, which is the key we
+                    # already trust everywhere else.
                     srows = await _q(
                         dbn,
-                        "SELECT EmpID_FK, SalHeadType, SalHeadName, Amount "
-                        "FROM EmployeeSalaryStructureDtl WHERE FirmID_FK = %s",
+                        "SELECT d.EmpID_FK, d.SalHeadType, d.SalHeadName, d.Amount "
+                        "FROM EmployeeSalaryStructureDtl d "
+                        "JOIN EmployeeMaster em ON em.EmpID = d.EmpID_FK "
+                        "WHERE em.FirmNo = %s",
                         (m.firm_no,),
                     )
                     for s in srows:
@@ -2167,11 +2174,21 @@ async def _sync_structures_job(job_id: str, admin_uid: str):
             await _prog(current_firm=firm_no, totals=totals)
             try:
                 emps = await _legacy_employees(dbn, firm_no)
+                # Iter 348 — join via EmpID_FK → EmployeeMaster.FirmNo (the
+                # trusted key); FirmID_FK alone missed structures for many
+                # firms ("allowances not fetched from old DB").
                 srows = await _q(
                     dbn,
-                    "SELECT EmpID_FK, SalHeadType, SalHeadName, Amount "
-                    "FROM EmployeeSalaryStructureDtl WHERE FirmID_FK = %s",
+                    "SELECT d.EmpID_FK, d.SalHeadType, d.SalHeadName, d.Amount "
+                    "FROM EmployeeSalaryStructureDtl d "
+                    "JOIN EmployeeMaster em ON em.EmpID = d.EmpID_FK "
+                    "WHERE em.FirmNo = %s",
                     (firm_no,))
+                totals["structure_rows"] = totals.get("structure_rows", 0) + len(srows)
+                if not srows:
+                    errors.append(f"firm {firm_no}: NO structure rows in old DB "
+                                  "(EmployeeSalaryStructureDtl) — employees keep "
+                                  "EmployeeMaster figures")
                 struct_by_emp: Dict[int, List[dict]] = {}
                 for s in srows:
                     struct_by_emp.setdefault(
@@ -2223,6 +2240,13 @@ async def _sync_structures_job(job_id: str, admin_uid: str):
                                if k in _SYNC_SALARY_KEYS}
                     if not updates:
                         continue
+                    # Old DB is the source of truth here — clear legacy
+                    # per-head fields that would otherwise DOUBLE-count on
+                    # top of the fresh allowance list (Iter 348).
+                    if "compliance_salary_allowances" in updates:
+                        updates.update({"hra_amount": None, "conv_amount": None,
+                                        "basic_amount": None,
+                                        "salary_structure_compliance": None})
                     try:
                         code = int(e.get("EmpCode") or 0)
                     except (TypeError, ValueError):
