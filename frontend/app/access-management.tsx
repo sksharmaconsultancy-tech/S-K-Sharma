@@ -79,7 +79,7 @@ export default function AccessManagementScreen() {
   }, [tab, companyId]);
 
   useEffect(() => {
-    api<{ companies: Company[] }>("/companies").then((r) => {
+    api<{ companies: Company[] }>("/companies?lite=1").then((r) => {
       setCompanies(r.companies || []);
       if (r.companies?.length) setCompanyId((p) => p || r.companies[0].company_id);
     }).catch(() => {});

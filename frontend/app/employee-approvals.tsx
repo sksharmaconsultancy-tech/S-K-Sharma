@@ -199,7 +199,7 @@ export default function EmployeeApprovalsScreen() {
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    api<{ companies: Company[] }>("/companies")
+    api<{ companies: Company[] }>("/companies?lite=1")
       .then((r) => {
         setCompanies(r.companies || []);
         if (r.companies?.length) setCompanyId((p) => p || r.companies[0].company_id);

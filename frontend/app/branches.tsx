@@ -81,7 +81,7 @@ export default function BranchesScreen() {
 
   useEffect(() => {
     if (isSuper && companies.length === 0) {
-      api<{ companies: any[] }>("/companies")
+      api<{ companies: any[] }>("/companies?lite=1")
         .then((r) => setCompanies(r.companies || []))
         .catch(() => {});
     }
@@ -117,7 +117,7 @@ export default function BranchesScreen() {
       });
       // Refresh the cached companies list for super_admin
       if (isSuper) {
-        const r = await api<{ companies: any[] }>("/companies");
+        const r = await api<{ companies: any[] }>("/companies?lite=1");
         setCompanies(r.companies || []);
       }
     } catch (e: any) {

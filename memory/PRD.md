@@ -2081,3 +2081,14 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - XLSX: new "Remark" column (NOT FOUND red / NEW REGISTRATION green).
 - punch-log-report.tsx: red/green row tint + ⛔/🆕 name markers.
 - Verified E2E with seeded unmapped punch (then cleaned up).
+
+## Iter 342 — PWA speed (/companies) + Bulk Correction On/Off-Roll
+- PERF: GET /companies per-firm loop (3 queries × N firms) replaced with 3 aggregations
+  (users/attendance/leaves grouped by company_id); to_list cap 500→2000.
+- NEW ?lite=1 param: only company_id/name/company_code/capability flags/is_active, skips stats.
+  ALL frontend firm pickers (28 call sites incl. SelectedCompanyContext, CompanyPicker) switched
+  to /companies?lite=1 (payload 5273→274 bytes in dev). companies.tsx (Firms dashboard) keeps
+  the full endpoint for stats.
+- Bulk Employee Correction (mode=actual): new "On/Off-Roll" select column (select:onroll,
+  key is_onroll) — bulk shift Off-Roll → On-Roll. Payload model + generic update path handles
+  bool. E2E verified flip False/True via API.

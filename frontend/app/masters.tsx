@@ -88,7 +88,7 @@ export default function MastersScreen() {
     if (!isSuper) return;
     (async () => {
       try {
-        const r = await api<{ companies: Company[] }>("/companies");
+        const r = await api<{ companies: Company[] }>("/companies?lite=1");
         // Iter 68 — Alphabetical company list for consistent UX
         const sorted = (r.companies || []).slice().sort((a, b) =>
           (a.name || "").localeCompare(b.name || "", "en", { sensitivity: "base" }),

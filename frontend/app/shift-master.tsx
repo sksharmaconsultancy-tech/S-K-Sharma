@@ -110,7 +110,7 @@ export default function ShiftMasterScreen() {
     if (!canAssign) return;
     (async () => {
       try {
-        const r = await api<{ companies: any[] }>("/companies");
+        const r = await api<{ companies: any[] }>("/companies?lite=1");
         const list = (r.companies || []).map((c: any) => ({
           company_id: c.company_id, name: c.name || c.company_id,
         }));

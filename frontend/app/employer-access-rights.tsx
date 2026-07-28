@@ -106,7 +106,7 @@ export default function EmployerAccessRightsScreen() {
     if (!isSuper) return;
     (async () => {
       try {
-        const r = await api<{ companies: Company[] }>("/companies");
+        const r = await api<{ companies: Company[] }>("/companies?lite=1");
         setCompanies(r.companies || []);
       } catch (e: any) {
         showMsg(e?.message || "Could not load companies");

@@ -136,7 +136,7 @@ export default function SyncEngineScreen() {
   const loadCompanies = useCallback(async () => {
     if (!isSuper) return;
     try {
-      const c = await api<{ companies: Company[] }>("/companies");
+      const c = await api<{ companies: Company[] }>("/companies?lite=1");
       setCompanies(c.companies || []);
       if (!companyId && (c.companies || []).length) setCompanyId(c.companies[0].company_id);
     } catch {}

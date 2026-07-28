@@ -135,7 +135,7 @@ export default function Dashboard() {
         companies.length === 0
       ) {
         try {
-          const r = await api<{ companies: any[] }>("/companies");
+          const r = await api<{ companies: any[] }>("/companies?lite=1");
           setCompanies(r.companies || []);
         } catch {}
       }

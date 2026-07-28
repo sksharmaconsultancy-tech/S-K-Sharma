@@ -88,7 +88,7 @@ export default function CompanyPicker({
       setLoading(true);
       setErr(null);
       try {
-        const r = await api<{ companies: PickerCompany[] }>("/companies");
+        const r = await api<{ companies: PickerCompany[] }>("/companies?lite=1");
         if (!cancelled) setCompanies(r.companies || []);
       } catch (e: any) {
         if (!cancelled) setErr(e?.message || "Failed to load companies");

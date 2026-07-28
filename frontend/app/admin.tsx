@@ -126,7 +126,7 @@ export default function AdminScreen() {
         api<{ employees: any[] }>(`/admin/employees${companyParam}`),
         api(`/admin/stats${companyParam}`).catch(() => null),
         isScopedAdmin
-          ? api<{ companies: Company[] }>("/companies").catch(() => ({ companies: [] }))
+          ? api<{ companies: Company[] }>("/companies?lite=1").catch(() => ({ companies: [] }))
           : Promise.resolve({ companies: [] as Company[] }),
         api<{ pending: any[] }>(`/admin/pending-approvals${companyParam}`).catch(() => ({ pending: [] })),
       ]);

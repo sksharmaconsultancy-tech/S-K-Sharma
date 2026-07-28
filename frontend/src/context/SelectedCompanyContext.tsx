@@ -107,7 +107,8 @@ export function SelectedCompanyProvider({ children }: { children: React.ReactNod
     }
     setLoading(true);
     try {
-      const r = await api<{ companies: CompanyLite[] }>("/companies");
+      // Iter 342 (perf) — lite list: no per-firm stats, tiny payload.
+      const r = await api<{ companies: CompanyLite[] }>("/companies?lite=1");
       // Iter 68 — Alphabetical firm order for consistent picker UX.
       const sorted = (r.companies || []).slice().sort((a, b) =>
         (a.name || "").localeCompare(b.name || "", "en", { sensitivity: "base" }),

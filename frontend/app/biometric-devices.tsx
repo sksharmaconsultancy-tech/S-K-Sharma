@@ -144,7 +144,7 @@ export default function BiometricDevicesScreen() {
       setUnmappedCount(r.unmapped_count || 0);
       if (isSuper) {
         try {
-          const c = await api<{ companies: Company[] }>("/companies");
+          const c = await api<{ companies: Company[] }>("/companies?lite=1");
           setCompanies(c.companies || []);
         } catch {}
       }

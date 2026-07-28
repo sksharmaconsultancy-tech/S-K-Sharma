@@ -331,7 +331,7 @@ export default function BulkEmployeeCorrectionScreen() {
     if (!isSuper) return;
     (async () => {
       try {
-        const cs = await api<{ companies: Company[] }>("/companies");
+        const cs = await api<{ companies: Company[] }>("/companies?lite=1");
         // Iter 68 — Alphabetical sorting for company + master lists.
         const cmp = (a: { name: string }, b: { name: string }) =>
           (a.name || "").localeCompare(b.name || "", "en", { sensitivity: "base" });
@@ -763,6 +763,36 @@ export default function BulkEmployeeCorrectionScreen() {
             placeholder="0"
             placeholderTextColor={colors.onSurfaceTertiary}
           />
+        </View>
+      );
+    }
+
+    // Iter 342 (user request) — On/Off-Roll shift (Actual mode): bulk move
+    // employees from Off-Roll to On-Roll (or back).
+    if (f.type === "select:onroll") {
+      const baseB = (row as any).is_onroll === false ? "off" : "on";
+      const curB =
+        dirty[row.user_id] && "is_onroll" in dirty[row.user_id]
+          ? ((dirty[row.user_id].is_onroll as boolean) ? "on" : "off")
+          : baseB;
+      return (
+        <View style={[styles.cellWrap, { width: w }, isDirty && styles.cellDirty]}>
+          {Platform.OS === "web" ? (
+            <select
+              value={curB}
+              onChange={(e) => {
+                const v = (e.target as HTMLSelectElement).value;
+                if (v === baseB) clearCell(row.user_id, "is_onroll");
+                else setCell(row.user_id, "is_onroll", v === "on");
+              }}
+              style={styles.cellSelect as any}
+            >
+              <option value="on">On-Roll</option>
+              <option value="off">Off-Roll</option>
+            </select>
+          ) : (
+            <Text style={styles.cellReadOnly}>Web only</Text>
+          )}
         </View>
       );
     }

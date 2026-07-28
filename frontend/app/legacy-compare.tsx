@@ -33,7 +33,7 @@ export default function LegacyCompareScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await api<any>("/companies");
+        const r = await api<any>("/companies?lite=1");
         setCompanies(r.companies || r || []);
       } catch { /* ignore */ }
     })();

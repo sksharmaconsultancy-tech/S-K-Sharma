@@ -76,7 +76,7 @@ export default function ComplianceSettingsScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await api<any>("/companies");
+        const r = await api<any>("/companies?lite=1");
         const list = (r?.companies || r || []).filter((c: any) => c.is_active !== false);
         setCompanies(list.map((c: any) => ({ company_id: c.company_id, name: c.name })));
       } catch { /* noop */ }

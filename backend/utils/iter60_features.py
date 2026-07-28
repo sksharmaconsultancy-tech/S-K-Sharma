@@ -181,6 +181,8 @@ class BulkEmployeeCorrection(BaseModel):
     father_name: Optional[str] = None
     actual_basic: Optional[float] = None
     pay_basis: Optional[str] = None          # "daily" | "monthly"
+    # Iter 342 (user request) — bulk shift Off-Roll → On-Roll (Actual mode).
+    is_onroll: Optional[bool] = None
     shift_id: Optional[str] = None           # Shift Master id; "" clears
     salary_1: Optional[float] = None
     day_1: Optional[float] = None
@@ -761,6 +763,8 @@ def register_iter60_features(
                     {"key": "designation", "label": "Designation", "type": "master:designation"},
                     {"key": "actual_basic", "label": "Actual Salary Basic", "type": "number"},
                     {"key": "pay_basis", "label": "Pay Basis", "type": "select:paybasis"},
+                    # Iter 342 (user request) — bulk shift Off-Roll → On-Roll.
+                    {"key": "is_onroll", "label": "On/Off-Roll", "type": "select:onroll"},
                     {"key": "shift_id", "label": "Shift", "type": "select:shift"},
                     {"key": "bio_code", "label": "Bio Code", "type": "text"},
                     {"key": "salary_1", "label": "Salary 1", "type": "number"},

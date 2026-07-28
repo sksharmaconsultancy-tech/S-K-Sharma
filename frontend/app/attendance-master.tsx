@@ -73,7 +73,7 @@ export default function AttendanceMasterScreen() {
     if (!user) return;
     (async () => {
       try {
-        const r = await api<{ companies: Company[] }>("/companies");
+        const r = await api<{ companies: Company[] }>("/companies?lite=1");
         setCompanies(r.companies || []);
         if ((r.companies || []).length === 1) setCompanyId(r.companies[0].company_id);
       } catch {

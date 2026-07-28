@@ -65,7 +65,7 @@ export default function CompOffLedgerScreen() {
         if (user.role !== "super_admin" && user.role !== "sub_admin") {
           setCompanyId(user.company_id || "");
         } else {
-          const r = await api<{ companies: Company[] }>("/companies");
+          const r = await api<{ companies: Company[] }>("/companies?lite=1");
           setCompanies(r.companies || []);
           if ((r.companies || []).length === 1) setCompanyId(r.companies[0].company_id);
         }

@@ -79,7 +79,7 @@ export default function AttendanceEmailConfigScreen() {
     if (!isAdminish) return;
     (async () => {
       try {
-        const r = await api<{ companies: Company[] }>("/companies");
+        const r = await api<{ companies: Company[] }>("/companies?lite=1");
         setCompanies(r.companies || []);
         if (r.companies?.length && !companyId) setCompanyId(r.companies[0].company_id);
       } catch (e: any) {

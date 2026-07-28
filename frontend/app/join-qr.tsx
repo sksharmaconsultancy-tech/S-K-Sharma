@@ -71,7 +71,7 @@ export default function JoinQrScreen() {
           setCompanies(list);
           if (list.length) setSelected(list[0]);
         } else {
-          const r = await api<{ companies: Company[] }>("/companies");
+          const r = await api<{ companies: Company[] }>("/companies?lite=1");
           const list = (r.companies || []).filter((c) => c.company_code);
           setCompanies(list);
           if (list.length === 1) setSelected(list[0]);

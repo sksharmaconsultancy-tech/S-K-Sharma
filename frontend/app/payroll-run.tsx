@@ -107,7 +107,7 @@ export default function PayrollRunScreen() {
 
   useEffect(() => {
     if (isSuper && companies.length === 0) {
-      api<{ companies: any[] }>("/companies")
+      api<{ companies: any[] }>("/companies?lite=1")
         .then((r) => setCompanies(r.companies || []))
         .catch(() => {});
     }

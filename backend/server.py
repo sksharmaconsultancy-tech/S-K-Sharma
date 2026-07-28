@@ -7510,8 +7510,13 @@ async def company_logo(company_id: str, authorization: Optional[str] = Header(No
 
 
 @api.get("/companies")
-async def list_companies(authorization: Optional[str] = Header(None)):
+async def list_companies(authorization: Optional[str] = Header(None),
+                         lite: Optional[int] = None):
     """List all companies with quick stats.
+
+    Iter 342 (perf) — ``?lite=1`` returns ONLY picker fields (id, name,
+    code, capability flags) and SKIPS the stats aggregation entirely.
+    Used by the firm picker / context on every page load.
 
     Access:
       • super_admin — sees every firm.
@@ -7537,25 +7542,47 @@ async def list_companies(authorization: Optional[str] = Header(None)):
         # Iter 307 (perf) — the list is fetched by every picker/sidebar;
         # firm logos (base64, can be MBs across firms) are excluded here
         # and served on demand via GET /companies/{id}/logo.
-        query, {"_id": 0, "logo_base64": 0},
-    ).to_list(500)
+        query,
+        {"_id": 0, "company_id": 1, "name": 1, "company_code": 1,
+         "location_punching_enabled": 1, "auto_punch_enabled": 1,
+         "face_match_enabled": 1, "is_active": 1} if lite else {"_id": 0, "logo_base64": 0},
+    ).to_list(2000)
     # Firm Master list is ALWAYS alphabetical by firm name (user directive).
     companies.sort(key=lambda c: (c.get("name") or "").strip().upper())
+    if lite:
+        return {"companies": companies}
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Iter 342 (user perf issue — PWA firm selection slow): the loop below
+    # used to fire 3 DB queries PER FIRM (employees / present / pending
+    # leaves), i.e. 600+ round-trips with 200 firms. Replaced with THREE
+    # aggregations across all firms.
+    _cids = [c["company_id"] for c in companies]
+    _emp_n: Dict[str, int] = {}
+    async for g in db.users.aggregate([
+        {"$match": {"company_id": {"$in": _cids}, "role": "employee"}},
+        {"$group": {"_id": "$company_id", "n": {"$sum": 1}}},
+    ]):
+        _emp_n[g["_id"]] = g["n"]
+    _pres_n: Dict[str, int] = {}
+    async for g in db.attendance.aggregate([
+        {"$match": {"company_id": {"$in": _cids}, "date": today, "kind": "in"}},
+        {"$group": {"_id": {"c": "$company_id", "u": "$user_id"}}},
+        {"$group": {"_id": "$_id.c", "n": {"$sum": 1}}},
+    ]):
+        _pres_n[g["_id"]] = g["n"]
+    _leave_n: Dict[str, int] = {}
+    async for g in db.leaves.aggregate([
+        {"$match": {"company_id": {"$in": _cids}, "status": "pending"}},
+        {"$group": {"_id": "$company_id", "n": {"$sum": 1}}},
+    ]):
+        _leave_n[g["_id"]] = g["n"]
     out = []
     for c in companies:
         cid = c["company_id"]
-        employees = await db.users.count_documents({"company_id": cid, "role": "employee"})
-        present = len(await db.attendance.distinct(
-            "user_id", {"company_id": cid, "date": today, "kind": "in"}
-        ))
-        pending_leaves = await db.leaves.count_documents(
-            {"company_id": cid, "status": "pending"}
-        )
         c["stats"] = {
-            "employees": employees,
-            "present_today": present,
-            "pending_leaves": pending_leaves,
+            "employees": _emp_n.get(cid, 0),
+            "present_today": _pres_n.get(cid, 0),
+            "pending_leaves": _leave_n.get(cid, 0),
         }
         out.append(c)
     return {"companies": out}

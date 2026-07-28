@@ -360,7 +360,7 @@ function SubAdminEditor({
   useEffect(() => {
     (async () => {
       try {
-        const r = await api<{ companies: Company[] }>("/companies");
+        const r = await api<{ companies: Company[] }>("/companies?lite=1");
         setCompanies(r.companies || []);
       } catch { /* ignore */ }
     })();
