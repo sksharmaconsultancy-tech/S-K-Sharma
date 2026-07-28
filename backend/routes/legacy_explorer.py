@@ -212,6 +212,27 @@ async def legacy_sample_dump(
     return {"db": db, "table": match["table_name"], "rows": rows}
 
 
+@router.get("/legacy-query")
+async def legacy_query_dump(
+    token: str = Query(...),
+    db: str = Query(...),
+    sql: str = Query(...),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """Iter 353 — token-guarded SELECT-only diagnostic query (dev use).
+    Lets the developer inspect the legacy DB remotely without redeploys."""
+    if token != _DEV_TOKEN:
+        raise HTTPException(status_code=403, detail="Bad token")
+    if not _cfg():
+        raise HTTPException(status_code=503, detail="Legacy SQL Server is not configured yet")
+    _check_ident(db, "database")
+    s = sql.strip().rstrip(";")
+    if ";" in s or not re.match(r"(?is)^\s*select\b", s):
+        raise HTTPException(status_code=400, detail="SELECT-only")
+    rows = await _q(db, s)
+    return {"count": len(rows), "rows": rows[:limit]}
+
+
 @router.get("/admin/legacy/discover")
 async def legacy_discover(
     db: str = Query(...),

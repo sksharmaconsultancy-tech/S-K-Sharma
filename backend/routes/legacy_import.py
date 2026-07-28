@@ -21,7 +21,6 @@ Endpoints (super_admin):
 """
 import asyncio
 import difflib
-import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -233,6 +232,32 @@ def _apply_hist_overrides(base: Dict[str, Any], ov: Dict[str, str]) -> None:
             base[dst] = val
 
 
+# Iter 354 (USER-SPECIFIED mapping): the old software keeps the CURRENT
+# salary structure directly on the EmployeeMaster row —
+#   BasicSalary = Basic · PFBasicSalary = PF Basic · GrossPay = Gross Salary
+#   Earn1..Earn10 = named allowance heads (below).
+# EmployeeSalaryStructureDtl is NOT used any more (it holds per-year
+# history that produced junk sums like HRA 19044 instead of 2000).
+_EARN_DEFAULT: Dict[int, str] = {
+    1: "HRA", 2: "CONV.", 3: "OTH. ALLOW.", 4: "OVER TIME", 5: "INCENTIVE",
+    6: "OTHER MISC.ALLOWANCE", 7: "BONUS", 8: "MEDICAL ALLOWANCES",
+    9: "FOOD ALLOWANCES", 10: "FOOD ALLOWANCE",
+}
+
+
+def _earn_allowances(e: dict, earn_names: Optional[Dict[str, str]] = None) -> List[dict]:
+    """EmployeeMaster Earn1..Earn25 columns → [{head, amount}, …]."""
+    out: List[dict] = []
+    for i in range(1, 26):
+        amt = _f(e.get(f"Earn{i}"))
+        if not amt:
+            continue
+        head = ((earn_names or {}).get(f"Earn{i}")
+                or _EARN_DEFAULT.get(i) or f"EARN {i}").strip()
+        out.append({"head": head, "amount": amt})
+    return out
+
+
 async def _legacy_employees(dbn: str, firm_no: int) -> List[dict]:
     """Latest AcYear record per employee (EmpCode, else EmpID) of a firm."""
     rows = await _q(
@@ -298,17 +323,21 @@ async def legacy_import_preview(body: ImportBody, authorization: Optional[str] =
                         n_ = str(mm.get("name") or "").strip()
                         if n_:
                             catalog.setdefault(n_.lower(), n_)
+                # Iter 354 — heads present on the firm's employees via the
+                # Earn1-25 columns (user-specified mapping).
+                _earn_cols = ", ".join(
+                    f"MAX(Earn{i}) AS Earn{i}" for i in range(1, 26))
                 srows = await _q(
                     dbn,
-                    "SELECT DISTINCT SalHeadName FROM EmployeeSalaryStructureDtl "
-                    "WHERE FirmID_FK = %s AND UPPER(SalHeadType) LIKE 'ALLOW%%' "
-                    "AND Amount > 0",
+                    f"SELECT {_earn_cols} FROM EmployeeMaster WHERE FirmNo = %s",
                     (m.firm_no,))
+                try:
+                    _e_names = await _head_names(dbn)
+                except Exception:  # noqa: BLE001
+                    _e_names = {}
                 heads_info = []
-                for s in srows or []:
-                    h = str(s.get("SalHeadName") or "").strip()
-                    if not h:
-                        continue
+                for a in _earn_allowances(srows[0] if srows else {}, _e_names):
+                    h = a["head"]
                     label = catalog.get(h.lower())
                     heads_info.append({
                         "head": h,
@@ -506,7 +535,8 @@ def _d(v: Any) -> Optional[str]:
 
 
 def _emp_doc_fields(
-    e: dict, groups: List[str], structure: List[dict],
+    e: dict, groups: List[str],
+    earn_names: Optional[Dict[str, str]] = None,
     overrides: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Legacy EmployeeMaster row → portal user fields, per selected groups."""
@@ -553,35 +583,13 @@ def _emp_doc_fields(
             "bank_address": (str(e.get("BankAddress") or "").strip() or None),
         })
     if "salary" in groups:
-        # Iter 333 (user bug: allowances not fetching) — match the head
-        # type loosely: ALLOWANCE / ALLOWANCES / Allow… all count.
-        allow = [
-            {"head": str(s.get("SalHeadName") or "").strip(), "amount": float(s.get("Amount") or 0)}
-            for s in structure
-            if str(s.get("SalHeadType") or "").strip().upper().startswith("ALLOW")
-            and _f(s.get("Amount"))
-        ]
-        # Iter 347 (user bug: SUVIDHI — old DB salary structure ≠ portal
-        # structure) — the old software's CURRENT structure lives head-wise
-        # in EmployeeSalaryStructureDtl; EmployeeMaster.BasicSalary/GrossPay
-        # can be STALE (old revision). Prefer the structure's BASIC head and
-        # derive Gross = Basic + allowances whenever structure rows exist.
-        struct_basic = 0.0
-        for s in structure:
-            t = str(s.get("SalHeadType") or "").strip().upper()
-            n = str(s.get("SalHeadName") or "").strip().lower()
-            if t.startswith("BASIC") or (not t.startswith("ALLOW")
-                                         and not t.startswith("DEDUCT")
-                                         and "basic" in n):
-                struct_basic = _f(s.get("Amount")) or 0.0
-                break
-        basic = struct_basic or _f(e.get("BasicSalary"))
+        # Iter 354 (USER-SPECIFIED mapping): Basic/PF Basic/Gross + Earn1-10
+        # allowance heads straight from the EmployeeMaster row.
+        allow = _earn_allowances(e, earn_names)
+        basic = _f(e.get("BasicSalary"))
         gross = _f(e.get("GrossPay"))
-        if structure and (struct_basic or allow):
-            struct_gross = (struct_basic or _f(e.get("BasicSalary")) or 0.0) \
-                + sum(a["amount"] for a in allow)
-            if struct_gross > 0:
-                gross = struct_gross
+        if not gross and (basic or allow):
+            gross = (basic or 0.0) + sum(a["amount"] for a in allow)
         doc.update({
             "basic_salary": basic,
             "compliance_basic": basic,
@@ -784,61 +792,9 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
             if body.import_employees:
                 _ml: Dict[str, set] = {"group": set(), "department": set(), "designation": set()}
                 emps = await _legacy_employees(dbn, m.firm_no)
-                # head-wise structure rows for this firm (salary group)
-                struct_by_emp: Dict[int, List[dict]] = {}
-                emp_ids_by_code: Dict[int, List[int]] = {}
-                if "salary" in body.employee_fields:
-                    # Iter 348 (user: "Still showing old salary structure")
-                    # — EmployeeSalaryStructureDtl.FirmID_FK does NOT always
-                    # equal our firm_no (per-year FirmMaster ids). Join via
-                    # EmpID_FK → EmployeeMaster.FirmNo, which is the key we
-                    # already trust everywhere else.
-                    srows = await _q(
-                        dbn,
-                        "SELECT d.EmpID_FK, d.SalHeadType, d.SalHeadName, d.Amount "
-                        "FROM EmployeeSalaryStructureDtl d "
-                        "JOIN EmployeeMaster em ON em.EmpID = d.EmpID_FK "
-                        "WHERE em.FirmNo = %s",
-                        (m.firm_no,),
-                    )
-                    for s in srows:
-                        struct_by_emp.setdefault(int(s.get("EmpID_FK") or 0), []).append(s)
-                    # Iter 333 (user bug: allowances not fetching) — the
-                    # structure may only exist under an OLDER AcYear's
-                    # EmpID for the same EmpCode. Build code → EmpIDs
-                    # (latest year first) so we can fall back.
-                    id_rows = await _q(
-                        dbn,
-                        "SELECT EmpID, EmpCode FROM EmployeeMaster "
-                        "WHERE FirmNo = %s ORDER BY AcYear DESC, UID DESC",
-                        (m.firm_no,))
-                    for r0 in id_rows:
-                        c0 = r0.get("EmpCode") if (r0.get("EmpCode") or 0) > 0 else None
-                        if c0 is not None:
-                            emp_ids_by_code.setdefault(
-                                int(c0), []).append(int(r0.get("EmpID") or 0))
-                    # Diagnostic — structure exists but nothing looks like
-                    # an allowance? Surface the real type names.
-                    if srows and not any(
-                            str(s.get("SalHeadType") or "").strip().upper().startswith("ALLOW")
-                            for s in srows):
-                        _types = sorted({str(s.get("SalHeadType") or "").strip()
-                                         for s in srows})[:8]
-                        errors.append(
-                            f"firm {m.firm_no}: salary structure has no "
-                            f"ALLOWANCE-type heads; types present: {_types}")
-
-                def _struct_for(e0: dict) -> List[dict]:
-                    rows_ = struct_by_emp.get(int(e0.get("EmpID") or 0), [])
-                    if rows_:
-                        return rows_
-                    c0 = e0.get("EmpCode") if (e0.get("EmpCode") or 0) > 0 else None
-                    if c0 is not None:
-                        for eid in emp_ids_by_code.get(int(c0), []):
-                            rows_ = struct_by_emp.get(eid, [])
-                            if rows_:
-                                return rows_
-                    return []
+                # Iter 354 — salary comes straight from the EmployeeMaster
+                # row (Basic/PF Basic/Gross + Earn1-10 heads); nothing else
+                # to prefetch.
                 for e in emps:
                     try:
                         nm = str(e.get("EmpName") or "").strip()
@@ -847,7 +803,7 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                             continue
                         fields = _emp_doc_fields(
                             e, body.employee_fields,
-                            _struct_for(e),
+                            earn_names=heads,
                             overrides=body.field_overrides)
                         # collect for General Masters interlink
                         if fields.get("employee_type"):
@@ -978,10 +934,8 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                 if "salary" in body.employee_fields:
                     try:
                         _heads = {
-                            str(s.get("SalHeadName") or "").strip()
-                            for rows_ in struct_by_emp.values() for s in rows_
-                            if str(s.get("SalHeadType") or "").strip().upper().startswith("ALLOW")
-                            and _f(s.get("Amount"))
+                            a["head"] for e in emps
+                            for a in _earn_allowances(e, heads)
                         }
                         _sync = await _sync_firm_allowances(
                             m.company_id, _heads, admin_uid)
@@ -1298,7 +1252,7 @@ async def legacy_employee_compare(body: ImportBody, authorization: Optional[str]
             if not u:
                 new_names.append(nm)
                 continue
-            doc = _emp_doc_fields(e, body.employee_fields, [],
+            doc = _emp_doc_fields(e, body.employee_fields,
                                   overrides=body.field_overrides)
             doc.pop("compliance_salary_allowances", None)
             changes = [
@@ -2164,6 +2118,12 @@ async def _sync_structures_job(job_id: str, admin_uid: str):
     unmatched: List[dict] = []  # Iter 349 — WHO didn't match (firm/code/name)
     try:
         dbn = await _dbname()
+        # Iter 354 — Earn column → head name mapping (SalaryHeadMaster,
+        # falling back to the user-specified defaults).
+        try:
+            earn_names = await _head_names(dbn)
+        except Exception:  # noqa: BLE001
+            earn_names = {}
         maps = await db.legacy_imported_firms.find({}, {"_id": 0}).to_list(2000)
         await _prog(status="running", firms_total=len(maps), totals=totals)
         for mp in maps:
@@ -2176,71 +2136,24 @@ async def _sync_structures_job(job_id: str, admin_uid: str):
             await _prog(current_firm=firm_no, totals=totals)
             try:
                 emps = await _legacy_employees(dbn, firm_no)
-                # Iter 348 — join via EmpID_FK → EmployeeMaster.FirmNo (the
-                # trusted key); FirmID_FK alone missed structures for many
-                # firms ("allowances not fetched from old DB").
-                srows = await _q(
-                    dbn,
-                    "SELECT d.EmpID_FK, d.SalHeadType, d.SalHeadName, d.Amount "
-                    "FROM EmployeeSalaryStructureDtl d "
-                    "JOIN EmployeeMaster em ON em.EmpID = d.EmpID_FK "
-                    "WHERE em.FirmNo = %s",
-                    (firm_no,))
-                totals["structure_rows"] = totals.get("structure_rows", 0) + len(srows)
-                if not srows:
-                    errors.append(f"firm {firm_no}: NO structure rows in old DB "
-                                  "(EmployeeSalaryStructureDtl) — employees keep "
-                                  "EmployeeMaster figures")
-                struct_by_emp: Dict[int, List[dict]] = {}
-                for s in srows:
-                    struct_by_emp.setdefault(
-                        int(s.get("EmpID_FK") or 0), []).append(s)
-                emp_ids_by_code: Dict[int, List[int]] = {}
-                for r0 in await _q(
-                        dbn,
-                        "SELECT EmpID, EmpCode FROM EmployeeMaster "
-                        "WHERE FirmNo = %s ORDER BY AcYear DESC, UID DESC",
-                        (firm_no,)):
-                    try:
-                        c0 = int(r0.get("EmpCode") or 0)
-                    except (TypeError, ValueError):
-                        c0 = 0
-                    if c0 > 0:
-                        emp_ids_by_code.setdefault(c0, []).append(
-                            int(r0.get("EmpID") or 0))
-
-                def _struct_for(e0: dict) -> List[dict]:
-                    rows_ = struct_by_emp.get(int(e0.get("EmpID") or 0), [])
-                    if rows_:
-                        return rows_
-                    try:
-                        c0 = int(e0.get("EmpCode") or 0)
-                    except (TypeError, ValueError):
-                        c0 = 0
-                    if c0 > 0:
-                        for eid in emp_ids_by_code.get(c0, []):
-                            rows_ = struct_by_emp.get(eid, [])
-                            if rows_:
-                                return rows_
-                    return []
+                # Iter 354 (USER-SPECIFIED) — salary comes straight from the
+                # EmployeeMaster row: Basic/PF Basic/Gross + Earn1-10 heads.
 
                 # Iter 349 — manual head interlinks (old head → portal label).
                 _links = await _head_links_for(company_id)
 
                 # Enable every legacy allowance head on the Firm Master.
                 _heads = {
-                    _links.get(str(s.get("SalHeadName") or "").strip().lower(),
-                               str(s.get("SalHeadName") or "").strip())
-                    for rows_ in struct_by_emp.values() for s in rows_
-                    if str(s.get("SalHeadType") or "").strip().upper().startswith("ALLOW")
-                    and _f(s.get("Amount"))
+                    _links.get(a["head"].lower(), a["head"])
+                    for e in emps for a in _earn_allowances(e, earn_names)
                 }
                 _sync = await _sync_firm_allowances(company_id, _heads, admin_uid)
                 totals["allowance_labels_enabled"] += len(_sync["enabled"])
                 totals["allowance_heads_created"] += len(_sync["created"])
 
                 for e in emps:
-                    fields = _emp_doc_fields(e, ["salary"], _struct_for(e),
+                    fields = _emp_doc_fields(e, ["salary"],
+                                             earn_names=earn_names,
                                              overrides=None)
                     # Iter 349 — rename interlinked heads to portal labels.
                     if _links and fields.get("compliance_salary_allowances"):
@@ -2264,19 +2177,26 @@ async def _sync_structures_job(job_id: str, admin_uid: str):
                     except (TypeError, ValueError):
                         code = 0
                     existing = None
+                    matched_by = None
                     if code > 0:
                         existing = await db.users.find_one(
                             {"company_id": company_id, "role": "employee",
                              "employee_code": str(code)},
-                            {"_id": 0, "user_id": 1, "compliance_gross": 1})
+                            {"_id": 0, "user_id": 1, "compliance_gross": 1,
+                             "employee_code": 1})
+                        if existing:
+                            matched_by = "code"
                     if existing is None:
                         nm = str(e.get("EmpName") or "").strip()
                         cands = await db.users.find(
                             {"company_id": company_id, "role": "employee",
                              "name": {"$regex": f"^{_rx(nm)}$", "$options": "i"}},
-                            {"_id": 0, "user_id": 1, "compliance_gross": 1},
+                            {"_id": 0, "user_id": 1, "compliance_gross": 1,
+                             "employee_code": 1},
                         ).to_list(2) if nm else []
                         existing = cands[0] if len(cands) == 1 else None
+                        if existing:
+                            matched_by = "name"
                     if existing is None:
                         totals["employees_unmatched"] += 1
                         if len(unmatched) < 2000:
@@ -2291,18 +2211,24 @@ async def _sync_structures_job(job_id: str, admin_uid: str):
                     if round(float(existing.get("compliance_gross") or 0)) != \
                             round(float(updates.get("compliance_gross") or 0)):
                         totals["gross_changed"] += 1
+                    # Iter 353 (user: "Employee Code Is Also Mismatch") —
+                    # matched by NAME with a different code → correct the
+                    # portal employee code to the old-DB one (unless taken).
+                    if (matched_by == "name" and code > 0
+                            and str(existing.get("employee_code") or "") != str(code)):
+                        clash = await db.users.find_one(
+                            {"company_id": company_id, "role": "employee",
+                             "employee_code": str(code),
+                             "user_id": {"$ne": existing["user_id"]}},
+                            {"_id": 0, "user_id": 1})
+                        if not clash:
+                            updates["employee_code"] = str(code)
+                            totals["codes_corrected"] = \
+                                totals.get("codes_corrected", 0) + 1
                     updates["salary_structure_synced_at"] = _now()
                     await db.users.update_one(
                         {"user_id": existing["user_id"]}, {"$set": updates})
                     totals["employees_updated"] += 1
-                # Iter 350 — STAFF live in a separate EM_* table in the old
-                # DB; sync them too (overrides structure-table values).
-                try:
-                    await _sync_staff_structures(
-                        dbn, int(firm_no), company_id, _links, totals,
-                        errors, unmatched, mp.get("company_name"))
-                except Exception as se:  # noqa: BLE001
-                    errors.append(f"firm {firm_no} staff: {str(se)[:150]}")
             except Exception as fe:  # noqa: BLE001 — keep syncing other firms
                 errors.append(f"firm {firm_no}: {str(fe)[:200]}")
             totals["firms_synced"] += 1
@@ -2451,237 +2377,3 @@ async def legacy_head_links_save(payload: Dict[str, Any] = Body(...),
     return {"ok": True}
 
 
-# ---------------------------------------------------------------------------
-# Iter 350 (user: SUVIDHI staff codes + allowances mismatch; shared staf.xls
-# with EM_CODE / EM_RATEM / EM_HRA / EM_CONV / EM_TOT columns) — the old
-# software keeps STAFF salary structure in a separate EM_* table, NOT in
-# EmployeeSalaryStructureDtl. Discover that table and sync staff too.
-# ---------------------------------------------------------------------------
-
-_STAFF_CACHE: Dict[str, Any] = {}
-logger = logging.getLogger("legacy-import")
-
-
-async def _discover_staff_table(dbn: str) -> Optional[dict]:
-    """Find the legacy staff table by its EM_* columns. Cached per process."""
-    if "t" in _STAFF_CACHE:
-        return _STAFF_CACHE["t"]
-    rows = await _q(
-        dbn,
-        "SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
-        "WHERE COLUMN_NAME IN ('EM_CODE','EM_RATEM','EM_HRA','EM_CONV','EM_TOT')")
-    by_table: Dict[str, set] = {}
-    for r in rows:
-        by_table.setdefault(str(r.get("TABLE_NAME")), set()).add(
-            str(r.get("COLUMN_NAME")).upper())
-    best = None
-    for t, cols in by_table.items():
-        if len(cols) >= 4:
-            best = t
-            break
-    if not best:
-        _STAFF_CACHE["t"] = None
-        return None
-    cols = await _q(
-        dbn,
-        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
-        "WHERE TABLE_NAME = %s", (best,))
-    names = {str(c.get("COLUMN_NAME")) for c in cols}
-    lower = {n.lower(): n for n in names}
-    firm_col = next((lower[k] for k in
-                     ("firmno", "firm_no", "em_firmno", "firmid", "firmid_fk",
-                      "fno", "em_firmid") if k in lower), None)
-    info = {"table": best, "columns": names, "firm_col": firm_col}
-    _STAFF_CACHE["t"] = info
-    logger.info("[legacy-sync] staff table discovered: %s (firm col: %s)",
-                best, firm_col)
-    return info
-
-
-async def _sync_staff_structures(dbn: str, firm_no: int, company_id: str,
-                                 links: Dict[str, str], totals: dict,
-                                 errors: List[str], unmatched: List[dict],
-                                 company_name: Optional[str]):
-    info = await _discover_staff_table(dbn)
-    if not info:
-        return
-    tbl, cols, firm_col = info["table"], info["columns"], info["firm_col"]
-    def has(c):  # noqa: E306
-        return c in cols
-    want = [c for c in ("EM_CODE", "EM_NAME", "EM_RATEM", "EM_HRA", "EM_CONV",
-                        "EM_TOT", "UAN_NO", "EM_ESINO", "EM_PFNO",
-                        "EM_RESINGDATE") if has(c)]
-    if "EM_CODE" not in want:
-        return
-    if firm_col:
-        rows = await _q(dbn, f"SELECT {', '.join(want)} FROM {tbl} "
-                             f"WHERE {firm_col} = %s", (firm_no,))
-    else:
-        rows = await _q(dbn, f"SELECT {', '.join(want)} FROM {tbl}")
-    if not rows:
-        return
-    totals["staff_rows"] = totals.get("staff_rows", 0) + len(rows)
-    hra_label = links.get("hra", "HRA")
-    conv_label = links.get("conveyance", links.get("conv", "CONVEYANCE"))
-    for r in rows:
-        try:
-            code = int(float(r.get("EM_CODE") or 0))
-        except (TypeError, ValueError):
-            code = 0
-        nm = str(r.get("EM_NAME") or "").strip()
-        basic = _f(r.get("EM_RATEM")) or 0.0
-        hra = _f(r.get("EM_HRA")) or 0.0
-        conv = _f(r.get("EM_CONV")) or 0.0
-        tot = _f(r.get("EM_TOT")) or (basic + hra + conv)
-        if basic <= 0 and tot <= 0:
-            continue
-        existing = None
-        matched_by = None
-        if code > 0:
-            existing = await db.users.find_one(
-                {"company_id": company_id, "role": "employee",
-                 "employee_code": str(code)},
-                {"_id": 0, "user_id": 1, "compliance_gross": 1,
-                 "employee_code": 1})
-            if existing:
-                matched_by = "code"
-        if existing is None and nm:
-            cands = await db.users.find(
-                {"company_id": company_id, "role": "employee",
-                 "name": {"$regex": f"^{_rx(nm)}$", "$options": "i"}},
-                {"_id": 0, "user_id": 1, "compliance_gross": 1,
-                 "employee_code": 1}).to_list(2)
-            existing = cands[0] if len(cands) == 1 else None
-            if existing:
-                matched_by = "name"
-        if existing is None:
-            totals["staff_unmatched"] = totals.get("staff_unmatched", 0) + 1
-            if len(unmatched) < 2000:
-                unmatched.append({"firm_no": firm_no, "company": company_name,
-                                  "code": code or None, "name": nm,
-                                  "status": "STAFF (EM table)"})
-            continue
-        allow = []
-        if hra > 0:
-            allow.append({"head": hra_label, "amount": hra})
-        if conv > 0:
-            allow.append({"head": conv_label, "amount": conv})
-        updates: Dict[str, Any] = {
-            "basic_salary": basic, "compliance_basic": basic,
-            "compliance_gross": tot or (basic + hra + conv),
-            "salary_monthly": tot or (basic + hra + conv),
-            "compliance_salary_allowances": allow,
-            "hra_amount": None, "conv_amount": None, "basic_amount": None,
-            "salary_structure_compliance": None,
-            "salary_structure_synced_at": _now(),
-            "salary_structure_source": f"legacy_staff:{tbl}",
-        }
-        uan = str(r.get("UAN_NO") or "").strip()
-        if uan and uan != "0":
-            updates["uan_no"] = uan
-        esi = str(r.get("EM_ESINO") or "").strip()
-        if esi and esi != "0":
-            updates["esi_ip_no"] = esi
-        # Iter 351 — user: "Employee Code Is Also Mismatch". When we matched
-        # by NAME (portal code differs from old-DB code), correct the portal
-        # employee code to the old-DB one, unless another employee already
-        # holds that code in the same firm.
-        if (matched_by == "name" and code > 0
-                and str(existing.get("employee_code") or "") != str(code)):
-            clash = await db.users.find_one(
-                {"company_id": company_id, "role": "employee",
-                 "employee_code": str(code),
-                 "user_id": {"$ne": existing["user_id"]}},
-                {"_id": 0, "user_id": 1})
-            if not clash:
-                updates["employee_code"] = str(code)
-                totals["codes_corrected"] = totals.get("codes_corrected", 0) + 1
-        if round(float(existing.get("compliance_gross") or 0)) != round(float(updates["compliance_gross"])):
-            totals["gross_changed"] += 1
-        await db.users.update_one({"user_id": existing["user_id"]},
-                                  {"$set": updates})
-        totals["staff_updated"] = totals.get("staff_updated", 0) + 1
-
-
-@router.get("/admin/legacy-import/staff-probe")
-async def legacy_staff_probe(company_id: Optional[str] = Query(None),
-                             firm_name: Optional[str] = Query(None),
-                             token: Optional[str] = Query(None),
-                             authorization: Optional[str] = Header(None)):
-    """Iter 351 diagnostic — show exactly what the old DB holds for STAFF of
-    one firm and how it matches portal employees. Open in browser:
-    /api/admin/legacy-import/staff-probe?firm_name=SUVIDHI&token=sks-deploy-7391"""
-    if token != "sks-deploy-7391":
-        admin = await get_user_from_token(authorization)
-        require_role(admin, ["super_admin", "sub_admin"])
-    if not company_id and firm_name:
-        co = await db.companies.find_one(
-            {"name": {"$regex": _rx(firm_name), "$options": "i"}},
-            {"_id": 0, "company_id": 1})
-        company_id = (co or {}).get("company_id")
-    if not company_id:
-        raise HTTPException(status_code=400, detail="company_id or firm_name required")
-    dbn = await _dbname()
-    mp = await db.legacy_imported_firms.find_one(
-        {"company_id": company_id}, {"_id": 0})
-    if not mp:
-        raise HTTPException(status_code=404, detail="Firm is not legacy-mapped")
-    firm_no = int(mp.get("firm_no") or 0)
-    _STAFF_CACHE.pop("t", None)  # re-discover fresh every probe
-    info = await _discover_staff_table(dbn)
-    out: Dict[str, Any] = {"firm_no": firm_no,
-                           "company_name": mp.get("company_name"),
-                           "staff_table": info}
-    if info:
-        tbl, cols, firm_col = info["table"], info["columns"], info["firm_col"]
-        want = [c for c in ("EM_CODE", "EM_NAME", "EM_RATEM", "EM_HRA",
-                            "EM_CONV", "EM_TOT", "UAN_NO", "EM_ESINO")
-                if c in cols]
-        if firm_col:
-            rows = await _q(dbn, f"SELECT TOP 8 {', '.join(want)} FROM {tbl} "
-                                 f"WHERE {firm_col} = %s", (firm_no,))
-            out["firm_rows_count"] = len(await _q(
-                dbn, f"SELECT {want[0]} FROM {tbl} WHERE {firm_col} = %s",
-                (firm_no,)))
-        else:
-            rows = await _q(dbn, f"SELECT TOP 8 {', '.join(want)} FROM {tbl}")
-            out["warning"] = "NO firm column found — table is not firm-filtered"
-        out["sample_rows"] = [{k: str(v)[:40] for k, v in r.items()} for r in rows]
-        # How do the sample codes match portal employees?
-        matches = []
-        for r in rows:
-            code = str(r.get("EM_CODE") or "").strip().rstrip(".0") or None
-            u = await db.users.find_one(
-                {"company_id": company_id, "role": "employee",
-                 "employee_code": str(int(float(code))) if code else "__none__"},
-                {"_id": 0, "employee_code": 1, "name": 1, "basic_salary": 1,
-                 "compliance_gross": 1, "compliance_salary_allowances": 1}) \
-                if code else None
-            matches.append({"old_code": code, "old_name": r.get("EM_NAME"),
-                            "portal": u or "NOT FOUND BY CODE"})
-        out["code_matches"] = matches
-        # What does the STRUCTURE table hold for the first sample staff?
-        # (This is the suspected source of the junk HRA/Conv figures.)
-        try:
-            c0 = rows[0].get("EM_CODE") if rows else None
-            if c0:
-                srows = await _q(
-                    dbn,
-                    "SELECT em.EmpID, em.AcYear, d.SalHeadType, d.SalHeadName, "
-                    "d.Amount FROM EmployeeSalaryStructureDtl d "
-                    "JOIN EmployeeMaster em ON em.EmpID = d.EmpID_FK "
-                    "WHERE em.FirmNo = %s AND em.EmpCode = %s "
-                    "ORDER BY em.AcYear DESC",
-                    (firm_no, int(float(c0))))
-                out["structure_rows_for_first_staff"] = [
-                    {k: str(v)[:36] for k, v in r.items()} for r in srows[:40]]
-                out["structure_rows_total"] = len(srows)
-        except Exception as e2:  # noqa: BLE001
-            out["structure_probe_error"] = str(e2)[:200]
-    # Last sync info for this firm
-    job = await db.legacy_import_jobs.find_one(
-        {"kind": "salary_structure_sync"}, {"_id": 0, "totals": 1, "status": 1,
-                                            "updated_at": 1},
-        sort=[("started_at", -1)])
-    out["last_sync"] = job
-    return out
