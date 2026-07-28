@@ -15818,8 +15818,13 @@ async def _compute_compliance_run(
             # picked a Days Calculation Method yet — a single import fills
             # the days, recalculates salary/statutory and matches Freeze
             # vs Gross without any reprocess.
+            # Iter 339b (user request — "no negative salary figures"):
+            # ALSO derive the days when the sheet-days salary OVERSHOOTS
+            # the imported gross (would print a negative Difference) — the
+            # freeze gross is authoritative, so days shrink to match it.
             if (_method == "attendance" and _imp_g0 > 0
-                    and row["attendance_days"] <= 0):
+                    and (row["attendance_days"] <= 0
+                         or float(row.get("gross_paid") or 0) > _imp_g0 + 0.5)):
                 _method = "attendance_gross_validation"
             _new_days = None
             if _method == "fixed":
@@ -15876,7 +15881,13 @@ async def _compute_compliance_run(
                             _step = 0.5
                         # User directive — days land on HALF or FULL days only.
                         _step = 1.0 if _step >= 1 else 0.5
-                        _new_days = round(_rawd / _step) * _step
+                        # Iter 339b (user request — "no negative salary
+                        # figures"): days always round DOWN to the step so
+                        # the calculated gross NEVER exceeds the imported
+                        # gross. The (positive) remainder goes to OT /
+                        # Other Allowance; a round-UP produced overshoots
+                        # like −117 in the Difference column.
+                        _new_days = math.floor((_rawd + 1e-9) / _step) * _step
             if _new_days is not None:
                 _new_days = max(0.0, min(round(_new_days, 2), float(month_days)))
                 if abs(_new_days - float(row.get("present_days") or 0)) > 1e-9:

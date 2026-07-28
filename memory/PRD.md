@@ -2019,3 +2019,11 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - firm-master.tsx: Days Calc Method points + freeze_to_actual toggle now gated on sp.online_salary.
 - Verified: Kankani 0-days entries → 28/31 days derived, calc≈imported, remainder→OT, ✓ Matched.
 - temp_bundle.py kind=script serves deploy_vps_iter339.sh (adds post-deploy verification lines).
+
+## Iter 339b — No negative salary figures on Freeze runs
+- Derived days round DOWN (math.floor to half/full step) so calculated gross never exceeds
+  imported gross (BHERU LAL TELI case: 20.8 was rounded UP to 21 → diff −117).
+- Attendance-method rows whose sheet-days salary OVERSHOOTS the imported gross now auto-derive
+  days from the gross too (freeze authoritative) → Difference always ≥ 0, remainder → OT/Other.
+- Verified: full Kankani imported run has 0 negative-difference rows (incl. monthly-rated 39000
+  master vs 21000 imported → days shrink, diff positive).

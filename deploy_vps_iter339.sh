@@ -10,6 +10,11 @@
 #     Gross (✓ Matched); only the remaining difference goes to OT/Other.
 #   • DAILY-RATED FIX: per-day gross probe (full-month compute) so days
 #     derive correctly for daily-rated workers too (previously 0).
+#   • NO NEGATIVE SALARY FIGURES (user request — BHERU LAL TELI −117):
+#     derived days now round DOWN (half/full step) so the calculated
+#     gross NEVER exceeds the imported freeze gross; rows whose sheet
+#     days overshoot the imported gross auto-derive days from the gross —
+#     the Difference column is always ≥ 0 (remainder → OT / Other).
 # Previous (338):
 #   • Import Freeze gross → ACTUAL Salary (Firm Master toggle) with OT /
 #     Oth.Allo / Basic-adjust allocation + ❄ Freeze badge on the grid.
