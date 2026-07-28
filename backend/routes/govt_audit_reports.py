@@ -246,8 +246,9 @@ async def _audit_rows(kind: str, company_id: str, limit: int):
     docs: List[dict] = []
     for coll in meta["colls"]:
         try:
-            q = {"$or": [{"company_id": company_id},
-                         {"company_id": {"$exists": False}}]}
+            q = ({"$or": [{"company_id": company_id},
+                          {"company_id": {"$exists": False}}]}
+                 if company_id else {})
             found = await db[coll].find(q, {"_id": 0}).sort(
                 "$natural", -1).to_list(limit)
             for d in found:

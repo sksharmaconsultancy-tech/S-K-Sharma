@@ -2208,3 +2208,19 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   Sidebar (AdminWebShell 2 places): Labour Statistics & HR Analytics / Annual Returns /
   Factory & Boilers. Present & Absent employee-wise report added on user request.
   Deploy script: deploy_vps_iter357.sh (served via temp_bundle kind=script).
+- Iter 358 (tested 15/15 + UI, iteration_358.json): REPORTS CENTER (app/reports-center.tsx,
+  sidebar "Reports Center"; single hub with chips + month/FY inputs + RegisterTable).
+  Routers: routes/payroll_reports.py (/api/admin/payroll-reports/*: salary-comparison,
+  gross-vs-net, salary-revision, increment, ex-gratia, incentive, arrear, full-and-final,
+  ctc-register, ctc-analysis, ot-department, ot-daily, ot-cost-analysis) and
+  routes/govt_audit_reports.py (govt_router /api/admin/govt-registers/*: wage/fine/deduction/
+  advance/gratuity; audit_router /api/admin/audit-reports/* super/sub-admin only, generic
+  collection dumps from salary_audit_log, attendance_audit_log, salary_history, activity_log,
+  access_audit, emp_login_attempts, employee_audit_logs, bulk_ops_log, onboarding_audit,
+  kyc_history). labour-stats += salary-distribution, tenure-analysis. factory += leave-with-wages
+  computed + adult-worker/dangerous-occurrence/welfare/canteen/machine-operator masters.
+  All use suffix .xlsx/.pdf delegation. User-supplied lists: reports already existing were
+  intentionally NOT duplicated (linked in the page). NOT built (no data model yet): shift-wise/
+  holiday/double OT + OT approvals (needs shift & approval masters), Form A-Z state-wise
+  government formats, Contractor/BOCW/Apprenticeship registers, succession planning.
+  Deploy: deploy_vps_iter358.sh (temp_bundle kind=script).
