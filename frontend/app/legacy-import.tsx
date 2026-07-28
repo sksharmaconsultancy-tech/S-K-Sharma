@@ -15,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Stack } from "expo-router";
 
 import { api } from "@/src/api/client";
+import { confirmYesNo } from "@/src/utils/confirm";
 import { colors, radius, spacing } from "@/src/theme";
 
 const FIELD_GROUPS: { key: string; label: string }[] = [
@@ -236,6 +237,24 @@ export default function LegacyImportScreen() {
       const r = await api<any>("/admin/legacy-import/run", { method: "POST", body: body() });
       pollJob(r.job_id);
     } catch (e: any) { setErr(e?.message || "Import failed to start"); setBusy(false); }
+  };
+
+  // Iter 347 (user request) — one-click salary STRUCTURE re-sync for ALL
+  // imported firms (fixes allowances/salary not fetched from the Old DB).
+  const startStructureSync = async () => {
+    const ok = await confirmYesNo(
+      "Re-sync SALARY STRUCTURES for ALL imported firms from the Old Database?\n\n" +
+      "Updates Basic + Allowances + Gross + Monthly Salary on existing employees " +
+      "(matched by employee code). Nothing else is touched.",
+    );
+    if (!ok) return;
+    setBusy(true); setErr("");
+    try {
+      const r = await api<any>("/admin/legacy-import/sync-salary-structures", {
+        method: "POST", body: {},
+      });
+      pollJob(r.job_id);
+    } catch (e: any) { setErr(e?.message || "Structure sync failed to start"); setBusy(false); }
   };
 
   const pollJob = async (id: string) => {
@@ -615,6 +634,35 @@ export default function LegacyImportScreen() {
                   <Ionicons name="download-outline" size={16} color="#fff" />
                   <Text style={st.actTxt}>Start Import</Text>
                 </Pressable>
+              ) : null}
+              {/* Iter 347 (user request) — ALL-firms salary structure re-sync. */}
+              <Pressable
+                style={[st.actBtn, { backgroundColor: "#0E7490", opacity: busy ? 0.5 : 1 }]}
+                disabled={busy}
+                onPress={startStructureSync}
+                testID="li-sync-structures"
+              >
+                <Ionicons name="sync-outline" size={16} color="#fff" />
+                <Text style={st.actTxt}>Sync Salary Structures — ALL Firms (from Old DB)</Text>
+              </Pressable>
+              {job && job.kind === "salary_structure_sync" ? (
+                <View style={st.prevRow}>
+                  <Text style={st.firmName}>
+                    {job.status === "done" ? "✅ Structure sync complete" :
+                      job.status === "failed" ? "❌ Structure sync failed" : "⏳ Syncing structures…"}
+                  </Text>
+                  <Text style={st.firmMeta}>
+                    Firms: {job.totals?.firms_synced || 0}{job.firms_total ? `/${job.firms_total}` : ""} ·
+                    Employees updated: {job.totals?.employees_updated || 0} ·
+                    Gross changed: {job.totals?.gross_changed || 0} ·
+                    Unmatched: {job.totals?.employees_unmatched || 0} ·
+                    Allowance heads enabled: {job.totals?.allowance_labels_enabled || 0}
+                    {job.totals?.allowance_heads_created ? ` (+${job.totals.allowance_heads_created} created)` : ""}
+                  </Text>
+                  {(job.errors || []).slice(0, 5).map((e2: string, i2: number) => (
+                    <Text key={i2} style={[st.firmMeta, { color: "#DC2626" }]}>{e2}</Text>
+                  ))}
+                </View>
               ) : null}
               {job ? (
                 <View style={st.prevRow}>

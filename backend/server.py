@@ -19432,6 +19432,12 @@ async def _master_rates_by_user(company_id: str):
                 misc += amt
         gross = _n(u.get("compliance_gross"))
         total = basic + hra + conv + sum(extra.values()) + misc
+        # Iter 347 (user check: "Gross figures correct or not") — when the
+        # employee HAS a head-wise breakup, the heads are the source of
+        # truth: Gross must equal Basic + all allowances. A stale
+        # compliance_gross (old-DB GrossPay) no longer wins over the heads.
+        if total > 0 and abs(gross - total) > 0.5:
+            gross = total
         if gross <= 0:
             gross = total if total > 0 else _n(u.get("salary_monthly"))
         if total > 0 or gross > 0:

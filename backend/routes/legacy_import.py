@@ -2129,3 +2129,150 @@ async def legacy_lock_compliance(
         emp_locked += e.modified_count
     return {"ok": True, "locked": total, "firms": len(cids),
             "employees_locked": emp_locked, "per_firm": per_firm}
+
+
+# ---------------------------------------------------------------------------
+# Iter 347 (user: "So Many Companies Facing Issues Regarding Allowances /
+# Salary Not Fetch From OLD DB — Please Set for All Firms") — one-click
+# salary STRUCTURE re-sync for EVERY firm that was imported from the legacy
+# database. Updates ONLY salary fields (basic, allowances, gross, monthly)
+# on existing portal employees, matched code-first exactly like the import.
+# ---------------------------------------------------------------------------
+
+_SYNC_SALARY_KEYS = ["basic_salary", "compliance_basic", "pf_basic",
+                     "compliance_gross", "salary_monthly",
+                     "compliance_salary_allowances"]
+
+
+async def _sync_structures_job(job_id: str, admin_uid: str):
+    async def _prog(**kw):
+        await db.legacy_import_jobs.update_one(
+            {"job_id": job_id}, {"$set": {**kw, "updated_at": _now()}})
+
+    totals = {"firms_synced": 0, "employees_updated": 0,
+              "employees_unmatched": 0, "gross_changed": 0,
+              "allowance_labels_enabled": 0, "allowance_heads_created": 0}
+    errors: List[str] = []
+    try:
+        dbn = await _dbname()
+        maps = await db.legacy_imported_firms.find({}, {"_id": 0}).to_list(2000)
+        await _prog(status="running", firms_total=len(maps), totals=totals)
+        for mp in maps:
+            firm_no = mp.get("firm_no")
+            company_id = mp.get("company_id")
+            if firm_no is None or not company_id:
+                continue
+            if not await db.companies.find_one({"company_id": company_id}, {"_id": 1}):
+                continue
+            await _prog(current_firm=firm_no, totals=totals)
+            try:
+                emps = await _legacy_employees(dbn, firm_no)
+                srows = await _q(
+                    dbn,
+                    "SELECT EmpID_FK, SalHeadType, SalHeadName, Amount "
+                    "FROM EmployeeSalaryStructureDtl WHERE FirmID_FK = %s",
+                    (firm_no,))
+                struct_by_emp: Dict[int, List[dict]] = {}
+                for s in srows:
+                    struct_by_emp.setdefault(
+                        int(s.get("EmpID_FK") or 0), []).append(s)
+                emp_ids_by_code: Dict[int, List[int]] = {}
+                for r0 in await _q(
+                        dbn,
+                        "SELECT EmpID, EmpCode FROM EmployeeMaster "
+                        "WHERE FirmNo = %s ORDER BY AcYear DESC, UID DESC",
+                        (firm_no,)):
+                    try:
+                        c0 = int(r0.get("EmpCode") or 0)
+                    except (TypeError, ValueError):
+                        c0 = 0
+                    if c0 > 0:
+                        emp_ids_by_code.setdefault(c0, []).append(
+                            int(r0.get("EmpID") or 0))
+
+                def _struct_for(e0: dict) -> List[dict]:
+                    rows_ = struct_by_emp.get(int(e0.get("EmpID") or 0), [])
+                    if rows_:
+                        return rows_
+                    try:
+                        c0 = int(e0.get("EmpCode") or 0)
+                    except (TypeError, ValueError):
+                        c0 = 0
+                    if c0 > 0:
+                        for eid in emp_ids_by_code.get(c0, []):
+                            rows_ = struct_by_emp.get(eid, [])
+                            if rows_:
+                                return rows_
+                    return []
+
+                # Enable every legacy allowance head on the Firm Master.
+                _heads = {
+                    str(s.get("SalHeadName") or "").strip()
+                    for rows_ in struct_by_emp.values() for s in rows_
+                    if str(s.get("SalHeadType") or "").strip().upper().startswith("ALLOW")
+                    and _f(s.get("Amount"))
+                }
+                _sync = await _sync_firm_allowances(company_id, _heads, admin_uid)
+                totals["allowance_labels_enabled"] += len(_sync["enabled"])
+                totals["allowance_heads_created"] += len(_sync["created"])
+
+                for e in emps:
+                    fields = _emp_doc_fields(e, ["salary"], _struct_for(e),
+                                             overrides=None)
+                    updates = {k: v for k, v in fields.items()
+                               if k in _SYNC_SALARY_KEYS}
+                    if not updates:
+                        continue
+                    try:
+                        code = int(e.get("EmpCode") or 0)
+                    except (TypeError, ValueError):
+                        code = 0
+                    existing = None
+                    if code > 0:
+                        existing = await db.users.find_one(
+                            {"company_id": company_id, "role": "employee",
+                             "employee_code": str(code)},
+                            {"_id": 0, "user_id": 1, "compliance_gross": 1})
+                    if existing is None:
+                        nm = str(e.get("EmpName") or "").strip()
+                        cands = await db.users.find(
+                            {"company_id": company_id, "role": "employee",
+                             "name": {"$regex": f"^{_rx(nm)}$", "$options": "i"}},
+                            {"_id": 0, "user_id": 1, "compliance_gross": 1},
+                        ).to_list(2) if nm else []
+                        existing = cands[0] if len(cands) == 1 else None
+                    if existing is None:
+                        totals["employees_unmatched"] += 1
+                        continue
+                    if round(float(existing.get("compliance_gross") or 0)) != \
+                            round(float(updates.get("compliance_gross") or 0)):
+                        totals["gross_changed"] += 1
+                    updates["salary_structure_synced_at"] = _now()
+                    await db.users.update_one(
+                        {"user_id": existing["user_id"]}, {"$set": updates})
+                    totals["employees_updated"] += 1
+            except Exception as fe:  # noqa: BLE001 — keep syncing other firms
+                errors.append(f"firm {firm_no}: {str(fe)[:200]}")
+            totals["firms_synced"] += 1
+            await _prog(totals=totals, errors=errors[-20:])
+        await _prog(status="done", totals=totals, errors=errors[-50:])
+    except Exception as e:  # noqa: BLE001
+        errors.append(str(e)[:300])
+        await _prog(status="failed", totals=totals, errors=errors[-50:])
+
+
+@router.post("/admin/legacy-import/sync-salary-structures")
+async def legacy_sync_salary_structures(
+        authorization: Optional[str] = Header(None)):
+    """Start the ALL-FIRMS salary structure re-sync from the legacy DB.
+    Returns a job_id — poll GET /admin/legacy-import/jobs/{job_id}."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin"])
+    job_id = f"lsync_{uuid.uuid4().hex[:10]}"
+    await db.legacy_import_jobs.insert_one({
+        "job_id": job_id, "kind": "salary_structure_sync",
+        "status": "queued", "totals": {}, "errors": [],
+        "started_by": admin.get("user_id"), "started_at": _now()})
+    asyncio.get_event_loop().create_task(
+        _sync_structures_job(job_id, admin.get("user_id") or ""))
+    return {"job_id": job_id}
