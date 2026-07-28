@@ -2132,3 +2132,33 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Freeze exact match: new `elif _diff_g < 0` branch — calc gross above imported is TRIMMED
   (OT first, then Others, head "Trimmed"), gross_paid = imported. Every imported row now has
   Gross − Freeze = 0 (verified full Kankani run: 0 mismatches; manual_override rows exempt).
+
+## Iter 342–347 (fork session, June 2026)
+- Iter 342: OFFLINE legacy salary import fix — `_month_key_any()` in legacy_import.py derives
+  month from FirstDayOfMonth OR MonthYear ('Feb 2019'/'02-2019'/201902 …); safe EmpCode parse;
+  `offline_skipped_no_month` diagnostic counters. deploy_vps_iter342.sh.
+- Iter 343: Compliance salary "Save only refreshes page" — root cause: window.confirm/alert
+  suppressed by browser + reload-on-No. Fixed: src/utils/confirm.ts now renders IN-APP DOM
+  modal (confirmYesNo) + showToast (unsuppressible); removed both window.location.reload()
+  paths in compliance-salary-run.tsx; finalize uses confirmYesNo. deploy_vps_iter343.sh.
+- Iter 345: AI Chat Assistant v2 (routes/ai_assistant.py rewrite): executes work — process/
+  finalize salary (confirm_api, danger flag), report downloads (auto), email reports, employee
+  phone/salary/status updates via POST /admin/ai-assistant/employee-status; purified data Q&A
+  (salary_total/esic_eligible/absent_list/present_count/employee_count/top_paid/run_status/
+  missing_data/pf_mismatch/why_salary); compliance_info expert (rules/news + portal links);
+  Hindi/Hinglish. Frontend AiAssistant.tsx: download/link actions, auto-run, danger styling.
+  Tested 13/13 backend + UI (iteration_345.json).
+- Iter 346: FULL AI LAYER (routes/ai_layer.py + app/ai-payroll-assistant.tsx + sidebar menu):
+  GET /admin/ai/analysis (scores, 18+ findings w/ confidence, trends, forecast, reconciliation,
+  calendar, insights, recommendations; cached in ai_analyses, refresh=1), apply-fix (PAN/IFSC
+  normalise; logs ai_action_log), feedback learning (ai_feedback suppression), salary-diff,
+  audit-report.pdf/.xlsx, map-columns (rules+LLM) + import-templates, red-risk → notifications.
+  Shortcuts: g+i, Alt+1..6, R. Attendance sheet `?sort=` (code/name/department/doj) + ms-sort
+  dropdown. Excel-style per-column header filters in compliance-salary-run.tsx & salary-run.tsx
+  (src/utils/colFilter.ts, >N <N =N ops). Tested 15/15 + UI (iteration_346.json).
+- Iter 347: SUVIDHI salary structure mismatch — legacy import now prefers CURRENT head-wise
+  structure (EmployeeSalaryStructureDtl BASIC head + allowances; gross = basic + allowances)
+  over stale EmployeeMaster.BasicSalary/GrossPay. Unit tested. Chat "_find_employees" strips
+  'code/emp' prefixes. deploy_vps_iter344.sh (served via temp_bundle token sks-deploy-7391).
+- PENDING: user to re-import SUVIDHI after deploy 344 and confirm structures match; P1
+  WhatsApp API integration; backlog server.py refactor.

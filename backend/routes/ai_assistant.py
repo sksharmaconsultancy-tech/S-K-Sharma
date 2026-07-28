@@ -254,6 +254,9 @@ def _resigned_query() -> dict:
 
 async def _find_employees(admin: dict, cid: Optional[str], term: str,
                           limit: int = 6) -> List[dict]:
+    # "code 50" / "emp 50" / "employee no 50" → "50" (testing feedback).
+    term = re.sub(r"^(?:employee|emp|code|worker|no\.?)\s+(?:no\.?\s*|code\s*)?",
+                  "", term.strip(), flags=re.IGNORECASE).strip() or term.strip()
     q: dict = {"role": "employee", "$or": [
         {"name": {"$regex": re.escape(term), "$options": "i"}},
         {"employee_code": {"$regex": f"^{re.escape(term)}$", "$options": "i"}},

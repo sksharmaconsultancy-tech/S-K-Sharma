@@ -560,11 +560,32 @@ def _emp_doc_fields(
             if str(s.get("SalHeadType") or "").strip().upper().startswith("ALLOW")
             and _f(s.get("Amount"))
         ]
+        # Iter 347 (user bug: SUVIDHI — old DB salary structure ≠ portal
+        # structure) — the old software's CURRENT structure lives head-wise
+        # in EmployeeSalaryStructureDtl; EmployeeMaster.BasicSalary/GrossPay
+        # can be STALE (old revision). Prefer the structure's BASIC head and
+        # derive Gross = Basic + allowances whenever structure rows exist.
+        struct_basic = 0.0
+        for s in structure:
+            t = str(s.get("SalHeadType") or "").strip().upper()
+            n = str(s.get("SalHeadName") or "").strip().lower()
+            if t.startswith("BASIC") or (not t.startswith("ALLOW")
+                                         and not t.startswith("DEDUCT")
+                                         and "basic" in n):
+                struct_basic = _f(s.get("Amount")) or 0.0
+                break
+        basic = struct_basic or _f(e.get("BasicSalary"))
+        gross = _f(e.get("GrossPay"))
+        if structure and (struct_basic or allow):
+            struct_gross = (struct_basic or _f(e.get("BasicSalary")) or 0.0) \
+                + sum(a["amount"] for a in allow)
+            if struct_gross > 0:
+                gross = struct_gross
         doc.update({
-            "basic_salary": _f(e.get("BasicSalary")),
-            "compliance_basic": _f(e.get("BasicSalary")),
+            "basic_salary": basic,
+            "compliance_basic": basic,
             "pf_basic": _f(e.get("PFBasicSalary")),
-            "compliance_gross": _f(e.get("GrossPay")),
+            "compliance_gross": gross,
             "salary_monthly": _f(e.get("Salary")),
         })
         if allow:
