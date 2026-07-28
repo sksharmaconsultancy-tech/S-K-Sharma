@@ -9181,16 +9181,8 @@ async def delete_employee(user_id: str,
     if admin.get("user_id") == user_id:
         raise HTTPException(status_code=400, detail="You cannot delete your own account")
 
-    if admin["role"] == "sub_admin":
-        # Iter 306 (user #1) — Sub Admin deletes go through Super Admin
-        # approval. Nothing is deleted until approved.
-        from routes.deletion_approvals import _queue_request
-        label = f"Employee · {target.get('name') or user_id}"
-        if target.get("employee_code"):
-            label += f" (code {target['employee_code']})"
-        return await _queue_request(admin, "employee", user_id, label,
-                                    target.get("company_id"))
-
+    # Iter 344 (user request) — Sub Super Admin deletes DIRECTLY, no
+    # Super Admin approval queue anymore (was Iter 306).
     result = await delete_employee_record(user_id, actor=admin.get("email") or admin.get("user_id"))
     return {"ok": True, **result}
 
@@ -16110,6 +16102,26 @@ async def _compute_compliance_run(
                         row["monthly_gross"] = round(
                             float(row.get("monthly_gross") or 0) + _diff_g, 2)
                         row["difference_allocation_head"] = "Other Allowances"
+                    row["gross_paid"] = _imp_g
+                    row["net"] = round(
+                        _imp_g - float(row.get("total_deduction") or 0), 2)
+                elif _diff_g < 0:
+                    # Iter 344 (user request) — EXACT match with the Freeze:
+                    # final Gross − Freeze must be 0. A calculated gross
+                    # ABOVE the imported figure is trimmed from OT first,
+                    # then Other Allowances.
+                    _need = -_diff_g
+                    _cut_ot = min(float(row.get("ot_pay") or 0), _need)
+                    if _cut_ot:
+                        row["ot_pay"] = round(
+                            float(row.get("ot_pay") or 0) - _cut_ot, 2)
+                    _rem = round(_need - _cut_ot, 2)
+                    if _rem:
+                        row["others"] = round(
+                            float(row.get("others") or 0) - _rem, 2)
+                        row["monthly_gross"] = round(
+                            float(row.get("monthly_gross") or 0) - _rem, 2)
+                    row["difference_allocation_head"] = "Trimmed"
                     row["gross_paid"] = _imp_g
                     row["net"] = round(
                         _imp_g - float(row.get("total_deduction") or 0), 2)

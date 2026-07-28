@@ -78,13 +78,14 @@ async def _delete_run(kind: str, run_id: str, user: Dict[str, Any]) -> Dict[str,
         raise HTTPException(status_code=403, detail="Not your firm's salary run")
 
     target_label = f"{label} · {run.get('month') or ''}".strip()
-    if user["role"] != "super_admin":
-        # User directive — salary data deletion is SUBJECT TO SUPER ADMIN
-        # approval for everyone except the super admin.
+    if user["role"] not in ("super_admin", "sub_admin"):
+        # User directive (Iter 344) — Super Admin AND Sub Super Admin
+        # delete salary data DIRECTLY; everyone else needs approval.
         return await _queue_request(user, kind, run_id, target_label, run.get("company_id"))
 
     await db[col].delete_one({"run_id": run_id})
-    logger.info("[deletion] %s %s deleted directly by super admin %s", kind, run_id, user["user_id"])
+    logger.info("[deletion] %s %s deleted directly by %s %s", kind, run_id,
+                user["role"], user["user_id"])
     return {"ok": True, "deleted": True}
 
 

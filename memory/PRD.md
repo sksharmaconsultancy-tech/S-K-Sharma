@@ -2125,3 +2125,10 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   others/gross_paid AS-IS (net = kept gross − fresh deductions); freeze fields display-only.
   Verified PASS (edited +500 kept across reprocess, diff −500 shown as Manual).
 - deploy_vps_iter341.sh created; temp_bundle serves it (kind=script). Covers iters 340b–343b.
+
+## Iter 344 — Direct delete for Sub Super Admin + Freeze EXACT match
+- delete_employee: sub_admin approval queue REMOVED — deletes directly (Iter 306 reverted per
+  user). deletion_approvals.py salary-run delete: sub_admin also direct now.
+- Freeze exact match: new `elif _diff_g < 0` branch — calc gross above imported is TRIMMED
+  (OT first, then Others, head "Trimmed"), gross_paid = imported. Every imported row now has
+  Gross − Freeze = 0 (verified full Kankani run: 0 mismatches; manual_override rows exempt).
