@@ -15,21 +15,28 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 
-import { api } from "@/src/api/client";
+import { api, apiBinary } from "@/src/api/client";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { useT, useLang } from "@/src/i18n";
 
 type Action =
   | { type: "navigate"; route: string; label?: string }
-  | { type: "confirm_api"; method: string; endpoint: string; body: any; label: string; navigate_after?: string };
+  | { type: "link"; url: string; label?: string }
+  | { type: "download"; endpoint: string; label?: string; filename?: string; auto?: boolean }
+  | {
+      type: "confirm_api"; method: string; endpoint: string; body: any;
+      label: string; navigate_after?: string; danger?: boolean; success_note?: string;
+    };
 
 type Msg = { who: "user" | "assistant"; text: string; action?: Action | null; done?: boolean };
 
 const SUGGESTIONS = [
-  "Process July payroll",
-  "Who is present today?",
+  "Process June compliance salary",
+  "Download bank sheet for June",
+  "Who is absent today?",
+  "Total net salary in June?",
+  "Any new PF notification?",
   "Pending approvals",
-  "Open attendance report",
 ];
 
 export default function AiAssistant({
@@ -66,6 +73,10 @@ export default function AiAssistant({
         { method: "POST", body: { text: cmd, company_id: selectedCompanyId || null } },
       );
       setMsgs((m) => [...m, { who: "assistant", text: r.reply, action: r.action }]);
+      // Safe actions (report downloads) run immediately — no confirm needed.
+      if (r.action && (r.action as any).auto) {
+        setTimeout(() => runAction(r.action!, -1), 150);
+      }
     } catch (e: any) {
       setMsgs((m) => [...m, { who: "assistant", text: e?.message || "Something went wrong. Try again." }]);
     } finally {
@@ -80,14 +91,39 @@ export default function AiAssistant({
       router.push(a.route as any);
       return;
     }
+    if (a.type === "link") {
+      if (Platform.OS === "web") window.open(a.url, "_blank");
+      return;
+    }
+    if (a.type === "download") {
+      setBusy(true);
+      try {
+        const r = await apiBinary(a.endpoint);
+        if (Platform.OS === "web" && r.webBlobUrl) {
+          const el = document.createElement("a");
+          el.href = r.webBlobUrl;
+          el.download = a.filename || "report";
+          document.body.appendChild(el);
+          el.click();
+          el.remove();
+          setMsgs((m) => [...m, { who: "assistant", text: `✅ Downloaded: ${a.filename || a.label}` }]);
+        }
+      } catch (e: any) {
+        setMsgs((m) => [...m, { who: "assistant", text: `❌ ${e?.message || "Download failed."}` }]);
+      } finally {
+        setBusy(false);
+        setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+      }
+      return;
+    }
     // confirm_api — execute the prepared call
     setBusy(true);
     try {
       await api(a.endpoint, { method: a.method as any, body: a.body });
-      setMsgs((m) => m.map((msg, i) => (i === idx ? { ...msg, done: true } : msg)));
+      if (idx >= 0) setMsgs((m) => m.map((msg, i) => (i === idx ? { ...msg, done: true } : msg)));
       setMsgs((m) => [...m, {
         who: "assistant",
-        text: "✅ Done! Payroll processed successfully.",
+        text: a.success_note || "✅ Done!",
         action: a.navigate_after
           ? { type: "navigate", route: a.navigate_after, label: "View Result" }
           : null,
@@ -172,15 +208,19 @@ export default function AiAssistant({
             <Text style={m.who === "user" ? styles.bubbleUserTxt : styles.bubbleAiTxt}>
               {m.text.replace(/\*\*/g, "")}
             </Text>
-            {m.action && !m.done ? (
+            {m.action && !m.done && !(m.action as any).auto ? (
               <Pressable
                 onPress={() => runAction(m.action!, i)}
                 style={[styles.actionBtn,
-                  m.action.type === "confirm_api" && { backgroundColor: "#22C55E" }]}
+                  m.action.type === "confirm_api"
+                    && { backgroundColor: (m.action as any).danger ? "#DC2626" : "#22C55E" },
+                  m.action.type === "link" && { backgroundColor: "#7C3AED" }]}
                 testID={`ai-action-${i}`}
               >
                 <Ionicons
-                  name={m.action.type === "confirm_api" ? "checkmark-circle" : "open-outline"}
+                  name={m.action.type === "confirm_api" ? "checkmark-circle"
+                    : m.action.type === "link" ? "globe-outline"
+                    : m.action.type === "download" ? "download-outline" : "open-outline"}
                   size={14} color="#fff" />
                 <Text style={styles.actionBtnTxt}>
                   {m.action.type === "confirm_api"
