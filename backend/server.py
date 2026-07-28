@@ -19450,7 +19450,8 @@ async def _master_rates_by_user(company_id: str):
 
 def _att_sheet_sort(employees: List[dict], sort_by: Optional[str]) -> List[dict]:
     """Iter 346 (user request) — sorting option before downloading the
-    attendance sheet: code (numeric, default) / name / department / doj."""
+    attendance sheet: code (numeric, default) / name / department /
+    designation / doj."""
     def _code_num(e):
         try:
             return (0, float(str(e.get("employee_code") or "").strip() or 1e12), "")
@@ -19462,6 +19463,11 @@ def _att_sheet_sort(employees: List[dict], sort_by: Optional[str]) -> List[dict]
     if s == "department":
         return sorted(employees, key=lambda e: (
             str(e.get("department") or e.get("employee_type") or "").lower(),
+            _code_num(e)))
+    if s == "designation":
+        # Iter 355 (user request) — sort by Designation, then employee code.
+        return sorted(employees, key=lambda e: (
+            str(e.get("designation") or e.get("position") or "").lower(),
             _code_num(e)))
     if s == "doj":
         return sorted(employees, key=lambda e: (str(e.get("doj") or "9999-99-99"),

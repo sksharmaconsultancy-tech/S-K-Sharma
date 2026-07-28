@@ -486,6 +486,7 @@ export default function AttendanceSheetScreen() {
                     <option value="code">Employee Code</option>
                     <option value="name">Name (A–Z)</option>
                     <option value="department">Department</option>
+                    <option value="designation">Designation</option>
                     <option value="doj">Date of Joining</option>
                   </select>
                 ) : (
