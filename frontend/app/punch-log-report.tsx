@@ -37,6 +37,8 @@ type Row = {
   company_name: string;
   status: string;
   has_photo?: boolean;
+  // Iter 341 — "not_found" | "new_registration" | ""
+  flag?: string;
 };
 
 type Machine = { key: string; label: string };
@@ -286,7 +288,15 @@ export default function PunchLogReportScreen() {
               ))}
             </View>
             {rows.map((r, i) => (
-              <View key={i} style={[styles.row, i % 2 === 1 && styles.rowAlt]}>
+              <View
+                key={i}
+                style={[
+                  styles.row,
+                  i % 2 === 1 && styles.rowAlt,
+                  r.flag === "not_found" && { backgroundColor: "#FEF2F2" },
+                  r.flag === "new_registration" && { backgroundColor: "#F0FDF4" },
+                ]}
+              >
                 {COLS.map((c) => (
                   <Text
                     key={c.key}
@@ -298,13 +308,25 @@ export default function PunchLogReportScreen() {
                         fontWeight: "800",
                         color: r.kind === "in" ? "#15803D" : "#B45309",
                       },
+                      c.key === "name" && r.flag === "not_found" && {
+                        fontWeight: "800", color: "#B91C1C",
+                      },
+                      c.key === "name" && r.flag === "new_registration" && {
+                        fontWeight: "800", color: "#15803D",
+                      },
                     ]}
                   >
                     {c.key === "kind"
                       ? (r.kind || "").toUpperCase()
                       : c.key === "has_photo"
                         ? (r.has_photo ? "📷" : "—")
-                        : (r as any)[c.key] || "—"}
+                        : c.key === "name"
+                          ? (r.flag === "not_found"
+                            ? `⛔ ${r.name || "NOT FOUND"}`
+                            : r.flag === "new_registration"
+                              ? `${r.name} 🆕 NEW`
+                              : r.name || "—")
+                          : (r as any)[c.key] || "—"}
                   </Text>
                 ))}
               </View>

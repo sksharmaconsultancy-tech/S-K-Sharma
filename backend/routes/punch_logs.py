@@ -10,6 +10,7 @@ GET /api/admin/punch-logs.xlsx    → Excel download (same filters)
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Any, Dict, List, Optional
 
@@ -100,7 +101,9 @@ async def _query_rows(
     if uids:
         async for u in db.users.find(
             {"user_id": {"$in": uids}},
-            {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1, "bio_code": 1},
+            {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1, "bio_code": 1,
+             # Iter 341 — "NEW REGISTRATION" flag needs the creation date.
+             "created_at": 1},
         ):
             users[u["user_id"]] = u
     cids = list({r.get("company_id") for r in recs if r.get("company_id")})
@@ -118,27 +121,95 @@ async def _query_rows(
     # the JSON payload.
     photo_ids = set(await db.attendance.distinct(
         "record_id", {**q, "selfie_base64": {"$exists": True, "$nin": [None, ""]}}))
+    # Iter 341 (user request) — flags: "not_found" when the punch's user is
+    # missing from the Employee Master, "new_registration" when the
+    # employee was registered TODAY.
+    _today_ist = datetime.now(
+        timezone(timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d")
     for r in recs:
         u = users.get(r.get("user_id") or "", {})
         at = str(r.get("at") or "")
         mkey = _machine_key(r)
         mlabel = _source_label(r)
         machines.setdefault(mkey, mlabel)
+        _flag = ""
+        if not u:
+            _flag = "not_found"
+        elif str(u.get("created_at") or "")[:10] == _today_ist:
+            _flag = "new_registration"
         rows.append({
             "record_id": r.get("record_id"),
             "date": r.get("date") or at[:10],
             "time": at[11:19] if len(at) >= 19 else at[11:16],
             "kind": r.get("kind"),
             "employee_code": u.get("employee_code") or "",
-            "name": u.get("name") or r.get("user_id") or "",
-            "bio_code": u.get("bio_code") or "",
+            "name": u.get("name") or ("NOT FOUND" if not u else r.get("user_id") or ""),
+            "bio_code": u.get("bio_code") or ("" if u else (r.get("user_id") or "")),
             "machine": mlabel,
             "machine_key": mkey,
             "company_name": firms.get(r.get("company_id") or "", ""),
-            "status": r.get("status") or "",
+            "status": "not found" if _flag == "not_found" else (r.get("status") or ""),
             "source": r.get("source") or "",
             "has_photo": r.get("record_id") in photo_ids,
+            "flag": _flag,
         })
+    # Iter 341 (user request) — device punches whose BIO CODE matched NO
+    # employee in the Master (stored in biometric_unmapped) appear in the
+    # report marked "NOT FOUND".
+    _allowed: Optional[set] = None
+    if isinstance(q.get("company_id"), str):
+        _allowed = {q["company_id"]}
+    elif isinstance(q.get("company_id"), dict):
+        _allowed = set(q["company_id"].get("$in") or [])
+    _dev_map: Dict[str, dict] = {}
+    async for d in db.biometric_devices.find(
+        {}, {"_id": 0, "serial_number": 1, "company_id": 1, "name": 1, "location": 1},
+    ):
+        _dev_map[str(d.get("serial_number") or "")] = d
+    _unm_q: Dict[str, Any] = {}
+    if from_date:
+        _unm_q.setdefault("at", {})["$gte"] = f"{from_date}T00:00:00"
+    if to_date:
+        _unm_q.setdefault("at", {})["$lte"] = f"{to_date}T23:59:59.999999"
+    _dev_cids = {d.get("company_id") for d in _dev_map.values()
+                 if d.get("company_id") and d.get("company_id") not in firms}
+    if _dev_cids:
+        async for c in db.companies.find(
+            {"company_id": {"$in": list(_dev_cids)}},
+            {"_id": 0, "company_id": 1, "name": 1},
+        ):
+            firms[c["company_id"]] = c.get("name") or c["company_id"]
+    async for m_ in db.biometric_unmapped.find(
+        _unm_q, {"_id": 0, "device_serial": 1, "device_user_id": 1, "at": 1},
+    ).sort([("at", -1)]).limit(2000):
+        d = _dev_map.get(str(m_.get("device_serial") or ""), {})
+        _cid = d.get("company_id")
+        if _allowed is not None and _cid not in _allowed:
+            continue
+        _serial = str(m_.get("device_serial") or "")
+        mkey = f"device:{_serial}" if _serial else "app"
+        if machine and mkey != machine:
+            continue
+        mlabel = f"Device {_serial}" if _serial else "Device"
+        machines.setdefault(mkey, mlabel)
+        at = str(m_.get("at") or "")
+        rows.append({
+            "record_id": None,
+            "date": at[:10],
+            "time": at[11:19] if len(at) >= 19 else at[11:16],
+            "kind": "",
+            "employee_code": "",
+            "name": "NOT FOUND IN MASTER",
+            "bio_code": str(m_.get("device_user_id") or ""),
+            "machine": mlabel,
+            "machine_key": mkey,
+            "company_name": firms.get(_cid or "", "") or (d.get("name") or ""),
+            "status": "not found",
+            "source": "device",
+            "has_photo": False,
+            "flag": "not_found",
+        })
+    rows.sort(key=lambda x: (x.get("date") or "", x.get("time") or ""), reverse=True)
     return {"rows": rows, "machines": machines}
 
 
@@ -378,7 +449,9 @@ async def punch_logs_xlsx(
     ws = wb.active
     ws.title = "Punch Log"
     headers = ["Sr", "Date", "Time", "IN/OUT", "Emp Code", "Employee Name",
-               "Bio Code", "Machine / Source", "Firm", "Status", "Photo"]
+               "Bio Code", "Machine / Source", "Firm", "Status", "Photo",
+               # Iter 341 — NOT FOUND / NEW REGISTRATION marker.
+               "Remark"]
     ws.append(headers)
     fill = PatternFill("solid", fgColor="1F4E79")
     for col in range(1, len(headers) + 1):
@@ -391,10 +464,16 @@ async def punch_logs_xlsx(
     MAX_EMBEDDED_PHOTOS = 2000
     photo_rows: List[tuple] = []  # (excel_row, record_id)
     for i, r in enumerate(data["rows"], start=1):
+        _rm = ("NOT FOUND" if r.get("flag") == "not_found"
+               else "NEW REGISTRATION" if r.get("flag") == "new_registration" else "")
         ws.append([i, r["date"], r["time"], (r["kind"] or "").upper(),
                    r["employee_code"], r["name"], r["bio_code"],
                    r["machine"], r["company_name"], r["status"],
-                   "" if r.get("has_photo") else "—"])
+                   "" if r.get("has_photo") else "—", _rm])
+        if _rm:
+            _c = ws.cell(row=i + 1, column=len(headers))
+            _c.font = Font(bold=True,
+                           color="B91C1C" if _rm == "NOT FOUND" else "15803D")
         if r.get("has_photo") and len(photo_rows) < MAX_EMBEDDED_PHOTOS:
             photo_rows.append((i + 1, r.get("record_id")))
     if photo_rows:
@@ -446,8 +525,6 @@ async def rectified_punches(
     month: str,
     authorization: Optional[str] = Header(None),
 ):
-    from datetime import datetime, timedelta
-
     from server import (
         dedupe_rapid_punches,
         dedupe_same_machine_punches,

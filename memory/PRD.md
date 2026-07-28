@@ -2071,3 +2071,13 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   EPS contrib 0, EPS portion moved into EPF_EPS_DIFF/employer share.
 - Both ECR download endpoints stamp users.eps_disabled on rows (covers runs generated earlier).
 - Verified: NORMAL 3041/253/112 vs EPSOFF 0/0/365 (both builders).
+
+## Iter 341b — Punch Log Report: NOT FOUND + NEW REGISTRATION flags
+- routes/punch_logs.py _query_rows: rows get flag="" | "not_found" (user doc missing) |
+  "new_registration" (users.created_at date == today IST).
+- biometric_unmapped punches (bio code with NO master match) merged into the report as rows:
+  name "NOT FOUND IN MASTER", bio_code = device_user_id, firm resolved via biometric_devices
+  serial → company; respects firm/machine filters + sub-admin scope; rows re-sorted date/time desc.
+- XLSX: new "Remark" column (NOT FOUND red / NEW REGISTRATION green).
+- punch-log-report.tsx: red/green row tint + ⛔/🆕 name markers.
+- Verified E2E with seeded unmapped punch (then cleaned up).
