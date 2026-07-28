@@ -2116,3 +2116,12 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   offline tab; startPublish picks endpoint by kind (shared month-picker modal + job poller).
 - E2E verified: seed offline hist row → publish → visible in /admin/salary-runs + opens in
   Actual screen (26 days / 21500 / 20950). Seed cleaned.
+
+## Iter 343b — Freeze display-only (manual OT edits stick) + deploy 341
+- compliance grid: editing ot_pay/others on imported rows sets manual_override=true +
+  difference_allocation_head "Manual"; freeze comparison (calculated_gross/difference/status)
+  recomputed live client-side.
+- _compute_compliance_run freeze block: prev row with manual_override → restore saved ot_pay/
+  others/gross_paid AS-IS (net = kept gross − fresh deductions); freeze fields display-only.
+  Verified PASS (edited +500 kept across reprocess, diff −500 shown as Manual).
+- deploy_vps_iter341.sh created; temp_bundle serves it (kind=script). Covers iters 340b–343b.

@@ -16066,7 +16066,29 @@ async def _compute_compliance_run(
         # later can trim the allocated difference.
         if payload.use_imported_sheet and _am is not None:
             _imp_g = round(float(_am.get("gross_earning") or 0), 2)
-            if _imp_g > 0:
+            # Iter 343b (user request) — after the import the admin may EDIT
+            # the OT Amount / Other Allowances. A REPROCESS keeps those
+            # MANUAL figures; the Freeze (imported) gross stays on the row
+            # purely as DISPLAY/comparison data.
+            _prev_imp = (prev_rows or {}).get(emp["user_id"])
+            if _prev_imp is not None and _prev_imp.get("manual_override"):
+                # Restore the admin's saved figures AS-IS (they were kept
+                # consistent by the grid at edit time).
+                row["ot_pay"] = round(float(_prev_imp.get("ot_pay") or 0), 2)
+                row["others"] = round(float(_prev_imp.get("others") or 0), 2)
+                _keep_g = round(float(_prev_imp.get("gross_paid") or 0), 2)
+                row["gross_paid"] = _keep_g
+                row["net"] = round(
+                    _keep_g - float(row.get("total_deduction") or 0), 2)
+                row["manual_override"] = True
+                if _imp_g > 0:
+                    row["imported_gross"] = _imp_g
+                    row["calculated_gross"] = _keep_g
+                    row["difference"] = round(_imp_g - _keep_g, 2)
+                    row["freeze_status"] = (
+                        "matched" if abs(row["difference"]) < 1 else "diff")
+                    row["difference_allocation_head"] = "Manual"
+            elif _imp_g > 0:
                 _calc_g = round(float(row.get("gross_paid") or 0), 2)
                 _diff_g = round(_imp_g - _calc_g, 2)
                 row["imported_gross"] = _imp_g

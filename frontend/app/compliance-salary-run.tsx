@@ -1116,6 +1116,13 @@ export default function ComplianceSalaryRunScreen() {
       const rows = prev.rows.map((r) => {
         if (r.user_id !== userId) return r;
         const next = { ...r, [key]: value } as any;
+        // Iter 343b (user request) — imported (Freeze) runs: manual edits
+        // to OT / Other Allowances STICK (reprocess keeps them); the Freeze
+        // salary stays as display-only comparison data.
+        if ((key === "ot_pay" || key === "others") && (r as any).imported_gross != null) {
+          next.manual_override = true;
+          next.difference_allocation_head = "Manual";
+        }
         if (key === "others") {
           const gross = (next.basic || 0) + (next.hra || 0) + (next.conveyance || 0)
             + (next.medical || 0) + (next.special || 0) + (next.others || 0);
@@ -1130,6 +1137,14 @@ export default function ComplianceSalaryRunScreen() {
           + (next.pt || 0) + (next.tds || 0) + (next.other_deduction || 0);
         next.total_deduction = Math.round(dedTotal);
         next.net = Math.round((next.gross_paid || 0) - dedTotal);
+        // Iter 343b — keep the Freeze comparison (display-only) in sync.
+        if ((next as any).imported_gross != null) {
+          (next as any).calculated_gross = next.gross_paid;
+          (next as any).difference =
+            Math.round(((next as any).imported_gross - (next.gross_paid || 0)) * 100) / 100;
+          (next as any).freeze_status =
+            Math.abs((next as any).difference) < 1 ? "matched" : "diff";
+        }
         return next;
       });
       // Keep the totals strip in sync for the edited keys.
