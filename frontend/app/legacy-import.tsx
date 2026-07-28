@@ -798,6 +798,24 @@ export default function LegacyImportScreen() {
                   {(job.errors || []).slice(0, 5).map((e2: string, i2: number) => (
                     <Text key={i2} style={[st.firmMeta, { color: "#DC2626" }]}>{e2}</Text>
                   ))}
+                  {/* Iter 349 (user: "Unmatched — how can we find?") */}
+                  {(job.unmatched || []).length ? (
+                    <View style={{ marginTop: 6 }}>
+                      <Text style={[st.firmMeta, { fontWeight: "800", color: "#B45309" }]}>
+                        Unmatched employees ({job.unmatched.length}) — exist in the Old DB but no
+                        portal employee with the same code (or unique name) was found:
+                      </Text>
+                      {job.unmatched.slice(0, 200).map((u: any, ui: number) => (
+                        <Text key={ui} style={st.firmMeta}>
+                          • {u.company || `Firm ${u.firm_no}`} — Code {String(u.code ?? "—")} · {u.name}
+                          {u.status ? ` (${u.status})` : ""}
+                        </Text>
+                      ))}
+                      {job.unmatched.length > 200 ? (
+                        <Text style={st.firmMeta}>…and {job.unmatched.length - 200} more.</Text>
+                      ) : null}
+                    </View>
+                  ) : null}
                 </View>
               ) : null}
               {job ? (

@@ -2160,6 +2160,7 @@ async def _sync_structures_job(job_id: str, admin_uid: str):
               "employees_unmatched": 0, "gross_changed": 0,
               "allowance_labels_enabled": 0, "allowance_heads_created": 0}
     errors: List[str] = []
+    unmatched: List[dict] = []  # Iter 349 — WHO didn't match (firm/code/name)
     try:
         dbn = await _dbname()
         maps = await db.legacy_imported_firms.find({}, {"_id": 0}).to_list(2000)
@@ -2277,6 +2278,14 @@ async def _sync_structures_job(job_id: str, admin_uid: str):
                         existing = cands[0] if len(cands) == 1 else None
                     if existing is None:
                         totals["employees_unmatched"] += 1
+                        if len(unmatched) < 2000:
+                            unmatched.append({
+                                "firm_no": firm_no,
+                                "company": mp.get("company_name"),
+                                "code": e.get("EmpCode"),
+                                "name": str(e.get("EmpName") or "").strip(),
+                                "status": str(e.get("Status") or "").strip() or None,
+                            })
                         continue
                     if round(float(existing.get("compliance_gross") or 0)) != \
                             round(float(updates.get("compliance_gross") or 0)):
@@ -2289,7 +2298,8 @@ async def _sync_structures_job(job_id: str, admin_uid: str):
                 errors.append(f"firm {firm_no}: {str(fe)[:200]}")
             totals["firms_synced"] += 1
             await _prog(totals=totals, errors=errors[-20:])
-        await _prog(status="done", totals=totals, errors=errors[-50:])
+        await _prog(status="done", totals=totals, errors=errors[-50:],
+                    unmatched=unmatched)
     except Exception as e:  # noqa: BLE001
         errors.append(str(e)[:300])
         await _prog(status="failed", totals=totals, errors=errors[-50:])
