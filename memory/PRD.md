@@ -2042,3 +2042,12 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   helpers; unit HRS/MIN toggle removed; save parses H:MM.
 - NOTE: stray duplicated "down\")..." fragment at server.py EOF removed (was breaking startup).
 - Verified via screenshots: grid order + highlight + HH:MM header; API compute: 0 neg, 0 over-days.
+
+## Iter 340b — Legacy Import: Active/Resigned counts + duplicate email fix
+- routes/legacy_import.py totals now track employees_active / employees_resigned (created +
+  updated branches; resigned = fields.employment_status=="resigned" or legacy IsResign).
+- legacy-import.tsx job meta line shows "Active imported: X · Resigned imported: Y".
+- Duplicate email E11000 fix (KRIPA SHARAN SHARMA case): pre-check users.email clash → drop
+  email; insert wrapped with retry-once (email+phone stripped) on any E11000.
+- Fixed stray "ked, ..." duplicated fragment at legacy_import.py EOF (syntax error, same class
+  of glitch as server.py "down\")" — WATCH for these after edits).

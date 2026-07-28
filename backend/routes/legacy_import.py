@@ -699,6 +699,8 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
         await db.legacy_import_jobs.update_one({"job_id": job_id}, {"$set": {**kw, "updated_at": _now()}})
 
     totals = {"employees_created": 0, "employees_updated": 0, "employees_skipped": 0,
+              # Iter 340 (user request) — Active vs Resigned import counts.
+              "employees_active": 0, "employees_resigned": 0,
               "online_rows": 0, "offline_rows": 0, "firms_created": 0}
     errors: List[str] = []
     try:
@@ -787,6 +789,16 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                                 {"phone": fields["phone"], "role": "employee"}, {"_id": 1})
                             if clash:
                                 fields["phone"] = None
+                        # Iter 340 (user bug: E11000 duplicate email —
+                        # KRIPA SHARAN SHARMA case) — the same email on two
+                        # legacy employees breaks the unique users.email
+                        # index. Drop the duplicate email rather than fail
+                        # the whole employee.
+                        if fields.get("email"):
+                            _eclash = await db.users.find_one(
+                                {"email": fields["email"]}, {"_id": 1})
+                            if _eclash:
+                                fields["email"] = None
                         code = e.get("EmpCode") if (e.get("EmpCode") or 0) > 0 else None
                         # Iter 332 (user bug: SUVIDHI RAYONS — 2548 emp
                         # imported as ~1000) — match by EMPLOYEE CODE first.
@@ -852,8 +864,25 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                             doc.setdefault("name", nm)
                             doc.setdefault("phone", None)
                             doc.setdefault("email", None)
-                            await db.users.insert_one(doc)
+                            try:
+                                await db.users.insert_one(doc)
+                            except Exception as _dk:
+                                # Iter 340 — any residual unique-index clash
+                                # (email/phone): retry once without them.
+                                if "E11000" in str(_dk):
+                                    doc["email"] = None
+                                    doc["phone"] = None
+                                    doc.pop("_id", None)
+                                    await db.users.insert_one(doc)
+                                else:
+                                    raise
                             totals["employees_created"] += 1
+                            # Iter 340 — Active / Resigned import counts.
+                            if doc.get("employment_status") == "resigned" \
+                                    or bool(e.get("IsResign")):
+                                totals["employees_resigned"] += 1
+                            else:
+                                totals["employees_active"] += 1
                             uid = doc["user_id"]
                         if code is not None:
                             emp_uid[int(code)] = uid

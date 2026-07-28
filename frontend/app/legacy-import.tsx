@@ -602,8 +602,9 @@ export default function LegacyImportScreen() {
                     {job.status === "done" ? "✅ Import complete" :
                       job.status === "failed" ? "❌ Import failed" : "⏳ Importing…"}
                   </Text>
-                  <Text style={st.firmMeta}>
+                    <Text style={st.firmMeta}>
                     Employees: {job.totals?.employees_created || 0} created, {job.totals?.employees_updated || 0} updated{job.totals?.employees_kept ? `, ${job.totals.employees_kept} kept (not replaced)` : ""} ·
+                    Active imported: {job.totals?.employees_active || 0} · Resigned imported: {job.totals?.employees_resigned || 0} ·
                     Online rows: {job.totals?.online_rows || 0} · Offline rows: {job.totals?.offline_rows || 0}
                     {job.totals?.offroll_created ? ` · Off-roll employees created: ${job.totals.offroll_created}` : ""}
                     {job.totals?.offroll_rate_backfilled ? ` · Off-roll rates backfilled: ${job.totals.offroll_rate_backfilled}` : ""}
