@@ -173,6 +173,7 @@ export const NAV_SUPER: NavItem[] = [
     children: [
       { route: "/pf-reports?kind=pf", label: "PF Reports", icon: "briefcase-outline" },
       { route: "/pf-reports?kind=esic", label: "ESIC Reports", icon: "medkit-outline" },
+      { route: "/claims-management", label: "PF & ESIC Claims", icon: "folder-open-outline" },
       { route: "/statutory-reports", label: "PT / LWF / Gratuity / MIS", icon: "receipt-outline" },
       { route: "/clra-registers", label: "CLRA Registers (Form XII\u2013XV)", icon: "documents-outline" },
       { route: "/labour-reports", label: "Labour Law Reports", icon: "library-outline" },
@@ -528,6 +529,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
     children: [
       { route: "/pf-reports?kind=pf", label: "PF Reports", icon: "briefcase-outline" },
       { route: "/pf-reports?kind=esic", label: "ESIC Reports", icon: "medkit-outline" },
+      { route: "/claims-management", label: "PF & ESIC Claims", icon: "folder-open-outline" },
       { route: "/statutory-reports", label: "PT / LWF / Gratuity / MIS", icon: "receipt-outline" },
       { route: "/clra-registers", label: "CLRA Registers (Form XII\u2013XV)", icon: "documents-outline" },
       { route: "/labour-reports", label: "Labour Law Reports", icon: "library-outline" },

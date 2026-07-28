@@ -22249,6 +22249,10 @@ from routes.govt_audit_reports import govt_router, audit_router  # noqa: E402
 app.include_router(govt_router)
 app.include_router(audit_router)
 
+# Iter 359 — PF & ESIC Claims Management.
+from routes.claims_management import router as claims_router  # noqa: E402
+app.include_router(claims_router)
+
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
 maybe_start_rpa_worker(app, db)
