@@ -1,0 +1,44 @@
+{
+  "summary": "Iter 346 — AI Layer + column filters + attendance sort verified. Backend: 15/15 pytest passed at /app/backend/tests/test_iter346_ai_layer.py (analysis w/ scores+findings+trends[6]+forecast+reconciliation+calendar+insights+recommendations; feedback false_positive → suppressed_count grew from 0→1 and the finding disappeared, then restored via verdict='correct'; apply-fix on non-fixable finding returned applied:false + fix_route; xlsx (~15KB) & pdf audit exports valid; salary-diff summary+rows; map-columns rules-based (Worker Name→name, Pay→gross_salary, Punch In→in_time, XYZ→unmapped); attendance-sheet .xlsx returns 200 for sort=None,name,doj,code,department; chatbot missing_data + pf_mismatch replies work; why_salary works with employee name (see minor UX note below). Frontend: /ai-payroll-assistant renders 7 score cards color-coded (Health 95, Compliance 0, Risk 'ACTION REQUIRED', AI Alerts 129, Attendance 46, Payroll 1, Pending 1), all 6 tabs present (ai-tab-0..5), Compliance Checker shows severity pills + confidence % + 'Open & Fix' / '👍 Correct' / '👎 False positive' buttons, Auditor tab shows severity counts (0/129/172/1) + 'Audit PDF' + 'Audit Excel' buttons, Salary Diff tab loads summary + 5 changed rows, ai-reanalyse clickable. /attendance-sheet 'Sort Sheet By' dropdown visible with all 4 options ['Employee Code','Name (A–Z)','Department','Date of Joining']. /compliance-salary-run — after Salary Process → in-app Yes modal (clicked via JS), grid loaded with 17 staff rows and 25 comp-colfilter-* inputs rendered under column headers ('Filter…' placeholder). /salary-run — grid already had existing draft (2026-06, 126 employees) with 14 asal-colfilter-* inputs (asal-colfilter-name, asal-colfilter-duty, asal-colfilter-pdays, asal-colfilter-phours, asal-colfilter-basic, asal-colfilter-bsalary, asal-colfilter-wbasic, asal-colfilter-othallo, …). All feature requirements met.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/admin/ai-assistant/command", "issue": "'Why is salary of code 50 lower this month?' — LLM parses employee_query as literal 'code 50', which _find_employees() cannot resolve (it expects name substring OR exact employee_code). Workarounds that work: 'Why is salary of 50 …', 'Why is SURENDRA SINGH salary …'. Consider preprocessing to strip a leading 'code '/'emp '/'employee ' prefix from parsed employee_query in ai_assistant.py:_h_why_salary before calling _find_employees()."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global (RN Web console)", "issues": [
+        "Console warns 'shadow* style props are deprecated — use boxShadow' on multiple screens (AiAssistant + others).",
+        "Console errors 'Invalid style property of \"padding\". Value is \"0 8px\" but only single values are supported' — still present from prior iterations."
+      ]},
+      {"screen": "/attendance-sheet ms-sort", "issues": [
+        "The Sort dropdown is a native HTML <select>; its testID='ms-sort' does not propagate to the DOM as data-testid (renders on the RN wrapper instead of <select>). Visually the dropdown works fine and lists all 4 options, but testability suffers. Consider adding accessibilityLabel='ms-sort' AND wrapping with a stable data-testid on the select element (or use Picker with nativeID)."
+      ]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter346_ai_layer.py",
+    "/app/test_reports/pytest/iter346.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: In ai_assistant.py._h_why_salary preprocess employee_query to strip 'code '/'emp '/'employee ' prefix so users can naturally ask 'Why is salary of code 50 lower this month?'.",
+    "OPTIONAL: Ensure the 'Sort Sheet By' <select> in attendance-sheet.tsx carries data-testid='ms-sort' directly on the DOM element (currently the testID lands on the RN wrapper only)."
+  ],
+  "critical_code_review_comments": [
+    "ai_layer.py cleanly separates read-only analysis (employee_checks/run_checks/attendance_checks) from mutating apply-fix (only PAN/IFSC normalisation, everything else returns fix_route). All actions audit-logged in ai_action_log — excellent audit-trail hygiene.",
+    "Learning engine (ai_feedback + finding['key'] = f'{code}:{user_id or firm}') suppresses per-employee+check false positives durably; refresh recomputes suppressed_count correctly.",
+    "colFilter.ts is DRY (matchColFilter + rowPassesColFilters used by both grids) and correctly handles >=,<=,=,>,< operators with substring fallback.",
+    "ai_layer.py uses proper StreamingResponse for xlsx/pdf and never leaks Mongo _id (all finds use projection {_id:0}).",
+    "Compliance Salary run flow uses the in-app confirmYesNo() modal — Playwright cannot easily click through RN Pressables via role selector, but a JS-driven click reliably fires the onPress handler. Not a functional bug."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (15/15)", "frontend": "100% (AI dashboard tabs, filter rows on both grids, ms-sort dropdown all verified)"},
+  "seed_data_creation": "None. Feedback false-positive marker was RESTORED to verdict='correct' at the end of TestFeedback (per review instructions).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend suite: /app/backend/tests/test_iter346_ai_layer.py (15 tests, ~10s incl. LLM). Frontend seams: /ai-payroll-assistant uses testIDs ai-tab-0..5, ai-reanalyse; findings show 'Open & Fix'/'👍 Correct'/'👎 False positive' buttons. /compliance-salary-run column filters are comp-colfilter-0..24 (Name is index 0). /salary-run column filters are asal-colfilter-<field> (name/duty/pdays/phours/basic/bsalary/wbasic/othallo/…). Compliance grid Salary Process opens an in-app Yes/No modal — Playwright's Pressable click via role does not always fire; use a JS evaluate() that walks up to the ancestor with role attribute and calls .click(). why_salary chatbot intent needs a name or bare number in the query (do not include the word 'code' before the number)."
+}

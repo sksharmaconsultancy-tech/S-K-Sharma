@@ -49,9 +49,28 @@ import ProcessCommandCenter from "@/src/components/salary/ProcessCommandCenter";
 import TotalsFooter from "@/src/components/salary/TotalsFooter";
 import GridFilterChips, { GRID_FILTER_DEFAULT, rowMatchesFilters, type GridFilters } from "@/src/components/GridFilterChips";
 import { GridScroller, stickyCol, stickyHeader } from "@/src/components/GridFreeze";
+import { rowPassesColFilters } from "@/src/utils/colFilter";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
 import { EmployeeListSkeleton } from "@/src/components/EmployeeStatsBar";
 import MasterSelect from "@/src/components/MasterSelect";
+
+// Iter 346 (user request) — header-wise column filters (Actual grid).
+const ACTUAL_COL_GETTERS: Record<string, (r: any) => any> = {
+  name: (r) => `${r.name || ""} ${r.employee_code || ""}`,
+  duty: (r) => r.duty_hrs,
+  pdays: (r) => r.p_days,
+  phours: (r) => r.p_hours,
+  basic: (r) => r.basic,
+  bsalary: (r) => r.basic_salary,
+  wbasic: (r) => r.w_basic_salary,
+  othallo: (r) => r.oth_allo,
+  gross: (r) => r.total_gross,
+  epf: (r) => r.epf,
+  esi: (r) => r.esi,
+  adv: (r) => r.adv,
+  tds: (r) => r.tds,
+  net: (r) => r.net_pay,
+};
 
 /* ------------------------------------------------------------------- */
 /*  Types                                                              */
@@ -931,8 +950,11 @@ function ResultGrid({
   const [gridFilters, setGridFilters] = useState<GridFilters>(GRID_FILTER_DEFAULT);
   // Iter 306 (user #8) — tap a row to HIGHLIGHT it across the wide grid.
   const [hlRow, setHlRow] = useState<string | null>(null);
+  // Iter 346 (user request) — Excel-style per-column header filters.
+  const [colFilters, setColFilters] = useState<Record<string, string>>({});
   const sortRows = (rows: ActualRow[]) => {
     let base = rows.filter((r) => rowMatchesFilters(r, gridFilters));
+    base = base.filter((r) => rowPassesColFilters(r, colFilters, ACTUAL_COL_GETTERS));
     const q = empSearch.trim().toLowerCase();
     if (q) {
       base = base.filter((r: any) =>
@@ -1030,8 +1052,10 @@ function ResultGrid({
 
       <GridScroller>
         <View style={Platform.OS === "web" ? undefined : { minWidth: totalMinWidth }}>
-          {/* header — Iter 140: frozen on top + SN/Code/Name frozen left */}
-          <View style={[styles.tblRow, styles.tblHeader, stickyHeader(colors.brandPrimary)]}>
+          {/* header — Iter 140: frozen on top + SN/Code/Name frozen left.
+              Iter 346 — filter row lives inside the same sticky block. */}
+          <View style={stickyHeader(colors.brandPrimary)}>
+          <View style={[styles.tblRow, styles.tblHeader]}>
             <HdrCell w={COL_WIDTHS.sn} frozen={stickyCol(0, colors.brandPrimary)}>SN</HdrCell>
             <HdrCell w={COL_WIDTHS.name} align="left" frozen={stickyCol(COL_WIDTHS.sn, colors.brandPrimary)}>Name</HdrCell>
             <HdrCell w={COL_WIDTHS.duty} bg={GRP.master}>Duty HRS</HdrCell>
@@ -1049,6 +1073,43 @@ function ResultGrid({
             <HdrCell w={COL_WIDTHS.tds} bg={GRP.ded}>TDS</HdrCell>
             <HdrCell w={COL_WIDTHS.net}>Net Pay</HdrCell>
             <HdrCell w={COL_WIDTHS.actions}>·</HdrCell>
+          </View>
+          {/* Iter 346 (user request) — Excel-style header-wise filters.
+              Text = contains; numbers support >n <n >=n <=n =n. */}
+          <View style={[styles.tblRow, { backgroundColor: "#EFF6FF" }]}>
+            {([
+              ["sn", null], ["name", "name"], ["duty", "duty"], ["md", null],
+              ["pdays", "pdays"], ["phours", "phours"], ["basic", "basic"],
+              ["bsalary", "bsalary"], ["wbasic", "wbasic"], ["othallo", "othallo"],
+              ["gross", "gross"], ["epf", "epf"], ["esi", "esi"], ["adv", "adv"],
+              ["tds", "tds"], ["net", "net"], ["actions", null],
+            ] as [keyof typeof COL_WIDTHS, string | null][]).map(([wk, fk], i) => (
+              <View
+                key={i}
+                style={[
+                  { width: COL_WIDTHS[wk], paddingHorizontal: 2, paddingVertical: 2 },
+                  i === 0 && stickyCol(0, "#EFF6FF"),
+                  i === 1 && stickyCol(COL_WIDTHS.sn, "#EFF6FF"),
+                ]}
+              >
+                {fk ? (
+                  <TextInput
+                    value={colFilters[fk] || ""}
+                    onChangeText={(v) => setColFilters((f) => ({ ...f, [fk]: v }))}
+                    placeholder="Filter…"
+                    placeholderTextColor="#94A3B8"
+                    style={{
+                      borderWidth: 1, borderColor: "#BFDBFE", borderRadius: 6,
+                      backgroundColor: "#fff", fontSize: 10.5, color: "#0F172A",
+                      paddingVertical: 3, paddingHorizontal: 5,
+                      ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as any) : null),
+                    }}
+                    testID={`asal-colfilter-${fk}`}
+                  />
+                ) : null}
+              </View>
+            ))}
+          </View>
           </View>
 
           {sortRows(run.rows).map((r, idx) => {

@@ -87,6 +87,8 @@ export default function AttendanceSheetScreen() {
   }, [globalCid]);
   const [groups, setGroups] = useState<GroupOption[]>([]);
   const [groupId, setGroupId] = useState<string>(""); // "" = All groups
+  // Iter 346 (user request) — sort order before downloading the sheet.
+  const [sortBy, setSortBy] = useState<string>("code");
   const [month, setMonth] = useState<string>(currentMonth());
   const [downloading, setDownloading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -166,7 +168,7 @@ export default function AttendanceSheetScreen() {
       // Excel per group bundled in a single archive (.zip).
       if (!groupId) {
         const res = await apiBinary(
-          `/admin/attendance-sheet/${companyId}/${month}/groups.zip`,
+          `/admin/attendance-sheet/${companyId}/${month}/groups.zip?sort=${sortBy}`,
         );
         if (Platform.OS === "web" && res.webBlobUrl) {
           const a = document.createElement("a");
@@ -177,7 +179,7 @@ export default function AttendanceSheetScreen() {
         }
         return;
       }
-      const qs = `?group_id=${encodeURIComponent(groupId)}`;
+      const qs = `?group_id=${encodeURIComponent(groupId)}&sort=${sortBy}`;
       const res = await apiBinary(
         `/admin/attendance-sheet/${companyId}/${month}.xlsx${qs}`,
       );
@@ -458,6 +460,33 @@ export default function AttendanceSheetScreen() {
                         {g.name}
                       </option>
                     ))}
+                  </select>
+                ) : (
+                  <Text style={styles.smallHint}>Best used on desktop web.</Text>
+                )}
+              </View>
+            </View>
+            <View style={styles.gridCol}>
+              <Text style={styles.label}>Sort sheet by</Text>
+              <View style={styles.pickerWrap}>
+                {Platform.OS === "web" ? (
+                  <select
+                    testID="ms-sort"
+                    value={sortBy}
+                    onChange={(e) => setSortBy((e.target as HTMLSelectElement).value)}
+                    style={{
+                      padding: 10,
+                      borderRadius: 8,
+                      borderColor: colors.borderStrong,
+                      borderWidth: 1,
+                      fontSize: 14,
+                      width: "100%",
+                    } as any}
+                  >
+                    <option value="code">Employee Code</option>
+                    <option value="name">Name (A–Z)</option>
+                    <option value="department">Department</option>
+                    <option value="doj">Date of Joining</option>
                   </select>
                 ) : (
                   <Text style={styles.smallHint}>Best used on desktop web.</Text>

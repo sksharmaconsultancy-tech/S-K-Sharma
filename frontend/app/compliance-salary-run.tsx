@@ -47,6 +47,7 @@ import TotalsFooter from "@/src/components/salary/TotalsFooter";
 import GridFilterChips, { GRID_FILTER_DEFAULT, rowMatchesFilters, type GridFilters } from "@/src/components/GridFilterChips";
 import RegisterLayoutEditor from "@/src/components/RegisterLayoutEditor";
 import { GridScroller, stickyCol, stickyHeader } from "@/src/components/GridFreeze";
+import { rowPassesColFilters } from "@/src/utils/colFilter";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
 import { sortEmployeeTypes } from "@/src/utils/employeeTypes";
 
@@ -169,6 +170,47 @@ function showMsg(msg: string, title = "Compliance salary") {
   showToast(msg, title);
 }
 
+// Iter 346 (user request) — header-wise column filters: label → row value.
+const COL_FILTER_GETTERS: Record<string, (r: any) => any> = {
+  "Name": (r) => r.name,
+  "Father Name": (r) => r.father_name,
+  "Designation": (r) => r.designation,
+  "UAN No.": (r) => r.uan_no,
+  "ESIC No.": (r) => r.esi_ip_no,
+  "Present Days": (r) => r.present_days,
+  "ESIC Leave": (r) => r.esic_leave_days,
+  "M.Basic": (r) => r.basic_master,
+  "M.HRA": (r) => r.hra_master,
+  "M.Conv": (r) => r.conveyance_master,
+  "M.Med": (r) => r.medical_master,
+  "M.Spl": (r) => r.special_master,
+  "M.Others": (r) => r.others_master,
+  "M.Gross": (r) => r.gross_master,
+  "Basic": (r) => r.basic,
+  "HRA": (r) => r.hra,
+  "Conv": (r) => r.conveyance,
+  "Med": (r) => r.medical,
+  "Spl": (r) => r.special,
+  "Others*": (r) => r.others,
+  "OT Amt*": (r) => r.ot_pay,
+  "OT Hrs": (r) => {
+    const hr = Number(r.ot_hourly_rate) || 0;
+    return hr > 0 ? (Number(r.ot_pay) || 0) / hr : Number(r.ot_hours) || 0;
+  },
+  "Gross": (r) => r.gross_paid,
+  "Freeze Salary": (r) => r.imported_gross,
+  "Wage Base": (r) => r.stat_wage_base,
+  "PF (E)": (r) => r.pf_employee,
+  "PF (Er)": (r) => r.pf_employer_total,
+  "ESI (E)": (r) => r.esic_employee,
+  "ESI (Er)": (r) => r.esic_employer,
+  "PT": (r) => r.pt,
+  "TDS": (r) => r.tds,
+  "Other*": (r) => r.other_deduction,
+  "Total Ded.": (r) => r.total_deduction,
+  "Net": (r) => r.net,
+};
+
 export default function ComplianceSalaryRunScreen() {
   const router = useRouter();
   const { user } = useAuth();
@@ -258,6 +300,8 @@ export default function ComplianceSalaryRunScreen() {
   const [gridFilters, setGridFilters] = useState<GridFilters>(GRID_FILTER_DEFAULT);
   // Iter 306 (user #8) — tap a row to HIGHLIGHT it across the wide grid.
   const [hlRow, setHlRow] = useState<string | null>(null);
+  // Iter 346 (user request) — Excel-style per-column header filters.
+  const [colFilters, setColFilters] = useState<Record<string, string>>({});
   const [auditOpen, setAuditOpen] = useState(false);
   const [auditEntries, setAuditEntries] = useState<any[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
@@ -1997,7 +2041,9 @@ export default function ComplianceSalaryRunScreen() {
                     "Other*", "Total Ded.", "Net",
                   ];
                   for (const d of dedLabels) headers.push({ label: d, group: "ded" });
+                  const infoW = [colW.name, colW.father, colW.desg, colW.uan, colW.esi, colW.pd, colW.el];
                   return (
+                    <>
                     <View style={[styles.tblRow, styles.tblHeader]}>
                       {headers.map((h, i) => (
                         <Text
@@ -2023,10 +2069,43 @@ export default function ComplianceSalaryRunScreen() {
                         </Text>
                       ))}
                     </View>
+                    {/* Iter 346 (user request) — Excel-style header-wise
+                        filter boxes. Text = contains; numbers support
+                        >n <n >=n <=n =n. */}
+                    <View style={[styles.tblRow, { backgroundColor: "#EFF6FF" }]}>
+                      {headers.map((h, i) => (
+                        <View
+                          key={i}
+                          style={[
+                            { width: i < 7 ? infoW[i] : colW.num, paddingHorizontal: 2, paddingVertical: 2 },
+                            i < 3 && stickyCol(
+                              [0, colW.name, colW.name + colW.father][i], "#EFF6FF"),
+                          ]}
+                        >
+                          {COL_FILTER_GETTERS[h.label] ? (
+                            <TextInput
+                              value={colFilters[h.label] || ""}
+                              onChangeText={(v) => setColFilters((f) => ({ ...f, [h.label]: v }))}
+                              placeholder="Filter…"
+                              placeholderTextColor="#94A3B8"
+                              style={{
+                                borderWidth: 1, borderColor: "#BFDBFE", borderRadius: 6,
+                                backgroundColor: "#fff", fontSize: 10.5, color: "#0F172A",
+                                paddingVertical: 3, paddingHorizontal: 5,
+                                ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as any) : null),
+                              }}
+                              testID={`comp-colfilter-${i}`}
+                            />
+                          ) : null}
+                        </View>
+                      ))}
+                    </View>
+                    </>
                   );
                 })()}
                 </View>
-                {sortRows(run.rows).map((r, idx) => {
+                {sortRows(run.rows.filter((r) =>
+                  rowPassesColFilters(r, colFilters, COL_FILTER_GETTERS))).map((r, idx) => {
                   const isHl = hlRow === r.user_id;
                   // Iter 339c (user request) — Gross vs Freeze mismatch
                   // highlights the whole row in the "difference" colour.

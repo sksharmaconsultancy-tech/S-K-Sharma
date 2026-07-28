@@ -83,6 +83,7 @@ SCREENS = {
     "notifications": ("/notifications", "Notifications"),
     "day_salary_sheet": ("/salary-day-sheet", "Day-wise Salary Sheet"),
     "daily_present": ("/daily-present-report", "Day-wise Present Count"),
+    "ai_dashboard": ("/ai-payroll-assistant", "AI Payroll Assistant"),
 }
 
 SYSTEM_PROMPT = """You are the AI command parser for an Indian payroll & attendance web portal (S.K. Sharma & Co.).
@@ -92,7 +93,7 @@ Parse the command into STRICT JSON (no markdown, no prose) with this schema:
   "intent": "process_salary" | "finalize_salary" | "report" | "email_report" | "employee_search" | "employee_update" | "data_query" | "compliance_info" | "attendance_summary" | "pending_approvals" | "navigate" | "answer",
   "salary_type": "actual" | "compliance" | "ot" | "arrear" | null,
   "report": "salary_register" | "bank_sheet" | "attendance_sheet" | "pf_ecr" | null,
-  "metric": "salary_total" | "esic_eligible" | "absent_list" | "present_count" | "employee_count" | "top_paid" | "run_status" | null,
+  "metric": "salary_total" | "esic_eligible" | "absent_list" | "present_count" | "employee_count" | "top_paid" | "run_status" | "missing_data" | "pf_mismatch" | "why_salary" | null,
   "month": "YYYY-MM" | null,
   "date": "YYYY-MM-DD" | null,
   "firm_name": string | null,
@@ -115,6 +116,9 @@ Rules (today is %TODAY%):
   * "how many employees / active / resigned" → employee_count
   * "highest paid employees" → top_paid
   * "is June salary finalized?" → run_status
+  * "list employees with missing UAN / ESIC number / Aadhaar / bank details" → missing_data with the field name in value ("uan"|"esic"|"aadhaar"|"bank")
+  * "show PF mismatches / PF errors" → pf_mismatch
+  * "why is Rajesh's salary lower (this month)?" → why_salary with employee_query (and month if named)
 - "find employee Ramesh", "show Suresh's details" → employee_search with employee_query.
 - "change Ramesh's phone to 98xxx", "set salary of code 50 to 15000", "mark Ramesh resigned/active" → employee_update with employee_query, field (phone|salary|status) and value (for status: "resigned" or "active").
 - "open X" / "go to X" → navigate with the best screen key.
@@ -609,6 +613,91 @@ async def _h_data_query(parsed, admin, cid, firm_label, company):
             lines.append(f"• Actual: {'FINALIZED 🔒' if act.get('finalized') else 'Draft (editable)'}"
                          f" · {act.get('employees_count')} employees")
         return ("\n".join(lines), None)
+
+    if metric == "missing_data":
+        fld = (parsed.get("value") or "").lower()
+        fmap = {
+            "uan": ({"uan_no": {"$in": [None, ""]}}, "UAN"),
+            "esic": ({"esi_ip_no": {"$in": [None, ""]}}, "ESIC IP number"),
+            "aadhaar": ({"$and": [{"aadhaar_no": {"$in": [None, ""]}},
+                                  {"aadhar_number": {"$in": [None, ""]}}]}, "Aadhaar"),
+            "bank": ({"$or": [{"bank_account": {"$in": [None, ""]}},
+                              {"bank_ifsc": {"$in": [None, ""]}}]}, "bank details"),
+        }
+        sub, label = fmap.get(fld) or fmap["uan"]
+        q: dict = {"role": "employee", "active": {"$ne": False},
+                   "employment_status": {"$nin": _RESIGNED_STATUSES}, **sub}
+        if cid:
+            q["company_id"] = cid
+        rows = await db.users.find(q, {"_id": 0, "name": 1, "employee_code": 1}) \
+            .sort("name", 1).to_list(300)
+        if not rows:
+            return (f"✅ No active employee is missing {label}"
+                    f"{' at ' + firm_label if cid else ''}.", None)
+        head = [f"• {r.get('name')} (Code {r.get('employee_code')})" for r in rows[:15]]
+        more = f"\n…and {len(rows) - 15} more." if len(rows) > 15 else ""
+        return (f"📋 {len(rows)} employee(s) missing {label}"
+                f"{' at ' + firm_label if cid else ''}:\n" + "\n".join(head) + more,
+                {"type": "navigate", "route": "/ai-payroll-assistant",
+                 "label": "Open AI Payroll Assistant"})
+
+    if metric == "pf_mismatch":
+        if not cid:
+            return ("Which firm? e.g. \"show PF mismatches for Kankani\".", None)
+        month = month or datetime.now().strftime("%Y-%m")
+        ana = await db.ai_analyses.find_one({"company_id": cid, "month": month}, {"_id": 0})
+        if not ana:
+            from routes.ai_layer import _analyze
+            ana = await _analyze(admin, cid, month)
+        pf = [f for f in ana.get("findings", []) if f["code"].startswith(("pf_", "missing_pf", "missing_uan"))]
+        if not pf:
+            return (f"✅ No PF issues found for {_mon_label(month)} — {firm_label}.", None)
+        head = [f"• {f['issue']}{' — ' + f['employee'] if f.get('employee') else ''} ({f['confidence']}%)"
+                for f in pf[:12]]
+        more = f"\n…and {len(pf) - 12} more." if len(pf) > 12 else ""
+        return (f"🔍 {len(pf)} PF issue(s) — {_mon_label(month)}, {firm_label}:\n"
+                + "\n".join(head) + more,
+                {"type": "navigate", "route": "/ai-payroll-assistant",
+                 "label": "Open AI Payroll Assistant"})
+
+    if metric == "why_salary":
+        term = (parsed.get("employee_query") or "").strip()
+        if not cid or not term:
+            return ("Tell me the firm and employee, e.g. \"Why is Ramesh's salary lower this month?\"", None)
+        month = month or datetime.now().strftime("%Y-%m")
+        rows = await _find_employees(admin, cid, term, limit=2)
+        if not rows:
+            return (f"No employee matching \"{term}\" found at {firm_label}.", None)
+        emp = rows[0]
+        y, m = map(int, month.split("-"))
+        pm = f"{y - 1}-12" if m == 1 else f"{y}-{m - 1:02d}"
+        async def _row(mon):  # noqa: E306
+            run = await db.compliance_salary_runs.find_one(
+                {"company_id": cid, "month": mon}, {"_id": 0, "rows": 1},
+                sort=[("generated_at", -1)])
+            return next((r for r in (run or {}).get("rows", [])
+                         if r.get("user_id") == emp["user_id"]), None)
+        cur, prv = await _row(month), await _row(pm)
+        if not cur:
+            return (f"{emp.get('name')} is not in the {_mon_label(month)} compliance run.", None)
+        if not prv:
+            return (f"{emp.get('name')} — {_mon_label(month)}: Net {_money(cur.get('net'))} "
+                    f"({cur.get('present_days'):g} days). No {_mon_label(pm)} run to compare.", None)
+        nd = round((cur.get("net") or 0) - (prv.get("net") or 0))
+        reasons = []
+        dd = (cur.get("present_days") or 0) - (prv.get("present_days") or 0)
+        if abs(dd) >= 0.5:
+            reasons.append(f"Present days {'+' if dd > 0 else ''}{dd:g} "
+                           f"({prv.get('present_days'):g} → {cur.get('present_days'):g})")
+        for k, lbl in (("ot_pay", "OT"), ("others", "Other allowances"),
+                       ("total_deduction", "Deductions"), ("monthly_gross", "Gross rate")):
+            d2 = round((cur.get(k) or 0) - (prv.get(k) or 0))
+            if abs(d2) >= 1:
+                reasons.append(f"{lbl} {'+' if d2 > 0 else ''}{_money(d2)}")
+        return (f"💡 {emp.get('name')} (Code {emp.get('employee_code')}) — "
+                f"{_mon_label(month)} Net {_money(cur.get('net'))} vs {_mon_label(pm)} "
+                f"{_money(prv.get('net'))} → {'+' if nd >= 0 else ''}{_money(nd)}.\n"
+                f"Reasons: {' · '.join(reasons) or 'no material component changes'}.", None)
 
     return (None, None)  # let generic answer flow
 

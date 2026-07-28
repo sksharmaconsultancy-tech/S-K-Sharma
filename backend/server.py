@@ -19442,8 +19442,30 @@ async def _master_rates_by_user(company_id: str):
     return labels, rates
 
 
+def _att_sheet_sort(employees: List[dict], sort_by: Optional[str]) -> List[dict]:
+    """Iter 346 (user request) — sorting option before downloading the
+    attendance sheet: code (numeric, default) / name / department / doj."""
+    def _code_num(e):
+        try:
+            return (0, float(str(e.get("employee_code") or "").strip() or 1e12), "")
+        except ValueError:
+            return (1, 0.0, str(e.get("employee_code") or ""))
+    s = (sort_by or "code").lower()
+    if s == "name":
+        return sorted(employees, key=lambda e: str(e.get("name") or "").lower())
+    if s == "department":
+        return sorted(employees, key=lambda e: (
+            str(e.get("department") or e.get("employee_type") or "").lower(),
+            _code_num(e)))
+    if s == "doj":
+        return sorted(employees, key=lambda e: (str(e.get("doj") or "9999-99-99"),
+                                                _code_num(e)))
+    return sorted(employees, key=_code_num)
+
+
 async def _generate_attendance_sheet_impl(
     company_id: str, month: str, admin: dict, group_id: Optional[str] = None,
+    sort_by: Optional[str] = None,
 ):
     from utils.master_sheet import build_master_sheet_xlsx
     from fastapi.responses import Response
@@ -19476,6 +19498,8 @@ async def _generate_attendance_sheet_impl(
     employees = [e for e in employees if not _month_is_before_doj(e, month)]
     # Iter 321 — ACTIVE employees only on the Attendance Sheet.
     employees = [e for e in employees if not _employee_inactive_for_report(e, month)]
+    # Iter 346 (user request) — apply the chosen sort order.
+    employees = _att_sheet_sort(employees, sort_by)
 
     # Iter 334 (user request) — master salary columns (Basic / HRA / Conv. /
     # firm-enabled allowances / Gross Salary) from the EMPLOYEE MASTER.
@@ -19526,18 +19550,20 @@ async def generate_attendance_sheet(
     company_id: str,
     month: str,
     group_id: Optional[str] = None,
+    sort: Optional[str] = None,
     authorization: Optional[str] = Header(None),
 ):
     """Generate the prefilled attendance sheet XLSX for a company + month,
-    optionally filtered by Employee Group."""
+    optionally filtered by Employee Group and sorted (code/name/department/doj)."""
     admin = await get_user_from_token(authorization)
-    return await _generate_attendance_sheet_impl(company_id, month, admin, group_id)
+    return await _generate_attendance_sheet_impl(company_id, month, admin, group_id, sort)
 
 
 @api.get("/admin/attendance-sheet/{company_id}/{month}/groups.zip")
 async def generate_attendance_sheet_groups_zip(
     company_id: str,
     month: str,
+    sort: Optional[str] = None,
     authorization: Optional[str] = Header(None),
 ):
     """Iter 334 (user request) — "All groups" download: one attendance
@@ -19598,7 +19624,7 @@ async def generate_attendance_sheet_groups_zip(
             xb = build_master_sheet_xlsx(
                 company_name=f"{company_name}  ·  {g}",
                 month=month,
-                employees=sorted(groups[g], key=lambda x: str(x.get("name") or "")),
+                employees=_att_sheet_sort(groups[g], sort or "name"),
                 attendance_days_by_user=days_by_user,
                 rates_by_user=rates_by_user,
                 allowance_labels=allowance_labels,
@@ -22160,6 +22186,8 @@ app.include_router(employee_reports_hub_router)
 
 # Iter 294 — AI Payroll Assistant (voice/NL commands) + Global Search.
 from routes.ai_assistant import router as ai_assistant_router  # noqa: E402
+from routes.ai_layer import router as ai_layer_router  # noqa: E402
+app.include_router(ai_layer_router)
 app.include_router(ai_assistant_router)
 from routes.productivity import router as productivity_router  # noqa: E402
 app.include_router(productivity_router)

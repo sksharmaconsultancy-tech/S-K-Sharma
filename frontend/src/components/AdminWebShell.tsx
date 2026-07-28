@@ -276,6 +276,7 @@ export const NAV_SUPER: NavItem[] = [
     ],
   },
   // User directive — AI Insights lives at the very END of the sidebar.
+  { route: "/ai-payroll-assistant", label: "AI Payroll Assistant", icon: "hardware-chip-outline" },
   { route: "/ai-insights", label: "AI Insights", icon: "sparkles-outline" },
 ];
 
@@ -969,7 +970,7 @@ export default function AdminWebShell({ children }: Props) {
         const map: Record<string, string> = {
           d: "/portal-dashboard", e: "/admin", a: "/attendance-grid",
           p: "/salary-run", r: "/reports?tab=salary", c: "/compliance-reports",
-          b: "/bank-transfer", m: "/masters",
+          b: "/bank-transfer", m: "/masters", i: "/ai-payroll-assistant",
         };
         const r = map[e.key.toLowerCase()];
         if (r) router.push(r as any);
