@@ -61,6 +61,47 @@ def _month_key(v: Any) -> Optional[str]:
     return s[:7] if len(s) >= 7 and s[4] == "-" else None
 
 
+_MON3 = {"jan": "01", "feb": "02", "mar": "03", "apr": "04", "may": "05",
+         "jun": "06", "jul": "07", "aug": "08", "sep": "09", "oct": "10",
+         "nov": "11", "dec": "12"}
+
+
+def _month_key_any(*vals: Any) -> Optional[str]:
+    """Iter 344 — derive 'YYYY-MM' from ANY legacy month column.
+    Handles FirstDayOfMonth datetime/iso, MonthYear text like 'Feb 2019' /
+    'February-2019' / '02-2019' / '2019-02' / '022019' / 201902."""
+    for v in vals:
+        if v is None or v == "":
+            continue
+        s = str(v).strip()
+        # ISO datetime / 'YYYY-MM...'
+        if len(s) >= 7 and s[4] in "-/" and s[:4].isdigit():
+            return f"{s[:4]}-{s[5:7]}"
+        low = s.lower().replace(",", " ").replace("-", " ").replace("/", " ")
+        parts = [p for p in low.split() if p]
+        if len(parts) == 2:
+            a, b = parts
+            # 'Feb 2019' / 'February 2019'
+            if a[:3] in _MON3 and b.isdigit() and len(b) == 4:
+                return f"{b}-{_MON3[a[:3]]}"
+            # '2019 Feb'
+            if b[:3] in _MON3 and a.isdigit() and len(a) == 4:
+                return f"{a}-{_MON3[b[:3]]}"
+            # '02 2019'
+            if a.isdigit() and b.isdigit() and len(b) == 4 and 1 <= int(a) <= 12:
+                return f"{b}-{int(a):02d}"
+            # '2019 02'
+            if a.isdigit() and b.isdigit() and len(a) == 4 and 1 <= int(b) <= 12:
+                return f"{a}-{int(b):02d}"
+        # '201902' or 201902 / '022019'
+        if s.isdigit() and len(s) == 6:
+            if 1 <= int(s[4:]) <= 12:
+                return f"{s[:4]}-{s[4:]}"
+            if 1 <= int(s[:2]) <= 12:
+                return f"{s[2:]}-{s[:2]}"
+    return None
+
+
 # --------------------------------------------------------------------------
 # Firms
 # --------------------------------------------------------------------------
@@ -945,91 +986,120 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                     {"company_id": m.company_id, "kind": kind, "firm_no": m.firm_no})
                 skip = 0
                 while True:
-                    rows = await _q(
-                        dbn,
-                        f"SELECT * FROM {table} WHERE FirmNo = %s AND DeletedDate IS NULL "
-                        f"ORDER BY UID OFFSET {skip} ROWS FETCH NEXT 2000 ROWS ONLY",
-                        (m.firm_no,),
-                    )
+                    # Iter 344 (user bug — offline rows "not getting"):
+                    # some legacy DB versions differ in schema; fall back
+                    # to a filter-free query and skip deleted rows in
+                    # Python instead of failing the whole kind.
+                    try:
+                        rows = await _q(
+                            dbn,
+                            f"SELECT * FROM {table} WHERE FirmNo = %s AND DeletedDate IS NULL "
+                            f"ORDER BY UID OFFSET {skip} ROWS FETCH NEXT 2000 ROWS ONLY",
+                            (m.firm_no,),
+                        )
+                    except Exception:
+                        rows = await _q(
+                            dbn,
+                            f"SELECT * FROM {table} WHERE FirmNo = %s "
+                            f"ORDER BY (SELECT NULL) OFFSET {skip} ROWS FETCH NEXT 2000 ROWS ONLY",
+                            (m.firm_no,),
+                        )
                     if not rows:
                         break
                     docs = []
                     for r in rows:
-                        mon = _month_key(r.get("FirstDayOfMonth"))
-                        if not mon:
+                        # Iter 344 — legacy column names vary in CASE between
+                        # installations (e.g. FirstDayofMonth); match keys
+                        # case-insensitively so rows are never skipped.
+                        rl = {str(k).lower(): v for k, v in r.items()}
+                        if rl.get("deleteddate"):
                             continue
-                        code = r.get("EmpCode") if (r.get("EmpCode") or 0) > 0 else None
+                        # Iter 344 — SalaryTransoff may carry the month ONLY
+                        # in MonthYear ('Feb 2019'); fall back to it so
+                        # offline rows are never dropped for a missing
+                        # FirstDayOfMonth.
+                        mon = _month_key_any(
+                            rl.get("firstdayofmonth"), rl.get("monthyear"))
+                        if not mon:
+                            totals[f"{kind}_skipped_no_month"] = (
+                                totals.get(f"{kind}_skipped_no_month", 0) + 1)
+                            continue
+                        try:
+                            _ec = int(float(rl.get("empcode")))
+                        except (TypeError, ValueError):
+                            _ec = 0
+                        code = _ec if _ec > 0 else None
                         base = {
                             "company_id": m.company_id,
                             "firm_no": m.firm_no,
                             "kind": kind,
                             "month": mon,
                             "emp_code": code,
-                            "emp_id": r.get("EmpID"),
-                            "user_id": emp_uid.get(int(code)) if code else emp_uid.get(f"id_{r.get('EmpID')}"),
-                            "name": str(r.get("EmpName") or "").strip(),
-                            "employee_type": (str(r.get("EmpType") or "").strip() or None),
-                            "month_days": r.get("MonthDays"),
-                            "present_days": _f(r.get("PresentDays")) or 0,
-                            "basic": _f(r.get("TBasicSalary")) or _f(r.get("BasicSalary")) or 0,
-                            "gross": _f(r.get("GrossSalary")) or 0,
-                            "net": _f(r.get("NetSalary")) or 0,
+                            "emp_id": rl.get("empid"),
+                            "user_id": emp_uid.get(code) if code else emp_uid.get(f"id_{rl.get('empid')}"),
+                            "name": str(rl.get("empname") or "").strip(),
+                            "employee_type": (str(rl.get("emptype") or "").strip() or None),
+                            "month_days": rl.get("monthdays"),
+                            "present_days": _f(rl.get("presentdays")) or 0,
+                            "basic": _f(rl.get("tbasicsalary")) or _f(rl.get("basicsalary")) or 0,
+                            "gross": _f(rl.get("grosssalary")) or 0,
+                            "net": _f(rl.get("netsalary")) or 0,
                         }
                         if kind == "online":
                             earn = {}
                             ded = {}
                             for i in range(1, 26):
-                                v = _f(r.get(f"Earn{i}"))
+                                v = _f(rl.get(f"earn{i}"))
                                 if v:
                                     earn[heads.get(f"Earn{i}", f"Earn{i}")] = v
                             for i in range(1, 21):
-                                v = _f(r.get(f"Deduct{i}"))
+                                v = _f(rl.get(f"deduct{i}"))
                                 if v:
                                     ded[heads.get(f"Deduct{i}", f"Deduct{i}")] = v
                             base.update({
                                 "earn_heads": earn, "deduct_heads": ded,
                                 # Iter 302f (user) — month's MASTER rates
                                 # (full-month salary) alongside earned.
-                                "master_basic": _f(r.get("BasicSalary")),
-                                "master_pf_basic": _f(r.get("PFBasicSalary")),
-                                "pf_basic": _f(r.get("T_PFBasicSalary")),
-                                "ee_pf": _f(r.get("EE_EPF")),
-                                "er_pf": (_f(r.get("ER_EPF")) or 0) + (_f(r.get("ER_FPF")) or 0) or None,
-                                "er_esi": _f(r.get("ER_ESI")),
-                                "less_adv": _f(r.get("LessAdv")),
-                                "less_other": _f(r.get("LessOther")),
-                                "less_loan": _f(r.get("LessLoan")),
-                                "less_total": _f(r.get("LessTotal")),
-                                "ot_hours": _f(r.get("OTWorkHours")),
+                                "master_basic": _f(rl.get("basicsalary")),
+                                "master_pf_basic": _f(rl.get("pfbasicsalary")),
+                                "pf_basic": _f(rl.get("t_pfbasicsalary")),
+                                "ee_pf": _f(rl.get("ee_epf")),
+                                "er_pf": (_f(rl.get("er_epf")) or 0) + (_f(rl.get("er_fpf")) or 0) or None,
+                                "er_esi": _f(rl.get("er_esi")),
+                                "less_adv": _f(rl.get("lessadv")),
+                                "less_other": _f(rl.get("lessother")),
+                                "less_loan": _f(rl.get("lessloan")),
+                                "less_total": _f(rl.get("lesstotal")),
+                                "ot_hours": _f(rl.get("otworkhours")),
                             })
                         else:
                             base.update({
-                                "rate": _f(r.get("SalaryRate")),
-                                "w_basic": _f(r.get("WBasicSalary")),
-                                "others": _f(r.get("TOther")),
-                                "tds": _f(r.get("TDS")),
-                                "work_hours": _f(r.get("WorkHours")),
-                                "less_epf": _f(r.get("LessEPF")),
-                                "less_esi": _f(r.get("LessESI")),
-                                "less_adv": _f(r.get("LessAdv")),
-                                "less_other": _f(r.get("LessOther")),
-                                "less_loan": _f(r.get("LessLoan")),
-                                "less_total": _f(r.get("LessTotal")),
+                                "rate": _f(rl.get("salaryrate")),
+                                "w_basic": _f(rl.get("wbasicsalary")),
+                                "others": _f(rl.get("tother")),
+                                "tds": _f(rl.get("tds")),
+                                "work_hours": _f(rl.get("workhours")),
+                                "less_epf": _f(rl.get("lessepf")),
+                                "less_esi": _f(rl.get("lessesi")),
+                                "less_adv": _f(rl.get("lessadv")),
+                                "less_other": _f(rl.get("lessother")),
+                                "less_loan": _f(rl.get("lessloan")),
+                                "less_total": _f(rl.get("lesstotal")),
                             })
                             # Iter 333 (user request) — remember the LATEST
                             # off-roll row per worker so we can create the
                             # missing OFF-ROLL employees with their master
                             # salary rate after the history import.
-                            _okey = int(code) if code else f"id_{r.get('EmpID')}"
+                            _okey = int(code) if code else f"id_{rl.get('empid')}"
                             _prev = off_latest.get(_okey)
                             if _prev is None or mon > _prev["month"]:
                                 off_latest[_okey] = {
                                     "month": mon,
                                     "code": code,
-                                    "emp_id": r.get("EmpID"),
-                                    "name": str(r.get("EmpName") or "").strip(),
-                                    "employee_type": (str(r.get("EmpType") or "").strip() or None),
-                                    "rate": _f(r.get("SalaryRate")) or 0,
+                                    "emp_id": rl.get("empid"),
+                                    "name": str(rl.get("empname") or "").strip(),
+                                    "employee_type": (str(rl.get("emptype") or "").strip() or None),
+                                    "rate": _f(rl.get("salaryrate")) or 0,
                                 }
                         _apply_hist_overrides(
                             base,
