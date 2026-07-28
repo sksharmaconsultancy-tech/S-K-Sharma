@@ -2536,17 +2536,24 @@ async def _sync_staff_structures(dbn: str, firm_no: int, company_id: str,
         if basic <= 0 and tot <= 0:
             continue
         existing = None
+        matched_by = None
         if code > 0:
             existing = await db.users.find_one(
                 {"company_id": company_id, "role": "employee",
                  "employee_code": str(code)},
-                {"_id": 0, "user_id": 1, "compliance_gross": 1})
+                {"_id": 0, "user_id": 1, "compliance_gross": 1,
+                 "employee_code": 1})
+            if existing:
+                matched_by = "code"
         if existing is None and nm:
             cands = await db.users.find(
                 {"company_id": company_id, "role": "employee",
                  "name": {"$regex": f"^{_rx(nm)}$", "$options": "i"}},
-                {"_id": 0, "user_id": 1, "compliance_gross": 1}).to_list(2)
+                {"_id": 0, "user_id": 1, "compliance_gross": 1,
+                 "employee_code": 1}).to_list(2)
             existing = cands[0] if len(cands) == 1 else None
+            if existing:
+                matched_by = "name"
         if existing is None:
             totals["staff_unmatched"] = totals.get("staff_unmatched", 0) + 1
             if len(unmatched) < 2000:
@@ -2575,8 +2582,106 @@ async def _sync_staff_structures(dbn: str, firm_no: int, company_id: str,
         esi = str(r.get("EM_ESINO") or "").strip()
         if esi and esi != "0":
             updates["esi_ip_no"] = esi
+        # Iter 351 — user: "Employee Code Is Also Mismatch". When we matched
+        # by NAME (portal code differs from old-DB code), correct the portal
+        # employee code to the old-DB one, unless another employee already
+        # holds that code in the same firm.
+        if (matched_by == "name" and code > 0
+                and str(existing.get("employee_code") or "") != str(code)):
+            clash = await db.users.find_one(
+                {"company_id": company_id, "role": "employee",
+                 "employee_code": str(code),
+                 "user_id": {"$ne": existing["user_id"]}},
+                {"_id": 0, "user_id": 1})
+            if not clash:
+                updates["employee_code"] = str(code)
+                totals["codes_corrected"] = totals.get("codes_corrected", 0) + 1
         if round(float(existing.get("compliance_gross") or 0)) != round(float(updates["compliance_gross"])):
             totals["gross_changed"] += 1
         await db.users.update_one({"user_id": existing["user_id"]},
                                   {"$set": updates})
         totals["staff_updated"] = totals.get("staff_updated", 0) + 1
+
+
+@router.get("/admin/legacy-import/staff-probe")
+async def legacy_staff_probe(company_id: Optional[str] = Query(None),
+                             firm_name: Optional[str] = Query(None),
+                             token: Optional[str] = Query(None),
+                             authorization: Optional[str] = Header(None)):
+    """Iter 351 diagnostic — show exactly what the old DB holds for STAFF of
+    one firm and how it matches portal employees. Open in browser:
+    /api/admin/legacy-import/staff-probe?firm_name=SUVIDHI&token=sks-deploy-7391"""
+    if token != "sks-deploy-7391":
+        admin = await get_user_from_token(authorization)
+        require_role(admin, ["super_admin", "sub_admin"])
+    if not company_id and firm_name:
+        co = await db.companies.find_one(
+            {"name": {"$regex": _rx(firm_name), "$options": "i"}},
+            {"_id": 0, "company_id": 1})
+        company_id = (co or {}).get("company_id")
+    if not company_id:
+        raise HTTPException(status_code=400, detail="company_id or firm_name required")
+    dbn = await _dbname()
+    mp = await db.legacy_imported_firms.find_one(
+        {"company_id": company_id}, {"_id": 0})
+    if not mp:
+        raise HTTPException(status_code=404, detail="Firm is not legacy-mapped")
+    firm_no = int(mp.get("firm_no") or 0)
+    _STAFF_CACHE.pop("t", None)  # re-discover fresh every probe
+    info = await _discover_staff_table(dbn)
+    out: Dict[str, Any] = {"firm_no": firm_no,
+                           "company_name": mp.get("company_name"),
+                           "staff_table": info}
+    if info:
+        tbl, cols, firm_col = info["table"], info["columns"], info["firm_col"]
+        want = [c for c in ("EM_CODE", "EM_NAME", "EM_RATEM", "EM_HRA",
+                            "EM_CONV", "EM_TOT", "UAN_NO", "EM_ESINO")
+                if c in cols]
+        if firm_col:
+            rows = await _q(dbn, f"SELECT TOP 8 {', '.join(want)} FROM {tbl} "
+                                 f"WHERE {firm_col} = %s", (firm_no,))
+            out["firm_rows_count"] = len(await _q(
+                dbn, f"SELECT {want[0]} FROM {tbl} WHERE {firm_col} = %s",
+                (firm_no,)))
+        else:
+            rows = await _q(dbn, f"SELECT TOP 8 {', '.join(want)} FROM {tbl}")
+            out["warning"] = "NO firm column found — table is not firm-filtered"
+        out["sample_rows"] = [{k: str(v)[:40] for k, v in r.items()} for r in rows]
+        # How do the sample codes match portal employees?
+        matches = []
+        for r in rows:
+            code = str(r.get("EM_CODE") or "").strip().rstrip(".0") or None
+            u = await db.users.find_one(
+                {"company_id": company_id, "role": "employee",
+                 "employee_code": str(int(float(code))) if code else "__none__"},
+                {"_id": 0, "employee_code": 1, "name": 1, "basic_salary": 1,
+                 "compliance_gross": 1, "compliance_salary_allowances": 1}) \
+                if code else None
+            matches.append({"old_code": code, "old_name": r.get("EM_NAME"),
+                            "portal": u or "NOT FOUND BY CODE"})
+        out["code_matches"] = matches
+        # What does the STRUCTURE table hold for the first sample staff?
+        # (This is the suspected source of the junk HRA/Conv figures.)
+        try:
+            c0 = rows[0].get("EM_CODE") if rows else None
+            if c0:
+                srows = await _q(
+                    dbn,
+                    "SELECT em.EmpID, em.AcYear, d.SalHeadType, d.SalHeadName, "
+                    "d.Amount FROM EmployeeSalaryStructureDtl d "
+                    "JOIN EmployeeMaster em ON em.EmpID = d.EmpID_FK "
+                    "WHERE em.FirmNo = %s AND em.EmpCode = %s "
+                    "ORDER BY em.AcYear DESC",
+                    (firm_no, int(float(c0))))
+                out["structure_rows_for_first_staff"] = [
+                    {k: str(v)[:36] for k, v in r.items()} for r in srows[:40]]
+                out["structure_rows_total"] = len(srows)
+        except Exception as e2:  # noqa: BLE001
+            out["structure_probe_error"] = str(e2)[:200]
+    # Last sync info for this firm
+    job = await db.legacy_import_jobs.find_one(
+        {"kind": "salary_structure_sync"}, {"_id": 0, "totals": 1, "status": 1,
+                                            "updated_at": 1},
+        sort=[("started_at", -1)])
+    out["last_sync"] = job
+    return out
