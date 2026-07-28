@@ -27,7 +27,6 @@ import {
   ActivityIndicator,
   ScrollView,
   Platform,
-  Alert,
   Modal,
   Switch,
 } from "react-native";
@@ -37,7 +36,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
 
 import { api, apiBinary } from "@/src/api/client";
-import { confirmYesNo } from "@/src/utils/confirm";
+import { confirmYesNo, showToast } from "@/src/utils/confirm";
 import { EmployeeListSkeleton } from "@/src/components/EmployeeStatsBar";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
@@ -164,8 +163,10 @@ function fmtInr(n?: number | null): string {
   return String(Math.round(n));
 }
 function showMsg(msg: string, title = "Compliance salary") {
-  if (Platform.OS === "web") globalThis.alert(msg);
-  else Alert.alert(title, msg);
+  // Iter 345 (user bug) — window.alert can be SUPPRESSED by the browser
+  // ("prevent additional dialogs"), leaving the user with zero feedback.
+  // The in-app toast is always visible.
+  showToast(msg, title);
 }
 
 export default function ComplianceSalaryRunScreen() {
@@ -654,10 +655,11 @@ export default function ComplianceSalaryRunScreen() {
         "YES → your previously ENTERED days & edits are KEPT — the " +
         "existing data is updated, not reset to zero.",
       );
-      if (!ok) {
-        if (Platform.OS === "web") window.location.reload();
-        return;
-      }
+      // Iter 345 (user bug — "page just refreshes") — a "No" must never
+      // RELOAD the page: with browser dialogs suppressed the old
+      // window.confirm returned false instantly and the silent reload
+      // made "Salary Process" look completely broken.
+      if (!ok) return;
     }
     setBusy(true);
     try {
@@ -731,10 +733,7 @@ export default function ComplianceSalaryRunScreen() {
     const ok = await confirmYesNo(
       "Do you want to REPROCESS this salary again?\nThe sheet will be recomputed with the current parameters.",
     );
-    if (!ok) {
-      if (Platform.OS === "web") window.location.reload();
-      return;
-    }
+    if (!ok) return; // Iter 345 — never silently reload the page on "No".
     setReprocessing(true);
     try {
       const r = await api<{ run: CompRun }>(
@@ -795,9 +794,9 @@ export default function ComplianceSalaryRunScreen() {
 
   const finalizeRun = async () => {
     if (!run || finalizing) return;
-    const okGo = Platform.OS === "web"
-      ? globalThis.confirm("Finalize this compliance run? It becomes LOCKED — nobody can change it without Super Admin approval.")
-      : true;
+    const okGo = await confirmYesNo(
+      "Finalize this compliance run? It becomes LOCKED — nobody can change it without Super Admin approval.",
+    );
     if (!okGo) return;
     setFinalizing(true);
     try {
