@@ -25,7 +25,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Body, Header, HTTPException, Query
 from pydantic import BaseModel
 
 from server import db, get_user_from_token, require_role  # noqa: E402
@@ -2222,9 +2222,13 @@ async def _sync_structures_job(job_id: str, admin_uid: str):
                                 return rows_
                     return []
 
+                # Iter 349 — manual head interlinks (old head → portal label).
+                _links = await _head_links_for(company_id)
+
                 # Enable every legacy allowance head on the Firm Master.
                 _heads = {
-                    str(s.get("SalHeadName") or "").strip()
+                    _links.get(str(s.get("SalHeadName") or "").strip().lower(),
+                               str(s.get("SalHeadName") or "").strip())
                     for rows_ in struct_by_emp.values() for s in rows_
                     if str(s.get("SalHeadType") or "").strip().upper().startswith("ALLOW")
                     and _f(s.get("Amount"))
@@ -2236,6 +2240,12 @@ async def _sync_structures_job(job_id: str, admin_uid: str):
                 for e in emps:
                     fields = _emp_doc_fields(e, ["salary"], _struct_for(e),
                                              overrides=None)
+                    # Iter 349 — rename interlinked heads to portal labels.
+                    if _links and fields.get("compliance_salary_allowances"):
+                        for a0 in fields["compliance_salary_allowances"]:
+                            lb0 = _links.get(str(a0.get("head") or "").strip().lower())
+                            if lb0:
+                                a0["head"] = lb0
                     updates = {k: v for k, v in fields.items()
                                if k in _SYNC_SALARY_KEYS}
                     if not updates:
@@ -2300,3 +2310,123 @@ async def legacy_sync_salary_structures(
     asyncio.get_event_loop().create_task(
         _sync_structures_job(job_id, admin.get("user_id") or ""))
     return {"job_id": job_id}
+
+
+@router.get("/admin/legacy-import/heads-compare")
+async def legacy_heads_compare(authorization: Optional[str] = Header(None)):
+    """Iter 348 (user request) — show BOTH databases' salary heads side by
+    side, per mapped firm: Old DB allowance + deduction heads (from
+    EmployeeSalaryStructureDtl via the EmpID join) vs the portal Firm
+    Master's enabled allowances + deductions."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin"])
+    dbn = await _dbname()
+    maps = await db.legacy_imported_firms.find({}, {"_id": 0}).to_list(2000)
+    # ONE query for all firms: firm-wise distinct head names by type.
+    rows = await _q(
+        dbn,
+        "SELECT em.FirmNo AS firm_no, d.SalHeadType, d.SalHeadName, "
+        "COUNT(*) AS n FROM EmployeeSalaryStructureDtl d "
+        "JOIN EmployeeMaster em ON em.EmpID = d.EmpID_FK "
+        "GROUP BY em.FirmNo, d.SalHeadType, d.SalHeadName")
+    old_by_firm: Dict[int, Dict[str, list]] = {}
+    for r in rows:
+        try:
+            fn = int(r.get("firm_no") or 0)
+        except (TypeError, ValueError):
+            continue
+        t = str(r.get("SalHeadType") or "").strip().upper()
+        nm = str(r.get("SalHeadName") or "").strip()
+        if not nm:
+            continue
+        bucket = ("allowances" if t.startswith("ALLOW")
+                  else "deductions" if t.startswith("DEDUCT")
+                  else "basic" if "BASIC" in t or "basic" in nm.lower()
+                  else "other")
+        d0 = old_by_firm.setdefault(fn, {"allowances": [], "deductions": [],
+                                         "basic": [], "other": []})
+        d0[bucket].append({"head": nm, "employees": int(r.get("n") or 0)})
+    out = []
+    from routes.firm_master import ALLOWANCE_LABELS
+    all_links = await db.legacy_head_links.find({}, {"_id": 0}).to_list(1000)
+    for mp in maps:
+        fn = mp.get("firm_no")
+        cid = mp.get("company_id")
+        co = await db.companies.find_one({"company_id": cid}, {"_id": 0, "name": 1})
+        fm = await db.firm_masters.find_one(
+            {"company_id": cid}, {"_id": 0, "allowances": 1, "deductions": 1})
+        old = old_by_firm.get(int(fn or 0)) or {"allowances": [], "deductions": [],
+                                                "basic": [], "other": []}
+        for k in ("allowances", "deductions", "basic", "other"):
+            old[k] = sorted(old[k], key=lambda x: -x["employees"])
+        custom = [str(m0.get("name") or "").strip() async for m0 in db.masters.find(
+            {"type": "allowance", "company_id": {"$in": [cid, "__global__", None]}},
+            {"_id": 0, "name": 1})]
+        links = {}
+        for l0 in sorted(all_links,
+                         key=lambda x: 0 if x.get("company_id") == "*" else 1):
+            if l0.get("company_id") in ("*", cid):
+                links[str(l0.get("old_head") or "").strip().lower()] = {
+                    "portal_label": l0.get("portal_label"),
+                    "scope": l0.get("company_id")}
+        out.append({
+            "firm_no": fn,
+            "company_id": cid,
+            "company_name": (co or {}).get("name") or mp.get("company_name"),
+            "old_db": old,
+            "portal_allowances": sorted(
+                [k for k, v in ((fm or {}).get("allowances") or {}).items() if v]),
+            "portal_deductions": sorted(
+                [k for k, v in ((fm or {}).get("deductions") or {}).items() if v]),
+            "label_options": sorted({*ALLOWANCE_LABELS, *[c for c in custom if c]}),
+            "links": links,
+        })
+    out.sort(key=lambda x: str(x["company_name"] or "").lower())
+    return {"firms": out}
+
+
+# ---------------------------------------------------------------------------
+# Iter 349 (user: "I will manually interlink") — head links: map an Old DB
+# allowance head to a portal allowance label. The ALL-FIRMS sync applies
+# these links (renames heads + enables the linked label) on the next run.
+# ---------------------------------------------------------------------------
+
+async def _head_links_for(company_id: str) -> Dict[str, str]:
+    """old_head(lower) → portal label. Firm-specific overrides global (*)."""
+    links: Dict[str, str] = {}
+    rows = await db.legacy_head_links.find(
+        {"company_id": {"$in": ["*", company_id]}}, {"_id": 0}).to_list(500)
+    for r in sorted(rows, key=lambda x: 0 if x.get("company_id") == "*" else 1):
+        oh = str(r.get("old_head") or "").strip().lower()
+        pl = str(r.get("portal_label") or "").strip()
+        if oh and pl:
+            links[oh] = pl
+    return links
+
+
+@router.get("/admin/legacy-import/head-links")
+async def legacy_head_links_list(authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin"])
+    rows = await db.legacy_head_links.find({}, {"_id": 0}).to_list(1000)
+    return {"links": rows}
+
+
+@router.post("/admin/legacy-import/head-links")
+async def legacy_head_links_save(payload: Dict[str, Any] = Body(...),
+                                 authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin"])
+    old_head = str(payload.get("old_head") or "").strip()
+    portal_label = str(payload.get("portal_label") or "").strip()
+    cid = "*" if payload.get("apply_all_firms") else (payload.get("company_id") or "*")
+    if not old_head:
+        raise HTTPException(status_code=400, detail="old_head is required")
+    key = {"company_id": cid, "old_head_lower": old_head.lower()}
+    if payload.get("remove") or not portal_label:
+        await db.legacy_head_links.delete_one(key)
+        return {"ok": True, "removed": True}
+    await db.legacy_head_links.replace_one(key, {
+        **key, "old_head": old_head, "portal_label": portal_label,
+        "by": admin.get("user_id"), "at": _now()}, upsert=True)
+    return {"ok": True}

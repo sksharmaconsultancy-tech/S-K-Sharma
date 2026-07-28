@@ -231,6 +231,32 @@ export default function LegacyImportScreen() {
     finally { setBusy(false); }
   };
 
+  // Iter 348 (user request) — show BOTH DBs' allowance/deduction heads.
+  const [heads, setHeads] = useState<any[] | null>(null);
+  const [headsBusy, setHeadsBusy] = useState(false);
+  const [headsOpen, setHeadsOpen] = useState<string | null>(null);
+  const loadHeads = async () => {
+    setHeadsBusy(true); setErr("");
+    try {
+      const r = await api<any>("/admin/legacy-import/heads-compare");
+      setHeads(r.firms || []);
+    } catch (e: any) { setErr(e?.message || "Heads compare failed"); }
+    finally { setHeadsBusy(false); }
+  };
+
+  // Iter 349 — save a manual head interlink (old head → portal label).
+  const [linkDraft, setLinkDraft] = useState<Record<string, string>>({});
+  const saveLink = async (companyId: string, oldHead: string, label: string, allFirms: boolean) => {
+    try {
+      await api("/admin/legacy-import/head-links", {
+        method: "POST",
+        body: { company_id: companyId, old_head: oldHead, portal_label: label,
+          apply_all_firms: allFirms, remove: !label },
+      });
+      await loadHeads();
+    } catch (e: any) { setErr(e?.message || "Link save failed"); }
+  };
+
   const startImport = async () => {
     setBusy(true); setErr("");
     try {
@@ -645,6 +671,116 @@ export default function LegacyImportScreen() {
                 <Ionicons name="sync-outline" size={16} color="#fff" />
                 <Text style={st.actTxt}>Sync Salary Structures — ALL Firms (from Old DB)</Text>
               </Pressable>
+              {/* Iter 348 (user request) — Old DB vs Portal heads viewer. */}
+              <Pressable
+                style={[st.actBtn, { backgroundColor: "#7C3AED", opacity: headsBusy ? 0.5 : 1 }]}
+                disabled={headsBusy}
+                onPress={loadHeads}
+                testID="li-heads-compare"
+              >
+                <Ionicons name="list-outline" size={16} color="#fff" />
+                <Text style={st.actTxt}>
+                  {headsBusy ? "Loading heads…" : "Show Allowance & Deduction Heads — Old DB vs Portal"}
+                </Text>
+              </Pressable>
+              {heads ? (
+                <View style={{ gap: 6 }}>
+                  <Text style={st.firmMeta}>
+                    {heads.length} firms · tap a firm to expand. 🟠 = head exists in Old DB but is
+                    NOT enabled on the portal Firm Master.
+                  </Text>
+                  {heads.map((f: any) => {
+                    const open = headsOpen === f.company_id;
+                    const oldAllow: any[] = f.old_db?.allowances || [];
+                    const oldDed: any[] = f.old_db?.deductions || [];
+                    const pa: string[] = f.portal_allowances || [];
+                    const missing = oldAllow.filter((a) =>
+                      !pa.some((p) => p.toLowerCase() === String(a.head).toLowerCase())).length;
+                    return (
+                      <View key={f.company_id || f.firm_no} style={st.prevRow}>
+                        <Pressable onPress={() => setHeadsOpen(open ? null : f.company_id)}>
+                          <Text style={st.firmName}>
+                            {open ? "▼" : "▶"} {f.company_name}{" "}
+                            <Text style={st.firmMeta}>
+                              (Old DB: {oldAllow.length} allow / {oldDed.length} ded · Portal:{" "}
+                              {pa.length} allow / {(f.portal_deductions || []).length} ded
+                              {missing ? ` · 🟠 ${missing} not enabled` : " · ✅"})
+                            </Text>
+                          </Text>
+                        </Pressable>
+                        {open ? (
+                          <View style={{ marginTop: 6, gap: 4 }}>
+                            <Text style={[st.firmMeta, { fontWeight: "800" }]}>OLD DB — Allowances (interlink → portal label, then Sync again):</Text>
+                            {oldAllow.length ? oldAllow.map((a: any, ai: number) => {
+                              const key = String(a.head).trim().toLowerCase();
+                              const link = (f.links || {})[key];
+                              const on = pa.some((p: string) => p.toLowerCase() === key)
+                                || !!link;
+                              const draftKey = `${f.company_id}|${key}`;
+                              return (
+                                <View key={ai} style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                  <Text style={st.firmMeta}>
+                                    {on ? "" : "🟠 "}{a.head} ({a.employees})
+                                    {link ? `  → ${link.portal_label}${link.scope === "*" ? " (all firms)" : ""}` : ""}
+                                  </Text>
+                                  {Platform.OS === "web" ? (
+                                    <select
+                                      value={linkDraft[draftKey] ?? (link?.portal_label || "")}
+                                      onChange={(e: any) => setLinkDraft((d) => ({ ...d, [draftKey]: e.target.value }))}
+                                      style={{ fontSize: 11, padding: 2, borderRadius: 6, borderColor: "#CBD5E1", maxWidth: 170 } as any}
+                                    >
+                                      <option value="">— interlink to —</option>
+                                      {(f.label_options || []).map((lo: string) => (
+                                        <option key={lo} value={lo}>{lo}</option>
+                                      ))}
+                                    </select>
+                                  ) : null}
+                                  <Pressable
+                                    onPress={() => saveLink(f.company_id, a.head, linkDraft[draftKey] ?? (link?.portal_label || ""), false)}
+                                    style={{ backgroundColor: "#0E7490", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}
+                                  >
+                                    <Text style={{ color: "#fff", fontSize: 10, fontWeight: "800" }}>Save</Text>
+                                  </Pressable>
+                                  <Pressable
+                                    onPress={() => saveLink(f.company_id, a.head, linkDraft[draftKey] ?? (link?.portal_label || ""), true)}
+                                    style={{ backgroundColor: "#7C3AED", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}
+                                  >
+                                    <Text style={{ color: "#fff", fontSize: 10, fontWeight: "800" }}>Save for ALL firms</Text>
+                                  </Pressable>
+                                  {link ? (
+                                    <Pressable
+                                      onPress={() => saveLink(link.scope === "*" ? "*" : f.company_id, a.head, "", link.scope === "*")}
+                                      style={{ backgroundColor: "#DC2626", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}
+                                    >
+                                      <Text style={{ color: "#fff", fontSize: 10, fontWeight: "800" }}>Remove</Text>
+                                    </Pressable>
+                                  ) : null}
+                                </View>
+                              );
+                            }) : <Text style={st.firmMeta}>— none —</Text>}
+                            <Text style={[st.firmMeta, { fontWeight: "800" }]}>OLD DB — Deductions:</Text>
+                            <Text style={st.firmMeta}>
+                              {oldDed.length ? oldDed.map((a: any) => `${a.head} (${a.employees})`).join(" · ") : "— none —"}
+                            </Text>
+                            {(f.old_db?.basic || []).length ? (
+                              <Text style={st.firmMeta}>
+                                <Text style={{ fontWeight: "800" }}>OLD DB — Basic: </Text>
+                                {(f.old_db.basic as any[]).map((a) => `${a.head} (${a.employees})`).join(" · ")}
+                              </Text>
+                            ) : null}
+                            <Text style={[st.firmMeta, { fontWeight: "800" }]}>PORTAL — Allowances enabled:</Text>
+                            <Text style={st.firmMeta}>{pa.length ? pa.join(" · ") : "— none —"}</Text>
+                            <Text style={[st.firmMeta, { fontWeight: "800" }]}>PORTAL — Deductions enabled:</Text>
+                            <Text style={st.firmMeta}>
+                              {(f.portal_deductions || []).length ? f.portal_deductions.join(" · ") : "— none —"}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    );
+                  })}
+                </View>
+              ) : null}
               {job && job.kind === "salary_structure_sync" ? (
                 <View style={st.prevRow}>
                   <Text style={st.firmName}>
