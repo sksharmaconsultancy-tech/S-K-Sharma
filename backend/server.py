@@ -22230,6 +22230,10 @@ app.include_router(employee_detail_slip_router)
 from routes.esic_leave import router as esic_leave_router  # noqa: E402
 app.include_router(esic_leave_router)
 
+# Iter 356 — Employee-Wise Yearly Payroll Register (Bonus-Register style).
+from routes.payroll_register import router as payroll_register_router  # noqa: E402
+app.include_router(payroll_register_router)
+
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
 maybe_start_rpa_worker(app, db)

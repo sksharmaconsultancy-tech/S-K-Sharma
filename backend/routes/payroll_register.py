@@ -89,6 +89,15 @@ def _month_vals(r: dict) -> Dict[str, float]:
             arrear += amt
     ot = _f(r.get("ot_pay"))
     gross = _f(r.get("gross_paid")) or _f(r.get("monthly_gross"))
+    # Freeze-salary difference allocation: gross_paid may exceed the head-wise
+    # sum (difference between Imported and Master gross allocated per firm
+    # settings). Absorb that residual into Other Allowance so the register
+    # balances; unexplained residuals (no import markers) stay flagged.
+    comp_sum = basic + da + hra + conv + special + other_allow + ot + \
+        incentive + arrear
+    residual = round(gross - comp_sum, 2)
+    if abs(residual) > 2 and ("imported_gross" in r or "difference" in r):
+        other_allow = round(other_allow + residual, 2)
     pf_ee = _f(r.get("pf_employee"))
     esic_ee = _f(r.get("esic_employee"))
     pt = _f(r.get("pt"))

@@ -1,0 +1,38 @@
+{
+  "summary": "Iter 356 — Employee-Wise Yearly Payroll Register (Bonus-Register-style). Both backend (8/8 pytest pass) and frontend (Expo web) tested end-to-end for Kankani Enterprises (cmp_527fecdd7c, FY 2026). All acceptance criteria met: JSON shape (127 employees, 12 months Apr-26..Mar-27, months_covered contains 2026-04..2026-07), pagination (skip=0 vs skip=5 disjoint), status/department filters, multi-FY (24 months), auth 401, XLSX 200 (>20KB), PDF 200 (>50KB). Frontend UI: employee blocks render with month columns + salary head rows + EMPLOYEE TOTAL line, GRAND TOTAL card at bottom, Prev/Next pagination works (Page 1/13 → 2/13 with different employees), FY dropdown switches years, PDF (181KB) and XLSX (97KB) downloads trigger correctly. Minor testability issue: `<select>` filters on web use `testID` prop directly on native `<select>` — React DOM does not translate testID→data-testid, so pr-fy/pr-years/pr-status are not selectable by data-testid (they exist and work via onChange). No functional bug.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {
+        "component": "payroll-register.tsx <select> filters",
+        "issue": "Native HTML <select> elements (Platform.OS==='web') use `testID` prop which React DOM does not recognize and strips (console warning: 'React does not recognize the testID prop on a DOM element'). Should use `data-testid={...}` for HTML elements instead of `testID`. Affected: pr-fy (line 189), pr-years (line 204), pr-status (line 219). Reference: /app/frontend/app/payroll-register.tsx:188-231. Does not affect functionality — UI works — but blocks automated testing of these filters via testID."
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter356_payroll_register.py",
+    "/app/test_reports/pytest/iter356.xml"
+  ],
+  "action_items": [
+    "OPTIONAL/MINOR: In /app/frontend/app/payroll-register.tsx replace `testID=\"pr-fy\"`, `testID=\"pr-years\"`, `testID=\"pr-status\"` on the raw <select> elements with `data-testid=\"pr-fy\"` etc. (or wrap them in a component that does the mapping). This is a testability improvement only; the feature works correctly."
+  ],
+  "critical_code_review_comments": [
+    "payroll_register.py (604 lines) is above the 700-line soft cap threshold but still within limit — acceptable. Consider splitting _build_xlsx and _build_pdf into separate modules if it grows further.",
+    "Backend correctly excludes MongoDB _id via projections. Auth enforced via require_role. Env vars respected. Good.",
+    "Response uses proper streaming for xlsx/pdf with correct MIME types."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter356_payroll_register.py (new)",
+    "/app/test_reports/pytest/iter356.xml (new)",
+    "/app/test_reports/iteration_356.json (new)"
+  ],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "100% (all flows verified)"},
+  "seed_data_creation": "None — used existing compliance salary runs for Kankani cmp_527fecdd7c (Apr–Jul 2026).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend endpoints at /api/admin/reports/payroll-register[.pdf|.xlsx] fully working. Frontend page at /payroll-register served under AdminWebShell sidebar 'Yearly Payroll Register'. Auth token key in localStorage: llc_session_token. Selected company key: llc_selected_company_id. For automated select tests, use page.locator('select').nth(N).select_option(...) — 3 native selects in filter row order: [0]=FY, [1]=fy_years, [2]=status.",
+  "rca_of_issue": "N/A — no functional bug found."
+}
