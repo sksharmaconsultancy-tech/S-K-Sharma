@@ -152,6 +152,26 @@ export default function LegacyImportScreen() {
   const [preview, setPreview] = useState<any[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState<any>(null);
+  // Iter 340 (user request) — Old DB vs Portal difference list.
+  const [missing, setMissing] = useState<any[] | null>(null);
+  const [missBusy, setMissBusy] = useState(false);
+
+  const loadMissing = async () => {
+    if (!job?.mappings?.length) return;
+    setMissBusy(true);
+    setMissing(null);
+    try {
+      const r = await api<any>(`/admin/legacy-import/missing`, {
+        method: "POST",
+        body: { mappings: job.mappings, import_employees: true },
+      });
+      setMissing(r.firms || []);
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load difference list");
+    } finally {
+      setMissBusy(false);
+    }
+  };
   const [showMap, setShowMap] = useState(false); // mapping chart
   // Iter 300e (user) — manual head overrides + 2-step confirmation.
   const [overrides, setOverrides] = useState<Record<string, string>>({}); // src field -> dst field | 'skip'
@@ -619,6 +639,39 @@ export default function LegacyImportScreen() {
                     <Text style={st.firmMeta}>
                       View imported salary: Import / Export → Legacy Salary Records
                     </Text>
+                  ) : null}
+                  {/* Iter 340 (user request) — Old DB vs Portal difference
+                      list: employees NOT imported, with the reason. */}
+                  {job.status === "done" && job.mappings?.length ? (
+                    <Pressable
+                      style={[st.actBtn, { backgroundColor: "#5B21B6", marginTop: 8, opacity: missBusy ? 0.5 : 1 }]}
+                      disabled={missBusy}
+                      onPress={loadMissing}
+                      testID="li-diff-list"
+                    >
+                      <Ionicons name="git-compare-outline" size={16} color="#fff" />
+                      <Text style={st.actTxt}>{missBusy ? "Checking…" : "Old DB vs Portal — Difference List"}</Text>
+                    </Pressable>
+                  ) : null}
+                  {missing ? (
+                    missing.every((f: any) => !f.missing_count) ? (
+                      <Text style={[st.firmMeta, { color: "#15803D", fontWeight: "700", marginTop: 6 }]}>
+                        ✓ No differences — every old-database employee is in the portal.
+                      </Text>
+                    ) : (
+                      missing.map((f: any) => (
+                        <View key={f.firm_no} style={{ marginTop: 8 }}>
+                          <Text style={[st.firmMeta, { fontWeight: "800", color: "#B91C1C" }]}>
+                            Firm {f.firm_no}: {f.missing_count} NOT imported (old DB: {f.legacy_count} · portal: {f.portal_count})
+                          </Text>
+                          {(f.missing || []).map((x: any, i: number) => (
+                            <Text key={i} style={st.errTxt}>
+                              {x.emp_code ? `[${x.emp_code}] ` : ""}{x.name}{x.resigned ? " (Resigned)" : " (Active)"} — {x.reason}
+                            </Text>
+                          ))}
+                        </View>
+                      ))
+                    )
                   ) : null}
                 </View>
               ) : null}

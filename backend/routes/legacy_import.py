@@ -1298,6 +1298,64 @@ class UndoBody(BaseModel):
     company_id: str
 
 
+@router.post("/admin/legacy-import/missing")
+async def legacy_import_missing(body: ImportBody, authorization: Optional[str] = Header(None)):
+    """Iter 340 (user request) — OLD DATABASE vs PORTAL difference list:
+    every legacy employee that did NOT land in the portal, with the
+    REASON it was not imported."""
+    await _super(authorization)
+    dbn = await _dbname()
+    firms: List[dict] = []
+    for m in body.mappings:
+        if not m.company_id:
+            continue
+        emps = await _legacy_employees(dbn, m.firm_no)
+        portal = await db.users.find(
+            {"company_id": m.company_id, "role": "employee"},
+            {"_id": 0, "name": 1, "employee_code": 1},
+        ).to_list(25000)
+        by_code = {str(u["employee_code"]): u for u in portal if u.get("employee_code")}
+        by_name: Dict[str, list] = {}
+        for u in portal:
+            by_name.setdefault(str(u.get("name") or "").strip().lower(), []).append(u)
+        job = await db.legacy_import_jobs.find_one(
+            {"mappings.firm_no": m.firm_no}, {"_id": 0, "errors": 1},
+            sort=[("started_at", -1)])
+        errs = (job or {}).get("errors") or []
+        missing: List[dict] = []
+        for e in emps:
+            nm = str(e.get("EmpName") or "").strip()
+            code = e.get("EmpCode") if (e.get("EmpCode") or 0) > 0 else None
+            resigned = bool(e.get("IsResign"))
+            if not nm:
+                missing.append({"emp_code": code, "name": "(blank name)",
+                                "resigned": resigned,
+                                "reason": "Blank employee name in the old database"})
+                continue
+            if code is not None and str(code) in by_code:
+                continue  # imported (matched by Employee Code)
+            if by_name.get(nm.lower()):
+                continue  # imported / merged into a same-name portal employee
+            reason = None
+            _pfx = f"emp {nm}"
+            for er in errs:
+                if str(er).startswith(_pfx):
+                    reason = f"Import error: {str(er)[len(_pfx) + 2:][:160]}"
+                    break
+            missing.append({
+                "emp_code": code, "name": nm, "resigned": resigned,
+                "reason": reason or ("Not found in the portal — record was "
+                                     "skipped during import (no error "
+                                     "captured); re-import the firm"),
+            })
+        firms.append({
+            "firm_no": m.firm_no, "company_id": m.company_id,
+            "legacy_count": len(emps), "portal_count": len(portal),
+            "missing_count": len(missing), "missing": missing,
+        })
+    return {"firms": firms}
+
+
 @router.post("/admin/legacy-import/undo")
 async def legacy_import_undo(body: UndoBody, authorization: Optional[str] = Header(None)):
     await _super(authorization)

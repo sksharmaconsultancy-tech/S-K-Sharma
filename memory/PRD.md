@@ -2051,3 +2051,13 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   email; insert wrapped with retry-once (email+phone stripped) on any E11000.
 - Fixed stray "ked, ..." duplicated fragment at legacy_import.py EOF (syntax error, same class
   of glitch as server.py "down\")" — WATCH for these after edits).
+
+## Iter 340c — Old DB vs Portal Difference List
+- POST /admin/legacy-import/missing (body: {mappings:[{firm_no, company_id}]}) → per firm:
+  legacy_count, portal_count, missing[] {emp_code, name, resigned, reason}. Reasons: blank name /
+  import error (matched from latest job errors "emp NAME: ...") / generic skipped.
+- Matched = portal user by employee_code OR exact name (merged) → not missing.
+- legacy-import.tsx: "Old DB vs Portal — Difference List" button on done jobs (uses job.mappings),
+  inline list firm-wise; green "No differences" note when all imported.
+- Endpoint verified E2E (returns 503 'Legacy SQL Server is not configured yet' in dev — real data
+  only exists on the user's VPS).
