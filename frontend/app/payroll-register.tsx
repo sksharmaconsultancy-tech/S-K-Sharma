@@ -186,7 +186,7 @@ export default function PayrollRegisterScreen() {
           {Platform.OS === "web" && (
             <>
               <select
-                testID="pr-fy"
+                data-testid="pr-fy"
                 value={fyStart}
                 onChange={(e) => {
                   setPage(0);
@@ -201,7 +201,7 @@ export default function PayrollRegisterScreen() {
                 ))}
               </select>
               <select
-                testID="pr-years"
+                data-testid="pr-years"
                 value={fyYears}
                 onChange={(e) => {
                   setPage(0);
@@ -216,7 +216,7 @@ export default function PayrollRegisterScreen() {
                 ))}
               </select>
               <select
-                testID="pr-status"
+                data-testid="pr-status"
                 value={status}
                 onChange={(e) => {
                   setPage(0);

@@ -2162,3 +2162,31 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   'code/emp' prefixes. deploy_vps_iter344.sh (served via temp_bundle token sks-deploy-7391).
 - PENDING: user to re-import SUVIDHI after deploy 344 and confirm structures match; P1
   WhatsApp API integration; backlog server.py refactor.
+- Iter 351-353 (fork): Suvidhi staff salary fix iterations — discovered WP_Emp_Attendance is a
+  10-row scratch table, NOT staff master; EmployeeSalaryStructureDtl holds PER-YEAR rows whose
+  EmpID join multiplied+summed across years (HRA 19044 vs true 2000). Added /api/legacy-query
+  (token sks-deploy-7391, SELECT-only) for remote legacy-DB diagnosis on VPS (smartpayrolling.com).
+- Iter 354: USER-SPECIFIED final mapping — salary read directly from EmployeeMaster:
+  BasicSalary/PFBasicSalary/GrossPay + Earn1..10 = HRA/CONV./OTH. ALLOW./OVER TIME/INCENTIVE/
+  OTHER MISC.ALLOWANCE/BONUS/MEDICAL ALLOWANCES/FOOD ALLOWANCES/FOOD ALLOWANCE (names refreshed
+  from SalaryHeadMaster via _head_names, defaults in _EARN_DEFAULT). _emp_doc_fields(earn_names=)
+  signature changed; EmployeeSalaryStructureDtl NO LONGER used. Sync auto-corrects employee codes
+  on name-match (codes_corrected counter). Unit tested vs staf.xls (30800/31300 cases).
+- Iter 355: Attendance Sheet "Sort sheet by" + Designation option (backend _att_sheet_sort).
+- Iter 356: EMPLOYEE-WISE YEARLY PAYROLL REGISTER (routes/payroll_register.py +
+  app/payroll-register.tsx + sidebar "Yearly Payroll Register"). Bonus-Register layout: employee
+  info block, Apr–Mar months across top, heads as rows, EMPLOYEE TOTAL + GRAND TOTAL. Endpoints:
+  /api/admin/reports/payroll-register[.pdf|.xlsx] (fy_start_year, fy_years 1-5, department,
+  designation, category, status, bank, skip/limit). PDF=A3 landscape ReportLab w/ logo+page nos;
+  XLSX=openpyxl merged headers/freeze/print-area. AI validation flags (pf/esic/gross mismatch,
+  negative net, missing attendance, loan recovery, duplicate) → red cells. Freeze-salary residual
+  absorbed into Other Allowance when imported_gross/difference markers present.
+  Tested 8/8 backend + full UI (iteration_356.json).
+- ROADMAP (user approved phases): B) Labour Statistics & HR Analytics Phase 1 (HR Analytics
+  Dashboard, Department Statistics, Category-wise Manpower, Monthly Labour Return, Turnover
+  Analysis — all auto-calculated, register-style PDF/Excel). C) Annual Returns Management
+  (Minimum Wages, Payment of Wages, Bonus, Equal Remuneration, Employment Statistics, Social
+  Security Statistics, LWF, PT returns + Compliance Dashboard). D) Factory & Boilers Compliance
+  (needs NEW masters first: licenses/boilers/accidents/PPE/medical, then registers + dashboard).
+  Full specs are in the user messages of this session (2026-07-28). P1 WhatsApp integration
+  still pending. VPS deploys served via kind=script (currently deploy_vps_iter356.sh).
