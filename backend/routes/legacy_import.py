@@ -21,6 +21,7 @@ Endpoints (super_admin):
 """
 import asyncio
 import difflib
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -2294,6 +2295,14 @@ async def _sync_structures_job(job_id: str, admin_uid: str):
                     await db.users.update_one(
                         {"user_id": existing["user_id"]}, {"$set": updates})
                     totals["employees_updated"] += 1
+                # Iter 350 — STAFF live in a separate EM_* table in the old
+                # DB; sync them too (overrides structure-table values).
+                try:
+                    await _sync_staff_structures(
+                        dbn, int(firm_no), company_id, _links, totals,
+                        errors, unmatched, mp.get("company_name"))
+                except Exception as se:  # noqa: BLE001
+                    errors.append(f"firm {firm_no} staff: {str(se)[:150]}")
             except Exception as fe:  # noqa: BLE001 — keep syncing other firms
                 errors.append(f"firm {firm_no}: {str(fe)[:200]}")
             totals["firms_synced"] += 1
@@ -2440,3 +2449,134 @@ async def legacy_head_links_save(payload: Dict[str, Any] = Body(...),
         **key, "old_head": old_head, "portal_label": portal_label,
         "by": admin.get("user_id"), "at": _now()}, upsert=True)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Iter 350 (user: SUVIDHI staff codes + allowances mismatch; shared staf.xls
+# with EM_CODE / EM_RATEM / EM_HRA / EM_CONV / EM_TOT columns) — the old
+# software keeps STAFF salary structure in a separate EM_* table, NOT in
+# EmployeeSalaryStructureDtl. Discover that table and sync staff too.
+# ---------------------------------------------------------------------------
+
+_STAFF_CACHE: Dict[str, Any] = {}
+logger = logging.getLogger("legacy-import")
+
+
+async def _discover_staff_table(dbn: str) -> Optional[dict]:
+    """Find the legacy staff table by its EM_* columns. Cached per process."""
+    if "t" in _STAFF_CACHE:
+        return _STAFF_CACHE["t"]
+    rows = await _q(
+        dbn,
+        "SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+        "WHERE COLUMN_NAME IN ('EM_CODE','EM_RATEM','EM_HRA','EM_CONV','EM_TOT')")
+    by_table: Dict[str, set] = {}
+    for r in rows:
+        by_table.setdefault(str(r.get("TABLE_NAME")), set()).add(
+            str(r.get("COLUMN_NAME")).upper())
+    best = None
+    for t, cols in by_table.items():
+        if len(cols) >= 4:
+            best = t
+            break
+    if not best:
+        _STAFF_CACHE["t"] = None
+        return None
+    cols = await _q(
+        dbn,
+        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+        "WHERE TABLE_NAME = %s", (best,))
+    names = {str(c.get("COLUMN_NAME")) for c in cols}
+    lower = {n.lower(): n for n in names}
+    firm_col = next((lower[k] for k in
+                     ("firmno", "firm_no", "em_firmno", "firmid", "firmid_fk",
+                      "fno", "em_firmid") if k in lower), None)
+    info = {"table": best, "columns": names, "firm_col": firm_col}
+    _STAFF_CACHE["t"] = info
+    logger.info("[legacy-sync] staff table discovered: %s (firm col: %s)",
+                best, firm_col)
+    return info
+
+
+async def _sync_staff_structures(dbn: str, firm_no: int, company_id: str,
+                                 links: Dict[str, str], totals: dict,
+                                 errors: List[str], unmatched: List[dict],
+                                 company_name: Optional[str]):
+    info = await _discover_staff_table(dbn)
+    if not info:
+        return
+    tbl, cols, firm_col = info["table"], info["columns"], info["firm_col"]
+    def has(c):  # noqa: E306
+        return c in cols
+    want = [c for c in ("EM_CODE", "EM_NAME", "EM_RATEM", "EM_HRA", "EM_CONV",
+                        "EM_TOT", "UAN_NO", "EM_ESINO", "EM_PFNO",
+                        "EM_RESINGDATE") if has(c)]
+    if "EM_CODE" not in want:
+        return
+    if firm_col:
+        rows = await _q(dbn, f"SELECT {', '.join(want)} FROM {tbl} "
+                             f"WHERE {firm_col} = %s", (firm_no,))
+    else:
+        rows = await _q(dbn, f"SELECT {', '.join(want)} FROM {tbl}")
+    if not rows:
+        return
+    totals["staff_rows"] = totals.get("staff_rows", 0) + len(rows)
+    hra_label = links.get("hra", "HRA")
+    conv_label = links.get("conveyance", links.get("conv", "CONVEYANCE"))
+    for r in rows:
+        try:
+            code = int(float(r.get("EM_CODE") or 0))
+        except (TypeError, ValueError):
+            code = 0
+        nm = str(r.get("EM_NAME") or "").strip()
+        basic = _f(r.get("EM_RATEM")) or 0.0
+        hra = _f(r.get("EM_HRA")) or 0.0
+        conv = _f(r.get("EM_CONV")) or 0.0
+        tot = _f(r.get("EM_TOT")) or (basic + hra + conv)
+        if basic <= 0 and tot <= 0:
+            continue
+        existing = None
+        if code > 0:
+            existing = await db.users.find_one(
+                {"company_id": company_id, "role": "employee",
+                 "employee_code": str(code)},
+                {"_id": 0, "user_id": 1, "compliance_gross": 1})
+        if existing is None and nm:
+            cands = await db.users.find(
+                {"company_id": company_id, "role": "employee",
+                 "name": {"$regex": f"^{_rx(nm)}$", "$options": "i"}},
+                {"_id": 0, "user_id": 1, "compliance_gross": 1}).to_list(2)
+            existing = cands[0] if len(cands) == 1 else None
+        if existing is None:
+            totals["staff_unmatched"] = totals.get("staff_unmatched", 0) + 1
+            if len(unmatched) < 2000:
+                unmatched.append({"firm_no": firm_no, "company": company_name,
+                                  "code": code or None, "name": nm,
+                                  "status": "STAFF (EM table)"})
+            continue
+        allow = []
+        if hra > 0:
+            allow.append({"head": hra_label, "amount": hra})
+        if conv > 0:
+            allow.append({"head": conv_label, "amount": conv})
+        updates: Dict[str, Any] = {
+            "basic_salary": basic, "compliance_basic": basic,
+            "compliance_gross": tot or (basic + hra + conv),
+            "salary_monthly": tot or (basic + hra + conv),
+            "compliance_salary_allowances": allow,
+            "hra_amount": None, "conv_amount": None, "basic_amount": None,
+            "salary_structure_compliance": None,
+            "salary_structure_synced_at": _now(),
+            "salary_structure_source": f"legacy_staff:{tbl}",
+        }
+        uan = str(r.get("UAN_NO") or "").strip()
+        if uan and uan != "0":
+            updates["uan_no"] = uan
+        esi = str(r.get("EM_ESINO") or "").strip()
+        if esi and esi != "0":
+            updates["esi_ip_no"] = esi
+        if round(float(existing.get("compliance_gross") or 0)) != round(float(updates["compliance_gross"])):
+            totals["gross_changed"] += 1
+        await db.users.update_one({"user_id": existing["user_id"]},
+                                  {"$set": updates})
+        totals["staff_updated"] = totals.get("staff_updated", 0) + 1
