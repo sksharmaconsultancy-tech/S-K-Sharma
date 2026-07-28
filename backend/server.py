@@ -22242,6 +22242,13 @@ app.include_router(annual_returns_router)
 from routes.factory_compliance import router as factory_router  # noqa: E402
 app.include_router(factory_router)
 
+# Iter 358 — Payroll Reports section (comparison, revision, CTC, F&F …).
+from routes.payroll_reports import router as payroll_reports_router  # noqa: E402
+app.include_router(payroll_reports_router)
+from routes.govt_audit_reports import govt_router, audit_router  # noqa: E402
+app.include_router(govt_router)
+app.include_router(audit_router)
+
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
 maybe_start_rpa_worker(app, db)

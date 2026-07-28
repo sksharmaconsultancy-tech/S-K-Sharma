@@ -1,0 +1,47 @@
+{
+  "summary": "Iter 358 — Reports Center (Payroll Reports + Government Registers + Audit Reports) fully tested end-to-end. Backend pytest 15/15 PASSED covering value correctness (net = gross - deductions, monthly_ctc = gross + er_pf + er_esic, salary-comparison gross_diff = gb - ga, ot-cost-analysis contains months 2026-04..07), govt registers (wage-register totals.net = Σrows.net; gratuity eligible='Yes' iff service_years >= 5), audit RBAC (super_admin allowed; company_admin blocked with 403; _source column present in payload), xlsx/pdf binary exports (increment.xlsx returns PK zip header 9KB+; deduction-register.pdf returns %PDF header 5KB+), and labour-stats salary-distribution + tenure-analysis both yield rows with share_pct, plus factory leave-with-wages returns a list-shaped payload. Frontend on Expo web preview: super admin login → sidebar 'Reports Center' → page renders three grouped chip rows (Payroll Reports 13, Government Registers 5, Audit Reports 7) plus 'Already Available (open page)' with 6 dashed links. Default report auto-loads a table. Setting Month=2026-07, clicking 'CTC Register' renders CTC table with Monthly/Annual CTC columns; 'Wage Register' renders wage table with 'Net Wages Paid'; 'User Activity Log' renders with Source column (0 entries — activity_log collection empty in dev DB, backend endpoint itself is healthy). PDF and XLSX exports via the header icons returned 200 with correct MIME (application/pdf, spreadsheetml.sheet).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Reports Center (RN Web, app-wide)", "issues": [
+        "Pre-existing console error 'Invalid style property of padding. Value is 0 8px' — RN Web StyleSheet does not accept shorthand padding; split into paddingVertical/paddingHorizontal (already reported iter 357).",
+        "Pre-existing deprecation warning: 'shadow*' style props → use 'boxShadow' (already reported iter 357)."
+      ]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter358_reports_center.py",
+    "/app/test_reports/pytest/iter358.xml",
+    "/app/test_reports/screens/iter358_rc_default.png",
+    "/app/test_reports/screens/iter358_rc_ctc.png",
+    "/app/test_reports/screens/iter358_rc_wage.png",
+    "/app/test_reports/screens/iter358_rc_audit.png"
+  ],
+  "action_items": [
+    "None blocking for Iter 358. (Optional: fix shorthand 'padding: 0 8px' RN Web console error — pre-existing global issue, not new to this iteration.)"
+  ],
+  "critical_code_review_comments": [
+    "payroll_reports.py:53 _prev_month uses '(m - 2) % 12 + 1' — clean and correct for month rollover; verified subtitle '2026-06 vs 2026-07' in salary-comparison call.",
+    "payroll_reports.py:90 change_pct guards against ga=0 (returns 0). Good.",
+    "payroll_reports.py:206 F&F gratuity_due uses '(dol - doj).days >= 5 * 365' — matches govt_audit_reports.py gratuity register (yrs >= 5). Consistent.",
+    "govt_audit_reports.py:142 gratuity accrued uses 'int(yrs)' — floors service years for accrual; standard Payment of Gratuity Act interpretation. Good.",
+    "govt_audit_reports.py:244 _audit_rows: '$or' query includes '{company_id: {$exists: False}}' so system-wide audit rows are included for super admin — reasonable; company scoping happens via header token.",
+    "reports-center.tsx:112 export URL uses raw qs which includes 'company_id=' (empty) for audit reports because 'if sel.group !== \"audit\"' short-circuits appending company_id; verified working. Good.",
+    "reports-center.tsx uses testID on Pressable chips consistently ('rc-<kind>'), enabling reliable e2e testing. Verified via playwright.",
+    "payroll_reports.py imports from routes.labour_statistics and routes.annual_returns — creates circular-import risk if either grows; consider moving _users/_run_rows/_fy_rows into utils/reports_common.py for cleanliness (non-blocking)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter358_reports_center.py (new, 15 tests)",
+    "/app/test_reports/pytest/iter358.xml (new)",
+    "/app/test_reports/iteration_358.json (new)"
+  ],
+  "success_rate": {"backend": "100% (15/15)", "frontend": "100% (all 4 chip flows + both exports verified)"},
+  "seed_data_creation": "None. Used existing Kankani (cmp_527fecdd7c) compliance salary runs 2026-04..2026-07 and existing user/activity collections. No test data written.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All Iter 358 Reports Center endpoints validated for value correctness (not just 200). Backend routers: /api/admin/payroll-reports/*, /api/admin/govt-registers/*, /api/admin/audit-reports/* — the first two accept super_admin/sub_admin/company_admin; audit-reports rejects company_admin (403). Frontend page /reports-center gated to those 3 roles. Reports needing FY param (fy_start_year) not month: salary-revision, increment, ex-gratia, incentive, arrear, full-and-final, ot-cost-analysis. Test emp 'User Activity Log' shows 0 entries in dev DB because activity_log collection is empty — this is data availability, not a bug (endpoint returns proper _source column & JSON envelope). To activate more login-history rows, trigger a few emp-code-login attempts. Super admin: sksharmaconsultancy@gmail.com / sharma123 via /api/auth/admin-password-login. Company admin (for RBAC 403 test): admin@kankani.local / Kankani@123.",
+  "rca_of_issue": "N/A — no bugs found."
+}

@@ -379,11 +379,94 @@ async def _welfare(company_id: str, month: str):
     return cols, rows, None
 
 
+async def _salary_distribution(company_id: str, month: str):
+    rows_by_uid = await _run_rows(company_id, month)
+    buckets = [(0, 10000), (10000, 15000), (15000, 21000), (21000, 30000),
+               (30000, 50000), (50000, 100000), (100000, 10**9)]
+    users = {u["user_id"]: u for u in await _users(company_id)}
+    agg = {b: {"n": 0, "gross": 0.0, "m": 0, "f": 0} for b in buckets}
+    for uid, r in rows_by_uid.items():
+        g = _f(r.get("gross_paid"))
+        if g <= 0:
+            continue
+        for b in buckets:
+            if b[0] <= g < b[1]:
+                agg[b]["n"] += 1
+                agg[b]["gross"] += g
+                gd = _gender(users.get(uid) or {})
+                if gd == "Male":
+                    agg[b]["m"] += 1
+                elif gd == "Female":
+                    agg[b]["f"] += 1
+                break
+    total = sum(a["n"] for a in agg.values()) or 1
+    out = []
+    for b in buckets:
+        a = agg[b]
+        lbl = (f"₹{b[0]:,} – ₹{b[1]:,}" if b[1] < 10**9 else f"₹{b[0]:,}+")
+        out.append({"salary_range": lbl, "employees": a["n"],
+                    "male": a["m"], "female": a["f"],
+                    "total_gross": round(a["gross"], 2),
+                    "avg_gross": round(a["gross"] / a["n"], 2) if a["n"] else 0,
+                    "share_pct": round(a["n"] * 100 / total, 1)})
+    cols = [("salary_range", "Salary Range"), ("employees", "Employees"),
+            ("male", "Male"), ("female", "Female"),
+            ("total_gross", "Total Gross"), ("avg_gross", "Avg Gross"),
+            ("share_pct", "Share %")]
+    totals = {"salary_range": "TOTAL"}
+    for k in ("employees", "male", "female", "total_gross"):
+        totals[k] = round(sum(r[k] for r in out), 2)
+    return cols, out, totals
+
+
+async def _tenure_analysis(company_id: str, month: str):
+    users = [u for u in await _users(company_id) if _active(u)]
+    today = date.today()
+    buckets = [("< 1 yr", 0, 1), ("1–3 yrs", 1, 3), ("3–5 yrs", 3, 5),
+               ("5–10 yrs", 5, 10), ("10+ yrs", 10, 999)]
+    agg = {b[0]: {"n": 0, "m": 0, "f": 0, "svc": 0.0} for b in buckets}
+    na = 0
+    for u in users:
+        doj = _dt(u.get("doj"))
+        if not doj:
+            na += 1
+            continue
+        yrs = (today - doj).days / 365
+        for lbl, lo, hi in buckets:
+            if lo <= yrs < hi:
+                a = agg[lbl]
+                a["n"] += 1
+                a["svc"] += yrs
+                g = _gender(u)
+                if g == "Male":
+                    a["m"] += 1
+                elif g == "Female":
+                    a["f"] += 1
+                break
+    total = sum(a["n"] for a in agg.values()) or 1
+    out = [{"tenure": lbl, "employees": agg[lbl]["n"],
+            "male": agg[lbl]["m"], "female": agg[lbl]["f"],
+            "avg_service_yrs": (round(agg[lbl]["svc"] / agg[lbl]["n"], 1)
+                                if agg[lbl]["n"] else 0),
+            "share_pct": round(agg[lbl]["n"] * 100 / total, 1)}
+           for lbl, _lo, _hi in buckets]
+    if na:
+        out.append({"tenure": "DOJ not set", "employees": na, "male": 0,
+                    "female": 0, "avg_service_yrs": 0, "share_pct": 0})
+    cols = [("tenure", "Tenure"), ("employees", "Employees"),
+            ("male", "Male"), ("female", "Female"),
+            ("avg_service_yrs", "Avg Service (yrs)"), ("share_pct", "Share %")]
+    return cols, out, None
+
+
 _KINDS = {
     "department": ("Department Labour Statistics Register", _dept_register),
     "category": ("Category Wise Manpower Register", _cat_register),
     "monthly-return": ("Monthly Labour Return", _monthly_return),
     "welfare": ("Labour Welfare & Compliance Statistics", _welfare),
+    "salary-distribution": ("Salary Distribution Analysis",
+                            _salary_distribution),
+    "tenure-analysis": ("Tenure Analysis", _tenure_analysis),
 }
 
 

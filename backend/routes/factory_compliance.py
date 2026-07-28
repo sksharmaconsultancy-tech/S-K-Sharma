@@ -107,6 +107,34 @@ _MASTER_KINDS: Dict[str, Dict[str, Any]] = {
         ("electricity_kwh", "Electricity (kWh)"), ("steam", "Steam"),
         ("compressed_air", "Compressed Air"), ("water", "Water"),
         ("fuel", "Fuel"), ("cost", "Cost")]},
+    # Iter 358 — additional Factories Act registers (user request)
+    "adult-worker": {"title": "Adult Worker Register (Form)", "fields": [
+        ("employee", "Worker Name"), ("employee_code", "Emp Code"),
+        ("father_name", "Father's Name"), ("dob", "Date of Birth"),
+        ("nature_of_work", "Nature of Work"), ("group", "Group"),
+        ("relay", "Relay/Shift"), ("certificate_no", "Fitness Cert. No."),
+        ("date_of_employment", "Date of Employment")]},
+    "dangerous-occurrence": {"title": "Dangerous Occurrence Register",
+                             "fields": [
+        ("date", "Date"), ("time", "Time"), ("department", "Department"),
+        ("description", "Description of Occurrence"),
+        ("persons_affected", "Persons Affected"),
+        ("cause", "Cause"), ("action_taken", "Action Taken"),
+        ("reported_to", "Reported To"), ("status", "Status")]},
+    "welfare": {"title": "Welfare Register", "fields": [
+        ("facility", "Facility (Creche/Restroom/Canteen/First-Aid…)"),
+        ("location", "Location"), ("in_charge", "In-charge"),
+        ("capacity", "Capacity"), ("last_inspection", "Last Inspection"),
+        ("remarks", "Remarks")]},
+    "canteen": {"title": "Canteen Register", "fields": [
+        ("date", "Date"), ("meals_served", "Meals Served"),
+        ("rate", "Rate"), ("subsidy", "Subsidy"),
+        ("contractor", "Canteen Contractor"), ("remarks", "Remarks")]},
+    "machine-operator": {"title": "Machine Operator Register", "fields": [
+        ("employee", "Operator Name"), ("employee_code", "Emp Code"),
+        ("machine", "Machine"), ("department", "Department"),
+        ("trained_on", "Trained On"), ("certificate", "Certificate"),
+        ("valid_till", "Valid Till"), ("remarks", "Remarks")]},
 }
 # due-date field per kind for the dashboard alerts
 _DUE_FIELDS = {
@@ -141,6 +169,8 @@ async def kinds(authorization: Optional[str] = Header(None)):
                 {"kind": "present-absent",
                  "title": "Present & Absent Report (employee-wise)"},
                 {"kind": "muster-roll", "title": "Daily Muster Roll Register"},
+                {"kind": "leave-with-wages",
+                 "title": "Leave with Wages Register"},
                 {"kind": "working-hours",
                  "title": "Working Hours & Overtime Register"},
                 {"kind": "strength", "title": "Factory Strength Register"}]}
@@ -277,6 +307,50 @@ async def _computed(kind: str, company_id: str, day: str, month: str):
                   "present_days": sum(r["present_days"] for r in rows),
                   "absent_days": sum(r["absent_days"] for r in rows)}
         return (f"Present & Absent Report — {day}", cols, rows, totals)
+    if kind == "leave-with-wages":
+        # Leave with Wages Register — from the leave collections when
+        # present, else derived from salary-run month days vs present days.
+        rows = []
+        for coll in ("leaves", "esic_leaves", "leave_requests"):
+            try:
+                docs = await db[coll].find(
+                    {"company_id": company_id},
+                    {"_id": 0}).sort("created_at", -1).to_list(2000)
+            except Exception:  # noqa: BLE001
+                docs = []
+            umap = {u["user_id"]: u for u in users}
+            for d in docs:
+                u = umap.get(d.get("user_id")) or {}
+                rows.append({
+                    "employee_code": u.get("employee_code")
+                    or d.get("employee_code"),
+                    "name": u.get("name") or d.get("employee_name"),
+                    "leave_type": d.get("leave_type") or d.get("type")
+                    or coll.replace("_", " "),
+                    "from_date": d.get("from_date") or d.get("start_date"),
+                    "to_date": d.get("to_date") or d.get("end_date"),
+                    "days": d.get("days") or d.get("total_days"),
+                    "status": d.get("status"),
+                })
+        if not rows:
+            run_rows = await _run_rows(company_id, month)
+            umap = {u["user_id"]: u for u in users}
+            for uid, r in run_rows.items():
+                lv = _f(r.get("month_days")) - _f(r.get("present_days")) - \
+                    _f(r.get("weekly_off_days"))
+                if lv > 0:
+                    u = umap.get(uid) or {}
+                    rows.append({"employee_code": u.get("employee_code"),
+                                 "name": u.get("name"),
+                                 "leave_type": "Derived (month days − "
+                                 "present − W/O)", "from_date": month,
+                                 "to_date": month, "days": round(lv, 1),
+                                 "status": "—"})
+        rows.sort(key=lambda r: str(r.get("employee_code") or "").zfill(8))
+        cols = [("employee_code", "Emp Code"), ("name", "Employee Name"),
+                ("leave_type", "Leave Type"), ("from_date", "From"),
+                ("to_date", "To"), ("days", "Days"), ("status", "Status")]
+        return (f"Leave with Wages Register — {month}", cols, rows, None)
     if kind == "muster-roll":
         recs = await db.attendance.find(
             {"company_id": company_id, "timestamp": {"$regex": f"^{day}"}},
