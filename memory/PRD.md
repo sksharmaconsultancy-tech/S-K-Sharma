@@ -2092,3 +2092,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Bulk Employee Correction (mode=actual): new "On/Off-Roll" select column (select:onroll,
   key is_onroll) — bulk shift Off-Roll → On-Roll. Payload model + generic update path handles
   bool. E2E verified flip False/True via API.
+
+## Iter 342b — Attendance Sheet Automation for Sub Super Admin
+- attendance-email.tsx: isSuper now includes sub_admin (Send now / Dry-run card + trigger guard);
+  isAdminish extended to company_admin (unchanged read access). Backend endpoints already
+  allowed sub_admin since Iter 332; sidebar already shows the menu.

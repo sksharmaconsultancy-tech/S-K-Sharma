@@ -59,8 +59,10 @@ function showMsg(msg: string, title = "Attendance Email") {
 export default function AttendanceEmailConfigScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const isSuper = user?.role === "super_admin";
-  const isAdminish = isSuper || user?.role === "sub_admin";
+  // Iter 342 (user request) — Sub Super Admins can run the Attendance
+  // Sheet Automation too (backend already allows sub_admin since Iter 332).
+  const isSuper = user?.role === "super_admin" || user?.role === "sub_admin";
+  const isAdminish = isSuper || user?.role === "company_admin";
 
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState<string>("");
