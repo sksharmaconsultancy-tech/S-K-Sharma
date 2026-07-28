@@ -2105,3 +2105,14 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - attendance-sheet.tsx: browser download names now include FIRM NAME slug:
   AttendanceSheets_{Firm}_{month}_AllGroups.zip, AttendanceSheet_{Firm}_{month}_{grp}.xlsx,
   MonthlyAttendance_{kind}_{Firm}_{month}.xlsx (a.download overrides server header on web).
+
+## Iter 343 — Publish OFFLINE legacy salary → ACTUAL Salary Process
+- routes/legacy_import.py: _legacy_row_to_actual mapper (rate→basic, w_basic, others→oth_allo,
+  less_adv+loan+other→adv, gross/net) + _publish_offline_actual_job (additive: skips months with
+  existing actual run) + POST /admin/legacy-salary/publish-actual (PublishBody).
+- Runs inserted into salary_runs (run_type "actual", attendance_source "legacy_import",
+  legacy_imported True, run_id asal_*). Undo deletes them too.
+- legacy-salary.tsx: purple "Publish months to ACTUAL Salary Process (off-roll)" button on the
+  offline tab; startPublish picks endpoint by kind (shared month-picker modal + job poller).
+- E2E verified: seed offline hist row → publish → visible in /admin/salary-runs + opens in
+  Actual screen (26 days / 21500 / 20950). Seed cleaned.

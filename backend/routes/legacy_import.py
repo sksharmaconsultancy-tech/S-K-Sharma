@@ -1376,12 +1376,16 @@ async def legacy_import_undo(body: UndoBody, authorization: Optional[str] = Head
         {"company_id": body.company_id, "firm_no": body.firm_no})
     runs = await db.compliance_salary_runs.delete_many(
         {"company_id": body.company_id, "legacy_imported": True})
+    # Iter 343 — UNDO also removes legacy-published ACTUAL salary runs.
+    act_runs = await db.salary_runs.delete_many(
+        {"company_id": body.company_id, "run_type": "actual",
+         "legacy_imported": True})
     lock = await db.legacy_imported_firms.delete_many({"firm_no": body.firm_no})
     return {"ok": True,
             "employees_deleted": u.deleted_count,
             "employees_unlocked": unlocked.modified_count,
             "salary_rows_deleted": h.deleted_count,
-            "published_runs_deleted": runs.deleted_count,
+            "published_runs_deleted": runs.deleted_count + act_runs.deleted_count,
             "unlocked": lock.deleted_count > 0}
 
 
@@ -1811,6 +1815,154 @@ class BulkLockBody(BaseModel):
     # Iter 308 (user) — lock MANY firms in one go from Legacy Salary Records.
     company_id: Optional[str] = None
     company_ids: Optional[List[str]] = None
+
+
+def _legacy_row_to_actual(r: dict, u: dict, sr: int) -> dict:
+    """Iter 343 (user request) — map a legacy OFFLINE salary history row to
+    the ACTUAL Salary Process row shape (salary_runs, run_type="actual")."""
+    less_epf = float(r.get("less_epf") or 0)
+    less_esi = float(r.get("less_esi") or 0)
+    adv = (float(r.get("less_adv") or 0) + float(r.get("less_loan") or 0)
+           + float(r.get("less_other") or 0))
+    tds = float(r.get("tds") or 0)
+    gross = float(r.get("gross") or 0)
+    net = float(r.get("net") or 0) or round(
+        gross - (less_epf + less_esi + adv + tds), 2)
+    return {
+        "sr": sr,
+        "user_id": r.get("user_id"),
+        "employee_code": str(r.get("emp_code") or "") or None,
+        "name": r.get("name"),
+        "father_name": u.get("father_name"),
+        "designation": u.get("designation"),
+        "salary_mode": u.get("salary_mode") or "daily",
+        "is_onroll": False,
+        "basic": float(r.get("rate") or 0),
+        "p_days": float(r.get("present_days") or 0),
+        "p_hours": float(r.get("work_hours") or 0),
+        "oth_allo": float(r.get("others") or 0),
+        "basic_salary": float(r.get("basic") or 0),
+        "w_basic_salary": float(r.get("w_basic") or 0),
+        "total_gross": round(gross, 2),
+        "epf": round(less_epf, 2),
+        "esi": round(less_esi, 2),
+        "adv": round(adv, 2),
+        "tds": round(tds, 2),
+        "net_pay": round(net, 2),
+        "legacy_imported": True,
+    }
+
+
+_ACT_TOTAL_KEYS = ("basic_salary", "w_basic_salary", "total_gross",
+                   "epf", "esi", "adv", "tds", "net_pay")
+
+
+async def _publish_offline_actual_job(job_id: str, company_id: str, admin_uid: str,
+                                      lock: bool = False,
+                                      only_months: Optional[List[str]] = None):
+    """Iter 343 (user request) — publish imported OFFLINE salary months as
+    ACTUAL Salary Process runs so the old database's off-roll salary shows
+    up in the new portal's Actual Salary options."""
+    async def _prog(**kw):
+        await db.legacy_import_jobs.update_one(
+            {"job_id": job_id}, {"$set": {**kw, "updated_at": _now()}})
+
+    published: List[str] = []
+    skipped: List[str] = []
+    errors: List[str] = []
+    try:
+        months = sorted(await db.legacy_salary_history.distinct(
+            "month", {"company_id": company_id, "kind": "offline"}))
+        if only_months:
+            keep = set(only_months)
+            months = [m for m in months if m in keep]
+        users: Dict[str, dict] = {}
+        async for u in db.users.find(
+                {"company_id": company_id, "role": "employee"},
+                {"_id": 0, "user_id": 1, "father_name": 1, "designation": 1,
+                 "salary_mode": 1}):
+            users[u["user_id"]] = u
+        for mon in months:
+            try:
+                # NEVER overwrite an existing ACTUAL run for that month —
+                # publishing is strictly additive.
+                if await db.salary_runs.find_one(
+                        {"company_id": company_id, "month": mon,
+                         "run_type": "actual"}, {"_id": 1}):
+                    skipped.append(mon)
+                    continue
+                hrows = await db.legacy_salary_history.find(
+                    {"company_id": company_id, "kind": "offline", "month": mon},
+                    {"_id": 0}).sort("name", 1).to_list(20000)
+                rows = [_legacy_row_to_actual(r, users.get(r.get("user_id")) or {}, i + 1)
+                        for i, r in enumerate(hrows)]
+                totals = {k: round(sum(float(r.get(k) or 0) for r in rows), 2)
+                          for k in _ACT_TOTAL_KEYS}
+                y, mn = int(mon[:4]), int(mon[5:7])
+                run = {
+                    "run_id": f"asal_{uuid.uuid4().hex[:12]}",
+                    "run_type": "actual",
+                    "month": mon, "year": y, "month_number": mn,
+                    "month_days": int(max((r.get("month_days") or 0) for r in hrows) or 30),
+                    "default_month_days": 30,
+                    "attendance_source": "legacy_import",
+                    "company_id": company_id,
+                    "employee_type": None,
+                    "is_onroll_filter": False,
+                    "group_id": None,
+                    "branch_name": None,
+                    "rows": rows,
+                    "totals": totals,
+                    "employees_count": len(rows),
+                    "legacy_imported": True,
+                    "finalized": bool(lock),
+                    **({"finalized_at": _now(), "finalized_by": admin_uid} if lock else {}),
+                    "generated_by": admin_uid,
+                    "generated_at": _now(),
+                }
+                await db.salary_runs.insert_one(run)
+                published.append(mon)
+            except Exception as ex:
+                if len(errors) < 40:
+                    errors.append(f"{mon}: {str(ex)[:120]}")
+            await _prog(totals={"published": len(published), "skipped": len(skipped),
+                                "months_total": len(months)})
+        await _prog(status="done", errors=errors, finished_at=_now(),
+                    totals={"published": len(published), "skipped": len(skipped),
+                            "months_total": len(months),
+                            "published_months": published[:60],
+                            "skipped_months": skipped[:60]})
+    except Exception as ex:
+        errors.append(str(ex)[:300])
+        await _prog(status="failed", errors=errors, finished_at=_now())
+
+
+@router.post("/admin/legacy-salary/publish-actual")
+async def legacy_publish_actual(
+    body: PublishBody, authorization: Optional[str] = Header(None),
+):
+    """Iter 343 (user request) — publish imported OFFLINE salary months into
+    the ACTUAL Salary Process (past runs)."""
+    admin = await _super(authorization)
+    months = await db.legacy_salary_history.distinct(
+        "month", {"company_id": body.company_id, "kind": "offline"})
+    if body.months:
+        months = [m for m in months if m in set(body.months)]
+    if not months:
+        raise HTTPException(
+            status_code=404,
+            detail="No imported OFFLINE salary months for this firm — run the "
+                   "Legacy Import Wizard first (or select at least one month).")
+    job_id = f"lpub_{uuid.uuid4().hex[:10]}"
+    await db.legacy_import_jobs.insert_one({
+        "job_id": job_id, "type": "publish_actual", "status": "running",
+        "company_id": body.company_id, "totals": {}, "errors": [],
+        "started_by": admin.get("user_id"), "started_at": _now(),
+    })
+    asyncio.get_event_loop().create_task(
+        _publish_offline_actual_job(job_id, body.company_id, admin.get("user_id"),
+                                    lock=body.lock, only_months=body.months))
+    return {"job_id": job_id, "months": len(months)}
 
 
 @router.post("/admin/legacy-salary/publish-compliance")

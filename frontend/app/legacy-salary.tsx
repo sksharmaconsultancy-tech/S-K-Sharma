@@ -50,7 +50,12 @@ export default function LegacySalaryScreen() {
   const startPublish = async () => {
     setPubStep(0); setPubBusy(true); setPubJob(null);
     try {
-      const r = await api<any>("/admin/legacy-salary/publish-compliance", {
+      // Iter 343 (user request) — OFFLINE months publish into the ACTUAL
+      // Salary Process; ONLINE months into the Compliance Salary Process.
+      const ep = kind === "offline"
+        ? "/admin/legacy-salary/publish-actual"
+        : "/admin/legacy-salary/publish-compliance";
+      const r = await api<any>(ep, {
         method: "POST",
         body: {
           company_id: cid, lock: false,
@@ -290,6 +295,18 @@ export default function LegacySalaryScreen() {
                   </Pressable>
                   {lockMsg ? <Text style={[st.sub, { color: "#16a34a", fontWeight: "700" }]}>{lockMsg}</Text> : null}
                 </>
+              ) : null}
+              {kind === "offline" ? (
+                <Pressable
+                  style={[st.pubBtn, { backgroundColor: "#5B21B6" }, pubBusy && { opacity: 0.5 }]}
+                  disabled={pubBusy}
+                  onPress={openPublish}
+                >
+                  <Ionicons name="cloud-upload-outline" size={15} color="#fff" />
+                  <Text style={st.pubBtnTxt}>
+                    Publish months to ACTUAL Salary Process (off-roll)
+                  </Text>
+                </Pressable>
               ) : null}
               {pubJob ? (
                 <View style={{ marginTop: 8 }}>
