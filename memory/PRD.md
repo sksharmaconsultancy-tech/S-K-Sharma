@@ -2304,3 +2304,10 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   corruption incident — parallel search_replace edits to same file clobbered each other
   (trailing garbage + lost edit); fixed sequentially; NEVER batch-edit same file in parallel.
   Deploy: deploy_vps_iter364.sh (temp_bundle kind=script→364).
+- Iter 365 (user request): DAILY MongoDB BACKUP on VPS. deploy_vps_iter365.sh is a
+  lightweight one-time SETUP script (no bundle download): writes
+  /home/sksharma/backup_mongo_daily.sh (mongodump --archive --gzip to
+  /home/sksharma/backups/mongo_YYYY-MM-DD.gz + env snapshot + log), installs cron 0 2 * * *,
+  rotation keeps 14 daily + 1st-of-month for 185 days, runs first backup immediately to
+  verify. Pairs with restore_actual_salary_from_backup.sh (Iter 364). temp_bundle
+  kind=script→365.
