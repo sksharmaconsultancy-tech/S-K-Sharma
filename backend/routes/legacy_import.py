@@ -21,6 +21,7 @@ Endpoints (super_admin):
 """
 import asyncio
 import difflib
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -2388,6 +2389,168 @@ async def legacy_heads_compare(authorization: Optional[str] = Header(None)):
 # allowance head to a portal allowance label. The ALL-FIRMS sync applies
 # these links (renames heads + enables the linked label) on the next run.
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Iter 362 (user request) — ACTUAL SALARY COMPARISON: Old DB vs Portal.
+# Side-by-side audit of Basic / Salary 1-3 / Days 1-3 for every employee,
+# per mapped firm, with mismatch status + Excel/PDF export.
+# ---------------------------------------------------------------------------
+
+def _struct_vals(struct: Optional[List[dict]]) -> Dict[str, float]:
+    """salary_structure_actual → flat {basic, s1, d1, s2, d2, s3, d3}."""
+    out = {"basic": 0.0, "s1": 0.0, "d1": 0, "s2": 0.0, "d2": 0,
+           "s3": 0.0, "d3": 0}
+    for r in struct or []:
+        if not isinstance(r, dict):
+            continue
+        h = str(r.get("head") or "").strip().lower()
+        if h.startswith("basic"):
+            out["basic"] = float(r.get("amount") or 0)
+        else:
+            m0 = re.fullmatch(r"salary\s*([123])", h)
+            if m0:
+                i = m0.group(1)
+                out[f"s{i}"] = float(r.get("amount") or 0)
+                out[f"d{i}"] = int(float(r.get("working_days") or 0))
+    return out
+
+
+_CMP_FIELDS = [("basic", "Basic"), ("s1", "Salary 1"), ("d1", "Days 1"),
+               ("s2", "Salary 2"), ("d2", "Days 2"),
+               ("s3", "Salary 3"), ("d3", "Days 3")]
+
+
+async def _actual_salary_compare_data(firm_no: Optional[int]) -> List[dict]:
+    dbn = await _dbname()
+    q0: Dict[str, Any] = {}
+    if firm_no is not None:
+        q0["firm_no"] = firm_no
+    maps = await db.legacy_imported_firms.find(q0, {"_id": 0}).to_list(2000)
+    firms_out: List[dict] = []
+    for mp in maps:
+        fn, cid = mp.get("firm_no"), mp.get("company_id")
+        if fn is None or not cid:
+            continue
+        co = await db.companies.find_one(
+            {"company_id": cid}, {"_id": 0, "name": 1})
+        if not co:
+            continue
+        by_code: Dict[str, dict] = {}
+        by_name: Dict[str, dict] = {}
+        async for u in db.users.find(
+                {"company_id": cid, "role": "employee"},
+                {"_id": 0, "employee_code": 1, "name": 1,
+                 "salary_structure_actual": 1}):
+            c0 = str(u.get("employee_code") or "").lstrip("0") \
+                or str(u.get("employee_code") or "")
+            if c0:
+                by_code[c0.lower()] = u
+            if u.get("name"):
+                by_name[str(u["name"]).strip().lower()] = u
+        try:
+            emps = await _legacy_employees(dbn, fn)
+        except Exception as e:  # noqa: BLE001
+            firms_out.append({"firm_no": fn, "company_id": cid,
+                              "company_name": co.get("name"),
+                              "error": str(e)[:200], "rows": []})
+            continue
+        rows: List[dict] = []
+        cnt = {"match": 0, "diff": 0, "unmatched": 0}
+        for e in emps:
+            nm = str(e.get("EmpName") or "").strip()
+            code = str(e.get("EmpCode") or "").strip() \
+                if (e.get("EmpCode") or 0) else ""
+            old = _struct_vals(_actual_salary_struct(e))
+            u = by_code.get((code.lstrip("0") or code).lower()) if code \
+                else None
+            if u is None and nm:
+                u = by_name.get(nm.lower())
+            if u is None:
+                cnt["unmatched"] += 1
+                rows.append({"code": code, "name": nm, "old": old,
+                             "portal": None, "status": "NOT IN PORTAL",
+                             "diff_fields": []})
+                continue
+            por = _struct_vals(u.get("salary_structure_actual"))
+            diffs = [lb for k, lb in _CMP_FIELDS
+                     if round(float(old[k]), 2) != round(float(por[k]), 2)]
+            status = "DIFF" if diffs else "MATCH"
+            cnt["diff" if diffs else "match"] += 1
+            rows.append({"code": code or u.get("employee_code"),
+                         "name": nm or u.get("name"), "old": old,
+                         "portal": por, "status": status,
+                         "diff_fields": diffs})
+        rows.sort(key=lambda r: ({"DIFF": 0, "NOT IN PORTAL": 1,
+                                  "MATCH": 2}[r["status"]],
+                                 str(r["name"]).lower()))
+        firms_out.append({"firm_no": fn, "company_id": cid,
+                          "company_name": co.get("name"),
+                          "total": len(rows), **cnt, "rows": rows})
+    firms_out.sort(key=lambda f: str(f.get("company_name") or "").lower())
+    return firms_out
+
+
+@router.get("/admin/legacy-import/actual-salary-compare")
+async def legacy_actual_salary_compare(
+        firm_no: Optional[int] = None, only_diff: bool = False,
+        authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin"])
+    firms = await _actual_salary_compare_data(firm_no)
+    if only_diff:
+        for f in firms:
+            f["rows"] = [r for r in f["rows"] if r["status"] != "MATCH"]
+    # cap payload per firm for the UI (exports carry everything)
+    for f in firms:
+        if len(f.get("rows") or []) > 500:
+            f["rows_truncated"] = len(f["rows"]) - 500
+            f["rows"] = f["rows"][:500]
+    return {"firms": firms}
+
+
+@router.get("/admin/legacy-import/actual-salary-compare.{fmt}")
+async def legacy_actual_salary_compare_export(
+        fmt: str, firm_no: Optional[int] = None,
+        authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin"])
+    if fmt not in ("xlsx", "pdf"):
+        raise HTTPException(status_code=404, detail="Use .xlsx or .pdf")
+    from fastapi.responses import StreamingResponse
+    from utils.register_export import register_pdf, register_xlsx
+    firms = await _actual_salary_compare_data(firm_no)
+    columns = [{"key": "firm", "label": "Firm"},
+               {"key": "code", "label": "Code"},
+               {"key": "name", "label": "Employee Name"}]
+    for k, lb in _CMP_FIELDS:
+        columns.append({"key": f"old_{k}", "label": f"Old {lb}"})
+        columns.append({"key": f"por_{k}", "label": f"Portal {lb}"})
+    columns += [{"key": "status", "label": "Status"},
+                {"key": "diffs", "label": "Mismatched Fields"}]
+    rows = []
+    for f in firms:
+        for r in f.get("rows") or []:
+            row = {"firm": f.get("company_name"), "code": r["code"],
+                   "name": r["name"], "status": r["status"],
+                   "diffs": ", ".join(r.get("diff_fields") or [])}
+            for k, _lb in _CMP_FIELDS:
+                row[f"old_{k}"] = (r.get("old") or {}).get(k, "")
+                row[f"por_{k}"] = (r.get("portal") or {}).get(k, "") \
+                    if r.get("portal") else ""
+            rows.append(row)
+    title = "Actual Salary Comparison — Old DB vs Portal"
+    sub = f"Generated {datetime.now():%d-%m-%Y} · Basic + Salary 1-3 + Days 1-3"
+    if fmt == "xlsx":
+        buf = register_xlsx(title, sub, columns, rows, None)
+        mt = ("application/vnd.openxmlformats-officedocument"
+              ".spreadsheetml.sheet")
+    else:
+        buf = register_pdf(title, sub, columns, rows, None, None)
+        mt = "application/pdf"
+    return StreamingResponse(buf, media_type=mt, headers={
+        "Content-Disposition":
+        f'attachment; filename="actual_salary_comparison.{fmt}"'})
+
 
 async def _head_links_for(company_id: str) -> Dict[str, str]:
     """old_head(lower) → portal label. Firm-specific overrides global (*)."""

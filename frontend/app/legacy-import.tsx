@@ -14,7 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Stack } from "expo-router";
 
-import { api } from "@/src/api/client";
+import { api, apiBinary } from "@/src/api/client";
 import { confirmYesNo } from "@/src/utils/confirm";
 import { colors, radius, spacing } from "@/src/theme";
 
@@ -235,6 +235,11 @@ export default function LegacyImportScreen() {
   const [heads, setHeads] = useState<any[] | null>(null);
   const [headsBusy, setHeadsBusy] = useState(false);
   const [headsOpen, setHeadsOpen] = useState<string | null>(null);
+  // Iter 362 (user request) — Actual Salary Comparison (Old DB vs Portal).
+  const [asc, setAsc] = useState<any[] | null>(null);
+  const [ascBusy, setAscBusy] = useState(false);
+  const [ascOpen, setAscOpen] = useState<number | null>(null);
+  const [ascExpBusy, setAscExpBusy] = useState("");
   const loadHeads = async () => {
     setHeadsBusy(true); setErr("");
     try {
@@ -242,6 +247,32 @@ export default function LegacyImportScreen() {
       setHeads(r.firms || []);
     } catch (e: any) { setErr(e?.message || "Heads compare failed"); }
     finally { setHeadsBusy(false); }
+  };
+
+  // Iter 362 — Actual Salary Comparison (Old DB vs Portal).
+  const loadAsc = async () => {
+    setAscBusy(true); setErr("");
+    try {
+      const r = await api<any>("/admin/legacy-import/actual-salary-compare");
+      setAsc(r.firms || []);
+    } catch (e: any) { setErr(e?.message || "Salary compare failed"); }
+    finally { setAscBusy(false); }
+  };
+  const ascExport = async (fmt: "xlsx" | "pdf") => {
+    setAscExpBusy(fmt);
+    try {
+      const res = await apiBinary(
+        `/admin/legacy-import/actual-salary-compare.${fmt}`);
+      if (Platform.OS === "web" && res.webBlobUrl) {
+        const a = document.createElement("a");
+        a.href = res.webBlobUrl;
+        a.download = `actual_salary_comparison.${fmt}`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 30000);
+      }
+    } catch (e: any) {
+      if (Platform.OS === "web") globalThis.alert(e?.message || "Export failed");
+    } finally { setAscExpBusy(""); }
   };
 
   // Iter 349 — save a manual head interlink (old head → portal label).
@@ -671,6 +702,89 @@ export default function LegacyImportScreen() {
                 <Ionicons name="sync-outline" size={16} color="#fff" />
                 <Text style={st.actTxt}>Sync Salary Structures — ALL Firms (from Old DB)</Text>
               </Pressable>
+              {/* Iter 362 (user request) — Actual Salary audit report. */}
+              <Pressable
+                style={[st.actBtn, { backgroundColor: "#15803D", opacity: ascBusy ? 0.5 : 1 }]}
+                disabled={ascBusy}
+                onPress={loadAsc}
+                testID="li-actual-salary-compare"
+              >
+                <Ionicons name="git-compare-outline" size={16} color="#fff" />
+                <Text style={st.actTxt}>
+                  {ascBusy ? "Comparing salaries…"
+                    : "Actual Salary Comparison — Old DB vs Portal (Basic + Salary 1-3 + Days)"}
+                </Text>
+              </Pressable>
+              {asc ? (
+                <View style={{ gap: 6 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <Text style={st.firmMeta}>
+                      {asc.length} firm(s) · 🟢 match · 🟠 different · 🔴 not in portal.
+                      Tap a firm to see the mismatched employees.
+                    </Text>
+                    <Pressable onPress={() => ascExport("xlsx")} disabled={!!ascExpBusy} hitSlop={8} testID="li-asc-xlsx">
+                      {ascExpBusy === "xlsx" ? <ActivityIndicator size="small" /> : (
+                        <Text style={[st.firmMeta, { color: "#0E7490", fontWeight: "800" }]}>⬇ Excel</Text>
+                      )}
+                    </Pressable>
+                    <Pressable onPress={() => ascExport("pdf")} disabled={!!ascExpBusy} hitSlop={8} testID="li-asc-pdf">
+                      {ascExpBusy === "pdf" ? <ActivityIndicator size="small" /> : (
+                        <Text style={[st.firmMeta, { color: "#B91C1C", fontWeight: "800" }]}>⬇ PDF</Text>
+                      )}
+                    </Pressable>
+                  </View>
+                  {asc.map((f: any) => {
+                    const open = ascOpen === f.firm_no;
+                    const bad = (f.rows || []).filter((r: any) => r.status !== "MATCH");
+                    return (
+                      <View key={`asc-${f.firm_no}`} style={st.prevRow}>
+                        <Pressable onPress={() => setAscOpen(open ? null : f.firm_no)}>
+                          <Text style={st.firmName}>
+                            {open ? "▼" : "▶"} {f.company_name}{" "}
+                            <Text style={st.firmMeta}>
+                              {f.error
+                                ? `(⚠ ${f.error})`
+                                : `(${f.total} employees · 🟢 ${f.match} · 🟠 ${f.diff} · 🔴 ${f.unmatched}${f.diff + f.unmatched === 0 ? " · ✅ ALL MATCH" : ""})`}
+                            </Text>
+                          </Text>
+                        </Pressable>
+                        {open ? (
+                          <View style={{ marginTop: 6, gap: 4 }}>
+                            {bad.length === 0 ? (
+                              <Text style={[st.firmMeta, { color: "#15803D" }]}>
+                                ✅ Every employee&apos;s Basic + Salary 1-3 + Days 1-3 matches the old DB.
+                              </Text>
+                            ) : bad.slice(0, 150).map((r: any, ri: number) => (
+                              <View key={ri} style={{ borderLeftWidth: 3, borderLeftColor: r.status === "DIFF" ? "#B45309" : "#B91C1C", paddingLeft: 8, paddingVertical: 2 }}>
+                                <Text style={[st.firmMeta, { fontWeight: "800", color: r.status === "DIFF" ? "#B45309" : "#B91C1C" }]}>
+                                  {r.code ? `${r.code} · ` : ""}{r.name} — {r.status}
+                                  {r.diff_fields?.length ? ` (${r.diff_fields.join(", ")})` : ""}
+                                </Text>
+                                <Text style={st.firmMeta}>
+                                  Old DB: Basic {r.old?.basic ?? 0} · S1 {r.old?.s1 ?? 0}/{r.old?.d1 ?? 0}d · S2 {r.old?.s2 ?? 0}/{r.old?.d2 ?? 0}d · S3 {r.old?.s3 ?? 0}/{r.old?.d3 ?? 0}d
+                                </Text>
+                                {r.portal ? (
+                                  <Text style={st.firmMeta}>
+                                    Portal: Basic {r.portal.basic} · S1 {r.portal.s1}/{r.portal.d1}d · S2 {r.portal.s2}/{r.portal.d2}d · S3 {r.portal.s3}/{r.portal.d3}d
+                                  </Text>
+                                ) : (
+                                  <Text style={[st.firmMeta, { color: "#B91C1C" }]}>No matching portal employee (by code or name)</Text>
+                                )}
+                              </View>
+                            ))}
+                            {bad.length > 150 ? (
+                              <Text style={st.firmMeta}>…and {bad.length - 150} more — use the Excel export for the full list.</Text>
+                            ) : null}
+                            {f.rows_truncated ? (
+                              <Text style={st.firmMeta}>({f.rows_truncated} matching rows not shown — exports carry everything)</Text>
+                            ) : null}
+                          </View>
+                        ) : null}
+                      </View>
+                    );
+                  })}
+                </View>
+              ) : null}
               {/* Iter 348 (user request) — Old DB vs Portal heads viewer. */}
               <Pressable
                 style={[st.actBtn, { backgroundColor: "#7C3AED", opacity: headsBusy ? 0.5 : 1 }]}

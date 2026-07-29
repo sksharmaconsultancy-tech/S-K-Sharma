@@ -2276,3 +2276,14 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   salary_structure_actual from old DB with new live counter totals.actual_salary_synced.
   Deploy: deploy_vps_iter361.sh (temp_bundle kind=script → 361). User must run the ALL-Firms
   sync on VPS to apply.
+- Iter 362 (potential-improvement accepted): ACTUAL SALARY COMPARISON Old DB vs Portal.
+  legacy_import.py: _struct_vals (salary_structure_actual → flat basic/s1-3/d1-3, handles
+  "Basic"/"Basic Salary" heads), _CMP_FIELDS, _actual_salary_compare_data (per mapped firm:
+  legacy rows via _actual_salary_struct vs portal users matched by code→name; status MATCH/
+  DIFF(+field list)/NOT IN PORTAL; per-firm counters; rows sorted DIFF first, capped 500 for
+  UI). GET /admin/legacy-import/actual-salary-compare[?firm_no&only_diff] + .xlsx/.pdf export
+  (register_xlsx/pdf, Old vs Portal columns for all 7 fields). Frontend legacy-import.tsx:
+  green button (testID li-actual-salary-compare) + per-firm expandable 🟢🟠🔴 summary showing
+  only problem rows + ⬇ Excel/⬇ PDF (apiBinary). Endpoints return clean 503 locally (legacy
+  MS SQL only on VPS); comparison/mapping logic unit-tested. Deploy: deploy_vps_iter362.sh
+  (temp_bundle kind=script → 362).
