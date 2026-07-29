@@ -2291,3 +2291,16 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   legacy_import.py _emp_doc_fields salary group: _pickcol(BioCode/BiometricCode/MachineCode),
   "72.0"→"72", skips empty/0; "bio_code" added to _SYNC_SALARY_KEYS; sync counter
   bio_codes_synced. Unit-tested. Deploy: deploy_vps_iter363.sh (temp_bundle kind=script→363).
+- Iter 364 (user request): ROLLBACK of Iter 361 Actual Salary auto-fetch. legacy_import.py:
+  removed doc["salary_structure_actual"] from _emp_doc_fields salary group, removed
+  "salary_structure_actual" from _SYNC_SALARY_KEYS, removed actual_salary_synced counter.
+  KEPT: bio_code sync (Iter 363), read-only Actual Salary Comparison report (Iter 362),
+  _actual_salary_struct helper (used by comparison). Compliance mapping re-verified against
+  user spec — matches exactly (Iter 354): BasicSalary→Basic, PFBasicSalary→PF Basic,
+  GrossPay→Gross, Earn1-10→HRA/CONV./OTH. ALLOW./OVER TIME/INCENTIVE/OTHER MISC.ALLOWANCE/
+  BONUS/MEDICAL ALLOWANCES/FOOD ALLOWANCES/FOOD ALLOWANCE. DATA RESTORE: new
+  /app/restore_actual_salary_from_backup.sh (mongorestore users→temp DB, restores ONLY
+  salary_structure_actual per user_id from pre-sync backup, then drops temp). NOTE: file
+  corruption incident — parallel search_replace edits to same file clobbered each other
+  (trailing garbage + lost edit); fixed sequentially; NEVER batch-edit same file in parallel.
+  Deploy: deploy_vps_iter364.sh (temp_bundle kind=script→364).

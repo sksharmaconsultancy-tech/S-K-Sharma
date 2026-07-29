@@ -642,11 +642,11 @@ def _emp_doc_fields(
         })
         if allow:
             doc["compliance_salary_allowances"] = allow
-        # Iter 361 (user request) — OFFLINE/ACTUAL salary structure:
-        # Salary → Basic Salary, Salary1-3 + Days1-3 → tier rows.
-        struct = _actual_salary_struct(e)
-        if struct:
-            doc["salary_structure_actual"] = struct
+        # Iter 364 ROLLBACK (user request): the Iter 361 auto-fetch of
+        # salary_structure_actual (Salary/Salary1-3/Days1-3) was removed —
+        # import/sync must NOT touch employees' Actual Salary anymore.
+        # (_actual_salary_struct is still used by the read-only
+        # Actual Salary Comparison report.)
         # Iter 363 (user request) — OLD DB BioCode → Bio Code (device
         # enrolment no.) on the portal employee.
         bio = _pickcol(e, "BioCode", "BiometricCode", "MachineCode")
@@ -2161,11 +2161,9 @@ async def legacy_lock_compliance(
 _SYNC_SALARY_KEYS = ["basic_salary", "compliance_basic", "pf_basic",
                      "compliance_gross", "salary_monthly",
                      "compliance_salary_allowances",
-                     # Iter 361 — Offline/Actual salary (Salary, Salary1-3,
-                     # Days1-3 from the old DB EmployeeMaster).
-                     "salary_structure_actual",
                      # Iter 363 — OLD DB BioCode → Bio Code (device
-                     # enrolment no.).
+                     # enrolment no.).  Iter 364: "salary_structure_actual"
+                     # was ROLLED BACK — sync must not touch Actual Salary.
                      "bio_code"]
 
 
@@ -2176,7 +2174,6 @@ async def _sync_structures_job(job_id: str, admin_uid: str):
 
     totals = {"firms_synced": 0, "employees_updated": 0,
               "employees_unmatched": 0, "gross_changed": 0,
-              "actual_salary_synced": 0,
               "allowance_labels_enabled": 0, "allowance_heads_created": 0}
     errors: List[str] = []
     unmatched: List[dict] = []  # Iter 349 — WHO didn't match (firm/code/name)
@@ -2290,8 +2287,6 @@ async def _sync_structures_job(job_id: str, admin_uid: str):
                             totals["codes_corrected"] = \
                                 totals.get("codes_corrected", 0) + 1
                     updates["salary_structure_synced_at"] = _now()
-                    if "salary_structure_actual" in updates:
-                        totals["actual_salary_synced"] += 1
                     if "bio_code" in updates:
                         totals["bio_codes_synced"] = \
                             totals.get("bio_codes_synced", 0) + 1
