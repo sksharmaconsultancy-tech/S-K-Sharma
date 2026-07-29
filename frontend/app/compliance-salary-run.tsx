@@ -310,6 +310,13 @@ export default function ComplianceSalaryRunScreen() {
   // Iter 182 — instant employee search + audit log
   const [empSearch, setEmpSearch] = useState("");
   const empSearchRef = useRef<TextInput | null>(null);
+  // Iter 380 (user accepted improvement) — one-click filter that shows
+  // ONLY the employees whose Freeze Salary differs from the calculated
+  // Gross (imported/frozen runs).
+  const [onlyMismatch, setOnlyMismatch] = useState(false);
+  const rowIsMismatch = (r: any) =>
+    r.imported_gross != null &&
+    Math.abs(Number(r.imported_gross) - Number(r.gross_paid || 0)) > 0.5;
   // Iter 183 — Branch / Dept / Contractor filter chips.
   const [gridFilters, setGridFilters] = useState<GridFilters>(GRID_FILTER_DEFAULT);
   // Iter 306 (user #8) — tap a row to HIGHLIGHT it across the wide grid.
@@ -356,6 +363,8 @@ export default function ComplianceSalaryRunScreen() {
   const sortRows = (rows: CompRow[]) => {
     // Iter 183 — branch/dept/contractor chips filter first…
     let base = rows.filter((r) => rowMatchesFilters(r, gridFilters));
+    // Iter 380 — "Show only mismatches" (Freeze ≠ Gross) toggle.
+    if (onlyMismatch) base = base.filter(rowIsMismatch);
     // …then Iter 182 — instant search filters the grid before sorting.
     const q = empSearch.trim().toLowerCase();
     if (q) {
@@ -2163,6 +2172,30 @@ export default function ComplianceSalaryRunScreen() {
                   <Text style={{ fontSize: 11, fontWeight: "700", color: sortBy === val ? "#fff" : colors.onSurfaceSecondary }}>{lab}</Text>
                 </Pressable>
               ))}
+              {/* Iter 380 (user accepted improvement) — show only the
+                  employees where Freeze Salary ≠ Gross. */}
+              {hasFrz ? (() => {
+                const n = (run.rows || []).filter(rowIsMismatch).length;
+                return (
+                  <Pressable
+                    onPress={() => setOnlyMismatch((v) => !v)}
+                    style={{
+                      flexDirection: "row", alignItems: "center", gap: 4,
+                      paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, borderWidth: 1,
+                      borderColor: onlyMismatch ? "#DC2626" : n > 0 ? "#FCA5A5" : colors.border,
+                      backgroundColor: onlyMismatch ? "#DC2626" : n > 0 ? "#FEF2F2" : colors.surface,
+                    }}
+                    testID="comp-only-mismatch"
+                  >
+                    <Ionicons name="warning-outline" size={12}
+                      color={onlyMismatch ? "#fff" : n > 0 ? "#DC2626" : colors.onSurfaceTertiary} />
+                    <Text style={{ fontSize: 11, fontWeight: "800",
+                      color: onlyMismatch ? "#fff" : n > 0 ? "#B91C1C" : colors.onSurfaceSecondary }}>
+                      Mismatch only ({n})
+                    </Text>
+                  </Pressable>
+                );
+              })() : null}
             </View>
 
             {/* Iter 255 (user request) — Dept chips hidden on the

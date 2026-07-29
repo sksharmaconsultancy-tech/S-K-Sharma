@@ -2524,3 +2524,12 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   header/cells, totals aligned. Freeze columns render only on imported
   runs (hasFrz) — unchanged.
   Deploy: deploy_vps_iter379.sh (temp_bundle→379, includes 370-378).
+- Iter 380 (user accepted improvement: "Mismatch only" filter):
+  compliance-salary-run.tsx: onlyMismatch state + rowIsMismatch(r)
+  (|imported_gross - gross_paid| > 0.5). sortRows filters when active.
+  Chip "⚠ Mismatch only (n)" beside Sort buttons, rendered only when
+  hasFrz; red-filled when active, red-outline when n>0.
+  Verified: patched July run rows with imported_gross (2 diffs) → chip
+  showed (2), click filtered grid to the 2 red-highlighted employees.
+  DB patch reverted after test.
+  Deploy: deploy_vps_iter380.sh (temp_bundle→380, includes 370-379).
