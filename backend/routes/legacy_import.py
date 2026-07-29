@@ -534,6 +534,48 @@ def _d(v: Any) -> Optional[str]:
     return s[:10] if len(s) >= 10 and s[4] == "-" else None
 
 
+def _pickcol(e: dict, *names: str) -> Any:
+    """Case-insensitive column lookup on a legacy row."""
+    low = {str(k).lower(): k for k in e.keys()}
+    for n in names:
+        k = low.get(n.lower())
+        if k is not None and e.get(k) is not None:
+            return e.get(k)
+    return None
+
+
+def _actual_salary_struct(e: dict) -> Optional[List[dict]]:
+    """Iter 361 (USER-SPECIFIED mapping) — Offline/Actual salary structure
+    straight from the EmployeeMaster row:
+        Salary   → Basic Salary (₹)
+        Salary1  → Salary 1        Days1 → Salary 1 — Working Days
+        Salary2  → Salary 2        Days2 → Salary 2 — Working Days
+        Salary3  → Salary 3        Days3 → Salary 3 — Working Days
+    Returns the exact ``salary_structure_actual`` shape the Employee form
+    saves (Basic row + Salary 1/2/3 tier rows), or None when the legacy
+    row carries no actual-salary data."""
+    base = _f(_pickcol(e, "Salary"))
+    mode = ("daily" if str(_pickcol(e, "PayBasis") or "").strip().upper()
+            == "DAILY" else "monthly")
+    struct: List[dict] = [{"head": "Basic", "amount": base or 0.0,
+                           "rate_type": mode}]
+    any_tier = False
+    for i in (1, 2, 3):
+        amt = _f(_pickcol(e, f"Salary{i}", f"Salary_{i}", f"Sal{i}"))
+        dv = _pickcol(e, f"Days{i}", f"Day{i}", f"Days_{i}", f"NoOfDays{i}")
+        try:
+            days = int(float(dv)) if dv is not None else 0
+        except (TypeError, ValueError):
+            days = 0
+        if amt or days:
+            any_tier = True
+        struct.append({"head": f"Salary {i}", "amount": amt or 0.0,
+                       "working_days": days})
+    if not base and not any_tier:
+        return None
+    return struct
+
+
 def _emp_doc_fields(
     e: dict, groups: List[str],
     earn_names: Optional[Dict[str, str]] = None,
@@ -599,6 +641,11 @@ def _emp_doc_fields(
         })
         if allow:
             doc["compliance_salary_allowances"] = allow
+        # Iter 361 (user request) — OFFLINE/ACTUAL salary structure:
+        # Salary → Basic Salary, Salary1-3 + Days1-3 → tier rows.
+        struct = _actual_salary_struct(e)
+        if struct:
+            doc["salary_structure_actual"] = struct
     if "status" in groups:
         if e.get("IsResign"):
             doc.update({
@@ -2103,7 +2150,10 @@ async def legacy_lock_compliance(
 
 _SYNC_SALARY_KEYS = ["basic_salary", "compliance_basic", "pf_basic",
                      "compliance_gross", "salary_monthly",
-                     "compliance_salary_allowances"]
+                     "compliance_salary_allowances",
+                     # Iter 361 — Offline/Actual salary (Salary, Salary1-3,
+                     # Days1-3 from the old DB EmployeeMaster).
+                     "salary_structure_actual"]
 
 
 async def _sync_structures_job(job_id: str, admin_uid: str):
@@ -2113,6 +2163,7 @@ async def _sync_structures_job(job_id: str, admin_uid: str):
 
     totals = {"firms_synced": 0, "employees_updated": 0,
               "employees_unmatched": 0, "gross_changed": 0,
+              "actual_salary_synced": 0,
               "allowance_labels_enabled": 0, "allowance_heads_created": 0}
     errors: List[str] = []
     unmatched: List[dict] = []  # Iter 349 — WHO didn't match (firm/code/name)
@@ -2226,6 +2277,8 @@ async def _sync_structures_job(job_id: str, admin_uid: str):
                             totals["codes_corrected"] = \
                                 totals.get("codes_corrected", 0) + 1
                     updates["salary_structure_synced_at"] = _now()
+                    if "salary_structure_actual" in updates:
+                        totals["actual_salary_synced"] += 1
                     await db.users.update_one(
                         {"user_id": existing["user_id"]}, {"$set": updates})
                     totals["employees_updated"] += 1

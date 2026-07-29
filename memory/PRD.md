@@ -2265,3 +2265,14 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   compliance cards w/ artifact download buttons. Sidebar (AdminWebShell x2): Payroll →
   "AI Universal Import" (sparkles icon). Deploy: deploy_vps_iter360.sh (temp_bundle
   kind=script now serves 360).
+- Iter 361 (user request, unit-tested locally — legacy MS SQL only exists on VPS): OFFLINE/
+  ACTUAL SALARY from OLD DB. routes/legacy_import.py: new _pickcol (case-insensitive column
+  lookup) + _actual_salary_struct(e) — EmployeeMaster Salary→Basic (rate_type from PayBasis),
+  Salary1-3→Salary 1/2/3 amounts, Days1-3→working_days; returns the exact
+  salary_structure_actual shape the Employee form saves ([{head:Basic,amount,rate_type},
+  {head:Salary i,amount,working_days}]); tolerant of Salary_i/Sali & Dayi variants; None when
+  row has no data. Wired into _emp_doc_fields "salary" group (import wizard + employee-compare
+  preview) AND _SYNC_SALARY_KEYS so "Sync Salary Structures — ALL Firms" overwrites
+  salary_structure_actual from old DB with new live counter totals.actual_salary_synced.
+  Deploy: deploy_vps_iter361.sh (temp_bundle kind=script → 361). User must run the ALL-Firms
+  sync on VPS to apply.
