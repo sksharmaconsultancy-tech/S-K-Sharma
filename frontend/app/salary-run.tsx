@@ -640,16 +640,8 @@ export default function ActualSalaryProcessScreen() {
       </SafeAreaView>
 
       <ScrollView contentContainerStyle={styles.scroll}>
-        {/* Enterprise Process Command Center — KPI cards, workflow stepper
-            and live validation (DB-driven per firm + month). */}
-        <ProcessCommandCenter
-          companyId={selectedCompanyId || user?.company_id}
-          month={month}
-          processType="actual"
-          runExists={!!run}
-          runFinalized={!!run?.finalized}
-          refreshKey={(run ? 1 : 0) + (run?.finalized ? 2 : 0)}
-        />
+        {/* Enterprise Process Command Center — Iter 370 (user request):
+            moved from the top of the page to the BOTTOM. */}
 
         {/* Iter 91 — In-screen firm picker for Super Admin.
             Iter 217 (user request) — searchable DROPDOWN instead of chips. */}
@@ -845,6 +837,17 @@ export default function ActualSalaryProcessScreen() {
           <Ionicons name="chevron-forward" size={16} color={colors.onSurfaceTertiary} />
         </Pressable>
 
+        {/* Iter 370 (user request) — Compliance Validation (Process Command
+            Center) moved to the BOTTOM of the page. */}
+        <ProcessCommandCenter
+          companyId={selectedCompanyId || user?.company_id}
+          month={month}
+          processType="actual"
+          runExists={!!run}
+          runFinalized={!!run?.finalized}
+          refreshKey={(run ? 1 : 0) + (run?.finalized ? 2 : 0)}
+        />
+
         <View style={{ height: 40 }} />
       </ScrollView>
 
@@ -952,6 +955,21 @@ function ResultGrid({
   const [hlRow, setHlRow] = useState<string | null>(null);
   // Iter 346 (user request) — Excel-style per-column header filters.
   const [colFilters, setColFilters] = useState<Record<string, string>>({});
+  // Iter 370 (user request) — click ANY column header to sort (asc → desc
+  // → off). Takes precedence over the sort chips while active.
+  const [colSort, setColSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
+  const toggleColSort = (key: string) => {
+    setColSort((cur) =>
+      !cur || cur.key !== key
+        ? { key, dir: "asc" }
+        : cur.dir === "asc"
+          ? { key, dir: "desc" }
+          : null);
+  };
+  const hdrSort = (key: string) => ({
+    onPress: () => toggleColSort(key),
+    sortDir: colSort?.key === key ? colSort.dir : null,
+  });
   const sortRows = (rows: ActualRow[]) => {
     let base = rows.filter((r) => rowMatchesFilters(r, gridFilters));
     base = base.filter((r) => rowPassesColFilters(r, colFilters, ACTUAL_COL_GETTERS));
@@ -961,15 +979,37 @@ function ResultGrid({
         [r.name, r.employee_code, r.designation, r.father_name]
           .some((v) => String(v || "").toLowerCase().includes(q)));
     }
-    if (!sortBy) return base;
+    if (!sortBy && !colSort) return base;
     const num = (v: any) => Number(v ?? 0);
     const arr = [...base];
     if (sortBy === "name") arr.sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")));
     else if (sortBy === "code") arr.sort((a: any, b: any) => num(a.employee_code) - num(b.employee_code));
     else if (sortBy === "net") arr.sort((a: any, b: any) => num(b.net_pay ?? b.net) - num(a.net_pay ?? a.net));
     else if (sortBy === "gross") arr.sort((a: any, b: any) => num(b.total_gross ?? b.gross) - num(a.total_gross ?? a.gross));
+    // Iter 370 (user request) — header-click sorting on EVERY column.
+    if (colSort) {
+      const g = ACTUAL_COL_GETTERS[colSort.key];
+      if (g) {
+        const dir = colSort.dir === "asc" ? 1 : -1;
+        arr.sort((a: any, b: any) => {
+          const va = g(a);
+          const vb = g(b);
+          const na = Number(va);
+          const nb = Number(vb);
+          const aNum = va !== null && va !== undefined && va !== "" && Number.isFinite(na);
+          const bNum = vb !== null && vb !== undefined && vb !== "" && Number.isFinite(nb);
+          if (aNum && bNum) return (na - nb) * dir;
+          if (aNum !== bNum) return (aNum ? -1 : 1) * dir; // numbers before blanks
+          return String(va ?? "").localeCompare(String(vb ?? "")) * dir;
+        });
+      }
+    }
     return arr;
   };
+
+  // Iter 370 (user request) — head-wise column totals for the footer row.
+  const sumCol = (k: keyof ActualRow) =>
+    (run.rows || []).reduce((s, r) => s + (Number(r[k]) || 0), 0);
 
   return (
     <View style={styles.card}>
@@ -1057,21 +1097,21 @@ function ResultGrid({
           <View style={stickyHeader(colors.brandPrimary)}>
           <View style={[styles.tblRow, styles.tblHeader]}>
             <HdrCell w={COL_WIDTHS.sn} frozen={stickyCol(0, colors.brandPrimary)}>SN</HdrCell>
-            <HdrCell w={COL_WIDTHS.name} align="left" frozen={stickyCol(COL_WIDTHS.sn, colors.brandPrimary)}>Name</HdrCell>
-            <HdrCell w={COL_WIDTHS.duty} bg={GRP.master}>Duty HRS</HdrCell>
+            <HdrCell w={COL_WIDTHS.name} align="left" frozen={stickyCol(COL_WIDTHS.sn, colors.brandPrimary)} {...hdrSort("name")}>Name</HdrCell>
+            <HdrCell w={COL_WIDTHS.duty} bg={GRP.master} {...hdrSort("duty")}>Duty HRS</HdrCell>
             <HdrCell w={COL_WIDTHS.md} bg={GRP.master}>M.Days</HdrCell>
-            <HdrCell w={COL_WIDTHS.pdays} bg={GRP.master}>P Days</HdrCell>
-            <HdrCell w={COL_WIDTHS.phours} bg={GRP.master}>P Hours</HdrCell>
-            <HdrCell w={COL_WIDTHS.basic} bg={GRP.master}>Basic (Master)</HdrCell>
-            <HdrCell w={COL_WIDTHS.bsalary} bg={GRP.calc}>Basic Sal</HdrCell>
-            <HdrCell w={COL_WIDTHS.wbasic} bg={GRP.calc}>W.Basic Sal</HdrCell>
-            <HdrCell w={COL_WIDTHS.othallo} bg={GRP.calc}>Oth.Allo</HdrCell>
-            <HdrCell w={COL_WIDTHS.gross} bg={GRP.calc}>Total Gross</HdrCell>
-            <HdrCell w={COL_WIDTHS.epf} bg={GRP.ded}>EPF</HdrCell>
-            <HdrCell w={COL_WIDTHS.esi} bg={GRP.ded}>ESI</HdrCell>
-            <HdrCell w={COL_WIDTHS.adv} bg={GRP.ded}>Adv</HdrCell>
-            <HdrCell w={COL_WIDTHS.tds} bg={GRP.ded}>TDS</HdrCell>
-            <HdrCell w={COL_WIDTHS.net}>Net Pay</HdrCell>
+            <HdrCell w={COL_WIDTHS.pdays} bg={GRP.master} {...hdrSort("pdays")}>P Days</HdrCell>
+            <HdrCell w={COL_WIDTHS.phours} bg={GRP.master} {...hdrSort("phours")}>P Hours</HdrCell>
+            <HdrCell w={COL_WIDTHS.basic} bg={GRP.master} {...hdrSort("basic")}>Basic (Master)</HdrCell>
+            <HdrCell w={COL_WIDTHS.bsalary} bg={GRP.calc} {...hdrSort("bsalary")}>Basic Sal</HdrCell>
+            <HdrCell w={COL_WIDTHS.wbasic} bg={GRP.calc} {...hdrSort("wbasic")}>W.Basic Sal</HdrCell>
+            <HdrCell w={COL_WIDTHS.othallo} bg={GRP.calc} {...hdrSort("othallo")}>Oth.Allo</HdrCell>
+            <HdrCell w={COL_WIDTHS.gross} bg={GRP.calc} {...hdrSort("gross")}>Total Gross</HdrCell>
+            <HdrCell w={COL_WIDTHS.epf} bg={GRP.ded} {...hdrSort("epf")}>EPF</HdrCell>
+            <HdrCell w={COL_WIDTHS.esi} bg={GRP.ded} {...hdrSort("esi")}>ESI</HdrCell>
+            <HdrCell w={COL_WIDTHS.adv} bg={GRP.ded} {...hdrSort("adv")}>Adv</HdrCell>
+            <HdrCell w={COL_WIDTHS.tds} bg={GRP.ded} {...hdrSort("tds")}>TDS</HdrCell>
+            <HdrCell w={COL_WIDTHS.net} {...hdrSort("net")}>Net Pay</HdrCell>
             <HdrCell w={COL_WIDTHS.actions}>·</HdrCell>
           </View>
           {/* Iter 346 (user request) — Excel-style header-wise filters.
@@ -1267,12 +1307,13 @@ function ResultGrid({
             </View>
             <ReadCell w={COL_WIDTHS.duty}></ReadCell>
             <ReadCell w={COL_WIDTHS.md}></ReadCell>
-            <ReadCell w={COL_WIDTHS.pdays}></ReadCell>
-            <ReadCell w={COL_WIDTHS.phours}></ReadCell>
-            <ReadCell w={COL_WIDTHS.basic}></ReadCell>
+            {/* Iter 370 (user request) — totals under EVERY column. */}
+            <BoldRead w={COL_WIDTHS.pdays}>{fmtNum(sumCol("p_days"), 1)}</BoldRead>
+            <BoldRead w={COL_WIDTHS.phours}>{fmtNum(sumCol("p_hours"), 1)}</BoldRead>
+            <BoldRead w={COL_WIDTHS.basic}>{fmtInr(sumCol("basic"))}</BoldRead>
             <BoldRead w={COL_WIDTHS.bsalary}>{fmtInr(run.totals?.basic_salary)}</BoldRead>
             <BoldRead w={COL_WIDTHS.wbasic}>{fmtInr(run.totals?.w_basic_salary)}</BoldRead>
-            <ReadCell w={COL_WIDTHS.othallo}></ReadCell>
+            <BoldRead w={COL_WIDTHS.othallo}>{fmtInr(sumCol("oth_allo"))}</BoldRead>
             <BoldRead w={COL_WIDTHS.gross}>{fmtInr(run.totals?.total_gross)}</BoldRead>
             <BoldRead w={COL_WIDTHS.epf}>{fmtInr(run.totals?.epf)}</BoldRead>
             <BoldRead w={COL_WIDTHS.esi}>{fmtInr(run.totals?.esi)}</BoldRead>
@@ -1304,9 +1345,14 @@ const GRP = {
   ded: "#FEF2F2",
 };
 
-function HdrCell({ w, children, align = "right" as "left" | "right", bg, frozen }: any) {
+function HdrCell({ w, children, align = "right" as "left" | "right", bg, frozen, onPress, sortDir }: any) {
   return (
-    <View style={[{ width: w, paddingHorizontal: 6, paddingVertical: 6, backgroundColor: bg || "transparent" }, frozen]}>
+    // Iter 370 (user request) — headers are tappable to sort the grid.
+    <Pressable
+      disabled={!onPress}
+      onPress={onPress}
+      style={[{ width: w, paddingHorizontal: 6, paddingVertical: 6, backgroundColor: bg || "transparent" }, frozen]}
+    >
       <Text
         style={[
           styles.tblHeaderTxt,
@@ -1317,8 +1363,9 @@ function HdrCell({ w, children, align = "right" as "left" | "right", bg, frozen 
         numberOfLines={1}
       >
         {children}
+        {sortDir ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
       </Text>
-    </View>
+    </Pressable>
   );
 }
 

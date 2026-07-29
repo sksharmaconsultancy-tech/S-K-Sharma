@@ -535,10 +535,18 @@ def compute_compliance_row(
     # deducted for that employee, and when filled ALL PF amounts derive
     # from it (pro-rated by attendance for monthly-rated staff).
     pf_basic_override = _num(user.get("pf_basic"), 0.0)
-    pf_applicable = (
+    # Iter 370 (user bug) — MASTER eligibility is tracked SEPARATELY from
+    # the zero-pay guard: a first process with 0 Present Days used to mark
+    # the row pf_applicable=False, which froze the grid's client-side
+    # recompute (typing days showed no PF/ESIC until a SECOND "Salary
+    # Process" click). ``pf_eligible`` is the days-independent flag.
+    pf_eligible = (
         firm_pf_enabled
         and user.get("pf_applicable") is not False
         and pf_basic_override > 0
+    )
+    pf_applicable = (
+        pf_eligible
         and not _zero_pay  # Iter 297 — no PF on a zero-day / zero-pay month
     )
     if pf_applicable:
@@ -601,10 +609,14 @@ def compute_compliance_row(
     _esic_elig_basic = _num(user.get("compliance_basic"), 0.0)
     if _esic_elig_basic <= 0:
         _esic_elig_basic = master_structure["basic"]
-    esic_applicable = (
+    # Iter 370 — days-independent ESIC eligibility (see pf_eligible above).
+    esic_eligible = (
         firm_esic_enabled
         and user.get("esic_applicable") is not False
         and _esic_elig_basic <= cfg["esic_gross_threshold"]
+    )
+    esic_applicable = (
+        esic_eligible
         # Iter 297 (user bug) — days ZERO in the front window ⇒ ESIC = 0.
         and not _zero_pay
     )
@@ -743,6 +755,10 @@ def compute_compliance_row(
         "gross_paid": round(gross_paid, 2),
         # PF
         "pf_applicable": pf_applicable,
+        # Iter 370 — days-independent flags for the grid's client-side
+        # recompute (fixes "first click doesn't calculate PF/ESIC").
+        "pf_eligible": pf_eligible,
+        "esic_eligible": esic_eligible,
         # Iter 129 — full-month PF Basic Salary from the Employee Master
         # (0 → no PF). Used by the grid's client-side recompute.
         "pf_basic": round(pf_basic_override, 2),

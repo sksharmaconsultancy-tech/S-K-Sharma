@@ -2348,3 +2348,26 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   employee) falls back to _calculate_ai_only. Frontend runCalc sends company_id/employee_code/
   month. Verified: emp 50 Kankani 2026-06 26d+10OT → gross 20766.88, ESIC 59, employer 252,
   net 20207.88; tables aligned. Deploy: deploy_vps_iter368.sh (temp_bundle→368).
+- Iter 370 (user: first-click PF/ESIC + sorting + totals + validation panel):
+  1. FIRST-CLICK FIX: utils/compliance_salary.py — pf_eligible/esic_eligible computed
+     SEPARATELY from _zero_pay guard and emitted on every row ("pf_eligible",
+     "esic_eligible"); row "pf_applicable"/"esic_applicable" amounts-gating unchanged
+     (exports/ECR untouched). Frontend updatePresentDays uses the eligibility flags
+     (falls back to old applicable flag for pre-370 runs) — typing days on a fresh
+     0-day run now computes PF/ESIC instantly, no second Salary Process click.
+     Also compliance-salary-run.tsx: loadPolicy() callback + policyReadyRef; generate()
+     AWAITS firm compliance-policy on first click and passes fresh values into
+     buildBody(pv) — fixes statutory-defaults race. Actual Salary unchanged (syncs
+     EPF/ESI from compliance run, benefits automatically).
+  2. HEADER-CLICK SORTING: both compliance-salary-run.tsx (colSort state, header Text
+     onPress → toggleColSort, uses COL_FILTER_GETTERS, asc ▲/desc ▼/off) and
+     salary-run.tsx (HdrCell now Pressable with onPress+sortDir, hdrSort() spread,
+     uses ACTUAL_COL_GETTERS). Sort chips + PDF sort/group untouched.
+  3. HEAD-WISE TOTALS: compliance TOTAL row — Master group sums (basic_master…gross_master),
+     Present Days, ESIC Leave, Wage Base (stat_wage_base) via sumCol(); actual TOTAL row —
+     P Days, P Hours, Basic (Master), Oth.Allo sums.
+  4. ProcessCommandCenter (Compliance Validation) moved to BOTTOM of page on both
+     compliance-salary-run.tsx and salary-run.tsx.
+  Verified E2E on preview (Kankani, STAFF, 2026-06): fresh process → type 26 days →
+  ESIC (E) 59 / (Er) 252 instantly; Gross ▲ / EPF ▲ header sorting works; panels at bottom.
+  Deploy: deploy_vps_iter370.sh (temp_bundle→370). USER MUST REPROCESS existing months once.

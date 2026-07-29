@@ -15620,8 +15620,15 @@ async def _compute_compliance_run(
                      "MEDICAL ALLOWANCES": "medical", "OTH. ALLOW.": "special",
                      "OTHER MISC.ALLOWANCE": "others"}
             allow_mask = {h for lbl, h in _amap.items() if _fm_allow.get(lbl)}
-            _pf_col = bool(_fm_ded.get("PF")) or bool((fm.get("epf") or {}).get("applicable"))
-            _esi_col = bool(_fm_ded.get("ESI")) or bool((fm.get("esi") or {}).get("applicable"))
+            # Iter 369 (user request) — EPF / ESI "Applicable" flags are
+            # AUTHORITATIVE when explicitly set (True or False): disabled
+            # means NO PF/ESIC even if the Deductions catalog has PF/ESI
+            # ticked. Only when the flag was never configured (None) do we
+            # fall back to the Deductions catalog (keeps the Iter 335 fix).
+            _epf_ap = (fm.get("epf") or {}).get("applicable")
+            _esi_ap = (fm.get("esi") or {}).get("applicable")
+            _pf_col = bool(_epf_ap) if _epf_ap is not None else bool(_fm_ded.get("PF"))
+            _esi_col = bool(_esi_ap) if _esi_ap is not None else bool(_fm_ded.get("ESI"))
             ded_mask = set()
             if _pf_col:
                 ded_mask.add("pf")
@@ -15632,13 +15639,15 @@ async def _compute_compliance_run(
             if _fm_ded.get("TDS") or _fm_ded.get("I. TAX"):
                 ded_mask.add("tds")
             firm_stat_flags[fm["company_id"]] = {
-                # Iter 335 (user bug: PF/ESIC showing 0 on imported runs) —
-                # PF/ESIC also count as enabled when the Firm Master
-                # Deductions catalog has PF / ESI toggled ON (not only the
-                # EPF/ESI "Applicable" flag).
-                "pf": bool((fm.get("epf") or {}).get("applicable")) or bool(_fm_ded.get("PF")),
-                "esic": bool((fm.get("esi") or {}).get("applicable")) or bool(_fm_ded.get("ESI")),
-                "allow_mask": allow_mask if allow_mask else None,
+                # Iter 369 — "Applicable" flag authoritative (see above).
+                "pf": _pf_col,
+                "esic": _esi_col,
+                # Iter 369 (user request) — MASTER SALARY (Full Month)
+                # columns follow the Firm Master Allowances catalog
+                # DYNAMICALLY: if the firm configured the catalog, the mask
+                # applies even when every head is switched OFF (only Basic
+                # + Gross remain). None only when never configured.
+                "allow_mask": allow_mask if _fm_allow else None,
                 "ded_mask": ded_mask if any(bool(v) for v in _fm_ded.values()) else None,
                 # Iter 310 — Freeze Salary difference allocation gate.
                 "ot_allowed": bool((fm.get("salary_process") or {}).get("ot_allowed")),

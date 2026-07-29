@@ -293,6 +293,18 @@ export default function ComplianceSalaryRunScreen() {
   const [mailLoading, setMailLoading] = useState(false);
   // Iter 98 — display sorting for the compliance grid.
   const [sortBy, setSortBy] = useState<string>("");
+  // Iter 370 (user request) — click ANY column header to sort (asc → desc
+  // → off). Takes precedence over the sort chips while active.
+  const [colSort, setColSort] = useState<{ label: string; dir: "asc" | "desc" } | null>(null);
+  const toggleColSort = (label: string) => {
+    if (!COL_FILTER_GETTERS[label]) return;
+    setColSort((cur) =>
+      !cur || cur.label !== label
+        ? { label, dir: "asc" }
+        : cur.dir === "asc"
+          ? { label, dir: "desc" }
+          : null);
+  };
   // Iter 182 — instant employee search + audit log
   const [empSearch, setEmpSearch] = useState("");
   const empSearchRef = useRef<TextInput | null>(null);
@@ -348,15 +360,38 @@ export default function ComplianceSalaryRunScreen() {
         [r.name, r.employee_code, r.uan_no, r.esi_ip_no, r.designation, r.father_name]
           .some((v) => String(v || "").toLowerCase().includes(q)));
     }
-    if (!sortBy) return base;
+    if (!sortBy && !colSort) return base;
     const num = (v: any) => Number(v ?? 0);
     const arr = [...base];
     if (sortBy === "name") arr.sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")));
     else if (sortBy === "code") arr.sort((a: any, b: any) => num(a.employee_code) - num(b.employee_code));
     else if (sortBy === "net") arr.sort((a: any, b: any) => num(b.net) - num(a.net));
     else if (sortBy === "gross") arr.sort((a: any, b: any) => num(b.gross) - num(a.gross));
+    // Iter 370 (user request) — header-click sorting on EVERY column.
+    if (colSort) {
+      const g = COL_FILTER_GETTERS[colSort.label];
+      if (g) {
+        const dir = colSort.dir === "asc" ? 1 : -1;
+        arr.sort((a: any, b: any) => {
+          const va = g(a);
+          const vb = g(b);
+          const na = Number(va);
+          const nb = Number(vb);
+          const aNum = va !== null && va !== undefined && va !== "" && Number.isFinite(na);
+          const bNum = vb !== null && vb !== undefined && vb !== "" && Number.isFinite(nb);
+          if (aNum && bNum) return (na - nb) * dir;
+          if (aNum !== bNum) return (aNum ? -1 : 1) * dir; // numbers before blanks
+          return String(va ?? "").localeCompare(String(vb ?? "")) * dir;
+        });
+      }
+    }
     return arr;
   };
+
+  // Iter 370 (user request) — head-wise column totals for the footer row.
+  const sumCol = (k: string) =>
+    (run?.rows || []).reduce((s: number, r: any) => s + (Number(r[k]) || 0), 0);
+  const fmtDaysTotal = (v: number) => (v % 1 ? v.toFixed(1) : String(v));
 
   // Iter 182 — keyboard shortcuts (web): "/" focuses employee search,
   // Ctrl/Cmd+S saves the draft.
@@ -480,42 +515,59 @@ export default function ComplianceSalaryRunScreen() {
     prevCidRef.current = activeCompanyId;
   }, [activeCompanyId]);
 
-  useEffect(() => {
-    if (!activeCompanyId) return;
-    (async () => {
-      try {
-        const r = await api<{ policy: any }>(
-          `/admin/companies/${activeCompanyId}/compliance-policy`,
-        );
-        const p = r.policy || {};
-        // Salary structure — fall back to hard-coded global defaults
-        if (p.basic_pct !== undefined) setBasicPct(String(p.basic_pct));
-        else setBasicPct("40");
-        if (p.hra_pct !== undefined) setHraPct(String(p.hra_pct));
-        else setHraPct("20");
-        if (p.conveyance_pct !== undefined) setConvPct(String(p.conveyance_pct));
-        else setConvPct("5");
-        if (p.medical_pct !== undefined) setMedicalPct(String(p.medical_pct));
-        else setMedicalPct("3");
-        if (p.special_pct !== undefined) setSpecialPct(String(p.special_pct));
-        else setSpecialPct("32");
-        if (p.others_pct !== undefined) setOthersPct(String(p.others_pct));
-        else setOthersPct("0");
-        // Statutory config
-        if (p.pf_wage_cap !== undefined) setPfCap(String(p.pf_wage_cap));
-        else setPfCap("15000");
-        if (p.pf_employee_rate !== undefined) setPfPctEmp(String(p.pf_employee_rate));
-        else setPfPctEmp("12");
-        if (p.esic_wage_threshold !== undefined) setEsiThreshold(String(p.esic_wage_threshold));
-        else setEsiThreshold("21000");
-        if (p.stat_wage_floor_pct !== undefined) setStatFloorPct(String(p.stat_wage_floor_pct));
-        else setStatFloorPct("50");
-      } catch {
-        // If the firm has no policy override yet, keep the hard-coded
-        // defaults already set in the initial state.
-      }
-    })();
+  // Iter 370 (user bug) — the firm policy fetch is ASYNC: clicking
+  // "Salary Process" right after opening the page / switching firm used
+  // to RACE it, sending the hard-coded defaults instead of the firm's
+  // saved statutory numbers — PF/ESIC looked "not calculated" until a
+  // second click. generate() now AWAITS this loader on the first click
+  // and uses the freshly returned values directly.
+  const policyReadyRef = useRef(false);
+  const loadPolicy = useCallback(async (): Promise<Record<string, string> | null> => {
+    if (!activeCompanyId) return null;
+    try {
+      const r = await api<{ policy: any }>(
+        `/admin/companies/${activeCompanyId}/compliance-policy`,
+      );
+      const p = r.policy || {};
+      const v = (x: any, d: string) => (x !== undefined ? String(x) : d);
+      // Salary structure + statutory — fall back to hard-coded defaults.
+      const vals: Record<string, string> = {
+        basicPct: v(p.basic_pct, "40"),
+        hraPct: v(p.hra_pct, "20"),
+        convPct: v(p.conveyance_pct, "5"),
+        medicalPct: v(p.medical_pct, "3"),
+        specialPct: v(p.special_pct, "32"),
+        othersPct: v(p.others_pct, "0"),
+        pfCap: v(p.pf_wage_cap, "15000"),
+        pfPctEmp: v(p.pf_employee_rate, "12"),
+        esiThreshold: v(p.esic_wage_threshold, "21000"),
+        statFloorPct: v(p.stat_wage_floor_pct, "50"),
+      };
+      setBasicPct(vals.basicPct);
+      setHraPct(vals.hraPct);
+      setConvPct(vals.convPct);
+      setMedicalPct(vals.medicalPct);
+      setSpecialPct(vals.specialPct);
+      setOthersPct(vals.othersPct);
+      setPfCap(vals.pfCap);
+      setPfPctEmp(vals.pfPctEmp);
+      setEsiThreshold(vals.esiThreshold);
+      setStatFloorPct(vals.statFloorPct);
+      policyReadyRef.current = true;
+      return vals;
+    } catch {
+      // If the firm has no policy override yet, keep the hard-coded
+      // defaults already set in the initial state.
+      policyReadyRef.current = true;
+      return null;
+    }
   }, [activeCompanyId]);
+
+  useEffect(() => {
+    policyReadyRef.current = false;
+    if (!activeCompanyId) return;
+    loadPolicy();
+  }, [activeCompanyId, loadPolicy]);
 
   const loadRuns = useCallback(async () => {
     try {
@@ -526,22 +578,25 @@ export default function ComplianceSalaryRunScreen() {
 
   useEffect(() => { if (isAdmin) loadRuns(); }, [isAdmin, loadRuns]);
 
-  const buildBody = () => {
+  // Iter 370 — ``pv`` carries the freshly loaded firm policy values when
+  // the state hasn't caught up yet (first click after page open).
+  const buildBody = (pv?: Record<string, string> | null) => {
+    const g = (k: string, sv: string) => (pv && pv[k] !== undefined ? pv[k] : sv);
     const body: any = {
       month,
       structure_pct: {
-        basic: Number(basicPct) || 0,
-        hra: Number(hraPct) || 0,
-        conveyance: Number(convPct) || 0,
-        medical: Number(medicalPct) || 0,
-        special: Number(specialPct) || 0,
-        others: Number(othersPct) || 0,
+        basic: Number(g("basicPct", basicPct)) || 0,
+        hra: Number(g("hraPct", hraPct)) || 0,
+        conveyance: Number(g("convPct", convPct)) || 0,
+        medical: Number(g("medicalPct", medicalPct)) || 0,
+        special: Number(g("specialPct", specialPct)) || 0,
+        others: Number(g("othersPct", othersPct)) || 0,
       },
       statutory_cfg: {
-        pf_wage_cap: Number(pfCap) || 15000,
-        pf_percent_employee: Number(pfPctEmp) || 12,
-        esic_gross_threshold: Number(esiThreshold) || 21000,
-        stat_wage_floor_pct: Number(statFloorPct) || 50,
+        pf_wage_cap: Number(g("pfCap", pfCap)) || 15000,
+        pf_percent_employee: Number(g("pfPctEmp", pfPctEmp)) || 12,
+        esic_gross_threshold: Number(g("esiThreshold", esiThreshold)) || 21000,
+        stat_wage_floor_pct: Number(g("statFloorPct", statFloorPct)) || 50,
       },
     };
     if (monthDaysOverride.trim()) body.month_days = Number(monthDaysOverride);
@@ -675,11 +730,16 @@ export default function ComplianceSalaryRunScreen() {
 
   const generate = async () => {
     if (busy) return;
+    // Iter 370 (user bug) — first click after opening the page: WAIT for
+    // the firm policy before processing so PF/ESIC use the firm's saved
+    // statutory numbers (not the defaults) on the very first click.
+    let pv: Record<string, string> | null = null;
+    if (activeCompanyId && !policyReadyRef.current) pv = await loadPolicy();
     // Iter 129e (user directive) — if a run for this firm + month already
     // exists, ask before reprocessing. "No" reloads the page unchanged.
     // Iter 257 (user bug) — the check is scoped to the SAME employee group,
     // so finalizing one group never blocks processing another.
-    const q: any = buildBody();
+    const q: any = buildBody(pv);
     const qGrp = String(q.employee_type || "").trim().toUpperCase();
     const existing = runs.find(
       (r: any) =>
@@ -709,7 +769,7 @@ export default function ComplianceSalaryRunScreen() {
     try {
       const r = await api<{ run: CompRun }>("/admin/compliance-salary-runs", {
         method: "POST",
-        body: buildBody(),
+        body: q,
       });
       setRun(r.run);
       await loadRuns();
@@ -1263,8 +1323,17 @@ export default function ComplianceSalaryRunScreen() {
         // Employee Master's "PF Basic Salary". The 50%-of-gross floor is
         // IGNORED for PF. Capped at the EPF ceiling unless the explicit
         // PF Basic exceeds it.
+        // Iter 370 (user bug) — a 0-day first process stored
+        // pf_applicable=false (zero-pay guard), which FROZE this client
+        // recompute: typing days never brought PF/ESIC back until a second
+        // "Salary Process" click. Use the days-independent eligibility
+        // flags from the backend when present (old runs fall back to the
+        // stored applicable flag).
         const pfBasicFull = Number((r as any).pf_basic || 0);
-        const pfOn = r.pf_applicable !== false && pfBasicFull > 0;
+        const pfMasterOk = (r as any).pf_eligible !== undefined
+          ? (r as any).pf_eligible !== false
+          : r.pf_applicable !== false;
+        const pfOn = pfMasterOk && pfBasicFull > 0;
         const pfBasicPro = (r as any).salary_mode === "monthly" ? pfBasicFull * ratio : pfBasicFull;
         const pfWagesNew = pfOn
           ? Math.min(pfBasicPro, Math.max(pfCap, pfBasicPro))
@@ -1279,7 +1348,11 @@ export default function ComplianceSalaryRunScreen() {
         // (falls back to full-month Basic when blank). Calculated ON
         // earned basic.
         const esiEligBasic = Number((r as any).compliance_basic || 0) || fullByHead.basic;
-        const esiApplicable = r.esic_applicable !== false && grossPaid > 0 && esiEligBasic <= esiThresh;
+        // Iter 370 — days-independent ESIC eligibility (see PF above).
+        const esiMasterOk = (r as any).esic_eligible !== undefined
+          ? (r as any).esic_eligible !== false
+          : r.esic_applicable !== false;
+        const esiApplicable = esiMasterOk && grossPaid > 0 && esiEligBasic <= esiThresh;
         const esiBase = esiApplicable ? paidBasic : 0;
         const esiEmp = esiApplicable ? Math.ceil(esiBase * esiEmpRate) : 0;
         const esiEr  = esiApplicable ? Math.ceil(esiBase * esiErRate)  : 0;
@@ -1398,15 +1471,8 @@ export default function ComplianceSalaryRunScreen() {
         </View>
 
         {/* Enterprise Process Command Center — KPI cards, workflow stepper
-            and live compliance validation (DB-driven per firm + month). */}
-        <ProcessCommandCenter
-          companyId={activeCompanyId}
-          month={month}
-          processType="compliance"
-          runExists={!!run}
-          runFinalized={runFinalized}
-          refreshKey={(run ? 1 : 0) + (runFinalized ? 2 : 0)}
-        />
+            and live compliance validation. Iter 370 (user request) —
+            moved from the top of the page to the BOTTOM. */}
 
         {/* Iter 91 — In-screen firm selection: ALL active firms listed,
             pick ONE and the salary process runs for that firm. */}
@@ -2049,6 +2115,9 @@ export default function ComplianceSalaryRunScreen() {
                         <Text
                           key={i}
                           numberOfLines={1}
+                          // Iter 370 (user request) — tap ANY header to sort
+                          // (asc → desc → off).
+                          onPress={() => toggleColSort(h.label)}
                           style={[
                             styles.tblCell,
                             { width: i < 7
@@ -2066,6 +2135,7 @@ export default function ComplianceSalaryRunScreen() {
                           ]}
                         >
                           {h.label}
+                          {colSort?.label === h.label ? (colSort.dir === "asc" ? " ▲" : " ▼") : ""}
                         </Text>
                       ))}
                     </View>
@@ -2305,8 +2375,9 @@ export default function ComplianceSalaryRunScreen() {
                   <Text style={[styles.tblCell, { width: colW.desg }, stickyCol(colW.name + colW.father, colors.brandTertiary)]}>—</Text>
                   <Text style={[styles.tblCell, { width: colW.uan }]}>—</Text>
                   <Text style={[styles.tblCell, { width: colW.esi }]}>—</Text>
-                  <Text style={[styles.tblCell, { width: colW.pd }]}>—</Text>
-                  <Text style={[styles.tblCell, { width: colW.el }]}>—</Text>
+                  {/* Iter 370 (user request) — totals under EVERY column. */}
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.pd, fontWeight: "700" }]}>{fmtDaysTotal(sumCol("present_days"))}</Text>
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.el, fontWeight: "700" }]}>{fmtDaysTotal(sumCol("esic_leave_days"))}</Text>
                   {/* Iter 171 — totals row follows the same column masks so
                       every figure lands under its own header. */}
                   {(() => {
@@ -2318,12 +2389,12 @@ export default function ComplianceSalaryRunScreen() {
                     const num = (v: any) => (
                       <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(v)}</Text>
                     );
-                    const dash = () => <Text style={[styles.tblCell, { width: colW.num }]}>—</Text>;
                     return (
                       <>
-                        {/* Master group — dashes (+M.Gross) */}
-                        {opt.map((k) => <React.Fragment key={`tm-${k}`}>{dash()}</React.Fragment>)}
-                        {dash()}
+                        {/* Master group — Iter 370 (user request): head-wise
+                            totals under EVERY column (were dashes). */}
+                        {opt.map((k) => <React.Fragment key={`tm-${k}`}>{num(sumCol(`${k}_master`))}</React.Fragment>)}
+                        {num(sumCol("gross_master"))}
                         {/* Calculated group totals (+Gross) */}
                         {opt.map((k) => <React.Fragment key={`tc-${k}`}>{num((run.totals as any)?.[k])}</React.Fragment>)}
                         {/* Iter 339c — OT Amt total BEFORE Gross. */}
@@ -2338,8 +2409,8 @@ export default function ComplianceSalaryRunScreen() {
                         {num(run.totals?.gross_paid)}
                         {/* Iter 335 — Freeze Salary total next to Gross. */}
                         {hasFrz ? num((run.totals as any)?.imported_gross) : null}
-                        {/* Deductions group */}
-                        {dash()}
+                        {/* Deductions group — Iter 370: Wage Base total too. */}
+                        {num(sumCol("stat_wage_base"))}
                         {hasDed("pf") ? num(run.totals?.pf_employee) : null}
                         {hasDed("pf") ? num(run.totals?.pf_employer_total) : null}
                         {hasDed("esi") ? num(run.totals?.esic_employee) : null}
@@ -2438,6 +2509,17 @@ export default function ComplianceSalaryRunScreen() {
             </Text>
           </Pressable>
         </View>
+
+        {/* Iter 370 (user request) — Compliance Validation (Process Command
+            Center) moved to the BOTTOM of the page. */}
+        <ProcessCommandCenter
+          companyId={activeCompanyId}
+          month={month}
+          processType="compliance"
+          runExists={!!run}
+          runFinalized={runFinalized}
+          refreshKey={(run ? 1 : 0) + (runFinalized ? 2 : 0)}
+        />
 
         {/* Iter 181 — payroll punch line (user request) */}
         <Text style={{

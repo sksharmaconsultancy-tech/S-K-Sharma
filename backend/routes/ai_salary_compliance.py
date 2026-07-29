@@ -239,10 +239,13 @@ async def _calculate_engine(cid: str, code: str, month: str,
     fm = await db.firm_masters.find_one({"company_id": cid}, {"_id": 0})
     fcp = (comp or {}).get("compliance_policy") or {}
     fded = (fm or {}).get("deductions") or {}
-    firm_pf = bool(((fm or {}).get("epf") or {}).get("applicable")) \
-        or bool(fded.get("PF"))
-    firm_esic = bool(((fm or {}).get("esi") or {}).get("applicable")) \
-        or bool(fded.get("ESI"))
+    # Iter 369 — EPF/ESI "Applicable" flags authoritative when set;
+    # fallback to the Deductions catalog only when never configured.
+    _epf_ap = ((fm or {}).get("epf") or {}).get("applicable")
+    _esi_ap = ((fm or {}).get("esi") or {}).get("applicable")
+    firm_pf = bool(_epf_ap) if _epf_ap is not None else bool(fded.get("PF"))
+    firm_esic = bool(_esi_ap) if _esi_ap is not None \
+        else bool(fded.get("ESI"))
     statutory = {k: fcp[k] for k in DEFAULT_STATUTORY_CFG if k in fcp}
     y, m = int(month[:4]), int(month[5:7])
     month_days = [31, 29 if y % 4 == 0 else 28, 31, 30, 31, 30,
