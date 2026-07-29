@@ -2311,3 +2311,13 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   rotation keeps 14 daily + 1st-of-month for 185 days, runs first backup immediately to
   verify. Pairs with restore_actual_salary_from_backup.sh (Iter 364). temp_bundle
   kind=script→365.
+- Iter 366: BACKUP CENTER + ALL-FIRMS RE-SYNC packaging. Backend routes/backup_center.py
+  (/api/admin/backups: list [session], /latest + /download/{name} [session OR token
+  sks-backup-7391], _bk_dir: BACKUP_DIR env → /home/sksharma/backups → /app/backups, filename
+  regex blocks traversal — tested 401/404). Registered backup_center_router in server.py.
+  Frontend app/backup-center.tsx: backup list w/ Download buttons + Windows Task Scheduler
+  auto-download instructions with USER-CHOSEN folder input (bk-pc-dir, default C:\SKSBackups,
+  commands template live) + note that server-side BACKUP_DIR is configurable. Sidebar x2:
+  Import/Export → "Backup Center". Verified sync job intact post-rollback (only
+  _SYNC_SALARY_KEYS: basic/pf_basic/gross/salary_monthly/allowances/bio_code). Deploy:
+  deploy_vps_iter366.sh (full bundle; re-sync workflow steps in output; temp_bundle→366).
