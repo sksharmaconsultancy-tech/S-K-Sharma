@@ -22253,6 +22253,9 @@ app.include_router(audit_router)
 from routes.claims_management import router as claims_router  # noqa: E402
 app.include_router(claims_router)
 
+from routes.ai_universal_import import router as ai_uimport_router  # noqa: E402
+app.include_router(ai_uimport_router)
+
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
 maybe_start_rpa_worker(app, db)
