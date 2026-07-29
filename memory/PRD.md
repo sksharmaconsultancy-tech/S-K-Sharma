@@ -2287,3 +2287,7 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   only problem rows + ⬇ Excel/⬇ PDF (apiBinary). Endpoints return clean 503 locally (legacy
   MS SQL only on VPS); comparison/mapping logic unit-tested. Deploy: deploy_vps_iter362.sh
   (temp_bundle kind=script → 362).
+- Iter 363 (user request): OLD DB BioCode → users.bio_code (device enrolment no.).
+  legacy_import.py _emp_doc_fields salary group: _pickcol(BioCode/BiometricCode/MachineCode),
+  "72.0"→"72", skips empty/0; "bio_code" added to _SYNC_SALARY_KEYS; sync counter
+  bio_codes_synced. Unit-tested. Deploy: deploy_vps_iter363.sh (temp_bundle kind=script→363).

@@ -647,6 +647,15 @@ def _emp_doc_fields(
         struct = _actual_salary_struct(e)
         if struct:
             doc["salary_structure_actual"] = struct
+        # Iter 363 (user request) — OLD DB BioCode → Bio Code (device
+        # enrolment no.) on the portal employee.
+        bio = _pickcol(e, "BioCode", "BiometricCode", "MachineCode")
+        if bio is not None:
+            b = str(bio).strip()
+            if re.fullmatch(r"\d+\.0", b):
+                b = b[:-2]
+            if b and b != "0":
+                doc["bio_code"] = b
     if "status" in groups:
         if e.get("IsResign"):
             doc.update({
@@ -2154,7 +2163,10 @@ _SYNC_SALARY_KEYS = ["basic_salary", "compliance_basic", "pf_basic",
                      "compliance_salary_allowances",
                      # Iter 361 — Offline/Actual salary (Salary, Salary1-3,
                      # Days1-3 from the old DB EmployeeMaster).
-                     "salary_structure_actual"]
+                     "salary_structure_actual",
+                     # Iter 363 — OLD DB BioCode → Bio Code (device
+                     # enrolment no.).
+                     "bio_code"]
 
 
 async def _sync_structures_job(job_id: str, admin_uid: str):
@@ -2280,6 +2292,9 @@ async def _sync_structures_job(job_id: str, admin_uid: str):
                     updates["salary_structure_synced_at"] = _now()
                     if "salary_structure_actual" in updates:
                         totals["actual_salary_synced"] += 1
+                    if "bio_code" in updates:
+                        totals["bio_codes_synced"] = \
+                            totals.get("bio_codes_synced", 0) + 1
                     await db.users.update_one(
                         {"user_id": existing["user_id"]}, {"$set": updates})
                     totals["employees_updated"] += 1
