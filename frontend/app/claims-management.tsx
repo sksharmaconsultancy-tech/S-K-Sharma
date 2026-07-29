@@ -102,6 +102,35 @@ function WebSelect({
   );
 }
 
+function WebDate({
+  value,
+  onChange,
+  testID,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  testID: string;
+}) {
+  if (Platform.OS !== "web") return null;
+  return (
+    <input
+      type="date"
+      data-testid={testID}
+      value={value}
+      onChange={(e) => onChange((e.target as HTMLInputElement).value)}
+      style={
+        {
+          padding: 7,
+          borderRadius: 8,
+          border: "1px solid #CBD5E1",
+          fontSize: 13,
+          fontFamily: "inherit",
+        } as any
+      }
+    />
+  );
+}
+
 export default function ClaimsManagementScreen() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
@@ -124,6 +153,10 @@ export default function ClaimsManagementScreen() {
   const [fType, setFType] = useState("");
   const [fCompany, setFCompany] = useState("");
   const [fQ, setFQ] = useState("");
+  // user request — date range + sorting (date / name / firm wise)
+  const [fFrom, setFFrom] = useState("");
+  const [fTo, setFTo] = useState("");
+  const [fSort, setFSort] = useState("date_desc");
 
   // form state
   const [claimId, setClaimId] = useState("");
@@ -136,6 +169,9 @@ export default function ClaimsManagementScreen() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
   const [aiResult, setAiResult] = useState<any>(null);
+  // user request — employee picker (Form-19/10C → left employees only)
+  const [empList, setEmpList] = useState<any[]>([]);
+  const [selEmp, setSelEmp] = useState("");
 
   const isCompanyAdmin = user?.role === "company_admin";
 
@@ -165,6 +201,9 @@ export default function ClaimsManagementScreen() {
       if (fType) p.set("claim_type", fType);
       if (fCompany) p.set("company_id", fCompany);
       if (fQ) p.set("q", fQ);
+      if (fFrom) p.set("date_from", fFrom);
+      if (fTo) p.set("date_to", fTo);
+      if (fSort) p.set("sort", fSort);
       const r = await api<any>(`/admin/claims?${p.toString()}`);
       setClaims(r.claims || []);
     } catch {
@@ -172,7 +211,7 @@ export default function ClaimsManagementScreen() {
     } finally {
       setLoading(false);
     }
-  }, [fKind, fStatus, fType, fCompany, fQ]);
+  }, [fKind, fStatus, fType, fCompany, fQ, fFrom, fTo, fSort]);
 
   const loadReminders = useCallback(async () => {
     setLoading(true);
@@ -205,6 +244,38 @@ export default function ClaimsManagementScreen() {
     if (tab === "reports") void loadReport();
   }, [tab, loadDash, loadClaims, loadReminders, loadReport]);
 
+  // Load the employee list of the selected company for the claim form.
+  useEffect(() => {
+    if (!cCompany || cCompany === "external") {
+      setEmpList([]);
+      return;
+    }
+    api<any>(`/admin/claims/employees?company_id=${cCompany}`)
+      .then((r) => setEmpList(r.employees || []))
+      .catch(() => setEmpList([]));
+  }, [cCompany]);
+
+  // PF Form-19 / Form-10C → only LEFT (resigned/exited) employees.
+  const leftOnly = cKind === "pf" && /Form-19|Form-10C/.test(cType);
+  const empOpts = empList.filter((e) => !leftOnly || e.left);
+
+  const pickEmployee = (uid: string) => {
+    setSelEmp(uid);
+    const e = empList.find((x) => x.user_id === uid);
+    if (!e) return;
+    setForm((p) => ({
+      ...p,
+      employee_code: e.employee_code || "",
+      employee_name: e.name || "",
+      uan: e.uan_no || "",
+      insurance_no: e.esi_ip_no || "",
+      department: e.department || "",
+      designation: e.designation || "",
+      doj: e.doj || "",
+      dol: e.dol || "",
+    }));
+  };
+
   const resetForm = (kind: "pf" | "esic" = "pf") => {
     setClaimId("");
     setCKind(kind);
@@ -214,6 +285,7 @@ export default function ClaimsManagementScreen() {
     setForm({});
     setDocs({});
     setAiResult(null);
+    setSelEmp("");
     setMsg("");
   };
 
@@ -232,6 +304,7 @@ export default function ClaimsManagementScreen() {
     });
     setForm(f);
     setDocs(c.documents || {});
+    setSelEmp("");
     setAiResult({
       ai_flags: c.ai_flags || [],
       doc_score: c.doc_score,
@@ -488,6 +561,42 @@ export default function ClaimsManagementScreen() {
                 <Ionicons name="search" size={16} color="#fff" />
               </Pressable>
             </View>
+            {/* user request — date range + sorting (date/name/firm wise) */}
+            <View
+              style={[
+                shared.row,
+                { flexWrap: "wrap", gap: 8, marginTop: 8, alignItems: "center" },
+              ]}
+            >
+              <Text style={st.formLbl}>From</Text>
+              <WebDate value={fFrom} onChange={setFFrom} testID="cl-f-from" />
+              <Text style={st.formLbl}>To</Text>
+              <WebDate value={fTo} onChange={setFTo} testID="cl-f-to" />
+              {(!!fFrom || !!fTo) && (
+                <Pressable
+                  onPress={() => {
+                    setFFrom("");
+                    setFTo("");
+                  }}
+                  testID="cl-f-cleardates"
+                >
+                  <Text style={st.linkTxt}>✕ Clear dates</Text>
+                </Pressable>
+              )}
+              <Text style={st.formLbl}>Sort</Text>
+              <WebSelect
+                testID="cl-f-sort"
+                value={fSort}
+                onChange={setFSort}
+                width={190}
+                options={[
+                  { value: "date_desc", label: "Date — Newest first" },
+                  { value: "date_asc", label: "Date — Oldest first" },
+                  { value: "name", label: "Employee Name (A–Z)" },
+                  { value: "firm", label: "Firm / Company wise" },
+                ]}
+              />
+            </View>
 
             {!loading && claims.length === 0 && (
               <Text style={[shared.meta, { marginTop: 16 }]}>
@@ -661,10 +770,27 @@ export default function ClaimsManagementScreen() {
                   <WebSelect
                     testID="cl-form-company"
                     value={cCompany}
-                    onChange={setCCompany}
+                    onChange={(v) => {
+                      setCCompany(v);
+                      setSelEmp("");
+                    }}
                     width={320}
                     options={companyOpts}
                   />
+                  {/* user request — add a company manually (record only,
+                      NEVER created in the Firm Master) */}
+                  <Pressable
+                    onPress={() => {
+                      setCCompany("external");
+                      setSelEmp("");
+                    }}
+                    style={{ marginTop: 6 }}
+                    testID="cl-add-external"
+                  >
+                    <Text style={st.linkTxt}>
+                      ＋ Add Other Company Manually (not in list)
+                    </Text>
+                  </Pressable>
                 </View>
               )}
               {cCompany === "external" && (
@@ -679,6 +805,10 @@ export default function ClaimsManagementScreen() {
                     placeholder="e.g. XYZ Industries Pvt Ltd"
                     testID="cl-f-company_name"
                   />
+                  <Text style={st.recordOnlyNote}>
+                    Record-only: this company is saved with the claim and will
+                    NOT be created in the Firm Master.
+                  </Text>
                 </View>
               )}
               <View style={st.formField}>
@@ -694,6 +824,44 @@ export default function ClaimsManagementScreen() {
                   ]}
                 />
               </View>
+              {/* user request — employee picker from the Employee Master.
+                  PF Form-19 / Form-10C → LEFT employees only; every other
+                  claim type → full list (active + resigned). */}
+              {!!cCompany && cCompany !== "external" && (
+                <View style={st.formField}>
+                  <Text style={st.formLbl}>
+                    Select Employee{" "}
+                    {leftOnly ? "(left employees only)" : "(active + resigned)"}
+                  </Text>
+                  <WebSelect
+                    testID="cl-form-employee"
+                    value={selEmp}
+                    onChange={pickEmployee}
+                    width={320}
+                    options={[
+                      {
+                        value: "",
+                        label:
+                          empOpts.length === 0
+                            ? leftOnly
+                              ? "— No left employees in this firm —"
+                              : "— No employees found —"
+                            : "— Select Employee —",
+                      },
+                      ...empOpts.map((e: any) => ({
+                        value: e.user_id,
+                        label: `${e.employee_code ? e.employee_code + " — " : ""}${e.name}${e.left ? "  (LEFT)" : ""}`,
+                      })),
+                    ]}
+                  />
+                  {leftOnly && (
+                    <Text style={st.recordOnlyNote}>
+                      Form-19 / Form-10C claims can be filed only for employees
+                      who have left (Date of Leaving in Employee Master).
+                    </Text>
+                  )}
+                </View>
+              )}
               <View style={st.formField}>
                 <Text style={st.formLbl}>Status</Text>
                 <WebSelect
@@ -991,6 +1159,12 @@ const st = StyleSheet.create({
   formWrap: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   formField: { minWidth: 200, flexGrow: 1, maxWidth: 320 },
   formLbl: { fontSize: 11.5, color: colors.onSurfaceSecondary, marginBottom: 3 },
+  recordOnlyNote: {
+    fontSize: 10.5,
+    color: "#B45309",
+    marginTop: 4,
+    fontStyle: "italic",
+  },
   docWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
   docChip: {
     flexDirection: "row",

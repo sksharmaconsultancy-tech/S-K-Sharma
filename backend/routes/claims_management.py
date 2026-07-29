@@ -163,6 +163,54 @@ async def meta(authorization: Optional[str] = Header(None)):
             "doc_checklist": DOC_CHECKLIST}
 
 
+@router.get("/employees")
+async def claim_employees(company_id: str,
+                          authorization: Optional[str] = Header(None)):
+    """Employee picker for the claim form (user request).
+
+    Returns every employee of the firm with a ``left`` flag so the UI can
+    show ONLY left/resigned employees for PF Form-19 / Form-10C claims and
+    the full list (active + resigned) for every other claim type."""
+    _admin, cid = await _adm(authorization, company_id)
+    company_id = cid or company_id
+    if not company_id or company_id == "external":
+        return {"employees": []}
+    out: List[dict] = []
+    async for u in db.users.find(
+            {"role": "employee", "company_id": company_id},
+            {"_id": 0, "user_id": 1, "employee_code": 1, "name": 1,
+             "uan_no": 1, "esi_ip_no": 1, "pf_no": 1, "department": 1,
+             "designation": 1, "position": 1, "doj": 1, "exit_date": 1,
+             "resign_date": 1, "date_of_leaving": 1, "leaving_date": 1,
+             "employment_status": 1, "active": 1, "disabled": 1}):
+        dol = ""
+        for k in ("exit_date", "resign_date", "date_of_leaving",
+                  "leaving_date"):
+            v = str(u.get(k) or "").strip()
+            if v:
+                dol = v[:10]
+                break
+        left = bool(dol) or \
+            str(u.get("employment_status") or "").lower() in (
+                "resigned", "exited", "left", "terminated", "inactive") or \
+            u.get("active") is False or u.get("disabled") is True
+        out.append({
+            "user_id": u["user_id"],
+            "employee_code": u.get("employee_code") or "",
+            "name": u.get("name") or "",
+            "uan_no": u.get("uan_no") or "",
+            "esi_ip_no": u.get("esi_ip_no") or "",
+            "pf_no": u.get("pf_no") or "",
+            "department": u.get("department") or "",
+            "designation": u.get("designation") or u.get("position") or "",
+            "doj": str(u.get("doj") or "")[:10],
+            "dol": dol,
+            "left": left,
+        })
+    out.sort(key=lambda e: (e.get("name") or "").lower())
+    return {"employees": out, "left_count": sum(1 for e in out if e["left"])}
+
+
 @router.get("/dashboard")
 async def dashboard(company_id: Optional[str] = None,
                     authorization: Optional[str] = Header(None)):
@@ -217,6 +265,8 @@ async def dashboard(company_id: Optional[str] = None,
 async def list_claims(claim_kind: str = "pf", status: str = "",
                       claim_type: str = "", q: str = "",
                       executive: str = "", company_id: Optional[str] = None,
+                      date_from: str = "", date_to: str = "",
+                      sort: str = "date_desc",
                       limit: int = 200,
                       authorization: Optional[str] = Header(None)):
     _admin, company_id = await _adm(authorization, company_id)
@@ -229,12 +279,38 @@ async def list_claims(claim_kind: str = "pf", status: str = "",
         qq["data.claim_type"] = claim_type
     if executive:
         qq["data.executive"] = {"$regex": executive, "$options": "i"}
+    # user request — Application Date range filter.
+    if date_from or date_to:
+        rng: Dict[str, Any] = {}
+        if date_from:
+            rng["$gte"] = date_from[:10]
+        if date_to:
+            rng["$lte"] = date_to[:10]
+        qq["data.application_date"] = rng
     if q:
         qq["$or"] = [{"data.employee_name": {"$regex": q, "$options": "i"}},
                      {"data.employee_code": {"$regex": q, "$options": "i"}},
                      {"claim_no": {"$regex": q, "$options": "i"}}]
     rows = await db.pf_esic_claims.find(qq, {"_id": 0}).sort(
         "created_at", -1).to_list(max(1, min(limit, 1000)))
+    # user request — sorting: date-wise / name-wise / firm-wise.
+    if sort in ("date_asc", "date_desc"):
+        rows.sort(key=lambda c: str((c.get("data") or {}).get(
+            "application_date") or ""), reverse=(sort == "date_desc"))
+    elif sort == "name":
+        rows.sort(key=lambda c: str((c.get("data") or {}).get(
+            "employee_name") or "").lower())
+    elif sort == "firm":
+        names = {c["company_id"]: (c.get("name") or "")
+                 async for c in db.companies.find(
+                     {}, {"_id": 0, "company_id": 1, "name": 1})}
+
+        def _firm(c):
+            if c.get("company_id") == "external":
+                return str((c.get("data") or {}).get(
+                    "company_name") or "~external").lower()
+            return names.get(c.get("company_id"), "").lower()
+        rows.sort(key=_firm)
     return {"claims": rows}
 
 

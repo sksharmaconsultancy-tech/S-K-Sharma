@@ -53,6 +53,8 @@ export type EmpForm = {
   compliance_deductions: SalaryLine[];
   permanent_address: string;
   permanent_pincode: string;
+  permanent_district: string;
+  permanent_state: string;
   pincode: string;
   district: string;
   state: string;
@@ -138,6 +140,8 @@ export const EMPTY_FORM: EmpForm = {
   address: "",
   permanent_address: "",
   permanent_pincode: "",
+  permanent_district: "",
+  permanent_state: "",
   pincode: "",
   district: "",
   state: "",

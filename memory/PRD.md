@@ -2433,3 +2433,28 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   Verified via API scripts: manual TDS 500 → reprocess → kept (net rebuilt); ot_pay 750 +
   others 300 kept; tds survived a 2nd reprocess. Test data reset afterwards.
   Deploy: deploy_vps_iter374.sh (temp_bundle→374, includes 370-373).
+- Iter 375 (user: Claims Mgmt upgrades + Employee Master fixes + deploy):
+  CLAIMS (routes/claims_management.py + claims-management.tsx):
+  1. GET /api/admin/claims/employees?company_id= → all employees w/ left flag
+     (dol from exit/resign/leaving fields, employment_status, active/disabled).
+  2. Claim form: employee picker dropdown — PF Form-19/10C shows LEFT employees
+     only, all other claim types show full list; picking auto-fills code/name/
+     UAN/IP/dept/desg/DOJ/DOL. "＋ Add Other Company Manually" button → external
+     mode with record-only note (company saved on claim only, NEVER in Firm Master).
+  3. GET /api/admin/claims: date_from/date_to (data.application_date) + sort=
+     date_desc|date_asc|name|firm. Register UI: From/To date inputs + sort select.
+  EMPLOYEE MASTER (employee-add.tsx):
+  4. FIXED CRASH: codeManual state was never declared (prev agent) → page showed
+     "codeManual is not defined". Added useState(false).
+  5. DOJ auto-fills 01-<current month>-<year> for NEW employees.
+  6. isoToDDMM now passes through DD-MM-YYYY legacy values (edit form showed
+     blank DOJ/DOB for all 125 legacy Kankani employees).
+  ATTENDANCE SHEET (server.py "Iter 377" comments):
+  7. _month_is_before_doj uses _parse_any_date (legacy DD-MM-YYYY DOJs never
+     filtered before); _att_sheet_sort doj sort parses mixed formats.
+  Verified: claims endpoints via curl (date range, name/firm sort, external claim
+  creates NO firm/company doc); UI via playwright (Form-19 → 1 placeholder option,
+  KYC → 129, external note, date filters); employee form new+edit (DOJ default
+  01-07-2026, legacy DOJ 01-12-2018 displays, PAN/Aadhaar autofill, pencil);
+  PATCH profile rejects "50/A"; attendance xlsx sort=doj chronological, 127 rows.
+  Deploy: deploy_vps_iter375.sh (temp_bundle→375, includes 370-374).

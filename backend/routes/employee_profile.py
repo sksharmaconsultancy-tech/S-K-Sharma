@@ -8,6 +8,8 @@ doubles as the EDIT form for existing employees (?user_id= deep link).
 """
 from typing import Any, Dict, Optional
 
+import re
+
 from fastapi import APIRouter, Body, Header, HTTPException
 
 from server import (  # noqa: E402
@@ -113,6 +115,13 @@ async def patch_employee_profile(
 
     # Iter 94 — Employee Code must stay unique within the firm.
     new_code = str(payload.get("employee_code") or "").strip()
+    # Iter 375 (user rule) — letters & digits ONLY in Employee Code.
+    if new_code and not re.fullmatch(r"[A-Za-z0-9]+", new_code):
+        raise HTTPException(
+            status_code=400,
+            detail="Employee Code can contain only letters and numbers — "
+                   "no special characters or spaces",
+        )
     if new_code and new_code != (emp.get("employee_code") or ""):
         dup = await db.users.find_one({
             "company_id": emp.get("company_id"),
@@ -157,6 +166,22 @@ async def patch_employee_profile(
         unified = updates.get("employee_type") or updates.get("employee_group")
         updates["employee_type"] = unified
         updates["employee_group"] = unified
+
+    # Iter 375 (user rule) — a BLANK Employee Code is never stored:
+    # auto-generate the next sequential code for the firm instead.
+    if not new_code:
+        _cur_code = (emp.get("employee_code") or "").strip()
+        _cleared = "employee_code" in updates and not updates.get("employee_code")
+        if not _cur_code or _cleared:
+            from server import _next_employee_code
+            try:
+                _auto = await _next_employee_code(emp.get("company_id"))
+            except Exception:
+                _auto = None
+            if _auto:
+                updates["employee_code"] = _auto
+            elif _cleared:
+                updates.pop("employee_code", None)
 
     # Iter 137 (user directive) — Compliance salary is ONE interlinked
     # source of truth: whenever Compliance Basic / allowance lines change,

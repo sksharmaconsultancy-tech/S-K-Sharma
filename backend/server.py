@@ -8442,6 +8442,14 @@ async def admin_create_employee(
         _onroll_val = True
 
     # Copy over allowed employee master fields.
+    _emp_code_in = (str(payload.get("employee_code") or "").strip() or None)
+    # Iter 375 (user rule) — letters & digits ONLY in Employee Code.
+    if _emp_code_in and not re.fullmatch(r"[A-Za-z0-9]+", _emp_code_in):
+        raise HTTPException(
+            status_code=400,
+            detail="Employee Code can contain only letters and numbers — "
+                   "no special characters or spaces",
+        )
     doc: Dict[str, Any] = {
         "user_id": f"user_{uuid.uuid4().hex[:12]}",
         "email": email,
@@ -8450,7 +8458,7 @@ async def admin_create_employee(
         "picture": None,
         "role": "employee",
         "company_id": cid,
-        "employee_code": (str(payload.get("employee_code") or "").strip() or None),
+        "employee_code": _emp_code_in,
         # Iter 94 — Bio Code (device enrolment no.) settable at creation
         # so Add form matches the master-sheet columns.
         "bio_code": (str(payload.get("bio_code") or "").strip() or None),
@@ -11354,7 +11362,11 @@ def _month_is_before_doj(user: dict, month_str: str) -> bool:
             end_of_run = datetime(y + 1, 1, 1)
         else:
             end_of_run = datetime(y, m + 1, 1)
-        doj_dt = datetime.fromisoformat(doj[:10])
+        # Iter 377 — legacy imports store DOJ as DD-MM-YYYY; use the
+        # tolerant parser so those employees are filtered correctly too.
+        doj_dt = _parse_any_date(doj)
+        if doj_dt is None:
+            return False
         return doj_dt >= end_of_run
     except Exception:
         return False
@@ -16299,6 +16311,190 @@ async def _compute_compliance_run(
     }
 
 
+async def _copy_last_month_from_legacy(
+    admin: dict,
+    payload: ComplianceSalaryRunCreate,
+    gate_cid: Optional[str],
+    group: str,
+    prev_month: str,
+) -> Optional[dict]:
+    """Iter 375 (user bug) — 'Copy Last Month Salary' FALLBACK: after the
+    Old-DB migration the previous month often exists ONLY in the imported
+    legacy history (``legacy_salary_history``, kind='online') — the copy
+    used to fail with "No Compliance Salary found". This builds the new
+    month's editable DRAFT from those locked Old-DB rows instead."""
+    from utils.salary_run import actual_days_in_month
+    q: Dict[str, Any] = {"kind": "online", "month": prev_month}
+    if gate_cid:
+        q["company_id"] = gate_cid
+    if group:
+        q["employee_type"] = {"$regex": f"^{re.escape(group)}$", "$options": "i"}
+    hist = await db.legacy_salary_history.find(q, {"_id": 0}).to_list(6000)
+    if not hist:
+        return None
+    y, m = int(payload.month[:4]), int(payload.month[5:7])
+    company_doc = await db.companies.find_one(
+        {"company_id": gate_cid}, {"_id": 0, "name": 1}) if gate_cid else None
+    # Resolve portal employees by user_id first, employee code second.
+    uids = [h.get("user_id") for h in hist if h.get("user_id")]
+    codes = [h.get("emp_code") for h in hist if h.get("emp_code")]
+    _or: List[dict] = []
+    if uids:
+        _or.append({"user_id": {"$in": uids}})
+    if codes:
+        _or.append({"employee_code": {"$in": codes + [str(c) for c in codes]}})
+    users_by_uid: Dict[str, dict] = {}
+    users_by_code: Dict[int, dict] = {}
+    if _or:
+        async for u in db.users.find(
+            {"$or": _or},
+            {"_id": 0, "user_id": 1, "employee_code": 1, "name": 1,
+             "father_name": 1, "designation": 1, "uan_no": 1, "esi_ip_no": 1,
+             "pf_no": 1, "exit_date": 1, "resign_date": 1, "disabled": 1,
+             "company_id": 1, "employee_type": 1, "is_onroll": 1},
+        ):
+            users_by_uid[u["user_id"]] = u
+            try:
+                users_by_code[int(float(u.get("employee_code")))] = u
+            except (TypeError, ValueError):
+                pass
+
+    def _amt(heads: Optional[dict], *needles: str) -> float:
+        tot = 0.0
+        for k, v in (heads or {}).items():
+            ku = str(k).upper()
+            if any(n in ku for n in needles):
+                tot += float(v or 0)
+        return round(tot, 2)
+
+    rows: List[dict] = []
+    skipped: List[dict] = []
+    for h in hist:
+        u = users_by_uid.get(h.get("user_id"))
+        if u is None and h.get("emp_code") is not None:
+            try:
+                u = users_by_code.get(int(float(h["emp_code"])))
+            except (TypeError, ValueError):
+                u = None
+        if u is None:
+            skipped.append({"user_id": h.get("user_id"),
+                            "name": h.get("name"),
+                            "reason": "not found in portal"})
+            continue
+        if u.get("disabled") is True or _month_is_after_exit(u, payload.month):
+            skipped.append({"user_id": u["user_id"], "name": h.get("name")})
+            continue
+        earn = h.get("earn_heads") or {}
+        ded = h.get("deduct_heads") or {}
+        gross = round(float(h.get("gross") or 0), 2)
+        basic = round(float(h.get("basic") or 0), 2)
+        hra = _amt(earn, "HRA")
+        conv = _amt(earn, "CONV")
+        medical = _amt(earn, "MEDICAL")
+        ot_pay = _amt(earn, "OVER TIME", "OVERTIME")
+        others = round(max(
+            0.0, gross - basic - hra - conv - medical - ot_pay), 2)
+        ee_pf = round(float(h.get("ee_pf") or 0), 2)
+        er_pf = round(float(h.get("er_pf") or 0), 2)
+        pf_wages = round(float(h.get("pf_basic") or 0), 2)
+        eps = round(min(pf_wages * 0.0833, er_pf), 2) if er_pf else 0.0
+        epf_er = round(er_pf - eps, 2) if er_pf else 0.0
+        esi_ee = _amt(ded, "ESI")
+        er_esi = round(float(h.get("er_esi") or 0), 2)
+        pt = _amt(ded, "PT", "PROF")
+        tds = _amt(ded, "TDS")
+        other_ded = round(float(h.get("less_adv") or 0)
+                          + float(h.get("less_other") or 0)
+                          + float(h.get("less_loan") or 0), 2)
+        total_ded = round(ee_pf + esi_ee + pt + tds + other_ded, 2)
+        net = round(float(h.get("net") or 0), 2) or round(gross - total_ded, 2)
+        _esic_on = esi_ee > 0 or er_esi > 0
+        rows.append({
+            "user_id": u["user_id"],
+            "employee_code": u.get("employee_code") or h.get("emp_code"),
+            "name": u.get("name") or h.get("name"),
+            "father_name": u.get("father_name"),
+            "designation": u.get("designation"),
+            "employee_type": h.get("employee_type") or u.get("employee_type"),
+            "is_onroll": bool(u.get("is_onroll", True)),
+            "company_id": u.get("company_id") or gate_cid,
+            "company_name": (company_doc or {}).get("name"),
+            "uan_no": u.get("uan_no"),
+            "esi_ip_no": u.get("esi_ip_no"),
+            "pf_no": u.get("pf_no"),
+            "salary_mode": "monthly",
+            "month_days": h.get("month_days"),
+            "present_days": round(float(h.get("present_days") or 0), 2),
+            "ot_hours": round(float(h.get("ot_hours") or 0), 2),
+            "basic": basic, "hra": hra, "conveyance": conv,
+            "medical": medical, "special": 0.0, "others": others,
+            "monthly_gross": round(gross - ot_pay, 2),
+            "ot_pay": ot_pay,
+            "gross_paid": gross,
+            "stat_wage_base": pf_wages or basic,
+            "pf_applicable": ee_pf > 0,
+            "pf_eligible": ee_pf > 0,
+            "pf_wages": pf_wages,
+            "pf_employee": ee_pf,
+            "pf_employer_epf": epf_er,
+            "pf_employer_eps": eps,
+            "pf_employer_total": er_pf,
+            "esic_applicable": _esic_on,
+            "esic_eligible": _esic_on,
+            "esic_wage_base": gross if _esic_on else 0.0,
+            "esic_employee": esi_ee,
+            "esic_employer": er_esi,
+            "pt": pt,
+            "tds": tds,
+            "other_deduction": other_ded,
+            "other_deduction_head": "Advance/Other" if other_ded else None,
+            "total_deduction": total_ded,
+            "net": net,
+            "copied_from_legacy": True,
+        })
+    if not rows:
+        return None
+    totals = {
+        k: round(sum(float(r.get(k) or 0.0) for r in rows), 2)
+        for k in (
+            "basic", "hra", "conveyance", "medical", "special", "others",
+            "monthly_gross", "gross_paid", "ot_pay",
+            "pf_wages", "pf_employee", "pf_employer_epf", "pf_employer_eps",
+            "pf_employer_total",
+            "esic_wage_base", "esic_employee", "esic_employer",
+            "pt", "tds", "total_deduction", "net",
+        )
+    }
+    _mdays = None
+    for h in hist:
+        try:
+            _mdays = int(float(h.get("month_days")))
+            break
+        except (TypeError, ValueError):
+            continue
+    return {
+        "month": payload.month,
+        "year": y,
+        "month_number": m,
+        "month_days": _mdays or actual_days_in_month(y, m),
+        "default_month_days": actual_days_in_month(y, m),
+        "company_id": gate_cid,
+        "employee_type": payload.employee_type,
+        "structure_pct": {},
+        "statutory_cfg": {},
+        "employees_count": len(rows),
+        "rows": rows,
+        "totals": totals,
+        "attendance_source": "copied_last_month_legacy",
+        "copied_from_month": prev_month,
+        "copied_from_legacy": True,
+        "copied_skipped": skipped,
+        "frozen": False,
+        "generated_by": admin["user_id"],
+        "generated_at": now_iso(),
+    }
+
+
 async def _copy_last_month_compliance_run(
     admin: dict,
     payload: ComplianceSalaryRunCreate,
@@ -16323,10 +16519,17 @@ async def _copy_last_month_compliance_run(
         sort=[("finalized", -1), ("generated_at", -1)],
     )
     if not src or not (src.get("rows") or []):
+        # Iter 375 (user bug) — after the Old-DB lock, last month exists
+        # only in the imported legacy history: copy from there instead.
+        legacy = await _copy_last_month_from_legacy(
+            admin, payload, gate_cid, group, prev_month)
+        if legacy is not None:
+            return legacy
         raise HTTPException(
             status_code=404,
             detail=f"No Compliance Salary found for {prev_month} (this firm/"
-                   "group) — process last month first, then copy it.",
+                   "group) — neither a portal run nor imported Old-DB salary "
+                   "history. Process or import last month first, then copy.",
         )
     # Drop employees who exited before the new month or were disabled.
     src_rows = src.get("rows") or []
@@ -19581,8 +19784,13 @@ def _att_sheet_sort(employees: List[dict], sort_by: Optional[str]) -> List[dict]
             str(e.get("designation") or e.get("position") or "").lower(),
             _code_num(e)))
     if s == "doj":
-        return sorted(employees, key=lambda e: (str(e.get("doj") or "9999-99-99"),
-                                                _code_num(e)))
+        # Iter 377 — DOJ may be stored DD-MM-YYYY (legacy import); parse it
+        # so mixed formats still sort chronologically.
+        def _doj_key(e):
+            dt = _parse_any_date(e.get("doj"))
+            return (dt.strftime("%Y-%m-%d") if dt else "9999-99-99",
+                    _code_num(e))
+        return sorted(employees, key=_doj_key)
     return sorted(employees, key=_code_num)
 
 
