@@ -2240,3 +2240,28 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   doc-checklist chips + Smart AI Analysis panel, Follow-up Reminders, Reports w/ exports).
   Sidebar (AdminWebShell x2): Compliance → "PF & ESIC Claims". Deploy: deploy_vps_iter359.sh
   (temp_bundle kind=script updated to 359).
+- Iter 360 (tested 9/9 pytest + full 5-step wizard UI, iteration_360.json): AI UNIVERSAL
+  PAYROLL IMPORT. Backend routes/ai_universal_import.py (router /api/admin/ai-import,
+  registered in server.py as ai_uimport_router): POST /analyze (pandas parse xls/xlsx/csv,
+  header-row auto-locate, FIELD_HINTS rule mapping 50 canonical fields, template fingerprint
+  sha1 of sorted headers → ai_universal_templates instant recognition, _guess_file_type 14
+  types top-3, _detect_period regex, company fuzzy match vs db.companies, single LLM assist
+  gpt-5.4 emergentintegrations only when needed; rows chunked 500/doc in ai_import_rows).
+  POST /validate (employee matching code→uan→esic→aadhaar→pan→mobile→name+dob→fuzzy w/
+  confidence; 20+ validations: dupes in file, format checks UAN/ESIC/PAN/IFSC, negative
+  values, days>calendar, min wage from compliance_policy.minimum_wage_daily, PF≤15k/ESIC≤21k
+  eligibility; AI Correction Engine fills UAN/ESIC/IFSC from master + prev-month gross diff
+  via compliance_salary_runs). POST /commit (asyncio background, progress polling GET /job/
+  {id}, 409 duplicate-import guard; targets: employee_master→users upsert/create,
+  attendance_salary→compliance_import_entries then AUTO PAYROLL via
+  _create_compliance_salary_run_core(use_imported_sheet=True) — reuses Freeze Salary engine,
+  leave→leaves, extras→ai_imported_extras; saves learned template; audit ai_import_audit;
+  temp rows deleted post-success). GET /compliance-check (post-run PF-UAN/ESIC-IP/wage-cap/
+  negative-net scan + 6 artifact links incl pf-ecr.txt), GET /dashboard, GET+DELETE
+  /templates, POST /explain (LLM plain-English error explainer). Frontend
+  app/ai-universal-import.tsx: 3 tabs (Import Wizard 5 steps w/ step indicator, Dashboard,
+  Learned Templates); web file input via dynamic <input type=file>; amber low-confidence
+  mapping rows; validation filters; target checkboxes; live progress bar; payroll +
+  compliance cards w/ artifact download buttons. Sidebar (AdminWebShell x2): Payroll →
+  "AI Universal Import" (sparkles icon). Deploy: deploy_vps_iter360.sh (temp_bundle
+  kind=script now serves 360).
