@@ -277,16 +277,48 @@ def _flow_for_employee(
 
     earnings = [
         ("Basic Pay", row.get("base_pay") or row.get("basic")),
-        ("HRA", row.get("hra")),
-        ("Bonus", row.get("bonus")),
-        ("Overtime", row.get("ot_pay")),
-        ("Other Earnings", row.get("other_earning")),
     ]
-    deductions = [
-        ("PF (Employee)", row.get("pf_employee") or row.get("pf")),
-        ("ESIC (Employee)", row.get("esic_employee") or row.get("esic")),
-        ("Professional Tax", row.get("pt")),
-        ("TDS", row.get("tds")),
+    # Iter 381 (user request) — the earnings heads follow the Firm Master
+    # enabled Allowances (``enabled_allowances`` stamped on the run row,
+    # same mask as the register/grid). Rows without the mask (legacy /
+    # actual-run snapshots) show HRA as before plus any other head that
+    # actually carries an amount.
+    en = row.get("enabled_allowances")
+    ed = row.get("enabled_deductions")
+
+    def _nz(v: Any) -> bool:
+        try:
+            return abs(float(v or 0)) > 0.005
+        except (TypeError, ValueError):
+            return False
+
+    for label, key in (("HRA", "hra"), ("Conveyance", "conveyance"),
+                       ("Medical Allow.", "medical"),
+                       ("Special Allow.", "special"),
+                       ("Other Allow.", "others")):
+        v = row.get(key)
+        if (en is not None and key in en) or \
+                (en is None and (key == "hra" or _nz(v))):
+            earnings.append((label, v))
+    earnings.append(("Overtime", row.get("ot_pay")))
+    for label, key in (("Bonus", "bonus"), ("Other Earnings", "other_earning")):
+        if en is None or _nz(row.get(key)):
+            earnings.append((label, row.get(key)))
+    deductions = []
+    # Deduction heads follow the Firm Master Deductions the same way.
+    for label, key, mk in (
+            ("PF (Employee)", "pf_employee", "pf"),
+            ("ESIC (Employee)", "esic_employee", "esi"),
+            ("Professional Tax", "pt", "pt"),
+            ("TDS", "tds", "tds")):
+        v = row.get(key)
+        if v is None and key == "pf_employee":
+            v = row.get("pf")
+        if v is None and key == "esic_employee":
+            v = row.get("esic")
+        if ed is None or mk in ed:
+            deductions.append((label, v))
+    deductions += [
         ("Advance / Loan", row.get("advance")),
         ("Other Deduction", row.get("other_deduction")),
     ]

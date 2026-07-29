@@ -15017,6 +15017,9 @@ async def _payslip_rows_for_month(company_id: str, month: str):
         {"company_id": company_id, "month": month}, {"_id": 0},
         sort=[("created_at", -1)])
     if crun and (crun.get("rows") or []):
+        # Iter 381 (user request) — payslips follow the Firm Master enabled
+        # heads; old runs get the live masks stamped like the register.
+        crun = await _ensure_firm_head_masks(crun)
         return (crun.get("rows") or [], crun.get("month_days"), "compliance")
     arun = await db.salary_runs.find_one(
         {"company_id": company_id, "month": month, "run_type": "actual"},

@@ -2533,3 +2533,18 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   showed (2), click filtered grid to the 2 red-highlighted employees.
   DB patch reverted after test.
   Deploy: deploy_vps_iter380.sh (temp_bundle→380, includes 370-379).
+- Iter 381 (user accepted improvement: payslips follow Firm Master heads):
+  utils/payslip_pdf.py _flow_for_employee: earnings list dynamic —
+  Basic always; HRA/Conveyance/Medical/Special/Others per
+  row.enabled_allowances (mask None → legacy: HRA always + others only
+  when non-zero); Overtime always; Bonus/Other Earnings hidden when mask
+  present & zero. Deductions PF/ESIC/PT/TDS per enabled_deductions;
+  Advance/Other always. server.py _payslip_rows_for_month (compliance
+  branch) stamps masks via _ensure_firm_head_masks → covers single
+  payslip, ZIP-all, e-mail payslips endpoints (all use this helper);
+  /me payslips + actual-run bulk keep legacy fallback (mask None).
+  Verified: employee-payslip.pdf for Kankani July → shows Basic/HRA/
+  Conveyance/Overtime + PF/ESIC only; Medical/Special/PT/TDS/Bonus
+  hidden. pytest payslip builder tests pass (7 passed; other errors are
+  pre-existing live-session fixtures).
+  Deploy: deploy_vps_iter381.sh (temp_bundle→381, includes 370-380).
