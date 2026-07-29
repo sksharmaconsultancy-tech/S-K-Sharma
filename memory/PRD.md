@@ -2321,3 +2321,18 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   Import/Export → "Backup Center". Verified sync job intact post-rollback (only
   _SYNC_SALARY_KEYS: basic/pf_basic/gross/salary_monthly/allowances/bio_code). Deploy:
   deploy_vps_iter366.sh (full bundle; re-sync workflow steps in output; temp_bundle→366).
+- Iter 367 (user request): SALARY COMPLIANCE PROCESS (AI). Backend
+  routes/ai_salary_compliance.py (router /api/admin/ai-salary-compliance, registered as
+  ai_salcomp_router): GET /employee-inputs (READ-ONLY prefill: firm_masters.allowances/
+  deductions enabled heads in ORIGINAL dict order — NO re-sort/re-group/filter, amounts from
+  compliance_salary_allowances; basic fallback chain compliance_basic→salary_structure_actual
+  Basic row (daily rate_basis)→salary_monthly; attendance from compliance_import_entries →
+  salary run row; PF/ESI eligibility, PT state). POST /calculate → gpt-5.4 with SYSTEM_PROMPT
+  (user's Senior Payroll & Compliance Expert prompt: 12 numbered sections, Sr. No. FIRST
+  column in every table, heads exact-order no-omit rule, daily-rate formula, plain text no
+  markdown). Frontend app/ai-salary-compliance.tsx: Load Employee (company/code/month) +
+  editable dynamic allowance/deduction rows (sr numbers) + attendance/variable/statutory
+  groups + result panel monospace. Sidebar x2: Payroll → "Salary Compliance Process (AI)".
+  E2E tested: emp 50 Kankani daily ₹745 → 200, all sections present, firm heads HRA/CONV./
+  OVER TIME + PF/ESI/ADVANCE in order. STRICTLY ADDITIVE — Freeze Salary/import untouched.
+  Deploy: deploy_vps_iter367.sh (temp_bundle→367).
