@@ -108,9 +108,16 @@ export default function AiSalaryComplianceScreen() {
     setErr("");
     setResult("");
     try {
+      const cid = isCompanyAdmin ? user?.company_id : companyId;
       const r = await api<any>("/admin/ai-salary-compliance/calculate", {
         method: "POST",
         body: {
+          // When an employee is loaded, the backend computes with the
+          // SAME Compliance Salary engine + firm policy (exact
+          // deductions & net); manual entries fall back to AI-only.
+          company_id: cid || undefined,
+          employee_code: empCode || undefined,
+          month: month || form.payroll_month || undefined,
           inputs: {
             ...form,
             allowances: allow

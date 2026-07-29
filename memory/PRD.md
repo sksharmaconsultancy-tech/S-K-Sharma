@@ -2336,3 +2336,15 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   E2E tested: emp 50 Kankani daily ₹745 → 200, all sections present, firm heads HRA/CONV./
   OVER TIME + PF/ESI/ADVANCE in order. STRICTLY ADDITIVE — Freeze Salary/import untouched.
   Deploy: deploy_vps_iter367.sh (temp_bundle→367).
+- Iter 368 (user fixes on Salary Compliance Process): DETERMINISTIC ENGINE MODE.
+  ai_salary_compliance.py: /calculate now routes to _calculate_engine when
+  company_id+employee_code+month present — uses utils.compliance_salary.compute_compliance_row
+  with firm compliance_policy (statutory keys from DEFAULT_STATUTORY_CFG), firm_masters
+  PF/ESI applicability flags, firm_pt state slabs, employee_policy — deductions/net identical
+  to Salary Process. _tbl() builds fixed-width tables in code: Sr. No. FIRST column
+  guaranteed, footer total right-aligned exactly under Amount (₹) heading. Variable pay
+  (incentives/bonus/arrears/reimb) added to gross; loan_recovery added to deductions. AI only
+  writes sections 10-12 (checklist/journal/notes), non-fatal on failure. Manual mode (no
+  employee) falls back to _calculate_ai_only. Frontend runCalc sends company_id/employee_code/
+  month. Verified: emp 50 Kankani 2026-06 26d+10OT → gross 20766.88, ESIC 59, employer 252,
+  net 20207.88; tables aligned. Deploy: deploy_vps_iter368.sh (temp_bundle→368).

@@ -193,8 +193,188 @@ async def employee_inputs(company_id: str, employee_code: str, month: str,
 @router.post("/calculate")
 async def calculate(body: dict = Body(...),
                     authorization: Optional[str] = Header(None)):
-    await _adm(authorization)
+    _admin, forced_cid = await _adm(authorization, body.get("company_id"))
+    cid = forced_cid or body.get("company_id")
+    code = str(body.get("employee_code") or "").strip()
+    month = str(body.get("month") or "").strip()
     raw = body.get("inputs") or {}
+    if cid and code and re.fullmatch(r"20\d{2}-\d{2}", month):
+        return await _calculate_engine(cid, code, month, raw)
+    return await _calculate_ai_only(raw)
+
+
+def _tbl(title: str, rows, total_label="TOTAL") -> str:
+    """Fixed-width table: Sr. No. FIRST column, footer total aligned
+    under the Amount heading (user request)."""
+    out = [title, "-" * 52,
+           f"{'Sr.':<5}{'Particulars':<32}{'Amount (₹)':>15}",
+           "-" * 52]
+    total = 0.0
+    sr = 0
+    for head, amt in rows:
+        sr += 1
+        total += float(amt)
+        out.append(f"{sr:<5}{str(head)[:31]:<32}{float(amt):>15,.2f}")
+    out.append("-" * 52)
+    out.append(f"{'':<5}{total_label:<32}{total:>15,.2f}")
+    out.append("")
+    return "\n".join(out)
+
+
+async def _calculate_engine(cid: str, code: str, month: str,
+                            raw: dict) -> dict:
+    """DETERMINISTIC: uses the SAME compute_compliance_row engine and the
+    firm's Compliance Salary Policy as the Salary Process — deductions &
+    net match the portal exactly. AI only writes checklist/journal/notes."""
+    from utils.compliance_salary import (DEFAULT_STATUTORY_CFG,
+                                         compute_compliance_row)
+    u = await db.users.find_one(
+        {"company_id": cid, "role": "employee",
+         "employee_code": {"$in": [code, code.lstrip("0"), code.zfill(2),
+                                   code.zfill(3)]}}, {"_id": 0})
+    if not u:
+        raise HTTPException(status_code=404,
+                            detail=f"Employee code {code} not found")
+    comp = await db.companies.find_one({"company_id": cid}, {"_id": 0})
+    fm = await db.firm_masters.find_one({"company_id": cid}, {"_id": 0})
+    fcp = (comp or {}).get("compliance_policy") or {}
+    fded = (fm or {}).get("deductions") or {}
+    firm_pf = bool(((fm or {}).get("epf") or {}).get("applicable")) \
+        or bool(fded.get("PF"))
+    firm_esic = bool(((fm or {}).get("esi") or {}).get("applicable")) \
+        or bool(fded.get("ESI"))
+    statutory = {k: fcp[k] for k in DEFAULT_STATUTORY_CFG if k in fcp}
+    y, m = int(month[:4]), int(month[5:7])
+    month_days = [31, 29 if y % 4 == 0 else 28, 31, 30, 31, 30,
+                  31, 31, 30, 31, 30, 31][m - 1]
+    present = _f(raw.get("present_days")) or month_days
+    ot_hours = _f(raw.get("ot_hours"))
+    stats = {"present_days": present, "effective_present": present,
+             "half_days": 0, "duty_hours": 0.0, "ot_hours": ot_hours}
+    policy = dict(u.get("employee_policy") or {})
+    if _f(raw.get("tds_amount")):
+        u = {**u, "tds_monthly": _f(raw.get("tds_amount"))}
+    row = compute_compliance_row(
+        u, policy, month_days, stats, statutory_cfg=statutory,
+        firm_pf_enabled=firm_pf, firm_esic_enabled=firm_esic,
+        firm_pt={"state": fcp.get("pt_state"), "slabs": fcp.get("pt_slabs")})
+
+    inc, bon = _f(raw.get("incentives")), _f(raw.get("bonus"))
+    arr, reim = _f(raw.get("arrears")), _f(raw.get("reimbursements"))
+    loan = _f(raw.get("loan_recovery"))
+    earn_rows = [("BASIC (earned)", row["basic"])]
+    for k, lb in (("hra", "HRA"), ("conveyance", "CONVEYANCE"),
+                  ("medical", "MEDICAL"), ("special", "SPECIAL ALLOWANCE"),
+                  ("others", "OTHER ALLOWANCES")):
+        if _f(row.get(k)):
+            earn_rows.append((lb, row[k]))
+    if _f(row.get("ot_pay")):
+        earn_rows.append((f"OVERTIME ({row['ot_hours']} hrs)",
+                          row["ot_pay"]))
+    for lb, v in (("INCENTIVES", inc), ("BONUS", bon), ("ARREARS", arr),
+                  ("REIMBURSEMENTS", reim)):
+        if v:
+            earn_rows.append((lb, v))
+    gross = round(_f(row.get("gross_paid")) + inc + bon + arr + reim, 2)
+
+    ded_rows = []
+    if _f(row.get("pf_employee")):
+        ded_rows.append((f"PF EMPLOYEE (12% of {row['pf_wages']:,.0f})",
+                         row["pf_employee"]))
+    if _f(row.get("vpf_amount")):
+        ded_rows.append(("VPF", row["vpf_amount"]))
+    if _f(row.get("esic_employee")):
+        ded_rows.append(("ESIC EMPLOYEE (0.75%)", row["esic_employee"]))
+    if _f(row.get("pt")):
+        ded_rows.append((f"PROFESSIONAL TAX ({row.get('pt_state') or ''})",
+                         row["pt"]))
+    if _f(row.get("tds")):
+        ded_rows.append(("TDS", row["tds"]))
+    if _f(row.get("master_deduction")):
+        ded_rows.append(("OTHER DEDUCTIONS (master)",
+                         row["master_deduction"]))
+    if loan:
+        ded_rows.append(("LOAN / ADVANCE RECOVERY", loan))
+    total_ded = round(sum(_f(a) for _h, a in ded_rows), 2)
+    net = round(gross - total_ded, 2)
+
+    cfg = dict(DEFAULT_STATUTORY_CFG)
+    for k, v in statutory.items():
+        if not isinstance(v, str):
+            cfg[k] = _f(v)
+    pfw = _f(row.get("pf_wages"))
+    er_rows = []
+    if _f(row.get("pf_employer_total")):
+        er_rows += [("EPF EMPLOYER 3.67%", row["pf_employer_epf"]),
+                    ("EPS EMPLOYER 8.33%", row["pf_employer_eps"]),
+                    ("EDLI 0.50%", round(pfw * cfg["pf_edli_percent"]
+                                         / 100, 2)),
+                    ("PF ADMIN 0.50%", round(pfw * cfg["pf_admin_percent"]
+                                             / 100, 2))]
+    if _f(row.get("esic_employer")):
+        er_rows.append(("ESIC EMPLOYER 3.25%", row["esic_employer"]))
+
+    hdr = (f"1. EMPLOYEE DETAILS\n{'-' * 52}\n"
+           f"Name          : {u.get('name')}\n"
+           f"Employee Code : {u.get('employee_code')}\n"
+           f"Company       : {(comp or {}).get('name')}\n"
+           f"Month         : {month}\n"
+           f"Rate          : {row['rate']:,.2f} ({row['salary_mode']})\n"
+           f"UAN           : {u.get('uan_no') or '—'}   "
+           f"ESIC IP: {u.get('esi_ip_no') or '—'}\n\n"
+           f"2. ATTENDANCE SUMMARY\n{'-' * 52}\n"
+           f"Month Days: {month_days}   Present: {row['present_days']}   "
+           f"OT Hours: {row['ot_hours']}\n")
+    body_txt = (
+        hdr + "\n" + _tbl("3. EARNINGS TABLE", earn_rows, "GROSS EARNINGS")
+        + _tbl("4. DEDUCTIONS TABLE", ded_rows, "TOTAL DEDUCTIONS")
+        + _tbl("5. EMPLOYER CONTRIBUTIONS (not deducted from employee)",
+               er_rows, "TOTAL EMPLOYER COST")
+        + f"6. GROSS SALARY      : ₹{gross:>13,.2f}\n"
+        + f"7. TOTAL DEDUCTIONS  : ₹{total_ded:>13,.2f}\n"
+        + f"8. NET SALARY PAYABLE: ₹{net:>13,.2f}\n\n"
+        + f"9. PAYSLIP SUMMARY\n{'-' * 52}\n"
+        + f"{u.get('name')} · {month} · Gross ₹{gross:,.2f} − "
+        + f"Deductions ₹{total_ded:,.2f} = NET ₹{net:,.2f}\n"
+        + "(Computed by the portal's Compliance Salary engine — same "
+        + "policy, rates,\n rounding and PF/ESIC/PT rules as your Salary "
+        + "Process.)\n")
+
+    ai_txt = ""
+    if EMERGENT_LLM_KEY:
+        try:
+            from emergentintegrations.llm.chat import LlmChat, UserMessage
+            chat = LlmChat(
+                api_key=EMERGENT_LLM_KEY,
+                session_id=f"ai-salcomp-{uuid.uuid4().hex[:8]}",
+                system_message=(
+                    "You are a Senior Indian Payroll Compliance Expert. "
+                    "The salary is ALREADY calculated by the firm's "
+                    "compliance engine — do NOT recalculate or change any "
+                    "number. Produce ONLY these plain-text sections (no "
+                    "markdown; every table MUST start with a Sr. No. "
+                    "column): 10. COMPLIANCE CHECKLIST (point-wise PF/ESIC/"
+                    "PT/TDS/LWF/minimum-wage checks with OK or ISSUE), "
+                    "11. PAYROLL JOURNAL ENTRIES (Sr., Account, Debit, "
+                    "Credit — salary payable, PF/ESIC payable incl. "
+                    "employer share, PT, TDS), 12. NOTES AND ASSUMPTIONS."),
+            ).with_model("openai", "gpt-5.4")
+            resp = await chat.send_message(UserMessage(
+                text=body_txt + "\nEmployer contributions total: ₹"
+                + f"{sum(_f(a) for _h, a in er_rows):,.2f}"))
+            ai_txt = "\n" + re.sub(r"[*#`|]", "", str(resp))
+        except Exception as e:  # noqa: BLE001
+            ai_txt = ("\n10. COMPLIANCE CHECKLIST\n(AI unavailable: "
+                      + str(e)[:120] + ")\n")
+    await db.ai_salary_compliance_log.insert_one({
+        "at": __import__("datetime").datetime.utcnow().isoformat(),
+        "employee": u.get("name"), "month": month, "mode": "engine"})
+    return {"result": body_txt + ai_txt, "engine": True,
+            "row": {"gross": gross, "total_deduction": total_ded,
+                    "net": net}}
+
+
+async def _calculate_ai_only(raw: dict) -> dict:
     inputs = {k: raw.get(k) for k in _IN_FIELDS if raw.get(k)
               not in (None, "")}
     if not _f(inputs.get("basic")) and not (inputs.get("allowances")):
