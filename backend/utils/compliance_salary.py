@@ -808,15 +808,49 @@ CSV_COLUMNS = [
 ]
 
 
+def dynamic_csv_columns(rows: List[Dict[str, Any]]) -> List[str]:
+    """Iter 373 (user request) — Excel/CSV export columns follow the
+    firm-enabled heads so spreadsheets always MATCH the PDF register."""
+    r0 = rows[0] if rows else {}
+    en = r0.get("enabled_allowances")
+    ed = r0.get("enabled_deductions")
+
+    def has_a(k: str) -> bool:
+        return (en is None) or (k in en) or k == "basic"
+
+    def has_d(k: str) -> bool:
+        return (ed is None) or (k in ed)
+
+    drop: set = set()
+    for k in ("hra", "conveyance", "medical", "special", "others"):
+        if not has_a(k):
+            drop.add(k)
+    if not has_d("pf"):
+        drop |= {"pf_applicable", "pf_wages", "pf_employee",
+                 "pf_employer_epf", "pf_employer_eps", "pf_employer_total"}
+    if not has_d("esi"):
+        drop |= {"esic_applicable", "esic_wage_base",
+                 "esic_employee", "esic_employer"}
+    if not has_d("pt"):
+        drop |= {"pt_state", "pt"}
+    if not has_d("tds"):
+        drop.add("tds")
+    return [c for c in CSV_COLUMNS if c not in drop]
+
+
 def to_csv(rows: List[Dict[str, Any]]) -> str:
+    # Iter 373 (user request) — dynamic firm-wise heads in CSV too.
+    cols = dynamic_csv_columns(rows)
     buf = io.StringIO()
-    w = csv.DictWriter(buf, fieldnames=CSV_COLUMNS, extrasaction="ignore")
+    w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
     w.writeheader()
     for r in rows:
-        row = {k: r.get(k, "") for k in CSV_COLUMNS}
+        row = {k: r.get(k, "") for k in cols}
         row["is_onroll"] = "On-roll" if r.get("is_onroll") else "Off-roll"
-        row["pf_applicable"] = "Yes" if r.get("pf_applicable") else "No"
-        row["esic_applicable"] = "Yes" if r.get("esic_applicable") else "No"
+        if "pf_applicable" in cols:
+            row["pf_applicable"] = "Yes" if r.get("pf_applicable") else "No"
+        if "esic_applicable" in cols:
+            row["esic_applicable"] = "Yes" if r.get("esic_applicable") else "No"
         w.writerow(row)
     return buf.getvalue()
 

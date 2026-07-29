@@ -765,6 +765,34 @@ export default function ComplianceSalaryRunScreen() {
     );
     if (existing) {
       if ((existing as any).finalized) {
+        // Iter 373 (user request) — offer the UNLOCK right here for
+        // Super / Sub Admins instead of a dead-end message.
+        if (isSuper) {
+          const okU = await confirmYesNo(
+            "This month's salary is already FINALIZED for this employee group.\n\n" +
+            "UNLOCK it now so it can be edited / reprocessed?",
+          );
+          if (okU) {
+            try {
+              const ur = await api<{ ok: boolean; unlocked?: boolean; message?: string }>(
+                `/admin/compliance-salary-runs/${(existing as any).run_id}/unlock-request`,
+                { method: "POST", body: { reason: "Unlocked from Salary Process" } },
+              );
+              if (ur.unlocked) {
+                if (run?.run_id === (existing as any).run_id) {
+                  setRun({ ...(run as any), finalized: false } as any);
+                }
+                await loadRuns();
+                showMsg("Salary unlocked ✓ — click Salary Process again to reprocess.");
+              } else {
+                showMsg(ur.message || "Unlock request sent for approval.");
+              }
+            } catch (e: any) {
+              showMsg(e?.message || "Unlock failed");
+            }
+          }
+          return;
+        }
         showMsg(
           "This month's salary is already FINALIZED for this employee group — it cannot be processed again. Use Unlock Request to de-finalize first.",
         );

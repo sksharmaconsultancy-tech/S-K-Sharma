@@ -343,6 +343,36 @@ def to_csv(rows: List[Dict[str, Any]]) -> str:
     return buf.getvalue()
 
 
+# Iter 373 (user request) — Actual Salary run export columns (dynamic
+# EPF / ESI per Firm Master, matching the Actual Salary Register PDF).
+ACTUAL_CSV_COLUMNS = [
+    "employee_code", "name", "father_name", "designation", "employee_type",
+    "salary_mode", "p_days", "p_hours",
+    "basic", "basic_salary", "w_basic_salary", "oth_allo", "total_gross",
+    "epf", "esi", "adv", "tds", "net_pay",
+]
+
+
+def actual_csv_columns(show_epf: bool = True, show_esi: bool = True) -> List[str]:
+    drop = set()
+    if not show_epf:
+        drop.add("epf")
+    if not show_esi:
+        drop.add("esi")
+    return [c for c in ACTUAL_CSV_COLUMNS if c not in drop]
+
+
+def to_actual_csv(rows: List[Dict[str, Any]],
+                  show_epf: bool = True, show_esi: bool = True) -> str:
+    cols = actual_csv_columns(show_epf, show_esi)
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+    w.writeheader()
+    for r in rows:
+        w.writerow({k: r.get(k, "") for k in cols})
+    return buf.getvalue()
+
+
 # Iter 274 — editable column catalog for the Actual Salary Register PDF
 # (Utilities → PDF Report Formats): (key, default heading, width mm, numeric).
 SALARY_REGISTER_COLUMNS = [

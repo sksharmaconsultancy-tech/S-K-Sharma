@@ -2403,3 +2403,16 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   Verified via pypdf text-extraction on Kankani June runs: v1 bands SALARY/HRA/CONV/TOTAL
   (no OTHER/TDS), IDs unlabeled; v2 dropped Other+TDS cols; actual register OK 6 pages.
   Deploy: deploy_vps_iter372.sh (temp_bundle→372, includes 370+371).
+- Iter 373 (user: Excel matches PDF + unlock in blocked path):
+  1. compliance_salary.py: dynamic_csv_columns(rows) filters CSV_COLUMNS by
+     enabled_allowances/enabled_deductions; to_csv uses it; compliance export.xlsx
+     endpoint uses dynamic_csv_columns.
+  2. salary_run.py: ACTUAL_CSV_COLUMNS + actual_csv_columns(show_epf, show_esi) +
+     to_actual_csv. server.py: _actual_epf_esi_flags(company_id) helper (Applicable
+     authoritative, fallback Deductions catalog) reused by register.pdf, export.csv,
+     export.xlsx — actual runs branch to Actual grid columns.
+  3. compliance-salary-run.tsx generate(): FINALIZED-blocked path now offers Super/Sub
+     Admins a Yes/No "UNLOCK it now" confirm → unlock-request endpoint → reload.
+  Verified: CSV headers dynamic (compliance drops med/spl/others/pt/tds), actual
+  CSV/XLSX new columns, XLSX headers via openpyxl, unlock dialog E2E (toast confirmed).
+  Deploy: deploy_vps_iter373.sh (temp_bundle→373, includes 370-372).

@@ -14688,6 +14688,25 @@ def _sort_export_rows(rows: list, sort_by: Optional[str]) -> list:
 
 
 
+async def _actual_epf_esi_flags(company_id: Optional[str]) -> tuple:
+    """Iter 373 (user request) — EPF/ESI column visibility for Actual
+    Salary exports: the Firm Master "Applicable" flags are authoritative;
+    when never configured, fall back to the Deductions catalog (exactly
+    like the compliance engine)."""
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id},
+        {"_id": 0, "epf": 1, "esi": 1, "deductions": 1}) or {}
+    _fm_ded = fm.get("deductions") or {}
+    _has_cat = any(bool(v) for v in _fm_ded.values())
+    _epf_ap = (fm.get("epf") or {}).get("applicable")
+    _esi_ap = (fm.get("esi") or {}).get("applicable")
+    show_epf = (bool(_epf_ap) if _epf_ap is not None
+                else (bool(_fm_ded.get("PF")) if _has_cat else True))
+    show_esi = (bool(_esi_ap) if _esi_ap is not None
+                else (bool(_fm_ded.get("ESI")) if _has_cat else True))
+    return show_epf, show_esi
+
+
 @api.get("/admin/salary-runs/{run_id}/export.csv")
 async def export_salary_run_csv(
     run_id: str,
@@ -14704,7 +14723,15 @@ async def export_salary_run_csv(
         raise HTTPException(status_code=404, detail="Salary run not found")
     if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
         raise HTTPException(status_code=403, detail="Not authorised for this run")
-    csv_str = to_csv(_sort_export_rows(run.get("rows") or [], sort_by))
+    # Iter 373 (user request) — ACTUAL runs export the Actual grid columns
+    # with EPF/ESI dynamic per Firm Master (matches the PDF register).
+    if (run.get("run_type") or "") == "actual":
+        from utils.salary_run import to_actual_csv
+        show_epf, show_esi = await _actual_epf_esi_flags(run.get("company_id"))
+        csv_str = to_actual_csv(_sort_export_rows(run.get("rows") or [], sort_by),
+                                show_epf=show_epf, show_esi=show_esi)
+    else:
+        csv_str = to_csv(_sort_export_rows(run.get("rows") or [], sort_by))
     return Response(
         content=csv_str,
         media_type="text/csv",
@@ -14746,13 +14773,26 @@ async def export_salary_run_xlsx(
         )
         if c and c.get("name"):
             company_name = c["name"]
-    xlsx_bytes = build_rows_xlsx(
-        columns=CSV_COLUMNS,
-        rows=_sort_export_rows(run.get("rows") or [], sort_by),
-        sheet_name="Salary Run",
-        title=f"Salary Run — {company_name}",
-        subtitle=f"Month: {run.get('month')} · Employees: {len(run.get('rows') or [])}",
-    )
+    # Iter 373 (user request) — ACTUAL runs export the Actual grid columns
+    # with EPF/ESI dynamic per Firm Master (matches the PDF register).
+    if (run.get("run_type") or "") == "actual":
+        from utils.salary_run import actual_csv_columns
+        show_epf, show_esi = await _actual_epf_esi_flags(run.get("company_id"))
+        xlsx_bytes = build_rows_xlsx(
+            columns=actual_csv_columns(show_epf, show_esi),
+            rows=_sort_export_rows(run.get("rows") or [], sort_by),
+            sheet_name="Actual Salary",
+            title=f"Actual Salary — {company_name}",
+            subtitle=f"Month: {run.get('month')} · Employees: {len(run.get('rows') or [])}",
+        )
+    else:
+        xlsx_bytes = build_rows_xlsx(
+            columns=CSV_COLUMNS,
+            rows=_sort_export_rows(run.get("rows") or [], sort_by),
+            sheet_name="Salary Run",
+            title=f"Salary Run — {company_name}",
+            subtitle=f"Month: {run.get('month')} · Employees: {len(run.get('rows') or [])}",
+        )
     return Response(
         content=xlsx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -14789,17 +14829,7 @@ async def export_salary_register_pdf(
     # back to the Deductions catalog exactly like the compliance engine).
     if (run.get("run_type") or "") == "actual":
         from utils.salary_run import build_actual_salary_register_pdf
-        fm = await db.firm_masters.find_one(
-            {"company_id": run.get("company_id")},
-            {"_id": 0, "epf": 1, "esi": 1, "deductions": 1}) or {}
-        _fm_ded = fm.get("deductions") or {}
-        _epf_ap = (fm.get("epf") or {}).get("applicable")
-        _esi_ap = (fm.get("esi") or {}).get("applicable")
-        _has_cat = any(bool(v) for v in _fm_ded.values())
-        show_epf = (bool(_epf_ap) if _epf_ap is not None
-                    else (bool(_fm_ded.get("PF")) if _has_cat else True))
-        show_esi = (bool(_esi_ap) if _esi_ap is not None
-                    else (bool(_fm_ded.get("ESI")) if _has_cat else True))
+        show_epf, show_esi = await _actual_epf_esi_flags(run.get("company_id"))
         pdf_bytes = build_actual_salary_register_pdf(
             run, company_name=company_name,
             show_epf=show_epf, show_esi=show_esi)
@@ -16902,7 +16932,7 @@ async def export_compliance_salary_run_xlsx(
     authorization: Optional[str] = Header(None),
 ):
     """Iter 64 — native Excel export for Compliance Salary runs."""
-    from utils.compliance_salary import CSV_COLUMNS
+    from utils.compliance_salary import dynamic_csv_columns
     from utils.report_xlsx import build_rows_xlsx
     from fastapi.responses import Response
     admin = await get_user_from_token(authorization)
@@ -16921,7 +16951,8 @@ async def export_compliance_salary_run_xlsx(
         if c and c.get("name"):
             company_name = c["name"]
     xlsx_bytes = build_rows_xlsx(
-        columns=CSV_COLUMNS,
+        # Iter 373 (user request) — dynamic firm-wise heads (matches PDF).
+        columns=dynamic_csv_columns(run.get("rows") or []),
         rows=_sort_export_rows(run.get("rows") or [], sort_by),
         sheet_name="Compliance",
         title=f"Compliance Salary — {company_name}",
