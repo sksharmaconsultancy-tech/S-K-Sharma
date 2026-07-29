@@ -586,6 +586,18 @@ export default function ActualSalaryProcessScreen() {
     }
     setFinalizing(true);
     try {
+      // Iter 374 (user bug) — FLUSH pending debounced row edits BEFORE
+      // locking so manually filled amounts are never dropped.
+      const pend = pendingRef.current;
+      for (const uid of Object.keys(pend)) {
+        if (!pend[uid] || Object.keys(pend[uid]).length === 0) continue;
+        const body = { user_id: uid, ...pend[uid] };
+        pendingRef.current[uid] = {};
+        if (patchTimersRef.current[uid]) clearTimeout(patchTimersRef.current[uid]);
+        try {
+          await api(`/admin/actual-salary-process/${run.run_id}/row`, { method: "PATCH", body });
+        } catch { /* proceed */ }
+      }
       await api(`/admin/actual-salary-process/${run.run_id}/finalize`, {
         method: "POST",
       });

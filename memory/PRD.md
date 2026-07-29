@@ -2416,3 +2416,20 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   Verified: CSV headers dynamic (compliance drops med/spl/others/pt/tds), actual
   CSV/XLSX new columns, XLSX headers via openpyxl, unlock dialog E2E (toast confirmed).
   Deploy: deploy_vps_iter373.sh (temp_bundle→373, includes 370-372).
+- Iter 374 (user bug: manual amounts removed on lock/unlock):
+  ROOT CAUSES: (a) finalize raced the 2.5-3s debounced auto-save — save-rows fired
+  AFTER the lock → 400 → silent loss; (b) reprocess (after unlock) only preserved
+  days/ot_hours/other_deduction — manual others/ot_pay/tds/esic_leave were recomputed
+  from master and wiped.
+  FIXES:
+  1. compliance-salary-run.tsx finalizeRun(): clears autoSaveTimer + flushes save-rows
+     BEFORE POST finalize. salary-run.tsx finalize(): flushes pendingRef row PATCHes first.
+  2. updateRowField stamps manual_override + manual_fields[key] on EVERY manual edit
+     (was imported-runs only).
+  3. server.py _compute_compliance_run: non-imported reprocess restores manual fields
+     from _prev (manual_fields + heuristics: esic_leave_days>0, ot_pay>0 w/ ot_hours 0,
+     tds>0 w/o sheet) and rebuilds monthly_gross/gross_paid/total_deduction/net deltas.
+     Inserted just before the Iter 310 Freeze block; imported runs keep Iter 343b logic.
+  Verified via API scripts: manual TDS 500 → reprocess → kept (net rebuilt); ot_pay 750 +
+  others 300 kept; tds survived a 2nd reprocess. Test data reset afterwards.
+  Deploy: deploy_vps_iter374.sh (temp_bundle→374, includes 370-373).

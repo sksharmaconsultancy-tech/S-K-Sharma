@@ -948,6 +948,16 @@ export default function ComplianceSalaryRunScreen() {
     if (!okGo) return;
     setFinalizing(true);
     try {
+      // Iter 374 (user bug) — FLUSH pending grid edits BEFORE locking:
+      // the debounced auto-save used to arrive AFTER the lock and get
+      // rejected, silently dropping manually filled amounts.
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+      try {
+        await api(`/admin/compliance-salary-runs/${run.run_id}/save-rows`, {
+          method: "POST",
+          body: { rows: run.rows, totals: run.totals },
+        });
+      } catch { /* proceed — run may already match the server state */ }
       const r = await api<{ ok: boolean; finalized_at?: string }>(
         `/admin/compliance-salary-runs/${run.run_id}/finalize`,
         { method: "POST", body: {} },
@@ -1292,11 +1302,16 @@ export default function ComplianceSalaryRunScreen() {
       const rows = prev.rows.map((r) => {
         if (r.user_id !== userId) return r;
         const next = { ...r, [key]: value } as any;
+        // Iter 374 (user bug) — EVERY manual edit is stamped on the row so
+        // a reprocess (e.g. after unlock) NEVER removes the typed amount.
+        next.manual_override = true;
+        next.manual_fields = Array.from(
+          new Set([...(((r as any).manual_fields) || []), key]),
+        );
         // Iter 343b (user request) — imported (Freeze) runs: manual edits
         // to OT / Other Allowances STICK (reprocess keeps them); the Freeze
         // salary stays as display-only comparison data.
         if ((key === "ot_pay" || key === "others") && (r as any).imported_gross != null) {
-          next.manual_override = true;
           next.difference_allocation_head = "Manual";
         }
         if (key === "others") {

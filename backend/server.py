@@ -16107,6 +16107,53 @@ async def _compute_compliance_run(
             row["max_p_days"] = cap
         except (ValueError, IndexError):
             row.setdefault("max_p_days", int(month_days))
+        # Iter 374 (user bug) — a REPROCESS must NEVER remove the admin's
+        # MANUALLY FILLED amounts (Others / OT Amt / TDS / ESIC Leave).
+        # The grid stamps every manual edit on ``manual_fields``; those
+        # figures are restored AS-IS and the money math rebuilt around
+        # them. Heuristics cover rows saved before the stamp existed:
+        # ESIC Leave is manual-entry only; an OT AMOUNT without OT hours
+        # and a TDS with no imported sheet were typed by the admin.
+        if _prev is not None and not payload.use_imported_sheet:
+            _mf = set(_prev.get("manual_fields") or [])
+            if float(_prev.get("esic_leave_days") or 0) > 0:
+                _mf.add("esic_leave_days")
+            if float(_prev.get("ot_pay") or 0) > 0 and \
+                    float(_prev.get("ot_hours") or 0) <= 0:
+                _mf.add("ot_pay")
+            if float(_prev.get("tds") or 0) > 0 and not _am:
+                _mf.add("tds")
+            if _mf:
+                row["manual_fields"] = sorted(_mf)
+                row["manual_override"] = True
+            if "esic_leave_days" in _mf:
+                row["esic_leave_days"] = float(_prev.get("esic_leave_days") or 0)
+            if "others" in _mf:
+                _new_oth = round(float(_prev.get("others") or 0), 2)
+                _delta = round(_new_oth - float(row.get("others") or 0), 2)
+                if _delta:
+                    row["others"] = _new_oth
+                    row["monthly_gross"] = round(
+                        float(row.get("monthly_gross") or 0) + _delta, 2)
+                    row["gross_paid"] = round(
+                        float(row.get("gross_paid") or 0) + _delta, 2)
+                    row["net"] = round(float(row.get("net") or 0) + _delta, 2)
+            if "ot_pay" in _mf:
+                _new_ot = round(float(_prev.get("ot_pay") or 0), 2)
+                _delta = round(_new_ot - float(row.get("ot_pay") or 0), 2)
+                if _delta:
+                    row["ot_pay"] = _new_ot
+                    row["gross_paid"] = round(
+                        float(row.get("gross_paid") or 0) + _delta, 2)
+                    row["net"] = round(float(row.get("net") or 0) + _delta, 2)
+            if "tds" in _mf and not (_am and float(_am.get("tds") or 0) > 0):
+                _new_tds = round(float(_prev.get("tds") or 0), 2)
+                _delta = round(_new_tds - float(row.get("tds") or 0), 2)
+                if _delta:
+                    row["tds"] = _new_tds
+                    row["total_deduction"] = round(
+                        float(row.get("total_deduction") or 0) + _delta, 2)
+                    row["net"] = round(float(row.get("net") or 0) - _delta, 2)
         # Iter 310 — FREEZE SALARY (user directive): when the run is driven
         # by the IMPORTED sheet, the sheet's Gross Earning is authoritative
         # and gets FROZEN on the run. If Imported Gross > the gross
