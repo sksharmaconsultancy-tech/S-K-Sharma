@@ -12,6 +12,7 @@ status, timeline[], ai_flags[], company_id, ...}
   GET  /api/admin/claims/dashboard
   GET  /api/admin/claims/report/{kind}[.xlsx|.pdf]
 """
+import base64
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -401,6 +402,136 @@ async def save_claim(body: dict = Body(...),
     return {"ok": True, "claim_id": cid, "claim_no": claim_no,
             "ai_flags": doc["ai_flags"], "doc_score": doc["doc_score"],
             "expected_settlement": doc["expected_settlement"]}
+
+
+_MAX_DOC_BYTES = 10 * 1024 * 1024  # 10 MB per attached file
+_ALLOWED_DOC_TYPES = {
+    "application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic",
+}
+
+
+async def _claim_guarded(claim_id: str, admin: dict,
+                         company_id: Optional[str]) -> dict:
+    claim = await db.pf_esic_claims.find_one({"claim_id": claim_id}, {"_id": 0})
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    if company_id and claim.get("company_id") != company_id:
+        raise HTTPException(status_code=403, detail="Not authorised for this claim")
+    return claim
+
+
+def _doc_public(d: dict) -> dict:
+    return {k: d.get(k) for k in (
+        "doc_id", "claim_id", "doc_name", "filename", "content_type",
+        "size", "uploaded_by", "uploaded_at")}
+
+
+@router.get("/{claim_id}/documents")
+async def list_claim_documents(claim_id: str,
+                               authorization: Optional[str] = Header(None)):
+    admin, company_id = await _adm(authorization)
+    await _claim_guarded(claim_id, admin, company_id)
+    docs = await db.claim_documents.find(
+        {"claim_id": claim_id}, {"_id": 0, "base64": 0}).sort(
+        "uploaded_at", 1).to_list(200)
+    return {"documents": [_doc_public(d) for d in docs]}
+
+
+@router.post("/{claim_id}/documents")
+async def upload_claim_document(claim_id: str, body: dict = Body(...),
+                                authorization: Optional[str] = Header(None)):
+    """user request — attach the ACTUAL scanned file (PDF / photo) of a
+    checklist document (Form-19, cancelled cheque, Aadhaar, …) to a claim,
+    turning the claims register into a complete digital file."""
+    admin, company_id = await _adm(authorization)
+    claim = await _claim_guarded(claim_id, admin, company_id)
+    doc_name = str(body.get("doc_name") or "").strip() or "Other"
+    filename = str(body.get("filename") or "document").strip()[:120]
+    content_type = str(body.get("content_type") or "").strip().lower()
+    if content_type not in _ALLOWED_DOC_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF / JPG / PNG / WEBP / HEIC files are allowed")
+    raw = str(body.get("base64") or "")
+    if "," in raw[:80]:  # strip a data-URL prefix if the client sent one
+        raw = raw.split(",", 1)[1]
+    try:
+        decoded = base64.b64decode(raw, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 payload")
+    if not decoded:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(decoded) > _MAX_DOC_BYTES:
+        raise HTTPException(status_code=400,
+                            detail="File too large — max 10 MB per document")
+    doc_id = f"cdoc_{uuid.uuid4().hex[:10]}"
+    await db.claim_documents.insert_one({
+        "doc_id": doc_id, "claim_id": claim_id,
+        "company_id": claim.get("company_id"),
+        "doc_name": doc_name, "filename": filename,
+        "content_type": content_type, "size": len(decoded),
+        "base64": raw,
+        "uploaded_by": admin.get("name") or admin.get("email"),
+        "uploaded_at": _now(),
+    })
+    # Auto-tick the checklist + timeline entry, then refresh AI/doc score.
+    documents = dict(claim.get("documents") or {})
+    kind = claim.get("claim_kind") or "pf"
+    if doc_name in DOC_CHECKLIST.get(kind, []):
+        documents[doc_name] = True
+    timeline = list(claim.get("timeline") or [])
+    timeline.append({"at": _now(), "status": claim.get("status"),
+                     "by": admin.get("name") or admin.get("email"),
+                     "note": f"File attached: {doc_name} ({filename})"})
+    upd = {"documents": documents, "timeline": timeline,
+           "updated_at": _now()}
+    merged = dict(claim, **upd)
+    upd["ai_flags"] = await _ai_checks(merged)
+    upd["doc_score"] = _doc_score(merged)
+    await db.pf_esic_claims.update_one({"claim_id": claim_id}, {"$set": upd})
+    return {"ok": True, "doc_id": doc_id, "doc_score": upd["doc_score"]}
+
+
+@router.get("/{claim_id}/documents/{doc_id}/file")
+async def download_claim_document(claim_id: str, doc_id: str,
+                                  authorization: Optional[str] = Header(None)):
+    from fastapi.responses import Response
+    admin, company_id = await _adm(authorization)
+    await _claim_guarded(claim_id, admin, company_id)
+    d = await db.claim_documents.find_one(
+        {"doc_id": doc_id, "claim_id": claim_id}, {"_id": 0})
+    if not d:
+        raise HTTPException(status_code=404, detail="Document not found")
+    data = base64.b64decode(d.get("base64") or "")
+    return Response(content=data, media_type=d.get("content_type"),
+                    headers={"Content-Disposition":
+                             f'inline; filename="{d.get("filename")}"'})
+
+
+@router.delete("/{claim_id}/documents/{doc_id}")
+async def delete_claim_document(claim_id: str, doc_id: str,
+                                authorization: Optional[str] = Header(None)):
+    admin, company_id = await _adm(authorization)
+    claim = await _claim_guarded(claim_id, admin, company_id)
+    d = await db.claim_documents.find_one(
+        {"doc_id": doc_id, "claim_id": claim_id}, {"_id": 0, "base64": 0})
+    if not d:
+        raise HTTPException(status_code=404, detail="Document not found")
+    await db.claim_documents.delete_one({"doc_id": doc_id})
+    # Untick the checklist when no other file remains for that doc name.
+    remaining = await db.claim_documents.count_documents(
+        {"claim_id": claim_id, "doc_name": d.get("doc_name")})
+    if remaining == 0:
+        documents = dict(claim.get("documents") or {})
+        if d.get("doc_name") in documents:
+            documents[d["doc_name"]] = False
+        merged = dict(claim, documents=documents)
+        await db.pf_esic_claims.update_one(
+            {"claim_id": claim_id},
+            {"$set": {"documents": documents,
+                      "doc_score": _doc_score(merged),
+                      "updated_at": _now()}})
+    return {"ok": True}
 
 
 @router.get("/reminders")

@@ -20,7 +20,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Redirect, useRouter } from "expo-router";
 
-import { api } from "@/src/api/client";
+import { api, apiBinary } from "@/src/api/client";
 import RegisterTable, {
   ExportButtons,
   shared,
@@ -172,6 +172,11 @@ export default function ClaimsManagementScreen() {
   // user request — employee picker (Form-19/10C → left employees only)
   const [empList, setEmpList] = useState<any[]>([]);
   const [selEmp, setSelEmp] = useState("");
+  // user request — real file attachments (PDF/photo) per claim document
+  const [claimDocs, setClaimDocs] = useState<any[]>([]);
+  const [attachType, setAttachType] = useState("");
+  const [docBusy, setDocBusy] = useState(false);
+  const [expandedDocs, setExpandedDocs] = useState<any[]>([]);
 
   const isCompanyAdmin = user?.role === "company_admin";
 
@@ -275,6 +280,106 @@ export default function ClaimsManagementScreen() {
       dol: e.dol || "",
     }));
   };
+
+  // ---- claim document attachments (user request) --------------------
+  const loadClaimDocs = useCallback(async (cid: string) => {
+    if (!cid) {
+      setClaimDocs([]);
+      return;
+    }
+    try {
+      const r = await api<any>(`/admin/claims/${cid}/documents`);
+      setClaimDocs(r.documents || []);
+    } catch {
+      setClaimDocs([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadClaimDocs(claimId);
+  }, [claimId, loadClaimDocs]);
+
+  // Load attachments of the claim expanded on the register.
+  useEffect(() => {
+    if (!expanded) {
+      setExpandedDocs([]);
+      return;
+    }
+    api<any>(`/admin/claims/${expanded}/documents`)
+      .then((r) => setExpandedDocs(r.documents || []))
+      .catch(() => setExpandedDocs([]));
+  }, [expanded]);
+
+  const attachFile = () => {
+    if (Platform.OS !== "web" || !claimId) return;
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/*";
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (file.size > 10 * 1024 * 1024) {
+        setMsg("File too large — max 10 MB per document");
+        return;
+      }
+      setDocBusy(true);
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const r = await api<any>(`/admin/claims/${claimId}/documents`, {
+            method: "POST",
+            body: {
+              doc_name: attachType || "Other",
+              filename: file.name,
+              content_type: file.type || "application/pdf",
+              base64: String(reader.result || ""),
+            },
+          });
+          if (attachType) setDocs((p) => ({ ...p, [attachType]: true }));
+          setMsg(`✓ File attached — document score ${r.doc_score}%`);
+          void loadClaimDocs(claimId);
+        } catch (e: any) {
+          setMsg(e?.message || "Upload failed");
+        } finally {
+          setDocBusy(false);
+        }
+      };
+      reader.onerror = () => {
+        setDocBusy(false);
+        setMsg("Could not read the file");
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  };
+
+  const viewDoc = async (cid: string, docId: string) => {
+    try {
+      const r = await apiBinary(`/admin/claims/${cid}/documents/${docId}/file`);
+      if (Platform.OS === "web" && r.webBlobUrl) {
+        window.open(r.webBlobUrl, "_blank");
+        setTimeout(() => URL.revokeObjectURL(r.webBlobUrl!), 60000);
+      }
+    } catch (e: any) {
+      setMsg(e?.message || "Could not open the file");
+    }
+  };
+
+  const deleteDoc = async (docId: string) => {
+    try {
+      await api(`/admin/claims/${claimId}/documents/${docId}`, {
+        method: "DELETE",
+      });
+      void loadClaimDocs(claimId);
+    } catch (e: any) {
+      setMsg(e?.message || "Delete failed");
+    }
+  };
+
+  const fmtSize = (n: number) =>
+    n > 1024 * 1024
+      ? `${(n / 1024 / 1024).toFixed(1)} MB`
+      : `${Math.max(1, Math.round(n / 1024))} KB`;
 
   const resetForm = (kind: "pf" | "esic" = "pf") => {
     setClaimId("");
@@ -696,6 +801,45 @@ export default function ClaimsManagementScreen() {
                             .map(([k]) => `✓ ${k}`)
                             .join(" · ") || "None marked received"}
                         </Text>
+                        {expandedDocs.length > 0 && (
+                          <>
+                            <Text style={st.detailH}>
+                              📎 Attached Files ({expandedDocs.length})
+                            </Text>
+                            {expandedDocs.map((d: any) => (
+                              <View key={d.doc_id} style={st.docFileRow}>
+                                <Ionicons
+                                  name={
+                                    d.content_type === "application/pdf"
+                                      ? "document-text-outline"
+                                      : "image-outline"
+                                  }
+                                  size={15}
+                                  color={colors.brandPrimary}
+                                />
+                                <View style={{ flex: 1 }}>
+                                  <Text style={st.docFileName} numberOfLines={1}>
+                                    {d.filename}
+                                  </Text>
+                                  <Text style={st.docFileMeta}>
+                                    {d.doc_name} · {fmtSize(d.size || 0)}
+                                  </Text>
+                                </View>
+                                <Pressable
+                                  onPress={() => viewDoc(c.claim_id, d.doc_id)}
+                                  style={st.docFileBtn}
+                                  testID={`cl-rview-${d.doc_id}`}
+                                >
+                                  <Ionicons
+                                    name="eye-outline"
+                                    size={15}
+                                    color={colors.brandPrimary}
+                                  />
+                                </Pressable>
+                              </View>
+                            ))}
+                          </>
+                        )}
                         <View style={st.actRow}>
                           <Pressable
                             onPress={() => editClaim(c)}
@@ -927,6 +1071,95 @@ export default function ClaimsManagementScreen() {
                 </Pressable>
               ))}
             </View>
+
+            {/* user request — ACTUAL file attachments (scan/PDF per doc) */}
+            <Text style={[st.detailH, { marginTop: 12 }]}>
+              📎 Attached Files ({claimDocs.length})
+            </Text>
+            {!claimId ? (
+              <Text style={st.recordOnlyNote}>
+                Save the claim first — then you can attach the scanned
+                documents (PDF / photo) here.
+              </Text>
+            ) : (
+              <>
+                <View
+                  style={[
+                    shared.row,
+                    { flexWrap: "wrap", gap: 8, alignItems: "center" },
+                  ]}
+                >
+                  <WebSelect
+                    testID="cl-attach-type"
+                    value={attachType}
+                    onChange={setAttachType}
+                    width={240}
+                    options={[
+                      { value: "", label: "Other document" },
+                      ...checklist.map((d) => ({ value: d, label: d })),
+                    ]}
+                  />
+                  <Pressable
+                    onPress={attachFile}
+                    disabled={docBusy}
+                    style={[st.attachBtn, docBusy && { opacity: 0.5 }]}
+                    testID="cl-attach-file"
+                  >
+                    {docBusy ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Ionicons name="attach" size={15} color="#fff" />
+                        <Text style={st.attachBtnTxt}>Attach File</Text>
+                      </>
+                    )}
+                  </Pressable>
+                  <Text style={st.recordOnlyNote}>
+                    PDF / JPG / PNG · max 10 MB · auto-ticks the checklist
+                  </Text>
+                </View>
+                {claimDocs.map((d: any) => (
+                  <View key={d.doc_id} style={st.docFileRow}>
+                    <Ionicons
+                      name={
+                        d.content_type === "application/pdf"
+                          ? "document-text-outline"
+                          : "image-outline"
+                      }
+                      size={16}
+                      color={colors.brandPrimary}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={st.docFileName} numberOfLines={1}>
+                        {d.filename}
+                      </Text>
+                      <Text style={st.docFileMeta}>
+                        {d.doc_name} · {fmtSize(d.size || 0)} ·{" "}
+                        {String(d.uploaded_at).slice(0, 10)} · {d.uploaded_by}
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={() => viewDoc(claimId, d.doc_id)}
+                      style={st.docFileBtn}
+                      testID={`cl-view-${d.doc_id}`}
+                    >
+                      <Ionicons
+                        name="eye-outline"
+                        size={16}
+                        color={colors.brandPrimary}
+                      />
+                    </Pressable>
+                    <Pressable
+                      onPress={() => deleteDoc(d.doc_id)}
+                      style={st.docFileBtn}
+                      testID={`cl-deldoc-${d.doc_id}`}
+                    >
+                      <Ionicons name="trash-outline" size={16} color="#B91C1C" />
+                    </Pressable>
+                  </View>
+                ))}
+              </>
+            )}
 
             <Pressable
               onPress={save}
@@ -1164,6 +1397,38 @@ const st = StyleSheet.create({
     color: "#B45309",
     marginTop: 4,
     fontStyle: "italic",
+  },
+  // user request — claim file attachments
+  attachBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: colors.brandPrimary,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  attachBtnTxt: { color: "#fff", fontWeight: "800", fontSize: 12.5 },
+  docFileRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    marginTop: 6,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 8,
+  },
+  docFileName: { fontSize: 12.5, fontWeight: "700", color: colors.onSurface },
+  docFileMeta: { fontSize: 10.5, color: colors.onSurfaceSecondary, marginTop: 1 },
+  docFileBtn: {
+    padding: 7,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#fff",
   },
   docWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
   docChip: {
