@@ -1256,17 +1256,58 @@ export default function ComplianceSalaryRunScreen() {
   // across ALL editable cells (Present Days → Others → OT Amt → TDS →
   // Other), following the Firm Master's enabled heads.
   const cellRefs = useRef<Record<string, any>>({});
+  // Iter 377 (user request) — the grid must ALWAYS follow the Firm
+  // Master's enabled Allowances/Deductions, for BOTH the Master Salary
+  // and the Calculated Salary columns. Runs saved before the masks were
+  // stamped on rows (old / copied / legacy runs) fall back to this
+  // live Firm Master mask.
+  const [fmMask, setFmMask] = useState<{ en?: string[]; ed?: string[] }>({});
+  const fmMaskCid = (run?.rows?.[0] as any)?.company_id
+    || (run as any)?.company_id || activeCompanyId;
+  useEffect(() => {
+    if (!fmMaskCid) {
+      setFmMask({});
+      return;
+    }
+    api<any>(`/admin/firm-master/${fmMaskCid}`)
+      .then((res) => {
+        const f = res?.master || {};
+        // Only a STORED firm master drives the mask (mirrors the backend
+        // rule: "None only when never configured").
+        const stored = !!(f.updated_at || f.updated_by);
+        const allow = f.allowances || {};
+        const ded = f.deductions || {};
+        const AMAP: Record<string, string> = {
+          "HRA": "hra", "CONV.": "conveyance",
+          "MEDICAL ALLOWANCES": "medical", "OTH. ALLOW.": "special",
+          "OTHER MISC.ALLOWANCE": "others",
+        };
+        const en = stored
+          ? ["basic",
+             ...Object.entries(AMAP).filter(([lbl]) => !!allow[lbl]).map(([, k]) => k)]
+          : undefined;
+        const epfAp = (f.epf || {}).applicable;
+        const esiAp = (f.esi || {}).applicable;
+        const ed2: string[] = [];
+        if (epfAp != null ? epfAp : !!ded.PF) ed2.push("pf");
+        if (esiAp != null ? esiAp : !!ded.ESI) ed2.push("esi");
+        if (ded.PT) ed2.push("pt");
+        if (ded.TDS || ded["I. TAX"]) ed2.push("tds");
+        setFmMask({ en, ed: stored ? ed2 : undefined });
+      })
+      .catch(() => setFmMask({}));
+  }, [fmMaskCid]);
   const navCols = useMemo(() => {
     const r0: any = run?.rows?.[0] || {};
-    const en = r0.enabled_allowances as string[] | undefined;
-    const ed = r0.enabled_deductions as string[] | undefined;
+    const en = (r0.enabled_allowances ?? fmMask.en) as string[] | undefined;
+    const ed = (r0.enabled_deductions ?? fmMask.ed) as string[] | undefined;
     const cols: string[] = ["pd"];
     if (!en || en.includes("others")) cols.push("others");
     cols.push("ot_pay");
     if (!ed || ed.includes("tds")) cols.push("tds");
     cols.push("other_deduction");
     return cols;
-  }, [run]);
+  }, [run, fmMask]);
   const focusCell = (col: string, idx: number) => {
     const el: any = col === "pd" ? pdRefs.current[idx] : cellRefs.current[`${col}:${idx}`];
     if (el && typeof el.focus === "function") el.focus();
@@ -2138,7 +2179,7 @@ export default function ComplianceSalaryRunScreen() {
                     scrolling down (web). */}
                 <View style={stickyHeader(colors.surface)}>
                 {(() => {
-                  const en = (run.rows[0] as any)?.enabled_allowances as string[] | undefined;
+                  const en = ((run.rows[0] as any)?.enabled_allowances ?? fmMask.en) as string[] | undefined;
                   const has = (k: string) => !en || en.includes(k) || k === "basic";
                   const CELL_W = colW.num;
                   const INFO_W = colW.name + colW.father + colW.desg + colW.uan + colW.esi + colW.pd + colW.el;
@@ -2151,7 +2192,7 @@ export default function ComplianceSalaryRunScreen() {
                   // imported (frozen) runs. Iter 340 — +OT Hrs column.
                   const calcCount = optKeys.length + 3 + (hasFrz ? 1 : 0);
                   // Iter 171 — deduction columns follow Firm Master Deductions
-                  const ed = (run.rows[0] as any)?.enabled_deductions as string[] | undefined;
+                  const ed = ((run.rows[0] as any)?.enabled_deductions ?? fmMask.ed) as string[] | undefined;
                   const hasDed = (k: string) => !ed || ed.includes(k);
                   const dedCount = 4 // WageBase, Other, TotalDed, Net
                     + (hasDed("pf") ? 2 : 0) + (hasDed("esi") ? 2 : 0)
@@ -2176,9 +2217,9 @@ export default function ComplianceSalaryRunScreen() {
                   );
                 })()}
                 {(() => {
-                  const en = (run.rows[0] as any)?.enabled_allowances as string[] | undefined;
+                  const en = ((run.rows[0] as any)?.enabled_allowances ?? fmMask.en) as string[] | undefined;
                   const has = (k: string) => !en || en.includes(k) || k === "basic";
-                  const ed = (run.rows[0] as any)?.enabled_deductions as string[] | undefined;
+                  const ed = ((run.rows[0] as any)?.enabled_deductions ?? fmMask.ed) as string[] | undefined;
                   const hasDed = (k: string) => !ed || ed.includes(k);
                   const headers: { label: string; group: "info" | "master" | "calc" | "ded" }[] = [
                     // User directive — Employee Code HIDDEN; show Father
@@ -2354,7 +2395,7 @@ export default function ComplianceSalaryRunScreen() {
                     {/* Iter 85 pt 1 — Master (full-month) heads,
                         conditionally rendered per firm allowance mask. */}
                     {(() => {
-                      const en = (r as any).enabled_allowances as string[] | undefined;
+                      const en = ((r as any).enabled_allowances ?? fmMask.en) as string[] | undefined;
                       const has = (k: string) => !en || en.includes(k) || k === "basic";
                       return (
                         <>
@@ -2440,7 +2481,7 @@ export default function ComplianceSalaryRunScreen() {
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.stat_wage_base)}</Text>
                     {/* Iter 171 — deduction cells follow Firm Master Deductions */}
                     {(() => {
-                      const ed = (r as any).enabled_deductions as string[] | undefined;
+                      const ed = ((r as any).enabled_deductions ?? fmMask.ed) as string[] | undefined;
                       const hasDed = (k: string) => !ed || ed.includes(k);
                       return (
                         <>
@@ -2498,9 +2539,9 @@ export default function ComplianceSalaryRunScreen() {
                   {/* Iter 171 — totals row follows the same column masks so
                       every figure lands under its own header. */}
                   {(() => {
-                    const en = (run.rows[0] as any)?.enabled_allowances as string[] | undefined;
+                    const en = ((run.rows[0] as any)?.enabled_allowances ?? fmMask.en) as string[] | undefined;
                     const has = (k: string) => !en || en.includes(k) || k === "basic";
-                    const ed = (run.rows[0] as any)?.enabled_deductions as string[] | undefined;
+                    const ed = ((run.rows[0] as any)?.enabled_deductions ?? fmMask.ed) as string[] | undefined;
                     const hasDed = (k: string) => !ed || ed.includes(k);
                     const opt = ["basic", "hra", "conveyance", "medical", "special", "others"].filter(has);
                     const num = (v: any) => (

@@ -2481,3 +2481,18 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   + playwright UI (attach button, 8 doc types, employee picker 129 opts in
   edit mode). Test claims cleaned up.
   Deploy: deploy_vps_iter376.sh (temp_bundle→376, includes 370-375).
+- Iter 377 (user: Compliance salary grid shows only Firm-Master-enabled heads):
+  Grid already masked columns via rows[0].enabled_allowances/enabled_deductions
+  (stamped by engine since Iter 85/171) but OLD runs / Copy-Last-Month / legacy
+  runs lack the stamp → all heads showed. FIX in compliance-salary-run.tsx:
+  fmMask state fetches /admin/firm-master/{cid} (cid from rows[0].company_id
+  or activeCompanyId), maps AMAP {HRA:hra, CONV.:conveyance, MEDICAL
+  ALLOWANCES:medical, OTH. ALLOW.:special, OTHER MISC.ALLOWANCE:others} +
+  ded mask (epf/esi applicable authoritative else PF/ESI catalog, PT, TDS/
+  I. TAX). Mask only when master stored (updated_at/updated_by present —
+  mirrors backend "None only when never configured"). All 8 mask sites now
+  use `?? fmMask.en/.ed` fallback (group header, col headers, row cells
+  master+calc, ded cells, totals, navCols).
+  Verified via playwright: Kankani grid (STAFF July) shows M.Basic/M.HRA/
+  M.Conv/M.Gross only; M.Med/M.Spl/M.Others + PT/TDS header cells hidden.
+  Deploy: deploy_vps_iter377.sh (temp_bundle→377, includes 370-376).
