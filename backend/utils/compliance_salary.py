@@ -556,12 +556,18 @@ def compute_compliance_row(
             )
         else:
             pf_basic_prorated = pf_basic_override
-        # Iter 254 (user directive) — PF is calculated STRICTLY on the
-        # Employee Master's "PF Basic Salary". The 50%-of-gross floor rule
-        # is IGNORED for PF (it previously inflated PF wages above the
-        # entered PF Basic, e.g. PF Basic 15000 with a higher gross).
-        pf_base = pf_basic_prorated
-        capped_pf_wages = min(pf_base, max(cfg["pf_wage_cap"], pf_basic_prorated))
+        # Iter 376 (user rule, replaces Iter 254) — PF wage base:
+        #   • PF Basic BELOW the ₹15,000 cap → the wage-base FLOOR applies:
+        #     wages = max(PF Basic, floor_pct% of Gross Earning), capped
+        #     at the PF wage cap (₹15,000).
+        #   • PF Basic AT/ABOVE ₹15,000 → the floor does NOT apply; PF is
+        #     calculated per the ceiling rule → wages = ₹15,000 (pro-rated
+        #     by attendance for monthly-rated staff).
+        if pf_basic_override < cfg["pf_wage_cap"]:
+            pf_base = max(pf_basic_prorated, gross_paid * (floor_pct / 100.0))
+        else:
+            pf_base = pf_basic_prorated
+        capped_pf_wages = min(pf_base, cfg["pf_wage_cap"])
         pf_employee = capped_pf_wages * (cfg["pf_percent_employee"] / 100.0)
         pf_employer_epf = capped_pf_wages * (cfg["pf_percent_employer_epf"] / 100.0)
         pf_employer_eps = capped_pf_wages * (cfg["pf_percent_employer_eps"] / 100.0)

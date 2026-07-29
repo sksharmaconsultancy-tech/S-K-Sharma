@@ -2458,3 +2458,26 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   01-07-2026, legacy DOJ 01-12-2018 displays, PAN/Aadhaar autofill, pencil);
   PATCH profile rejects "50/A"; attendance xlsx sort=doj chronological, 127 rows.
   Deploy: deploy_vps_iter375.sh (temp_bundle→375, includes 370-374).
+- Iter 376 (user: claim file attachments + PF wage-base floor rule):
+  CLAIM ATTACHMENTS (claims_management.py + claims-management.tsx):
+  1. New collection claim_documents {doc_id, claim_id, doc_name, filename,
+     content_type, size, base64, uploaded_by/at}. Endpoints:
+     GET/POST /admin/claims/{id}/documents, GET .../{doc_id}/file (inline),
+     DELETE .../{doc_id}. PDF/JPG/PNG/WEBP/HEIC only, 10MB cap.
+  2. Upload auto-ticks matching checklist item + timeline entry + recompute
+     doc_score/ai_flags; deleting last file for a doc_name un-ticks it.
+  3. Form UI: "📎 Attached Files" block (doc-type select + Attach File via
+     FileReader→base64), file rows with view (blob new tab) / delete;
+     register expanded detail lists attached files w/ view.
+  PF WAGE BASE (user confirmed option a):
+  4. compliance_salary.py compute_compliance_row: floor applies ONLY when
+     pf_basic_override < pf_wage_cap → base=max(pf_basic_prorated,
+     floor%×gross_paid); else base=pf_basic_prorated; wages=min(base, cap).
+     Replaces Iter 254 strict-PF-Basic rule. Mirrored in
+     compliance-salary-run.tsx client grid recompute (grossEarn incl ot_pay).
+  Verified: 7 unit cases (8000/20000→10000, 8000/40000→15000, 18000→15000,
+  15000→15000, 8000/12000→8000, half-month 18000→9000, 0→0); attachments
+  E2E via curl (upload/list/download/auto-tick/bad-type-reject/delete-untick)
+  + playwright UI (attach button, 8 doc types, employee picker 129 opts in
+  edit mode). Test claims cleaned up.
+  Deploy: deploy_vps_iter376.sh (temp_bundle→376, includes 370-375).

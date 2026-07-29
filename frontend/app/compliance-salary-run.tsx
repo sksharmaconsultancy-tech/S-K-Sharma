@@ -1407,10 +1407,11 @@ export default function ComplianceSalaryRunScreen() {
           + rHeads.medical + rHeads.special + rHeads.others;
 
         // Statutory wage base — mirrors utils/compliance_salary.py:
-        // Iter 254 (user directive) — PF is calculated STRICTLY on the
-        // Employee Master's "PF Basic Salary". The 50%-of-gross floor is
-        // IGNORED for PF. Capped at the EPF ceiling unless the explicit
-        // PF Basic exceeds it.
+        // Iter 376 (user rule, replaces Iter 254) — PF wage base:
+        //   • PF Basic BELOW the ₹15,000 cap → floor applies:
+        //     wages = max(PF Basic, floor% of Gross Earning), capped at
+        //     the PF wage cap.
+        //   • PF Basic AT/ABOVE the cap → wages = the cap (₹15,000).
         // Iter 370 (user bug) — a 0-day first process stored
         // pf_applicable=false (zero-pay guard), which FROZE this client
         // recompute: typing days never brought PF/ESIC back until a second
@@ -1423,9 +1424,12 @@ export default function ComplianceSalaryRunScreen() {
           : r.pf_applicable !== false;
         const pfOn = pfMasterOk && pfBasicFull > 0;
         const pfBasicPro = (r as any).salary_mode === "monthly" ? pfBasicFull * ratio : pfBasicFull;
-        const pfWagesNew = pfOn
-          ? Math.min(pfBasicPro, Math.max(pfCap, pfBasicPro))
-          : 0;
+        const floorPct = Number(stat.stat_wage_floor_pct ?? 50) / 100;
+        const grossEarn = grossPaid + Number((r as any).ot_pay || 0);
+        const pfBase = pfBasicFull < pfCap
+          ? Math.max(pfBasicPro, grossEarn * floorPct)
+          : pfBasicPro;
+        const pfWagesNew = pfOn ? Math.min(pfBase, pfCap) : 0;
         const pfEmp = pfWagesNew * pfEmpRate;
         const pfErEpf = pfWagesNew * pfErEpfRate;
         const pfErEps = pfWagesNew * pfErEpsRate;
