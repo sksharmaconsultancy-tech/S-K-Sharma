@@ -2496,3 +2496,14 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   Verified via playwright: Kankani grid (STAFF July) shows M.Basic/M.HRA/
   M.Conv/M.Gross only; M.Med/M.Spl/M.Others + PT/TDS header cells hidden.
   Deploy: deploy_vps_iter377.sh (temp_bundle→377, includes 370-376).
+- Iter 378 (user accepted improvement: old-run exports follow Firm Master):
+  server.py: async _ensure_firm_head_masks(run) — when rows[0] lacks
+  enabled_allowances/enabled_deductions, stamps LIVE firm master masks
+  (same AMAP + epf/esi applicable-or-catalog + PT + TDS/I. TAX logic as
+  engine) on all rows at EXPORT time. Called in compliance-salary-runs
+  export.csv / export.xlsx / register.pdf endpoints (after auth guard).
+  Verified: cloned July run with masks stripped (run_test_oldmask) →
+  CSV/XLSX headers show basic/hra/conveyance only (no medical/special/
+  others/pt/tds); PDF text lacks Medical/Special/P.Tax/TDS. Test run
+  deleted after verification.
+  Deploy: deploy_vps_iter378.sh (temp_bundle→378, includes 370-377).

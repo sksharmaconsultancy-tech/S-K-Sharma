@@ -17149,6 +17149,56 @@ async def reprocess_compliance_salary_run(
     return {"ok": True, "run": {k: v for k, v in run.items() if k != "_id"}}
 
 
+async def _ensure_firm_head_masks(run: dict) -> dict:
+    """Iter 378 (user request) — OLD runs (saved before the head masks were
+    stamped on rows, incl. Copy-Last-Month / legacy imports) get the LIVE
+    Firm Master Allowance/Deduction masks stamped at EXPORT time, so the
+    PDF / Excel / CSV registers match the on-screen grid and the current
+    Firm Master settings."""
+    rows = run.get("rows") or []
+    if not rows:
+        return run
+    r0 = rows[0]
+    if r0.get("enabled_allowances") is not None \
+            and r0.get("enabled_deductions") is not None:
+        return run
+    fm = await db.firm_masters.find_one(
+        {"company_id": run.get("company_id")},
+        {"_id": 0, "allowances": 1, "deductions": 1, "epf": 1, "esi": 1})
+    if not fm:
+        return run
+    _fm_allow = fm.get("allowances") or {}
+    _fm_ded = fm.get("deductions") or {}
+    _amap = {"HRA": "hra", "CONV.": "conveyance",
+             "MEDICAL ALLOWANCES": "medical", "OTH. ALLOW.": "special",
+             "OTHER MISC.ALLOWANCE": "others"}
+    allow_mask = (sorted({h for lbl, h in _amap.items()
+                          if _fm_allow.get(lbl)} | {"basic"})
+                  if _fm_allow else None)
+    _epf_ap = (fm.get("epf") or {}).get("applicable")
+    _esi_ap = (fm.get("esi") or {}).get("applicable")
+    ded_configured = (any(bool(v) for v in _fm_ded.values())
+                      or _epf_ap is not None or _esi_ap is not None)
+    ded_mask: Optional[list] = None
+    if ded_configured:
+        dm = set()
+        if (_epf_ap if _epf_ap is not None else _fm_ded.get("PF")):
+            dm.add("pf")
+        if (_esi_ap if _esi_ap is not None else _fm_ded.get("ESI")):
+            dm.add("esi")
+        if _fm_ded.get("PT"):
+            dm.add("pt")
+        if _fm_ded.get("TDS") or _fm_ded.get("I. TAX"):
+            dm.add("tds")
+        ded_mask = sorted(dm)
+    for r in rows:
+        if allow_mask is not None and r.get("enabled_allowances") is None:
+            r["enabled_allowances"] = allow_mask
+        if ded_mask is not None and r.get("enabled_deductions") is None:
+            r["enabled_deductions"] = ded_mask
+    return run
+
+
 @api.get("/admin/compliance-salary-runs/{run_id}/export.csv")
 async def export_compliance_salary_run_csv(
     run_id: str,
@@ -17165,6 +17215,7 @@ async def export_compliance_salary_run_csv(
         raise HTTPException(status_code=404, detail="Compliance salary run not found")
     if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
         raise HTTPException(status_code=403, detail="Not authorised for this run")
+    run = await _ensure_firm_head_masks(run)
     csv_str = to_csv(_sort_export_rows(run.get("rows") or [], sort_by))
     return Response(
         content=csv_str,
@@ -17193,6 +17244,7 @@ async def export_compliance_salary_run_xlsx(
         raise HTTPException(status_code=404, detail="Compliance salary run not found")
     if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
         raise HTTPException(status_code=403, detail="Not authorised for this run")
+    run = await _ensure_firm_head_masks(run)
     company_name = "S.K. Sharma & Co."
     if run.get("company_id"):
         c = await db.companies.find_one(
@@ -17239,6 +17291,7 @@ async def export_compliance_salary_register_pdf(
         raise HTTPException(status_code=404, detail="Compliance salary run not found")
     if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
         raise HTTPException(status_code=403, detail="Not authorised for this run")
+    run = await _ensure_firm_head_masks(run)
 
     # Iter 324 (user request) — SORTING + GROUPING on the register PDF.
     sort_by = str(sort_by or "").strip().lower()
