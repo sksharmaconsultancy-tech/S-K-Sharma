@@ -338,6 +338,7 @@ export default function ComplianceSalaryRunScreen() {
                 fmtInr(r.stat_wage_base), fmtInr(r.total_deduction));
     }
     return {
+      sr: 40, // Iter 379 (user request) — Sr. No first column
       name: fit("Name", rows.map((r: any) => r.name), 110),
       father: fit("Father Name", rows.map((r: any) => r.father_name), 100),
       desg: fit("Designation", rows.map((r: any) => r.designation), 90),
@@ -2182,8 +2183,10 @@ export default function ComplianceSalaryRunScreen() {
                   const en = ((run.rows[0] as any)?.enabled_allowances ?? fmMask.en) as string[] | undefined;
                   const has = (k: string) => !en || en.includes(k) || k === "basic";
                   const CELL_W = colW.num;
-                  const INFO_W = colW.name + colW.father + colW.desg + colW.uan + colW.esi + colW.pd + colW.el;
-                  const FROZEN_W = colW.name + colW.father + colW.desg;
+                  // Iter 379 (user request) — column order: Sr → UAN →
+                  // ESIC → Name → Father → Designation.
+                  const INFO_W = colW.sr + colW.uan + colW.esi + colW.name + colW.father + colW.desg + colW.pd + colW.el;
+                  const FROZEN_W = colW.sr + colW.uan + colW.esi + colW.name;
                   const optKeys = ["basic","hra","conveyance","medical","special","others"].filter((k) => has(k));
                   const masterCount = optKeys.length + 1; // +M.Gross
                   // Iter 306 — +Gross AND +OT Amt (the band was one cell
@@ -2224,11 +2227,14 @@ export default function ComplianceSalaryRunScreen() {
                   const headers: { label: string; group: "info" | "master" | "calc" | "ded" }[] = [
                     // User directive — Employee Code HIDDEN; show Father
                     // Name, Designation, UAN No. & ESIC No. instead.
+                    // Iter 379 (user request) — Sr. No first, then UAN No.
+                    // and ESIC No., THEN the Employee Name.
+                    { label: "Sr", group: "info" },
+                    { label: "UAN No.", group: "info" },
+                    { label: "ESIC No.", group: "info" },
                     { label: "Name", group: "info" },
                     { label: "Father Name", group: "info" },
                     { label: "Designation", group: "info" },
-                    { label: "UAN No.", group: "info" },
-                    { label: "ESIC No.", group: "info" },
                     { label: "Present Days", group: "info" },
                     // Iter 306 (user #20) — editable ESIC Leave days.
                     { label: "ESIC Leave", group: "info" },
@@ -2265,7 +2271,8 @@ export default function ComplianceSalaryRunScreen() {
                     "Other*", "Total Ded.", "Net",
                   ];
                   for (const d of dedLabels) headers.push({ label: d, group: "ded" });
-                  const infoW = [colW.name, colW.father, colW.desg, colW.uan, colW.esi, colW.pd, colW.el];
+                  const infoW = [colW.sr, colW.uan, colW.esi, colW.name, colW.father, colW.desg, colW.pd, colW.el];
+                  const stickyOff = [0, colW.sr, colW.sr + colW.uan, colW.sr + colW.uan + colW.esi];
                   return (
                     <>
                     <View style={[styles.tblRow, styles.tblHeader]}>
@@ -2278,18 +2285,17 @@ export default function ComplianceSalaryRunScreen() {
                           onPress={() => toggleColSort(h.label)}
                           style={[
                             styles.tblCell,
-                            { width: i < 7
-                                ? [colW.name, colW.father, colW.desg, colW.uan, colW.esi, colW.pd, colW.el][i]
-                                : colW.num },
+                            { width: i < 8 ? infoW[i] : colW.num },
                             styles.tblHeaderTxt,
-                            i >= 5 && { textAlign: "right" },
+                            i >= 6 && { textAlign: "right" },
                             h.group === "master" && styles.groupHdrCellHeaderMaster,
                             h.group === "calc" && styles.groupHdrCellHeaderCalc,
                             h.group === "ded" && styles.groupHdrCellHeaderDed,
-                            i < 3 && stickyCol(
-                              [0, colW.name, colW.name + colW.father][i],
-                              colors.brandPrimary,
-                            ),
+                            // Iter 379 (user request) — highlight the Gross
+                            // and Freeze Salary column headers.
+                            h.label === "Gross" && { backgroundColor: "#B45309", color: "#FEF3C7" },
+                            h.label === "Freeze Salary" && { backgroundColor: "#5B21B6", color: "#EDE9FE" },
+                            i < 4 && stickyCol(stickyOff[i], colors.brandPrimary),
                           ]}
                         >
                           {h.label}
@@ -2305,9 +2311,8 @@ export default function ComplianceSalaryRunScreen() {
                         <View
                           key={i}
                           style={[
-                            { width: i < 7 ? infoW[i] : colW.num, paddingHorizontal: 2, paddingVertical: 2 },
-                            i < 3 && stickyCol(
-                              [0, colW.name, colW.name + colW.father][i], "#EFF6FF"),
+                            { width: i < 8 ? infoW[i] : colW.num, paddingHorizontal: 2, paddingVertical: 2 },
+                            i < 4 && stickyCol(stickyOff[i], "#EFF6FF"),
                           ]}
                         >
                           {COL_FILTER_GETTERS[h.label] ? (
@@ -2335,10 +2340,11 @@ export default function ComplianceSalaryRunScreen() {
                 {sortRows(run.rows.filter((r) =>
                   rowPassesColFilters(r, colFilters, COL_FILTER_GETTERS))).map((r, idx) => {
                   const isHl = hlRow === r.user_id;
-                  // Iter 339c (user request) — Gross vs Freeze mismatch
-                  // highlights the whole row in the "difference" colour.
+                  // Iter 339c / Iter 379 (user request) — Gross vs Freeze
+                  // mismatch: compare the VALUES directly (live, updates as
+                  // days/OT are edited) and highlight the whole employee row.
                   const frzDiff = hasFrz && (r as any).imported_gross != null
-                    && (r as any).freeze_status !== "matched";
+                    && Math.abs(Number((r as any).imported_gross) - Number(r.gross_paid || 0)) > 0.5;
                   const rowBg = isHl ? "#FEF3C7" : frzDiff ? "#FEE2E2"
                     : idx % 2 === 0 ? colors.surfaceSecondary : colors.surface;
                   return (
@@ -2352,11 +2358,14 @@ export default function ComplianceSalaryRunScreen() {
                       !isHl && frzDiff && { borderLeftWidth: 3, borderLeftColor: "#DC2626" },
                     ]}
                   >
-                    <Text style={[styles.tblCell, { width: colW.name }, stickyCol(0, rowBg)]} numberOfLines={1}>{r.name || "—"}</Text>
-                    <Text style={[styles.tblCell, { width: colW.father }, stickyCol(colW.name, rowBg)]} numberOfLines={1}>{(r as any).father_name || "—"}</Text>
-                    <Text style={[styles.tblCell, { width: colW.desg }, stickyCol(colW.name + colW.father, rowBg)]} numberOfLines={1}>{(r as any).designation || "—"}</Text>
-                    <Text style={[styles.tblCell, { width: colW.uan }]} numberOfLines={1}>{(r as any).uan_no || "—"}</Text>
-                    <Text style={[styles.tblCell, { width: colW.esi }]} numberOfLines={1}>{(r as any).esi_ip_no || "—"}</Text>
+                    {/* Iter 379 (user request) — Sr → UAN → ESIC → Name;
+                        first four columns frozen while scrolling. */}
+                    <Text style={[styles.tblCell, { width: colW.sr, color: "#64748B" }, stickyCol(0, rowBg)]}>{idx + 1}</Text>
+                    <Text style={[styles.tblCell, { width: colW.uan }, stickyCol(colW.sr, rowBg)]} numberOfLines={1}>{(r as any).uan_no || "—"}</Text>
+                    <Text style={[styles.tblCell, { width: colW.esi }, stickyCol(colW.sr + colW.uan, rowBg)]} numberOfLines={1}>{(r as any).esi_ip_no || "—"}</Text>
+                    <Text style={[styles.tblCell, { width: colW.name }, frzDiff && { color: "#B91C1C", fontWeight: "800" }, stickyCol(colW.sr + colW.uan + colW.esi, rowBg)]} numberOfLines={1}>{r.name || "—"}</Text>
+                    <Text style={[styles.tblCell, { width: colW.father }]} numberOfLines={1}>{(r as any).father_name || "—"}</Text>
+                    <Text style={[styles.tblCell, { width: colW.desg }]} numberOfLines={1}>{(r as any).designation || "—"}</Text>
                     {/* Iter 85 — Editable Present Days. Admin can override
                         the biometric-derived value; the row is recomputed
                         client-side via ``updatePresentDays()`` so PF /
@@ -2470,11 +2479,22 @@ export default function ComplianceSalaryRunScreen() {
                         </Text>
                       );
                     })()}
-                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.gross_paid)}</Text>
+                    {/* Iter 379 (user request) — Gross column HIGHLIGHTED;
+                        red when it differs from the Freeze Salary. */}
+                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "800" },
+                      frzDiff
+                        ? { backgroundColor: "#FECACA", color: "#991B1B" }
+                        : { backgroundColor: "#FEF3C7", color: "#92400E" }]}>
+                      {fmtInr(r.gross_paid)}
+                    </Text>
                     {/* Iter 335 (user request) — Freeze Salary shown right
-                        NEXT TO the Gross column. */}
+                        NEXT TO the Gross column. Iter 379 — red highlight
+                        when it differs from the calculated Gross. */}
                     {hasFrz ? (
-                      <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700", color: "#5B21B6", backgroundColor: "#F5F3FF" }]}>
+                      <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" },
+                        frzDiff
+                          ? { backgroundColor: "#FECACA", color: "#991B1B" }
+                          : { backgroundColor: "#F5F3FF", color: "#5B21B6" }]}>
                         {(r as any).imported_gross != null ? fmtInr((r as any).imported_gross) : "—"}
                       </Text>
                     ) : null}
@@ -2528,11 +2548,13 @@ export default function ComplianceSalaryRunScreen() {
                   );
                 })}
                 <View style={[styles.tblRow, { backgroundColor: colors.brandTertiary }]}>
-                  <Text style={[styles.tblCell, { width: colW.name, fontWeight: "700" }, stickyCol(0, colors.brandTertiary)]}>TOTAL</Text>
-                  <Text style={[styles.tblCell, { width: colW.father }, stickyCol(colW.name, colors.brandTertiary)]}>—</Text>
-                  <Text style={[styles.tblCell, { width: colW.desg }, stickyCol(colW.name + colW.father, colors.brandTertiary)]}>—</Text>
-                  <Text style={[styles.tblCell, { width: colW.uan }]}>—</Text>
-                  <Text style={[styles.tblCell, { width: colW.esi }]}>—</Text>
+                  {/* Iter 379 — totals row follows Sr → UAN → ESIC → Name. */}
+                  <Text style={[styles.tblCell, { width: colW.sr }, stickyCol(0, colors.brandTertiary)]}>—</Text>
+                  <Text style={[styles.tblCell, { width: colW.uan }, stickyCol(colW.sr, colors.brandTertiary)]}>—</Text>
+                  <Text style={[styles.tblCell, { width: colW.esi }, stickyCol(colW.sr + colW.uan, colors.brandTertiary)]}>—</Text>
+                  <Text style={[styles.tblCell, { width: colW.name, fontWeight: "700" }, stickyCol(colW.sr + colW.uan + colW.esi, colors.brandTertiary)]}>TOTAL</Text>
+                  <Text style={[styles.tblCell, { width: colW.father }]}>—</Text>
+                  <Text style={[styles.tblCell, { width: colW.desg }]}>—</Text>
                   {/* Iter 370 (user request) — totals under EVERY column. */}
                   <Text style={[styles.tblCell, styles.rightCell, { width: colW.pd, fontWeight: "700" }]}>{fmtDaysTotal(sumCol("present_days"))}</Text>
                   <Text style={[styles.tblCell, styles.rightCell, { width: colW.el, fontWeight: "700" }]}>{fmtDaysTotal(sumCol("esic_leave_days"))}</Text>

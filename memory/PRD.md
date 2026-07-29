@@ -2507,3 +2507,20 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   others/pt/tds); PDF text lacks Medical/Special/P.Tax/TDS. Test run
   deleted after verification.
   Deploy: deploy_vps_iter378.sh (temp_bundle→378, includes 370-377).
+- Iter 379 (user: compliance grid highlights + column order):
+  compliance-salary-run.tsx:
+  1. Column order: Sr(new, 40px, idx+1) → UAN No. → ESIC No. → Name →
+     Father → Desg → PD → ESIC Leave. First FOUR columns sticky
+     (stickyOff [0,sr,sr+uan,sr+uan+esi]); infoW/i<8/i>=6 right-align;
+     FROZEN_W/INFO_W updated; filter row + totals row realigned (TOTAL
+     under Name).
+  2. Gross column highlighted amber (#FEF3C7 cells, #B45309 header);
+     Freeze Salary purple as before (#5B21B6 header now too).
+  3. frzDiff now VALUE-based: |imported_gross - gross_paid| > 0.5
+     (was freeze_status !== "matched" which broke on runs without the
+     stored status). Diff employees: row #FEE2E2 + red left border
+     (existing), NAME bold red, Gross+Freeze cells #FECACA/#991B1B.
+  Verified via playwright: grid shows Sr|UAN|ESIC|Name order, amber Gross
+  header/cells, totals aligned. Freeze columns render only on imported
+  runs (hasFrz) — unchanged.
+  Deploy: deploy_vps_iter379.sh (temp_bundle→379, includes 370-378).
