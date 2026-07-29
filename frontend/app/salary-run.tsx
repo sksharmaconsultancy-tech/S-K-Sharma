@@ -140,8 +140,10 @@ type PastRunSummary = {
 
 function currentMonth(): string {
   // Iter 126h — salary is processed for the PREVIOUS month by default.
+  // Iter 371 (user request) — AFTER the 25th the default flips to the
+  // CURRENT month (next salary-prep cycle starts then).
   const d = new Date();
-  d.setMonth(d.getMonth() - 1);
+  if (d.getDate() <= 25) d.setMonth(d.getMonth() - 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
@@ -279,6 +281,48 @@ export default function ActualSalaryProcessScreen() {
     if (isAdmin) loadRuns();
   }, [isAdmin, loadRuns]);
   useOnRefresh(() => { if (isAdmin) loadRuns(); });
+
+  // Iter 371 (user request) — Configure batch shows an UNLOCK button when
+  // the month's salary is already processed & FINALIZED for this firm /
+  // branch (Super / Sub Admins only).
+  const isSuperRole = user?.role === "super_admin" || user?.role === "sub_admin";
+  const [finalizedExisting, setFinalizedExisting] = useState<any | null>(null);
+  const [unlockBusy, setUnlockBusy] = useState(false);
+  const refreshFinalized = useCallback(async () => {
+    try {
+      const prev = await api<{ runs: any[] }>("/admin/salary-runs");
+      const f = (prev.runs || []).find(
+        (r: any) =>
+          r.month === month &&
+          (!selectedCompanyId || r.company_id === selectedCompanyId) &&
+          (branch ? String(r.branch_name || "") === branch : !r.branch_name) &&
+          r.finalized,
+      );
+      setFinalizedExisting(f || null);
+    } catch { setFinalizedExisting(null); }
+  }, [month, selectedCompanyId, branch]);
+  useEffect(() => { if (isAdmin) refreshFinalized(); }, [isAdmin, refreshFinalized, run]);
+  const unlockExisting = async () => {
+    if (!finalizedExisting || unlockBusy) return;
+    const ok = await confirmYesNo(
+      `UNLOCK the FINALIZED salary for ${finalizedExisting.month}?\n\n` +
+      "The run becomes editable again and can be reprocessed.",
+    );
+    if (!ok) return;
+    setUnlockBusy(true);
+    try {
+      await api(`/admin/salary-runs/${finalizedExisting.run_id}/unlock`, {
+        method: "POST", body: { reason: "Unlocked from Configure batch" },
+      });
+      if (run?.run_id === finalizedExisting.run_id) {
+        setRun((p) => (p ? { ...p, finalized: false } : p));
+      }
+      setFinalizedExisting(null);
+      showMsg("Salary unlocked ✓ — you can process/edit this month again.");
+    } catch (e: any) {
+      showMsg(e?.message || "Unlock failed");
+    } finally { setUnlockBusy(false); }
+  };
 
   useLiveSync(selectedCompanyId, (ev) => {
     if (ev?.type?.startsWith("salary.run.") && isAdmin) loadRuns();
@@ -781,6 +825,31 @@ export default function ActualSalaryProcessScreen() {
               </>
             )}
           </Pressable>
+          {/* Iter 371 (user request) — the month is already processed &
+              FINALIZED → Super / Sub Admins get a one-tap UNLOCK here. */}
+          {finalizedExisting && isSuperRole ? (
+            <Pressable
+              testID="asp-unlock-existing"
+              onPress={unlockExisting}
+              disabled={unlockBusy}
+              style={[
+                styles.primaryBtn,
+                { marginTop: 8, backgroundColor: "#D97706" },
+                unlockBusy && { opacity: 0.6 },
+              ]}
+            >
+              {unlockBusy ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="lock-open-outline" size={16} color="#fff" />
+                  <Text style={styles.primaryBtnTxt}>
+                    Unlock Salary — {finalizedExisting.month} is Finalized 🔒
+                  </Text>
+                </>
+              )}
+            </Pressable>
+          ) : null}
         </View>
 
         {/* Iter 182 — loading skeleton while processing */}

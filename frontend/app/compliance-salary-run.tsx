@@ -140,8 +140,10 @@ type EmployeeLite = {
 
 function currentMonth(): string {
   // Iter 126h — salary is processed for the PREVIOUS month by default.
+  // Iter 371 (user request) — AFTER the 25th the default flips to the
+  // CURRENT month (next salary-prep cycle starts then).
   const d = new Date();
-  d.setMonth(d.getMonth() - 1);
+  if (d.getDate() <= 25) d.setMonth(d.getMonth() - 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
@@ -577,6 +579,20 @@ export default function ComplianceSalaryRunScreen() {
   }, []);
 
   useEffect(() => { if (isAdmin) loadRuns(); }, [isAdmin, loadRuns]);
+
+  // Iter 371 (user request) — Configure batch shows an UNLOCK button when
+  // the selected month's salary is already processed & FINALIZED for this
+  // firm + employee group (Super / Sub Admins only).
+  const finalizedExisting = useMemo(() => {
+    const grp = (empType !== "all" ? empType : "").trim().toUpperCase();
+    return (runs as any[]).find(
+      (r: any) =>
+        r.month === month &&
+        (!activeCompanyId || r.company_id === activeCompanyId) &&
+        String(r.employee_type || "").trim().toUpperCase() === grp &&
+        r.finalized,
+    ) || null;
+  }, [runs, month, activeCompanyId, empType]);
 
   // Iter 370 — ``pv`` carries the freshly loaded firm policy values when
   // the state hasn't caught up yet (first click after page open).
@@ -1052,6 +1068,35 @@ export default function ComplianceSalaryRunScreen() {
       showMsg(approve ? "Unlock APPROVED ✓ — run is editable again." : "Unlock request rejected.");
     } catch (e: any) {
       showMsg(e?.message || "Decision failed");
+    } finally { setUnlockBusy(false); }
+  };
+
+  // Iter 371 (user request) — one-tap unlock of the month's FINALIZED run
+  // straight from the Configure batch card (Super / Sub Admins).
+  const unlockExisting = async () => {
+    if (!finalizedExisting || unlockBusy) return;
+    const ok = await confirmYesNo(
+      `UNLOCK the FINALIZED salary for ${finalizedExisting.month}?\n\n` +
+      "The run becomes editable again and can be reprocessed.",
+    );
+    if (!ok) return;
+    setUnlockBusy(true);
+    try {
+      const r = await api<{ ok: boolean; unlocked?: boolean; message?: string }>(
+        `/admin/compliance-salary-runs/${finalizedExisting.run_id}/unlock-request`,
+        { method: "POST", body: { reason: "Unlocked from Configure batch" } },
+      );
+      if (r.unlocked) {
+        if (run?.run_id === finalizedExisting.run_id) {
+          setRun({ ...(run as any), finalized: false } as any);
+        }
+        await loadRuns();
+        showMsg("Salary unlocked ✓ — you can process/edit this month again.");
+      } else {
+        showMsg(r.message || "Unlock request sent for approval.");
+      }
+    } catch (e: any) {
+      showMsg(e?.message || "Unlock failed");
     } finally { setUnlockBusy(false); }
   };
 
@@ -1820,6 +1865,31 @@ export default function ComplianceSalaryRunScreen() {
               <Text style={styles.primaryBtnTxt}>Copy Last Month Salary</Text>
             </Pressable>
           </View>
+          {/* Iter 371 (user request) — the month is already processed &
+              FINALIZED → Super / Sub Admins get a one-tap UNLOCK here. */}
+          {finalizedExisting && isSuper ? (
+            <Pressable
+              testID="csr-unlock-existing"
+              onPress={unlockExisting}
+              disabled={unlockBusy}
+              style={[
+                styles.primaryBtn,
+                { marginTop: 8, backgroundColor: "#D97706" },
+                unlockBusy && { opacity: 0.6 },
+              ]}
+            >
+              {unlockBusy ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="lock-open-outline" size={16} color="#fff" />
+                  <Text style={styles.primaryBtnTxt}>
+                    Unlock Salary — {finalizedExisting.month} is Finalized 🔒
+                  </Text>
+                </>
+              )}
+            </Pressable>
+          ) : null}
         </View>
 
         {/* Iter 182 — loading skeleton while a run computes */}

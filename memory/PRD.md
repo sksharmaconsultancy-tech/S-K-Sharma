@@ -2371,3 +2371,35 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   Verified E2E on preview (Kankani, STAFF, 2026-06): fresh process → type 26 days →
   ESIC (E) 59 / (Er) 252 instantly; Gross ▲ / EPF ▲ header sorting works; panels at bottom.
   Deploy: deploy_vps_iter370.sh (temp_bundle→370). USER MUST REPROCESS existing months once.
+- Iter 371 (user: unlock button + month default):
+  1. UNLOCK IN CONFIGURE BATCH: compliance-salary-run.tsx — finalizedExisting useMemo
+     (runs list matched on month+company+employee_type+finalized) + unlockExisting()
+     → POST /admin/compliance-salary-runs/{id}/unlock-request; amber button
+     (csr-unlock-existing) under Salary Process row, isSuper (super/sub) only.
+     salary-run.tsx — refreshFinalized() fetches /admin/salary-runs (month+firm+branch),
+     asp-unlock-existing button → NEW endpoint POST /admin/salary-runs/{run_id}/unlock
+     (server.py, after finalize_actual_salary_run; super/sub only, sets finalized False).
+     server.py unlock-request: sub_admin now unlocks IMMEDIATELY (was request-only);
+     company_admin still goes through salary_unlock_requests approval flow.
+  2. MONTH DEFAULT: currentMonth() in both compliance-salary-run.tsx and salary-run.tsx —
+     day > 25 ⇒ CURRENT month, else previous month.
+  Verified E2E on preview: compliance default month July (server Jul 29), June finalized →
+  unlock button appears → Yes → "Salary unlocked ✓" toast, button gone; actual window
+  unlock same; curl finalize→unlock on asal run OK.
+  Deploy: deploy_vps_iter371.sh (temp_bundle→371, includes Iter 370).
+- Iter 372 (user: PDF dynamic heads + label/overflow fixes):
+  1. build_compliance_register_pdf (v1) REWRITTEN spec-driven: m_cols/e_cols/d_cols
+     built from rows[0].enabled_allowances / enabled_deductions (show_hra/show_conv/
+     show_oth_m/show_oth_e/show_pf/show_esi/show_tds). Dynamic indices M0/DAYS_I/E0/
+     D0/NET_I/SIGN_I/NCOLS drive spans/widths/backgrounds. Summary lines conditional.
+  2. v1 IDs column: header "UAN / P.F.NO. / ESI NO.", rows print PLAIN numbers (labels
+     removed), new idcell ParagraphStyle wordWrap="CJK" fixes EPF No. overwriting cols.
+  3. build_compliance_register_pdf_v2: cols_spec filtered via _col_ok (hra/conv/
+     other_earn/pf/esi/tds) from same masks; summary conditional too.
+  4. NEW build_actual_salary_register_pdf in utils/salary_run.py (Actual grid columns,
+     GRAND TOTAL, zebra). Endpoint /admin/salary-runs/{run_id}/register.pdf branches on
+     run_type=="actual"; EPF/ESI col visibility mirrors engine semantics (epf/esi
+     .applicable authoritative, fallback Deductions catalog PF/ESI).
+  Verified via pypdf text-extraction on Kankani June runs: v1 bands SALARY/HRA/CONV/TOTAL
+  (no OTHER/TDS), IDs unlabeled; v2 dropped Other+TDS cols; actual register OK 6 pages.
+  Deploy: deploy_vps_iter372.sh (temp_bundle→372, includes 370+371).

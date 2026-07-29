@@ -854,6 +854,27 @@ def build_compliance_register_pdf(
     month_days = run.get("month_days") or run.get("default_month_days") or ""
     group = (run.get("employee_type") or "ALL").upper()
 
+    # Iter 372 (user request) — allowance & deduction HEADS are DYNAMIC per
+    # firm: only heads enabled in the Firm Master appear as columns (same
+    # masks the on-screen grid uses, stamped on every row by the engine).
+    _r0 = rows[0] if rows else {}
+    _en = _r0.get("enabled_allowances")
+    _ed = _r0.get("enabled_deductions")
+
+    def _has_a(k: str) -> bool:
+        return (_en is None) or (k in _en) or k == "basic"
+
+    def _has_d(k: str) -> bool:
+        return (_ed is None) or (k in _ed)
+
+    show_hra = _has_a("hra")
+    show_conv = _has_a("conveyance")
+    show_oth_m = any(_has_a(k) for k in ("medical", "special", "others"))
+    show_oth_e = show_oth_m or any(float(r.get("ot_pay") or 0) for r in rows)
+    show_pf = _has_d("pf")
+    show_esi = _has_d("esi")
+    show_tds = _has_d("tds")
+
     def A(v: Any) -> str:
         # Iter 323 (user request) — whole rupees only, no ".00".
         try:
@@ -940,25 +961,63 @@ def build_compliance_register_pdf(
     # ---- table ------------------------------------------------------------
     # Iter 323 (user request) — MASTER SALARY & ALLOWANCES band inserted
     # between DESIG. and DAYS/HRS, figures centre-aligned, wider SIGN column.
-    hdr_top = [
-        "S.No", "NAME /\nFATHER NAME", "P.F.NO. /\nESI NO.", "DESIG.",
-        "-------- MASTER SALARY & ALLOWANCES --------", "", "", "", "",
-        "DAYS\n/HRS",
-        "-------------- EARNINGS --------------", "", "", "", "",
-        "------------- DEDUCTIONS -------------", "", "", "", "", "",
-        "NET\nPAYABLE", "SIGN. /\nBANK",
-    ]
-    hdr_sub = [
-        "", "", "", "",
-        "SALARY", "H.R.A", "CONV.", "OTHER", "TOTAL",
-        "",
-        "SALARY", "H.R.A", "CONV.", "OTHER", "TOTAL",
-        "P.F.", "E.S.I.", "ADVANCE", "OTHER", "TDS", "TOTAL",
-        "AMOUNT", "DATE OF\nPAYMENT",
-    ]
+    # Iter 372 (user request) — the bands are built DYNAMICALLY from the
+    # firm-enabled heads (see show_* flags above).
+    m_cols: List[Any] = [("SALARY", "m_sal")]
+    if show_hra:
+        m_cols.append(("H.R.A", "m_hra"))
+    if show_conv:
+        m_cols.append(("CONV.", "m_conv"))
+    if show_oth_m:
+        m_cols.append(("OTHER", "m_oth"))
+    m_cols.append(("TOTAL", "m_tot"))
+    e_cols: List[Any] = [("SALARY", "sal")]
+    if show_hra:
+        e_cols.append(("H.R.A", "hra"))
+    if show_conv:
+        e_cols.append(("CONV.", "conv"))
+    if show_oth_e:
+        e_cols.append(("OTHER", "oth"))
+    e_cols.append(("TOTAL", "gross"))
+    d_cols: List[Any] = []
+    if show_pf:
+        d_cols.append(("P.F.", "pf"))
+    if show_esi:
+        d_cols.append(("E.S.I.", "esi"))
+    d_cols += [("ADVANCE", "adv"), ("OTHER", "othd")]
+    if show_tds:
+        d_cols.append(("TDS", "tds"))
+    d_cols.append(("TOTAL", "ded"))
+    M0 = 4
+    DAYS_I = M0 + len(m_cols)
+    E0 = DAYS_I + 1
+    D0 = E0 + len(e_cols)
+    NET_I = D0 + len(d_cols)
+    SIGN_I = NET_I + 1
+    NCOLS = SIGN_I + 1
+    hdr_top = (
+        # Iter 372 (user request) — per-employee "UAN No./P.F./ESI" labels
+        # removed from the rows; the column heading identifies them instead.
+        ["S.No", "NAME /\nFATHER NAME", "UAN / P.F.NO. /\nESI NO.", "DESIG."]
+        + ["-------- MASTER SALARY & ALLOWANCES --------"] + [""] * (len(m_cols) - 1)
+        + ["DAYS\n/HRS"]
+        + ["-------------- EARNINGS --------------"] + [""] * (len(e_cols) - 1)
+        + ["------------- DEDUCTIONS -------------"] + [""] * (len(d_cols) - 1)
+        + ["NET\nPAYABLE", "SIGN. /\nBANK"]
+    )
+    hdr_sub = (
+        ["", "", "", ""]
+        + [h for h, _k in m_cols] + [""]
+        + [h for h, _k in e_cols] + [h for h, _k in d_cols]
+        + ["AMOUNT", "DATE OF\nPAYMENT"]
+    )
     data: List[List[Any]] = [hdr_top, hdr_sub]
 
     cell = ParagraphStyle("cell", fontName="Helvetica", fontSize=6.5, leading=7.5)
+    # Iter 372 (user bug) — long UAN / EPF numbers used to OVERWRITE the
+    # neighbouring columns; CJK word-wrap breaks anywhere within the cell.
+    idcell = ParagraphStyle("idcell", fontName="Helvetica", fontSize=6,
+                            leading=7, wordWrap="CJK")
     tot = {k: 0.0 for k in (
         "days", "hrs", "sal", "hra", "conv", "oth", "gross",
         "m_sal", "m_hra", "m_conv", "m_oth", "m_tot",
@@ -982,14 +1041,14 @@ def build_compliance_register_pdf(
         return ""
 
     def _sub_cells(gname: str, g: Dict[str, float]) -> List[Any]:
-        return [
-            "", f"TOTAL — {gname}", "", "",
-            A(g["m_sal"]), A(g["m_hra"]), A(g["m_conv"]), A(g["m_oth"]), A(g["m_tot"]),
-            f"{g['days']:g}/{g['hrs']:g}",
-            A(g["sal"]), A(g["hra"]), A(g["conv"]), A(g["oth"]), A(g["gross"]),
-            A(g["pf"]), A(g["esi"]), "0", A(g["othd"]), A(g["tds"]), A(g["ded"]),
-            A(g["net"]), "",
-        ]
+        return (
+            ["", f"TOTAL — {gname}", "", ""]
+            + [A(g[k]) for _h, k in m_cols]
+            + [f"{g['days']:g}/{g['hrs']:g}"]
+            + [A(g[k]) for _h, k in e_cols]
+            + [A(g[k]) for _h, k in d_cols]
+            + [A(g["net"]), ""]
+        )
 
     for i, r in enumerate(rows, start=1):
         if group_by:
@@ -1039,62 +1098,79 @@ def build_compliance_register_pdf(
             tot["nonesi_base"] += gross
         name_p = Paragraph(
             f"{(r.get('name') or '').upper()}<br/>S/O {(r.get('father_name') or '').upper()}", cell)
+        # Iter 372 (user request) — plain numbers only (no per-row labels);
+        # heading column identifies UAN / P.F. / ESI. wordWrap fixes the
+        # EPF-No.-overwriting-columns bug.
         ids_p = Paragraph(
-            f"UAN No. {r.get('uan_no') or '-'}<br/>P.F.: {r.get('pf_no') or '-'}"
-            f"<br/>ESI: {r.get('esi_ip_no') or '-'}", cell)
-        data.append([
-            str(i), name_p, ids_p,
-            Paragraph((r.get("designation") or "").upper(), cell),
-            A(m_sal), A(m_hra), A(m_conv), A(m_oth), A(m_tot),
-            f"{days:g}/{('%g' % hrs) if hrs else ''}",
-            A(r.get("basic")), A(r.get("hra")), A(r.get("conveyance")),
-            A(oth_e), A(gross),
-            A(pf_v), A(r.get("esic_employee")), "0", A(oth_d),
-            A(r.get("tds")), A(r.get("total_deduction")),
-            A(r.get("net")), "",
-        ])
+            f"{r.get('uan_no') or '-'}<br/>{r.get('pf_no') or '-'}"
+            f"<br/>{r.get('esi_ip_no') or '-'}", idcell)
+        _rv = {
+            "m_sal": m_sal, "m_hra": m_hra, "m_conv": m_conv,
+            "m_oth": m_oth, "m_tot": m_tot,
+            "sal": r.get("basic"), "hra": r.get("hra"),
+            "conv": r.get("conveyance"), "oth": oth_e, "gross": gross,
+            "pf": pf_v, "esi": r.get("esic_employee"), "adv": 0,
+            "othd": oth_d, "tds": r.get("tds"), "ded": r.get("total_deduction"),
+        }
+        data.append(
+            [str(i), name_p, ids_p,
+             Paragraph((r.get("designation") or "").upper(), cell)]
+            + [A(_rv[k]) for _h, k in m_cols]
+            + [f"{days:g}/{('%g' % hrs) if hrs else ''}"]
+            + [A(_rv[k]) for _h, k in e_cols]
+            + [A(_rv[k]) for _h, k in d_cols]
+            + [A(r.get("net")), ""]
+        )
         body_items.append({"kind": "emp", "cells": data[-1]})
     if group_by and cur_g is not None:
         body_items.append({"kind": "sub", "cells": _sub_cells(cur_g, g_tot)})
-    grand_row = [
-        "", "GRAND TOTAL", "", "",
-        A(tot["m_sal"]), A(tot["m_hra"]), A(tot["m_conv"]), A(tot["m_oth"]), A(tot["m_tot"]),
-        f"{tot['days']:g}/{tot['hrs']:g}",
-        A(tot["sal"]), A(tot["hra"]), A(tot["conv"]), A(tot["oth"]), A(tot["gross"]),
-        A(tot["pf"]), A(tot["esi"]), "0", A(tot["othd"]), A(tot["tds"]), A(tot["ded"]),
-        A(tot["net"]), "",
-    ]
+    grand_row = (
+        ["", "GRAND TOTAL", "", ""]
+        + [A(tot[k]) for _h, k in m_cols]
+        + [f"{tot['days']:g}/{tot['hrs']:g}"]
+        + [A(tot[k]) for _h, k in e_cols]
+        + [A(tot[k]) for _h, k in d_cols]
+        + [A(tot["net"]), ""]
+    )
 
     # Iter 323 — wider SIGN column for physical signatures.
-    widths = [5, 20, 18, 10,
-              8, 7, 7, 7, 9,
-              7,
-              8, 7, 7, 7, 9,
-              7, 7, 7, 7, 6, 9,
-              10, 18]
+    def _wcol(h: str, first: bool) -> float:
+        if h == "TOTAL":
+            return 9
+        if h == "TDS":
+            return 6
+        return 8 if first else 7
+
+    widths = ([5, 20, 18, 10]
+              + [_wcol(h, j == 0) for j, (h, _k) in enumerate(m_cols)]
+              + [7]
+              + [_wcol(h, j == 0) for j, (h, _k) in enumerate(e_cols)]
+              + [_wcol(h, False) for h, _k in d_cols]
+              + [10, 18])
     # Landscape — stretch the reference column ratios to the full width.
     _scale = (W - 12 * mm) / (sum(widths) * mm)
     col_widths = [wmm * mm * _scale for wmm in widths]
 
     def _base_style() -> list:
         return [
-            ("SPAN", (4, 0), (8, 0)),    # MASTER SALARY & ALLOWANCES band
-            ("SPAN", (10, 0), (14, 0)),  # EARNINGS band
-            ("SPAN", (15, 0), (20, 0)),  # DEDUCTIONS band
+            # Iter 372 — dynamic band spans (columns vary per firm).
+            ("SPAN", (M0, 0), (DAYS_I - 1, 0)),   # MASTER SALARY band
+            ("SPAN", (E0, 0), (D0 - 1, 0)),       # EARNINGS band
+            ("SPAN", (D0, 0), (NET_I - 1, 0)),    # DEDUCTIONS band
             ("SPAN", (0, 0), (0, 1)), ("SPAN", (1, 0), (1, 1)), ("SPAN", (2, 0), (2, 1)),
-            ("SPAN", (3, 0), (3, 1)), ("SPAN", (9, 0), (9, 1)),
-            ("SPAN", (21, 0), (21, 1)), ("SPAN", (22, 0), (22, 1)),
+            ("SPAN", (3, 0), (3, 1)), ("SPAN", (DAYS_I, 0), (DAYS_I, 1)),
+            ("SPAN", (NET_I, 0), (NET_I, 1)), ("SPAN", (SIGN_I, 0), (SIGN_I, 1)),
             # Iter 326 (user request) — heading highlighted like Format 2.
             ("BACKGROUND", (0, 0), (-1, 1), rl_colors.HexColor("#0F3B5C")),
             ("TEXTCOLOR", (0, 0), (-1, 1), rl_colors.white),
-            ("BACKGROUND", (4, 0), (8, 1), rl_colors.HexColor("#1B5480")),
+            ("BACKGROUND", (M0, 0), (DAYS_I - 1, 1), rl_colors.HexColor("#1B5480")),
             ("FONTNAME", (0, 0), (-1, 1), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, 1), 6),
             ("FONTNAME", (0, 2), (-1, -1), "Helvetica"),
             ("FONTSIZE", (0, 2), (-1, -1), 6),
             ("ALIGN", (0, 0), (-1, 1), "CENTER"),
             # Iter 323 (user request) — figures centre-aligned.
-            ("ALIGN", (4, 2), (-1, -1), "CENTER"),
+            ("ALIGN", (M0, 2), (-1, -1), "CENTER"),
             ("ALIGN", (0, 2), (0, -1), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("GRID", (0, 0), (-1, -1), 0.4, rl_colors.black),
@@ -1161,34 +1237,47 @@ def build_compliance_register_pdf(
     for t in page_tables:
         story.append(t)
         story.append(PageBreak())
-    story.append(sec([
-        ("No. Of Emp", str(len(rows))),
-        ("Total Salary Amount", A(tot["sal"])),
-        ("Total H.R.A Amount", A(tot["hra"])),
-        ("Total Conveyance Amount", A(tot["conv"])),
-        ("Total Other Amount", A(tot["oth"])),
-        ("Total Bonus Amount", "0"),
-        ("Total Gross Amount", A(tot["gross"])),
-    ]))
+    # Iter 372 (user request) — summary lines follow the firm-enabled heads.
+    _sum1 = [("No. Of Emp", str(len(rows))),
+             ("Total Salary Amount", A(tot["sal"]))]
+    if show_hra:
+        _sum1.append(("Total H.R.A Amount", A(tot["hra"])))
+    if show_conv:
+        _sum1.append(("Total Conveyance Amount", A(tot["conv"])))
+    if show_oth_e:
+        _sum1.append(("Total Other Amount", A(tot["oth"])))
+    _sum1 += [("Total Bonus Amount", "0"),
+              ("Total Gross Amount", A(tot["gross"]))]
+    story.append(sec(_sum1))
     story.append(Spacer(1, 4 * mm))
-    story.append(sec([
-        ("P.F. Deduction Amount", A(tot["pf"])),
-        ("ABRY P.F. Benifit", "0"),
-        ("E.S.I. Deduction Amount", A(tot["esi"])),
-        ("Advance Deduction Amount", "0"),
-        ("Other Deduction Amount", A(tot["othd"])),
-        ("TDS Deduction Amount", A(tot["tds"])),
-        ("Total Deduction Amount", A(tot["ded"])),
-    ]))
+    _sum2: List[Any] = []
+    if show_pf:
+        _sum2 += [("P.F. Deduction Amount", A(tot["pf"])),
+                  ("ABRY P.F. Benifit", "0")]
+    if show_esi:
+        _sum2.append(("E.S.I. Deduction Amount", A(tot["esi"])))
+    _sum2 += [("Advance Deduction Amount", "0"),
+              ("Other Deduction Amount", A(tot["othd"]))]
+    if show_tds:
+        _sum2.append(("TDS Deduction Amount", A(tot["tds"])))
+    _sum2.append(("Total Deduction Amount", A(tot["ded"])))
+    story.append(sec(_sum2))
     story.append(Spacer(1, 4 * mm))
-    story.append(sec([
-        ("Total Salary of P.F.", A(tot["pf_wages"])),
-        ("Total Less Salary on PF", A(max(0.0, tot["gross_pf"] - tot["pf_wages"]))),
-        ("Total Salary of non-P.F", A(tot["gross_nonpf"])),
-        ("Total Salary+HRA+CONV(ESI)", A(tot["esi_base"])),
-        ("Total Salary+HRA+CONV(NON-ESI)", A(tot["nonesi_base"])),
-    ], bold_last=False))
-    story.append(Spacer(1, 4 * mm))
+    _sum3: List[Any] = []
+    if show_pf:
+        _sum3 += [
+            ("Total Salary of P.F.", A(tot["pf_wages"])),
+            ("Total Less Salary on PF", A(max(0.0, tot["gross_pf"] - tot["pf_wages"]))),
+            ("Total Salary of non-P.F", A(tot["gross_nonpf"])),
+        ]
+    if show_esi:
+        _sum3 += [
+            ("Total Salary+HRA+CONV(ESI)", A(tot["esi_base"])),
+            ("Total Salary+HRA+CONV(NON-ESI)", A(tot["nonesi_base"])),
+        ]
+    if _sum3:
+        story.append(sec(_sum3, bold_last=False))
+        story.append(Spacer(1, 4 * mm))
     story.append(sec([
         ("Total Days ->", f"{tot['days']:g}"),
         ("Total Hours ->", f"{tot['hrs']:g}"),
@@ -1362,6 +1451,26 @@ def build_compliance_register_pdf_v2(
         # end) even on layouts saved before it existed.
         if "sign" not in {c["key"] for c in cols_spec}:
             cols_spec.append({"key": "sign"})
+    # Iter 372 (user request) — heads DYNAMIC per firm: drop columns whose
+    # head is disabled in the Firm Master (same masks as the grid).
+    _r0v2 = rows[0] if rows else {}
+    _env2 = _r0v2.get("enabled_allowances")
+    _edv2 = _r0v2.get("enabled_deductions")
+
+    def _has_a2(k: str) -> bool:
+        return (_env2 is None) or (k in _env2) or k == "basic"
+
+    def _has_d2(k: str) -> bool:
+        return (_edv2 is None) or (k in _edv2)
+
+    _show_oth2 = (any(_has_a2(k) for k in ("medical", "special", "others"))
+                  or any(float(r.get("ot_pay") or 0) for r in rows))
+    _col_ok = {
+        "hra": _has_a2("hra"), "conv": _has_a2("conveyance"),
+        "other_earn": _show_oth2, "pf": _has_d2("pf"),
+        "esi": _has_d2("esi"), "tds": _has_d2("tds"),
+    }
+    cols_spec = [c for c in cols_spec if _col_ok.get(c["key"], True)]
     col_keys = [c["key"] for c in cols_spec]
     header = [str(c.get("heading") or _defaults[c["key"]][0]) for c in cols_spec]
     widths = [max(4.0, float(c.get("width") or _defaults[c["key"]][1]))
@@ -1624,34 +1733,47 @@ def build_compliance_register_pdf_v2(
     # KeepInFrame(shrink) guarantees it always fits on ONE final page.
     from reportlab.platypus import KeepInFrame
     summary: List[Any] = []
-    summary.append(sec([
-        ("No. Of Emp", str(len(rows))),
-        ("Total Salary Amount", A(tot["sal"])),
-        ("Total H.R.A Amount", A(tot["hra_e"])),
-        ("Total Conveyance Amount", A(tot["conv_e"])),
-        ("Total Other Amount", A(tot["oth_e"])),
-        ("Total Bonus Amount", "0"),
-        ("Total Gross Amount", A(tot["gross"])),
-    ]))
+    # Iter 372 (user request) — summary lines follow the firm-enabled heads.
+    _s1 = [("No. Of Emp", str(len(rows))),
+           ("Total Salary Amount", A(tot["sal"]))]
+    if _col_ok["hra"]:
+        _s1.append(("Total H.R.A Amount", A(tot["hra_e"])))
+    if _col_ok["conv"]:
+        _s1.append(("Total Conveyance Amount", A(tot["conv_e"])))
+    if _col_ok["other_earn"]:
+        _s1.append(("Total Other Amount", A(tot["oth_e"])))
+    _s1 += [("Total Bonus Amount", "0"),
+            ("Total Gross Amount", A(tot["gross"]))]
+    summary.append(sec(_s1))
     summary.append(Spacer(1, 4 * mm))
-    summary.append(sec([
-        ("P.F. Deduction Amount", A(tot["pf"])),
-        ("ABRY P.F. Benifit", "0"),
-        ("E.S.I. Deduction Amount", A(tot["esi"])),
-        ("Advance Deduction Amount", "0"),
-        ("Other Deduction Amount", A(tot["othd"])),
-        ("TDS Deduction Amount", A(tot["tds"])),
-        ("Total Deduction Amount", A(tot["ded"])),
-    ]))
+    _s2: List[Any] = []
+    if _col_ok["pf"]:
+        _s2 += [("P.F. Deduction Amount", A(tot["pf"])),
+                ("ABRY P.F. Benifit", "0")]
+    if _col_ok["esi"]:
+        _s2.append(("E.S.I. Deduction Amount", A(tot["esi"])))
+    _s2 += [("Advance Deduction Amount", "0"),
+            ("Other Deduction Amount", A(tot["othd"]))]
+    if _col_ok["tds"]:
+        _s2.append(("TDS Deduction Amount", A(tot["tds"])))
+    _s2.append(("Total Deduction Amount", A(tot["ded"])))
+    summary.append(sec(_s2))
     summary.append(Spacer(1, 4 * mm))
-    summary.append(sec([
-        ("Total Salary of P.F.", A(tot["pf_wages"])),
-        ("Total Less Salary on PF", A(max(0.0, tot["gross_pf"] - tot["pf_wages"]))),
-        ("Total Salary of non-P.F", A(tot["gross_nonpf"])),
-        ("Total Salary+HRA+CONV(ESI)", A(tot["esi_base"])),
-        ("Total Salary+HRA+CONV(NON-ESI)", A(tot["nonesi_base"])),
-    ], bold_last=False))
-    summary.append(Spacer(1, 4 * mm))
+    _s3: List[Any] = []
+    if _col_ok["pf"]:
+        _s3 += [
+            ("Total Salary of P.F.", A(tot["pf_wages"])),
+            ("Total Less Salary on PF", A(max(0.0, tot["gross_pf"] - tot["pf_wages"]))),
+            ("Total Salary of non-P.F", A(tot["gross_nonpf"])),
+        ]
+    if _col_ok["esi"]:
+        _s3 += [
+            ("Total Salary+HRA+CONV(ESI)", A(tot["esi_base"])),
+            ("Total Salary+HRA+CONV(NON-ESI)", A(tot["nonesi_base"])),
+        ]
+    if _s3:
+        summary.append(sec(_s3, bold_last=False))
+        summary.append(Spacer(1, 4 * mm))
     summary.append(sec([
         ("Total Days ->", f"{tot['days']:g}"),
         ("Total Hours ->", f"{tot['hrs']:g}"),

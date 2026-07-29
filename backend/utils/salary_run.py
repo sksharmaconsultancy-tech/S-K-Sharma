@@ -531,6 +531,184 @@ def build_salary_register_pdf(
 _MONTH_RE = re.compile(r"^(\d{4})-(\d{2})$")
 
 
+def build_actual_salary_register_pdf(
+    run: Dict[str, Any],
+    company_name: str = "S.K. Sharma & Co.",
+    show_epf: bool = True,
+    show_esi: bool = True,
+) -> bytes:
+    """Iter 372 (user request) — Actual Salary register with allowance /
+    deduction heads DYNAMIC per firm: the EPF / ESI columns appear only
+    when they are Applicable in the Firm Master. Columns mirror the
+    Actual Salary Process grid."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        BaseDocTemplate, Frame, PageTemplate,
+        Paragraph, Spacer, Table, TableStyle,
+    )
+
+    BRAND = colors.HexColor("#0F3B5C")
+    BAND = colors.HexColor("#EAF1F7")
+    ZEBRA = colors.HexColor("#F6F8FA")
+    W, H = landscape(A4)
+
+    rows = list(run.get("rows") or [])
+    month = str(run.get("month") or "")
+    try:
+        from datetime import datetime as _dt
+        _y, _m = int(month[:4]), int(month[5:7])
+        month_label = _dt(_y, _m, 1).strftime("%B %Y")
+    except Exception:
+        month_label = month
+
+    def A_(v: Any) -> str:
+        try:
+            return f"{int(round(float(v or 0))):,}"
+        except Exception:
+            return "0"
+
+    def N_(v: Any) -> str:
+        try:
+            f = float(v or 0)
+            return f"{f:g}"
+        except Exception:
+            return "0"
+
+    cols: List[tuple] = [
+        ("sno", "SN", 7),
+        ("name", "Name / Father Name", 42),
+        ("desig", "Desig.", 18),
+        ("mdays", "M.Days", 10),
+        ("pdays", "P Days", 10),
+        ("phours", "P Hours", 11),
+        ("basic", "Basic (Master)", 15),
+        ("bsalary", "Basic Sal", 14),
+        ("wbasic", "W.Basic Sal", 14),
+        ("othallo", "Oth.Allo", 13),
+        ("gross", "Total Gross", 15),
+    ]
+    if show_epf:
+        cols.append(("epf", "EPF", 12))
+    if show_esi:
+        cols.append(("esi", "ESI", 12))
+    cols += [("adv", "Adv", 11), ("tds", "TDS", 11), ("net", "NET PAY", 15)]
+    keys = [k for k, _h, _w in cols]
+
+    def _header(c, d):
+        c.saveState()
+        c.setFillColor(BRAND)
+        c.rect(0, H - 20 * mm, W, 20 * mm, stroke=0, fill=1)
+        c.setFillColor(colors.white)
+        c.setFont("Helvetica-Bold", 15)
+        c.drawString(8 * mm, H - 9 * mm, company_name.upper())
+        c.setFont("Helvetica", 9)
+        c.drawString(8 * mm, H - 15 * mm,
+                     f"Employees: {len(rows)}   ·   Month Days: {run.get('month_days')}")
+        c.setFont("Helvetica-Bold", 13)
+        c.drawRightString(W - 8 * mm, H - 9 * mm, "ACTUAL SALARY REGISTER")
+        c.setFont("Helvetica-Bold", 11)
+        c.drawRightString(W - 8 * mm, H - 15 * mm, month_label)
+        c.setFillColor(colors.HexColor("#666666"))
+        c.setFont("Helvetica", 7)
+        c.drawRightString(W - 8 * mm, 5 * mm, f"Page {d.page}")
+        c.restoreState()
+
+    buf = io.BytesIO()
+    doc = BaseDocTemplate(
+        buf, pagesize=landscape(A4),
+        leftMargin=6 * mm, rightMargin=6 * mm,
+        topMargin=24 * mm, bottomMargin=10 * mm,
+        title=f"Actual Salary Register — {month}",
+    )
+    frame = Frame(doc.leftMargin, doc.bottomMargin, W - 12 * mm,
+                  H - doc.topMargin - doc.bottomMargin, id="f")
+    doc.addPageTemplates([PageTemplate(id="pg", frames=[frame], onPage=_header)])
+
+    cell = ParagraphStyle("cell", fontName="Helvetica", fontSize=7.5, leading=8.6)
+    data: List[List[Any]] = [[h for _k, h, _w in cols]]
+    tot = {k: 0.0 for k in ("pdays", "phours", "basic", "bsalary", "wbasic",
+                            "othallo", "gross", "epf", "esi", "adv", "tds", "net")}
+    for i, r in enumerate(rows, start=1):
+        vals = {
+            "sno": str(i),
+            "name": Paragraph(
+                f"<b>{(r.get('name') or '').upper()}</b><br/>"
+                f"{(r.get('father_name') or '').upper()}", cell),
+            "desig": Paragraph((r.get("designation") or "").upper(), cell),
+            "mdays": N_(run.get("month_days")),
+            "pdays": N_(r.get("p_days")),
+            "phours": N_(r.get("p_hours")),
+            "basic": A_(r.get("basic")),
+            "bsalary": A_(r.get("basic_salary")),
+            "wbasic": A_(r.get("w_basic_salary")),
+            "othallo": A_(r.get("oth_allo")),
+            "gross": A_(r.get("total_gross")),
+            "epf": A_(r.get("epf")),
+            "esi": A_(r.get("esi")),
+            "adv": A_(r.get("adv")),
+            "tds": A_(r.get("tds")),
+            "net": A_(r.get("net_pay")),
+        }
+        data.append([vals[k] for k in keys])
+        for tk, rk in (("pdays", "p_days"), ("phours", "p_hours"),
+                       ("basic", "basic"), ("bsalary", "basic_salary"),
+                       ("wbasic", "w_basic_salary"), ("othallo", "oth_allo"),
+                       ("gross", "total_gross"), ("epf", "epf"), ("esi", "esi"),
+                       ("adv", "adv"), ("tds", "tds"), ("net", "net_pay")):
+            try:
+                tot[tk] += float(r.get(rk) or 0)
+            except Exception:
+                pass
+    tot_vals = {
+        "sno": "", "name": "GRAND TOTAL", "desig": "", "mdays": "",
+        "pdays": f"{tot['pdays']:g}", "phours": f"{tot['phours']:g}",
+        "basic": A_(tot["basic"]), "bsalary": A_(tot["bsalary"]),
+        "wbasic": A_(tot["wbasic"]), "othallo": A_(tot["othallo"]),
+        "gross": A_(tot["gross"]), "epf": A_(tot["epf"]), "esi": A_(tot["esi"]),
+        "adv": A_(tot["adv"]), "tds": A_(tot["tds"]), "net": A_(tot["net"]),
+    }
+    data.append([tot_vals[k] for k in keys])
+
+    widths = [w for _k, _h, w in cols]
+    _scale = (W - 12 * mm) / (sum(widths) * mm)
+    col_widths = [w * mm * _scale for w in widths]
+    t = Table(data, colWidths=col_widths, repeatRows=1)
+    style = [
+        ("BACKGROUND", (0, 0), (-1, 0), BRAND),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 7.5),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 1), (-1, -1), 7.5),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#B9C4CE")),
+        ("ALIGN", (3, 0), (-1, -1), "RIGHT"),
+        ("ALIGN", (0, 0), (0, -1), "CENTER"),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("BACKGROUND", (0, -1), (-1, -1), BAND),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2.5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2.5),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]
+    for ri in range(1, len(data) - 1):
+        if ri % 2 == 0:
+            style.append(("BACKGROUND", (0, ri), (-1, ri), ZEBRA))
+    t.setStyle(TableStyle(style))
+
+    story: List[Any] = [t, Spacer(1, 8 * mm)]
+    try:
+        from utils.pdf_branding import punchline_flowables
+        story.extend(punchline_flowables())
+    except Exception:
+        pass
+    doc.build(story)
+    return buf.getvalue()
+
+
 def parse_month(month_str: str) -> tuple[int, int]:
     """Parse a 'YYYY-MM' string into (year, month) ints. Raises ValueError."""
     m = _MONTH_RE.match((month_str or "").strip())

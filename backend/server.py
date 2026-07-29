@@ -14784,10 +14784,30 @@ async def export_salary_register_pdf(
         c = await db.companies.find_one({"company_id": run["company_id"]}, {"_id": 0, "name": 1})
         if c and c.get("name"):
             company_name = c["name"]
-    from routes.report_formats import get_report_format
-    pdf_bytes = build_salary_register_pdf(
-        run, company_name=company_name,
-        fmt=await get_report_format("salary_register"))
+    # Iter 372 (user request) — ACTUAL runs get their own register with
+    # EPF / ESI columns DYNAMIC per Firm Master (Applicable flags, falling
+    # back to the Deductions catalog exactly like the compliance engine).
+    if (run.get("run_type") or "") == "actual":
+        from utils.salary_run import build_actual_salary_register_pdf
+        fm = await db.firm_masters.find_one(
+            {"company_id": run.get("company_id")},
+            {"_id": 0, "epf": 1, "esi": 1, "deductions": 1}) or {}
+        _fm_ded = fm.get("deductions") or {}
+        _epf_ap = (fm.get("epf") or {}).get("applicable")
+        _esi_ap = (fm.get("esi") or {}).get("applicable")
+        _has_cat = any(bool(v) for v in _fm_ded.values())
+        show_epf = (bool(_epf_ap) if _epf_ap is not None
+                    else (bool(_fm_ded.get("PF")) if _has_cat else True))
+        show_esi = (bool(_esi_ap) if _esi_ap is not None
+                    else (bool(_fm_ded.get("ESI")) if _has_cat else True))
+        pdf_bytes = build_actual_salary_register_pdf(
+            run, company_name=company_name,
+            show_epf=show_epf, show_esi=show_esi)
+    else:
+        from routes.report_formats import get_report_format
+        pdf_bytes = build_salary_register_pdf(
+            run, company_name=company_name,
+            fmt=await get_report_format("salary_register"))
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -16690,17 +16710,21 @@ async def request_compliance_run_unlock(
     if not run.get("finalized"):
         return {"ok": True, "already_unlocked": True}
     reason = (payload.get("reason") or "").strip()
-    if admin["role"] == "super_admin":
+    # Iter 371 (user request) — Sub Admins (S.K. Sharma staff) unlock
+    # IMMEDIATELY like the Super Admin; only employer company admins go
+    # through the approval-request flow.
+    if admin["role"] in ("super_admin", "sub_admin"):
         await db.compliance_salary_runs.update_one(
             {"run_id": run_id},
             {"$set": {
                 "finalized": False,
                 "unlocked_at": now_iso(),
                 "unlocked_by": admin["user_id"],
-                "unlock_reason": reason or "Super admin unlock",
+                "unlock_reason": reason or f"{admin['role']} unlock",
             }},
         )
-        logger.info("[compliance-run] unlocked run=%s by super admin %s", run_id, admin["user_id"])
+        logger.info("[compliance-run] unlocked run=%s by %s %s",
+                    run_id, admin["role"], admin["user_id"])
         return {"ok": True, "unlocked": True}
     dup = await db.salary_unlock_requests.find_one(
         {"run_id": run_id, "status": "pending"}, {"_id": 0, "req_id": 1})
@@ -21711,6 +21735,37 @@ async def finalize_actual_salary_run(
     except Exception:
         pass
     return {"ok": True}
+
+
+@api.post("/admin/salary-runs/{run_id}/unlock")
+async def unlock_actual_salary_run(
+    run_id: str,
+    payload: Dict[str, Any] = Body(default={}),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 371 (user request) — Super / Sub Admins can UNLOCK a FINALIZED
+    Actual Salary run directly (Configure batch card unlock button)."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin"])
+    existing = await db.salary_runs.find_one(
+        {"run_id": run_id, "run_type": "actual"}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Actual salary run not found")
+    if not existing.get("finalized"):
+        return {"ok": True, "already_unlocked": True}
+    await db.salary_runs.update_one(
+        {"run_id": run_id},
+        {"$set": {
+            "finalized": False,
+            "unlocked_at": now_iso(),
+            "unlocked_by": admin["user_id"],
+            "unlock_reason": (payload.get("reason") or "").strip()
+                             or f"{admin['role']} unlock",
+        }},
+    )
+    logger.info("[actual-run] unlocked run=%s by %s %s",
+                run_id, admin["role"], admin["user_id"])
+    return {"ok": True, "unlocked": True}
 
 
 app.add_middleware(
