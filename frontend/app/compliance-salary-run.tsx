@@ -270,6 +270,7 @@ export default function ComplianceSalaryRunScreen() {
   const [pdfGroup, setPdfGroup] = useState("");
   const [layoutOpen, setLayoutOpen] = useState(false); // Iter 162 — PDF layout editor
   const [pushing, setPushing] = useState(false);
+  const [waBlasting, setWaBlasting] = useState(false);
   const [reprocessing, setReprocessing] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
 
@@ -1242,6 +1243,27 @@ export default function ComplianceSalaryRunScreen() {
       showMsg(e?.message || "Push failed");
     } finally { setPushing(false); }
   };
+
+  // Iter 396 — one-click WhatsApp payslip blast for this run's month.
+  const sendWhatsAppBlast = async () => {
+    if (!run || waBlasting) return;
+    setWaBlasting(true);
+    try {
+      const cid = (run as any).company_id || activeCompanyId;
+      const r = await api<{ ok: boolean; queued: number; skipped: number }>(
+        `/admin/whatsapp/send-salary-slips?company_id=${encodeURIComponent(cid || "")}`,
+        { method: "POST", body: { month: run.month } },
+      );
+      showMsg(
+        `WhatsApp blast queued: ${r.queued} payslip PDF(s) for ${run.month}` +
+        (r.skipped ? ` (${r.skipped} skipped — no number)` : "") +
+        ". Track them in WhatsApp Center → History.",
+      );
+    } catch (e: any) {
+      showMsg(e?.message || "WhatsApp blast failed");
+    } finally { setWaBlasting(false); }
+  };
+
 
   const openPastRun = async (r: CompRun) => {
     try {
@@ -2282,6 +2304,9 @@ export default function ComplianceSalaryRunScreen() {
                   </Text>
                 ) : null}
                 <ActionBtn icon="paper-plane-outline" label="Push payslips" busy={pushing} onPress={pushToPayslips} primary />
+                {/* Iter 396 — WhatsApp payslip blast */}
+                <ActionBtn icon="logo-whatsapp" label="WhatsApp Payslips" testID="btn-wa-blast"
+                  busy={waBlasting} onPress={sendWhatsAppBlast} primary />
               </View>
               {/* Iter 324 (user request) — PDF Sorting & Grouping */}
               {Platform.OS === "web" ? (

@@ -30,6 +30,9 @@
 #   • Background queue worker (20s) with retry/backoff + daily limits.
 #   • PENDING-CONFIG mode: until you enter Meta credentials, messages
 #     queue and can be retried after setup — nothing breaks.
+#   • Iter 396 — "WhatsApp Payslips" one-click blast button on the
+#     Compliance Salary Process action bar: queues every employee's
+#     payslip PDF for the open run's month straight to WhatsApp.
 #
 # Run ON THE VPS as root/sksharma.
 set -e
@@ -116,3 +119,5 @@ echo "      URL: https://YOUR-DOMAIN/api/whatsapp/webhook + your verify"
 echo "      token, subscribe to the 'messages' field."
 echo "   3) Communication → WhatsApp Templates → Seed Defaults (30 ready)."
 echo "   4) Communication → WhatsApp Communication → send a test message."
+echo "   5) Compliance Salary Process → open a run → 'WhatsApp Payslips'"
+echo "      button queues every payslip PDF to employees in one click."

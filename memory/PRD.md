@@ -2774,3 +2774,10 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   two-way HR conversations, Hindi/English multi-language, WhatsApp OTP,
   payslip acknowledgment, approval workflows via WhatsApp (leave/OT/
   reimbursement), voice/document sharing, QR code to start chat.
+- Iter 396 (potential improvement, user approved): "WhatsApp Payslips"
+  one-click blast button on compliance-salary-run.tsx action bar (next to
+  Push payslips) → POST /admin/whatsapp/send-salary-slips {month} for the
+  open run's firm. E2E verified (queued 18/18 for csrun 2026-07, test
+  messages cleaned). NOTE: initial search_replace corrupted the file tail
+  (orphaned StyleSheet block) — fixed by truncating + insert_text.
+  Included in deploy_vps_iter395.sh bundle (user hasn't deployed yet).
