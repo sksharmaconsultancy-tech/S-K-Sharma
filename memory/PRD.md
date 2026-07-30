@@ -2697,3 +2697,13 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   (apiBinary → window.open blob on web). Verified: 1-page PDF w/ all
   sections. Deploy: deploy_vps_iter389.sh (temp_bundle→389; combined
   386+387+388+389).
+- Iter 390 (user: Compliance Salary Process must follow Firm Master
+  enabled Allowances/Deductions everywhere): VERIFIED grid Master-rate &
+  calculated columns already mask correctly (Iter 377; Kankani shows
+  only M.Basic/M.HRA/M.Conv). FIXED 3 remaining spots in
+  compliance-salary-run.tsx that ignored the mask: (1) header subtitle
+  "PF · ESIC · PT · TDS" now lists only enabled deduction heads,
+  (2) run summary line (month_days · PF · ESIC · PT · TDS) hides
+  disabled heads, (3) sticky TotalsFooter hides PF/ESIC/PT/TDS blocks
+  per enabled_deductions (row-stamped mask, fmMask fallback). Verified
+  via screenshot on Kankani (PT/TDS disabled → hidden everywhere).

@@ -1620,7 +1620,18 @@ export default function ComplianceSalaryRunScreen() {
             <Text style={styles.h1}>Compliance Salary Process</Text>
             <Text style={styles.hsub}>
               {Platform.OS === "web"
-                ? "PF · ESIC · PT · TDS  —  New labour-code wage base"
+                ? (() => {
+                  // Iter 390 (user request) — subtitle lists only the
+                  // Firm-Master-enabled deduction heads.
+                  const ed = ((run?.rows?.[0] as any)?.enabled_deductions ?? fmMask.ed) as string[] | undefined;
+                  const parts = [
+                    (!ed || ed.includes("pf")) && "PF",
+                    (!ed || ed.includes("esi")) && "ESIC",
+                    (!ed || ed.includes("pt")) && "PT",
+                    (!ed || ed.includes("tds")) && "TDS",
+                  ].filter(Boolean);
+                  return `${parts.join(" · ")}  —  New labour-code wage base`;
+                })()
                 : "Best used on desktop / web portal"}
             </Text>
           </View>
@@ -2171,7 +2182,19 @@ export default function ComplianceSalaryRunScreen() {
                   {run.month}  ·  {run.employees_count} employees  ·  Net {fmtInr(run.totals?.net)}
                 </Text>
                 <Text style={styles.smallHint}>
-                  month_days = {run.month_days} · PF (Emp): {fmtInr(run.totals?.pf_employee)} · ESIC (Emp): {fmtInr(run.totals?.esic_employee)} · PT: {fmtInr(run.totals?.pt)} · TDS: {fmtInr(run.totals?.tds)}
+                  {/* Iter 390 (user request) — the summary line follows the
+                      Firm Master's enabled Deductions (Master-linked):
+                      disabled heads (PT/TDS/…) are NOT shown. */}
+                  {(() => {
+                    const ed = ((run.rows[0] as any)?.enabled_deductions ?? fmMask.ed) as string[] | undefined;
+                    const hasDed = (k: string) => !ed || ed.includes(k);
+                    const segs: string[] = [`month_days = ${run.month_days}`];
+                    if (hasDed("pf")) segs.push(`PF (Emp): ${fmtInr(run.totals?.pf_employee)}`);
+                    if (hasDed("esi")) segs.push(`ESIC (Emp): ${fmtInr(run.totals?.esic_employee)}`);
+                    if (hasDed("pt")) segs.push(`PT: ${fmtInr(run.totals?.pt)}`);
+                    if (hasDed("tds")) segs.push(`TDS: ${fmtInr(run.totals?.tds)}`);
+                    return segs.join(" · ");
+                  })()}
                   {run.payslips_generated_at
                     ? `  ·  ${run.payslips_count} payslips pushed`
                     : ""}
@@ -2915,21 +2938,31 @@ export default function ComplianceSalaryRunScreen() {
         </Text>
       </ScrollView>
 
-      {/* Enterprise footer summary — sticky run totals */}
-      {run ? (
-        <TotalsFooter items={[
-          { label: "Gross", value: run.totals?.gross_paid ?? run.totals?.monthly_gross ?? 0 },
-          { label: "PF (EE)", value: run.totals?.pf_employee ?? 0 },
-          { label: "PF (ER)", value: run.totals?.pf_employer_total ?? 0 },
-          { label: "ESIC (EE)", value: run.totals?.esic_employee ?? 0 },
-          { label: "ESIC (ER)", value: run.totals?.esic_employer ?? 0 },
-          { label: "PT", value: run.totals?.pt ?? 0 },
-          { label: "TDS", value: run.totals?.tds ?? 0 },
-          { label: "Advance", value: run.totals?.advance_recovery ?? 0 },
-          { label: "Deductions", value: run.totals?.total_deduction ?? 0 },
-          { label: "Net Salary", value: run.totals?.net ?? 0, tone: "#059669" },
-        ]} />
-      ) : null}
+      {/* Enterprise footer summary — sticky run totals.
+          Iter 390 (user request) — the footer follows the Firm Master's
+          enabled Deductions (Master-linked): disabled heads are hidden. */}
+      {run ? (() => {
+        const ed = ((run.rows[0] as any)?.enabled_deductions ?? fmMask.ed) as string[] | undefined;
+        const hasDed = (k: string) => !ed || ed.includes(k);
+        return (
+          <TotalsFooter items={[
+            { label: "Gross", value: run.totals?.gross_paid ?? run.totals?.monthly_gross ?? 0 },
+            ...(hasDed("pf") ? [
+              { label: "PF (EE)", value: run.totals?.pf_employee ?? 0 },
+              { label: "PF (ER)", value: run.totals?.pf_employer_total ?? 0 },
+            ] : []),
+            ...(hasDed("esi") ? [
+              { label: "ESIC (EE)", value: run.totals?.esic_employee ?? 0 },
+              { label: "ESIC (ER)", value: run.totals?.esic_employer ?? 0 },
+            ] : []),
+            ...(hasDed("pt") ? [{ label: "PT", value: run.totals?.pt ?? 0 }] : []),
+            ...(hasDed("tds") ? [{ label: "TDS", value: run.totals?.tds ?? 0 }] : []),
+            { label: "Advance", value: run.totals?.advance_recovery ?? 0 },
+            { label: "Deductions", value: run.totals?.total_deduction ?? 0 },
+            { label: "Net Salary", value: run.totals?.net ?? 0, tone: "#059669" },
+          ]} />
+        );
+      })() : null}
 
       {/* Employee config modal */}
       <EmployeeConfigModal
