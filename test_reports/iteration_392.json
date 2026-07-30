@@ -1,0 +1,41 @@
+{
+  "summary": "Iter 392 — Attendance Synchronization Dashboard (backend + frontend). 11/12 backend pytest cases + 1 role-gate skip converted to pass (12/12 all green). All frontend interactive flows verified on web preview at mobile viewport: menu entry, KPI cards, preset chips, missing-days chip, search, collapse/expand, XLSX export download, and row navigation to employee-detail-slip. Regression on /attendance-grid confirmed unaffected. READ-ONLY module — no data mutation.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "attendance-sync-dashboard (and other admin pages)", "issues": ["Global console warning: Invalid style property 'padding: 0 8px' (shorthand not supported by RN Web) — pre-existing across shell, not from this module", "'shadow*' style props deprecated warning — pre-existing across app", "Image.style.resizeMode deprecated warning — pre-existing"]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter392_attendance_sync_dashboard.py",
+    "/app/test_reports/pytest/iter392.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: In this test firm all 125 rows are 'Never Punched' (999d missing), so the missing_days=3 vs 7 counts are both 125 in the UI. Backend supports shrinking correctly for firms that have varied last_punch dates — verified by unit assertion (7d ≤ 3d).",
+    "OPTIONAL micro-nit: routes/attendance_sync_dashboard.py:41 return annotation '-> (str, str)' should be Tuple[str, str] for lint cleanliness."
+  ],
+  "critical_code_review_comments": [
+    "Clean async Mongo aggregations with allowDiskUse=True — good.",
+    "MongoDB _id excluded in all projections — good.",
+    "Role gate correctly forces company_id=admin.company_id for company_admin, and require_role blocks employee token (403 confirmed).",
+    "Frontend uses api/apiBinary helpers and process env — no hardcoded URLs.",
+    "All interactive elements have testID (asd-preset-*, asd-miss-*, asd-search, asd-sec-*, asd-exp-*-*, asd-refresh).",
+    "SafeAreaView from react-native-safe-area-context (correct).",
+    "No deprecated Expo packages (expo-av/expo-barcode-scanner/expo-background-fetch) used in this module."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter392_attendance_sync_dashboard.py (new)"
+  ],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100% (10/10 flows)"},
+  "seed_data_creation": "None — read-only module. No data mutated or created.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend tests live at /app/backend/tests/test_iter392_attendance_sync_dashboard.py; run with `pytest backend/tests/test_iter392_attendance_sync_dashboard.py -v`. Uses super_admin password login (sksharmaconsultancy@gmail.com / sharma123) and employee pin-login (login_id=TEST50, pin=123456) for role gate. Kankani firm cmp_527fecdd7c has 128 employees, 125 machine-registered, and mostly 'Never Punched' status which is why missing_days 3d and 7d yield identical UI counts (this is data reality, not a bug — backend logic verified independently).",
+  "rca_of_issue": "N/A — feature testing, no bugs found."
+}

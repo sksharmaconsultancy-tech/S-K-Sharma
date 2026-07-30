@@ -22527,6 +22527,7 @@ from routes.user_prefs import router as user_prefs_router  # noqa: E402
 from routes.challan_summary import router as challan_summary_router  # noqa: E402
 from routes.compliance_settings import router as compliance_settings_router  # noqa: E402
 from routes.compliance_validation import router as compliance_validation_router  # noqa: E402
+from routes.attendance_sync_dashboard import router as attendance_sync_dash_router  # noqa: E402
 
 
 from utils.rpa_worker import maybe_start as maybe_start_rpa_worker  # noqa: E402
@@ -22593,6 +22594,7 @@ from routes.uan_esic_import import router as uan_esic_import_router  # noqa: E40
 app.include_router(uan_esic_import_router)
 app.include_router(compliance_settings_router)
 app.include_router(compliance_validation_router)
+app.include_router(attendance_sync_dash_router)
 from routes.report_formats import router as report_formats_router  # noqa: E402
 app.include_router(report_formats_router)
 from routes.punch_import import router as punch_import_router  # noqa: E402

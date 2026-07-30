@@ -118,6 +118,7 @@ export const NAV_SUPER: NavItem[] = [
     children: [
       { route: "/attendance-policy", label: "Attendance Policy", icon: "time-outline" },
       { route: "/attendance-grid", label: "Attendance Report", icon: "grid-outline" },
+      { route: "/attendance-sync-dashboard", label: "Attendance Sync Dashboard", icon: "sync-outline" },
       { route: "/attendance-sheet", label: "Attendance Master Sheet", icon: "document-text-outline" },
       { route: "/inout-ot-matrix", label: "In/Out & OT Matrix", icon: "apps-outline" },
       { route: "/daily-present-report", label: "Day-wise Present Count", icon: "people-outline" },
@@ -204,6 +205,7 @@ export const NAV_SUPER: NavItem[] = [
     icon: "bar-chart-outline",
     children: [
       { route: "/attendance-grid", label: "Attendance Reports", icon: "grid-outline" },
+      { route: "/attendance-sync-dashboard", label: "Attendance Sync Dashboard", icon: "sync-outline" },
       { route: "/reports?tab=salary", label: "Payroll Reports", icon: "cash-outline" },
       { route: "/employee-reports", label: "Employee Reports", icon: "documents-outline" },
       { route: "/compliance-reports", label: "Compliance Reports", icon: "shield-checkmark-outline" },
@@ -486,6 +488,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
     children: [
       { route: "/attendance-policy", label: "Attendance Policy", icon: "time-outline" },
       { route: "/attendance-grid", label: "Attendance Report", icon: "grid-outline" },
+      { route: "/attendance-sync-dashboard", label: "Attendance Sync Dashboard", icon: "sync-outline" },
       { route: "/inout-ot-matrix", label: "In/Out & OT Matrix", icon: "apps-outline" },
       { route: "/daily-present-report", label: "Day-wise Present Count", icon: "people-outline" },
       { route: "/geofence-policy", label: "Geofence Policy", icon: "location-outline" },
@@ -561,6 +564,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
     icon: "bar-chart-outline",
     children: [
       { route: "/attendance-grid", label: "Attendance Reports", icon: "grid-outline" },
+      { route: "/attendance-sync-dashboard", label: "Attendance Sync Dashboard", icon: "sync-outline" },
       { route: "/reports?tab=salary", label: "Payroll Reports", icon: "cash-outline" },
       { route: "/employee-reports", label: "Employee Reports", icon: "documents-outline" },
       { route: "/compliance-reports", label: "Compliance Reports", icon: "shield-checkmark-outline" },
