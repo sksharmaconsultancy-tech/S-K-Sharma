@@ -1,0 +1,2251 @@
+"""Iter 394 — COMPLIANCE SALARY RUNS module (extracted from server.py).
+
+Refactor only: every endpoint, model and helper below was MOVED verbatim
+from server.py (create/process, list, save-rows, finalize with the
+Iter-388 validation gate, unlock, reprocess, CSV/XLSX/register/ECR/ESIC
+exports and payslip generation). No behavioural change.
+"""
+import math
+import re
+import uuid
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Body, Header, HTTPException, Query
+from pydantic import BaseModel
+
+from server import (  # noqa: E402
+    _compute_monthly_grid_data,
+    _month_is_after_exit,
+    _month_is_before_doj,
+    _onboarding_payroll_exclusion,
+    _policy2_biometric_stats,
+    _sort_export_rows,
+    db,
+    get_user_from_token,
+    holiday_dates_for_company,
+    logger,
+    now_iso,
+    require_employer_permission,
+    require_role,
+    require_super_admin_strict,
+)
+
+router = APIRouter(prefix="/api")
+api = router  # endpoints below keep their original @api.* decorators
+
+class ComplianceSalaryRunCreate(BaseModel):
+    """Body for POST /api/admin/compliance-salary-runs.
+
+    * ``month`` — YYYY-MM (e.g. "2026-06")
+    * ``month_days`` — optional override; defaults to actual days in month
+    * ``employee_type`` — optional filter (e.g. "Staff"). Pass "unset" for
+      employees without a type. Omit or "all" for no filter.
+    * ``is_onroll`` — True → only on-roll, False → only off-roll, null → both.
+    * ``structure_pct`` — optional company-wide salary-structure percentages
+      overriding the module defaults. Recognised keys: basic, hra,
+      conveyance, medical, special, others.
+    * ``statutory_cfg`` — optional overrides for statutory rates. Keys:
+      pf_percent_employee, pf_wage_cap, pf_percent_employer_epf,
+      pf_percent_employer_eps, esic_percent_employee, esic_percent_employer,
+      esic_gross_threshold, stat_wage_floor_pct.
+    """
+    month: str
+    company_id: Optional[str] = None
+    month_days: Optional[int] = None
+    employee_type: Optional[str] = None
+    is_onroll: Optional[bool] = None
+    structure_pct: Optional[Dict[str, float]] = None
+    statutory_cfg: Optional[Dict[str, float]] = None
+    # Iter 101 — import Present Days + Other Deductions from the imported
+    # salary sheet (file upload / Gmail attachment) instead of biometric.
+    use_imported_sheet: Optional[bool] = False
+    # Iter 330 (user request) — copy LAST MONTH's salary into this month
+    # exactly as it was (same Present Days / Gross / PF / ESIC / Net).
+    copy_last_month: Optional[bool] = False
+
+
+async def _compute_compliance_run(
+    admin: dict,
+    payload: ComplianceSalaryRunCreate,
+    prev_rows: Optional[Dict[str, dict]] = None,
+) -> dict:
+    """Shared compute path for compliance salary runs. Mirrors the base
+    salary run pipeline (same attendance stats + policy merge) but uses
+    ``utils.compliance_salary.compute_compliance_row`` for the payroll
+    line items."""
+    from utils.salary_run import (
+        actual_days_in_month, parse_month, compute_present_days_and_ot,
+    )
+    from utils.compliance_salary import compute_compliance_row
+    try:
+        year, mon = parse_month(payload.month)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    default_days = actual_days_in_month(year, mon)
+    month_days = payload.month_days if payload.month_days else default_days
+    if not (1 <= int(month_days) <= 31):
+        raise HTTPException(status_code=400, detail="month_days must be 1..31")
+
+    # ---- Scope employees ----
+    q: dict = {"role": "employee"}
+    if admin["role"] == "company_admin":
+        q["company_id"] = admin.get("company_id")
+    elif payload.company_id:
+        q["company_id"] = payload.company_id
+    if payload.employee_type is not None:
+        et = payload.employee_type.strip()
+        if et.lower() == "unset":
+            q["$or"] = [
+                {"employee_type": {"$exists": False}},
+                {"employee_type": None},
+                {"employee_type": ""},
+            ]
+        elif et and et.lower() != "all":
+            title = et.title()
+            q["employee_type"] = {"$in": [title, et, et.lower(), et.upper()]}
+    # Iter 164 (user directive) — Compliance Salary Process is STRICTLY
+    # ON-ROLL: off-roll employees are excluded from compliance runs no
+    # matter what filter the caller sent. The dedicated off-roll run type
+    # (Iter 77j) is the only exception.
+    run_type = (getattr(payload, "run_type", None) or "compliance").lower()
+    if run_type == "off_roll":
+        q["is_onroll"] = False
+    else:
+        q.pop("is_onroll", None)
+        q.setdefault("$and", []).append({
+            "$or": [
+                {"is_onroll": True},
+                {"is_onroll": {"$exists": False}},
+                {"is_onroll": None},
+            ]
+        })
+
+    # Iter 285 — exclude unapproved (onboarding) employees unless the firm
+    # policy allows statutory processing before approval.
+    await _onboarding_payroll_exclusion(
+        q, payload.company_id, ["allow_pf", "allow_esic", "allow_tds"])
+
+    employees = await db.users.find(q, {"_id": 0}).to_list(2000)
+
+    # Iter 167 — "Resigned this month" summary: capture who gets auto-
+    # excluded because they resigned/exited before the run month starts,
+    # so the Compliance Salary screen can show the list.
+    excluded_resigned = [
+        {"user_id": e.get("user_id"), "name": e.get("name"),
+         "employee_code": e.get("employee_code"),
+         "exit_date": str(e.get("exit_date") or e.get("resign_date") or "")[:10]}
+        for e in employees if _month_is_after_exit(e, payload.month)
+    ]
+    excluded_resigned.sort(key=lambda x: (x.get("name") or "").lower())
+
+    # Iter 57 — Exclude employees whose date-of-joining is AFTER the run's
+    # month end. Payslips must never be generated for pre-DOJ months.
+    employees = [e for e in employees if not _month_is_before_doj(e, payload.month)
+                 and not _month_is_after_exit(e, payload.month)
+                 and e.get("disabled") is not True]  # Iter 166/168
+
+    # Iter 127f/g — statutory config precedence: global Standard Compliance
+    # Settings < firm-specific overrides (Firm Master) < per-run cfg.
+    from routes.compliance_settings import (
+        get_standard_compliance_cfg,
+        get_firm_statutory_overrides,
+    )
+    _std_cfg = await get_standard_compliance_cfg(on_date=f"{payload.month}-31")
+    _firm_over = await get_firm_statutory_overrides(payload.company_id)
+    effective_statutory = {**_std_cfg, **_firm_over, **(payload.statutory_cfg or {})}
+    # Iter 387 — salary month for the engine's ESIC Exit-Date rule.
+    effective_statutory["_salary_month"] = payload.month
+
+
+    # ---- Load attendance for the month once (indexed by user_id) ----
+    date_from = f"{year:04d}-{mon:02d}-01"
+    date_to = f"{year:04d}-{mon:02d}-{default_days:02d}"
+    attendance_by_user: dict = {}
+    if employees:
+        user_ids = [e["user_id"] for e in employees]
+        async for r in db.attendance.find(
+            {
+                "user_id": {"$in": user_ids},
+                "date": {"$gte": date_from, "$lte": date_to},
+            },
+            {"_id": 0, "user_id": 1, "kind": 1, "at": 1, "date": 1,
+             "status": 1, "source": 1},
+        ):
+            attendance_by_user.setdefault(r["user_id"], []).append(r)
+
+    # Iter 101 — Imported salary sheet: manual Present Days + Other
+    # Deductions (uploaded file / Gmail attachment) override the biometric
+    # attendance for this run.
+    am_entries: dict = {}
+    if payload.use_imported_sheet:
+        _am_q: dict = {"month": payload.month}
+        if q.get("company_id"):
+            _am_q["company_id"] = q["company_id"]
+        async for e in db.compliance_import_entries.find(_am_q, {"_id": 0}):
+            am_entries[e["user_id"]] = e
+
+    # Iter 216 (user request) — Compliance Present Days are FETCHED from
+    # the Attendance Report grid (the exact same source the Actual Salary
+    # Process uses) so the compliance run always matches the report.
+    # Imported-sheet runs keep their own source.
+    grid_by_user_c: Dict[str, Any] = {}
+    if not payload.use_imported_sheet:
+        # Iter 217 — resolve grids for EVERY firm in scope (not just the
+        # payload's company_id) so super-admin runs without an explicit
+        # firm filter still auto-fetch from the Attendance Report.
+        for _cidg in {e.get("company_id") for e in employees if e.get("company_id")}:
+            try:
+                _grid_c = await _compute_monthly_grid_data(_cidg, payload.month)
+                for gr in _grid_c.get("employees") or _grid_c.get("rows") or []:
+                    grid_by_user_c[gr["user_id"]] = gr
+            except HTTPException:
+                continue
+
+    # ---- Load company policies (for full_day_hours / half_day_hours) ----
+    company_ids = list({e.get("company_id") for e in employees if e.get("company_id")})
+    company_policies: dict = {}
+    if company_ids:
+        async for c in db.companies.find(
+            {"company_id": {"$in": company_ids}},
+            {
+                "_id": 0, "company_id": 1, "attendance_policy": 1, "name": 1,
+                # Iter 85 — include compliance_policy so enabled_allowances
+                # toggles can be applied when computing rows.
+                "compliance_policy": 1,
+            },
+        ):
+            company_policies[c["company_id"]] = c
+
+    # Iter 98 — Firm Master EPF / ESI "Applicable" flags gate the statutory
+    # calculation firm-wide. When OFF (or the firm has no Firm Master
+    # record), PF / ESIC are NOT calculated for that firm's employees.
+    firm_stat_flags: dict = {}
+    if company_ids:
+        async for fm in db.firm_masters.find(
+            {"company_id": {"$in": company_ids}},
+            {"_id": 0, "company_id": 1, "epf": 1, "esi": 1,
+             "salary_process": 1, "allowances": 1, "deductions": 1},
+        ):
+            _fm_allow = fm.get("allowances") or {}
+            _fm_ded = fm.get("deductions") or {}
+            # Iter 171 (user request) — Firm Master Allowances/Deductions
+            # toggles drive the Compliance Salary columns. A mask of None
+            # means the firm never configured that catalog (show defaults).
+            _amap = {"HRA": "hra", "CONV.": "conveyance",
+                     "MEDICAL ALLOWANCES": "medical", "OTH. ALLOW.": "special",
+                     "OTHER MISC.ALLOWANCE": "others"}
+            allow_mask = {h for lbl, h in _amap.items() if _fm_allow.get(lbl)}
+            # Iter 369 (user request) — EPF / ESI "Applicable" flags are
+            # AUTHORITATIVE when explicitly set (True or False): disabled
+            # means NO PF/ESIC even if the Deductions catalog has PF/ESI
+            # ticked. Only when the flag was never configured (None) do we
+            # fall back to the Deductions catalog (keeps the Iter 335 fix).
+            _epf_ap = (fm.get("epf") or {}).get("applicable")
+            _esi_ap = (fm.get("esi") or {}).get("applicable")
+            _pf_col = bool(_epf_ap) if _epf_ap is not None else bool(_fm_ded.get("PF"))
+            _esi_col = bool(_esi_ap) if _esi_ap is not None else bool(_fm_ded.get("ESI"))
+            ded_mask = set()
+            if _pf_col:
+                ded_mask.add("pf")
+            if _esi_col:
+                ded_mask.add("esi")
+            if _fm_ded.get("PT"):
+                ded_mask.add("pt")
+            if _fm_ded.get("TDS") or _fm_ded.get("I. TAX"):
+                ded_mask.add("tds")
+            firm_stat_flags[fm["company_id"]] = {
+                # Iter 369 — "Applicable" flag authoritative (see above).
+                "pf": _pf_col,
+                "esic": _esi_col,
+                # Iter 369 (user request) — MASTER SALARY (Full Month)
+                # columns follow the Firm Master Allowances catalog
+                # DYNAMICALLY: if the firm configured the catalog, the mask
+                # applies even when every head is switched OFF (only Basic
+                # + Gross remain). None only when never configured.
+                "allow_mask": allow_mask if _fm_allow else None,
+                "ded_mask": ded_mask if any(bool(v) for v in _fm_ded.values()) else None,
+                # Iter 310 — Freeze Salary difference allocation gate.
+                "ot_allowed": bool((fm.get("salary_process") or {}).get("ot_allowed")),
+                # Iter 337 (user request) — Days Calculation Method.
+                "days_calc_method": str((fm.get("salary_process") or {}).get("days_calc_method") or "attendance"),
+                "days_calc_fixed": (fm.get("salary_process") or {}).get("days_calc_fixed") or 26,
+                "days_calc_rounding": (fm.get("salary_process") or {}).get("days_calc_rounding", 0.5),
+            }
+            # Iter 142 — Firm Master OT gate for compliance-salary rows.
+            _v = (fm.get("salary_process") or {}).get("ot_allowed")
+            if _v is not None and fm["company_id"] in company_policies:
+                _ap = dict(company_policies[fm["company_id"]].get("attendance_policy") or {})
+                _ap["firm_ot_allowed"] = bool(_v)
+                company_policies[fm["company_id"]]["attendance_policy"] = _ap
+
+    rows = []
+    # Iter 200 — Holiday Master dates per firm (for holiday_present_add_ot).
+    _holidays_by_cid: Dict[str, list] = {}
+    for _cid_ in {e.get("company_id") for e in employees if e.get("company_id")}:
+        _holidays_by_cid[_cid_] = sorted(await holiday_dates_for_company(_cid_))
+    # Iter 313 — ESIC Leave Module: auto-import APPROVED ESIC leave days
+    # into the run (per firm, honours enabled + link_compliance settings).
+    from routes.esic_leave import esic_leave_days_map as _esic_map_fn
+    _esic_maps: Dict[str, Dict[str, float]] = {}
+    for _cid_ in {e.get("company_id") for e in employees if e.get("company_id")}:
+        _esic_maps[_cid_] = await _esic_map_fn(_cid_, payload.month)
+    for emp in employees:
+        emp = dict(emp)
+        emp.pop("pin_hash", None)
+        emp.pop("password_hash", None)
+        emp.pop("temp_pin_plaintext", None)
+        emp.pop("temp_password_plaintext", None)
+        pol = emp.get("employee_policy") or {}
+        company_doc = company_policies.get(emp.get("company_id")) or {}
+        att_pol = company_doc.get("attendance_policy") or {}
+        merged_pol = {**att_pol, **pol}
+        merged_pol["_holiday_dates"] = _holidays_by_cid.get(emp.get("company_id")) or []
+        # Iter 142 — per-employee OT flag (override wins over legacy flag).
+        _emp_ot = (emp.get("attendance_policy_override") or {}).get(
+            "ot_allowed", emp.get("ot_applicable"))
+        if _emp_ot is not None:
+            merged_pol["ot_allowed"] = bool(_emp_ot)
+        att_rows = attendance_by_user.get(emp["user_id"], [])
+        _pm_202 = (att_pol.get("policy_master") or {})
+        if (att_pol.get("policy_variant") or "").strip() == "policy_2":
+            # Iter 129c — Textile Policy 2: Present Days auto-synced from
+            # biometrics via the grid's textile pipeline (8 hrs = 1 day).
+            stats = _policy2_biometric_stats(att_rows, merged_pol, emp)
+        else:
+            # Iter 202 — "Count Present Day @ 8 HRS" sub-point: compliance
+            # runs count 1 Present Day per 8 worked hrs (extra hrs → OT)
+            # when the firm's Salary Allowed includes Compliance.
+            if _pm_202.get("compliance_present_8hr") and \
+                    (att_pol.get("salary_allowed") or "both") in ("compliance", "both"):
+                merged_pol["_present_day_hours_override"] = 8.0
+            stats = compute_present_days_and_ot(att_rows, merged_pol)
+        # Iter 216 (user request) — override with the Attendance Report's
+        # Present Days + OT so the Compliance Salary run always agrees
+        # with the report (and the Actual process). Applies to policy_2
+        # firms too.
+        # Iter 219 — "Count Present Day @ 8 HRS" now ALSO direct-syncs
+        # from the Attendance Report grid (same punch pipeline as the
+        # report): per day, 8+ worked hrs = 1 Present Day with the extra
+        # hrs → OT; the Half-Day Threshold Rule is honoured (½ day, rest
+        # → OT); week-off / holiday sub-points mirror the grid compute.
+        _g_c = grid_by_user_c.get(emp["user_id"])
+        _c8_on = bool(_pm_202.get("compliance_present_8hr")) and \
+            (att_pol.get("salary_allowed") or "both") in ("compliance", "both")
+        if _g_c and _c8_on:
+            _half_h8 = float(merged_pol.get("half_day_hours") or 4.0)
+            _hd_rule8 = bool(_pm_202.get("halfday_threshold_rule"))
+            _pd8 = 0.0
+            _half8 = 0
+            _duty8 = 0.0
+            _ot8 = 0.0
+            for _dcell in (_g_c.get("days") or {}).values():
+                _dcell = _dcell or {}
+                _w = float(_dcell.get("hours") or _dcell.get("raw_hours") or 0.0)
+                if _w <= 0:
+                    continue
+                if _dcell.get("weekly_off") and _pm_202.get("weekoff_present_add_ot"):
+                    _ot8 += _w
+                    continue
+                if _dcell.get("holiday") and _pm_202.get("holiday_present_add_ot"):
+                    _pd8 += 1.0
+                    _ot8 += _w
+                    continue
+                if _w >= 8.0:
+                    _pd8 += 1.0
+                    _duty8 += 8.0
+                    _ot8 += _w - 8.0
+                elif _hd_rule8 and _w >= _half_h8:
+                    _half8 += 1
+                    _duty8 += _half_h8
+                    _ot8 += _w - _half_h8
+                elif _hd_rule8:
+                    _ot8 += _w
+                else:
+                    if _w >= _half_h8:
+                        _half8 += 1
+                    _duty8 += _w
+            if merged_pol.get("ot_allowed") is False or \
+                    merged_pol.get("firm_ot_allowed") is False:
+                _ot8 = 0.0
+            _eff8 = _pd8 + 0.5 * _half8
+            stats = {
+                "present_days": round(_eff8 * 2) / 2.0,
+                "half_days": _half8,
+                "absent_days": 0,
+                "duty_hours": round(_duty8, 2),
+                "ot_hours": round(_ot8, 2),
+                "effective_present": _eff8,
+            }
+        elif _g_c and not _c8_on:
+            _t_c = _g_c.get("totals") or {}
+            _pd_c = _t_c.get("present_days_policy")
+            if _pd_c is None:
+                _pd_c = _t_c.get("total_days_computed")
+            if _pd_c is not None:
+                _pd_cf = float(_pd_c or 0.0)
+                stats = dict(stats)
+                # Iter 219 — keep half days (26.5) instead of int().
+                stats["present_days"] = round(_pd_cf * 2) / 2.0
+                stats["effective_present"] = _pd_cf
+                stats["half_days"] = 0
+                stats["duty_hours"] = float(
+                    _t_c.get("duty_hours")
+                    or _t_c.get("hours")
+                    or stats.get("duty_hours")
+                    or 0.0
+                )
+                stats["ot_hours"] = float(_t_c.get("ot_hours") or 0.0)
+        _am = am_entries.get(emp["user_id"]) if payload.use_imported_sheet else None
+        if payload.use_imported_sheet:
+            # Imported sheet wins: present days from the uploaded/email
+            # salary sheet (0 when the employee has no row).
+            # Iter 219 — half days (e.g. 18.5) are kept, not truncated.
+            # Iter 340 (user request) — NEVER above the month's days.
+            _pd = min(float((_am or {}).get("present_days") or 0),
+                      float(month_days))
+            _fdh = float(merged_pol.get("full_day_hours") or 8.0)
+            stats = {
+                "present_days": round(_pd * 2) / 2.0,
+                "half_days": 0,
+                "effective_present": _pd,
+                "duty_hours": round(_pd * _fdh, 2),
+                "ot_hours": 0.0,
+            }
+        # Iter 270 (user request) — "OT Include in Existing Compliance
+        # Salary" (Yes/No). When NO, OT Duty HRS are kept OUT of the
+        # Compliance Salary (no OT pay in gross) — they auto-import into
+        # the separate OT Salary Process instead (no double payment).
+        if not _pm_202.get("compliance_ot_include", True):
+            stats = dict(stats)
+            stats["ot_hours"] = 0.0
+        # Iter 297 (user directive) — NON-DESTRUCTIVE REPROCESS: when the
+        # month was already processed, the admin's previously ENTERED
+        # days are KEPT (never reset to zero). The money fields are
+        # recalculated from those preserved days with the current
+        # parameters. Imported-sheet runs keep the sheet as the source.
+        _prev = (prev_rows or {}).get(emp["user_id"]) \
+            if not payload.use_imported_sheet else None
+        if _prev is not None:
+            # Iter 340 (user request) — kept days also clamp to month days.
+            _ppd = min(float(_prev.get("present_days") or 0.0),
+                       float(month_days))
+            stats = dict(stats)
+            stats["present_days"] = round(_ppd * 2) / 2.0
+            stats["effective_present"] = _ppd
+            stats["half_days"] = 0
+            stats["ot_hours"] = float(_prev.get("ot_hours") or 0.0)
+            if _prev.get("duty_hours") is not None:
+                stats["duty_hours"] = float(_prev.get("duty_hours") or 0.0)
+        _ff = firm_stat_flags.get(emp.get("company_id")) or {"pf": False, "esic": False}
+        # Iter 178 — state-wise PT from the firm's compliance policy.
+        _fcp = (company_doc.get("compliance_policy") or {}) if company_doc else {}
+        row = compute_compliance_row(
+            emp, merged_pol, int(month_days), stats,
+            company_structure_pct=payload.structure_pct,
+            statutory_cfg=effective_statutory,
+            firm_pf_enabled=_ff["pf"],
+            firm_esic_enabled=_ff["esic"],
+            firm_pt={"state": _fcp.get("pt_state"), "slabs": _fcp.get("pt_slabs")},
+        )
+        # Iter 337 (user request) — DAYS CALCULATION METHOD (Firm Master →
+        # Payroll Settings). For imported (Freeze) runs the Compliance Days
+        # can be DERIVED from the imported gross:
+        #   Per-Day Gross = Master Monthly Gross ÷ Month Days
+        #   Compliance Days = Imported Gross ÷ Per-Day Gross (rounded to
+        #   0.50 / 0.25 per firm policy) — statutory is then recalculated
+        #   on those days; the remaining difference lands in OT / Other
+        #   Allowance via the Freeze block below.
+        if payload.use_imported_sheet and _am is not None:
+            row["attendance_days"] = round(
+                min(float(_am.get("present_days") or 0), float(month_days)), 2)
+            _dcm = firm_stat_flags.get(emp.get("company_id")) or {}
+            _method = str(_dcm.get("days_calc_method") or "attendance")
+            _imp_g0 = round(float(_am.get("gross_earning") or 0), 2)
+            # Iter 339 (user request) — ONE-TIME freeze import: when the
+            # imported sheet carries a GROSS but NO attendance days, the
+            # Compliance Days are auto-derived from that gross (Attendance
+            # + Gross Validation behaviour) even when the firm hasn't
+            # picked a Days Calculation Method yet — a single import fills
+            # the days, recalculates salary/statutory and matches Freeze
+            # vs Gross without any reprocess.
+            # Iter 339b (user request — "no negative salary figures"):
+            # ALSO derive the days when the sheet-days salary OVERSHOOTS
+            # the imported gross (would print a negative Difference) — the
+            # freeze gross is authoritative, so days shrink to match it.
+            if (_method == "attendance" and _imp_g0 > 0
+                    and (row["attendance_days"] <= 0
+                         or float(row.get("gross_paid") or 0) > _imp_g0 + 0.5)):
+                _method = "attendance_gross_validation"
+            _new_days = None
+            if _method == "fixed":
+                if row["attendance_days"] > 0 or _imp_g0 > 0:
+                    _new_days = float(_dcm.get("days_calc_fixed") or 26)
+            elif _method in ("gross_based", "freeze_based",
+                             "attendance_gross_validation",
+                             "freeze_actual_gross") and _imp_g0 > 0:
+                # Per-Day Gross — from the first pass (exact for both
+                # daily-rated and monthly-rated employees); falls back to
+                # Master Monthly Gross ÷ Month Days.
+                _g0 = float(row.get("gross_paid") or 0)
+                _pd0 = float(row.get("present_days") or 0)
+                _mg0 = float(row.get("monthly_gross") or 0)
+                _per_day = (_g0 / _pd0) if (_g0 > 0 and _pd0 > 0) else (
+                    (_mg0 / float(month_days or 1)) if _mg0 > 0 else 0.0)
+                if _per_day <= 0:
+                    # Iter 339 — DAILY-RATED employees with a gross-only
+                    # sheet (0 days): both fallbacks above are 0. Probe a
+                    # FULL-MONTH compute to learn the true per-day gross
+                    # (rate + allowances) so days can still be derived.
+                    _stF = dict(stats)
+                    _stF["present_days"] = float(month_days)
+                    _stF["effective_present"] = float(month_days)
+                    _stF["half_days"] = 0
+                    _stF["duty_hours"] = round(
+                        float(month_days)
+                        * float(merged_pol.get("full_day_hours") or 8.0), 2)
+                    _rowF = compute_compliance_row(
+                        emp, merged_pol, int(month_days), _stF,
+                        company_structure_pct=payload.structure_pct,
+                        statutory_cfg=effective_statutory,
+                        firm_pf_enabled=_ff["pf"],
+                        firm_esic_enabled=_ff["esic"],
+                        firm_pt={"state": _fcp.get("pt_state"),
+                                 "slabs": _fcp.get("pt_slabs")},
+                    )
+                    _gF = float(_rowF.get("gross_paid") or 0)
+                    if _gF > 0:
+                        _per_day = _gF / float(month_days or 1)
+                if _per_day > 0:
+                    _rawd = _imp_g0 / _per_day
+                    if _method == "freeze_actual_gross":
+                        # Iter 337b (user request) — Freeze Salary taken
+                        # AS-IS as the Actual Gross: exact fractional days
+                        # (no half/full rounding) so the calculated gross
+                        # equals the imported gross to the rupee; statutory
+                        # is computed on that gross. Iter 340 — FLOOR at 2
+                        # decimals so the calc can never overshoot the
+                        # imported gross (no negative Difference).
+                        _new_days = math.floor(_rawd * 100 + 1e-9) / 100
+                    else:
+                        try:
+                            _step = float(_dcm.get("days_calc_rounding") or 0.5)
+                        except (TypeError, ValueError):
+                            _step = 0.5
+                        # User directive — days land on HALF or FULL days only.
+                        _step = 1.0 if _step >= 1 else 0.5
+                        # Iter 339b (user request — "no negative salary
+                        # figures"): days always round DOWN to the step so
+                        # the calculated gross NEVER exceeds the imported
+                        # gross. The (positive) remainder goes to OT /
+                        # Other Allowance; a round-UP produced overshoots
+                        # like −117 in the Difference column.
+                        _new_days = math.floor((_rawd + 1e-9) / _step) * _step
+            if _new_days is not None:
+                _new_days = max(0.0, min(round(_new_days, 2), float(month_days)))
+                if abs(_new_days - float(row.get("present_days") or 0)) > 1e-9:
+                    _st2 = dict(stats)
+                    _st2["present_days"] = _new_days
+                    _st2["effective_present"] = _new_days
+                    _st2["half_days"] = 0
+                    _st2["duty_hours"] = round(
+                        _new_days * float(merged_pol.get("full_day_hours") or 8.0), 2)
+                    row = compute_compliance_row(
+                        emp, merged_pol, int(month_days), _st2,
+                        company_structure_pct=payload.structure_pct,
+                        statutory_cfg=effective_statutory,
+                        firm_pf_enabled=_ff["pf"],
+                        firm_esic_enabled=_ff["esic"],
+                        firm_pt={"state": _fcp.get("pt_state"),
+                                 "slabs": _fcp.get("pt_slabs")},
+                    )
+                    row["attendance_days"] = round(
+                        min(float(_am.get("present_days") or 0),
+                            float(month_days)), 2)
+                row["compliance_days"] = _new_days
+            else:
+                row["compliance_days"] = round(float(row.get("present_days") or 0), 2)
+        # Iter 100 — Attendance Master "Other Deduction" (Advance/TDS etc.)
+        # Iter 328 — client sheet's Adv + "Other Less" combine into Other
+        # Deduction; sheet TDS overrides the master TDS.
+        _am_ded = round(float((_am or {}).get("deduction_amount") or 0)
+                        + float((_am or {}).get("other_less") or 0), 2)
+        if _am and _am_ded > 0:
+            row["other_deduction_head"] = _am.get("deduction_head") or (
+                "Advance/Other" if float(_am.get("other_less") or 0) > 0 else "Advance")
+            row["other_deduction"] = _am_ded
+            row["total_deduction"] = round(float(row.get("total_deduction") or 0) + _am_ded, 2)
+            row["net"] = round(float(row.get("net") or 0) - _am_ded, 2)
+        # Iter 297 — reprocess also keeps the manually ENTERED "Other
+        # Deduction" from the previous run (default is 0 → any value was
+        # typed by the admin).
+        if _prev is not None and not _am and \
+                float(_prev.get("other_deduction") or 0) > 0:
+            _pod = round(float(_prev.get("other_deduction") or 0), 2)
+            row["other_deduction_head"] = (
+                _prev.get("other_deduction_head") or "Other")
+            row["other_deduction"] = _pod
+            row["total_deduction"] = round(
+                float(row.get("total_deduction") or 0) + _pod, 2)
+            row["net"] = round(float(row.get("net") or 0) - _pod, 2)
+        row["company_id"] = emp.get("company_id")
+        row["company_name"] = company_doc.get("name")
+        # Iter 85 — Apply the firm's Compliance-Allowances toggles.
+        # Iter 171 — ALSO honour the Firm Master Allowances catalog: when
+        # the firm configured allowances there, the two masks intersect.
+        # Basic is always kept (statutory floor). Any allowance head that
+        # is switched OFF is zeroed out so it doesn't inflate
+        # Total Gross / statutory bases.
+        firm_comp_policy = company_doc.get("compliance_policy") or {}
+        enabled = firm_comp_policy.get("enabled_allowances")
+        _pol_set = ({str(x).lower() for x in enabled}
+                    if enabled and isinstance(enabled, list) else None)
+        _fm_masks = firm_stat_flags.get(emp.get("company_id")) or {}
+        _fm_set = _fm_masks.get("allow_mask")
+        if _pol_set is not None and _fm_set is not None:
+            enabled_set = _pol_set & set(_fm_set)
+        elif _pol_set is not None:
+            enabled_set = _pol_set
+        elif _fm_set is not None:
+            enabled_set = set(_fm_set)
+        else:
+            enabled_set = None
+        if enabled_set is not None:
+            enabled_set.add("basic")  # always
+            for head in ("hra", "conveyance", "medical", "special", "others"):
+                if head not in enabled_set:
+                    row[head] = 0.0
+            # Recompute gross-derived fields to reflect the trimmed heads
+            heads_sum = float(
+                (row.get("basic") or 0)
+                + (row.get("hra") or 0)
+                + (row.get("conveyance") or 0)
+                + (row.get("medical") or 0)
+                + (row.get("special") or 0)
+                + (row.get("others") or 0)
+            )
+            row["monthly_gross"] = round(heads_sum, 2)
+            row["enabled_allowances"] = sorted(enabled_set)
+
+        # Iter 171 — Firm Master DEDUCTIONS catalog drives the deduction
+        # columns. PF/ESI stay governed by statutory applicability; PT and
+        # TDS are zeroed (and removed from Total Ded. / added back to Net)
+        # when the firm switched them OFF.
+        _ded_set = _fm_masks.get("ded_mask")
+        if _ded_set is not None:
+            _removed = 0.0
+            for _dk in ("pt", "tds"):
+                if _dk not in _ded_set and float(row.get(_dk) or 0):
+                    _removed += float(row[_dk])
+                    row[_dk] = 0.0
+            if _removed:
+                row["total_deduction"] = round(
+                    float(row.get("total_deduction") or 0) - _removed, 2)
+                row["net"] = round(float(row.get("net") or 0) + _removed, 2)
+            row["enabled_deductions"] = sorted(_ded_set)
+
+        # Iter 328 — imported sheet TDS is authoritative: applied AFTER the
+        # firm deduction mask so an explicit TDS on the client sheet always
+        # lands on the run.
+        if _am and float(_am.get("tds") or 0) > 0:
+            _tds_new = round(float(_am.get("tds") or 0), 2)
+            _tds_delta = round(_tds_new - float(row.get("tds") or 0), 2)
+            row["tds"] = _tds_new
+            row["total_deduction"] = round(float(row.get("total_deduction") or 0) + _tds_delta, 2)
+            row["net"] = round(float(row.get("net") or 0) - _tds_delta, 2)
+
+        # Iter 85 — DOJ / Exit-date cap for Compliance Salary. Same idea
+        # as Actual Salary: cap present_days at the number of days the
+        # employee was actually on the rolls this month.
+        try:
+            doj = str(emp.get("doj") or "")
+            exit_date = str(emp.get("exit_date") or "")
+            month_start = f"{year:04d}-{mon:02d}-01"
+            month_end = f"{year:04d}-{mon:02d}-{default_days:02d}"
+            cap = int(month_days)
+            if doj and month_start <= doj <= month_end:
+                cap = min(cap, month_days - int(doj.split("-")[2]) + 1)
+            if exit_date and month_start <= exit_date <= month_end:
+                cap = min(cap, int(exit_date.split("-")[2]))
+            cap = max(0, cap)
+            if row.get("present_days", 0) > cap:
+                row["present_days"] = cap
+            row["max_p_days"] = cap
+        except (ValueError, IndexError):
+            row.setdefault("max_p_days", int(month_days))
+        # Iter 374 (user bug) — a REPROCESS must NEVER remove the admin's
+        # MANUALLY FILLED amounts (Others / OT Amt / TDS / ESIC Leave).
+        # The grid stamps every manual edit on ``manual_fields``; those
+        # figures are restored AS-IS and the money math rebuilt around
+        # them. Heuristics cover rows saved before the stamp existed:
+        # ESIC Leave is manual-entry only; an OT AMOUNT without OT hours
+        # and a TDS with no imported sheet were typed by the admin.
+        if _prev is not None and not payload.use_imported_sheet:
+            _mf = set(_prev.get("manual_fields") or [])
+            if float(_prev.get("esic_leave_days") or 0) > 0:
+                _mf.add("esic_leave_days")
+            if float(_prev.get("ot_pay") or 0) > 0 and \
+                    float(_prev.get("ot_hours") or 0) <= 0:
+                _mf.add("ot_pay")
+            if float(_prev.get("tds") or 0) > 0 and not _am:
+                _mf.add("tds")
+            if _mf:
+                row["manual_fields"] = sorted(_mf)
+                row["manual_override"] = True
+            if "esic_leave_days" in _mf:
+                row["esic_leave_days"] = float(_prev.get("esic_leave_days") or 0)
+            if "others" in _mf:
+                _new_oth = round(float(_prev.get("others") or 0), 2)
+                _delta = round(_new_oth - float(row.get("others") or 0), 2)
+                if _delta:
+                    row["others"] = _new_oth
+                    row["monthly_gross"] = round(
+                        float(row.get("monthly_gross") or 0) + _delta, 2)
+                    row["gross_paid"] = round(
+                        float(row.get("gross_paid") or 0) + _delta, 2)
+                    row["net"] = round(float(row.get("net") or 0) + _delta, 2)
+            if "ot_pay" in _mf:
+                _new_ot = round(float(_prev.get("ot_pay") or 0), 2)
+                _delta = round(_new_ot - float(row.get("ot_pay") or 0), 2)
+                if _delta:
+                    row["ot_pay"] = _new_ot
+                    row["gross_paid"] = round(
+                        float(row.get("gross_paid") or 0) + _delta, 2)
+                    row["net"] = round(float(row.get("net") or 0) + _delta, 2)
+            if "tds" in _mf and not (_am and float(_am.get("tds") or 0) > 0):
+                _new_tds = round(float(_prev.get("tds") or 0), 2)
+                _delta = round(_new_tds - float(row.get("tds") or 0), 2)
+                if _delta:
+                    row["tds"] = _new_tds
+                    row["total_deduction"] = round(
+                        float(row.get("total_deduction") or 0) + _delta, 2)
+                    row["net"] = round(float(row.get("net") or 0) - _delta, 2)
+        # Iter 310 — FREEZE SALARY (user directive): when the run is driven
+        # by the IMPORTED sheet, the sheet's Gross Earning is authoritative
+        # and gets FROZEN on the run. If Imported Gross > the gross
+        # calculated from the Employee Master, the DIFFERENCE is routed to
+        # OVERTIME when the Firm Master allows OT
+        # (salary_process.ot_allowed) — otherwise to OTHER ALLOWANCES.
+        # Runs AFTER the allowance/deduction masks + DOJ cap so nothing
+        # later can trim the allocated difference.
+        if payload.use_imported_sheet and _am is not None:
+            _imp_g = round(float(_am.get("gross_earning") or 0), 2)
+            # Iter 343b (user request) — after the import the admin may EDIT
+            # the OT Amount / Other Allowances. A REPROCESS keeps those
+            # MANUAL figures; the Freeze (imported) gross stays on the row
+            # purely as DISPLAY/comparison data.
+            _prev_imp = (prev_rows or {}).get(emp["user_id"])
+            if _prev_imp is not None and _prev_imp.get("manual_override"):
+                # Restore the admin's saved figures AS-IS (they were kept
+                # consistent by the grid at edit time).
+                row["ot_pay"] = round(float(_prev_imp.get("ot_pay") or 0), 2)
+                row["others"] = round(float(_prev_imp.get("others") or 0), 2)
+                _keep_g = round(float(_prev_imp.get("gross_paid") or 0), 2)
+                row["gross_paid"] = _keep_g
+                row["net"] = round(
+                    _keep_g - float(row.get("total_deduction") or 0), 2)
+                row["manual_override"] = True
+                if _imp_g > 0:
+                    row["imported_gross"] = _imp_g
+                    row["calculated_gross"] = _keep_g
+                    row["difference"] = round(_imp_g - _keep_g, 2)
+                    row["freeze_status"] = (
+                        "matched" if abs(row["difference"]) < 1 else "diff")
+                    row["difference_allocation_head"] = "Manual"
+            elif _imp_g > 0:
+                _calc_g = round(float(row.get("gross_paid") or 0), 2)
+                _diff_g = round(_imp_g - _calc_g, 2)
+                row["imported_gross"] = _imp_g
+                row["calculated_gross"] = _calc_g
+                row["difference"] = _diff_g
+                row["difference_allocation_head"] = ""
+                # Iter 337 — validation status for the grid (✓ Matched).
+                row["freeze_status"] = "matched" if abs(_diff_g) < 1 else "diff"
+                if _diff_g > 0:
+                    _frz_ot = (firm_stat_flags.get(emp.get("company_id"))
+                               or {}).get("ot_allowed")
+                    if _frz_ot:
+                        row["ot_pay"] = round(
+                            float(row.get("ot_pay") or 0) + _diff_g, 2)
+                        row["difference_allocation_head"] = "Overtime"
+                    else:
+                        row["others"] = round(
+                            float(row.get("others") or 0) + _diff_g, 2)
+                        row["monthly_gross"] = round(
+                            float(row.get("monthly_gross") or 0) + _diff_g, 2)
+                        row["difference_allocation_head"] = "Other Allowances"
+                    row["gross_paid"] = _imp_g
+                    row["net"] = round(
+                        _imp_g - float(row.get("total_deduction") or 0), 2)
+                elif _diff_g < 0:
+                    # Iter 344 (user request) — EXACT match with the Freeze:
+                    # final Gross − Freeze must be 0. A calculated gross
+                    # ABOVE the imported figure is trimmed from OT first,
+                    # then Other Allowances.
+                    _need = -_diff_g
+                    _cut_ot = min(float(row.get("ot_pay") or 0), _need)
+                    if _cut_ot:
+                        row["ot_pay"] = round(
+                            float(row.get("ot_pay") or 0) - _cut_ot, 2)
+                    _rem = round(_need - _cut_ot, 2)
+                    if _rem:
+                        row["others"] = round(
+                            float(row.get("others") or 0) - _rem, 2)
+                        row["monthly_gross"] = round(
+                            float(row.get("monthly_gross") or 0) - _rem, 2)
+                    row["difference_allocation_head"] = "Trimmed"
+                    row["gross_paid"] = _imp_g
+                    row["net"] = round(
+                        _imp_g - float(row.get("total_deduction") or 0), 2)
+        # Iter 340 (user request) — OT HOURS derived from the OT AMOUNT:
+        # OT Hrs = OT Amt ÷ (per-hour rate × OT multiplier). Per-hour rate
+        # follows Firm Master "OT Calculation On" (basic | gross):
+        # full-month Basic/Gross ÷ Month Days ÷ Daily HRS. Computed for
+        # every row so manual OT-hours entry works on normal runs too.
+        _fsf_row = firm_stat_flags.get(emp.get("company_id")) or {}
+        row["firm_ot_allowed"] = bool(_fsf_row.get("ot_allowed"))
+        _fdh3 = float(merged_pol.get("full_day_hours") or 8.0)
+        _otm3 = float(merged_pol.get("ot_multiplier") or 2.0)
+        _basis3 = str(_fsf_row.get("ot_calc_basis") or "basic")
+        _full3 = (float(row.get("gross_master") or 0) if _basis3 == "gross"
+                  else float(row.get("basic_master") or 0))
+        if _full3 <= 0:
+            _full3 = float(row.get("gross_master") or 0)
+        _oth_rate = ((_full3 / float(month_days or 26) / _fdh3) * _otm3
+                     if _full3 > 0 and _fdh3 > 0 else 0.0)
+        row["ot_hourly_rate"] = round(_oth_rate, 4)
+        if (_oth_rate > 0 and float(row.get("ot_pay") or 0) > 0
+                and float(row.get("ot_hours") or 0) <= 0):
+            row["ot_hours"] = round(float(row["ot_pay"]) / _oth_rate, 2)
+        # Iter 313 — ESIC Leave Module auto-import (fills the editable
+        # esic_leave_days column when approved entries exist this month).
+        _esic_d = (_esic_maps.get(emp.get("company_id")) or {}).get(emp.get("user_id"))
+        if _esic_d:
+            row["esic_leave_days"] = round(float(_esic_d), 1)
+        rows.append(row)
+
+    totals = {
+        k: round(sum(r.get(k, 0.0) or 0.0 for r in rows), 2)
+        for k in (
+            "basic", "hra", "conveyance", "medical", "special", "others",
+            "monthly_gross", "gross_paid", "ot_pay",
+            "pf_wages", "pf_employee", "pf_employer_epf", "pf_employer_eps", "pf_employer_total",
+            "esic_wage_base", "esic_employee", "esic_employer",
+            "pt", "tds",
+            "total_deduction", "net",
+            # Iter 310 — Freeze Salary comparison totals.
+            "imported_gross", "calculated_gross", "difference",
+        )
+    }
+
+    return {
+        "month": payload.month,
+        "year": year,
+        "month_number": mon,
+        "month_days": int(month_days),
+        "default_month_days": default_days,
+        "company_id": q.get("company_id"),
+        "employee_type": payload.employee_type,
+        "is_onroll_filter": payload.is_onroll,
+        "structure_pct": payload.structure_pct or {},
+        "statutory_cfg": payload.statutory_cfg or {},
+        # Iter 387 — FULL effective statutory snapshot (standard + firm
+        # overrides + per-run cfg) for the grid's client-side recompute and
+        # the "View Calculation" layer. Reprocess still re-merges live
+        # settings via statutory_cfg above.
+        "statutory_effective": effective_statutory,
+        "employees_count": len(rows),
+        "rows": rows,
+        # Iter 167 — resigned staff auto-excluded from this run.
+        "excluded_resigned": excluded_resigned,
+        "excluded_resigned_count": len(excluded_resigned),
+        "attendance_source": "imported_sheet" if payload.use_imported_sheet else "biometric",
+        # Iter 310 — imported-sheet runs are FROZEN (immutable snapshot
+        # is written alongside the run — see freeze_salary_snapshots).
+        "frozen": bool(payload.use_imported_sheet),
+
+        "totals": totals,
+        "generated_by": admin["user_id"],
+        "generated_at": now_iso(),
+    }
+
+
+async def _copy_last_month_from_legacy(
+    admin: dict,
+    payload: ComplianceSalaryRunCreate,
+    gate_cid: Optional[str],
+    group: str,
+    prev_month: str,
+) -> Optional[dict]:
+    """Iter 375 (user bug) — 'Copy Last Month Salary' FALLBACK: after the
+    Old-DB migration the previous month often exists ONLY in the imported
+    legacy history (``legacy_salary_history``, kind='online') — the copy
+    used to fail with "No Compliance Salary found". This builds the new
+    month's editable DRAFT from those locked Old-DB rows instead."""
+    from utils.salary_run import actual_days_in_month
+    q: Dict[str, Any] = {"kind": "online", "month": prev_month}
+    if gate_cid:
+        q["company_id"] = gate_cid
+    if group:
+        q["employee_type"] = {"$regex": f"^{re.escape(group)}$", "$options": "i"}
+    hist = await db.legacy_salary_history.find(q, {"_id": 0}).to_list(6000)
+    if not hist:
+        return None
+    y, m = int(payload.month[:4]), int(payload.month[5:7])
+    company_doc = await db.companies.find_one(
+        {"company_id": gate_cid}, {"_id": 0, "name": 1}) if gate_cid else None
+    # Resolve portal employees by user_id first, employee code second.
+    uids = [h.get("user_id") for h in hist if h.get("user_id")]
+    codes = [h.get("emp_code") for h in hist if h.get("emp_code")]
+    _or: List[dict] = []
+    if uids:
+        _or.append({"user_id": {"$in": uids}})
+    if codes:
+        _or.append({"employee_code": {"$in": codes + [str(c) for c in codes]}})
+    users_by_uid: Dict[str, dict] = {}
+    users_by_code: Dict[int, dict] = {}
+    if _or:
+        async for u in db.users.find(
+            {"$or": _or},
+            {"_id": 0, "user_id": 1, "employee_code": 1, "name": 1,
+             "father_name": 1, "designation": 1, "uan_no": 1, "esi_ip_no": 1,
+             "pf_no": 1, "exit_date": 1, "resign_date": 1, "disabled": 1,
+             "company_id": 1, "employee_type": 1, "is_onroll": 1},
+        ):
+            users_by_uid[u["user_id"]] = u
+            try:
+                users_by_code[int(float(u.get("employee_code")))] = u
+            except (TypeError, ValueError):
+                pass
+
+    def _amt(heads: Optional[dict], *needles: str) -> float:
+        tot = 0.0
+        for k, v in (heads or {}).items():
+            ku = str(k).upper()
+            if any(n in ku for n in needles):
+                tot += float(v or 0)
+        return round(tot, 2)
+
+    rows: List[dict] = []
+    skipped: List[dict] = []
+    for h in hist:
+        u = users_by_uid.get(h.get("user_id"))
+        if u is None and h.get("emp_code") is not None:
+            try:
+                u = users_by_code.get(int(float(h["emp_code"])))
+            except (TypeError, ValueError):
+                u = None
+        if u is None:
+            skipped.append({"user_id": h.get("user_id"),
+                            "name": h.get("name"),
+                            "reason": "not found in portal"})
+            continue
+        if u.get("disabled") is True or _month_is_after_exit(u, payload.month):
+            skipped.append({"user_id": u["user_id"], "name": h.get("name")})
+            continue
+        earn = h.get("earn_heads") or {}
+        ded = h.get("deduct_heads") or {}
+        gross = round(float(h.get("gross") or 0), 2)
+        basic = round(float(h.get("basic") or 0), 2)
+        hra = _amt(earn, "HRA")
+        conv = _amt(earn, "CONV")
+        medical = _amt(earn, "MEDICAL")
+        ot_pay = _amt(earn, "OVER TIME", "OVERTIME")
+        others = round(max(
+            0.0, gross - basic - hra - conv - medical - ot_pay), 2)
+        ee_pf = round(float(h.get("ee_pf") or 0), 2)
+        er_pf = round(float(h.get("er_pf") or 0), 2)
+        pf_wages = round(float(h.get("pf_basic") or 0), 2)
+        eps = round(min(pf_wages * 0.0833, er_pf), 2) if er_pf else 0.0
+        epf_er = round(er_pf - eps, 2) if er_pf else 0.0
+        esi_ee = _amt(ded, "ESI")
+        er_esi = round(float(h.get("er_esi") or 0), 2)
+        pt = _amt(ded, "PT", "PROF")
+        tds = _amt(ded, "TDS")
+        other_ded = round(float(h.get("less_adv") or 0)
+                          + float(h.get("less_other") or 0)
+                          + float(h.get("less_loan") or 0), 2)
+        total_ded = round(ee_pf + esi_ee + pt + tds + other_ded, 2)
+        net = round(float(h.get("net") or 0), 2) or round(gross - total_ded, 2)
+        _esic_on = esi_ee > 0 or er_esi > 0
+        rows.append({
+            "user_id": u["user_id"],
+            "employee_code": u.get("employee_code") or h.get("emp_code"),
+            "name": u.get("name") or h.get("name"),
+            "father_name": u.get("father_name"),
+            "designation": u.get("designation"),
+            "employee_type": h.get("employee_type") or u.get("employee_type"),
+            "is_onroll": bool(u.get("is_onroll", True)),
+            "company_id": u.get("company_id") or gate_cid,
+            "company_name": (company_doc or {}).get("name"),
+            "uan_no": u.get("uan_no"),
+            "esi_ip_no": u.get("esi_ip_no"),
+            "pf_no": u.get("pf_no"),
+            "salary_mode": "monthly",
+            "month_days": h.get("month_days"),
+            "present_days": round(float(h.get("present_days") or 0), 2),
+            "ot_hours": round(float(h.get("ot_hours") or 0), 2),
+            "basic": basic, "hra": hra, "conveyance": conv,
+            "medical": medical, "special": 0.0, "others": others,
+            "monthly_gross": round(gross - ot_pay, 2),
+            "ot_pay": ot_pay,
+            "gross_paid": gross,
+            "stat_wage_base": pf_wages or basic,
+            "pf_applicable": ee_pf > 0,
+            "pf_eligible": ee_pf > 0,
+            "pf_wages": pf_wages,
+            "pf_employee": ee_pf,
+            "pf_employer_epf": epf_er,
+            "pf_employer_eps": eps,
+            "pf_employer_total": er_pf,
+            "esic_applicable": _esic_on,
+            "esic_eligible": _esic_on,
+            "esic_wage_base": gross if _esic_on else 0.0,
+            "esic_employee": esi_ee,
+            "esic_employer": er_esi,
+            "pt": pt,
+            "tds": tds,
+            "other_deduction": other_ded,
+            "other_deduction_head": "Advance/Other" if other_ded else None,
+            "total_deduction": total_ded,
+            "net": net,
+            "copied_from_legacy": True,
+        })
+    if not rows:
+        return None
+    totals = {
+        k: round(sum(float(r.get(k) or 0.0) for r in rows), 2)
+        for k in (
+            "basic", "hra", "conveyance", "medical", "special", "others",
+            "monthly_gross", "gross_paid", "ot_pay",
+            "pf_wages", "pf_employee", "pf_employer_epf", "pf_employer_eps",
+            "pf_employer_total",
+            "esic_wage_base", "esic_employee", "esic_employer",
+            "pt", "tds", "total_deduction", "net",
+        )
+    }
+    _mdays = None
+    for h in hist:
+        try:
+            _mdays = int(float(h.get("month_days")))
+            break
+        except (TypeError, ValueError):
+            continue
+    return {
+        "month": payload.month,
+        "year": y,
+        "month_number": m,
+        "month_days": _mdays or actual_days_in_month(y, m),
+        "default_month_days": actual_days_in_month(y, m),
+        "company_id": gate_cid,
+        "employee_type": payload.employee_type,
+        "structure_pct": {},
+        "statutory_cfg": {},
+        "employees_count": len(rows),
+        "rows": rows,
+        "totals": totals,
+        "attendance_source": "copied_last_month_legacy",
+        "copied_from_month": prev_month,
+        "copied_from_legacy": True,
+        "copied_skipped": skipped,
+        "frozen": False,
+        "generated_by": admin["user_id"],
+        "generated_at": now_iso(),
+    }
+
+
+async def _copy_last_month_compliance_run(
+    admin: dict,
+    payload: ComplianceSalaryRunCreate,
+    gate_cid: Optional[str],
+    group: str,
+) -> dict:
+    """Iter 330 (user request) — 'Copy Last Month Salary': builds the new
+    month's run by copying LAST MONTH's rows exactly as they were (same
+    Present Days, Gross, PF/ESIC/PT/TDS, Net). Employees who exited before
+    the new month (or were disabled) are dropped. The copied run is a
+    normal editable DRAFT — it can be edited, saved and finalized."""
+    from utils.salary_run import actual_days_in_month
+    y, m = int(payload.month[:4]), int(payload.month[5:7])
+    prev_month = f"{y - 1}-12" if m == 1 else f"{y:04d}-{m - 1:02d}"
+    _grp_q = (
+        {"$regex": f"^{re.escape(group)}$", "$options": "i"} if group
+        else {"$in": [None, ""]}
+    )
+    src = await db.compliance_salary_runs.find_one(
+        {"month": prev_month, "company_id": gate_cid, "employee_type": _grp_q},
+        {"_id": 0},
+        sort=[("finalized", -1), ("generated_at", -1)],
+    )
+    if not src or not (src.get("rows") or []):
+        # Iter 375 (user bug) — after the Old-DB lock, last month exists
+        # only in the imported legacy history: copy from there instead.
+        legacy = await _copy_last_month_from_legacy(
+            admin, payload, gate_cid, group, prev_month)
+        if legacy is not None:
+            return legacy
+        raise HTTPException(
+            status_code=404,
+            detail=f"No Compliance Salary found for {prev_month} (this firm/"
+                   "group) — neither a portal run nor imported Old-DB salary "
+                   "history. Process or import last month first, then copy.",
+        )
+    # Drop employees who exited before the new month or were disabled.
+    src_rows = src.get("rows") or []
+    uids = [r.get("user_id") for r in src_rows if r.get("user_id")]
+    users_by_id: Dict[str, dict] = {}
+    if uids:
+        async for u in db.users.find(
+            {"user_id": {"$in": uids}},
+            {"_id": 0, "user_id": 1, "exit_date": 1, "resign_date": 1,
+             "disabled": 1},
+        ):
+            users_by_id[u["user_id"]] = u
+    rows = []
+    skipped = []
+    for r in src_rows:
+        u = users_by_id.get(r.get("user_id")) or {}
+        if u.get("disabled") is True or _month_is_after_exit(u, payload.month):
+            skipped.append({"user_id": r.get("user_id"), "name": r.get("name")})
+            continue
+        nr = dict(r)
+        # Last month's advance EMI must not be carried verbatim — the
+        # endpoint re-applies the CURRENT month's advance recovery after
+        # this copy (keeps the advance ledger correct).
+        _adv = round(float(nr.get("advance_recovery") or 0), 2)
+        if _adv:
+            nr["advance_recovery"] = 0.0
+            nr["total_deduction"] = round(
+                float(nr.get("total_deduction") or 0) - _adv, 2)
+            nr["net"] = round(float(nr.get("net") or 0) + _adv, 2)
+        rows.append(nr)
+    totals = {
+        k: round(sum(float(r.get(k) or 0.0) for r in rows), 2)
+        for k in (
+            "basic", "hra", "conveyance", "medical", "special", "others",
+            "monthly_gross", "gross_paid", "ot_pay",
+            "pf_wages", "pf_employee", "pf_employer_epf", "pf_employer_eps",
+            "pf_employer_total",
+            "esic_wage_base", "esic_employee", "esic_employer",
+            "pt", "tds", "total_deduction", "net",
+        )
+    }
+    return {
+        "month": payload.month,
+        "year": y,
+        "month_number": m,
+        "month_days": int(src.get("month_days") or actual_days_in_month(y, m)),
+        "default_month_days": actual_days_in_month(y, m),
+        "company_id": gate_cid,
+        "employee_type": payload.employee_type,
+        "structure_pct": src.get("structure_pct") or {},
+        "statutory_cfg": src.get("statutory_cfg") or {},
+        "employees_count": len(rows),
+        "rows": rows,
+        "totals": totals,
+        "attendance_source": "copied_last_month",
+        "copied_from_month": prev_month,
+        "copied_from_run_id": src.get("run_id"),
+        "copied_skipped": skipped,
+        "frozen": False,
+        "generated_by": admin["user_id"],
+        "generated_at": now_iso(),
+    }
+
+
+async def _firm_offline_salary_enabled(company_id: Optional[str]) -> bool:
+    """Iter 164 — True when the firm's Firm Master has 'Offline Salary'
+    (salary_process.offline_salary) enabled. Off-roll employees are only
+    allowed in such firms; everywhere else employees are always On-roll."""
+    if not company_id:
+        return False
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "salary_process": 1},
+    )
+    return bool(((fm or {}).get("salary_process") or {}).get("offline_salary"))
+
+
+async def _firm_biometric_attendance_enabled(company_id: Optional[str]) -> bool:
+    """Iter 165 — True when the firm's Firm Master has 'Bio Matrix
+    Attendance' (salary_process.bio_matrix_attendance) enabled. Gates the
+    per-employee fingerprint verification requirement."""
+    if not company_id:
+        return False
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "salary_process": 1},
+    )
+    return bool(((fm or {}).get("salary_process") or {}).get("bio_matrix_attendance"))
+
+
+async def _require_firm_salary_permission(company_id: Optional[str], kind: str) -> None:
+    """Iter 98 — Firm Master 'Salary Process Settings' gating.
+
+    * ``kind='online'``  → Compliance Salary requires ``salary_process.online_salary``.
+    * ``kind='offline'`` → Salary Process (Actual) requires ``salary_process.offline_salary``.
+
+    Raises 403 "You are not permitted for this" when the flag is OFF (or the
+    firm was never configured). Skipped when no single firm is in scope
+    (e.g. super-admin without a company filter).
+    """
+    if not company_id:
+        return
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "salary_process": 1},
+    )
+    sp = (fm or {}).get("salary_process") or {}
+    allowed = sp.get("online_salary") if kind == "online" else sp.get("offline_salary")
+    if not allowed:
+        label = (
+            "Online Salary (Compliance Salary)" if kind == "online"
+            else "Offline Salary (Salary Process Actual)"
+        )
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"You are not permitted for this — {label} is not enabled for "
+                "this firm. Enable it in Firm Master → Salary Process Settings."
+            ),
+        )
+
+
+@api.post("/admin/compliance-salary-runs")
+async def create_compliance_salary_run(
+    payload: ComplianceSalaryRunCreate,
+    authorization: Optional[str] = Header(None),
+):
+    """Compute + persist a new compliance salary run (PF/ESIC/PT/TDS)."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    # Iter 62 — Compliance is OPT-IN for company admins. Super Admin must
+    # explicitly enable compliance_salary:write on the firm's access rights.
+    await require_employer_permission(admin, "compliance_salary:write", db)
+    return await _create_compliance_salary_run_core(payload, admin)
+
+
+async def _create_compliance_salary_run_core(
+    payload: ComplianceSalaryRunCreate, admin: dict,
+) -> dict:
+    """Iter 335 — shared core so the sheet import can auto-reprocess the
+    month right after importing (user request)."""
+    # Iter 98 — Firm Master gate: Online Salary must be enabled for the firm.
+    _gate_cid = (
+        admin.get("company_id") if admin["role"] == "company_admin"
+        else payload.company_id
+    )
+    await _require_firm_salary_permission(_gate_cid, "online")
+    # Iter 129f (user directive) — a FINALIZED month can never be processed
+    # again. Iter 257 (user bug): the block is scoped to the SAME employee
+    # group — finalizing STAFF must not stop LABOUR from being processed.
+    _grp0 = (payload.employee_type or "").strip()
+    _fin_q: Dict[str, Any] = {"month": payload.month, "finalized": True}
+    if payload.company_id:
+        _fin_q["company_id"] = payload.company_id
+    _fin_q["employee_type"] = (
+        {"$regex": f"^{re.escape(_grp0)}$", "$options": "i"} if _grp0
+        else {"$in": [None, ""]}
+    )
+    if await db.compliance_salary_runs.find_one(_fin_q, {"_id": 1}):
+        raise HTTPException(
+            status_code=409,
+            detail="This month's Compliance salary is already FINALIZED for this "
+                   "employee group — it cannot be processed again. Use Unlock "
+                   "Request to de-finalize first.",
+        )
+    # Iter 297 (user directive) — NON-DESTRUCTIVE REPROCESS: when a draft
+    # run already exists for this firm + month + group, its rows are
+    # passed into the compute so the previously ENTERED days / manual
+    # deductions are KEPT (updated in place — never reset to zero).
+    _prev_run = await db.compliance_salary_runs.find_one(
+        {
+            "month": payload.month,
+            "company_id": _gate_cid,
+            "employee_type": (
+                {"$regex": f"^{re.escape(_grp0)}$", "$options": "i"} if _grp0
+                else {"$in": [None, ""]}
+            ),
+            "finalized": {"$ne": True},
+        },
+        {"_id": 0, "rows": 1},
+        sort=[("generated_at", -1)],
+    )
+    _prev_rows: Dict[str, dict] = {
+        r.get("user_id"): r for r in ((_prev_run or {}).get("rows") or [])
+    }
+    # Iter 330 (user request) — "Copy Last Month Salary": build this
+    # month's run as an EXACT copy of last month's rows instead of
+    # recomputing from attendance / master.
+    if payload.copy_last_month:
+        run = await _copy_last_month_compliance_run(
+            admin, payload, _gate_cid, _grp0)
+    else:
+        run = await _compute_compliance_run(admin, payload, prev_rows=_prev_rows)
+    run["run_id"] = f"csrun_{uuid.uuid4().hex[:12]}"
+    if _prev_rows and not payload.copy_last_month:
+        run["reprocessed"] = True
+    # Iter 310 — FREEZE SALARY: imported-sheet runs freeze the exact
+    # imported attendance/earnings at process time.
+    if payload.use_imported_sheet:
+        run["frozen"] = True
+        run["frozen_at"] = now_iso()
+        run["freeze_snapshot_id"] = f"frz_{uuid.uuid4().hex[:12]}"
+    # Advance Management — auto-deduct active advance EMIs / single-shot
+    # recoveries into the rows (idempotent per month+process).
+    from routes.advances import apply_advance_recovery
+    _adv_total = await apply_advance_recovery(
+        payload.company_id, payload.month, "compliance", run["run_id"], run["rows"])
+    if _adv_total or any(r.get("advance_recovery") for r in run["rows"]):
+        t = run.get("totals") or {}
+        t["advance_recovery"] = round(sum(float(r.get("advance_recovery") or 0) for r in run["rows"]), 2)
+        t["total_deduction"] = round(sum(float(r.get("total_deduction") or 0) for r in run["rows"]), 2)
+        t["net"] = round(sum(float(r.get("net") or 0) for r in run["rows"]), 2)
+        run["totals"] = t
+    # Iter 174 (user directive) — REPLACE old data: a fresh process for the
+    # same firm + month + employee group deletes the previous draft run(s)
+    # so only the newest data exists (finalized runs are already blocked
+    # above and are never touched).
+    _grp = (payload.employee_type or "").strip()
+    await db.compliance_salary_runs.delete_many({
+        "month": payload.month,
+        # Iter 297 — scope by the EFFECTIVE firm (company_admin's own firm
+        # when the payload omits company_id) so old drafts never pile up.
+        "company_id": _gate_cid,
+        "employee_type": (
+            {"$regex": f"^{re.escape(_grp)}$", "$options": "i"} if _grp
+            else {"$in": [None, ""]}
+        ),
+        "finalized": {"$ne": True},
+    })
+    await db.compliance_salary_runs.insert_one(run)
+    # Iter 310 — immutable Freeze Salary snapshot (never edited by
+    # save-rows / reprocess — kept as the audit copy of what was imported
+    # and how the difference was allocated).
+    if payload.use_imported_sheet:
+        await db.freeze_salary_snapshots.insert_one({
+            "snapshot_id": run["freeze_snapshot_id"],
+            "run_id": run["run_id"],
+            "month": payload.month,
+            "company_id": _gate_cid,
+            "employee_type": _grp or None,
+            "source": "imported_sheet",
+            "frozen_at": run["frozen_at"],
+            "frozen_by": admin["user_id"],
+            "rows": [
+                {k: r.get(k) for k in (
+                    "user_id", "name", "employee_code", "present_days",
+                    "imported_gross", "calculated_gross", "difference",
+                    "difference_allocation_head", "ot_pay", "others",
+                    "monthly_gross", "gross_paid", "total_deduction", "net",
+                )} for r in run.get("rows") or []
+            ],
+        })
+    # Iter 182 — audit trail
+    from routes.salary_audit import write_salary_audit
+    _audit_msg = (
+        f"Copied {len(run.get('rows') or [])} employees from "
+        f"{run.get('copied_from_month')} (Copy Last Month Salary)"
+        if payload.copy_last_month
+        else f"Processed {len(run.get('rows') or [])} employees"
+    )
+    await write_salary_audit(admin, "process", run, _audit_msg)
+    return {"ok": True, "run": {k: v for k, v in run.items() if k != "_id"}}
+
+
+@api.get("/admin/compliance-salary-runs")
+async def list_compliance_salary_runs(
+    company_id: Optional[str] = Query(None),
+    company_ids: Optional[List[str]] = Query(
+        None, description="Cross-firm filter. Ignored for company_admin."
+    ),
+    month: Optional[str] = Query(None),
+    fy_start_year: Optional[int] = Query(None),
+    finalized_only: bool = Query(
+        False, description="Iter 174 — only FINALIZED runs (Automation screens), "
+                           "deduped to the newest run per firm+month+group."),
+    authorization: Optional[str] = Header(None),
+):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    # Iter 62 — Compliance is OPT-IN for company admins.
+    await require_employer_permission(admin, "compliance_salary:read", db)
+    q: dict = {}
+    if admin["role"] == "company_admin":
+        q["company_id"] = admin.get("company_id")
+    elif company_ids:
+        cleaned = [c for c in company_ids if c]
+        if cleaned:
+            q["company_id"] = {"$in": cleaned}
+    elif company_id:
+        q["company_id"] = company_id
+    if month:
+        q["month"] = month
+    if fy_start_year is not None:
+        y = int(fy_start_year)
+        q["month"] = q.get("month") or {"$gte": f"{y}-04", "$lte": f"{y + 1}-03"}
+    if finalized_only:
+        q["finalized"] = True
+    runs = await db.compliance_salary_runs.find(
+        q, {"_id": 0, "rows": 0},
+    ).sort("generated_at", -1).to_list(500)
+    if finalized_only:
+        # Keep only the NEWEST run per firm + month + employee group so
+        # replaced/reprocessed data never shows alongside the old copy.
+        seen: set = set()
+        deduped = []
+        for r in runs:
+            key = (r.get("company_id"), r.get("month"), r.get("employee_type"))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(r)
+        runs = deduped
+    # Iter 85 — Enrich with generator/finalizer names for audit display.
+    uids: set = set()
+    for r in runs:
+        for k in ("generated_by", "finalized_by", "updated_by"):
+            v = r.get(k)
+            if v:
+                uids.add(v)
+    name_by_uid: dict = {}
+    if uids:
+        async for u in db.users.find(
+            {"user_id": {"$in": list(uids)}},
+            {"_id": 0, "user_id": 1, "name": 1, "role": 1},
+        ):
+            name_by_uid[u["user_id"]] = {
+                "name": u.get("name") or "—",
+                "role": u.get("role") or "",
+            }
+    for r in runs:
+        for src_key, name_key, role_key in (
+            ("generated_by", "generated_by_name", "generated_by_role"),
+            ("finalized_by", "finalized_by_name", "finalized_by_role"),
+            ("updated_by", "updated_by_name", "updated_by_role"),
+        ):
+            uid = r.get(src_key)
+            if uid and uid in name_by_uid:
+                r[name_key] = name_by_uid[uid]["name"]
+                r[role_key] = name_by_uid[uid]["role"]
+    return {"runs": runs}
+
+
+@api.get("/admin/compliance-salary-runs/{run_id}")
+async def get_compliance_salary_run(
+    run_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    await require_employer_permission(admin, "compliance_salary:read", db)
+    run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Compliance salary run not found")
+    if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised for this run")
+    return {"run": run}
+
+
+@api.post("/admin/compliance-salary-runs/{run_id}/save-rows")
+async def save_compliance_run_rows(
+    run_id: str,
+    payload: Dict[str, Any] = Body(default={}),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 145 — P0 fix: persist grid edits (Present Days, Others, Other
+    Deduction and their recomputed row values) made in the Compliance
+    Salary sheet. Previously "Save as Draft" saved NOTHING — every edit
+    was client-side only and vanished when the run was reopened."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    await require_employer_permission(admin, "compliance_salary:write", db)
+    run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Compliance salary run not found")
+    if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised for this run")
+    if run.get("finalized"):
+        raise HTTPException(status_code=400, detail="Run is finalized (read-only). Unlock it first.")
+
+    rows = payload.get("rows")
+    if not isinstance(rows, list) or not rows:
+        raise HTTPException(status_code=400, detail="rows list is required")
+    # Sanity: the incoming rows must match the run's employees (no adding /
+    # dropping rows through this endpoint).
+    existing_ids = {r.get("user_id") for r in (run.get("rows") or [])}
+    incoming_ids = {r.get("user_id") for r in rows}
+    if incoming_ids != existing_ids:
+        raise HTTPException(status_code=400, detail="Row set does not match this run — reload and retry.")
+
+    updates: Dict[str, Any] = {
+        "rows": rows,
+        "draft_saved_at": now_iso(),
+        "draft_saved_by": admin["user_id"],
+    }
+    totals = payload.get("totals")
+    if isinstance(totals, dict) and totals:
+        updates["totals"] = totals
+    await db.compliance_salary_runs.update_one({"run_id": run_id}, {"$set": updates})
+    # Iter 182 — audit trail
+    from routes.salary_audit import write_salary_audit
+    await write_salary_audit(admin, "save_rows", run,
+                             f"Saved draft edits for {len(rows)} rows")
+    return {"ok": True, "draft_saved_at": updates["draft_saved_at"]}
+
+
+@api.post("/admin/compliance-salary-runs/{run_id}/finalize")
+async def finalize_compliance_salary_run(
+    run_id: str,
+    payload: Optional[Dict[str, Any]] = Body(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 91 — Save/Finalize a compliance salary run. Marks the run as
+    finalized (read-only): reprocessing is blocked until unfinalized.
+
+    Iter 388 (Phase 3) — SALARY LOCK VALIDATION: the PF/ESIC Validation
+    Engine runs automatically. ERRORS always block the lock; WARNINGS
+    block unless a Super Admin locks with ``{"allow_warnings": true}``
+    (user-approved override policy)."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    await require_employer_permission(admin, "compliance_salary:write", db)
+    run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Compliance salary run not found")
+    if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised for this run")
+    if run.get("finalized"):
+        return {"ok": True, "already_finalized": True,
+                "finalized_at": run.get("finalized_at")}
+
+    # Iter 388 — pre-lock validation gate.
+    from routes.compliance_validation import validate_compliance_run
+    validation = await validate_compliance_run(run)
+    allow_warnings = bool((payload or {}).get("allow_warnings"))
+    if validation["errors_count"] > 0:
+        raise HTTPException(status_code=422, detail={
+            "message": f"Salary Lock blocked — {validation['errors_count']} error(s) "
+                       f"and {validation['warnings_count']} warning(s) found.",
+            "validation": validation,
+        })
+    if validation["warnings_count"] > 0 and not (
+            allow_warnings and admin["role"] == "super_admin"):
+        raise HTTPException(status_code=409, detail={
+            "message": f"Salary Lock blocked — {validation['warnings_count']} warning(s). "
+                       "A Super Admin can lock anyway with the override.",
+            "validation": validation,
+            "can_override": admin["role"] == "super_admin",
+        })
+
+    stamp = {
+        "finalized": True,
+        "finalized_at": now_iso(),
+        "finalized_by": admin["user_id"],
+        # Iter 388 — lock-time validation summary stored on the run.
+        "lock_validation": {
+            "errors_count": validation["errors_count"],
+            "warnings_count": validation["warnings_count"],
+            "employees_flagged": validation["employees_flagged"],
+            "warnings_overridden": bool(validation["warnings_count"] and allow_warnings),
+            "checked_at": validation["checked_at"],
+        },
+    }
+    await db.compliance_salary_runs.update_one({"run_id": run_id}, {"$set": stamp})
+    logger.info("[compliance-run] finalized run=%s by %s", run_id, admin["user_id"])
+    # Iter 388 (Phase 4) — append-only monthly statutory snapshot.
+    try:
+        from routes.compliance_validation import write_monthly_snapshot
+        await write_monthly_snapshot(run, admin, stamp["lock_validation"])
+    except Exception as _snap_err:  # snapshot must never block the lock
+        logger.warning("[compliance-run] snapshot failed run=%s: %s", run_id, _snap_err)
+    # Iter 182 — audit trail
+    from routes.salary_audit import write_salary_audit
+    await write_salary_audit(
+        admin, "finalize", run,
+        "Run finalized (locked)"
+        + (f" — {validation['warnings_count']} warning(s) OVERRIDDEN by Super Admin"
+           if validation["warnings_count"] and allow_warnings else ""))
+    # Iter 103 — automated email trigger
+    try:
+        from routes.email_notifications import fire_email_event
+        await fire_email_event("salary_finalized", company_id=run.get("company_id"),
+                               details=f"Compliance Salary {run.get('month')}")
+    except Exception:
+        pass
+    return {"ok": True, **stamp}
+
+
+@api.post("/admin/compliance-salary-runs/{run_id}/unlock-request")
+async def request_compliance_run_unlock(
+    run_id: str,
+    payload: Dict[str, Any] = Body(default={}),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 126h — a FINALIZED run is locked for everyone. Sub admins /
+    employers must raise an unlock request that the Super Admin approves
+    before any change is possible. Super admin unlock is immediate."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    await require_employer_permission(admin, "compliance_salary:write", db)
+    run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Compliance salary run not found")
+    if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised for this run")
+    if not run.get("finalized"):
+        return {"ok": True, "already_unlocked": True}
+    reason = (payload.get("reason") or "").strip()
+    # Iter 371 (user request) — Sub Admins (S.K. Sharma staff) unlock
+    # IMMEDIATELY like the Super Admin; only employer company admins go
+    # through the approval-request flow.
+    if admin["role"] in ("super_admin", "sub_admin"):
+        await db.compliance_salary_runs.update_one(
+            {"run_id": run_id},
+            {"$set": {
+                "finalized": False,
+                "unlocked_at": now_iso(),
+                "unlocked_by": admin["user_id"],
+                "unlock_reason": reason or f"{admin['role']} unlock",
+            }},
+        )
+        logger.info("[compliance-run] unlocked run=%s by %s %s",
+                    run_id, admin["role"], admin["user_id"])
+        return {"ok": True, "unlocked": True}
+    dup = await db.salary_unlock_requests.find_one(
+        {"run_id": run_id, "status": "pending"}, {"_id": 0, "req_id": 1})
+    if dup:
+        return {"ok": True, "pending": True, "req_id": dup["req_id"],
+                "message": "An unlock request is already pending approval."}
+    req = {
+        "req_id": f"sur_{uuid.uuid4().hex[:12]}",
+        "run_id": run_id,
+        "run_type": "compliance",
+        "company_id": run.get("company_id"),
+        "month": run.get("month"),
+        "reason": reason,
+        "requested_by": admin["user_id"],
+        "requested_by_name": admin.get("name") or admin.get("email") or "",
+        "requested_by_role": admin["role"],
+        "status": "pending",
+        "created_at": now_iso(),
+    }
+    await db.salary_unlock_requests.insert_one(req)
+    req.pop("_id", None)
+    return {"ok": True, "pending": True, "req_id": req["req_id"],
+            "message": "Unlock request sent to the Super Admin for approval."}
+
+
+@api.get("/admin/salary-unlock-requests")
+async def list_salary_unlock_requests(
+    status: Optional[str] = None,
+    run_id: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 126h — pending finalized-salary unlock requests. Super admin
+    sees all; requesters see their own (to show 'pending' state)."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    q: Dict[str, Any] = {}
+    if status:
+        q["status"] = status
+    if run_id:
+        q["run_id"] = run_id
+    if admin["role"] != "super_admin":
+        q["requested_by"] = admin["user_id"]
+    rows = await db.salary_unlock_requests.find(q, {"_id": 0}).sort(
+        "created_at", -1).to_list(200)
+    return {"requests": rows}
+
+
+@api.post("/admin/salary-unlock-requests/{req_id}/decide")
+async def decide_salary_unlock_request(
+    req_id: str,
+    payload: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 126h — Super Admin (only) approves/rejects an unlock request.
+    Approval unfinalizes the run so changes become possible again."""
+    admin = await get_user_from_token(authorization)
+    require_super_admin_strict(admin)
+    req = await db.salary_unlock_requests.find_one({"req_id": req_id}, {"_id": 0})
+    if not req:
+        raise HTTPException(status_code=404, detail="Unlock request not found")
+    if req.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="Request already decided")
+    approve = bool(payload.get("approve"))
+    note = (payload.get("note") or "").strip()
+    await db.salary_unlock_requests.update_one(
+        {"req_id": req_id},
+        {"$set": {
+            "status": "approved" if approve else "rejected",
+            "decided_by": admin["user_id"],
+            "decided_at": now_iso(),
+            "decision_note": note,
+        }},
+    )
+    if approve:
+        await db.compliance_salary_runs.update_one(
+            {"run_id": req["run_id"]},
+            {"$set": {
+                "finalized": False,
+                "unlocked_at": now_iso(),
+                "unlocked_by": admin["user_id"],
+                "unlock_reason": req.get("reason") or "Approved unlock request",
+            }},
+        )
+        logger.info("[compliance-run] unlock APPROVED run=%s req=%s", req["run_id"], req_id)
+        # Iter 182 — audit trail
+        from routes.salary_audit import write_salary_audit
+        run_doc = await db.compliance_salary_runs.find_one(
+            {"run_id": req["run_id"]}, {"_id": 0, "run_id": 1, "company_id": 1,
+                                        "company_name": 1, "month": 1})
+        await write_salary_audit(admin, "unlock", run_doc or {"run_id": req["run_id"]},
+                                 f"Unlock approved — {note or 'no note'}")
+    return {"ok": True, "approved": approve}
+
+
+@api.post("/admin/compliance-salary-runs/{run_id}/reprocess")
+async def reprocess_compliance_salary_run(
+    run_id: str,
+    payload: Optional[ComplianceSalaryRunCreate] = None,
+    authorization: Optional[str] = Header(None),
+):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    await require_employer_permission(admin, "compliance_salary:write", db)
+    existing = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Compliance salary run not found")
+    if admin["role"] == "company_admin" and existing.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised for this run")
+    if existing.get("finalized"):
+        raise HTTPException(
+            status_code=409,
+            detail="Run is finalized and read-only. Unfinalize it first to reprocess.",
+        )
+    # Iter 98 — Firm Master gate: Online Salary must be enabled for the firm.
+    await _require_firm_salary_permission(existing.get("company_id"), "online")
+
+    if payload is None:
+        payload = ComplianceSalaryRunCreate(
+            month=existing["month"],
+            company_id=existing.get("company_id"),
+            month_days=existing.get("month_days"),
+            employee_type=existing.get("employee_type"),
+            is_onroll=existing.get("is_onroll_filter"),
+            structure_pct=existing.get("structure_pct"),
+            statutory_cfg=existing.get("statutory_cfg"),
+        )
+    run = await _compute_compliance_run(admin, payload)
+    run["run_id"] = run_id
+    run["reprocessed_from_at"] = existing.get("generated_at")
+    # Advance Management — re-apply (idempotent) advance deductions so the
+    # reprocessed sheet still shows the recovery lines.
+    from routes.advances import apply_advance_recovery
+    _adv_total = await apply_advance_recovery(
+        existing.get("company_id"), existing["month"], "compliance", run_id, run["rows"])
+    if _adv_total or any(r.get("advance_recovery") for r in run["rows"]):
+        t = run.get("totals") or {}
+        t["advance_recovery"] = round(sum(float(r.get("advance_recovery") or 0) for r in run["rows"]), 2)
+        t["total_deduction"] = round(sum(float(r.get("total_deduction") or 0) for r in run["rows"]), 2)
+        t["net"] = round(sum(float(r.get("net") or 0) for r in run["rows"]), 2)
+        run["totals"] = t
+    await db.compliance_salary_runs.replace_one({"run_id": run_id}, run)
+    return {"ok": True, "run": {k: v for k, v in run.items() if k != "_id"}}
+
+
+async def _ensure_firm_head_masks(run: dict) -> dict:
+    """Iter 378 (user request) — OLD runs (saved before the head masks were
+    stamped on rows, incl. Copy-Last-Month / legacy imports) get the LIVE
+    Firm Master Allowance/Deduction masks stamped at EXPORT time, so the
+    PDF / Excel / CSV registers match the on-screen grid and the current
+    Firm Master settings."""
+    rows = run.get("rows") or []
+    if not rows:
+        return run
+    r0 = rows[0]
+    if r0.get("enabled_allowances") is not None \
+            and r0.get("enabled_deductions") is not None:
+        return run
+    fm = await db.firm_masters.find_one(
+        {"company_id": run.get("company_id")},
+        {"_id": 0, "allowances": 1, "deductions": 1, "epf": 1, "esi": 1})
+    if not fm:
+        return run
+    _fm_allow = fm.get("allowances") or {}
+    _fm_ded = fm.get("deductions") or {}
+    _amap = {"HRA": "hra", "CONV.": "conveyance",
+             "MEDICAL ALLOWANCES": "medical", "OTH. ALLOW.": "special",
+             "OTHER MISC.ALLOWANCE": "others"}
+    allow_mask = (sorted({h for lbl, h in _amap.items()
+                          if _fm_allow.get(lbl)} | {"basic"})
+                  if _fm_allow else None)
+    _epf_ap = (fm.get("epf") or {}).get("applicable")
+    _esi_ap = (fm.get("esi") or {}).get("applicable")
+    ded_configured = (any(bool(v) for v in _fm_ded.values())
+                      or _epf_ap is not None or _esi_ap is not None)
+    ded_mask: Optional[list] = None
+    if ded_configured:
+        dm = set()
+        if (_epf_ap if _epf_ap is not None else _fm_ded.get("PF")):
+            dm.add("pf")
+        if (_esi_ap if _esi_ap is not None else _fm_ded.get("ESI")):
+            dm.add("esi")
+        if _fm_ded.get("PT"):
+            dm.add("pt")
+        if _fm_ded.get("TDS") or _fm_ded.get("I. TAX"):
+            dm.add("tds")
+        ded_mask = sorted(dm)
+    for r in rows:
+        if allow_mask is not None and r.get("enabled_allowances") is None:
+            r["enabled_allowances"] = allow_mask
+        if ded_mask is not None and r.get("enabled_deductions") is None:
+            r["enabled_deductions"] = ded_mask
+    return run
+
+
+@api.get("/admin/compliance-salary-runs/{run_id}/export.csv")
+async def export_compliance_salary_run_csv(
+    run_id: str,
+    sort_by: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+):
+    from utils.compliance_salary import to_csv
+    from fastapi.responses import Response
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    await require_employer_permission(admin, "compliance_salary:read", db)
+    run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Compliance salary run not found")
+    if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised for this run")
+    run = await _ensure_firm_head_masks(run)
+    csv_str = to_csv(_sort_export_rows(run.get("rows") or [], sort_by))
+    return Response(
+        content=csv_str,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="ComplianceSalary_{run.get("month")}_{run_id}.csv"',
+        },
+    )
+
+
+@api.get("/admin/compliance-salary-runs/{run_id}/export.xlsx")
+async def export_compliance_salary_run_xlsx(
+    run_id: str,
+    sort_by: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 64 — native Excel export for Compliance Salary runs."""
+    from utils.compliance_salary import dynamic_csv_columns
+    from utils.report_xlsx import build_rows_xlsx
+    from fastapi.responses import Response
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    await require_employer_permission(admin, "compliance_salary:read", db)
+    run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Compliance salary run not found")
+    if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised for this run")
+    run = await _ensure_firm_head_masks(run)
+    company_name = "S.K. Sharma & Co."
+    if run.get("company_id"):
+        c = await db.companies.find_one(
+            {"company_id": run["company_id"]}, {"_id": 0, "name": 1}
+        )
+        if c and c.get("name"):
+            company_name = c["name"]
+    xlsx_bytes = build_rows_xlsx(
+        # Iter 373 (user request) — dynamic firm-wise heads (matches PDF).
+        columns=dynamic_csv_columns(run.get("rows") or []),
+        rows=_sort_export_rows(run.get("rows") or [], sort_by),
+        sheet_name="Compliance",
+        title=f"Compliance Salary — {company_name}",
+        subtitle=f"Month: {run.get('month')} · Employees: {len(run.get('rows') or [])}",
+    )
+    return Response(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="ComplianceSalary_{run.get("month")}_{run_id}.xlsx"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@api.get("/admin/compliance-salary-runs/{run_id}/register.pdf")
+async def export_compliance_salary_register_pdf(
+    run_id: str,
+    variant: int = 1,
+    sort_by: str = "",
+    group_by: str = "",
+    authorization: Optional[str] = Header(None),
+):
+    from utils.compliance_salary import (
+        build_compliance_register_pdf,
+        build_compliance_register_pdf_v2,
+    )
+    from fastapi.responses import Response
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    await require_employer_permission(admin, "compliance_salary:read", db)
+    run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Compliance salary run not found")
+    if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised for this run")
+    run = await _ensure_firm_head_masks(run)
+
+    # Iter 324 (user request) — SORTING + GROUPING on the register PDF.
+    sort_by = str(sort_by or "").strip().lower()
+    group_by = str(group_by or "").strip().lower()
+    if sort_by not in ("", "name", "code", "designation", "department"):
+        sort_by = ""
+    if group_by not in ("", "employee_group", "department", "designation"):
+        group_by = ""
+    _rows = list(run.get("rows") or [])
+    if sort_by or group_by:
+        # Enrich rows with department / employee group from the Employee
+        # Master (older runs may not carry these fields on the row).
+        _uids = [r.get("user_id") for r in _rows if r.get("user_id")]
+        _umap = {u["user_id"]: u async for u in db.users.find(
+            {"user_id": {"$in": _uids}},
+            {"_id": 0, "user_id": 1, "employee_code": 1, "department": 1,
+             "employee_group": 1, "employee_type": 1, "designation": 1})}
+        for r in _rows:
+            u = _umap.get(r.get("user_id")) or {}
+            r.setdefault("department", u.get("department") or "")
+            r.setdefault("employee_code", u.get("employee_code") or "")
+            if not r.get("employee_group"):
+                r["employee_group"] = (u.get("employee_group")
+                                       or u.get("employee_type") or "")
+
+        def _code_key(r):
+            c = str(r.get("employee_code") or "").strip()
+            try:
+                return (0, float(c), "")
+            except ValueError:
+                return (1, 0.0, c.upper())
+
+        def _sort_key(r):
+            if sort_by == "code":
+                return _code_key(r)
+            if sort_by == "designation":
+                return (str(r.get("designation") or "").upper(), str(r.get("name") or "").upper())
+            if sort_by == "department":
+                return (str(r.get("department") or "").upper(), str(r.get("name") or "").upper())
+            return (str(r.get("name") or "").upper(),)
+
+        def _grp_val(r):
+            if group_by == "employee_group":
+                return str(r.get("employee_group") or "No Group").upper()
+            if group_by == "department":
+                return str(r.get("department") or "No Department").upper()
+            if group_by == "designation":
+                return str(r.get("designation") or "No Designation").upper()
+            return ""
+
+        if group_by:
+            _rows.sort(key=lambda r: (_grp_val(r),) + tuple(_sort_key(r)))
+        elif sort_by:
+            _rows.sort(key=_sort_key)
+        run = {**run, "rows": _rows}
+
+    company_name = "S.K. Sharma & Co."
+    firm_info: Dict[str, Any] = {}
+    if run.get("company_id"):
+        c = await db.companies.find_one(
+            {"company_id": run["company_id"]}, {"_id": 0, "name": 1, "address": 1},
+        )
+        if c and c.get("name"):
+            company_name = c["name"]
+        fm = await db.firm_masters.find_one(
+            {"company_id": run["company_id"]},
+            {"_id": 0, "epf": 1, "esi": 1, "registered_address": 1},
+        )
+        # Iter 137 (user directive) — the register shows the firm's
+        # REGISTERED address from the Firm Master, NOT the geofence
+        # office address. Falls back to the company address only when
+        # no registered address has been filled in.
+        ra = (fm or {}).get("registered_address") or {}
+        reg_addr = ", ".join(str(x).strip() for x in [
+            ra.get("address1"), ra.get("address2"), ra.get("city"),
+            ra.get("state"), ra.get("pin_code"),
+        ] if x and str(x).strip())
+        firm_info["address"] = reg_addr or ((c or {}).get("address") or "")
+        firm_info["pf_code"] = ((fm or {}).get("epf") or {}).get("epf_no") or ""
+        firm_info["esi_code"] = ((fm or {}).get("esi") or {}).get("esi_no") or ""
+    builder = build_compliance_register_pdf_v2 if int(variant or 1) == 2 else build_compliance_register_pdf
+    # Iter 306 (user #10) — saved title override from the Report Formats editor.
+    from routes.report_formats import get_report_format
+    _fmt_id = "compliance_register_v2" if int(variant or 1) == 2 else "compliance_register_v1"
+    _title_ov = str((await get_report_format(_fmt_id)).get("title") or "").strip()
+    if int(variant or 1) == 2:
+        # Iter 162 — apply the ONE-TIME saved register layout (columns /
+        # order / headings / widths / rows-per-page / row height).
+        _lay = await db.app_settings.find_one(
+            {"key": "compliance_register_layout"}, {"_id": 0, "layout": 1})
+        pdf_bytes = builder(run, company_name=company_name, firm=firm_info,
+                            layout=(_lay or {}).get("layout"), title_override=_title_ov,
+                            group_by=group_by)
+    else:
+        pdf_bytes = builder(run, company_name=company_name, firm=firm_info,
+                            title_override=_title_ov, group_by=group_by)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="ComplianceSalaryRegister_{run.get("month")}_{run_id}.pdf"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@api.get("/admin/compliance-salary-runs/{run_id}/pf-ecr.txt")
+async def download_pf_ecr(
+    run_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """PF ECR (Electronic Challan cum Return) text file for one month.
+
+    Layout (hash-separated, no header): ``UAN#NAME#GROSS#EPF_WAGES#
+    EPS_WAGES#EDLI_WAGES#EPF_CONTRIB#EPS_CONTRIB#EPF_EPS_DIFF#NCP#REFUND``.
+    Uploaded on the EPFO Unified Portal ▸ ECR & Return.
+    """
+    from fastapi.responses import Response
+    from utils.statutory_bulk import build_pf_ecr_txt
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    await require_employer_permission(admin, "compliance_salary:read", db)
+    run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Compliance salary run not found")
+    if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised for this run")
+
+    rows = run.get("rows") or run.get("lines") or []
+    # Enrich with user master fields (UAN) if not already on the row.
+    uids = [r.get("user_id") for r in rows if r.get("user_id") and not r.get("uan_no")]
+    if uids:
+        async for u in db.users.find(
+            {"user_id": {"$in": uids}},
+            {"_id": 0, "user_id": 1, "uan_no": 1},
+        ):
+            for r in rows:
+                if r.get("user_id") == u["user_id"]:
+                    r["uan_no"] = u.get("uan_no")
+    body = build_pf_ecr_txt(rows)
+    fname = f"PF_ECR_{run.get('month')}.txt"
+    return Response(
+        content=body,
+        media_type="text/plain",
+        headers={
+            "Content-Disposition": f'attachment; filename="{fname}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@api.get("/admin/compliance-salary-runs/{run_id}/esic-mc.csv")
+async def download_esic_mc(
+    run_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """ESIC Monthly Contribution CSV for the ESIC Insurance Portal."""
+    from fastapi.responses import Response
+    from utils.statutory_bulk import build_esic_mc_csv
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    await require_employer_permission(admin, "compliance_salary:read", db)
+    run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Compliance salary run not found")
+    if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised for this run")
+
+    rows = run.get("rows") or run.get("lines") or []
+    uids = [r.get("user_id") for r in rows if r.get("user_id") and not r.get("esi_ip_no")]
+    if uids:
+        async for u in db.users.find(
+            {"user_id": {"$in": uids}},
+            {"_id": 0, "user_id": 1, "esi_ip_no": 1},
+        ):
+            for r in rows:
+                if r.get("user_id") == u["user_id"]:
+                    r["esi_ip_no"] = u.get("esi_ip_no")
+    body = build_esic_mc_csv(rows)
+    fname = f"ESIC_MC_{run.get('month')}.csv"
+    return Response(
+        content=body,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="{fname}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@api.get("/admin/compliance-salary-runs/{run_id}/esic-ip-reg.csv")
+async def download_esic_ip_reg(
+    run_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """ESIC Insured-Person Registration CSV (only new joiners).
+
+    Includes only employees that DO NOT yet have an ``esi_ip_no`` in
+    the master.  Once the portal returns an IP number for each row the
+    operator should update the employee master so the row falls off
+    subsequent monthly files.
+    """
+    from fastapi.responses import Response
+    from utils.statutory_bulk import build_esic_ip_reg_csv
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    await require_employer_permission(admin, "compliance_salary:read", db)
+    run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Compliance salary run not found")
+    if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised for this run")
+
+    rows = run.get("rows") or run.get("lines") or []
+    # Enrich with the full employee master so we have DOB, addresses, PAN…
+    uids = [r.get("user_id") for r in rows if r.get("user_id")]
+    if uids:
+        async for u in db.users.find(
+            {"user_id": {"$in": uids}},
+            {"_id": 0, "user_id": 1, "esi_ip_no": 1, "dob": 1, "doj": 1,
+             "gender": 1, "father_name": 1, "aadhaar_no": 1, "pan_no": 1,
+             "phone": 1, "address": 1, "permanent_address": 1,
+             "bank_ifsc": 1, "marital_status": 1},
+        ):
+            for r in rows:
+                if r.get("user_id") == u["user_id"]:
+                    for k, v in u.items():
+                        r.setdefault(k, v)
+    body = build_esic_ip_reg_csv(rows)
+    fname = f"ESIC_IP_Registration_{run.get('month')}.csv"
+    return Response(
+        content=body,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="{fname}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@api.post("/admin/compliance-salary-runs/{run_id}/generate-payslips")
+async def generate_compliance_payslips_from_run(
+    run_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Push a compliance run into per-employee compliance-payslip records.
+    Stored separately (kind='compliance') so the base + compliance payslips
+    don't collide."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    await require_employer_permission(admin, "compliance_salary:write", db)
+    run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Compliance salary run not found")
+    if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised for this run")
+
+    month = run["month"]
+    created = 0
+    skipped_pre_doj = 0
+    for r in (run.get("rows") or []):
+        uid = r.get("user_id")
+        if not uid:
+            continue
+        # Iter 57 — never generate a compliance payslip for a month before DOJ.
+        emp = await db.users.find_one({"user_id": uid}, {"_id": 0, "doj": 1})
+        if emp and _month_is_before_doj(emp, month):
+            skipped_pre_doj += 1
+            continue
+        # Replace existing compliance slip for this employee+month
+        await db.payslips.delete_many({
+            "employee_user_id": uid, "month": month, "kind": "compliance",
+        })
+        slip = {
+            "slip_id": f"cslp_{uuid.uuid4().hex[:12]}",
+            "kind": "compliance",
+            "employee_user_id": uid,
+            "company_id": r.get("company_id") or run.get("company_id"),
+            "month": month,
+            "gross": r.get("gross_paid", 0.0),
+            "deductions": r.get("total_deduction", 0.0),
+            "net": r.get("net", 0.0),
+            "status": "paid",
+            "generated_by": admin["user_id"],
+            "generated_at": now_iso(),
+            "compliance_salary_run_id": run_id,
+            "breakup": {
+                "basic": r.get("basic"),
+                "hra": r.get("hra"),
+                "conveyance": r.get("conveyance"),
+                "medical": r.get("medical"),
+                "special": r.get("special"),
+                "others": r.get("others"),
+                "ot_pay": r.get("ot_pay"),
+                "stat_wage_base": r.get("stat_wage_base"),
+                "pf_wages": r.get("pf_wages"),
+                "pf_employee": r.get("pf_employee"),
+                "pf_employer_total": r.get("pf_employer_total"),
+                "esic_wage_base": r.get("esic_wage_base"),
+                "esic_employee": r.get("esic_employee"),
+                "esic_employer": r.get("esic_employer"),
+                "pt_state": r.get("pt_state"),
+                "pt": r.get("pt"),
+                "tds": r.get("tds"),
+                "present_days": r.get("present_days"),
+                "half_days": r.get("half_days"),
+                "month_days": r.get("month_days"),
+            },
+        }
+        await db.payslips.insert_one(slip)
+        created += 1
+    await db.compliance_salary_runs.update_one(
+        {"run_id": run_id},
+        {"$set": {"payslips_generated_at": now_iso(), "payslips_count": created}},
+    )
+    return {"ok": True, "payslips_count": created, "skipped_pre_doj": skipped_pre_doj}
+
+
+
+@api.get("/admin/compliance-salary-runs/{run_id}/ecr.txt")
+async def download_ecr_file(run_id: str, authorization: Optional[str] = Header(None)):
+    """Download the EPFO ECR (Electronic Challan return) text file for a
+    compliance salary run. Super admin uploads this to unifiedportal-emp.epfindia.gov.in.
+    Supports optional ?group_id= filter to only include employees in that
+    Employee Group."""
+    from utils.master_sheet import build_ecr_text
+    from fastapi.responses import Response
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    await require_employer_permission(admin, "compliance_salary:read", db)
+    run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Compliance salary run not found")
+    if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised")
+    # Iter 341 — stamp the Employee Master "EPS Disable" flag on rows
+    # (works for runs generated before the flag existed too).
+    _rows_e = run.get("rows") or []
+    _uids_e = [r.get("user_id") for r in _rows_e if r.get("user_id")]
+    if _uids_e:
+        async for u in db.users.find(
+            {"user_id": {"$in": _uids_e}, "eps_disabled": True},
+            {"_id": 0, "user_id": 1},
+        ):
+            for r in _rows_e:
+                if r.get("user_id") == u["user_id"]:
+                    r["eps_disabled"] = True
+    txt = build_ecr_text(run)
+    return Response(
+        content=txt,
+        media_type="text/plain",
+        headers={"Content-Disposition": f'attachment; filename="ECR_{run.get("month")}.txt"'},
+    )
+

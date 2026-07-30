@@ -1,0 +1,37 @@
+{
+  "summary": "Iter 394 — Backend-only regression for the compliance-salary-runs refactor (2,200-line block extracted from server.py to /app/backend/routes/compliance_salary_runs.py; 4 shared helpers re-imported; duplicated router registrations de-duped). 23/23 pytest cases green covering all requested paths. No NameError / 500 observed for the refactor's endpoints during the test session. Existing production run csrun_bca09c4a4cec (2026-07) was NOT modified — verified via DB re-read. Test data (test month 2026-08 run + temp employee) was fully cleaned up.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/admin/compliance-salary-runs/{run_id}/pf-ecr.txt (and /ecr.txt)", "issue": "Data-dependent — on csrun_bca09c4a4cec the response is empty (0 bytes) / just a newline. Refactor is fine (endpoint still resolves 200 with text/plain), but if a non-empty ECR/PF-ECR is expected for that run, the underlying data may need PF/ESIC coverage. Not a refactor regression."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": [], "react_native_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter394_compliance_salary_runs_refactor.py",
+    "/app/test_reports/pytest/iter394.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: If pf-ecr.txt / ecr.txt on csrun_bca09c4a4cec are expected to have body content, check the run's Firm Master PF/ESIC flags and row-level pf_wages/esic_wages population — this is data behaviour, not the refactor.",
+    "OPTIONAL: The 5xx entries visible in /var/log/supervisor/backend.out.log are unrelated (audit-export xlsx, biometric/connection-doctor, rpa interact, compliance-import upload) — none of them belong to the extracted module."
+  ],
+  "critical_code_review_comments": [
+    "compliance_salary_runs.py imports 11 symbols back from server (helpers, db, logger, now_iso, get_user_from_token, require_role, require_employer_permission, require_super_admin_strict, plus policy/grid helpers) — clean.",
+    "Router uses prefix='/api' and keeps its original @api.* decorators via an alias (api = router). Path list matches openapi.json (21 compliance-salary-run paths).",
+    "Included ONCE at server.py:20393 via app.include_router(compliance_salary_runs_router). No duplicate include for this module — confirmed.",
+    "De-dup verified: 10 previously double-registered modules (esic_leave, payroll_register, labour_stats, annual_returns, factory, payroll_reports, govt, audit, claims, ai_uimport) each now appear exactly once via `grep -c include_router(...)` on server.py.",
+    "MongoDB _id excluded from find/find_one in all endpoints of the new module.",
+    "Iter 388 pre-lock validation gate still runs on finalize (errors → 422, warnings → 409 unless super-admin override) — verified.",
+    "Unlock semantics: super_admin & sub_admin unlock immediately; company_admin creates pending request — matches Iter 371.",
+    "Firm head-mask stamping (_ensure_firm_head_masks) invoked before Excel & PDF exports for legacy rows — call sites present at exports."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter394_compliance_salary_runs_refactor.py (new)"
+  ],
+  "success_rate": {"backend": "100% (23/23)", "frontend": "N/A — backend-only per request"},
+  "seed_data_creation": "Temporary: 1 compliance salary run for 2026-08 (Staff, on-roll, cmp_527fecdd7c) + up to 1 test employee (TEST_ITER394_*) — BOTH cleaned up in the module teardown / delete path. DB re-check confirms zero leftovers.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Test file: /app/backend/tests/test_iter394_compliance_salary_runs_refactor.py. Runs in ~3s. Uses super_admin password login (sksharmaconsultancy@gmail.com / sharma123). Existing run csrun_bca09c4a4cec (month 2026-07) is used READ-ONLY for exports. Test month = 2026-08. Auto-cleans via pymongo teardown. If /pf-ecr.txt or /ecr.txt content assertions ever tighten, only enable on a run known to have PF/ESIC-applicable rows.",
+  "rca_of_issue": "N/A — pure refactor regression, no bugs found. All 4 re-imported helpers reachable from legacy call sites; no NameError raised during POST /admin/employees, POST /admin/actual-salary-process, GET /admin/salary-runs/{id}/payslips.zip probes."
+}
