@@ -2733,3 +2733,4 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   endpoint — ONE Excel sheet with all 7 sections stacked (styled bands),
   one combined PDF (landscape, 10pp) and CSV. Header EXCEL/PDF buttons
   (testID asd-full-xlsx/asd-full-pdf). Verified via openpyxl/pypdf.
+- Iter 393 deploy: deploy_vps_iter393.sh (temp_bundle→393, incl 392+393). USER DEPLOYING.
