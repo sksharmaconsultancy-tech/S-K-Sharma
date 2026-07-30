@@ -2590,3 +2590,11 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   Verified: PDFs rendered to PNG and visually match attachments; endpoint
   200 for both; UI section renders with print buttons; test claim deleted.
   Deploy: deploy_vps_iter383.sh (temp_bundle→383, includes 370-382).
+- Iter 384 (user accepted improvement: one-tap claimant→bank auto-copy):
+  claims-management.tsx: green "Auto-copy Claimant names → Bank tables"
+  button (testid cl-dc-autocopy) between claimant blocks and PF bank
+  section — copies dc_cl{i}_name → dc_pfbank{i}_name (i≤3) +
+  dc_pnbank{i}_name (i≤4), and dc_pfbank{i}_{acc,bank,ifsc} →
+  dc_pnbank{i}_* ; fills only blank fields (never overwrites).
+  Verified via playwright: claimant names + PF acc/IFSC propagated.
+  Deploy: deploy_vps_iter384.sh (temp_bundle→384, includes 370-383).

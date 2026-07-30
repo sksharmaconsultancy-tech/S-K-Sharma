@@ -1219,6 +1219,40 @@ export default function ClaimsManagementScreen() {
                     </View>
                   </View>
                 ))}
+                {/* Iter 384 (user accepted improvement) — one-tap copy of
+                    the claimant details into the PF & Pension bank tables. */}
+                <Pressable
+                  onPress={() =>
+                    setForm((p) => {
+                      const n: Record<string, string> = { ...p };
+                      for (let i = 1; i <= 4; i++) {
+                        const nm = p[`dc_cl${i}_name`];
+                        if (nm && i <= 3 && !p[`dc_pfbank${i}_name`])
+                          n[`dc_pfbank${i}_name`] = nm;
+                        if (nm && !p[`dc_pnbank${i}_name`])
+                          n[`dc_pnbank${i}_name`] = nm;
+                        for (const k of ["acc", "bank", "ifsc"]) {
+                          if (i <= 3 && p[`dc_pfbank${i}_${k}`] &&
+                              !p[`dc_pnbank${i}_${k}`])
+                            n[`dc_pnbank${i}_${k}`] = p[`dc_pfbank${i}_${k}`];
+                        }
+                      }
+                      return n;
+                    })}
+                  style={[st.attachBtn, { backgroundColor: "#15803D", alignSelf: "flex-start", marginTop: 8 }]}
+                  testID="cl-dc-autocopy"
+                >
+                  <Ionicons name="flash-outline" size={15} color="#fff" />
+                  <Text style={st.attachBtnTxt}>
+                    Auto-copy Claimant names → Bank tables (PF ↔ Pension)
+                  </Text>
+                </Pressable>
+                <Text style={st.recordOnlyNote}>
+                  Fills the Name rows of both bank tables from the Claimants
+                  above and copies the PF bank A/c, Bank & IFSC into the
+                  Pension table (only blank boxes are filled — nothing is
+                  overwritten).
+                </Text>
                 <Text style={st.dcSubH}>
                   Bank Account for PF & EDLI payment (Claimant I–III)
                 </Text>
