@@ -2206,6 +2206,25 @@ async def generate_compliance_payslips_from_run(
         }
         await db.payslips.insert_one(slip)
         created += 1
+        # Iter 395 — WhatsApp "salary processed" + payslip-PDF notifications
+        # (only fire when the firm enabled these automations).
+        try:
+            from utils.whatsapp_engine import notify_event as _wa_notify
+            _net = (slip.get("amounts") or {}).get("net") or slip.get("net_pay")
+            await _wa_notify("salary_processed", run.get("company_id"),
+                             slip.get("user_id"),
+                             extra={"Month": run.get("month"),
+                                    "Salary": str(_net if _net is not None else "")})
+            await _wa_notify("salary_slip", run.get("company_id"),
+                             slip.get("user_id"),
+                             extra={"Month": run.get("month"),
+                                    "Salary": str(_net if _net is not None else "")},
+                             attachment={"payslip": {
+                                 "company_id": run.get("company_id"),
+                                 "user_id": slip.get("user_id"),
+                                 "month": run.get("month")}})
+        except Exception:
+            pass
     await db.compliance_salary_runs.update_one(
         {"run_id": run_id},
         {"$set": {"payslips_generated_at": now_iso(), "payslips_count": created}},

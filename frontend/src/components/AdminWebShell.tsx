@@ -119,6 +119,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/attendance-policy", label: "Attendance Policy", icon: "time-outline" },
       { route: "/attendance-grid", label: "Attendance Report", icon: "grid-outline" },
       { route: "/attendance-sync-dashboard", label: "Attendance Sync Dashboard", icon: "sync-outline" },
+      { route: "/whatsapp-center?tab=history", label: "WhatsApp Alerts", icon: "logo-whatsapp" },
       { route: "/attendance-sheet", label: "Attendance Master Sheet", icon: "document-text-outline" },
       { route: "/inout-ot-matrix", label: "In/Out & OT Matrix", icon: "apps-outline" },
       { route: "/daily-present-report", label: "Day-wise Present Count", icon: "people-outline" },
@@ -150,6 +151,7 @@ export const NAV_SUPER: NavItem[] = [
         ],
       },
       { route: "/advances", label: "Advance Management", icon: "wallet-outline" },
+      { route: "/whatsapp-center?tab=slips", label: "Send Salary Slips (WhatsApp)", icon: "logo-whatsapp" },
       { route: "/bonus-run", label: "Bonus Process", icon: "gift-outline" },
       { route: "/bonus-registers", label: "Bonus Registers (A, B, D)", icon: "albums-outline" },
       { route: "/bonus-yearly-summary", label: "Bonus Yearly Summary", icon: "calendar-outline" },
@@ -183,6 +185,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/challans", label: "PF / ESIC Challans", icon: "receipt-outline" },
       { route: "/challan-summary", label: "Monthly Challan Summary", icon: "documents-outline" },
       { route: "/automation-studio", label: "Compliance Automation Studio", icon: "sparkles-outline" },
+      { route: "/whatsapp-center?tab=dashboard", label: "Notification Center", icon: "logo-whatsapp" },
     ],
   },
   {
@@ -270,6 +273,8 @@ export const NAV_SUPER: NavItem[] = [
     icon: "mail-outline",
     children: [
       { route: "/mailbox", label: "Mailbox", icon: "mail-outline" },
+      { route: "/whatsapp-center", label: "WhatsApp Communication", icon: "logo-whatsapp" },
+      { route: "/whatsapp-templates", label: "WhatsApp Templates", icon: "albums-outline" },
       { route: "/messages", label: "Messages", icon: "chatbubbles-outline" },
       { route: "/tickets", label: "Tickets", icon: "ticket-outline" },
     ],
@@ -279,6 +284,7 @@ export const NAV_SUPER: NavItem[] = [
     icon: "construct-outline",
     children: [
       { route: "/access-management", label: "Access Management", icon: "key-outline" },
+      { route: "/whatsapp-config", label: "WhatsApp Configuration", icon: "logo-whatsapp" },
       { route: "/users-log-report", label: "User Log Report", icon: "document-text-outline" },
       { route: "/rectified-punches", label: "Rectified Punch Audit", icon: "shield-checkmark-outline" },
       { route: "/super-admin-access", label: "Super Admin Rights", icon: "star-outline" },

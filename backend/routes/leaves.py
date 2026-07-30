@@ -216,6 +216,17 @@ async def decide_leave(leave_id: str, payload: LeaveDecision,
             details=f"{leave.get('leave_type')} leave {leave.get('from_date')} → {leave.get('to_date')}")
     except Exception:
         pass
+    # Iter 395 — WhatsApp leave decision notification.
+    try:
+        from utils.whatsapp_engine import notify_event as _wa_notify
+        await _wa_notify(
+            "leave_approved" if payload.status == "approved" else "leave_rejected",
+            leave.get("company_id"), leave.get("user_id"),
+            extra={"LeaveType": leave.get("leave_type") or "Leave",
+                   "FromDate": leave.get("from_date"),
+                   "ToDate": leave.get("to_date")})
+    except Exception:
+        pass
     # Iter 145 — web-push the leave decision to the employee's devices.
     try:
         from routes.web_push import push_to_user

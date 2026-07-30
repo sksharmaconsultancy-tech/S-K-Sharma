@@ -8636,6 +8636,12 @@ async def admin_create_employee(
                                     actor=admin.get("user_id", "system"))
     except Exception:
         pass
+    # Iter 395 — WhatsApp welcome message (if automation enabled for firm).
+    try:
+        from utils.whatsapp_engine import notify_event as _wa_notify
+        await _wa_notify("welcome", cid, doc["user_id"])
+    except Exception:
+        pass
     return {
         "ok": True,
         "user_id": doc["user_id"],
@@ -20391,6 +20397,9 @@ from routes.compliance_salary_runs import (  # noqa: E402
     _require_firm_salary_permission,  # noqa: F401
 )
 app.include_router(compliance_salary_runs_router)
+# Iter 395 — WhatsApp Business Cloud API Notification Engine.
+from routes.whatsapp_center import router as whatsapp_center_router  # noqa: E402
+app.include_router(whatsapp_center_router)
 from routes.report_formats import router as report_formats_router  # noqa: E402
 app.include_router(report_formats_router)
 from routes.punch_import import router as punch_import_router  # noqa: E402
@@ -20532,6 +20541,11 @@ app.include_router(ai_salcomp_router)
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
 maybe_start_rpa_worker(app, db)
+
+# Iter 395 — WhatsApp queue worker (always on; no-op until a firm enables
+# WhatsApp in its configuration).
+from utils.whatsapp_engine import maybe_start as maybe_start_wa_worker  # noqa: E402
+maybe_start_wa_worker(app, db, logger)
 
 
 @app.on_event("shutdown")
