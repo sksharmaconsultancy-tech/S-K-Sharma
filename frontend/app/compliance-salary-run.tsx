@@ -2242,7 +2242,7 @@ export default function ComplianceSalaryRunScreen() {
                 <ActionBtn icon="download-outline" label="CSV" busy={downloading} onPress={() => downloadFile("csv")} />
                 <ActionBtn icon="time-outline" label="Audit Log" busy={auditLoading} onPress={openAudit} />
                 {/* Iter 388 (Phase 4) — PF & ESIC Audit Dashboard */}
-                <ActionBtn icon="shield-checkmark-outline" label="PF/ESIC Audit"
+                <ActionBtn icon="shield-checkmark-outline" label="PF/ESIC Audit" testID="btn-pf-esic-audit"
                   onPress={() => router.push(`/pf-esic-audit?run_id=${run.run_id}` as any)} />
                 {autoSavedAt ? (
                   <Text style={{ fontSize: 9.5, color: colors.success, fontWeight: "700", alignSelf: "center" }}>
@@ -3309,14 +3309,15 @@ function TypeChip({ label, active, onPress }: { label: string; active: boolean; 
 }
 
 function ActionBtn({
-  icon, label, onPress, busy, primary,
+  icon, label, onPress, busy, primary, testID,
 }: {
-  icon: any; label: string; onPress: () => void; busy?: boolean; primary?: boolean;
+  icon: any; label: string; onPress: () => void; busy?: boolean; primary?: boolean; testID?: string;
 }) {
   return (
     <Pressable
       onPress={onPress}
       disabled={busy}
+      testID={testID}
       style={[
         styles.actionBtn,
         primary && styles.actionBtnPrimary,

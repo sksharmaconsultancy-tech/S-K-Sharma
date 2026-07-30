@@ -2658,3 +2658,34 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   11 engine unit cases + testing agent 8/8 pytest + UI smoke ALL PASS
   (test_reports/iteration_387.json). rule_version saved: "FY 2026-27 v1".
   DEFERRED: single deploy script after Phase 6.
+- Iter 388 (Phases 3-6 of PF/ESIC module — ALL DONE, tested 17/17):
+  P3 VALIDATION ENGINE: routes/compliance_validation.py —
+  validate_compliance_run() checks PF_ZERO/PF_MISSING_UAN/PF_DUP_UAN/
+  PF_WAGE_INVALID/PF_ABOVE_CEILING/PF_MISSING_BASIC/
+  PF_HIGHER_PENSION_MISMATCH/PF_SALARY_CHANGED + ESIC_ZERO/MISSING_IP/
+  DUP_IP/WAGE_INVALID/ABOVE_CEILING/WRONG_EXCLUSION/EXIT_BEFORE_MONTH/
+  MAPPING_MISSING. GET .../{run_id}/validate. Finalize (server.py
+  ~16955): errors→422, warnings→409 (can_override), super_admin +
+  {allow_warnings:true}→200 + lock_validation stamp. Frontend: lockCheck
+  modal in compliance-salary-run.tsx (finalizeRun validates first;
+  "Lock Anyway (Super Admin — warnings only)" button).
+  P4 AUDIT DASHBOARD: GET .../{run_id}/audit-dashboard; new screen
+  /pf-esic-audit (run picker → color table Green/Yellow/Red + filters +
+  search + View Calc modal rendering calc_snapshot). "PF/ESIC Audit"
+  ActionBtn (testID btn-pf-esic-audit) on salary run screen. Monthly
+  snapshot: write_monthly_snapshot() → db.compliance_monthly_snapshots
+  (append-only, on finalize; failure never blocks lock).
+  P5 REPORTS: GET .../audit-export?kind=pf|esic|exceptions&format=
+  xlsx|pdf (openpyxl/reportlab; sheet-title sanitizer _re_sheet) + GET
+  /admin/compliance-reports/missing-ids?which=uan|ip&format=. All 10
+  combos 200.
+  P6 AI ASSISTANT: POST .../{run_id}/ai-explain/{user_id} — Emergent
+  LLM key, gpt-5.4-mini, explains PF/ESIC why/heads/rules/validation/
+  action; purple "AI Explain" button in View Calc modal.
+  Also fixed pre-existing duplicate router-include/shutdown block in
+  server.py tail. Testing agent: backend 17/17 + frontend all pass
+  (iteration_388.json; pytest backend/tests/test_iter388_*.py).
+  PENDING USER ANSWER: printable A4 explanation sheet in View Calc?
+  DEFERRED: single VPS deploy script after user confirms (deploy script
+  387 currently live on temp-code-bundle; needs 388 bump when user asks
+  to deploy).
