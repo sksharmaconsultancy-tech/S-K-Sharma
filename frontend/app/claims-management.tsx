@@ -116,6 +116,53 @@ function WebSelect({
   );
 }
 
+// Iter 383 (user request) — extra data captured for Form-20 / Form-10D /
+// Form 5-IF (Composite Claim Form in Death Cases) + Form No. 8, printed
+// in the user's attached formats.
+const DC_ROWS: [string, string][] = [
+  ["dc_father", "Father's Name (deceased)"],
+  ["dc_spouse", "Spouse's Name (deceased)"],
+  ["dc_marital", "Marital Status (deceased)"],
+  ["dc_aadhaar", "Aadhaar No. (deceased)"],
+  ["dc_pf_acc", "PF Account No."],
+  ["dc_death_date", "Date of Death (DD-MM-YYYY)"],
+  ["dc_died_in_service", "Died while in service? (Yes/No)"],
+  ["dc_scheme_issued", "Scheme Certificate issued? (Yes/No)"],
+  ["dc_scheme_no", "Scheme Certificate No."],
+  ["dc_scheme_office", "Scheme Cert. issuing office"],
+  ["dc_ncp", "Non-Contributory service (Y/M/D)"],
+  ["dc_address", "Postal Address of Claimant"],
+  ["dc_pin", "PIN Code"],
+];
+const DC_CL_COLS: [string, string][] = [
+  ["name", "Name"],
+  ["father", "Father / Spouse Name"],
+  ["aadhaar", "Aadhaar Number"],
+  ["gender", "Gender"],
+  ["dob", "Date of Birth (DD-MM-YYYY)"],
+  ["marital", "Marital Status"],
+  ["rel", "Relationship with Member"],
+  ["guardian", "Guardian (if minor)"],
+];
+const DC_BANK_COLS: [string, string][] = [
+  ["name", "Name"],
+  ["acc", "Savings Bank A/c No."],
+  ["bank", "Name & Address of Bank"],
+  ["ifsc", "IFS Code"],
+];
+const F8_ROWS: [string, string][] = [
+  ["dc_f8_pensioner", "Name of the Pensioner"],
+  ["dc_f8_father", "Father's / Husband's Name"],
+  ["dc_f8_sex", "Sex"],
+  ["dc_f8_nationality", "Nationality"],
+  ["dc_f8_religion", "Religion"],
+  ["dc_f8_height", "Height"],
+  ["dc_f8_mark1", "Personal Identification Mark 1"],
+  ["dc_f8_mark2", "Personal Identification Mark 2"],
+  ["dc_f8_place", "Place"],
+  ["dc_f8_date", "Date (DD-MM-YYYY)"],
+];
+
 function WebDate({
   value,
   onChange,
@@ -398,6 +445,25 @@ export default function ClaimsManagementScreen() {
     }
   };
 
+  // Iter 383 — print the death-claim forms in the attached formats.
+  const isDeathType = /Form-10D|Form-20|5-IF|Composite|Death/i.test(cType);
+  const printDeathForm = async (which: string) => {
+    if (!claimId) {
+      setMsg("Save the claim first — then print the form.");
+      return;
+    }
+    try {
+      const r = await apiBinary(
+        `/admin/claims/${claimId}/death-forms.pdf?which=${which}`);
+      if (Platform.OS === "web" && r.webBlobUrl) {
+        window.open(r.webBlobUrl, "_blank");
+        setTimeout(() => URL.revokeObjectURL(r.webBlobUrl!), 60000);
+      }
+    } catch (e: any) {
+      setMsg(e?.message || "Could not build the form PDF");
+    }
+  };
+
   const fmtSize = (n: number) =>
     n > 1024 * 1024
       ? `${(n / 1024 / 1024).toFixed(1)} MB`
@@ -428,6 +494,10 @@ export default function ClaimsManagementScreen() {
         f[k] = DATE_KEYS.includes(k)
           ? isoToDDMM(String(c.data[k]))
           : String(c.data[k]);
+    });
+    // Iter 383 — restore the death-claim (dc_*) fields too.
+    Object.keys(c.data || {}).forEach((k) => {
+      if (k.startsWith("dc_")) f[k] = String(c.data[k] ?? "");
     });
     ["uan", "insurance_no", "company_name"].forEach((k) => {
       if (c.data?.[k] != null) f[k] = String(c.data[k]);
@@ -1080,6 +1150,159 @@ export default function ClaimsManagementScreen() {
               ))}
             </View>
 
+            {/* Iter 383 (user request) — data for the Composite Claim Form
+                in Death Cases [Form-20 / Form-10D / Form 5-IF] + Form No.8,
+                printable in the user's attached formats. */}
+            {isDeathType && (
+              <>
+                <Text style={[st.detailH, { marginTop: 12 }]}>
+                  ⚰️ Composite Death Claim — Form-20 / 10D / 5-IF Details
+                </Text>
+                <View style={[shared.row, { flexWrap: "wrap", gap: 8 }]}>
+                  {[["dc_app_pf", "Provident Fund (Form-20)"],
+                    ["dc_app_pension", "Pension (Form-10D)"],
+                    ["dc_app_edli", "Insurance EDLI (Form 5-IF)"]].map(
+                    ([k, lbl]) => {
+                      const on = (form[k] || "") === "Yes";
+                      return (
+                        <Pressable
+                          key={k}
+                          onPress={() =>
+                            setForm((p) => ({ ...p, [k]: on ? "" : "Yes" }))}
+                          style={[st.docChip, on && st.docChipOn]}
+                          testID={`cl-${k}`}
+                        >
+                          <Ionicons
+                            name={on ? "checkbox" : "square-outline"}
+                            size={15}
+                            color={on ? "#15803D" : "#94A3B8"}
+                          />
+                          <Text style={[st.docTxt, on && { color: "#15803D" }]}>
+                            {lbl}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                </View>
+                <View style={st.formWrap}>
+                  {DC_ROWS.map(([k, lbl]) => (
+                    <View key={k} style={st.formField}>
+                      <Text style={st.formLbl}>{lbl}</Text>
+                      <TextInput
+                        style={shared.input}
+                        value={form[k] || ""}
+                        onChangeText={(t) =>
+                          setForm((p) => ({ ...p, [k]: t }))}
+                        placeholder={lbl}
+                        testID={`cl-f-${k}`}
+                      />
+                    </View>
+                  ))}
+                </View>
+                {[1, 2, 3, 4].map((i) => (
+                  <View key={i}>
+                    <Text style={st.dcSubH}>Claimant / Nominee {i}</Text>
+                    <View style={st.formWrap}>
+                      {DC_CL_COLS.map(([k, lbl]) => (
+                        <View key={k} style={st.formField}>
+                          <Text style={st.formLbl}>{lbl}</Text>
+                          <TextInput
+                            style={shared.input}
+                            value={form[`dc_cl${i}_${k}`] || ""}
+                            onChangeText={(t) =>
+                              setForm((p) => ({ ...p, [`dc_cl${i}_${k}`]: t }))}
+                            placeholder={lbl}
+                            testID={`cl-f-dc_cl${i}_${k}`}
+                          />
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                ))}
+                <Text style={st.dcSubH}>
+                  Bank Account for PF & EDLI payment (Claimant I–III)
+                </Text>
+                {[1, 2, 3].map((i) => (
+                  <View key={i} style={st.formWrap}>
+                    {DC_BANK_COLS.map(([k, lbl]) => (
+                      <View key={k} style={st.formField}>
+                        <Text style={st.formLbl}>{`${lbl} — Claimant ${i}`}</Text>
+                        <TextInput
+                          style={shared.input}
+                          value={form[`dc_pfbank${i}_${k}`] || ""}
+                          onChangeText={(t) =>
+                            setForm((p) => ({ ...p, [`dc_pfbank${i}_${k}`]: t }))}
+                          placeholder={lbl}
+                          testID={`cl-f-dc_pfbank${i}_${k}`}
+                        />
+                      </View>
+                    ))}
+                  </View>
+                ))}
+                <Text style={st.dcSubH}>
+                  Bank Account for Pension payment (Claimant I–IV)
+                </Text>
+                {[1, 2, 3, 4].map((i) => (
+                  <View key={i} style={st.formWrap}>
+                    {DC_BANK_COLS.map(([k, lbl]) => (
+                      <View key={k} style={st.formField}>
+                        <Text style={st.formLbl}>{`${lbl} — Claimant ${i}`}</Text>
+                        <TextInput
+                          style={shared.input}
+                          value={form[`dc_pnbank${i}_${k}`] || ""}
+                          onChangeText={(t) =>
+                            setForm((p) => ({ ...p, [`dc_pnbank${i}_${k}`]: t }))}
+                          placeholder={lbl}
+                          testID={`cl-f-dc_pnbank${i}_${k}`}
+                        />
+                      </View>
+                    ))}
+                  </View>
+                ))}
+                <Text style={st.dcSubH}>Form No. 8 (Pensioner Descriptive Roll)</Text>
+                <View style={st.formWrap}>
+                  {F8_ROWS.map(([k, lbl]) => (
+                    <View key={k} style={st.formField}>
+                      <Text style={st.formLbl}>{lbl}</Text>
+                      <TextInput
+                        style={shared.input}
+                        value={form[k] || ""}
+                        onChangeText={(t) =>
+                          setForm((p) => ({ ...p, [k]: t }))}
+                        placeholder={lbl}
+                        testID={`cl-f-${k}`}
+                      />
+                    </View>
+                  ))}
+                </View>
+                <View style={[shared.row, { flexWrap: "wrap", gap: 8, marginTop: 6 }]}>
+                  <Pressable
+                    onPress={() => void printDeathForm("composite")}
+                    style={st.attachBtn}
+                    testID="cl-print-composite"
+                  >
+                    <Ionicons name="print-outline" size={15} color="#fff" />
+                    <Text style={st.attachBtnTxt}>
+                      Print Composite Form (20 / 10D / 5-IF)
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => void printDeathForm("form8")}
+                    style={[st.attachBtn, { backgroundColor: "#5B21B6" }]}
+                    testID="cl-print-form8"
+                  >
+                    <Ionicons name="print-outline" size={15} color="#fff" />
+                    <Text style={st.attachBtnTxt}>Print Form No. 8 (duplicate)</Text>
+                  </Pressable>
+                  {!claimId && (
+                    <Text style={st.recordOnlyNote}>
+                      Save the claim first — then print in the attached format.
+                    </Text>
+                  )}
+                </View>
+              </>
+            )}
+
             <Text style={[st.detailH, { marginTop: 12 }]}>
               📄 Document Checklist ({cKind.toUpperCase()})
             </Text>
@@ -1422,6 +1645,13 @@ const st = StyleSheet.create({
   },
   formWrap: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   formField: { minWidth: 200, flexGrow: 1, maxWidth: 320 },
+  dcSubH: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#5B21B6",
+    marginTop: 10,
+    marginBottom: 4,
+  },
   formLbl: { fontSize: 11.5, color: colors.onSurfaceSecondary, marginBottom: 3 },
   recordOnlyNote: {
     fontSize: 10.5,

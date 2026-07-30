@@ -2568,3 +2568,25 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   Verified via playwright (all removals, autofill, new types, save) +
   DB check; test claim deleted.
   Deploy: deploy_vps_iter382.sh (temp_bundle→382, includes 370-381).
+- Iter 383 (user: Form 20/10D/5-IF data capture + print in attached format):
+  User uploaded "PF Composite Claim Form No 20,10D & 5IF.xls" + "New Forn
+  No-8.docx". Built:
+  1. /app/backend/utils/death_claim_forms.py — reportlab canvas builders:
+     build_composite_death_claim_pdf (replicates Excel: header epfindia/
+     mobile, titles, items 1-10 numbered rows with tick boxes, item 11
+     claimant table 4 rows × 9 cols, item 12 PF/EDLI bank (Claimant I-III),
+     item 13 Pension bank (I-IV), item 14 address+PIN, certification,
+     signatures, 5 enclosures) and build_form8_pdf (FORM No. 8 descriptive
+     roll, rows 1-9 + specimen signature + finger-impression grid + date/
+     place/attesting authority, 2 identical pages = duplicate). dc dates
+     printed DD-MM (ISO converted).
+  2. GET /admin/claims/{id}/death-forms.pdf?which=composite|form8.
+  3. claims-management.tsx: isDeathType (/Form-10D|Form-20|5-IF|Composite|
+     Death/) shows section — PF/Pension/EDLI tick chips (dc_app_*),
+     DC_ROWS deceased fields, 4 claimant blocks (DC_CL_COLS), PF bank ×3 +
+     Pension bank ×4 (DC_BANK_COLS), F8_ROWS; all flat dc_* keys in
+     form/data; editClaim restores dc_*. Print buttons (composite/form8)
+     via apiBinary; require saved claim.
+  Verified: PDFs rendered to PNG and visually match attachments; endpoint
+  200 for both; UI section renders with print buttons; test claim deleted.
+  Deploy: deploy_vps_iter383.sh (temp_bundle→383, includes 370-382).

@@ -540,6 +540,29 @@ async def delete_claim_document(claim_id: str, doc_id: str,
     return {"ok": True}
 
 
+@router.get("/{claim_id}/death-forms.pdf")
+async def death_claim_forms_pdf(claim_id: str, which: str = "composite",
+                                authorization: Optional[str] = Header(None)):
+    """Iter 383 (user request) — print the Composite Claim Form in Death
+    Cases (Form-20 / 10D / 5-IF) or Form No. 8 in the user's attached
+    format, filled from the claim's saved data."""
+    admin, company_id = await _adm(authorization)
+    claim = await _claim_guarded(claim_id, admin, company_id)
+    from fastapi.responses import Response
+    from utils.death_claim_forms import (build_composite_death_claim_pdf,
+                                         build_form8_pdf)
+    d = claim.get("data") or {}
+    if which == "form8":
+        pdf = build_form8_pdf(d)
+        fname = f"Form8_{claim.get('claim_no')}.pdf"
+    else:
+        pdf = build_composite_death_claim_pdf(d)
+        fname = f"CompositeDeathClaim_{claim.get('claim_no')}.pdf"
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition":
+                             f'inline; filename="{fname}"'})
+
+
 @router.get("/reminders")
 async def reminders(company_id: Optional[str] = None,
                     authorization: Optional[str] = Header(None)):
