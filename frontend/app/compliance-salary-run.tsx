@@ -950,6 +950,32 @@ export default function ComplianceSalaryRunScreen() {
     }
   };
 
+  // Iter 388 (Phase 3) — Pre-lock PF/ESIC validation result modal.
+  const [lockCheck, setLockCheck] = useState<any | null>(null);
+
+  const doFinalize = async (allowWarnings: boolean) => {
+    if (!run) return;
+    setFinalizing(true);
+    try {
+      const r = await api<{ ok: boolean; finalized_at?: string }>(
+        `/admin/compliance-salary-runs/${run.run_id}/finalize`,
+        { method: "POST", body: { allow_warnings: allowWarnings } },
+      );
+      void r;
+      setLockCheck(null);
+      // Iter 256 (user request) — after Finalize & Lock the front page is
+      // CLEARED so the next batch starts fresh (run stays in Past Runs).
+      setRun(null);
+      setEmpType("all");
+      await loadRuns();
+      showMsg("Run finalized ✓ — locked & moved to Past Runs. Page cleared for the next batch.");
+    } catch (e: any) {
+      showMsg(typeof e?.message === "string"
+        ? e.message
+        : "Salary Lock blocked by the PF/ESIC validation — fix the listed issues first.");
+    } finally { setFinalizing(false); }
+  };
+
   const finalizeRun = async () => {
     if (!run || finalizing) return;
     const okGo = await confirmYesNo(
@@ -968,20 +994,18 @@ export default function ComplianceSalaryRunScreen() {
           body: { rows: run.rows, totals: run.totals },
         });
       } catch { /* proceed — run may already match the server state */ }
-      const r = await api<{ ok: boolean; finalized_at?: string }>(
-        `/admin/compliance-salary-runs/${run.run_id}/finalize`,
-        { method: "POST", body: {} },
-      );
-      void r;
-      // Iter 256 (user request) — after Finalize & Lock the front page is
-      // CLEARED so the next batch starts fresh (run stays in Past Runs).
-      setRun(null);
-      setEmpType("all");
-      await loadRuns();
-      showMsg("Run finalized ✓ — locked & moved to Past Runs. Page cleared for the next batch.");
-    } catch (e: any) {
-      showMsg(e?.message || "Finalize failed");
-    } finally { setFinalizing(false); }
+      // Iter 388 (Phase 3) — automatic PF/ESIC validation before the lock.
+      // Errors ALWAYS block; warnings block unless a Super Admin overrides.
+      try {
+        const v = await api<any>(`/admin/compliance-salary-runs/${run.run_id}/validate`);
+        if ((v?.errors_count || 0) > 0 || (v?.warnings_count || 0) > 0) {
+          setLockCheck(v);
+          setFinalizing(false);
+          return;
+        }
+      } catch { /* validation fetch failed — the server re-validates on finalize */ }
+    } catch { /* noop */ }
+    await doFinalize(false);
   };
 
   // Iter 126h — Draft / lock workflow.
@@ -1881,6 +1905,126 @@ export default function ComplianceSalaryRunScreen() {
             </View>
           </Modal>
 
+          {/* Iter 388 (Phase 3) — Pre-Lock PF/ESIC Validation results */}
+          <Modal
+            visible={!!lockCheck}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setLockCheck(null)}
+          >
+            <View style={{
+              flex: 1, backgroundColor: "rgba(15,23,42,0.45)",
+              alignItems: "center", justifyContent: "center", padding: 20,
+            }}>
+              <View style={{
+                backgroundColor: colors.surfaceSecondary, borderRadius: 16, padding: 16,
+                width: "100%", maxWidth: 640, maxHeight: "85%",
+                borderWidth: 1, borderColor: colors.border,
+              }}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                  <Text style={{ fontSize: 15, fontWeight: "800", color: colors.onSurface }}>
+                    🔒 Salary Lock — PF/ESIC Validation
+                  </Text>
+                  <Pressable onPress={() => setLockCheck(null)} hitSlop={10} testID="lock-check-close">
+                    <Ionicons name="close" size={18} color={colors.onSurfaceSecondary} />
+                  </Pressable>
+                </View>
+                <View style={{ flexDirection: "row", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+                  <View style={{ backgroundColor: "#FEE2E2", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
+                    <Text style={{ fontSize: 11, fontWeight: "800", color: "#B91C1C" }}>
+                      {lockCheck?.errors_count || 0} error(s) — always block
+                    </Text>
+                  </View>
+                  <View style={{ backgroundColor: "#FEF3C7", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
+                    <Text style={{ fontSize: 11, fontWeight: "800", color: "#92400E" }}>
+                      {lockCheck?.warnings_count || 0} warning(s)
+                    </Text>
+                  </View>
+                  <View style={{ backgroundColor: "#E0F2FE", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
+                    <Text style={{ fontSize: 11, fontWeight: "800", color: "#075985" }}>
+                      {lockCheck?.employees_flagged || 0} / {lockCheck?.employees_total || 0} employees flagged
+                    </Text>
+                  </View>
+                </View>
+                <ScrollView style={{ maxHeight: 420 }}>
+                  {(lockCheck?.global_issues || []).map((g: any, i: number) => (
+                    <View key={`g${i}`} style={{
+                      flexDirection: "row", gap: 8, padding: 8, borderRadius: 8, marginBottom: 6,
+                      backgroundColor: g.level === "error" ? "#FEF2F2" : "#FFFBEB",
+                      borderWidth: 1, borderColor: g.level === "error" ? "#FCA5A5" : "#FCD34D",
+                    }}>
+                      <Ionicons name={g.level === "error" ? "close-circle" : "warning"} size={16}
+                        color={g.level === "error" ? "#DC2626" : "#D97706"} style={{ marginTop: 1 }} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 12, fontWeight: "700", color: colors.onSurface }}>{g.message}</Text>
+                        <Text style={{ fontSize: 11, color: colors.onSurfaceSecondary, marginTop: 1 }}>→ {g.suggestion}</Text>
+                      </View>
+                    </View>
+                  ))}
+                  {(lockCheck?.rows || []).map((er: any) => (
+                    <View key={er.user_id} style={{
+                      borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider,
+                      paddingVertical: 8,
+                    }}>
+                      <Text style={{ fontSize: 12.5, fontWeight: "800", color: colors.onSurface }}>
+                        {er.employee_code ? `${er.employee_code} · ` : ""}{er.name}
+                        <Text style={{ fontWeight: "400", color: colors.onSurfaceTertiary }}>
+                          {"   "}Gross ₹{Number(er.gross_paid || 0).toLocaleString("en-IN")} · {er.present_days} days
+                        </Text>
+                      </Text>
+                      {(er.issues || []).map((is: any, j: number) => (
+                        <View key={j} style={{ flexDirection: "row", gap: 6, marginTop: 4, marginLeft: 2 }}>
+                          <Ionicons name={is.level === "error" ? "close-circle" : "warning"} size={14}
+                            color={is.level === "error" ? "#DC2626" : "#D97706"} style={{ marginTop: 1 }} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 11.5, color: is.level === "error" ? "#B91C1C" : "#92400E", fontWeight: "600" }}>
+                              [{is.code}] {is.message}
+                            </Text>
+                            <Text style={{ fontSize: 10.5, color: colors.onSurfaceSecondary }}>→ {is.suggestion}</Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  ))}
+                </ScrollView>
+                <View style={{ flexDirection: "row", gap: 8, marginTop: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                  <Pressable
+                    onPress={() => setLockCheck(null)}
+                    style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border }}
+                    testID="lock-check-cancel"
+                  >
+                    <Text style={{ fontSize: 13, fontWeight: "700", color: colors.onSurfaceSecondary }}>Fix issues first</Text>
+                  </Pressable>
+                  {(lockCheck?.errors_count || 0) === 0 && (lockCheck?.warnings_count || 0) > 0
+                    && user?.role === "super_admin" ? (
+                    <Pressable
+                      onPress={() => doFinalize(true)}
+                      disabled={finalizing}
+                      style={{
+                        flexDirection: "row", alignItems: "center", gap: 6,
+                        paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10,
+                        backgroundColor: "#D97706", opacity: finalizing ? 0.6 : 1,
+                      }}
+                      testID="lock-anyway"
+                    >
+                      {finalizing ? <ActivityIndicator size="small" color="#fff" /> : (
+                        <Ionicons name="lock-closed" size={14} color="#fff" />
+                      )}
+                      <Text style={{ fontSize: 13, fontWeight: "800", color: "#fff" }}>
+                        Lock Anyway (Super Admin — warnings only)
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+                {(lockCheck?.errors_count || 0) > 0 ? (
+                  <Text style={{ fontSize: 10.5, color: "#B91C1C", marginTop: 8 }}>
+                    Errors must be fixed before the Salary Lock — the override only applies to warnings.
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+          </Modal>
+
           {/* Iter 101 — Gmail attachment picker */}
           <Modal
             visible={mailModal}
@@ -2097,6 +2241,9 @@ export default function ComplianceSalaryRunScreen() {
                 <RegisterLayoutEditor visible={layoutOpen} onClose={() => setLayoutOpen(false)} />
                 <ActionBtn icon="download-outline" label="CSV" busy={downloading} onPress={() => downloadFile("csv")} />
                 <ActionBtn icon="time-outline" label="Audit Log" busy={auditLoading} onPress={openAudit} />
+                {/* Iter 388 (Phase 4) — PF & ESIC Audit Dashboard */}
+                <ActionBtn icon="shield-checkmark-outline" label="PF/ESIC Audit"
+                  onPress={() => router.push(`/pf-esic-audit?run_id=${run.run_id}` as any)} />
                 {autoSavedAt ? (
                   <Text style={{ fontSize: 9.5, color: colors.success, fontWeight: "700", alignSelf: "center" }}>
                     ✓ Auto-saved {autoSavedAt}

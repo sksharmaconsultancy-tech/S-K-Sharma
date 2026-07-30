@@ -16955,10 +16955,16 @@ async def save_compliance_run_rows(
 @api.post("/admin/compliance-salary-runs/{run_id}/finalize")
 async def finalize_compliance_salary_run(
     run_id: str,
+    payload: Optional[Dict[str, Any]] = Body(None),
     authorization: Optional[str] = Header(None),
 ):
     """Iter 91 — Save/Finalize a compliance salary run. Marks the run as
-    finalized (read-only): reprocessing is blocked until unfinalized."""
+    finalized (read-only): reprocessing is blocked until unfinalized.
+
+    Iter 388 (Phase 3) — SALARY LOCK VALIDATION: the PF/ESIC Validation
+    Engine runs automatically. ERRORS always block the lock; WARNINGS
+    block unless a Super Admin locks with ``{"allow_warnings": true}``
+    (user-approved override policy)."""
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     await require_employer_permission(admin, "compliance_salary:write", db)
@@ -16970,16 +16976,54 @@ async def finalize_compliance_salary_run(
     if run.get("finalized"):
         return {"ok": True, "already_finalized": True,
                 "finalized_at": run.get("finalized_at")}
+
+    # Iter 388 — pre-lock validation gate.
+    from routes.compliance_validation import validate_compliance_run
+    validation = await validate_compliance_run(run)
+    allow_warnings = bool((payload or {}).get("allow_warnings"))
+    if validation["errors_count"] > 0:
+        raise HTTPException(status_code=422, detail={
+            "message": f"Salary Lock blocked — {validation['errors_count']} error(s) "
+                       f"and {validation['warnings_count']} warning(s) found.",
+            "validation": validation,
+        })
+    if validation["warnings_count"] > 0 and not (
+            allow_warnings and admin["role"] == "super_admin"):
+        raise HTTPException(status_code=409, detail={
+            "message": f"Salary Lock blocked — {validation['warnings_count']} warning(s). "
+                       "A Super Admin can lock anyway with the override.",
+            "validation": validation,
+            "can_override": admin["role"] == "super_admin",
+        })
+
     stamp = {
         "finalized": True,
         "finalized_at": now_iso(),
         "finalized_by": admin["user_id"],
+        # Iter 388 — lock-time validation summary stored on the run.
+        "lock_validation": {
+            "errors_count": validation["errors_count"],
+            "warnings_count": validation["warnings_count"],
+            "employees_flagged": validation["employees_flagged"],
+            "warnings_overridden": bool(validation["warnings_count"] and allow_warnings),
+            "checked_at": validation["checked_at"],
+        },
     }
     await db.compliance_salary_runs.update_one({"run_id": run_id}, {"$set": stamp})
     logger.info("[compliance-run] finalized run=%s by %s", run_id, admin["user_id"])
+    # Iter 388 (Phase 4) — append-only monthly statutory snapshot.
+    try:
+        from routes.compliance_validation import write_monthly_snapshot
+        await write_monthly_snapshot(run, admin, stamp["lock_validation"])
+    except Exception as _snap_err:  # snapshot must never block the lock
+        logger.warning("[compliance-run] snapshot failed run=%s: %s", run_id, _snap_err)
     # Iter 182 — audit trail
     from routes.salary_audit import write_salary_audit
-    await write_salary_audit(admin, "finalize", run, "Run finalized (locked)")
+    await write_salary_audit(
+        admin, "finalize", run,
+        "Run finalized (locked)"
+        + (f" — {validation['warnings_count']} warning(s) OVERRIDDEN by Super Admin"
+           if validation["warnings_count"] and allow_warnings else ""))
     # Iter 103 — automated email trigger
     try:
         from routes.email_notifications import fire_email_event
@@ -22482,6 +22526,7 @@ from routes.temp_bundle import router as temp_bundle_router  # noqa: E402
 from routes.user_prefs import router as user_prefs_router  # noqa: E402
 from routes.challan_summary import router as challan_summary_router  # noqa: E402
 from routes.compliance_settings import router as compliance_settings_router  # noqa: E402
+from routes.compliance_validation import router as compliance_validation_router  # noqa: E402
 
 
 from utils.rpa_worker import maybe_start as maybe_start_rpa_worker  # noqa: E402
@@ -22547,6 +22592,7 @@ app.include_router(portal_rpa_router)
 from routes.uan_esic_import import router as uan_esic_import_router  # noqa: E402
 app.include_router(uan_esic_import_router)
 app.include_router(compliance_settings_router)
+app.include_router(compliance_validation_router)
 from routes.report_formats import router as report_formats_router  # noqa: E402
 app.include_router(report_formats_router)
 from routes.punch_import import router as punch_import_router  # noqa: E402
@@ -22684,6 +22730,35 @@ app.include_router(backup_center_router)
 
 from routes.ai_salary_compliance import router as ai_salcomp_router  # noqa: E402
 app.include_router(ai_salcomp_router)
+
+from routes.esic_leave import router as esic_leave_router  # noqa: E402
+app.include_router(esic_leave_router)
+
+# Iter 356 — Employee-Wise Yearly Payroll Register (Bonus-Register style).
+from routes.payroll_register import router as payroll_register_router  # noqa: E402
+app.include_router(payroll_register_router)
+
+# Iter 357 — Phase B/C/D: Labour Statistics, Annual Returns, Factory & Boilers.
+from routes.labour_statistics import router as labour_stats_router  # noqa: E402
+app.include_router(labour_stats_router)
+from routes.annual_returns import router as annual_returns_router  # noqa: E402
+app.include_router(annual_returns_router)
+from routes.factory_compliance import router as factory_router  # noqa: E402
+app.include_router(factory_router)
+
+# Iter 358 — Payroll Reports section (comparison, revision, CTC, F&F …).
+from routes.payroll_reports import router as payroll_reports_router  # noqa: E402
+app.include_router(payroll_reports_router)
+from routes.govt_audit_reports import govt_router, audit_router  # noqa: E402
+app.include_router(govt_router)
+app.include_router(audit_router)
+
+# Iter 359 — PF & ESIC Claims Management.
+from routes.claims_management import router as claims_router  # noqa: E402
+app.include_router(claims_router)
+
+from routes.ai_universal_import import router as ai_uimport_router  # noqa: E402
+app.include_router(ai_uimport_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
