@@ -142,6 +142,18 @@ export default function AttendanceSyncDashboard() {
             {data ? ` · ${data.range.from} → ${data.range.to}` : ""}
           </Text>
         </View>
+        <Pressable onPress={() => doExport("full", "xlsx")} style={[styles.refresh, { flexDirection: "row", gap: 4, alignItems: "center" }]} testID="asd-full-xlsx">
+          {busyExp === "full-xlsx" ? <ActivityIndicator size="small" color="#16A34A" /> : (
+            <Ionicons name="document-outline" size={15} color="#16A34A" />
+          )}
+          <Text style={{ fontSize: 10, fontWeight: "800", color: "#16A34A" }}>EXCEL</Text>
+        </Pressable>
+        <Pressable onPress={() => doExport("full", "pdf")} style={[styles.refresh, { flexDirection: "row", gap: 4, alignItems: "center" }]} testID="asd-full-pdf">
+          {busyExp === "full-pdf" ? <ActivityIndicator size="small" color="#DC2626" /> : (
+            <Ionicons name="document-text-outline" size={15} color="#DC2626" />
+          )}
+          <Text style={{ fontSize: 10, fontWeight: "800", color: "#DC2626" }}>PDF</Text>
+        </Pressable>
         <Pressable onPress={load} style={styles.refresh} testID="asd-refresh">
           <Ionicons name="refresh" size={16} color={colors.brandPrimary} />
         </Pressable>

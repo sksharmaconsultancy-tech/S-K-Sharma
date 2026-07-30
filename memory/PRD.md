@@ -2713,3 +2713,23 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   firm-enabled) via edMask fetched from firm-master. Verified via
   screenshot (Kankani: PT/TDS hidden). Deploy: deploy_vps_iter391.sh
   (temp_bundle→391; combined 386-391). USER DEPLOYING LIVE NOW.
+- Iter 392 (user spec: Attendance Synchronization Dashboard): NEW module
+  — backend routes/attendance_sync_dashboard.py (GET
+  /admin/attendance-sync-dashboard w/ filters company/preset/
+  missing_days/dept/desig/machine/status; KPIs, 7 sections: new joining,
+  machine-only (biometric_unmapped + difflib suggested match),
+  master-only, attendance-missing (leave-aware remarks), continuous
+  absence buckets 3/5/7/15/30, machine sync health, weekly-join +
+  daily-punch trends; rule-based smart remarks; 0.24s load) + export
+  endpoint (xlsx/pdf/csv per section). Frontend
+  app/attendance-sync-dashboard.tsx (KPI cards, filter chips, search,
+  collapsible sections, progress bars, trend bars, row nav to
+  employee-detail-slip / biometric-devices). Menu after "Attendance
+  Report" in AdminWebShell (Attendance & Shift + Reports groups).
+  Testing agent: 12/12 backend pytest + 10/10 frontend flows PASS.
+  Deferred (per WhatsApp integration pending): Notify HR/WhatsApp/Email
+  actions, nightly scheduler.
+- Iter 393 (user: single-sheet full export): section=full on the export
+  endpoint — ONE Excel sheet with all 7 sections stacked (styled bands),
+  one combined PDF (landscape, 10pp) and CSV. Header EXCEL/PDF buttons
+  (testID asd-full-xlsx/asd-full-pdf). Verified via openpyxl/pypdf.

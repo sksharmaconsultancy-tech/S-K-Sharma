@@ -38,7 +38,7 @@ def _iso_date(d: datetime) -> str:
 
 
 def _range_from_preset(preset: str, date_from: Optional[str],
-                       date_to: Optional[str]) -> (str, str):
+                       date_to: Optional[str]):
     t = _today()
     today = _iso_date(t)
     if preset == "today":
@@ -399,7 +399,7 @@ async def attendance_sync_dashboard(
 @router.get("/admin/attendance-sync-dashboard/export")
 async def attendance_sync_export(
     section: str = Query("attendance_missing",
-                         pattern="^(new_joining|machine_only|master_only|attendance_missing)$"),
+                         pattern="^(new_joining|machine_only|master_only|attendance_missing|full)$"),
     format: str = Query("xlsx", pattern="^(xlsx|pdf|csv)$"),
     company_id: Optional[str] = Query(None),
     preset: str = Query("month", pattern="^(today|yesterday|week|month|custom)$"),
@@ -445,8 +445,133 @@ async def attendance_sync_export(
                                  r.get("leave_status") or "—", r.get("status"),
                                  r.get("remark")] for r in data["attendance_missing"]]),
     }
-    title, headers, rows = cfg[section]
+    title, headers, rows = cfg[section] if section != "full" else (None, None, None)
     from routes.compliance_validation import _file_response, _pdf_bytes, _xlsx_bytes
+
+    # ---- Iter 393 (user request) — FULL report: every section in ONE
+    # single sheet / one PDF document. ----
+    if section == "full":
+        k = data["kpis"]
+        kpi_pairs = [
+            ("Total Employees", k["total_employees"]),
+            ("Machine Registered", k["machine_registered"]),
+            ("Active Employees", k["active_employees"]),
+            ("New Joining", k["new_joining"]),
+            ("Master Pending (machine-only users)", k["master_pending"]),
+            ("Machine Pending (not enrolled)", k["machine_pending"]),
+            ("Attendance Missing", k["attendance_missing"]),
+            ("Never Punched", k["never_punched"]),
+            ("Attendance %", f"{k['attendance_pct']}%"),
+            ("Machine Sync %", f"{k['machine_sync_pct']}%"),
+            ("Master Sync %", f"{k['master_sync_pct']}%"),
+            ("Overall Health Score", f"{k['overall_health']}%"),
+            ("Machines Online", f"{k['machines_online']}/{k['machines_total']}"),
+            ("Last Synchronization", str(k.get("last_sync_at") or "—")[:16]),
+        ]
+        cont = data["continuous_absence"]
+        sections = [
+            ("SUMMARY (KPI)", ["Indicator", "Value"],
+             [[a, b] for a, b in kpi_pairs]),
+            *[(cfg[s][0].upper(), cfg[s][1], cfg[s][2])
+              for s in ("new_joining", "machine_only", "master_only",
+                        "attendance_missing")],
+            ("CONTINUOUS ABSENCE", ["Consecutive Days", "Employees"],
+             [[f"{d}+ days", n] for d, n in cont.items()]),
+            ("MACHINE SYNCHRONIZATION", ["Machine", "Serial", "Status", "Last Seen", "Remark"],
+             [[m.get("name") or "—", m.get("serial_number"),
+               "ONLINE" if m.get("online") else "OFFLINE",
+               str(m.get("last_seen_at") or "never")[:16],
+               m.get("remark") or "OK"] for m in data["machines"]]),
+        ]
+        fname = f"attendance_sync_full_{data['range']['from']}_{data['range']['to']}.{format}"
+        sub = (f"{data['range']['from']} → {data['range']['to']} · "
+               f"Overall Health {k['overall_health']}%")
+        if format == "xlsx":
+            # SINGLE SHEET: all sections stacked with styled section bands.
+            import io as _io
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Attendance Sync Report"
+            ws.append(["ATTENDANCE SYNCHRONIZATION DASHBOARD"])
+            ws.cell(row=1, column=1).font = Font(bold=True, size=13)
+            ws.append([sub])
+            maxw: Dict[int, int] = {}
+            for title2, hdrs, rows2 in sections:
+                ws.append([])
+                ws.append([title2])
+                c = ws.cell(row=ws.max_row, column=1)
+                c.font = Font(bold=True, color="FFFFFF")
+                c.fill = PatternFill("solid", fgColor="1D4ED8")
+                ws.append(hdrs)
+                for cc in ws[ws.max_row]:
+                    cc.font = Font(bold=True, color="FFFFFF")
+                    cc.fill = PatternFill("solid", fgColor="0F172A")
+                for r in rows2:
+                    ws.append(r)
+                for i2, h in enumerate(hdrs, start=1):
+                    w = max([len(str(h))] + [len(str(r[i2 - 1])) for r in rows2[:150]] or [8])
+                    maxw[i2] = max(maxw.get(i2, 8), min(44, w + 2))
+            for i2, w in maxw.items():
+                ws.column_dimensions[ws.cell(row=1, column=i2).column_letter].width = w
+            buf = _io.BytesIO()
+            wb.save(buf)
+            return _file_response(buf.getvalue(), fname, "xlsx")
+        if format == "pdf":
+            # One PDF with all section tables stacked.
+            import io as _io
+            from reportlab.lib import colors as rl
+            from reportlab.lib.pagesizes import A4, landscape
+            from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+            from reportlab.lib.units import mm
+            from reportlab.platypus import (Paragraph, SimpleDocTemplate,
+                                            Spacer, Table, TableStyle)
+            styles = getSampleStyleSheet()
+            cell = ParagraphStyle("cell", parent=styles["Normal"], fontSize=6.8, leading=8.2)
+            headp = ParagraphStyle("head", parent=cell, textColor=rl.white,
+                                   fontName="Helvetica-Bold")
+            secp = ParagraphStyle("sec", parent=styles["Normal"], fontSize=10,
+                                  fontName="Helvetica-Bold", spaceBefore=8,
+                                  textColor=rl.HexColor("#1D4ED8"))
+            story = [Paragraph("Attendance Synchronization Dashboard", styles["Title"]),
+                     Paragraph(sub, styles["Normal"]), Spacer(1, 3 * mm)]
+            for title2, hdrs, rows2 in sections:
+                story.append(Paragraph(title2, secp))
+                tdata = [[Paragraph(str(h), headp) for h in hdrs]]
+                for r in rows2[:400]:
+                    tdata.append([Paragraph(str(v if v is not None else ""), cell) for v in r])
+                t = Table(tdata, repeatRows=1)
+                t.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#0F172A")),
+                    ("GRID", (0, 0), (-1, -1), 0.4, rl.HexColor("#CBD5E1")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+                     [rl.white, rl.HexColor("#F8FAFC")]),
+                ]))
+                story.append(t)
+            buf = _io.BytesIO()
+            SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=8 * mm,
+                              rightMargin=8 * mm, topMargin=10 * mm,
+                              bottomMargin=10 * mm).build(story)
+            return _file_response(buf.getvalue(), fname, "pdf")
+        # CSV: sections stacked with blank separators.
+        import csv as _csv
+        import io as _io
+        buf2 = _io.StringIO()
+        w = _csv.writer(buf2)
+        w.writerow(["ATTENDANCE SYNCHRONIZATION DASHBOARD"])
+        w.writerow([sub])
+        for title2, hdrs, rows2 in sections:
+            w.writerow([])
+            w.writerow([title2])
+            w.writerow(hdrs)
+            w.writerows(rows2)
+        from fastapi import Response
+        return Response(content=buf2.getvalue().encode("utf-8-sig"),
+                        media_type="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
     fname = f"{section}_{data['range']['from']}_{data['range']['to']}.{format}"
     if format == "csv":
         import csv as _csv
