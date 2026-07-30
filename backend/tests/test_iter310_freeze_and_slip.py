@@ -168,10 +168,13 @@ class TestFreezeOtOffBranch:
 
 
 class TestFreezeNegativeDiff:
-    """Import LOWER than calc → diff negative, no allocation, gross_paid unchanged."""
+    """Iter 339b/340/344 — imported gross BELOW the sheet-days calc no
+    longer produces a negative Difference: Compliance Days are auto-derived
+    (shrunk, floored) from the imported gross, the small positive remainder
+    routes to OT/Other and the FINAL gross equals the freeze gross exactly."""
 
     def test_negative_diff_non_destructive(self, hdr):
-        # daily 745*26 = 19370; import 10000 → diff -9370
+        # daily 745*26 = 19370; import 10000 → days shrink to match 10000
         _upload(hdr, [{"code": CODE_DAILY, "pd": 26, "ge": 10000}])
         # OT restore already done
         _db.firm_masters.update_one(
@@ -181,12 +184,16 @@ class TestFreezeNegativeDiff:
         run = _process(hdr)
         r = _row(run, CODE_DAILY)
         assert r, "row for code 50 not found"
-        assert r["difference"] < 0, f"expected negative diff, got {r['difference']}"
-        assert r["difference_allocation_head"] == "", \
-            f"expected empty head, got {r['difference_allocation_head']}"
-        # gross_paid stays at calculated (non-destructive)
-        assert abs(r["gross_paid"] - r["calculated_gross"]) < 0.01, \
-            f"gross_paid should equal calc: gp={r['gross_paid']} calc={r['calculated_gross']}"
+        # days-shrink guarantees the calc never overshoots the import
+        assert r["difference"] >= 0, \
+            f"expected non-negative diff (days auto-shrink), got {r['difference']}"
+        # any remainder is allocated to OT (firm OT allowed)
+        if r["difference"] >= 1:
+            assert r["difference_allocation_head"] == "Overtime", \
+                f"expected Overtime head, got {r['difference_allocation_head']}"
+        # FINAL gross must equal the imported freeze gross exactly (Iter 344)
+        assert abs(r["gross_paid"] - r["imported_gross"]) < 0.01, \
+            f"gross must equal import: gp={r['gross_paid']} imp={r['imported_gross']}"
 
 
 # ---------------------------------------------------------------------------
@@ -214,16 +221,17 @@ class TestDetailSlip:
         titles = [s["title"] for s in j.get("sections") or []]
         for want in ("Personal Information", "Employment Details",
                      "Statutory / KYC", "Bank Details",
-                     "Salary Information", "Other (Phase 2)"):
+                     "Salary Information", "Additional Details"):
             assert want in titles, f"section missing: {want}"
         assert "attendance_fytd" in j and "leaves_fytd" in j
         pc = j.get("profile_completion")
         assert isinstance(pc, int) and 0 <= pc <= 100, f"profile_completion={pc}"
-        # Mother Name should be None (Phase-2 placeholder)
+        # Mother Name was a Phase-2 placeholder at Iter 310; it is now a
+        # real editable field — just assert it is present in the section.
         personal = next(s for s in j["sections"]
                         if s["title"] == "Personal Information")
-        mother = next(f for f in personal["fields"] if f["label"] == "Mother Name")
-        assert mother["value"] in (None, ""), f"Mother Name should be None: {mother}"
+        assert any(f["label"] == "Mother Name" for f in personal["fields"]), \
+            "Mother Name field missing from Personal Information"
 
     def test_pdf_export(self, hdr):
         r = requests.get(
