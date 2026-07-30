@@ -1403,7 +1403,10 @@ export default function ComplianceSalaryRunScreen() {
   const updatePresentDays = (userId: string, newPd: number) => {
     if (!run) return;
     const monthDays = Math.max(1, run.month_days || 30);
-    const stat = (run.statutory_cfg || {}) as any;
+    // Iter 387 — prefer the FULL effective statutory snapshot saved on the
+    // run (standard + firm overrides + per-run cfg); fall back to the old
+    // per-run cfg for runs created before Iter 387.
+    const stat = ((run as any).statutory_effective || run.statutory_cfg || {}) as any;
     const pfEmpRate = Number(stat.pf_percent_employee ?? stat.pf_employee_rate ?? 12) / 100;
     const pfErEpfRate = Number(stat.pf_percent_employer_epf ?? 3.67) / 100;
     const pfErEpsRate = Number(stat.pf_percent_employer_eps ?? 8.33) / 100;
@@ -1477,13 +1480,22 @@ export default function ComplianceSalaryRunScreen() {
         const pfBasicPro = (r as any).salary_mode === "monthly" ? pfBasicFull * ratio : pfBasicFull;
         const floorPct = Number(stat.stat_wage_floor_pct ?? 50) / 100;
         const grossEarn = grossPaid + Number((r as any).ot_pay || 0);
-        const pfBase = pfBasicFull < pfCap
+        // Iter 387 — Wage Definition Rule switch mirrors the engine.
+        const wageRuleOn = stat.wage_definition_rule_enabled !== false;
+        const pfBase = pfBasicFull < pfCap && wageRuleOn
           ? Math.max(pfBasicPro, grossEarn * floorPct)
           : pfBasicPro;
-        const pfWagesNew = pfOn ? Math.min(pfBase, pfCap) : 0;
+        // Iter 387 — International Worker: EPF without the wage ceiling.
+        const pfWagesNew = pfOn ? ((r as any).intl_worker ? pfBase : Math.min(pfBase, pfCap)) : 0;
         const pfEmp = pfWagesNew * pfEmpRate;
-        const pfErEpf = pfWagesNew * pfErEpfRate;
-        const pfErEps = pfWagesNew * pfErEpsRate;
+        let pfErEpf = pfWagesNew * pfErEpfRate;
+        // Iter 387 — Higher Pension: EPS on the UNCAPPED PF base.
+        let pfErEps = ((r as any).higher_pension && pfOn ? pfBase : pfWagesNew) * pfErEpsRate;
+        // Iter 341 — EPS Disable: full employer share goes to EPF.
+        if ((r as any).eps_disabled) {
+          pfErEpf += pfWagesNew * pfErEpsRate;
+          pfErEps = 0;
+        }
         const pfErTot = pfErEpf + pfErEps;
 
         // ESIC (Iter 254 user directive): eligibility by the Employee
@@ -1499,8 +1511,16 @@ export default function ComplianceSalaryRunScreen() {
         // Iter 385 (user confirmed rule) — ESIC wage base = max(Basic,
         // floor% of Gross Earning): Basic when it exceeds 50% of gross,
         // else 50% of gross. Mirrors utils/compliance_salary.py.
+        // Iter 387 — Wage Definition Rule OFF ⇒ base = Σ heads flagged
+        // "ESIC Wage" in the Salary Head Mapping (+ OT when mapped).
+        const hm = stat.head_mapping || null;
+        const esicHeadOn = (k: string) => !hm || (hm[k] || {}).esic !== false;
         const esiBase = esiApplicable
-          ? Math.max(paidBasic, grossEarn * floorPct)
+          ? (wageRuleOn
+            ? Math.max(paidBasic, grossEarn * floorPct)
+            : (["basic", "hra", "conveyance", "medical", "special", "others"] as const)
+                .reduce((n, k) => n + (esicHeadOn(k) ? Number((rHeads as any)[k] || 0) : 0), 0)
+              + (esicHeadOn("ot") ? Number((r as any).ot_pay || 0) : 0))
           : 0;
         const esiEmp = esiApplicable ? Math.ceil(esiBase * esiEmpRate) : 0;
         const esiEr  = esiApplicable ? Math.ceil(esiBase * esiErRate)  : 0;

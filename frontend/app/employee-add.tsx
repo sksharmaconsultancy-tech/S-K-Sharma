@@ -178,6 +178,14 @@ export default function EmployeeAddScreen() {
           pf_basic: p.pf_basic != null ? String(p.pf_basic) : "",
           vpf_enabled: !!p.vpf_enabled,
           eps_disabled: !!p.eps_disabled,
+          higher_pension: !!p.higher_pension,
+          intl_worker: !!p.intl_worker,
+          excluded_employee: !!p.excluded_employee,
+          esic_temp_exempt: !!p.esic_temp_exempt,
+          esic_reg_status: p.esic_reg_status || "",
+          dispensary: p.dispensary || "",
+          esic_join_date: p.esic_join_date || "",
+          esic_exit_date: p.esic_exit_date || "",
           vpf_amount: p.vpf_amount != null ? String(p.vpf_amount) : "",
           compliance_salary_mode: p.compliance_salary_mode || "monthly",
           basic_salary: basicRow?.amount != null && basicRow.amount > 0 ? String(basicRow.amount) : "",
@@ -758,6 +766,14 @@ export default function EmployeeAddScreen() {
         // Iter 126i — VPF (Voluntary PF)
         vpf_enabled: form.vpf_enabled,
         eps_disabled: form.eps_disabled,
+        higher_pension: form.higher_pension,
+        intl_worker: form.intl_worker,
+        excluded_employee: form.excluded_employee,
+        esic_temp_exempt: form.esic_temp_exempt,
+        esic_reg_status: form.esic_reg_status.trim() || undefined,
+        dispensary: form.dispensary.trim() || undefined,
+        esic_join_date: form.esic_join_date || undefined,
+        esic_exit_date: form.esic_exit_date || undefined,
         vpf_amount: form.vpf_enabled && form.vpf_amount ? Number(form.vpf_amount) : undefined,
         compliance_salary_mode: form.compliance_salary_mode || undefined,
         // Iter 91 — fixed Actual structure (Basic + rate basis, Salary
@@ -1953,6 +1969,29 @@ export default function EmployeeAddScreen() {
               share goes to EPF for this employee.
             </Text>
           ) : null}
+
+          {/* Iter 387 — configurable statutory module: per-employee PF flags. */}
+          {([
+            ["higher_pension", "Higher Pension (EPS on uncapped wages)", colors.brandPrimary],
+            ["intl_worker", "International Worker (no EPF wage ceiling)", colors.brandPrimary],
+            ["excluded_employee", "Excluded Employee (EPF not applicable)", "#B91C1C"],
+          ] as const).map(([k, label, tint]) => (
+            <Pressable
+              key={k}
+              onPress={() => setField(k, !form[k])}
+              style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 }}
+              testID={`${k}-toggle`}
+            >
+              <Ionicons
+                name={form[k] ? "checkbox" : "square-outline"}
+                size={20}
+                color={form[k] ? tint : colors.onSurfaceSecondary}
+              />
+              <Text style={{ fontSize: 13, fontWeight: "700", color: colors.onSurface }}>
+                {label}
+              </Text>
+            </Pressable>
+          ))}
           </>)}
 
           {/* Iter 200 (user request) — Allowance / Deduction heads (Actual,
@@ -2123,6 +2162,72 @@ export default function EmployeeAddScreen() {
               autoCapitalize="none"
             />
           </TwoCol>
+
+          {/* Iter 387 — configurable statutory module: ESIC master details. */}
+          <Text style={styles.lbl}>ESIC Registration Status</Text>
+          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+            {["Registered", "Pending", "Not Registered"].map((s) => {
+              const on = form.esic_reg_status === s;
+              return (
+                <Pressable
+                  key={s}
+                  onPress={() => setField("esic_reg_status", on ? "" : s)}
+                  style={[
+                    { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999, borderWidth: 1.5 },
+                    on
+                      ? { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary }
+                      : { backgroundColor: colors.surface, borderColor: colors.border },
+                  ]}
+                  testID={`esic-status-${s}`}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: "700", color: on ? "#fff" : colors.onSurfaceSecondary }}>
+                    {s}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <TwoCol>
+            <Field
+              label="Dispensary (ESIC)"
+              value={form.dispensary}
+              onChange={(v) => setField("dispensary", v)}
+              placeholder="Allotted dispensary / IMP"
+            />
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={styles.lbl}>ESIC Joining Date</Text>
+              <DateField
+                value={form.esic_join_date}
+                onChangeISO={(iso) => setField("esic_join_date", iso || "")}
+                testID="emp-esic-join"
+              />
+            </View>
+          </TwoCol>
+          <TwoCol>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={styles.lbl}>ESIC Exit Date</Text>
+              <DateField
+                value={form.esic_exit_date}
+                onChangeISO={(iso) => setField("esic_exit_date", iso || "")}
+                testID="emp-esic-exit"
+              />
+            </View>
+            <View style={{ flex: 1 }} />
+          </TwoCol>
+          <Pressable
+            onPress={() => setField("esic_temp_exempt", !form.esic_temp_exempt)}
+            style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 }}
+            testID="esic-temp-exempt-toggle"
+          >
+            <Ionicons
+              name={form.esic_temp_exempt ? "checkbox" : "square-outline"}
+              size={20}
+              color={form.esic_temp_exempt ? "#B91C1C" : colors.onSurfaceSecondary}
+            />
+            <Text style={{ fontSize: 13, fontWeight: "700", color: colors.onSurface }}>
+              ESIC Temporary Exemption (skip ESIC this period)
+            </Text>
+          </Pressable>
           <TwoCol>
             <Field
               label="PAN"

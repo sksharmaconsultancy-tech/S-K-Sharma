@@ -59,7 +59,7 @@ DEFAULT_STRUCTURE_PCT: Dict[str, float] = {
 # --------------------------------------------------------------------------- 
 # Statutory rate defaults (all editable via run body)
 # --------------------------------------------------------------------------- 
-DEFAULT_STATUTORY_CFG: Dict[str, float] = {
+DEFAULT_STATUTORY_CFG: Dict[str, Any] = {
     # PF (new labour code)
     "pf_percent_employee": 12.0,
     "pf_percent_employer_epf": 3.67,
@@ -87,9 +87,71 @@ DEFAULT_STATUTORY_CFG: Dict[str, float] = {
     # rupee, ESIC rounded UP to the next rupee).
     "pf_rounding": "nearest",     # nearest | ceil | floor | none
     "esic_rounding": "ceil",      # ceil | nearest | floor | none
+
+    # Iter 387 (user request — configurable statutory module, global OR
+    # per-firm). Defaults REPLICATE the pre-387 behaviour exactly.
+    "pf_enabled": True,                      # module-level PF Applicable
+    "esic_enabled": True,                    # module-level ESIC Applicable
+    # Wage Definition Rule = the max(Basic, floor% of Gross) floor.
+    "wage_definition_rule_enabled": True,
+    # When False, employees stay ESIC-covered even above the ceiling.
+    "esic_disable_above_ceiling": True,
+    "pf_proration_method": "calendar_days",
+    "esic_proration_method": "calendar_days",
+    "rule_version": "",                      # free label, e.g. "FY 2026-27 v1"
+    # head_mapping default is None → DEFAULT_HEAD_MAPPING applies.
 }
 
 _ROUNDING_KEYS = ("pf_rounding", "esic_rounding")
+
+# Iter 387 — Salary Head Mapping: which earning heads count as PF / ESIC
+# wages. Admin-editable in Standard Compliance Settings (global or firm).
+# NOTE (user-confirmed Iter 129/385 rules kept): PF amounts always derive
+# from the Employee Master "PF Basic Salary"; the PF flags feed the
+# validation/AI-explanation layers. ESIC flags drive the ESIC wage base
+# whenever the Wage Definition Rule is switched OFF.
+STATUTORY_HEAD_KEYS = ("basic", "hra", "conveyance", "medical", "special", "others", "ot")
+DEFAULT_HEAD_MAPPING: Dict[str, Dict[str, bool]] = {
+    "basic": {"pf": True, "esic": True},
+    "hra": {"pf": False, "esic": True},
+    "conveyance": {"pf": False, "esic": True},
+    "medical": {"pf": False, "esic": True},
+    "special": {"pf": False, "esic": True},
+    "others": {"pf": False, "esic": True},
+    "ot": {"pf": False, "esic": True},
+}
+
+PRORATION_METHODS = ("calendar_days", "paid_days", "attendance_days", "working_days", "none")
+
+# cfg keys passed through as-is (not coerced to float) when merging.
+_CFG_PASSTHRU_KEYS = (
+    "pf_enabled", "esic_enabled", "wage_definition_rule_enabled",
+    "esic_disable_above_ceiling", "pf_proration_method",
+    "esic_proration_method", "rule_version", "head_mapping", "_salary_month",
+)
+
+
+def _proration_factor(method: str, effective_present: float, month_days: int) -> float:
+    """Iter 387 — configurable proration for monthly-rated staff.
+
+    calendar_days → present ÷ days-in-month (pre-387 behaviour, default)
+    working_days  → present ÷ 26
+    attendance_days → present ÷ 30 (fixed 30-day divisor)
+    paid_days     → full wages whenever ANY day is paid
+    none          → never prorated
+    """
+    m = (method or "calendar_days").strip().lower()
+    if m == "none":
+        return 1.0
+    if m == "paid_days":
+        return 1.0 if effective_present > 0 else 0.0
+    if m == "working_days":
+        div = 26.0
+    elif m == "attendance_days":
+        div = 30.0
+    else:
+        div = float(max(1, month_days))
+    return min(1.0, effective_present / div) if div > 0 else 0.0
 
 # Iter 162 — column catalog for the customisable v2 register PDF.
 # key -> (default heading, default width unit, numeric?)
@@ -345,7 +407,13 @@ def compute_compliance_row(
         for k, v in statutory_cfg.items():
             if v is None:
                 continue
-            cfg[k] = str(v) if k in _ROUNDING_KEYS else _num(v)
+            if k in _ROUNDING_KEYS:
+                cfg[k] = str(v)
+            elif k in _CFG_PASSTHRU_KEYS:
+                # Iter 387 — bool / enum / dict settings pass through as-is.
+                cfg[k] = v
+            else:
+                cfg[k] = _num(v)
 
     salary_mode = (policy.get("salary_mode") or "monthly").lower()
     # Iter 68 — Two salary structures on the employee master:
@@ -535,25 +603,41 @@ def compute_compliance_row(
     # deducted for that employee, and when filled ALL PF amounts derive
     # from it (pro-rated by attendance for monthly-rated staff).
     pf_basic_override = _num(user.get("pf_basic"), 0.0)
+    # Iter 387 — Wage Definition Rule = the max(Basic, floor% Gross) floor;
+    # configurable (global / per-firm) in Standard Compliance Settings.
+    wage_rule_on = cfg.get("wage_definition_rule_enabled") is not False
     # Iter 370 (user bug) — MASTER eligibility is tracked SEPARATELY from
     # the zero-pay guard: a first process with 0 Present Days used to mark
     # the row pf_applicable=False, which froze the grid's client-side
     # recompute (typing days showed no PF/ESIC until a SECOND "Salary
     # Process" click). ``pf_eligible`` is the days-independent flag.
-    pf_eligible = (
-        firm_pf_enabled
-        and user.get("pf_applicable") is not False
-        and pf_basic_override > 0
-    )
+    # Iter 387 — module-level PF switch + Excluded Employee flag; the skip
+    # REASON is captured for the audit/"View Calculation" layers.
+    _pf_skip_reason = ""
+    if not firm_pf_enabled:
+        _pf_skip_reason = "EPF marked Not Applicable on the Firm Master"
+    elif cfg.get("pf_enabled") is False:
+        _pf_skip_reason = "PF module disabled in Compliance Settings"
+    elif user.get("pf_applicable") is False:
+        _pf_skip_reason = "PF Applicable = No on the Employee Master"
+    elif user.get("excluded_employee"):
+        _pf_skip_reason = "Excluded Employee (EPF) on the Employee Master"
+    elif pf_basic_override <= 0:
+        _pf_skip_reason = "PF Basic Salary blank/0 on the Employee Master"
+    pf_eligible = not _pf_skip_reason
     pf_applicable = (
         pf_eligible
         and not _zero_pay  # Iter 297 — no PF on a zero-day / zero-pay month
     )
+    if pf_eligible and _zero_pay:
+        _pf_skip_reason = "Zero-pay month (no payable days / hours / gross)"
+    pf_proration_method = str(cfg.get("pf_proration_method") or "calendar_days")
     if pf_applicable:
         if salary_mode == "monthly":
-            pf_basic_prorated = _safe_div(
-                pf_basic_override * effective_present, max(1, month_days)
-            )
+            # Iter 387 — configurable proration method (default replicates
+            # the old present ÷ month-days behaviour).
+            pf_basic_prorated = pf_basic_override * _proration_factor(
+                pf_proration_method, effective_present, max(1, month_days))
         else:
             pf_basic_prorated = pf_basic_override
         # Iter 376 (user rule, replaces Iter 254) — PF wage base:
@@ -563,14 +647,22 @@ def compute_compliance_row(
         #   • PF Basic AT/ABOVE ₹15,000 → the floor does NOT apply; PF is
         #     calculated per the ceiling rule → wages = ₹15,000 (pro-rated
         #     by attendance for monthly-rated staff).
-        if pf_basic_override < cfg["pf_wage_cap"]:
+        # Iter 387 — the floor only applies while the Wage Definition Rule
+        # is enabled in Compliance Settings.
+        if pf_basic_override < cfg["pf_wage_cap"] and wage_rule_on:
             pf_base = max(pf_basic_prorated, gross_paid * (floor_pct / 100.0))
         else:
             pf_base = pf_basic_prorated
-        capped_pf_wages = min(pf_base, cfg["pf_wage_cap"])
+        # Iter 387 — International Worker: EPF applies WITHOUT the wage
+        # ceiling (statutory IW rule).
+        _intl_worker = bool(user.get("intl_worker"))
+        capped_pf_wages = pf_base if _intl_worker else min(pf_base, cfg["pf_wage_cap"])
         pf_employee = capped_pf_wages * (cfg["pf_percent_employee"] / 100.0)
         pf_employer_epf = capped_pf_wages * (cfg["pf_percent_employer_epf"] / 100.0)
-        pf_employer_eps = capped_pf_wages * (cfg["pf_percent_employer_eps"] / 100.0)
+        # Iter 387 — Higher Pension (joint option): EPS contribution on the
+        # UNCAPPED PF wages instead of the ceiling.
+        _eps_wages = pf_base if user.get("higher_pension") else capped_pf_wages
+        pf_employer_eps = _eps_wages * (cfg["pf_percent_employer_eps"] / 100.0)
         # Iter 341 (user request) — Employee Master "EPS Disable": the
         # employee is NOT eligible for Pension, so the entire employer
         # share goes to EPF and EPS is 0 (ECR prints EPS as 0).
@@ -598,6 +690,7 @@ def compute_compliance_row(
         pf_employer_total = pf_employer_epf + pf_employer_eps
     else:
         capped_pf_wages = 0.0
+        pf_base = pf_basic_prorated = 0.0
         vpf = 0.0
         pf_employee = pf_employer_epf = pf_employer_eps = pf_employer_total = 0.0
 
@@ -616,23 +709,76 @@ def compute_compliance_row(
     if _esic_elig_basic <= 0:
         _esic_elig_basic = master_structure["basic"]
     # Iter 370 — days-independent ESIC eligibility (see pf_eligible above).
-    esic_eligible = (
-        firm_esic_enabled
-        and user.get("esic_applicable") is not False
-        and _esic_elig_basic <= cfg["esic_gross_threshold"]
-    )
+    # Iter 387 — module switch, Temporary Exemption, ESIC Exit Date and the
+    # configurable disable-above-ceiling rule; skip REASON captured for the
+    # audit / "View Calculation" layers.
+    _salary_month = str(cfg.get("_salary_month") or "")[:7]
+    _esic_exit_month = str(user.get("esic_exit_date") or "")[:7]
+    _esic_skip_reason = ""
+    if not firm_esic_enabled:
+        _esic_skip_reason = "ESI marked Not Applicable on the Firm Master"
+    elif cfg.get("esic_enabled") is False:
+        _esic_skip_reason = "ESIC module disabled in Compliance Settings"
+    elif user.get("esic_applicable") is False:
+        _esic_skip_reason = "ESIC Applicable = No on the Employee Master"
+    elif user.get("esic_temp_exempt"):
+        _esic_skip_reason = "ESIC Temporary Exemption on the Employee Master"
+    elif (_salary_month and _esic_exit_month
+          and re.fullmatch(r"\d{4}-\d{2}", _esic_exit_month)
+          and _esic_exit_month < _salary_month):
+        _esic_skip_reason = (
+            f"ESIC Exit Date ({user.get('esic_exit_date')}) is before the salary month")
+    elif (_esic_elig_basic > cfg["esic_gross_threshold"]
+          and cfg.get("esic_disable_above_ceiling") is not False):
+        _esic_skip_reason = (
+            f"Basic ₹{_esic_elig_basic:,.0f} above the ESIC ceiling "
+            f"₹{cfg['esic_gross_threshold']:,.0f}")
+    esic_eligible = not _esic_skip_reason
     esic_applicable = (
         esic_eligible
         # Iter 297 (user bug) — days ZERO in the front window ⇒ ESIC = 0.
         and not _zero_pay
     )
+    if esic_eligible and _zero_pay:
+        _esic_skip_reason = "Zero-pay month (no payable days / hours / gross)"
+    esic_proration_method = str(cfg.get("esic_proration_method") or "calendar_days")
+    _head_map = cfg.get("head_mapping") if isinstance(cfg.get("head_mapping"), dict) else None
+
+    def _esic_head_on(k: str) -> bool:
+        if not _head_map:
+            return DEFAULT_HEAD_MAPPING.get(k, {}).get("esic", True)
+        return (_head_map.get(k) or {}).get("esic") is not False
+
     if esic_applicable:
         # Iter 385 (user confirmed rule) — ESIC wage base follows the 50%
         # floor rule: when the earned Basic is MORE than floor% (default
         # 50%) of the Gross Earning, ESIC is deducted on Basic; otherwise
         # on floor% of Gross. i.e. wage base = max(Basic, floor% × Gross).
         # (Replaces Iter 130 "ESIC on Basic only".)
-        esic_wage_base = stat_wage_base
+        # Iter 387 — when the Wage Definition Rule is OFF, the base is the
+        # SUM of the earning heads flagged "ESIC Wage" in the Salary Head
+        # Mapping (+ OT when mapped). ESIC proration "none" uses the
+        # full-month master heads instead of the earned (pro-rated) ones.
+        if wage_rule_on:
+            if esic_proration_method == "none":
+                esic_wage_base = max(
+                    master_structure["basic"],
+                    monthly_gross_master * (floor_pct / 100.0))
+            else:
+                esic_wage_base = stat_wage_base
+        else:
+            if esic_proration_method == "none":
+                _src = master_structure
+                _ot_component = 0.0
+            else:
+                _src = {"basic": basic, "hra": hra, "conveyance": conveyance,
+                        "medical": medical, "special": special, "others": others}
+                _ot_component = ot_pay if _esic_head_on("ot") else 0.0
+            esic_wage_base = sum(
+                _num(_src.get(k), 0.0)
+                for k in ("basic", "hra", "conveyance", "medical", "special", "others")
+                if _esic_head_on(k)
+            ) + _ot_component
         esic_employee = esic_wage_base * (cfg["esic_percent_employee"] / 100.0)
         esic_employer = esic_wage_base * (cfg["esic_percent_employer"] / 100.0)
         # Iter 127f — ESIC statutory rounding (default: UP to next rupee).
@@ -795,6 +941,75 @@ def compute_compliance_row(
         # Totals
         "total_deduction": round(total_deduction, 2),
         "net": round(net, 2),
+        # Iter 387 — Phase-1 employee flags carried on the row (grid
+        # recompute + ECR/validation layers).
+        "higher_pension": bool(user.get("higher_pension")),
+        "intl_worker": bool(user.get("intl_worker")),
+        "excluded_employee": bool(user.get("excluded_employee")),
+        "esic_temp_exempt": bool(user.get("esic_temp_exempt")),
+        # Iter 387 — human-readable calculation reasons + full snapshot
+        # ("View Calculation" / audit dashboard / AI assistant layers).
+        "pf_reason": (
+            _pf_skip_reason if not pf_applicable else (
+                f"PF ₹{pf_employee:,.0f} = {cfg['pf_percent_employee']:g}% of "
+                f"wages ₹{capped_pf_wages:,.0f}"
+                + (" (no ceiling — International Worker)" if user.get("intl_worker")
+                   else (f" (capped from ₹{pf_base:,.0f} at ₹{cfg['pf_wage_cap']:,.0f})"
+                         if pf_base > capped_pf_wages + 0.5 else ""))
+                + (f"; floor rule max(PF Basic ₹{pf_basic_prorated:,.0f}, "
+                   f"{floor_pct:g}% of Gross)" if (wage_rule_on and pf_basic_override < cfg["pf_wage_cap"]) else "")
+                + ("; EPS on uncapped wages (Higher Pension)" if user.get("higher_pension") else "")
+                + ("; EPS = 0 (EPS Disabled)" if user.get("eps_disabled") else "")
+                + (f"; + VPF ₹{vpf:,.0f}" if vpf > 0 else "")
+            )
+        ),
+        "esic_reason": (
+            _esic_skip_reason if not esic_applicable else (
+                f"ESIC EE ₹{esic_employee:,.0f} / ER ₹{esic_employer:,.0f} = "
+                f"{cfg['esic_percent_employee']:g}% / {cfg['esic_percent_employer']:g}% "
+                f"of wage base ₹{esic_wage_base:,.0f}"
+                + (f" = max(Basic, {floor_pct:g}% of Gross)" if wage_rule_on
+                   else " = Σ heads flagged ESIC Wage in the Head Mapping")
+            )
+        ),
+        "calc_snapshot": {
+            "rule_version": str(cfg.get("rule_version") or ""),
+            "wage_definition_rule": bool(wage_rule_on),
+            "pf_proration_method": pf_proration_method,
+            "esic_proration_method": esic_proration_method,
+            "stat_wage_floor_pct": floor_pct,
+            "pf": {
+                "pf_basic_master": round(pf_basic_override, 2),
+                "pf_basic_prorated": round(pf_basic_prorated, 2),
+                "wage_base": round(pf_base, 2),
+                "ceiling": _num(cfg.get("pf_wage_cap"), 15000.0),
+                "wages": round(capped_pf_wages, 2),
+                "rate_employee": _num(cfg.get("pf_percent_employee"), 12.0),
+                "rate_epf": _num(cfg.get("pf_percent_employer_epf"), 3.67),
+                "rate_eps": _num(cfg.get("pf_percent_employer_eps"), 8.33),
+                "rounding": str(cfg.get("pf_rounding") or "nearest"),
+            },
+            "esic": {
+                "eligibility_basic": round(_esic_elig_basic, 2),
+                "ceiling": _num(cfg.get("esic_gross_threshold"), 21000.0),
+                "wage_base": round(esic_wage_base, 2),
+                "rate_employee": _num(cfg.get("esic_percent_employee"), 0.75),
+                "rate_employer": _num(cfg.get("esic_percent_employer"), 3.25),
+                "rounding": str(cfg.get("esic_rounding") or "ceil"),
+            },
+            "heads_considered": {
+                k: {
+                    "amount": round(_num({"basic": basic, "hra": hra,
+                                          "conveyance": conveyance,
+                                          "medical": medical, "special": special,
+                                          "others": others, "ot": ot_pay}.get(k), 0.0), 2),
+                    "esic_wage": _esic_head_on(k),
+                    "pf_wage": (
+                        (_head_map.get(k) or {}).get("pf") is True if _head_map
+                        else DEFAULT_HEAD_MAPPING.get(k, {}).get("pf", False)),
+                } for k in STATUTORY_HEAD_KEYS
+            },
+        },
     }
 
 

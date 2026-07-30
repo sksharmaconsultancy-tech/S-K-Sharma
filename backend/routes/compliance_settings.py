@@ -20,7 +20,13 @@ from server import (  # noqa: E402
     require_role,
     now_iso,
 )
-from utils.compliance_salary import DEFAULT_STATUTORY_CFG, _ROUNDING_KEYS
+from utils.compliance_salary import (
+    DEFAULT_HEAD_MAPPING,
+    DEFAULT_STATUTORY_CFG,
+    PRORATION_METHODS,
+    STATUTORY_HEAD_KEYS,
+    _ROUNDING_KEYS,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -34,6 +40,52 @@ _NUMERIC_FIELDS = (
     "pf_admin_percent", "pf_edli_percent", "pf_edli_admin_percent",
 )
 _ROUND_MODES = ("nearest", "ceil", "floor", "none")
+
+# Iter 387 — configurable statutory module (global AND per-firm).
+_BOOL_CFG_FIELDS = (
+    "pf_enabled", "esic_enabled",
+    "wage_definition_rule_enabled", "esic_disable_above_ceiling",
+)
+_PRORATION_FIELDS = ("pf_proration_method", "esic_proration_method")
+
+
+def _extract_cfg_updates(payload: Dict[str, Any], *, strict: bool) -> Dict[str, Any]:
+    """Validated Iter-387 settings shared by the Standard and Firm PUTs.
+    ``strict`` raises on bad values (Standard); Firm overrides skip them."""
+    upd: Dict[str, Any] = {}
+    for k in _BOOL_CFG_FIELDS:
+        if k in payload and payload[k] is not None:
+            upd[k] = bool(payload[k])
+    for k in _PRORATION_FIELDS:
+        if k in payload and payload[k] is not None:
+            v = str(payload[k]).strip().lower()
+            if v not in PRORATION_METHODS:
+                if strict:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{k} must be one of {PRORATION_METHODS}")
+                continue
+            upd[k] = v
+    if "rule_version" in payload and payload["rule_version"] is not None:
+        upd["rule_version"] = str(payload["rule_version"]).strip()[:60]
+    if "head_mapping" in payload and payload["head_mapping"] is not None:
+        raw = payload["head_mapping"]
+        if isinstance(raw, dict):
+            hm: Dict[str, Dict[str, bool]] = {}
+            for hk in STATUTORY_HEAD_KEYS:
+                row = raw.get(hk)
+                dflt = DEFAULT_HEAD_MAPPING[hk]
+                if isinstance(row, dict):
+                    hm[hk] = {"pf": bool(row.get("pf", dflt["pf"])),
+                              "esic": bool(row.get("esic", dflt["esic"]))}
+                else:
+                    hm[hk] = dict(dflt)
+            # Basic is statutorily ALWAYS a PF & ESIC wage.
+            hm["basic"] = {"pf": True, "esic": True}
+            upd["head_mapping"] = hm
+        elif strict:
+            raise HTTPException(status_code=400, detail="head_mapping must be an object")
+    return upd
 
 
 async def get_firm_statutory_overrides(company_id: Optional[str]) -> Dict[str, Any]:
@@ -52,6 +104,18 @@ async def get_firm_statutory_overrides(company_id: Optional[str]) -> Dict[str, A
     for k in _ROUNDING_KEYS:
         if raw.get(k) in _ROUND_MODES:
             out[k] = raw[k]
+    # Iter 387 — firm-level bool / proration / rule-version / head-mapping
+    # overrides (same precedence layering as the numeric fields).
+    for k in _BOOL_CFG_FIELDS:
+        if isinstance(raw.get(k), bool):
+            out[k] = raw[k]
+    for k in _PRORATION_FIELDS:
+        if raw.get(k) in PRORATION_METHODS:
+            out[k] = raw[k]
+    if isinstance(raw.get("rule_version"), str) and raw["rule_version"].strip():
+        out["rule_version"] = raw["rule_version"].strip()
+    if isinstance(raw.get("head_mapping"), dict):
+        out["head_mapping"] = raw["head_mapping"]
     return out
 
 
@@ -103,6 +167,8 @@ async def save_firm_compliance_settings(
     for k in _ROUNDING_KEYS:
         if k in payload and payload[k] in _ROUND_MODES:
             upd[k] = payload[k]
+    # Iter 387 — firm-level module switches / proration / head mapping.
+    upd.update(_extract_cfg_updates(payload, strict=False))
     if not upd:
         raise HTTPException(status_code=400, detail="Nothing to update")
     upd["updated_at"] = now_iso()
@@ -133,12 +199,30 @@ async def get_standard_compliance_cfg(on_date: Optional[str] = None) -> Dict[str
         if ver:
             doc = ver.get("settings") or {}
     cfg = dict(DEFAULT_STATUTORY_CFG)
+    cfg["head_mapping"] = {k: dict(v) for k, v in DEFAULT_HEAD_MAPPING.items()}
     for k in _NUMERIC_FIELDS:
         if doc.get(k) is not None:
             cfg[k] = float(doc[k])
     for k in _ROUNDING_KEYS:
         if doc.get(k) in _ROUND_MODES:
             cfg[k] = doc[k]
+    # Iter 387 — configurable statutory module settings.
+    for k in _BOOL_CFG_FIELDS:
+        if isinstance(doc.get(k), bool):
+            cfg[k] = doc[k]
+    for k in _PRORATION_FIELDS:
+        if doc.get(k) in PRORATION_METHODS:
+            cfg[k] = doc[k]
+    if isinstance(doc.get("rule_version"), str):
+        cfg["rule_version"] = doc["rule_version"]
+    if isinstance(doc.get("head_mapping"), dict):
+        cfg["head_mapping"] = {
+            hk: {"pf": bool((doc["head_mapping"].get(hk) or {}).get(
+                     "pf", DEFAULT_HEAD_MAPPING[hk]["pf"])),
+                 "esic": bool((doc["head_mapping"].get(hk) or {}).get(
+                     "esic", DEFAULT_HEAD_MAPPING[hk]["esic"]))}
+            for hk in STATUTORY_HEAD_KEYS
+        }
     return cfg
 
 
@@ -183,6 +267,8 @@ async def save_compliance_settings(
             if payload[k] not in _ROUND_MODES:
                 raise HTTPException(status_code=400, detail=f"{k} must be one of {_ROUND_MODES}")
             upd[k] = payload[k]
+    # Iter 387 — module switches / proration / rule version / head mapping.
+    upd.update(_extract_cfg_updates(payload, strict=True))
     if not upd:
         raise HTTPException(status_code=400, detail="Nothing to update")
 

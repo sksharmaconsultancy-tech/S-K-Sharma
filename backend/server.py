@@ -8490,6 +8490,16 @@ async def admin_create_employee(
         "vpf_amount": payload.get("vpf_amount"),
         # Iter 341 — EPS Disable (not eligible for Pension; ECR EPS = 0).
         "eps_disabled": bool(payload.get("eps_disabled") or False),
+        # Iter 387 — configurable statutory module: per-employee PF flags.
+        "higher_pension": bool(payload.get("higher_pension") or False),
+        "intl_worker": bool(payload.get("intl_worker") or False),
+        "excluded_employee": bool(payload.get("excluded_employee") or False),
+        # Iter 387 — per-employee ESIC master fields.
+        "esic_temp_exempt": bool(payload.get("esic_temp_exempt") or False),
+        "esic_reg_status": payload.get("esic_reg_status") or None,
+        "dispensary": payload.get("dispensary") or None,
+        "esic_join_date": payload.get("esic_join_date") or None,
+        "esic_exit_date": payload.get("esic_exit_date") or None,
         "actual_salary_allowances": payload.get("actual_salary_allowances") or [],
         "actual_salary_deductions": payload.get("actual_salary_deductions") or [],
         # Iter 91 — fixed Actual structure saved from the Add form
@@ -15605,6 +15615,8 @@ async def _compute_compliance_run(
     _std_cfg = await get_standard_compliance_cfg(on_date=f"{payload.month}-31")
     _firm_over = await get_firm_statutory_overrides(payload.company_id)
     effective_statutory = {**_std_cfg, **_firm_over, **(payload.statutory_cfg or {})}
+    # Iter 387 — salary month for the engine's ESIC Exit-Date rule.
+    effective_statutory["_salary_month"] = payload.month
 
 
     # ---- Load attendance for the month once (indexed by user_id) ----
@@ -16298,6 +16310,11 @@ async def _compute_compliance_run(
         "is_onroll_filter": payload.is_onroll,
         "structure_pct": payload.structure_pct or {},
         "statutory_cfg": payload.statutory_cfg or {},
+        # Iter 387 — FULL effective statutory snapshot (standard + firm
+        # overrides + per-run cfg) for the grid's client-side recompute and
+        # the "View Calculation" layer. Reprocess still re-merges live
+        # settings via statutory_cfg above.
+        "statutory_effective": effective_statutory,
         "employees_count": len(rows),
         "rows": rows,
         # Iter 167 — resigned staff auto-excluded from this run.

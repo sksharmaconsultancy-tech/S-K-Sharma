@@ -49,6 +49,8 @@ _STR_FIELDS = [
     # Iter 312 — Employee Detail Slip Phase 2 master fields.
     "grade", "cost_centre", "confirmation_date", "education", "experience",
     "company_assets", "nominee_name", "nominee_relation",
+    # Iter 387 — configurable statutory module: ESIC master fields.
+    "esic_reg_status", "dispensary", "esic_join_date", "esic_exit_date",
 ]
 _NUM_FIELDS = [
     "salary_monthly", "compliance_gross",
@@ -60,7 +62,10 @@ _NUM_FIELDS = [
 ]
 _BOOL_FIELDS = ["is_onroll", "vpf_enabled",
                 # Iter 341 — EPS Disable (not eligible for Pension).
-                "eps_disabled"]
+                "eps_disabled",
+                # Iter 387 — PF/ESIC statutory flags.
+                "higher_pension", "intl_worker", "excluded_employee",
+                "esic_temp_exempt"]
 _LIST_FIELDS = [
     "salary_structure_actual",
     "actual_salary_allowances", "actual_salary_deductions",

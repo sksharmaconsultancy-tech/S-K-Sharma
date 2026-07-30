@@ -46,6 +46,37 @@ const ROUND_LABEL: Record<string, string> = {
   nearest: "Nearest ₹", ceil: "Round UP ₹", floor: "Round DOWN ₹", none: "Exact (paise)",
 };
 
+// Iter 387 — configurable statutory module (global AND per-firm).
+const PRORATION_OPTS = ["calendar_days", "paid_days", "attendance_days", "working_days", "none"] as const;
+const PRORATION_LABEL: Record<string, string> = {
+  calendar_days: "Calendar Days",
+  paid_days: "Paid Days",
+  attendance_days: "Attendance (÷30)",
+  working_days: "Working Days (÷26)",
+  none: "No Proration",
+};
+const BOOL_FIELDS: { key: string; label: string; hint: string }[] = [
+  { key: "pf_enabled", label: "PF Applicable (module switch)", hint: "OFF = no PF for any employee in this scope." },
+  { key: "esic_enabled", label: "ESIC Applicable (module switch)", hint: "OFF = no ESIC for any employee in this scope." },
+  { key: "wage_definition_rule_enabled", label: "Wage Definition Rule — max(Basic, floor% of Gross)", hint: "OFF = PF on PF Basic only; ESIC wage from the Head Mapping below." },
+  { key: "esic_disable_above_ceiling", label: "Disable ESIC above the wage ceiling", hint: "OFF = employees stay ESIC-covered even above the ceiling (contribution-period continuation)." },
+];
+const HEAD_ROWS: { key: string; label: string }[] = [
+  { key: "basic", label: "Basic / DA" },
+  { key: "hra", label: "HRA" },
+  { key: "conveyance", label: "Conveyance" },
+  { key: "medical", label: "Medical" },
+  { key: "special", label: "Special Allowance" },
+  { key: "others", label: "Other Allowances" },
+  { key: "ot", label: "Overtime" },
+];
+const DEFAULT_HM: Record<string, { pf: boolean; esic: boolean }> = {
+  basic: { pf: true, esic: true }, hra: { pf: false, esic: true },
+  conveyance: { pf: false, esic: true }, medical: { pf: false, esic: true },
+  special: { pf: false, esic: true }, others: { pf: false, esic: true },
+  ot: { pf: false, esic: true },
+};
+
 export default function ComplianceSettingsScreen() {
   const { user } = useAuth();
   const isSuper = user?.role === "super_admin" || (user?.role as string) === "sub_admin";
@@ -112,6 +143,14 @@ export default function ComplianceSettingsScreen() {
       for (const { key } of NUM_FIELDS) f[key] = String(settings?.[key] ?? "");
       f.pf_rounding = settings?.pf_rounding || "nearest";
       f.esic_rounding = settings?.esic_rounding || "ceil";
+      // Iter 387 — module switches / proration / rule version / mapping.
+      for (const { key } of BOOL_FIELDS) f[key] = settings?.[key] !== false;
+      f.pf_proration_method = settings?.pf_proration_method || "calendar_days";
+      f.esic_proration_method = settings?.esic_proration_method || "calendar_days";
+      f.rule_version = settings?.rule_version || "";
+      f.head_mapping = settings?.head_mapping && typeof settings.head_mapping === "object"
+        ? { ...DEFAULT_HM, ...settings.head_mapping }
+        : { ...DEFAULT_HM };
       setForm(f);
     } catch (e: any) {
       setBanner({ kind: "err", msg: e?.message || "Failed to load settings" });
@@ -126,7 +165,16 @@ export default function ComplianceSettingsScreen() {
     setSaving(true);
     setBanner(null);
     try {
-      const body: Cfg = { pf_rounding: form.pf_rounding, esic_rounding: form.esic_rounding };
+      const body: Cfg = {
+        pf_rounding: form.pf_rounding,
+        esic_rounding: form.esic_rounding,
+        // Iter 387 — module switches / proration / rule version / mapping.
+        pf_proration_method: form.pf_proration_method,
+        esic_proration_method: form.esic_proration_method,
+        rule_version: String(form.rule_version || ""),
+        head_mapping: form.head_mapping || DEFAULT_HM,
+      };
+      for (const { key } of BOOL_FIELDS) body[key] = !!form[key];
       for (const { key, label } of NUM_FIELDS) {
         const v = Number(form[key]);
         if (!Number.isFinite(v) || v < 0) {
@@ -372,6 +420,114 @@ export default function ComplianceSettingsScreen() {
               {NUM_FIELDS.filter((f) => f.group === "base").map((f) => <NumRow key={f.key} f={f} />)}
               <Text style={styles.hint}>
                 PF & ESIC wage base = max(Basic, this % of Gross Earning) — new labour code rule.
+              </Text>
+            </Section>
+
+            {/* Iter 387 — module switches, wage rule, proration & version. */}
+            <Section title="Module Switches & Rules" icon="options-outline">
+              {BOOL_FIELDS.map((b) => (
+                <View key={b.key} style={{ paddingVertical: 6 }}>
+                  <View style={styles.fieldRow}>
+                    <Text style={[styles.fieldLbl, { fontWeight: "600" }]}>{b.label}</Text>
+                    <Pressable
+                      disabled={!isSuper}
+                      onPress={() => setForm((p) => ({ ...p, [b.key]: !p[b.key] }))}
+                      style={[styles.chip, form[b.key] ? styles.chipActive : { backgroundColor: "#FEE2E2", borderColor: "#FCA5A5" }]}
+                      testID={`cs-${b.key}`}
+                    >
+                      <Text style={[styles.chipTxt, form[b.key] ? styles.chipTxtActive : { color: "#B91C1C" }]}>
+                        {form[b.key] ? "ENABLED" : "DISABLED"}
+                      </Text>
+                    </Pressable>
+                  </View>
+                  <Text style={styles.hint}>{b.hint}</Text>
+                </View>
+              ))}
+              {(["pf_proration_method", "esic_proration_method"] as const).map((k) => (
+                <View key={k} style={styles.fieldRow}>
+                  <Text style={styles.fieldLbl}>{k === "pf_proration_method" ? "PF Proration Method" : "ESIC Proration Method"}</Text>
+                  <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
+                    {PRORATION_OPTS.map((o) => (
+                      <Pressable
+                        key={o}
+                        disabled={!isSuper}
+                        onPress={() => setForm((p) => ({ ...p, [k]: o }))}
+                        style={[styles.chip, form[k] === o && styles.chipActive]}
+                        testID={`cs-${k}-${o}`}
+                      >
+                        <Text style={[styles.chipTxt, form[k] === o && styles.chipTxtActive]}>
+                          {PRORATION_LABEL[o]}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              ))}
+              <View style={styles.fieldRow}>
+                <Text style={styles.fieldLbl}>Rule Version (label saved on every calculation)</Text>
+                <TextInput
+                  style={[styles.input, { minWidth: 170, textAlign: "left" }, !isSuper && styles.inputLocked]}
+                  value={String(form.rule_version ?? "")}
+                  onChangeText={(v) => setForm((p) => ({ ...p, rule_version: v.slice(0, 60) }))}
+                  placeholder="e.g. FY 2026-27 v1"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  editable={isSuper}
+                  testID="cs-rule-version"
+                />
+              </View>
+              <Text style={styles.hint}>
+                Proration: Calendar = present ÷ days-in-month (default) · Working = ÷26 ·
+                Attendance = ÷30 · Paid Days = full wages when any day is paid · No Proration = always full.
+              </Text>
+            </Section>
+
+            {/* Iter 387 — Salary Head Mapping: PF Wage / ESIC Wage per head. */}
+            <Section title="Salary Head Mapping (PF / ESIC Wages)" icon="git-branch-outline">
+              <View style={[styles.fieldRow, { paddingVertical: 4 }]}>
+                <Text style={[styles.fieldLbl, { fontWeight: "800", flex: 1 }]}>Earning Head</Text>
+                <Text style={{ fontSize: 11, fontWeight: "800", color: colors.onSurfaceSecondary, width: 74, textAlign: "center" }}>PF Wage</Text>
+                <Text style={{ fontSize: 11, fontWeight: "800", color: colors.onSurfaceSecondary, width: 74, textAlign: "center" }}>ESIC Wage</Text>
+              </View>
+              {HEAD_ROWS.map((h) => {
+                const hm = (form.head_mapping || DEFAULT_HM)[h.key] || DEFAULT_HM[h.key];
+                const locked = h.key === "basic";
+                const flip = (which: "pf" | "esic") =>
+                  setForm((p) => ({
+                    ...p,
+                    head_mapping: {
+                      ...(p.head_mapping || DEFAULT_HM),
+                      [h.key]: { ...hm, [which]: !hm[which] },
+                    },
+                  }));
+                const Cell = ({ which }: { which: "pf" | "esic" }) => (
+                  <Pressable
+                    disabled={!isSuper || locked}
+                    onPress={() => flip(which)}
+                    style={{ width: 74, alignItems: "center", paddingVertical: 6 }}
+                    testID={`cs-hm-${h.key}-${which}`}
+                  >
+                    <Ionicons
+                      name={hm[which] ? "checkmark-circle" : "close-circle-outline"}
+                      size={22}
+                      color={hm[which] ? "#16A34A" : "#DC2626"}
+                    />
+                  </Pressable>
+                );
+                return (
+                  <View key={h.key} style={[styles.fieldRow, { paddingVertical: 2, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}>
+                    <Text style={[styles.fieldLbl, { flex: 1 }]}>
+                      {h.label}{locked ? "  🔒" : ""}
+                    </Text>
+                    <Cell which="pf" />
+                    <Cell which="esic" />
+                  </View>
+                );
+              })}
+              <Text style={styles.hint}>
+                Basic is statutorily always a PF & ESIC wage. ESIC flags drive the ESIC wage
+                base when the Wage Definition Rule is OFF. PF amounts follow the Employee
+                Master&apos;s &quot;PF Basic Salary&quot; (your confirmed rule) — the PF flags feed the
+                validation & AI-explanation layers.
               </Text>
             </Section>
 

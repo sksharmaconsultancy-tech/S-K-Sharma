@@ -36,6 +36,16 @@ export type EmpForm = {
   // Iter 341 (user request) — EPS Disabled: employee not eligible for
   // Pension contribution (ECR prints EPS wages/contribution as 0).
   eps_disabled: boolean;
+  // Iter 387 — configurable statutory module: per-employee PF flags.
+  higher_pension: boolean;
+  intl_worker: boolean;
+  excluded_employee: boolean;
+  // Iter 387 — per-employee ESIC master fields.
+  esic_temp_exempt: boolean;
+  esic_reg_status: string;
+  dispensary: string;
+  esic_join_date: string;
+  esic_exit_date: string;
   vpf_amount: string;
   // Iter 94 — SEPARATE rate basis for the Compliance salary part.
   compliance_salary_mode: string;
@@ -114,6 +124,14 @@ export const EMPTY_FORM: EmpForm = {
   pf_basic: "",
   vpf_enabled: false,
   eps_disabled: false,
+  higher_pension: false,
+  intl_worker: false,
+  excluded_employee: false,
+  esic_temp_exempt: false,
+  esic_reg_status: "",
+  dispensary: "",
+  esic_join_date: "",
+  esic_exit_date: "",
   vpf_amount: "",
   compliance_salary_mode: "monthly",
   basic_salary: "",

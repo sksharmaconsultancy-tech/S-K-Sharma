@@ -1,0 +1,28 @@
+{
+  "summary": "Iter 387 Configurable PF/ESIC Statutory Module — E2E tested. 8/8 backend pytest cases pass (Standard settings GET/PUT with new fields, invalid proration rejected 400, basic head force-True in head_mapping, Firm override PUT+GET+clear round-trip, Employee master create->PATCH->GET->DELETE round-trip of all new fields, Compliance run row has statutory_effective + calc_snapshot + reasons + flags). Frontend UI verified: /compliance-settings shows 'Module Switches & Rules' + 'Salary Head Mapping (PF / ESIC Wages)' sections with 4 ENABLED toggles and Rule Version input. /employee-add exposes higher_pension-toggle, intl_worker-toggle, excluded_employee-toggle, esic-temp-exempt-toggle testIDs, ESIC Registration Status chips, Dispensary field, and +91 fixed prefix on emp-mobile. compliance-salary-run.tsx line 1409 reads run.statutory_effective with fallback to statutory_cfg (regression fix present). All test data cleaned up: test employee deleted, firm override cleared, no test runs finalized (auto-deleted after inspection).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter387_pf_esic_module.py",
+    "/app/test_reports/pytest/iter387.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "compliance_settings.py PUT /firm allows sub_admin+super_admin only (company_admin can only READ); appropriate scope.",
+    "employee_profile.py PATCH — new ESIC date fields flow through _STR_FIELDS whitelist; empty-string handling collapses to None which is correct semantics for 'clear date'.",
+    "compliance_salary.py compute_compliance_row correctly gates via new cfg flags (pf_enabled/esic_enabled/wage_definition_rule_enabled/esic_disable_above_ceiling) and captures skip reasons for both PF & ESIC — backward-compat defaults preserved."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter387_pf_esic_module.py (NEW)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Created 1 TEST employee (TEST_Iter387) then deleted; PUT firm override then cleared; POST run then deleted via DELETE endpoint. All temporary data removed. Standard settings left with rule_version='FY 2026-27 v1' and all toggles ENABLED, calendar_days proration — matches user directive.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend engine + settings + employee master round-trip for Iter 387 all green. Backend test file /app/backend/tests/test_iter387_pf_esic_module.py is reusable. Frontend structural checks passed; deeper UI interaction (toggle-save-reload persistence loop, firm dropdown scope switch, actual value persistence) was NOT click-driven this iteration — only element presence + login+navigation smoke were verified. If regression concerns arise, add Playwright interactions on data-testid values already confirmed present."
+}
