@@ -20,12 +20,13 @@ import {
   ActivityIndicator,
   Modal,
   TextInput,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, router } from "expo-router";
 
-import { api } from "@/src/api/client";
+import { api, apiBinary } from "@/src/api/client";
 import { colors, radius, spacing } from "@/src/theme";
 
 const STATUS_UI: Record<string, { bg: string; border: string; text: string; label: string; icon: any }> = {
@@ -49,6 +50,23 @@ export default function PfEsicAuditScreen() {
   // Iter 388 (Phase 6) — AI Compliance Assistant explanation.
   const [aiText, setAiText] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
+  // Iter 389 (user request) — printable A4 explanation sheet.
+  const [printBusy, setPrintBusy] = useState(false);
+
+  const printSheet = async () => {
+    if (!runId || !calcRow || printBusy) return;
+    setPrintBusy(true);
+    try {
+      const r = await apiBinary(
+        `/admin/compliance-salary-runs/${runId}/calc-sheet/${calcRow.user_id}`);
+      if (Platform.OS === "web" && r.webBlobUrl) {
+        window.open(r.webBlobUrl, "_blank");
+        setTimeout(() => URL.revokeObjectURL(r.webBlobUrl!), 60000);
+      }
+    } catch (e: any) {
+      setAiText(`A4 sheet failed: ${e?.message || "unknown error"}`);
+    } finally { setPrintBusy(false); }
+  };
 
   const aiExplain = async () => {
     if (!runId || !calcRow || aiBusy) return;
@@ -351,19 +369,34 @@ export default function PfEsicAuditScreen() {
               ) : null}
 
               {/* Iter 388 (Phase 6) — AI Compliance Assistant */}
-              <Pressable
-                onPress={aiExplain}
-                disabled={aiBusy}
-                style={styles.aiBtn}
-                testID="calc-ai-explain"
-              >
-                {aiBusy ? <ActivityIndicator size="small" color="#fff" /> : (
-                  <Ionicons name="sparkles" size={14} color="#fff" />
-                )}
-                <Text style={{ fontSize: 12.5, fontWeight: "800", color: "#fff" }}>
-                  {aiBusy ? "AI is analysing…" : "AI Explain (why PF/ESIC was or wasn't calculated)"}
-                </Text>
-              </Pressable>
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 14 }}>
+                <Pressable
+                  onPress={printSheet}
+                  disabled={printBusy}
+                  style={[styles.aiBtn, { flex: 1, marginTop: 0, backgroundColor: "#0F766E" }]}
+                  testID="calc-print-a4"
+                >
+                  {printBusy ? <ActivityIndicator size="small" color="#fff" /> : (
+                    <Ionicons name="print" size={14} color="#fff" />
+                  )}
+                  <Text style={{ fontSize: 12.5, fontWeight: "800", color: "#fff" }}>
+                    {printBusy ? "Preparing…" : "Print A4 Sheet"}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={aiExplain}
+                  disabled={aiBusy}
+                  style={[styles.aiBtn, { flex: 1.4, marginTop: 0 }]}
+                  testID="calc-ai-explain"
+                >
+                  {aiBusy ? <ActivityIndicator size="small" color="#fff" /> : (
+                    <Ionicons name="sparkles" size={14} color="#fff" />
+                  )}
+                  <Text style={{ fontSize: 12.5, fontWeight: "800", color: "#fff" }}>
+                    {aiBusy ? "AI is analysing…" : "AI Explain (why / why not)"}
+                  </Text>
+                </Pressable>
+              </View>
               {aiText ? (
                 <View style={styles.aiBox}>
                   <Text style={{ fontSize: 11.5, color: colors.onSurface, lineHeight: 17 }}>{aiText}</Text>

@@ -635,3 +635,159 @@ async def ai_explain_employee(
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"AI explanation failed: {str(e)[:160]}")
     return {"ok": True, "explanation": text, "name": row.get("name")}
+
+
+# ---------------------------------------------------------------------------
+# Iter 389 (user request) — PRINTABLE A4 CALCULATION EXPLANATION SHEET.
+# One-page portrait PDF per employee for PF/ESIC inspector queries:
+# every figure of the stored snapshot + rules applied + validation result.
+# ---------------------------------------------------------------------------
+@router.get("/admin/compliance-salary-runs/{run_id}/calc-sheet/{user_id}")
+async def calc_explanation_sheet(
+    run_id: str, user_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Compliance salary run not found")
+    if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised for this run")
+    row = next((r for r in (run.get("rows") or []) if r.get("user_id") == user_id), None)
+    if not row:
+        raise HTTPException(status_code=404, detail="Employee not found in this run")
+
+    validation = await validate_compliance_run(run)
+    issues = next((r["issues"] for r in validation["rows"]
+                   if r["user_id"] == user_id), [])
+    company = await db.companies.find_one(
+        {"company_id": run.get("company_id")}, {"_id": 0, "name": 1}) or {}
+
+    from reportlab.lib import colors as rl
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
+                                    Paragraph, Spacer)
+
+    s = row.get("calc_snapshot") or {}
+    pf = s.get("pf") or {}
+    es = s.get("esic") or {}
+    heads = s.get("heads_considered") or {}
+    month = str(run.get("month") or "")
+
+    styles = getSampleStyleSheet()
+    h1 = ParagraphStyle("h1", parent=styles["Title"], fontSize=13, leading=16,
+                        spaceAfter=1)
+    sub = ParagraphStyle("sub", parent=styles["Normal"], fontSize=8.5,
+                         textColor=rl.HexColor("#475569"), alignment=1)
+    sec = ParagraphStyle("sec", parent=styles["Normal"], fontSize=9.5,
+                         fontName="Helvetica-Bold",
+                         textColor=rl.HexColor("#0F172A"), spaceBefore=7,
+                         spaceAfter=2)
+    cell = ParagraphStyle("cell", parent=styles["Normal"], fontSize=8, leading=10)
+    ital = ParagraphStyle("ital", parent=cell, fontName="Helvetica-Oblique",
+                          textColor=rl.HexColor("#475569"))
+
+    def _rs(v):
+        return f"Rs. {_num(v):,.2f}"
+
+    def _kv_table(pairs, col1=62 * mm):
+        t = Table([[Paragraph(str(a), cell), Paragraph(str(b), cell)]
+                   for a, b in pairs], colWidths=[col1, None])
+        t.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.4, rl.HexColor("#CBD5E1")),
+            ("BACKGROUND", (0, 0), (0, -1), rl.HexColor("#F1F5F9")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ]))
+        return t
+
+    story = [
+        Paragraph(str(company.get("name") or "S.K. Sharma & Co."), h1),
+        Paragraph("PF & ESIC CALCULATION EXPLANATION SHEET — "
+                  f"Salary Month {month}", sub),
+        Spacer(1, 3 * mm),
+        _kv_table([
+            ("Employee", f"{row.get('name') or ''}  "
+                         f"(Code {row.get('employee_code') or '—'})"),
+            ("UAN / ESI IP No.", f"{row.get('uan_no') or '—'}  /  "
+                                 f"{row.get('esi_ip_no') or '—'}"),
+            ("Paid Days / Gross Earned",
+             f"{_num(row.get('present_days')):g} days  /  {_rs(row.get('gross_paid'))}"),
+            ("Rule Version / Wage Definition Rule",
+             f"{s.get('rule_version') or '—'}  /  "
+             + ("ON — max(Basic, floor% of Gross)"
+                if s.get("wage_definition_rule") is not False else "OFF — Head Mapping")),
+            ("Proration (PF / ESIC)",
+             f"{s.get('pf_proration_method') or 'calendar_days'} / "
+             f"{s.get('esic_proration_method') or 'calendar_days'}"),
+        ]),
+        Paragraph("1. SALARY HEADS CONSIDERED", sec),
+    ]
+    head_rows = [["Head", "Earned Amount", "PF Wage?", "ESIC Wage?"]]
+    for k in ("basic", "hra", "conveyance", "medical", "special", "others", "ot"):
+        h = heads.get(k) or {}
+        head_rows.append([k.upper(), _rs(h.get("amount")),
+                          "Yes" if h.get("pf_wage") else "No",
+                          "Yes" if h.get("esic_wage") else "No"])
+    ht = Table(head_rows, colWidths=[38 * mm, 42 * mm, 30 * mm, 30 * mm])
+    ht.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.4, rl.HexColor("#CBD5E1")),
+        ("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#0F172A")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), rl.white),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    story += [ht, Paragraph("2. PROVIDENT FUND (EPF)", sec), _kv_table([
+        ("PF Basic (Employee Master)", _rs(pf.get("pf_basic_master"))),
+        ("PF Basic after proration", _rs(pf.get("pf_basic_prorated"))),
+        ("Wage Base (after wage rule)", _rs(pf.get("wage_base"))),
+        ("Statutory Ceiling", _rs(pf.get("ceiling"))),
+        ("PF Wages (final)", _rs(row.get("pf_wages"))),
+        (f"Employee PF @ {pf.get('rate_employee', 12):g}%", _rs(row.get("pf_employee"))),
+        (f"Employer EPF @ {pf.get('rate_epf', 3.67):g}%", _rs(row.get("pf_employer_epf"))),
+        (f"Employer EPS @ {pf.get('rate_eps', 8.33):g}%", _rs(row.get("pf_employer_eps"))),
+        ("Rounding", str(pf.get("rounding") or "nearest")),
+    ]), Paragraph("Engine reason: " + (row.get("pf_reason") or "—"), ital),
+        Paragraph("3. ESIC", sec), _kv_table([
+        ("Eligibility Basic", _rs(es.get("eligibility_basic"))),
+        ("ESIC Ceiling", _rs(es.get("ceiling"))),
+        ("ESIC Wage Base", _rs(row.get("esic_wage_base"))),
+        (f"Employee ESIC @ {es.get('rate_employee', 0.75):g}%", _rs(row.get("esic_employee"))),
+        (f"Employer ESIC @ {es.get('rate_employer', 3.25):g}%", _rs(row.get("esic_employer"))),
+        ("Rounding", str(es.get("rounding") or "ceil")),
+    ]), Paragraph("Engine reason: " + (row.get("esic_reason") or "—"), ital),
+        Paragraph("4. VALIDATION RESULT", sec)]
+    if not issues:
+        story.append(Paragraph("All PF/ESIC checks passed — no issues.", cell))
+    else:
+        vt_rows = [["Level", "Check", "Finding", "Suggested Fix"]]
+        for i in issues:
+            vt_rows.append([i["level"].upper(), i["code"], i["message"], i["suggestion"]])
+        vt = Table([[Paragraph(str(c), cell) for c in r] for r in vt_rows],
+                   colWidths=[16 * mm, 34 * mm, 65 * mm, None])
+        st = [("GRID", (0, 0), (-1, -1), 0.4, rl.HexColor("#CBD5E1")),
+              ("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#0F172A")),
+              ("VALIGN", (0, 0), (-1, -1), "TOP")]
+        for idx, i in enumerate(issues, start=1):
+            st.append(("BACKGROUND", (0, idx), (-1, idx),
+                       rl.HexColor("#FEE2E2" if i["level"] == "error" else "#FEF3C7")))
+        vt.setStyle(TableStyle(st))
+        story.append(vt)
+    story += [Spacer(1, 5 * mm),
+              Paragraph(f"Computer-generated explanation sheet · Run {run_id}"
+                        f"{' · LOCKED' if run.get('finalized') else ''} · "
+                        f"Generated {now_iso()[:16].replace('T', ' ')}", ital)]
+
+    buf = io.BytesIO()
+    SimpleDocTemplate(buf, pagesize=A4, leftMargin=14 * mm, rightMargin=14 * mm,
+                      topMargin=12 * mm, bottomMargin=12 * mm).build(story)
+    fname = f"calc_sheet_{row.get('employee_code') or user_id}_{month}.pdf"
+    return _file_response(buf.getvalue(), fname, "pdf")

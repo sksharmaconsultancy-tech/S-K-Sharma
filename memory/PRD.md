@@ -2689,3 +2689,11 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   DEFERRED: single VPS deploy script after user confirms (deploy script
   387 currently live on temp-code-bundle; needs 388 bump when user asks
   to deploy).
+- Iter 389 (user confirmed): Printable A4 Explanation Sheet — GET
+  /admin/compliance-salary-runs/{run_id}/calc-sheet/{user_id} (reportlab
+  A4 portrait: employee header, heads-considered table, PF/ESIC workings,
+  rules, validation table color-coded, footer). "Print A4 Sheet" button
+  (teal, testID calc-print-a4) beside AI Explain in View Calc modal
+  (apiBinary → window.open blob on web). Verified: 1-page PDF w/ all
+  sections. Deploy: deploy_vps_iter389.sh (temp_bundle→389; combined
+  386+387+388+389).
