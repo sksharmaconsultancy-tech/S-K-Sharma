@@ -2616,3 +2616,12 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
      verified: locked emp edit ok, audit log w/ from→to + flag, legacy
      docs count unchanged; test data reverted.
   Deploy: deploy_vps_iter385.sh (temp_bundle→385, includes 370-384).
+- Iter 386 (user: Employee Master +91 mobile):
+  employee-add.tsx: new MobileField component — fixed NON-editable
+  "+91" badge (surfaceTertiary bg, right border) + TextInput capped at
+  10 digits (maxLength+regex). normalizePhone10() strips legacy
+  "+91"/"91" prefixes on form load. Review summary shows "+91 XXXXXXXXXX".
+  Storage unchanged: form.phone holds 10 digits only (Iter 376
+  validation intact). Verified via playwright: badge visible, typing 13
+  digits keeps only 10.
+  Deploy: deploy_vps_iter386.sh (temp_bundle→386, includes 370-385).

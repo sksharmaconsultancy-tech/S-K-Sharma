@@ -151,7 +151,9 @@ export default function EmployeeAddScreen() {
           employee_code: p.employee_code != null ? String(p.employee_code) : "",
           bio_code: p.bio_code != null ? String(p.bio_code) : "",
           name: p.name || "",
-          phone: p.phone || "",
+          // Iter 386 — normalize legacy phones: strip "+91"/"91" country
+          // code so the field always holds exactly the 10-digit number.
+          phone: normalizePhone10(p.phone || ""),
           email: p.email || "",
           father_name: p.father_name || "",
           gender: normGender(p.gender || ""),
@@ -1392,13 +1394,13 @@ export default function EmployeeAddScreen() {
             </View>
           </TwoCol>
           <TwoCol>
-            <Field
-              label="Mobile (10 digits)"
+            {/* Iter 386 (user request) — fixed, NON-editable "+91" country
+                code prefix; user types only the 10-digit number. */}
+            <MobileField
+              label="Mobile No."
               required
               value={form.phone}
               onChange={(v) => setField("phone", v.replace(/\D/g, "").slice(0, 10))}
-              placeholder="98xxxxxxxx"
-              keyboardType="phone-pad"
             />
             <Field
               label="Email"
@@ -2514,7 +2516,7 @@ export default function EmployeeAddScreen() {
               {[
                 ["Name", form.name], ["Father's Name", form.father_name],
                 ["Gender", form.gender], ["Date of Birth", form.dob],
-                ["Mobile", form.phone], ["Email", form.email],
+                ["Mobile", form.phone ? `+91 ${form.phone}` : ""], ["Email", form.email],
                 ["Employee Code", form.employee_code || "(auto)"], ["Bio Code", form.bio_code],
                 ["Date of Joining", form.doj], ["Designation", form.designation],
                 ["Department", form.department], ["Employee Group", form.employee_group],
@@ -2582,6 +2584,47 @@ function SectionHeader({ icon, title, tint, first, anchorId }: {
 }
 
 /** Small labeled field wrapper. */
+/** Iter 386 — strip country code so state always holds max 10 digits. */
+function normalizePhone10(raw: string): string {
+  let d = String(raw || "").replace(/\D/g, "");
+  if (d.length > 10 && d.startsWith("91")) d = d.slice(d.length - 10);
+  return d.slice(0, 10);
+}
+
+/** Iter 386 (user request) — Mobile input with a FIXED, non-editable
+ *  "+91" prefix badge. The user can only type the 10-digit number; the
+ *  country code can never be deleted or edited. */
+function MobileField(props: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  required?: boolean;
+}) {
+  return (
+    <View style={{ flex: 1, gap: 4 }}>
+      <Text style={styles.lbl}>
+        {props.label}
+        {props.required ? <Text style={{ color: "#DC2626", fontWeight: "900" }}> *</Text> : null}
+      </Text>
+      <View style={styles.mobileRow}>
+        <View style={styles.mobilePrefix}>
+          <Text style={styles.mobilePrefixTxt}>+91</Text>
+        </View>
+        <TextInput
+          style={styles.mobileInput}
+          value={props.value}
+          onChangeText={(v) => props.onChange(v)}
+          placeholder="10-digit number"
+          placeholderTextColor={colors.onSurfaceTertiary}
+          keyboardType="phone-pad"
+          maxLength={10}
+          testID="emp-mobile"
+        />
+      </View>
+    </View>
+  );
+}
+
 function Field(props: {
   label: string;
   value: string;
@@ -3067,6 +3110,36 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: spacing.sm,
     flexWrap: "wrap",
+  },
+  // Iter 386 — fixed "+91" mobile prefix layout.
+  mobileRow: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    backgroundColor: colors.surface,
+    overflow: "hidden",
+  },
+  mobilePrefix: {
+    paddingHorizontal: 12,
+    justifyContent: "center",
+    backgroundColor: colors.surfaceTertiary,
+    borderRightWidth: 1,
+    borderRightColor: colors.border,
+  },
+  mobilePrefixTxt: {
+    color: colors.onSurfaceSecondary,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  mobileInput: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: Platform.OS === "web" ? 10 : 11,
+    color: colors.onSurface,
+    fontSize: 14,
+    ...Platform.select({ web: { outlineWidth: 0 as any } }),
   },
   primaryBtn: {
     flexDirection: "row",
