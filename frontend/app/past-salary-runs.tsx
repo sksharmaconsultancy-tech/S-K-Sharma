@@ -57,6 +57,31 @@ export default function PastSalaryRunsScreen() {
   const companyName =
     (companies || []).find((c: any) => c.company_id === selectedCompanyId)?.name || null;
 
+  // Iter 391 (user request) — the compliance run summaries follow the
+  // Firm Master's enabled Deductions (Master-linked): disabled heads
+  // (PT/TDS/…) are not shown in the list either.
+  const [edMask, setEdMask] = useState<string[] | undefined>(undefined);
+  useEffect(() => {
+    const cid = selectedCompanyId || user?.company_id || null;
+    if (!cid) { setEdMask(undefined); return; }
+    api<any>(`/admin/firm-master/${cid}`)
+      .then((res) => {
+        const f = res?.master || {};
+        if (!(f.updated_at || f.updated_by)) { setEdMask(undefined); return; }
+        const ded = f.deductions || {};
+        const epfAp = (f.epf || {}).applicable;
+        const esiAp = (f.esi || {}).applicable;
+        const ed: string[] = [];
+        if (epfAp != null ? epfAp : !!ded.PF) ed.push("pf");
+        if (esiAp != null ? esiAp : !!ded.ESI) ed.push("esi");
+        if (ded.PT) ed.push("pt");
+        if (ded.TDS || ded["I. TAX"]) ed.push("tds");
+        setEdMask(ed);
+      })
+      .catch(() => setEdMask(undefined));
+  }, [selectedCompanyId, user?.company_id]);
+  const hasDed = (k: string) => !edMask || edMask.includes(k);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -179,6 +204,13 @@ export default function PastSalaryRunsScreen() {
                   </Text>
                   <Text style={styles.rowMeta}>
                     Net {fmtInr(r.totals?.net_pay ?? (r.totals as any)?.net)}
+                    {/* Iter 391 — masked head totals for compliance runs */}
+                    {tab === "compliance" ? [
+                      hasDed("pf") ? `  ·  PF ${fmtInr(r.totals?.pf_employee)}` : "",
+                      hasDed("esi") ? `  ·  ESIC ${fmtInr(r.totals?.esic_employee)}` : "",
+                      hasDed("pt") ? `  ·  PT ${fmtInr(r.totals?.pt)}` : "",
+                      hasDed("tds") ? `  ·  TDS ${fmtInr(r.totals?.tds)}` : "",
+                    ].join("") : ""}
                     {r.attendance_source ? `  ·  ${r.attendance_source === "biometric" ? "Biometric" : "Manual"}` : ""}
                   </Text>
                   {(r.generated_at || r.generated_by_name) ? (

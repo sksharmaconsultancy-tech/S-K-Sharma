@@ -2707,3 +2707,9 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   disabled heads, (3) sticky TotalsFooter hides PF/ESIC/PT/TDS blocks
   per enabled_deductions (row-stamped mask, fmMask fallback). Verified
   via screenshot on Kankani (PT/TDS disabled → hidden everywhere).
+- Iter 391 (user confirmed improvement): mask applied to Copy Last
+  Month confirm text (enabled ded heads only) + Past Salary Runs
+  compliance list meta now shows Net · PF · ESIC (· PT · TDS only when
+  firm-enabled) via edMask fetched from firm-master. Verified via
+  screenshot (Kankani: PT/TDS hidden). Deploy: deploy_vps_iter391.sh
+  (temp_bundle→391; combined 386-391). USER DEPLOYING LIVE NOW.

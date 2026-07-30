@@ -856,9 +856,18 @@ export default function ComplianceSalaryRunScreen() {
       );
       return;
     }
+    // Iter 391 (user request) — the copy confirmation lists only the
+    // Firm-Master-enabled deduction heads.
+    const _edm = fmMask.ed as string[] | undefined;
+    const _dedTxt = [
+      (!_edm || _edm.includes("pf")) && "PF",
+      (!_edm || _edm.includes("esi")) && "ESIC",
+      (!_edm || _edm.includes("pt")) && "PT",
+      (!_edm || _edm.includes("tds")) && "TDS",
+    ].filter(Boolean).join("/");
     const ok = await confirmYesNo(
       `Copy LAST MONTH's salary (${prevMonth}) into ${q.month}?\n\n` +
-      "• Present Days, Gross, PF/ESIC/PT/TDS and Net are copied EXACTLY as last month.\n" +
+      `• Present Days, Gross, ${_dedTxt} and Net are copied EXACTLY as last month.\n` +
       "• Employees who exited before this month are dropped; new joiners are not added.\n" +
       "• The copied run is a normal editable draft — you can edit, save and finalize it." +
       (existing ? "\n\n⚠ The existing draft for this month will be REPLACED." : ""),
