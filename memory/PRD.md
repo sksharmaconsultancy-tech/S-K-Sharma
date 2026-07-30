@@ -2625,3 +2625,36 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   validation intact). Verified via playwright: badge visible, typing 13
   digits keeps only 10.
   Deploy: deploy_vps_iter386.sh (temp_bundle→386, includes 370-385).
+- Iter 387 (user: Revise PF & ESIC Calculation Module — Phase 1+2 of 6):
+  PLAN (user approved): P1 config+masters, P2 engine+snapshot, P3
+  validation engine + Salary Lock block (Super Admin can override
+  WARNINGS, errors always block), P4 audit dashboard + View Calculation
+  + monthly snapshot, P5 reports, P6 AI assistant. SINGLE deploy script
+  at the END of all phases (no per-phase deploys).
+  P1: compliance_settings.py + compliance-settings.tsx — new cfg keys
+  pf_enabled/esic_enabled/wage_definition_rule_enabled/
+  esic_disable_above_ceiling (bools), pf/esic_proration_method
+  (calendar_days|paid_days|attendance_days|working_days|none),
+  rule_version (label), head_mapping (7 heads basic/hra/conveyance/
+  medical/special/others/ot × {pf,esic}; basic force-locked true).
+  Works in BOTH scopes: Standard (all firms) + per-firm override
+  (firm_masters.statutory_overrides). Employee Master new fields:
+  higher_pension/intl_worker/excluded_employee/esic_temp_exempt (bool),
+  esic_reg_status/dispensary/esic_join_date/esic_exit_date (str) — in
+  employee_profile.py whitelists, server.py create (~8492),
+  employeeForm.ts, employee-add.tsx UI (PF flags after EPS Disable;
+  ESIC block after UPI in Statutory section).
+  P2: compliance_salary.py engine — cfg passthru keys (_CFG_PASSTHRU),
+  _proration_factor(), module gates, excluded_employee skip, intl
+  worker = no PF cap, higher_pension = EPS on uncapped base, ESIC temp
+  exempt + exit-date(month via cfg._salary_month) + disable-above-
+  ceiling toggle, wage-rule OFF ⇒ ESIC base = Σ mapped heads (+OT),
+  pf/esic_reason strings + calc_snapshot on every row. Run doc stores
+  statutory_effective (full merged cfg) — statutory_cfg untouched so
+  reprocess still re-merges live settings. Grid recompute
+  (compliance-salary-run.tsx updatePresentDays) mirrors: reads
+  statutory_effective, wage-rule switch, head mapping, eps_disabled/
+  higher_pension/intl_worker. DEFAULTS REPLICATE PRE-387 BEHAVIOUR.
+  11 engine unit cases + testing agent 8/8 pytest + UI smoke ALL PASS
+  (test_reports/iteration_387.json). rule_version saved: "FY 2026-27 v1".
+  DEFERRED: single deploy script after Phase 6.
