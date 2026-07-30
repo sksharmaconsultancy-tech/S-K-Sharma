@@ -627,10 +627,12 @@ def compute_compliance_row(
         and not _zero_pay
     )
     if esic_applicable:
-        # Iter 130 (user directive) — ESIC is calculated ON BASIC SALARY
-        # (earned basic for the month), exactly per the Standard Compliance
-        # Settings. No gross-based wage floor is applied to ESIC.
-        esic_wage_base = basic
+        # Iter 385 (user confirmed rule) — ESIC wage base follows the 50%
+        # floor rule: when the earned Basic is MORE than floor% (default
+        # 50%) of the Gross Earning, ESIC is deducted on Basic; otherwise
+        # on floor% of Gross. i.e. wage base = max(Basic, floor% × Gross).
+        # (Replaces Iter 130 "ESIC on Basic only".)
+        esic_wage_base = stat_wage_base
         esic_employee = esic_wage_base * (cfg["esic_percent_employee"] / 100.0)
         esic_employer = esic_wage_base * (cfg["esic_percent_employer"] / 100.0)
         # Iter 127f — ESIC statutory rounding (default: UP to next rupee).

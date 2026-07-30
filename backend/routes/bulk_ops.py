@@ -521,12 +521,10 @@ async def salary_revision(
              "compliance_gross": 1, "legacy_locked": 1})
         if not u:
             continue
-        # Iter 332 (user request) — LEGACY LOCK: salary master is frozen.
-        if u.get("legacy_locked"):
-            results.append({"user_id": uid, "employee_code": u.get("employee_code"),
-                            "name": u.get("name"),
-                            "skipped": "LOCKED (Legacy Salary Records) — Undo the legacy import first"})
-            continue
+        # Iter 385 (user request, replaces Iter 332) — OLD-DB (legacy)
+        # employees' MASTER salary is editable again; the imported Legacy
+        # Salary Records are never touched and every revision is logged in
+        # salary_revisions (flagged legacy_locked for later review).
         updates: Dict[str, Any] = {}
         detail: Dict[str, Any] = {"user_id": uid, "employee_code": u.get("employee_code"),
                                   "name": u.get("name")}
@@ -564,6 +562,7 @@ async def salary_revision(
             "changes": {k: v for k, v in detail.items()
                         if k not in ("user_id", "employee_code", "name")},
             "note": note,
+            "legacy_locked": bool(u.get("legacy_locked")),
             "by": admin["user_id"], "by_name": admin.get("name"),
             "at": now_iso(),
         })

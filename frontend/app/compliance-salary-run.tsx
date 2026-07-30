@@ -1496,7 +1496,12 @@ export default function ComplianceSalaryRunScreen() {
           ? (r as any).esic_eligible !== false
           : r.esic_applicable !== false;
         const esiApplicable = esiMasterOk && grossPaid > 0 && esiEligBasic <= esiThresh;
-        const esiBase = esiApplicable ? paidBasic : 0;
+        // Iter 385 (user confirmed rule) — ESIC wage base = max(Basic,
+        // floor% of Gross Earning): Basic when it exceeds 50% of gross,
+        // else 50% of gross. Mirrors utils/compliance_salary.py.
+        const esiBase = esiApplicable
+          ? Math.max(paidBasic, grossEarn * floorPct)
+          : 0;
         const esiEmp = esiApplicable ? Math.ceil(esiBase * esiEmpRate) : 0;
         const esiEr  = esiApplicable ? Math.ceil(esiBase * esiErRate)  : 0;
 

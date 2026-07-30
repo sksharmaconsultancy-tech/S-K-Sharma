@@ -2598,3 +2598,21 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   dc_pnbank{i}_* ; fills only blank fields (never overwrites).
   Verified via playwright: claimant names + PF acc/IFSC propagated.
   Deploy: deploy_vps_iter384.sh (temp_bundle→384, includes 370-383).
+- Iter 385 (user: PF/ESIC audit + OLD-DB unlock w/ log):
+  AUDIT FINDINGS: PF=0 for all Kankani emps because Employee Master
+  pf_basic blank (Iter 129/254 rule). User confirmed: (1) PF blank →
+  NO deduction (keep rule); (2) ESIC wage base = 50% rule: max(Basic,
+  50% of Gross); (3) pf_applicable=No exclusion stays.
+  a) compliance_salary.py: esic_wage_base = stat_wage_base (was basic;
+     replaces Iter 130). compliance-salary-run.tsx grid recompute:
+     esiBase = max(paidBasic, grossEarn*floorPct). Unit verified:
+     basic 4000/gross 10000 → base 5000, EE 38, ER 163.
+  b) OLD-DB employees (legacy_locked): employee_profile.py PATCH no
+     longer blocks — full master+salary edits allowed; audit log entry
+     (Iter 312 employee_audit_logs) now flagged legacy_locked:true.
+     bulk_ops.py revise: locked skip removed, salary_revisions entry
+     flagged legacy_locked. Delete of locked employee remains BLOCKED
+     (server.py 9180). legacy_salary_history NEVER written. E2E
+     verified: locked emp edit ok, audit log w/ from→to + flag, legacy
+     docs count unchanged; test data reverted.
+  Deploy: deploy_vps_iter385.sh (temp_bundle→385, includes 370-384).

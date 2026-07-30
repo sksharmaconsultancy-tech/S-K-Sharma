@@ -227,25 +227,14 @@ async def patch_employee_profile(
     # Records were locked, the Employee Master is frozen — ONLY Resign /
     # Exit data may still be updated. Everything else requires clicking
     # UNDO on the Legacy Import first.
-    if emp.get("legacy_locked"):
-        _RESIGN_FIELDS = {
-            "resign_date", "exit_date", "date_of_leaving", "leaving_date",
-            "employment_status", "exit_reason", "exit_remarks",
-        }
-        _blocked = [
-            k for k, v in updates.items()
-            if k not in _RESIGN_FIELDS and emp.get(k) != v
-        ]
-        if _blocked:
-            raise HTTPException(
-                status_code=403,
-                detail=("This employee is LOCKED — the firm's Legacy Salary "
-                        "Records are locked. Only Resign/Exit data can be "
-                        "updated. Click UNDO on the Legacy Import to unlock "
-                        f"other fields. Blocked: {', '.join(sorted(_blocked)[:8])}"))
-        updates = {k: v for k, v in updates.items() if k in _RESIGN_FIELDS}
-        if not updates:
-            raise HTTPException(status_code=400, detail="Nothing to update")
+    # Iter 385 (user request, replaces Iter 332 edit-freeze) — employees
+    # from the OLD (legacy) database stay flagged ``legacy_locked`` but the
+    # Employee MASTER DATA (incl. salary) is now EDITABLE. Edits only touch
+    # the Mongo master record — the imported Legacy Salary Records
+    # (legacy_salary_history) are NEVER modified — and every change is
+    # written to the employee_audit_logs correction log below (marked
+    # legacy_locked so old-DB corrections stay traceable). Deleting a
+    # locked employee remains blocked.
 
     updates["profile_updated_at"] = now_iso()
     updates["profile_updated_by"] = admin["user_id"]
@@ -267,6 +256,9 @@ async def patch_employee_profile(
             "changed_by_name": admin.get("name") or admin.get("email"),
             "at": updates["profile_updated_at"],
             "changes": _changes,
+            # Iter 385 — corrections on OLD-DB (legacy) employees are
+            # flagged so they can be reviewed later.
+            "legacy_locked": bool(emp.get("legacy_locked")),
         })
     await db.users.update_one({"user_id": user_id}, {"$set": updates})
     logger.info("[profile] %s updated %s fields=%s",
