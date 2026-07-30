@@ -2781,3 +2781,20 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   messages cleaned). NOTE: initial search_replace corrupted the file tail
   (orphaned StyleSheet block) — fixed by truncating + insert_text.
   Included in deploy_vps_iter395.sh bundle (user hasn't deployed yet).
+- Iter 396 (user): PF Reports "Portal Login" card added to pf-reports.tsx —
+  green "Login — Open EPFO Portal" (opens
+  https://unifiedportal-emp.epfindia.gov.in/epfo/ in a NEW browser tab;
+  ESIC tab opens the ESIC login URL) + amber "Auto-Login Runner (Chrome)"
+  (downloads /admin/portal-automation/runner-download zip, firm-scoped).
+  E2E verified via Playwright (new tab url confirmed).
+- Iter 396 (verification): Freeze Salary OT/Other allocation confirmed
+  correct in current code (OT ON→Overtime, OT OFF→Other Allowances,
+  days auto-shrink, final gross==imported). Stale legacy row in frozen
+  2026-07 run (emp 50, diff −1.55) predates Iter 340/344 fixes —
+  remedy: unlock → reprocess → refreeze. 2 stale Iter-310 tests updated,
+  suite 10/10 green.
+- Iter 396 (refactor step 2): Actual Salary Process block (server.py
+  19152–19961: _actual_salary_row_compute/_actual_salary_totals, models,
+  /admin/branches, actual-salary-process create/row/finalize,
+  salary-runs unlock) extracted to routes/actual_salary_process.py;
+  router registered; openapi 696 paths, all 5 extracted routes live.

@@ -76,6 +76,37 @@ export default function PfReportsScreen() {
     } finally { setBusy(""); }
   };
 
+  // Iter 396 (user request) — Portal Login button: downloads the Local PC
+  // Runner zip (Selenium + auto-managed ChromeDriver). Double-clicking
+  // run_pf.bat / run_esic.bat opens the portal in the operator's own
+  // Google Chrome and auto-fills the firm's saved Login ID + Password.
+  const downloadRunner = async () => {
+    if (!companyId) {
+      if (Platform.OS === "web") globalThis.alert("Select a firm from the top bar first.");
+      return;
+    }
+    setBusy("runner");
+    try {
+      if (Platform.OS !== "web") {
+        globalThis.alert?.("Open this page on a computer (Chrome/Edge) to download the auto-login runner.");
+        return;
+      }
+      const origin = (globalThis as any).location?.origin || "";
+      const res = await apiBinary(
+        `/admin/portal-automation/runner-download?api_base=${encodeURIComponent(origin)}&company_id=${encodeURIComponent(companyId)}`,
+      );
+      if (res.webBlobUrl) {
+        const a = document.createElement("a");
+        a.href = res.webBlobUrl;
+        a.download = "sks-autologin-pc.zip";
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 30000);
+      }
+    } catch (e: any) {
+      if (Platform.OS === "web") globalThis.alert(e?.message || "Download failed");
+    } finally { setBusy(""); }
+  };
+
   if (authLoading) return null;
   if (!user || !["super_admin", "sub_admin", "company_admin"].includes(user.role)) {
     return <Redirect href="/" />;
@@ -175,6 +206,68 @@ export default function PfReportsScreen() {
           </Pressable>
         </View>
 
+        {/* Iter 396 — Portal Login (direct open + Local PC Chrome Runner) */}
+        <View style={[styles.card, { borderColor: "#05966940" }]}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <Ionicons name="logo-chrome" size={18} color="#059669" />
+            <Text style={[styles.cardTitle, { marginBottom: 0 }]}>
+              {kind === "pf" ? "EPFO Portal Login" : "ESIC Portal Login"}
+            </Text>
+          </View>
+          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+            <Pressable
+              onPress={() => {
+                const url = kind === "pf"
+                  ? "https://unifiedportal-emp.epfindia.gov.in/epfo/"
+                  : "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx";
+                if (Platform.OS === "web") {
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.target = "_blank";
+                  a.rel = "noopener";
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                }
+              }}
+              style={[styles.dlBtn, { backgroundColor: "#059669" }]}
+              testID="pfr-portal-login"
+            >
+              <Ionicons name="log-in-outline" size={15} color="#fff" />
+              <Text style={styles.dlTxt}>
+                {kind === "pf" ? "Login — Open EPFO Portal" : "Login — Open ESIC Portal"}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={downloadRunner}
+              disabled={busy === "runner" || !companyId}
+              style={[styles.dlBtn, { backgroundColor: "#B45309" },
+                busy === "runner" && { opacity: 0.6 }]}
+              testID="pfr-runner-download"
+            >
+              {busy === "runner" ? <ActivityIndicator size="small" color="#fff" /> : (
+                <Ionicons name="download-outline" size={15} color="#fff" />
+              )}
+              <Text style={styles.dlTxt}>Auto-Login Runner (Chrome)</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.runnerHint}>
+            <Text style={{ fontWeight: "700" }}>Login</Text> opens the{" "}
+            {kind === "pf" ? "EPFO Employer" : "ESIC Employer"} portal in a NEW browser tab —
+            with the SKS Chrome extension installed, your firm&apos;s Login ID &amp; Password
+            auto-fill there. <Text style={{ fontWeight: "700" }}>Auto-Login Runner</Text>{" "}
+            downloads the PC tool: unzip once, then double-click{" "}
+            <Text style={styles.mono}>{kind === "pf" ? "run_pf.bat" : "run_esic.bat"}</Text>
+            {kind === "pf" ? (
+              <>
+                {" "}(ECR test: <Text style={styles.mono}>run_ecr_test.bat</Text>)
+              </>
+            ) : null}
+            {" "}— a new Google Chrome window opens the portal and pastes the saved credentials
+            automatically. It self-updates every run.
+          </Text>
+        </View>
+
         {/* preview */}
         {loading ? <ActivityIndicator style={{ marginTop: 30 }} color={colors.brandPrimary} /> : summary ? (
           <View style={styles.card}>
@@ -244,5 +337,10 @@ const styles = StyleSheet.create({
   cell: { flex: 1, fontSize: 11, color: colors.onSurface },
   hcell: { fontWeight: "700", color: colors.onSurfaceSecondary },
   warn: { color: "#B45309", fontSize: 12, marginTop: 8, fontWeight: "600" },
+  runnerHint: { fontSize: 11.5, color: colors.onSurfaceSecondary, lineHeight: 17, marginTop: 4 },
+  mono: {
+    fontFamily: Platform.OS === "web" ? "monospace" : "Courier",
+    color: colors.onSurface, fontWeight: "700",
+  },
   totTxt: { marginTop: 8, fontSize: 13, fontWeight: "800", color: colors.brandPrimary },
 });

@@ -33,6 +33,13 @@
 #   • Iter 396 — "WhatsApp Payslips" one-click blast button on the
 #     Compliance Salary Process action bar: queues every employee's
 #     payslip PDF for the open run's month straight to WhatsApp.
+#   • Iter 396 — PF Reports "Portal Login" card: "Login — Open EPFO/ESIC
+#     Portal" opens the government portal in a NEW browser tab, plus an
+#     "Auto-Login Runner (Chrome)" download (Selenium + auto-managed
+#     ChromeDriver, run_pf.bat / run_esic.bat / run_ecr_test.bat).
+#   • Iter 396 — server.py refactor step 2: Actual Salary Process
+#     (~810 lines) extracted to routes/actual_salary_process.py.
+#     No behaviour change.
 #
 # Run ON THE VPS as root/sksharma.
 set -e
