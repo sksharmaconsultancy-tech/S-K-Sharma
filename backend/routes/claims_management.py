@@ -27,6 +27,10 @@ from routes.labour_statistics import _company, _dt, _f  # noqa: E402
 router = APIRouter(prefix="/api/admin/claims", tags=["claims"])
 
 PF_TYPES = ["Final Settlement (Form-19)", "Pension Withdrawal (Form-10C)",
+            # Iter 382 (user request) — Form-10D pension, Form 20/5-IF
+            # death claims and the Composite Claim Form filing entry.
+            "Pension (Form-10D)", "Death Claim (Form-20 / 5-IF)",
+            "Composite Claim Form",
             "Partial Withdrawal (Form-31)", "Advance", "Transfer Claim",
             "Higher Pension", "Death Claim", "Nominee Claim", "KYC Update",
             "Bank Correction", "Name Correction", "DOB Correction",
@@ -181,7 +185,8 @@ async def claim_employees(company_id: str,
             {"role": "employee", "company_id": company_id},
             {"_id": 0, "user_id": 1, "employee_code": 1, "name": 1,
              "uan_no": 1, "esi_ip_no": 1, "pf_no": 1, "department": 1,
-             "designation": 1, "position": 1, "doj": 1, "exit_date": 1,
+             "designation": 1, "position": 1, "phone": 1, "doj": 1,
+             "exit_date": 1,
              "resign_date": 1, "date_of_leaving": 1, "leaving_date": 1,
              "employment_status": 1, "active": 1, "disabled": 1}):
         dol = ""
@@ -204,6 +209,7 @@ async def claim_employees(company_id: str,
             "pf_no": u.get("pf_no") or "",
             "department": u.get("department") or "",
             "designation": u.get("designation") or u.get("position") or "",
+            "phone": u.get("phone") or "",
             "doj": str(u.get("doj") or "")[:10],
             "dol": dol,
             "left": left,

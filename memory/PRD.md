@@ -2548,3 +2548,23 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   hidden. pytest payslip builder tests pass (7 passed; other errors are
   pre-existing live-session fixtures).
   Deploy: deploy_vps_iter381.sh (temp_bundle→381, includes 370-380).
+- Iter 382 (user: PF & ESIC Claims form changes):
+  Backend claims_management.py: PF_TYPES += "Pension (Form-10D)",
+  "Death Claim (Form-20 / 5-IF)", "Composite Claim Form"; /employees
+  projection returns phone.
+  Frontend claims-management.tsx:
+  1. FIELDS: removed department/designation/acknowledgement_no/
+     payment_reference; added uan_password + mobile_no. Field ORDER
+     (user follow-up): UAN Number → UAN Password → Mobile No. →
+     Employee Code → Employee Name → dates.
+  2. All date fields labeled/typed DD-MM-YYYY; DATE_KEYS + isoToDDMM/
+     ddmmToISO convert on load (editClaim) and save (save() converts to
+     ISO before POST so range filter/sort/reminders still work);
+     verified: typed 15-06-2026 → stored 2026-06-15. Reminders display
+     converted. pickEmployee fills mobile_no + DD-MM dates.
+  3. Executive auto-fills logged-in user name (useAuth user.name),
+     editable.
+  4. Attach button renamed "Upload Document" (cloud icon).
+  Verified via playwright (all removals, autofill, new types, save) +
+  DB check; test claim deleted.
+  Deploy: deploy_vps_iter382.sh (temp_bundle→382, includes 370-381).

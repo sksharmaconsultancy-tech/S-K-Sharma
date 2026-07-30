@@ -47,21 +47,35 @@ const REPORTS = [
   ["settlement", "Settlement Register"],
 ] as const;
 const FIELDS: [string, string][] = [
+  // Iter 382 (user request) — Department / Designation / Ack No. /
+  // Payment Ref removed; Mobile No. + UAN Password added; every date
+  // entered & shown as DD-MM-YYYY (stored internally as ISO).
+  // Field order (user): UAN Number → UAN Password → Mobile No.
+  ["uan_password", "UAN Password"],
+  ["mobile_no", "Mobile No."],
   ["employee_code", "Employee Code"],
   ["employee_name", "Employee Name"],
-  ["department", "Department"],
-  ["designation", "Designation"],
-  ["doj", "Date of Joining (YYYY-MM-DD)"],
-  ["dol", "Date of Leaving (YYYY-MM-DD)"],
-  ["application_date", "Application Date (YYYY-MM-DD)"],
+  ["doj", "Date of Joining (DD-MM-YYYY)"],
+  ["dol", "Date of Leaving (DD-MM-YYYY)"],
+  ["application_date", "Application Date (DD-MM-YYYY)"],
   ["claim_amount", "Claim Amount (₹)"],
-  ["follow_up_date", "Follow-up Date (YYYY-MM-DD)"],
+  ["follow_up_date", "Follow-up Date (DD-MM-YYYY)"],
   ["executive", "Handled By (Executive)"],
-  ["acknowledgement_no", "Acknowledgement / Ref No."],
-  ["payment_reference", "Payment Reference (NEFT/UTR)"],
-  ["settlement_date", "Settlement Date (YYYY-MM-DD)"],
+  ["settlement_date", "Settlement Date (DD-MM-YYYY)"],
   ["remarks", "Remarks"],
 ];
+// Date keys stored as ISO (YYYY-MM-DD) but typed/shown as DD-MM-YYYY.
+const DATE_KEYS = ["doj", "dol", "application_date", "follow_up_date", "settlement_date"];
+const isoToDDMM = (v?: string) => {
+  const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : String(v || "");
+};
+const ddmmToISO = (v?: string) => {
+  const s = String(v || "").trim().replace(/\//g, "-");
+  const m = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  return s; // already ISO or free text — stored as-is
+};
 
 function WebSelect({
   value,
@@ -260,6 +274,15 @@ export default function ClaimsManagementScreen() {
       .catch(() => setEmpList([]));
   }, [cCompany]);
 
+  // Iter 382 (user request) — "Handled By (Executive)" auto-fills with
+  // the logged-in user's name (still editable).
+  useEffect(() => {
+    if (tab === "form" && !form.executive && user?.name) {
+      setForm((p) => (p.executive ? p : { ...p, executive: user.name }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, user?.name, form.executive]);
+
   // PF Form-19 / Form-10C → only LEFT (resigned/exited) employees.
   const leftOnly = cKind === "pf" && /Form-19|Form-10C/.test(cType);
   const empOpts = empList.filter((e) => !leftOnly || e.left);
@@ -272,12 +295,11 @@ export default function ClaimsManagementScreen() {
       ...p,
       employee_code: e.employee_code || "",
       employee_name: e.name || "",
+      mobile_no: e.phone || "",
       uan: e.uan_no || "",
       insurance_no: e.esi_ip_no || "",
-      department: e.department || "",
-      designation: e.designation || "",
-      doj: e.doj || "",
-      dol: e.dol || "",
+      doj: isoToDDMM(e.doj || ""),
+      dol: isoToDDMM(e.dol || ""),
     }));
   };
 
@@ -402,7 +424,10 @@ export default function ClaimsManagementScreen() {
     setCType(c.data?.claim_type || "");
     const f: Record<string, string> = {};
     FIELDS.forEach(([k]) => {
-      if (c.data?.[k] != null) f[k] = String(c.data[k]);
+      if (c.data?.[k] != null)
+        f[k] = DATE_KEYS.includes(k)
+          ? isoToDDMM(String(c.data[k]))
+          : String(c.data[k]);
     });
     ["uan", "insurance_no", "company_name"].forEach((k) => {
       if (c.data?.[k] != null) f[k] = String(c.data[k]);
@@ -435,6 +460,12 @@ export default function ClaimsManagementScreen() {
     setSaving(true);
     setMsg("");
     try {
+      // Iter 382 — dates typed as DD-MM-YYYY are stored as ISO so the
+      // register date-range filter / sorting / reminders keep working.
+      const data: Record<string, any> = { ...form, claim_type: cType };
+      for (const k of DATE_KEYS) {
+        if (data[k]) data[k] = ddmmToISO(String(data[k]));
+      }
       const r = await api<any>("/admin/claims", {
         method: "POST",
         body: {
@@ -443,7 +474,7 @@ export default function ClaimsManagementScreen() {
           company_id: cCompany === "external" ? undefined : cCompany,
           status: cStatus,
           documents: docs,
-          data: { ...form, claim_type: cType },
+          data,
         },
       });
       setClaimId(r.claim_id);
@@ -1041,7 +1072,7 @@ export default function ClaimsManagementScreen() {
                     value={form[k] || ""}
                     onChangeText={(t) => setForm((p) => ({ ...p, [k]: t }))}
                     placeholder={
-                      /date|doj|dol/.test(k) ? "YYYY-MM-DD" : lbl
+                      /date|doj|dol/.test(k) ? "DD-MM-YYYY" : lbl
                     }
                     testID={`cl-f-${k}`}
                   />
@@ -1109,8 +1140,8 @@ export default function ClaimsManagementScreen() {
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
                       <>
-                        <Ionicons name="attach" size={15} color="#fff" />
-                        <Text style={st.attachBtnTxt}>Attach File</Text>
+                        <Ionicons name="cloud-upload-outline" size={15} color="#fff" />
+                        <Text style={st.attachBtnTxt}>Upload Document</Text>
                       </>
                     )}
                   </Pressable>
@@ -1248,7 +1279,7 @@ export default function ClaimsManagementScreen() {
                     {r.claim_no} — {r.employee_name || "—"}
                   </Text>
                   <Text style={shared.meta}>
-                    {r.claim_type} · {r.status} · due {r.follow_up_date}
+                    {r.claim_type} · {r.status} · due {isoToDDMM(r.follow_up_date)}
                     {r.executive ? ` · ${r.executive}` : ""}
                   </Text>
                 </View>
