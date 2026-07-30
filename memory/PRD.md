@@ -2734,3 +2734,17 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   one combined PDF (landscape, 10pp) and CSV. Header EXCEL/PDF buttons
   (testID asd-full-xlsx/asd-full-pdf). Verified via openpyxl/pypdf.
 - Iter 393 deploy: deploy_vps_iter393.sh (temp_bundle→393, incl 392+393). USER DEPLOYING.
+- Iter 394 (server.py refactor P0): Compliance Salary Runs engine
+  (~2,200 lines: create/process, list, save-rows, finalize + Iter-388
+  validation gate, unlock requests, reprocess, CSV/XLSX/register-PDF/
+  PF-ECR/ESIC exports, generate-payslips) extracted from server.py into
+  routes/compliance_salary_runs.py (server.py 22k → 20.5k lines).
+  Previous fork created the module but never registered it, leaving 6
+  NameError call sites in server.py (_firm_offline_salary_enabled,
+  _firm_biometric_attendance_enabled, _ensure_firm_head_masks,
+  _require_firm_salary_permission). Fixed: router registered + 4 helpers
+  imported back into server.py namespace. Also removed a duplicated
+  include_router block (9 modules registered twice). Testing agent:
+  23/23 backend pytest PASS (tests/test_iter394_compliance_salary_runs_refactor.py).
+- Iter 394 deploy: deploy_vps_iter394.sh (temp_bundle→394). AWAITING USER DEPLOY.
+- Next: WhatsApp API integration (P1); continue server.py extraction (P2).

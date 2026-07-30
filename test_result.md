@@ -238,3 +238,15 @@ See `/app/memory/test_credentials.md`. Super admin
 ## Iter 318
 - EPFO Login & Dashboard flow live E2E: Open Portal → Close Alert → Enter User ID & Password
   (from Firm Master, auto-detected) all done; flow paused at captcha prompt as designed.
+
+## Iter 394 — server.py refactor: Compliance Salary Runs extraction
+- routes/compliance_salary_runs.py registered in server.py; 4 shared helpers imported back
+  (they are still called at server.py lines ~8441/13858/15032/19307). De-duplicated 9
+  double-registered routers. flake8 F821 clean on both files.
+- Testing agent 23/23 pytest PASS (tests/test_iter394_compliance_salary_runs_refactor.py,
+  report /app/test_reports/iteration_394.json): CRUD on test run 2026-08, finalize gate,
+  unlock flow, all 7 exports on existing run csrun_bca09c4a4cec (unmodified), legacy
+  helper-dependent endpoints (POST /admin/employees, actual-salary-process, payslips.zip),
+  de-dup sanity, no NameError in logs. Test data cleaned.
+- Pre-existing unrelated 500s noted in logs: audit-export xlsx, biometric/connection-doctor,
+  rpa interact, compliance-import upload (env/data-related, NOT from this refactor).
