@@ -250,3 +250,15 @@ See `/app/memory/test_credentials.md`. Super admin
   de-dup sanity, no NameError in logs. Test data cleaned.
 - Pre-existing unrelated 500s noted in logs: audit-export xlsx, biometric/connection-doctor,
   rpa interact, compliance-import upload (env/data-related, NOT from this refactor).
+
+## Iter 395 — WhatsApp Business Integration Module
+- Backend 22/22 pytest PASS (tests/test_iter395_whatsapp.py, report
+  /app/test_reports/iteration_395.json): settings masked-token round-trip, test-connection
+  graceful fail, template CRUD/seed/preview, queue → worker → failed(not_configured) in
+  pending-config mode, retry/cancel/delete, send-salary-slips, dashboard, reports
+  json/xlsx/pdf, schedules CRUD, webhook verify 403/challenge-echo, status callback,
+  chatbot HELP reply, employee-create regression.
+- Frontend verified: whatsapp-config (firm dd, creds, automation switches, PENDING CONFIG
+  badge), whatsapp-templates (30 seeded, edit/preview modals), whatsapp-center all 6 tabs.
+- NOTE: Meta Graph API not mocked — unconfigured by design until user enters credentials
+  on the VPS. All test data cleaned; Kankani wa_settings reset to disabled.

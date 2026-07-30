@@ -2748,3 +2748,29 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   23/23 backend pytest PASS (tests/test_iter394_compliance_salary_runs_refactor.py).
 - Iter 394 deploy: deploy_vps_iter394.sh (temp_bundle→394). AWAITING USER DEPLOY.
 - Next: WhatsApp API integration (P1); continue server.py extraction (P2).
+- Iter 395 (user: WhatsApp Business Integration Module, all 3 phases):
+  Backend utils/whatsapp_engine.py (Graph client, per-firm encrypted
+  creds via secrets_vault, 20s queue worker with retry/backoff + daily
+  limits + auto log cleanup, daily scans: birthday/anniversary/absent/
+  continuous-absence/holiday/doc reminders, schedules engine, chatbot
+  keyword replies SALARY/ATTENDANCE/LEAVE/PF/ESIC/HOLIDAY/PROFILE/BANK/
+  HELP) + routes/whatsapp_center.py (settings w/ masked tokens, template
+  CRUD + 30 seeded defaults + preview, manual/bulk send, send-salary-
+  slips by month, history retry/cancel/delete, dashboard KPIs, schedules
+  CRUD, reports json/xlsx/pdf, PUBLIC webhook GET verify + POST statuses
+  /inbound chatbot with optional HMAC signature check, employee wa-field
+  update endpoint). Hooks: welcome on employee create (server.py),
+  salary_processed + salary_slip PDF on generate-payslips
+  (compliance_salary_runs.py), leave approved/rejected (leaves.py).
+  Frontend: whatsapp-config.tsx, whatsapp-templates.tsx,
+  whatsapp-center.tsx (6 tabs) + 5 AdminWebShell menu entries
+  (Administration/Communication/Payroll/Attendance/Compliance).
+  PENDING-CONFIG mode until user enters Meta credentials (user choice 1b).
+  Collections: wa_settings, wa_templates, wa_messages, wa_schedules,
+  wa_inbound, wa_audit. Testing agent: 22/22 backend + frontend PASS
+  (/app/test_reports/iteration_395.json).
+- Iter 395 deploy: deploy_vps_iter395.sh (temp_bundle→395). AWAITING USER DEPLOY.
+- Backlog Phase 4 (user's future enhancements): AI chatbot self-service,
+  two-way HR conversations, Hindi/English multi-language, WhatsApp OTP,
+  payslip acknowledgment, approval workflows via WhatsApp (leave/OT/
+  reimbursement), voice/document sharing, QR code to start chat.
