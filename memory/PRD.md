@@ -2822,3 +2822,19 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   openapi 696 paths unchanged; all smoke tests OK. Full testing-agent
   regression STILL PENDING (first attempt aborted during setup) — rerun
   before/after next deploy.
+- Iter 398 (refactor step 7, FINAL BIG BLOCK): attendance core cluster
+  (~3,520 lines: punch engine, worksites, pending/approve, roster/mark,
+  day-status, manual-punch + audit, admin history, _compute_payroll_run,
+  shared date helpers) extracted to routes/attendance_core.py. server.py
+  17,924 → 14,400 lines (22k at session start). 13 shared names
+  re-exported into server namespace FIRST at bottom (fixed boot
+  ImportError _month_is_complete by scanning ALL route modules'
+  `from server import` lists). Testing agent 26/26 PASS
+  (tests/test_iter398_attendance_core_refactor.py, employee PIN-login
+  punch flow, manual-punch + roster cycles with cleanup, payroll engine,
+  downstream payslips/biometric/messages imports, openapi 698).
+- Iter 398 (user): Runner v7 — alert dismiss now tries OK
+  (#btnCloseModal, 20s) first, then X (aria-label="Close"), then generic
+  dismiss buttons; applied to ecr_test flow, sign-in modal strip and the
+  generic login flow, THEN autofill runs. Compile-checked; served
+  version 7 verified.

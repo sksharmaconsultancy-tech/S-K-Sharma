@@ -253,7 +253,7 @@ async def ext_solve_captcha(payload: Dict[str, Any] = Body(...)):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "6"
+RUNNER_VERSION = "7"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -366,22 +366,26 @@ def run(API_BASE, TOKEN, portal):
         print("Opening EPFO employer portal...")
         driver.get(PORTALS["epfo"])
 
-        # Step 1 — close the alert popup (OK).
-        try:
-            btn = WebDriverWait(driver, 20).until(
-                EC.element_to_be_clickable((By.ID, "btnCloseModal")))
-            btn.click()
-            print("OK button clicked - alert popup closed.")
-        except Exception:
+        # Step 1 — close the alert popup: OK (#btnCloseModal) first, then
+        # the X (aria-label="Close"), then generic dismiss buttons.
+        _closed = False
+        for _i, _sel in enumerate((
+                (By.ID, "btnCloseModal"),
+                (By.CSS_SELECTOR, "button[aria-label='Close'], [aria-label='Close']"),
+                (By.CSS_SELECTOR, "button.btn-danger[data-bs-dismiss='modal']"),
+                (By.CSS_SELECTOR, "button[data-dismiss='modal']"))):
             try:
-                btn = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable((
-                        By.CSS_SELECTOR,
-                        "button.btn-danger[data-bs-dismiss='modal']")))
+                btn = WebDriverWait(driver, 20 if _i == 0 else 3).until(
+                    EC.element_to_be_clickable(_sel))
                 btn.click()
-                print("OK button clicked - alert popup closed.")
+                print("Alert popup closed (%s clicked)."
+                      % ("OK" if _i == 0 else "Close"))
+                _closed = True
+                break
             except Exception:
-                print("No alert popup appeared - nothing to close.")
+                continue
+        if not _closed:
+            print("No alert popup appeared - nothing to close.")
 
         # Step 2 — paste Username (EPFO Login ID) + Password from firm.
         # NOTE: the EPFO portal is an ANGULAR app — fields are bound with
@@ -523,6 +527,8 @@ def run(API_BASE, TOKEN, portal):
             # Sign In click; close it + strip any lingering modal first.
             try:
                 for msel in ("#btnCloseModal",
+                             "button[aria-label='Close']",
+                             "[aria-label='Close']",
                              "#mainHomePageAlertModal button.btn-danger"):
                     for el in driver.find_elements(By.CSS_SELECTOR, msel):
                         if el.is_displayed():
@@ -607,6 +613,7 @@ def run(API_BASE, TOKEN, portal):
         from selenium.webdriver.support.ui import WebDriverWait
         from selenium.webdriver.support import expected_conditions as EC
         for _i, _sel in enumerate(((By.ID, "btnCloseModal"),
+                     (By.CSS_SELECTOR, "button[aria-label='Close'], [aria-label='Close']"),
                      (By.CSS_SELECTOR, "button.btn-danger[data-bs-dismiss='modal']"),
                      (By.CSS_SELECTOR, "button[data-dismiss='modal']"),
                      (By.CSS_SELECTOR, ".modal.show button.btn, .modal.in button.btn"))):

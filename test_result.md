@@ -274,3 +274,9 @@ See `/app/memory/test_credentials.md`. Super admin
   contract verified via curl; frontend fallback (tab + hint) verified via Playwright.
 - Employee create→delete cycle functionally verified post-extraction (no 500 with
   WhatsApp unconfigured).
+
+## Iter 398 — attendance_core extraction + Runner v7 alert handling
+- 26/26 backend regression PASS (report /app/test_reports/iteration_398.json). server.py
+  now 14,400 lines. Boot ImportError fixed by re-exporting 13 shared names before other
+  route-module imports.
+- Runner v7: OK (#btnCloseModal) → X (aria-label=Close) → generic dismiss, then autofill.
