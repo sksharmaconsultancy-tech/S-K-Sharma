@@ -2888,3 +2888,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   (light-blue OT days, AMBER heaviest day), xlsx footer block, pdf footer
   table. Verified live (July: month OT 854:00, peak day 12 = 154:30).
 - Deploy: /app/deploy_vps_iter403.sh served via temp-code-bundle kind=script.
+- Iter 404 (user): QR Codes (Joining & App) firm selection converted from
+  chip list to searchable dropdown (reused src/components/CompanyPicker,
+  allowAll=false, preloaded list, auto-select first firm). Chip styles
+  removed. Screenshot-verified incl. firm switch updating QR + code.
+- Deploy: /app/deploy_vps_iter404.sh served via temp-code-bundle kind=script.

@@ -21,6 +21,7 @@ import { Redirect, useRouter } from "expo-router";
 import QRCode from "react-native-qrcode-svg";
 
 import { api } from "@/src/api/client";
+import CompanyPicker from "@/src/components/CompanyPicker";
 import { useAuth } from "@/src/context/AuthContext";
 import { colors, radius, spacing, type } from "@/src/theme";
 
@@ -74,7 +75,7 @@ export default function JoinQrScreen() {
           const r = await api<{ companies: Company[] }>("/companies?lite=1");
           const list = (r.companies || []).filter((c) => c.company_code);
           setCompanies(list);
-          if (list.length === 1) setSelected(list[0]);
+          if (list.length) setSelected(list[0]);
         }
       } catch {
         setCompanies([]);
@@ -163,30 +164,27 @@ export default function JoinQrScreen() {
           </View>
         ) : null}
 
-        <Text style={styles.lbl}>Select Firm</Text>
         {loading ? (
           <ActivityIndicator color={colors.brandPrimary} style={{ marginVertical: 24 }} />
         ) : companies.length === 0 ? (
-          <Text style={styles.empty}>No firms with a company code found.</Text>
+          <>
+            <Text style={styles.lbl}>Select Firm</Text>
+            <Text style={styles.empty}>No firms with a company code found.</Text>
+          </>
         ) : (
-          <View style={styles.chipWrap}>
-            {companies.map((c) => (
-              <Pressable
-                key={c.company_id}
-                onPress={() => setSelected(c)}
-                style={[styles.chip, selected?.company_id === c.company_id && styles.chipActive]}
-                testID={`joinqr-firm-${c.company_id}`}
-              >
-                <Text
-                  style={[
-                    styles.chipTxt,
-                    selected?.company_id === c.company_id && styles.chipTxtActive,
-                  ]}
-                >
-                  {c.name}
-                </Text>
-              </Pressable>
-            ))}
+          // Iter 404 (user request) — firm selection as a searchable DROPDOWN
+          // instead of a chip list.
+          <View style={{ marginBottom: spacing.md, maxWidth: 460 }}>
+            <CompanyPicker
+              value={selected?.company_id || "all"}
+              onChange={(v) =>
+                setSelected(companies.find((c) => c.company_id === v) || null)
+              }
+              companies={companies}
+              allowAll={false}
+              label="Select Firm"
+              testID="joinqr-firm-picker"
+            />
           </View>
         )}
 
@@ -299,18 +297,6 @@ const styles = StyleSheet.create({
   baseNow: { color: "#16A34A", fontSize: 11.5, fontWeight: "700", marginTop: 6 },
   lbl: { color: colors.onSurface, fontSize: type.sm, fontWeight: "800", marginBottom: 8 },
   empty: { color: colors.onSurfaceTertiary, fontSize: type.sm, marginVertical: 16 },
-  chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: spacing.md },
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: radius.pill ?? 999,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  chipActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
-  chipTxt: { color: colors.onSurface, fontSize: type.sm, fontWeight: "600" },
-  chipTxtActive: { color: "#fff" },
   card: {
     backgroundColor: colors.surface,
     borderRadius: radius.md,
