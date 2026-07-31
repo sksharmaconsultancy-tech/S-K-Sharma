@@ -35,9 +35,9 @@ from server import (  # noqa: E402
     sub_admin_can_touch_company,
 )
 from routes.attendance_core import (  # noqa: E402
-    _compute_day_hours,
     apply_contractual_gate,
 )
+from shared.hours import _compute_day_hours  # noqa: E402
 from routes.attendance_location_api import _compute_location_status  # noqa: E402
 from shared.dates import _parse_any_date  # noqa: E402
 

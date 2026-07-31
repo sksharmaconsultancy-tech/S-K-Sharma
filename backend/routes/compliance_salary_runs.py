@@ -16,7 +16,6 @@ from pydantic import BaseModel
 from server import (  # noqa: E402
     _compute_monthly_grid_data,
     _policy2_biometric_stats,
-    _sort_export_rows,
     db,
     get_user_from_token,
     holiday_dates_for_company,
@@ -26,6 +25,8 @@ from server import (  # noqa: E402
     require_role,
     require_super_admin_strict,
 )
+
+from shared.sorting import _sort_export_rows  # noqa: E402
 
 from shared.dates import (  # noqa: E402
     _month_is_after_exit,

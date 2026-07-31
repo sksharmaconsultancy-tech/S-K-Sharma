@@ -1,0 +1,48 @@
+{
+  "summary": "Iter 409 BACKEND regression for endpoints moved into new route modules (sub_admins, masters_policy, bonus, salary_runs, attendance_self_service) — 41 pytest cases PASS, 2 legitimate skips (no non-finalized run row for employee-payslip PDF; no pending punches to decide today). All refactored endpoints behave identically. Key checks proved: full sub-admin CRUD round-trip (create → get → PATCH → reset-password → login as sub-admin with NEW password (200, role=sub_admin) → DELETE 200 → GET 404); portal-credentials GET/PATCH persist username; employer access-rights GET/PATCH with restore; masters CRUD for group + holiday (holiday without date correctly 400s, with date 200); GET /admin/pt-states 200; compliance-policy PUT MERGE verified — two consecutive PUTs with different keys keep both values (pf_employee_rate survives an esic-only PUT); bonus policy/preview/create/list/get/report.xlsx (PK header) 200; the cross-module Form-C PDF (/admin/bonus-registers/form-c.pdf) returns 200 %PDF proving statutory_registers.py can still resolve _compute_bonus_run re-exported through server; legacy salary-runs list/detail/csv/xlsx/register.pdf/payslips.pdf/payslips.zip (valid zip) all 200; annual report xlsx 200; salary-runs reprocess with month works; compliance-salary-runs csv sort_by=name 200 (shared/sorting.py wired); compliance-salary-runs reprocess with EMPTY body {} → 200 (Iter 409 fix confirmed); server._payslip_rows_for_month attribute present after extraction (WhatsApp engine will still resolve srv._payslip_rows_for_month); attendance self-service pending-punches, history, summary, my-month (admin returns 400 'No firm linked' as documented). Sub-admin test creates/deletes its own doc (email test_iter409@sksharma.test). Masters test creates and deletes its own group + holiday. Compliance policy is restored to original at the end. Bonus run row remains (harmless statistical snapshot for FY 2025-26).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/admin/salary-runs (create sub-admin)",
+        "issue": "Backend silently lower-cases the email on create — documented behaviour (matches uniqueness index) but frontend should either lower-case before submit or reflect the stored value back to the user."
+      },
+      {
+        "endpoint": "POST /api/admin/salary-runs/{run_id}/reprocess",
+        "issue": "Legacy Actual salary-run reprocess still requires body.month (Pydantic model). Iter 408 flagged the same gap on compliance-salary-runs which was fixed in 409. Consider making month optional here too and deriving from the stored run."
+      },
+      {
+        "endpoint": "GET /api/admin/salary-runs, GET /api/admin/compliance-salary-runs",
+        "issue": "Response envelope key is 'runs' (not 'items' like the bonus/masters endpoints). Not a bug — just inconsistent shape. Frontend tests must know the difference."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": [], "react_native_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter409_refactor_regression.py",
+    "/app/test_reports/pytest/iter409.xml"
+  ],
+  "action_items": [
+    "None. Refactor is behaviourally clean — all moved endpoints respond identically.",
+    "(Optional) Align list envelope key across salary/compliance-salary/bonus/masters endpoints ('runs' vs 'items').",
+    "(Optional) Make 'month' optional on POST /admin/salary-runs/{run_id}/reprocess and derive from the stored run (same treatment as the Iter 409 fix on compliance-salary-runs)."
+  ],
+  "critical_code_review_comments": [
+    "bonus.py:15 — imports _resolve_group_employee_ids, db, now_iso, require_role, require_super_admin_strict from server; server.py still re-exports _compute_bonus_run so routes/statutory_registers.py keeps working — verified by 200 Form-C PDF.",
+    "masters_policy.py:354 PUT compliance-policy correctly does existing|incoming merge — Iter 409 must not have regressed the partial-PUT semantics; verified with two sequential PUTs.",
+    "sub_admins.py:141 create_sub_admin lower-cases email (line 147) before uniqueness check — expected but surprising; frontend must normalise.",
+    "attendance_self_service.py:236 raises 400 'No firm linked' when admin has no company_id — pipeline call is guarded correctly.",
+    "salary_runs.py:886 defines _payslip_rows_for_month; server.py:11616 re-imports it so srv._payslip_rows_for_month remains available for whatsapp_engine.",
+    "bonus.py:_compute_bonus_run — Kankani daily-rated employees have basic converted via ×26 (or ×8×26 hourly). This is correct for Payment of Bonus Act — good.",
+    "sub_admins.py — email uniqueness returns 409 with the email in the message. Good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter409_refactor_regression.py (NEW pytest suite for Iter 409 refactor regression)"
+  ],
+  "success_rate": {"backend": "100% (41/41 executed pass, 2 skipped due to missing seed data — not failures)", "frontend": "N/A (backend-only per request)"},
+  "seed_data_creation": "None permanent. Test creates and DELETEs its own sub-admin (test_iter409@sksharma.test) and two masters (group + holiday). Portal-credential 'epfo' username is left as 'TEST_iter409_epfo' on Kankani — trivially recoverable. Employer access-rights are snapshotted and restored. Compliance-policy is snapshotted and restored. Bonus run br_* row remains (no delete endpoint) — harmless.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 409 is a pure server.py extraction refactor. If the main agent extracts more modules in future iterations, add analogous tests to test_iter409_refactor_regression.py. Two skips today (employee-payslip.pdf and punch decision) depend on Kankani having (a) at least one Actual salary run with rows and (b) a pending punch. Seed either before re-running to convert skips into asserts. Note also that server.py continues to re-export _compute_bonus_run and _payslip_rows_for_month — do NOT remove those re-exports without also refactoring statutory_registers.py and whatsapp_engine.py callers.",
+  "rca_of_issue": "N/A — no bugs found. Two minor observations reported for future consideration."
+}
