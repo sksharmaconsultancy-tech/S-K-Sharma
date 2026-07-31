@@ -9226,13 +9226,27 @@ async def _resolve_group_employee_ids(company_id: str, group_id: Optional[str]) 
         return None
     grp = await db.masters.find_one(
         {"master_id": group_id, "type": "group",
-         "company_id": {"$in": [company_id, "__global__"]}},
+         # Iter 412 (user bug: group-wise sheet blank) — legacy masters can
+         # carry company_id None; include them like the list endpoints do.
+         "company_id": {"$in": [company_id, "__global__", None]}},
         {"_id": 0, "member_user_ids": 1, "name": 1},
     )
     if grp is not None:
         ids = list(grp.get("member_user_ids") or [])
         if ids:
-            return ids
+            # Iter 412 (user bug: group-wise sheet blank) — PROD ROOT CAUSE:
+            # global "category" groups (LABOUR/STAFF…) can carry a stale
+            # member list pointing at ANOTHER firm's employees. Keep only
+            # members of THIS firm; if none remain, fall through to the
+            # name-match below instead of returning a blank report.
+            docs = await db.users.find(
+                {"user_id": {"$in": ids}, "company_id": company_id,
+                 "role": "employee"},
+                {"_id": 0, "user_id": 1},
+            ).to_list(4000)
+            valid = [d["user_id"] for d in docs]
+            if valid:
+                return valid
         # Iter 101 — global/legacy master groups often have NO explicit
         # members; they are categories. Fall back to name-matching the
         # employees' employee_group / employee_type fields (e.g. the
@@ -9254,11 +9268,16 @@ async def _resolve_group_employee_ids(company_id: str, group_id: Optional[str]) 
     )
     if not egp:
         return []
-    grp_name = egp.get("name") or egp.get("group_name")
+    grp_name = (egp.get("name") or egp.get("group_name") or "").strip()
     if not grp_name:
         return []
+    # Iter 412 (user bug: group-wise sheet blank) — match case-insensitively
+    # on BOTH employee_group AND employee_type (legacy imports only fill
+    # employee_type), exactly like the masters name-fallback above.
+    rx = {"$regex": f"^{re.escape(grp_name)}$", "$options": "i"}
     ids = await db.users.find(
-        {"company_id": company_id, "employee_group": grp_name},
+        {"company_id": company_id, "role": "employee",
+         "$or": [{"employee_group": rx}, {"employee_type": rx}]},
         {"_id": 0, "user_id": 1},
     ).to_list(4000)
     return [u["user_id"] for u in ids]

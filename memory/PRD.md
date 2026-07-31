@@ -2994,3 +2994,19 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   with report line "DUPLICATE EmpCode ..." (totals.employees_duplicate_code).
   seen_codes resets per firm.
 - Deploy: /app/deploy_vps_iter411.sh served via temp-code-bundle kind=script.
+
+## Iter 412 — Group-wise attendance sheet BLANK fix (user bug)
+- ROOT CAUSE (verified on prod data — 10+ firms affected incl. KANKANI 110→5,
+  IKORE 133→5): global category group masters (LABOUR etc.) carry a stale
+  member_user_ids list pointing at ANOTHER firm's employee → resolver
+  returned that 1 foreign id → blank sheet. All-groups ZIP splits by
+  employee_type directly, hence worked.
+- Fix in server.py _resolve_group_employee_ids:
+  1) explicit member lists filtered to the selected firm; if none remain,
+     fall through to name matching;
+  2) masters lookup includes company_id None;
+  3) EGP fallback now regex-matches BOTH employee_group AND employee_type
+     case-insensitively (was employee_group-only exact match).
+- Verified: injected stale foreign member into dev LABOUR group → export
+  now 113 rows (was blank/5). Test data restored.
+- Deploy: /app/deploy_vps_iter412.sh via temp-code-bundle kind=script.
