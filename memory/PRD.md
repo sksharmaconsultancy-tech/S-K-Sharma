@@ -2893,3 +2893,9 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   allowAll=false, preloaded list, auto-select first firm). Chip styles
   removed. Screenshot-verified incl. firm switch updating QR + code.
 - Deploy: /app/deploy_vps_iter404.sh served via temp-code-bundle kind=script.
+- Iter 405 (user accepted): "Download PNG" button on both QR cards in
+  join-qr.tsx — serializes the on-screen react-native-qrcode-svg SVG onto
+  a 640px canvas (white bg, offline; the first attempt via api.qrserver.com
+  fetch stalled) and downloads `<Firm>-<type>-QR.png`. Playwright-verified
+  actual download (City-Care-Hospital-employee-QR.png).
+- Deploy: /app/deploy_vps_iter405.sh served via temp-code-bundle kind=script.

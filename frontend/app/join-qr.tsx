@@ -233,6 +233,44 @@ export default function JoinQrScreen() {
                     <Ionicons name="copy-outline" size={16} color={colors.brandPrimary} />
                     <Text style={styles.btnTxt}>Copy Link</Text>
                   </Pressable>
+                  {/* Iter 405 (user accepted) — save the QR as a PNG for
+                      WhatsApp / poster designs without printing. Renders the
+                      on-screen SVG onto a canvas (works offline). */}
+                  {Platform.OS === "web" ? (
+                    <Pressable style={styles.btn} testID={`appqr-${qc.key}-download`}
+                      onPress={() => {
+                        try {
+                          const svg = document.querySelector(
+                            `[data-testid="appqr-${qc.key}"] svg`);
+                          if (!svg) { showToast("QR not ready yet"); return; }
+                          const xml = new XMLSerializer().serializeToString(svg);
+                          const img = new Image();
+                          img.onload = () => {
+                            const cv = document.createElement("canvas");
+                            cv.width = 640; cv.height = 640;
+                            const ctx = cv.getContext("2d")!;
+                            ctx.fillStyle = "#FFFFFF";
+                            ctx.fillRect(0, 0, 640, 640);
+                            ctx.drawImage(img, 20, 20, 600, 600);
+                            const a = document.createElement("a");
+                            a.href = cv.toDataURL("image/png");
+                            const firm = qc.key === "employee" && selected
+                              ? selected.name.replace(/[^A-Za-z0-9]+/g, "-")
+                              : "SK-Sharma";
+                            a.download = `${firm}-${qc.key}-QR.png`;
+                            a.click();
+                            showToast("QR downloaded as PNG ✓");
+                          };
+                          img.src = "data:image/svg+xml;base64," +
+                            btoa(unescape(encodeURIComponent(xml)));
+                        } catch {
+                          showToast("Download failed");
+                        }
+                      }}>
+                      <Ionicons name="download-outline" size={16} color={colors.brandPrimary} />
+                      <Text style={styles.btnTxt}>Download PNG</Text>
+                    </Pressable>
+                  ) : null}
                   {Platform.OS === "web" ? (
                     <Pressable style={[styles.btn, styles.btnPrimary]} testID={`appqr-${qc.key}-print`}
                       onPress={() => {
