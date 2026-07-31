@@ -776,6 +776,38 @@ export default function AdminScreen() {
                       <Text style={styles.previewMeta}>· Bio {selected.bio_code}</Text>
                     ) : null}
                   </View>
+                  {/* Iter 410 (user request) — Father Name + Online/Offline
+                      (On-Roll/Off-Roll) shown on the quick-manage sheet. */}
+                  <View style={styles.previewMetaRow}>
+                    {selected?.father_name ? (
+                      <Text style={styles.previewMeta}>
+                        Father: {selected.father_name}
+                      </Text>
+                    ) : null}
+                  </View>
+                  <View style={styles.previewMetaRow}>
+                    <View
+                      style={[
+                        styles.rollBadge,
+                        selected?.is_onroll === false
+                          ? styles.rollBadgeOff
+                          : styles.rollBadgeOn,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.rollBadgeTxt,
+                          selected?.is_onroll === false
+                            ? styles.rollBadgeTxtOff
+                            : styles.rollBadgeTxtOn,
+                        ]}
+                      >
+                        {selected?.is_onroll === false
+                          ? "Offline · Off-Roll"
+                          : "Online · On-Roll"}
+                      </Text>
+                    </View>
+                  </View>
                 </View>
               </View>
 
@@ -1487,6 +1519,53 @@ const styles = StyleSheet.create({
   previewAvatarTxt: { color: "#fff", fontWeight: "800", fontSize: 24 },
   previewMetaRow: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 2 },
   previewMeta: { color: colors.onSurfaceSecondary, fontSize: type.sm },
+  // Iter 410 — Online/Offline (On-Roll/Off-Roll) badge on the quick sheet.
+  rollBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignSelf: "flex-start",
+    marginTop: 2,
+  },
+  rollBadgeOn: { backgroundColor: "#dcfce7", borderColor: "#86efac" },
+  rollBadgeOff: { backgroundColor: "#fef3c7", borderColor: "#fcd34d" },
+  rollBadgeTxt: { fontSize: 11, fontWeight: "600" },
+  rollBadgeTxtOn: { color: "#166534" },
+  rollBadgeTxtOff: { color: "#92400e" },
+  // Live-in employee toggle row (styles were missing — rendered unstyled).
+  liveInRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  liveInRowOn: { borderColor: colors.brandPrimary, backgroundColor: "#eef2ff" },
+  liveInIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#eef2ff",
+  },
+  liveInTitle: { fontSize: type.sm, fontWeight: "600", color: colors.onSurface },
+  liveInSub: { fontSize: 11, color: colors.onSurfaceSecondary, marginTop: 2 },
+  liveInBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  liveInBadgeOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   // Iter 94 — primary "Edit All Details" button (same form as Add)
   editAllBtn: {
     flexDirection: "row",

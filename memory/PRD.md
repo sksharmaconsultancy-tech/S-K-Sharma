@@ -2946,3 +2946,25 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   month preserved after reprocess.
 - Deploy: /app/deploy_vps_iter409.sh served via temp-code-bundle kind=script.
 - WhatsApp/Meta block: still NOT lifted (user confirmed) — remains blocked.
+
+## Iter 409b/410 — Refactor + Quick-sheet + BIOFACE (June 2026 fork)
+- Iter 409 refactor DONE: server.py 14,449→11,952 lines. Extracted verbatim:
+  routes/sub_admins.py (sub-admin CRUD + portal creds + access rights),
+  routes/masters_policy.py (masters CRUD + pt-states + compliance-policy),
+  routes/bonus.py (bonus policy/runs/report), routes/salary_runs.py
+  (legacy Actual salary runs + exports + payslips + annual report),
+  shared/sorting.py (_sort_export_rows), shared/hours.py
+  (_compute_day_hours & co.), routes/attendance_self_service.py (punch
+  approvals + history/selfie/my-month/summary; attendance_core 1262→858).
+  Re-exports kept on server: _payslip_rows_for_month (WhatsApp engine),
+  _sort_export_rows, _compute_bonus_run (statutory_registers),
+  _clean_mobile_or_400/_validate_pin_or_400 (company_roles).
+  testing_agent regression 41/41 PASS (iteration_409.json,
+  tests/test_iter409_refactor_regression.py).
+- Iter 410 (user request): Employee quick-manage sheet (admin.tsx) now
+  shows Father Name, Online/Offline (On-Roll/Off-Roll) badge and DOJ.
+  Also fixed missing Live-in toggle styles (was unstyled).
+- Iter 410: BIOFACE-MSD1K biometric machine — new brand "bioface" in
+  frontend BRANDS + backend model map. iClock/ADMS ingest verified
+  (handshake + ATTLOG push with user SN 1801FACEMSD1K1030).
+- Deploy: /app/deploy_vps_iter410.sh served via temp-code-bundle kind=script.
