@@ -1570,14 +1570,20 @@ async def finalize_compliance_salary_run(
     from routes.compliance_validation import validate_compliance_run
     validation = await validate_compliance_run(run)
     allow_warnings = bool((payload or {}).get("allow_warnings"))
-    if validation["errors_count"] > 0:
+    # Iter 407 (user request — "Please unblock this, allow Salary Lock") —
+    # a SUPER ADMIN may override even ERRORS and lock anyway; the override
+    # is stamped on the run + audit trail. Other roles stay hard-blocked.
+    allow_errors = (bool((payload or {}).get("allow_errors"))
+                    and admin["role"] == "super_admin")
+    if validation["errors_count"] > 0 and not allow_errors:
         raise HTTPException(status_code=422, detail={
             "message": f"Salary Lock blocked — {validation['errors_count']} error(s) "
                        f"and {validation['warnings_count']} warning(s) found.",
             "validation": validation,
+            "can_override": admin["role"] == "super_admin",
         })
     if validation["warnings_count"] > 0 and not (
-            allow_warnings and admin["role"] == "super_admin"):
+            (allow_warnings or allow_errors) and admin["role"] == "super_admin"):
         raise HTTPException(status_code=409, detail={
             "message": f"Salary Lock blocked — {validation['warnings_count']} warning(s). "
                        "A Super Admin can lock anyway with the override.",
@@ -1594,7 +1600,10 @@ async def finalize_compliance_salary_run(
             "errors_count": validation["errors_count"],
             "warnings_count": validation["warnings_count"],
             "employees_flagged": validation["employees_flagged"],
-            "warnings_overridden": bool(validation["warnings_count"] and allow_warnings),
+            "warnings_overridden": bool(validation["warnings_count"]
+                                        and (allow_warnings or allow_errors)),
+            # Iter 407 — Super Admin locked despite validation ERRORS.
+            "errors_overridden": bool(validation["errors_count"] and allow_errors),
             "checked_at": validation["checked_at"],
         },
     }
@@ -1611,8 +1620,10 @@ async def finalize_compliance_salary_run(
     await write_salary_audit(
         admin, "finalize", run,
         "Run finalized (locked)"
+        + (f" — {validation['errors_count']} ERROR(s) OVERRIDDEN by Super Admin"
+           if validation["errors_count"] and allow_errors else "")
         + (f" — {validation['warnings_count']} warning(s) OVERRIDDEN by Super Admin"
-           if validation["warnings_count"] and allow_warnings else ""))
+           if validation["warnings_count"] and (allow_warnings or allow_errors) else ""))
     # Iter 103 — automated email trigger
     try:
         from routes.email_notifications import fire_email_event

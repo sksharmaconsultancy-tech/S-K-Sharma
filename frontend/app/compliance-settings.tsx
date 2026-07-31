@@ -39,6 +39,8 @@ const NUM_FIELDS: { key: string; label: string; suffix: string; group: "pf" | "e
   { key: "esic_percent_employer", label: "ESIC — Employer share", suffix: "%", group: "esic" },
   { key: "esic_gross_threshold", label: "ESIC eligibility limit (Basic ≤)", suffix: "₹", group: "esic" },
   { key: "stat_wage_floor_pct", label: "Wage base floor (% of gross)", suffix: "%", group: "base" },
+  // Iter 408 — company limit on VPF percentage (0 = no limit).
+  { key: "vpf_max_percent", label: "VPF max limit (0 = no limit)", suffix: "%", group: "pf" },
 ];
 
 const ROUND_OPTS = ["nearest", "ceil", "floor", "none"] as const;
@@ -55,11 +57,14 @@ const PRORATION_LABEL: Record<string, string> = {
   working_days: "Working Days (÷26)",
   none: "No Proration",
 };
-const BOOL_FIELDS: { key: string; label: string; hint: string }[] = [
+const BOOL_FIELDS: { key: string; label: string; hint: string; def?: boolean }[] = [
   { key: "pf_enabled", label: "PF Applicable (module switch)", hint: "OFF = no PF for any employee in this scope." },
   { key: "esic_enabled", label: "ESIC Applicable (module switch)", hint: "OFF = no ESIC for any employee in this scope." },
   { key: "wage_definition_rule_enabled", label: "Wage Definition Rule — max(Basic, floor% of Gross)", hint: "OFF = PF on PF Basic only; ESIC wage from the Head Mapping below." },
   { key: "esic_disable_above_ceiling", label: "Disable ESIC above the wage ceiling", hint: "OFF = employees stay ESIC-covered even above the ceiling (contribution-period continuation)." },
+  // Iter 408 — Higher PF / VPF company policy.
+  { key: "allow_higher_pf", label: "Allow Higher PF (contribution on ACTUAL PF wages)", hint: "OFF = employees marked Higher PF fall back to the statutory ceiling (validation flags them).", def: false },
+  { key: "allow_vpf", label: "Allow Voluntary PF (VPF)", hint: "OFF = VPF is not deducted for any employee in this scope.", def: true },
 ];
 const HEAD_ROWS: { key: string; label: string }[] = [
   { key: "basic", label: "Basic / DA" },
@@ -144,7 +149,11 @@ export default function ComplianceSettingsScreen() {
       f.pf_rounding = settings?.pf_rounding || "nearest";
       f.esic_rounding = settings?.esic_rounding || "ceil";
       // Iter 387 — module switches / proration / rule version / mapping.
-      for (const { key } of BOOL_FIELDS) f[key] = settings?.[key] !== false;
+      for (const fld of BOOL_FIELDS) {
+        f[fld.key] = settings?.[fld.key] != null
+          ? settings[fld.key] !== false
+          : fld.def !== false;
+      }
       f.pf_proration_method = settings?.pf_proration_method || "calendar_days";
       f.esic_proration_method = settings?.esic_proration_method || "calendar_days";
       f.rule_version = settings?.rule_version || "";

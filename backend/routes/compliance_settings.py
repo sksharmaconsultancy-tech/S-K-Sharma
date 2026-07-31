@@ -38,6 +38,8 @@ _NUMERIC_FIELDS = (
     "esic_gross_threshold", "stat_wage_floor_pct",
     # Iter 160 — EPF Act employer charge accounts
     "pf_admin_percent", "pf_edli_percent", "pf_edli_admin_percent",
+    # Iter 408 — company limit on VPF % (0 = no limit)
+    "vpf_max_percent",
 )
 _ROUND_MODES = ("nearest", "ceil", "floor", "none")
 
@@ -45,6 +47,8 @@ _ROUND_MODES = ("nearest", "ceil", "floor", "none")
 _BOOL_CFG_FIELDS = (
     "pf_enabled", "esic_enabled",
     "wage_definition_rule_enabled", "esic_disable_above_ceiling",
+    # Iter 408 — Higher PF / VPF company policy switches.
+    "allow_higher_pf", "allow_vpf",
 )
 _PRORATION_FIELDS = ("pf_proration_method", "esic_proration_method")
 

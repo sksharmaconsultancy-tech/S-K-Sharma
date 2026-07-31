@@ -963,13 +963,13 @@ export default function ComplianceSalaryRunScreen() {
   // Iter 388 (Phase 3) — Pre-lock PF/ESIC validation result modal.
   const [lockCheck, setLockCheck] = useState<any | null>(null);
 
-  const doFinalize = async (allowWarnings: boolean) => {
+  const doFinalize = async (allowWarnings: boolean, allowErrors = false) => {
     if (!run) return;
     setFinalizing(true);
     try {
       const r = await api<{ ok: boolean; finalized_at?: string }>(
         `/admin/compliance-salary-runs/${run.run_id}/finalize`,
-        { method: "POST", body: { allow_warnings: allowWarnings } },
+        { method: "POST", body: { allow_warnings: allowWarnings, allow_errors: allowErrors } },
       );
       void r;
       setLockCheck(null);
@@ -2112,10 +2112,33 @@ export default function ComplianceSalaryRunScreen() {
                       </Text>
                     </Pressable>
                   ) : null}
+                  {/* Iter 407 (user request) — Super Admin may UNBLOCK the
+                      lock even with ERRORS after reviewing the list. */}
+                  {(lockCheck?.errors_count || 0) > 0 && user?.role === "super_admin" ? (
+                    <Pressable
+                      onPress={() => doFinalize(true, true)}
+                      disabled={finalizing}
+                      style={{
+                        flexDirection: "row", alignItems: "center", gap: 6,
+                        paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10,
+                        backgroundColor: "#DC2626", opacity: finalizing ? 0.6 : 1,
+                      }}
+                      testID="lock-anyway-errors"
+                    >
+                      {finalizing ? <ActivityIndicator size="small" color="#fff" /> : (
+                        <Ionicons name="lock-closed" size={14} color="#fff" />
+                      )}
+                      <Text style={{ fontSize: 13, fontWeight: "800", color: "#fff" }}>
+                        Lock Anyway (Super Admin — override errors)
+                      </Text>
+                    </Pressable>
+                  ) : null}
                 </View>
                 {(lockCheck?.errors_count || 0) > 0 ? (
                   <Text style={{ fontSize: 10.5, color: "#B91C1C", marginTop: 8 }}>
-                    Errors must be fixed before the Salary Lock — the override only applies to warnings.
+                    {user?.role === "super_admin"
+                      ? "Review the employee-wise errors above — as Super Admin you can still lock with the red override button (recorded on the run + audit trail)."
+                      : "Errors must be fixed before the Salary Lock — only a Super Admin can override errors."}
                   </Text>
                 ) : null}
               </View>

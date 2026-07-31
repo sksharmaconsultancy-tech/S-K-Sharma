@@ -56,7 +56,12 @@ async def validate_compliance_run(run: Dict[str, Any]) -> Dict[str, Any]:
             {"_id": 0, "user_id": 1, "uan_no": 1, "esi_ip_no": 1, "pf_basic": 1,
              "compliance_basic": 1, "pf_applicable": 1, "esic_applicable": 1,
              "higher_pension": 1, "eps_disabled": 1, "exit_date": 1,
-             "esic_exit_date": 1, "excluded_employee": 1},
+             "esic_exit_date": 1, "excluded_employee": 1,
+             # Iter 408 — Higher PF / VPF validation inputs.
+             "pf_contribution_type": 1, "higher_pf_wage": 1, "higher_pf_from": 1,
+             "higher_pf_to": 1, "pf_approval_status": 1, "pf_approval_required": 1,
+             "pf_declaration_available": 1, "vpf_enabled": 1, "vpf_percent": 1,
+             "vpf_amount": 1},
         ):
             masters[u["user_id"]] = u
 
@@ -123,11 +128,74 @@ async def validate_compliance_run(run: Dict[str, Any]) -> Dict[str, Any]:
                 "PF_WAGE_INVALID", "warning",
                 f"PF wages ₹{pf_wages:,.0f} exceed the Gross Earning ₹{gross:,.0f}.",
                 "Check PF Basic Salary / proration method — wages above gross are unusual."))
-        if pf_emp > 0 and pf_wages > pf_cap + 0.5 and not r.get("intl_worker"):
+        if pf_emp > 0 and pf_wages > pf_cap + 0.5 and not r.get("intl_worker") \
+                and not r.get("pf_higher_active"):
             issues.append(_issue(
                 "PF_ABOVE_CEILING", "error",
                 f"PF wages ₹{pf_wages:,.0f} exceed the ceiling ₹{pf_cap:,.0f}.",
-                "Only International Workers may cross the EPF ceiling — re-run Salary Process."))
+                "Only International Workers / approved Higher PF may cross the EPF ceiling — re-run Salary Process."))
+
+        # ---------------- Higher PF / VPF checks (Iter 408) ----------------
+        _pft = str(r.get("pf_contribution_type")
+                   or m.get("pf_contribution_type") or "statutory").lower()
+        if _pft == "higher":
+            if not stat.get("allow_higher_pf"):
+                issues.append(_issue(
+                    "HIGHER_PF_NOT_ALLOWED", "error",
+                    "Higher PF selected but the company policy does not allow Higher PF.",
+                    "Enable 'Allow Higher PF' in Standard Compliance Settings, or set the employee back to Statutory PF."))
+            if not (r.get("pf_declaration_available")
+                    or m.get("pf_declaration_available")):
+                issues.append(_issue(
+                    "HIGHER_PF_NO_DECLARATION", "error",
+                    "Higher PF selected but the Employee Declaration is missing.",
+                    "Tick 'Employee Declaration Available' on the Employee Master after collecting the joint declaration."))
+            if (m.get("pf_approval_required") is not False
+                    and str(m.get("pf_approval_status") or "").lower() != "approved"):
+                issues.append(_issue(
+                    "HIGHER_PF_APPROVAL_PENDING", "error",
+                    f"Higher PF approval status is '{m.get('pf_approval_status') or 'pending'}' — management approval required.",
+                    "Set Approval Status = Approved on the Employee Master (or untick Management Approval Required)."))
+            _hf, _ht = str(m.get("higher_pf_from") or "")[:7], str(m.get("higher_pf_to") or "")[:7]
+            if _hf and _ht and _hf > _ht:
+                issues.append(_issue(
+                    "HIGHER_PF_INVALID_DATES", "error",
+                    f"Higher PF Effective From ({_hf}) is AFTER Effective To ({_ht}).",
+                    "Correct the effective dates on the Employee Master."))
+            elif month and ((_hf and month[:7] < _hf) or (_ht and month[:7] > _ht)):
+                issues.append(_issue(
+                    "HIGHER_PF_OUT_OF_WINDOW", "warning",
+                    f"Higher PF window ({_hf or '…'} → {_ht or '…'}) does not cover {month} — statutory ceiling was used.",
+                    "Extend the effective window or ignore if intentional."))
+            if _num(m.get("higher_pf_wage")) <= 0:
+                issues.append(_issue(
+                    "HIGHER_PF_WAGE_BLANK", "warning",
+                    "Higher PF Wage is blank — the ACTUAL PF wage was used instead.",
+                    "Fill Higher PF Wage on the Employee Master if a fixed approved wage applies."))
+        _vpf_on = _pft == "vpf" or bool(m.get("vpf_enabled") or r.get("vpf_enabled"))
+        if _vpf_on:
+            if stat.get("allow_vpf") is False:
+                issues.append(_issue(
+                    "VPF_NOT_ALLOWED", "error",
+                    "VPF selected but the company policy does not allow VPF.",
+                    "Enable 'Allow VPF' in Standard Compliance Settings, or remove VPF from the Employee Master."))
+            _vp, _va = _num(m.get("vpf_percent")), _num(m.get("vpf_amount"))
+            if _vp < 0 or _va < 0:
+                issues.append(_issue(
+                    "VPF_NEGATIVE", "error",
+                    "VPF percentage / amount is negative.",
+                    "Correct the VPF value on the Employee Master."))
+            _vlim = _num(stat.get("vpf_max_percent"))
+            if _vlim > 0 and _vp > _vlim + 0.001:
+                issues.append(_issue(
+                    "VPF_ABOVE_LIMIT", "error",
+                    f"VPF {_vp:g}% exceeds the company limit of {_vlim:g}%.",
+                    f"Reduce the employee's VPF % to {_vlim:g}% or raise the limit in Compliance Settings."))
+            if _pft == "vpf" and _vp <= 0 and _va <= 0:
+                issues.append(_issue(
+                    "VPF_VALUE_MISSING", "warning",
+                    "Contribution Type is VPF but neither VPF % nor a fixed amount is set — no VPF was deducted.",
+                    "Set VPF Percentage or VPF Fixed Amount on the Employee Master."))
         # PF Basic blank on the master (user rule: PF intentionally skipped).
         _m_pf_basic = _num(m.get("pf_basic"))
         if (m and m.get("pf_applicable") is not False
@@ -337,6 +405,11 @@ async def write_monthly_snapshot(run: Dict[str, Any], admin: Dict[str, Any],
             "esic_wage_base": _num(r.get("esic_wage_base")),
             "esic_employee": _num(r.get("esic_employee")),
             "esic_employer": _num(r.get("esic_employer")),
+            # Iter 408 — PF contribution type snapshot (never changes after lock).
+            "pf_contribution_type": r.get("pf_contribution_type") or "statutory",
+            "pf_higher_active": bool(r.get("pf_higher_active")),
+            "pf_ceiling_applied": bool(r.get("pf_ceiling_applied")),
+            "vpf_amount": _num(r.get("vpf_amount")),
         })
     doc = {
         "snapshot_id": f"csnap_{uuid.uuid4().hex[:12]}",

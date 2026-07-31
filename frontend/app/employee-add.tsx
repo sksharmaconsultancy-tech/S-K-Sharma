@@ -187,6 +187,15 @@ export default function EmployeeAddScreen() {
           esic_join_date: p.esic_join_date || "",
           esic_exit_date: p.esic_exit_date || "",
           vpf_amount: p.vpf_amount != null ? String(p.vpf_amount) : "",
+          pf_contribution_type: p.pf_contribution_type || "statutory",
+          higher_pf_wage: p.higher_pf_wage != null && p.higher_pf_wage !== 0 ? String(p.higher_pf_wage) : "",
+          vpf_percent: p.vpf_percent != null && p.vpf_percent !== 0 ? String(p.vpf_percent) : "",
+          higher_pf_from: p.higher_pf_from || "",
+          higher_pf_to: p.higher_pf_to || "",
+          pf_declaration_available: !!p.pf_declaration_available,
+          pf_approval_required: p.pf_approval_required !== false,
+          pf_approval_status: p.pf_approval_status || "",
+          pf_remarks: p.pf_remarks || "",
           compliance_salary_mode: p.compliance_salary_mode || "monthly",
           basic_salary: basicRow?.amount != null && basicRow.amount > 0 ? String(basicRow.amount) : "",
           sal1_amount: String(salRow(1)?.amount ?? ""), sal1_days: String(salRow(1)?.working_days ?? ""),
@@ -774,7 +783,17 @@ export default function EmployeeAddScreen() {
         dispensary: form.dispensary.trim() || undefined,
         esic_join_date: form.esic_join_date || undefined,
         esic_exit_date: form.esic_exit_date || undefined,
-        vpf_amount: form.vpf_enabled && form.vpf_amount ? Number(form.vpf_amount) : undefined,
+        vpf_amount: (form.vpf_enabled || form.pf_contribution_type === "vpf") && form.vpf_amount ? Number(form.vpf_amount) : 0,
+        // Iter 408 — PF Contribution Type + Higher PF / VPF workflow.
+        pf_contribution_type: form.pf_contribution_type || "statutory",
+        higher_pf_wage: form.higher_pf_wage ? Number(form.higher_pf_wage) : 0,
+        vpf_percent: form.vpf_percent ? Number(form.vpf_percent) : 0,
+        higher_pf_from: form.higher_pf_from || "",
+        higher_pf_to: form.higher_pf_to || "",
+        pf_declaration_available: form.pf_declaration_available,
+        pf_approval_required: form.pf_approval_required,
+        pf_approval_status: form.pf_approval_status || "",
+        pf_remarks: form.pf_remarks || "",
         compliance_salary_mode: form.compliance_salary_mode || undefined,
         // Iter 91 — fixed Actual structure (Basic + rate basis, Salary
         // 1/2/3 tiers) — same shape the Employee Master modal saves.
@@ -1916,9 +1935,144 @@ export default function EmployeeAddScreen() {
             </>
           ) : null}
 
+          {/* Iter 408 (user spec) — PF Contribution Type: Statutory /
+              Higher PF (actual wages, no ceiling) / Voluntary PF. Higher
+              and VPF fields appear only when selected. */}
+          <Text style={{ fontSize: 13, fontWeight: "800", color: colors.onSurface, marginTop: 12 }}>
+            PF Contribution Type
+          </Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+            {([["statutory", "Statutory PF"], ["higher", "Higher PF (Actual Wages)"], ["vpf", "Voluntary PF (VPF)"]] as const).map(([k, l]) => {
+              const on = (form.pf_contribution_type || "statutory") === k;
+              return (
+                <Pressable
+                  key={k}
+                  onPress={() => setField("pf_contribution_type", k)}
+                  style={{
+                    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999,
+                    borderWidth: 1.5,
+                    borderColor: on ? colors.brandPrimary : colors.border,
+                    backgroundColor: on ? colors.brandPrimary : colors.surface,
+                  }}
+                  testID={`pf-type-${k}`}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: "700", color: on ? "#fff" : colors.onSurface }}>{l}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {form.pf_contribution_type === "higher" ? (
+            <View style={{ marginTop: 8, padding: 10, borderRadius: 10, backgroundColor: "#EFF6FF", borderWidth: 1, borderColor: "#BFDBFE" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <Text style={{ fontSize: 12.5, fontWeight: "800", color: "#1E40AF" }}>Higher PF — contribution on actual PF wages (no ceiling)</Text>
+                {(() => {
+                  const st = (form.pf_approval_status || "").toLowerCase();
+                  const now = new Date().toISOString().slice(0, 7);
+                  const expired = form.higher_pf_to && now > form.higher_pf_to.slice(0, 7);
+                  const chip = expired ? ["Expired", "#6B7280"]
+                    : st === "approved" ? ["Approved", "#15803D"]
+                    : st === "rejected" ? ["Rejected", "#B91C1C"]
+                    : ["Pending Approval", "#D97706"];
+                  return (
+                    <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: chip[1] }}>
+                      <Text style={{ fontSize: 10.5, fontWeight: "800", color: "#fff" }}>{chip[0]}</Text>
+                    </View>
+                  );
+                })()}
+              </View>
+              <TwoCol>
+                <Field
+                  label="Higher PF Wage (₹, optional)"
+                  value={form.higher_pf_wage}
+                  onChange={(v) => setField("higher_pf_wage", v.replace(/[^0-9.]/g, ""))}
+                  placeholder="Blank = actual PF wage"
+                  keyboardType="numeric"
+                />
+                <View style={{ flex: 1 }} />
+              </TwoCol>
+              <TwoCol>
+                <Field
+                  label="Effective From (YYYY-MM)"
+                  value={form.higher_pf_from}
+                  onChange={(v) => setField("higher_pf_from", v)}
+                  placeholder="2026-04"
+                />
+                <Field
+                  label="Effective To (YYYY-MM)"
+                  value={form.higher_pf_to}
+                  onChange={(v) => setField("higher_pf_to", v)}
+                  placeholder="Blank = no end"
+                />
+              </TwoCol>
+              <Pressable
+                onPress={() => setField("pf_declaration_available", !form.pf_declaration_available)}
+                style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 }}
+                testID="pf-declaration-toggle"
+              >
+                <Ionicons name={form.pf_declaration_available ? "checkbox" : "square-outline"} size={20}
+                  color={form.pf_declaration_available ? colors.brandPrimary : colors.onSurfaceSecondary} />
+                <Text style={{ fontSize: 12.5, color: colors.onSurface }}>Employee Declaration Available (joint declaration)</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setField("pf_approval_required", !form.pf_approval_required)}
+                style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 }}
+                testID="pf-approval-required-toggle"
+              >
+                <Ionicons name={form.pf_approval_required ? "checkbox" : "square-outline"} size={20}
+                  color={form.pf_approval_required ? colors.brandPrimary : colors.onSurfaceSecondary} />
+                <Text style={{ fontSize: 12.5, color: colors.onSurface }}>Management Approval Required</Text>
+              </Pressable>
+              <Text style={{ fontSize: 11.5, fontWeight: "700", color: colors.onSurfaceSecondary, marginTop: 8 }}>Approval Status</Text>
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+                {(["pending", "approved", "rejected"] as const).map((s2) => {
+                  const on = (form.pf_approval_status || "pending") === s2;
+                  return (
+                    <Pressable key={s2} onPress={() => setField("pf_approval_status", s2)}
+                      style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1.2, borderColor: on ? colors.brandPrimary : colors.border, backgroundColor: on ? colors.brandPrimary : colors.surface }}
+                      testID={`pf-approval-${s2}`}>
+                      <Text style={{ fontSize: 11.5, fontWeight: "700", color: on ? "#fff" : colors.onSurface }}>{s2.toUpperCase()}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Field
+                label="Remarks"
+                value={form.pf_remarks}
+                onChange={(v) => setField("pf_remarks", v)}
+                placeholder="Reason / reference of the approval"
+              />
+            </View>
+          ) : null}
+          {form.pf_contribution_type === "vpf" ? (
+            <View style={{ marginTop: 8, padding: 10, borderRadius: 10, backgroundColor: "#F0FDF4", borderWidth: 1, borderColor: "#BBF7D0" }}>
+              <Text style={{ fontSize: 12.5, fontWeight: "800", color: "#166534", marginBottom: 6 }}>
+                VPF — statutory PF first, then VPF on top (employee side only)
+              </Text>
+              <TwoCol>
+                <Field
+                  label="VPF Percentage (% of PF wages)"
+                  value={form.vpf_percent}
+                  onChange={(v) => setField("vpf_percent", v.replace(/[^0-9.]/g, ""))}
+                  placeholder="e.g. 10"
+                  keyboardType="numeric"
+                />
+                <Field
+                  label="VPF Fixed Amount / month (₹)"
+                  value={form.vpf_amount}
+                  onChange={(v) => setField("vpf_amount", v.replace(/[^0-9.]/g, ""))}
+                  placeholder="Used when % is blank"
+                  keyboardType="numeric"
+                />
+              </TwoCol>
+            </View>
+          ) : null}
+
           {/* Iter 126i — VPF (Voluntary PF) — user request. When enabled,
               the amount is deducted along with the employee's PF deduction
-              in the Compliance salary. */}
+              in the Compliance salary. (Hidden when Contribution Type =
+              VPF — the green box above covers it.) */}
+          {form.pf_contribution_type !== "vpf" ? (
+          <>
           <Pressable
             onPress={() => setField("vpf_enabled", !form.vpf_enabled)}
             style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 }}
@@ -1944,6 +2098,8 @@ export default function EmployeeAddScreen() {
               />
               <View style={{ flex: 1 }} />
             </TwoCol>
+          ) : null}
+          </>
           ) : null}
 
           {/* Iter 341 (user request) — EPS Disable: employee is NOT

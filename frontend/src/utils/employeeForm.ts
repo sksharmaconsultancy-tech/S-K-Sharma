@@ -47,6 +47,17 @@ export type EmpForm = {
   esic_join_date: string;
   esic_exit_date: string;
   vpf_amount: string;
+  // Iter 408 — PF Contribution Type (statutory | higher | vpf) + Higher PF
+  // approval workflow + VPF percentage mode.
+  pf_contribution_type: string;
+  higher_pf_wage: string;
+  vpf_percent: string;
+  higher_pf_from: string;
+  higher_pf_to: string;
+  pf_declaration_available: boolean;
+  pf_approval_required: boolean;
+  pf_approval_status: string;
+  pf_remarks: string;
   // Iter 94 — SEPARATE rate basis for the Compliance salary part.
   compliance_salary_mode: string;
   // Iter 91 — fixed structure (same as Employee Master Salary Update):
@@ -133,6 +144,15 @@ export const EMPTY_FORM: EmpForm = {
   esic_join_date: "",
   esic_exit_date: "",
   vpf_amount: "",
+  pf_contribution_type: "statutory",
+  higher_pf_wage: "",
+  vpf_percent: "",
+  higher_pf_from: "",
+  higher_pf_to: "",
+  pf_declaration_available: false,
+  pf_approval_required: true,
+  pf_approval_status: "",
+  pf_remarks: "",
   compliance_salary_mode: "monthly",
   basic_salary: "",
   sal1_amount: "", sal1_days: "",

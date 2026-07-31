@@ -99,6 +99,10 @@ DEFAULT_STATUTORY_CFG: Dict[str, Any] = {
     "pf_proration_method": "calendar_days",
     "esic_proration_method": "calendar_days",
     "rule_version": "",                      # free label, e.g. "FY 2026-27 v1"
+    # Iter 408 (user spec) — Higher PF / VPF company policy (Company Master).
+    "allow_higher_pf": False,   # permit contribution on ACTUAL PF wages
+    "allow_vpf": True,          # permit Voluntary PF (employee side only)
+    "vpf_max_percent": 0.0,     # 0 = no company limit on VPF %
     # head_mapping default is None → DEFAULT_HEAD_MAPPING applies.
 }
 
@@ -128,6 +132,8 @@ _CFG_PASSTHRU_KEYS = (
     "pf_enabled", "esic_enabled", "wage_definition_rule_enabled",
     "esic_disable_above_ceiling", "pf_proration_method",
     "esic_proration_method", "rule_version", "head_mapping", "_salary_month",
+    # Iter 408 — Higher PF / VPF company policy flags.
+    "allow_higher_pf", "allow_vpf",
 )
 
 
@@ -644,6 +650,11 @@ def compute_compliance_row(
     if pf_eligible and _zero_pay:
         _pf_skip_reason = "Zero-pay month (no payable days / hours / gross)"
     pf_proration_method = str(cfg.get("pf_proration_method") or "calendar_days")
+    # Iter 408 — PF Contribution Type + Higher PF activation state (also
+    # exposed on the row when PF is skipped, for the reports/AI layers).
+    _pf_type = str(user.get("pf_contribution_type") or "statutory").lower()
+    _hi_active = False
+    _hi_reason = ""
     if pf_applicable:
         if salary_mode == "monthly":
             # Iter 387 — configurable proration method (default replicates
@@ -668,13 +679,49 @@ def compute_compliance_row(
         # Iter 387 — International Worker: EPF applies WITHOUT the wage
         # ceiling (statutory IW rule).
         _intl_worker = bool(user.get("intl_worker"))
-        capped_pf_wages = pf_base if _intl_worker else min(pf_base, cfg["pf_wage_cap"])
+        # Iter 408 (user spec) — PF CONTRIBUTION TYPE (Employee Master):
+        #   statutory → ceiling applies exactly as before (default)
+        #   higher    → BOTH sides on ACTUAL PF wages (or the approved
+        #               Higher PF Wage) with NO ceiling — requires company
+        #               "Allow Higher PF", approval and the effective window
+        #   vpf       → statutory PF + VPF on top (employee side only)
+        if _pf_type == "higher":
+            _hi_from = str(user.get("higher_pf_from") or "")[:7]
+            _hi_to = str(user.get("higher_pf_to") or "")[:7]
+            _month_key = str(cfg.get("_salary_month") or "")[:7]
+            if not cfg.get("allow_higher_pf"):
+                _hi_reason = "company policy disallows Higher PF"
+            elif (user.get("pf_approval_required") is not False
+                  and str(user.get("pf_approval_status") or "").lower() != "approved"):
+                _hi_reason = "management approval pending"
+            elif _month_key and _hi_from and _month_key < _hi_from:
+                _hi_reason = f"effective only from {_hi_from}"
+            elif _month_key and _hi_to and _month_key > _hi_to:
+                _hi_reason = f"expired after {_hi_to}"
+            else:
+                _hi_active = True
+        if _hi_active:
+            _hi_wage = _num(user.get("higher_pf_wage"), 0.0)
+            capped_pf_wages = max(pf_base, _hi_wage) if _hi_wage > 0 else pf_base
+        else:
+            capped_pf_wages = pf_base if _intl_worker else min(pf_base, cfg["pf_wage_cap"])
         pf_employee = capped_pf_wages * (cfg["pf_percent_employee"] / 100.0)
-        pf_employer_epf = capped_pf_wages * (cfg["pf_percent_employer_epf"] / 100.0)
-        # Iter 387 — Higher Pension (joint option): EPS contribution on the
-        # UNCAPPED PF wages instead of the ceiling.
-        _eps_wages = pf_base if user.get("higher_pension") else capped_pf_wages
-        pf_employer_eps = _eps_wages * (cfg["pf_percent_employer_eps"] / 100.0)
+        if _hi_active:
+            # ECR-compatible split: employer total on the FULL higher wage;
+            # EPS stays on the statutory ceiling (unless the Higher Pension
+            # joint option is ticked); EPF gets the remainder.
+            _er_total = capped_pf_wages * (
+                (cfg["pf_percent_employer_epf"] + cfg["pf_percent_employer_eps"]) / 100.0)
+            _eps_wages = (capped_pf_wages if user.get("higher_pension")
+                          else min(capped_pf_wages, cfg["pf_wage_cap"]))
+            pf_employer_eps = _eps_wages * (cfg["pf_percent_employer_eps"] / 100.0)
+            pf_employer_epf = _er_total - pf_employer_eps
+        else:
+            pf_employer_epf = capped_pf_wages * (cfg["pf_percent_employer_epf"] / 100.0)
+            # Iter 387 — Higher Pension (joint option): EPS contribution on
+            # the UNCAPPED PF wages instead of the ceiling.
+            _eps_wages = pf_base if user.get("higher_pension") else capped_pf_wages
+            pf_employer_eps = _eps_wages * (cfg["pf_percent_employer_eps"] / 100.0)
         # Iter 341 (user request) — Employee Master "EPS Disable": the
         # employee is NOT eligible for Pension, so the entire employer
         # share goes to EPF and EPS is 0 (ECR prints EPS as 0).
@@ -685,14 +732,26 @@ def compute_compliance_row(
         # Iter 126i — VPF (Voluntary PF): extra EMPLOYEE-side deduction on
         # top of the statutory PF (employer share unchanged). Pro-rated by
         # attendance for monthly-rated staff.
+        # Iter 408 — VPF also via the Contribution Type dropdown; supports a
+        # PERCENTAGE of PF wages (vpf_percent) or the fixed monthly amount;
+        # honours the company Allow VPF flag + optional max-% limit.
         vpf = 0.0
-        if user.get("vpf_enabled"):
-            vpf_amt = _num(user.get("vpf_amount"), 0.0)
-            if vpf_amt > 0:
-                if salary_mode == "monthly":
-                    vpf = _safe_div(vpf_amt * effective_present, max(1, month_days))
-                else:
-                    vpf = vpf_amt
+        _vpf_on = bool(user.get("vpf_enabled")) or _pf_type == "vpf"
+        if _vpf_on and cfg.get("allow_vpf", True) is not False:
+            _vpf_pct = _num(user.get("vpf_percent"), 0.0)
+            _vpf_lim = _num(cfg.get("vpf_max_percent"), 0.0)
+            if _vpf_pct > 0 and _vpf_lim > 0:
+                _vpf_pct = min(_vpf_pct, _vpf_lim)
+            if _vpf_pct > 0:
+                vpf = capped_pf_wages * (_vpf_pct / 100.0)
+            else:
+                vpf_amt = _num(user.get("vpf_amount"), 0.0)
+                if vpf_amt > 0:
+                    if salary_mode == "monthly":
+                        vpf = _safe_div(vpf_amt * effective_present, max(1, month_days))
+                    else:
+                        vpf = vpf_amt
+            vpf = max(0.0, vpf)
         pf_employee += vpf
         # Iter 127f — whole-rupee statutory rounding (Standard Settings).
         pf_mode = str(cfg.get("pf_rounding") or "nearest")
@@ -959,6 +1018,17 @@ def compute_compliance_row(
         "intl_worker": bool(user.get("intl_worker")),
         "excluded_employee": bool(user.get("excluded_employee")),
         "esic_temp_exempt": bool(user.get("esic_temp_exempt")),
+        # Iter 408 — PF Contribution Type snapshot for the reports /
+        # validation / AI-explanation layers.
+        "pf_contribution_type": _pf_type,
+        "pf_higher_active": _hi_active,
+        "pf_higher_reason": _hi_reason,
+        "pf_ceiling_applied": bool(pf_applicable and not _hi_active
+                                   and not user.get("intl_worker")
+                                   and pf_base > capped_pf_wages + 0.5),
+        "higher_pf_wage": _num(user.get("higher_pf_wage"), 0.0),
+        "pf_approval_status": str(user.get("pf_approval_status") or ""),
+        "pf_declaration_available": bool(user.get("pf_declaration_available")),
         # Iter 387 — human-readable calculation reasons + full snapshot
         # ("View Calculation" / audit dashboard / AI assistant layers).
         "pf_reason": (
@@ -972,7 +1042,17 @@ def compute_compliance_row(
                    f"{floor_pct:g}% of Gross)" if (wage_rule_on and pf_basic_override < cfg["pf_wage_cap"]) else "")
                 + ("; EPS on uncapped wages (Higher Pension)" if user.get("higher_pension") else "")
                 + ("; EPS = 0 (EPS Disabled)" if user.get("eps_disabled") else "")
-                + (f"; + VPF ₹{vpf:,.0f}" if vpf > 0 else "")
+                + (f"; HIGHER PF — contribution on actual wages ₹{capped_pf_wages:,.0f}, "
+                   "NO ceiling (approved by employer)" if _hi_active else "")
+                + (f"; Higher PF NOT applied — {_hi_reason}; statutory ceiling used"
+                   if (_pf_type == "higher" and not _hi_active) else "")
+                + (f"; + VPF ₹{vpf:,.0f}"
+                   + (f" ({_num(user.get('vpf_percent'), 0):g}% of PF wages)"
+                      if _num(user.get("vpf_percent"), 0) > 0 else "")
+                   if vpf > 0 else "")
+                + ("; VPF NOT applied — company policy disallows VPF"
+                   if (_pf_type == "vpf" and vpf <= 0
+                       and cfg.get("allow_vpf", True) is False) else "")
             )
         ),
         "esic_reason": (

@@ -33,6 +33,7 @@ type Kind = { kind: string; title: string; group: string };
 
 const EXISTING = [
   { title: "Salary Register", route: "/salary-register" },
+  { title: "PF Contribution (Higher PF / VPF)", route: "/pf-contribution-report" },
   { title: "Yearly Payroll Register", route: "/payroll-register" },
   { title: "Bonus Registers (A, B, D)", route: "/bonus-registers" },
   { title: "Labour Statistics & HR Analytics", route: "/labour-statistics" },

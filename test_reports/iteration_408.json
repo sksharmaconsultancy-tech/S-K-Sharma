@@ -1,0 +1,33 @@
+{
+  "summary": "Iter 408 (Higher PF & VPF) BACKEND tests — 10/10 pytest cases pass end-to-end. Verified: super-admin password login, PF field save with pf_audit_log write (11 docs, latest 2 belong to test flow: higher then statutory revert), Standard Compliance Settings PUT allow_higher_pf/allow_vpf/vpf_max_percent=20 persists and reads back, compliance run POST /api/admin/compliance-salary-runs for cmp_527fecdd7c 2026-07 (reuses+reprocesses when a finalized run already exists), row shape contains pf_contribution_type/pf_higher_active/pf_ceiling_applied AND the test employee row is 'higher', PF Contribution report JSON view=all returns rows+summary+policy and view=higher filters to HIGHER-only rows, .xlsx (PK zip) and .pdf (%PDF) binaries return 200, Iter-407 finalize override path validated (either 200 clean or 422 with can_override=true then {allow_errors:true} → 200 with lock_validation.errors_overridden=true), unlock-request as super_admin immediately unlocks, HIGHER_PF_APPROVAL_PENDING validation code appears for the employee after switching pf_approval_status to 'pending' and reprocessing. Cleanup mandatory reverts done: employee PF fields reset to statutory (audit log entry captured), compliance settings restored, tests-created runs deleted.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PATCH /api/admin/employees/{user_id}/profile", "issue": "Spec/review-request says PUT but the router only exposes PATCH. Test does PATCH first and falls back to PUT-if-405; PATCH worked. Consider adding a PUT alias to match Iter-408 spec."},
+      {"endpoint": "POST /api/admin/compliance-salary-runs/{run_id}/reprocess", "issue": "Body now requires 'month' (Pydantic model). Passing {use_imported_sheet:true} alone returns 422 'Field required: body.month'. Docs/UI callers must include month, or make month optional and derive from the stored run."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": [], "react_native_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter408_higher_pf_vpf.py",
+    "/app/test_reports/pytest/iter408.xml"
+  ],
+  "action_items": [
+    "Consider adding PUT alias to /api/admin/employees/{user_id}/profile (spec says PUT, code only accepts PATCH).",
+    "Make 'month' optional on POST /admin/compliance-salary-runs/{run_id}/reprocess or document that callers must resend the month; today it 422s when month is omitted."
+  ],
+  "critical_code_review_comments": [
+    "pf_contribution_report.py: sheet title formatted as f\"PF {view}\"[:28] — fine, but note openpyxl forbids some chars; safe here since 'view' is validated against VIEWS enum.",
+    "employee_profile.py PATCH: pf_audit_log entry written BEFORE unified employee_type mirroring — correct order; audit only records PF-related keys.",
+    "compliance_validation.py HIGHER_PF_OUT_OF_WINDOW is a warning (not error) — matches spec, verified via code path.",
+    "finalize: allow_errors gated behind role==super_admin only (Iter 407) — correct authorization."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter408_higher_pf_vpf.py (NEW pytest suite for Iter 408)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "N/A (backend-only per request)"},
+  "seed_data_creation": "None. Used existing cmp_527fecdd7c employees. All test writes reverted in cleanup step (verified via pf_audit_log revert doc for statutory).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Kankani firm 2026-07 has an existing (previously finalized) compliance run; test unlocks it via /unlock-request (super admin immediate unlock), then reprocesses OR creates a new run. Pre-existing runs are NOT deleted — only runs created by the test itself are DELETEd in cleanup. Compliance settings persist globally, so test snapshots and restores allow_higher_pf/allow_vpf/vpf_max_percent."
+}

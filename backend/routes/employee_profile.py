@@ -51,6 +51,10 @@ _STR_FIELDS = [
     "company_assets", "nominee_name", "nominee_relation",
     # Iter 387 — configurable statutory module: ESIC master fields.
     "esic_reg_status", "dispensary", "esic_join_date", "esic_exit_date",
+    # Iter 408 — PF Contribution Type (statutory | higher | vpf) + Higher
+    # PF effective window, approval workflow status and remarks.
+    "pf_contribution_type", "higher_pf_from", "higher_pf_to",
+    "pf_approval_status", "pf_remarks",
 ]
 _NUM_FIELDS = [
     "salary_monthly", "compliance_gross",
@@ -59,13 +63,17 @@ _NUM_FIELDS = [
     "compliance_basic", "pf_basic",
     # Iter 126i — VPF (Voluntary PF) amount, deducted with employee PF.
     "vpf_amount",
+    # Iter 408 — Higher PF wage (optional) + VPF percentage mode.
+    "higher_pf_wage", "vpf_percent",
 ]
 _BOOL_FIELDS = ["is_onroll", "vpf_enabled",
                 # Iter 341 — EPS Disable (not eligible for Pension).
                 "eps_disabled",
                 # Iter 387 — PF/ESIC statutory flags.
                 "higher_pension", "intl_worker", "excluded_employee",
-                "esic_temp_exempt"]
+                "esic_temp_exempt",
+                # Iter 408 — Higher PF declaration / approval workflow.
+                "pf_declaration_available", "pf_approval_required"]
 _LIST_FIELDS = [
     "salary_structure_actual",
     "actual_salary_allowances", "actual_salary_deductions",
@@ -165,6 +173,32 @@ async def patch_employee_profile(
     for k in _LIST_FIELDS:
         if k in payload and isinstance(payload[k], list):
             updates[k] = payload[k]
+
+    # Iter 408 — PF audit trail: any change to the Contribution Type /
+    # Higher PF wage / VPF settings is logged (old vs new, who, when, why).
+    _pf_audit_keys = ("pf_contribution_type", "higher_pf_wage", "vpf_percent",
+                      "vpf_amount", "vpf_enabled", "pf_approval_status",
+                      "higher_pf_from", "higher_pf_to",
+                      "pf_declaration_available", "pf_approval_required")
+    _pf_changes = {k: {"old": emp.get(k), "new": updates[k]}
+                   for k in _pf_audit_keys
+                   if k in updates and updates[k] != emp.get(k)}
+    if _pf_changes:
+        await db.pf_audit_log.insert_one({
+            "user_id": user_id,
+            "employee_code": emp.get("employee_code"),
+            "name": emp.get("name"),
+            "company_id": emp.get("company_id"),
+            "changes": _pf_changes,
+            "old_type": emp.get("pf_contribution_type") or "statutory",
+            "new_type": updates.get("pf_contribution_type",
+                                    emp.get("pf_contribution_type") or "statutory"),
+            "reason": str(payload.get("pf_remarks")
+                          or updates.get("pf_remarks") or "").strip(),
+            "changed_by": admin["user_id"],
+            "changed_by_name": admin.get("name"),
+            "changed_at": now_iso(),
+        })
 
     # Employee Type / Group are unified — mirror whichever was sent.
     if "employee_type" in updates or "employee_group" in updates:
