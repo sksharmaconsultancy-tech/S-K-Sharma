@@ -262,3 +262,15 @@ See `/app/memory/test_credentials.md`. Super admin
   badge), whatsapp-templates (30 seeded, edit/preview modals), whatsapp-center all 6 tabs.
 - NOTE: Meta Graph API not mocked — unconfigured by design until user enters credentials
   on the VPS. All test data cleaned; Kankani wa_settings reset to disabled.
+
+## Iter 397 — server.py refactor (steps 3-6) + one-click portal login
+- 35/35 backend regression PASS (tests/test_iter397_refactor_regression.py, report
+  /app/test_reports/iteration_397.json). Extracted: attendance_policy_api,
+  attendance_reports_api, attendance_location_api, employees_admin (+ earlier
+  actual_salary_process). server.py 19,747 → 17,914. openapi 698 paths (2 new
+  portal-login endpoints added).
+- One-click portal login: launch-token (auth) + get-login alias + Runner v6 listener
+  (127.0.0.1:8765, CORS + Private-Network) + alert-OK click before autofill. Listener
+  contract verified via curl; frontend fallback (tab + hint) verified via Playwright.
+- Employee create→delete cycle functionally verified post-extraction (no 500 with
+  WhatsApp unconfigured).
