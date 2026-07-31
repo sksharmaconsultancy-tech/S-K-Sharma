@@ -1766,7 +1766,7 @@ async def decide_salary_unlock_request(
 @api.post("/admin/compliance-salary-runs/{run_id}/reprocess")
 async def reprocess_compliance_salary_run(
     run_id: str,
-    payload: Optional[ComplianceSalaryRunCreate] = None,
+    body: Optional[Dict[str, Any]] = Body(None),
     authorization: Optional[str] = Header(None),
 ):
     admin = await get_user_from_token(authorization)
@@ -1785,16 +1785,21 @@ async def reprocess_compliance_salary_run(
     # Iter 98 — Firm Master gate: Online Salary must be enabled for the firm.
     await _require_firm_salary_permission(existing.get("company_id"), "online")
 
-    if payload is None:
-        payload = ComplianceSalaryRunCreate(
-            month=existing["month"],
-            company_id=existing.get("company_id"),
-            month_days=existing.get("month_days"),
-            employee_type=existing.get("employee_type"),
-            is_onroll=existing.get("is_onroll_filter"),
-            structure_pct=existing.get("structure_pct"),
-            statutory_cfg=existing.get("statutory_cfg"),
-        )
+    # Iter 409 — tolerate a missing/partial body: fields not supplied fall
+    # back to the run's existing values (previously a body without `month`
+    # was rejected with a 422 by Pydantic before reaching this handler).
+    body = body or {}
+    payload = ComplianceSalaryRunCreate(
+        month=body.get("month") or existing["month"],
+        company_id=body.get("company_id", existing.get("company_id")),
+        month_days=body.get("month_days", existing.get("month_days")),
+        employee_type=body.get("employee_type", existing.get("employee_type")),
+        is_onroll=body.get("is_onroll", existing.get("is_onroll_filter")),
+        structure_pct=body.get("structure_pct", existing.get("structure_pct")),
+        statutory_cfg=body.get("statutory_cfg", existing.get("statutory_cfg")),
+        use_imported_sheet=bool(body.get("use_imported_sheet", False)),
+        copy_last_month=bool(body.get("copy_last_month", False)),
+    )
     run = await _compute_compliance_run(admin, payload)
     run["run_id"] = run_id
     run["reprocessed_from_at"] = existing.get("generated_at")

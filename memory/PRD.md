@@ -2911,3 +2911,38 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   E2E verified on a fresh freeze run (RAJENDRA: swb 10,500 = 50%x21,000
   incl OT 912; ESIC 79); full-run 0 mismatches; freeze test suite passed.
 - Deploy: /app/deploy_vps_iter406.sh served via temp-code-bundle kind=script.
+- Iter 407 (user): Salary Lock ERROR override — finalize accepts
+  allow_errors (super_admin only) -> 422 detail includes can_override;
+  lock_validation.errors_overridden stamped; red "Lock Anyway (override
+  errors)" button in the lock popup. E2E tested.
+- Iter 408 (user spec): Higher PF & VPF module. Engine: pf_contribution_type
+  statutory|higher|vpf on Employee Master (+higher_pf_wage, vpf_percent,
+  higher_pf_from/to, pf_declaration_available, pf_approval_required,
+  pf_approval_status, pf_remarks; all in employee_profile allowed fields
+  with db.pf_audit_log change trail). Company policy allow_higher_pf
+  (default false)/allow_vpf(default true)/vpf_max_percent in compliance
+  settings (backend tuples + settings screen with per-field bool default
+  support). compute_compliance_row: higher = uncapped both sides, EPS on
+  cap unless higher_pension, gated by policy+approval+window w/ fallback
+  reason (pf_higher_reason, calc_note explains); vpf = % of PF wages or
+  fixed, clamped by vpf_max_percent, employer unchanged. 10 new lock
+  validations in compliance_validation.py (PF_ABOVE_CEILING exempts
+  higher-active). Snapshot rows freeze type. NEW routes/
+  pf_contribution_report.py (view=all|higher|vpf|pending|diff, xlsx, pdf)
+  + app/pf-contribution-report.tsx + Reports Center link. Employee Master
+  UI: type chips + conditional Higher/VPF boxes + status chip
+  (Pending/Approved/Rejected/Expired). Unit tests 10/10 + testing_agent
+  iteration_408.json 10/10 PASS. Pre-existing minor notes: profile route
+  is PATCH (not PUT); reprocess requires month in body.
+- Deploy: /app/deploy_vps_iter408.sh served via temp-code-bundle kind=script.
+
+## Iter 409 — Reprocess 422 fix (June 2026 fork)
+- User verified Iter 408 (Higher PF/VPF) on VPS: all good.
+- Fix: POST /admin/compliance-salary-runs/{run_id}/reprocess no longer
+  422s when body is empty / missing "month". Endpoint now accepts a raw
+  Optional[Dict] Body and falls back to the run's saved values (month,
+  month_days, employee_type, is_onroll, structure_pct, statutory_cfg).
+  Verified: empty body, no body, partial (no month), full body → all 200,
+  month preserved after reprocess.
+- Deploy: /app/deploy_vps_iter409.sh served via temp-code-bundle kind=script.
+- WhatsApp/Meta block: still NOT lifted (user confirmed) — remains blocked.
