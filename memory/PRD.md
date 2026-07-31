@@ -2968,3 +2968,11 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   frontend BRANDS + backend model map. iClock/ADMS ingest verified
   (handshake + ATTLOG push with user SN 1801FACEMSD1K1030).
 - Deploy: /app/deploy_vps_iter410.sh served via temp-code-bundle kind=script.
+- Iter 410b (remote, on PRODUCTION smartpayrolling.com): BIOFACE MSD1K
+  registered via API — device_id dev_31fcd51c54, SN 1801FACEMSD1K1030,
+  firm JAI CLINIC & NURSING HOME (cmp_652c3d8222), kind=both,
+  brand=bioface. iClock handshake 200 + test ATTLOG punch (bio 99999)
+  ingested → Punch Log shows "NOT FOUND IN MASTER" as expected.
+  NOTE: prod super-admin password is Sharma@2026 (NOT sharma123).
+  User still needs to: run deploy_vps_iter410.sh + configure machine ADMS
+  + physical punch test.
