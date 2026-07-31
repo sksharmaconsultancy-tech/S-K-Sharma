@@ -3048,3 +3048,26 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   immediate location-ping; denied/dismissed → Enable banner fallback.
   Verified via Playwright (auto ping fired, no banner when granted).
   Deploy: /app/deploy_vps_iter416.sh.
+
+## Iter 417 — Smart Punch GPS Verification revamp (user spec)
+- NEW src/utils/smartGps.ts: SmartGpsEngine — warmUp (5s background
+  refresh, Balanced), getPunchFix (preflight perm/services/network →
+  warm-fix shortcut if fresh<5s & ≤30m → 4 attempts × getAccurateFix
+  (15s, final 30s) with 5s waits; tiers ≤30 proceed / ≤100 accept from
+  attempt 2 / final best-effort), diagnoseGpsFailure (exact guidance),
+  logGpsDiagnostic (POST /gps-diagnostics), smartPunchFix singleton for
+  legacy paths. PunchFlowModal GPS step streams live progress; old
+  "Could not get your location" removed. attendance.tsx punch fetches
+  swapped to smartPunchFix.
+- NEW routes/gps_diagnostics.py: POST /gps-diagnostics (any auth user),
+  GET /admin/gps-diagnostics (+counts+success_rate, filters
+  company/date/outcome, company_admin scoped), GET .xlsx export.
+  Registered in server.py. Collection: db.gps_diagnostics.
+- NEW app/gps-dashboard.tsx + sidebar entry "GPS Diagnostics" (Attendance
+  group). Fixed duplicate-sidebar (root _layout already wraps
+  AdminWebShell — page must not wrap again).
+- testing_agent: backend 12/12 PASS + dashboard UI verified
+  (iteration_417.json, tests/test_iter417_gps_diagnostics.py).
+- DEFERRED (needs policy decision): offline attendance with GPS-pending
+  background sync (spec item 9) — changes attendance saving; not done.
+- Deploy: /app/deploy_vps_iter417.sh via temp-code-bundle kind=script.

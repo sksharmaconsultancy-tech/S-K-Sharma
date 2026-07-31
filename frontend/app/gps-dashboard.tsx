@@ -14,7 +14,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { api, apiBinary } from "@/src/api/client";
 import { colors, type } from "@/src/theme";
-import AdminWebShell from "@/src/components/AdminWebShell";
 import CompanyPicker from "@/src/components/CompanyPicker";
 
 type Row = {
@@ -174,7 +173,8 @@ export default function GpsDashboard() {
     </ScrollView>
   );
 
-  if (Platform.OS === "web") return <AdminWebShell>{body}</AdminWebShell>;
+  // Root _layout already wraps admin web routes in AdminWebShell.
+  if (Platform.OS === "web") return body;
   return <SafeAreaView style={{ flex: 1 }}>{body}</SafeAreaView>;
 }
 
