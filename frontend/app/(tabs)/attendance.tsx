@@ -17,6 +17,7 @@ import * as Location from "expo-location";
 import { MiniMap } from "@/src/components/MiniMap";
 import { formatDistance, reverseGeocode } from "@/src/utils/location";
 import { getAccurateFix } from "@/src/utils/accurateLocation";
+import { smartPunchFix } from "@/src/utils/smartGps";
 import * as LocalAuthentication from "expo-local-authentication";
 import * as Haptics from "expo-haptics";
 import { Redirect, router as navRouter } from "expo-router";
@@ -522,7 +523,7 @@ export default function AttendanceScreen() {
       // refreshLocation() updates state which may not have flushed yet;
       // read fresh coords directly so the geofence check is reliable.
       try {
-        const fix = await getAccurateFix();
+        const fix = await smartPunchFix();
         punchLoc = { latitude: fix.latitude, longitude: fix.longitude };
         if (fix.accuracy != null) setGpsAcc(fix.accuracy);
         setLoc(punchLoc);
@@ -633,7 +634,7 @@ export default function AttendanceScreen() {
     if (!loc && !currentLoc) {
       // React may not have flushed setLoc yet; re-fetch quickly
       try {
-        const fix = await getAccurateFix();
+        const fix = await smartPunchFix();
         currentLoc = { latitude: fix.latitude, longitude: fix.longitude };
         if (fix.accuracy != null) setGpsAcc(fix.accuracy);
         setLoc(currentLoc);

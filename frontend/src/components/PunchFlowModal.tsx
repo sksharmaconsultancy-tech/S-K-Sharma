@@ -25,6 +25,7 @@ import {
   fingerprintSupported, verifyFingerprint, enrollFingerprint, fingerprintEnrolled,
 } from "@/src/utils/fingerprintGate";
 import { formatDistance } from "@/src/utils/location";
+import { SmartGpsEngine } from "@/src/utils/smartGps";
 
 type Worksite = {
   worksite_id: string;
@@ -103,6 +104,25 @@ export default function PunchFlowModal({ visible, kind, user, postPunch, onClose
   };
 
   // ---- Step 1: GPS verification (mandatory geofence) ----
+  // Iter 417 — Smart GPS engine: warm-up + background refresh from the
+  // moment the modal opens, automatic 4-attempt retry, accuracy tiers and
+  // exact corrective guidance. Workflow itself is unchanged.
+  const gpsEngineRef = useRef<SmartGpsEngine | null>(null);
+  const cancelledRef = useRef(false);
+  useEffect(() => {
+    if (visible) {
+      cancelledRef.current = false;
+      const eng = new SmartGpsEngine();
+      gpsEngineRef.current = eng;
+      eng.warmUp();
+      return () => {
+        cancelledRef.current = true;
+        eng.dispose();
+        gpsEngineRef.current = null;
+      };
+    }
+  }, [visible]);
+
   const runGps = useCallback(async (): Promise<{ ok: boolean; sites: Worksite[]; pos?: { latitude: number; longitude: number } }> => {
     setStep("gps", "active");
     let sites: Worksite[] = [];
@@ -112,13 +132,22 @@ export default function PunchFlowModal({ visible, kind, user, postPunch, onClose
       setWorksites(sites);
     } catch { /* worksites optional */ }
     try {
-      const perm = await Location.requestForegroundPermissionsAsync();
-      if (!perm.granted) {
-        setStep("gps", "failed", "Location permission denied — enable GPS to punch.");
-        setError("Turn on location — geofence verification is mandatory for every punch.");
+      const engine = gpsEngineRef.current || new SmartGpsEngine();
+      const outcome = await engine.getPunchFix(
+        (p) => {
+          // Live progress on the GPS step — never a dead "could not" text.
+          const acc = p.accuracy != null ? ` · ±${p.accuracy}m` : "";
+          setStep("gps", "active", `${p.message}${p.phase === "improving" ? "" : acc}`);
+        },
+        () => cancelledRef.current,
+      );
+      if (!outcome.ok || !outcome.fix) {
+        setStep("gps", "failed", "GPS unavailable after automatic retries");
+        setError(outcome.guidance ||
+          "GPS could not lock. Keep Location ON (High accuracy), move near a window, and try again.");
         return { ok: false, sites };
       }
-      const fix = await getAccurateFix();
+      const fix = outcome.fix;
       const pos = { latitude: fix.latitude, longitude: fix.longitude };
       // Phase 3 — fake/mock GPS detection (Android reports `mocked`).
       mockRef.current = fix.mocked;
@@ -142,13 +171,13 @@ export default function PunchFlowModal({ visible, kind, user, postPunch, onClose
         return { ok: false, sites };
       }
       setChosenSite(best);
-      setStep("gps", "done", `Inside geofence · ${Math.round(bestD)}m from ${best.name}`);
+      setStep("gps", "done", `Inside geofence · ${Math.round(bestD)}m from ${best.name} · GPS ±${accuracyRef.current ?? "?"}m`);
       return { ok: true, sites, pos };
     } catch {
-      setStep("gps", "failed", "Could not get your location");
+      setStep("gps", "failed", "GPS unavailable after automatic retries");
       setError(
-        "Could not fetch GPS location. Please turn ON device Location " +
-        "(High accuracy mode), move near a window / open area, then tap Retry.",
+        "GPS could not lock even after automatic retries. Keep device Location ON " +
+        "(High accuracy mode), move near a window / open area — then tap Retry once.",
       );
       return { ok: false, sites };
     }

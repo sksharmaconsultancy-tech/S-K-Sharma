@@ -119,6 +119,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/attendance-policy", label: "Attendance Policy", icon: "time-outline" },
       { route: "/attendance-grid", label: "Attendance Report", icon: "grid-outline" },
       { route: "/attendance-sync-dashboard", label: "Attendance Sync Dashboard", icon: "sync-outline" },
+      { route: "/gps-dashboard", label: "GPS Diagnostics", icon: "locate-outline" },
       { route: "/whatsapp-center?tab=history", label: "WhatsApp Alerts", icon: "logo-whatsapp" },
       { route: "/attendance-sheet", label: "Attendance Master Sheet", icon: "document-text-outline" },
       { route: "/inout-ot-matrix", label: "In/Out & OT Matrix", icon: "apps-outline" },

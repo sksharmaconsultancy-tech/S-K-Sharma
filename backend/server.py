@@ -11647,6 +11647,9 @@ from routes.bonus import (  # noqa: E402
     _compute_bonus_run,  # noqa: F401
 )
 app.include_router(bonus_router)
+# Iter 417 — Smart Punch GPS diagnostics (device logs + admin dashboard).
+from routes.gps_diagnostics import router as gps_diagnostics_router  # noqa: E402
+app.include_router(gps_diagnostics_router)
 # Iter 409 — Actual (legacy) Salary Runs extracted to routes/salary_runs.py.
 # _payslip_rows_for_month is imported back because the WhatsApp engine
 # accesses it as a server attribute (srv._payslip_rows_for_month).
