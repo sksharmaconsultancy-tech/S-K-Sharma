@@ -3043,3 +3043,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   (web: address-bar lock instructions; native: Open Settings). Banner
   hides once granted. Verified via Playwright as TEST50 employee.
 - Deploy: /app/deploy_vps_iter415.sh via temp-code-bundle kind=script.
+- Iter 416: GPS popup now AUTO-TRIGGERS on employee dashboard load
+  (requestForegroundPermissionsAsync on mount when canAskAgain); granted →
+  immediate location-ping; denied/dismissed → Enable banner fallback.
+  Verified via Playwright (auto ping fired, no banner when granted).
+  Deploy: /app/deploy_vps_iter416.sh.

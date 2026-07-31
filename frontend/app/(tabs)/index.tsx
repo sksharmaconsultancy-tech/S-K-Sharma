@@ -255,8 +255,28 @@ export default function Dashboard() {
       try {
         const perm = await Location.getForegroundPermissionsAsync();
         if (perm.status !== "granted") {
-          // Iter 415 — surface the Enable-GPS banner instead of staying
-          // silent, so employees switch GPS on right after installing.
+          // Iter 416 (user request) — GPS ON BY DEFAULT: auto-trigger the
+          // OS/browser permission popup the moment the employee lands on
+          // the dashboard (no tap needed). The banner stays as fallback
+          // if they dismiss/deny the popup.
+          if (perm.canAskAgain) {
+            const req = await Location.requestForegroundPermissionsAsync();
+            if (req.status === "granted") {
+              if (!cancelled) setGpsNeeded(false);
+              const l0 = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.Balanced,
+              });
+              if (cancelled) return;
+              await api("/me/location-ping", {
+                method: "POST",
+                body: {
+                  latitude: l0.coords.latitude,
+                  longitude: l0.coords.longitude,
+                },
+              }).catch(() => {});
+              return;
+            }
+          }
           if (!cancelled) setGpsNeeded(true);
           return;
         }
