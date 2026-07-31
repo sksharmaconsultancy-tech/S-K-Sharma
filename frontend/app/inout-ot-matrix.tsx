@@ -32,8 +32,9 @@ import MonthPicker from "@/src/components/MonthPicker";
 import { colors } from "@/src/theme";
 
 const ROW_LABELS: [string, string][] = [
-  ["d_in", "D-In"], ["d_out", "D-Out"], ["ot_in", "OT-In"],
-  ["ot_out", "OT-Out"], ["total", "Total Hrs"], ["ot", "OT Hrs"],
+  ["d_in", "D-In"], ["d_out", "D-Out"], ["total", "Total Hrs"],
+  ["ot_in", "OT-In"], ["ot_out", "OT-Out"], ["ot", "Total OT Hrs"],
+  ["grand", "Total Working Hrs"],
 ];
 
 const FLAG_BG: Record<string, string> = {
@@ -63,7 +64,7 @@ export default function InOutOtMatrixScreen() {
   const [cat, setCat] = useState("");
   const [contr, setContr] = useState("");
   const [shift, setShift] = useState("");
-  const [status, setStatus] = useState<"all" | "active" | "resigned">("all");
+  const [status, setStatus] = useState<"all" | "active" | "resigned">("active");
   const [page, setPage] = useState(1);
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
@@ -86,7 +87,7 @@ export default function InOutOtMatrixScreen() {
     if (cat) p.set("employee_type", cat);
     if (contr) p.set("contractor", contr);
     if (shift) p.set("shift", shift);
-    if (status !== "all") p.set("status", status);
+    p.set("status", status);
     return p.toString();
   }, [cid, month, q, dept, desig, cat, contr, shift, status, page]);
 

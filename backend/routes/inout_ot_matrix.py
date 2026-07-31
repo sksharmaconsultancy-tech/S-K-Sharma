@@ -24,9 +24,12 @@ from fastapi.responses import Response
 
 router = APIRouter(prefix="/api/admin/reports", tags=["inout-ot-matrix"])
 
+# Iter 402 (user request) — row sequence: D-In, D-Out, Total Hrs, OT-In,
+# OT-Out, Total OT Hrs, then Total Working Hrs (= Total Hrs + Total OT Hrs).
 ROW_KEYS = [
-    ("d_in", "D-In"), ("d_out", "D-Out"), ("ot_in", "OT-In"),
-    ("ot_out", "OT-Out"), ("total", "Total Hrs"), ("ot", "OT Hrs"),
+    ("d_in", "D-In"), ("d_out", "D-Out"), ("total", "Total Hrs"),
+    ("ot_in", "OT-In"), ("ot_out", "OT-Out"), ("ot", "Total OT Hrs"),
+    ("grand", "Total Working Hrs"),
 ]
 
 # hex colours shared by xlsx + pdf so exports match the screen exactly
@@ -38,6 +41,13 @@ FLAG_COLORS = {
     "weekly_off": "DCFCE7",  # light green
     "leave": "FED7AA",     # orange
 }
+
+
+def _f(v: Any) -> float:
+    try:
+        return float(v or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _fmt_hm(hours: Any) -> str:
@@ -92,7 +102,7 @@ async def _build(
     contractor: Optional[str] = None,
     shift: Optional[str] = None,
     q: Optional[str] = None,
-    status: str = "all",
+    status: str = "active",
 ) -> Dict[str, Any]:
     """Compute the grid once, join extra master fields, apply filters and
     shape the per-employee 6-row matrix."""
@@ -175,6 +185,8 @@ async def _build(
                 "ot_out": cell.get("ot_out") or "-",
                 "total": _fmt_hm(cell.get("hours")),
                 "ot": _fmt_hm(cell.get("ot_hours")),
+                # Iter 402 — Total Working Hrs = Total Hrs + Total OT Hrs.
+                "grand": _fmt_hm(_f(cell.get("hours")) + _f(cell.get("ot_hours"))),
                 "flag": flag,
                 # hover / click details
                 "detail": {
@@ -200,6 +212,8 @@ async def _build(
             "days": days,
             "month_total": _fmt_hm(totals.get("duty_hours")),
             "month_ot": _fmt_hm(totals.get("ot_hours")),
+            "month_grand": _fmt_hm(_f(totals.get("duty_hours"))
+                                   + _f(totals.get("ot_hours"))),
             "present_days": totals.get("present_days_policy",
                                        totals.get("present_days")),
         })
@@ -239,7 +253,7 @@ async def inout_ot_matrix_json(
     contractor: Optional[str] = None,
     shift: Optional[str] = None,
     q: Optional[str] = None,
-    status: str = "all",
+    status: str = "active",
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     authorization: Optional[str] = Header(None),
@@ -284,7 +298,7 @@ async def inout_ot_matrix_xlsx(
     contractor: Optional[str] = None,
     shift: Optional[str] = None,
     q: Optional[str] = None,
-    status: str = "all",
+    status: str = "active",
     authorization: Optional[str] = Header(None),
 ):
     from openpyxl import Workbook
@@ -338,6 +352,7 @@ async def inout_ot_matrix_xlsx(
         sr = head_row + 1 + len(ROW_KEYS)
         ws.cell(row=sr, column=1,
                 value=f"Month Totals — Working {emp['month_total']} · OT {emp['month_ot']}"
+                      f" · Total Working {emp.get('month_grand') or '-'}"
                       f" · Present Days {emp.get('present_days') or 0}").font = Font(bold=True, size=9)
         r = sr + 2  # blank separator row between employees
     ws.column_dimensions["A"].width = 13
@@ -364,7 +379,7 @@ async def inout_ot_matrix_csv(
     contractor: Optional[str] = None,
     shift: Optional[str] = None,
     q: Optional[str] = None,
-    status: str = "all",
+    status: str = "active",
     authorization: Optional[str] = Header(None),
 ):
     _, cid = await _auth(authorization, company_id)
@@ -398,7 +413,7 @@ async def inout_ot_matrix_pdf(
     contractor: Optional[str] = None,
     shift: Optional[str] = None,
     q: Optional[str] = None,
-    status: str = "all",
+    status: str = "active",
     authorization: Optional[str] = Header(None),
 ):
     """LEGAL LANDSCAPE (Iter 293, user request) — all employees flow
@@ -478,6 +493,7 @@ async def inout_ot_matrix_pdf(
         block.append(Spacer(1, 1.5 * mm))
         block.append(Paragraph(
             f"Month Totals — Working {emp['month_total']} · OT {emp['month_ot']} · "
+            f"Total Working {emp.get('month_grand') or '-'} · "
             f"Present Days {emp.get('present_days') or 0}", h2))
         block.append(Spacer(1, 4 * mm))
         # Keep an employee's header + matrix together on one page.

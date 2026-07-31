@@ -1908,13 +1908,29 @@ def split_regular_ot_times(
 
     reg_in, reg_out = pairs[0]
 
-    # Multi-pair day → second pair (and beyond) is OT.
+    # Iter 402 (user rule) — an "OT-In" punch that happens BEFORE the duty
+    # window is complete is a BREAK RETURN, not the start of overtime.
+    # Merge every pair whose IN falls before (first-IN + duty quota) into
+    # the REGULAR window; OT starts only with the first pair that begins
+    # AFTER the duty quota is over. (Before: the 2nd pair was always OT,
+    # so a lunch-break re-entry wrongly turned the afternoon into OT.)
     if len(pairs) >= 2:
-        ot_in = pairs[1][0]
-        ot_out = pairs[-1][1]
-        return reg_in, reg_out, ot_in, ot_out
+        if split_after_minutes > 0:
+            boundary = reg_in + _td(minutes=split_after_minutes)
+            ot_pairs: List[Tuple[datetime, datetime]] = []
+            for pin, pout in pairs[1:]:
+                if not ot_pairs and pin < boundary:
+                    reg_out = max(reg_out, pout)
+                else:
+                    ot_pairs.append((pin, pout))
+            if ot_pairs:
+                return reg_in, reg_out, ot_pairs[0][0], ot_pairs[-1][1]
+            # All pairs were duty sessions — fall through to the
+            # arithmetic split below using the MERGED duty window.
+        else:
+            return reg_in, reg_out, pairs[1][0], pairs[-1][1]
 
-    # Single-pair day → arithmetic OT split if the shift is over-length.
+    # Single-window day → arithmetic OT split if the shift is over-length.
     total_min = (reg_out - reg_in).total_seconds() / 60.0
     if split_after_minutes > 0 and total_min > split_after_minutes:
         boundary = reg_in + _td(minutes=split_after_minutes)
