@@ -2865,3 +2865,20 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   month_days. Verified on run csrun_630128ccfd1d (127 emps): rows and
   summary tally (105,002), Excel totals correct.
 - Deploy: /app/deploy_vps_iter401.sh served via temp-code-bundle kind=script.
+- Iter 402 (user, In/Out & OT Matrix): row sequence now D-In, D-Out,
+  Total Hrs, OT-In, OT-Out, Total OT Hrs + NEW "Total Working Hrs" row
+  (= Total + OT; uses grid cell "hours" which is duty+OT combined, while
+  "total" now maps to duty_hours DUTY-ONLY so rows tally). Default status
+  = "active" (backend all endpoints + frontend chip). OT-In/OT-Out blanked
+  when OT rounds to zero (no phantom boundary time before D-Out).
+  month_grand added to JSON/xlsx/pdf Month Totals.
+- Iter 402 (user OT rule, shared engine server.py split_regular_ot_times):
+  a 2nd IN→OUT pair whose IN falls BEFORE (first-IN + duty quota) is a
+  BREAK RETURN merged into the regular window — NOT OT. OT starts only
+  from a pair beginning at/after the quota boundary (second-precision).
+  If merged window exceeds quota, existing arithmetic split still applies
+  (user: "decide as per Attendance Policy" for no-re-entry days).
+  Unit-tested: lunch-break, real-OT, short+break, single-long, break+OT,
+  boundary-second cases all pass; live July data (51 emps) grand tally
+  0 mismatches; UI screenshot verified (rows + Active default).
+- Deploy: /app/deploy_vps_iter402.sh served via temp-code-bundle kind=script.

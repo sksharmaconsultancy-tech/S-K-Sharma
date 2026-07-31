@@ -178,15 +178,23 @@ async def _build(
             c = dict(cell)
             c["leave"] = leave
             flag = _cell_flag(c)
+            _tot_s = _fmt_hm(cell.get("duty_hours"))
+            _ot_s = _fmt_hm(cell.get("ot_hours"))
+            # Iter 402 (user rule) — when NO OT is counted for the day the
+            # OT-In / OT-Out punches are NOT shown either (the arithmetic
+            # split boundary is not a real punch and used to appear BEFORE
+            # the duty OUT).
+            _has_ot = _ot_s != "-"
             days[dl] = {
                 "d_in": cell.get("in") or "-",
                 "d_out": cell.get("out") or "-",
-                "ot_in": cell.get("ot_in") or "-",
-                "ot_out": cell.get("ot_out") or "-",
-                "total": _fmt_hm(cell.get("hours")),
-                "ot": _fmt_hm(cell.get("ot_hours")),
-                # Iter 402 — Total Working Hrs = Total Hrs + Total OT Hrs.
-                "grand": _fmt_hm(_f(cell.get("hours")) + _f(cell.get("ot_hours"))),
+                "ot_in": (cell.get("ot_in") or "-") if _has_ot else "-",
+                "ot_out": (cell.get("ot_out") or "-") if _has_ot else "-",
+                "total": _tot_s,
+                "ot": _ot_s,
+                # Iter 402 — Total Working Hrs = Total Hrs + Total OT Hrs
+                # (the grid's ``hours`` is already duty + OT combined).
+                "grand": _fmt_hm(cell.get("hours")),
                 "flag": flag,
                 # hover / click details
                 "detail": {
