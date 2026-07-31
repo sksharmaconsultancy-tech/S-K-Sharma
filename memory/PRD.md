@@ -3010,3 +3010,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Verified: injected stale foreign member into dev LABOUR group → export
   now 113 rows (was blank/5). Test data restored.
 - Deploy: /app/deploy_vps_iter412.sh via temp-code-bundle kind=script.
+- Iter 412b (user approved): startup migration wipes stale member_user_ids
+  on GLOBAL group masters (idempotent via migration_flags
+  iter412_global_group_member_wipe). Verified in dev (seeded stale member
+  → wiped on restart, flag set). Runs automatically when the VPS deploy
+  restarts the backend.

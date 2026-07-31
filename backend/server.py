@@ -2712,6 +2712,28 @@ async def startup():
             await migrate_portal_secrets()
         except Exception:
             logger.exception("[startup] SEC-003 portal secret migration failed")
+        # Iter 412b (user approved) — one-time cleanup: GLOBAL category
+        # groups (LABOUR/STAFF/…) must not carry member lists; a stale
+        # entry pointing at one firm's employee blanked every other firm's
+        # group-wise report. Idempotent via migration_flags marker.
+        try:
+            flag = await db.migration_flags.find_one(
+                {"_id": "iter412_global_group_member_wipe"})
+            if not flag:
+                r = await db.masters.update_many(
+                    {"type": "group",
+                     "company_id": {"$in": ["__global__", None]},
+                     "member_user_ids.0": {"$exists": True}},
+                    {"$set": {"member_user_ids": [],
+                              "member_wipe_note": "iter412 stale-member cleanup"}},
+                )
+                await db.migration_flags.insert_one(
+                    {"_id": "iter412_global_group_member_wipe",
+                     "applied_at": now_iso(), "modified": r.modified_count})
+                logger.info("[startup] iter412 global-group member wipe: %s doc(s)",
+                            r.modified_count)
+        except Exception:
+            logger.exception("[startup] iter412 global-group cleanup failed")
         await _run_startup_backfill()
 
     # Only the small index creation on startup path (should complete in

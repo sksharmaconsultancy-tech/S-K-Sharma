@@ -55,6 +55,9 @@
 #     case-sensitive) and included legacy masters with company_id null.
 #   • Applies everywhere groups filter data: attendance sheet Excel,
 #     auto-email to client, salary process, bonus runs.
+#   • PLUS one-time DB cleanup on first restart: stale member lists on
+#     GLOBAL category groups are wiped automatically (idempotent,
+#     recorded in migration_flags.iter412_global_group_member_wipe).
 #
 # Run ON THE VPS as root/sksharma.
 set -e
