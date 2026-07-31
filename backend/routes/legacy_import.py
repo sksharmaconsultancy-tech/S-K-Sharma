@@ -849,6 +849,11 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
             if body.import_employees:
                 _ml: Dict[str, set] = {"group": set(), "department": set(), "designation": set()}
                 emps = await _legacy_employees(dbn, m.firm_no)
+                # Iter 411 (user rule) — STRICT code matching: if the OLD DB
+                # itself contains two rows with the same EmpCode in a firm,
+                # only the FIRST row is imported; later rows are skipped and
+                # reported. Data of two employees is never interchanged.
+                seen_codes: set = set()
                 # Iter 354 — salary comes straight from the EmployeeMaster
                 # row (Basic/PF Basic/Gross + Earn1-10 heads); nothing else
                 # to prefetch.
@@ -886,31 +891,32 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                             if _eclash:
                                 fields["email"] = None
                         code = e.get("EmpCode") if (e.get("EmpCode") or 0) > 0 else None
-                        # Iter 332 (user bug: SUVIDHI RAYONS — 2548 emp
-                        # imported as ~1000) — match by EMPLOYEE CODE first.
-                        # Name-only matching merged every duplicate name
-                        # into one record. Name fallback only applies when
-                        # the legacy row has no code, or to enrich a portal
-                        # employee that has no code yet.
+                        # Iter 411 (user rule) — duplicate EmpCode in the
+                        # OLD DB: keep the first row, SKIP the rest so the
+                        # whole master (and its salary history) stays with
+                        # one employee only — never interchanged.
+                        if code is not None:
+                            if int(code) in seen_codes:
+                                totals["employees_duplicate_code"] = (
+                                    totals.get("employees_duplicate_code", 0) + 1)
+                                if len(errors) < 40:
+                                    errors.append(
+                                        f"DUPLICATE EmpCode {code} in old DB — "
+                                        f"'{nm}' skipped (first row with this "
+                                        "code was imported)")
+                                continue
+                            seen_codes.add(int(code))
+                        # Iter 332 → Iter 411 (user rule, FINAL): match by
+                        # EMPLOYEE CODE ONLY. Name matching is fully removed
+                        # — same-name employees are NEVER treated as the same
+                        # person and NEVER updated. No code match ⇒ NEW
+                        # employee is created.
                         existing = None
                         if code is not None:
                             existing = await db.users.find_one(
                                 {"company_id": m.company_id, "role": "employee",
                                  "employee_code": str(code)},
                                 {"_id": 0, "user_id": 1})
-                        if existing is None:
-                            q = {"company_id": m.company_id, "role": "employee",
-                                 "name": {"$regex": f"^{_rx(nm)}$", "$options": "i"}}
-                            if code is not None:
-                                # legacy row HAS a code → only enrich a
-                                # same-name portal employee without a code
-                                # (never merge two coded employees).
-                                q["$or"] = [
-                                    {"employee_code": None},
-                                    {"employee_code": ""},
-                                    {"employee_code": {"$exists": False}},
-                                ]
-                            existing = await db.users.find_one(q, {"_id": 0, "user_id": 1})
                         if existing:
                             # Iter 305 (user) — replace only CONFIRMED names.
                             repl = (body.replace_names or {}).get(str(m.firm_no))
@@ -920,11 +926,6 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                             else:
                                 fields.pop("phone", None)
                                 fields.pop("email", None)
-                                if code is not None:
-                                    # backfill the code on a name-matched
-                                    # portal employee so future imports
-                                    # match by code directly.
-                                    fields.setdefault("employee_code", str(code))
                                 await db.users.update_one(
                                     {"user_id": existing["user_id"]},
                                     {"$set": {k: v for k, v in fields.items() if v is not None}})
@@ -1174,11 +1175,8 @@ async def _run_job(job_id: str, body: ImportBody, admin_uid: str = ""):
                                 {"company_id": m.company_id, "role": "employee",
                                  "employee_code": str(code)},
                                 {"_id": 0, "user_id": 1, "salary_structure_actual": 1})
-                        if existing is None:
-                            existing = await db.users.find_one(
-                                {"company_id": m.company_id, "role": "employee",
-                                 "name": {"$regex": f"^{_rx(nm)}$", "$options": "i"}},
-                                {"_id": 0, "user_id": 1, "salary_structure_actual": 1})
+                        # Iter 411 (user rule) — code match ONLY; same-name
+                        # workers are never treated as the same person.
                         rate_struct = ([{"head": "Basic Salary", "amount": w["rate"],
                                          "rate_type": "daily"}] if w["rate"] else None)
                         if existing:

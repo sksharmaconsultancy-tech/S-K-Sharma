@@ -2984,3 +2984,13 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - User reported "Bioface option not showing" — root cause: Iter 410 not
   yet deployed on VPS (prod JS bundle predates change; preview verified
   BIOFACE chip renders). deploy_vps_iter410.sh updated with email alert.
+
+## Iter 411 — Legacy import: STRICT code matching (user rule)
+- routes/legacy_import.py: employee master + off-roll workers import now
+  match by EMPLOYEE CODE ONLY. All name-based fallback matching REMOVED
+  (user: "do not treat same-name as same employee, do not update") —
+  no code match ⇒ NEW employee created.
+- Duplicate EmpCode within the OLD DB: first row wins, later rows skipped
+  with report line "DUPLICATE EmpCode ..." (totals.employees_duplicate_code).
+  seen_codes resets per firm.
+- Deploy: /app/deploy_vps_iter411.sh served via temp-code-bundle kind=script.
