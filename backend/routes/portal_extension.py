@@ -253,7 +253,7 @@ async def ext_solve_captcha(payload: Dict[str, Any] = Body(...)):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "7"
+RUNNER_VERSION = "9"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -267,6 +267,39 @@ PORTALS = {
     "esic": "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx",
     "epfo": "https://unifiedportal-emp.epfindia.gov.in/epfo/",
 }
+
+
+def _fresh_driver(opts):
+    """Start Chrome with an AUTO-UPDATED ChromeDriver.
+
+    Selenium Manager normally keeps chromedriver current, but when Chrome
+    auto-updates on the PC a cached/stale driver can mismatch and Chrome
+    refuses to start. Self-heal ladder:
+      1. normal start (Selenium Manager picks/downloads the driver)
+      2. wipe the cached drivers + upgrade Selenium itself, retry
+      3. force-download a matching Chrome-for-Testing + driver pair, retry
+    """
+    import os
+    import shutil
+    import subprocess
+    import sys
+    from selenium import webdriver
+    try:
+        return webdriver.Chrome(options=opts)
+    except Exception as e:
+        print("Chrome did not start (%s...)" % str(e)[:140])
+    print("AUTO-UPDATING ChromeDriver to match your Chrome...")
+    shutil.rmtree(os.path.join(os.path.expanduser("~"), ".cache", "selenium"),
+                  ignore_errors=True)
+    subprocess.run([sys.executable, "-m", "pip", "install", "-U", "-q",
+                    "selenium>=4.16"], check=False)
+    try:
+        return webdriver.Chrome(options=opts)
+    except Exception as e:
+        print("Still failing (%s...)" % str(e)[:140])
+    print("Downloading a matching Chrome + Driver pair (one time)...")
+    os.environ["SE_FORCE_BROWSER_DOWNLOAD"] = "true"
+    return webdriver.Chrome(options=opts)
 
 
 def run(API_BASE, TOKEN, portal):
@@ -362,7 +395,7 @@ def run(API_BASE, TOKEN, portal):
         opts.add_experimental_option("detach", True)
         opts.add_argument("--start-maximized")
         print("Launching Google Chrome (auto-managed ChromeDriver)...")
-        driver = webdriver.Chrome(options=opts)
+        driver = _fresh_driver(opts)
         print("Opening EPFO employer portal...")
         driver.get(PORTALS["epfo"])
 
@@ -602,40 +635,132 @@ def run(API_BASE, TOKEN, portal):
     opts = Options()
     opts.add_experimental_option("detach", True)
     print("Launching Chrome (auto-managed driver)...")
-    driver = webdriver.Chrome(options=opts)
+    driver = _fresh_driver(opts)
     driver.get(PORTALS[portal])
-    time.sleep(3)
 
-    # Iter 397 (user request) — BEFORE filling ID & Password, close the
-    # portal's alert popup by clicking its OK button (EPFO shows one on
-    # every load; harmless no-op when absent).
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.webdriver.common.keys import Keys
+
+    # Iter 400 (user fix) — BEFORE filling ID & Password, click OK/Close on
+    # the portal's alert popup. The old code used one element_to_be_clickable
+    # wait + a single native click; the EPFO modal fades in, so the click
+    # fired mid-animation, got intercepted and the popup stayed open.
+    # New logic: wait for full page load, then POLL up to 25s — whenever a
+    # VISIBLE modal is on screen, click its OK/Close button (native click
+    # with a JavaScript-click fallback). Finally strip any lingering
+    # modal/backdrop so the login fields are usable.
     try:
-        from selenium.webdriver.support.ui import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
-        for _i, _sel in enumerate(((By.ID, "btnCloseModal"),
-                     (By.CSS_SELECTOR, "button[aria-label='Close'], [aria-label='Close']"),
-                     (By.CSS_SELECTOR, "button.btn-danger[data-bs-dismiss='modal']"),
-                     (By.CSS_SELECTOR, "button[data-dismiss='modal']"),
-                     (By.CSS_SELECTOR, ".modal.show button.btn, .modal.in button.btn"))):
+        WebDriverWait(driver, 30).until(
+            lambda d: d.execute_script("return document.readyState") == "complete")
+    except Exception:
+        pass
+    time.sleep(1.5)  # let the modal fade-in animation start
+
+    _POPUP_SELS = ("#btnCloseModal",
+                   "button[aria-label='Close']",
+                   "[aria-label='Close']",
+                   "button.btn-danger[data-bs-dismiss='modal']",
+                   "button[data-dismiss='modal']",
+                   "#mainHomePageAlertModal button",
+                   ".modal.show button.btn, .modal.in button.btn")
+
+    def _visible_modal():
+        for _m in driver.find_elements(
+                By.CSS_SELECTOR, "#mainHomePageAlertModal, .modal.show, .modal.in"):
             try:
-                btn = WebDriverWait(driver, 8 if _i == 0 else 2).until(
-                    EC.element_to_be_clickable(_sel))
-                btn.click()
-                print("Alert popup closed (OK clicked).")
-                time.sleep(1)
-                break
+                if _m.is_displayed():
+                    return _m
             except Exception:
                 continue
-        else:
-            print("No alert popup detected - continuing.")
+        return None
+
+    _clicked = False
+    _quiet = 0
+    _deadline = time.time() + 25
+    while time.time() < _deadline:
+        if _visible_modal() is None:
+            _quiet += 1
+            if _clicked or _quiet >= 6:  # ~3s with no popup -> move on
+                break
+            time.sleep(0.5)
+            continue
+        _quiet = 0
+        for _sel in _POPUP_SELS:
+            for _el in driver.find_elements(By.CSS_SELECTOR, _sel):
+                try:
+                    if not _el.is_displayed():
+                        continue
+                    try:
+                        _el.click()
+                    except Exception:
+                        driver.execute_script("arguments[0].click();", _el)
+                    _clicked = True
+                    print("Alert popup: OK/Close clicked.")
+                    time.sleep(1.0)
+                    break
+                except Exception:
+                    continue
+            if _clicked:
+                break
+        if _clicked and _visible_modal() is None:
+            break
+        time.sleep(0.5)
+    if not _clicked:
+        print("No alert popup detected - continuing.")
+    # Safety net: remove any stuck modal/backdrop so fields are clickable.
+    try:
+        driver.execute_script(
+            "document.querySelectorAll('#mainHomePageAlertModal,"
+            ".modal.show,.modal.in,.modal-backdrop').forEach("
+            "function(e){e.classList.remove('show');e.classList.remove('in');"
+            "e.style.display='none';if(e.remove)e.remove();});"
+            "document.body.classList.remove('modal-open');"
+            "document.body.style.overflow='';")
     except Exception:
         pass
 
+    # The EPFO portal is an Angular app — JS value injection does not update
+    # ng-model (box looks filled but submits blank). Type like a real
+    # keyboard (send_keys) with a native-setter JS fallback.
     def set_val(el, val):
-        driver.execute_script(
-            "arguments[0].value=arguments[1];"
-            "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));"
-            "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));", el, val)
+        try:
+            el.click()
+        except Exception:
+            pass
+        try:
+            el.send_keys(Keys.CONTROL, "a")
+            el.send_keys(Keys.DELETE)
+        except Exception:
+            pass
+        try:
+            el.clear()
+        except Exception:
+            pass
+        try:
+            el.send_keys(val)
+        except Exception:
+            pass
+        try:
+            if (el.get_attribute("value") or "") != val:
+                driver.execute_script(
+                    "var s=Object.getOwnPropertyDescriptor("
+                    "window.HTMLInputElement.prototype,'value').set;"
+                    "s.call(arguments[0],arguments[1]);"
+                    "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));"
+                    "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));"
+                    "arguments[0].dispatchEvent(new Event('blur',{bubbles:true}));",
+                    el, val)
+        except Exception:
+            pass
+
+    # Wait for the login form to render after the modal closes.
+    try:
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located(
+                (By.CSS_SELECTOR, "input[type=password]")))
+    except Exception:
+        pass
 
     user_el = None
     for el in driver.find_elements(By.CSS_SELECTOR, "input[type=text], input:not([type])"):

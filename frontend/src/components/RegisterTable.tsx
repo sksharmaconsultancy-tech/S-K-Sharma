@@ -87,8 +87,8 @@ export default function RegisterTable({
     <ScrollView horizontal showsHorizontalScrollIndicator>
       <View>
         <View style={st.tr}>
-          {columns.map((c) => (
-            <Text key={c.key} style={[st.cell, st.th]}>
+          {columns.map((c, j) => (
+            <Text key={c.key} style={[st.cell, st.th, j === 0 && st.thFirst]}>
               {c.label}
             </Text>
           ))}
@@ -151,6 +151,9 @@ const st = StyleSheet.create({
     textAlign: "center",
     width: 108,
   },
+  // Iter 400 — the FIRST data column is 170px wide (st.first) but its
+  // heading stayed 108px, shifting every heading off its column. Match it.
+  thFirst: { width: 170 },
   num: { textAlign: "right" },
   tot: { backgroundColor: "#FFF2CC", fontWeight: "800" },
   empty: {
