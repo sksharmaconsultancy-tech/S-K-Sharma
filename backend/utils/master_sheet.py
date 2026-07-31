@@ -278,6 +278,125 @@ def build_master_sheet_xlsx(
 # ---------------------------------------------------------------------------
 # Ingest / MIS column-matching
 # ---------------------------------------------------------------------------
+def build_master_sheet_pdf(
+    *,
+    company_name: str,
+    month: str,   # "YYYY-MM"
+    employees: List[Dict[str, Any]],
+    attendance_days_by_user: Optional[Dict[str, int]] = None,
+    rates_by_user: Optional[Dict[str, Dict[str, Any]]] = None,
+    allowance_labels: Optional[List[str]] = None,
+) -> bytes:
+    """Iter 413 (user accepted) — print-ready PDF twin of the client
+    attendance sheet (same columns as build_master_sheet_xlsx), attached to
+    the auto-email so clients can view it on mobile without Excel."""
+    from reportlab.lib import colors as rl_colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer,
+    )
+    from reportlab.lib.styles import ParagraphStyle
+
+    labels = list(allowance_labels or [])
+    headers = [
+        "PF No", "UAN", "ESI No", "Code", "Name", "Father Name",
+        "Desig.", "DOJ", "Resign", "Basic", "HRA", "Conv.",
+        *labels, "Gross",
+        "Present", "OT", "Adv", "TDS", "Other Less", "Emp Salary",
+    ]
+
+    def _resign_date(emp: Dict[str, Any]) -> str:
+        for k in ("exit_date", "resign_date", "date_of_leaving", "leaving_date"):
+            v = str(emp.get(k) or "").strip()
+            if v:
+                return v[:10]
+        return ""
+
+    def _num(v) -> str:
+        return f"{v:,.0f}" if v else ""
+
+    data: List[List[Any]] = [headers]
+    for emp in employees:
+        days_worked = (attendance_days_by_user or {}).get(emp.get("user_id"))
+        rt = (rates_by_user or {}).get(emp.get("user_id")) or {}
+        basic = float(rt.get("basic") or 0)
+        hra = float(rt.get("hra") or 0)
+        conv = float(rt.get("conv") or 0)
+        extra = rt.get("extra") or {}
+        gross = float(rt.get("gross") or 0) or round(
+            basic + hra + conv + sum(float(v or 0) for v in extra.values()), 2)
+        data.append([
+            emp.get("pf_no") or "",
+            emp.get("uan_no") or "",
+            emp.get("esi_ip_no") or "",
+            emp.get("employee_code") or "",
+            (emp.get("name") or "")[:26],
+            (emp.get("father_name") or "")[:22],
+            (emp.get("designation") or emp.get("position") or "")[:14],
+            (emp.get("doj") or "")[:10],
+            _resign_date(emp),
+            _num(basic), _num(hra), _num(conv),
+            *[_num(float(extra.get(lb) or 0)) for lb in labels],
+            _num(gross),
+            "" if days_worked is None else str(days_worked),
+            "", "", "", "", "",
+        ])
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=landscape(A4),
+        leftMargin=8 * mm, rightMargin=8 * mm,
+        topMargin=8 * mm, bottomMargin=8 * mm,
+    )
+    title_style = ParagraphStyle(
+        "t", fontName="Helvetica-Bold", fontSize=12,
+        textColor=rl_colors.HexColor("#0f766e"), spaceAfter=2)
+    sub_style = ParagraphStyle(
+        "s", fontName="Helvetica-Oblique", fontSize=7,
+        textColor=rl_colors.HexColor("#334155"), spaceAfter=4)
+    story = [
+        Paragraph(f"{company_name}  ·  Attendance / Salary Sheet  ·  {month}",
+                  title_style),
+        Paragraph(
+            "Please fill Present Days, OVER_TIME, Adv, TDS, Other Less and "
+            "Employee Salary for each employee, then email the completed "
+            "sheet back to us for processing.", sub_style),
+        Spacer(1, 2),
+    ]
+    # Column widths (mm) — name/father get the extra room.
+    fixed = [16, 16, 15, 10, 34, 28, 18, 14, 14, 12, 11, 11]
+    tail = [13, 12, 9, 9, 9, 12, 15]
+    avail = 281 - sum(fixed) - sum(tail)
+    lab_w = max(10, avail / len(labels)) if labels else 0
+    col_widths = [w * mm for w in (fixed + [lab_w] * len(labels) + tail)]
+    tbl = Table(data, colWidths=col_widths, repeatRows=1)
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor("#0f766e")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 5.6),
+        ("FONTSIZE", (0, 1), (-1, -1), 5.6),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("ALIGN", (9, 1), (-1, -1), "RIGHT"),
+        ("GRID", (0, 0), (-1, -1), 0.3, rl_colors.HexColor("#cbd5e1")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+         [rl_colors.white, rl_colors.HexColor("#f1f5f9")]),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 1.5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 1.5),
+    ]))
+    story.append(tbl)
+    story.append(Spacer(1, 3))
+    story.append(Paragraph(
+        f"Generated on {datetime.now(timezone.utc).strftime('%d %b %Y')}"
+        f"  ·  {len(employees)} employees  ·  S.K. Sharma & Co.", sub_style))
+    doc.build(story)
+    return buf.getvalue()
+
+
 def parse_uploaded_xlsx(xlsx_bytes: bytes) -> Tuple[List[str], List[List[Any]]]:
     """Return (headers, data_rows) from a raw xlsx. Uses the first non-empty
     row as the header. Skips totally-blank leading rows."""

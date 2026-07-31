@@ -3015,3 +3015,11 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   iter412_global_group_member_wipe). Verified in dev (seeded stale member
   → wiped on restart, flag set). Runs automatically when the VPS deploy
   restarts the backend.
+
+## Iter 413 — Attendance email: Excel + PDF (user accepted)
+- utils/master_sheet.py: NEW build_master_sheet_pdf (landscape A4,
+  reportlab, same columns as xlsx, repeating header). Verified with 128
+  Kankani employees → 4-page PDF.
+- utils/iter60_features.py _run_attendance_email_batch: email now attaches
+  Excel + PDF twin; PDF failure is non-fatal (logged, Excel still sent).
+- Deploy: /app/deploy_vps_iter413.sh via temp-code-bundle kind=script.

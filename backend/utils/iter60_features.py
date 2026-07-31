@@ -321,18 +321,39 @@ async def _run_attendance_email_batch(
             })
             continue
 
-        # Email
+        # Email — Iter 413 (user accepted): attach BOTH the Excel and a
+        # print-ready PDF so clients on mobile can view without Excel.
+        from utils.master_sheet import build_master_sheet_pdf
         att = base64.b64encode(xlsx_bytes).decode("ascii")
+        attachments = [{"filename": filename, "content": att}]
+        try:
+            pdf_bytes = build_master_sheet_pdf(
+                company_name=c.get("name") or "S.K. Sharma & Co.",
+                month=target_month,
+                employees=employees,
+                attendance_days_by_user=days_by_user,
+                rates_by_user=rates_by_user,
+                allowance_labels=allowance_labels,
+            )
+            attachments.append({
+                "filename": filename.replace(".xlsx", ".pdf"),
+                "content": base64.b64encode(pdf_bytes).decode("ascii"),
+            })
+        except Exception:
+            log.exception("attendance-email PDF build failed for %s",
+                          c.get("company_id"))
         subject = f"[{c.get('name')}] Attendance Sheet — {target_month}"
         text_body = (
-            f"Attached: attendance sheet for {c.get('name')} — {target_month}.\n\n"
+            f"Attached: attendance sheet for {c.get('name')} — {target_month} "
+            "(Excel + print-ready PDF).\n\n"
             "Please fill in Gross, Advance and TDS and return by the 5th so we can process payroll.\n\n"
             "— S.K. Sharma & Co."
         )
         html_body = (
             f"<div style='font-family:sans-serif'><p>Hi team,</p>"
             f"<p>Please find attached the attendance sheet for <b>{c.get('name')}</b> — "
-            f"<b>{target_month}</b>. Fill in Gross, Advance and TDS and return by the 5th.</p>"
+            f"<b>{target_month}</b> (Excel to fill &amp; return, plus a print-ready PDF copy). "
+            f"Fill in Gross, Advance and TDS and return by the 5th.</p>"
             f"<p>— S.K. Sharma &amp; Co.</p></div>"
         )
         send_result = await _send_email_with_attachment(
@@ -340,7 +361,7 @@ async def _run_attendance_email_batch(
             subject=subject,
             text_body=text_body,
             html_body=html_body,
-            attachments=[{"filename": filename, "content": att}],
+            attachments=attachments,
         )
         # Persist send log
         await db.attendance_email_log.insert_one({
