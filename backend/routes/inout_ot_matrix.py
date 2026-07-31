@@ -230,6 +230,21 @@ async def _build(
     comp_doc = await db.companies.find_one(
         {"company_id": company_id}, {"_id": 0, "name": 1, "logo_base64": 1})
     y, m = month[:4], month[5:7]
+
+    # Iter 403 (user accepted) — day-wise OT totals across the FILTERED
+    # employee set so supervisors spot heavy-OT days at a glance.
+    def _hm_min(s: Any) -> int:
+        try:
+            h, mn = str(s).split(":")
+            return int(h) * 60 + int(mn)
+        except (ValueError, AttributeError):
+            return 0
+
+    day_ot_min: Dict[str, int] = {dl: 0 for dl in day_labels}
+    for e in out_rows:
+        for dl, v in (e.get("days") or {}).items():
+            if v.get("ot") and v["ot"] != "-":
+                day_ot_min[dl] = day_ot_min.get(dl, 0) + _hm_min(v["ot"])
     return {
         "company": {"company_id": company_id,
                     "name": (comp_doc or {}).get("name") or company.get("name"),
@@ -238,6 +253,8 @@ async def _build(
         "payroll_period": f"01-{m}-{y} to {len(day_labels):02d}-{m}-{y}",
         "day_labels": day_labels, "weekday_labels": weekday_labels,
         "employees": out_rows,
+        "day_ot_totals": {dl: _fmt_hm(mn / 60.0) for dl, mn in day_ot_min.items()},
+        "month_ot_total": _fmt_hm(sum(day_ot_min.values()) / 60.0),
         "filter_options": {
             "departments": sorted({e.get("department") or "" for e in extra.values()} - {""}),
             "designations": sorted({(e.get("designation") or e.get("position") or "") for e in extra.values()} - {""}),
@@ -363,6 +380,35 @@ async def inout_ot_matrix_xlsx(
                       f" · Total Working {emp.get('month_grand') or '-'}"
                       f" · Present Days {emp.get('present_days') or 0}").font = Font(bold=True, size=9)
         r = sr + 2  # blank separator row between employees
+    # Iter 403 (user accepted) — day-wise OT totals footer.
+    ws.cell(row=r, column=1, value="DAY-WISE OT TOTALS (all filtered employees)"
+            ).font = Font(bold=True, size=10)
+    r += 1
+    hc2 = ws.cell(row=r, column=1, value="Day")
+    hc2.fill = PatternFill("solid", fgColor="1E3A8A")
+    hc2.font = Font(bold=True, color="FFFFFF")
+    for j, dl in enumerate(data["day_labels"], start=2):
+        cell = ws.cell(row=r, column=j, value=str(dl)[:2])
+        cell.fill = PatternFill("solid", fgColor="1E3A8A")
+        cell.font = Font(bold=True, color="FFFFFF", size=9)
+        cell.alignment = center
+        cell.border = thin
+    r += 1
+    lc2 = ws.cell(row=r, column=1, value="Total OT")
+    lc2.font = Font(bold=True, size=9)
+    lc2.border = thin
+    for j, dl in enumerate(data["day_labels"], start=2):
+        v = (data.get("day_ot_totals") or {}).get(dl) or "-"
+        cell = ws.cell(row=r, column=j, value=v)
+        cell.alignment = center
+        cell.font = Font(size=8, bold=(v != "-"))
+        cell.border = thin
+        if v != "-":
+            cell.fill = PatternFill("solid", fgColor="DBEAFE")
+    r += 1
+    ws.cell(row=r, column=1,
+            value=f"Month OT Total: {data.get('month_ot_total') or '-'}"
+            ).font = Font(bold=True, size=9)
     ws.column_dimensions["A"].width = 13
     for j in range(2, len(data["day_labels"]) + 2):
         ws.column_dimensions[get_column_letter(j)].width = 6.5
@@ -506,6 +552,33 @@ async def inout_ot_matrix_pdf(
         block.append(Spacer(1, 4 * mm))
         # Keep an employee's header + matrix together on one page.
         flow.append(KeepTogether(block))
+    # Iter 403 (user accepted) — day-wise OT totals footer.
+    ot_head = ["Day"] + [str(d)[:2] for d in data["day_labels"]]
+    ot_vals = ["Total OT"] + [(data.get("day_ot_totals") or {}).get(dl) or "-"
+                              for dl in data["day_labels"]]
+    ot_styles = [
+        ("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#1E3A8A")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), rl.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 6),
+        ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("GRID", (0, 0), (-1, -1), 0.4, rl.HexColor("#CBD5E1")),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.6),
+    ]
+    for j, v in enumerate(ot_vals[1:]):
+        if v != "-":
+            ot_styles.append(("BACKGROUND", (j + 1, 1), (j + 1, 1),
+                              rl.HexColor("#DBEAFE")))
+    ot_tbl = Table([ot_head, ot_vals],
+                   colWidths=[label_w] + [day_w] * ndays)
+    ot_tbl.setStyle(TableStyle(ot_styles))
+    flow.append(KeepTogether([
+        Paragraph(f"Day-wise OT Totals (all filtered employees) — "
+                  f"Month OT Total: {data.get('month_ot_total') or '-'}", h1),
+        Spacer(1, 1.5 * mm), ot_tbl]))
     doc.build(flow)
     return Response(
         content=buf.getvalue(), media_type="application/pdf",

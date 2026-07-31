@@ -225,6 +225,7 @@ export default function InOutOtMatrixScreen() {
             {(data.employees || []).map((emp: any) => (
               <EmployeeMatrix key={emp.user_id} data={data} emp={emp} onCell={openDetail} />
             ))}
+            {data.day_ot_totals ? <DayOtFooter data={data} /> : null}
             {/* Pagination */}
             {data.total_pages > 1 ? (
               <View style={s.pageRow}>
@@ -329,6 +330,55 @@ function FilterSelect({ label, value, onChange, options }: {
           </ScrollView>
         </View>
       ) : null}
+    </View>
+  );
+}
+
+/** Iter 403 — day-wise OT totals footer (heavy-OT days at a glance). */
+function DayOtFooter({ data }: { data: any }) {
+  const dayLabels: string[] = data.day_labels || [];
+  const totals = data.day_ot_totals || {};
+  const toMin = (v: string) => {
+    if (!v || v === "-") return 0;
+    const [h, m] = v.split(":");
+    return parseInt(h, 10) * 60 + parseInt(m, 10);
+  };
+  const max = Math.max(0, ...dayLabels.map((d) => toMin(totals[d])));
+  return (
+    <View style={s.empCard} testID="iom-ot-footer">
+      <Text style={s.empName}>
+        Day-wise OT Totals — all {data.total_employees} employee(s) · Month OT {data.month_ot_total || "-"}
+      </Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator>
+        <View>
+          <View style={s.mRow}>
+            <View style={[s.mCellLabel, s.mHeadBg]}>
+              <Text style={s.mHeadTxt}>Day</Text>
+            </View>
+            {dayLabels.map((d, i) => (
+              <View key={d} style={[s.mCell, s.mHeadBg]}>
+                <Text style={s.mHeadTxt}>{String(d).slice(0, 2)}</Text>
+                <Text style={s.mHeadSub}>{(data.weekday_labels || [])[i] || ""}</Text>
+              </View>
+            ))}
+          </View>
+          <View style={s.mRow}>
+            <View style={s.mCellLabel}>
+              <Text style={s.mLabelTxt}>Total OT</Text>
+            </View>
+            {dayLabels.map((d) => {
+              const v = totals[d] || "-";
+              const mn = toMin(v);
+              const bg = mn <= 0 ? "#FFFFFF" : mn === max ? "#FDE68A" : "#DBEAFE";
+              return (
+                <View key={d} style={[s.mCell, { backgroundColor: bg }]}>
+                  <Text style={[s.mCellTxt, mn > 0 && { fontWeight: "700" }]}>{v}</Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      </ScrollView>
     </View>
   );
 }

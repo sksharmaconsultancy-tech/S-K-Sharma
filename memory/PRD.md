@@ -2882,3 +2882,9 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   boundary-second cases all pass; live July data (51 emps) grand tally
   0 mismatches; UI screenshot verified (rows + Active default).
 - Deploy: /app/deploy_vps_iter402.sh served via temp-code-bundle kind=script.
+- Iter 403 (user accepted): Day-wise OT Totals footer on In/Out & OT
+  Matrix — per-day OT sums across ALL filtered employees (computed in
+  _build pre-pagination; keys day_ot_totals + month_ot_total). UI card
+  (light-blue OT days, AMBER heaviest day), xlsx footer block, pdf footer
+  table. Verified live (July: month OT 854:00, peak day 12 = 154:30).
+- Deploy: /app/deploy_vps_iter403.sh served via temp-code-bundle kind=script.
