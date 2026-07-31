@@ -1895,6 +1895,42 @@ async def device_offline_alert_loop():
                             "created_by": "system",
                         })
                     logger.warning("[zkteco] OFFLINE alert raised for %s", d.get("serial_number"))
+                    # Iter 410 (user accepted) — also EMAIL the alert to the
+                    # super admins + the firm's company admins so nobody
+                    # silently loses punches. Best-effort: any email failure
+                    # never breaks the loop (in-app notification above is
+                    # already raised).
+                    try:
+                        from routes.email_notifications import _get_settings, _send_and_log
+                        settings = await _get_settings()
+                        if settings and settings.get("enabled") and settings.get("username"):
+                            recipients: set = set()
+                            async for a in db.users.find(
+                                {"role": {"$in": ["super_admin", "company_admin"]},
+                                 "email": {"$nin": [None, ""]}},
+                                {"_id": 0, "email": 1, "role": 1, "company_id": 1},
+                            ):
+                                if a["role"] == "super_admin" or \
+                                        a.get("company_id") == d.get("company_id"):
+                                    recipients.add(a["email"])
+                            subject = (f"⚠️ Biometric machine OFFLINE — "
+                                       f"{d.get('name') or d.get('serial_number')}")
+                            body = (
+                                f"Biometric machine '{d.get('name')}' "
+                                f"(SN {d.get('serial_number')}) has been OFFLINE for over "
+                                f"{OFFLINE_ALERT_AFTER_MIN} minutes.\n\n"
+                                f"Last seen: {last}\n"
+                                "Punches are NOT syncing — please check the machine's "
+                                "power and internet connection.\n\n"
+                                "You will not receive another email for this outage; "
+                                "alerts re-arm automatically once the machine reconnects."
+                            )
+                            for to in sorted(recipients):
+                                await _send_and_log(settings, to, subject, body,
+                                                    "device_offline")
+                    except Exception:
+                        logger.warning("[zkteco] offline alert EMAIL failed",
+                                       exc_info=True)
                 elif not offline and d.get("offline_alerted"):
                     await db.biometric_devices.update_one(
                         {"device_id": d["device_id"]},

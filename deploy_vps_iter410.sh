@@ -22,6 +22,15 @@
 #   • Biometric Devices → Register: new brand "BIOFACE (MSD1K)" —
 #     connects over the same iClock/ADMS push protocol (verified
 #     handshake + ATTLOG ingest with SN 1801FACEMSD1K1030).
+#   • Machine ALREADY REGISTERED on production via API for
+#     JAI CLINIC & NURSING HOME (device_id dev_31fcd51c54).
+#
+# Iter 410 — DEVICE OFFLINE EMAIL ALERT (user accepted):
+#   • When any biometric machine stops pushing for 15+ minutes the portal
+#     now also EMAILS the super admins + that firm's company admins
+#     (in addition to the existing in-app notification). One email per
+#     outage; re-arms automatically when the machine reconnects.
+#     Requires SMTP configured in Email Settings (already set on prod).
 #
 # Run ON THE VPS as root/sksharma.
 set -e
@@ -119,6 +128,8 @@ echo -n "   Quick-sheet Father/Online badge / Iter 410 (must say OK): "
 grep -q "rollBadge" $APP_DIR/frontend/app/admin.tsx && echo "OK" || echo "MISSING!"
 echo -n "   BIOFACE MSD1K brand / Iter 410 (must say OK): "
 grep -q "bioface" $APP_DIR/frontend/app/biometric-devices.tsx && echo "OK" || echo "MISSING!"
+echo -n "   Device offline EMAIL alert / Iter 410 (must say OK): "
+grep -q "offline alert EMAIL" $APP_DIR/backend/routes/biometric_devices.py && echo "OK" || echo "MISSING!"
 echo ""
 echo "✅ Deploy Iter 410 complete! HARD-REFRESH the browser (Ctrl+Shift+R)."
 echo ""

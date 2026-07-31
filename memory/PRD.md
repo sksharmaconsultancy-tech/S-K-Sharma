@@ -2976,3 +2976,11 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   NOTE: prod super-admin password is Sharma@2026 (NOT sharma123).
   User still needs to: run deploy_vps_iter410.sh + configure machine ADMS
   + physical punch test.
+- Iter 410c: Device OFFLINE alert now also EMAILS (super admins + firm's
+  company admins) via SMTP settings machinery (routes/email_notifications
+  _get_settings/_send_and_log), lazy-imported in device_offline_alert_loop.
+  One email per outage, re-arms on reconnect. Gated on SMTP configured
+  (prod has it; dev doesn't — verified recipients resolution in dev).
+- User reported "Bioface option not showing" — root cause: Iter 410 not
+  yet deployed on VPS (prod JS bundle predates change; preview verified
+  BIOFACE chip renders). deploy_vps_iter410.sh updated with email alert.
