@@ -24,7 +24,17 @@ _NUMERIC_COLS = {
     "pf_wage_base", "pf_employee", "pf_employer_epf", "pf_employer_eps",
     "pf_admin_charges", "esic_wage_base", "esic_employee",
     "esic_employer", "pt", "tds",
+    # Iter 401 (user check) — money columns that were treated as TEXT, so
+    # the TOTAL row stayed blank for them in the Compliance Salary export.
+    "basic", "hra", "conveyance", "medical", "special", "others",
+    "monthly_gross", "gross_paid", "pf_wages", "stat_wage_base",
+    "vpf_amount", "other_deduction", "master_deduction",
+    "pf_employer_total",
 }
+
+# Numeric columns where a column SUM is meaningless — formatted as numbers
+# but skipped on the TOTAL row (Iter 401, user: "pointless Rate total").
+_NO_TOTAL_COLS = {"rate", "month_days"}
 
 # Booleans/flags we render as readable strings.
 _BOOL_COLS = {"is_onroll": ("On-roll", "Off-roll"),
@@ -131,7 +141,7 @@ def build_rows_xlsx(
         total_row = data_start + len(rows_list)
         ws.cell(row=total_row, column=1, value="TOTAL").font = Font(bold=True)
         for i, col in enumerate(columns, start=1):
-            if col not in _NUMERIC_COLS:
+            if col not in _NUMERIC_COLS or col in _NO_TOTAL_COLS:
                 continue
             total = 0.0
             for row in rows_list:

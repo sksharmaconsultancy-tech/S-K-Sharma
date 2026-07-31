@@ -1141,6 +1141,14 @@ def build_compliance_register_pdf(
 
     # ---- per-row derived values -----------------------------------------
     def other_earn(r: Dict[str, Any]) -> float:
+        # Iter 401 (user check) — RESIDUAL (gross − basic − hra − conv) so
+        # the EARNINGS columns always tally to the TOTAL column. Daily-rated
+        # rows keep the medical/special/other value inside gross while the
+        # earned heads stay 0, so summing the heads under-reported "Other".
+        g = float(r.get("gross_paid") or 0)
+        if g:
+            return g - (float(r.get("basic") or 0) + float(r.get("hra") or 0)
+                        + float(r.get("conveyance") or 0))
         return (float(r.get("medical") or 0) + float(r.get("special") or 0)
                 + float(r.get("others") or 0) + float(r.get("ot_pay") or 0))
 
@@ -1156,6 +1164,12 @@ def build_compliance_register_pdf(
         return (float(r.get("other_deduction") or 0)
                 + float(r.get("master_deduction") or 0)
                 + float(r.get("pt") or 0))
+
+    # Iter 401 — show the Other columns whenever any row actually carries a
+    # value there, even if the head is not in the firm's enabled allowances
+    # (daily-rated firms keep medical/special only on the master).
+    show_oth_m = show_oth_m or any(abs(other_master(r)) >= 0.5 for r in rows)
+    show_oth_e = show_oth_e or any(abs(other_earn(r)) >= 0.5 for r in rows)
 
     # ---- header (drawn on every page) ------------------------------------
     W, H = landscape(A4)
@@ -1721,7 +1735,14 @@ def build_compliance_register_pdf_v2(
         return (_edv2 is None) or (k in _edv2)
 
     _show_oth2 = (any(_has_a2(k) for k in ("medical", "special", "others"))
-                  or any(float(r.get("ot_pay") or 0) for r in rows))
+                  or any(float(r.get("ot_pay") or 0) for r in rows)
+                  # Iter 401 — also when a residual Other exists (daily-rated
+                  # firms carry medical/special inside gross only).
+                  or any(abs(float(r.get("gross_paid") or 0)
+                             - float(r.get("basic") or 0)
+                             - float(r.get("hra") or 0)
+                             - float(r.get("conveyance") or 0)) >= 0.5
+                         for r in rows))
     _col_ok = {
         "hra": _has_a2("hra"), "conv": _has_a2("conveyance"),
         "other_earn": _show_oth2, "pf": _has_d2("pf"),
@@ -1735,10 +1756,17 @@ def build_compliance_register_pdf_v2(
     data: List[List[Any]] = [header]
 
     def other_earn(r):
-        # Iter 273 (user directive) — earning heads come from the MASTER
-        # (full-month) salary structure, not the pro-rated earned values.
-        return (float(r.get("medical_master") or 0) + float(r.get("special_master") or 0)
-                + float(r.get("others_master") or 0))
+        # Iter 401 (user check) — RESIDUAL (gross − basic − hra − conv) so
+        # Basic + HRA + Conv + Other always equals GROSS. The old value used
+        # the MASTER medical/special/other heads (Iter 273), which mixed
+        # full-month masters with the pro-rated earned Basic/HRA/Conv
+        # (Iter 329) and never tallied for part-month / daily-rated rows.
+        g = float(r.get("gross_paid") or 0)
+        if g:
+            return g - (float(r.get("basic") or 0) + float(r.get("hra") or 0)
+                        + float(r.get("conveyance") or 0))
+        return (float(r.get("medical") or 0) + float(r.get("special") or 0)
+                + float(r.get("others") or 0) + float(r.get("ot_pay") or 0))
 
     def other_ded(r):
         return (float(r.get("other_deduction") or 0)
@@ -1820,8 +1848,9 @@ def build_compliance_register_pdf_v2(
         tot["sal"] += float(r.get("basic") or 0)
         tot["hra_e"] += float(r.get("hra") or 0)
         tot["conv_e"] += float(r.get("conveyance") or 0)
-        tot["oth_e"] += (float(r.get("medical") or 0) + float(r.get("special") or 0)
-                         + float(r.get("others") or 0) + float(r.get("ot_pay") or 0))
+        # Iter 401 — use the same residual Other as the table column so the
+        # summary tallies: Salary + HRA + Conv + Other = Gross.
+        tot["oth_e"] += oth_e
         _gross_r = float(r.get("gross_paid") or 0)
         if r.get("pf_applicable"):
             tot["pf_wages"] += float(r.get("pf_wages") or 0)

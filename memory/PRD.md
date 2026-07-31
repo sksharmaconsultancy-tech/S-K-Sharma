@@ -2838,3 +2838,30 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   dismiss buttons; applied to ecr_test flow, sign-in modal strip and the
   generic login flow, THEN autofill runs. Compile-checked; served
   version 7 verified.
+- Iter 400 (user): Runner v9 — EPFO alert popup fix (real root cause: click
+  fired mid fade-in animation and was intercepted). New logic: wait for
+  document.readyState complete → poll up to 25s for a VISIBLE modal → click
+  OK/Close with JS-click fallback → verify modal gone → strip stuck
+  backdrops → THEN autofill (Angular-safe send_keys typing in generic path).
+  Also ChromeDriver AUTO-UPDATE self-heal ladder in _fresh_driver()
+  (retry → wipe ~/.cache/selenium + pip -U selenium → SE_FORCE_BROWSER_DOWNLOAD).
+  E2E-verified in-container with real Chrome + mock EPFO page (delayed
+  animated modal): popup clicked, modal gone, creds filled. Runner is
+  self-updating; user only restarts run_listener.bat. User confirmed to
+  KEEP the PC-runner architecture (Selenium→ChromeDriver→Chrome on user PC).
+- Iter 400 (user): Reports Center column alignment — RegisterTable header
+  first cell was 108px vs 170px data cell (st.first); added st.thFirst so
+  ALL register-style report headings align. Screenshot-verified.
+- Iter 401 (user check "Salary Report PDF/Excel Format 1 & 2"): register
+  earnings "Other" column in BOTH PDF formats is now the RESIDUAL
+  (gross_paid − basic − hra − conv) so rows ALWAYS tally to GROSS (daily-
+  rated rows keep medical/special inside gross with earned heads at 0).
+  F1 master OTHER column + earnings OTHER now also show when heads exist
+  only on the master (show_oth_m/show_oth_e extended). v2 summary
+  tot["oth_e"] uses same residual. Excel: _NUMERIC_COLS extended (basic,
+  hra, conveyance, monthly_gross, gross_paid, pf_wages, stat_wage_base,
+  vpf_amount, medical, special, others, other_deduction, master_deduction,
+  pf_employer_total) so TOTAL row sums them; _NO_TOTAL_COLS skips rate/
+  month_days. Verified on run csrun_630128ccfd1d (127 emps): rows and
+  summary tally (105,002), Excel totals correct.
+- Deploy: /app/deploy_vps_iter401.sh served via temp-code-bundle kind=script.
