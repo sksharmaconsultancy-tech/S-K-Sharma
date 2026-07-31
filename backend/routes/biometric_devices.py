@@ -237,7 +237,7 @@ async def _ingest_attlog_line(
         return True, "duplicate_ignored"
     # Iter 175 — contractual employees: machine punches must be approved
     # by the company first (Contractor Punch approvals).
-    from server import apply_contractual_gate
+    from routes.attendance_core import apply_contractual_gate
     await apply_contractual_gate(record)
     # Iter 250 — attach a parked machine photo (ATTPHOTO that arrived
     # before this ATTLOG line) to the new punch record.

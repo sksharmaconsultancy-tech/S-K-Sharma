@@ -19,14 +19,47 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import Response
+from pydantic import BaseModel
 
 from server import (  # noqa: E402
     db,
     get_user_from_token,
     require_role,
     now_iso,
-    MessageCreate,
 )
+
+
+class MessageAttachment(BaseModel):
+    """Iter 74 — single attachment on an in-app message.
+
+    ``base64`` may include the ``data:...;base64,`` prefix (the API
+    strips it before storage). Server enforces max size ≤ 5 MB and
+    max 3 attachments per message.
+    """
+    filename: str
+    mime_type: str
+    base64: str
+    size_bytes: Optional[int] = None
+
+
+class MessageCreate(BaseModel):
+    subject: str
+    body: str
+    # Choose one of the following two recipient modes:
+    broadcast: bool = False  # send to all employees in the caller's scope
+    recipient_user_ids: Optional[List[str]] = None  # explicit multi-select
+    # Optional company override for super_admin. Ignored for company_admin.
+    company_id: Optional[str] = None
+    # Iter 74 — optional attachments (images / PDF), max 3 × 5 MB each.
+    attachments: Optional[List[MessageAttachment]] = None
+
+
+
+
+# ---------------------------------------------------------------------------
+# Payslips
+# ---------------------------------------------------------------------------
+
 
 router = APIRouter(prefix="/api", tags=["messages"])
 

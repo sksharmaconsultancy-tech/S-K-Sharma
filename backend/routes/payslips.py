@@ -27,6 +27,8 @@ from server import (  # noqa: E402
     require_role,
     now_iso,
     PayslipCreate,
+)
+from shared.dates import (  # noqa: E402
     _month_is_complete,
     _payslip_is_processed,
 )

@@ -12,8 +12,6 @@ from pydantic import BaseModel
 
 from server import (  # noqa: E402
     _compute_monthly_grid_data,
-    _month_is_after_exit,
-    _month_is_before_doj,
     _resolve_group_employee_ids,
     _shift_duration_hours,
     db,
@@ -26,6 +24,11 @@ from server import (  # noqa: E402
 )
 from routes.compliance_salary_runs import (  # noqa: E402
     _require_firm_salary_permission,
+)
+
+from shared.dates import (  # noqa: E402
+    _month_is_after_exit,
+    _month_is_before_doj,
 )
 
 router = APIRouter(prefix="/api")

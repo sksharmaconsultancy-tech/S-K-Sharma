@@ -29,6 +29,17 @@ import asyncio
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
+# Iter 399 — pure date/payroll-month helpers live in shared/dates.py.
+from shared.dates import (  # noqa: E402
+    _employee_inactive_for_report,  # noqa: F401
+    _last_completed_month,  # noqa: F401
+    _month_is_after_exit,  # noqa: F401
+    _month_is_before_doj,  # noqa: F401
+    _month_is_complete,  # noqa: F401
+    _parse_any_date,  # noqa: F401
+    _payslip_is_processed,  # noqa: F401
+)
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("labourlaw")
 
@@ -14100,29 +14111,26 @@ app.include_router(api)
 # `APIRouter(prefix="/api")` and pulls shared helpers (`db`,
 # `get_user_from_token`, `require_role`) from this file by name — safe
 # because those names are already bound by the time we get here.
-# Iter 398 — Attendance core (punch/roster/admin attendance + payroll
-# compute engine) extracted. Imported FIRST because the shared helpers
-# below must be bound in this namespace before the other route modules
-# (compliance_salary_runs, actual_salary_process, employees_admin, …)
-# import them via `from server import …`.
+# Iter 398/399 — Attendance split into three modules + shared/dates.py.
+# Only the helpers server.py itself still calls are imported back here;
+# every other route module now imports from shared.dates / the modules
+# directly.
 from routes.attendance_core import (  # noqa: E402
     router as attendance_core_router,
-    AUTO_CLOSE_TICK_SECONDS,  # noqa: F401
-    MessageCreate,  # noqa: F401
-    _auto_close_open_shifts,  # noqa: F401
-    _compute_payroll_run,  # noqa: F401
-    _employee_inactive_for_report,  # noqa: F401
-    _month_is_after_exit,  # noqa: F401
-    _month_is_before_doj,  # noqa: F401
-    _month_is_complete,  # noqa: F401
     _onboarding_login_gate,  # noqa: F401
-    _onboarding_payroll_exclusion,  # noqa: F401
-    _parse_any_date,  # noqa: F401
-    _payslip_is_processed,  # noqa: F401
-    apply_contractual_gate,  # noqa: F401
-    punch,  # noqa: F401
 )
 app.include_router(attendance_core_router)
+from routes.attendance_admin_core import (  # noqa: E402
+    router as attendance_admin_core_router,
+    AUTO_CLOSE_TICK_SECONDS,  # noqa: F401
+    _auto_close_open_shifts,  # noqa: F401
+)
+app.include_router(attendance_admin_core_router)
+from routes.payroll_core import (  # noqa: E402
+    router as payroll_core_router,
+    _compute_payroll_run,  # noqa: F401
+)
+app.include_router(payroll_core_router)
 from routes.reports_extra import router as reports_extra_router  # noqa: E402
 from routes.tickets import router as tickets_router  # noqa: E402
 from routes.notifications import router as notifications_router  # noqa: E402

@@ -15,9 +15,6 @@ from pydantic import BaseModel
 
 from server import (  # noqa: E402
     _compute_monthly_grid_data,
-    _month_is_after_exit,
-    _month_is_before_doj,
-    _onboarding_payroll_exclusion,
     _policy2_biometric_stats,
     _sort_export_rows,
     db,
@@ -29,6 +26,12 @@ from server import (  # noqa: E402
     require_role,
     require_super_admin_strict,
 )
+
+from shared.dates import (  # noqa: E402
+    _month_is_after_exit,
+    _month_is_before_doj,
+)
+from routes.attendance_core import _onboarding_payroll_exclusion  # noqa: E402
 
 router = APIRouter(prefix="/api")
 api = router  # endpoints below keep their original @api.* decorators

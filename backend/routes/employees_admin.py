@@ -19,7 +19,6 @@ from server import (  # noqa: E402
     _hash_pin,
     _next_employee_code,
     _normalise_phone,
-    _parse_any_date,
     build_compliance_structure,
     compliance_gross_total,
     db,
@@ -28,6 +27,8 @@ from server import (  # noqa: E402
     now_iso,
     require_role,
 )
+
+from shared.dates import _parse_any_date  # noqa: E402
 
 router = APIRouter(prefix="/api")
 api = router

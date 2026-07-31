@@ -1,0 +1,32 @@
+{
+  "summary": "Iter 399 backend regression — attendance_core / attendance_admin_core / payroll_core / shared.dates PURE REFACTOR verified. 29/29 pytest tests PASSED (1 skipped — DB-side message cleanup fixture couldn't read backend env in the pytest ctx; handled out-of-band with the mongo cleanup script — verified 0 residual test records). Coverage: (A) EMPLOYEE token flow (riskiest): TEST50/PIN123456 login → /attendance/today, /attendance/my-month?month=2026-07, /attendance/punch (clean policy handling, NO 500), /salary/monthly (payroll_core moved) 200, /me/payslips/year-summary 200 with totals+history+window_months, /me/id-card 200 with qr_payload='SKSCO|...'. (B) ADMIN attendance: today/roster+date/open-shifts/present-not-punched/history?limit=5/day-status(from_date+to_date) all 200. (C) MANUAL PUNCH cycle: POST /admin/attendance/manual-punch (kind=in, at=2026-07-22T09:15:00+05:30) → 200, verified in history, DELETE /admin/attendance/{id}?reason=... → 200, 0 iter399 records remain. (D) PAYROLL CORE admin: /admin/employees?company_id=cmp_527fecdd7c 200 with 125 employees, /admin/employee-types 200, /admin/payroll?company_id&month=2026-07 200 with 'payslips' key, /admin/payroll/run?year=2026&month=7&company_id=... 200 with rows+totals+year+month (exercises _compute_payroll_run engine). (E) DOWNSTREAM IMPORTS intact: /api/payslips (shared.dates helpers) 200, /api/biometric/devices (apply_contractual_gate re-import from routes.attendance_core) 200, /api/admin/compliance-salary-runs 200, POST /api/messages + GET /api/messages/sent full cycle passed (MessageCreate moved into routes/messages.py works — sent message found in outbox), employee create+DELETE cycle 200 (employees_admin uses shared.dates._parse_any_date). (F) ONBOARDING GATE + AUTO-CLOSE: admin-password-login 200 (routes through _onboarding_login_gate); backend log post-startup scan: ZERO NameError / ImportError. (G) openapi paths = 698 EXACTLY (matches problem statement). CLEANUP: 1 test message, 0 test punches, 0 test employees remaining (verified via direct mongo count).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter399_split_refactor.py",
+    "/app/test_reports/pytest/iter399.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Iter 399 split is CLEAN: attendance_core (1,265) + attendance_admin_core (1,507) + payroll_core (744) — all now well under the 2k-line soft cap. shared/dates.py is the right pattern; the iter-398 concern about server.py-as-import-hub is partially addressed. Recommend continuing that migration by moving _onboarding_login_gate + _auto_close_open_shifts + _compute_payroll_run into shared modules so nothing needs to import from server.",
+    "server.py is still ~14k lines and remains an import hub (routes/payroll_core.py still does `from server import (...)` to grab db, get_user_from_token, require_role, now_iso, plus _compute_payroll_run at bottom re-export). Long-term, move common infra (auth deps + db handle) into shared/auth.py and shared/db.py so downstream routers stop reaching back into server.",
+    "/api/salary/monthly declares no `month` query param (payroll_core.py:47) but the problem statement mentioned '?month=2026-06'. The extra query is silently ignored (endpoint always returns last 6 months) — not a bug but worth aligning either the API doc or the caller. If per-month lookup is needed, add a `month: Optional[str] = None` param."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter399_split_refactor.py (created)"
+  ],
+  "success_rate": {"backend": "100% (29/29 executed; 1 optional cleanup skipped, handled out-of-band)", "frontend": "N/A (skipped by request)"},
+  "seed_data_creation": "None persisted. During run: 1 manual attendance record on 2026-07-22 for TEST50 — deleted in-test. 1 test employee 'TEST_ITER399 EMP' — deleted in-test. 1 test message 'TEST_iter399' — deleted via mongo cleanup script. Post-run mongo counts confirmed 0 leftovers for all three.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reuse /app/backend/tests/test_iter399_split_refactor.py for future regression. Payload-shape gotchas encoded: (1) /admin/attendance/manual-punch body = {user_id, kind, at, reason}; DELETE takes ?reason=... QUERY param. (2) /admin/attendance/day-status/{cid} requires BOTH from_date AND to_date query params (422 otherwise). (3) /salary/monthly endpoint ignores any month query — always returns last 6 months. (4) /admin/payroll/run response includes {year, month, rows, totals, ...}. (5) POST /messages body = MessageCreate {subject, body, recipient_user_ids OR broadcast, optional company_id, optional attachments}. (6) Employee login: {login_id:'TEST50', pin:'123456'} → /api/auth/pin-login. (7) openapi.json only reachable via http://localhost:8001/openapi.json (public ingress blocks it). (8) There is no public DELETE /messages/{id} — use direct mongo cleanup for messages. Env: MONGO_URL + DB_NAME are in /app/backend/.env, load via `from dotenv import load_dotenv; load_dotenv('/app/backend/.env')` before AsyncIOMotorClient.",
+  "rca_of_issue": "N/A — no backend regressions detected. The Iter 399 split is byte-clean: every moved endpoint responds correctly, every downstream module (payslips/biometric/messages/compliance_salary_runs/employees_admin) that now imports from shared.dates or routes.attendance_core continues to work, backend log shows no post-startup NameError/ImportError, and openapi path count matches exactly (698). Only cosmetic note: one test (message DB cleanup) skipped because Motor client couldn't pick up MONGO_URL in the pytest process — fixed post-run via a direct cleanup script; not a code issue."
+}
