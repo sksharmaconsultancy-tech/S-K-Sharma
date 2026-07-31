@@ -1,0 +1,32 @@
+{
+  "summary": "Iter 398 backend regression — Attendance core cluster PURE REFACTOR verified. 26/26 pytest cases PASSED against the public preview URL. Covered (A) EMPLOYEE punch flow — the riskiest moved code: login as TEST50/PIN123456 via /auth/pin-login (login_id path), GET /attendance/today, /first-punch-status, /my-month?month=2026-07, /history, and POST /attendance/punch (no 500 — clean policy/geofence handling); (B) admin attendance endpoints: /today, /roster (with date), /day-status/{cid}?from_date&to_date (200) + 422 when from_date missing, /open-shifts, /present-not-punched, /history?limit=5; (C) FULL manual-punch cycle: POST /admin/attendance/manual-punch (kind=in, at=2026-07-20T09:15:00+05:30, reason=TEST_iter398) → 200, verified in history, then DELETE /admin/attendance/{record_id}?reason=... → 200, verified 0 records remain post-cleanup; (D) roster/mark cycle: POST /roster/mark {marks:[{user_id,action:absent}]} → 200, cleanup via DELETE; (E) payroll compute engine: GET /admin/attendance/monthly-grid/{cid}/{month} → 200 (exercises _compute_payroll_run), POST /admin/payroll/email-report → clean handled response, NO NameError/ImportError; (F) downstream module imports intact — /api/payslips (uses _month_is_complete/_payslip_is_processed) 200, /api/biometric/devices (uses apply_contractual_gate) 200, /api/messages/inbox (uses MessageCreate) 200; (G) global regression — openapi paths=698 (exact match), /admin/compliance-salary-runs 200, employee create+DELETE cycle 200, backend log scan post-startup shows ZERO NameError/ImportError. Cleanup: all TEST_iter398 records deleted (verified via history query — only pre-existing import:audit226x records remain on 2026-07-20). No prod compliance runs touched.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter398_attendance_core_refactor.py",
+    "/app/test_reports/pytest/iter398.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routes/attendance_core.py is 3,576 lines — largest single route module in the codebase. Consider splitting into sub-modules on the next refactor pass: (a) employee punch flow (punch/today/history/my-month) ~1,200 lines; (b) admin ops (roster/manual-punch/approve/audit) ~1,400 lines; (c) payroll compute engine (_compute_payroll_run + helpers) ~700 lines. Same file-size concern flagged for employees_admin.py in Iter 397.",
+    "server.py still 14,424 lines. The bottom re-export block for shared helpers (_parse_any_date, _month_is_after_exit, _month_is_before_doj, _month_is_complete, _payslip_is_processed, _onboarding_payroll_exclusion, apply_contractual_gate, MessageCreate, punch) is fragile — any additional module that imports 'from server import X' at import-time will circular-fault if X isn't re-exported. Consider moving these helpers to a dedicated /app/backend/shared/ package so no module ever needs to import from server.",
+    "/api/admin/attendance/roster/mark ignores any payload-supplied date and hard-codes today (line 1957 of attendance_core.py: `today = datetime.now(timezone.utc).strftime('%Y-%m-%d')`). If the intent is 'mark today's roster only' that's fine, but the endpoint name doesn't suggest that restriction. Consider either accepting an optional `date` on RosterMarkRequest or renaming to /roster/mark-today."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter398_attendance_core_refactor.py (created)"
+  ],
+  "success_rate": {"backend": "100% (26/26)", "frontend": "N/A (skipped by request)"},
+  "seed_data_creation": "None persisted. During the run: 1 manual punch (att_*) on 2026-07-20 for TEST50 user_44cd6f561da0 — deleted in-test. 1 roster-absent record for today — deleted in-test. 1 test employee 'TEST_ITER398 EMP' — deleted in-test. Post-run verification confirms 0 leftovers.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reuse /app/backend/tests/test_iter398_attendance_core_refactor.py for future regression on the attendance core cluster. Key gotchas encoded in the tests: (1) /admin/attendance/manual-punch schema is {user_id, kind, at, reason} (NOT date/in_time/out_time); (2) DELETE /admin/attendance/{record_id} requires ?reason=... QUERY param (not body); (3) /admin/attendance/roster/mark schema is {marks:[{user_id, action}], note?} and action must be 'in'|'out'|'absent' (NOT status/weekoff); the endpoint hard-codes TODAY. (4) /admin/attendance/day-status/{cid} needs BOTH from_date & to_date query params or returns 422. (5) Employee login for TEST50 is via {login_id:'TEST50', pin:'123456'} to /auth/pin-login. openapi is only reachable via http://localhost:8001/openapi.json (not through the public ingress).",
+  "rca_of_issue": "N/A — no backend regressions. Three initial failures were pure test-harness payload-shape mistakes (documented above in context_for_next_testing_agent) — fixed in-file, all 26/26 green on rerun. The refactor is clean: no NameError/ImportError, 698 openapi paths (matches problem statement exactly), all shared helpers correctly re-exported from server.py so payslips/biometric/messages modules continue to work unchanged."
+}
