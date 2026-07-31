@@ -451,6 +451,9 @@ async def _compute_compliance_run(
             firm_esic_enabled=_ff["esic"],
             firm_pt={"state": _fcp.get("pt_state"), "slabs": _fcp.get("pt_slabs")},
         )
+        # Iter 406 — remember the stats the FINAL row was computed with so
+        # the Freeze block can re-compute statutory on the allocated gross.
+        _stats_final = stats
         # Iter 337 (user request) — DAYS CALCULATION METHOD (Firm Master →
         # Payroll Settings). For imported (Freeze) runs the Compliance Days
         # can be DERIVED from the imported gross:
@@ -562,6 +565,7 @@ async def _compute_compliance_run(
                         firm_pt={"state": _fcp.get("pt_state"),
                                  "slabs": _fcp.get("pt_slabs")},
                     )
+                    _stats_final = _st2
                     row["attendance_days"] = round(
                         min(float(_am.get("present_days") or 0),
                             float(month_days)), 2)
@@ -764,42 +768,85 @@ async def _compute_compliance_run(
                 row["difference_allocation_head"] = ""
                 # Iter 337 — validation status for the grid (✓ Matched).
                 row["freeze_status"] = "matched" if abs(_diff_g) < 1 else "diff"
-                if _diff_g > 0:
+                if abs(_diff_g) > 0.004:
+                    # Iter 406 (user rule — "Gross Earning includes OT") —
+                    # the difference is allocated INSIDE the compute
+                    # (ot_pay_extra / other_allowance_extra) and the row is
+                    # RE-COMPUTED, so PF / ESIC / PT wage bases see the FULL
+                    # Gross Earning INCLUDING OT. Previously the diff was
+                    # bolted on AFTER the statutory calc, so PF/ESIC never
+                    # saw the freeze OT.
                     _frz_ot = (firm_stat_flags.get(emp.get("company_id"))
                                or {}).get("ot_allowed")
-                    if _frz_ot:
-                        row["ot_pay"] = round(
-                            float(row.get("ot_pay") or 0) + _diff_g, 2)
-                        row["difference_allocation_head"] = "Overtime"
+                    _st3 = dict(_stats_final)
+                    if _diff_g > 0:
+                        if _frz_ot:
+                            _st3["ot_pay_extra"] = _diff_g
+                            row["difference_allocation_head"] = "Overtime"
+                        else:
+                            _st3["other_allowance_extra"] = _diff_g
+                            row["difference_allocation_head"] = "Other Allowances"
                     else:
-                        row["others"] = round(
-                            float(row.get("others") or 0) + _diff_g, 2)
-                        row["monthly_gross"] = round(
-                            float(row.get("monthly_gross") or 0) + _diff_g, 2)
-                        row["difference_allocation_head"] = "Other Allowances"
+                        # Iter 344 (user request) — EXACT match with the
+                        # Freeze: trim from OT first, then Other Allowances.
+                        _need = -_diff_g
+                        _cut_ot = round(min(float(row.get("ot_pay") or 0), _need), 2)
+                        _rem = round(_need - _cut_ot, 2)
+                        if _cut_ot:
+                            _st3["ot_pay_extra"] = -_cut_ot
+                        if _rem:
+                            _st3["other_allowance_extra"] = -_rem
+                        row["difference_allocation_head"] = "Trimmed"
+                    _row2 = compute_compliance_row(
+                        emp, merged_pol, int(month_days), _st3,
+                        company_structure_pct=payload.structure_pct,
+                        statutory_cfg=effective_statutory,
+                        firm_pf_enabled=_ff["pf"],
+                        firm_esic_enabled=_ff["esic"],
+                        firm_pt={"state": _fcp.get("pt_state"),
+                                 "slabs": _fcp.get("pt_slabs")},
+                    )
+                    # Merge the recomputed earnings + statutory figures into
+                    # the row (sheet TDS / Other Deduction / deduction masks
+                    # applied earlier stay untouched).
+                    for _k in ("basic", "hra", "conveyance", "medical",
+                               "special", "others", "ot_pay",
+                               "monthly_gross", "gross_paid",
+                               "stat_wage_base", "pf_wages", "pf_employee",
+                               "pf_employer_epf", "pf_employer_eps",
+                               "pf_employer_total", "vpf_amount",
+                               "esic_wage_base", "esic_employee",
+                               "esic_employer", "calc_note"):
+                        if _k in _row2:
+                            row[_k] = _row2[_k]
+                    # PT follows the new gross unless the firm's deduction
+                    # mask switched it OFF earlier.
+                    if not (_ded_set is not None and "pt" not in _ded_set):
+                        row["pt"] = _row2.get("pt", row.get("pt"))
+                    # Re-apply the firm's allowance mask: heads zeroed
+                    # earlier stay zero; an Others-routed freeze diff
+                    # survives even a masked-off Others head (unchanged
+                    # behaviour from the old post-compute allocation).
+                    if enabled_set is not None:
+                        for _head in ("hra", "conveyance", "medical", "special"):
+                            if _head not in enabled_set:
+                                row[_head] = 0.0
+                        if "others" not in enabled_set:
+                            row["others"] = round(max(
+                                0.0, float(_st3.get("other_allowance_extra") or 0)), 2)
+                        row["monthly_gross"] = round(sum(
+                            float(row.get(_h) or 0)
+                            for _h in ("basic", "hra", "conveyance",
+                                       "medical", "special", "others")), 2)
                     row["gross_paid"] = _imp_g
-                    row["net"] = round(
-                        _imp_g - float(row.get("total_deduction") or 0), 2)
-                elif _diff_g < 0:
-                    # Iter 344 (user request) — EXACT match with the Freeze:
-                    # final Gross − Freeze must be 0. A calculated gross
-                    # ABOVE the imported figure is trimmed from OT first,
-                    # then Other Allowances.
-                    _need = -_diff_g
-                    _cut_ot = min(float(row.get("ot_pay") or 0), _need)
-                    if _cut_ot:
-                        row["ot_pay"] = round(
-                            float(row.get("ot_pay") or 0) - _cut_ot, 2)
-                    _rem = round(_need - _cut_ot, 2)
-                    if _rem:
-                        row["others"] = round(
-                            float(row.get("others") or 0) - _rem, 2)
-                        row["monthly_gross"] = round(
-                            float(row.get("monthly_gross") or 0) - _rem, 2)
-                    row["difference_allocation_head"] = "Trimmed"
-                    row["gross_paid"] = _imp_g
-                    row["net"] = round(
-                        _imp_g - float(row.get("total_deduction") or 0), 2)
+                    row["total_deduction"] = round(
+                        float(row.get("pf_employee") or 0)
+                        + float(row.get("esic_employee") or 0)
+                        + float(row.get("pt") or 0)
+                        + float(row.get("tds") or 0)
+                        + float(row.get("other_deduction") or 0)
+                        + float(row.get("master_deduction") or 0), 2)
+                    row["net"] = round(_imp_g - row["total_deduction"], 2)
         # Iter 340 (user request) — OT HOURS derived from the OT AMOUNT:
         # OT Hrs = OT Amt ÷ (per-hour rate × OT multiplier). Per-hour rate
         # follows Firm Master "OT Calculation On" (basic | gross):

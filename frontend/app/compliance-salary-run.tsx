@@ -1430,6 +1430,58 @@ export default function ComplianceSalaryRunScreen() {
           // Gross Paid = Monthly Gross (heads) + OT Amount.
           next.gross_paid = Math.round((next.monthly_gross || 0) + value);
         }
+        // Iter 406 (user rule — "Gross Earning includes OT") — editing the
+        // OT Amt / Others also refreshes the PF & ESIC wage bases on the
+        // FULL Gross Earning including OT (mirrors utils/compliance_salary.py).
+        if (key === "ot_pay" || key === "others") {
+          const stat = ((prev as any).statutory_effective || (prev as any).statutory_cfg || {}) as any;
+          const floorPct = Number(stat.stat_wage_floor_pct ?? 50) / 100;
+          const wageRuleOn = stat.wage_definition_rule_enabled !== false;
+          const pfCap = Number(stat.pf_wage_cap ?? 15000);
+          const grossEarn = Number(next.gross_paid || 0);
+          const monthDays2 = Math.max(1, Number((prev as any).month_days) || 30);
+          const ratio2 = Math.min(1, (Number(next.present_days) || 0) / monthDays2);
+          const pfBasicFull = Number(next.pf_basic || 0);
+          const pfOn = (next.pf_eligible !== undefined
+            ? next.pf_eligible !== false : next.pf_applicable !== false)
+            && pfBasicFull > 0 && grossEarn > 0;
+          if (pfOn) {
+            const pfBasicPro = next.salary_mode === "monthly" ? pfBasicFull * ratio2 : pfBasicFull;
+            const pfBase = pfBasicFull < pfCap && wageRuleOn
+              ? Math.max(pfBasicPro, grossEarn * floorPct) : pfBasicPro;
+            const pfWages = next.intl_worker ? pfBase : Math.min(pfBase, pfCap);
+            const pfEmpRate = Number(stat.pf_percent_employee ?? 12) / 100;
+            const pfErEpfRate = Number(stat.pf_percent_employer_epf ?? 3.67) / 100;
+            const pfErEpsRate = Number(stat.pf_percent_employer_eps ?? 8.33) / 100;
+            let epf = pfWages * pfErEpfRate;
+            let eps = (next.higher_pension ? pfBase : pfWages) * pfErEpsRate;
+            if (next.eps_disabled) { epf += pfWages * pfErEpsRate; eps = 0; }
+            next.pf_wages = Math.round(pfWages);
+            next.pf_employee = Math.round(pfWages * pfEmpRate);
+            next.pf_employer_epf = Math.round(epf);
+            next.pf_employer_eps = Math.round(eps);
+            next.pf_employer_total = next.pf_employer_epf + next.pf_employer_eps;
+            next.stat_wage_base = Math.round(Math.max(
+              Number(next.basic || 0), grossEarn * floorPct));
+          }
+          const esiOn = (next.esic_eligible !== undefined
+            ? next.esic_eligible !== false : next.esic_applicable !== false)
+            && grossEarn > 0;
+          if (esiOn && Number(next.esic_employee || 0) >= 0 && next.esic_applicable !== false) {
+            const hm = stat.head_mapping || null;
+            const esicHeadOn = (k: string) => !hm || (hm[k] || {}).esic !== false;
+            const esiBase = wageRuleOn
+              ? Math.max(Number(next.basic || 0), grossEarn * floorPct)
+              : (["basic", "hra", "conveyance", "medical", "special", "others"] as const)
+                  .reduce((n, k) => n + (esicHeadOn(k) ? Number((next as any)[k] || 0) : 0), 0)
+                + (esicHeadOn("ot") ? Number(next.ot_pay || 0) : 0);
+            const esiEmpRate = Number(stat.esic_percent_employee ?? 0.75) / 100;
+            const esiErRate = Number(stat.esic_percent_employer ?? 3.25) / 100;
+            next.esic_wage_base = Math.round(esiBase);
+            next.esic_employee = Math.ceil(esiBase * esiEmpRate);
+            next.esic_employer = Math.ceil(esiBase * esiErRate);
+          }
+        }
         const dedTotal = (next.pf_employee || 0) + (next.esic_employee || 0)
           + (next.pt || 0) + (next.tds || 0) + (next.other_deduction || 0);
         next.total_deduction = Math.round(dedTotal);
@@ -1447,7 +1499,10 @@ export default function ComplianceSalaryRunScreen() {
       // Keep the totals strip in sync for the edited keys.
       const totals = { ...(prev.totals || {}) } as Record<string, number>;
       for (const k of ["others", "other_deduction", "ot_pay", "tds",
-                       "monthly_gross", "gross_paid", "total_deduction", "net"]) {
+                       "monthly_gross", "gross_paid", "total_deduction", "net",
+                       "pf_wages", "pf_employee", "pf_employer_epf",
+                       "pf_employer_eps", "pf_employer_total",
+                       "esic_wage_base", "esic_employee", "esic_employer"]) {
         totals[k] = Math.round(rows.reduce((s, r) => s + (Number((r as any)[k]) || 0), 0));
       }
       return { ...prev, rows, totals: totals as any };

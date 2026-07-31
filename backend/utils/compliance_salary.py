@@ -476,6 +476,11 @@ def compute_compliance_row(
         per_hour_rate = _safe_div(rate, max(1, month_days) * full_day_hours)
     ot_multiplier = _num(policy.get("ot_multiplier"), 1.5)
     ot_pay = ot_hours * per_hour_rate * ot_multiplier
+    # Iter 406 (user rule — "Gross Earning includes OT") — freeze-import
+    # difference allocated to OVERTIME lands INSIDE the compute so the
+    # PF / ESIC / PT wage bases are calculated on the FULL Gross Earning
+    # including OT (previously it was bolted on after the statutory calc).
+    ot_pay += _num(stats.get("ot_pay_extra"), 0.0)
 
     # ---- Structure split ----
     # Iter 126g — explicit "Compliance Basic Salary" from the Employee
@@ -561,6 +566,13 @@ def compute_compliance_row(
     if effective_present <= 0 and duty_hours <= 0 and ot_pay <= 0:
         basic = hra = conveyance = medical = special = others = 0.0
         monthly_gross = 0.0
+
+    # Iter 406 (user rule) — freeze-import difference allocated to OTHER
+    # ALLOWANCES also lands inside the compute (see ot_pay_extra above).
+    _oth_extra = _num(stats.get("other_allowance_extra"), 0.0)
+    if _oth_extra:
+        others += _oth_extra
+        monthly_gross = round(monthly_gross + _oth_extra, 2)
 
     # Gross for statutory purposes:
     # Under new labour code (per client policy), the WAGE BASE for both

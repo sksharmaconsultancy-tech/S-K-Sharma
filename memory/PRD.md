@@ -2899,3 +2899,15 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   fetch stalled) and downloads `<Firm>-<type>-QR.png`. Playwright-verified
   actual download (City-Care-Hospital-employee-QR.png).
 - Deploy: /app/deploy_vps_iter405.sh served via temp-code-bundle kind=script.
+- Iter 406 (user rule "Gross Earning includes OT" for PF/ESIC):
+  compute_compliance_row now accepts stats.ot_pay_extra /
+  stats.other_allowance_extra; the Freeze block in
+  routes/compliance_salary_runs.py re-computes the row with the diff
+  allocated INSIDE the compute (merging earnings+statutory fields back,
+  preserving sheet TDS/other_deduction/deduction+allowance masks; single
+  path handles +diff Overtime/Other Allowances and -diff Trim). Frontend
+  grid updateRowField(ot_pay/others) now refreshes PF wages/amounts +
+  ESIC base/amounts live (mirrors backend); totals strip extended.
+  E2E verified on a fresh freeze run (RAJENDRA: swb 10,500 = 50%x21,000
+  incl OT 912; ESIC 79); full-run 0 mismatches; freeze test suite passed.
+- Deploy: /app/deploy_vps_iter406.sh served via temp-code-bundle kind=script.
