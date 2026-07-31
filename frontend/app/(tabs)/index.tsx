@@ -7,6 +7,9 @@ import {
   Pressable,
   RefreshControl,
   ActivityIndicator,
+  Alert,
+  Linking,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
@@ -202,6 +205,45 @@ export default function Dashboard() {
     }
   });
 
+  // Iter 415 (user request) — GPS ON by default for the Employee PWA:
+  // if location permission isn't granted yet, show a one-tap "Enable GPS"
+  // banner on the dashboard so the permission is set right after install,
+  // not at the first punch.
+  const [gpsNeeded, setGpsNeeded] = useState(false);
+  const enableGps = useCallback(async () => {
+    try {
+      const req = await Location.requestForegroundPermissionsAsync();
+      if (req.status === "granted") {
+        setGpsNeeded(false);
+        const l = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        await api("/me/location-ping", {
+          method: "POST",
+          body: { latitude: l.coords.latitude, longitude: l.coords.longitude },
+        }).catch(() => {});
+        return;
+      }
+      if (!req.canAskAgain) {
+        if (Platform.OS === "web") {
+          Alert.alert(
+            "Enable location in browser settings",
+            "Location is blocked for this site. Tap the lock icon in the address bar → Site settings → Location → Allow, then reload the app.",
+          );
+        } else {
+          Alert.alert(
+            "Location permission needed",
+            "Please enable location access in Settings so your attendance punch works instantly.",
+            [
+              { text: "Cancel", style: "cancel" },
+              { text: "Open settings", onPress: () => Linking.openSettings() },
+            ],
+          );
+        }
+      }
+    } catch {}
+  }, []);
+
   // Silently ping the employee's current location once when they land on the
   // dashboard. Used by the employer's "present but not punched" report so an
   // employee inside the office geofence shows up without having to visit the
@@ -212,7 +254,13 @@ export default function Dashboard() {
     (async () => {
       try {
         const perm = await Location.getForegroundPermissionsAsync();
-        if (perm.status !== "granted") return; // don't auto-prompt
+        if (perm.status !== "granted") {
+          // Iter 415 — surface the Enable-GPS banner instead of staying
+          // silent, so employees switch GPS on right after installing.
+          if (!cancelled) setGpsNeeded(true);
+          return;
+        }
+        if (!cancelled) setGpsNeeded(false);
         const l = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
         });
@@ -334,6 +382,23 @@ export default function Dashboard() {
           <ActivityIndicator style={{ marginTop: 80 }} color={colors.brandPrimary} />
         ) : (
           <>
+            {/* Iter 415 — one-tap GPS enable banner (employee PWA). */}
+            {user?.role === "employee" && gpsNeeded && (
+              <Pressable style={styles.gpsBanner} onPress={enableGps}>
+                <View style={styles.gpsIconWrap}>
+                  <Ionicons name="location" size={18} color="#fff" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.gpsBannerTitle}>Turn on GPS location</Text>
+                  <Text style={styles.gpsBannerSub}>
+                    Enable location so your attendance punch works instantly
+                  </Text>
+                </View>
+                <View style={styles.gpsBannerBtn}>
+                  <Text style={styles.gpsBannerBtnTxt}>Enable</Text>
+                </View>
+              </Pressable>
+            )}
             {/* Iter 180 — Premium ESS punch card (live clock + working
                 hours). Employers use My Attendance instead. */}
             {user?.role === "employee" && (
@@ -1122,6 +1187,36 @@ function ActionRow({
 }
 
 const styles = StyleSheet.create({
+  // Iter 415 — GPS enable banner (employee PWA)
+  gpsBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginHorizontal: 16,
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: "#eff6ff",
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+  },
+  gpsIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#2563eb",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  gpsBannerTitle: { fontSize: 13, fontWeight: "700", color: "#1e3a8a" },
+  gpsBannerSub: { fontSize: 11, color: "#3b5ba5", marginTop: 1 },
+  gpsBannerBtn: {
+    backgroundColor: "#2563eb",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  gpsBannerBtnTxt: { color: "#fff", fontSize: 12, fontWeight: "700" },
   root: { flex: 1, backgroundColor: colors.surface },
   adminHero: {
     paddingHorizontal: spacing.lg,

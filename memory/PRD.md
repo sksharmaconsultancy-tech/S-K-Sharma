@@ -3023,3 +3023,23 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - utils/iter60_features.py _run_attendance_email_batch: email now attaches
   Excel + PDF twin; PDF failure is non-fatal (logged, Excel still sent).
 - Deploy: /app/deploy_vps_iter413.sh via temp-code-bundle kind=script.
+
+## Iter 414 — Salary-structure sync: strict code matching (user rule)
+- _sync_structures_job in routes/legacy_import.py: name-matching fallback
+  + Iter 353 name-based code correction REMOVED. Code match only; no match
+  ⇒ unmatched list. Sync still refreshes Basic/PF Basic/Gross + linked
+  Earn heads (SalaryHeadMaster + manual head-links), enables Firm Master
+  heads, stamps salary_structure_synced_at.
+- User flow: deploy iter414 → run "Sync Salary Structures" (button on the
+  Legacy Import screen, or POST /admin/legacy-import/sync-salary-structures)
+  to refresh linked heads from old DB.
+- Deploy: /app/deploy_vps_iter414.sh via temp-code-bundle kind=script.
+
+## Iter 415 — Employee PWA: GPS on by default (user request)
+- app/(tabs)/index.tsx: employee dashboard shows a one-tap "Turn on GPS
+  location — Enable" banner when foreground location permission isn't
+  granted (browsers can't silently enable GPS at install). Enable →
+  permission prompt → immediate location-ping; blocked → guidance
+  (web: address-bar lock instructions; native: Open Settings). Banner
+  hides once granted. Verified via Playwright as TEST50 employee.
+- Deploy: /app/deploy_vps_iter415.sh via temp-code-bundle kind=script.

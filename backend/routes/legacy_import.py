@@ -2236,26 +2236,16 @@ async def _sync_structures_job(job_id: str, admin_uid: str):
                     except (TypeError, ValueError):
                         code = 0
                     existing = None
-                    matched_by = None
                     if code > 0:
                         existing = await db.users.find_one(
                             {"company_id": company_id, "role": "employee",
                              "employee_code": str(code)},
                             {"_id": 0, "user_id": 1, "compliance_gross": 1,
                              "employee_code": 1})
-                        if existing:
-                            matched_by = "code"
-                    if existing is None:
-                        nm = str(e.get("EmpName") or "").strip()
-                        cands = await db.users.find(
-                            {"company_id": company_id, "role": "employee",
-                             "name": {"$regex": f"^{_rx(nm)}$", "$options": "i"}},
-                            {"_id": 0, "user_id": 1, "compliance_gross": 1,
-                             "employee_code": 1},
-                        ).to_list(2) if nm else []
-                        existing = cands[0] if len(cands) == 1 else None
-                        if existing:
-                            matched_by = "name"
+                    # Iter 414 (user rule) — STRICT code matching in the
+                    # salary-structure sync too: name matching removed,
+                    # same-name employees are never updated by guess. No
+                    # code match ⇒ counted unmatched (never interchanged).
                     if existing is None:
                         totals["employees_unmatched"] += 1
                         if len(unmatched) < 2000:
@@ -2270,20 +2260,6 @@ async def _sync_structures_job(job_id: str, admin_uid: str):
                     if round(float(existing.get("compliance_gross") or 0)) != \
                             round(float(updates.get("compliance_gross") or 0)):
                         totals["gross_changed"] += 1
-                    # Iter 353 (user: "Employee Code Is Also Mismatch") —
-                    # matched by NAME with a different code → correct the
-                    # portal employee code to the old-DB one (unless taken).
-                    if (matched_by == "name" and code > 0
-                            and str(existing.get("employee_code") or "") != str(code)):
-                        clash = await db.users.find_one(
-                            {"company_id": company_id, "role": "employee",
-                             "employee_code": str(code),
-                             "user_id": {"$ne": existing["user_id"]}},
-                            {"_id": 0, "user_id": 1})
-                        if not clash:
-                            updates["employee_code"] = str(code)
-                            totals["codes_corrected"] = \
-                                totals.get("codes_corrected", 0) + 1
                     updates["salary_structure_synced_at"] = _now()
                     if "bio_code" in updates:
                         totals["bio_codes_synced"] = \
