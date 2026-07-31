@@ -1,0 +1,34 @@
+{
+  "summary": "Iter 397 backend regression — full pass. Ran 35 pytest cases against the public preview URL covering (A) refactored modules (attendance_policy_api, attendance_reports_api, attendance_location_api, employees_admin, actual_salary_process) and (B) the new one-click portal login plumbing (POST /admin/portal-automation/launch-token, GET /portal-ext/get-login alias, GET /portal-ext/runner-script v6, GET /admin/portal-automation/runner-download). All 35/35 tests PASSED. Employee create->list->delete->verify cycle worked cleanly (no 500s despite WhatsApp being unconfigured — try/except wrappers hold). All 8 attendance exports (xlsx/pdf) return valid binaries with correct magic bytes. Launch-token auth-gated (401 without bearer, 200 with); get-login returns {ok, user_id, password} on valid token and 401 on invalid; runner-download zip contains run_listener.bat + sks_launcher.py; runner-script returns version '6' with 'listen' + 'btnCloseModal' strings. Zero NameError/ImportError in backend logs during the entire session. Cleanup: deleted 14 test-created automation_ext_tokens for the test firm; test employee was already cascaded by DELETE endpoint (verified 0 remaining).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/openapi.json", "issue": "OpenAPI schema is only served on internal port 8001 (returns 404 through the public ingress on /openapi.json, /docs, /api/openapi.json, /api/docs). Not a regression — just an environmental note. Tested internally: 698 paths (problem statement said 696; the +2 are expected from Iter-397 new alias /portal-ext/get-login + new /admin/portal-automation/launch-token)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter397_refactor_regression.py",
+    "/app/test_reports/pytest/iter397.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "employees_admin.py is 973 lines — approaching the 700-line soft cap; consider splitting delete cascade + bulk-import into sub-modules on the next refactor pass.",
+    "portal_extension.py is 903 lines and embeds a large runner Python payload as a string literal (_RUNNER_CODE). Consider moving that payload to a separate .py.tpl file for cleaner diffs.",
+    "attendance_policy_api PATCH accepts company_id only as a query param (not body). Frontend must send ?company_id= — worth documenting in the module docstring to avoid confusion with the GET which accepts both."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter397_refactor_regression.py (created)"
+  ],
+  "success_rate": {"backend": "100% (35/35)", "frontend": "N/A (skipped by request)"},
+  "seed_data_creation": "None persisted. Temporary employee 'REFACTOR TEST EMP' was created + deleted during the cycle test. 14 launch/pc_runner automation_ext_tokens for cmp_527fecdd7c were cleaned up post-run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reuse /app/backend/tests/test_iter397_refactor_regression.py for regression. It's parametrized over attendance exports and covers create/delete cycle end-to-end. Uses env EXPO_PUBLIC_BACKEND_URL. Cleanup step for automation_ext_tokens is manual (see this iteration's finish log) — future runs should either add a session-scoped teardown fixture or accept small growth of that collection.",
+  "rca_of_issue": "N/A — no failures. Two initial script-side issues were fixed in-file: (1) PATCH policy passes company_id via query, not body; (2) openapi.json is not exposed via public ingress so the test now fetches it via http://localhost:8001. Both were test-harness bugs, not backend regressions."
+}

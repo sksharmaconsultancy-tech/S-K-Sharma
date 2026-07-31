@@ -76,10 +76,56 @@ export default function PfReportsScreen() {
     } finally { setBusy(""); }
   };
 
-  // Iter 396 (user request) — Portal Login button: downloads the Local PC
-  // Runner zip (Selenium + auto-managed ChromeDriver). Double-clicking
-  // run_pf.bat / run_esic.bat opens the portal in the operator's own
-  // Google Chrome and auto-fills the firm's saved Login ID + Password.
+  // Iter 397 — one-click portal login: request a fresh firm-scoped token,
+  // hand it to the local Runner (run_listener.bat on the operator's PC),
+  // which opens Chrome, clicks the alert's OK and auto-fills ID+Password.
+  // If the Runner is not listening, fall back to opening the portal tab.
+  const [loginMsg, setLoginMsg] = useState<string>("");
+  const openPortalLogin = async () => {
+    const portalKey = kind === "pf" ? "epfo" : "esic";
+    const url = kind === "pf"
+      ? "https://unifiedportal-emp.epfindia.gov.in/epfo/"
+      : "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx";
+    if (Platform.OS !== "web") return;
+    setBusy("login"); setLoginMsg("");
+    try {
+      let token = "";
+      if (companyId) {
+        try {
+          const t = await api<any>(
+            `/admin/portal-automation/launch-token?company_id=${encodeURIComponent(companyId)}`,
+            { method: "POST", body: {} });
+          token = t?.token || "";
+        } catch { /* runner can still use its baked token */ }
+      }
+      // try the local Runner first (listener on the operator's PC)
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 2500);
+        const r = await fetch(
+          `http://127.0.0.1:8765/login?portal=${portalKey}&token=${encodeURIComponent(token)}`,
+          { signal: ctrl.signal });
+        clearTimeout(timer);
+        if (r.ok) {
+          setLoginMsg(
+            "✅ Runner launched — a Chrome window is opening on your PC with " +
+            "the firm's ID & Password auto-filled. Enter the captcha and click Login.");
+          return;
+        }
+        throw new Error("runner not ok");
+      } catch {
+        // Runner not running → open the portal in a new tab as fallback
+        const a = document.createElement("a");
+        a.href = url; a.target = "_blank"; a.rel = "noopener";
+        document.body.appendChild(a); a.click(); a.remove();
+        setLoginMsg(
+          "Portal opened in a new tab. For automatic ID/Password filling, " +
+          "download the Auto-Login Runner once, then keep run_listener.bat " +
+          "open — the Login button will then launch Chrome with everything filled.");
+      }
+    } finally { setBusy(""); }
+  };
+
   const downloadRunner = async () => {
     if (!companyId) {
       if (Platform.OS === "web") globalThis.alert("Select a firm from the top bar first.");
@@ -216,24 +262,15 @@ export default function PfReportsScreen() {
           </View>
           <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
             <Pressable
-              onPress={() => {
-                const url = kind === "pf"
-                  ? "https://unifiedportal-emp.epfindia.gov.in/epfo/"
-                  : "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx";
-                if (Platform.OS === "web") {
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.target = "_blank";
-                  a.rel = "noopener";
-                  document.body.appendChild(a);
-                  a.click();
-                  a.remove();
-                }
-              }}
-              style={[styles.dlBtn, { backgroundColor: "#059669" }]}
+              onPress={openPortalLogin}
+              disabled={busy === "login"}
+              style={[styles.dlBtn, { backgroundColor: "#059669" },
+                busy === "login" && { opacity: 0.6 }]}
               testID="pfr-portal-login"
             >
-              <Ionicons name="log-in-outline" size={15} color="#fff" />
+              {busy === "login" ? <ActivityIndicator size="small" color="#fff" /> : (
+                <Ionicons name="log-in-outline" size={15} color="#fff" />
+              )}
               <Text style={styles.dlTxt}>
                 {kind === "pf" ? "Login — Open EPFO Portal" : "Login — Open ESIC Portal"}
               </Text>
@@ -251,20 +288,24 @@ export default function PfReportsScreen() {
               <Text style={styles.dlTxt}>Auto-Login Runner (Chrome)</Text>
             </Pressable>
           </View>
+          {loginMsg ? (
+            <Text style={[styles.runnerHint, { color: "#059669", fontWeight: "600" }]}>{loginMsg}</Text>
+          ) : null}
           <Text style={styles.runnerHint}>
-            <Text style={{ fontWeight: "700" }}>Login</Text> opens the{" "}
-            {kind === "pf" ? "EPFO Employer" : "ESIC Employer"} portal in a NEW browser tab —
-            with the SKS Chrome extension installed, your firm&apos;s Login ID &amp; Password
-            auto-fill there. <Text style={{ fontWeight: "700" }}>Auto-Login Runner</Text>{" "}
-            downloads the PC tool: unzip once, then double-click{" "}
-            <Text style={styles.mono}>{kind === "pf" ? "run_pf.bat" : "run_esic.bat"}</Text>
+            <Text style={{ fontWeight: "700" }}>Login</Text> — with the Runner listening
+            (run_listener.bat open on your PC), a Chrome window opens the{" "}
+            {kind === "pf" ? "EPFO Employer" : "ESIC Employer"} portal, clicks the alert&apos;s OK
+            and auto-fills this firm&apos;s ID &amp; Password — you only enter the captcha and
+            click Login. Without the Runner, the portal simply opens in a new tab.{" "}
+            <Text style={{ fontWeight: "700" }}>Auto-Login Runner</Text> downloads the PC tool
+            once: unzip, then double-click <Text style={styles.mono}>run_listener.bat</Text>{" "}
+            (keep it open) or <Text style={styles.mono}>{kind === "pf" ? "run_pf.bat" : "run_esic.bat"}</Text>
             {kind === "pf" ? (
               <>
                 {" "}(ECR test: <Text style={styles.mono}>run_ecr_test.bat</Text>)
               </>
             ) : null}
-            {" "}— a new Google Chrome window opens the portal and pastes the saved credentials
-            automatically. It self-updates every run.
+            . It self-updates every run.
           </Text>
         </View>
 

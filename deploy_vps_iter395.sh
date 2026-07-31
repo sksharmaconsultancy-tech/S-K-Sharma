@@ -40,6 +40,20 @@
 #   • Iter 396 — server.py refactor step 2: Actual Salary Process
 #     (~810 lines) extracted to routes/actual_salary_process.py.
 #     No behaviour change.
+#   • Iter 397 — ONE-CLICK PORTAL LOGIN (user-specified flow): PF Reports
+#     "Login — Open EPFO/ESIC Portal" now: generates a firm-scoped secure
+#     token → calls the local Runner (run_listener.bat on the operator's
+#     Windows PC, listening on 127.0.0.1:8765) → Runner fetches ONLY the
+#     selected firm's credentials via /api/portal-ext/get-login → opens
+#     Chrome → clicks the alert popup's OK button FIRST → auto-fills
+#     Username & Password → user enters captcha → clicks Login.
+#     Runner v6 (self-updating; existing folders get it automatically —
+#     re-download only needed for the new run_listener.bat file).
+#     If the Runner isn't running, the portal simply opens in a new tab.
+#   • Iter 397 — server.py refactor steps 3-6: attendance policy,
+#     attendance report exports, attendance location/flags and employees
+#     admin (create/bulk-import/delete) extracted into route modules.
+#     server.py: 19,747 → 17,914 lines. No behaviour change.
 #
 # Run ON THE VPS as root/sksharma.
 set -e

@@ -212,6 +212,7 @@ async def extension_download(
 
 
 @router.get("/portal-ext/creds")
+@router.get("/portal-ext/get-login")
 async def ext_creds(token: str, portal: str = "esic"):
     portal = (portal or "esic").lower()
     if portal not in ("esic", "epfo"):
@@ -252,7 +253,7 @@ async def ext_solve_captcha(payload: Dict[str, Any] = Body(...)):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "5"
+RUNNER_VERSION = "6"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -270,6 +271,58 @@ PORTALS = {
 
 def run(API_BASE, TOKEN, portal):
     portal = (portal or "esic").lower()
+
+    # Iter 397 — LISTENER mode: keep this window open; the payroll web app
+    # triggers logins on this PC with one click (Login - Open EPFO Portal).
+    if portal in ("listen", "listener"):
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        from urllib.parse import urlparse, parse_qs
+
+        class _H(BaseHTTPRequestHandler):
+            def _cors(self):
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "*")
+                self.send_header("Access-Control-Allow-Private-Network", "true")
+
+            def do_OPTIONS(self):
+                self.send_response(204)
+                self._cors()
+                self.end_headers()
+
+            def do_GET(self):
+                q = urlparse(self.path)
+                qs = parse_qs(q.query)
+                if q.path == "/ping":
+                    body = b'{"ok":true,"runner":"sks"}'
+                elif q.path == "/login":
+                    p = (qs.get("portal") or ["epfo"])[0].lower()
+                    tok = (qs.get("token") or [TOKEN])[0]
+                    print("Launch request: portal=%s" % p)
+                    threading.Thread(
+                        target=run, args=(API_BASE, tok, p), daemon=True).start()
+                    body = b'{"ok":true,"launched":true}'
+                else:
+                    body = b'{"ok":false,"detail":"unknown path"}'
+                self.send_response(200)
+                self._cors()
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+
+        print("=" * 60)
+        print("SKS Runner is LISTENING on http://127.0.0.1:8765")
+        print("Keep this window open. In the payroll app open PF Reports and")
+        print("click 'Login - Open EPFO Portal' (or ESIC) - a Chrome window")
+        print("opens HERE with the firm's login auto-filled. You only enter")
+        print("the captcha and click Login.")
+        print("=" * 60)
+        HTTPServer(("127.0.0.1", 8765), _H).serve_forever()
+        return
 
     def _get(url):
         with urllib.request.urlopen(url, timeout=30) as r:
@@ -547,6 +600,30 @@ def run(API_BASE, TOKEN, portal):
     driver.get(PORTALS[portal])
     time.sleep(3)
 
+    # Iter 397 (user request) — BEFORE filling ID & Password, close the
+    # portal's alert popup by clicking its OK button (EPFO shows one on
+    # every load; harmless no-op when absent).
+    try:
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+        for _i, _sel in enumerate(((By.ID, "btnCloseModal"),
+                     (By.CSS_SELECTOR, "button.btn-danger[data-bs-dismiss='modal']"),
+                     (By.CSS_SELECTOR, "button[data-dismiss='modal']"),
+                     (By.CSS_SELECTOR, ".modal.show button.btn, .modal.in button.btn"))):
+            try:
+                btn = WebDriverWait(driver, 8 if _i == 0 else 2).until(
+                    EC.element_to_be_clickable(_sel))
+                btn.click()
+                print("Alert popup closed (OK clicked).")
+                time.sleep(1)
+                break
+            except Exception:
+                continue
+        else:
+            print("No alert popup detected - continuing.")
+    except Exception:
+        pass
+
     def set_val(el, val):
         driver.execute_script(
             "arguments[0].value=arguments[1];"
@@ -701,6 +778,14 @@ _RUNNER_BAT_ECR_TEST = (
     "pause\r\n"
 )
 
+# Iter 397 — LISTENER: one-click login from the payroll web app.
+_RUNNER_BAT_LISTENER = (
+    "@echo off\r\n"
+    "title SKS Runner - keep this window open\r\n"
+    "python sks_launcher.py listen\r\n"
+    "pause\r\n"
+)
+
 _RUNNER_SH = (
     "#!/bin/sh\n"
     "python3 sks_launcher.py \"${1:-esic}\"\n"
@@ -726,6 +811,11 @@ _RUNNER_README = (
     "          ECR TEST: double-click run_ecr_test.bat - a new Chrome\n"
     "          window opens the EPFO portal and clicks the alert's OK\n"
     "          button automatically (no login).\n"
+    "          ONE-CLICK FROM THE APP: double-click run_listener.bat and\n"
+    "          KEEP THAT WINDOW OPEN. Now the 'Login - Open EPFO Portal'\n"
+    "          button in PF Reports launches Chrome on this PC with the\n"
+    "          selected firm's ID + Password auto-filled - you only type\n"
+    "          the captcha and click Login.\n"
     "MAC/LINUX: open a terminal in the folder,\n"
     "           chmod +x run.sh ; ./run.sh esic   (or ./run.sh epfo)\n"
     "           ECR TEST: ./run.sh ecr_test\n\n"
@@ -741,6 +831,30 @@ async def runner_script(token: str):
     if not doc:
         raise HTTPException(status_code=401, detail="Invalid token")
     return {"version": RUNNER_VERSION, "code": _RUNNER_CODE}
+
+
+# Iter 397 — one-click launch: the web app requests a fresh firm-scoped
+# token, then pings the local Runner (http://127.0.0.1:8765/login) which
+# fetches the credentials with it and opens Chrome.
+@router.post("/admin/portal-automation/launch-token")
+async def portal_launch_token(
+    payload: Optional[Dict[str, Any]] = None,
+    company_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
+    company_id = await _resolve_company(
+        admin, company_id or (payload or {}).get("company_id"))
+    token = secrets.token_urlsafe(24)
+    await db.automation_ext_tokens.insert_one({
+        "token": token,
+        "company_id": company_id,
+        "created_by": admin["user_id"],
+        "created_at": now_iso(),
+        "kind": "launch",
+    })
+    return {"ok": True, "token": token, "runner_url": "http://127.0.0.1:8765"}
 
 
 @router.get("/admin/portal-automation/runner-download")
@@ -776,6 +890,7 @@ async def runner_download(
         z.writestr("run_esic.bat", _RUNNER_BAT)
         z.writestr("run_pf.bat", _RUNNER_BAT_PF)
         z.writestr("run_ecr_test.bat", _RUNNER_BAT_ECR_TEST)
+        z.writestr("run_listener.bat", _RUNNER_BAT_LISTENER)
         z.writestr("run.sh", _RUNNER_SH)
         z.writestr("README.txt", _RUNNER_README)
     buf.seek(0)

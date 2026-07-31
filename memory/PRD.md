@@ -2798,3 +2798,27 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   /admin/branches, actual-salary-process create/row/finalize,
   salary-runs unlock) extracted to routes/actual_salary_process.py;
   router registered; openapi 696 paths, all 5 extracted routes live.
+- Iter 397 (user flow): ONE-CLICK PORTAL LOGIN implemented exactly per
+  user diagram: PF Reports Login button → POST
+  /admin/portal-automation/launch-token (firm-scoped, auth) → browser
+  fetches http://127.0.0.1:8765/login?portal=epfo|esic&token=... →
+  Runner v6 listener (run_listener.bat, CORS + Private-Network headers)
+  → GET /api/portal-ext/get-login (alias of creds; returns ONLY selected
+  firm creds) → Selenium Chrome opens portal → CLICKS ALERT OK FIRST
+  (btnCloseModal + 3 fallback selectors, 8s/2s waits) → auto-fills
+  Username/Password → user enters captcha + clicks Login. Fallback when
+  Runner not listening: opens portal tab + hint (verified E2E via
+  Playwright: fallback tab https://unifiedportal-emp.epfindia.gov.in/epfo/
+  + message shown; listener contract verified via curl: /ping, /login
+  launched:true, OPTIONS CORS headers). Runner code compile-checked.
+- Iter 397 (refactor steps 3-6): extracted routes/attendance_policy_api.py
+  (policy get/patch/presets/saved-list/reset + textile compute-day),
+  routes/attendance_reports_api.py (_monthly/_daily_report_impl + monthly
+  hours/ot/inout + daily xlsx/pdf), routes/attendance_location_api.py
+  (flagged, location-audit +xlsx, clear-flag, selfie; _compute_location_status
+  imported back), routes/employees_admin.py (create/bulk-import/template/
+  parse/delete; _employee_is_resigned + delete_employee_record imported
+  back for deletion_approvals lazy import). server.py 19,747→17,914.
+  openapi 696 paths unchanged; all smoke tests OK. Full testing-agent
+  regression STILL PENDING (first attempt aborted during setup) — rerun
+  before/after next deploy.
