@@ -3120,3 +3120,17 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   origin-template skip, status endpoint. Script:
   backend/tests/check_machine_only_sync.py. UI button verified via screenshot.
 - Deploy: same deploy_vps_iter418.sh (bundle rebuilds on demand — re-run).
+
+## Iter 419 (cont.) — Machines tab, Sync Attendance removed, firm follow
+- NEW "Machines" tab on Device Sync Engine: every registered machine with
+  ONLINE/OFFLINE, employees-on-machine / fingerprints / punch-records
+  (live counts the machine reports on its heartbeat INFO — already parsed
+  by _parse_info into biometric_devices), pending sync commands, firmware,
+  IP, last contact. Backend: GET /sync/machines/overview (sync_engine.py).
+- "Sync Attendance" toggle REMOVED (user rule: attendance flows only FROM
+  machines INTO the portal, never machine↔machine). Dropped from
+  SYNC_DEFAULTS + Settings tab UI.
+- Firm dropdown on sync-engine now ALWAYS opens with the currently
+  selected firm (useSelectedCompany) and follows top-bar switches.
+- Verified via API + screenshot (Kankani: 125 employees / 118 FP / 3010
+  records on Test Gate).

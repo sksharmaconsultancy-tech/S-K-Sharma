@@ -18,6 +18,7 @@ import { useRouter } from "expo-router";
 import { api, apiBinary } from "@/src/api/client";
 import { useLiveSync } from "@/src/api/live-sync";
 import { useAuth } from "@/src/context/AuthContext";
+import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import CompanyPicker from "@/src/components/CompanyPicker";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
 
@@ -69,6 +70,25 @@ type Conflict = {
   created_at: string;
 };
 
+type Machine = {
+  device_id: string;
+  serial_number: string;
+  name?: string;
+  brand?: string;
+  model?: string;
+  kind?: string;
+  enabled?: boolean;
+  sync_enabled?: boolean;
+  online: boolean;
+  last_seen_at?: string | null;
+  employees_on_machine?: number | null;
+  fp_count?: number | null;
+  att_log_count?: number | null;
+  firmware?: string | null;
+  device_ip?: string | null;
+  pending_cmds: number;
+};
+
 type Settings = {
   enable_auto_sync: boolean;
   sync_fingerprints: boolean;
@@ -76,13 +96,12 @@ type Settings = {
   sync_card: boolean;
   sync_password: boolean;
   sync_photos: boolean;
-  sync_attendance: boolean;
   retry_failed: boolean;
   max_retry_count: number;
   sync_interval: number;
 };
 
-const TABS = ["Dashboard", "Queue", "History", "Settings", "Conflicts"] as const;
+const TABS = ["Dashboard", "Machines", "Queue", "History", "Settings", "Conflicts"] as const;
 type Tab = (typeof TABS)[number];
 
 const STATUS_COLORS: Record<string, string> = {
@@ -119,11 +138,18 @@ export default function SyncEngineScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [companies, setCompanies] = useState<Company[]>([]);
+  // Iter 419 (user request) — always open with the firm currently selected
+  // in the top bar, and follow it when the admin switches firms.
+  const { selectedCompanyId } = useSelectedCompany();
   const [companyId, setCompanyId] = useState<string>("");
+  useEffect(() => {
+    if (isSuper && selectedCompanyId) setCompanyId(selectedCompanyId);
+  }, [isSuper, selectedCompanyId]);
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [logs, setLogs] = useState<LogRow[]>([]);
   const [conflicts, setConflicts] = useState<Conflict[]>([]);
+  const [machines, setMachines] = useState<Machine[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -138,9 +164,10 @@ export default function SyncEngineScreen() {
     try {
       const c = await api<{ companies: Company[] }>("/companies?lite=1");
       setCompanies(c.companies || []);
-      if (!companyId && (c.companies || []).length) setCompanyId(c.companies[0].company_id);
+      setCompanyId((prev) =>
+        prev || selectedCompanyId || (c.companies?.[0]?.company_id ?? ""));
     } catch {}
-  }, [isSuper, companyId]);
+  }, [isSuper, selectedCompanyId]);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -150,18 +177,20 @@ export default function SyncEngineScreen() {
 
   const loadAll = useCallback(async () => {
     try {
-      const [s, j, l, cf, st] = await Promise.all([
+      const [s, j, l, cf, st, mc] = await Promise.all([
         api<SyncStatus>(`/sync/status${qs}`),
         api<{ jobs: Job[] }>(`/queue${qs}${qs ? "&" : "?"}limit=100`),
         api<{ logs: LogRow[] }>(`/sync/logs${qs}${qs ? "&" : "?"}limit=150`),
         api<{ conflicts: Conflict[] }>(`/sync/conflicts${qs}`),
         api<Settings>(`/sync/settings${qs}`),
+        api<{ machines: Machine[] }>(`/sync/machines/overview${qs}`),
       ]);
       setStatus(s);
       setJobs(j.jobs || []);
       setLogs(l.logs || []);
       setConflicts(cf.conflicts || []);
       setSettings(st);
+      setMachines(mc.machines || []);
     } catch (e: any) {
       setBanner(e?.message || "Failed to load sync data");
     } finally {
@@ -352,6 +381,63 @@ export default function SyncEngineScreen() {
             </>
           )}
 
+          {tab === "Machines" && (
+            machines.length === 0 ? <Empty text="No machine registered for this firm." /> :
+            <>
+              <Text style={styles.section}>
+                {machines.length} registered machine(s) · {machines.filter((m) => m.online).length} online
+              </Text>
+              {machines.map((m) => (
+                <View key={m.device_id} style={styles.machineCard} testID={`machine-${m.serial_number}`}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <Ionicons name="hardware-chip-outline" size={18}
+                      color={m.online ? "#16A34A" : "#DC2626"} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.rowTitle}>{m.name || m.serial_number}</Text>
+                      <Text style={styles.rowSub}>
+                        {m.serial_number}
+                        {m.model ? ` · ${m.model}` : m.brand ? ` · ${String(m.brand).toUpperCase()}` : ""}
+                        {m.firmware ? ` · ${m.firmware}` : ""}
+                        {m.device_ip ? ` · ${m.device_ip}` : ""}
+                      </Text>
+                    </View>
+                    <View style={[styles.onlinePill, { backgroundColor: m.online ? "#DCFCE7" : "#FEE2E2" }]}>
+                      <Text style={{ fontSize: 11, fontWeight: "800", color: m.online ? "#16A34A" : "#DC2626" }}>
+                        {m.online ? "ONLINE" : "OFFLINE"}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.machineStats}>
+                    <View style={styles.statBox}>
+                      <Text style={styles.statVal}>{m.employees_on_machine ?? "—"}</Text>
+                      <Text style={styles.statLbl}>Employees on machine</Text>
+                    </View>
+                    <View style={styles.statBox}>
+                      <Text style={styles.statVal}>{m.fp_count ?? "—"}</Text>
+                      <Text style={styles.statLbl}>Fingerprints</Text>
+                    </View>
+                    <View style={styles.statBox}>
+                      <Text style={styles.statVal}>{m.att_log_count ?? "—"}</Text>
+                      <Text style={styles.statLbl}>Punch records</Text>
+                    </View>
+                    <View style={styles.statBox}>
+                      <Text style={[styles.statVal, m.pending_cmds > 0 && { color: "#B45309" }]}>{m.pending_cmds}</Text>
+                      <Text style={styles.statLbl}>Sync commands waiting</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.rowTime}>
+                    Last contact: {fmtTime(m.last_seen_at)}
+                    {m.sync_enabled === false ? "  ·  ⚠ Sync disabled for this machine" : ""}
+                  </Text>
+                </View>
+              ))}
+              <Text style={styles.machineHint}>
+                Counts are reported by each machine itself on its heartbeat — refresh a
+                minute after a sync to see updated employee counts.
+              </Text>
+            </>
+          )}
+
           {tab === "Queue" && (
             jobs.length === 0 ? <Empty text="Queue is empty." /> :
             jobs.map((j) => (
@@ -401,8 +487,6 @@ export default function SyncEngineScreen() {
                 onValueChange={(v) => saveSettings({ sync_password: v })} />
               <ToggleRow label="Sync Photos" value={settings.sync_photos}
                 onValueChange={(v) => saveSettings({ sync_photos: v })} />
-              <ToggleRow label="Sync Attendance" value={settings.sync_attendance}
-                onValueChange={(v) => saveSettings({ sync_attendance: v })} />
               <ToggleRow label="Retry Failed Jobs" value={settings.retry_failed}
                 onValueChange={(v) => saveSettings({ retry_failed: v })} />
               <NumRow label="Maximum Retry Count" value={settings.max_retry_count} min={0} max={10}
@@ -611,6 +695,20 @@ const styles = StyleSheet.create({
   rowTitle: { fontSize: type.sm, fontWeight: "700", color: colors.onSurface },
   rowSub: { fontSize: type.xs, color: colors.onSurfaceSecondary, marginTop: 2 },
   rowTime: { fontSize: type.xs, color: colors.onSurfaceTertiary, marginTop: 2 },
+  // Iter 419 — Machines tab
+  machineCard: {
+    backgroundColor: colors.surface, borderRadius: radius.md, padding: 14,
+    marginBottom: 10, borderWidth: 1, borderColor: colors.border,
+  },
+  onlinePill: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  machineStats: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12, marginBottom: 8 },
+  statBox: {
+    flexGrow: 1, minWidth: 120, backgroundColor: colors.background,
+    borderRadius: radius.sm, paddingVertical: 10, paddingHorizontal: 12, alignItems: "center",
+  },
+  statVal: { fontSize: 20, fontWeight: "900", color: colors.onSurface },
+  statLbl: { fontSize: type.xs, color: colors.onSurfaceSecondary, marginTop: 2, textAlign: "center" },
+  machineHint: { fontSize: type.xs, color: colors.onSurfaceTertiary, marginTop: 6, lineHeight: 17 },
   pill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   pillTxt: { fontSize: 10, fontWeight: "800", textTransform: "uppercase" },
   miniBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.sm },

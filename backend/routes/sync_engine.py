@@ -54,7 +54,8 @@ SYNC_DEFAULTS: Dict[str, Any] = {
     "sync_card": True,
     "sync_password": True,
     "sync_photos": False,
-    "sync_attendance": True,
+    # Iter 419 (user rule): attendance is NEVER synced between machines —
+    # it only flows FROM each machine INTO the portal (ATTLOG push).
     "retry_failed": True,
     "max_retry_count": 3,
     "sync_interval": 30,  # seconds (worker cadence)
@@ -672,6 +673,49 @@ async def sync_machines_status_api(company_id: Optional[str] = Query(None),
     run = await db.machine_sync_runs.find_one(
         {"company_id": cid}, {"_id": 0}, sort=[("created_at", -1)])
     return {"run": run}
+
+
+@router.get("/sync/machines/overview")
+async def sync_machines_overview_api(company_id: Optional[str] = Query(None),
+                                     authorization: Optional[str] = Header(None)):
+    """Iter 419 (user request) — every registered machine of the firm with
+    LIVE on-device counts (employees / fingerprints / punch records, as
+    reported by the machine itself on each heartbeat) + online status and
+    pending command backlog."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    cid = _scope_company(admin, company_id)
+    now = datetime.now(timezone.utc)
+    devices = await db.biometric_devices.find(
+        {"company_id": cid},
+        {"_id": 0, "device_id": 1, "serial_number": 1, "name": 1, "brand": 1,
+         "model": 1, "kind": 1, "enabled": 1, "sync_enabled": 1,
+         "last_seen_at": 1, "user_count": 1, "fp_count": 1,
+         "att_log_count": 1, "firmware": 1, "device_ip": 1,
+         "templates_captured": 1, "total_punches_ingested": 1},
+    ).to_list(200)
+    machines = []
+    for d in devices:
+        online = False
+        last = d.get("last_seen_at")
+        if last:
+            try:
+                online = (now - datetime.fromisoformat(
+                    str(last).replace("Z", "+00:00"))).total_seconds() < 180
+            except Exception:
+                pass
+        pending_cmds = await db.biometric_device_cmds.count_documents(
+            {"device_serial": d["serial_number"],
+             "status": {"$in": ["pending", "sent"]}})
+        machines.append({
+            **d,
+            "online": online,
+            "pending_cmds": pending_cmds,
+            # Employees ON the machine, as the machine reports on heartbeat.
+            "employees_on_machine": d.get("user_count"),
+        })
+    machines.sort(key=lambda m: (not m["online"], m.get("name") or ""))
+    return {"machines": machines}
 
 
 @router.get("/sync/status")
