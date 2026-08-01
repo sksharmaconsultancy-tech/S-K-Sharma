@@ -30,7 +30,7 @@ Design notes
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Header, HTTPException, Query
@@ -384,7 +384,84 @@ async def process_sync_queue() -> Dict[str, int]:
         except Exception:
             logger.warning("[sync] reconcile error job=%s", job.get("job_id"),
                            exc_info=True)
+    # Iter 419 — machine-only sync runs due for their distribute phase.
+    try:
+        await _process_machine_sync_runs()
+    except Exception:
+        logger.warning("[sync] machine-sync pass error", exc_info=True)
     return {"dispatched": dispatched, "reconciled": reconciled}
+
+
+# ---------------------------------------------------------------------------
+# Iter 419 — MACHINE-ONLY SYNC (user request: master data feeding pending).
+# Synchronizes the machines with EACH OTHER — users + fingerprint / face
+# templates — without touching or requiring the Employee Master.
+# Phase 1 (harvest): every machine is asked to upload its user database and
+# templates. Phase 2 (distribute, ~2 min later via the worker loop): every
+# captured user + template is pushed to every machine (skipping templates on
+# their origin machine). Offline machines catch up on their next poll.
+# ---------------------------------------------------------------------------
+async def _process_machine_sync_runs() -> int:
+    processed = 0
+    now = _now()
+    async for run in db.machine_sync_runs.find(
+            {"phase": "harvest", "distribute_at": {"$lte": now}}).limit(5):
+        try:
+            await _distribute_machine_sync(run)
+            processed += 1
+        except Exception:
+            logger.warning("[sync] machine-sync distribute error run=%s",
+                           run.get("run_id"), exc_info=True)
+            await db.machine_sync_runs.update_one(
+                {"run_id": run["run_id"]},
+                {"$set": {"phase": "failed", "error": "distribute error",
+                          "updated_at": _now()}},
+            )
+    return processed
+
+
+async def _distribute_machine_sync(run: dict) -> None:
+    cid = run["company_id"]
+    devices = await _sync_enabled_devices(cid)
+    templates = await db.biometric_templates.find(
+        {"company_id": cid}, {"_id": 0}).to_list(20000)
+    musers: Dict[str, dict] = {}
+    async for m in db.biometric_machine_users.find({"company_id": cid}, {"_id": 0}):
+        musers[str(m.get("pin") or "").strip()] = m
+    pins = sorted({str(t["pin"]).strip() for t in templates} | set(musers.keys()))
+    pins = [p for p in pins if p]
+    queued = 0
+    for d in devices:
+        sn = d["serial_number"]
+        for pin in pins:
+            mu = musers.get(pin) or {}
+            nm = (mu.get("name") or "")[:24].replace("\t", " ")
+            parts = [f"DATA UPDATE USERINFO PIN={pin}", f"Name={nm}",
+                     f"Pri={mu.get('pri') or 0}"]
+            if mu.get("passwd"):
+                parts.append(f"Passwd={mu['passwd']}")
+            if mu.get("card"):
+                parts.append(f"Card={mu['card']}")
+            await _queue_cmd(sn, "\t".join(parts),
+                             run.get("created_by") or "system:machine-sync",
+                             f"Machine sync user {nm or pin}")
+            queued += 1
+        for t in templates:
+            if t.get("device_serial") == sn:
+                continue  # already enrolled on its origin machine
+            await _queue_cmd(sn, _template_to_cmd(t),
+                             run.get("created_by") or "system:machine-sync",
+                             f"Machine sync {t.get('kind')} PIN {t.get('pin')}")
+            queued += 1
+    await db.machine_sync_runs.update_one(
+        {"run_id": run["run_id"]},
+        {"$set": {"phase": "done", "queued": queued, "users": len(pins),
+                  "templates": len(templates), "devices": len(devices),
+                  "distributed_at": _now(), "updated_at": _now()}},
+    )
+    logger.info("[sync] machine-sync run=%s distributed: %d cmd(s), %d user(s), "
+                "%d template(s) -> %d device(s)",
+                run.get("run_id"), queued, len(pins), len(templates), len(devices))
 
 
 async def sync_engine_loop():
@@ -537,6 +614,64 @@ async def sync_all_api(payload: dict = Body(None),
                 "message": f"0 sync jobs queued — {why}"}
     return {"ok": True, "queued": queued, "employees": len(emps),
             "message": f"{queued} employee sync job(s) queued."}
+
+
+@router.post("/sync/machines")
+async def sync_machines_only_api(payload: dict = Body(None),
+                                 authorization: Optional[str] = Header(None)):
+    """Iter 419 — MACHINE-ONLY sync: synchronize all machines of the firm
+    with each other (users + FP/face templates captured ON the machines).
+    The Employee Master is NOT checked and NOT required. Body: {company_id?}."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    payload = payload or {}
+    cid = _scope_company(admin, payload.get("company_id"))
+    devices = await _sync_enabled_devices(cid)
+    if not devices:
+        raise HTTPException(
+            status_code=404,
+            detail="No sync-enabled machine registered for this company.")
+    # Phase 1 — harvest: ask every machine to upload its users + templates.
+    for d in devices:
+        for cmd, label in (
+            ("DATA QUERY USERINFO", "Machine sync — query users"),
+            ("DATA QUERY FINGERTMP", "Machine sync — query fingerprints"),
+            ("DATA QUERY BIODATA", "Machine sync — query face/bio-data"),
+        ):
+            await _queue_cmd(d["serial_number"], cmd, admin["user_id"], label)
+    run_id = f"ms_{uuid.uuid4().hex[:12]}"
+    await db.machine_sync_runs.insert_one({
+        "run_id": run_id,
+        "company_id": cid,
+        "phase": "harvest",
+        # Distribute after the machines had time to upload (~2 minutes).
+        "distribute_at": (datetime.now(timezone.utc) + timedelta(seconds=120))
+            .isoformat().replace("+00:00", "Z"),
+        "created_by": admin["user_id"],
+        "created_at": _now(),
+        "updated_at": _now(),
+    })
+    return {
+        "ok": True, "run_id": run_id, "devices": len(devices),
+        "message": (
+            f"Machine-only sync started on {len(devices)} machine(s) — "
+            "collecting users + fingerprints/faces from every machine now; "
+            "distribution to all machines starts automatically in ~2 minutes. "
+            "Employee Master is not required."
+        ),
+    }
+
+
+@router.get("/sync/machines/status")
+async def sync_machines_status_api(company_id: Optional[str] = Query(None),
+                                   authorization: Optional[str] = Header(None)):
+    """Latest machine-only sync run for the firm."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    cid = _scope_company(admin, company_id)
+    run = await db.machine_sync_runs.find_one(
+        {"company_id": cid}, {"_id": 0}, sort=[("created_at", -1)])
+    return {"run": run}
 
 
 @router.get("/sync/status")

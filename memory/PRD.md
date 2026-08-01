@@ -3099,3 +3099,24 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   Contractual employees' machine punches correctly go to pending (Iter 175).
 - Deploy: /app/deploy_vps_iter418.sh via temp-code-bundle kind=script
   (temp_bundle.py updated to serve deploy418.sh).
+
+## Iter 419 — Machine-Only Sync (no Employee Master) + sync-all diagnostics
+- User report "0 employee sync job(s) queued": /sync/all now explains WHY
+  (no employees in firm / no Bio Codes / filter mismatch / no sync-enabled
+  machine) instead of a bare zero. Verified live.
+- MACHINE-ONLY SYNC (user: master data feeding pending, machines already
+  enrolled): POST /sync/machines (+ GET /sync/machines/status). Phase 1
+  harvest: DATA QUERY USERINFO/FINGERTMP/BIODATA to every sync-enabled
+  machine; run doc in db.machine_sync_runs (phase harvest, distribute_at
+  +120s). Phase 2 distribute (worker loop process_sync_queue →
+  _process_machine_sync_runs): pushes every captured machine user
+  (db.biometric_machine_users — NEW: USER PIN= lines now parsed in
+  _ingest_templates) + every biometric_template to every machine, skipping
+  templates on their origin device. Master users collection never consulted.
+- Frontend: sync-engine.tsx Dashboard → new "Sync Machines Only" button
+  (confirm dialog) before "Sync All Employees".
+- E2E verified 7/7: run start, harvest cmds delivered, USER/FP capture,
+  worker distribute (machine names like "RAKESH MACHINE" + Card pushed),
+  origin-template skip, status endpoint. Script:
+  backend/tests/check_machine_only_sync.py. UI button verified via screenshot.
+- Deploy: same deploy_vps_iter418.sh (bundle rebuilds on demand — re-run).

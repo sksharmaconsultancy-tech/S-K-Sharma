@@ -350,6 +350,30 @@ async def _ingest_templates(raw: str, device: dict) -> int:
         line = line.strip()
         if not line:
             continue
+        # Iter 419 — MACHINE-ONLY SYNC: capture the machine's own user rows
+        # (PIN + Name + Card/Passwd) so machines can be synchronized with
+        # each other even BEFORE the Employee Master is fed in the portal.
+        if re.match(r"^USER\s+PIN=", line, re.IGNORECASE):
+            uf = _kv_parse(line[4:].strip())
+            upin = (uf.get("pin") or "").strip()
+            if upin:
+                await db.biometric_machine_users.update_one(
+                    {"company_id": device.get("company_id"), "pin": upin},
+                    {"$set": {
+                        "company_id": device.get("company_id"),
+                        "pin": upin,
+                        "name": (uf.get("name") or "").strip(),
+                        "pri": uf.get("pri") or "0",
+                        "passwd": uf.get("passwd") or "",
+                        "card": uf.get("card") or "",
+                        "grp": uf.get("grp") or "",
+                        "device_serial": device.get("serial_number"),
+                        "captured_at": _now_iso_z(),
+                    }},
+                    upsert=True,
+                )
+                saved += 1
+            continue
         m = _TMPL_LINE_RE.match(line)
         if m:
             prefix = m.group(1).upper()

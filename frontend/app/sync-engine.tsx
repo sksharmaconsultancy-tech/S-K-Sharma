@@ -331,6 +331,17 @@ export default function SyncEngineScreen() {
 
               <Text style={styles.section}>Manual sync</Text>
               <View style={styles.actionsGrid}>
+                <ActionBtn icon="hardware-chip-outline" label="Sync Machines Only" busy={busy}
+                  onPress={() => {
+                    const ok = Platform.OS === "web"
+                      ? window.confirm(
+                          "Machine-only sync: copies users + fingerprints/faces " +
+                          "from every machine to all other machines of this firm.\n\n" +
+                          "Employee Master is NOT checked — use this while master " +
+                          "data feeding is still pending.")
+                      : true;
+                    if (ok) runManual("/sync/machines", {}, "Machine sync");
+                  }} />
                 <ActionBtn icon="people-outline" label="Sync All Employees" busy={busy}
                   onPress={() => runManual("/sync/all", {}, "Sync all")} />
                 <ActionBtn icon="download-outline" label="Download Report" busy={busy}
