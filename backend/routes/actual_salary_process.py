@@ -106,13 +106,16 @@ def _actual_salary_row_compute(row: dict, month_days: int, ot_basis: str = "basi
     # Iter 91 — EPF/ESI come from the Compliance run (already on the row).
     epf = float(row.get("epf") or 0.0)
     esi = float(row.get("esi") or 0.0)
-    net_pay = total_gross - (epf + esi + adv + tds)
+    # Iter 421 (user request) — manual "Other Deduction" from Gross.
+    other_ded = float(row.get("other_ded") or 0.0)
+    net_pay = total_gross - (epf + esi + adv + tds + other_ded)
 
     row["basic_salary"] = round(basic_salary, 2)
     row["w_basic_salary"] = round(w_basic_salary, 2)
     row["total_gross"] = round(total_gross, 2)
     row["epf"] = round(epf, 2)
     row["esi"] = round(esi, 2)
+    row["other_ded"] = round(other_ded, 2)
     row["net_pay"] = round(net_pay, 2)
     return row
 
@@ -120,7 +123,7 @@ def _actual_salary_row_compute(row: dict, month_days: int, ot_basis: str = "basi
 def _actual_salary_totals(rows: list) -> dict:
     keys = (
         "basic_salary", "w_basic_salary", "total_gross",
-        "epf", "esi", "adv", "tds", "net_pay",
+        "epf", "esi", "adv", "tds", "other_ded", "net_pay",
     )
     return {k: round(sum((r.get(k) or 0.0) for r in rows), 2) for k in keys}
 
@@ -150,6 +153,8 @@ class ActualSalaryRowPatchBody(BaseModel):
     w_basic: Optional[float] = None
     adv: Optional[float] = None
     tds: Optional[float] = None
+    # Iter 421 (user request) — manual Other Deduction from Gross.
+    other_ded: Optional[float] = None
 
 
 @api.get("/admin/branches")
@@ -749,6 +754,9 @@ async def patch_actual_salary_row(
         row["adv"] = float(body.adv)
     if body.tds is not None:
         row["tds"] = float(body.tds)
+    # Iter 421 (user request) — manual Other Deduction from Gross.
+    if body.other_ded is not None:
+        row["other_ded"] = float(body.other_ded)
     # Iter 85 — P Days & P Hours are now ALWAYS editable regardless of
     # the run's attendance source. Biometric-derived values are just the
     # initial defaults; admins can override any row inline. The DOJ /

@@ -69,6 +69,7 @@ const ACTUAL_COL_GETTERS: Record<string, (r: any) => any> = {
   esi: (r) => r.esi,
   adv: (r) => r.adv,
   tds: (r) => r.tds,
+  othded: (r) => (r as any).other_ded,
   net: (r) => r.net_pay,
 };
 
@@ -93,6 +94,8 @@ type ActualRow = {
   oth_allo: number;
   adv: number;
   tds: number;
+  // Iter 421 (user request) — manual Other Deduction from Gross.
+  other_ded?: number;
   basic_salary: number;
   w_basic_salary: number;
   total_gross: number;
@@ -189,7 +192,8 @@ function computeRow(r: ActualRow, monthDays: number): ActualRow {
   // values through and deduct them from Net Pay.
   const epf = Number(r.epf) || 0;
   const esi = Number(r.esi) || 0;
-  const net = totalGross - (epf + esi + r.adv + r.tds);
+  const otherDed = Number(r.other_ded) || 0;
+  const net = totalGross - (epf + esi + r.adv + r.tds + otherDed);
   return {
     ...r,
     basic_salary: Math.round(basicSalary * 100) / 100,
@@ -197,6 +201,7 @@ function computeRow(r: ActualRow, monthDays: number): ActualRow {
     total_gross: Math.round(totalGross * 100) / 100,
     epf: Math.round(epf * 100) / 100,
     esi: Math.round(esi * 100) / 100,
+    other_ded: Math.round(otherDed * 100) / 100,
     net_pay: Math.round(net * 100) / 100,
   };
 }
@@ -204,7 +209,7 @@ function computeRow(r: ActualRow, monthDays: number): ActualRow {
 function sumTotals(rows: ActualRow[]): Record<string, number> {
   const keys: (keyof ActualRow)[] = [
     "basic_salary", "w_basic_salary", "total_gross",
-    "epf", "esi", "adv", "tds", "net_pay",
+    "epf", "esi", "adv", "tds", "other_ded", "net_pay",
   ];
   const out: Record<string, number> = {};
   for (const k of keys) {
@@ -618,7 +623,7 @@ export default function ActualSalaryProcessScreen() {
       "SN", "Code", "Name", "Father", "Designation", "Type", "Roll", "Duty HRS",
       "Month Days", "P Days", "P Hours", "Basic",
       "Basic Salary", "W.Basic Salary", "Oth. Allo.", "Total Gross",
-      "EPF", "ESI", "Adv", "TDS", "Net Pay",
+      "EPF", "ESI", "Adv", "TDS", "Other Ded", "Net Pay",
     ];
     const rowsCsv = run.rows.map((r, i) => [
       i + 1,
@@ -641,6 +646,7 @@ export default function ActualSalaryProcessScreen() {
       r.esi,
       r.adv,
       r.tds,
+      (r as any).other_ded || 0,
       r.net_pay,
     ]);
     const escape = (v: any) => {
@@ -940,6 +946,7 @@ export default function ActualSalaryProcessScreen() {
           { label: "ESI", value: run.totals?.esi ?? 0 },
           { label: "Advance", value: run.totals?.adv ?? 0 },
           { label: "TDS", value: run.totals?.tds ?? 0 },
+          { label: "Other Ded.", value: (run.totals as any)?.other_ded ?? 0 },
           { label: "Net Pay", value: run.totals?.net_pay ?? 0, tone: "#059669" },
         ]} />
       ) : null}
@@ -955,7 +962,7 @@ const BASE_COL_WIDTHS = {
   sn: 40, name: 150,
   duty: 70, md: 70, pdays: 70, phours: 80,
   basic: 90, bsalary: 100, wbasic: 100, othallo: 90,
-  gross: 100, epf: 80, esi: 80, adv: 80, tds: 80, net: 100,
+  gross: 100, epf: 80, esi: 80, adv: 80, tds: 80, othded: 84, net: 100,
   actions: 40,
 };
 
@@ -1005,6 +1012,7 @@ function ResultGrid({
       esi: fit(64, "ESI", rows.map((r) => fmtInr(r.esi))),
       adv: fit(64, "Advance", rows.map((r) => fmtInr(r.adv))),
       tds: fit(64, "TDS", rows.map((r) => fmtInr(r.tds))),
+      othded: fit(68, "Other Ded", rows.map((r) => fmtInr((r as any).other_ded || 0))),
       net: fit(80, "Net Pay", rows.map((r) => fmtInr(r.net_pay))),
     };
   }, [run.rows]);
@@ -1192,6 +1200,7 @@ function ResultGrid({
             <HdrCell w={COL_WIDTHS.esi} bg={GRP.ded} {...hdrSort("esi")}>ESI</HdrCell>
             <HdrCell w={COL_WIDTHS.adv} bg={GRP.ded} {...hdrSort("adv")}>Adv</HdrCell>
             <HdrCell w={COL_WIDTHS.tds} bg={GRP.ded} {...hdrSort("tds")}>TDS</HdrCell>
+            <HdrCell w={COL_WIDTHS.othded} bg={GRP.ded} {...hdrSort("othded")}>Other Ded.*</HdrCell>
             <HdrCell w={COL_WIDTHS.net} {...hdrSort("net")}>Net Pay</HdrCell>
             <HdrCell w={COL_WIDTHS.actions}>·</HdrCell>
           </View>
@@ -1203,7 +1212,7 @@ function ResultGrid({
               ["pdays", "pdays"], ["phours", "phours"], ["basic", "basic"],
               ["bsalary", "bsalary"], ["wbasic", "wbasic"], ["othallo", "othallo"],
               ["gross", "gross"], ["epf", "epf"], ["esi", "esi"], ["adv", "adv"],
-              ["tds", "tds"], ["net", "net"], ["actions", null],
+              ["tds", "tds"], ["othded", "othded"], ["net", "net"], ["actions", null],
             ] as [keyof typeof COL_WIDTHS, string | null][]).map(([wk, fk], i) => (
               <View
                 key={i}
@@ -1364,6 +1373,15 @@ function ResultGrid({
                 money
                 gridRow={idx} gridCol={6} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.ded}
               />
+              {/* Iter 421 (user request) — manual Other Deduction from Gross. */}
+              <EditCell
+                w={COL_WIDTHS.othded}
+                value={(r as any).other_ded || 0}
+                onChange={(v) => editField(r.user_id, "other_ded" as keyof ActualRow, v)}
+                disabled={readOnly}
+                money
+                gridRow={idx} gridCol={7} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.ded}
+              />
               <View style={{ width: COL_WIDTHS.net, paddingHorizontal: 6, paddingVertical: 4, justifyContent: "center" }}>
                 <Text style={[styles.readTxt, { textAlign: "right", fontWeight: "700" }]}>
                   {fmtInr(r.net_pay)}
@@ -1400,6 +1418,7 @@ function ResultGrid({
             <BoldRead w={COL_WIDTHS.esi}>{fmtInr(run.totals?.esi)}</BoldRead>
             <BoldRead w={COL_WIDTHS.adv}>{fmtInr(run.totals?.adv)}</BoldRead>
             <BoldRead w={COL_WIDTHS.tds}>{fmtInr(run.totals?.tds)}</BoldRead>
+            <BoldRead w={COL_WIDTHS.othded}>{fmtInr((run.totals as any)?.other_ded)}</BoldRead>
             <BoldRead w={COL_WIDTHS.net}>{fmtInr(run.totals?.net_pay)}</BoldRead>
             <View style={{ width: COL_WIDTHS.actions }} />
           </View>

@@ -2608,6 +2608,9 @@ export default function ComplianceSalaryRunScreen() {
                     ...(hasDed("esi") ? ["ESI (E)", "ESI (Er)"] : []),
                     ...(hasDed("pt") ? ["PT"] : []),
                     ...(hasDed("tds") ? ["TDS"] : []),
+                    // Iter 420 (user request) — one dynamic column per
+                    // custom deduction head enabled in the Firm Master.
+                    ...(((run?.rows?.[0] as any)?.deduction_head_labels as string[]) || []),
                     "Other*", "Total Ded.", "Net",
                   ];
                   for (const d of dedLabels) headers.push({ label: d, group: "ded" });
@@ -2868,6 +2871,13 @@ export default function ComplianceSalaryRunScreen() {
                         </>
                       );
                     })()}
+                    {/* Iter 420 — dynamic Firm-Master deduction head cells
+                        (amounts come from the Employee Master heads). */}
+                    {((((run?.rows?.[0] as any)?.deduction_head_labels as string[]) || []).map((dl) => (
+                      <Text key={dl} style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>
+                        {fmtInr(((r as any).deduction_heads || {})[dl] || 0)}
+                      </Text>
+                    )))}
                     {/* Iter 85 — Editable "Other" deduction. */}
                     <TextInput
                       ref={(el) => { cellRefs.current[`other_deduction:${idx}`] = el; }}

@@ -98,6 +98,16 @@ async def _employee_checks(cid: str) -> List[dict]:
          "doj": 1, "compliance_gross": 1, "father_name": 1,
          "exit_date": 1}).to_list(5000)
     emps = [e for e in emps if not (e.get("exit_date") or "").strip()]
+    # Iter 421 (user rule) — validations follow the FIRM MASTER policy:
+    # when EPF (or ESI) is DISABLED for the firm, don't demand UAN / ESIC
+    # IP numbers from its employees.
+    _fm = await db.firm_masters.find_one(
+        {"company_id": cid}, {"_id": 0, "epf": 1, "esi": 1, "deductions": 1}) or {}
+    _fm_ded = _fm.get("deductions") or {}
+    _epf_ap = (_fm.get("epf") or {}).get("applicable")
+    _esi_ap = (_fm.get("esi") or {}).get("applicable")
+    _pf_on = bool(_epf_ap) if _epf_ap is not None else bool(_fm_ded.get("PF", True))
+    _esi_on = bool(_esi_ap) if _esi_ap is not None else bool(_fm_ded.get("ESI", True))
     seen_bank: Dict[str, dict] = {}
     seen_uan: Dict[str, dict] = {}
     seen_namefather: Dict[str, dict] = {}
@@ -105,13 +115,13 @@ async def _employee_checks(cid: str) -> List[dict]:
     for e in emps:
         gross = float(e.get("compliance_gross") or 0)
         prof = f"/employee-detail-slip?user_id={e['user_id']}"
-        if not (e.get("uan_no") or "").strip() and gross > 0:
+        if _pf_on and not (e.get("uan_no") or "").strip() and gross > 0:
             out.append(_f("missing_uan", "high", e, "Missing UAN",
                           "Employee has a compliance gross but no UAN number.",
                           "PF ECR upload will reject this member.",
                           "Collect the UAN (or generate via EPFO) and update the Employee Master.",
                           100, fix_route=prof))
-        if not (e.get("esi_ip_no") or "").strip() and 0 < gross <= 21000:
+        if _esi_on and not (e.get("esi_ip_no") or "").strip() and 0 < gross <= 21000:
             out.append(_f("missing_esic_no", "high", e, "Missing ESIC IP Number",
                           f"Gross {_money(gross)} is within the ESIC wage limit (₹21,000) but no IP number is on record.",
                           "ESIC monthly contribution filing will fail for this employee.",

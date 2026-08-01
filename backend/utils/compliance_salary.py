@@ -882,20 +882,28 @@ def compute_compliance_row(
     # ---- Iter 127c — Firm-linked deduction heads from the Employee Master
     # (compliance section). PF / ESI heads are skipped — those are computed
     # statutorily above and must not double-count.
+    # Iter 420 (user request) — per-head breakdown kept so every enabled
+    # Firm Master deduction head can render as its OWN dynamic column.
     master_deduction = 0.0
+    deduction_heads: Dict[str, float] = {}
     for r in (user.get("compliance_salary_deductions") or []):
         if not isinstance(r, dict):
             continue
         s = str(r.get("head") or "").strip().lower()
         if "pf" in s or "esi" in s or "provident" in s:
             continue
-        master_deduction += _num(r.get("amount"), 0.0)
+        _amt = _num(r.get("amount"), 0.0)
+        master_deduction += _amt
+        if _amt:
+            _lbl = str(r.get("head") or "").strip() or "OTH. DEDUC."
+            deduction_heads[_lbl] = round(deduction_heads.get(_lbl, 0.0) + _amt, 2)
 
     # Iter 297 — zero-day / zero-pay month ⇒ every deduction is 0.
     if _zero_pay:
         pt = 0.0
         tds = 0.0
         master_deduction = 0.0
+        deduction_heads = {}
 
     total_deduction = pf_employee + esic_employee + pt + tds + master_deduction
     net = gross_paid - total_deduction
@@ -1009,6 +1017,7 @@ def compute_compliance_row(
         "tds": round(tds, 2),
         # Iter 127c — firm-linked deduction heads from the Employee Master
         "master_deduction": round(master_deduction, 2),
+        "deduction_heads": deduction_heads,
         # Totals
         "total_deduction": round(total_deduction, 2),
         "net": round(net, 2),
@@ -1123,6 +1132,28 @@ CSV_COLUMNS = [
 ]
 
 
+def _ded_head_labels(rows: List[Dict[str, Any]]) -> List[str]:
+    """Iter 420 — dynamic Firm-Master deduction head labels for a run."""
+    r0 = rows[0] if rows else {}
+    labels = r0.get("deduction_head_labels")
+    if labels is None:
+        labels = sorted({h for r in rows for h in (r.get("deduction_heads") or {})})
+    return [str(l) for l in labels if l]
+
+
+def flatten_deduction_heads(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Iter 420 — copy rows with each firm-master deduction head flattened
+    to a top-level key so CSV/XLSX exports render one column per head."""
+    labels = _ded_head_labels(rows)
+    if not labels:
+        return rows
+    out = []
+    for r in rows:
+        heads = r.get("deduction_heads") or {}
+        out.append({**r, **{l: heads.get(l, 0) for l in labels}})
+    return out
+
+
 def dynamic_csv_columns(rows: List[Dict[str, Any]]) -> List[str]:
     """Iter 373 (user request) — Excel/CSV export columns follow the
     firm-enabled heads so spreadsheets always MATCH the PDF register."""
@@ -1150,12 +1181,20 @@ def dynamic_csv_columns(rows: List[Dict[str, Any]]) -> List[str]:
         drop |= {"pt_state", "pt"}
     if not has_d("tds"):
         drop.add("tds")
-    return [c for c in CSV_COLUMNS if c not in drop]
+    cols = [c for c in CSV_COLUMNS if c not in drop]
+    # Iter 420 (user request) — one dynamic column per Firm-Master enabled
+    # deduction head, placed just before Total Ded.
+    labels = _ded_head_labels(rows)
+    if labels:
+        idx = cols.index("total_deduction") if "total_deduction" in cols else len(cols)
+        cols[idx:idx] = labels
+    return cols
 
 
 def to_csv(rows: List[Dict[str, Any]]) -> str:
     # Iter 373 (user request) — dynamic firm-wise heads in CSV too.
     cols = dynamic_csv_columns(rows)
+    rows = flatten_deduction_heads(rows)
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
     w.writeheader()

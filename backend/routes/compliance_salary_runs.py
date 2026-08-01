@@ -258,6 +258,13 @@ async def _compute_compliance_run(
                 ded_mask.add("pt")
             if _fm_ded.get("TDS") or _fm_ded.get("I. TAX"):
                 ded_mask.add("tds")
+            # Iter 420 (user request) — CUSTOM deduction heads enabled in
+            # the Firm Master (ADVANCE / UNIFORM / CANTEEN / …) become
+            # their own DYNAMIC columns on the Compliance Salary sheet.
+            _STAT_DED = {"PF", "ESI", "PT", "TDS", "I. TAX"}
+            custom_ded_labels = sorted(
+                lbl for lbl, on in _fm_ded.items()
+                if on and str(lbl).strip().upper() not in _STAT_DED)
             firm_stat_flags[fm["company_id"]] = {
                 # Iter 369 — "Applicable" flag authoritative (see above).
                 "pf": _pf_col,
@@ -269,6 +276,9 @@ async def _compute_compliance_run(
                 # + Gross remain). None only when never configured.
                 "allow_mask": allow_mask if _fm_allow else None,
                 "ded_mask": ded_mask if any(bool(v) for v in _fm_ded.values()) else None,
+                # Iter 420 — dynamic custom deduction heads (None when the
+                # firm never configured the Deductions catalog).
+                "custom_ded_labels": custom_ded_labels if _fm_ded else None,
                 # Iter 310 — Freeze Salary difference allocation gate.
                 "ot_allowed": bool((fm.get("salary_process") or {}).get("ot_allowed")),
                 # Iter 337 (user request) — Days Calculation Method.
@@ -651,6 +661,29 @@ async def _compute_compliance_run(
                     float(row.get("total_deduction") or 0) - _removed, 2)
                 row["net"] = round(float(row.get("net") or 0) + _removed, 2)
             row["enabled_deductions"] = sorted(_ded_set)
+
+        # Iter 420 (user request) — DEDUCTIONS follow the Firm Master
+        # catalog DYNAMICALLY: each enabled custom head is its own column;
+        # amounts on heads the firm switched OFF are removed from Total
+        # Ded. and returned to Net.
+        _custom = _fm_masks.get("custom_ded_labels")
+        if _custom is not None:
+            _low = {str(c).strip().lower() for c in _custom}
+            _keep: dict = {}
+            _rm = 0.0
+            for _h, _amt in (row.get("deduction_heads") or {}).items():
+                if str(_h).strip().lower() in _low:
+                    _keep[_h] = _amt
+                else:
+                    _rm += float(_amt or 0)
+            if _rm:
+                row["master_deduction"] = round(
+                    float(row.get("master_deduction") or 0) - _rm, 2)
+                row["total_deduction"] = round(
+                    float(row.get("total_deduction") or 0) - _rm, 2)
+                row["net"] = round(float(row.get("net") or 0) + _rm, 2)
+            row["deduction_heads"] = _keep
+            row["deduction_head_labels"] = _custom
 
         # Iter 328 — imported sheet TDS is authoritative: applied AFTER the
         # firm deduction mask so an explicit TDS on the client sheet always
@@ -1926,7 +1959,7 @@ async def export_compliance_salary_run_xlsx(
     authorization: Optional[str] = Header(None),
 ):
     """Iter 64 — native Excel export for Compliance Salary runs."""
-    from utils.compliance_salary import dynamic_csv_columns
+    from utils.compliance_salary import dynamic_csv_columns, flatten_deduction_heads
     from utils.report_xlsx import build_rows_xlsx
     from fastapi.responses import Response
     admin = await get_user_from_token(authorization)
@@ -1948,7 +1981,8 @@ async def export_compliance_salary_run_xlsx(
     xlsx_bytes = build_rows_xlsx(
         # Iter 373 (user request) — dynamic firm-wise heads (matches PDF).
         columns=dynamic_csv_columns(run.get("rows") or []),
-        rows=_sort_export_rows(run.get("rows") or [], sort_by),
+        rows=flatten_deduction_heads(
+            _sort_export_rows(run.get("rows") or [], sort_by)),
         sheet_name="Compliance",
         title=f"Compliance Salary — {company_name}",
         subtitle=f"Month: {run.get('month')} · Employees: {len(run.get('rows') or [])}",

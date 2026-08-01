@@ -3187,3 +3187,25 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - testing_agent iteration_420.json: backend 10/10 + all frontend flows
   PASS. WEB_SELECT style warning fixed post-test. Email/WA return clear
   400 when SMTP/WA unconfigured (expected).
+
+## Iter 421 — Dynamic deductions, Actual Other Ded., PF validation per Firm Master
+- Compliance Salary DYNAMIC DEDUCTIONS per Firm Master: engine
+  (compute_compliance_row) now keeps per-head breakdown row.deduction_heads;
+  run compute filters heads to Firm-Master-enabled custom labels
+  (custom_ded_labels; disabled-head amounts removed from Total Ded., added
+  back to Net); rows carry deduction_head_labels. CSV/XLSX exports render
+  one dynamic column per head (dynamic_csv_columns + flatten_deduction_heads);
+  frontend grid renders per-head read-only cells between TDS and Other*.
+  Verified: ADVANCE 500 + CANTEEN 200 counted, disabled UNIFORM 99 excluded.
+- Actual Salary Process: NEW editable "Other Ded.*" column (row.other_ded)
+  — backend _actual_salary_row_compute/net, totals, PATCH body; frontend
+  salary-run.tsx (col, editable cell, totals chip/row, CSV, sort/filter).
+  Verified: PATCH other_ded=250 → net -250, totals aggregated.
+- PF validation follows FIRM MASTER policy (user rule): AI compliance
+  analysis (ai_layer._employee_checks) no longer flags Missing UAN when
+  firm EPF disabled (epf.applicable / deductions.PF), nor Missing ESIC IP
+  when ESI disabled. Verified ON→findings 1/1, OFF→0/0. (Compliance salary
+  engine already gated PF/ESI amounts via firm_pf_enabled/firm_esi_enabled.)
+- Also this session: Present Days ≤ month-days validation (grid save +
+  import — see Iter 420 notes), machine filter firm-scoped in Daily
+  Verification.
