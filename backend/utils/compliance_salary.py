@@ -1294,6 +1294,7 @@ def build_compliance_register_pdf(
     def other_ded(r: Dict[str, Any]) -> float:
         return (float(r.get("other_deduction") or 0)
                 + float(r.get("master_deduction") or 0)
+                + float(r.get("advance_recovery") or 0)
                 + float(r.get("pt") or 0))
 
     # Iter 401 — show the Other columns whenever any row actually carries a
@@ -1902,6 +1903,7 @@ def build_compliance_register_pdf_v2(
     def other_ded(r):
         return (float(r.get("other_deduction") or 0)
                 + float(r.get("master_deduction") or 0)
+                + float(r.get("advance_recovery") or 0)
                 + float(r.get("pt") or 0))
 
     tot = {k: 0.0 for k in ("days", "basic", "hra", "conv", "oth", "gross",

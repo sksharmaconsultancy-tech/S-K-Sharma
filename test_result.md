@@ -280,3 +280,12 @@ See `/app/memory/test_credentials.md`. Super admin
   now 14,400 lines. Boot ImportError fixed by re-exporting 13 shared names before other
   route-module imports.
 - Runner v7: OK (#btnCloseModal) → X (aria-label=Close) → generic dismiss, then autofill.
+
+## Iter 422
+- Editable Advance Deduction: backend E2E (tests/check_advance_edit.py) —
+  compliance run 2026-05 save-rows with advance_recovery=500 + manual_fields,
+  reprocess → adv preserved (500), td/net adjusted; test run deleted after.
+  Actual run asal_dedbdccd233e PATCH adv=750 → net -750 (200 OK), reverted.
+- Frontend Playwright: Advance* editable column + ADVANCE totals chip visible
+  on compliance grid (run csrun_bca09c4a4cec); "Date of Join" header visible
+  in /master-data-report; xlsx export 200.

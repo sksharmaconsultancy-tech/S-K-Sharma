@@ -209,6 +209,11 @@ async def apply_advance_recovery(
         net_key = "net" if process_type == "compliance" else "net_pay"
         total_new = 0.0
         for row in rows:
+            # Iter 422 (user request) — the admin manually edited the
+            # Advance deduction on this row (compliance grid stamps it on
+            # manual_fields). The ledger must NOT overwrite that figure.
+            if "advance_recovery" in (row.get("manual_fields") or []):
+                continue
             advs = by_user.get(row.get("user_id"))
             if not advs:
                 continue

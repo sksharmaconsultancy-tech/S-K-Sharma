@@ -3209,3 +3209,27 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Also this session: Present Days ≤ month-days validation (grid save +
   import — see Iter 420 notes), machine filter firm-scoped in Daily
   Verification.
+
+## Iter 422 — Editable Advance Deduction + Master Report "Date of Join"
+- COMPLIANCE SALARY grid: NEW editable "Advance*" column (deductions band,
+  before Other*). Auto-filled from the Advance ledger; inline edits stamp
+  manual_fields ("advance_recovery") so REPROCESS keeps the typed amount
+  (both normal + imported/Freeze runs). routes/advances.py
+  apply_advance_recovery skips rows with manual advance_recovery. Frontend
+  compliance-salary-run.tsx: navCols/arrow-nav, totals strip + totals row,
+  col filter/sort, dedTotal (updateRowField + updatePresentDays) now include
+  advance_recovery (also fixed latent bug where editing any cell dropped the
+  ledger advance from Total Ded.). Register export helpers (other_ded in
+  utils/compliance_salary.py) include advance_recovery.
+- ACTUAL SALARY: Adv column was already editable (PATCH body.adv). Fixed
+  reprocess DOUBLE-COUNT: carry-forward now takes prev.adv MINUS
+  prev.advance_recovery (ledger EMI re-applied idempotently on top).
+- Employee Master Report (Reports → /master-data-report): "DOJ" column
+  relabeled "Date of Join" (grid + xlsx export) — column & data already
+  existed (backend routes/master_data_report.py _COLUMNS).
+- Verified: backend E2E script tests/check_advance_edit.py (compliance
+  save-rows → reprocess keeps adv 500 + manual_fields; actual PATCH adv 750
+  → net -750, reverted); Playwright screenshots — Advance* column visible &
+  editable on run csrun_bca09c4a4cec, "Date of Join" header in master report.
+- deploy_vps_iter422.sh created; temp_bundle "script" kind now serves it
+  (wget .../api/temp-code-bundle?token=sks-deploy-7391&kind=script).

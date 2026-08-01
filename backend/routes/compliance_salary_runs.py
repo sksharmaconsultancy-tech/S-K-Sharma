@@ -761,6 +761,18 @@ async def _compute_compliance_run(
                     row["total_deduction"] = round(
                         float(row.get("total_deduction") or 0) + _delta, 2)
                     row["net"] = round(float(row.get("net") or 0) - _delta, 2)
+            # Iter 422 (user request) — manually edited ADVANCE deduction
+            # survives a reprocess. apply_advance_recovery() skips rows
+            # whose manual_fields carry "advance_recovery" so the ledger
+            # never overwrites the admin's typed amount.
+            if "advance_recovery" in _mf:
+                _new_adv = round(float(_prev.get("advance_recovery") or 0), 2)
+                _delta = round(_new_adv - float(row.get("advance_recovery") or 0), 2)
+                if _delta:
+                    row["advance_recovery"] = _new_adv
+                    row["total_deduction"] = round(
+                        float(row.get("total_deduction") or 0) + _delta, 2)
+                    row["net"] = round(float(row.get("net") or 0) - _delta, 2)
         # Iter 310 — FREEZE SALARY (user directive): when the run is driven
         # by the IMPORTED sheet, the sheet's Gross Earning is authoritative
         # and gets FROZEN on the run. If Imported Gross > the gross
@@ -786,6 +798,21 @@ async def _compute_compliance_run(
                 row["net"] = round(
                     _keep_g - float(row.get("total_deduction") or 0), 2)
                 row["manual_override"] = True
+                # Iter 422 (user request) — manual ADVANCE edits survive a
+                # reprocess on imported (Freeze) runs too. manual_fields is
+                # carried so apply_advance_recovery() skips this row.
+                _mf_imp = set(_prev_imp.get("manual_fields") or [])
+                if _mf_imp:
+                    row["manual_fields"] = sorted(_mf_imp)
+                if "advance_recovery" in _mf_imp:
+                    _adv_prev = round(
+                        float(_prev_imp.get("advance_recovery") or 0), 2)
+                    if _adv_prev != float(row.get("advance_recovery") or 0):
+                        _d = round(_adv_prev - float(row.get("advance_recovery") or 0), 2)
+                        row["advance_recovery"] = _adv_prev
+                        row["total_deduction"] = round(
+                            float(row.get("total_deduction") or 0) + _d, 2)
+                        row["net"] = round(float(row.get("net") or 0) - _d, 2)
                 if _imp_g > 0:
                     row["imported_gross"] = _imp_g
                     row["calculated_gross"] = _keep_g

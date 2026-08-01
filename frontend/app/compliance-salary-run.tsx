@@ -208,6 +208,7 @@ const COL_FILTER_GETTERS: Record<string, (r: any) => any> = {
   "ESI (Er)": (r) => r.esic_employer,
   "PT": (r) => r.pt,
   "TDS": (r) => r.tds,
+  "Advance*": (r) => (r as any).advance_recovery,
   "Other*": (r) => r.other_deduction,
   "Total Ded.": (r) => r.total_deduction,
   "Net": (r) => r.net,
@@ -1370,6 +1371,7 @@ export default function ComplianceSalaryRunScreen() {
     if (!en || en.includes("others")) cols.push("others");
     cols.push("ot_pay");
     if (!ed || ed.includes("tds")) cols.push("tds");
+    cols.push("advance_recovery");
     cols.push("other_deduction");
     return cols;
   }, [run, fmMask]);
@@ -1400,7 +1402,7 @@ export default function ComplianceSalaryRunScreen() {
   // locally so the grid stays in sync while editing.
   const updateRowField = (
     userId: string,
-    key: "others" | "other_deduction" | "ot_pay" | "tds" | "esic_leave_days",
+    key: "others" | "other_deduction" | "advance_recovery" | "ot_pay" | "tds" | "esic_leave_days",
     value: number,
   ) => {
     setRun((prev) => {
@@ -1483,7 +1485,8 @@ export default function ComplianceSalaryRunScreen() {
           }
         }
         const dedTotal = (next.pf_employee || 0) + (next.esic_employee || 0)
-          + (next.pt || 0) + (next.tds || 0) + (next.other_deduction || 0);
+          + (next.pt || 0) + (next.tds || 0) + (next.other_deduction || 0)
+          + (next.advance_recovery || 0);
         next.total_deduction = Math.round(dedTotal);
         next.net = Math.round((next.gross_paid || 0) - dedTotal);
         // Iter 343b — keep the Freeze comparison (display-only) in sync.
@@ -1498,7 +1501,7 @@ export default function ComplianceSalaryRunScreen() {
       });
       // Keep the totals strip in sync for the edited keys.
       const totals = { ...(prev.totals || {}) } as Record<string, number>;
-      for (const k of ["others", "other_deduction", "ot_pay", "tds",
+      for (const k of ["others", "other_deduction", "advance_recovery", "ot_pay", "tds",
                        "monthly_gross", "gross_paid", "total_deduction", "net",
                        "pf_wages", "pf_employee", "pf_employer_epf",
                        "pf_employer_eps", "pf_employer_total",
@@ -1638,7 +1641,8 @@ export default function ComplianceSalaryRunScreen() {
         const pt = Number(r.pt || 0);   // keep PT slab as-is
         const tds = Number(r.tds || 0); // keep TDS as-is
         const otherDed = Number((r as any).other_deduction || 0);
-        const totalDed = Math.round(pfEmp) + esiEmp + pt + tds + otherDed;
+        const advDed = Number((r as any).advance_recovery || 0);
+        const totalDed = Math.round(pfEmp) + esiEmp + pt + tds + otherDed + advDed;
         const net = grossPaid - totalDed;
 
         return {
@@ -2537,7 +2541,7 @@ export default function ComplianceSalaryRunScreen() {
                   // Iter 171 — deduction columns follow Firm Master Deductions
                   const ed = ((run.rows[0] as any)?.enabled_deductions ?? fmMask.ed) as string[] | undefined;
                   const hasDed = (k: string) => !ed || ed.includes(k);
-                  const dedCount = 4 // WageBase, Other, TotalDed, Net
+                  const dedCount = 5 // WageBase, Advance, Other, TotalDed, Net
                     + (hasDed("pf") ? 2 : 0) + (hasDed("esi") ? 2 : 0)
                     + (hasDed("pt") ? 1 : 0) + (hasDed("tds") ? 1 : 0);
                   return (
@@ -2611,7 +2615,8 @@ export default function ComplianceSalaryRunScreen() {
                     // Iter 420 (user request) — one dynamic column per
                     // custom deduction head enabled in the Firm Master.
                     ...(((run?.rows?.[0] as any)?.deduction_head_labels as string[]) || []),
-                    "Other*", "Total Ded.", "Net",
+                    // Iter 422 (user request) — editable Advance deduction.
+                    "Advance*", "Other*", "Total Ded.", "Net",
                   ];
                   for (const d of dedLabels) headers.push({ label: d, group: "ded" });
                   const infoW = [colW.sr, colW.uan, colW.esi, colW.name, colW.father, colW.desg, colW.pd, colW.el];
@@ -2878,6 +2883,22 @@ export default function ComplianceSalaryRunScreen() {
                         {fmtInr(((r as any).deduction_heads || {})[dl] || 0)}
                       </Text>
                     )))}
+                    {/* Iter 422 (user request) — Editable Advance deduction.
+                        Auto-filled from the Advance ledger; admins can
+                        override it inline (stamped on manual_fields so a
+                        reprocess keeps the typed amount). */}
+                    <TextInput
+                      ref={(el) => { cellRefs.current[`advance_recovery:${idx}`] = el; }}
+                      value={String(Math.round((r as any).advance_recovery || 0))}
+                      onChangeText={(v) => {
+                        const n = Number(v.replace(/[^0-9.]/g, ""));
+                        if (!Number.isNaN(n)) updateRowField(r.user_id, "advance_recovery", n);
+                      }}
+                      onKeyPress={(e: any) => handleNavKey(e, "advance_recovery", idx)}
+                      keyboardType="decimal-pad"
+                      selectTextOnFocus
+                      style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
+                    />
                     {/* Iter 85 — Editable "Other" deduction. */}
                     <TextInput
                       ref={(el) => { cellRefs.current[`other_deduction:${idx}`] = el; }}
@@ -2947,6 +2968,7 @@ export default function ComplianceSalaryRunScreen() {
                         {hasDed("esi") ? num(run.totals?.esic_employer) : null}
                         {hasDed("pt") ? num(run.totals?.pt) : null}
                         {hasDed("tds") ? num(run.totals?.tds) : null}
+                        {num((run.rows || []).reduce((s, r) => s + (Number((r as any).advance_recovery) || 0), 0))}
                         {num((run.rows || []).reduce((s, r) => s + (Number((r as any).other_deduction) || 0), 0))}
                         {num(run.totals?.total_deduction)}
                         {num(run.totals?.net)}

@@ -585,7 +585,13 @@ async def create_actual_salary_process(
         # Iter 297 — manual money edits carried over (defaults are 0, so
         # any non-zero value was typed by the admin in the grid).
         if _prev_a is not None:
-            row["adv"] = float(_prev_a.get("adv") or 0.0)
+            # Iter 422 — carry only the MANUAL portion of Adv: the previous
+            # run's adv includes the ledger's advance_recovery, which
+            # apply_advance_recovery() re-adds below (idempotent txns).
+            # Carrying it verbatim would double the ledger amount.
+            row["adv"] = max(0.0, round(
+                float(_prev_a.get("adv") or 0.0)
+                - float(_prev_a.get("advance_recovery") or 0.0), 2))
             row["tds"] = float(_prev_a.get("tds") or 0.0)
             if _prev_a.get("w_basic_override") is not None:
                 row["w_basic_override"] = float(_prev_a["w_basic_override"])

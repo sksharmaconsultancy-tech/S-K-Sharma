@@ -42,7 +42,7 @@ _COLUMNS = [
     ("department", "Department"),
     ("employee_type", "Type / Group"),
     ("is_onroll", "On-roll"),
-    ("doj", "DOJ"),
+    ("doj", "Date of Join"),
     ("exit_date", "Exit / Resign Date"),   # hidden on the Active tab
     ("basic", "Basic"),
     ("pf_basic", "PF Basic"),
