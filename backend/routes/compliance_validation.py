@@ -157,11 +157,8 @@ async def validate_compliance_run(run: Dict[str, Any]) -> Dict[str, Any]:
         _pft = str(r.get("pf_contribution_type")
                    or m.get("pf_contribution_type") or "statutory").lower()
         if _pft == "higher":
-            if not stat.get("allow_higher_pf"):
-                issues.append(_issue(
-                    "HIGHER_PF_NOT_ALLOWED", "error",
-                    "Higher PF selected but the company policy does not allow Higher PF.",
-                    "Enable 'Allow Higher PF' in Standard Compliance Settings, or set the employee back to Statutory PF."))
+            # Iter 425b — company "Allow Higher PF" switch no longer gates
+            # the engine, so the HIGHER_PF_NOT_ALLOWED check is removed.
             if not (r.get("pf_declaration_available")
                     or m.get("pf_declaration_available")):
                 issues.append(_issue(

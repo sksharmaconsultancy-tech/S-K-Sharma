@@ -28,12 +28,13 @@ row2 = compute_compliance_row(u2, {}, 30, STATS, statutory_cfg=CFG)
 print("HIGHER (pending): active =", row2["pf_higher_active"], "| pf_wages =", row2["pf_wages"])
 assert row2["pf_higher_active"] is True, "approval must be ignored"
 
-# 1c. Company toggle OFF → falls back to ceiling with reason.
+# 1c. Company toggle OFF → Iter 425b: NO LONGER gates — still active.
 row3 = compute_compliance_row(u, {}, 30, STATS,
                               statutory_cfg=dict(CFG, allow_higher_pf=False))
 print("HIGHER (toggle off): active =", row3["pf_higher_active"],
-      "| reason =", row3["pf_higher_reason"], "| pf_wages =", row3["pf_wages"])
-assert row3["pf_higher_active"] is False and row3["pf_wages"] == 15000
+      "| pf_wages =", row3["pf_wages"])
+assert row3["pf_higher_active"] is True and row3["pf_wages"] == 25000, \
+    "company switch must not gate Higher PF anymore"
 
 # 2. VPF — statutory ceiling + 10% VPF on top (employee side only).
 uv = dict(BASE_USER, pf_contribution_type="vpf", vpf_percent=10)

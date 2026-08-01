@@ -100,7 +100,8 @@ DEFAULT_STATUTORY_CFG: Dict[str, Any] = {
     "esic_proration_method": "calendar_days",
     "rule_version": "",                      # free label, e.g. "FY 2026-27 v1"
     # Iter 408 (user spec) — Higher PF / VPF company policy (Company Master).
-    "allow_higher_pf": False,   # permit contribution on ACTUAL PF wages
+    "allow_higher_pf": True,    # Iter 425b — informational only; engine no
+                                # longer gates Higher PF on this switch.
     "allow_vpf": True,          # permit Voluntary PF (employee side only)
     "vpf_max_percent": 0.0,     # 0 = no company limit on VPF %
     # head_mapping default is None → DEFAULT_HEAD_MAPPING applies.
@@ -689,12 +690,13 @@ def compute_compliance_row(
             _hi_from = str(user.get("higher_pf_from") or "")[:7]
             _hi_to = str(user.get("higher_pf_to") or "")[:7]
             _month_key = str(cfg.get("_salary_month") or "")[:7]
-            # Iter 425 (user directive) — Management Approval REMOVED:
-            # Higher PF is always auto-approved; only the company
-            # "Allow Higher PF" switch and the effective window gate it.
-            if not cfg.get("allow_higher_pf"):
-                _hi_reason = "company policy disallows Higher PF"
-            elif _month_key and _hi_from and _month_key < _hi_from:
+            # Iter 425 (user directive) — Management Approval REMOVED and
+            # Iter 425b (user bug) — the company "Allow Higher PF" switch is
+            # NO LONGER consulted (it was resolved through time-versioned
+            # settings and silently fell back to the ceiling on months whose
+            # policy version predated the switch). Marking the EMPLOYEE as
+            # Higher PF is enough; only the effective window gates it.
+            if _month_key and _hi_from and _month_key < _hi_from:
                 _hi_reason = f"effective only from {_hi_from}"
             elif _month_key and _hi_to and _month_key > _hi_to:
                 _hi_reason = f"expired after {_hi_to}"

@@ -3273,3 +3273,13 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   Engine tests: tests/check_higher_pf_vpf.py ALL PASS (25000 wages @12% =
   3000 with pending approval ignored; toggle OFF → 15000; VPF 3300 = 1800+
   1500). Preview standard_compliance: allow_higher_pf=True, allow_vpf=True.
+- Iter 425b (user bug — "Higher PF not working, PF 1800 / Wage Base 0"):
+  ROOT CAUSE: allow_higher_pf resolved through TIME-VERSIONED compliance
+  settings (compliance_settings_log) — months whose policy version predated
+  the switch silently fell back to the ₹15,000 ceiling. FIX: engine no longer
+  consults the company "Allow Higher PF" switch at all (employee type=higher
+  + effective window is enough); HIGHER_PF_NOT_ALLOWED validation removed;
+  DEFAULT allow_higher_pf=True (informational). E2E verified on preview:
+  RAJENDRA MEENA (STAFF, 13.5 days) → pf_wages 25000, pf_employee 3000,
+  higher_active=True; user's draft run + employee master fully restored.
+  Unit tests updated (toggle-off no longer gates) — ALL PASS.
