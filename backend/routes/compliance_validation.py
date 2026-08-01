@@ -168,12 +168,8 @@ async def validate_compliance_run(run: Dict[str, Any]) -> Dict[str, Any]:
                     "HIGHER_PF_NO_DECLARATION", "error",
                     "Higher PF selected but the Employee Declaration is missing.",
                     "Tick 'Employee Declaration Available' on the Employee Master after collecting the joint declaration."))
-            if (m.get("pf_approval_required") is not False
-                    and str(m.get("pf_approval_status") or "").lower() != "approved"):
-                issues.append(_issue(
-                    "HIGHER_PF_APPROVAL_PENDING", "error",
-                    f"Higher PF approval status is '{m.get('pf_approval_status') or 'pending'}' — management approval required.",
-                    "Set Approval Status = Approved on the Employee Master (or untick Management Approval Required)."))
+            # Iter 425 (user directive) — Management Approval check REMOVED:
+            # Higher PF is always auto-approved.
             _hf, _ht = str(m.get("higher_pf_from") or "")[:7], str(m.get("higher_pf_to") or "")[:7]
             if _hf and _ht and _hf > _ht:
                 issues.append(_issue(

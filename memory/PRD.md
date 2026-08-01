@@ -3263,3 +3263,13 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Iter 424: All Employee Data list (/admin) — each card now shows
   "S/O <father_name> · DOJ: <date>" under the designation line (fields
   already on the /admin/employees payload). Verified via screenshot.
+- Iter 425 (user directive): Higher PF "Management Approval" REMOVED — always
+  auto-approved. utils/compliance_salary.py drops the approval-pending gate
+  (Higher PF activates with company allow_higher_pf ON + type=higher +
+  effective window); compliance_validation.py HIGHER_PF_APPROVAL_PENDING
+  removed; employee-add.tsx approval toggle/status selector removed, chip
+  shows Approved/Expired only. VPF verified: statutory PF + VPF% on top
+  (employee side only), employer statutory; allow_vpf=False skips VPF.
+  Engine tests: tests/check_higher_pf_vpf.py ALL PASS (25000 wages @12% =
+  3000 with pending approval ignored; toggle OFF → 15000; VPF 3300 = 1800+
+  1500). Preview standard_compliance: allow_higher_pf=True, allow_vpf=True.

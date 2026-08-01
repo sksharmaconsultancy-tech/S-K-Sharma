@@ -689,11 +689,11 @@ def compute_compliance_row(
             _hi_from = str(user.get("higher_pf_from") or "")[:7]
             _hi_to = str(user.get("higher_pf_to") or "")[:7]
             _month_key = str(cfg.get("_salary_month") or "")[:7]
+            # Iter 425 (user directive) — Management Approval REMOVED:
+            # Higher PF is always auto-approved; only the company
+            # "Allow Higher PF" switch and the effective window gate it.
             if not cfg.get("allow_higher_pf"):
                 _hi_reason = "company policy disallows Higher PF"
-            elif (user.get("pf_approval_required") is not False
-                  and str(user.get("pf_approval_status") or "").lower() != "approved"):
-                _hi_reason = "management approval pending"
             elif _month_key and _hi_from and _month_key < _hi_from:
                 _hi_reason = f"effective only from {_hi_from}"
             elif _month_key and _hi_to and _month_key > _hi_to:

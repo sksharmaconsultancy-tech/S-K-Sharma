@@ -300,3 +300,8 @@ See `/app/memory/test_credentials.md`. Super admin
   200 OK, lock_validation stamped with non_blocking_policy; clone deleted.
 - Actual p_days uncapped: PATCH p_days=35 on asal_dedbdccd233e (month_days
   31) → accepted; reverted to original.
+
+## Iter 425
+- Higher PF auto-approve + VPF: tests/check_higher_pf_vpf.py — 6 assertions
+  PASS (higher wages uncapped, approval ignored, toggle-off fallback, VPF on
+  top employee-side, VPF disallowed skip).

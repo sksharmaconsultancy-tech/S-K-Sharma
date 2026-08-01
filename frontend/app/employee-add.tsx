@@ -1966,13 +1966,11 @@ export default function EmployeeAddScreen() {
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
                 <Text style={{ fontSize: 12.5, fontWeight: "800", color: "#1E40AF" }}>Higher PF — contribution on actual PF wages (no ceiling)</Text>
                 {(() => {
-                  const st = (form.pf_approval_status || "").toLowerCase();
                   const now = new Date().toISOString().slice(0, 7);
                   const expired = form.higher_pf_to && now > form.higher_pf_to.slice(0, 7);
-                  const chip = expired ? ["Expired", "#6B7280"]
-                    : st === "approved" ? ["Approved", "#15803D"]
-                    : st === "rejected" ? ["Rejected", "#B91C1C"]
-                    : ["Pending Approval", "#D97706"];
+                  // Iter 425 (user directive) — Higher PF is ALWAYS
+                  // auto-approved; no management approval workflow.
+                  const chip = expired ? ["Expired", "#6B7280"] : ["Approved", "#15803D"];
                   return (
                     <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: chip[1] }}>
                       <Text style={{ fontSize: 10.5, fontWeight: "800", color: "#fff" }}>{chip[0]}</Text>
@@ -2013,33 +2011,13 @@ export default function EmployeeAddScreen() {
                   color={form.pf_declaration_available ? colors.brandPrimary : colors.onSurfaceSecondary} />
                 <Text style={{ fontSize: 12.5, color: colors.onSurface }}>Employee Declaration Available (joint declaration)</Text>
               </Pressable>
-              <Pressable
-                onPress={() => setField("pf_approval_required", !form.pf_approval_required)}
-                style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 }}
-                testID="pf-approval-required-toggle"
-              >
-                <Ionicons name={form.pf_approval_required ? "checkbox" : "square-outline"} size={20}
-                  color={form.pf_approval_required ? colors.brandPrimary : colors.onSurfaceSecondary} />
-                <Text style={{ fontSize: 12.5, color: colors.onSurface }}>Management Approval Required</Text>
-              </Pressable>
-              <Text style={{ fontSize: 11.5, fontWeight: "700", color: colors.onSurfaceSecondary, marginTop: 8 }}>Approval Status</Text>
-              <View style={{ flexDirection: "row", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
-                {(["pending", "approved", "rejected"] as const).map((s2) => {
-                  const on = (form.pf_approval_status || "pending") === s2;
-                  return (
-                    <Pressable key={s2} onPress={() => setField("pf_approval_status", s2)}
-                      style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1.2, borderColor: on ? colors.brandPrimary : colors.border, backgroundColor: on ? colors.brandPrimary : colors.surface }}
-                      testID={`pf-approval-${s2}`}>
-                      <Text style={{ fontSize: 11.5, fontWeight: "700", color: on ? "#fff" : colors.onSurface }}>{s2.toUpperCase()}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
+              {/* Iter 425 (user directive) — Management Approval workflow
+                  REMOVED: Higher PF is always auto-approved. */}
               <Field
                 label="Remarks"
                 value={form.pf_remarks}
                 onChange={(v) => setField("pf_remarks", v)}
-                placeholder="Reason / reference of the approval"
+                placeholder="Reason / reference (optional)"
               />
             </View>
           ) : null}
