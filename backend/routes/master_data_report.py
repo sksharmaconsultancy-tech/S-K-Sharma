@@ -36,6 +36,7 @@ _COLUMNS = [
     ("name", "Name"),
     ("father_name", "Father / Spouse Name"),
     ("gender", "Gender"),
+    ("dob", "Date of Birth"),
     ("marital_status", "Marital Status"),
     ("phone", "Phone"),
     ("designation", "Designation"),

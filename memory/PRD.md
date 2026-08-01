@@ -3233,3 +3233,5 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   editable on run csrun_bca09c4a4cec, "Date of Join" header in master report.
 - deploy_vps_iter422.sh created; temp_bundle "script" kind now serves it
   (wget .../api/temp-code-bundle?token=sks-deploy-7391&kind=script).
+- Iter 422b: Employee Master Report — NEW "Date of Birth" column (key: dob,
+  between Gender and Marital Status) in grid + xlsx export. Verified via API.
