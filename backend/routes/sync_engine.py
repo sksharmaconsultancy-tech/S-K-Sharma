@@ -511,6 +511,30 @@ async def sync_all_api(payload: dict = Body(None),
         if await enqueue_employee_sync(cid, e["user_id"], "update",
                                        actor=admin["user_id"], force=True):
             queued += 1
+    # Iter 419 (user report: "0 employee sync job(s) queued") — when nothing
+    # queues, say exactly WHY instead of a bare zero.
+    if queued == 0:
+        base_q = {"role": "employee", "company_id": cid}
+        total = await db.users.count_documents(base_q)
+        with_bio = await db.users.count_documents(
+            {**base_q, "bio_code": {"$exists": True, "$nin": [None, ""]}})
+        filters = {k: payload[k] for k in ("department", "group", "branch") if payload.get(k)}
+        if total == 0:
+            why = ("this firm has no employees in the portal — check the "
+                   "firm selected in the dropdown above.")
+        elif with_bio == 0:
+            why = (f"none of the {total} employee(s) of this firm have a "
+                   "Bio Code (machine punch number). Set Bio Codes in the "
+                   "Employee Master first, then sync again.")
+        elif filters:
+            why = (f"{with_bio} employee(s) have a Bio Code, but none match "
+                   f"the selected filter {filters} — clear the filter and retry.")
+        else:
+            why = (f"{with_bio} employee(s) have a Bio Code but no job could "
+                   "be queued — check that at least one machine of this firm "
+                   "has Sync enabled (Devices tab).")
+        return {"ok": True, "queued": 0, "employees": len(emps),
+                "message": f"0 sync jobs queued — {why}"}
     return {"ok": True, "queued": queued, "employees": len(emps),
             "message": f"{queued} employee sync job(s) queued."}
 
