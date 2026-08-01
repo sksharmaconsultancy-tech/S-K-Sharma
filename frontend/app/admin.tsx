@@ -664,6 +664,22 @@ export default function AdminScreen() {
                     </Text>
                   ) : null}
                 </View>
+                {/* Iter 424 (user request) — Father Name + Date of Joining
+                    shown directly on the All-Employee list card. */}
+                {(e.father_name || e.doj) ? (
+                  <View style={styles.metaRow}>
+                    {e.father_name ? (
+                      <Text style={styles.empMeta} numberOfLines={1}>
+                        S/O {e.father_name}
+                      </Text>
+                    ) : null}
+                    {e.doj ? (
+                      <Text style={styles.empMeta} numberOfLines={1}>
+                        {e.father_name ? "· " : ""}DOJ: {formatDate(e.doj)}
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : null}
                 {e.salary_monthly ? (
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <Text style={styles.salaryLine}>

@@ -3260,3 +3260,6 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   finalize clone with 8 errors → 200 + stamp; PATCH p_days=35 (month 31) OK.
   NOTE: Compliance Present-Days ≤ month-days rule (Iter 420) intentionally
   KEPT — user only unblocked Actual.
+- Iter 424: All Employee Data list (/admin) — each card now shows
+  "S/O <father_name> · DOJ: <date>" under the designation line (fields
+  already on the /admin/employees payload). Verified via screenshot.
