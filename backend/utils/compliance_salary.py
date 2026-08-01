@@ -704,7 +704,14 @@ def compute_compliance_row(
                 _hi_active = True
         if _hi_active:
             _hi_wage = _num(user.get("higher_pf_wage"), 0.0)
-            capped_pf_wages = max(pf_base, _hi_wage) if _hi_wage > 0 else pf_base
+            # Iter 425c (user directive — "Always Calculate on Wage Base") —
+            # Higher PF contributes on the WAGE BASE from the Compliance
+            # Policy (max(Basic, floor% of Gross Earning)) with NO ceiling,
+            # never on the ₹15,000-capped master PF Basic. The approved
+            # Higher PF Wage (if filled) acts as a minimum floor.
+            capped_pf_wages = max(pf_base, stat_wage_base)
+            if _hi_wage > 0:
+                capped_pf_wages = max(capped_pf_wages, _hi_wage)
         else:
             capped_pf_wages = pf_base if _intl_worker else min(pf_base, cfg["pf_wage_cap"])
         pf_employee = capped_pf_wages * (cfg["pf_percent_employee"] / 100.0)

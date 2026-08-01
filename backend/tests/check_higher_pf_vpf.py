@@ -36,6 +36,17 @@ print("HIGHER (toggle off): active =", row3["pf_higher_active"],
 assert row3["pf_higher_active"] is True and row3["pf_wages"] == 25000, \
     "company switch must not gate Higher PF anymore"
 
+# 1d. Iter 425c — Higher PF with pf_basic stuck at the old ceiling (15000)
+# but ACTUAL wage base higher → PF must follow the WAGE BASE (no ceiling).
+u4 = dict(BASE_USER, pf_contribution_type="higher",
+          pf_basic=15000, compliance_basic=22000, compliance_gross=30000)
+row4 = compute_compliance_row(u4, {}, 30, STATS, statutory_cfg=CFG)
+print("HIGHER (wage base): stat_wage_base =", row4["stat_wage_base"],
+      "| pf_wages =", row4["pf_wages"], "| pf_employee =", row4["pf_employee"])
+assert row4["pf_wages"] == row4["stat_wage_base"] > 15000, \
+    "Higher PF must use the wage base, not the capped PF Basic"
+assert row4["pf_employee"] == round(row4["pf_wages"] * 0.12)
+
 # 2. VPF — statutory ceiling + 10% VPF on top (employee side only).
 uv = dict(BASE_USER, pf_contribution_type="vpf", vpf_percent=10)
 rowv = compute_compliance_row(uv, {}, 30, STATS, statutory_cfg=CFG)

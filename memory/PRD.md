@@ -3283,3 +3283,10 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   RAJENDRA MEENA (STAFF, 13.5 days) → pf_wages 25000, pf_employee 3000,
   higher_active=True; user's draft run + employee master fully restored.
   Unit tests updated (toggle-off no longer gates) — ALL PASS.
+- Iter 425c (user directive — "Always Calculate on Wage Base"): Higher PF
+  wages = max(pf_base, stat_wage_base[, higher_pf_wage]) — the Compliance
+  Policy WAGE BASE (max(Basic, floor% Gross Earning)) with NO ceiling, never
+  the ₹15,000-capped master PF Basic (that was why PF stayed 1800 when the
+  master PF Basic was 15000). ESIC already on the wage base. Unit test added
+  (pf_basic 15000 / basic 22000 / gross 30000 → pf_wages 22000, PF 2640) —
+  ALL PASS.
