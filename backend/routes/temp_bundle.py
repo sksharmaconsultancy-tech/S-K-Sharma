@@ -26,6 +26,11 @@ async def _build_tar() -> None:
         "--exclude='.git' --exclude='node_modules' --exclude='.expo' "
         "--exclude='dist' --exclude='venv' --exclude='__pycache__' "
         "--exclude='*.pyc' --exclude='.env' "
+        # Iter 419 — the bundle had ballooned to 140 MB and the proxy cut
+        # the download at ~90 s. Exclude caches / media that the VPS never
+        # needs: metro bundler cache, RPA session recordings, pytest cache.
+        "--exclude='.metro-cache' --exclude='rpa_media' "
+        "--exclude='.pytest_cache' --exclude='*.webm' "
         "backend frontend memory test_reports && mv {out}.part {out}"
     ).format(out=_TAR)
     proc = await asyncio.create_subprocess_shell(

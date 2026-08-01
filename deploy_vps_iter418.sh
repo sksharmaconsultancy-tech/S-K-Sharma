@@ -39,7 +39,7 @@ WEB_DIR=/var/www/sksharma
 BUNDLE_URL="https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=tar"
 PIP=$APP_DIR/backend/venv/bin/pip
 
-echo "==> 1/7 Downloading latest code bundle (~115 MB, retries enabled)..."
+echo "==> 1/7 Downloading latest code bundle (~10 MB, retries enabled)..."
 rm -f /tmp/sks-latest.tar
 ok=""
 for i in 1 2 3 4 5; do
