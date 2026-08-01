@@ -1405,6 +1405,19 @@ async def _create_compliance_salary_run_core(
     # the form is ignored.
     if _prev_run and _prev_run.get("month_days"):
         payload.month_days = int(_prev_run["month_days"])
+    elif _gate_cid and not payload.use_imported_sheet:
+        # Iter 427b (user clarification) — FIXED DAYS (26/30/31): the run's
+        # MONTH DAYS are FETCHED from the Firm Master's Fixed Days option,
+        # so the whole salary basis (divisor + default present days) is the
+        # selected fixed figure.
+        _fm_sp = ((await db.firm_masters.find_one(
+            {"company_id": _gate_cid}, {"_id": 0, "salary_process": 1})
+        ) or {}).get("salary_process") or {}
+        if str(_fm_sp.get("days_calc_method") or "") == "fixed":
+            try:
+                payload.month_days = int(_fm_sp.get("days_calc_fixed") or 26)
+            except (TypeError, ValueError):
+                payload.month_days = 26
     _prev_rows: Dict[str, dict] = {
         r.get("user_id"): r for r in ((_prev_run or {}).get("rows") or [])
     }

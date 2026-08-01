@@ -3327,3 +3327,10 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
      E2E: Kankani temporarily set to fixed/26 → all 2026-05 STAFF rows
      present_days=26, gross 19370; firm restored, run deleted.
   Screenshot verified: Group by gone, footer caption present, month-days 🔒.
+- Iter 427b (user clarification): FIXED DAYS (26/30/31) now sets the run's
+  MONTH DAYS too — backend create fetches firm_masters.salary_process; when
+  method=fixed, payload.month_days = days_calc_fixed (prev-run month-days
+  lock still wins). Frontend: "Month days (override)" auto-prefills the
+  firm's fixed figure on firm selection. E2E: fixed=30, form sent 31 →
+  run.month_days=30, all present_days=30, full master gross 22350; firm
+  restored, run deleted.

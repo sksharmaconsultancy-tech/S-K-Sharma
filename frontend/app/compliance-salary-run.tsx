@@ -563,6 +563,23 @@ export default function ComplianceSalaryRunScreen() {
     loadPolicy();
   }, [activeCompanyId, loadPolicy]);
 
+  // Iter 427b (user clarification) — when the firm's Salary Process method
+  // is FIXED DAYS (26/30/31), the "Month days (override)" field FETCHES the
+  // firm's fixed figure automatically.
+  useEffect(() => {
+    if (!activeCompanyId) return;
+    let alive = true;
+    api<any>(`/admin/firm-master/${activeCompanyId}`)
+      .then((r) => {
+        const sp = ((r?.master || r?.firm || r) as any)?.salary_process || {};
+        if (alive && String(sp.days_calc_method || "") === "fixed") {
+          setMonthDaysOverride(String(sp.days_calc_fixed || 26));
+        }
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [activeCompanyId]);
+
   const loadRuns = useCallback(async () => {
     try {
       const r = await api<{ runs: CompRun[] }>("/admin/compliance-salary-runs");
