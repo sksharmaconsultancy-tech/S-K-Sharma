@@ -15,7 +15,6 @@ import {
   ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import * as Location from "expo-location";
 import * as LocalAuthentication from "expo-local-authentication";
 
 import { api } from "@/src/api/client";
@@ -26,6 +25,9 @@ import {
 } from "@/src/utils/fingerprintGate";
 import { formatDistance } from "@/src/utils/location";
 import { SmartGpsEngine } from "@/src/utils/smartGps";
+// Iter 418 — Smart Punch SDK: telemetry enrichment + offline cache fallback.
+import { getTelemetry } from "@/src/sdk";
+import { enqueuePunch, startAutoSync, offlinePunchAllowed } from "@/src/sdk/offlineQueue";
 
 type Worksite = {
   worksite_id: string;
@@ -267,6 +269,10 @@ export default function PunchFlowModal({ visible, kind, user, postPunch, onClose
   // ---- Step 5: save punch (offline-aware when postPunch prop is given) ----
   const runSave = useCallback(async (pos: { latitude: number; longitude: number } | null, site: Worksite | null) => {
     setStep("save", "active", "Saving attendance…");
+    // Iter 418 — enrich the punch with SDK telemetry (device model, OS,
+    // battery, network, root flag) for the audit trail.
+    let tel: any = null;
+    try { tel = await getTelemetry(); } catch { /* best-effort */ }
     try {
       const body = {
         kind,
@@ -274,9 +280,12 @@ export default function PunchFlowModal({ visible, kind, user, postPunch, onClose
         longitude: pos?.longitude ?? null,
         biometric_method: methodRef.current,
         selfie_base64: selfieRef.current,
-        device_info: Platform.OS,
+        device_info: tel
+          ? `${tel.device_model} · ${tel.os_version} · ${tel.network_type}${tel.rooted ? " · ROOTED" : ""}`
+          : Platform.OS,
         mock_location: mockRef.current || undefined,
         gps_accuracy_m: accuracyRef.current ?? undefined,
+        battery_level: tel?.battery_level ?? undefined,
         ...(site && site.worksite_id !== "main"
           ? { worksite_id: site.worksite_id, worksite_name: site.name }
           : site ? { worksite_name: site.name } : {}),
@@ -299,6 +308,35 @@ export default function PunchFlowModal({ visible, kind, user, postPunch, onClose
       });
       onDone();
     } catch (e: any) {
+      // Iter 418 — OFFLINE CACHE (SDK Device Sync Engine): network failure
+      // ⇒ store the punch on the device and auto-sync when internet returns
+      // (idempotent replay). Gated by the firm's offline-punching switch.
+      const status = e?.status ?? e?.response?.status;
+      const isNetwork = !(typeof status === "number" && status >= 400 && status < 500);
+      const allowed = isNetwork && (await offlinePunchAllowed().catch(() => false));
+      if (allowed) {
+        try {
+          const n = await enqueuePunch({
+            kind,
+            latitude: pos?.latitude ?? null,
+            longitude: pos?.longitude ?? null,
+            biometric_method: methodRef.current,
+            selfie_base64: selfieRef.current,
+            device_info: tel ? `${tel.device_model} · ${tel.os_version}` : Platform.OS,
+            mock_location: mockRef.current || undefined,
+            gps_accuracy_m: accuracyRef.current ?? undefined,
+            battery_level: tel?.battery_level ?? undefined,
+            ...(site && site.worksite_id !== "main"
+              ? { worksite_id: site.worksite_id, worksite_name: site.name }
+              : site ? { worksite_name: site.name } : {}),
+          });
+          startAutoSync();
+          setStep("save", "done", `Saved on device (offline) — will sync automatically (${n} pending)`);
+          setResult({ pending: false, distance_m: 0, offline: true });
+          onDone();
+          return;
+        } catch { /* fall through to error */ }
+      }
       setStep("save", "failed", e?.message || "Save failed");
       setError(e?.message || "Punch failed");
     }

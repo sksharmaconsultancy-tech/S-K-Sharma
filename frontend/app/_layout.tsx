@@ -17,6 +17,7 @@ import AdminWebShell from "@/src/components/AdminWebShell";
 import IdleLogout from "@/src/components/IdleLogout";
 import { refreshRemindersOnBoot } from "@/src/utils/punchReminders";
 import { setupPWA } from "@/src/utils/pwa";
+import { startAutoSync } from "@/src/sdk/offlineQueue";
 import { ThemeProvider, useTheme } from "@/src/context/ThemeContext";
 
 LogBox.ignoreAllLogs(true);
@@ -42,6 +43,10 @@ export default function RootLayout() {
   useEffect(() => {
     refreshRemindersOnBoot();
     setupPWA();
+    // Iter 418 — start the Smart Punch SDK Device Sync Engine on boot so
+    // offline punches sync app-wide (and the native background task is
+    // registered early). Idempotent + no-op while the queue is empty.
+    startAutoSync();
     // Iter 312 — dismiss the app-shell splash (app/+html.tsx) once React
     // has mounted (web only).
     if (typeof document !== "undefined") {

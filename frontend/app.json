@@ -29,7 +29,7 @@
     "ios": {
       "bundleIdentifier": "app.emergent.emploconnect1d35e8531",
       "infoPlist": {
-        "NSCameraUsageDescription": "Take a selfie for attendance \u0026 profile",
+        "NSCameraUsageDescription": "Take a selfie for attendance & profile",
         "NSFaceIDUsageDescription": "Unlock the app and confirm attendance with Face ID",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Auto punch you in and out at the office",
         "NSLocationAlwaysUsageDescription": "Auto punch you in and out at the office",
@@ -43,7 +43,7 @@
       },
       "supportsTablet": true
     },
-    "name": "S.K. Sharma \u0026 Co.",
+    "name": "S.K. Sharma & Co.",
     "newArchEnabled": true,
     "orientation": "portrait",
     "plugins": [
@@ -83,7 +83,8 @@
         {
           "color": "#0F3D3E"
         }
-      ]
+      ],
+      "expo-background-task"
     ],
     "scheme": "labourlawconnect",
     "slug": "sk-sharma-consultancy",

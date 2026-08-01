@@ -35,9 +35,12 @@ import {
 import {
   fingerprintSupported, verifyFingerprint, enrollFingerprint,
 } from "@/src/utils/fingerprintGate";
+// Iter 418 — Device Sync Engine: all offline caching + synchronization is
+// routed through the Smart Punch SDK (adds background sync on native builds).
 import {
-  enqueuePunch, flushQueue, getOfflinePunchEnabled, isOnline, pendingCount, setLastSync,
-} from "@/src/utils/offlinePunch";
+  enqueuePunch, flushPunchQueue, offlinePunchAllowed, isOnline,
+  queuedPunchCount, onSyncResult, startAutoSync,
+} from "@/src/sdk/offlineQueue";
 
 type Company = {
   name: string;
@@ -69,14 +72,14 @@ export default function AttendanceScreen() {
   const [pendingSync, setPendingSync] = useState(0);
 
   const refreshPending = useCallback(async () => {
-    try { setPendingSync(await pendingCount()); } catch {}
+    try { setPendingSync(await queuedPunchCount()); } catch {}
   }, []);
 
   const doFlush = useCallback(async () => {
     if (!offlineEnabled || !isOnline()) return;
     try {
-      const r = await flushQueue(api as any);
-      if (r.synced > 0) { await setLastSync(Date.now()); await loadAllRef.current?.(); }
+      const r = await flushPunchQueue();
+      if (r.synced > 0) { await loadAllRef.current?.(); }
       setPendingSync(r.remaining);
     } catch {}
   }, [offlineEnabled]);
@@ -91,20 +94,30 @@ export default function AttendanceScreen() {
     // MOUNT-ONLY: resolve whether this firm allows offline punching
     // (TTL-cached — see offlinePunch.ts, prevents 429 storms on remounts)
     // and hook up online/offline listeners once.
-    getOfflinePunchEnabled(api as any)
+    offlinePunchAllowed()
       .then((enabled) => setOfflineEnabled(enabled))
       .catch(() => {});
     void refreshPending();
+    // Iter 418 — start the SDK Device Sync Engine (online listener +
+    // foreground interval + native background task) and mirror its sync
+    // results into the pending-punches badge.
+    startAutoSync();
+    const unsub = onSyncResult((r) => {
+      setPendingSync(r.remaining);
+      if (r.synced > 0) void loadAllRef.current?.();
+    });
     if (Platform.OS === "web" && typeof window !== "undefined") {
       const on = () => { setOnline(true); void doFlushRef.current(); };
       const off = () => setOnline(false);
       window.addEventListener("online", on);
       window.addEventListener("offline", off);
       return () => {
+        unsub();
         window.removeEventListener("online", on);
         window.removeEventListener("offline", off);
       };
     }
+    return () => { unsub(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
