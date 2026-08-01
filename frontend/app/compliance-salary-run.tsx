@@ -2033,7 +2033,7 @@ export default function ComplianceSalaryRunScreen() {
                 <View style={{ flexDirection: "row", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
                   <View style={{ backgroundColor: "#FEE2E2", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
                     <Text style={{ fontSize: 11, fontWeight: "800", color: "#B91C1C" }}>
-                      {lockCheck?.errors_count || 0} error(s) — always block
+                      {lockCheck?.errors_count || 0} error(s) — review below
                     </Text>
                   </View>
                   <View style={{ backgroundColor: "#FEF3C7", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
@@ -2096,47 +2096,26 @@ export default function ComplianceSalaryRunScreen() {
                   >
                     <Text style={{ fontSize: 13, fontWeight: "700", color: colors.onSurfaceSecondary }}>Fix issues first</Text>
                   </Pressable>
-                  {(lockCheck?.errors_count || 0) === 0 && (lockCheck?.warnings_count || 0) > 0
-                    && user?.role === "super_admin" ? (
-                    <Pressable
-                      onPress={() => doFinalize(true)}
-                      disabled={finalizing}
-                      style={{
-                        flexDirection: "row", alignItems: "center", gap: 6,
-                        paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10,
-                        backgroundColor: "#D97706", opacity: finalizing ? 0.6 : 1,
-                      }}
-                      testID="lock-anyway"
-                    >
-                      {finalizing ? <ActivityIndicator size="small" color="#fff" /> : (
-                        <Ionicons name="lock-closed" size={14} color="#fff" />
-                      )}
-                      <Text style={{ fontSize: 13, fontWeight: "800", color: "#fff" }}>
-                        Lock Anyway (Super Admin — warnings only)
-                      </Text>
-                    </Pressable>
-                  ) : null}
-                  {/* Iter 407 (user request) — Super Admin may UNBLOCK the
-                      lock even with ERRORS after reviewing the list. */}
-                  {(lockCheck?.errors_count || 0) > 0 && user?.role === "super_admin" ? (
-                    <Pressable
-                      onPress={() => doFinalize(true, true)}
-                      disabled={finalizing}
-                      style={{
-                        flexDirection: "row", alignItems: "center", gap: 6,
-                        paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10,
-                        backgroundColor: "#DC2626", opacity: finalizing ? 0.6 : 1,
-                      }}
-                      testID="lock-anyway-errors"
-                    >
-                      {finalizing ? <ActivityIndicator size="small" color="#fff" /> : (
-                        <Ionicons name="lock-closed" size={14} color="#fff" />
-                      )}
-                      <Text style={{ fontSize: 13, fontWeight: "800", color: "#fff" }}>
-                        Lock Anyway (Super Admin — override errors)
-                      </Text>
-                    </Pressable>
-                  ) : null}
+                  {/* Iter 423b (user directive) — the validation NEVER
+                      blocks the lock: findings are informational and the
+                      Finalize button is always available to every admin. */}
+                  <Pressable
+                    onPress={() => doFinalize(true, true)}
+                    disabled={finalizing}
+                    style={{
+                      flexDirection: "row", alignItems: "center", gap: 6,
+                      paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10,
+                      backgroundColor: "#059669", opacity: finalizing ? 0.6 : 1,
+                    }}
+                    testID="lock-anyway"
+                  >
+                    {finalizing ? <ActivityIndicator size="small" color="#fff" /> : (
+                      <Ionicons name="lock-closed" size={14} color="#fff" />
+                    )}
+                    <Text style={{ fontSize: 13, fontWeight: "800", color: "#fff" }}>
+                      Finalize &amp; Lock Now
+                    </Text>
+                  </Pressable>
                 </View>
                 {(lockCheck?.errors_count || 0) > 0 ? (
                   <Text style={{ fontSize: 10.5, color: "#B91C1C", marginTop: 8 }}>

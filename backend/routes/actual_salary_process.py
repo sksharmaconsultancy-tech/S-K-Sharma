@@ -765,11 +765,12 @@ async def patch_actual_salary_row(
         row["other_ded"] = float(body.other_ded)
     # Iter 85 — P Days & P Hours are now ALWAYS editable regardless of
     # the run's attendance source. Biometric-derived values are just the
-    # initial defaults; admins can override any row inline. The DOJ /
-    # exit-date cap stored on the row still limits the maximum.
+    # initial defaults; admins can override any row inline.
+    # Iter 423b (user request) — the DOJ/exit/month-days cap on manual
+    # P Days entry is REMOVED: admins may enter MORE days than the month
+    # (e.g. extra duty paid as additional working days).
     if body.p_days is not None:
-        cap = float(row.get("max_p_days") or run.get("month_days") or 31)
-        row["p_days"] = min(float(body.p_days), cap)
+        row["p_days"] = float(body.p_days)
     if body.p_hours is not None:
         row["p_hours"] = float(body.p_hours)
         # editing hours re-enables the hours-based OT computation

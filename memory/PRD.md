@@ -3250,3 +3250,13 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   when EPF disabled and ESIC_* (incl. global ESIC_MAPPING_MISSING) when ESI
   disabled. Verified live: both ON → 8 err/9 warn; ESI OFF → 0 err;
   BOTH OFF → 0/0; flags restored.
+- Iter 423b (user directives): (1) Compliance Finalize & Lock is now
+  NON-BLOCKING in ALL cases — validate_compliance_run still runs and findings
+  are stamped on lock_validation (non_blocking_policy: true) + audit trail,
+  but 422/409 raises removed; frontend pre-lock modal shows findings with a
+  single always-available "Finalize & Lock Now" button (role gates removed).
+  (2) Actual Salary Process: p_days month-days/DOJ cap REMOVED on the row
+  PATCH — admins may enter more present days than the month. Verified:
+  finalize clone with 8 errors → 200 + stamp; PATCH p_days=35 (month 31) OK.
+  NOTE: Compliance Present-Days ≤ month-days rule (Iter 420) intentionally
+  KEPT — user only unblocked Actual.

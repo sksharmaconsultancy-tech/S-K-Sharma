@@ -294,3 +294,9 @@ See `/app/memory/test_credentials.md`. Super admin
 - Salary Lock validation firm-policy gate: toggled Kankani epf/esi.applicable
   live against run csrun_bca09c4a4cec — BOTH ON (8e/9w: ESIC_MISSING_IP,
   PF_MISSING_BASIC), ESI OFF (0e/9w), BOTH OFF (0/0), restored to ON.
+
+## Iter 423b
+- Non-blocking finalize: cloned csrun_bca09c4a4cec → finalize with 8e/9w →
+  200 OK, lock_validation stamped with non_blocking_policy; clone deleted.
+- Actual p_days uncapped: PATCH p_days=35 on asal_dedbdccd233e (month_days
+  31) → accepted; reverted to original.
