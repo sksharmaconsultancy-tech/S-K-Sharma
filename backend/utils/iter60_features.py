@@ -758,12 +758,29 @@ def register_iter60_features(
             for lbl, _ in fixed_allow
         ]
         offline_salary_on = False
+        bio_code_in_compliance = False
         if company_id:
             fm = await db.firm_masters.find_one(
                 {"company_id": company_id},
                 {"_id": 0, "allowances": 1, "salary_process": 1}) or {}
             offline_salary_on = bool(
                 (fm.get("salary_process") or {}).get("offline_salary"))
+            # Iter 420 (user rule) — firms with "Count Present Day @ 8 HRS"
+            # ON and biometric enabled (Bio Matrix Attendance in the Firm
+            # Master OR a registered biometric machine) get the Bio Code
+            # column in the COMPLIANCE (On-Roll) correction grid too.
+            _comp = await db.companies.find_one(
+                {"company_id": company_id},
+                {"_id": 0, "attendance_policy": 1}) or {}
+            _pm = ((_comp.get("attendance_policy") or {})
+                   .get("policy_master") or {})
+            _bio_on = bool((fm.get("salary_process") or {})
+                           .get("bio_matrix_attendance"))
+            if not _bio_on:
+                _bio_on = await db.biometric_devices.count_documents(
+                    {"company_id": company_id}) > 0
+            bio_code_in_compliance = bool(
+                _pm.get("compliance_present_8hr")) and _bio_on
             for head, on in (fm.get("allowances") or {}).items():
                 if not on:
                     continue
@@ -807,6 +824,10 @@ def register_iter60_features(
             {"key": "email", "label": "Email", "type": "email"},
             {"key": "doj", "label": "DOJ (YYYY-MM-DD)", "type": "text"},
             {"key": "employee_group_id", "label": "Employee Group", "type": "master:group"},
+            # Iter 420 — Bio Code for On-Roll data when the firm counts
+            # Present @ 8 HRS and biometric attendance is enabled.
+            *([{"key": "bio_code", "label": "Bio Code", "type": "text"}]
+              if bio_code_in_compliance else []),
             {"key": "compliance_basic", "label": "Basic Salary (Compliance)", "type": "number"},
             {"key": "pf_basic", "label": "PF Basic", "type": "number"},
             *allow_fields,

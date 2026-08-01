@@ -11909,6 +11909,8 @@ app.include_router(sync_engine_router)
 # Iter 292 — Monthly In/Out & OT Matrix report + Employee Reports hub.
 from routes.inout_ot_matrix import router as inout_ot_matrix_router  # noqa: E402
 app.include_router(inout_ot_matrix_router)
+from routes.daily_verification import router as daily_verification_router  # noqa: E402
+app.include_router(daily_verification_router)
 from routes.pf_contribution_report import router as pf_contribution_router  # noqa: E402
 app.include_router(pf_contribution_router)
 from routes.employee_reports_hub import router as employee_reports_hub_router  # noqa: E402

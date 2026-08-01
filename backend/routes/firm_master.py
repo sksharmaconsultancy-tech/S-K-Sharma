@@ -478,6 +478,20 @@ async def upsert_firm_master(
         {"$set": merged},
         upsert=True,
     )
+    # Iter 420 (user rule) — when the firm's Actual Salary Process (Offline
+    # Salary) is DISABLED, or Bio Matrix Attendance is ENABLED, default the
+    # attendance-policy sub-point "Count Present Day @ 8 HRS — Compliance
+    # Salary only" to YES for this firm.
+    _sp = merged.get("salary_process") or {}
+    if (not _sp.get("offline_salary")) or _sp.get("bio_matrix_attendance"):
+        await db.companies.update_one(
+            {"company_id": company_id},
+            {"$set": {"attendance_policy.policy_master.compliance_present_8hr": True}},
+        )
+        logger.info("[firm-master] %s — compliance_present_8hr auto-set YES "
+                    "(offline_salary=%s, bio_matrix=%s)", company_id,
+                    bool(_sp.get("offline_salary")),
+                    bool(_sp.get("bio_matrix_attendance")))
     # Iter 89 — Mirror the firm logo onto ``companies.logo_base64`` so
     # the admin shell + mobile app can render it via the standard
     # /api/companies feed without a second lookup.
