@@ -181,6 +181,31 @@ async def _store_import(admin: dict, company_id: str, month: str,
     matched = []
     unmatched = []
     seen: set = set()
+    # Iter 420 (user rule) — Present Days in the imported sheet can NEVER
+    # exceed the number of days in the import month.
+    try:
+        from utils.salary_run import actual_days_in_month, parse_month
+        _y, _m = parse_month(month)
+        _month_days = actual_days_in_month(_y, _m)
+    except Exception:
+        _month_days = 31
+    _over_days = []
+    for row in rows:
+        try:
+            _pd = float(row.get("present_days") or 0)
+        except (TypeError, ValueError):
+            _pd = 0.0
+        if _pd > _month_days:
+            _over_days.append(
+                f"Row {row.get('_row_no')}: {row.get('name') or row.get('code')}"
+                f" — {_pd:g} days")
+    if _over_days:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Import rejected — Present Days cannot be more than "
+                    f"{_month_days} days for {month}. Fix these rows and "
+                    f"re-import: " + "; ".join(_over_days[:10])
+                    + ("…" if len(_over_days) > 10 else "")))
     for row in rows:
         uid = None
         code = _cell_str(row.get("code")).lstrip("0") or _cell_str(row.get("code"))

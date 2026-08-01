@@ -1519,6 +1519,29 @@ async def save_compliance_run_rows(
     rows = payload.get("rows")
     if not isinstance(rows, list) or not rows:
         raise HTTPException(status_code=400, detail="rows list is required")
+    # Iter 420 (user rule) — Present Days can NEVER exceed the number of
+    # days in the run's month.
+    from utils.salary_run import actual_days_in_month, parse_month
+    try:
+        _y, _m = parse_month(run.get("month") or "")
+        month_days = actual_days_in_month(_y, _m)
+    except Exception:
+        month_days = 31
+    _bad = []
+    for r in rows:
+        try:
+            _pd = float(r.get("present_days") or 0)
+        except (TypeError, ValueError):
+            _pd = 0.0
+        if _pd > month_days:
+            _bad.append(f"{r.get('name') or r.get('employee_code') or r.get('user_id')} "
+                        f"({_pd:g} days)")
+    if _bad:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Present Days cannot be more than {month_days} days for "
+                    f"{run.get('month')}: " + ", ".join(_bad[:10])
+                    + ("…" if len(_bad) > 10 else "")))
     # Sanity: the incoming rows must match the run's employees (no adding /
     # dropping rows through this endpoint).
     existing_ids = {r.get("user_id") for r in (run.get("rows") or [])}
