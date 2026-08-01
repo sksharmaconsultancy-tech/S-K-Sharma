@@ -3290,3 +3290,23 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   master PF Basic was 15000). ESIC already on the wage base. Unit test added
   (pf_basic 15000 / basic 22000 / gross 30000 → pf_wages 22000, PF 2640) —
   ALL PASS.
+- Iter 426 (user requests, Compliance Salary Process screen):
+  1. "Recompute (Attendance)", "PDF Layout ⚙", "Audit Log", "PF/ESIC Audit"
+     buttons REMOVED (+ audit modal, RegisterLayoutEditor import, dead state).
+  2. Salary Process now: first time processes directly; when a draft exists →
+     3-way choice (confirmChoice in utils/confirm.ts): "With EXISTING Data"
+     (keeps edits) / "From BLANK" (payload.fresh=True → _prev_rows cleared,
+     rebuild from attendance+master, extra confirm) / Cancel.
+  3. Employee Group selection MANDATORY before Salary Process & Copy Last
+     Month (blocks empType==="all"); dropdown label "— Select group
+     (mandatory) —".
+  4. MONTH DAYS LOCK: once processed (draft/finalized) for firm+month+group,
+     Month days input is read-only (🔒 + note) and backend FORCES
+     payload.month_days to the previous run's value on every reprocess.
+  5. "Active Firm / Firm Settings" banner hidden on this screen.
+  Verified: backend E2E (26 days locked across existing+fresh reprocess,
+  manual other_ded kept on existing / discarded on fresh, cleanup OK) +
+  screenshot (buttons gone, lock note visible, mandatory group).
+  NOTE: parallel search_replace on the same file RACES — existingAny memo
+  was lost once and re-added via insert_text (sequential edits for same-file
+  changes from now on).

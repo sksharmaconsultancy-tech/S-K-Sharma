@@ -36,7 +36,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
 
 import { api, apiBinary } from "@/src/api/client";
-import { confirmYesNo, showToast } from "@/src/utils/confirm";
+import { confirmYesNo, confirmChoice, showToast } from "@/src/utils/confirm";
 import { EmployeeListSkeleton } from "@/src/components/EmployeeStatsBar";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
@@ -45,7 +45,6 @@ import MonthPicker from "@/src/components/MonthPicker";
 import ProcessCommandCenter from "@/src/components/salary/ProcessCommandCenter";
 import TotalsFooter from "@/src/components/salary/TotalsFooter";
 import GridFilterChips, { GRID_FILTER_DEFAULT, rowMatchesFilters, type GridFilters } from "@/src/components/GridFilterChips";
-import RegisterLayoutEditor from "@/src/components/RegisterLayoutEditor";
 import { GridScroller, stickyCol, stickyHeader } from "@/src/components/GridFreeze";
 import { rowPassesColFilters } from "@/src/utils/colFilter";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
@@ -269,10 +268,8 @@ export default function ComplianceSalaryRunScreen() {
   // Iter 324 (user request) — PDF sorting & grouping choices.
   const [pdfSort, setPdfSort] = useState("");
   const [pdfGroup, setPdfGroup] = useState("");
-  const [layoutOpen, setLayoutOpen] = useState(false); // Iter 162 — PDF layout editor
   const [pushing, setPushing] = useState(false);
   const [waBlasting, setWaBlasting] = useState(false);
-  const [reprocessing, setReprocessing] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
 
   // ── Iter 61: Multi-firm batch mode ─────────────────────────────────────
@@ -325,9 +322,6 @@ export default function ComplianceSalaryRunScreen() {
   const [hlRow, setHlRow] = useState<string | null>(null);
   // Iter 346 (user request) — Excel-style per-column header filters.
   const [colFilters, setColFilters] = useState<Record<string, string>>({});
-  const [auditOpen, setAuditOpen] = useState(false);
-  const [auditEntries, setAuditEntries] = useState<any[]>([]);
-  const [auditLoading, setAuditLoading] = useState(false);
   // Iter 127e — AUTO-ADJUST every column to its widest content so nothing
   // is cut off (user request; replaces the wrap-text experiment).
   const colW = useMemo(() => {
@@ -426,19 +420,6 @@ export default function ComplianceSalaryRunScreen() {
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run]);
-
-  const openAudit = async () => {
-    setAuditOpen(true);
-    setAuditLoading(true);
-    try {
-      const p = new URLSearchParams({ limit: "60" });
-      if (run?.run_id) p.set("run_id", run.run_id);
-      else if (month) p.set("month", month);
-      const r = await api<{ entries: any[] }>(`/admin/salary-audit-log?${p.toString()}`);
-      setAuditEntries(r.entries);
-    } catch { setAuditEntries([]); }
-    setAuditLoading(false);
-  };
 
   // Prefill from global picker whenever batch mode is turned on.
   useEffect(() => {
@@ -606,6 +587,19 @@ export default function ComplianceSalaryRunScreen() {
     ) || null;
   }, [runs, month, activeCompanyId, empType]);
 
+  // Iter 426 (user request) — ANY existing run (draft OR finalized) for
+  // this firm + month + group locks the "Month days" input: a reprocess
+  // must proceed with the SAME days already processed.
+  const existingAny = useMemo(() => {
+    const grp = (empType !== "all" ? empType : "").trim().toUpperCase();
+    return (runs as any[]).find(
+      (r: any) =>
+        r.month === month &&
+        (!activeCompanyId || r.company_id === activeCompanyId) &&
+        String(r.employee_type || "").trim().toUpperCase() === grp,
+    ) || null;
+  }, [runs, month, activeCompanyId, empType]);
+
   // Iter 370 — ``pv`` carries the freshly loaded firm policy values when
   // the state hasn't caught up yet (first click after page open).
   const buildBody = (pv?: Record<string, string> | null) => {
@@ -758,6 +752,12 @@ export default function ComplianceSalaryRunScreen() {
 
   const generate = async () => {
     if (busy) return;
+    // Iter 426 (user request) — Employee Group selection is MANDATORY:
+    // processing ALL groups together is no longer allowed.
+    if (empType === "all") {
+      showMsg("Please select an Employee Group first — group selection is mandatory before Salary Process.");
+      return;
+    }
     // Iter 370 (user bug) — first click after opening the page: WAIT for
     // the firm policy before processing so PF/ESIC use the firm's saved
     // statutory numbers (not the defaults) on the very first click.
@@ -810,16 +810,30 @@ export default function ComplianceSalaryRunScreen() {
         );
         return;
       }
-      const ok = await confirmYesNo(
-        "Do you want to REPROCESS the salary for this month?\n\n" +
-        "YES → your previously ENTERED days & edits are KEPT — the " +
-        "existing data is updated, not reset to zero.",
+      const choice = await confirmChoice(
+        "A salary sheet for this month already exists.\nHow do you want to reprocess?",
+        "Reprocess Salary",
+        [
+          {
+            label: "With EXISTING Data — entered days & edits are KEPT",
+            value: "existing", color: "#2563EB",
+          },
+          {
+            label: "From BLANK — fresh rebuild from attendance & master (edits discarded)",
+            value: "blank", color: "#DC2626",
+          },
+        ],
       );
-      // Iter 345 (user bug — "page just refreshes") — a "No" must never
-      // RELOAD the page: with browser dialogs suppressed the old
-      // window.confirm returned false instantly and the silent reload
-      // made "Salary Process" look completely broken.
-      if (!ok) return;
+      // Iter 345 (user bug — "page just refreshes") — a cancel must never
+      // RELOAD the page.
+      if (!choice) return;
+      if (choice === "blank") {
+        const sure = await confirmYesNo(
+          "Reprocess from BLANK will DISCARD all manually entered days & edits on the existing sheet.\n\nContinue?",
+        );
+        if (!sure) return;
+        q.fresh = true;
+      }
     }
     setBusy(true);
     try {
@@ -840,6 +854,11 @@ export default function ComplianceSalaryRunScreen() {
   // Iter 330 (user request) — Copy Last Month Salary into this month.
   const copyLastMonth = async () => {
     if (busy) return;
+    // Iter 426 (user request) — group selection mandatory here too.
+    if (empType === "all") {
+      showMsg("Please select an Employee Group first — group selection is mandatory before processing.");
+      return;
+    }
     const q: any = buildBody();
     const [yy, mm] = String(q.month || "").split("-").map(Number);
     const prevMonth = mm === 1
@@ -891,30 +910,6 @@ export default function ComplianceSalaryRunScreen() {
     } catch (e: any) {
       showMsg(e?.message || "Copy Last Month failed");
     } finally { setBusy(false); }
-  };
-
-  const reprocess = async () => {
-    if (!run || reprocessing) return;
-    if ((run as any).finalized) {
-      showMsg("This run is finalized (read-only). It cannot be reprocessed.");
-      return;
-    }
-    const ok = await confirmYesNo(
-      "Do you want to REPROCESS this salary again?\nThe sheet will be recomputed with the current parameters.",
-    );
-    if (!ok) return; // Iter 345 — never silently reload the page on "No".
-    setReprocessing(true);
-    try {
-      const r = await api<{ run: CompRun }>(
-        `/admin/compliance-salary-runs/${run.run_id}/reprocess`,
-        { method: "POST", body: buildBody() },
-      );
-      setRun(r.run);
-      await loadRuns();
-      showMsg("Recomputed with the current parameters ✓");
-    } catch (e: any) {
-      showMsg(e?.message || "Reprocess failed");
-    } finally { setReprocessing(false); }
   };
 
   // Iter 230 (user request) — Reprocess: reload the LAST SAVED data of
@@ -1730,38 +1725,8 @@ export default function ComplianceSalaryRunScreen() {
       </SafeAreaView>
 
       <ScrollView contentContainerStyle={styles.scroll}>
-        {/* Iter 85 — Pinned Firm Settings shortcut at the top of the tab.
-            Shows the currently-active firm and a one-tap link to jump
-            into that firm's Compliance Policy screen so admins can
-            tune Basic/HRA/PF/ESIC without scrolling down. */}
-        <View style={styles.firmSettingsBar}>
-          <View style={styles.firmSettingsIcon}>
-            <Ionicons name="business-outline" size={18} color={colors.brandPrimary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.firmSettingsLabel}>Active Firm</Text>
-            <Text style={styles.firmSettingsName} numberOfLines={1}>
-              {(ctxCompanies || []).find((c: any) => c.company_id === activeCompanyId)?.name
-                || user?.company_id
-                || (isSuper ? "All firms — pick one from the list below" : "—")}
-            </Text>
-          </View>
-          <Pressable
-            onPress={() =>
-              router.push(
-                activeCompanyId
-                  ? `/compliance-policy?company_id=${encodeURIComponent(activeCompanyId)}`
-                  : "/compliance-policy",
-              )
-            }
-            style={styles.firmSettingsBtn}
-            testID="csr-firm-settings-top"
-            disabled={!activeCompanyId}
-          >
-            <Ionicons name="settings-outline" size={14} color="#FFF" />
-            <Text style={styles.firmSettingsBtnTxt}>Firm Settings</Text>
-          </Pressable>
-        </View>
+        {/* Iter 426 (user request) — the "Active Firm / Firm Settings"
+            banner is HIDDEN on this screen. */}
 
         {/* Enterprise Process Command Center — KPI cards, workflow stepper
             and live compliance validation. Iter 370 (user request) —
@@ -1867,10 +1832,14 @@ export default function ComplianceSalaryRunScreen() {
             <View style={styles.gridCol}>
               <Text style={styles.label}>
                 Month days (override) · Max {calendarDaysInMonth(month)}
+                {existingAny ? "  🔒" : ""}
               </Text>
               <TextInput
                 testID="csr-days"
-                value={monthDaysOverride}
+                value={existingAny && (existingAny as any).month_days
+                  ? String((existingAny as any).month_days)
+                  : monthDaysOverride}
+                editable={!existingAny}
                 onChangeText={(v) => {
                   // Iter 86 — Cap to actual calendar days in the selected month.
                   const cleaned = v.replace(/[^0-9]/g, "");
@@ -1884,10 +1853,15 @@ export default function ComplianceSalaryRunScreen() {
                 }}
                 placeholder={`Auto (${calendarDaysInMonth(month)})`}
                 placeholderTextColor={colors.onSurfaceTertiary}
-                style={styles.input}
+                style={[styles.input, existingAny ? { opacity: 0.55 } : null]}
                 keyboardType="numeric"
                 maxLength={2}
               />
+              {existingAny ? (
+                <Text style={{ fontSize: 9.5, color: colors.onSurfaceTertiary, marginTop: 2 }}>
+                  Locked — salary already processed for this month; reprocess uses the same days.
+                </Text>
+              ) : null}
             </View>
             <View style={styles.gridCol}>
               {/* Iter 255 (user request) — Employee Group DROPDOWN placed
@@ -1905,7 +1879,7 @@ export default function ComplianceSalaryRunScreen() {
                     fontSize: 13, fontWeight: 600, padding: "0 10px", width: "100%",
                   } as any}
                 >
-                  <option value="all">— Select group —</option>
+                  <option value="all">— Select group (mandatory) —</option>
                   {types.map((t) => (
                     <option key={t.name} value={t.name}>
                       {t.name} ({t.count})
@@ -1940,71 +1914,6 @@ export default function ComplianceSalaryRunScreen() {
           {/* Iter 255 (user request) — Import Salary Sheet moved to the
               BOTTOM of the page (see below, before the footer). */}
 
-          {/* Iter 182 — Audit Log modal */}
-          <Modal
-            visible={auditOpen}
-            transparent
-            animationType="fade"
-            onRequestClose={() => setAuditOpen(false)}
-          >
-            <View style={{
-              flex: 1, backgroundColor: "rgba(15,23,42,0.45)",
-              alignItems: "center", justifyContent: "center", padding: 20,
-            }}>
-              <View style={{
-                backgroundColor: colors.surfaceSecondary, borderRadius: 16, padding: 16,
-                width: "100%", maxWidth: 560, maxHeight: "80%",
-                borderWidth: 1, borderColor: colors.border,
-              }}>
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                  <Text style={{ fontSize: 15, fontWeight: "800", color: colors.onSurface }}>
-                    🕘 Salary Process Audit Log
-                  </Text>
-                  <Pressable onPress={() => setAuditOpen(false)} hitSlop={10} testID="comp-audit-close">
-                    <Ionicons name="close" size={18} color={colors.onSurfaceSecondary} />
-                  </Pressable>
-                </View>
-                {auditLoading ? (
-                  <ActivityIndicator color={colors.brandPrimary} style={{ marginVertical: 24 }} />
-                ) : auditEntries.length === 0 ? (
-                  <Text style={{ fontSize: 12, color: colors.onSurfaceSecondary, paddingVertical: 16 }}>
-                    No audit entries yet — actions (process / save / finalize / unlock) will appear here.
-                  </Text>
-                ) : (
-                  <ScrollView style={{ maxHeight: 420 }}>
-                    {auditEntries.map((a) => {
-                      const ui: any = {
-                        process: { c: "#2563EB", i: "play-circle-outline" },
-                        save_rows: { c: "#0891B2", i: "save-outline" },
-                        finalize: { c: "#16A34A", i: "lock-closed-outline" },
-                        unlock: { c: "#F97316", i: "lock-open-outline" },
-                      }[a.action] || { c: colors.onSurfaceSecondary, i: "ellipse-outline" };
-                      return (
-                        <View key={a.audit_id} style={{
-                          flexDirection: "row", gap: 10, paddingVertical: 8,
-                          borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider,
-                        }}>
-                          <Ionicons name={ui.i} size={16} color={ui.c} style={{ marginTop: 2 }} />
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ fontSize: 12, fontWeight: "700", color: colors.onSurface }}>
-                              {String(a.action).replace("_", " ").toUpperCase()}
-                              {a.month ? `  ·  ${a.month}` : ""}
-                            </Text>
-                            <Text style={{ fontSize: 11, color: colors.onSurfaceSecondary, marginTop: 1 }}>
-                              {a.detail || ""}{a.company_name ? `  ·  ${a.company_name}` : ""}
-                            </Text>
-                            <Text style={{ fontSize: 9.5, color: colors.onSurfaceTertiary, marginTop: 2 }}>
-                              {a.actor_name || a.actor_id} ({a.actor_role}) · {String(a.at || "").slice(0, 16).replace("T", " ")}
-                            </Text>
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </ScrollView>
-                )}
-              </View>
-            </View>
-          </Modal>
 
           {/* Iter 388 (Phase 3) — Pre-Lock PF/ESIC Validation results */}
           <Modal
@@ -2346,19 +2255,10 @@ export default function ComplianceSalaryRunScreen() {
                     <ActionBtn icon="checkmark-done-outline" label="Finalize & Lock" busy={finalizing} onPress={finalizeRun} primary />
                   </>
                 )}
-                <ActionBtn icon="refresh" label="Recompute (Attendance)" busy={reprocessing} onPress={reprocess} />
                 <ActionBtn icon="grid-outline" label="Excel" busy={downloading} onPress={() => downloadFile("xlsx")} />
                 <ActionBtn icon="document-text-outline" label="PDF" busy={downloading} onPress={() => downloadFile("pdf")} />
                 <ActionBtn icon="document-outline" label="PDF (Option 2)" busy={downloading} onPress={() => downloadFile("pdf2")} />
-                {user?.role === "super_admin" ? (
-                  <ActionBtn icon="options-outline" label="PDF Layout ⚙" busy={false} onPress={() => setLayoutOpen(true)} />
-                ) : null}
-                <RegisterLayoutEditor visible={layoutOpen} onClose={() => setLayoutOpen(false)} />
                 <ActionBtn icon="download-outline" label="CSV" busy={downloading} onPress={() => downloadFile("csv")} />
-                <ActionBtn icon="time-outline" label="Audit Log" busy={auditLoading} onPress={openAudit} />
-                {/* Iter 388 (Phase 4) — PF & ESIC Audit Dashboard */}
-                <ActionBtn icon="shield-checkmark-outline" label="PF/ESIC Audit" testID="btn-pf-esic-audit"
-                  onPress={() => router.push(`/pf-esic-audit?run_id=${run.run_id}` as any)} />
                 {autoSavedAt ? (
                   <Text style={{ fontSize: 9.5, color: colors.success, fontWeight: "700", alignSelf: "center" }}>
                     ✓ Auto-saved {autoSavedAt}

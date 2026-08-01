@@ -305,3 +305,9 @@ See `/app/memory/test_credentials.md`. Super admin
 - Higher PF auto-approve + VPF: tests/check_higher_pf_vpf.py — 6 assertions
   PASS (higher wages uncapped, approval ignored, toggle-off fallback, VPF on
   top employee-side, VPF disallowed skip).
+
+## Iter 426
+- Backend: 2026-05 STAFF run created @26 days; reprocess w/ 31 → stays 26 &
+  keeps manual other_ded 111; fresh=True → stays 26, edits discarded; deleted.
+- Screenshot: 4 buttons removed, firm banner gone, month-days 🔒 note, group
+  mandatory dropdown; grid renders fine (run csrun_bca09c4a4cec).

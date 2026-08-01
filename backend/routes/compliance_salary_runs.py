@@ -66,6 +66,10 @@ class ComplianceSalaryRunCreate(BaseModel):
     # Iter 330 (user request) — copy LAST MONTH's salary into this month
     # exactly as it was (same Present Days / Gross / PF / ESIC / Net).
     copy_last_month: Optional[bool] = False
+    # Iter 426 (user request) — reprocess FROM BLANK: rebuild the sheet
+    # fresh from attendance + master, DISCARDING the previous draft's
+    # manually entered days / edits.
+    fresh: Optional[bool] = False
 
 
 async def _compute_compliance_run(
@@ -1376,12 +1380,22 @@ async def _create_compliance_salary_run_core(
             ),
             "finalized": {"$ne": True},
         },
-        {"_id": 0, "rows": 1},
+        {"_id": 0, "rows": 1, "month_days": 1},
         sort=[("generated_at", -1)],
     )
+    # Iter 426 (user request) — MONTH DAYS LOCK: once a salary is processed
+    # for this firm + month + group, every reprocess (existing OR blank)
+    # proceeds with the SAME month days — an accidentally changed value in
+    # the form is ignored.
+    if _prev_run and _prev_run.get("month_days"):
+        payload.month_days = int(_prev_run["month_days"])
     _prev_rows: Dict[str, dict] = {
         r.get("user_id"): r for r in ((_prev_run or {}).get("rows") or [])
     }
+    # Iter 426 (user request) — "Reprocess from BLANK": ignore the previous
+    # draft entirely so the sheet rebuilds fresh from attendance + master.
+    if payload.fresh:
+        _prev_rows = {}
     # Iter 330 (user request) — "Copy Last Month Salary": build this
     # month's run as an EXACT copy of last month's rows instead of
     # recomputing from attendance / master.
