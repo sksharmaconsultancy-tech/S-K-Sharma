@@ -3071,3 +3071,31 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - DEFERRED (needs policy decision): offline attendance with GPS-pending
   background sync (spec item 9) — changes attendance saving; not done.
 - Deploy: /app/deploy_vps_iter417.sh via temp-code-bundle kind=script.
+
+## Iter 418 — Smart Punch Native SDK + Device Sync Engine (offline punches)
+- Workflow UNCHANGED (user strict rule). Added SDK layer frontend/src/sdk/:
+  index.ts (SmartPunchSDK: capabilities, getTelemetry device/OS/battery/
+  network/root, biometricAuth native+webauthn, gps, offline) and
+  offlineQueue.ts (Device Sync Engine — SINGLE sync authority; storage
+  delegated to proven src/utils/offlinePunch.ts: IndexedDB web /
+  AsyncStorage native; onSyncResult listeners; offlinePunchAllowed firm
+  gate; startAutoSync = online event + 60s interval + expo-background-task
+  WorkManager/BGTask ~15min on real builds, idempotent, boot flush).
+- attendance.tsx queue/sync imports switched to @/src/sdk/offlineQueue;
+  onSyncResult keeps pending badge live. _layout.tsx calls startAutoSync()
+  on boot (app-wide sync + early background-task registration).
+- PunchFlowModal.tsx: fixed missing imports (getTelemetry, enqueuePunch,
+  startAutoSync, offlinePunchAllowed); telemetry enrichment on save;
+  catch-block offline cache now firm-gated. Removed unused expo-location.
+- Backend UNCHANGED (punch endpoint already idempotent on client_dedupe_id
+  + honours client_punch_at). Kankani offline_geofence_enabled set True.
+- testing_agent: backend 2/2 (idempotency, geo-policy flag) + frontend
+  offline banner / seeded-queue auto-drain verified (iteration_418.json,
+  tests/test_iter418_offline_sync.py). Background task needs real build
+  (not Expo Go/web) — user informed.
+- ZKTeco ADMS SDK health check on user request: 8/8 PASS (handshake,
+  heartbeat/commands, ATTLOG ingest, duplicate guard, unmapped parking,
+  OPERLOG, online heartbeat). Script: backend/tests/check_zkteco_sdk.py.
+  Contractual employees' machine punches correctly go to pending (Iter 175).
+- Deploy: /app/deploy_vps_iter418.sh via temp-code-bundle kind=script
+  (temp_bundle.py updated to serve deploy418.sh).
