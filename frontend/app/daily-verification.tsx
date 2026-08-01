@@ -96,7 +96,7 @@ function Sel({ label, value, onChange, options, width = 150 }: {
       <Text style={st.lbl}>{label}</Text>
       {Platform.OS === "web" ? (
         <select value={value} onChange={(e) => onChange((e.target as HTMLSelectElement).value)}
-          style={st.select as any}>
+          style={WEB_SELECT}>
           <option value="">All</option>
           {options.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
         </select>
@@ -288,7 +288,7 @@ export default function DailyVerificationScreen() {
               {Platform.OS === "web" ? (
                 <select value={companyId}
                   onChange={(e) => setCompanyId((e.target as HTMLSelectElement).value)}
-                  style={st.select as any}>
+                  style={WEB_SELECT}>
                   {companies.map((c: any) => (
                     <option key={c.company_id} value={c.company_id}>{c.name}</option>
                   ))}
@@ -301,7 +301,7 @@ export default function DailyVerificationScreen() {
             {Platform.OS === "web" ? (
               <input type="date" value={date}
                 onChange={(e) => setDate((e.target as HTMLInputElement).value)}
-                style={st.select as any} />
+                style={WEB_SELECT} />
             ) : (
               <TextInput value={date} onChangeText={setDate} style={st.input}
                 placeholder="YYYY-MM-DD" />
@@ -522,6 +522,13 @@ export default function DailyVerificationScreen() {
   );
 }
 
+// Plain JS object for the web <select>/<input> DOM elements (NOT a RN style —
+// keeps react-native-web from warning about CSS shorthand properties).
+const WEB_SELECT: any = {
+  height: 36, borderRadius: 8, border: `1px solid ${colors.border}`,
+  padding: "0 8px", fontSize: 13, background: "#fff", width: "100%",
+};
+
 const st = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   header: {
@@ -537,10 +544,6 @@ const st = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border, marginBottom: 12,
   },
   lbl: { fontSize: type.xs, color: colors.onSurfaceSecondary, marginBottom: 4, fontWeight: "700" },
-  select: {
-    height: 36, borderRadius: 8, border: `1px solid ${colors.border}`,
-    padding: "0 8px", fontSize: 13, background: "#fff", width: "100%",
-  },
   input: {
     height: 36, borderRadius: 8, borderWidth: 1, borderColor: colors.border,
     paddingHorizontal: 8, fontSize: 13, backgroundColor: "#fff", color: colors.onSurface,

@@ -3162,3 +3162,28 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - VPS bundle fix: temp-code-bundle tar had ballooned to 140MB (.metro-cache,
   rpa_media, *.webm) and the proxy cut downloads at ~90s → now 9.5MB via
   new excludes. Verified <1s download, valid tar.
+
+## Iter 420 — Daily In/Out & OT Verification Report + Bio Code policy rules
+- NEW module (Reports → Daily In/Out & OT Verification):
+  backend routes/daily_verification.py + frontend app/daily-verification.tsx.
+  Reuses _compute_monthly_grid_data (1:1 with Attendance Grid). 13 filters,
+  16 summary tiles, colour-coded rows (red missing punch / orange
+  unapproved OT / yellow late-early / blue manual / green normal / grey
+  absent-WO-holiday-leave), statuses incl. Missing In/Out, Half Day,
+  Late/Early/OT/Manual markers, Approved vs Unapproved OT (ot_applicable +
+  optional policy ot_daily_max_hours cap), per-row Physical Verification
+  (checkbox + remarks → db.daily_verifications + attendance_audit_log
+  module=daily_verification), drill-down (punch timeline w/ source,
+  machine, geo, selfie + previous-7-days), exports: xlsx / csv / pdf
+  landscape+portrait / print / email (SMTP) / WhatsApp PDF (WA engine).
+  All exports audited. 128 emps in 0.1s; paginated (limit/offset).
+- Bulk Employee Correction: Bio Code column now also in COMPLIANCE
+  (On-Roll) mode when firm policy compliance_present_8hr ON AND biometric
+  enabled (salary_process.bio_matrix_attendance OR registered machine) —
+  iter60_features.bulk_correction_fields.
+- Firm Master auto-default: on PATCH firm-master, if
+  salary_process.offline_salary DISABLED or bio_matrix_attendance ENABLED
+  → attendance_policy.policy_master.compliance_present_8hr auto-set True.
+- testing_agent iteration_420.json: backend 10/10 + all frontend flows
+  PASS. WEB_SELECT style warning fixed post-test. Email/WA return clear
+  400 when SMTP/WA unconfigured (expected).
