@@ -289,3 +289,8 @@ See `/app/memory/test_credentials.md`. Super admin
 - Frontend Playwright: Advance* editable column + ADVANCE totals chip visible
   on compliance grid (run csrun_bca09c4a4cec); "Date of Join" header visible
   in /master-data-report; xlsx export 200.
+
+## Iter 423
+- Salary Lock validation firm-policy gate: toggled Kankani epf/esi.applicable
+  live against run csrun_bca09c4a4cec — BOTH ON (8e/9w: ESIC_MISSING_IP,
+  PF_MISSING_BASIC), ESI OFF (0e/9w), BOTH OFF (0/0), restored to ON.

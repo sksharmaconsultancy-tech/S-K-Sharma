@@ -46,6 +46,24 @@ async def validate_compliance_run(run: Dict[str, Any]) -> Dict[str, Any]:
     disable_above = stat.get("esic_disable_above_ceiling") is not False
     head_map = stat.get("head_mapping") if isinstance(stat.get("head_mapping"), dict) else None
 
+    # Iter 423 (user bug — "Finalize Lock still showing validation error") —
+    # the SALARY LOCK validation must respect the FIRM MASTER policy:
+    # when the firm disabled EPF / ESIC, those checks are SKIPPED entirely
+    # (same Iter 369 authoritative-flag logic as the salary engine —
+    # explicit ``applicable`` wins, else the Deductions catalog decides).
+    firm_pf_on = firm_esi_on = True
+    _cid = run.get("company_id")
+    if _cid:
+        _fm = await db.firm_masters.find_one(
+            {"company_id": _cid},
+            {"_id": 0, "epf.applicable": 1, "esi.applicable": 1, "deductions": 1})
+        if _fm is not None:
+            _fm_ded = _fm.get("deductions") or {}
+            _epf_ap = (_fm.get("epf") or {}).get("applicable")
+            _esi_ap = (_fm.get("esi") or {}).get("applicable")
+            firm_pf_on = bool(_epf_ap) if _epf_ap is not None else bool(_fm_ded.get("PF"))
+            firm_esi_on = bool(_esi_ap) if _esi_ap is not None else bool(_fm_ded.get("ESI"))
+
     # Current Employee Master docs — detects post-calculation master changes
     # and missing/duplicate statutory IDs on the LIVE master.
     user_ids = [r.get("user_id") for r in rows if r.get("user_id")]
@@ -78,7 +96,7 @@ async def validate_compliance_run(run: Dict[str, Any]) -> Dict[str, Any]:
             ip_owners.setdefault(ip, []).append(nm)
 
     global_issues: List[Dict[str, str]] = []
-    if not wage_rule_on and head_map and not any(
+    if firm_esi_on and not wage_rule_on and head_map and not any(
             (head_map.get(k) or {}).get("esic") for k in head_map):
         global_issues.append(_issue(
             "ESIC_MAPPING_MISSING", "error",
@@ -272,6 +290,14 @@ async def validate_compliance_run(run: Dict[str, Any]) -> Dict[str, Any]:
                     f"{'Exit Date' if _exit_field == 'exit_date' else 'ESIC Exit Date'} ({m.get(_exit_field)}) is before {month} but ESIC was deducted.",
                     "Remove the employee from the run or correct the exit date, then re-run."))
                 break
+
+        # Iter 423 — Firm Master policy gate: drop PF / ESIC findings when
+        # the firm disabled that statute (nothing to validate).
+        if not firm_pf_on:
+            issues = [i for i in issues if not i["code"].startswith(
+                ("PF_", "HIGHER_PF", "VPF_"))]
+        if not firm_esi_on:
+            issues = [i for i in issues if not i["code"].startswith("ESIC_")]
 
         if issues:
             errors += sum(1 for i in issues if i["level"] == "error")

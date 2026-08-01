@@ -3242,3 +3242,11 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   correct (AFZAL 01-01-1990 → 36), June birthdays = 0 (data histogram Jan:120,
   Mar:3, Apr:1, Jul:1). NOTE: file corruption during parallel edits fixed
   (duplicated tail block removed, helpers re-added).
+- Iter 423: FIX — Compliance Salary Finalize/Lock validation now respects
+  Firm Master policy. Root cause: Iter 421 gated only ai_layer; the LOCK gate
+  uses routes/compliance_validation.validate_compliance_run which never read
+  firm toggles. Fix: fetch firm_masters epf/esi applicable + deductions
+  catalog (Iter 369 authoritative logic), drop PF_*/HIGHER_PF/VPF_* findings
+  when EPF disabled and ESIC_* (incl. global ESIC_MAPPING_MISSING) when ESI
+  disabled. Verified live: both ON → 8 err/9 warn; ESI OFF → 0 err;
+  BOTH OFF → 0/0; flags restored.
