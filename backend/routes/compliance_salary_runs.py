@@ -437,6 +437,22 @@ async def _compute_compliance_run(
         if not _pm_202.get("compliance_ot_include", True):
             stats = dict(stats)
             stats["ot_hours"] = 0.0
+        # Iter 427 (user request) — FIXED DAYS (26 / 30 / 31) method now
+        # also drives the NORMAL Salary Process (it previously applied to
+        # Salary Imports only): every employee is processed at the firm's
+        # Fixed Days regardless of attendance. Manually edited days still
+        # win on a reprocess (Iter 297 carry below).
+        if not payload.use_imported_sheet:
+            _dcm0 = firm_stat_flags.get(emp.get("company_id")) or {}
+            if str(_dcm0.get("days_calc_method") or "attendance") == "fixed":
+                _fx = min(float(_dcm0.get("days_calc_fixed") or 26),
+                          float(month_days))
+                stats = dict(stats)
+                stats["present_days"] = _fx
+                stats["effective_present"] = _fx
+                stats["half_days"] = 0
+                stats["duty_hours"] = round(
+                    _fx * float(merged_pol.get("full_day_hours") or 8.0), 2)
         # Iter 297 (user directive) — NON-DESTRUCTIVE REPROCESS: when the
         # month was already processed, the admin's previously ENTERED
         # days are KEPT (never reset to zero). The money fields are

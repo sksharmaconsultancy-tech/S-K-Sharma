@@ -3310,3 +3310,20 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   NOTE: parallel search_replace on the same file RACES — existingAny memo
   was lost once and re-added via insert_text (sequential edits for same-file
   changes from now on).
+- Iter 427 (user requests):
+  1. "Group by:" PDF option removed from Compliance Salary Process (pdfGroup
+     state deleted; export URL sends empty group_by).
+  2. Run summary (month · employees · month_days · payslips pushed) moved
+     from the header to the sticky TotalsFooter via new `caption` prop
+     (src/components/salary/TotalsFooter.tsx); header title/hint block
+     removed.
+  3. PF-on-second-process bug FIXED: the grid recompute (updatePresentDays)
+     now mirrors the engine's Higher PF rule (wage base, no ceiling, ECR
+     split w/ EPS on ceiling) and scales VPF with new PF wages — first
+     process + typed days show correct PF immediately.
+  4. FIXED DAYS (26/30/31) now applies to the NORMAL Salary Process too
+     (was import-only): stats overridden to firm's days_calc_fixed before
+     compute; manual/prev-carry days still win on reprocess-with-existing.
+     E2E: Kankani temporarily set to fixed/26 → all 2026-05 STAFF rows
+     present_days=26, gross 19370; firm restored, run deleted.
+  Screenshot verified: Group by gone, footer caption present, month-days 🔒.

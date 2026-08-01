@@ -16,10 +16,13 @@ function fmt(v: number | string): string {
   return `₹${Math.round(v)}`;
 }
 
-export default function TotalsFooter({ items }: { items: TotalItem[] }) {
+export default function TotalsFooter({ items, caption }: { items: TotalItem[]; caption?: string }) {
   if (!items.length) return null;
   return (
     <View style={st.wrap} testID="totals-footer">
+      {caption ? (
+        <Text style={st.caption} numberOfLines={1}>{caption}</Text>
+      ) : null}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}
         contentContainerStyle={st.row}>
         {items.map((it) => (
@@ -42,6 +45,10 @@ const st = StyleSheet.create({
     paddingVertical: 8, paddingHorizontal: 12,
   },
   row: { gap: 18, alignItems: "center", paddingRight: 12 },
+  caption: {
+    fontSize: 10.5, fontWeight: "700", color: colors.textSecondary,
+    marginBottom: 4,
+  },
   item: { minWidth: 86 },
   label: { fontSize: 10, fontWeight: "700", color: colors.textSecondary, textTransform: "uppercase" },
   value: { fontSize: 14.5, fontWeight: "800", color: colors.textPrimary, marginTop: 1 },

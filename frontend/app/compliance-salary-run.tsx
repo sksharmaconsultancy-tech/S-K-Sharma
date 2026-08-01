@@ -267,7 +267,6 @@ export default function ComplianceSalaryRunScreen() {
   const [downloading, setDownloading] = useState(false);
   // Iter 324 (user request) — PDF sorting & grouping choices.
   const [pdfSort, setPdfSort] = useState("");
-  const [pdfGroup, setPdfGroup] = useState("");
   const [pushing, setPushing] = useState(false);
   const [waBlasting, setWaBlasting] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
@@ -1182,7 +1181,7 @@ export default function ComplianceSalaryRunScreen() {
     if (!run || downloading) return;
     setDownloading(true);
     try {
-      const _pg = `sort_by=${pdfSort}&group_by=${pdfGroup}`;
+      const _pg = `sort_by=${pdfSort}&group_by=`;
       const url =
         kind === "csv"
           ? `/admin/compliance-salary-runs/${run.run_id}/export.csv`
@@ -1594,14 +1593,43 @@ export default function ComplianceSalaryRunScreen() {
           ? Math.max(pfBasicPro, grossEarn * floorPct)
           : pfBasicPro;
         // Iter 387 — International Worker: EPF without the wage ceiling.
-        const pfWagesNew = pfOn ? ((r as any).intl_worker ? pfBase : Math.min(pfBase, pfCap)) : 0;
-        const pfEmp = pfWagesNew * pfEmpRate;
-        let pfErEpf = pfWagesNew * pfErEpfRate;
-        // Iter 387 — Higher Pension: EPS on the UNCAPPED PF base.
-        let pfErEps = ((r as any).higher_pension && pfOn ? pfBase : pfWagesNew) * pfErEpsRate;
+        // Iter 427 (user bug — "PF correct only on SECOND process") — the
+        // grid recompute now mirrors the engine's HIGHER PF rule: PF on the
+        // WAGE BASE (max(Basic, floor% Gross)) with NO ceiling, so the very
+        // FIRST process + typed days already show the right PF.
+        const hiActive = (r as any).pf_higher_active === true ||
+          String((r as any).pf_contribution_type || "").toLowerCase() === "higher";
+        const pfWagesNew = pfOn
+          ? (hiActive
+            ? Math.max(pfBase, paidBasic, grossEarn * floorPct)
+            : ((r as any).intl_worker ? pfBase : Math.min(pfBase, pfCap)))
+          : 0;
+        // Iter 427 — VPF (employee side) survives the grid recompute:
+        // scale the server-computed VPF with the new PF wages.
+        const vpfPrev = Number((r as any).vpf_amount || 0);
+        const pfWagesOld = Number((r as any).pf_wages || 0);
+        const vpfNew = vpfPrev > 0 && pfWagesOld > 0
+          ? vpfPrev * (pfWagesNew / pfWagesOld)
+          : vpfPrev;
+        const pfEmp = pfWagesNew * pfEmpRate + vpfNew;
+        let pfErEpf: number;
+        let pfErEps: number;
+        if (hiActive) {
+          // Iter 427 — mirror the engine's ECR split for Higher PF:
+          // employer total on the FULL higher wage; EPS stays on the
+          // statutory ceiling (unless Higher Pension); EPF = remainder.
+          const erTot = pfWagesNew * (pfErEpfRate + pfErEpsRate);
+          const epsWages = (r as any).higher_pension ? pfWagesNew : Math.min(pfWagesNew, pfCap);
+          pfErEps = epsWages * pfErEpsRate;
+          pfErEpf = erTot - pfErEps;
+        } else {
+          pfErEpf = pfWagesNew * pfErEpfRate;
+          // Iter 387 — Higher Pension: EPS on the UNCAPPED PF base.
+          pfErEps = ((r as any).higher_pension && pfOn ? pfBase : pfWagesNew) * pfErEpsRate;
+        }
         // Iter 341 — EPS Disable: full employer share goes to EPF.
         if ((r as any).eps_disabled) {
-          pfErEpf += pfWagesNew * pfErEpsRate;
+          pfErEpf += pfErEps;
           pfErEps = 0;
         }
         const pfErTot = pfErEpf + pfErEps;
@@ -1654,6 +1682,7 @@ export default function ComplianceSalaryRunScreen() {
           pf_applicable: pfOn,
           pf_wages: Math.round(pfWagesNew),
           pf_employee: Math.round(pfEmp),
+          vpf_amount: Math.round(vpfNew),
           pf_employer_epf: Math.round(pfErEpf),
           pf_employer_eps: Math.round(pfErEps),
           pf_employer_total: Math.round(pfErTot),
@@ -2178,29 +2207,9 @@ export default function ComplianceSalaryRunScreen() {
         {run ? (
           <View style={styles.card}>
             <View style={styles.rowBetween}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.cardTitle}>
-                  {run.month}  ·  {run.employees_count} employees  ·  Net {fmtInr(run.totals?.net)}
-                </Text>
-                <Text style={styles.smallHint}>
-                  {/* Iter 390 (user request) — the summary line follows the
-                      Firm Master's enabled Deductions (Master-linked):
-                      disabled heads (PT/TDS/…) are NOT shown. */}
-                  {(() => {
-                    const ed = ((run.rows[0] as any)?.enabled_deductions ?? fmMask.ed) as string[] | undefined;
-                    const hasDed = (k: string) => !ed || ed.includes(k);
-                    const segs: string[] = [`month_days = ${run.month_days}`];
-                    if (hasDed("pf")) segs.push(`PF (Emp): ${fmtInr(run.totals?.pf_employee)}`);
-                    if (hasDed("esi")) segs.push(`ESIC (Emp): ${fmtInr(run.totals?.esic_employee)}`);
-                    if (hasDed("pt")) segs.push(`PT: ${fmtInr(run.totals?.pt)}`);
-                    if (hasDed("tds")) segs.push(`TDS: ${fmtInr(run.totals?.tds)}`);
-                    return segs.join(" · ");
-                  })()}
-                  {run.payslips_generated_at
-                    ? `  ·  ${run.payslips_count} payslips pushed`
-                    : ""}
-                </Text>
-              </View>
+              {/* Iter 427 (user request) — the run summary (month · employees
+                  · net · month_days · PF/ESIC/TDS totals) moved to the sticky
+                  FOOTER strip at the bottom of the screen. */}
               <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
                 {(run as any).frozen ? (
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "#EDE9FE", borderRadius: 999 }}>
@@ -2291,29 +2300,7 @@ export default function ComplianceSalaryRunScreen() {
                     <option value="designation">Designation</option>
                     <option value="department">Department</option>
                   </select>
-                  <Text style={{ fontSize: 11.5, fontWeight: "800", color: colors.onSurfaceSecondary }}>
-                    Group by:
-                  </Text>
-                  <select
-                    data-testid="pdf-group"
-                    value={pdfGroup}
-                    onChange={(e) => setPdfGroup((e.target as HTMLSelectElement).value)}
-                    style={{
-                      padding: "5px 8px", borderRadius: 8, fontSize: 12,
-                      border: `1px solid ${colors.border}`, background: colors.surface,
-                      color: colors.onSurface,
-                    } as any}
-                  >
-                    <option value="">No grouping</option>
-                    <option value="employee_group">Employee Group</option>
-                    <option value="department">Department</option>
-                    <option value="designation">Designation</option>
-                  </select>
-                  {pdfGroup ? (
-                    <Text style={{ fontSize: 10.5, color: colors.onSurfaceTertiary }}>
-                      Sections with sub-totals per {pdfGroup.replace("_", " ")} · applies to PDF & PDF (Option 2)
-                    </Text>
-                  ) : null}
+                  {/* Iter 427 (user request) — "Group by" option removed. */}
                 </View>
               ) : null}
             </View>
@@ -2968,7 +2955,12 @@ export default function ComplianceSalaryRunScreen() {
         const ed = ((run.rows[0] as any)?.enabled_deductions ?? fmMask.ed) as string[] | undefined;
         const hasDed = (k: string) => !ed || ed.includes(k);
         return (
-          <TotalsFooter items={[
+          <TotalsFooter
+            caption={
+              `${run.month}  ·  ${run.employees_count} employees  ·  month_days = ${run.month_days}` +
+              (run.payslips_generated_at ? `  ·  ${run.payslips_count} payslips pushed` : "")
+            }
+            items={[
             { label: "Gross", value: run.totals?.gross_paid ?? run.totals?.monthly_gross ?? 0 },
             ...(hasDed("pf") ? [
               { label: "PF (EE)", value: run.totals?.pf_employee ?? 0 },
