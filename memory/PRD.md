@@ -3334,3 +3334,10 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   firm's fixed figure on firm selection. E2E: fixed=30, form sent 31 →
   run.month_days=30, all present_days=30, full master gross 22350; firm
   restored, run deleted.
+- Iter 428 (user request): Employee Master — PF Contribution Type is now
+  OPTIONAL and moved NEXT TO the PF Basic column. New "Change PF Policy for
+  this employee (Higher PF / VPF)" checkbox (default OFF → options hidden,
+  salary follows Compliance Policy / Firm Master statutory PF; toggling OFF
+  resets pf_contribution_type to statutory). Auto-opens for employees whose
+  saved type is non-statutory. Screenshot verified (hidden by default,
+  chips appear on enable).

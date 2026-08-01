@@ -1871,70 +1871,41 @@ export default function EmployeeAddScreen() {
             calculated on the filled amount.
           </Text>
 
-          {/* Iter 126e/g — Firm-Master-linked salary heads (part of the
-              COMPLIANCE salary). Heads ordered HRA → CONV. → OTH. ALLOW.
-              → rest (Iter 245). */}
-          {orderedAllowHeads.length > 0 ? (
-            <>
-              <Text style={styles.lbl}>Allowances (from Firm Master)</Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {orderedAllowHeads.map((h) => (
-                  <View key={h} style={{ minWidth: 150, flexGrow: 1, flexBasis: "30%" }}>
-                    <Field
-                      label={h}
-                      value={lineAmount(form.compliance_allowances, h)}
-                      onChange={(v) => setLineAmount("compliance_allowances", h, v)}
-                      placeholder="0"
-                      keyboardType="numeric"
-                    />
-                  </View>
-                ))}
-              </View>
-            </>
-          ) : null}
-
-          {/* Iter 137 — Total Allowances + LINKED Gross Salary right after
-              the allowances. Gross = Basic + Σ allowances (auto). */}
-          {orderedAllowHeads.length > 0 ? (
-            <Text style={[styles.smallNote, { fontWeight: "800", color: "#B45309" }]}>
-              Total Allowances (Compliance): ₹{complAllowTotal.toLocaleString()}
-            </Text>
-          ) : null}
-          <TwoCol>
-            <Field
-              label={
-                complGrossComputed > 0
-                  ? "Gross Salary (auto = Basic + HRA + CONV. + Allowances)"
-                  : "Gross Salary / month (₹)"
+          {/* Iter 428 (user request) — PF POLICY CHANGE is OPTIONAL and sits
+              right next to the PF Basic column. Disabled (default) → the
+              options are hidden and salary follows the Compliance Policy /
+              Firm Master (Statutory PF). Enable only when this employee
+              needs a different PF policy (Higher PF / VPF). */}
+          <Pressable
+            onPress={() => {
+              const on = (form as any).pf_policy_enabled === true ||
+                (!!form.pf_contribution_type && form.pf_contribution_type !== "statutory");
+              if (on) {
+                setField("pf_policy_enabled" as any, false);
+                setField("pf_contribution_type", "statutory");
+              } else {
+                setField("pf_policy_enabled" as any, true);
               }
-              value={form.compliance_gross}
-              onChange={(v) => setField("compliance_gross", v.replace(/[^0-9.]/g, ""))}
-              editable={!(complGrossComputed > 0)}
-              placeholder="For PF / ESIC / TDS"
-              keyboardType="numeric"
+            }}
+            style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10 }}
+            testID="pf-policy-toggle"
+          >
+            <Ionicons
+              name={((form as any).pf_policy_enabled === true ||
+                (!!form.pf_contribution_type && form.pf_contribution_type !== "statutory"))
+                ? "checkbox" : "square-outline"}
+              size={20}
+              color={((form as any).pf_policy_enabled === true ||
+                (!!form.pf_contribution_type && form.pf_contribution_type !== "statutory"))
+                ? colors.brandPrimary : colors.onSurfaceSecondary}
             />
-            <View style={{ flex: 1 }} />
-          </TwoCol>
-
-          {allDeductionHeads.length > 0 ? (
-            <>
-              <Text style={styles.lbl}>Deductions (from Firm Master)</Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {allDeductionHeads.map((h) => (
-                  <View key={h} style={{ minWidth: 150, flexGrow: 1, flexBasis: "30%" }}>
-                    <Field
-                      label={h}
-                      value={lineAmount(form.compliance_deductions, h)}
-                      onChange={(v) => setLineAmount("compliance_deductions", h, v)}
-                      placeholder="0"
-                      keyboardType="numeric"
-                    />
-                  </View>
-                ))}
-              </View>
-            </>
-          ) : null}
-
+            <Text style={{ fontSize: 13, fontWeight: "700", color: colors.onSurface }}>
+              Change PF Policy for this employee (Higher PF / VPF)
+            </Text>
+          </Pressable>
+          {((form as any).pf_policy_enabled === true ||
+            (!!form.pf_contribution_type && form.pf_contribution_type !== "statutory")) ? (
+          <>
           {/* Iter 408 (user spec) — PF Contribution Type: Statutory /
               Higher PF (actual wages, no ceiling) / Voluntary PF. Higher
               and VPF fields appear only when selected. */}
@@ -2043,6 +2014,78 @@ export default function EmployeeAddScreen() {
                 />
               </TwoCol>
             </View>
+          ) : null}
+          </>
+          ) : (
+            <Text style={styles.smallNote}>
+              PF policy disabled — salary is calculated as per the Compliance
+              Policy / Firm Master (Statutory PF).
+            </Text>
+          )}
+
+
+          {/* Iter 126e/g — Firm-Master-linked salary heads (part of the
+              COMPLIANCE salary). Heads ordered HRA → CONV. → OTH. ALLOW.
+              → rest (Iter 245). */}
+          {orderedAllowHeads.length > 0 ? (
+            <>
+              <Text style={styles.lbl}>Allowances (from Firm Master)</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {orderedAllowHeads.map((h) => (
+                  <View key={h} style={{ minWidth: 150, flexGrow: 1, flexBasis: "30%" }}>
+                    <Field
+                      label={h}
+                      value={lineAmount(form.compliance_allowances, h)}
+                      onChange={(v) => setLineAmount("compliance_allowances", h, v)}
+                      placeholder="0"
+                      keyboardType="numeric"
+                    />
+                  </View>
+                ))}
+              </View>
+            </>
+          ) : null}
+
+          {/* Iter 137 — Total Allowances + LINKED Gross Salary right after
+              the allowances. Gross = Basic + Σ allowances (auto). */}
+          {orderedAllowHeads.length > 0 ? (
+            <Text style={[styles.smallNote, { fontWeight: "800", color: "#B45309" }]}>
+              Total Allowances (Compliance): ₹{complAllowTotal.toLocaleString()}
+            </Text>
+          ) : null}
+          <TwoCol>
+            <Field
+              label={
+                complGrossComputed > 0
+                  ? "Gross Salary (auto = Basic + HRA + CONV. + Allowances)"
+                  : "Gross Salary / month (₹)"
+              }
+              value={form.compliance_gross}
+              onChange={(v) => setField("compliance_gross", v.replace(/[^0-9.]/g, ""))}
+              editable={!(complGrossComputed > 0)}
+              placeholder="For PF / ESIC / TDS"
+              keyboardType="numeric"
+            />
+            <View style={{ flex: 1 }} />
+          </TwoCol>
+
+          {allDeductionHeads.length > 0 ? (
+            <>
+              <Text style={styles.lbl}>Deductions (from Firm Master)</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {allDeductionHeads.map((h) => (
+                  <View key={h} style={{ minWidth: 150, flexGrow: 1, flexBasis: "30%" }}>
+                    <Field
+                      label={h}
+                      value={lineAmount(form.compliance_deductions, h)}
+                      onChange={(v) => setLineAmount("compliance_deductions", h, v)}
+                      placeholder="0"
+                      keyboardType="numeric"
+                    />
+                  </View>
+                ))}
+              </View>
+            </>
           ) : null}
 
           {/* Iter 126i — VPF (Voluntary PF) — user request. When enabled,
