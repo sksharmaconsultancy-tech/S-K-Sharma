@@ -174,9 +174,11 @@ async def _build(company_id: str, date: str,
         pass
 
     # ---- the day's raw punches (sources / machines / drill data) ----------
+    # Iter 420 (user rule) — only machines LINKED to this firm.
     dev_names: Dict[str, str] = {}
     async for d in db.biometric_devices.find(
-            {}, {"_id": 0, "serial_number": 1, "name": 1}):
+            {"company_id": company_id},
+            {"_id": 0, "serial_number": 1, "name": 1}):
         dev_names[str(d.get("serial_number") or "")] = d.get("name") or ""
     punches: Dict[str, List[dict]] = {}
     async for p in db.attendance.find(
@@ -476,7 +478,8 @@ async def daily_verification_employee(
         raise HTTPException(status_code=404, detail="Employee not found")
     dev_names: Dict[str, str] = {}
     async for d in db.biometric_devices.find(
-            {}, {"_id": 0, "serial_number": 1, "name": 1, "model": 1, "brand": 1}):
+            {"company_id": cid},
+            {"_id": 0, "serial_number": 1, "name": 1, "model": 1, "brand": 1}):
         dev_names[str(d.get("serial_number") or "")] = (
             d.get("name") or d.get("model") or str(d.get("brand") or "").upper())
     timeline: List[dict] = []
