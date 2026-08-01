@@ -3235,3 +3235,10 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   (wget .../api/temp-code-bundle?token=sks-deploy-7391&kind=script).
 - Iter 422b: Employee Master Report — NEW "Date of Birth" column (key: dob,
   between Gender and Marital Status) in grid + xlsx export. Verified via API.
+- Iter 422c: Employee Master Report — NEW "Age" column (auto-calculated from
+  dob via _parse_dob/_age_years, handles dd-mm-yyyy/yyyy-mm-dd/dd/mm/yyyy) +
+  "🎂 Birthdays" chip filter (birthdays=true query param → only employees with
+  DOB in the CURRENT month; wired into grid + xlsx export). Verified: ages
+  correct (AFZAL 01-01-1990 → 36), June birthdays = 0 (data histogram Jan:120,
+  Mar:3, Apr:1, Jul:1). NOTE: file corruption during parallel edits fixed
+  (duplicated tail block removed, helpers re-added).

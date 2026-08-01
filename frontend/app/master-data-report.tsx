@@ -39,6 +39,8 @@ export default function MasterDataReportScreen() {
   const [q, setQ] = useState("");
   const [empType, setEmpType] = useState("");
   const [rollFilter, setRollFilter] = useState<"all" | "on" | "off">("all");
+  // Iter 422c (user request) — Birthdays-this-month filter.
+  const [bdayOnly, setBdayOnly] = useState(false);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [cols, setCols] = useState<Col[]>([]);
@@ -123,9 +125,10 @@ export default function MasterDataReportScreen() {
     if (q.trim()) p.set("q", q.trim());
     if (empType) p.set("employee_type", empType);
     if (rollFilter !== "all") p.set("is_onroll", rollFilter === "on" ? "true" : "false");
+    if (bdayOnly) p.set("birthdays", "true");
     if (selectedCompanyId) p.set("company_id", selectedCompanyId);
     return p.toString();
-  }, [status, q, empType, rollFilter, selectedCompanyId]);
+  }, [status, q, empType, rollFilter, bdayOnly, selectedCompanyId]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -254,6 +257,14 @@ export default function MasterDataReportScreen() {
               </Text>
             </Pressable>
           ))}
+          {/* Iter 422c (user request) — Birthdays-this-month filter. */}
+          <Pressable
+            onPress={() => setBdayOnly((v) => !v)}
+            style={[styles.rollChip, bdayOnly && { backgroundColor: "#DB2777", borderColor: "#DB2777" }]}
+            testID="mdr-bday"
+          >
+            <Text style={[styles.rollTxt, bdayOnly && styles.rollTxtOn]}>🎂 Birthdays</Text>
+          </Pressable>
         </View>
         <Pressable onPress={load} style={styles.showBtn} testID="mdr-show">
           <Text style={styles.showTxt}>Show</Text>
@@ -358,6 +369,7 @@ function colWidth(key: string): number {
     case "pan_name": case "aadhaar_name": return 150;
     case "pf_no": case "esi_ip_no": return 130;
     case "gender": case "pincode": case "permanent_pincode": return 80;
+    case "age": return 60;
     case "basic": case "pf_basic": case "hra": case "conveyance":
     case "monthly_gross": return 95;
     default: return 110;

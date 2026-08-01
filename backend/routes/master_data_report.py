@@ -37,6 +37,7 @@ _COLUMNS = [
     ("father_name", "Father / Spouse Name"),
     ("gender", "Gender"),
     ("dob", "Date of Birth"),
+    ("age", "Age"),
     ("marital_status", "Marital Status"),
     ("phone", "Phone"),
     ("designation", "Designation"),
@@ -83,6 +84,31 @@ def _allow_key(head: str) -> str:
     return "al_" + _re.sub(r"[^a-z0-9]+", "_", head.strip().lower()).strip("_")
 
 
+def _parse_dob(v):
+    """Parse the many DOB formats on the master (dd-mm-yyyy, yyyy-mm-dd,
+    dd/mm/yyyy, dd.mm.yyyy). Returns a date or None when unparseable."""
+    from datetime import date, datetime
+    s = str(v or "").strip()
+    if not s:
+        return None
+    for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%d.%m.%Y", "%m/%d/%Y"):
+        try:
+            d = datetime.strptime(s[:10], fmt).date()
+            if 1900 <= d.year <= date.today().year:
+                return d
+        except ValueError:
+            continue
+    return None
+
+
+def _age_years(dob) -> Optional[int]:
+    from datetime import date
+    if not dob:
+        return None
+    t = date.today()
+    return t.year - dob.year - ((t.month, t.day) < (dob.month, dob.day))
+
+
 async def _fetch_rows(
     admin: Dict[str, Any],
     status: str,
@@ -90,6 +116,7 @@ async def _fetch_rows(
     employee_type: Optional[str],
     company_id: Optional[str],
     is_onroll: Optional[str],
+    birthdays: Optional[str] = None,
 ) -> tuple:
     query: Dict[str, Any] = {"role": "employee"}
     if admin["role"] == "company_admin":
@@ -124,6 +151,14 @@ async def _fetch_rows(
         users = [u for u in users if not _is_resigned(u)]
     elif status == "left":
         users = [u for u in users if _is_resigned(u)]
+
+    # Iter 422c (user request) — "Birthdays this month" filter: keep only
+    # employees whose Date of Birth falls in the CURRENT calendar month.
+    if birthdays == "true":
+        from datetime import date
+        _cur_m = date.today().month
+        users = [u for u in users
+                 if (_d := _parse_dob(u.get("dob"))) and _d.month == _cur_m]
 
     # Firm names for display
     cids = {u.get("company_id") for u in users if u.get("company_id")}
@@ -194,6 +229,8 @@ async def _fetch_rows(
             "pan_no": u.get("pan_no") or u.get("pan_number"),
             "exit_date": (u.get("exit_date") or u.get("resign_date")
                           or u.get("date_of_leaving") or u.get("leaving_date")),
+            # Iter 422c — Age auto-calculated from Date of Birth.
+            "age": _age_years(_parse_dob(u.get("dob"))),
             "basic": basic or None,
             "pf_basic": _num0(u.get("pf_basic")) or None,
             "hra": al["hra"] or None,
@@ -236,12 +273,14 @@ async def master_data_report(
     employee_type: Optional[str] = None,
     company_id: Optional[str] = None,
     is_onroll: Optional[str] = None,
+    birthdays: Optional[str] = None,
     authorization: Optional[str] = Header(None),
 ):
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     s = _parse_common(status)
-    columns, rows = await _fetch_rows(admin, s, q, employee_type, company_id, is_onroll)
+    columns, rows = await _fetch_rows(
+        admin, s, q, employee_type, company_id, is_onroll, birthdays)
     return {
         "status": s,
         "count": len(rows),
@@ -289,12 +328,14 @@ async def master_data_report_xlsx(
     employee_type: Optional[str] = None,
     company_id: Optional[str] = None,
     is_onroll: Optional[str] = None,
+    birthdays: Optional[str] = None,
     authorization: Optional[str] = Header(None),
 ):
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     s = _parse_common(status)
-    columns, rows = await _fetch_rows(admin, s, q, employee_type, company_id, is_onroll)
+    columns, rows = await _fetch_rows(
+        admin, s, q, employee_type, company_id, is_onroll, birthdays)
     buf = _build_xlsx(rows, s, columns)
     return StreamingResponse(
         buf,
