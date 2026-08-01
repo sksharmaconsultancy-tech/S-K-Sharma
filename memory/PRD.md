@@ -3349,3 +3349,10 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   fixed-days fetch on the backend. Default (no flag) still keeps the same
   processed days (safety preserved). E2E: 26 → reprocess 31 no-flag stays
   26 → override becomes 31; cleaned up.
+- Iter 430 (user directive): PF Basic Salary ABOVE ₹15,000 → statutory PF
+  follows the COMPLIANCE POLICY WAGE BASE capped at the ceiling:
+  pf_wages = min(max(prorated PF Basic, stat_wage_base), 15000). Engine
+  (utils/compliance_salary.py) + grid recompute mirror updated. Tests:
+  full month 1800 (unchanged); half month pf_basic 20000/basic 22000 →
+  wages 11000 → PF 1320 (was 1200); below-cap unchanged; prior Higher-PF/
+  VPF suite still green.

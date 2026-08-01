@@ -1635,7 +1635,13 @@ export default function ComplianceSalaryRunScreen() {
         const pfWagesNew = pfOn
           ? (hiActive
             ? Math.max(pfBase, paidBasic, grossEarn * floorPct)
-            : ((r as any).intl_worker ? pfBase : Math.min(pfBase, pfCap)))
+            : ((r as any).intl_worker
+              ? pfBase
+              // Iter 430 (user directive) — PF Basic ABOVE ₹15,000:
+              // statutory PF follows the wage base capped at the ceiling.
+              : (pfBasicFull > pfCap
+                ? Math.min(Math.max(pfBase, paidBasic, grossEarn * floorPct), pfCap)
+                : Math.min(pfBase, pfCap))))
           : 0;
         // Iter 427 — VPF (employee side) survives the grid recompute:
         // scale the server-computed VPF with the new PF wages.

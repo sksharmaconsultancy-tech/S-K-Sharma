@@ -713,7 +713,17 @@ def compute_compliance_row(
             if _hi_wage > 0:
                 capped_pf_wages = max(capped_pf_wages, _hi_wage)
         else:
-            capped_pf_wages = pf_base if _intl_worker else min(pf_base, cfg["pf_wage_cap"])
+            if _intl_worker:
+                capped_pf_wages = pf_base
+            elif pf_basic_override > cfg["pf_wage_cap"]:
+                # Iter 430 (user directive) — PF Basic Salary ABOVE ₹15,000:
+                # statutory PF follows the COMPLIANCE POLICY WAGE BASE
+                # (max(PF Basic earned, floor% of Gross Earning)) capped at
+                # the ceiling — not just the pro-rated master PF Basic.
+                capped_pf_wages = min(
+                    max(pf_base, stat_wage_base), cfg["pf_wage_cap"])
+            else:
+                capped_pf_wages = min(pf_base, cfg["pf_wage_cap"])
         pf_employee = capped_pf_wages * (cfg["pf_percent_employee"] / 100.0)
         if _hi_active:
             # ECR-compatible split: employer total on the FULL higher wage;
