@@ -3134,3 +3134,16 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   selected firm (useSelectedCompany) and follows top-bar switches.
 - Verified via API + screenshot (Kankani: 125 employees / 118 FP / 3010
   records on Test Gate).
+
+## Iter 419 (cont. 2) — "Always sync, no approval" + direct command delivery
+- Conflicts AUTO-APPROVED: log_template_conflict now stores conflicts as
+  status=approved (resolved_by system:auto-approve) — machine-only
+  templates sync everywhere with zero admin action. Startup migration in
+  sync_engine_loop auto-approves any legacy OPEN conflicts (idempotent).
+  Conflicts tab empty-state copy updated.
+- Command delivery made DIRECT: iclock getrequest batch raised 5 → 30
+  commands per poll (biometric_devices.py) — full-firm syncs finish in a
+  few polls. (There never was an approval step; "waiting" = machine not
+  polled yet.)
+- Verified: template-only upload → conflict auto-approved, 0 open; 12
+  queued cmds delivered in ONE poll.

@@ -497,7 +497,7 @@ export default function SyncEngineScreen() {
           )}
 
           {tab === "Conflicts" && (
-            conflicts.length === 0 ? <Empty text="No open conflicts. 🎉" /> :
+            conflicts.length === 0 ? <Empty text="No conflicts — machine data is captured & approved automatically. 🎉" /> :
             conflicts.map((c) => (
               <View key={c.conflict_id} style={styles.row}>
                 <View style={{ flex: 1 }}>

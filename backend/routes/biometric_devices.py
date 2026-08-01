@@ -728,10 +728,13 @@ async def iclock_getrequest(
         return PlainTextResponse(f"C:{cmd_id}:CHECK\n")
     # Iter 258 — centralized device management: deliver queued remote
     # commands (restart / sync / clear-log / push-employee ...) to the
-    # device, oldest first, max 5 per poll.
+    # device, oldest first. Iter 419 (user: "make it direct — no waiting"):
+    # batch raised 5 → 30 per poll so full-firm syncs finish in a few
+    # polls instead of trickling for many minutes. There is NO approval
+    # step — commands transfer the moment the machine contacts the server.
     pending = await db.biometric_device_cmds.find(
         {"device_serial": SN, "status": "pending"}, {"_id": 0}
-    ).sort("created_at", 1).to_list(5)
+    ).sort("created_at", 1).to_list(30)
     if pending:
         lines = []
         for c in pending:

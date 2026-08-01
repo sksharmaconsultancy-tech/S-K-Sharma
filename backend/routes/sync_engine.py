@@ -468,6 +468,19 @@ async def _distribute_machine_sync(run: dict) -> None:
 async def sync_engine_loop():
     """Background scheduler — drains the sync queue every 30 seconds."""
     logger.info("[sync] engine loop started (30s cadence)")
+    # Iter 419 — "Always sync, no approval": clear any conflicts still
+    # waiting for review from before the auto-approve rule (idempotent).
+    try:
+        r = await db.sync_conflicts.update_many(
+            {"status": "open"},
+            {"$set": {"status": "approved",
+                      "resolved_by": "system:auto-approve",
+                      "resolved_at": _now()}})
+        if r.modified_count:
+            logger.info("[sync] auto-approved %d legacy open conflict(s)",
+                        r.modified_count)
+    except Exception:
+        pass
     while True:
         try:
             await process_sync_queue()
@@ -481,9 +494,11 @@ async def sync_engine_loop():
 # ---------------------------------------------------------------------------
 async def log_template_conflict(company_id: str, pin: str, device_serial: str,
                                 kind: str) -> None:
-    """Record that a machine holds biometric data for a PIN the portal has no
-    template for — so an admin can decide to pull it in. Idempotent per
-    (company, pin, kind, device)."""
+    """Iter 419 (user rule: "Always sync — no approval needed"): a machine
+    holding biometric data the portal has nowhere else is captured and
+    AUTO-APPROVED immediately — the template is already stored by the
+    ingest path, so it syncs to other machines with zero admin action.
+    A resolved audit row is kept so the History still shows what happened."""
     try:
         exists = await db.biometric_templates.count_documents(
             {"company_id": company_id, "pin": pin, "kind": kind,
@@ -492,12 +507,17 @@ async def log_template_conflict(company_id: str, pin: str, device_serial: str,
             return
         await db.sync_conflicts.update_one(
             {"company_id": company_id, "pin": pin, "kind": kind,
-             "device_serial": device_serial, "status": "open"},
+             "device_serial": device_serial},
             {"$setOnInsert": {
                 "conflict_id": f"cf_{uuid.uuid4().hex[:10]}",
                 "reason": "machine_only_template",
-                "detail": f"{kind} template present only on device {device_serial}",
+                "detail": f"{kind} template present only on device {device_serial} — auto-approved",
                 "created_at": _now(),
+            },
+             "$set": {
+                "status": "approved",
+                "resolved_by": "system:auto-approve",
+                "resolved_at": _now(),
             }},
             upsert=True,
         )
