@@ -95,6 +95,8 @@ curl -s http://localhost:8001/api/health >/dev/null && echo "   Backend healthy 
   echo "   ⚠ Backend health check failed — journalctl -u sksharma-backend -n 50"
 echo -n "   Compliance Advance column / Iter 422 (must say OK): "
 grep -q '"Advance\*"' $APP_DIR/frontend/app/compliance-salary-run.tsx && echo "OK" || echo "MISSING!"
+echo -n "   Compliance page fix (existingAny defined) / Iter 426 (must say OK): "
+grep -q 'const existingAny' $APP_DIR/frontend/app/compliance-salary-run.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Manual advance survives reprocess (backend) / Iter 422 (must say OK): "
 grep -q 'advance_recovery" in _mf' $APP_DIR/backend/routes/compliance_salary_runs.py && echo "OK" || echo "MISSING!"
 echo -n "   Ledger skips manually-edited advance / Iter 422 (must say OK): "
