@@ -850,6 +850,22 @@ export default function ComplianceSalaryRunScreen() {
         if (!sure) return;
         q.fresh = true;
       }
+      // Iter 429 (user request) — Month days stays EDITABLE: when the typed
+      // value differs from the already-processed days, ASK which to use.
+      const prevMd = Number((existing as any).month_days || 0);
+      const newMd = Number(monthDaysOverride || 0);
+      if (prevMd > 0 && newMd > 0 && newMd !== prevMd) {
+        const mdc = await confirmChoice(
+          `This month was already processed with ${prevMd} days, but the form now says ${newMd} days.\nWhich should the reprocess use?`,
+          "Month Days Changed",
+          [
+            { label: `Keep processed days (${prevMd})`, value: "keep", color: "#2563EB" },
+            { label: `Use NEW days (${newMd})`, value: "new", color: "#D97706" },
+          ],
+        );
+        if (!mdc) return;
+        if (mdc === "new") q.override_month_days = true;
+      }
     }
     setBusy(true);
     try {
@@ -1878,14 +1894,10 @@ export default function ComplianceSalaryRunScreen() {
             <View style={styles.gridCol}>
               <Text style={styles.label}>
                 Month days (override) · Max {calendarDaysInMonth(month)}
-                {existingAny ? "  🔒" : ""}
               </Text>
               <TextInput
                 testID="csr-days"
-                value={existingAny && (existingAny as any).month_days
-                  ? String((existingAny as any).month_days)
-                  : monthDaysOverride}
-                editable={!existingAny}
+                value={monthDaysOverride}
                 onChangeText={(v) => {
                   // Iter 86 — Cap to actual calendar days in the selected month.
                   const cleaned = v.replace(/[^0-9]/g, "");
@@ -1899,13 +1911,13 @@ export default function ComplianceSalaryRunScreen() {
                 }}
                 placeholder={`Auto (${calendarDaysInMonth(month)})`}
                 placeholderTextColor={colors.onSurfaceTertiary}
-                style={[styles.input, existingAny ? { opacity: 0.55 } : null]}
+                style={styles.input}
                 keyboardType="numeric"
                 maxLength={2}
               />
-              {existingAny ? (
+              {existingAny && (existingAny as any).month_days ? (
                 <Text style={{ fontSize: 9.5, color: colors.onSurfaceTertiary, marginTop: 2 }}>
-                  Locked — salary already processed for this month; reprocess uses the same days.
+                  Already processed with {(existingAny as any).month_days} days — a different value will ask for confirmation.
                 </Text>
               ) : null}
             </View>

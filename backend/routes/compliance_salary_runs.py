@@ -70,6 +70,9 @@ class ComplianceSalaryRunCreate(BaseModel):
     # fresh from attendance + master, DISCARDING the previous draft's
     # manually entered days / edits.
     fresh: Optional[bool] = False
+    # Iter 429 (user request) — admin explicitly confirmed a DIFFERENT
+    # month-days figure for an already-processed month.
+    override_month_days: Optional[bool] = False
 
 
 async def _compute_compliance_run(
@@ -1403,9 +1406,11 @@ async def _create_compliance_salary_run_core(
     # for this firm + month + group, every reprocess (existing OR blank)
     # proceeds with the SAME month days — an accidentally changed value in
     # the form is ignored.
-    if _prev_run and _prev_run.get("month_days"):
+    if (_prev_run and _prev_run.get("month_days")
+            and not payload.override_month_days):
         payload.month_days = int(_prev_run["month_days"])
-    elif _gate_cid and not payload.use_imported_sheet:
+    elif (_gate_cid and not payload.use_imported_sheet
+            and not payload.override_month_days):
         # Iter 427b (user clarification) — FIXED DAYS (26/30/31): the run's
         # MONTH DAYS are FETCHED from the Firm Master's Fixed Days option,
         # so the whole salary basis (divisor + default present days) is the

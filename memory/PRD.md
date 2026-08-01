@@ -3341,3 +3341,11 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   resets pf_contribution_type to statutory). Auto-opens for employees whose
   saved type is non-statutory. Screenshot verified (hidden by default,
   chips appear on enable).
+- Iter 429 (user complaint — "Month days locked, not able to edit"): the
+  hard lock (Iter 426) softened. Field is EDITABLE again; when the typed
+  value differs from the already-processed days, a confirmChoice asks
+  "Keep processed days (X)" / "Use NEW days (Y)" — NEW sends
+  override_month_days=true which bypasses both the prev-run force and the
+  fixed-days fetch on the backend. Default (no flag) still keeps the same
+  processed days (safety preserved). E2E: 26 → reprocess 31 no-flag stays
+  26 → override becomes 31; cleaned up.
