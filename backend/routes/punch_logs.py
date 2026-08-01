@@ -116,11 +116,52 @@ async def _query_rows(
 
     rows: List[Dict[str, Any]] = []
     machines: Dict[str, str] = {}
+    # Iter 419 (user request) — two extra columns:
+    #   • Machine Name  — the friendly device name from Device Setup.
+    #   • Name In Machine — the employee name AS STORED ON THE MACHINE
+    #     (harvested via machine sync into biometric_machine_users).
+    _dev_map: Dict[str, dict] = {}
+    async for d in db.biometric_devices.find(
+        {}, {"_id": 0, "serial_number": 1, "company_id": 1, "name": 1, "location": 1},
+    ):
+        _dev_map[str(d.get("serial_number") or "")] = d
+    _mu_map: Dict[tuple, str] = {}
+    async for mu in db.biometric_machine_users.find(
+        {}, {"_id": 0, "company_id": 1, "pin": 1, "name": 1},
+    ):
+        _mu_map[(mu.get("company_id"), str(mu.get("pin") or "").strip())] = mu.get("name") or ""
+
+    def _serial_of(rec: dict) -> str:
+        s = str(rec.get("device_serial") or "")
+        if s and not s.startswith("import:"):
+            return s
+        src = str(rec.get("source") or "")
+        if src.startswith("zkteco:"):
+            return src.split(":", 1)[1]
+        return ""
+
     # Iter 250 — which records carry a punch photo (machine ATTPHOTO or
     # mobile selfie)? Cheap id-only lookup, photos themselves stay out of
     # the JSON payload.
     photo_ids = set(await db.attendance.distinct(
         "record_id", {**q, "selfie_base64": {"$exists": True, "$nin": [None, ""]}}))
+    # Iter 419 (user request) — flag OT punches: the system convention is
+    # that a 2nd IN→OUT pair on the same day is the OT session (same rule
+    # as the Day-wise Present/OT count). Everything from the 2nd IN of the
+    # day onwards is marked "OT PUNCH".
+    _by_day: Dict[tuple, List[dict]] = {}
+    for r in recs:
+        _by_day.setdefault((r.get("user_id"), r.get("date")), []).append(r)
+    _ot_threshold: Dict[tuple, str] = {}
+    for key, plist in _by_day.items():
+        ins = sorted(str(p.get("at") or "") for p in plist if p.get("kind") == "in")
+        if len(ins) >= 2:
+            _ot_threshold[key] = ins[1]  # 2nd IN of the day
+
+    def _is_ot(rec: dict) -> bool:
+        th = _ot_threshold.get((rec.get("user_id"), rec.get("date")))
+        return bool(th) and str(rec.get("at") or "") >= th
+
     # Iter 341 (user request) — flags: "not_found" when the punch's user is
     # missing from the Employee Master, "new_registration" when the
     # employee was registered TODAY.
@@ -137,14 +178,19 @@ async def _query_rows(
             _flag = "not_found"
         elif str(u.get("created_at") or "")[:10] == _today_ist:
             _flag = "new_registration"
+        _serial = _serial_of(r)
+        _pin = str(u.get("bio_code") or "").strip() or (r.get("user_id") or "" if not u else "")
         rows.append({
             "record_id": r.get("record_id"),
             "date": r.get("date") or at[:10],
             "time": at[11:19] if len(at) >= 19 else at[11:16],
             "kind": r.get("kind"),
+            "ot": _is_ot(r),
             "employee_code": u.get("employee_code") or "",
             "name": u.get("name") or ("NOT FOUND" if not u else r.get("user_id") or ""),
+            "name_in_machine": _mu_map.get((r.get("company_id"), _pin), ""),
             "bio_code": u.get("bio_code") or ("" if u else (r.get("user_id") or "")),
+            "machine_name": (_dev_map.get(_serial) or {}).get("name") or "",
             "machine": mlabel,
             "machine_key": mkey,
             "company_name": firms.get(r.get("company_id") or "", ""),
@@ -161,11 +207,6 @@ async def _query_rows(
         _allowed = {q["company_id"]}
     elif isinstance(q.get("company_id"), dict):
         _allowed = set(q["company_id"].get("$in") or [])
-    _dev_map: Dict[str, dict] = {}
-    async for d in db.biometric_devices.find(
-        {}, {"_id": 0, "serial_number": 1, "company_id": 1, "name": 1, "location": 1},
-    ):
-        _dev_map[str(d.get("serial_number") or "")] = d
     _unm_q: Dict[str, Any] = {}
     if from_date:
         _unm_q.setdefault("at", {})["$gte"] = f"{from_date}T00:00:00"
@@ -198,9 +239,13 @@ async def _query_rows(
             "date": at[:10],
             "time": at[11:19] if len(at) >= 19 else at[11:16],
             "kind": "",
+            "ot": False,
             "employee_code": "",
             "name": "NOT FOUND IN MASTER",
+            "name_in_machine": _mu_map.get(
+                (_cid, str(m_.get("device_user_id") or "").strip()), ""),
             "bio_code": str(m_.get("device_user_id") or ""),
+            "machine_name": d.get("name") or "",
             "machine": mlabel,
             "machine_key": mkey,
             "company_name": firms.get(_cid or "", "") or (d.get("name") or ""),
@@ -448,8 +493,13 @@ async def punch_logs_xlsx(
     wb = Workbook()
     ws = wb.active
     ws.title = "Punch Log"
-    headers = ["Sr", "Date", "Time", "IN/OUT", "Emp Code", "Employee Name",
-               "Bio Code", "Machine / Source", "Firm", "Status", "Photo",
+    headers = ["Sr", "Date", "Time", "IN/OUT",
+               # Iter 419 — OT punches (2nd IN→OUT pair of the day) marked.
+               "OT",
+               "Emp Code", "Employee Name",
+               # Iter 419 — employee name AS STORED ON THE MACHINE + device name.
+               "Name In Machine", "Bio Code", "Machine Name",
+               "Machine / Source", "Firm", "Status", "Photo",
                # Iter 341 — NOT FOUND / NEW REGISTRATION marker.
                "Remark"]
     ws.append(headers)
@@ -462,14 +512,20 @@ async def punch_logs_xlsx(
     # Iter 250 (user request) — punches WITH PHOTO: embed the actual punch
     # photo (machine ATTPHOTO / mobile selfie) as a thumbnail in the row.
     MAX_EMBEDDED_PHOTOS = 2000
+    _photo_col = headers.index("Photo") + 1
     photo_rows: List[tuple] = []  # (excel_row, record_id)
     for i, r in enumerate(data["rows"], start=1):
         _rm = ("NOT FOUND" if r.get("flag") == "not_found"
                else "NEW REGISTRATION" if r.get("flag") == "new_registration" else "")
         ws.append([i, r["date"], r["time"], (r["kind"] or "").upper(),
-                   r["employee_code"], r["name"], r["bio_code"],
+                   "OT PUNCH" if r.get("ot") else "",
+                   r["employee_code"], r["name"], r.get("name_in_machine") or "",
+                   r["bio_code"], r.get("machine_name") or "",
                    r["machine"], r["company_name"], r["status"],
                    "" if r.get("has_photo") else "—", _rm])
+        if r.get("ot"):
+            _oc = ws.cell(row=i + 1, column=5)
+            _oc.font = Font(bold=True, color="B45309")
         if _rm:
             _c = ws.cell(row=i + 1, column=len(headers))
             _c.font = Font(bold=True,
@@ -495,11 +551,11 @@ async def punch_logs_xlsx(
                 pim.convert("RGB").save(out, format="PNG")
                 out.seek(0)
                 xli = XLImage(out)
-                ws.add_image(xli, f"K{xl_row}")
+                ws.add_image(xli, f"{get_column_letter(_photo_col)}{xl_row}")
                 ws.row_dimensions[xl_row].height = 45
             except Exception:
-                ws.cell(row=xl_row, column=11, value="YES")
-    widths = [6, 12, 10, 8, 10, 26, 9, 22, 24, 10, 12]
+                ws.cell(row=xl_row, column=_photo_col, value="YES")
+    widths = [6, 12, 10, 8, 11, 10, 26, 22, 9, 18, 22, 24, 10, 12, 16]
     for col, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(col)].width = w
     ws.freeze_panes = "A2"

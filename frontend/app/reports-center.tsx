@@ -155,7 +155,7 @@ export default function ReportsCenterScreen() {
         <Pressable onPress={() => router.back()} hitSlop={10} testID="rc-back">
           <Ionicons name="arrow-back" size={22} color={colors.onSurface} />
         </Pressable>
-        <Text style={shared.headerTitle}>Reports Center</Text>
+        <Text style={shared.headerTitle}>Report Hub</Text>
         {sel ? (
           <ExportButtons
             basePath={`${GROUP_BASE[sel.group]}/${sel.kind}?${qs()}`}

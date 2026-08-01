@@ -3147,3 +3147,18 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   polled yet.)
 - Verified: template-only upload → conflict auto-approved, 0 open; 12
   queued cmds delivered in ONE poll.
+
+## Iter 419 (cont. 3) — Punch Log columns + OT marking + menu renames + bundle fix
+- Punch Log Report (screen + Excel): NEW columns "Name In Machine" (employee
+  name AS STORED ON the machine — from biometric_machine_users harvest),
+  "Machine Name" (friendly device name), and "OT" column marking OT PUNCH
+  (everything from the 2nd IN of the day = OT session, same rule as
+  day-counts). Excel photo-embed column now anchored dynamically.
+  Verified: IN/OUT/IN(OT)/OUT(OT) sequence + xlsx headers/values.
+- Menu: "Reports Center" → "Report Hub", moved from Payroll group into
+  Reports group; "Labour Law Reports" → "Labour Reports", moved from
+  Compliance group into Reports group (both super-admin + company-admin
+  menus; page titles updated).
+- VPS bundle fix: temp-code-bundle tar had ballooned to 140MB (.metro-cache,
+  rpa_media, *.webm) and the proxy cut downloads at ~90s → now 9.5MB via
+  new excludes. Verified <1s download, valid tar.

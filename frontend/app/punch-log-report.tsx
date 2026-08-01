@@ -29,9 +29,12 @@ type Row = {
   date: string;
   time: string;
   kind: string;
+  ot?: boolean;
   employee_code: string;
   name: string;
+  name_in_machine: string;
   bio_code: string;
+  machine_name: string;
   machine: string;
   machine_key: string;
   company_name: string;
@@ -56,9 +59,14 @@ const COLS: { key: keyof Row; label: string; w: number }[] = [
   { key: "date", label: "Date", w: 96 },
   { key: "time", label: "Time", w: 76 },
   { key: "kind", label: "IN/OUT", w: 64 },
+  // Iter 419 — OT punches (2nd IN→OUT pair of the day) marked.
+  { key: "ot", label: "OT", w: 80 },
   { key: "employee_code", label: "Code", w: 60 },
   { key: "name", label: "Employee", w: 180 },
+  // Iter 419 — employee name as stored ON the machine (from machine sync).
+  { key: "name_in_machine", label: "Name in Machine", w: 150 },
   { key: "bio_code", label: "Bio", w: 50 },
+  { key: "machine_name", label: "Machine Name", w: 120 },
   { key: "machine", label: "Machine / Source", w: 160 },
   { key: "company_name", label: "Firm", w: 170 },
   { key: "status", label: "Status", w: 90 },
@@ -308,6 +316,9 @@ export default function PunchLogReportScreen() {
                         fontWeight: "800",
                         color: r.kind === "in" ? "#15803D" : "#B45309",
                       },
+                      c.key === "ot" && r.ot && {
+                        fontWeight: "800", color: "#B45309",
+                      },
                       c.key === "name" && r.flag === "not_found" && {
                         fontWeight: "800", color: "#B91C1C",
                       },
@@ -318,7 +329,9 @@ export default function PunchLogReportScreen() {
                   >
                     {c.key === "kind"
                       ? (r.kind || "").toUpperCase()
-                      : c.key === "has_photo"
+                      : c.key === "ot"
+                        ? (r.ot ? "⏱ OT PUNCH" : "—")
+                        : c.key === "has_photo"
                         ? (r.has_photo ? "📷" : "—")
                         : c.key === "name"
                           ? (r.flag === "not_found"

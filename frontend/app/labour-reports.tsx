@@ -180,7 +180,7 @@ export default function LabourReportsScreen() {
             <Ionicons name="chevron-back" size={22} color={colors.onSurface} />
           </Pressable>
           <View style={{ flex: 1 }}>
-            <Text style={st.title}>Labour Law Reports</Text>
+            <Text style={st.title}>Labour Reports</Text>
             <Text style={st.sub}>22 statutory attendance registers & reports · PDF / Excel / CSV / Print · QR verified</Text>
           </View>
         </View>
