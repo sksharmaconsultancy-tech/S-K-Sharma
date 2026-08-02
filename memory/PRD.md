@@ -3497,3 +3497,14 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   - ESIC SAL column now ALWAYS the ESIC wage base (amount ESIC deducted
     on), never Gross — fixed challans esic.xls/esic.xlsx + statutory_bulk
     build_esic_mc_csv (removed gross fallbacks).
+- Iter 446 (user bug — EPFO "File name cannot have spaces or a non-word
+  character"): all ECR/ESIC portal file names now use MMYYYY (word chars
+  only): ECR_072026.txt instead of ECR_2026-07.txt. Fixed backend
+  (challans.py _portal_month helper on ecr.txt/ecr.xlsx/esic.xls/esic.xlsx
+  + RPA upload job file_name; compliance_salary_runs.py PF_ECR + ECR
+  export headers) AND frontend a.download names (challans.tsx, reports.tsx,
+  compliance-salary-run.tsx) since the browser save name comes from the
+  frontend. Verified header: ECR_062026.txt.
+  ⚠ LESSON (recurred twice): PARALLEL search_replace edits on the SAME
+  file corrupt/truncate it (challans.py got stray "ls}" tail; earlier
+  compliance_salary_runs.py truncated). Edit the same file SEQUENTIALLY.

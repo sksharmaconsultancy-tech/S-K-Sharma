@@ -677,7 +677,8 @@ export default function ReportsHubScreen() {
                     onPress={() =>
                       downloadBinary(
                         `/admin/compliance-salary-runs/${r.run_id}/ecr.txt`,
-                        `ECR_${r.month}.txt`,
+                        // Iter 446 — EPFO rejects non-word chars in filenames.
+                        `ECR_${String(r.month || "").replace(/^(\d{4})-(\d{2})$/, "$2$1")}.txt`,
                       )
                     }
                     style={styles.linkBtn}

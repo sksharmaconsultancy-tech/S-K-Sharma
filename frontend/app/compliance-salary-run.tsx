@@ -1257,7 +1257,8 @@ export default function ComplianceSalaryRunScreen() {
                 : kind === "pdf2"
                   ? `ComplianceSalaryRegister_Option2_${run.month}.pdf`
                   : kind === "ecr"
-                    ? `PF_ECR_${run.month}.txt`
+                    // Iter 446 — EPFO rejects non-word chars in filenames.
+                    ? `PF_ECR_${String(run.month || "").replace(/^(\d{4})-(\d{2})$/, "$2$1")}.txt`
                     : kind === "esic-mc"
                       ? `ESIC_MC_${run.month}.csv`
                       : `ESIC_IP_Registration_${run.month}.csv`;

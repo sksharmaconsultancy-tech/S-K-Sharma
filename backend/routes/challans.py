@@ -384,6 +384,17 @@ async def _uan_esic_map(rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]
     return {u["user_id"]: u for u in users}
 
 
+def _portal_month(month: Any) -> str:
+    """Iter 446 (user bug) — EPFO rejects filenames with a hyphen ("File
+    name cannot have spaces or a non-word character"). Convert the run
+    month "2026-07" → "072026" so files are named ECR_072026.txt etc."""
+    m = str(month or "").strip()
+    if len(m) == 7 and m[4] == "-":
+        return f"{m[5:7]}{m[:4]}"
+    import re as _re
+    return _re.sub(r"\W", "_", m) or "month"
+
+
 def _r0(v: Any) -> int:
     try:
         return int(round(float(v or 0)))
@@ -552,7 +563,7 @@ async def download_ecr_txt(
     run = await _load_run_for_portal(run_id, user)
     extra = await _uan_esic_map(run.get("rows") or [])
     content = _ecr_txt_bytes(run, extra, bool(skip_missing))
-    fname = f"ECR_{run.get('month') or 'month'}.txt"
+    fname = f"ECR_{_portal_month(run.get('month'))}.txt"
     return StreamingResponse(
         io.BytesIO(content),
         media_type="text/plain",
@@ -618,7 +629,7 @@ async def download_ecr_xlsx(
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-    fname = f"ECR_{run.get('month') or 'month'}.xlsx"
+    fname = f"ECR_{_portal_month(run.get('month'))}.xlsx"
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -641,7 +652,7 @@ async def download_esic_xls(
     run = await _load_run_for_portal(run_id, user)
     extra = await _uan_esic_map(run.get("rows") or [])
     content = _esic_xls_bytes(run, extra)
-    fname = f"ESIC_MC_{run.get('month') or 'month'}.xls"
+    fname = f"ESIC_MC_{_portal_month(run.get('month'))}.xls"
     return StreamingResponse(
         io.BytesIO(content),
         media_type="application/vnd.ms-excel",
@@ -702,7 +713,7 @@ async def download_esic_xlsx(
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-    fname = f"ESIC_MC_{run.get('month') or 'month'}.xlsx"
+    fname = f"ESIC_MC_{_portal_month(run.get('month'))}.xlsx"
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -888,10 +899,10 @@ async def create_portal_upload_job(
     month = run.get("month") or "month"
     if portal == "epfo":
         content = _ecr_txt_bytes(run, extra)
-        file_name = f"ECR_{month}.txt"
+        file_name = f"ECR_{_portal_month(month)}.txt"
     else:
         content = _esic_xls_bytes(run, extra)
-        file_name = f"ESIC_MC_{month}.xls"
+        file_name = f"ESIC_MC_{_portal_month(month)}.xls"
 
     job_id = f"puj_{uuid.uuid4().hex[:12]}"
     await db.portal_automation_jobs.insert_one({

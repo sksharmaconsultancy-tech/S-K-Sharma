@@ -2415,7 +2415,10 @@ async def download_pf_ecr(
                 if r.get("user_id") == u["user_id"]:
                     r["uan_no"] = u.get("uan_no")
     body = build_pf_ecr_txt(rows)
-    fname = f"PF_ECR_{run.get('month')}.txt"
+    # Iter 446 (user bug) — EPFO rejects filenames with non-word characters.
+    _m = str(run.get("month") or "")
+    _mword = f"{_m[5:7]}{_m[:4]}" if len(_m) == 7 and _m[4] == "-" else "month"
+    fname = f"PF_ECR_{_mword}.txt"
     return Response(
         content=body,
         media_type="text/plain",
@@ -2642,9 +2645,12 @@ async def download_ecr_file(run_id: str, authorization: Optional[str] = Header(N
                 if r.get("user_id") == u["user_id"]:
                     r["eps_disabled"] = True
     txt = build_ecr_text(run)
+    # Iter 446 (user bug) — EPFO rejects filenames with non-word characters.
+    _m2 = str(run.get("month") or "")
+    _m2w = f"{_m2[5:7]}{_m2[:4]}" if len(_m2) == 7 and _m2[4] == "-" else "month"
     return Response(
         content=txt,
         media_type="text/plain",
-        headers={"Content-Disposition": f'attachment; filename="ECR_{run.get("month")}.txt"'},
+        headers={"Content-Disposition": f'attachment; filename="ECR_{_m2w}.txt"'},
     )
 
