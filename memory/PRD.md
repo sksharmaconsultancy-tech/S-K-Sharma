@@ -3530,3 +3530,32 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
     Remove-Without-UAN toggle. Tested by testing_agent — PASSED (report
     /app/test_reports/iteration_448.json).
   - Note: /challans run dropdown only lists runs with finalized:true.
+- Iter 449 (user spec — "Enhancement of Existing PF & ESIC Settings with
+  Statutory Corrections"): implemented WITHOUT any new module, fully
+  backward compatible (defaults = legacy behaviour):
+  - NEW SETTINGS (Standard + per-firm overrides, compliance_settings.py
+    _CHOICE_FIELDS): pf_wage_calc_method (basic_da | floor | higher* )
+    and esic_wage_calc_method (wage_base* | actual | floor | higher).
+    UI chips on /compliance-settings (ChoicePicker, testids
+    cs-pf_wage_calc_method-*, cs-esic_wage_calc_method-*).
+  - ENGINE (utils/compliance_salary.py): PF wages per method capped at
+    ceiling; ADOPT PF above ceiling — adopt_pf="no" ⇒ Excluded Employee
+    (pf 0, reason in pf_reason), adopt_pf="yes"+pf_wage_override ⇒ PF on
+    manual wage (prorated, uncapped) with EPS ALWAYS capped at ceiling and
+    ER split = 12%×wage − EPS → EPF; ESIC wages per method (actual = ESI-
+    flagged heads + OT); ESIC ELIGIBILITY on full-month ESI Wages when a
+    non-default method is set (legacy Basic check kept for default).
+    _CFG_PASSTHRU_KEYS updated. 12 unit cases pass incl. SAPNA + Higher PF
+    regressions.
+  - EMPLOYEE MASTER: adopt_pf (_STR_FIELDS) + pf_wage_override
+    (_NUM_FIELDS) in employee_profile.py; UI chips + conditional wage
+    input on employee-add.tsx (testids adopt-pf-*, pf-wage-override);
+    employeeForm.ts fields.
+  - VALIDATION (compliance_validation.py): PF_ABOVE_CEILING now allows
+    Adopt PF=Yes; new ADOPT_PF_WAGE_MISSING + PF_EXCLUDED_ABOVE_CEILING
+    warnings.
+  - GRID mirror: both client-side recompute blocks in
+    compliance-salary-run.tsx honour both methods.
+  - testing_agent iteration_449: 100% PASS (settings persist, employee UI
+    hydrates, 400 on invalid values). Fixed testing feedback: employee
+    Save now window.alert()s the mandatory-field error (was silent).

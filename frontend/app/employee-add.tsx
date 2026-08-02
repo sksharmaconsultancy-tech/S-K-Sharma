@@ -735,6 +735,10 @@ export default function EmployeeAddScreen() {
     if (mandatoryError) {
       setReviewOpen(false);
       setError(mandatoryError);
+      // Iter 449 (testing feedback) — the inline banner can sit off-screen
+      // on long forms; surface the reason immediately so Save never no-ops
+      // silently (e.g. existing records missing a mandatory Phone).
+      if (Platform.OS === "web") window.alert(mandatoryError);
       return;
     }
     setError(null);
