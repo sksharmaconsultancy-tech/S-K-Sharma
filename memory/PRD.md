@@ -3638,3 +3638,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   _uan_esic_map now also fetches exit_date/resign_date.
 - Deploy Iter 456: /app/deploy_vps_iter456.sh served via
   /api/temp-code-bundle?kind=script.
+- Iter 457 (user bug — MILAP CHAND JAIN, Basic 2,30,000 / PF Basic 1,70,000
+  showed PF 27,600): the "Higher PF (Actual Wages)" path (REVERSES Iter 425c
+  "always wage base") now uses: Higher PF Wage (pro-rated) → else earned PF
+  Basic → else wage base. Verified: MILAP → PF 20,400. Test file
+  /tmp/test_pf_engine.py extended to 13 scenarios.

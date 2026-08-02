@@ -704,14 +704,22 @@ def compute_compliance_row(
                 _hi_active = True
         if _hi_active:
             _hi_wage = _num(user.get("higher_pf_wage"), 0.0)
-            # Iter 425c (user directive — "Always Calculate on Wage Base") —
-            # Higher PF contributes on the WAGE BASE from the Compliance
-            # Policy (max(Basic, floor% of Gross Earning)) with NO ceiling,
-            # never on the ₹15,000-capped master PF Basic. The approved
-            # Higher PF Wage (if filled) acts as a minimum floor.
-            capped_pf_wages = max(pf_base, stat_wage_base)
+            # Iter 457 (user bug — MILAP: Basic 2,30,000 / PF Basic 1,70,000
+            # showed PF 27,600 instead of 20,400) — Higher PF contributes on
+            # the employee's OWN PF wage, never silently on the full wage
+            # base. Precedence:
+            #   1. Higher PF Wage filled → PF on that wage (pro-rated).
+            #   2. PF Basic filled → PF on the EARNED PF Basic (no ceiling).
+            #   3. Neither → actual wage base (max(Basic, floor% Gross)).
             if _hi_wage > 0:
-                capped_pf_wages = max(capped_pf_wages, _hi_wage)
+                _fct = (_proration_factor(
+                    pf_proration_method, effective_present,
+                    max(1, month_days)) if salary_mode == "monthly" else 1.0)
+                capped_pf_wages = _hi_wage * _fct
+            elif pf_basic_override > 0:
+                capped_pf_wages = pf_basic_prorated
+            else:
+                capped_pf_wages = max(pf_base, stat_wage_base)
         else:
             if _intl_worker:
                 capped_pf_wages = pf_base

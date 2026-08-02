@@ -29,6 +29,12 @@
 #   • Members who worked part of the month and left → NO reason / NO last
 #     working day (instruction 6).
 #
+# Iter 457 (user bug — MILAP CHAND JAIN): employee marked "Higher PF
+# (Actual Wages)" with Basic 2,30,000 / PF Basic 1,70,000 showed PF 27,600
+# (12% of full Basic) instead of 20,400. The Higher PF path now contributes
+# on the employee's OWN PF wage: Higher PF Wage (if filled, pro-rated) →
+# else earned PF Basic → else the actual wage base.
+#
 # Run ON THE VPS as root/sksharma.
 set -e
 
@@ -97,6 +103,8 @@ curl -s http://localhost:8001/api/health >/dev/null && echo "   Backend healthy 
   echo "   ⚠ Backend health check failed — journalctl -u sksharma-backend -n 50"
 echo -n "   Final PF Engine (Iter 456 spec) (must say OK): "
 grep -q 'Iter 456 (user final PF Engine spec)' $APP_DIR/backend/utils/compliance_salary.py && echo "OK" || echo "MISSING!"
+echo -n "   Higher PF on own PF wage (MILAP fix, Iter 457) (must say OK): "
+grep -q 'Iter 457' $APP_DIR/backend/utils/compliance_salary.py && echo "OK" || echo "MISSING!"
 echo -n "   Adopt PF REMOVED from engine (must say ABSENT): "
 grep -q 'adopt_pf' $APP_DIR/backend/utils/compliance_salary.py && echo "STILL PRESENT!" || echo "ABSENT"
 echo -n "   Calc-Method dropdowns REMOVED from Settings (must say ABSENT): "
