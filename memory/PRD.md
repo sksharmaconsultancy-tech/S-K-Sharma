@@ -3437,3 +3437,16 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
     SMTP settings handle any recipient.
   - Backend verified via curl (pdf+pdf2 mail OK, empty formats → 400,
     firm-emails OK); UI verified via screenshot on salary-run.
+- Iter 441 (VPS incident): user's VPS backend DOWN after deploy435 →
+  created /app/fix_backend_441.sh (served via temp-code-bundle
+  kind=fixscript) — prints stderr tail, manual import test, reinstalls
+  reqs, clears port 8001, restarts + health check. AWAITING user run
+  result. Preview env verified healthy (dashboard renders fine).
+- Iter 442 (user request): "Download / Mail" button directly in Report
+  Hub header (reports-center.tsx, testID rc-share, hidden for audit
+  group) → ReportsShareModal with PDF/Excel chips + firm email chips.
+  NEW POST /admin/payroll-reports/email-report handles BOTH payroll
+  kinds (_REPORTS+ctx) and govt kinds (_GOVT+month_to/employee_ids,
+  incl. fine empty-note PDF). Modal gained `extraBody` prop merged into
+  the email POST body. Verified via curl (payroll + govt kinds) + UI
+  screenshot.

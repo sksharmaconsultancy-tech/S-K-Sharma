@@ -38,6 +38,9 @@
 #   (Compliance), Employee Group badge, recipient chips fetched from the
 #   Firm Master registered email ids (pick one / all + extra email),
 #   ≥1 format selection MANDATORY, mail carries exactly what's selected.
+# Iter 442 — Report Hub: "Download / Mail" button in the header — mail or
+#   download ANY payroll report / govt register (PDF / Excel) directly
+#   from the Reports section, with the same firm-email picker.
 #
 # Run ON THE VPS as root/sksharma.
 set -e

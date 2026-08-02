@@ -12,6 +12,7 @@ import {
   View,
   Text,
   ScrollView,
+  Platform,
   Pressable,
   TextInput,
   ActivityIndicator,
@@ -20,11 +21,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Redirect, useRouter } from "expo-router";
 
-import { api } from "@/src/api/client";
+import { api, apiBinary } from "@/src/api/client";
 import RegisterTable, {
   ExportButtons,
   shared,
 } from "@/src/components/RegisterTable";
+import ReportsShareModal from "@/src/components/salary/ReportsShareModal";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors } from "@/src/theme";
@@ -92,6 +94,8 @@ export default function ReportsCenterScreen() {
   const [selEmps, setSelEmps] = useState<string[]>([]);
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  // Iter 442 (user request) — Download / Mail directly from the Report Hub.
+  const [shareOpen, setShareOpen] = useState(false);
 
   const companyId =
     user?.role === "company_admin" ? user.company_id : selectedCompanyId;
@@ -220,10 +224,32 @@ export default function ReportsCenterScreen() {
         </Pressable>
         <Text style={shared.headerTitle}>Report Hub</Text>
         {sel ? (
-          <ExportButtons
-            basePath={`${GROUP_BASE[sel.group]}/${sel.kind}?${qs()}`}
-            fileBase={sel.kind}
-          />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            {sel.group !== "audit" && (
+              <Pressable
+                onPress={() => setShareOpen(true)}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 5,
+                  paddingVertical: 7,
+                  paddingHorizontal: 10,
+                  borderRadius: 8,
+                  backgroundColor: "#166534",
+                }}
+                testID="rc-share"
+              >
+                <Ionicons name="mail-outline" size={14} color="#FFF" />
+                <Text style={{ color: "#FFF", fontWeight: "800", fontSize: 11.5 }}>
+                  Download / Mail
+                </Text>
+              </Pressable>
+            )}
+            <ExportButtons
+              basePath={`${GROUP_BASE[sel.group]}/${sel.kind}?${qs()}`}
+              fileBase={sel.kind}
+            />
+          </View>
         ) : (
           <View style={{ width: 40 }} />
         )}
@@ -473,6 +499,54 @@ export default function ReportsCenterScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Iter 442 (user request) — Download / Mail the selected report
+          (PDF / Excel) straight from the Report Hub. */}
+      {sel && (
+        <ReportsShareModal
+          visible={shareOpen}
+          onClose={() => setShareOpen(false)}
+          title={`${data?.title || sel.title}${data?.subtitle ? ` — ${data.subtitle}` : ""}`}
+          formatOptions={[
+            { key: "pdf", label: "PDF" },
+            { key: "xlsx", label: "Excel" },
+          ]}
+          companyId={companyId || ""}
+          defaultEmail={(user as any)?.email || ""}
+          emailEndpoint="/admin/payroll-reports/email-report"
+          extraBody={{
+            group: sel.group,
+            kind: sel.kind,
+            company_id: companyId || "",
+            month,
+            month_b: sel.kind === "salary-comparison" ? monthB : "",
+            fy_start_year: FY_KINDS.has(sel.kind) ? fy : 0,
+            month_to:
+              MONTH_RANGE_KINDS.has(sel.kind) && fineMode === "periodic"
+                ? monthTo
+                : "",
+            employee_ids: EMP_KINDS.has(sel.kind) ? selEmps.join(",") : "",
+            from_date: DATE_KINDS.has(sel.kind) ? dateFrom : "",
+            to_date: DATE_KINDS.has(sel.kind)
+              ? otMode === "daily" ? dateFrom : dateTo
+              : "",
+          }}
+          onDownload={async (fmts) => {
+            for (const f of fmts) {
+              const res = await apiBinary(
+                `${GROUP_BASE[sel.group]}/${sel.kind}.${f}?${qs()}`,
+              );
+              if (Platform.OS === "web" && res.webBlobUrl) {
+                const a = document.createElement("a");
+                a.href = res.webBlobUrl;
+                a.download = `${sel.kind}_${month}.${f}`;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 30000);
+              }
+            }
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 }

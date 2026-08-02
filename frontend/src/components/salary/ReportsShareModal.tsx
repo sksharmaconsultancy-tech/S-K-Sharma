@@ -33,6 +33,7 @@ type Props = {
   employeeGroup?: string; // Iter 439 — group the run was processed for
   formatOptions?: FormatOption[]; // Iter 439 — e.g. PDF Format 1 / Format 2
   companyId?: string; // Iter 440 — fetch Firm Master registered email ids
+  extraBody?: Record<string, any>; // Iter 442 — merged into the email POST
   defaultEmail?: string;
   emailEndpoint: string; // POST {to, formats}
   onDownload: (formats: ReportFormat[]) => Promise<void>;
@@ -46,6 +47,7 @@ export default function ReportsShareModal({
   employeeGroup,
   formatOptions,
   companyId,
+  extraBody,
   defaultEmail,
   emailEndpoint,
   onDownload,
@@ -142,7 +144,7 @@ export default function ReportsShareModal({
     try {
       const r = await api<{ ok: boolean; message?: string }>(emailEndpoint, {
         method: "POST",
-        body: { to: recipients, formats: sel },
+        body: { to: recipients, formats: sel, ...(extraBody || {}) },
       });
       setStatus(r.message || `Report emailed to ${recipients.join(", ")} ✓`);
     } catch (e: any) {

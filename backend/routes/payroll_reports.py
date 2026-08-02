@@ -18,9 +18,9 @@ are linked, not duplicated):
       params: company_id, month, month_b, fy_start_year
 """
 from datetime import date, datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Body, Header, HTTPException
 from fastapi.responses import StreamingResponse
 
 from server import db, get_user_from_token, require_role  # noqa: E402
@@ -461,6 +461,75 @@ async def list_reports(authorization: Optional[str] = Header(None)):
     return {"reports": [{"kind": k, "title": t}
                         for k, (t, _fn) in _REPORTS.items()],
             "existing": _LINKS}
+
+
+@router.post("/email-report")
+async def email_hub_report(payload: Dict[str, Any] = Body(default={}),
+                           authorization: Optional[str] = Header(None)):
+    """Iter 442 (user request) — Download / Mail directly from the Report
+    Hub: emails the selected report (PDF / Excel) to the chosen Firm
+    Master email id(s). Handles both payroll reports and govt registers."""
+    from utils.report_email import normalize_formats, send_report_email
+    kind = str(payload.get("kind") or "")
+    group = str(payload.get("group") or "payroll")
+    company_id = await _adm(authorization, payload.get("company_id"))
+    month = str(payload.get("month") or date.today().strftime("%Y-%m"))
+    formats = normalize_formats(payload.get("formats"), allowed=("pdf", "xlsx"))
+    emp_ids = [e for e in str(payload.get("employee_ids") or "").split(",") if e]
+    c = await _company(company_id)
+    empty_note = None
+    if group == "govt":
+        from routes.govt_audit_reports import (
+            _GOVT, _govt_empty_note, _govt_period,
+        )
+        if kind not in _GOVT:
+            raise HTTPException(status_code=404, detail="Unknown register")
+        gctx = {"month_to": str(payload.get("month_to") or "").strip(),
+                "employee_ids": emp_ids}
+        title, cols, rows, totals = await _GOVT[kind](company_id, month, gctx)
+        period = _govt_period(month, gctx)
+        if not rows:
+            empty_note = _govt_empty_note(kind, month, gctx)
+    else:
+        if kind not in _REPORTS:
+            raise HTTPException(status_code=404, detail="Unknown report")
+        fy = _fy_or_now(int(payload.get("fy_start_year") or 0))
+        ctx = {"employee_ids": emp_ids,
+               "from_date": str(payload.get("from_date") or "").strip(),
+               "to_date": str(payload.get("to_date") or "").strip()}
+        title, fn = _REPORTS[kind]
+        cols, rows, totals, extra = await fn(
+            company_id, month, payload.get("month_b"), fy, ctx)
+        period = str(extra or month)
+    columns = [{"key": k, "label": lb} for k, lb in cols]
+    sub = (f"{c.get('name')} · {period} · "
+           f"Generated {datetime.now():%d-%m-%Y}")
+    attachments = []
+    if "pdf" in formats:
+        attachments.append({
+            "filename": f"{title.replace(' ', '_')}.pdf",
+            "content": register_pdf(title, sub, columns, rows, totals,
+                                    c.get("logo_base64"),
+                                    empty_note=empty_note).getvalue(),
+            "mime": "application/pdf"})
+    if "xlsx" in formats:
+        attachments.append({
+            "filename": f"{title.replace(' ', '_')}.xlsx",
+            "content": register_xlsx(title, sub, columns, rows,
+                                     totals).getvalue(),
+            "mime": "application/vnd.openxmlformats-officedocument"
+                    ".spreadsheetml.sheet"})
+    fmt_txt = ", ".join(f.upper() for f in formats)
+    res = await send_report_email(
+        payload.get("to"),
+        f"{title} — {c.get('name')} ({period})",
+        (f"Please find attached: {title} for {c.get('name')} — {period}.\n\n"
+         f"Rows: {len(rows)}\nFormats: {fmt_txt}\n\n"
+         f"Sent from Smart Payroll Service."),
+        attachments)
+    rcpts = ", ".join(res.get("to") or [])
+    return {"ok": True, "via": res.get("via"), "to": res.get("to"),
+            "message": f"{title} ({fmt_txt}) emailed to {rcpts}"}
 
 
 @router.get("/{kind}")
