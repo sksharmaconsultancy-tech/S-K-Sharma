@@ -3450,3 +3450,37 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   incl. fine empty-note PDF). Modal gained `extraBody` prop merged into
   the email POST body. Verified via curl (payroll + govt kinds) + UI
   screenshot.
+- Iter 443 (user request — Freeze as Actual Gross + Master-linked deductions
+  + PF/ESIC on Wage Base):
+  - FREEZE AS ACTUAL GROSS: firms with days_calc_method=freeze_actual_gross
+    now auto-import the ACTUAL Salary run (db.salary_runs run_type=actual,
+    same month, newest first) into the Compliance run: total_gross → Freeze
+    (imported_gross, taken AS-IS, days derived, diff → OT/Other Allow.),
+    adv → advance_recovery (stamped manual_fields so ledger skips), tds →
+    tds, other_ded → other_deduction. Works WITHOUT an imported sheet
+    (attendance_source="actual_salary_freeze", frozen=True badge). Key var
+    _frz_imp = use_imported_sheet OR _fag_row present; gates at stats
+    block, days-derivation block (L~548) and Freeze block (L~862).
+  - MASTER-LINKED DEDUCTIONS: ded_mask now carries "advance" (ADVANCE
+    toggle) and "other" (OTH. DEDUC. toggle). Disabled heads are NOT
+    applied (sheet TDS/other gates, prev-row restores gated, advance
+    ledger rows filtered at both apply_advance_recovery call sites) and
+    columns hidden on grid (compliance-salary-run.tsx hasDed("advance"/
+    "other") in headers, dedCount, row cells, totals row, footer, navCols,
+    fmMask ed2) + CSV/Excel exports (dynamic_csv_columns) +
+    _ensure_firm_head_masks for old runs.
+  - PF ON WAGE BASE (user confirmed): statutory PF wages = min(max(pf_base,
+    stat_wage_base), 15000) whenever wage_definition_rule on — i.e. wage
+    base max(Basic earned, 50% Gross) capped ₹15,000. PF Basic blank/0
+    still ⇒ no PF (applicability), Firm Master EPF/ESI gate first then
+    Employee Master flags. ESIC unchanged (already on stat_wage_base).
+  - Renamed "Standard Compliance Settings" title → "PF/ESIC Settings".
+  - Tested: seeded actual run rows → compliance process verified gross
+    18000/25000/9500 imported AS-IS, adv/tds/other landed, ESIC on wage
+    base, diff→OT; PF unit tests (firm gate, emp gate, blank pf_basic,
+    wage-base floor). Test data reverted after.
+  - CAUTION: /app/backend/routes/compliance_salary_runs.py was TRUNCATED
+    once during parallel search_replace edits (restored from git HEAD tail).
+    Verify file ends with the ECR endpoint if editing heavily in parallel.
+  - Deploy: /app/deploy_vps_iter444.sh (temp_bundle kind=script now serves
+    deploy444.sh).

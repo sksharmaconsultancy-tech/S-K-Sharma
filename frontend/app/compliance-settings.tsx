@@ -275,7 +275,7 @@ export default function ComplianceSettingsScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.title}>Standard Compliance Settings</Text>
+        <Text style={styles.title}>PF/ESIC Settings</Text>
         <Text style={styles.sub}>
           These statutory rules apply GLOBALLY to the Compliance Salary Process of{" "}
           <Text style={{ fontWeight: "800" }}>every firm</Text>. Re-calculate a month after

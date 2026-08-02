@@ -265,6 +265,12 @@ async def _compute_compliance_run(
                 ded_mask.add("pt")
             if _fm_ded.get("TDS") or _fm_ded.get("I. TAX"):
                 ded_mask.add("tds")
+            # Iter 443 (user request) — Master-linked ADVANCE / OTH. DEDUC.
+            # heads gate the built-in Advance* / Other* columns dynamically.
+            if _fm_ded.get("ADVANCE"):
+                ded_mask.add("advance")
+            if _fm_ded.get("OTH. DEDUC."):
+                ded_mask.add("other")
             # Iter 420 (user request) — CUSTOM deduction heads enabled in
             # the Firm Master (ADVANCE / UNIFORM / CANTEEN / …) become
             # their own DYNAMIC columns on the Compliance Salary sheet.
@@ -299,6 +305,25 @@ async def _compute_compliance_run(
                 _ap = dict(company_policies[fm["company_id"]].get("attendance_policy") or {})
                 _ap["firm_ot_allowed"] = bool(_v)
                 company_policies[fm["company_id"]]["attendance_policy"] = _ap
+
+    # Iter 443 (user request) — "Freeze as Actual Gross" firms: the ACTUAL
+    # Salary Process run of the SAME month feeds the compliance run —
+    # Total Gross → Freeze gross · Adv → Advance · TDS → TDS ·
+    # Other Ded.* → Other Deductions. Newest run wins per employee.
+    _fag_cids = [c for c, f in firm_stat_flags.items()
+                 if str(f.get("days_calc_method") or "") == "freeze_actual_gross"]
+    actual_by_user: Dict[str, dict] = {}
+    _fag_used = False
+    if _fag_cids:
+        async for _ar in db.salary_runs.find(
+            {"run_type": "actual", "month": payload.month,
+             "company_id": {"$in": _fag_cids}},
+            {"_id": 0, "rows": 1},
+            sort=[("generated_at", -1)],
+        ):
+            for _r in _ar.get("rows") or []:
+                if _r.get("user_id"):
+                    actual_by_user.setdefault(_r["user_id"], _r)
 
     rows = []
     # Iter 200 — Holiday Master dates per firm (for holiday_present_add_ot).
@@ -418,7 +443,31 @@ async def _compute_compliance_run(
                 )
                 stats["ot_hours"] = float(_t_c.get("ot_hours") or 0.0)
         _am = am_entries.get(emp["user_id"]) if payload.use_imported_sheet else None
-        if payload.use_imported_sheet:
+        # Iter 443 (user request) — "Freeze as Actual Gross": the ACTUAL
+        # Salary Process run of the SAME month is the authoritative import
+        # source. Its Total Gross becomes the Freeze gross; Adv / TDS /
+        # Other Ded.* import into the matching deduction columns below.
+        _fag_row = None
+        if str((firm_stat_flags.get(emp.get("company_id")) or {}).get(
+                "days_calc_method") or "") == "freeze_actual_gross":
+            _fag_row = actual_by_user.get(emp["user_id"])
+        if _fag_row is not None:
+            _fag_used = True
+            _am = {
+                **(_am or {}),
+                "gross_earning": round(float(_fag_row.get("total_gross") or 0), 2),
+                "present_days": float((_am or {}).get("present_days")
+                                      or _fag_row.get("p_days") or 0),
+                "tds": round(float(_fag_row.get("tds") or 0), 2),
+                # Actual run "Other Ded.*" → Other Deductions column.
+                "deduction_amount": round(float(_fag_row.get("other_ded") or 0), 2),
+                "deduction_head": "Other Ded.",
+                "other_less": 0.0,
+            }
+        # A row is FREEZE-driven when the sheet was imported OR the firm
+        # uses Freeze-as-Actual-Gross and an Actual run row exists.
+        _frz_imp = bool(payload.use_imported_sheet or _fag_row is not None)
+        if _frz_imp:
             # Imported sheet wins: present days from the uploaded/email
             # salary sheet (0 when the employee has no row).
             # Iter 219 — half days (e.g. 18.5) are kept, not truncated.
@@ -462,7 +511,7 @@ async def _compute_compliance_run(
         # recalculated from those preserved days with the current
         # parameters. Imported-sheet runs keep the sheet as the source.
         _prev = (prev_rows or {}).get(emp["user_id"]) \
-            if not payload.use_imported_sheet else None
+            if not _frz_imp else None
         if _prev is not None:
             # Iter 340 (user request) — kept days also clamp to month days.
             _ppd = min(float(_prev.get("present_days") or 0.0),
@@ -496,7 +545,7 @@ async def _compute_compliance_run(
         #   0.50 / 0.25 per firm policy) — statutory is then recalculated
         #   on those days; the remaining difference lands in OT / Other
         #   Allowance via the Freeze block below.
-        if payload.use_imported_sheet and _am is not None:
+        if _frz_imp and _am is not None:
             row["attendance_days"] = round(
                 min(float(_am.get("present_days") or 0), float(month_days)), 2)
             _dcm = firm_stat_flags.get(emp.get("company_id")) or {}
@@ -606,12 +655,18 @@ async def _compute_compliance_run(
                 row["compliance_days"] = _new_days
             else:
                 row["compliance_days"] = round(float(row.get("present_days") or 0), 2)
+        # Iter 443 (user request) — Master-linked deductions: heads switched
+        # OFF in the Firm Master are neither shown nor applied.
+        _ded_set0 = _ff.get("ded_mask") if isinstance(_ff, dict) else None
+        _oth_on = _ded_set0 is None or "other" in _ded_set0
+        _tds_on = _ded_set0 is None or "tds" in _ded_set0
+        _adv_on = _ded_set0 is None or "advance" in _ded_set0
         # Iter 100 — Attendance Master "Other Deduction" (Advance/TDS etc.)
         # Iter 328 — client sheet's Adv + "Other Less" combine into Other
         # Deduction; sheet TDS overrides the master TDS.
         _am_ded = round(float((_am or {}).get("deduction_amount") or 0)
                         + float((_am or {}).get("other_less") or 0), 2)
-        if _am and _am_ded > 0:
+        if _am and _am_ded > 0 and _oth_on:
             row["other_deduction_head"] = _am.get("deduction_head") or (
                 "Advance/Other" if float(_am.get("other_less") or 0) > 0 else "Advance")
             row["other_deduction"] = _am_ded
@@ -620,7 +675,7 @@ async def _compute_compliance_run(
         # Iter 297 — reprocess also keeps the manually ENTERED "Other
         # Deduction" from the previous run (default is 0 → any value was
         # typed by the admin).
-        if _prev is not None and not _am and \
+        if _prev is not None and not _am and _oth_on and \
                 float(_prev.get("other_deduction") or 0) > 0:
             _pod = round(float(_prev.get("other_deduction") or 0), 2)
             row["other_deduction_head"] = (
@@ -711,7 +766,7 @@ async def _compute_compliance_run(
         # Iter 328 — imported sheet TDS is authoritative: applied AFTER the
         # firm deduction mask so an explicit TDS on the client sheet always
         # lands on the run.
-        if _am and float(_am.get("tds") or 0) > 0:
+        if _am and float(_am.get("tds") or 0) > 0 and _tds_on:
             _tds_new = round(float(_am.get("tds") or 0), 2)
             _tds_delta = round(_tds_new - float(row.get("tds") or 0), 2)
             row["tds"] = _tds_new
@@ -776,7 +831,7 @@ async def _compute_compliance_run(
                     row["gross_paid"] = round(
                         float(row.get("gross_paid") or 0) + _delta, 2)
                     row["net"] = round(float(row.get("net") or 0) + _delta, 2)
-            if "tds" in _mf and not (_am and float(_am.get("tds") or 0) > 0):
+            if "tds" in _mf and _tds_on and not (_am and float(_am.get("tds") or 0) > 0):
                 _new_tds = round(float(_prev.get("tds") or 0), 2)
                 _delta = round(_new_tds - float(row.get("tds") or 0), 2)
                 if _delta:
@@ -788,7 +843,7 @@ async def _compute_compliance_run(
             # survives a reprocess. apply_advance_recovery() skips rows
             # whose manual_fields carry "advance_recovery" so the ledger
             # never overwrites the admin's typed amount.
-            if "advance_recovery" in _mf:
+            if "advance_recovery" in _mf and _adv_on:
                 _new_adv = round(float(_prev.get("advance_recovery") or 0), 2)
                 _delta = round(_new_adv - float(row.get("advance_recovery") or 0), 2)
                 if _delta:
@@ -804,7 +859,7 @@ async def _compute_compliance_run(
         # (salary_process.ot_allowed) — otherwise to OTHER ALLOWANCES.
         # Runs AFTER the allowance/deduction masks + DOJ cap so nothing
         # later can trim the allocated difference.
-        if payload.use_imported_sheet and _am is not None:
+        if _frz_imp and _am is not None:
             _imp_g = round(float(_am.get("gross_earning") or 0), 2)
             # Iter 343b (user request) — after the import the admin may EDIT
             # the OT Amount / Other Allowances. A REPROCESS keeps those
@@ -931,6 +986,21 @@ async def _compute_compliance_run(
                         + float(row.get("other_deduction") or 0)
                         + float(row.get("master_deduction") or 0), 2)
                     row["net"] = round(_imp_g - row["total_deduction"], 2)
+        # Iter 443 (user request) — Freeze as Actual Gross: the Actual run's
+        # Adv lands in the ADVANCE deduction column (honours the Firm Master
+        # ADVANCE toggle; the ledger recovery skips this row via
+        # manual_fields so the imported figure is never double-deducted).
+        if _fag_row is not None and _adv_on:
+            _adv_imp = round(float(_fag_row.get("adv") or 0), 2)
+            _adv_d = round(_adv_imp - float(row.get("advance_recovery") or 0), 2)
+            if _adv_d:
+                row["advance_recovery"] = _adv_imp
+                row["total_deduction"] = round(
+                    float(row.get("total_deduction") or 0) + _adv_d, 2)
+                row["net"] = round(float(row.get("net") or 0) - _adv_d, 2)
+            if _adv_imp > 0:
+                row["manual_fields"] = sorted(
+                    set(row.get("manual_fields") or []) | {"advance_recovery"})
         # Iter 340 (user request) — OT HOURS derived from the OT AMOUNT:
         # OT Hrs = OT Amt ÷ (per-hour rate × OT multiplier). Per-hour rate
         # follows Firm Master "OT Calculation On" (basic | gross):
@@ -993,10 +1063,13 @@ async def _compute_compliance_run(
         # Iter 167 — resigned staff auto-excluded from this run.
         "excluded_resigned": excluded_resigned,
         "excluded_resigned_count": len(excluded_resigned),
-        "attendance_source": "imported_sheet" if payload.use_imported_sheet else "biometric",
+        "attendance_source": (
+            "actual_salary_freeze" if (_fag_used and not payload.use_imported_sheet)
+            else ("imported_sheet" if payload.use_imported_sheet else "biometric")),
         # Iter 310 — imported-sheet runs are FROZEN (immutable snapshot
         # is written alongside the run — see freeze_salary_snapshots).
-        "frozen": bool(payload.use_imported_sheet),
+        # Iter 443 — Freeze-as-Actual-Gross runs show the Freeze badge too.
+        "frozen": bool(payload.use_imported_sheet) or _fag_used,
 
         "totals": totals,
         "generated_by": admin["user_id"],
@@ -1450,8 +1523,13 @@ async def _create_compliance_salary_run_core(
     # Advance Management — auto-deduct active advance EMIs / single-shot
     # recoveries into the rows (idempotent per month+process).
     from routes.advances import apply_advance_recovery
+    # Iter 443 — Master-linked: rows whose firm disabled the ADVANCE head
+    # never receive ledger recoveries (column is hidden on the grid too).
+    _adv_rows = [r for r in run["rows"]
+                 if r.get("enabled_deductions") is None
+                 or "advance" in r["enabled_deductions"]]
     _adv_total = await apply_advance_recovery(
-        payload.company_id, payload.month, "compliance", run["run_id"], run["rows"])
+        payload.company_id, payload.month, "compliance", run["run_id"], _adv_rows)
     if _adv_total or any(r.get("advance_recovery") for r in run["rows"]):
         t = run.get("totals") or {}
         t["advance_recovery"] = round(sum(float(r.get("advance_recovery") or 0) for r in run["rows"]), 2)
@@ -1920,8 +1998,12 @@ async def reprocess_compliance_salary_run(
     # Advance Management — re-apply (idempotent) advance deductions so the
     # reprocessed sheet still shows the recovery lines.
     from routes.advances import apply_advance_recovery
+    # Iter 443 — Master-linked ADVANCE gate (same as the process endpoint).
+    _adv_rows = [r for r in run["rows"]
+                 if r.get("enabled_deductions") is None
+                 or "advance" in r["enabled_deductions"]]
     _adv_total = await apply_advance_recovery(
-        existing.get("company_id"), existing["month"], "compliance", run_id, run["rows"])
+        existing.get("company_id"), existing["month"], "compliance", run_id, _adv_rows)
     if _adv_total or any(r.get("advance_recovery") for r in run["rows"]):
         t = run.get("totals") or {}
         t["advance_recovery"] = round(sum(float(r.get("advance_recovery") or 0) for r in run["rows"]), 2)
@@ -1973,6 +2055,11 @@ async def _ensure_firm_head_masks(run: dict) -> dict:
             dm.add("pt")
         if _fm_ded.get("TDS") or _fm_ded.get("I. TAX"):
             dm.add("tds")
+        # Iter 443 — Master-linked ADVANCE / OTH. DEDUC. columns.
+        if _fm_ded.get("ADVANCE"):
+            dm.add("advance")
+        if _fm_ded.get("OTH. DEDUC."):
+            dm.add("other")
         ded_mask = sorted(dm)
     for r in rows:
         if allow_mask is not None and r.get("enabled_allowances") is None:

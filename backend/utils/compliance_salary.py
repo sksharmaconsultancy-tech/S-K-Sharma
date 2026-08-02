@@ -715,11 +715,13 @@ def compute_compliance_row(
         else:
             if _intl_worker:
                 capped_pf_wages = pf_base
-            elif pf_basic_override > cfg["pf_wage_cap"]:
-                # Iter 430 (user directive) — PF Basic Salary ABOVE ₹15,000:
-                # statutory PF follows the COMPLIANCE POLICY WAGE BASE
-                # (max(PF Basic earned, floor% of Gross Earning)) capped at
-                # the ceiling — not just the pro-rated master PF Basic.
+            elif wage_rule_on:
+                # Iter 443 (user directive) — statutory PF is calculated on
+                # the WAGE BASE (max(Basic earned, floor% of Gross Earning))
+                # capped at the ₹15,000 ceiling for EVERY PF-applicable
+                # employee (Firm Master EPF ✓ → Employee Master PF ✓). The
+                # Employee Master PF Basic still gates applicability
+                # (blank/0 ⇒ no PF) and lifts the base when it is higher.
                 capped_pf_wages = min(
                     max(pf_base, stat_wage_base), cfg["pf_wage_cap"])
             else:
@@ -1200,6 +1202,11 @@ def dynamic_csv_columns(rows: List[Dict[str, Any]]) -> List[str]:
         drop |= {"pt_state", "pt"}
     if not has_d("tds"):
         drop.add("tds")
+    # Iter 443 — Master-linked ADVANCE / OTH. DEDUC. export columns.
+    if not has_d("advance"):
+        drop.add("advance_recovery")
+    if not has_d("other"):
+        drop |= {"other_deduction", "other_deduction_head"}
     cols = [c for c in CSV_COLUMNS if c not in drop]
     # Iter 420 (user request) — one dynamic column per Firm-Master enabled
     # deduction head, placed just before Total Ded.

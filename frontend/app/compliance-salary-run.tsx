@@ -1426,6 +1426,9 @@ export default function ComplianceSalaryRunScreen() {
         if (esiAp != null ? esiAp : !!ded.ESI) ed2.push("esi");
         if (ded.PT) ed2.push("pt");
         if (ded.TDS || ded["I. TAX"]) ed2.push("tds");
+        // Iter 443 — Master-linked ADVANCE / OTH. DEDUC. columns.
+        if (ded.ADVANCE) ed2.push("advance");
+        if (ded["OTH. DEDUC."]) ed2.push("other");
         setFmMask({ en, ed: stored ? ed2 : undefined });
       })
       .catch(() => setFmMask({}));
@@ -1438,8 +1441,8 @@ export default function ComplianceSalaryRunScreen() {
     if (!en || en.includes("others")) cols.push("others");
     cols.push("ot_pay");
     if (!ed || ed.includes("tds")) cols.push("tds");
-    cols.push("advance_recovery");
-    cols.push("other_deduction");
+    if (!ed || ed.includes("advance")) cols.push("advance_recovery");
+    if (!ed || ed.includes("other")) cols.push("other_deduction");
     return cols;
   }, [run, fmMask]);
   const focusCell = (col: string, idx: number) => {
@@ -2508,9 +2511,11 @@ export default function ComplianceSalaryRunScreen() {
                   // Iter 171 — deduction columns follow Firm Master Deductions
                   const ed = ((run.rows[0] as any)?.enabled_deductions ?? fmMask.ed) as string[] | undefined;
                   const hasDed = (k: string) => !ed || ed.includes(k);
-                  const dedCount = 5 // WageBase, Advance, Other, TotalDed, Net
+                  const dedCount = 3 // WageBase, TotalDed, Net
                     + (hasDed("pf") ? 2 : 0) + (hasDed("esi") ? 2 : 0)
-                    + (hasDed("pt") ? 1 : 0) + (hasDed("tds") ? 1 : 0);
+                    + (hasDed("pt") ? 1 : 0) + (hasDed("tds") ? 1 : 0)
+                    // Iter 443 — Master-linked Advance* / Other* columns.
+                    + (hasDed("advance") ? 1 : 0) + (hasDed("other") ? 1 : 0);
                   return (
                     <View style={[styles.tblRow, styles.groupHdrRow]}>
                       <View style={[{ width: FROZEN_W }, stickyCol(0, colors.surface)]} />
@@ -2583,7 +2588,10 @@ export default function ComplianceSalaryRunScreen() {
                     // custom deduction head enabled in the Firm Master.
                     ...(((run?.rows?.[0] as any)?.deduction_head_labels as string[]) || []),
                     // Iter 422 (user request) — editable Advance deduction.
-                    "Advance*", "Other*", "Total Ded.", "Net",
+                    // Iter 443 — Master-linked: hidden when disabled.
+                    ...(hasDed("advance") ? ["Advance*"] : []),
+                    ...(hasDed("other") ? ["Other*"] : []),
+                    "Total Ded.", "Net",
                   ];
                   for (const d of dedLabels) headers.push({ label: d, group: "ded" });
                   const infoW = [colW.sr, colW.uan, colW.esi, colW.name, colW.father, colW.desg, colW.pd, colW.el];
@@ -2853,32 +2861,46 @@ export default function ComplianceSalaryRunScreen() {
                     {/* Iter 422 (user request) — Editable Advance deduction.
                         Auto-filled from the Advance ledger; admins can
                         override it inline (stamped on manual_fields so a
-                        reprocess keeps the typed amount). */}
-                    <TextInput
-                      ref={(el) => { cellRefs.current[`advance_recovery:${idx}`] = el; }}
-                      value={String(Math.round((r as any).advance_recovery || 0))}
-                      onChangeText={(v) => {
-                        const n = Number(v.replace(/[^0-9.]/g, ""));
-                        if (!Number.isNaN(n)) updateRowField(r.user_id, "advance_recovery", n);
-                      }}
-                      onKeyPress={(e: any) => handleNavKey(e, "advance_recovery", idx)}
-                      keyboardType="decimal-pad"
-                      selectTextOnFocus
-                      style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
-                    />
-                    {/* Iter 85 — Editable "Other" deduction. */}
-                    <TextInput
-                      ref={(el) => { cellRefs.current[`other_deduction:${idx}`] = el; }}
-                      value={String(Math.round((r as any).other_deduction || 0))}
-                      onChangeText={(v) => {
-                        const n = Number(v.replace(/[^0-9.]/g, ""));
-                        if (!Number.isNaN(n)) updateRowField(r.user_id, "other_deduction", n);
-                      }}
-                      onKeyPress={(e: any) => handleNavKey(e, "other_deduction", idx)}
-                      keyboardType="decimal-pad"
-                      selectTextOnFocus
-                      style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
-                    />
+                        reprocess keeps the typed amount).
+                        Iter 443 — Master-linked: Advance* and Other* cells
+                        hide when the head is disabled in the Firm Master. */}
+                    {(() => {
+                      const ed = ((r as any).enabled_deductions ?? fmMask.ed) as string[] | undefined;
+                      const hasDed = (k: string) => !ed || ed.includes(k);
+                      return (
+                        <>
+                          {hasDed("advance") ? (
+                            <TextInput
+                              ref={(el) => { cellRefs.current[`advance_recovery:${idx}`] = el; }}
+                              value={String(Math.round((r as any).advance_recovery || 0))}
+                              onChangeText={(v) => {
+                                const n = Number(v.replace(/[^0-9.]/g, ""));
+                                if (!Number.isNaN(n)) updateRowField(r.user_id, "advance_recovery", n);
+                              }}
+                              onKeyPress={(e: any) => handleNavKey(e, "advance_recovery", idx)}
+                              keyboardType="decimal-pad"
+                              selectTextOnFocus
+                              style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
+                            />
+                          ) : null}
+                          {/* Iter 85 — Editable "Other" deduction. */}
+                          {hasDed("other") ? (
+                            <TextInput
+                              ref={(el) => { cellRefs.current[`other_deduction:${idx}`] = el; }}
+                              value={String(Math.round((r as any).other_deduction || 0))}
+                              onChangeText={(v) => {
+                                const n = Number(v.replace(/[^0-9.]/g, ""));
+                                if (!Number.isNaN(n)) updateRowField(r.user_id, "other_deduction", n);
+                              }}
+                              onKeyPress={(e: any) => handleNavKey(e, "other_deduction", idx)}
+                              keyboardType="decimal-pad"
+                              selectTextOnFocus
+                              style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
+                            />
+                          ) : null}
+                        </>
+                      );
+                    })()}
                     {/* Iter 136 (user request) — Total Deduction before Net Pay */}
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(r.total_deduction)}</Text>
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(r.net)}</Text>
@@ -2935,8 +2957,8 @@ export default function ComplianceSalaryRunScreen() {
                         {hasDed("esi") ? num(run.totals?.esic_employer) : null}
                         {hasDed("pt") ? num(run.totals?.pt) : null}
                         {hasDed("tds") ? num(run.totals?.tds) : null}
-                        {num((run.rows || []).reduce((s, r) => s + (Number((r as any).advance_recovery) || 0), 0))}
-                        {num((run.rows || []).reduce((s, r) => s + (Number((r as any).other_deduction) || 0), 0))}
+                        {hasDed("advance") ? num((run.rows || []).reduce((s, r) => s + (Number((r as any).advance_recovery) || 0), 0)) : null}
+                        {hasDed("other") ? num((run.rows || []).reduce((s, r) => s + (Number((r as any).other_deduction) || 0), 0)) : null}
                         {num(run.totals?.total_deduction)}
                         {num(run.totals?.net)}
                       </>
@@ -3073,7 +3095,7 @@ export default function ComplianceSalaryRunScreen() {
             ] : []),
             ...(hasDed("pt") ? [{ label: "PT", value: run.totals?.pt ?? 0 }] : []),
             ...(hasDed("tds") ? [{ label: "TDS", value: run.totals?.tds ?? 0 }] : []),
-            { label: "Advance", value: run.totals?.advance_recovery ?? 0 },
+            ...(hasDed("advance") ? [{ label: "Advance", value: run.totals?.advance_recovery ?? 0 }] : []),
             { label: "Deductions", value: run.totals?.total_deduction ?? 0 },
             { label: "Net Salary", value: run.totals?.net ?? 0, tone: "#059669" },
           ]} />
