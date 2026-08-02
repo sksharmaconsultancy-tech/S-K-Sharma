@@ -279,14 +279,16 @@ export default function ChallansScreen() {
       // non-word characters (the hyphen in "2026-07"): use MMYYYY instead.
       const mWord = /^\d{4}-\d{2}$/.test(month) ? `${month.slice(5, 7)}${month.slice(0, 4)}` : month.replace(/\W/g, "_");
       // Iter 452 (user request) — file names carry the FIRM NAME + month
-      // so the ECR can be uploaded directly: e.g. KANKANIENTERPRISES_072026.txt
-      const firm = String((run as any)?.company_name || "").replace(/\W/g, "").toUpperCase();
-      const base = firm ? `${firm}_${mWord}` : mWord;
+      // so the ECR can be uploaded directly. Iter 455 (user request) — EPFO
+      // rejects EVERY special character (even "_"): KANKANIENTERPRISES072026.txt
+      const firm = String((run as any)?.company_name || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+      const mm = mWord.replace(/[^A-Za-z0-9]/g, "");
+      const ecrBase = firm ? `${firm}${mm}` : `ECR${mm}`;
       const names: Record<string, string> = {
-        "ecr.txt": `${base}.txt`,
-        "ecr.xlsx": `ECR_${base}.xlsx`,
-        "esic.xls": `ESIC_MC_${base}.xls`,
-        "esic.xlsx": `ESIC_MC_${base}.xlsx`,
+        "ecr.txt": `${ecrBase}.txt`,
+        "ecr.xlsx": `${ecrBase}.xlsx`,
+        "esic.xls": `ESIC_MC_${firm ? `${firm}_${mWord}` : mWord}.xls`,
+        "esic.xlsx": `ESIC_MC_${firm ? `${firm}_${mWord}` : mWord}.xlsx`,
       };
       const a = document.createElement("a");
       a.href = r.webBlobUrl;

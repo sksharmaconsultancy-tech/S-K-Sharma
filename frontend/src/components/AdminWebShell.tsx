@@ -338,6 +338,7 @@ function NavRow({
   depth = 0,
   favSet,
   onToggleFav,
+  collapseTick = 0,
 }: {
   item: NavItem;
   activeRoute: string;
@@ -347,6 +348,7 @@ function NavRow({
   depth?: number;
   favSet?: Set<string>;
   onToggleFav?: (route: string) => void;
+  collapseTick?: number;
 }) {
   const tr = useT();
   const hasChildren = !!(item.children && item.children.length > 0);
@@ -366,6 +368,11 @@ function NavRow({
   React.useEffect(() => {
     if (childActive) setOpen(true);
   }, [childActive]);
+  // Iter 454 (user request) — clicking "Dashboard" collapses ALL expanded
+  // sidebar groups (the shell bumps ``collapseTick`` on that click).
+  React.useEffect(() => {
+    if (collapseTick) setOpen(false);
+  }, [collapseTick]);
   const active = !hasChildren && matchesFull(item.route || "");
   const testId = `nav-${(item.route || item.label).replace(/[^a-z0-9]/gi, "-")}`;
   return (
@@ -465,6 +472,7 @@ function NavRow({
               depth={depth + 1}
               favSet={favSet}
               onToggleFav={onToggleFav}
+              collapseTick={collapseTick}
             />
           ))}
         </View>
@@ -687,6 +695,9 @@ export default function AdminWebShell({ children }: Props) {
   const [aiOpen, setAiOpen] = React.useState(false);
   const [notifOpen, setNotifOpen] = React.useState(false);
   const [helpOpen, setHelpOpen] = React.useState(false);
+  // Iter 454 (user request) — clicking "Dashboard" hides all expanded
+  // sidebar sub-points; the tick is broadcast to every NavRow group.
+  const [collapseTick, setCollapseTick] = React.useState(0);
   // Iter 306 (user #13) — pin/hide the sidebar (persisted per browser).
   const [sbHidden, setSbHidden] = React.useState<boolean>(() => {
     try { return (globalThis as any).localStorage?.getItem("sks_sidebar_hidden") === "1"; }
@@ -1071,6 +1082,9 @@ export default function AdminWebShell({ children }: Props) {
       : pathname;
 
   const navigateTo = (route: string) => {
+    if ((route || "").split("?")[0] === "/portal-dashboard") {
+      setCollapseTick((t) => t + 1);
+    }
     router.push((route === "/(tabs)" ? "/" : route) as any);
   };
 
@@ -1168,6 +1182,7 @@ export default function AdminWebShell({ children }: Props) {
                     onNavigate={navigateTo}
                     favSet={favSet}
                     onToggleFav={toggleFav}
+                    collapseTick={collapseTick}
                   />
                 );
               })}
@@ -1184,6 +1199,7 @@ export default function AdminWebShell({ children }: Props) {
               onNavigate={navigateTo}
               favSet={favSet}
               onToggleFav={toggleFav}
+              collapseTick={collapseTick}
             />
           ))}
         </ScrollView>

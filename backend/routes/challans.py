@@ -397,14 +397,15 @@ def _portal_month(month: Any) -> str:
 
 
 async def _ecr_fname(run: dict) -> str:
-    """Iter 452 (user request) — ECR file named FIRMNAME_MMYYYY.txt (word
-    characters only) so it can be uploaded to EPFO directly."""
+    """Iter 452 (user request) — ECR file named after the firm + month so it
+    can be uploaded to EPFO directly. Iter 455 (user request) — EPFO does not
+    accept ANY special character (not even "_"): FIRMNAMEMMYYYY.txt."""
     import re as _re
     c = await db.companies.find_one(
         {"company_id": run.get("company_id")}, {"_id": 0, "name": 1}) or {}
-    firm = _re.sub(r"\W", "", str(c.get("name") or "")).upper()
-    m = _portal_month(run.get("month"))
-    return f"{firm}_{m}.txt" if firm else f"ECR_{m}.txt"
+    firm = _re.sub(r"[^A-Za-z0-9]", "", str(c.get("name") or "")).upper()
+    m = _re.sub(r"[^A-Za-z0-9]", "", _portal_month(run.get("month")))
+    return f"{firm}{m}.txt" if firm else f"ECR{m}.txt"
 
 
 def _r0(v: Any) -> int:

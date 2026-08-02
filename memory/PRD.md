@@ -3608,3 +3608,13 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   served via /api/temp-code-bundle?kind=script (temp_bundle.py updated).
   Covers Iters 445-453 on top of the Iter 444 release. User given wget
   instructions to run it on the VPS.
+- Iter 454 (user request): clicking "Dashboard" in the admin sidebar
+  collapses ALL expanded sub-menus (collapseTick broadcast in
+  AdminWebShell.tsx NavRow). Verified via browser automation.
+- Iter 455 (user request): EPFO accepts NO special characters in the ECR
+  filename — underscore removed: FIRMNAMEMMYYYY.txt (backend
+  challans._ecr_fname + frontend challans.tsx names map). ESIC files keep
+  ESIC_MC_FIRM_MMYYYY (portal accepts "_"). Verified via API
+  (KANKANIENTERPRISES072026.txt).
+- Deploy Iter 455: /app/deploy_vps_iter455.sh served via
+  /api/temp-code-bundle?kind=script.
