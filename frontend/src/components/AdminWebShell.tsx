@@ -234,7 +234,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/masters?tab=holiday", label: "Holiday Master", icon: "calendar-outline" },
       { route: "/masters?tab=allowance", label: "Allowance & Deduction Heads", icon: "cash-outline" },
       { route: "/attendance-master", label: "Shift Master", icon: "time-outline" },
-      { route: "/compliance-settings", label: "Salary Heads / Compliance", icon: "shield-checkmark-outline" },
+      { route: "/compliance-settings", label: "PF/ESIC Settings", icon: "shield-checkmark-outline" },
       { route: "/sub-admins", label: "User Master (Sub Admins)", icon: "people-circle-outline" },
     ],
   },
