@@ -3401,3 +3401,7 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   missing IP). Default unchanged (blank UAN included in .txt per Iter 291).
 - Deploy script: /app/deploy_vps_iter435.sh (served via
   /api/temp-code-bundle?token=sks-deploy-7391&kind=script).
+- Iter 437 (ROLLED BACK on user request): the Fine/Advance "Reason column
+  from grid remarks" improvement was started (remark pencil in grid +
+  reprocess carry) then FULLY REVERTED — user said "No need". Do NOT
+  re-suggest this feature. Codebase is back to Iter 436 state.
