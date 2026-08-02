@@ -716,14 +716,15 @@ def compute_compliance_row(
             if _intl_worker:
                 capped_pf_wages = pf_base
             elif wage_rule_on:
-                # Iter 443 (user directive) — statutory PF is calculated on
-                # the WAGE BASE (max(Basic earned, floor% of Gross Earning))
-                # capped at the ₹15,000 ceiling for EVERY PF-applicable
-                # employee (Firm Master EPF ✓ → Employee Master PF ✓). The
-                # Employee Master PF Basic still gates applicability
-                # (blank/0 ⇒ no PF) and lifts the base when it is higher.
-                capped_pf_wages = min(
-                    max(pf_base, stat_wage_base), cfg["pf_wage_cap"])
+                # Iter 447 (user bug — "PF is not calculating as per Wage
+                # Base", employee SAPNA: Wage Base 12,044 must give PF
+                # 1,445, not 1,495 computed on the 12,459 PF Basic):
+                # statutory PF wages are EXACTLY the WAGE BASE column —
+                # max(Basic earned, floor% of Gross Earning) — capped at
+                # the ₹15,000 ceiling. The Employee Master PF Basic only
+                # gates applicability (blank/0 ⇒ no PF); it NO LONGER
+                # lifts the wages above the wage base.
+                capped_pf_wages = min(stat_wage_base, cfg["pf_wage_cap"])
             else:
                 capped_pf_wages = min(pf_base, cfg["pf_wage_cap"])
         pf_employee = capped_pf_wages * (cfg["pf_percent_employee"] / 100.0)

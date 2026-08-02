@@ -1522,7 +1522,13 @@ export default function ComplianceSalaryRunScreen() {
             const pfBasicPro = next.salary_mode === "monthly" ? pfBasicFull * ratio2 : pfBasicFull;
             const pfBase = pfBasicFull < pfCap && wageRuleOn
               ? Math.max(pfBasicPro, grossEarn * floorPct) : pfBasicPro;
-            const pfWages = next.intl_worker ? pfBase : Math.min(pfBase, pfCap);
+            // Iter 447 (user bug) — statutory PF wages = the WAGE BASE
+            // (max(Basic earned, floor% Gross)) capped at the ceiling; PF
+            // Basic only gates applicability (mirrors the engine).
+            const statBase2 = Math.max(Number(next.basic || 0), grossEarn * floorPct);
+            const pfWages = next.intl_worker
+              ? pfBase
+              : (wageRuleOn ? Math.min(statBase2, pfCap) : Math.min(pfBase, pfCap));
             const pfEmpRate = Number(stat.pf_percent_employee ?? 12) / 100;
             const pfErEpfRate = Number(stat.pf_percent_employer_epf ?? 3.67) / 100;
             const pfErEpsRate = Number(stat.pf_percent_employer_eps ?? 8.33) / 100;
@@ -1681,10 +1687,12 @@ export default function ComplianceSalaryRunScreen() {
             ? Math.max(pfBase, paidBasic, grossEarn * floorPct)
             : ((r as any).intl_worker
               ? pfBase
-              // Iter 430 (user directive) — PF Basic ABOVE ₹15,000:
-              // statutory PF follows the wage base capped at the ceiling.
-              : (pfBasicFull > pfCap
-                ? Math.min(Math.max(pfBase, paidBasic, grossEarn * floorPct), pfCap)
+              // Iter 447 (user bug — "PF is not calculating as per Wage
+              // Base") — statutory PF wages = the WAGE BASE (max(Basic
+              // earned, floor% Gross)) capped at the ceiling; PF Basic
+              // only gates applicability (mirrors the engine).
+              : (wageRuleOn
+                ? Math.min(Math.max(paidBasic, grossEarn * floorPct), pfCap)
                 : Math.min(pfBase, pfCap))))
           : 0;
         // Iter 427 — VPF (employee side) survives the grid recompute:

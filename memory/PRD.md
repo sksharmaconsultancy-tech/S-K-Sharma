@@ -3508,3 +3508,13 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   ⚠ LESSON (recurred twice): PARALLEL search_replace edits on the SAME
   file corrupt/truncate it (challans.py got stray "ls}" tail; earlier
   compliance_salary_runs.py truncated). Edit the same file SEQUENTIALLY.
+- Iter 447 (user bug — "PF is Not Calculating as per Wage Base", example
+  SAPNA PARMAR: Wage Base 12,044 but PF showed 1,495 = 12% of PF Basic
+  12,459): statutory PF wages are now EXACTLY min(stat_wage_base, 15000)
+  when the Wage Definition Rule is on — PF Basic no longer LIFTS wages
+  above the wage base (it only gates applicability: blank/0 ⇒ no PF).
+  Fixed utils/compliance_salary.py (removed max(pf_base, …)) AND BOTH
+  frontend client-side recompute blocks in compliance-salary-run.tsx
+  (present-days edit + OT/Others edit) to mirror it. Higher PF / IW / VPF
+  paths unchanged. Verified: SAPNA case → pf_wages 12043.7, PF 1445, ESIC
+  91 (matches grid). Runs must be REPROCESSED to update stored figures.
