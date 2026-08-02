@@ -94,6 +94,16 @@ sudo fuser -k 8001/tcp 2>/dev/null || true
 sleep 2
 sudo supervisorctl start sksharma-backend
 
+echo "==> 5b/7 Nginx upload limits (Salary Sheet Excel import fix — Iter 458)..."
+# Default nginx body limit is 1 MB — a base64 Excel exceeds it and nginx
+# rejected the upload with 413 BEFORE the backend ever saw it ("server
+# never uploads the sheet"). Drop-in applies to every server block.
+sudo tee /etc/nginx/conf.d/sks-upload.conf >/dev/null <<'NGINX'
+client_max_body_size 100M;
+proxy_read_timeout 300s;
+proxy_send_timeout 300s;
+NGINX
+
 echo "==> 6/7 Reloading nginx..."
 sudo nginx -t && sudo systemctl reload nginx
 
@@ -119,6 +129,8 @@ echo -n "   FIRMNAMEMMYYYY (no special chars) filenames / Iter 455 (must say OK)
 grep -q 'Iter 455' $APP_DIR/backend/routes/challans.py && echo "OK" || echo "MISSING!"
 echo -n "   Dashboard click collapses sidebar / Iter 454 (must say OK): "
 grep -q 'collapseTick' $APP_DIR/frontend/src/components/AdminWebShell.tsx && echo "OK" || echo "MISSING!"
+echo -n "   Nginx 100M upload limit (Excel import, Iter 458) (must say OK): "
+grep -q 'client_max_body_size 100M' /etc/nginx/conf.d/sks-upload.conf 2>/dev/null && echo "OK" || echo "MISSING!"
 echo ""
 echo "✅ Deploy Iter 456 complete! HARD-REFRESH the browser (Ctrl+Shift+R)."
 echo ""

@@ -720,7 +720,15 @@ export default function ComplianceSalaryRunScreen() {
         );
       }
     } catch (e: any) {
-      showMsg(e?.message || "Import failed");
+      // Iter 458 (user bug — "Server never uploads the sheet") — nginx's
+      // 1 MB default body limit rejected big Excel files with 413 before
+      // the backend saw them; surface a clear message.
+      const msg = String(e?.message || "");
+      showMsg(
+        /413|too large|entity/i.test(msg)
+          ? "The file is too large for the server's upload limit — run the latest deploy script (it raises the nginx limit to 100 MB) and try again."
+          : msg || "Import failed",
+      );
     } finally { setImportBusy(false); }
   };
 

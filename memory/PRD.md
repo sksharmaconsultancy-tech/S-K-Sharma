@@ -3652,3 +3652,10 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - IMPORTANT: MILAP CHAND JAIN exists ONLY on the user's VPS DB — user's
   "still 27,600" report is from the un-deployed VPS. Fix requires:
   run deploy456.sh on VPS + RE-RUN the Compliance Salary Process.
+- Iter 458 (user bug — "Server Never Upload the Sheet", Import Salary Sheet
+  2026-07): endpoint /admin/compliance-import/upload verified working on
+  preview (200). ROOT CAUSE: VPS nginx default client_max_body_size 1M
+  rejects base64 Excel bodies with 413 before FastAPI. deploy456.sh now
+  writes /etc/nginx/conf.d/sks-upload.conf (client_max_body_size 100M,
+  proxy_read/send_timeout 300s) + verification grep. Frontend
+  pickAndUpload catch now shows a clear message for 413/too-large.
