@@ -1,0 +1,42 @@
+{
+  "summary": "Iter 449 PF/ESIC statutory corrections tested end-to-end via UI. FRONTEND 1 (/compliance-settings): all 7 new method chips present with correct testIDs (cs-pf_wage_calc_method-basic_da/floor/higher, cs-esic_wage_calc_method-wage_base/actual/floor/higher). Selected non-default (floor + actual) in Standard scope, Save → success banner shown, reload → both chips remain highlighted (bg rgb(37,99,235)); backend GET confirmed persistence. Reset to defaults (higher + wage_base) saved and re-verified. FRONTEND 2 (/employee-add?user_id=user_83f0e0c387bb, MAHAVEER SINGH): all 3 Adopt PF chips present (adopt-pf-default/yes/no); initial state = Default highlighted. Click 'Yes' → pf-wage-override input appears with explanatory note ('PF will be calculated on this wage… EPS stays capped… balance moves to Employer EPF'). Click 'No' → input hides, EXCLUDED EMPLOYEE note appears. Filled 18000 in the input. Reload of edit screen (after PATCHing adopt_pf=yes/pf_wage_override=18000 via API — see caveat below) → chip 'Yes' highlighted (bg blue) AND input hydrated with '18000'. BACKEND spot-checks: PUT /api/admin/compliance-settings {pf_wage_calc_method:'bogus'} → 400 with message \"pf_wage_calc_method must be one of ('basic_da','floor','higher')\"; {'floor'} → 200 & GET returns 'floor'. PATCH /api/admin/employees/user_83f0e0c387bb/profile with {adopt_pf:'yes', pf_wage_override:18000} → next GET returns adopt_pf='yes', pf_wage_override=18000.0. All CLEANUP applied: compliance-settings back to (higher, wage_base); employee back to (adopt_pf=None/'', pf_wage_override=0).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Full-form Save on /employee-add for existing employee with missing 'phone' silently no-ops (button click doesn't fire any network request and no visible error toast)", "issue": "getMandatoryError() sets an inline `error` state (setError) but no visible banner/toast surfaces for the user when 'phone' or other mandatory fields are missing on an EDIT save. Also user_83f0e0c387bb (MAHAVEER SINGH) has phone=None, so ent-primary-save does nothing. Not blocking Iter 449 (Adopt PF is a sub-field), but a UX gap. Verified backend PATCH still works fine.", "affected_testIDs": ["ent-primary-save", "adopt-pf-yes", "pf-wage-override"]}
+    ],
+    "design_issues": [
+      {"screen": "global", "issues": ["Repeated console error 'Invalid style property of \"padding\". Value is \"0 8px\" but only single values are supported.' — same RN-web shorthand bug reported in iteration_448 (not introduced by Iter 449)."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/screens/iter449_cs_initial.png",
+    "/app/test_reports/screens/iter449_cs_selected_nondefault.png",
+    "/app/test_reports/screens/iter449_cs_after_save.png",
+    "/app/test_reports/screens/iter449_cs_after_reload.png",
+    "/app/test_reports/screens/iter449_cs_reset_defaults.png",
+    "/app/test_reports/screens/iter449_emp_adopt_pf_initial.png",
+    "/app/test_reports/screens/iter449_emp_adopt_pf_yes.png",
+    "/app/test_reports/screens/iter449_emp_adopt_pf_no.png",
+    "/app/test_reports/screens/iter449_emp_adopt_pf_yes_18000.png",
+    "/app/test_reports/screens/iter449_emp_hydrate_yes_18000.png"
+  ],
+  "action_items": [
+    "OPTIONAL UX: on /employee-add EDIT flow, surface getMandatoryError() as a visible toast/inline banner near the header Save button when the user taps Save but validation fails silently (currently only sets a state var). Reproduce: open /employee-add?user_id=user_83f0e0c387bb (phone=None), tap Save → nothing happens, no error. Not an Iter-449 regression — pre-existing.",
+    "OPTIONAL: fix RN-web 'padding: 0 8px' shorthand style warning (existing issue, not Iter-449)."
+  ],
+  "critical_code_review_comments": [
+    "compliance-settings.tsx: ChoicePicker properly renders chips with testID `cs-{key}-{option}` and hydrates selection from settings state (highlighted via colors.brandPrimary). Defaults on load: higher/wage_base — matches backend defaults.",
+    "employee-add.tsx line 1900-1948 (Adopt PF section): chips render three variants using testID `adopt-pf-{val || 'default'}`. Conditional render for pf-wage-override input (Yes) and Excluded Employee note (No) is correct. Save payload (line 792-793) correctly gates pf_wage_override to 0 unless adopt_pf==='yes'.",
+    "Hydration (line 191-192) correctly parses pf_wage_override numeric → string for the TextInput and treats 0 as blank."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "None. Temporarily PATCH-ed user_83f0e0c387bb (adopt_pf=yes, pf_wage_override=18000) to verify UI hydration, then reset to (adopt_pf='', pf_wage_override=0). Temporarily changed Standard compliance-settings to (pf_wage_calc_method=floor, esic_wage_calc_method=actual), then restored to defaults (higher, wage_base). All cleanup applied — DB state matches pre-test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login flow (works, reused from iter_448): POST /api/auth/admin-password-login → session_token → localStorage['llc_session_token']. TestID reference for Iter 449 chips: cs-pf_wage_calc_method-{basic_da|floor|higher}, cs-esic_wage_calc_method-{wage_base|actual|floor|higher}, adopt-pf-{default|yes|no}, pf-wage-override. Note that on /employee-add EDIT the full-form Save button (testID=ent-primary-save) silently no-ops when phone is missing — validate mandatory fields before UI save, or use PATCH /api/admin/employees/{uid}/profile for isolated field updates.",
+  "rca_of_issue": "N/A — feature works end-to-end. Only caveat is unrelated pre-existing UX gap: silent Save validation on /employee-add EDIT when phone is missing on the record."
+}

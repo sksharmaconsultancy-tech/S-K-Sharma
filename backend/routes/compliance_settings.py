@@ -51,6 +51,11 @@ _BOOL_CFG_FIELDS = (
     "allow_higher_pf", "allow_vpf",
 )
 _PRORATION_FIELDS = ("pf_proration_method", "esic_proration_method")
+# Iter 449 (user spec) — configurable PF / ESIC Wage Calculation Methods.
+_CHOICE_FIELDS: Dict[str, tuple] = {
+    "pf_wage_calc_method": ("basic_da", "floor", "higher"),
+    "esic_wage_calc_method": ("wage_base", "actual", "floor", "higher"),
+}
 
 
 def _extract_cfg_updates(payload: Dict[str, Any], *, strict: bool) -> Dict[str, Any]:
@@ -60,6 +65,15 @@ def _extract_cfg_updates(payload: Dict[str, Any], *, strict: bool) -> Dict[str, 
     for k in _BOOL_CFG_FIELDS:
         if k in payload and payload[k] is not None:
             upd[k] = bool(payload[k])
+    for k, opts in _CHOICE_FIELDS.items():
+        if k in payload and payload[k] is not None:
+            v = str(payload[k]).strip().lower()
+            if v not in opts:
+                if strict:
+                    raise HTTPException(
+                        status_code=400, detail=f"{k} must be one of {opts}")
+                continue
+            upd[k] = v
     for k in _PRORATION_FIELDS:
         if k in payload and payload[k] is not None:
             v = str(payload[k]).strip().lower()
@@ -115,6 +129,9 @@ async def get_firm_statutory_overrides(company_id: Optional[str]) -> Dict[str, A
             out[k] = raw[k]
     for k in _PRORATION_FIELDS:
         if raw.get(k) in PRORATION_METHODS:
+            out[k] = raw[k]
+    for k, opts in _CHOICE_FIELDS.items():
+        if raw.get(k) in opts:
             out[k] = raw[k]
     if isinstance(raw.get("rule_version"), str) and raw["rule_version"].strip():
         out["rule_version"] = raw["rule_version"].strip()
@@ -216,6 +233,9 @@ async def get_standard_compliance_cfg(on_date: Optional[str] = None) -> Dict[str
             cfg[k] = doc[k]
     for k in _PRORATION_FIELDS:
         if doc.get(k) in PRORATION_METHODS:
+            cfg[k] = doc[k]
+    for k, opts in _CHOICE_FIELDS.items():
+        if doc.get(k) in opts:
             cfg[k] = doc[k]
     if isinstance(doc.get("rule_version"), str):
         cfg["rule_version"] = doc["rule_version"]

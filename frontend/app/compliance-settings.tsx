@@ -48,6 +48,21 @@ const ROUND_LABEL: Record<string, string> = {
   nearest: "Nearest ₹", ceil: "Round UP ₹", floor: "Round DOWN ₹", none: "Exact (paise)",
 };
 
+// Iter 449 (user spec) — configurable PF / ESIC Wage Calculation Methods.
+const PF_METHOD_OPTS = ["basic_da", "floor", "higher"] as const;
+const PF_METHOD_LABEL: Record<string, string> = {
+  basic_da: "Actual Basic + DA",
+  floor: "Wage Base Floor (% of Gross)",
+  higher: "Higher of the two (default)",
+};
+const ESI_METHOD_OPTS = ["wage_base", "actual", "floor", "higher"] as const;
+const ESI_METHOD_LABEL: Record<string, string> = {
+  wage_base: "Wage Base — max(Basic, floor%) (default)",
+  actual: "Actual ESI Wages (all ESI heads)",
+  floor: "Wage Base Floor (% of Gross)",
+  higher: "Higher of Actual or Floor",
+};
+
 // Iter 387 — configurable statutory module (global AND per-firm).
 const PRORATION_OPTS = ["calendar_days", "paid_days", "attendance_days", "working_days", "none"] as const;
 const PRORATION_LABEL: Record<string, string> = {
@@ -156,6 +171,9 @@ export default function ComplianceSettingsScreen() {
       }
       f.pf_proration_method = settings?.pf_proration_method || "calendar_days";
       f.esic_proration_method = settings?.esic_proration_method || "calendar_days";
+      // Iter 449 — PF / ESIC Wage Calculation Methods.
+      f.pf_wage_calc_method = settings?.pf_wage_calc_method || "higher";
+      f.esic_wage_calc_method = settings?.esic_wage_calc_method || "wage_base";
       f.rule_version = settings?.rule_version || "";
       f.head_mapping = settings?.head_mapping && typeof settings.head_mapping === "object"
         ? { ...DEFAULT_HM, ...settings.head_mapping }
@@ -180,6 +198,9 @@ export default function ComplianceSettingsScreen() {
         // Iter 387 — module switches / proration / rule version / mapping.
         pf_proration_method: form.pf_proration_method,
         esic_proration_method: form.esic_proration_method,
+        // Iter 449 — PF / ESIC Wage Calculation Methods.
+        pf_wage_calc_method: form.pf_wage_calc_method || "higher",
+        esic_wage_calc_method: form.esic_wage_calc_method || "wage_base",
         rule_version: String(form.rule_version || ""),
         head_mapping: form.head_mapping || DEFAULT_HM,
       };
@@ -265,6 +286,30 @@ export default function ComplianceSettingsScreen() {
           >
             <Text style={[styles.chipTxt, form[k] === o && styles.chipTxtActive]}>
               {ROUND_LABEL[o]}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+
+  // Iter 449 — generic choice picker (PF / ESIC Wage Calculation Method).
+  const ChoicePicker = ({ k, label, opts, labels }: {
+    k: string; label: string; opts: readonly string[]; labels: Record<string, string>;
+  }) => (
+    <View style={styles.fieldRow}>
+      <Text style={styles.fieldLbl}>{label}</Text>
+      <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap", flexShrink: 1, justifyContent: "flex-end" }}>
+        {opts.map((o) => (
+          <Pressable
+            key={o}
+            disabled={!isSuper}
+            onPress={() => setForm((p) => ({ ...p, [k]: o }))}
+            style={[styles.chip, form[k] === o && styles.chipActive]}
+            testID={`cs-${k}-${o}`}
+          >
+            <Text style={[styles.chipTxt, form[k] === o && styles.chipTxtActive]}>
+              {labels[o]}
             </Text>
           </Pressable>
         ))}
@@ -408,20 +453,27 @@ export default function ComplianceSettingsScreen() {
                 </Text>
               </View>
               <RoundPicker k="pf_rounding" label="PF rounding" />
+              {/* Iter 449 (user spec) — PF Wage Calculation Method */}
+              <ChoicePicker k="pf_wage_calc_method" label="PF Wage Calculation Method" opts={PF_METHOD_OPTS} labels={PF_METHOD_LABEL} />
               <Text style={styles.hint}>
-                PF wages = max(Basic, floor% of gross) capped at the ceiling — unless the
-                employee&apos;s &quot;PF Basic Salary&quot; is filled in the Employee Master (then that
-                amount is used).
+                PF wages follow the selected method, capped at the EPF ceiling.
+                Above the ceiling the Employee Master &quot;Adopt PF&quot; decides:
+                No = Excluded Employee (no PF) · Yes = PF on the manually
+                entered PF Wage. EPS always stays capped at the ceiling — the
+                balance of the employer share moves to Employer EPF.
               </Text>
             </Section>
 
             <Section title="ESIC" icon="medkit-outline">
               {NUM_FIELDS.filter((f) => f.group === "esic").map((f) => <NumRow key={f.key} f={f} />)}
               <RoundPicker k="esic_rounding" label="ESIC rounding" />
+              {/* Iter 449 (user spec) — ESIC Wage Calculation Method */}
+              <ChoicePicker k="esic_wage_calc_method" label="ESIC Wage Calculation Method" opts={ESI_METHOD_OPTS} labels={ESI_METHOD_LABEL} />
               <Text style={styles.hint}>
-                ESIC is applied on BASIC salary — an employee is covered only when
-                Basic ≤ the eligibility limit. Statutory practice rounds ESIC UP
-                to the next rupee.
+                ESI Wages follow the selected method. With a non-default
+                method, ELIGIBILITY is also checked on the full-month ESI
+                Wages (as per the ESI Act) instead of Basic. Statutory
+                practice rounds ESIC UP to the next rupee.
               </Text>
             </Section>
 

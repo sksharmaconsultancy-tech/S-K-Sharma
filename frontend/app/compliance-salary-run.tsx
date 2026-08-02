@@ -1525,7 +1525,13 @@ export default function ComplianceSalaryRunScreen() {
             // Iter 447 (user bug) — statutory PF wages = the WAGE BASE
             // (max(Basic earned, floor% Gross)) capped at the ceiling; PF
             // Basic only gates applicability (mirrors the engine).
-            const statBase2 = Math.max(Number(next.basic || 0), grossEarn * floorPct);
+            // Iter 449 (user spec) — PF Wage Calculation Method mirror.
+            const pfMeth = String(stat.pf_wage_calc_method || "higher");
+            const statBase2 = pfMeth === "basic_da"
+              ? Number(next.basic || 0)
+              : pfMeth === "floor"
+                ? grossEarn * floorPct
+                : Math.max(Number(next.basic || 0), grossEarn * floorPct);
             const pfWages = next.intl_worker
               ? pfBase
               : (wageRuleOn ? Math.min(statBase2, pfCap) : Math.min(pfBase, pfCap));
@@ -1549,11 +1555,20 @@ export default function ComplianceSalaryRunScreen() {
           if (esiOn && Number(next.esic_employee || 0) >= 0 && next.esic_applicable !== false) {
             const hm = stat.head_mapping || null;
             const esicHeadOn = (k: string) => !hm || (hm[k] || {}).esic !== false;
-            const esiBase = wageRuleOn
-              ? Math.max(Number(next.basic || 0), grossEarn * floorPct)
-              : (["basic", "hra", "conveyance", "medical", "special", "others"] as const)
-                  .reduce((n, k) => n + (esicHeadOn(k) ? Number((next as any)[k] || 0) : 0), 0)
-                + (esicHeadOn("ot") ? Number(next.ot_pay || 0) : 0);
+            const esiActual = (["basic", "hra", "conveyance", "medical", "special", "others"] as const)
+              .reduce((n, k) => n + (esicHeadOn(k) ? Number((next as any)[k] || 0) : 0), 0)
+              + (esicHeadOn("ot") ? Number(next.ot_pay || 0) : 0);
+            // Iter 449 (user spec) — ESIC Wage Calculation Method mirror.
+            const esiMeth = String(stat.esic_wage_calc_method || "wage_base");
+            const esiBase = esiMeth === "actual"
+              ? esiActual
+              : esiMeth === "floor"
+                ? grossEarn * floorPct
+                : esiMeth === "higher"
+                  ? Math.max(esiActual, grossEarn * floorPct)
+                  : (wageRuleOn
+                    ? Math.max(Number(next.basic || 0), grossEarn * floorPct)
+                    : esiActual);
             const esiEmpRate = Number(stat.esic_percent_employee ?? 0.75) / 100;
             const esiErRate = Number(stat.esic_percent_employer ?? 3.25) / 100;
             next.esic_wage_base = Math.round(esiBase);
@@ -1688,11 +1703,17 @@ export default function ComplianceSalaryRunScreen() {
             : ((r as any).intl_worker
               ? pfBase
               // Iter 447 (user bug — "PF is not calculating as per Wage
-              // Base") — statutory PF wages = the WAGE BASE (max(Basic
-              // earned, floor% Gross)) capped at the ceiling; PF Basic
-              // only gates applicability (mirrors the engine).
+              // Base") — statutory PF wages = the WAGE BASE capped at the
+              // ceiling; PF Basic only gates applicability.
+              // Iter 449 (user spec) — PF Wage Calculation Method mirror.
               : (wageRuleOn
-                ? Math.min(Math.max(paidBasic, grossEarn * floorPct), pfCap)
+                ? Math.min(
+                    String(stat.pf_wage_calc_method || "higher") === "basic_da"
+                      ? paidBasic
+                      : String(stat.pf_wage_calc_method || "higher") === "floor"
+                        ? grossEarn * floorPct
+                        : Math.max(paidBasic, grossEarn * floorPct),
+                    pfCap)
                 : Math.min(pfBase, pfCap))))
           : 0;
         // Iter 427 — VPF (employee side) survives the grid recompute:
@@ -1742,12 +1763,21 @@ export default function ComplianceSalaryRunScreen() {
         // "ESIC Wage" in the Salary Head Mapping (+ OT when mapped).
         const hm = stat.head_mapping || null;
         const esicHeadOn = (k: string) => !hm || (hm[k] || {}).esic !== false;
+        const esiActual2 = (["basic", "hra", "conveyance", "medical", "special", "others"] as const)
+          .reduce((n, k) => n + (esicHeadOn(k) ? Number((rHeads as any)[k] || 0) : 0), 0)
+          + (esicHeadOn("ot") ? Number((r as any).ot_pay || 0) : 0);
+        // Iter 449 (user spec) — ESIC Wage Calculation Method mirror.
+        const esiMeth2 = String(stat.esic_wage_calc_method || "wage_base");
         const esiBase = esiApplicable
-          ? (wageRuleOn
-            ? Math.max(paidBasic, grossEarn * floorPct)
-            : (["basic", "hra", "conveyance", "medical", "special", "others"] as const)
-                .reduce((n, k) => n + (esicHeadOn(k) ? Number((rHeads as any)[k] || 0) : 0), 0)
-              + (esicHeadOn("ot") ? Number((r as any).ot_pay || 0) : 0))
+          ? (esiMeth2 === "actual"
+            ? esiActual2
+            : esiMeth2 === "floor"
+              ? grossEarn * floorPct
+              : esiMeth2 === "higher"
+                ? Math.max(esiActual2, grossEarn * floorPct)
+                : (wageRuleOn
+                  ? Math.max(paidBasic, grossEarn * floorPct)
+                  : esiActual2))
           : 0;
         const esiEmp = esiApplicable ? Math.ceil(esiBase * esiEmpRate) : 0;
         const esiEr  = esiApplicable ? Math.ceil(esiBase * esiErRate)  : 0;

@@ -50,6 +50,10 @@ export type EmpForm = {
   // Iter 408 — PF Contribution Type (statutory | higher | vpf) + Higher PF
   // approval workflow + VPF percentage mode.
   pf_contribution_type: string;
+  // Iter 449 (user spec) — Adopt PF above the ceiling ("" | "yes" | "no")
+  // + the manual PF Wage used when Adopt PF = Yes.
+  adopt_pf: string;
+  pf_wage_override: string;
   higher_pf_wage: string;
   vpf_percent: string;
   higher_pf_from: string;
@@ -145,6 +149,8 @@ export const EMPTY_FORM: EmpForm = {
   esic_exit_date: "",
   vpf_amount: "",
   pf_contribution_type: "statutory",
+  adopt_pf: "",
+  pf_wage_override: "",
   higher_pf_wage: "",
   vpf_percent: "",
   higher_pf_from: "",

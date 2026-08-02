@@ -55,6 +55,8 @@ _STR_FIELDS = [
     # PF effective window, approval workflow status and remarks.
     "pf_contribution_type", "higher_pf_from", "higher_pf_to",
     "pf_approval_status", "pf_remarks",
+    # Iter 449 (user spec) — Adopt PF above the ceiling ("" / "yes" / "no").
+    "adopt_pf",
 ]
 _NUM_FIELDS = [
     "salary_monthly", "compliance_gross",
@@ -65,6 +67,8 @@ _NUM_FIELDS = [
     "vpf_amount",
     # Iter 408 — Higher PF wage (optional) + VPF percentage mode.
     "higher_pf_wage", "vpf_percent",
+    # Iter 449 (user spec) — manual PF Wage when Adopt PF = Yes.
+    "pf_wage_override",
 ]
 _BOOL_FIELDS = ["is_onroll", "vpf_enabled",
                 # Iter 341 — EPS Disable (not eligible for Pension).
