@@ -50,6 +50,13 @@ async def temp_code_bundle(token: str = Query(...), kind: str = Query("tar")):
             raise HTTPException(status_code=404, detail="Bundle not found")
         return FileResponse(path, filename=os.path.basename(path),
                             media_type="application/octet-stream")
+    if kind == "fixscript":
+        # Iter 441 — backend repair/diagnostic script for the VPS.
+        path = "/app/fix_backend_441.sh"
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="Fix script not found")
+        return FileResponse(path, filename="fix441.sh",
+                            media_type="text/x-shellscript")
     if kind == "script":
         # Latest VPS deploy script — lets the user fetch + run it in two
         # lines instead of pasting a long script into the SSH terminal.
