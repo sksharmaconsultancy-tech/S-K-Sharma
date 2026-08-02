@@ -3356,3 +3356,11 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   full month 1800 (unchanged); half month pf_basic 20000/basic 22000 →
   wages 11000 → PF 1320 (was 1200); below-cap unchanged; prior Higher-PF/
   VPF suite still green.
+- Iter 431 (user request): PF Basic Salary > ₹15,000 auto-defaults to
+  HIGHER PF (Actual Wages, auto-approved) with PF Basic copied into Higher
+  PF Wage. Frontend: pf_basic onChange auto-opens the PF policy section,
+  sets type=higher + higher_pf_wage (keeps auto-copied wage in sync when
+  lowered). Backend safety net (employee_profile PATCH): same rule when
+  pf_contribution_type absent from payload; explicit type in payload always
+  respected (employer can change later, engine follows saved values). E2E
+  verified + employee restored.

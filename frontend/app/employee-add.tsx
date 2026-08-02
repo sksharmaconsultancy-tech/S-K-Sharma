@@ -1854,7 +1854,28 @@ export default function EmployeeAddScreen() {
                   : "PF Basic Salary (optional)"
               }
               value={form.pf_basic}
-              onChange={(v) => setField("pf_basic", v.replace(/[^0-9.]/g, ""))}
+              onChange={(v) => {
+                const clean = v.replace(/[^0-9.]/g, "");
+                setField("pf_basic", clean);
+                // Iter 431 (user request) — PF wage figure ABOVE ₹15,000:
+                // auto-mark HIGHER PF (Actual Wages, auto-approved) and copy
+                // the PF Basic into the Higher PF Wage. The employer can
+                // still change the type/wage later — the engine follows
+                // whatever is saved.
+                const n = Number(clean || 0);
+                if (n > 15000) {
+                  setField("pf_policy_enabled" as any, true);
+                  setField("pf_contribution_type", "higher");
+                  setField("higher_pf_wage", clean);
+                } else if (
+                  form.pf_contribution_type === "higher" &&
+                  String(form.higher_pf_wage || "") === String(form.pf_basic || "")
+                ) {
+                  // dropped back to/below the ceiling and the Higher PF Wage
+                  // was the auto-copied figure → keep it in sync.
+                  setField("higher_pf_wage", clean);
+                }
+              }}
               editable={
                 !(
                   Number(form.compliance_basic || 0) > 0 &&

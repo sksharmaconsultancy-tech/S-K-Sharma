@@ -174,6 +174,26 @@ async def patch_employee_profile(
         if k in payload and isinstance(payload[k], list):
             updates[k] = payload[k]
 
+    # Iter 431 (user request) — PF wage figure ABOVE ₹15,000 defaults to
+    # HIGHER PF (Actual Wages, auto-approved) with the PF Basic copied into
+    # the Higher PF Wage — unless the employer explicitly chose a type in
+    # this same request (they may change it later; the engine follows the
+    # saved values).
+    _new_pf_basic = updates.get("pf_basic", emp.get("pf_basic"))
+    try:
+        _new_pf_basic = float(_new_pf_basic or 0)
+    except (TypeError, ValueError):
+        _new_pf_basic = 0.0
+    _eff_type = updates.get("pf_contribution_type",
+                            emp.get("pf_contribution_type"))
+    if (_new_pf_basic > 15000
+            and "pf_contribution_type" not in payload
+            and (not _eff_type or _eff_type == "statutory")):
+        updates["pf_contribution_type"] = "higher"
+        if not float(updates.get("higher_pf_wage",
+                                 emp.get("higher_pf_wage")) or 0):
+            updates["higher_pf_wage"] = _new_pf_basic
+
     # Iter 408 — PF audit trail: any change to the Contribution Type /
     # Higher PF wage / VPF settings is logged (old vs new, who, when, why).
     _pf_audit_keys = ("pf_contribution_type", "higher_pf_wage", "vpf_percent",
