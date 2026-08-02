@@ -547,6 +547,139 @@ def _esic_xls_bytes(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> by
     return buf.getvalue()
 
 
+@router.get("/challans/ecr-check")
+async def ecr_pre_upload_check(
+    run_id: str,
+    skip_missing: int = 0,
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 448 (user request) — pre-upload "EPFO File Check": validates the
+    ECR file the SAME way the EPFO portal does, BEFORE the user goes to the
+    portal — filename rule (word characters only), UAN presence/format/
+    duplicates, and the RFE-37 contribution formula (ER diff = Due EPF −
+    Due EPS computed from the wage columns), plus NCP-days sanity."""
+    import re as _re
+    user = await _assert_admin(authorization)
+    run = await _load_run_for_portal(run_id, user)
+    extra = await _uan_esic_map(run.get("rows") or [])
+    members = _ecr_lines(run, extra, bool(skip_missing))
+    all_members = members if skip_missing else members
+    _skipped = 0
+    if skip_missing:
+        _skipped = len(_ecr_lines(run, extra, False)) - len(members)
+    fname = f"ECR_{_portal_month(run.get('month'))}.txt"
+    month_days = int(run.get("month_days") or 30)
+
+    checks: List[Dict[str, Any]] = []
+    issues: List[Dict[str, Any]] = []
+
+    def _chk(label: str, status: str, detail: str):
+        checks.append({"label": label, "status": status, "detail": detail})
+
+    # 1. Filename — EPFO rejects spaces / non-word characters.
+    _fn_ok = bool(_re.fullmatch(r"\w+\.txt", fname))
+    _chk("File name (no spaces / special characters)",
+         "pass" if _fn_ok else "fail", fname)
+
+    # 2. UAN presence / format / duplicates.
+    no_uan = [m for m in all_members if not m["uan"]]
+    bad_uan = [m for m in all_members if m["uan"] and not _re.fullmatch(r"\d{12}", m["uan"])]
+    seen: Dict[str, int] = {}
+    for m in all_members:
+        if m["uan"]:
+            seen[m["uan"]] = seen.get(m["uan"], 0) + 1
+    dups = {u for u, n in seen.items() if n > 1}
+    if no_uan:
+        _chk("UAN present for every member", "fail",
+             f"{len(no_uan)} member(s) WITHOUT UAN are in the file — tick "
+             "'Remove Without UAN / ESIC No. Employees' or fill the UANs")
+        for m in no_uan:
+            issues.append({"name": m["name"], "uan": "", "problem": "Missing UAN"})
+    elif _skipped:
+        _chk("UAN present for every member", "warn",
+             f"{_skipped} member(s) without UAN were REMOVED from the file")
+    else:
+        _chk("UAN present for every member", "pass", f"{len(all_members)} members")
+    if bad_uan:
+        _chk("UAN format (12 digits)", "fail", f"{len(bad_uan)} invalid UAN(s)")
+        for m in bad_uan:
+            issues.append({"name": m["name"], "uan": m["uan"], "problem": "UAN is not 12 digits"})
+    else:
+        _chk("UAN format (12 digits)", "pass", "All UANs are 12-digit numbers")
+    if dups:
+        _chk("Duplicate UANs", "fail", f"{len(dups)} UAN(s) appear more than once")
+        for m in all_members:
+            if m["uan"] in dups:
+                issues.append({"name": m["name"], "uan": m["uan"], "problem": "Duplicate UAN"})
+    else:
+        _chk("Duplicate UANs", "pass", "No duplicates")
+
+    # 3. Member NAME — EPFO allows alphabets, spaces and dots only.
+    bad_names = [m for m in all_members if _re.search(r"[^A-Z .]", m["name"] or "")]
+    if bad_names:
+        _chk("Member names (letters / spaces only)", "warn",
+             f"{len(bad_names)} name(s) contain special characters the portal may reject")
+        for m in bad_names:
+            issues.append({"name": m["name"], "uan": m["uan"],
+                           "problem": "Name has special characters"})
+    else:
+        _chk("Member names (letters / spaces only)", "pass", "OK")
+
+    # 4. RFE-37 — ER PF share must equal Due EPF − Due EPS from the wages.
+    rfe37_bad = []
+    for m in all_members:
+        due_epf = _due(m["epf_wages"], 12.0)
+        due_eps = _due(m["eps_wages"], 8.33)
+        if m["diff_er"] != max(0, due_epf - due_eps) or m["eps_er"] != due_eps:
+            rfe37_bad.append(m)
+        elif m["epf_ee"] < due_epf:
+            rfe37_bad.append(m)
+    if rfe37_bad:
+        _chk("RFE-37 · contributions match wages (12% / 8.33%)", "fail",
+             f"{len(rfe37_bad)} member(s) fail the EPFO due-contribution formula")
+        for m in rfe37_bad:
+            issues.append({"name": m["name"], "uan": m["uan"],
+                           "problem": f"EPF wages {m['epf_wages']} / EPS wages {m['eps_wages']} "
+                                      f"vs EE {m['epf_ee']} · EPS {m['eps_er']} · Diff {m['diff_er']}"})
+    else:
+        _chk("RFE-37 · contributions match wages (12% / 8.33%)", "pass",
+             "ER diff = Due EPF − Due EPS for every member")
+
+    # 5. Wage sanity — EPS/EDLI never above EPF wages; EPS/EDLI ≤ ₹15,000.
+    wage_bad = [m for m in all_members
+                if m["eps_wages"] > m["epf_wages"] or m["edli_wages"] > m["epf_wages"]
+                or m["eps_wages"] > 15000 or m["edli_wages"] > 15000]
+    # Higher-pension members legitimately keep EPS above the ceiling.
+    wage_bad = [m for m in wage_bad
+                if not (m["eps_wages"] == m["epf_wages"] and m["eps_wages"] > 15000)]
+    if wage_bad:
+        _chk("EPS / EDLI wages within limits", "fail", f"{len(wage_bad)} member(s)")
+        for m in wage_bad:
+            issues.append({"name": m["name"], "uan": m["uan"],
+                           "problem": f"EPS {m['eps_wages']} / EDLI {m['edli_wages']} exceed limits"})
+    else:
+        _chk("EPS / EDLI wages within limits", "pass", "OK")
+
+    # 6. NCP days sanity — 0 ≤ NCP ≤ month days.
+    ncp_bad = [m for m in all_members if float(m["ncp"]) < 0 or float(m["ncp"]) > month_days]
+    if ncp_bad:
+        _chk("NCP days (0 – month days)", "fail", f"{len(ncp_bad)} member(s)")
+        for m in ncp_bad:
+            issues.append({"name": m["name"], "uan": m["uan"], "problem": f"NCP {m['ncp']}"})
+    else:
+        _chk("NCP days (0 – month days)", "pass", "OK")
+
+    ok = not any(c["status"] == "fail" for c in checks)
+    return {
+        "ok": ok,
+        "file_name": fname,
+        "members": len(all_members),
+        "skipped_no_uan": _skipped,
+        "checks": checks,
+        "issues": issues[:100],
+    }
+
+
 @router.get("/challans/ecr.txt")
 async def download_ecr_txt(
     run_id: str,

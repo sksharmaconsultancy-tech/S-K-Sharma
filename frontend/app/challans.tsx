@@ -315,6 +315,20 @@ export default function ChallansScreen() {
   // Iter 161 — on-screen data preview before portal upload.
   const [preview, setPreview] = useState<any>(null);
   const [previewBusy, setPreviewBusy] = useState<string>("");
+  // Iter 448 (user request) — pre-upload EPFO File Check (filename + RFE rules).
+  const [ecrCheck, setEcrCheck] = useState<any>(null);
+  const [ecrCheckBusy, setEcrCheckBusy] = useState(false);
+  const runEcrCheck = async () => {
+    if (!selRunId) { window.alert("Pick a Compliance Run first."); return; }
+    if (ecrCheck) { setEcrCheck(null); return; } // toggle off
+    setEcrCheckBusy(true);
+    try {
+      setEcrCheck(await api<any>(
+        `/admin/challans/ecr-check?run_id=${selRunId}&skip_missing=${skipMissing ? 1 : 0}`));
+    } catch (e: any) {
+      window.alert(e?.message || "File check failed");
+    } finally { setEcrCheckBusy(false); }
+  };
   const loadPreview = async (kind: "epfo" | "esic") => {
     if (!selRunId) return;
     if (preview?.kind === kind) { setPreview(null); return; } // toggle off
@@ -532,7 +546,55 @@ export default function ChallansScreen() {
               {dlPortal === "esic.xlsx" ? <ActivityIndicator size="small" color="#FFF" /> : <Ionicons name="eye-outline" size={14} color="#FFF" />}
               <Text style={styles.uploadBtnTxt}>ESIC Check (Excel)</Text>
             </Pressable>
+            {/* Iter 448 (user request) — pre-upload EPFO File Check */}
+            <Pressable
+              onPress={() => void runEcrCheck()}
+              disabled={ecrCheckBusy || !selRunId}
+              style={[styles.uploadBtn, { backgroundColor: "#7C3AED" }, (ecrCheckBusy || !selRunId) && { opacity: 0.6 }]}
+              testID="ecr-file-check"
+            >
+              {ecrCheckBusy ? <ActivityIndicator size="small" color="#FFF" /> : <Ionicons name="shield-checkmark-outline" size={14} color="#FFF" />}
+              <Text style={styles.uploadBtnTxt}>{ecrCheck ? "Hide File Check" : "EPFO File Check"}</Text>
+            </Pressable>
           </View>
+          {ecrCheck ? (
+            <View style={{
+              marginTop: 10, borderWidth: 1, borderRadius: 10, padding: 10,
+              borderColor: ecrCheck.ok ? "#BBF7D0" : "#FECACA",
+              backgroundColor: ecrCheck.ok ? "#F0FDF4" : "#FEF2F2",
+            }}>
+              <Text style={{ fontSize: 12.5, fontWeight: "800", color: ecrCheck.ok ? "#166534" : "#B91C1C" }}>
+                {ecrCheck.ok
+                  ? `✓ READY TO UPLOAD — ${ecrCheck.file_name} · ${ecrCheck.members} members`
+                  : `✗ FIX BEFORE UPLOADING — ${ecrCheck.file_name} · ${ecrCheck.members} members`}
+                {ecrCheck.skipped_no_uan ? `  (${ecrCheck.skipped_no_uan} without UAN removed)` : ""}
+              </Text>
+              {(ecrCheck.checks || []).map((c: any, i: number) => (
+                <View key={i} style={{ flexDirection: "row", gap: 6, alignItems: "flex-start", marginTop: 5 }}>
+                  <Text style={{ fontSize: 11.5 }}>
+                    {c.status === "pass" ? "✅" : c.status === "warn" ? "⚠️" : "❌"}
+                  </Text>
+                  <Text style={{ fontSize: 11.5, color: "#334155", flex: 1 }}>
+                    <Text style={{ fontWeight: "700" }}>{c.label}</Text> — {c.detail}
+                  </Text>
+                </View>
+              ))}
+              {(ecrCheck.issues || []).length ? (
+                <View style={{ marginTop: 6, borderTopWidth: 1, borderTopColor: "#E2E8F0", paddingTop: 6 }}>
+                  {(ecrCheck.issues || []).slice(0, 25).map((it: any, i: number) => (
+                    <Text key={i} style={{ fontSize: 11, color: "#7F1D1D" }}>
+                      • {it.name || "(no name)"}{it.uan ? ` · ${it.uan}` : ""} — {it.problem}
+                    </Text>
+                  ))}
+                  {(ecrCheck.issues || []).length > 25 ? (
+                    <Text style={{ fontSize: 11, color: "#7F1D1D" }}>
+                      …and {(ecrCheck.issues || []).length - 25} more
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
+            </View>
+          ) : null}
         </View>
 
         {/* 🤖 User directive — automated portal upload (stops at challan) */}
