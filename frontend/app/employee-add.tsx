@@ -188,8 +188,6 @@ export default function EmployeeAddScreen() {
           esic_exit_date: p.esic_exit_date || "",
           vpf_amount: p.vpf_amount != null ? String(p.vpf_amount) : "",
           pf_contribution_type: p.pf_contribution_type || "statutory",
-          adopt_pf: p.adopt_pf || "",
-          pf_wage_override: p.pf_wage_override != null && p.pf_wage_override !== 0 ? String(p.pf_wage_override) : "",
           higher_pf_wage: p.higher_pf_wage != null && p.higher_pf_wage !== 0 ? String(p.higher_pf_wage) : "",
           vpf_percent: p.vpf_percent != null && p.vpf_percent !== 0 ? String(p.vpf_percent) : "",
           higher_pf_from: p.higher_pf_from || "",
@@ -792,9 +790,6 @@ export default function EmployeeAddScreen() {
         vpf_amount: (form.vpf_enabled || form.pf_contribution_type === "vpf") && form.vpf_amount ? Number(form.vpf_amount) : 0,
         // Iter 408 — PF Contribution Type + Higher PF / VPF workflow.
         pf_contribution_type: form.pf_contribution_type || "statutory",
-        // Iter 449 (user spec) — Adopt PF above the ceiling + manual PF Wage.
-        adopt_pf: form.adopt_pf || "",
-        pf_wage_override: form.adopt_pf === "yes" && form.pf_wage_override ? Number(form.pf_wage_override) : 0,
         higher_pf_wage: form.higher_pf_wage ? Number(form.higher_pf_wage) : 0,
         vpf_percent: form.vpf_percent ? Number(form.vpf_percent) : 0,
         higher_pf_from: form.higher_pf_from || "",
@@ -1900,56 +1895,6 @@ export default function EmployeeAddScreen() {
             Basic ₹15,000 or above → PF Basic is optional; when filled, PF is
             calculated on the filled amount.
           </Text>
-
-          {/* Iter 449 (user spec) — ADOPT PF: when the PF Wage crosses the
-              EPF ceiling, choose No → Excluded Employee (no PF) or Yes →
-              PF on a manually entered PF Wage (₹15,000 / 18,000 / actual). */}
-          <Text style={{ fontSize: 13, fontWeight: "700", color: colors.onSurface, marginTop: 10, marginBottom: 6 }}>Adopt PF (PF Wage above ceiling)</Text>
-          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-            {([["", "Default (cap at ceiling)"], ["yes", "Yes — manual PF Wage"], ["no", "No — Excluded Employee"]] as const).map(([val, lbl]) => {
-              const on = (form.adopt_pf || "") === val;
-              return (
-                <Pressable
-                  key={val || "default"}
-                  onPress={() => setField("adopt_pf" as any, val)}
-                  style={{
-                    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999,
-                    borderWidth: 1.5,
-                    borderColor: on ? colors.brandPrimary : colors.border,
-                    backgroundColor: on ? colors.brandPrimary : colors.surface,
-                  }}
-                  testID={`adopt-pf-${val || "default"}`}
-                >
-                  <Text style={{ fontSize: 12, fontWeight: "700", color: on ? "#fff" : colors.onSurface }}>{lbl}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          {form.adopt_pf === "yes" ? (
-            <>
-              <Text style={{ fontSize: 13, fontWeight: "700", color: colors.onSurface, marginTop: 8, marginBottom: 6 }}>PF Wage (Adopt PF) *</Text>
-              <TextInput
-                value={form.pf_wage_override}
-                onChangeText={(v) => setField("pf_wage_override" as any, v.replace(/[^0-9.]/g, ""))}
-                keyboardType="decimal-pad"
-                placeholder="e.g. 15000 / 18000 / 25000 / actual wage"
-                placeholderTextColor={colors.onSurfaceSecondary}
-                style={styles.input}
-                testID="pf-wage-override"
-              />
-              <Text style={styles.smallNote}>
-                PF will be calculated on this wage (pro-rated by attendance).
-                EPS stays capped at the statutory ceiling; the balance of the
-                employer share moves to Employer EPF.
-              </Text>
-            </>
-          ) : null}
-          {form.adopt_pf === "no" ? (
-            <Text style={styles.smallNote}>
-              If the PF Wage exceeds the EPF ceiling this employee is treated
-              as an EXCLUDED EMPLOYEE — no PF will be deducted.
-            </Text>
-          ) : null}
 
           {/* Iter 428 (user request) — PF POLICY CHANGE is OPTIONAL and sits
               right next to the PF Basic column. Disabled (default) → the

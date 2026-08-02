@@ -3618,3 +3618,23 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   (KANKANIENTERPRISES072026.txt).
 - Deploy Iter 455: /app/deploy_vps_iter455.sh served via
   /api/temp-code-bundle?kind=script.
+- Iter 456 (user FINAL PF Engine spec — rollback/simplification):
+  * PF Basic 0/blank → no PF. PF Basic ≤ 15,000 → PF wage = max(earned PF
+    Basic, earned 50% gross) capped 15,000. PF Basic > 15,000 → ADOPTED
+    HIGHER PF: PF on full earned PF Basic (pro-rated), NO cap; EPS capped;
+    balance ER share → Employer EPF. VPF + Higher PF contribution type kept.
+  * REMOVED: adopt_pf / pf_wage_override (engine, employee_profile fields,
+    Employee Master UI, compliance_validation checks) and
+    pf_wage_calc_method / esic_wage_calc_method (engine defaults+passthru,
+    compliance_settings _CHOICE_FIELDS, Settings page dropdowns +
+    ChoicePicker). ESIC stays on LEGACY rules only.
+  * Verified via /tmp/test_pf_engine.py — 9 scenarios incl. AMIT 17,796 →
+    2,136 and 1,70,000 → 20,400, adopt_pf ignored, VPF/HigherPF intact.
+- Iter 456 (ESIC template instructions, user-uploaded sheet): esic.xls +
+  esic.xlsx now: DAYS ceil (round UP), all cells TEXT format, zero-wage
+  exited members → Reason 2 + Last Working Day dd/mm/yyyy (exit_date/
+  resign_date from users, on/before month end), other zero-wage → Reason 1,
+  part-month leavers → no reason/date. Shared helper challans._esic_row_vals;
+  _uan_esic_map now also fetches exit_date/resign_date.
+- Deploy Iter 456: /app/deploy_vps_iter456.sh served via
+  /api/temp-code-bundle?kind=script.

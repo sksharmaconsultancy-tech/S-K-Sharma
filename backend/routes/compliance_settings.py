@@ -51,11 +51,7 @@ _BOOL_CFG_FIELDS = (
     "allow_higher_pf", "allow_vpf",
 )
 _PRORATION_FIELDS = ("pf_proration_method", "esic_proration_method")
-# Iter 449 (user spec) — configurable PF / ESIC Wage Calculation Methods.
-_CHOICE_FIELDS: Dict[str, tuple] = {
-    "pf_wage_calc_method": ("basic_da", "floor", "higher"),
-    "esic_wage_calc_method": ("wage_base", "actual", "floor", "higher"),
-}
+_CHOICE_FIELDS: Dict[str, tuple] = {}
 
 
 def _extract_cfg_updates(payload: Dict[str, Any], *, strict: bool) -> Dict[str, Any]:

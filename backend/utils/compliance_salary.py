@@ -82,17 +82,6 @@ DEFAULT_STATUTORY_CFG: Dict[str, Any] = {
     # Shared statutory wage-base rule (new labour code, per client policy):
     # PF & ESIC apply on max(Basic, floor_pct% of Gross Earning).
     "stat_wage_floor_pct": 50.0,
-    # Iter 449 (user spec) — PF Wage Calculation Method:
-    #   basic_da → Actual Basic (+DA) earned
-    #   floor    → Compliance Wage Base Floor (floor% of Gross Earning)
-    #   higher   → Higher of the two (DEFAULT — current wage-base rule)
-    "pf_wage_calc_method": "higher",
-    # Iter 449 (user spec) — ESIC Wage Calculation Method:
-    #   wage_base → max(Basic, floor% Gross)  (DEFAULT — legacy rule)
-    #   actual    → Actual ESI Wages (all ESI-flagged earning heads + OT)
-    #   floor     → Compliance Wage Base Floor (floor% of Gross)
-    #   higher    → Higher of Actual ESI Wages or the Floor
-    "esic_wage_calc_method": "wage_base",
 
     # Iter 127f — whole-rupee rounding (statutory practice: PF nearest
     # rupee, ESIC rounded UP to the next rupee).
@@ -146,8 +135,6 @@ _CFG_PASSTHRU_KEYS = (
     "esic_proration_method", "rule_version", "head_mapping", "_salary_month",
     # Iter 408 — Higher PF / VPF company policy flags.
     "allow_higher_pf", "allow_vpf",
-    # Iter 449 — PF / ESIC Wage Calculation Methods.
-    "pf_wage_calc_method", "esic_wage_calc_method",
 )
 
 
@@ -669,8 +656,6 @@ def compute_compliance_row(
     _pf_type = str(user.get("pf_contribution_type") or "statutory").lower()
     _hi_active = False
     _hi_reason = ""
-    # Iter 449 (user spec) — Adopt PF (Excluded Employee above the ceiling).
-    _pf_excluded_above = False
     if pf_applicable:
         if salary_mode == "monthly":
             # Iter 387 — configurable proration method (default replicates
@@ -730,53 +715,22 @@ def compute_compliance_row(
         else:
             if _intl_worker:
                 capped_pf_wages = pf_base
-            elif wage_rule_on:
-                # Iter 447 (user bug) — statutory PF wages follow the WAGE
-                # BASE, capped at the ceiling; the Employee Master PF Basic
-                # only gates applicability (blank/0 ⇒ no PF).
-                # Iter 449 (user spec) — configurable PF Wage Calculation
-                # Method (Compliance Settings):
-                #   basic_da → Actual Basic (+DA) earned
-                #   floor    → Compliance Wage Base Floor (floor% of Gross)
-                #   higher   → max of the two (DEFAULT — Iter 447 rule)
-                _pf_meth = str(cfg.get("pf_wage_calc_method") or "higher")
-                if _pf_meth == "basic_da":
-                    _pf_calc_base = basic
-                elif _pf_meth == "floor":
-                    _pf_calc_base = gross_paid * (floor_pct / 100.0)
-                else:
-                    _pf_calc_base = stat_wage_base
-                # Iter 449 (user spec) — PF Wage ABOVE the ceiling:
-                #   Adopt PF = No  → Excluded Employee, NO PF this month.
-                #   Adopt PF = Yes → PF on the manually entered PF Wage
-                #     (e.g. ₹15,000 / 18,000 / 25,000 / actual), pro-rated
-                #     by attendance for monthly staff, WITHOUT the ceiling.
-                #   Not set → statutory ceiling applies (existing rule).
-                _adopt = str(user.get("adopt_pf") or "").strip().lower()
-                _pfw_manual = _num(user.get("pf_wage_override"), 0.0)
-                # Iter 450 (user confirmed — AMIT PF Basis 17,796 ⇒ PF
-                # ₹2,136): a PF Basic FILLED ABOVE the ceiling on the
-                # Employee Master IS the adopted PF wage — PF is deducted
-                # on it in full (pro-rated), WITHOUT the ceiling. EPS stays
-                # capped; the ER split follows the 12%-minus-EPS rule.
-                if pf_basic_override > cfg["pf_wage_cap"]:
-                    _pf_eff = max(pf_basic_prorated, _pf_calc_base)
-                else:
-                    _pf_eff = _pf_calc_base
-                if _pf_eff > cfg["pf_wage_cap"] and _adopt == "no":
-                    _pf_excluded_above = True
-                    capped_pf_wages = 0.0
-                elif (_pf_eff > cfg["pf_wage_cap"] and _adopt == "yes"
-                      and _pfw_manual > 0):
-                    _fct = (_proration_factor(
-                        pf_proration_method, effective_present,
-                        max(1, month_days)) if salary_mode == "monthly" else 1.0)
-                    capped_pf_wages = _pfw_manual * _fct
-                elif pf_basic_override > cfg["pf_wage_cap"]:
-                    capped_pf_wages = _pf_eff
-                else:
-                    capped_pf_wages = min(_pf_eff, cfg["pf_wage_cap"])
+            elif pf_basic_override > cfg["pf_wage_cap"]:
+                # Iter 456 (user final PF Engine spec) — PF Basic FILLED
+                # ABOVE the ₹15,000 ceiling on the Employee Master = ADOPTED
+                # HIGHER PF: PF on the FULL EARNED PF Basic (pro-rated by
+                # present days), WITHOUT the ceiling. EPS stays restricted
+                # to the statutory ceiling; the balance of the employer
+                # share moves to Employer EPF (12%-minus-EPS split below).
+                # (Iter 450 confirmed — AMIT PF Basis 17,796 ⇒ PF ₹2,136.)
+                capped_pf_wages = pf_basic_prorated
             else:
+                # Iter 456 (user final PF Engine spec) — PF Basic ≤ ₹15,000:
+                # PF Wage = HIGHER of Earned PF Basic / Earned 50% Compliance
+                # Wage Base (pf_base already carries this max, Iter 376),
+                # capped at the statutory ceiling. Adopt PF / manual PF Wage
+                # and the PF Wage Calculation Method options were REMOVED
+                # (user rollback).
                 capped_pf_wages = min(pf_base, cfg["pf_wage_cap"])
         pf_employee = capped_pf_wages * (cfg["pf_percent_employee"] / 100.0)
         if _hi_active:
@@ -842,16 +796,6 @@ def compute_compliance_row(
         pf_employer_epf = _round_stat(pf_employer_epf, pf_mode)
         pf_employer_eps = _round_stat(pf_employer_eps, pf_mode)
         pf_employer_total = pf_employer_epf + pf_employer_eps
-        # Iter 449 (user spec) — Adopt PF = No above the ceiling ⇒ the
-        # employee is an EXCLUDED EMPLOYEE for this month: no PF/VPF at
-        # all, with the reason surfaced on the audit / validation layers.
-        if _pf_excluded_above:
-            _pf_skip_reason = (
-                "Excluded Employee — PF Wage above the ceiling "
-                f"₹{cfg['pf_wage_cap']:,.0f} and Adopt PF = No")
-            pf_eligible = pf_applicable = False
-            vpf = 0.0
-            pf_employee = pf_employer_epf = pf_employer_eps = pf_employer_total = 0.0
     else:
         capped_pf_wages = 0.0
         pf_base = pf_basic_prorated = 0.0
@@ -885,9 +829,6 @@ def compute_compliance_row(
             return DEFAULT_HEAD_MAPPING.get(k, {}).get("esic", True)
         return (_head_map.get(k) or {}).get("esic") is not False
 
-    # Iter 449 (user spec) — configurable ESIC Wage Calculation Method.
-    _esi_meth = str(cfg.get("esic_wage_calc_method") or "wage_base")
-
     def _esi_actual_wages(src: Dict[str, Any], ot_component: float) -> float:
         """Actual ESI Wages = sum of ESI-flagged earning heads (+ OT)."""
         return sum(
@@ -911,25 +852,10 @@ def compute_compliance_row(
         _esic_skip_reason = (
             f"ESIC Exit Date ({user.get('esic_exit_date')}) is before the salary month")
     elif cfg.get("esic_disable_above_ceiling") is not False:
-        # Iter 449 (user correction) — when an ESIC Wage Calculation Method
-        # is configured, ELIGIBILITY follows the FULL-MONTH ESI WAGES per
-        # that method (as per the ESI Act — never just Basic + DA). The
-        # default "wage_base" keeps the legacy Compliance-Basic check for
-        # full backward compatibility.
-        if _esi_meth != "wage_base":
-            _esi_actual_m = _esi_actual_wages(master_structure, 0.0)
-            _esi_floor_m = monthly_gross_master * (floor_pct / 100.0)
-            if _esi_meth == "actual":
-                _esi_elig_wages = _esi_actual_m
-            elif _esi_meth == "floor":
-                _esi_elig_wages = _esi_floor_m
-            else:  # higher
-                _esi_elig_wages = max(_esi_actual_m, _esi_floor_m)
-            if _esi_elig_wages > cfg["esic_gross_threshold"]:
-                _esic_skip_reason = (
-                    f"ESI Wages ₹{_esi_elig_wages:,.0f} above the ESIC "
-                    f"eligibility limit ₹{cfg['esic_gross_threshold']:,.0f}")
-        elif _esic_elig_basic > cfg["esic_gross_threshold"]:
+        # Iter 456 (user rollback) — ESIC eligibility stays on the LEGACY
+        # rule: full-month Basic vs the ESIC ceiling. The configurable
+        # ESIC Wage Calculation Method was removed.
+        if _esic_elig_basic > cfg["esic_gross_threshold"]:
             _esic_skip_reason = (
                 f"Basic ₹{_esic_elig_basic:,.0f} above the ESIC ceiling "
                 f"₹{cfg['esic_gross_threshold']:,.0f}")
@@ -964,13 +890,9 @@ def compute_compliance_row(
             _esi_gross_ref = gross_paid
         _esi_actual = _esi_actual_wages(_esi_src, _esi_ot)
         _esi_floor = _esi_gross_ref * (floor_pct / 100.0)
-        if _esi_meth == "actual":
-            esic_wage_base = _esi_actual
-        elif _esi_meth == "floor":
-            esic_wage_base = _esi_floor
-        elif _esi_meth == "higher":
-            esic_wage_base = max(_esi_actual, _esi_floor)
-        elif wage_rule_on:
+        # Iter 456 (user rollback) — ESIC stays on the LEGACY rules only;
+        # the configurable ESIC Wage Calculation Method was removed.
+        if wage_rule_on:
             esic_wage_base = (max(master_structure["basic"], _esi_floor)
                               if _use_master else stat_wage_base)
         else:
@@ -1151,9 +1073,6 @@ def compute_compliance_row(
         "higher_pension": bool(user.get("higher_pension")),
         "intl_worker": bool(user.get("intl_worker")),
         "excluded_employee": bool(user.get("excluded_employee")),
-        # Iter 449 — Adopt PF (Excluded-above-ceiling choice) audit fields.
-        "adopt_pf": str(user.get("adopt_pf") or "") or None,
-        "pf_wage_override": _num(user.get("pf_wage_override"), 0.0) or None,
         "esic_temp_exempt": bool(user.get("esic_temp_exempt")),
         # Iter 408 — PF Contribution Type snapshot for the reports /
         # validation / AI-explanation layers.

@@ -79,7 +79,7 @@ async def validate_compliance_run(run: Dict[str, Any]) -> Dict[str, Any]:
              "pf_contribution_type": 1, "higher_pf_wage": 1, "higher_pf_from": 1,
              "higher_pf_to": 1, "pf_approval_status": 1, "pf_approval_required": 1,
              "pf_declaration_available": 1, "vpf_enabled": 1, "vpf_percent": 1,
-             "vpf_amount": 1, "adopt_pf": 1, "pf_wage_override": 1},
+             "vpf_amount": 1},
         ):
             masters[u["user_id"]] = u
 
@@ -148,25 +148,11 @@ async def validate_compliance_run(run: Dict[str, Any]) -> Dict[str, Any]:
                 "Check PF Basic Salary / proration method — wages above gross are unusual."))
         if pf_emp > 0 and pf_wages > pf_cap + 0.5 and not r.get("intl_worker") \
                 and not r.get("pf_higher_active") \
-                and _num(m.get("pf_basic")) <= pf_cap \
-                and str(r.get("adopt_pf") or m.get("adopt_pf") or "").lower() != "yes":
+                and _num(m.get("pf_basic")) <= pf_cap:
             issues.append(_issue(
                 "PF_ABOVE_CEILING", "error",
                 f"PF wages ₹{pf_wages:,.0f} exceed the ceiling ₹{pf_cap:,.0f}.",
-                "Only International Workers / approved Higher PF / Adopt PF = Yes / PF Basic above the ceiling may cross the EPF ceiling — re-run Salary Process."))
-
-        # ---------------- Adopt PF checks (Iter 449, user spec) ----------------
-        _adopt = str(r.get("adopt_pf") or m.get("adopt_pf") or "").strip().lower()
-        if _adopt == "yes" and _num(r.get("pf_wage_override") or m.get("pf_wage_override")) <= 0:
-            issues.append(_issue(
-                "ADOPT_PF_WAGE_MISSING", "warning",
-                "Adopt PF = Yes but no manual PF Wage is filled — the statutory ceiling was used.",
-                "Fill 'PF Wage (Adopt PF)' on the Employee Master (e.g. 15000 / 18000 / 25000 / actual)."))
-        if "Excluded Employee — PF Wage above the ceiling" in str(r.get("pf_reason") or ""):
-            issues.append(_issue(
-                "PF_EXCLUDED_ABOVE_CEILING", "warning",
-                "PF Wage above the ceiling with Adopt PF = No — treated as EXCLUDED EMPLOYEE (no PF this month).",
-                "Ignore if intentional, or set Adopt PF = Yes with a PF Wage to keep PF membership."))
+                "Only International Workers / approved Higher PF / PF Basic above the ceiling may cross the EPF ceiling — re-run Salary Process."))
 
         # ---------------- Higher PF / VPF checks (Iter 408) ----------------
         _pft = str(r.get("pf_contribution_type")

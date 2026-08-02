@@ -380,9 +380,45 @@ async def _uan_esic_map(rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]
     uids = [r.get("user_id") for r in rows if r.get("user_id")]
     users = await db.users.find(
         {"user_id": {"$in": uids}},
-        {"_id": 0, "user_id": 1, "uan_no": 1, "esi_ip_no": 1},
+        {"_id": 0, "user_id": 1, "uan_no": 1, "esi_ip_no": 1,
+         # Iter 456 (ESIC template instructions) — exit date drives Reason 2
+         # (Left Service) + Last Working Day on the upload sheet.
+         "exit_date": 1, "resign_date": 1},
     ).to_list(5000)
     return {u["user_id"]: u for u in users}
+
+
+def _esic_row_vals(r: Dict[str, Any], u: Dict[str, Any], month: Any):
+    """Iter 456 — ESIC upload template rules (user's instructions sheet):
+    • DAYS rounded UP to the next whole number (instruction 2).
+    • SAL = gross earned for the month, truncated to whole ₹.
+    • 0-wage members: Reason 2 (Left Service) + Last Working Day dd/mm/yyyy
+      when the member exited on/before the month end (IP removed from next
+      wage period) — otherwise Reason 1 (On Leave), date BLANK.
+    • Members who worked part of the month carry NO reason (0) and the
+      last-working-day stays BLANK (instruction 6).
+    Returns (days, wages, reason, last_working_day) — all display values."""
+    import re as _re
+    present = float(r.get("present_days") or 0)
+    days = int(math.ceil(present - 1e-9))
+    wages = int(float(r.get("gross_paid") or 0))
+    reason, lwd = 0, ""
+    if days <= 0 or wages <= 0:
+        days, wages = 0, 0
+        exit_d = str(u.get("exit_date") or u.get("resign_date") or "")[:10]
+        m = str(month or "")[:7]
+        m_end = ""
+        if _re.fullmatch(r"\d{4}-\d{2}", m):
+            import calendar as _cal
+            y, mo = int(m[:4]), int(m[5:7])
+            m_end = f"{y:04d}-{mo:02d}-{_cal.monthrange(y, mo)[1]:02d}"
+        if _re.fullmatch(r"\d{4}-\d{2}-\d{2}", exit_d) and (not m_end or exit_d <= m_end):
+            reason = 2
+            yy, mm, dd = exit_d.split("-")
+            lwd = f"{dd}/{mm}/{yy}"
+        else:
+            reason = 1
+    return days, wages, reason, lwd
 
 
 def _portal_month(month: Any) -> str:
@@ -528,32 +564,31 @@ def _esic_xls_bytes(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> by
     import xlwt
     wb = xlwt.Workbook()
     ws = wb.add_sheet("ESIC")
+    # Iter 456 (ESIC template instruction 10) — ALL columns must be in
+    # 'Text' format, values written as strings.
+    _txt = xlwt.easyxf(num_format_str="@")
     for col, h in enumerate(["ESI_CODE", "NAME", "DAYS", "SAL", "RE", "DATE"]):
         ws.write(0, col, h)
     rownum = 1
     for r in run.get("rows") or []:
-        ip_no = str((extra.get(r.get("user_id"), {}) or {}).get("esi_ip_no") or "").strip()
+        u = extra.get(r.get("user_id"), {}) or {}
+        ip_no = str(u.get("esi_ip_no") or "").strip()
         if not ip_no:
             continue
         present = float(r.get("present_days") or 0)
         _zero = present <= 0 or float(r.get("gross_paid") or 0) <= 0
         # Iter 453 (user format sheet) — members who LEFT / worked 0 days in
-        # the month are INCLUDED with DAYS 0 · SAL 0 · RE 1; members exempt
-        # from ESIC for any other reason stay out of the file.
+        # the month are INCLUDED; members exempt from ESIC for any other
+        # reason stay out of the file.
         if not r.get("esic_applicable") and not _zero:
             continue
-        days = int(math.floor(present + 0.5))
-        # Iter 453 (user format sheet) — SAL = GROSS EARNED for the month
-        # (exactly as the client's ESIC upload format), truncated to ₹.
-        wages = int(float(r.get("gross_paid") or 0))
-        if _zero or days <= 0:
-            days, wages = 0, 0
-        ws.write(rownum, 0, ip_no)
-        ws.write(rownum, 1, (r.get("name") or "").upper())
-        ws.write(rownum, 2, days)
-        ws.write(rownum, 3, wages)
-        ws.write(rownum, 4, 1 if days <= 0 else 0)
-        ws.write(rownum, 5, "")
+        days, wages, reason, lwd = _esic_row_vals(r, u, run.get("month"))
+        ws.write(rownum, 0, ip_no, _txt)
+        ws.write(rownum, 1, (r.get("name") or "").upper(), _txt)
+        ws.write(rownum, 2, str(days), _txt)
+        ws.write(rownum, 3, str(wages), _txt)
+        ws.write(rownum, 4, str(reason), _txt)
+        ws.write(rownum, 5, lwd, _txt)
         rownum += 1
     if rownum == 1:
         raise HTTPException(
@@ -840,22 +875,23 @@ async def download_esic_xlsx(
     warn_fill = PatternFill(start_color="FDE68A", end_color="FDE68A", fill_type="solid")
     n = 0
     for r in run.get("rows") or []:
-        ip_no = str((extra.get(r.get("user_id"), {}) or {}).get("esi_ip_no") or "").strip()
+        u = extra.get(r.get("user_id"), {}) or {}
+        ip_no = str(u.get("esi_ip_no") or "").strip()
         if skip_missing and not ip_no:
             continue
         present = float(r.get("present_days") or 0)
         _zero = present <= 0 or float(r.get("gross_paid") or 0) <= 0
-        # Iter 453 (user format sheet) — LEFT / zero-day members included
-        # with DAYS 0 · SAL 0 · RE 1; other ESIC-exempt members stay out.
+        # Iter 453 (user format sheet) — LEFT / zero-day members included;
+        # other ESIC-exempt members stay out.
         if not r.get("esic_applicable") and not _zero:
             continue
-        days = int(math.floor(present + 0.5))
-        # Iter 453 (user format sheet) — SAL = GROSS EARNED, truncated to ₹.
-        wages = int(float(r.get("gross_paid") or 0))
-        if _zero or days <= 0:
-            days, wages = 0, 0
+        # Iter 456 — template rules: DAYS rounded UP, SAL = gross earned,
+        # Reason 2 + Last Working Day for exited members, all cells TEXT.
+        days, wages, reason, lwd = _esic_row_vals(r, u, run.get("month"))
         ws.append([ip_no or "MISSING IP NO", (r.get("name") or "").upper(),
-                   days, wages, 1 if days <= 0 else 0, ""])
+                   str(days), str(wages), str(reason), lwd])
+        for c in ws[ws.max_row]:
+            c.number_format = "@"
         if not ip_no:
             for c in ws[ws.max_row]:
                 c.fill = warn_fill
