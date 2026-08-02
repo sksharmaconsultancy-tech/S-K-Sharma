@@ -181,7 +181,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/claims-management", label: "PF & ESIC Claims", icon: "folder-open-outline" },
       { route: "/statutory-reports", label: "PT / LWF / Gratuity / MIS", icon: "receipt-outline" },
       { route: "/clra-registers", label: "CLRA Registers (Form XII\u2013XV)", icon: "documents-outline" },
-      { route: "/challans", label: "PF / ESIC Challans", icon: "receipt-outline" },
+      { route: "/challans", label: "PF / ESIC Upload", icon: "receipt-outline" },
       { route: "/challan-summary", label: "Monthly Challan Summary", icon: "documents-outline" },
       { route: "/automation-studio", label: "Compliance Automation Studio", icon: "sparkles-outline" },
       { route: "/whatsapp-center?tab=dashboard", label: "Notification Center", icon: "logo-whatsapp" },

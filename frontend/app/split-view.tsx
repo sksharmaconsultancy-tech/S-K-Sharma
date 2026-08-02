@@ -22,7 +22,7 @@ const SCREEN_CHOICES: { route: string; label: string }[] = [
   { route: "/admin", label: "Employee Master" },
   { route: "/pf-reports?kind=pf", label: "PF Reports" },
   { route: "/pf-reports?kind=esic", label: "ESIC Reports" },
-  { route: "/challans", label: "PF / ESIC Challans" },
+  { route: "/challans", label: "PF / ESIC Upload" },
   { route: "/portal-dashboard", label: "Dashboard" },
 ];
 
