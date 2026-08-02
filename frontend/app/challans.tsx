@@ -481,11 +481,21 @@ export default function ChallansScreen() {
                   data-testid="portal-run-select"
                 >
                   {filteredRuns.length === 0 ? <option value="">No FINALIZED compliance run — finalize the month in Salary Process first</option> : null}
-                  {filteredRuns.map((r) => (
-                    <option key={r.run_id} value={r.run_id}>
-                      {r.month} · {r.employee_type || "All"} · {r.employees_count || 0} emp{r.finalized_at ? " ✓" : ""}
-                    </option>
-                  ))}
+                  {/* Iter 452 (user request) — show only the MONTH NAME of
+                      finalized runs (no employee count); the group is added
+                      only when the same month has multiple runs. */}
+                  {filteredRuns.map((r) => {
+                    const [yy, mm] = String(r.month || "").split("-");
+                    const mName = yy && mm
+                      ? `${["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][Number(mm) - 1]} ${yy}`
+                      : r.month;
+                    const dup = filteredRuns.filter((x) => x.month === r.month).length > 1;
+                    return (
+                      <option key={r.run_id} value={r.run_id}>
+                        {mName}{dup ? ` · ${r.employee_type || "All"}` : ""}{r.finalized_at ? " ✓" : ""}
+                      </option>
+                    );
+                  })}
                 </select>
               ) : null}
             </View>
