@@ -3587,3 +3587,24 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   21,000, ESI on max(Basic, 50% Gross)). Do NOT switch to "actual" and do
   NOT tell user to change it on VPS. The configurable option remains
   available but default/legacy is active.
+- Iter 452/453 (user requests, PF/ESIC Upload screen):
+  - Sidebar renamed "PF / ESIC Challans" → "PF / ESIC Upload" (AdminWebShell
+    + split-view).
+  - Run dropdown shows only MONTH NAME of finalized runs (e.g. "June 2026
+    ✓"), no employee count; group appended only when same month has
+    multiple runs.
+  - ECR filename = FIRMNAME_MMYYYY.txt (word chars, e.g.
+    KANKANIENTERPRISES_072026.txt) via challans._ecr_fname (db.companies
+    name); fallback ECR_MMYYYY.txt when run has no company. Frontend
+    download names use run.company_name (added to the runs LIST endpoint).
+  - ESIC upload format matched EXACTLY to user's "Format for Upload.xls":
+    columns ESI_CODE/NAME/DAYS/SAL/RE/DATE, SAL = GROSS EARNED truncated
+    to ₹ (REVERSES Iter 445 wage-base SAL per explicit user sample),
+    DAYS whole numbers, LEFT/zero-day members INCLUDED with DAYS 0 SAL 0
+    RE 1 (previously excluded because zero-pay rows have
+    esic_applicable=False). Applied to both esic.xls and esic.xlsx.
+  - ECR NCP whole numbers (Iter 451) retained.
+- Deploy Iter 453 (this session): /app/deploy_vps_iter453.sh created and
+  served via /api/temp-code-bundle?kind=script (temp_bundle.py updated).
+  Covers Iters 445-453 on top of the Iter 444 release. User given wget
+  instructions to run it on the VPS.

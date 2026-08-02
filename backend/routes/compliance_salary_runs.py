@@ -1662,6 +1662,17 @@ async def list_compliance_salary_runs(
             if uid and uid in name_by_uid:
                 r[name_key] = name_by_uid[uid]["name"]
                 r[role_key] = name_by_uid[uid]["role"]
+    # Iter 452 (user request) — firm name for download filenames
+    # ("FIRMNAME_MMYYYY.txt" on the PF/ESIC Upload screen).
+    _cids = {r.get("company_id") for r in runs if r.get("company_id")}
+    _cname: dict = {}
+    if _cids:
+        async for c in db.companies.find(
+            {"company_id": {"$in": list(_cids)}}, {"_id": 0, "company_id": 1, "name": 1},
+        ):
+            _cname[c["company_id"]] = c.get("name") or ""
+    for r in runs:
+        r["company_name"] = _cname.get(r.get("company_id"), "")
     return {"runs": runs}
 
 

@@ -273,15 +273,20 @@ export default function ChallansScreen() {
       const skipQ = skipMissing ? "&skip_missing=1" : "";
       const r = await apiBinary(`/admin/challans/${kind}?run_id=${encodeURIComponent(selRunId)}${skipQ}`);
       if (!r.webBlobUrl) throw new Error("Download failed");
-      const month = runs.find((x) => x.run_id === selRunId)?.month || "month";
+      const run = runs.find((x) => x.run_id === selRunId);
+      const month = run?.month || "month";
       // Iter 446 (user bug) — EPFO rejects filenames containing spaces or
       // non-word characters (the hyphen in "2026-07"): use MMYYYY instead.
       const mWord = /^\d{4}-\d{2}$/.test(month) ? `${month.slice(5, 7)}${month.slice(0, 4)}` : month.replace(/\W/g, "_");
+      // Iter 452 (user request) — file names carry the FIRM NAME + month
+      // so the ECR can be uploaded directly: e.g. KANKANIENTERPRISES_072026.txt
+      const firm = String((run as any)?.company_name || "").replace(/\W/g, "").toUpperCase();
+      const base = firm ? `${firm}_${mWord}` : mWord;
       const names: Record<string, string> = {
-        "ecr.txt": `ECR_${mWord}.txt`,
-        "ecr.xlsx": `ECR_${mWord}.xlsx`,
-        "esic.xls": `ESIC_MC_${mWord}.xls`,
-        "esic.xlsx": `ESIC_MC_${mWord}.xlsx`,
+        "ecr.txt": `${base}.txt`,
+        "ecr.xlsx": `ECR_${base}.xlsx`,
+        "esic.xls": `ESIC_MC_${base}.xls`,
+        "esic.xlsx": `ESIC_MC_${base}.xlsx`,
       };
       const a = document.createElement("a");
       a.href = r.webBlobUrl;

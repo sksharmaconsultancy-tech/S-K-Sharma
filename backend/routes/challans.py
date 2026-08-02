@@ -396,6 +396,17 @@ def _portal_month(month: Any) -> str:
     return _re.sub(r"\W", "_", m) or "month"
 
 
+async def _ecr_fname(run: dict) -> str:
+    """Iter 452 (user request) — ECR file named FIRMNAME_MMYYYY.txt (word
+    characters only) so it can be uploaded to EPFO directly."""
+    import re as _re
+    c = await db.companies.find_one(
+        {"company_id": run.get("company_id")}, {"_id": 0, "name": 1}) or {}
+    firm = _re.sub(r"\W", "", str(c.get("name") or "")).upper()
+    m = _portal_month(run.get("month"))
+    return f"{firm}_{m}.txt" if firm else f"ECR_{m}.txt"
+
+
 def _r0(v: Any) -> int:
     try:
         return int(round(float(v or 0)))
@@ -520,18 +531,22 @@ def _esic_xls_bytes(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> by
         ws.write(0, col, h)
     rownum = 1
     for r in run.get("rows") or []:
-        if not r.get("esic_applicable"):
-            continue
         ip_no = str((extra.get(r.get("user_id"), {}) or {}).get("esi_ip_no") or "").strip()
         if not ip_no:
             continue
         present = float(r.get("present_days") or 0)
-        days = int(present) if present.is_integer() else present
-        # Iter 445 (user request) — SAL column = the ESIC WAGE BASE (the
-        # amount ESIC was actually deducted on), never the Gross.
-        wages = _r0(r.get("esic_wage_base"))
-        if days <= 0:
-            wages = 0
+        _zero = present <= 0 or float(r.get("gross_paid") or 0) <= 0
+        # Iter 453 (user format sheet) — members who LEFT / worked 0 days in
+        # the month are INCLUDED with DAYS 0 · SAL 0 · RE 1; members exempt
+        # from ESIC for any other reason stay out of the file.
+        if not r.get("esic_applicable") and not _zero:
+            continue
+        days = int(math.floor(present + 0.5))
+        # Iter 453 (user format sheet) — SAL = GROSS EARNED for the month
+        # (exactly as the client's ESIC upload format), truncated to ₹.
+        wages = int(float(r.get("gross_paid") or 0))
+        if _zero or days <= 0:
+            days, wages = 0, 0
         ws.write(rownum, 0, ip_no)
         ws.write(rownum, 1, (r.get("name") or "").upper())
         ws.write(rownum, 2, days)
@@ -569,7 +584,7 @@ async def ecr_pre_upload_check(
     _skipped = 0
     if skip_missing:
         _skipped = len(_ecr_lines(run, extra, False)) - len(members)
-    fname = f"ECR_{_portal_month(run.get('month'))}.txt"
+    fname = await _ecr_fname(run)
     month_days = int(run.get("month_days") or 30)
 
     checks: List[Dict[str, Any]] = []
@@ -698,7 +713,7 @@ async def download_ecr_txt(
     run = await _load_run_for_portal(run_id, user)
     extra = await _uan_esic_map(run.get("rows") or [])
     content = _ecr_txt_bytes(run, extra, bool(skip_missing))
-    fname = f"ECR_{_portal_month(run.get('month'))}.txt"
+    fname = await _ecr_fname(run)
     return StreamingResponse(
         io.BytesIO(content),
         media_type="text/plain",
@@ -824,17 +839,20 @@ async def download_esic_xlsx(
     warn_fill = PatternFill(start_color="FDE68A", end_color="FDE68A", fill_type="solid")
     n = 0
     for r in run.get("rows") or []:
-        if not r.get("esic_applicable"):
-            continue
         ip_no = str((extra.get(r.get("user_id"), {}) or {}).get("esi_ip_no") or "").strip()
         if skip_missing and not ip_no:
             continue
         present = float(r.get("present_days") or 0)
-        days = int(present) if present.is_integer() else present
-        # Iter 445 (user request) — SAL = ESIC wage base, never the Gross.
-        wages = _r0(r.get("esic_wage_base"))
-        if days <= 0:
-            wages = 0
+        _zero = present <= 0 or float(r.get("gross_paid") or 0) <= 0
+        # Iter 453 (user format sheet) — LEFT / zero-day members included
+        # with DAYS 0 · SAL 0 · RE 1; other ESIC-exempt members stay out.
+        if not r.get("esic_applicable") and not _zero:
+            continue
+        days = int(math.floor(present + 0.5))
+        # Iter 453 (user format sheet) — SAL = GROSS EARNED, truncated to ₹.
+        wages = int(float(r.get("gross_paid") or 0))
+        if _zero or days <= 0:
+            days, wages = 0, 0
         ws.append([ip_no or "MISSING IP NO", (r.get("name") or "").upper(),
                    days, wages, 1 if days <= 0 else 0, ""])
         if not ip_no:
@@ -1034,7 +1052,7 @@ async def create_portal_upload_job(
     month = run.get("month") or "month"
     if portal == "epfo":
         content = _ecr_txt_bytes(run, extra)
-        file_name = f"ECR_{_portal_month(month)}.txt"
+        file_name = await _ecr_fname(run)
     else:
         content = _esic_xls_bytes(run, extra)
         file_name = f"ESIC_MC_{_portal_month(month)}.xls"
