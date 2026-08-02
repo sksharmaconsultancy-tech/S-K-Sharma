@@ -18,6 +18,7 @@ Challan doc shape:
 """
 import base64
 import io
+import math
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -458,8 +459,9 @@ def _ecr_lines(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]],
         # EE share: never below the due (VPF members legitimately remit more).
         epf_ee = max(_r0(r.get("pf_employee")), due_epf)
         present = float(r.get("present_days") or 0)
-        ncp = max(0, round(month_days - present, 1))
-        ncp = int(ncp) if float(ncp).is_integer() else ncp
+        # Iter 451 (user request) — NCP DAYS always a WHOLE NUMBER in the
+        # ECR file (EPFO rejects decimals): rounded half-up (0.5 → 1).
+        ncp = int(max(0, math.floor((month_days - present) + 0.5)))
         out.append({
             "uan": uan,
             "name": (r.get("name") or "").upper(),

@@ -3579,3 +3579,6 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   user expectations; harness reminder: pass compliance_basic +
   compliance_salary_allowances (NOT salary_structure_compliance) for
   correct proration in ad-hoc engine demos.
+- Iter 451 (user request): ECR .txt NCP DAYS always WHOLE numbers (rounded
+  half-up, 0.5 → 1) in challans.py _ecr_lines (statutory_bulk/master_sheet
+  already integer). Verified 55-member file: 0 decimal NCPs.
