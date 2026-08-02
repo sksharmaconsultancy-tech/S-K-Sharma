@@ -34,6 +34,7 @@ _HEADS = [
     ("ot", "Overtime", "earn", True),
     ("incentive", "Incentive", "earn", True),
     ("arrear", "Arrear", "earn", True),
+    ("bonus", "Bonus Amount", "earn", True),
     ("gross", "Gross Salary", "total", False),
     ("pf_ee", "Employee PF", "ded", False),
     ("esic_ee", "Employee ESIC", "ded", False),
@@ -77,7 +78,7 @@ def _month_vals(r: dict) -> Dict[str, float]:
     special = _f(r.get("special"))
     other_allow = _f(r.get("medical")) + _f(r.get("others"))
     # dynamic per-head allowances list (legacy-import structures)
-    da = incentive = arrear = 0.0
+    da = incentive = arrear = bonus = 0.0
     for a in r.get("allowances") or []:
         h = str(a.get("head") or "").lower()
         amt = _f(a.get("amount"))
@@ -87,6 +88,10 @@ def _month_vals(r: dict) -> Dict[str, float]:
             incentive += amt
         elif "arrear" in h:
             arrear += amt
+        elif "bonus" in h:
+            bonus += amt
+    # Iter 433 (user request) — Bonus Amount column in the register.
+    bonus += _f(r.get("bonus")) + _f(r.get("bonus_amount"))
     ot = _f(r.get("ot_pay"))
     gross = _f(r.get("gross_paid")) or _f(r.get("monthly_gross"))
     # Freeze-salary difference allocation: gross_paid may exceed the head-wise
@@ -94,7 +99,7 @@ def _month_vals(r: dict) -> Dict[str, float]:
     # settings). Absorb that residual into Other Allowance so the register
     # balances; unexplained residuals (no import markers) stay flagged.
     comp_sum = basic + da + hra + conv + special + other_allow + ot + \
-        incentive + arrear
+        incentive + arrear + bonus
     residual = round(gross - comp_sum, 2)
     if abs(residual) > 2 and ("imported_gross" in r or "difference" in r):
         other_allow = round(other_allow + residual, 2)
@@ -115,7 +120,7 @@ def _month_vals(r: dict) -> Dict[str, float]:
         "days": _f(r.get("present_days")), "basic": basic, "da": da,
         "hra": hra, "conveyance": conv, "special": special,
         "other_allow": other_allow, "ot": ot, "incentive": incentive,
-        "arrear": arrear, "gross": gross, "pf_ee": pf_ee,
+        "arrear": arrear, "bonus": bonus, "gross": gross, "pf_ee": pf_ee,
         "esic_ee": esic_ee, "pt": pt, "lwf": lwf, "tds": tds,
         "advance": advance, "loan": loan, "other_ded": other_ded,
         "total_ded": total_ded, "net": net, "pf_er": pf_er,
@@ -138,7 +143,7 @@ def _validate(r: dict, v: Dict[str, float]) -> List[str]:
         flags.append("negative_net")
     earn_sum = round(sum(v[k] for k in (
         "basic", "da", "hra", "conveyance", "special", "other_allow",
-        "ot", "incentive", "arrear")), 2)
+        "ot", "incentive", "arrear", "bonus")), 2)
     if abs(earn_sum - v["gross"]) > 2:
         flags.append("gross_mismatch")
     if v["gross"] > 0 and v["days"] <= 0:
@@ -443,6 +448,7 @@ def _build_xlsx(data: Dict[str, Any]) -> BytesIO:
     pairs = [("Total Employees", data["total_employees"]),
              ("Total Days", g["days"]), ("Total Basic", g["basic"]),
              ("Total Gross", g["gross"]), ("Total Overtime", g["ot"]),
+             ("Total Bonus", g["bonus"]),
              ("Total PF", g["pf_ee"]), ("Total ESIC", g["esic_ee"]),
              ("Total PT", g["pt"]), ("Total LWF", g["lwf"]),
              ("Total TDS", g["tds"]), ("Total Advance", g["advance"]),
@@ -571,6 +577,7 @@ def _build_pdf(data: Dict[str, Any]) -> BytesIO:
     pairs = [("Total Employees", data["total_employees"]),
              ("Total Days", g["days"]), ("Total Basic", g["basic"]),
              ("Total Gross", g["gross"]), ("Total Overtime", g["ot"]),
+             ("Total Bonus", g["bonus"]),
              ("Total PF", g["pf_ee"]), ("Total ESIC", g["esic_ee"]),
              ("Total PT", g["pt"]), ("Total LWF", g["lwf"]),
              ("Total TDS", g["tds"]), ("Total Advance", g["advance"]),

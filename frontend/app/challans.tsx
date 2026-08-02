@@ -181,6 +181,9 @@ export default function ChallansScreen() {
   const [runs, setRuns] = useState<RunLite[]>([]);
   const [selRunId, setSelRunId] = useState<string>("");
   const [dlPortal, setDlPortal] = useState<string | null>(null);
+  // Iter 436 (user request) — one-tap toggle: remove employees WITHOUT a
+  // UAN / ESIC number from the generated portal upload files.
+  const [skipMissing, setSkipMissing] = useState(false);
   const [runMonth, setRunMonth] = useState<string>("all");
   const [runGroup, setRunGroup] = useState<string>("all");
 
@@ -267,7 +270,8 @@ export default function ChallansScreen() {
     if (!selRunId) { window.alert("Run a Compliance Salary first, then pick the run here."); return; }
     setDlPortal(kind);
     try {
-      const r = await apiBinary(`/admin/challans/${kind}?run_id=${encodeURIComponent(selRunId)}`);
+      const skipQ = skipMissing ? "&skip_missing=1" : "";
+      const r = await apiBinary(`/admin/challans/${kind}?run_id=${encodeURIComponent(selRunId)}${skipQ}`);
       if (!r.webBlobUrl) throw new Error("Download failed");
       const month = runs.find((x) => x.run_id === selRunId)?.month || "month";
       const names: Record<string, string> = {
@@ -413,9 +417,10 @@ export default function ChallansScreen() {
           <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary, marginBottom: 6 }}>
             Generated from a saved Compliance Salary run. EPFO .txt is the exact
             6-field contribution file (UAN#~#NAME#~#EE#~#EPS#~#ER#~#REFUND); ESIC .xls
-            matches your portal sheet (ESI_CODE, NAME, DAYS, SAL, RE, DATE). Employees
-            missing UAN / ESIC number are skipped in portal files and highlighted in the
-            check Excels.
+            matches your portal sheet (ESI_CODE, NAME, DAYS, SAL, RE, DATE). Tick
+            &quot;Remove Without UAN / ESIC No. Employees&quot; to drop members missing a
+            UAN / ESIC number from the files (otherwise they appear blank /
+            highlighted in the check Excels).
           </Text>
           <View style={{ flexDirection: "row", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
             <View style={{ minWidth: 110 }}>
@@ -467,6 +472,27 @@ export default function ChallansScreen() {
                 </select>
               ) : null}
             </View>
+            <Pressable
+              onPress={() => setSkipMissing((v) => !v)}
+              style={[
+                styles.uploadBtn,
+                {
+                  backgroundColor: skipMissing ? "#7C2D12" : "#F3F4F6",
+                  borderWidth: 1,
+                  borderColor: skipMissing ? "#7C2D12" : "#D6DEE4",
+                },
+              ]}
+              testID="toggle-skip-missing"
+            >
+              <Ionicons
+                name={skipMissing ? "checkbox" : "square-outline"}
+                size={14}
+                color={skipMissing ? "#FFF" : "#334155"}
+              />
+              <Text style={[styles.uploadBtnTxt, !skipMissing && { color: "#334155" }]}>
+                Remove Without UAN / ESIC No. Employees
+              </Text>
+            </Pressable>
             <Pressable
               onPress={() => downloadPortalFile("ecr.txt")}
               disabled={!!dlPortal}

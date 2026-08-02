@@ -3364,3 +3364,40 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   pf_contribution_type absent from payload; explicit type in payload always
   respected (employer can change later, engine follows saved values). E2E
   verified + employee restored.
+- Iter 433 (user request — 11-POINT PAYROLL REPORT CORRECTIONS):
+  1. Arrear Register export (PDF NEW + Excel rebuilt via shared register
+     builder): S.No | UAN | ESIC | Emp Name | Father Name | Days | Rate |
+     Gross Arrear | dynamic PF/ESIC deduction cols | Net Payable
+     (routes/arrear_salary.py `_arrear_register_data`).
+  2. CTC Analysis: S.No column.
+  3. Fine Register: Month-wise/Periodic (`month_to` param, aggregates
+     months) + centred empty note "There is No Fine in this Month of
+     (Month Year)" (JSON `empty_note` + PDF via register_pdf empty_note).
+  4/5/6. F&F, Gratuity Register, OT Cost Analysis: `employee_ids` param
+     (single/multiple/all picker chips in reports-center.tsx); picked
+     employees included even without exit-date/DOJ.
+  7. Daily OT Register: Daily/Periodic date range (`from_date`/`to_date`),
+     Month-wise removed in UI, S.No added.
+  8. Dept-wise OT: REWRITTEN punch-based over date range — dept-wise
+     employee count, OT employee names list, S.No, Daily/Periodic.
+  9. Employee-wise Payroll Register: Bonus Amount head (optional earn,
+     parsed from allowances "bonus" + r.bonus), in earn_sum + grand totals.
+  10. PF Contribution PDF: margins 8→4mm, centred headings, font 7.
+  11. Salary Register Compliance: v1 margins 5→3mm, v2 6→4mm (scale
+     widths updated). Master head-wise cols already dynamic.
+  Global: register_export body font 9→10pt; title leading fixed (no
+  overlap); duplicate "TOTAL" label in totals row fixed.
+  All verified: backend/tests/check_report_corrections.py (18/18 PASS) +
+  PDF renders + Report Hub UI screenshot.
+- Iter 435 (user request — ROLLBACK): Employee Name LEFT-aligned in ALL
+  reports (register_export PDF+xlsx, compliance register v1/v2, actual
+  salary register, salary_register_pdf, PF contribution, labour reports,
+  daily verification). NOTE: user first asked right-align then reversed —
+  Name columns must stay LEFT.
+- Iter 436 (user request): Portal Upload Files (EPFO ECR / ESIC MC) —
+  new toggle button "Remove Without UAN / ESIC No. Employees"
+  (challans.tsx `toggle-skip-missing`) → `skip_missing=1` on
+  /admin/challans/ecr.txt, ecr.xlsx, esic.xlsx (esic.xls always skips
+  missing IP). Default unchanged (blank UAN included in .txt per Iter 291).
+- Deploy script: /app/deploy_vps_iter435.sh (served via
+  /api/temp-code-bundle?token=sks-deploy-7391&kind=script).

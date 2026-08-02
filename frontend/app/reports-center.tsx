@@ -56,6 +56,18 @@ const FY_KINDS = new Set([
   "full-and-final",
   "ot-cost-analysis",
 ]);
+// Iter 433 (user request) — employee picker (single/multiple/all)
+const EMP_KINDS = new Set([
+  "full-and-final",
+  "ot-cost-analysis",
+  "gratuity-register",
+]);
+// Iter 433 (user request) — Daily / Periodic (date range) instead of month
+const DATE_KINDS = new Set(["ot-daily", "ot-department"]);
+// Iter 433 (user request) — Month wise / Periodic month range
+const MONTH_RANGE_KINDS = new Set(["fine-register"]);
+
+type EmpLite = { user_id: string; name?: string; employee_code?: string };
 
 export default function ReportsCenterScreen() {
   const router = useRouter();
@@ -67,6 +79,17 @@ export default function ReportsCenterScreen() {
     new Date().toISOString().slice(0, 7),
   );
   const [monthB, setMonthB] = useState("");
+  const [monthTo, setMonthTo] = useState(""); // fine-register periodic
+  const [fineMode, setFineMode] = useState<"month" | "periodic">("month");
+  const [otMode, setOtMode] = useState<"daily" | "periodic">("daily");
+  const [dateFrom, setDateFrom] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  );
+  const [dateTo, setDateTo] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  );
+  const [emps, setEmps] = useState<EmpLite[]>([]);
+  const [selEmps, setSelEmps] = useState<string[]>([]);
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
 
@@ -107,20 +130,60 @@ export default function ReportsCenterScreen() {
     return Number(month.slice(5, 7)) >= 4 ? y : y - 1;
   }, [month]);
 
+  // Iter 433 — employee list for the single/multiple/all picker
+  useEffect(() => {
+    if (!companyId) return;
+    (async () => {
+      try {
+        const r = await api<{ employees: EmpLite[] }>(
+          `/admin/employees?company_id=${companyId}`,
+        );
+        setEmps(r.employees || []);
+      } catch {
+        setEmps([]);
+      }
+    })();
+    setSelEmps([]);
+  }, [companyId]);
+
   const qs = useCallback(() => {
     if (!sel) return "";
     const p = new URLSearchParams();
     if (sel.group !== "audit") p.append("company_id", companyId || "");
     if (sel.group === "audit") p.append("limit", "200");
-    else if (FY_KINDS.has(sel.kind))
+    else if (DATE_KINDS.has(sel.kind)) {
+      p.append("month", month);
+      p.append("from_date", dateFrom);
+      p.append("to_date", otMode === "daily" ? dateFrom : dateTo);
+    } else if (FY_KINDS.has(sel.kind)) {
       p.append("fy_start_year", String(fy));
-    else {
+    } else {
       p.append("month", month);
       if (sel.kind === "salary-comparison" && monthB)
         p.append("month_b", monthB);
+      if (
+        MONTH_RANGE_KINDS.has(sel.kind) &&
+        fineMode === "periodic" &&
+        /^\d{4}-\d{2}$/.test(monthTo)
+      )
+        p.append("month_to", monthTo);
     }
+    if (EMP_KINDS.has(sel.kind) && selEmps.length)
+      p.append("employee_ids", selEmps.join(","));
     return p.toString();
-  }, [sel, companyId, month, monthB, fy]);
+  }, [
+    sel,
+    companyId,
+    month,
+    monthB,
+    monthTo,
+    fineMode,
+    otMode,
+    dateFrom,
+    dateTo,
+    selEmps,
+    fy,
+  ]);
 
   const load = useCallback(async () => {
     if (!sel || (!companyId && sel.group !== "audit")) return;
@@ -217,33 +280,166 @@ export default function ReportsCenterScreen() {
           </View>
         </View>
 
-        {sel && sel.group !== "audit" && (
-          <View style={[shared.row, { marginBottom: 10 }]}>
-            <Text style={shared.meta}>
-              {FY_KINDS.has(sel.kind)
-                ? `FY ${fy}-${String(fy + 1).slice(-2)} (from month)`
-                : "Month"}
-              :
-            </Text>
-            <TextInput
-              style={shared.input}
-              value={month}
-              onChangeText={setMonth}
-              placeholder="YYYY-MM"
-              testID="rc-month"
-            />
-            {sel.kind === "salary-comparison" && (
-              <>
-                <Text style={shared.meta}>Compare with:</Text>
-                <TextInput
-                  style={shared.input}
-                  value={monthB}
-                  onChangeText={setMonthB}
-                  placeholder="prev month (auto)"
-                  testID="rc-month-b"
-                />
-              </>
+        {sel && sel.group !== "audit" && DATE_KINDS.has(sel.kind) && (
+          <View style={{ marginBottom: 10 }}>
+            <View style={[shared.row, { marginBottom: 6 }]}>
+              {(["daily", "periodic"] as const).map((m) => (
+                <Pressable
+                  key={m}
+                  onPress={() => setOtMode(m)}
+                  style={[shared.tab, otMode === m && shared.tabActive]}
+                  testID={`rc-otmode-${m}`}
+                >
+                  <Text
+                    style={[
+                      shared.tabTxt,
+                      otMode === m && shared.tabTxtActive,
+                    ]}
+                  >
+                    {m === "daily" ? "Daily" : "Periodic"}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <View style={shared.row}>
+              <Text style={shared.meta}>
+                {otMode === "daily" ? "Date:" : "From:"}
+              </Text>
+              <TextInput
+                style={shared.input}
+                value={dateFrom}
+                onChangeText={setDateFrom}
+                placeholder="YYYY-MM-DD"
+                testID="rc-date-from"
+              />
+              {otMode === "periodic" && (
+                <>
+                  <Text style={shared.meta}>To:</Text>
+                  <TextInput
+                    style={shared.input}
+                    value={dateTo}
+                    onChangeText={setDateTo}
+                    placeholder="YYYY-MM-DD"
+                    testID="rc-date-to"
+                  />
+                </>
+              )}
+            </View>
+          </View>
+        )}
+
+        {sel && sel.group !== "audit" && !DATE_KINDS.has(sel.kind) && (
+          <View style={{ marginBottom: 10 }}>
+            {MONTH_RANGE_KINDS.has(sel.kind) && (
+              <View style={[shared.row, { marginBottom: 6 }]}>
+                {(["month", "periodic"] as const).map((m) => (
+                  <Pressable
+                    key={m}
+                    onPress={() => setFineMode(m)}
+                    style={[shared.tab, fineMode === m && shared.tabActive]}
+                    testID={`rc-finemode-${m}`}
+                  >
+                    <Text
+                      style={[
+                        shared.tabTxt,
+                        fineMode === m && shared.tabTxtActive,
+                      ]}
+                    >
+                      {m === "month" ? "Month wise" : "Periodic"}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
             )}
+            <View style={shared.row}>
+              <Text style={shared.meta}>
+                {FY_KINDS.has(sel.kind)
+                  ? `FY ${fy}-${String(fy + 1).slice(-2)} (from month)`
+                  : MONTH_RANGE_KINDS.has(sel.kind) &&
+                      fineMode === "periodic"
+                    ? "From Month"
+                    : "Month"}
+                :
+              </Text>
+              <TextInput
+                style={shared.input}
+                value={month}
+                onChangeText={setMonth}
+                placeholder="YYYY-MM"
+                testID="rc-month"
+              />
+              {MONTH_RANGE_KINDS.has(sel.kind) && fineMode === "periodic" && (
+                <>
+                  <Text style={shared.meta}>To Month:</Text>
+                  <TextInput
+                    style={shared.input}
+                    value={monthTo}
+                    onChangeText={setMonthTo}
+                    placeholder="YYYY-MM"
+                    testID="rc-month-to"
+                  />
+                </>
+              )}
+              {sel.kind === "salary-comparison" && (
+                <>
+                  <Text style={shared.meta}>Compare with:</Text>
+                  <TextInput
+                    style={shared.input}
+                    value={monthB}
+                    onChangeText={setMonthB}
+                    placeholder="prev month (auto)"
+                    testID="rc-month-b"
+                  />
+                </>
+              )}
+            </View>
+          </View>
+        )}
+
+        {sel && EMP_KINDS.has(sel.kind) && (
+          <View style={{ marginBottom: 10 }}>
+            <Text style={[shared.meta, { marginBottom: 6 }]}>
+              Employees ({selEmps.length ? `${selEmps.length} selected` : "All"}
+              ):
+            </Text>
+            <View style={shared.tabs}>
+              <Pressable
+                onPress={() => setSelEmps([])}
+                style={[shared.tab, !selEmps.length && shared.tabActive]}
+                testID="rc-emp-all"
+              >
+                <Text
+                  style={[
+                    shared.tabTxt,
+                    !selEmps.length && shared.tabTxtActive,
+                  ]}
+                >
+                  All Employees
+                </Text>
+              </Pressable>
+              {emps.map((e) => {
+                const on = selEmps.includes(e.user_id);
+                return (
+                  <Pressable
+                    key={e.user_id}
+                    onPress={() =>
+                      setSelEmps((prev) =>
+                        on
+                          ? prev.filter((x) => x !== e.user_id)
+                          : [...prev, e.user_id],
+                      )
+                    }
+                    style={[shared.tab, on && shared.tabActive]}
+                    testID={`rc-emp-${e.user_id}`}
+                  >
+                    <Text style={[shared.tabTxt, on && shared.tabTxtActive]}>
+                      {e.employee_code ? `${e.employee_code} · ` : ""}
+                      {e.name || e.user_id}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
         )}
 
@@ -254,11 +450,26 @@ export default function ReportsCenterScreen() {
               {data.title}
               {data.subtitle ? ` — ${data.subtitle}` : ""}
             </Text>
-            <RegisterTable
-              columns={data.columns}
-              rows={data.rows}
-              totals={data.totals}
-            />
+            {!data.rows?.length && data.empty_note ? (
+              <Text
+                style={{
+                  textAlign: "center",
+                  paddingVertical: 32,
+                  fontSize: 15,
+                  fontWeight: "700",
+                  color: colors.onSurfaceSecondary,
+                }}
+                testID="rc-empty-note"
+              >
+                {data.empty_note}
+              </Text>
+            ) : (
+              <RegisterTable
+                columns={data.columns}
+                rows={data.rows}
+                totals={data.totals}
+              />
+            )}
           </View>
         )}
       </ScrollView>

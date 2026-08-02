@@ -127,20 +127,22 @@ export default function ArrearSalaryRunScreen() {
     } catch (e: any) { showMsg(e?.message || "Could not open run"); }
   };
 
-  const download = async (kind: "ecr" | "xlsx") => {
+  const download = async (kind: "ecr" | "xlsx" | "pdf") => {
     if (!run || downloading) return;
     setDownloading(true);
     try {
-      const path = kind === "ecr"
-        ? `/admin/arrear-salary-runs/${run.run_id}/ecr.txt`
-        : `/admin/arrear-salary-runs/${run.run_id}/export.xlsx`;
+      const path =
+        kind === "ecr"
+          ? `/admin/arrear-salary-runs/${run.run_id}/ecr.txt`
+          : `/admin/arrear-salary-runs/${run.run_id}/export.${kind}`;
       const f = await apiBinary(path);
       if (Platform.OS === "web" && f.webBlobUrl) {
         const a = document.createElement("a");
         a.href = f.webBlobUrl;
-        a.download = kind === "ecr"
-          ? `arrear_ecr_${run.from_month}_${run.to_month}.txt`
-          : `arrear_register_${run.from_month}_${run.to_month}.xlsx`;
+        a.download =
+          kind === "ecr"
+            ? `arrear_ecr_${run.from_month}_${run.to_month}.txt`
+            : `arrear_register_${run.from_month}_${run.to_month}.${kind}`;
         a.click();
       } else {
         showMsg("Download is available on the web portal.");
@@ -254,6 +256,10 @@ export default function ArrearSalaryRunScreen() {
                   {run.months_skipped?.length ? `  ·  Skipped (no run): ${run.months_skipped.join(", ")}` : ""}
                 </Text>
               </View>
+              <Pressable style={styles.secondaryBtn} onPress={() => download("pdf")} disabled={downloading} testID="arrear-dl-pdf">
+                <Ionicons name="print-outline" size={14} color={colors.brandPrimary} />
+                <Text style={styles.secondaryBtnTxt}>PDF Register</Text>
+              </Pressable>
               <Pressable style={styles.secondaryBtn} onPress={() => download("xlsx")} disabled={downloading} testID="arrear-dl-xlsx">
                 <Ionicons name="grid-outline" size={14} color={colors.brandPrimary} />
                 <Text style={styles.secondaryBtnTxt}>Excel Register</Text>

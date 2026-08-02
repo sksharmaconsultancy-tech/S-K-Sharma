@@ -245,11 +245,14 @@ async def pf_contribution_pdf(
     from reportlab.platypus import (Paragraph, SimpleDocTemplate, Spacer,
                                     Table, TableStyle)
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=8 * mm,
-                            rightMargin=8 * mm, topMargin=8 * mm,
+    # Iter 433 (user request) — tighter L/R page margins + CENTRED headings.
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=4 * mm,
+                            rightMargin=4 * mm, topMargin=8 * mm,
                             bottomMargin=8 * mm)
-    h1 = ParagraphStyle("h1", fontName="Helvetica-Bold", fontSize=11)
-    h2 = ParagraphStyle("h2", fontName="Helvetica", fontSize=8)
+    h1 = ParagraphStyle("h1", fontName="Helvetica-Bold", fontSize=12,
+                        alignment=1)
+    h2 = ParagraphStyle("h2", fontName="Helvetica", fontSize=8.5,
+                        alignment=1)
     s = data["summary"]
     flow = [
         Paragraph(f"{data['company_name']} — PF Contribution Report "
@@ -276,9 +279,12 @@ async def pf_contribution_pdf(
         ("TEXTCOLOR", (0, 0), (-1, 0), rl.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 6.2),
+        ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
         ("GRID", (0, 0), (-1, -1), 0.4, rl.HexColor("#CBD5E1")),
         ("ALIGN", (6, 1), (-1, -1), "RIGHT"),
+        # Iter 435 (user request) — Name column LEFT-aligned.
+        ("ALIGN", (1, 1), (1, -1), "LEFT"),
         ("ROWBACKGROUNDS", (0, 1), (-1, -2), [rl.white, rl.HexColor("#F8FAFC")]),
         ("BACKGROUND", (0, -1), (-1, -1), rl.HexColor("#DDEBF7")),
     ]))

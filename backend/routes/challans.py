@@ -391,8 +391,12 @@ def _r0(v: Any) -> int:
         return 0
 
 
-def _ecr_lines(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """One dict per PF member with all ECR 2.0 columns computed."""
+def _ecr_lines(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]],
+               skip_missing: bool = False) -> List[Dict[str, Any]]:
+    """One dict per PF member with all ECR 2.0 columns computed.
+
+    Iter 436 (user request) — ``skip_missing=True`` drops members WITHOUT
+    a UAN from the file entirely."""
     month_days = int(run.get("month_days") or 30)
     eps_cap = 15000
     out: List[Dict[str, Any]] = []
@@ -400,6 +404,8 @@ def _ecr_lines(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> List[Di
         if not r.get("pf_applicable"):
             continue
         uan = str((extra.get(r.get("user_id"), {}) or {}).get("uan_no") or "").strip()
+        if skip_missing and not uan:
+            continue
         gross = _r0(r.get("gross_paid"))
         epf_wages = _r0(r.get("pf_wages"))
         eps_wages = min(epf_wages, eps_cap)
@@ -427,7 +433,8 @@ def _ecr_lines(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> List[Di
     return out
 
 
-def _ecr_txt_bytes(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> bytes:
+def _ecr_txt_bytes(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]],
+                   skip_missing: bool = False) -> bytes:
     """EPFO ECR 2.0 upload text file — the OFFICIAL 11-field #~# format the
     unified portal accepts directly (Iter 291, user request):
 
@@ -437,12 +444,14 @@ def _ecr_txt_bytes(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> byt
     Members WITH a UAN are written normally; PF members WITHOUT a UAN yet
     (new joiners) are still included with a BLANK UAN field so EPFO can
     assign one on upload (per user request). Only raises 400 if there are
-    no PF-applicable members at all."""
-    members = _ecr_lines(run, extra)
+    no PF-applicable members at all. Iter 436 — ``skip_missing=True``
+    excludes the blank-UAN members instead."""
+    members = _ecr_lines(run, extra, skip_missing)
     if not members:
         raise HTTPException(
             status_code=400,
-            detail="No PF-applicable members in this run.",
+            detail="No PF-applicable members in this run."
+            + (" (all are missing UAN)" if skip_missing else ""),
         )
     lines = [
         "#~#".join(str(x) for x in (
@@ -495,17 +504,19 @@ def _esic_xls_bytes(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> by
 @router.get("/challans/ecr.txt")
 async def download_ecr_txt(
     run_id: str,
+    skip_missing: int = 0,
     authorization: Optional[str] = Header(None),
 ):
     """EPFO Contribution file (.txt) — EXACT 6-field format from the EPFO
     portal's CONTRIBUTION_HELP_FILE:
     ``UAN#~#MEMBER NAME#~#EPF EE CONTRI#~#EPS ER CONTRI#~#EPF ER CONTRI#~#REFUND``
     e.g. ``123467198618#~#VIRAT SHARMA#~#300#~#100#~#50#~#0``.
-    Members without a UAN in the Employee Master are SKIPPED."""
+    Iter 436 (user request) — ``skip_missing=1`` removes members WITHOUT a
+    UAN from the file."""
     user = await _assert_admin(authorization)
     run = await _load_run_for_portal(run_id, user)
     extra = await _uan_esic_map(run.get("rows") or [])
-    content = _ecr_txt_bytes(run, extra)
+    content = _ecr_txt_bytes(run, extra, bool(skip_missing))
     fname = f"ECR_{run.get('month') or 'month'}.txt"
     return StreamingResponse(
         io.BytesIO(content),
@@ -517,14 +528,16 @@ async def download_ecr_txt(
 @router.get("/challans/ecr.xlsx")
 async def download_ecr_xlsx(
     run_id: str,
+    skip_missing: int = 0,
     authorization: Optional[str] = Header(None),
 ):
     """The ECR member data as Excel — for checking before uploading the
-    .txt on the EPFO portal (includes members missing UAN, highlighted)."""
+    .txt on the EPFO portal (includes members missing UAN, highlighted;
+    Iter 436 — ``skip_missing=1`` removes them instead)."""
     user = await _assert_admin(authorization)
     run = await _load_run_for_portal(run_id, user)
     extra = await _uan_esic_map(run.get("rows") or [])
-    members = _ecr_lines(run, extra)
+    members = _ecr_lines(run, extra, bool(skip_missing))
     try:
         from openpyxl import Workbook
         from openpyxl.styles import Font, PatternFill
@@ -581,13 +594,14 @@ async def download_ecr_xlsx(
 @router.get("/challans/esic.xls")
 async def download_esic_xls(
     run_id: str,
+    skip_missing: int = 0,
     authorization: Optional[str] = Header(None),
 ):
     """ESIC monthly-contribution upload sheet (.xls) — EXACT format from the
     firm's sample file: columns ``ESI_CODE, NAME, DAYS, SAL, RE, DATE``.
     RE = 1 for zero working days (else 0); DATE = last working day, blank
-    unless the employee exited. Members without an ESIC number are SKIPPED
-    (use /challans/esic-check.xlsx to review them)."""
+    unless the employee exited. Members without an ESIC number are ALWAYS
+    skipped in this portal file (use the Check Excel to review them)."""
     user = await _assert_admin(authorization)
     run = await _load_run_for_portal(run_id, user)
     extra = await _uan_esic_map(run.get("rows") or [])
@@ -603,11 +617,13 @@ async def download_esic_xls(
 @router.get("/challans/esic.xlsx")
 async def download_esic_xlsx(
     run_id: str,
+    skip_missing: int = 0,
     authorization: Optional[str] = Header(None),
 ):
     """ESIC review Excel (same ESI_CODE/NAME/DAYS/SAL/RE/DATE columns) —
     INCLUDES employees missing an ESIC number (highlighted) so the admin can
-    fix the Employee Master before generating the portal .xls."""
+    fix the Employee Master before generating the portal .xls.
+    Iter 436 (user request) — ``skip_missing=1`` removes them instead."""
     user = await _assert_admin(authorization)
     run = await _load_run_for_portal(run_id, user)
     extra = await _uan_esic_map(run.get("rows") or [])
@@ -630,6 +646,8 @@ async def download_esic_xlsx(
         if not r.get("esic_applicable"):
             continue
         ip_no = str((extra.get(r.get("user_id"), {}) or {}).get("esi_ip_no") or "").strip()
+        if skip_missing and not ip_no:
+            continue
         present = float(r.get("present_days") or 0)
         days = int(present) if present.is_integer() else present
         wages = _r0(r.get("esic_wage_base") or r.get("gross_paid"))

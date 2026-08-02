@@ -623,6 +623,8 @@ def _build_pdf(data: dict, orientation: str = "landscape") -> bytes:
         ("FONTSIZE", (0, 0), (-1, -1), fs),
         ("GRID", (0, 0), (-1, -1), 0.4, rl.HexColor("#94A3B8")),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        # Iter 435 (user request) — Employee Name column LEFT-aligned.
+        ("ALIGN", (2, 1), (2, -1), "LEFT"),
     ]
     for i, r in enumerate(data["rows"], start=1):
         tdata.append([str(v) for v in _row_values(i, r)])

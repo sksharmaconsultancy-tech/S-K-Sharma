@@ -921,6 +921,7 @@ def _pdf_bytes(comp: str, source: str, month: str,
             ci = j + 1
         for idx, c in enumerate(columns, 1):
             if c["type"] == "text":
+                # Iter 435 (user request) — text incl. Name LEFT-aligned.
                 style.append(("ALIGN", (idx, 1), (idx, -1), "LEFT"))
         tbl.setStyle(TableStyle(style))
         return tbl

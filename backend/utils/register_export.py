@@ -43,8 +43,11 @@ def register_xlsx(title: str, subtitle: str, columns: List[Dict[str, str]],
                 cell.alignment = Alignment(horizontal="right")
         r += 1
     if totals:
+        _has_lbl = any(str(v).strip().upper() == "TOTAL"
+                       for v in totals.values())
         for j, c in enumerate(columns, 1):
-            v = totals.get(c["key"], "TOTAL" if j == 1 else None)
+            v = totals.get(c["key"],
+                           "TOTAL" if j == 1 and not _has_lbl else None)
             cell = ws.cell(r, j, v)
             cell.font = Font(bold=True)
             cell.fill = PatternFill("solid", fgColor="FFF2CC")
@@ -63,7 +66,8 @@ def register_xlsx(title: str, subtitle: str, columns: List[Dict[str, str]],
 
 def register_pdf(title: str, subtitle: str, columns: List[Dict[str, str]],
                  rows: List[dict], totals: Optional[dict] = None,
-                 logo_b64: Optional[str] = None) -> BytesIO:
+                 logo_b64: Optional[str] = None,
+                 empty_note: Optional[str] = None) -> BytesIO:
     import base64
     from reportlab.lib import colors as rl
     from reportlab.lib.pagesizes import A3, landscape
@@ -72,10 +76,12 @@ def register_pdf(title: str, subtitle: str, columns: List[Dict[str, str]],
     from reportlab.platypus import (Image, Paragraph, SimpleDocTemplate,
                                     Spacer, Table, TableStyle)
     buf = BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=landscape(A3), leftMargin=8 * mm,
-                            rightMargin=8 * mm, topMargin=8 * mm,
-                            bottomMargin=10 * mm, title=title)
-    W = landscape(A3)[0] - 16 * mm
+    # Iter 432 (user request) — tighter page margins so the table gets more
+    # width for the BIGGER print-friendly fonts.
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A3), leftMargin=6 * mm,
+                            rightMargin=6 * mm, topMargin=7 * mm,
+                            bottomMargin=9 * mm, title=title)
+    W = landscape(A3)[0] - 12 * mm
     story: List[Any] = []
     if logo_b64:
         try:
@@ -84,44 +90,80 @@ def register_pdf(title: str, subtitle: str, columns: List[Dict[str, str]],
         except Exception:  # noqa: BLE001
             pass
     story.append(Paragraph(title, ParagraphStyle(
-        "h", fontSize=13, fontName="Helvetica-Bold", alignment=1)))
+        "h", fontSize=16, leading=20, fontName="Helvetica-Bold",
+        alignment=1)))
     story.append(Paragraph(subtitle, ParagraphStyle(
-        "s", fontSize=8.5, alignment=1)))
+        "s", fontSize=10, leading=13, alignment=1)))
     story.append(Spacer(1, 4 * mm))
+    # Iter 432 (user request) — when the period has NO data (e.g. Fine
+    # Register with no fines), print a clear centred line instead of an
+    # empty table.
+    if not rows and empty_note:
+        story.append(Spacer(1, 18 * mm))
+        story.append(Paragraph(empty_note, ParagraphStyle(
+            "e", fontSize=14, fontName="Helvetica-Bold", alignment=1,
+            textColor=rl.HexColor("#475569"))))
+        doc.build(story)
+        buf.seek(0)
+        return buf
     data = [[c["label"] for c in columns]]
     for row in rows:
         data.append([
             (f"{v:,.2f}".rstrip("0").rstrip(".") if isinstance(v, float)
              else ("" if v is None else str(v)))
             for v in (row.get(c["key"]) for c in columns)])
+    # Iter 432 (user request) — bigger print font, FIGURES CENTRED with a
+    # tighter column gap; the Employee Name column is RIGHT-aligned.
     styles = [
-        ("FONTSIZE", (0, 0), (-1, -1), 6.8),
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
         ("GRID", (0, 0), (-1, -1), 0.4, rl.HexColor("#9AA0A6")),
         ("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#DDEBF7")),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+        ("ALIGN", (0, 1), (-1, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
     ]
+    # Iter 435 (user request) — Name columns LEFT-aligned in all reports.
+    for j, c in enumerate(columns):
+        if "name" in str(c.get("key") or "").lower():
+            styles.append(("ALIGN", (j, 1), (j, -1), "LEFT"))
     if totals:
+        _has_lbl = any(str(v).strip().upper() == "TOTAL"
+                       for v in totals.values())
         data.append([
             (f"{v:,.2f}".rstrip("0").rstrip(".") if isinstance(v, float)
              else ("" if v is None else str(v)))
-            for v in (totals.get(c["key"], "TOTAL" if i == 0 else None)
+            for v in (totals.get(c["key"],
+                                 "TOTAL" if i == 0 and not _has_lbl else None)
                       for i, c in enumerate(columns))])
         styles += [
             ("BACKGROUND", (0, len(data) - 1), (-1, len(data) - 1),
              rl.HexColor("#FFF2CC")),
             ("FONTNAME", (0, len(data) - 1), (-1, len(data) - 1),
              "Helvetica-Bold")]
-    tbl = Table(data, colWidths=[W / len(columns)] * len(columns),
-                repeatRows=1)
+    # Narrow serial / code columns, wider name columns.
+    weights = []
+    for c in columns:
+        k = str(c.get("key") or "").lower()
+        if k in ("sno", "s_no", "serial"):
+            weights.append(0.45)
+        elif "name" in k:
+            weights.append(1.7)
+        else:
+            weights.append(1.0)
+    tw = sum(weights)
+    tbl = Table(data, colWidths=[W * w / tw for w in weights], repeatRows=1)
     tbl.setStyle(TableStyle(styles))
     story.append(tbl)
 
     def _page(cv, d):
-        cv.setFont("Helvetica", 7)
+        cv.setFont("Helvetica", 8)
         from reportlab.lib.pagesizes import A3 as _A3, landscape as _ls
-        cv.drawRightString(_ls(_A3)[0] - 8 * mm, 5 * mm,
+        cv.drawRightString(_ls(_A3)[0] - 6 * mm, 5 * mm,
                            f"Page {cv.getPageNumber()}")
     doc.build(story, onFirstPage=_page, onLaterPages=_page)
     buf.seek(0)

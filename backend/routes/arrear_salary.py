@@ -323,8 +323,65 @@ async def arrear_ecr_txt(run_id: str, authorization: Optional[str] = Header(None
     )
 
 
-@router.get("/admin/arrear-salary-runs/{run_id}/export.xlsx")
-async def arrear_export_xlsx(run_id: str, authorization: Optional[str] = Header(None)):
+async def _arrear_register_data(run: dict):
+    """Iter 433 (user request) — Arrear Register columns:
+    S.No | UAN | ESIC | Emp Name | Father Name | Days | Rate | Gross Arrear
+    | (dynamic deductions) | Net Payable."""
+    rows = run.get("rows") or []
+    uids = [r.get("user_id") for r in rows if r.get("user_id")]
+    users: dict = {}
+    if uids:
+        async for u in db.users.find(
+            {"user_id": {"$in": uids}},
+            {"_id": 0, "user_id": 1, "father_name": 1, "compliance_gross": 1,
+             "salary_monthly": 1, "rate": 1},
+        ):
+            users[u["user_id"]] = u
+    has_pf = any(int(r.get("epf_due") or 0) for r in rows)
+    has_esic = any(int(r.get("esic_employee") or 0) for r in rows)
+    out = []
+    for i, r in enumerate(rows, 1):
+        u = users.get(r.get("user_id")) or {}
+        days = round(sum(float(m.get("present_days") or 0)
+                         for m in (r.get("months") or [])), 1)
+        rate = float(u.get("compliance_gross") or u.get("salary_monthly")
+                     or u.get("rate") or 0)
+        gross = float(r.get("arrear_gross") or 0)
+        pf_d = int(r.get("epf_due") or 0)
+        esi_d = int(r.get("esic_employee") or 0)
+        row = {"sno": i, "uan": r.get("uan_no") or "",
+               "esic": r.get("esic_no") or "",
+               "name": r.get("name") or "",
+               "father_name": u.get("father_name") or "",
+               "days": days, "rate": round(rate, 2),
+               "gross_arrear": round(gross, 2)}
+        if has_pf:
+            row["pf_ded"] = pf_d
+        if has_esic:
+            row["esic_ded"] = esi_d
+        row["net_payable"] = round(gross - pf_d - esi_d, 2)
+        out.append(row)
+    columns = [{"key": "sno", "label": "S.No"},
+               {"key": "uan", "label": "UAN"},
+               {"key": "esic", "label": "ESIC"},
+               {"key": "name", "label": "Emp Name"},
+               {"key": "father_name", "label": "Father Name"},
+               {"key": "days", "label": "Days"},
+               {"key": "rate", "label": "Rate"},
+               {"key": "gross_arrear", "label": "Gross Arrear"}]
+    if has_pf:
+        columns.append({"key": "pf_ded", "label": "PF Ded."})
+    if has_esic:
+        columns.append({"key": "esic_ded", "label": "ESIC Ded."})
+    columns.append({"key": "net_payable", "label": "Net Payable"})
+    totals = {"name": "TOTAL"}
+    for k in ("gross_arrear", "pf_ded", "esic_ded", "net_payable"):
+        if any(k in r for r in out):
+            totals[k] = round(sum(float(r.get(k) or 0) for r in out), 2)
+    return columns, out, totals
+
+
+async def _load_arrear_run(run_id: str, authorization):
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "sub_admin", "company_admin"])
     await require_employer_permission(admin, "salary_process:read", db)
@@ -333,52 +390,41 @@ async def arrear_export_xlsx(run_id: str, authorization: Optional[str] = Header(
         raise HTTPException(status_code=404, detail="Arrear run not found")
     if admin["role"] == "company_admin" and admin.get("company_id") != run["company_id"]:
         raise HTTPException(status_code=403, detail="Not your firm")
+    return run
 
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Arrear Register"
-    ws.append([f"ARREAR REGISTER — {run.get('company_name') or run['company_id']}"])
-    ws.append([f"Period: {run['from_month']} to {run['to_month']}  ·  Generated: {run.get('generated_at', '')[:10]}"])
-    ws.append([])
-    hdr = ["SN", "Emp Code", "Name", "UAN", "ESIC No",
-           "Old Gross (Paid)", "Revised Gross", "Arrear Gross",
-           "Arrear EPF Wages", "Arrear EPS Wages", "Arrear EDLI Wages",
-           "EPF Due (EE)", "EPS Due", "ER Due (3.67)",
-           "ESIC EE", "ESIC ER", "Months"]
-    ws.append(hdr)
-    for c in ws[ws.max_row]:
-        c.font = Font(bold=True, color="FFFFFF")
-        c.fill = PatternFill("solid", fgColor="0F2E3D")
-    for i, r in enumerate(run.get("rows", []), start=1):
-        ws.append([
-            i, r.get("employee_code"), r.get("name"), r.get("uan_no"), r.get("esic_no"),
-            r.get("old_gross"), r.get("new_gross"), r.get("arrear_gross"),
-            r.get("arrear_epf_wages"), r.get("arrear_eps_wages"), r.get("arrear_edli_wages"),
-            r.get("epf_due"), r.get("eps_due"), r.get("er_due"),
-            r.get("esic_employee"), r.get("esic_employer"),
-            ", ".join(m["month"] for m in (r.get("months") or [])),
-        ])
-    t = run.get("totals") or {}
-    ws.append([])
-    ws.append(["", "", "TOTAL", "", "",
-               "", "", t.get("arrear_gross"),
-               t.get("arrear_epf_wages"), t.get("arrear_epf_wages"), t.get("arrear_epf_wages"),
-               t.get("epf_due"), t.get("eps_due"), t.get("er_due"),
-               t.get("esic_employee"), t.get("esic_employer"), ""])
-    for c in ws[ws.max_row]:
-        c.font = Font(bold=True)
-    widths = [5, 10, 24, 15, 13, 14, 14, 13, 15, 15, 15, 12, 12, 12, 10, 10, 24]
-    for j, w in enumerate(widths, start=1):
-        ws.column_dimensions[chr(64 + j) if j <= 26 else "A" + chr(64 + j - 26)].width = w
-
-    buf = io.BytesIO()
-    wb.save(buf)
+@router.get("/admin/arrear-salary-runs/{run_id}/export.xlsx")
+async def arrear_export_xlsx(run_id: str, authorization: Optional[str] = Header(None)):
+    from utils.register_export import register_xlsx
+    run = await _load_arrear_run(run_id, authorization)
+    columns, rows, totals = await _arrear_register_data(run)
+    sub = (f"{run.get('company_name') or run['company_id']} · "
+           f"{run['from_month']} to {run['to_month']} · "
+           f"Generated {str(run.get('generated_at') or '')[:10]}")
+    buf = register_xlsx("ARREAR REGISTER", sub, columns, rows, totals)
     fname = f"arrear_register_{run['from_month']}_{run['to_month']}.xlsx"
     return Response(
         content=buf.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@router.get("/admin/arrear-salary-runs/{run_id}/export.pdf")
+async def arrear_export_pdf(run_id: str, authorization: Optional[str] = Header(None)):
+    from utils.register_export import register_pdf
+    run = await _load_arrear_run(run_id, authorization)
+    columns, rows, totals = await _arrear_register_data(run)
+    company = await db.companies.find_one(
+        {"company_id": run["company_id"]}, {"_id": 0, "logo_base64": 1})
+    sub = (f"{run.get('company_name') or run['company_id']} · "
+           f"{run['from_month']} to {run['to_month']} · "
+           f"Generated {str(run.get('generated_at') or '')[:10]}")
+    buf = register_pdf("ARREAR REGISTER", sub, columns, rows, totals,
+                       (company or {}).get("logo_base64"))
+    fname = f"arrear_register_{run['from_month']}_{run['to_month']}.pdf"
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )

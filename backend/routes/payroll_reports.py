@@ -68,8 +68,9 @@ def _emp_sort(rows):
 
 
 # each builder → (columns[(key,label)], rows, totals|None, subtitle_extra)
+# ctx (Iter 433) = {"employee_ids": [..], "from_date": "", "to_date": ""}
 
-async def _salary_comparison(company_id, month, month_b, fy):
+async def _salary_comparison(company_id, month, month_b, fy, ctx=None):
     m_a = month_b or _prev_month(month)
     rows_a = await _run_rows(company_id, m_a)
     rows_b = await _run_rows(company_id, month)
@@ -99,7 +100,7 @@ async def _salary_comparison(company_id, month, month_b, fy):
     return cols, _emp_sort(out), totals, f"{m_a} vs {month}"
 
 
-async def _gross_vs_net(company_id, month, month_b, fy):
+async def _gross_vs_net(company_id, month, month_b, fy, ctx=None):
     rows = await _run_rows(company_id, month)
     users = {u["user_id"]: u for u in await _users(company_id)}
     out = []
@@ -121,6 +122,7 @@ async def _gross_vs_net(company_id, month, month_b, fy):
 
 
 async def _revision(company_id, month, month_b, fy, increments_only=False):
+    # (ctx not used)
     by_month = await _fy_rows(company_id, fy)
     users = {u["user_id"]: u for u in await _users(company_id)}
     months = [m for m in _fy_months(fy) if m in by_month]
@@ -179,31 +181,37 @@ async def _head_register(company_id, fy, needles, label):
     return cols, out, totals, f"FY {fy}-{str(fy + 1)[-2:]}"
 
 
-async def _fnf(company_id, month, month_b, fy):
+async def _fnf(company_id, month, month_b, fy, ctx=None):
     users = await _users(company_id)
+    emp_ids = set((ctx or {}).get("employee_ids") or [])
     fy_start, fy_end = date(fy, 4, 1), date(fy + 1, 3, 31)
     by_month = await _fy_rows(company_id, fy)
     rows_by_m = {m: {r.get("user_id"): r for r in rr}
                  for m, rr in by_month.items()}
     out = []
     for u in users:
+        if emp_ids and u["user_id"] not in emp_ids:
+            continue
         dol = _dt(u.get("exit_date") or u.get("resign_date"))
-        if not dol or not (fy_start <= dol <= fy_end):
+        # Iter 433 (user request) — when SPECIFIC employees are picked,
+        # include them even without an exit date in this FY.
+        if not emp_ids and (not dol or not (fy_start <= dol <= fy_end)):
             continue
         last_m, last_r = "", {}
         for m in sorted(rows_by_m):
             if u["user_id"] in rows_by_m[m]:
                 last_m, last_r = m, rows_by_m[m][u["user_id"]]
         doj = _dt(u.get("doj"))
+        _end = dol or date.today()
         out.append({
             "employee_code": u.get("employee_code"), "name": u.get("name"),
-            "doj": u.get("doj"), "dol": dol.isoformat(),
-            "service_years": (round((dol - doj).days / 365, 1) if doj else 0),
+            "doj": u.get("doj"), "dol": dol.isoformat() if dol else "",
+            "service_years": (round((_end - doj).days / 365, 1) if doj else 0),
             "last_salary_month": last_m,
             "last_gross": _f(last_r.get("gross_paid")),
             "last_net": _f(last_r.get("net")),
             "gratuity_due": ("Yes" if doj
-                             and (dol - doj).days >= 5 * 365 else "No"),
+                             and (_end - doj).days >= 5 * 365 else "No"),
         })
     cols = [("employee_code", "Emp Code"), ("name", "Employee Name"),
             ("doj", "DOJ"), ("dol", "DOL"),
@@ -214,7 +222,7 @@ async def _fnf(company_id, month, month_b, fy):
     return cols, _emp_sort(out), None, f"FY {fy}-{str(fy + 1)[-2:]}"
 
 
-async def _ctc_register(company_id, month, month_b, fy):
+async def _ctc_register(company_id, month, month_b, fy, ctx=None):
     rows = await _run_rows(company_id, month)
     users = {u["user_id"]: u for u in await _users(company_id)}
     out = []
@@ -241,7 +249,7 @@ async def _ctc_register(company_id, month, month_b, fy):
     return cols, _emp_sort(out), totals, month
 
 
-async def _ctc_analysis(company_id, month, month_b, fy):
+async def _ctc_analysis(company_id, month, month_b, fy, ctx=None):
     rows = await _run_rows(company_id, month)
     users = {u["user_id"]: u for u in await _users(company_id)}
     depts: Dict[str, dict] = {}
@@ -254,16 +262,17 @@ async def _ctc_analysis(company_id, month, month_b, fy):
         d["er"] += _f(r.get("pf_employer_total")) + _f(r.get("esic_employer"))
     total_ctc = sum(d["gross"] + d["er"] for d in depts.values()) or 1
     out = []
-    for dn in sorted(depts):
+    for i, dn in enumerate(sorted(depts), 1):
         d = depts[dn]
         ctc = round(d["gross"] + d["er"], 2)
-        out.append({"department": dn, "employees": d["employees"],
+        out.append({"sno": i, "department": dn, "employees": d["employees"],
                     "gross": round(d["gross"], 2),
                     "employer_cost": round(d["er"], 2), "monthly_ctc": ctc,
                     "annual_ctc": round(ctc * 12, 2),
                     "avg_ctc_per_employee": round(ctc / d["employees"], 2),
                     "share_pct": round(ctc * 100 / total_ctc, 1)})
-    cols = [("department", "Department"), ("employees", "Employees"),
+    cols = [("sno", "S.No"), ("department", "Department"),
+            ("employees", "Employees"),
             ("gross", "Gross"), ("employer_cost", "Employer Cost"),
             ("monthly_ctc", "Monthly CTC"), ("annual_ctc", "Annual CTC"),
             ("avg_ctc_per_employee", "Avg CTC / Employee"),
@@ -275,46 +284,77 @@ async def _ctc_analysis(company_id, month, month_b, fy):
     return cols, out, totals, month
 
 
-async def _ot_department(company_id, month, month_b, fy):
-    rows = await _run_rows(company_id, month)
-    users = {u["user_id"]: u for u in await _users(company_id)}
-    depts: Dict[str, dict] = {}
-    for uid, r in rows.items():
-        u = users.get(uid) or {}
-        d = depts.setdefault(str(u.get("department") or "GENERAL").upper(),
-                             {"emp": 0, "ot_emp": 0, "hrs": 0.0, "pay": 0.0,
-                              "gross": 0.0})
-        d["emp"] += 1
-        d["gross"] += _f(r.get("gross_paid"))
-        oh, op = _f(r.get("ot_hours")), _f(r.get("ot_pay"))
-        if oh or op:
-            d["ot_emp"] += 1
-            d["hrs"] += oh
-            d["pay"] += op
-    out = []
-    for dn in sorted(depts):
-        d = depts[dn]
-        out.append({"department": dn, "employees": d["emp"],
-                    "ot_employees": d["ot_emp"],
-                    "ot_hours": round(d["hrs"], 1),
-                    "ot_cost": round(d["pay"], 2),
-                    "avg_ot_hours": (round(d["hrs"] / d["ot_emp"], 1)
-                                     if d["ot_emp"] else 0),
-                    "ot_vs_salary_pct": (round(d["pay"] * 100 / d["gross"], 1)
-                                         if d["gross"] else 0)})
-    cols = [("department", "Department"), ("employees", "Employees"),
-            ("ot_employees", "OT Employees"), ("ot_hours", "OT Hours"),
-            ("ot_cost", "OT Cost"), ("avg_ot_hours", "Avg OT Hours"),
-            ("ot_vs_salary_pct", "OT vs Salary %")]
-    totals = {"department": "TOTAL"}
-    for k in ("employees", "ot_employees", "ot_hours", "ot_cost"):
-        totals[k] = round(sum(r[k] for r in out), 2)
-    return cols, out, totals, month
-
-
-async def _ot_daily(company_id, month, month_b, fy):
+async def _ot_department(company_id, month, month_b, fy, ctx=None):
+    """Iter 433 (user request) — Daily / Periodic dept-wise OT from punches
+    with employee names, dept-wise employee count and S.No."""
+    ctx = ctx or {}
+    dfrom = ctx.get("from_date") or f"{month}-01"
+    dto = ctx.get("to_date") or f"{month}-31"
     recs = await db.attendance.find(
-        {"company_id": company_id, "timestamp": {"$regex": f"^{month}"}},
+        {"company_id": company_id,
+         "timestamp": {"$gte": dfrom, "$lte": f"{dto}T23:59:59"}},
+        {"_id": 0, "user_id": 1, "timestamp": 1}).to_list(500000)
+    users = {u["user_id"]: u for u in await _users(company_id)}
+    by_day: Dict[str, Dict[str, List[str]]] = {}
+    for r in recs:
+        ts = str(r.get("timestamp"))
+        by_day.setdefault(ts[:10], {}).setdefault(
+            r["user_id"], []).append(ts[11:16])
+    per_user_ot: Dict[str, float] = {}
+    punched: set = set()
+    for by_uid in by_day.values():
+        for uid, times in by_uid.items():
+            punched.add(uid)
+            times.sort()
+            if len(times) < 2:
+                continue
+            try:
+                h1, m1 = map(int, times[0].split(":"))
+                h2, m2 = map(int, times[-1].split(":"))
+            except ValueError:
+                continue
+            hrs = (h2 * 60 + m2 - h1 * 60 - m1) / 60
+            if hrs > 8:
+                per_user_ot[uid] = per_user_ot.get(uid, 0) + (hrs - 8)
+    depts: Dict[str, dict] = {}
+    for uid in punched:
+        u = users.get(uid) or {}
+        dn = str(u.get("department") or "GENERAL").upper()
+        d = depts.setdefault(dn, {"emp": 0, "ot_emp": 0, "hrs": 0.0,
+                                  "names": []})
+        d["emp"] += 1
+        if per_user_ot.get(uid):
+            d["ot_emp"] += 1
+            d["hrs"] += per_user_ot[uid]
+            d["names"].append(str(u.get("name") or uid))
+    out = []
+    for i, dn in enumerate(sorted(depts), 1):
+        d = depts[dn]
+        out.append({"sno": i, "department": dn, "employees": d["emp"],
+                    "ot_employees": d["ot_emp"],
+                    "ot_employee_names": ", ".join(sorted(d["names"])),
+                    "ot_hours": round(d["hrs"], 1),
+                    "avg_ot_hours": (round(d["hrs"] / d["ot_emp"], 1)
+                                     if d["ot_emp"] else 0)})
+    cols = [("sno", "S.No"), ("department", "Department"),
+            ("employees", "Employees"), ("ot_employees", "OT Employees"),
+            ("ot_employee_names", "OT Employee Names"),
+            ("ot_hours", "OT Hours"), ("avg_ot_hours", "Avg OT Hours")]
+    totals = {"department": "TOTAL"}
+    for k in ("employees", "ot_employees", "ot_hours"):
+        totals[k] = round(sum(r[k] for r in out), 2)
+    label = dfrom if dfrom == dto else f"{dfrom} to {dto}"
+    return cols, out, totals, label
+
+
+async def _ot_daily(company_id, month, month_b, fy, ctx=None):
+    """Iter 433 (user request) — Daily / Periodic (date range) with S.No."""
+    ctx = ctx or {}
+    dfrom = ctx.get("from_date") or f"{month}-01"
+    dto = ctx.get("to_date") or f"{month}-31"
+    recs = await db.attendance.find(
+        {"company_id": company_id,
+         "timestamp": {"$gte": dfrom, "$lte": f"{dto}T23:59:59"}},
         {"_id": 0, "user_id": 1, "timestamp": 1}).to_list(500000)
     by_day: Dict[str, Dict[str, List[str]]] = {}
     for r in recs:
@@ -322,7 +362,7 @@ async def _ot_daily(company_id, month, month_b, fy):
         by_day.setdefault(ts[:10], {}).setdefault(
             r["user_id"], []).append(ts[11:16])
     out = []
-    for day in sorted(by_day):
+    for i, day in enumerate(sorted(by_day), 1):
         ot_emp, ot_hrs = 0, 0.0
         for times in by_day[day].values():
             times.sort()
@@ -336,23 +376,31 @@ async def _ot_daily(company_id, month, month_b, fy):
                         ot_hrs += hrs - 8
                 except ValueError:
                     continue
-        out.append({"date": day, "punched_employees": len(by_day[day]),
+        out.append({"sno": i, "date": day,
+                    "punched_employees": len(by_day[day]),
                     "ot_employees": ot_emp, "ot_hours": round(ot_hrs, 1)})
-    cols = [("date", "Date"), ("punched_employees", "Employees Punched"),
+    cols = [("sno", "S.No"), ("date", "Date"),
+            ("punched_employees", "Employees Punched"),
             ("ot_employees", "Employees on OT"), ("ot_hours", "OT Hours")]
     totals = {"date": "TOTAL",
               "ot_employees": sum(r["ot_employees"] for r in out),
               "ot_hours": round(sum(r["ot_hours"] for r in out), 1)}
-    return cols, out, totals, month
+    label = dfrom if dfrom == dto else f"{dfrom} to {dto}"
+    return cols, out, totals, label
 
 
-async def _ot_cost_analysis(company_id, month, month_b, fy):
+async def _ot_cost_analysis(company_id, month, month_b, fy, ctx=None):
+    emp_ids = set((ctx or {}).get("employee_ids") or [])
     by_month = await _fy_rows(company_id, fy)
     out = []
     for m in _fy_months(fy):
         rows = by_month.get(m)
         if not rows:
             continue
+        if emp_ids:
+            rows = [r for r in rows if r.get("user_id") in emp_ids]
+            if not rows:
+                continue
         gross = sum(_f(r.get("gross_paid")) for r in rows)
         hrs = sum(_f(r.get("ot_hours")) for r in rows)
         pay = sum(_f(r.get("ot_pay")) for r in rows)
@@ -378,18 +426,18 @@ _REPORTS = {
     "salary-comparison": ("Salary Comparison", _salary_comparison),
     "gross-vs-net": ("Gross vs Net Analysis", _gross_vs_net),
     "salary-revision": ("Salary Revision Report",
-                        lambda c, m, b, f: _revision(c, m, b, f, False)),
+                        lambda c, m, b, f, x=None: _revision(c, m, b, f, False)),
     "increment": ("Increment Report",
-                  lambda c, m, b, f: _revision(c, m, b, f, True)),
+                  lambda c, m, b, f, x=None: _revision(c, m, b, f, True)),
     "ex-gratia": ("Ex-gratia Register",
-                  lambda c, m, b, f: _head_register(c, f, ("exgratia",),
-                                                    "Ex-gratia")),
+                  lambda c, m, b, f, x=None: _head_register(c, f, ("exgratia",),
+                                                            "Ex-gratia")),
     "incentive": ("Incentive Register",
-                  lambda c, m, b, f: _head_register(c, f, ("incent",),
-                                                    "Incentive")),
+                  lambda c, m, b, f, x=None: _head_register(c, f, ("incent",),
+                                                            "Incentive")),
     "arrear": ("Arrear Register",
-               lambda c, m, b, f: _head_register(c, f, ("arrear",),
-                                                 "Arrear")),
+               lambda c, m, b, f, x=None: _head_register(c, f, ("arrear",),
+                                                         "Arrear")),
     "full-and-final": ("Full & Final Settlement", _fnf),
     "ctc-register": ("CTC Register", _ctc_register),
     "ctc-analysis": ("Cost to Company Analysis", _ctc_analysis),
@@ -419,25 +467,29 @@ async def list_reports(authorization: Optional[str] = Header(None)):
 async def report_json(kind: str, company_id: Optional[str] = None,
                       month: Optional[str] = None,
                       month_b: Optional[str] = None, fy_start_year: int = 0,
+                      employee_ids: str = "", from_date: str = "",
+                      to_date: str = "",
                       authorization: Optional[str] = Header(None)):
+    ctx = {"employee_ids": [e for e in (employee_ids or "").split(",") if e],
+           "from_date": from_date.strip(), "to_date": to_date.strip()}
     for ext in ("xlsx", "pdf"):
         if kind.endswith(f".{ext}"):
             return await _exp(kind[: -len(ext) - 1], company_id, month,
-                              month_b, fy_start_year, authorization, ext)
+                              month_b, fy_start_year, authorization, ext, ctx)
     if kind not in _REPORTS:
         raise HTTPException(status_code=404, detail="Unknown report")
     company_id = await _adm(authorization, company_id)
     month = month or date.today().strftime("%Y-%m")
     fy = _fy_or_now(fy_start_year)
     title, fn = _REPORTS[kind]
-    cols, rows, totals, extra = await fn(company_id, month, month_b, fy)
+    cols, rows, totals, extra = await fn(company_id, month, month_b, fy, ctx)
     return {"title": title, "subtitle": extra,
             "columns": [{"key": k, "label": lb} for k, lb in cols],
             "rows": rows, "totals": totals}
 
 
 async def _exp(kind, company_id, month, month_b, fy_start_year,
-               authorization, fmt):
+               authorization, fmt, ctx=None):
     if kind not in _REPORTS:
         raise HTTPException(status_code=404, detail="Unknown report")
     company_id = await _adm(authorization, company_id)
@@ -445,7 +497,7 @@ async def _exp(kind, company_id, month, month_b, fy_start_year,
     fy = _fy_or_now(fy_start_year)
     c = await _company(company_id)
     title, fn = _REPORTS[kind]
-    cols, rows, totals, extra = await fn(company_id, month, month_b, fy)
+    cols, rows, totals, extra = await fn(company_id, month, month_b, fy, ctx)
     columns = [{"key": k, "label": lb} for k, lb in cols]
     sub = f"{c.get('name')} · {extra} · Generated {datetime.now():%d-%m-%Y}"
     if fmt == "xlsx":

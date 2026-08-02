@@ -1372,11 +1372,12 @@ def build_compliance_register_pdf(
     buf = io.BytesIO()
     doc = BaseDocTemplate(
         buf, pagesize=landscape(A4),
-        leftMargin=5 * mm, rightMargin=5 * mm,
+        # Iter 433 (user request) — reduced L/R page margins.
+        leftMargin=3 * mm, rightMargin=3 * mm,
         topMargin=20 * mm, bottomMargin=8 * mm,
         title=f"Salary Register — {month}",
     )
-    frame = Frame(doc.leftMargin, doc.bottomMargin, W - 10 * mm,
+    frame = Frame(doc.leftMargin, doc.bottomMargin, W - 6 * mm,
                   H - doc.topMargin - doc.bottomMargin, id="f")
     doc.addPageTemplates([PageTemplate(id="pg", frames=[frame], onPage=_header)])
 
@@ -1570,7 +1571,7 @@ def build_compliance_register_pdf(
               + [_wcol(h, False) for h, _k in d_cols]
               + [10, 18])
     # Landscape — stretch the reference column ratios to the full width.
-    _scale = (W - 12 * mm) / (sum(widths) * mm)
+    _scale = (W - 6 * mm) / (sum(widths) * mm)
     col_widths = [wmm * mm * _scale for wmm in widths]
 
     def _base_style() -> list:
@@ -1594,6 +1595,8 @@ def build_compliance_register_pdf(
             # Iter 323 (user request) — figures centre-aligned.
             ("ALIGN", (M0, 2), (-1, -1), "CENTER"),
             ("ALIGN", (0, 2), (0, -1), "CENTER"),
+            # Iter 435 (user request) — Name column LEFT-aligned.
+            ("ALIGN", (1, 2), (1, -1), "LEFT"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("GRID", (0, 0), (-1, -1), 0.4, rl_colors.black),
             ("LEFTPADDING", (0, 0), (-1, -1), 1.5),
@@ -1840,11 +1843,12 @@ def build_compliance_register_pdf_v2(
     buf = io.BytesIO()
     doc = BaseDocTemplate(
         buf, pagesize=landscape(A4),
-        leftMargin=6 * mm, rightMargin=6 * mm,
+        # Iter 433 (user request) — reduced L/R page margins.
+        leftMargin=4 * mm, rightMargin=4 * mm,
         topMargin=24 * mm, bottomMargin=10 * mm,
         title=f"Salary Register (Option 2) — {month}",
     )
-    frame = Frame(doc.leftMargin, doc.bottomMargin, W - 12 * mm,
+    frame = Frame(doc.leftMargin, doc.bottomMargin, W - 8 * mm,
                   H - doc.topMargin - doc.bottomMargin, id="f")
     doc.addPageTemplates([PageTemplate(id="pg", frames=[frame], onPage=_header)])
 
@@ -2049,7 +2053,7 @@ def build_compliance_register_pdf_v2(
         tot_vals[col_keys[0]] = "GRAND TOTAL"
     data.append([tot_vals[k] for k in col_keys])
 
-    _scale = (W - 12 * mm) / (sum(widths) * mm)
+    _scale = (W - 8 * mm) / (sum(widths) * mm)
     col_widths = [wmm * mm * _scale for wmm in widths]
     _num_idx = [i for i, k in enumerate(col_keys) if k in _numeric]
 
@@ -2074,6 +2078,9 @@ def build_compliance_register_pdf_v2(
         for ci_, k in enumerate(col_keys):
             if k in ("sno", "code", "uan", "pf_no", "esi_no"):
                 style.append(("ALIGN", (ci_, 0), (ci_, -1), "CENTER"))
+            # Iter 435 (user request) — Name column LEFT-aligned.
+            elif k == "name":
+                style.append(("ALIGN", (ci_, 1), (ci_, -1), "LEFT"))
         if is_final:
             style.append(("FONTNAME", (0, last), (-1, last), "Helvetica-Bold"))
             style.append(("BACKGROUND", (0, last), (-1, last), BAND))
