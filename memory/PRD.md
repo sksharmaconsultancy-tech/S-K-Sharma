@@ -3582,3 +3582,8 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
 - Iter 451 (user request): ECR .txt NCP DAYS always WHOLE numbers (rounded
   half-up, 0.5 → 1) in challans.py _ecr_lines (statutory_bulk/master_sheet
   already integer). Verified 55-member file: 0 decimal NCPs.
+- Iter 451b (user reverted): ESIC stays on the LEGACY rule — setting
+  esic_wage_calc_method reset to "wage_base" (eligibility on Basic ≤
+  21,000, ESI on max(Basic, 50% Gross)). Do NOT switch to "actual" and do
+  NOT tell user to change it on VPS. The configurable option remains
+  available but default/legacy is active.
