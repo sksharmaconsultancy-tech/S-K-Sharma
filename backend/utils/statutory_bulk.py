@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 from typing import Any, Dict, List
 
 _PF_CAP = 15000  # Rs — statutory EPF wage ceiling.
@@ -78,16 +79,14 @@ def build_pf_ecr_txt(rows: List[Dict[str, Any]]) -> bytes:
         _eps_off = bool(r.get("eps_disabled"))
         eps_wages = 0 if _eps_off else pf_wages
         edli_wages = pf_wages
-        epf_contrib = _to_int_rupees(r.get("pf_employee"))
-        eps_contrib = 0 if _eps_off else _to_int_rupees(r.get("pf_employer_eps"))
-        # EPFO expects the employer's EPF contribution net of the EPS
-        # portion (i.e. the "EPF_EPS_DIFF" column).  If the compliance
-        # engine stored the total employer contribution separately we
-        # compute the diff on the fly.
-        empr_epf = _to_int_rupees(r.get("pf_employer_epf"))
-        if _eps_off:
-            empr_epf += _to_int_rupees(r.get("pf_employer_eps"))
-        epf_eps_diff = max(empr_epf, 0)
+        # Iter 445 (user bug — EPFO error RFE-37): the portal validates the
+        # ER PF share against Due EPF (12% of EPF wages) − Due EPS (8.33% of
+        # EPS wages), each rounded half-up from the WAGE columns. Derive the
+        # contributions from the wages exactly like the portal does.
+        due_epf = int(math.floor(pf_wages * 12.0 / 100.0 + 0.5))
+        eps_contrib = int(math.floor(eps_wages * 8.33 / 100.0 + 0.5))
+        epf_contrib = max(_to_int_rupees(r.get("pf_employee")), due_epf)
+        epf_eps_diff = max(0, due_epf - eps_contrib)
         ncp_days = _to_int_rupees(
             (r.get("month_days") or 0)
             - (r.get("present_days") or 0)
@@ -160,7 +159,9 @@ def build_esic_mc_csv(rows: List[Dict[str, Any]]) -> bytes:
             (r.get("present_days") or 0) + 0.5 * (r.get("half_days") or 0)
         )
         wages = _to_int_rupees(
-            r.get("esic_wage_base") or r.get("gross_paid") or r.get("monthly_gross")
+            # Iter 445 (user request) — wages column = the ESIC WAGE BASE
+            # (amount ESIC was deducted on), never the Gross.
+            r.get("esic_wage_base")
         )
         reason_code = 0 if days > 0 else 7
         w.writerow([

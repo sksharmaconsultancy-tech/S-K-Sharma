@@ -3484,3 +3484,16 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
     Verify file ends with the ECR endpoint if editing heavily in parallel.
   - Deploy: /app/deploy_vps_iter444.sh (temp_bundle kind=script now serves
     deploy444.sh).
+- Iter 445 (user bug — EPFO ECR upload error RFE-37 + ESIC SAL column):
+  - RFE-37 fix: ALL 3 ECR builders (routes/challans.py _ecr_lines — the
+    Portal Upload Files screen; utils/statutory_bulk.build_pf_ecr_txt;
+    utils/master_sheet.build_ecr_text) now DERIVE contributions from the
+    WAGE columns exactly like the EPFO validator: Due EPF = 12%×EPF wages,
+    Due EPS = 8.33%×EPS wages (HALF-UP rounding, not banker's), ER diff =
+    Due EPF − Due EPS. EPS-disabled members print EPS wages = 0; higher-
+    pension members keep EPS on uncapped wages; EE = max(row EE, due) so
+    VPF still remits more. Verified: unit cases + real run (55 members,
+    all pass the portal formula).
+  - ESIC SAL column now ALWAYS the ESIC wage base (amount ESIC deducted
+    on), never Gross — fixed challans esic.xls/esic.xlsx + statutory_bulk
+    build_esic_mc_csv (removed gross fallbacks).

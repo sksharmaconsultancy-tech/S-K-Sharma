@@ -576,11 +576,15 @@ def build_ecr_text(compliance_run: Dict[str, Any]) -> bytes:
         _eps_off = bool(r.get("eps_disabled"))
         eps_wages = 0 if _eps_off else epf_wages  # same base under new labour code
         edli_wages = epf_wages
-        _er_epf = round(r.get("pf_employer_epf") or 0) + (
-            round(r.get("pf_employer_eps") or 0) if _eps_off else 0)
-        epf_contrib = round(r.get("pf_employee") or 0) + _er_epf
-        eps_contrib = 0 if _eps_off else round(r.get("pf_employer_eps") or 0)
-        epf_eps_diff = max(0, _er_epf - eps_contrib)
+        # Iter 445 (user bug — EPFO error RFE-37): contributions derived
+        # from the WAGE columns exactly like the portal's validation —
+        # Due EPF = 12% of EPF wages, Due EPS = 8.33% of EPS wages (half-up
+        # rounding); ER share = Due EPF − Due EPS.
+        import math as _math
+        due_epf = int(_math.floor(epf_wages * 12.0 / 100.0 + 0.5))
+        eps_contrib = int(_math.floor(eps_wages * 8.33 / 100.0 + 0.5))
+        epf_contrib = max(round(r.get("pf_employee") or 0), due_epf)
+        epf_eps_diff = max(0, due_epf - eps_contrib)
         ncp_days = max(0, int(r.get("month_days") or 30) - int(r.get("present_days") or 0))
         refund = 0
         lines.append(

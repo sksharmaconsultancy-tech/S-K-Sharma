@@ -391,14 +391,38 @@ def _r0(v: Any) -> int:
         return 0
 
 
+def _due(w: Any, pct: float) -> int:
+    """EPFO-style due contribution: pct% of wages, rounded HALF-UP to the
+    rupee (the portal's own validation math — Iter 445, error RFE-37)."""
+    import math
+    try:
+        return int(math.floor(float(w or 0) * pct / 100.0 + 0.5))
+    except Exception:
+        return 0
+
+
 def _ecr_lines(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]],
                skip_missing: bool = False) -> List[Dict[str, Any]]:
     """One dict per PF member with all ECR 2.0 columns computed.
 
     Iter 436 (user request) — ``skip_missing=True`` drops members WITHOUT
-    a UAN from the file entirely."""
+    a UAN from the file entirely.
+
+    Iter 445 (user bug — EPFO error RFE-37 "Employer PF contribution must
+    match the difference between the Due EPF and Due EPS contributions
+    calculated on wages"): the portal RE-COMPUTES Due EPF (12% of EPF
+    wages) and Due EPS (8.33% of EPS wages) from the wage columns and
+    validates the ER share against their difference. We therefore DERIVE
+    the contribution fields from the wages exactly like the portal
+    (half-up rounding) instead of copying the run's 3.67%-rounded figure.
+    EPS-disabled members print EPS wages = 0 (so Due EPS = 0 and the full
+    12% lands in the ER diff); higher-pension members keep EPS on the
+    uncapped wages."""
     month_days = int(run.get("month_days") or 30)
     eps_cap = 15000
+    _cfg = run.get("statutory_effective") or {}
+    pf_pct = float(_cfg.get("pf_percent_employee") or 12.0)
+    eps_pct = float(_cfg.get("pf_percent_employer_eps") or 8.33)
     out: List[Dict[str, Any]] = []
     for r in run.get("rows") or []:
         if not r.get("pf_applicable"):
@@ -408,11 +432,20 @@ def _ecr_lines(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]],
             continue
         gross = _r0(r.get("gross_paid"))
         epf_wages = _r0(r.get("pf_wages"))
-        eps_wages = min(epf_wages, eps_cap)
+        row_eps = _r0(r.get("pf_employer_eps"))
+        if bool(r.get("eps_disabled")) or row_eps <= 0:
+            eps_wages = 0
+        elif epf_wages > eps_cap and row_eps > _due(eps_cap, eps_pct) + 1:
+            # Higher Pension joint option — EPS on uncapped wages.
+            eps_wages = epf_wages
+        else:
+            eps_wages = min(epf_wages, eps_cap)
         edli_wages = min(epf_wages, eps_cap)
-        epf_ee = _r0(r.get("pf_employee"))
-        eps_er = _r0(r.get("pf_employer_eps"))
-        diff_er = _r0(r.get("pf_employer_epf"))
+        due_epf = _due(epf_wages, pf_pct)
+        eps_er = _due(eps_wages, eps_pct)
+        diff_er = max(0, due_epf - eps_er)
+        # EE share: never below the due (VPF members legitimately remit more).
+        epf_ee = max(_r0(r.get("pf_employee")), due_epf)
         present = float(r.get("present_days") or 0)
         ncp = max(0, round(month_days - present, 1))
         ncp = int(ncp) if float(ncp).is_integer() else ncp
@@ -481,7 +514,9 @@ def _esic_xls_bytes(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> by
             continue
         present = float(r.get("present_days") or 0)
         days = int(present) if present.is_integer() else present
-        wages = _r0(r.get("esic_wage_base") or r.get("gross_paid"))
+        # Iter 445 (user request) — SAL column = the ESIC WAGE BASE (the
+        # amount ESIC was actually deducted on), never the Gross.
+        wages = _r0(r.get("esic_wage_base"))
         if days <= 0:
             wages = 0
         ws.write(rownum, 0, ip_no)
@@ -650,7 +685,8 @@ async def download_esic_xlsx(
             continue
         present = float(r.get("present_days") or 0)
         days = int(present) if present.is_integer() else present
-        wages = _r0(r.get("esic_wage_base") or r.get("gross_paid"))
+        # Iter 445 (user request) — SAL = ESIC wage base, never the Gross.
+        wages = _r0(r.get("esic_wage_base"))
         if days <= 0:
             wages = 0
         ws.append([ip_no or "MISSING IP NO", (r.get("name") or "").upper(),
