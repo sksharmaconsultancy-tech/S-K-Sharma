@@ -1534,7 +1534,11 @@ export default function ComplianceSalaryRunScreen() {
                 : Math.max(Number(next.basic || 0), grossEarn * floorPct);
             const pfWages = next.intl_worker
               ? pfBase
-              : (wageRuleOn ? Math.min(statBase2, pfCap) : Math.min(pfBase, pfCap));
+              // Iter 450 (user confirmed) — PF Basic filled ABOVE the
+              // ceiling = adopted PF wage, deducted in full (no ceiling).
+              : pfBasicFull > pfCap
+                ? Math.max(pfBase, statBase2)
+                : (wageRuleOn ? Math.min(statBase2, pfCap) : Math.min(pfBase, pfCap));
             const pfEmpRate = Number(stat.pf_percent_employee ?? 12) / 100;
             const pfErEpfRate = Number(stat.pf_percent_employer_epf ?? 3.67) / 100;
             const pfErEpsRate = Number(stat.pf_percent_employer_eps ?? 8.33) / 100;
@@ -1706,15 +1710,19 @@ export default function ComplianceSalaryRunScreen() {
               // Base") — statutory PF wages = the WAGE BASE capped at the
               // ceiling; PF Basic only gates applicability.
               // Iter 449 (user spec) — PF Wage Calculation Method mirror.
-              : (wageRuleOn
-                ? Math.min(
-                    String(stat.pf_wage_calc_method || "higher") === "basic_da"
-                      ? paidBasic
-                      : String(stat.pf_wage_calc_method || "higher") === "floor"
-                        ? grossEarn * floorPct
-                        : Math.max(paidBasic, grossEarn * floorPct),
-                    pfCap)
-                : Math.min(pfBase, pfCap))))
+              // Iter 450 (user confirmed) — PF Basic filled ABOVE the
+              // ceiling = adopted PF wage, deducted in full (no ceiling).
+              : (pfBasicFull > pfCap
+                ? Math.max(pfBase, paidBasic, grossEarn * floorPct)
+                : wageRuleOn
+                  ? Math.min(
+                      String(stat.pf_wage_calc_method || "higher") === "basic_da"
+                        ? paidBasic
+                        : String(stat.pf_wage_calc_method || "higher") === "floor"
+                          ? grossEarn * floorPct
+                          : Math.max(paidBasic, grossEarn * floorPct),
+                      pfCap)
+                  : Math.min(pfBase, pfCap))))
           : 0;
         // Iter 427 — VPF (employee side) survives the grid recompute:
         // scale the server-computed VPF with the new PF wages.

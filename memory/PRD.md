@@ -3559,3 +3559,23 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   - testing_agent iteration_449: 100% PASS (settings persist, employee UI
     hydrates, 400 on invalid values). Fixed testing feedback: employee
     Save now window.alert()s the mandatory-field error (was silent).
+- Iter 450 (user confirmed via Data.xls demo — AMIT PF Basis 17,796 must
+  give PF 2,136 not 1,800): a PF Basic FILLED ABOVE the EPF ceiling on the
+  Employee Master is treated as the ADOPTED PF wage — PF deducted on the
+  FULL PF Basic (prorated, uncapped, _pf_eff=max(pf_basic_prorated,
+  calc_base)); EPS stays capped at 15,000; ER split = 12%×wage − EPS →
+  EPF. (Partially reverses Iter 430/447 for the pf_basic>cap case ONLY;
+  wage-base rule intact below the ceiling — SAPNA 1,445 regression-safe.)
+  Grid recompute mirrored in both blocks; validation PF_ABOVE_CEILING now
+  also allows master pf_basic>cap.
+- Iter 450: user approved switching ESIC eligibility to ESI Act basis —
+  Standard compliance setting esic_wage_calc_method = "actual" SET IN THE
+  PREVIEW DB. ⚠ DB setting does NOT deploy with code: user must ALSO set
+  PF/ESIC Settings → ESIC Wage Calculation Method = "Actual ESI Wages" on
+  the VPS after deploying (or leave default wage_base if they change mind).
+  Effect: eligibility on full-month GROSS ≤ 21,000 and ESI on full gross
+  earned (e.g. LAXMI gross 23,540 → exempt; NEERAJ 21,000 → ESI 158/683).
+- Demo calculation for user's Data.xls (22 employees) verified against
+  user expectations; harness reminder: pass compliance_basic +
+  compliance_salary_allowances (NOT salary_structure_compliance) for
+  correct proration in ad-hoc engine demos.

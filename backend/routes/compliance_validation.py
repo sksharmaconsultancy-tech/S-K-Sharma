@@ -148,11 +148,12 @@ async def validate_compliance_run(run: Dict[str, Any]) -> Dict[str, Any]:
                 "Check PF Basic Salary / proration method — wages above gross are unusual."))
         if pf_emp > 0 and pf_wages > pf_cap + 0.5 and not r.get("intl_worker") \
                 and not r.get("pf_higher_active") \
+                and _num(m.get("pf_basic")) <= pf_cap \
                 and str(r.get("adopt_pf") or m.get("adopt_pf") or "").lower() != "yes":
             issues.append(_issue(
                 "PF_ABOVE_CEILING", "error",
                 f"PF wages ₹{pf_wages:,.0f} exceed the ceiling ₹{pf_cap:,.0f}.",
-                "Only International Workers / approved Higher PF / Adopt PF = Yes may cross the EPF ceiling — re-run Salary Process."))
+                "Only International Workers / approved Higher PF / Adopt PF = Yes / PF Basic above the ceiling may cross the EPF ceiling — re-run Salary Process."))
 
         # ---------------- Adopt PF checks (Iter 449, user spec) ----------------
         _adopt = str(r.get("adopt_pf") or m.get("adopt_pf") or "").strip().lower()

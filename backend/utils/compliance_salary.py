@@ -754,17 +754,28 @@ def compute_compliance_row(
                 #   Not set → statutory ceiling applies (existing rule).
                 _adopt = str(user.get("adopt_pf") or "").strip().lower()
                 _pfw_manual = _num(user.get("pf_wage_override"), 0.0)
-                if _pf_calc_base > cfg["pf_wage_cap"] and _adopt == "no":
+                # Iter 450 (user confirmed — AMIT PF Basis 17,796 ⇒ PF
+                # ₹2,136): a PF Basic FILLED ABOVE the ceiling on the
+                # Employee Master IS the adopted PF wage — PF is deducted
+                # on it in full (pro-rated), WITHOUT the ceiling. EPS stays
+                # capped; the ER split follows the 12%-minus-EPS rule.
+                if pf_basic_override > cfg["pf_wage_cap"]:
+                    _pf_eff = max(pf_basic_prorated, _pf_calc_base)
+                else:
+                    _pf_eff = _pf_calc_base
+                if _pf_eff > cfg["pf_wage_cap"] and _adopt == "no":
                     _pf_excluded_above = True
                     capped_pf_wages = 0.0
-                elif (_pf_calc_base > cfg["pf_wage_cap"] and _adopt == "yes"
+                elif (_pf_eff > cfg["pf_wage_cap"] and _adopt == "yes"
                       and _pfw_manual > 0):
                     _fct = (_proration_factor(
                         pf_proration_method, effective_present,
                         max(1, month_days)) if salary_mode == "monthly" else 1.0)
                     capped_pf_wages = _pfw_manual * _fct
+                elif pf_basic_override > cfg["pf_wage_cap"]:
+                    capped_pf_wages = _pf_eff
                 else:
-                    capped_pf_wages = min(_pf_calc_base, cfg["pf_wage_cap"])
+                    capped_pf_wages = min(_pf_eff, cfg["pf_wage_cap"])
             else:
                 capped_pf_wages = min(pf_base, cfg["pf_wage_cap"])
         pf_employee = capped_pf_wages * (cfg["pf_percent_employee"] / 100.0)
