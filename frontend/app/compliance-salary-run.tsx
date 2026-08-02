@@ -1522,29 +1522,35 @@ export default function ComplianceSalaryRunScreen() {
             const pfBasicPro = next.salary_mode === "monthly" ? pfBasicFull * ratio2 : pfBasicFull;
             const pfBase = pfBasicFull < pfCap && wageRuleOn
               ? Math.max(pfBasicPro, grossEarn * floorPct) : pfBasicPro;
-            // Iter 447 (user bug) — statutory PF wages = the WAGE BASE
-            // (max(Basic earned, floor% Gross)) capped at the ceiling; PF
-            // Basic only gates applicability (mirrors the engine).
-            // Iter 449 (user spec) — PF Wage Calculation Method mirror.
-            const pfMeth = String(stat.pf_wage_calc_method || "higher");
-            const statBase2 = pfMeth === "basic_da"
-              ? Number(next.basic || 0)
-              : pfMeth === "floor"
-                ? grossEarn * floorPct
-                : Math.max(Number(next.basic || 0), grossEarn * floorPct);
-            const pfWages = next.intl_worker
-              ? pfBase
-              // Iter 450 (user confirmed) — PF Basic filled ABOVE the
-              // ceiling = adopted PF wage, deducted in full (no ceiling).
-              : pfBasicFull > pfCap
-                ? Math.max(pfBase, statBase2)
-                : (wageRuleOn ? Math.min(statBase2, pfCap) : Math.min(pfBase, pfCap));
+            // Iter 456 (user final PF Engine spec) — PF Basic ≤ cap → PF
+            // wage = max(earned PF Basic, floor% Gross) capped at the
+            // ceiling; PF Basic ABOVE the cap → ADOPTED: PF on the FULL
+            // earned PF Basic (no cap).
+            // Iter 457 (MILAP bug) — Higher PF on the employee's OWN wage:
+            // Higher PF Wage (pro-rated) → earned PF Basic → wage base.
+            const hiActive1 = (next as any).pf_higher_active === true ||
+              String((next as any).pf_contribution_type || "").toLowerCase() === "higher";
+            const hiWage1 = Number((next as any).higher_pf_wage || 0);
+            const pfWages = hiActive1
+              ? (hiWage1 > 0
+                ? (next.salary_mode === "monthly" ? hiWage1 * ratio2 : hiWage1)
+                : (pfBasicFull > 0
+                  ? pfBasicPro
+                  : Math.max(pfBase, Number(next.basic || 0), grossEarn * floorPct)))
+              : (next.intl_worker
+                ? pfBase
+                : (pfBasicFull > pfCap ? pfBasicPro : Math.min(pfBase, pfCap)));
             const pfEmpRate = Number(stat.pf_percent_employee ?? 12) / 100;
             const pfErEpfRate = Number(stat.pf_percent_employer_epf ?? 3.67) / 100;
             const pfErEpsRate = Number(stat.pf_percent_employer_eps ?? 8.33) / 100;
-            let epf = pfWages * pfErEpfRate;
-            let eps = (next.higher_pension ? pfBase : pfWages) * pfErEpsRate;
-            if (next.eps_disabled) { epf += pfWages * pfErEpsRate; eps = 0; }
+            // Iter 456 — EPS always capped at the ceiling; wages above the
+            // cap follow the ECR split (ER total 12%, remainder → ER EPF).
+            const epsWages1 = next.higher_pension ? pfBase : Math.min(pfWages, pfCap);
+            let eps = epsWages1 * pfErEpsRate;
+            let epf = (pfWages > pfCap && !next.higher_pension)
+              ? pfWages * (pfErEpfRate + pfErEpsRate) - eps
+              : pfWages * pfErEpfRate;
+            if (next.eps_disabled) { epf += eps; eps = 0; }
             next.pf_wages = Math.round(pfWages);
             next.pf_employee = Math.round(pfWages * pfEmpRate);
             next.pf_employer_epf = Math.round(epf);
@@ -1562,17 +1568,12 @@ export default function ComplianceSalaryRunScreen() {
             const esiActual = (["basic", "hra", "conveyance", "medical", "special", "others"] as const)
               .reduce((n, k) => n + (esicHeadOn(k) ? Number((next as any)[k] || 0) : 0), 0)
               + (esicHeadOn("ot") ? Number(next.ot_pay || 0) : 0);
-            // Iter 449 (user spec) — ESIC Wage Calculation Method mirror.
-            const esiMeth = String(stat.esic_wage_calc_method || "wage_base");
-            const esiBase = esiMeth === "actual"
-              ? esiActual
-              : esiMeth === "floor"
-                ? grossEarn * floorPct
-                : esiMeth === "higher"
-                  ? Math.max(esiActual, grossEarn * floorPct)
-                  : (wageRuleOn
-                    ? Math.max(Number(next.basic || 0), grossEarn * floorPct)
-                    : esiActual);
+            // Iter 456 (user rollback) — ESIC stays on the LEGACY rule:
+            // max(Basic earned, floor% of Gross); the configurable ESIC
+            // Wage Calculation Method was removed.
+            const esiBase = wageRuleOn
+              ? Math.max(Number(next.basic || 0), grossEarn * floorPct)
+              : esiActual;
             const esiEmpRate = Number(stat.esic_percent_employee ?? 0.75) / 100;
             const esiErRate = Number(stat.esic_percent_employer ?? 3.25) / 100;
             next.esic_wage_base = Math.round(esiBase);
@@ -1701,28 +1702,26 @@ export default function ComplianceSalaryRunScreen() {
         // FIRST process + typed days already show the right PF.
         const hiActive = (r as any).pf_higher_active === true ||
           String((r as any).pf_contribution_type || "").toLowerCase() === "higher";
+        // Iter 457 (MILAP bug — Basic 2,30,000 / PF Basic 1,70,000 showed
+        // PF 27,600) — Higher PF contributes on the employee's OWN PF wage:
+        // Higher PF Wage (pro-rated) → earned PF Basic → wage base.
+        const hiWageFull = Number((r as any).higher_pf_wage || 0);
         const pfWagesNew = pfOn
           ? (hiActive
-            ? Math.max(pfBase, paidBasic, grossEarn * floorPct)
+            ? (hiWageFull > 0
+              ? ((r as any).salary_mode === "monthly" ? hiWageFull * ratio : hiWageFull)
+              : (pfBasicFull > 0
+                ? pfBasicPro
+                : Math.max(pfBase, paidBasic, grossEarn * floorPct)))
             : ((r as any).intl_worker
               ? pfBase
-              // Iter 447 (user bug — "PF is not calculating as per Wage
-              // Base") — statutory PF wages = the WAGE BASE capped at the
-              // ceiling; PF Basic only gates applicability.
-              // Iter 449 (user spec) — PF Wage Calculation Method mirror.
-              // Iter 450 (user confirmed) — PF Basic filled ABOVE the
-              // ceiling = adopted PF wage, deducted in full (no ceiling).
+              // Iter 456 (user final PF Engine spec) — PF Basic ABOVE the
+              // ceiling = ADOPTED Higher PF: PF on the FULL earned PF Basic
+              // (no cap). Below/at the ceiling: PF wage = max(earned PF
+              // Basic, floor% of Gross) capped at the ceiling.
               : (pfBasicFull > pfCap
-                ? Math.max(pfBase, paidBasic, grossEarn * floorPct)
-                : wageRuleOn
-                  ? Math.min(
-                      String(stat.pf_wage_calc_method || "higher") === "basic_da"
-                        ? paidBasic
-                        : String(stat.pf_wage_calc_method || "higher") === "floor"
-                          ? grossEarn * floorPct
-                          : Math.max(paidBasic, grossEarn * floorPct),
-                      pfCap)
-                  : Math.min(pfBase, pfCap))))
+                ? pfBasicPro
+                : Math.min(pfBase, pfCap))))
           : 0;
         // Iter 427 — VPF (employee side) survives the grid recompute:
         // scale the server-computed VPF with the new PF wages.
@@ -1743,9 +1742,15 @@ export default function ComplianceSalaryRunScreen() {
           pfErEps = epsWages * pfErEpsRate;
           pfErEpf = erTot - pfErEps;
         } else {
-          pfErEpf = pfWagesNew * pfErEpfRate;
-          // Iter 387 — Higher Pension: EPS on the UNCAPPED PF base.
-          pfErEps = ((r as any).higher_pension && pfOn ? pfBase : pfWagesNew) * pfErEpsRate;
+          // Iter 456 — EPS always capped at the ceiling; statutory wages
+          // ABOVE the cap (adopted PF Basic) follow the ECR split: ER total
+          // 12% of the adopted wage, EPS capped, remainder → Employer EPF.
+          const epsWages2 = (r as any).higher_pension && pfOn
+            ? pfBase : Math.min(pfWagesNew, pfCap);
+          pfErEps = epsWages2 * pfErEpsRate;
+          pfErEpf = (pfWagesNew > pfCap && !(r as any).higher_pension)
+            ? pfWagesNew * (pfErEpfRate + pfErEpsRate) - pfErEps
+            : pfWagesNew * pfErEpfRate;
         }
         // Iter 341 — EPS Disable: full employer share goes to EPF.
         if ((r as any).eps_disabled) {
@@ -1774,18 +1779,12 @@ export default function ComplianceSalaryRunScreen() {
         const esiActual2 = (["basic", "hra", "conveyance", "medical", "special", "others"] as const)
           .reduce((n, k) => n + (esicHeadOn(k) ? Number((rHeads as any)[k] || 0) : 0), 0)
           + (esicHeadOn("ot") ? Number((r as any).ot_pay || 0) : 0);
-        // Iter 449 (user spec) — ESIC Wage Calculation Method mirror.
-        const esiMeth2 = String(stat.esic_wage_calc_method || "wage_base");
+        // Iter 456 (user rollback) — ESIC stays on the LEGACY rule only:
+        // max(Basic earned, floor% of Gross); Wage Rule OFF ⇒ Σ ESI heads.
         const esiBase = esiApplicable
-          ? (esiMeth2 === "actual"
-            ? esiActual2
-            : esiMeth2 === "floor"
-              ? grossEarn * floorPct
-              : esiMeth2 === "higher"
-                ? Math.max(esiActual2, grossEarn * floorPct)
-                : (wageRuleOn
-                  ? Math.max(paidBasic, grossEarn * floorPct)
-                  : esiActual2))
+          ? (wageRuleOn
+            ? Math.max(paidBasic, grossEarn * floorPct)
+            : esiActual2)
           : 0;
         const esiEmp = esiApplicable ? Math.ceil(esiBase * esiEmpRate) : 0;
         const esiEr  = esiApplicable ? Math.ceil(esiBase * esiErRate)  : 0;

@@ -3643,3 +3643,12 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   "always wage base") now uses: Higher PF Wage (pro-rated) → else earned PF
   Basic → else wage base. Verified: MILAP → PF 20,400. Test file
   /tmp/test_pf_engine.py extended to 13 scenarios.
+- Iter 457b: BOTH client-side grid recompute mirrors in
+  compliance-salary-run.tsx (ot_pay/others editor + updatePresentDays)
+  updated to the final PF Engine: PF Basic>cap → earned PF Basic (no max
+  with wage base), Higher PF → own wage (hiWage prorated → PF Basic →
+  wage base), EPS capped + ECR ER split for above-cap statutory wages,
+  ESIC legacy only (calc-method mirrors removed).
+- IMPORTANT: MILAP CHAND JAIN exists ONLY on the user's VPS DB — user's
+  "still 27,600" report is from the un-deployed VPS. Fix requires:
+  run deploy456.sh on VPS + RE-RUN the Compliance Salary Process.
