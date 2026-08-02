@@ -30,6 +30,14 @@
 # Iter 436 — Portal Upload Files (EPFO ECR / ESIC MC): new toggle button
 #   "Remove Without UAN / ESIC No. Employees" — drops members missing a
 #   UAN / ESIC number from the generated upload files.
+# Iter 438 — After SAVE / FINALIZE on Compliance & Actual Salary Process:
+#   "Download / Mail Reports" popup — PDF / Excel / CSV / All chips,
+#   one-click Download + Send-by-email (uses the Email Settings SMTP,
+#   falls back to the built-in mail key).
+# Iter 439/440 — Modal upgrades: PDF Format 1 & Format 2 options
+#   (Compliance), Employee Group badge, recipient chips fetched from the
+#   Firm Master registered email ids (pick one / all + extra email),
+#   ≥1 format selection MANDATORY, mail carries exactly what's selected.
 #
 # Run ON THE VPS as root/sksharma.
 set -e
@@ -119,6 +127,8 @@ echo -n "   Name LEFT-aligned everywhere / Iter 435 (must say OK): "
 grep -q 'Name columns LEFT-aligned' $APP_DIR/backend/utils/register_export.py && echo "OK" || echo "MISSING!"
 echo -n "   Remove-without-UAN/ESIC toggle / Iter 436 (must say OK): "
 grep -q 'skip_missing' $APP_DIR/backend/routes/challans.py && grep -q 'toggle-skip-missing' $APP_DIR/frontend/app/challans.tsx && echo "OK" || echo "MISSING!"
+echo -n "   Download/Mail Reports modal / Iter 438-440 (must say OK): "
+grep -q 'email-report' $APP_DIR/backend/routes/compliance_salary_runs.py && grep -q 'firm-emails' $APP_DIR/backend/routes/firm_master.py && [ -f $APP_DIR/frontend/src/components/salary/ReportsShareModal.tsx ] && echo "OK" || echo "MISSING!"
 echo -n "   Report Hub Daily/Periodic + pickers (frontend) / Iter 433 (must say OK): "
 grep -q 'rc-otmode-daily' $APP_DIR/frontend/app/reports-center.tsx && echo "OK" || echo "MISSING!"
 echo ""

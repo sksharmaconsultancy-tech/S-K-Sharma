@@ -2182,6 +2182,118 @@ async def export_compliance_salary_register_pdf(
     )
 
 
+async def _compliance_report_attachments(run: Dict[str, Any],
+                                         formats: List[str]):
+    """Iter 438 (user request) — build PDF/Excel/CSV report files for a
+    compliance run (same builders as the download endpoints)."""
+    from utils.compliance_salary import (
+        build_compliance_register_pdf, dynamic_csv_columns,
+        flatten_deduction_heads, to_csv,
+    )
+    from utils.report_xlsx import build_rows_xlsx
+    month = run.get("month") or ""
+    company_name = "S.K. Sharma & Co."
+    firm_info: Dict[str, Any] = {}
+    if run.get("company_id"):
+        c = await db.companies.find_one(
+            {"company_id": run["company_id"]}, {"_id": 0, "name": 1, "address": 1})
+        if c and c.get("name"):
+            company_name = c["name"]
+        fm = await db.firm_masters.find_one(
+            {"company_id": run["company_id"]},
+            {"_id": 0, "epf": 1, "esi": 1, "registered_address": 1})
+        ra = (fm or {}).get("registered_address") or {}
+        reg_addr = ", ".join(str(x).strip() for x in [
+            ra.get("address1"), ra.get("address2"), ra.get("city"),
+            ra.get("state"), ra.get("pin_code")] if x and str(x).strip())
+        firm_info["address"] = reg_addr or ((c or {}).get("address") or "")
+        firm_info["pf_code"] = ((fm or {}).get("epf") or {}).get("epf_no") or ""
+        firm_info["esi_code"] = ((fm or {}).get("esi") or {}).get("esi_no") or ""
+    out = []
+    if "pdf" in formats or "pdf2" in formats:
+        from routes.report_formats import get_report_format
+        if "pdf" in formats:
+            _title_ov = str((await get_report_format("compliance_register_v1")).get("title") or "").strip()
+            out.append({"filename": f"ComplianceSalaryRegister_{month}.pdf",
+                        "content": build_compliance_register_pdf(
+                            run, company_name=company_name, firm=firm_info,
+                            title_override=_title_ov),
+                        "mime": "application/pdf"})
+        if "pdf2" in formats:
+            # Iter 439 (user request) — PDF Format 2 (Option 2 register).
+            from utils.compliance_salary import build_compliance_register_pdf_v2
+            _title_ov2 = str((await get_report_format("compliance_register_v2")).get("title") or "").strip()
+            _lay = await db.app_settings.find_one(
+                {"key": "compliance_register_layout"}, {"_id": 0, "layout": 1})
+            out.append({"filename": f"ComplianceSalaryRegister_Format2_{month}.pdf",
+                        "content": build_compliance_register_pdf_v2(
+                            run, company_name=company_name, firm=firm_info,
+                            layout=(_lay or {}).get("layout"),
+                            title_override=_title_ov2),
+                        "mime": "application/pdf"})
+    if "xlsx" in formats:
+        out.append({"filename": f"ComplianceSalary_{month}.xlsx",
+                    "content": build_rows_xlsx(
+                        columns=dynamic_csv_columns(run.get("rows") or []),
+                        rows=flatten_deduction_heads(run.get("rows") or []),
+                        sheet_name="Compliance",
+                        title=f"Compliance Salary — {company_name}",
+                        subtitle=f"Month: {month} · Employees: {len(run.get('rows') or [])}"),
+                    "mime": "application/vnd.openxmlformats-officedocument"
+                            ".spreadsheetml.sheet"})
+    if "csv" in formats:
+        out.append({"filename": f"ComplianceSalary_{month}.csv",
+                    "content": to_csv(run.get("rows") or []).encode("utf-8"),
+                    "mime": "text/csv"})
+    return out, company_name
+
+
+@api.post("/admin/compliance-salary-runs/{run_id}/email-report")
+async def email_compliance_run_report(
+    run_id: str,
+    payload: Dict[str, Any] = Body(default={}),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 438 (user request) — after Save / Finalize the admin can MAIL
+    the run's reports (PDF / Excel / CSV / All) to any email address."""
+    from utils.report_email import normalize_formats, send_report_email
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    await require_employer_permission(admin, "compliance_salary:read", db)
+    run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Compliance salary run not found")
+    if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised for this run")
+    run = await _ensure_firm_head_masks(run)
+    # Iter 439/440 (user request) — PDF Format 1 & 2; ≥1 format MANDATORY;
+    # the mail carries EXACTLY the selected formats.
+    formats = normalize_formats(payload.get("formats"),
+                                allowed=("pdf", "pdf2", "xlsx", "csv"))
+    to = payload.get("to") or admin.get("email") or ""
+    attachments, company_name = await _compliance_report_attachments(run, formats)
+    month = run.get("month") or ""
+    status = "FINALIZED" if run.get("finalized") else "Draft"
+    _fmt_labels = {"pdf": "PDF Format 1", "pdf2": "PDF Format 2",
+                   "xlsx": "Excel", "csv": "CSV"}
+    fmt_txt = ", ".join(_fmt_labels.get(f, f.upper()) for f in formats)
+    grp = str(run.get("employee_type") or "").strip() or "All Groups"
+    res = await send_report_email(
+        to,
+        f"Compliance Salary Report — {company_name} ({month})",
+        (f"Please find attached the Compliance Salary report(s) for "
+         f"{company_name} — {month} ({status}).\n\n"
+         f"Employee Group: {grp}\n"
+         f"Employees: {len(run.get('rows') or [])}\n"
+         f"Formats: {fmt_txt}\n\n"
+         f"Sent from Smart Payroll Service."),
+        attachments)
+    rcpts = ", ".join(res.get("to") or [])
+    return {"ok": True, "via": res.get("via"), "to": res.get("to"),
+            "formats": formats,
+            "message": f"Report ({fmt_txt}) emailed to {rcpts}"}
+
+
 @api.get("/admin/compliance-salary-runs/{run_id}/pf-ecr.txt")
 async def download_pf_ecr(
     run_id: str,

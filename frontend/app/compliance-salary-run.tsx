@@ -43,6 +43,7 @@ import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
   
 import MonthPicker from "@/src/components/MonthPicker";
 import ProcessCommandCenter from "@/src/components/salary/ProcessCommandCenter";
+import ReportsShareModal, { type ReportFormat } from "@/src/components/salary/ReportsShareModal";
 import TotalsFooter from "@/src/components/salary/TotalsFooter";
 import GridFilterChips, { GRID_FILTER_DEFAULT, rowMatchesFilters, type GridFilters } from "@/src/components/GridFilterChips";
 import { GridScroller, stickyCol, stickyHeader } from "@/src/components/GridFreeze";
@@ -289,6 +290,11 @@ export default function ComplianceSalaryRunScreen() {
   const [importStatus, setImportStatus] = useState<{ count: number; source?: string; filename?: string } | null>(null);
   const [importBusy, setImportBusy] = useState(false);
   const [mailModal, setMailModal] = useState(false);
+  // Iter 438 (user request) — after Save / Finalize offer to Download or
+  // Mail the run's reports (PDF / Excel / CSV / All).
+  const [reportsFor, setReportsFor] = useState<
+    { run_id: string; month: string; note: string; group?: string } | null
+  >(null);
   const [mailMsgs, setMailMsgs] = useState<any[]>([]);
   const [mailLoading, setMailLoading] = useState(false);
   // Iter 98 — display sorting for the compliance grid.
@@ -1007,6 +1013,10 @@ export default function ComplianceSalaryRunScreen() {
       setEmpType("all");
       await loadRuns();
       showMsg("Run finalized ✓ — locked & moved to Past Runs. Page cleared for the next batch.");
+      setReportsFor({
+        run_id: run.run_id, month: run.month, note: "Finalized 🔒",
+        group: (run as any).employee_type || (empType !== "all" ? empType : "All Groups"),
+      });
     } catch (e: any) {
       showMsg(typeof e?.message === "string"
         ? e.message
@@ -1088,6 +1098,10 @@ export default function ComplianceSalaryRunScreen() {
       });
       await loadRuns();
       showMsg("Saved as draft ✓ — your edits are stored and will be there when you reopen this run.");
+      setReportsFor({
+        run_id: run.run_id, month: run.month, note: "Saved as draft ✓",
+        group: (run as any).employee_type || (empType !== "all" ? empType : "All Groups"),
+      });
     } catch (e: any) {
       showMsg(e?.message || "Draft save failed");
     } finally { setSavingDraft(false); }
@@ -1253,6 +1267,32 @@ export default function ComplianceSalaryRunScreen() {
     } catch (e: any) {
       showMsg(e?.message || "Download failed");
     } finally { setDownloading(false); }
+  };
+
+  // Iter 438 — download reports by run id (works even after Finalize
+  // clears the page — the modal keeps the finalized run's id).
+  const downloadRunReports = async (
+    runId: string,
+    m: string,
+    formats: ReportFormat[],
+  ) => {
+    for (const f of formats) {
+      const url = f === "pdf" || f === "pdf2"
+        ? `/admin/compliance-salary-runs/${runId}/register.pdf?variant=${f === "pdf2" ? 2 : 1}&sort_by=${pdfSort}&group_by=`
+        : `/admin/compliance-salary-runs/${runId}/export.${f}`;
+      const res = await apiBinary(url);
+      if (Platform.OS === "web" && res.webBlobUrl) {
+        const a = document.createElement("a");
+        a.href = res.webBlobUrl;
+        a.download = f === "pdf"
+          ? `ComplianceSalaryRegister_${m}.pdf`
+          : f === "pdf2"
+            ? `ComplianceSalaryRegister_Option2_${m}.pdf`
+            : `ComplianceSalary_${m}.${f}`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 30000);
+      }
+    }
   };
 
   const pushToPayslips = async () => {
@@ -2100,6 +2140,32 @@ export default function ComplianceSalaryRunScreen() {
               </View>
             </View>
           </Modal>
+
+          {/* Iter 438 (user request) — post Save / Finalize: Download or
+              Mail the reports (PDF / Excel / CSV / All). */}
+          <ReportsShareModal
+            visible={!!reportsFor}
+            onClose={() => setReportsFor(null)}
+            title={`Compliance Salary — ${reportsFor?.month || ""}`}
+            subtitle={reportsFor?.note}
+            employeeGroup={reportsFor?.group}
+            formatOptions={[
+              { key: "pdf", label: "PDF Format 1" },
+              { key: "pdf2", label: "PDF Format 2" },
+              { key: "xlsx", label: "Excel" },
+              { key: "csv", label: "CSV" },
+            ]}
+            defaultEmail={(user as any)?.email || ""}
+            companyId={(run as any)?.company_id || activeCompanyId || ""}
+            emailEndpoint={reportsFor
+              ? `/admin/compliance-salary-runs/${reportsFor.run_id}/email-report`
+              : ""}
+            onDownload={async (fmts) => {
+              if (reportsFor) {
+                await downloadRunReports(reportsFor.run_id, reportsFor.month, fmts);
+              }
+            }}
+          />
 
           {/* Iter 101 — Gmail attachment picker */}
           <Modal

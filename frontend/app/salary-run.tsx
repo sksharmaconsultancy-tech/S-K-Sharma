@@ -37,7 +37,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
-import { api } from "@/src/api/client";
+import { api, apiBinary } from "@/src/api/client";
 import { confirmYesNo } from "@/src/utils/confirm";
 import { useLiveSync } from "@/src/api/live-sync";
 import { useAuth } from "@/src/context/AuthContext";
@@ -46,6 +46,7 @@ import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import MonthPicker from "@/src/components/MonthPicker";
 import CompanyPicker from "@/src/components/CompanyPicker";
 import ProcessCommandCenter from "@/src/components/salary/ProcessCommandCenter";
+import ReportsShareModal, { type ReportFormat } from "@/src/components/salary/ReportsShareModal";
 import TotalsFooter from "@/src/components/salary/TotalsFooter";
 import GridFilterChips, { GRID_FILTER_DEFAULT, rowMatchesFilters, type GridFilters } from "@/src/components/GridFilterChips";
 import { GridScroller, stickyCol, stickyHeader } from "@/src/components/GridFreeze";
@@ -292,6 +293,33 @@ export default function ActualSalaryProcessScreen() {
   // branch (Super / Sub Admins only).
   const isSuperRole = user?.role === "super_admin" || user?.role === "sub_admin";
   const [finalizedExisting, setFinalizedExisting] = useState<any | null>(null);
+  // Iter 438 (user request) — after Save / Finalize offer to Download or
+  // Mail the run's reports (PDF / Excel / CSV / All).
+  const [reportsFor, setReportsFor] = useState<
+    { run_id: string; month: string; note: string; group?: string } | null
+  >(null);
+
+  const downloadRunReports = async (
+    runId: string,
+    m: string,
+    formats: ReportFormat[],
+  ) => {
+    for (const f of formats) {
+      const url = f === "pdf"
+        ? `/admin/salary-runs/${runId}/register.pdf`
+        : `/admin/salary-runs/${runId}/export.${f}`;
+      const res = await apiBinary(url);
+      if (Platform.OS === "web" && res.webBlobUrl) {
+        const a = document.createElement("a");
+        a.href = res.webBlobUrl;
+        a.download = f === "pdf"
+          ? `SalaryRegister_${m}.pdf`
+          : `ActualSalary_${m}.${f}`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 30000);
+      }
+    }
+  };
   const [unlockBusy, setUnlockBusy] = useState(false);
   const refreshFinalized = useCallback(async () => {
     try {
@@ -535,6 +563,10 @@ export default function ActualSalaryProcessScreen() {
         await api(`/admin/actual-salary-process/${run.run_id}/row`, { method: "PATCH", body });
       }
       showMsg("Saved ✓ — salary data stored (not finalized).");
+      setReportsFor({
+        run_id: run.run_id, month: run.month, note: "Saved ✓",
+        group: run.employee_type || "All Groups",
+      });
     } catch (e: any) {
       showMsg(e?.message || "Save failed");
     }
@@ -609,6 +641,10 @@ export default function ActualSalaryProcessScreen() {
       setRun((prev) => prev ? { ...prev, finalized: true } : prev);
       await loadRuns();
       showMsg("Run finalized ✓");
+      setReportsFor({
+        run_id: run.run_id, month: run.month, note: "Finalized 🔒",
+        group: run.employee_type || "All Groups",
+      });
     } catch (e: any) {
       showMsg(e?.message || "Finalize failed");
     } finally {
@@ -882,6 +918,12 @@ export default function ActualSalaryProcessScreen() {
             onFinalize={finalize}
             finalizing={finalizing}
             onExportCsv={exportCsv}
+            onShareReports={() =>
+              run && setReportsFor({
+                run_id: run.run_id, month: run.month,
+                note: run.finalized ? "Finalized 🔒" : "Draft ✏️",
+                group: run.employee_type || "All Groups",
+              })}
             onSave={saveNow}
             onReprocess={reprocessRun}
             onDelete={deleteRun}
@@ -950,6 +992,26 @@ export default function ActualSalaryProcessScreen() {
           { label: "Net Pay", value: run.totals?.net_pay ?? 0, tone: "#059669" },
         ]} />
       ) : null}
+
+      {/* Iter 438 (user request) — post Save / Finalize: Download or Mail
+          the reports (PDF / Excel / CSV / All). */}
+      <ReportsShareModal
+        visible={!!reportsFor}
+        onClose={() => setReportsFor(null)}
+        title={`Actual Salary — ${reportsFor?.month || ""}`}
+        subtitle={reportsFor?.note}
+        employeeGroup={reportsFor?.group}
+        companyId={run?.company_id || selectedCompanyId || user?.company_id || ""}
+        defaultEmail={(user as any)?.email || ""}
+        emailEndpoint={reportsFor
+          ? `/admin/salary-runs/${reportsFor.run_id}/email-report`
+          : ""}
+        onDownload={async (fmts) => {
+          if (reportsFor) {
+            await downloadRunReports(reportsFor.run_id, reportsFor.month, fmts);
+          }
+        }}
+      />
     </View>
   );
 }
@@ -968,7 +1030,7 @@ const BASE_COL_WIDTHS = {
 
 function ResultGrid({
   run, editField, savingRow, onFinalize, finalizing, onExportCsv,
-  onSave, onReprocess, onDelete,
+  onShareReports, onSave, onReprocess, onDelete,
 }: {
   run: ActualRun;
   editField: (uid: string, field: keyof ActualRow, val: number) => void;
@@ -976,6 +1038,7 @@ function ResultGrid({
   onFinalize: () => void;
   finalizing: boolean;
   onExportCsv: () => void;
+  onShareReports: () => void;
   onSave: () => void;
   onReprocess: () => void;
   onDelete: () => void;
@@ -1118,6 +1181,8 @@ function ResultGrid({
         </View>
         <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
           <ActionBtn icon="download-outline" label="Export CSV" onPress={onExportCsv} />
+          {/* Iter 438 (user request) — Download / Mail PDF · Excel · CSV. */}
+          <ActionBtn icon="mail-outline" label="Download / Mail" onPress={onShareReports} />
           {!run.finalized ? (
             <>
               {/* Iter 230 (user request) — 4-button lifecycle. */}

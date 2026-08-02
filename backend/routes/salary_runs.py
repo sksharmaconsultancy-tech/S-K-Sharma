@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Body, Header, HTTPException, Query
 from pydantic import BaseModel
 
 from server import (  # noqa: E402
@@ -730,6 +730,103 @@ async def export_salary_register_pdf(
             "Cache-Control": "no-store",
         },
     )
+
+
+async def _salary_run_attachments(run: Dict[str, Any], formats: List[str]):
+    """Iter 438 (user request) — build PDF/Excel/CSV report files for an
+    Actual / legacy salary run (same builders as the download endpoints)."""
+    from utils.report_xlsx import build_rows_xlsx
+    from utils.salary_run import CSV_COLUMNS, to_csv
+    month = run.get("month") or ""
+    is_actual = (run.get("run_type") or "") == "actual"
+    company_name = "S.K. Sharma & Co."
+    if run.get("company_id"):
+        c = await db.companies.find_one(
+            {"company_id": run["company_id"]}, {"_id": 0, "name": 1})
+        if c and c.get("name"):
+            company_name = c["name"]
+    show_epf = show_esi = True
+    if is_actual:
+        show_epf, show_esi = await _actual_epf_esi_flags(run.get("company_id"))
+    rows = run.get("rows") or []
+    out = []
+    if "pdf" in formats:
+        if is_actual:
+            from utils.salary_run import build_actual_salary_register_pdf
+            pdf_bytes = build_actual_salary_register_pdf(
+                run, company_name=company_name,
+                show_epf=show_epf, show_esi=show_esi)
+        else:
+            from routes.report_formats import get_report_format
+            from utils.salary_run import build_salary_register_pdf
+            pdf_bytes = build_salary_register_pdf(
+                run, company_name=company_name,
+                fmt=await get_report_format("salary_register"))
+        out.append({"filename": f"SalaryRegister_{month}.pdf",
+                    "content": pdf_bytes, "mime": "application/pdf"})
+    if "xlsx" in formats:
+        if is_actual:
+            from utils.salary_run import actual_csv_columns
+            cols = actual_csv_columns(show_epf, show_esi)
+            sheet, title = "Actual Salary", f"Actual Salary — {company_name}"
+        else:
+            cols, sheet, title = CSV_COLUMNS, "Salary Run", f"Salary Run — {company_name}"
+        out.append({"filename": f"SalaryRun_{month}.xlsx",
+                    "content": build_rows_xlsx(
+                        columns=cols, rows=rows, sheet_name=sheet, title=title,
+                        subtitle=f"Month: {month} · Employees: {len(rows)}"),
+                    "mime": "application/vnd.openxmlformats-officedocument"
+                            ".spreadsheetml.sheet"})
+    if "csv" in formats:
+        if is_actual:
+            from utils.salary_run import to_actual_csv
+            csv_str = to_actual_csv(rows, show_epf=show_epf, show_esi=show_esi)
+        else:
+            csv_str = to_csv(rows)
+        out.append({"filename": f"SalaryRun_{month}.csv",
+                    "content": csv_str.encode("utf-8"), "mime": "text/csv"})
+    return out, company_name
+
+
+@api.post("/admin/salary-runs/{run_id}/email-report")
+async def email_salary_run_report(
+    run_id: str,
+    payload: Dict[str, Any] = Body(default={}),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 438 (user request) — after Save / Finalize the admin can MAIL
+    the Actual Salary reports (PDF / Excel / CSV / All) to any email."""
+    from utils.report_email import normalize_formats, send_report_email
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    await require_employer_permission(admin, "salary_process:read", db)
+    run = await db.salary_runs.find_one({"run_id": run_id}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Salary run not found")
+    if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised for this run")
+    formats = normalize_formats(payload.get("formats"))
+    to = payload.get("to") or admin.get("email") or ""
+    attachments, company_name = await _salary_run_attachments(run, formats)
+    month = run.get("month") or ""
+    label = "Actual Salary" if (run.get("run_type") or "") == "actual" else "Salary Run"
+    status = "FINALIZED" if run.get("finalized") else "Draft"
+    grp = str(run.get("employee_type") or "").strip() or "All Groups"
+    fmt_txt = ", ".join(f.upper() for f in formats)
+    res = await send_report_email(
+        to,
+        f"{label} Report — {company_name} ({month})",
+        (f"Please find attached the {label} report(s) for "
+         f"{company_name} — {month} ({status}).\n\n"
+         f"Employee Group: {grp}\n"
+         f"Employees: {len(run.get('rows') or [])}\n"
+         f"Formats: {fmt_txt}\n\n"
+         f"Sent from Smart Payroll Service."),
+        attachments)
+    rcpts = ", ".join(res.get("to") or [])
+    return {"ok": True, "via": res.get("via"), "to": res.get("to"),
+            "formats": formats,
+            "message": f"Report ({fmt_txt}) emailed to {rcpts}"}
 
 
 @api.get("/admin/salary-runs/{run_id}/payslips.pdf")

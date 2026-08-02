@@ -352,6 +352,26 @@ async def _assert_firm_access(user: Dict[str, Any], company_id: str) -> Dict[str
     return company
 
 
+@router.get("/firm-emails/{company_id}")
+async def get_firm_emails(
+    company_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 440 (user request) — the Firm Master's registered email id(s)
+    (header.email_1 / email_2) for the Download / Mail Reports popup."""
+    user = await get_user_from_token(authorization)
+    await _assert_firm_access(user, company_id)
+    doc = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "header": 1})
+    hdr = (doc or {}).get("header") or {}
+    emails = []
+    for k in ("email_1", "email_2"):
+        e = str(hdr.get(k) or "").strip()
+        if e and "@" in e and e not in emails:
+            emails.append(e)
+    return {"emails": emails}
+
+
 @router.get("/firm-master/{company_id}")
 async def get_firm_master(
     company_id: str,

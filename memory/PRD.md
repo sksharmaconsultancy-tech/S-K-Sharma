@@ -3405,3 +3405,35 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   from grid remarks" improvement was started (remark pencil in grid +
   reprocess carry) then FULLY REVERTED — user said "No need". Do NOT
   re-suggest this feature. Codebase is back to Iter 436 state.
+- Iter 438 (user request): After SAVE or FINALIZE on Compliance & Actual
+  Salary Process → "Download / Mail Reports" modal (PDF / Excel / CSV /
+  All chips, Download button + email input with Send).
+  - Shared component: frontend/src/components/salary/ReportsShareModal.tsx
+    (NOTE: animationType MUST be "none" — "fade" left the modal ghosted/
+    half-transparent on these pages).
+  - Compliance: modal opens after Save-as-Draft + Finalize (run_id/month
+    captured in `reportsFor` BEFORE finalize clears the page). Actual
+    (salary-run.tsx): after Save + Finalize + a "Download / Mail"
+    ActionBtn in the run header.
+  - Backend: POST /admin/compliance-salary-runs/{id}/email-report and
+    POST /admin/salary-runs/{id}/email-report — body {to, formats:[...|all]}.
+    Attachments reuse the existing register/export builders.
+  - utils/report_email.py: tries admin SMTP (Email Settings) first, falls
+    back to RESEND_API_KEY env. E2E verified (both endpoints via curl +
+    UI Send button → "Report (PDF) emailed to …").
+- Iter 439/440 (user request — Download/Mail Reports modal upgrades):
+  - Compliance modal formats: PDF Format 1 (variant 1), PDF Format 2
+    (variant 2 / Option 2 register), Excel, CSV. Actual Salary: PDF/Excel/CSV.
+  - Employee Group badge shown in modal (run.employee_type).
+  - "Or mail the reports": fetches Firm Master registered emails via NEW
+    GET /admin/firm-emails/{company_id} (header.email_1/email_2) — chips
+    to pick one/several/all (default all) + optional extra typed email.
+  - ≥1 format selection is MANDATORY (frontend status message + backend
+    400 "Select at least one report format"). Mail carries EXACTLY the
+    selected formats.
+  - send_report_email now accepts a recipient LIST (SMTP loops per
+    recipient; Resend gets full list). NOTE: dev Resend sandbox key only
+    delivers to the account owner (403 for others) — on VPS the user's
+    SMTP settings handle any recipient.
+  - Backend verified via curl (pdf+pdf2 mail OK, empty formats → 400,
+    firm-emails OK); UI verified via screenshot on salary-run.
