@@ -3518,3 +3518,15 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   (present-days edit + OT/Others edit) to mirror it. Higher PF / IW / VPF
   paths unchanged. Verified: SAPNA case → pf_wages 12043.7, PF 1445, ESIC
   91 (matches grid). Runs must be REPROCESSED to update stored figures.
+- Iter 448 (user-accepted enhancement — pre-upload "EPFO File Check"):
+  - New GET /api/admin/challans/ecr-check?run_id&skip_missing → validates
+    the ECR file like the EPFO portal: filename word-chars rule, UAN
+    presence/12-digit format/duplicates, member-name characters, RFE-37
+    formula (ER diff = Due EPF − Due EPS from wages, EE ≥ due), EPS/EDLI
+    wage limits (higher-pension exempt), NCP-days sanity. Returns
+    {ok, file_name, members, skipped_no_uan, checks[], issues[]}.
+  - challans.tsx: purple "EPFO File Check" button (testid ecr-file-check)
+    in the Portal Upload Files card + green/red results panel; honours the
+    Remove-Without-UAN toggle. Tested by testing_agent — PASSED (report
+    /app/test_reports/iteration_448.json).
+  - Note: /challans run dropdown only lists runs with finalized:true.
