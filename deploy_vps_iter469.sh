@@ -64,6 +64,17 @@
 #     machine re-uploads ONLY that month's punches (lighter than the full
 #     "Fetch old data" re-sync; duplicates skipped automatically).
 #
+# Iter 474 — NEW MACHINES NOW UPLOAD THEIR STORED PUNCHES AUTOMATICALLY
+#   (user report — "registered 4 machines, showing ONLINE but no data"):
+#   • A freshly registered machine now gets ATTLOGStamp=0 on its first
+#     handshake, so it uploads EVERY punch already stored in its memory.
+#     Previously the server answered "None" = "I have everything", so new
+#     machines only sent punches made AFTER registration.
+#   • Registering a device also queues a CHECK command, so the machine
+#     re-initialises within ~1 minute — no manual reboot needed.
+#   • For machines registered BEFORE this deploy that still show no data:
+#     press "Fetch old data" once per machine (or just reboot the machine).
+#
 # Run ON THE VPS as root/sksharma.
 set -e
 
@@ -158,6 +169,8 @@ echo -n "   Reprocess keeps Days+Freeze, refreshes PF/ESIC (Iter 472) (must say 
 grep -q 'Iter 472' $APP_DIR/backend/routes/compliance_salary_runs.py && echo "OK" || echo "MISSING!"
 echo -n "   New-machine cards + month fetch (Iter 473) (must say OK): "
 grep -q 'fetch-range' $APP_DIR/backend/routes/biometric_devices.py && echo "OK" || echo "MISSING!"
+echo -n "   First-sync auto-upload for new machines (Iter 474) (must say OK): "
+grep -q '_first_sync' $APP_DIR/backend/routes/biometric_devices.py && echo "OK" || echo "MISSING!"
 echo -n "   Auto-reprocess after import FIXED (Iter 469) (must say OK): "
 grep -q 'from routes.compliance_salary_runs import' $APP_DIR/backend/routes/compliance_import.py && echo "OK" || echo "MISSING!"
 echo -n "   Dynamic deduction-head columns on the run (Iter 469) (must say OK): "

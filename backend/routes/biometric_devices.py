@@ -551,7 +551,14 @@ async def iclock_handshake(
     # re-sync window is active we answer ATTLOGStamp=0, which resets the
     # device's upload cursor so it re-transmits EVERY attendance log stored
     # in its memory (idempotency guard skips duplicates server-side).
-    att_stamp = "0" if _resync_active(device) else "None"
+    # Iter 474 (user report — "registered 4 machines, showing ONLINE but no
+    # data"): a FRESHLY REGISTERED machine also gets ATTLOGStamp=0 until its
+    # first data push lands — otherwise answering "None" tells the machine
+    # the server is up-to-date and it NEVER uploads the punches already
+    # stored in its memory (it would only send punches made after
+    # registration). Once any push arrives, normal stamping resumes.
+    _first_sync = not (device.get("last_push_at"))
+    att_stamp = "0" if (_resync_active(device) or _first_sync) else "None"
     # Standard ADMS response — see ZKTeco Push SDK docs
     body_lines = [
         f"GET OPTION FROM: {SN}",
@@ -1384,6 +1391,15 @@ async def register_biometric_device(
     }
     await db.biometric_devices.insert_one(device)
     device.pop("_id", None)
+    # Iter 474 — the machine may have handshaked BEFORE it was registered
+    # (or only handshakes on reboot). Queue a CHECK so it re-initialises
+    # within a minute and picks up the first-sync ATTLOGStamp=0, uploading
+    # the punches already stored in its memory without a manual reboot.
+    try:
+        await _queue_cmd(sn, "CHECK", admin["user_id"],
+                         "Initial sync after registration")
+    except Exception:
+        logger.warning("[zkteco] initial CHECK queue failed", exc_info=True)
     return {"ok": True, "device": device}
 
 

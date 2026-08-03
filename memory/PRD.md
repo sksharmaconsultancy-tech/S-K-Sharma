@@ -3828,3 +3828,15 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   NOTE: /admin-login route does NOT exist — admin login page is
   /admin-pin-login (Password tab). Testing agent suggested refactor:
   biometric-devices.tsx 2134 lines (backlog).
+- Iter 474 (user report — "registered 4 machines today: CQIK231260072,
+  NCD8251000569, NCD8251000531, NCD8251000591 — showing ONLINE but data
+  didn't come"): ROOT CAUSE — handshake answered ATTLOGStamp=None for
+  freshly registered devices, telling the machine the server already has
+  everything, so stored punches were never uploaded (only future punches).
+  Fixes in biometric_devices.py: (a) _first_sync — handshake answers
+  ATTLOGStamp=0 until the device's FIRST data push lands (last_push_at
+  empty), then normal stamping; (b) device registration auto-queues a
+  CHECK command so the machine re-initialises within ~1 min (no reboot).
+  Verified E2E: register → CHECK queued → handshake stamp=0 → push ATTLOG →
+  handshake stamp=None. For machines registered BEFORE the deploy the user
+  must press "Fetch old data" once per machine (or reboot the machine).
