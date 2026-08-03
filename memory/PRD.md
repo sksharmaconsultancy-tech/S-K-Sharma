@@ -3808,3 +3808,23 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   Verified E2E: freeze run + manual OT +500 + master pf_basic revision →
   reprocess kept days 14.5 & gross 18500, PF went 0 → 1110 (wages 9250 =
   50% of kept gross), ESIC 70 on kept gross. Full suites 69 passed 3 skipped.
+- Iter 473 (user reports — "new machines not showing in machine list" +
+  "allow fetching current month or one month back data from machine"):
+  biometric_devices.py — (a) _unknown_devices_payload() helper (extracted
+  from Connection Doctor); GET /biometric/devices now returns
+  unknown_devices so unregistered serials show ON the Machine List;
+  (b) POST /biometric/devices/{id}/fetch-range?range=current_month|
+  last_month queues `DATA QUERY ATTLOG StartTime=...\tEndTime=...` (ZK push
+  protocol, tab-separated, verified via web docs) + a CHECK; month edges
+  computed in the device's GMT zone. Frontend biometric-devices.tsx:
+  red "New machines detected" cards with Register button pre-filling the
+  serial (openRegisterUnknown); "Fetch this month"/"Fetch last month"
+  buttons per device card. testing_agent frontend run: ALL PASS
+  (/app/test_reports/iteration_471.json) incl. Server Iter 472 badge,
+  unknown card, prefill, month-fetch alert. Seeded test serials cleaned.
+  KNOWN LIMITATION explained to user: ADMS machines push only NEW punches;
+  historical data needs Fetch old data (full) or the new month fetch
+  (firmware must support DATA QUERY; fallback message included).
+  NOTE: /admin-login route does NOT exist — admin login page is
+  /admin-pin-login (Password tab). Testing agent suggested refactor:
+  biometric-devices.tsx 2134 lines (backlog).

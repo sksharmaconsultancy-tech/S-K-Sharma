@@ -54,6 +54,16 @@
 #     basis, PF Basic, ESIC flags, %s) flow into statutory without
 #     touching the days or the freeze.
 #
+# Iter 473 — BIOMETRIC MACHINE visibility + month fetch (user requests):
+#   • NEW machines that reach the server but are NOT registered now show
+#     directly ON the Machine List (red "New machines detected" card) with
+#     a one-tap Register button (serial pre-filled). Previously hidden
+#     inside the Connection Doctor only.
+#   • "Fetch this month" / "Fetch last month" buttons on every device card:
+#     queues a targeted DATA QUERY ATTLOG StartTime/EndTime command so the
+#     machine re-uploads ONLY that month's punches (lighter than the full
+#     "Fetch old data" re-sync; duplicates skipped automatically).
+#
 # Run ON THE VPS as root/sksharma.
 set -e
 
@@ -146,6 +156,8 @@ echo -n "   ECR runner v10 auto-navigation (Iter 471) (must say OK): "
 grep -q 'RUNNER_VERSION = "10"' $APP_DIR/backend/routes/portal_extension.py && echo "OK" || echo "MISSING!"
 echo -n "   Reprocess keeps Days+Freeze, refreshes PF/ESIC (Iter 472) (must say OK): "
 grep -q 'Iter 472' $APP_DIR/backend/routes/compliance_salary_runs.py && echo "OK" || echo "MISSING!"
+echo -n "   New-machine cards + month fetch (Iter 473) (must say OK): "
+grep -q 'fetch-range' $APP_DIR/backend/routes/biometric_devices.py && echo "OK" || echo "MISSING!"
 echo -n "   Auto-reprocess after import FIXED (Iter 469) (must say OK): "
 grep -q 'from routes.compliance_salary_runs import' $APP_DIR/backend/routes/compliance_import.py && echo "OK" || echo "MISSING!"
 echo -n "   Dynamic deduction-head columns on the run (Iter 469) (must say OK): "
