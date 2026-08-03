@@ -3699,3 +3699,16 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   correctly). Improvements shipped: more header aliases (workingdays/
   paiddays/totaldays/salary/grosssalary/etc.) + 400 error now echoes the
   sheet's own first row so users see the mismatched columns.
+- Iter 463/465 (user error recording + PORTAL-ACCEPTED MC_Template11.xls):
+  ESIC .xls is now built ON TOP of the official template stored at
+  /app/backend/assets/esic_mc_template.xls via xlutils.copy — preserves
+  the portal's exact long header captions + "Instructions & Reason Codes"
+  sheet. Data: IP zfill(10) TEXT, name sanitized (alphabets+space only)
+  TEXT, days/wages/reason NUMERIC, LWD dd-mm-yyyy TEXT (portal page says
+  dashes). xlutils added to requirements.txt. Verified generated file:
+  headers + Instructions sheet intact, 0987654320 padding, Reason 2 +
+  10-07-2026 for exited member.
+- Iter 464 (user request): clicking the ACTIVE workspace tab now REFRESHES
+  the current page (remount via ?_r nonce, stripped from stored routes)
+  instead of doing nothing / jumping to Dashboard; inactive tab click still
+  switches to that tab's own saved page.

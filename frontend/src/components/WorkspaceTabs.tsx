@@ -52,7 +52,11 @@ export default function WorkspaceTabs({
 
   const fullRoute = React.useCallback(() => {
     if (Platform.OS === "web" && typeof window !== "undefined") {
-      return window.location.pathname + (window.location.search || "");
+      // Strip the internal ?_r refresh nonce so stored tab routes stay clean.
+      const sp = new URLSearchParams(window.location.search || "");
+      sp.delete("_r");
+      const q = sp.toString();
+      return window.location.pathname + (q ? `?${q}` : "");
     }
     return pathname;
   }, [pathname]);
@@ -93,7 +97,14 @@ export default function WorkspaceTabs({
   }, [pathname, active]);
 
   const switchTab = (t: WorkspaceTab) => {
-    if (t.id === active) return;
+    if (t.id === active) {
+      // Iter 464 (user request) — clicking the ACTIVE tab REFRESHES the
+      // page it is already on (remount + refetch), never jumps elsewhere.
+      switching.current = t.route;
+      const p = t.route.split("?")[0];
+      router.replace((p + "?_r=" + Date.now()) as any);
+      return;
+    }
     setActive(t.id);
     saveState(tabs, t.id);
     switching.current = t.route;

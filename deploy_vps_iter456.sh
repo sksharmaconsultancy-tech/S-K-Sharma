@@ -59,6 +59,14 @@
 #     Control / Cancel. Footer STATUS BAR: Online · Database connected ·
 #     Last sync · Auto Save On.
 #
+# Iter 463/465 — ESIC UPLOAD .XLS built ON the OFFICIAL PORTAL TEMPLATE
+# (user's accepted MC_Template11.xls): exact long header captions +
+# "Instructions & Reason Codes" sheet preserved; IP zero-padded to 10
+# digits (TEXT), names alphabets+space only, Days/Wages/Reason NUMERIC,
+# Last Working Day dd-mm-yyyy TEXT for exited members (Reason 2).
+#
+# Iter 464 — clicking the ACTIVE workspace tab refreshes its current page.
+#
 # Run ON THE VPS as root/sksharma.
 set -e
 
@@ -155,6 +163,8 @@ echo -n "   Dashboard click collapses sidebar / Iter 454 (must say OK): "
 grep -q 'collapseTick' $APP_DIR/frontend/src/components/AdminWebShell.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Workspace tabs + sync + locking (Iter 461) (must say OK): "
 grep -q 'WorkspaceTabs' $APP_DIR/frontend/src/components/AdminWebShell.tsx && echo "OK" || echo "MISSING!"
+echo -n "   ESIC .xls uses OFFICIAL portal template (Iter 465) (must say OK): "
+[ -f $APP_DIR/backend/assets/esic_mc_template.xls ] && grep -q 'Iter 465' $APP_DIR/backend/routes/challans.py && echo "OK" || echo "MISSING!"
 echo -n "   ESIC .xls matches working sample (Iter 460) (must say OK): "
 grep -q 'Iter 460' $APP_DIR/backend/routes/challans.py && echo "OK" || echo "MISSING!"
 echo -n "   Zero-day members in ECR (Iter 459) (must say OK): "

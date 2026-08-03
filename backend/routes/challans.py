@@ -19,6 +19,7 @@ Challan doc shape:
 import base64
 import io
 import math
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -392,9 +393,10 @@ def _esic_row_vals(r: Dict[str, Any], u: Dict[str, Any], month: Any):
     """Iter 456 — ESIC upload template rules (user's instructions sheet):
     • DAYS rounded UP to the next whole number (instruction 2).
     • SAL = gross earned for the month, truncated to whole ₹.
-    • 0-wage members: Reason 2 (Left Service) + Last Working Day dd/mm/yyyy
-      when the member exited on/before the month end (IP removed from next
-      wage period) — otherwise Reason 1 (On Leave), date BLANK.
+    • 0-wage members: Reason 2 (Left Service) + Last Working Day dd-mm-yyyy
+      (Iter 463 — the ESIC portal upload page demands dd-mm-yyyy with
+      DASHES, "column format should be text") when the member exited on/
+      before the month end — otherwise Reason 1 (On Leave), date BLANK.
     • Members who worked part of the month carry NO reason (0) and the
       last-working-day stays BLANK (instruction 6).
     Returns (days, wages, reason, last_working_day) — all display values."""
@@ -415,10 +417,26 @@ def _esic_row_vals(r: Dict[str, Any], u: Dict[str, Any], month: Any):
         if _re.fullmatch(r"\d{4}-\d{2}-\d{2}", exit_d) and (not m_end or exit_d <= m_end):
             reason = 2
             yy, mm, dd = exit_d.split("-")
-            lwd = f"{dd}/{mm}/{yy}"
+            lwd = f"{dd}-{mm}-{yy}"
         else:
             reason = 1
     return days, wages, reason, lwd
+
+
+def _esic_ip_fmt(ip_no: str) -> str:
+    """Iter 463 — ESIC Insurance Numbers are 10 DIGITS; Excel-sourced
+    masters often lose leading zeros. Left-pad numeric IPs to 10."""
+    s = str(ip_no or "").strip().replace(" ", "")
+    if s.isdigit() and len(s) < 10:
+        s = s.zfill(10)
+    return s
+
+
+def _esic_name_fmt(name: str) -> str:
+    """Iter 463 — portal rule: IP Name = ONLY alphabets and spaces."""
+    import re as _re
+    s = _re.sub(r"[^A-Za-z ]+", " ", str(name or "").upper())
+    return _re.sub(r"\s+", " ", s).strip()
 
 
 def _portal_month(month: Any) -> str:
@@ -566,17 +584,22 @@ def _ecr_txt_bytes(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]],
 
 def _esic_xls_bytes(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> bytes:
     """ESIC monthly-contribution bulk sheet (.xls) body. Raises 400 if no
-    ESIC-applicable member has an IP number."""
+    ESIC-applicable member has an IP number.
+
+    Iter 465 (user provided the PORTAL-ACCEPTED "MC_Template11.xls") — the
+    file is now built ON TOP of that official template (kept at
+    backend/assets/esic_mc_template.xls): the original header row with the
+    portal's exact long captions and the "Instructions & Reason Codes"
+    sheet are preserved; data rows are filled into Sheet1 with IP Number +
+    Name + Last Working Day as TEXT and Days / Wages / Reason as NUMBERS."""
     import xlwt
-    wb = xlwt.Workbook()
-    ws = wb.add_sheet("Sheet1")
-    # Iter 460 (user's WORKING "sample format of ESIC.xls") — the ESIC
-    # portal accepts: ESI_CODE + NAME as TEXT cells, DAYS / SAL / RE as
-    # NUMERIC cells (General format), DATE blank (or dd/mm/yyyy TEXT for
-    # exited members). Writing everything as text (Iter 456) was rejected.
+    import xlrd as _xlrd
+    from xlutils.copy import copy as _xl_copy
+    _tpl_path = os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                             "assets", "esic_mc_template.xls")
+    wb = _xl_copy(_xlrd.open_workbook(_tpl_path, formatting_info=True))
+    ws = wb.get_sheet(0)
     _txt = xlwt.easyxf(num_format_str="@")
-    for col, h in enumerate(["ESI_CODE", "NAME", "DAYS", "SAL", "RE", "DATE"]):
-        ws.write(0, col, h, _txt)
     rownum = 1
     for r in run.get("rows") or []:
         u = extra.get(r.get("user_id"), {}) or {}
@@ -591,8 +614,8 @@ def _esic_xls_bytes(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> by
         if not r.get("esic_applicable") and not _zero:
             continue
         days, wages, reason, lwd = _esic_row_vals(r, u, run.get("month"))
-        ws.write(rownum, 0, ip_no, _txt)
-        ws.write(rownum, 1, (r.get("name") or "").upper(), _txt)
+        ws.write(rownum, 0, _esic_ip_fmt(ip_no), _txt)
+        ws.write(rownum, 1, _esic_name_fmt(r.get("name")), _txt)
         ws.write(rownum, 2, days)
         ws.write(rownum, 3, wages)
         ws.write(rownum, 4, reason)
@@ -894,10 +917,10 @@ async def download_esic_xlsx(
         # other ESIC-exempt members stay out.
         if not r.get("esic_applicable") and not _zero:
             continue
-        # Iter 460 (user's working sample) — IP/NAME as TEXT, DAYS/SAL/RE
-        # as NUMBERS, DATE dd/mm/yyyy text only for exited members.
+        # Iter 460/465 — IP/NAME as TEXT (padded/sanitized), DAYS/SAL/RE
+        # as NUMBERS, DATE dd-mm-yyyy text only for exited members.
         days, wages, reason, lwd = _esic_row_vals(r, u, run.get("month"))
-        ws.append([ip_no or "MISSING IP NO", (r.get("name") or "").upper(),
+        ws.append([_esic_ip_fmt(ip_no) or "MISSING IP NO", _esic_name_fmt(r.get("name")),
                    days, wages, reason, lwd])
         ws.cell(row=ws.max_row, column=1).number_format = "@"
         ws.cell(row=ws.max_row, column=2).number_format = "@"
