@@ -3840,3 +3840,30 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   Verified E2E: register → CHECK queued → handshake stamp=0 → push ATTLOG →
   handshake stamp=None. For machines registered BEFORE the deploy the user
   must press "Fetch old data" once per machine (or reboot the machine).
+- Iter 475 (user spec — Employee Rejoin/Rehire): NEW
+  /app/backend/routes/employee_rejoin.py registered in server.py:
+  GET /admin/employees/{id}/rejoin-info (previous details + service span/
+  gap + history + firm policy), POST /admin/employees/{id}/rejoin
+  (validations: must be separated, rejoin_date >= LWD, reason required;
+  archives closing period to employment_history with sequence; employee
+  code continue/new per firm_masters.rejoin_policy with
+  previous_employee_codes link; applies new dept/desig/salary/compliance
+  structure via build_compliance_structure; leave policy continue/reset/
+  manual; gratuity_service_policy stamped; UAN/ESIC NEVER changed;
+  active=True restores PWA/mobile/biometric; immutable rejoin_audit with
+  admin+IP; ws broadcast employee.rejoined),
+  GET /admin/employees/{id}/employment-history,
+  GET/PUT /admin/firm-masters/{cid}/rejoin-policy.
+  Frontend: /app/frontend/app/employee-rejoin.tsx wizard (read-only prev
+  card, service summary, section B form, policy card, history timeline);
+  employee-master.tsx shows green "Rejoin Employee (Rehire)" (em-rejoin)
+  for separated employees. Backend E2E verified (validations, archive,
+  audit, code continuity). testing_agent frontend run ALL PASS after it
+  fixed 2 bugs: (1) employee-master detail merge missing active/
+  employment_status/exit_date/resign_date fields; (2) employee-rejoin
+  double JSON.stringify (api client already stringifies). Report:
+  /app/test_reports/iteration_475.json. Seeded test employee cleaned.
+  NOTE: _parse_any_date returns datetime — use _to_date() wrapper.
+  Backlog from spec (NOT yet built): rejoin-policy Firm Master UI screen
+  (API ready), multi-period report annotations, notifications to HR/
+  manager beyond ws broadcast.

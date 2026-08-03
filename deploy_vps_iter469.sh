@@ -75,6 +75,20 @@
 #   • For machines registered BEFORE this deploy that still show no data:
 #     press "Fetch old data" once per machine (or just reboot the machine).
 #
+# Iter 475 — EMPLOYEE REJOIN (REHIRE) module (user spec):
+#   • Separated employees (resigned/terminated/retired/absconded/left) show
+#     a green "Rejoin Employee (Rehire)" button on the Employee Master.
+#   • Guided wizard: read-only previous employment (code/DOJ/LWD/reason/
+#     UAN/ESIC/Aadhaar/PAN), Service Summary (previous service + gap days),
+#     new employment details (rejoin date/reason/dept/desig/salary), Firm
+#     Rejoin Policy card and full Employment History timeline.
+#   • On rejoin: the closing period is archived to employment_history, the
+#     SAME UAN & ESIC IP continue (never re-issued), attendance & payroll
+#     restart from the Rejoin Date, PWA/mobile access restores, and an
+#     immutable audit record (user, IP, before/after) is written.
+#   • Firm-Master rejoin policy (API): employee code continue/new, leave
+#     balance continue/reset/manual, gratuity service continue/fresh.
+#
 # Run ON THE VPS as root/sksharma.
 set -e
 
@@ -171,6 +185,8 @@ echo -n "   New-machine cards + month fetch (Iter 473) (must say OK): "
 grep -q 'fetch-range' $APP_DIR/backend/routes/biometric_devices.py && echo "OK" || echo "MISSING!"
 echo -n "   First-sync auto-upload for new machines (Iter 474) (must say OK): "
 grep -q '_first_sync' $APP_DIR/backend/routes/biometric_devices.py && echo "OK" || echo "MISSING!"
+echo -n "   Employee Rejoin (Rehire) module (Iter 475) (must say OK): "
+[ -f $APP_DIR/backend/routes/employee_rejoin.py ] && grep -q 'employee-rejoin' $APP_DIR/frontend/app/employee-master.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Auto-reprocess after import FIXED (Iter 469) (must say OK): "
 grep -q 'from routes.compliance_salary_runs import' $APP_DIR/backend/routes/compliance_import.py && echo "OK" || echo "MISSING!"
 echo -n "   Dynamic deduction-head columns on the run (Iter 469) (must say OK): "
