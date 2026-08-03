@@ -222,6 +222,11 @@ export default function EmployeeMasterScreen() {
             present_address: full.present_address ?? null,
             uan_no: full.uan_no ?? null,
             esi_ip_no: full.esi_ip_no ?? null,
+            // Iter 475 — separation fields (used to gate the Rejoin button)
+            active: full.active,
+            employment_status: full.employment_status ?? null,
+            exit_date: full.exit_date ?? null,
+            resign_date: full.resign_date ?? null,
           });
         }
       } catch {}
@@ -650,6 +655,23 @@ export default function EmployeeMasterScreen() {
                 <Ionicons name="create-outline" size={16} color="#fff" />
                 <Text style={styles.editAllTxt}>Edit All Details (One Page)</Text>
               </Pressable>
+
+              {/* Iter 475 — Rejoin (rehire) for separated employees */}
+              {Boolean(
+                (emp as any).exit_date || (emp as any).resign_date ||
+                ["resigned", "terminated", "retired", "absconded", "exited", "left"]
+                  .includes(String((emp as any).employment_status || "").toLowerCase()) ||
+                (emp as any).active === false,
+              ) && (
+                <Pressable
+                  onPress={() => router.push(`/employee-rejoin?user_id=${emp.user_id}`)}
+                  style={[styles.editAllBtn, { backgroundColor: "#059669", marginTop: 8 }]}
+                  testID="em-rejoin"
+                >
+                  <Ionicons name="refresh-circle-outline" size={16} color="#fff" />
+                  <Text style={styles.editAllTxt}>Rejoin Employee (Rehire)</Text>
+                </Pressable>
+              )}
 
               {/* Iter 96l — employer sets this employee's login credentials */}
               <EmployeeCredentialsCard

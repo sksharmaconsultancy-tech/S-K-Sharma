@@ -11849,6 +11849,9 @@ from routes.employees_admin import (  # noqa: E402
     delete_employee_record,  # noqa: F401
 )
 app.include_router(employees_admin_router)
+# Iter 475 — Employee Rejoin (rehire) module.
+from routes.employee_rejoin import router as employee_rejoin_router  # noqa: E402
+app.include_router(employee_rejoin_router)
 # Iter 395 — WhatsApp Business Cloud API Notification Engine.
 from routes.whatsapp_center import router as whatsapp_center_router  # noqa: E402
 app.include_router(whatsapp_center_router)

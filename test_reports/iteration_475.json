@@ -1,0 +1,43 @@
+{
+  "summary": "Iter 475 Employee Rejoin (Rehire) — FRONTEND ONLY testing. End-to-end flow verified on preview URL after fixing 2 blocker bugs in the freshly-added feature. Login (password), locate 'TEST REJOIN EMP' via /employee-master?user_id=user_test_rejoin1, click 'em-rejoin', /employee-rejoin loads with correct read-only previous card (Code 999 / LWD 2026-02-28 / resigned / UAN 100999888777), Service Summary shows Gap, Section B form fill (reason chip 'Business requirement', Designation 'SR HELPER', New Actual Salary 18000), submit -> 'Rejoined ✅' alert, navigation back. Re-opening the employee shows em-rejoin button GONE and Designation 'SR HELPER · PACKING' with Monthly Salary ₹18,000. No crash / blank screen. Both bugs FIXED IN PLACE by the testing agent (trivial mapping/serialization mistakes) and re-verified.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "employee-master.tsx (Rejoin button gating)",
+        "issue": "The gating block reads emp.exit_date / emp.resign_date / emp.employment_status / emp.active, but the Object.assign(e, {...}) that merges the /admin/employees list row into `emp` was NOT pass-throughing any of those four fields. Result: the green 'Rejoin Employee (Rehire)' button was NEVER rendered even for clearly separated employees (backend correctly returns resign_date='2026-02-28', employment_status='resigned', active=false for TEST REJOIN EMP). FIXED by adding active/employment_status/exit_date/resign_date to the Object.assign block around line 224.",
+        "testID": "em-rejoin",
+        "priority": "CRITICAL"
+      },
+      {
+        "component": "employee-rejoin.tsx submit()",
+        "issue": "Double JSON.stringify: submit() called api(`/admin/employees/${id}/rejoin`, { method: 'POST', body: JSON.stringify(body) }) but src/api/client.ts already does JSON.stringify(body) internally. Backend received a stringified JSON string and rejected with pydantic 422 model_attributes_type ('Input should be a valid dictionary or object to extract fields from') so EVERY submit failed with a red 'Rejoin failed' alert. FIXED by passing the raw object (body: body).",
+        "testID": "rejoin-submit",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Review the two fixes I applied (employee-master.tsx Object.assign now spreads active/employment_status/exit_date/resign_date; employee-rejoin.tsx submit no longer double-stringifies) and keep them.",
+    "Consider adding a light regression guard: a shared helper on the employee list row → detail-panel mapping so future gating fields (like rehire/exit flags) can't silently be dropped.",
+    "Consider tightening the api client contract so passing a string body throws instead of getting silently double-serialized."
+  ],
+  "critical_code_review_comments": [
+    "employee-master.tsx is 2325 lines — well over the 700-line guideline. Splitting into smaller sub-components (identity, credentials, grouping, textile, OT, docs, rejoin) would have made the missing field mapping obvious.",
+    "The Rejoin gating logic is duplicated implicitly: backend `/admin/employees/{id}/rejoin-info` computes `eligible`, but the frontend reimplements the check from raw fields. Prefer fetching a lightweight `/eligible-for-rejoin` (or reusing rejoin-info.eligible via a cached call) so both stay in sync."
+  ],
+  "updated_files": [
+    "/app/frontend/app/employee-master.tsx",
+    "/app/frontend/app/employee-rejoin.tsx"
+  ],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "100% after fixes"},
+  "seed_data_creation": "None. Used seeded user_test_rejoin1 (TEST REJOIN EMP, code 999, firm Kankani cmp_527fecdd7c) as provided. This employee is now ACTIVE again (rejoin submitted) with new DOJ 2026-08-03, designation SR HELPER, salary ₹18,000, employment period #2. Main agent should clean up per the note.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "TEST REJOIN EMP is now ACTIVE (rejoined). To re-test the rejoin flow the main agent must first re-separate the employee (POST /admin/employees/{id}/exit or similar) or re-seed a fresh separated employee. Fixes applied in employee-master.tsx line ~225 (added active/employment_status/exit_date/resign_date pass-through) and employee-rejoin.tsx submit() (removed extra JSON.stringify).",
+  "rca_of_issue": "Bug 1 (RCA): The pattern in employee-master.tsx is: /admin/employees/{id}/policy gives base object → /admin/employees list is scanned for the same user_id → Object.assign whitelists specific fields into `emp`. When Iter 475 added the Rejoin gating that reads emp.employment_status/resign_date/exit_date/active, the developer forgot to whitelist those fields in the Object.assign, so they arrived as undefined and the Boolean(...) always evaluated to false. Reproduce: login as super_admin, open /employee-master?user_id=user_test_rejoin1 → button absent. Mitigation applied: added the four fields to the whitelist. Bug 2 (RCA): api client already JSON.stringify's body. employee-rejoin.tsx submit() also called JSON.stringify(body) so backend received `\"{\\\"rejoin_date\\\":\\\"2026-08-03\\\",...}\"` (a JSON-encoded string) instead of a dict, tripping FastAPI pydantic model_attributes_type validation. Every submit failed 422. Fix: pass raw object."
+}
