@@ -485,7 +485,13 @@ def _ecr_lines(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]],
     eps_pct = float(_cfg.get("pf_percent_employer_eps") or 8.33)
     out: List[Dict[str, Any]] = []
     for r in run.get("rows") or []:
-        if not r.get("pf_applicable"):
+        # Iter 459 (user request) — PF members with ZERO working days must
+        # STILL appear in the ECR (wages/contributions 0, NCP = full month)
+        # so EPFO keeps their membership continuity. ``pf_eligible`` is the
+        # membership flag (PF Basic filled, not Excluded, PF = Yes);
+        # ``pf_applicable`` additionally requires a non-zero-pay month.
+        # Truly non-eligible employees stay out of the file.
+        if not (r.get("pf_applicable") or r.get("pf_eligible")):
             continue
         uan = str((extra.get(r.get("user_id"), {}) or {}).get("uan_no") or "").strip()
         if skip_missing and not uan:

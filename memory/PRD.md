@@ -3659,3 +3659,9 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   writes /etc/nginx/conf.d/sks-upload.conf (client_max_body_size 100M,
   proxy_read/send_timeout 300s) + verification grep. Frontend
   pickAndUpload catch now shows a clear message for 413/too-large.
+- Iter 459 (user request): PF ECR now INCLUDES members with ZERO working
+  days (pf_eligible but not pf_applicable): wages/contributions 0, NCP =
+  full month days — membership continuity on EPFO. Non-eligible employees
+  (no PF Basic / Excluded / PF=No) stay out. challans._ecr_lines filter
+  changed to (pf_applicable or pf_eligible). Verified via synthetic
+  zero-day row: "#~#0#~#0...#~#26#~#0" and ecr-check passes NCP sanity.

@@ -35,6 +35,11 @@
 # on the employee's OWN PF wage: Higher PF Wage (if filled, pro-rated) →
 # else earned PF Basic → else the actual wage base.
 #
+# Iter 459 — PF ECR now INCLUDES members with ZERO working days (wages /
+# contributions 0, NCP = full month) so EPFO membership continuity is kept.
+# Only truly non-eligible employees (no PF Basic / Excluded / PF = No) are
+# left out of the file.
+#
 # Run ON THE VPS as root/sksharma.
 set -e
 
@@ -129,6 +134,8 @@ echo -n "   FIRMNAMEMMYYYY (no special chars) filenames / Iter 455 (must say OK)
 grep -q 'Iter 455' $APP_DIR/backend/routes/challans.py && echo "OK" || echo "MISSING!"
 echo -n "   Dashboard click collapses sidebar / Iter 454 (must say OK): "
 grep -q 'collapseTick' $APP_DIR/frontend/src/components/AdminWebShell.tsx && echo "OK" || echo "MISSING!"
+echo -n "   Zero-day members in ECR (Iter 459) (must say OK): "
+grep -q 'Iter 459' $APP_DIR/backend/routes/challans.py && echo "OK" || echo "MISSING!"
 echo -n "   Nginx 100M upload limit (Excel import, Iter 458) (must say OK): "
 grep -q 'client_max_body_size 100M' /etc/nginx/conf.d/sks-upload.conf 2>/dev/null && echo "OK" || echo "MISSING!"
 echo ""
