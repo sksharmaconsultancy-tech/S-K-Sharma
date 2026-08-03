@@ -829,6 +829,7 @@ async def _compute_compliance_run(
         # and a TDS with no imported sheet were typed by the admin.
         if _prev is not None and not payload.use_imported_sheet:
             _mf = set(_prev.get("manual_fields") or [])
+            _fresh_g472 = round(float(row.get("gross_paid") or 0), 2)
             if float(_prev.get("esic_leave_days") or 0) > 0:
                 _mf.add("esic_leave_days")
             if float(_prev.get("ot_pay") or 0) > 0 and \
@@ -879,6 +880,43 @@ async def _compute_compliance_run(
                     row["total_deduction"] = round(
                         float(row.get("total_deduction") or 0) + _delta, 2)
                     row["net"] = round(float(row.get("net") or 0) - _delta, 2)
+            # Iter 472 (user request) — manual OT / Others changed the kept
+            # Gross Earning: PF / ESIC / PT REFRESH on that kept gross with
+            # the CURRENT master data (days and the kept figures stay).
+            _kept_g472 = round(float(row.get("gross_paid") or 0), 2)
+            if ({"others", "ot_pay"} & _mf) and \
+                    abs(_kept_g472 - _fresh_g472) > 0.004:
+                _st5 = dict(_stats_final)
+                _st5["other_allowance_extra"] = round(
+                    _kept_g472 - _fresh_g472, 2)
+                _row4 = compute_compliance_row(
+                    emp, merged_pol, int(month_days), _st5,
+                    company_structure_pct=payload.structure_pct,
+                    statutory_cfg=effective_statutory,
+                    firm_pf_enabled=_ff["pf"],
+                    firm_esic_enabled=_ff["esic"],
+                    firm_pt={"state": _fcp.get("pt_state"),
+                             "slabs": _fcp.get("pt_slabs")},
+                )
+                for _k in ("stat_wage_base", "pf_wages", "pf_employee",
+                           "pf_employer_epf", "pf_employer_eps",
+                           "pf_employer_total", "vpf_amount",
+                           "esic_wage_base", "esic_employee",
+                           "esic_employer", "calc_note"):
+                    if _k in _row4:
+                        row[_k] = _row4[_k]
+                _ded_set472 = _fm_masks.get("ded_mask")
+                if not (_ded_set472 is not None and "pt" not in _ded_set472):
+                    row["pt"] = _row4.get("pt", row.get("pt"))
+                row["total_deduction"] = round(
+                    float(row.get("pf_employee") or 0)
+                    + float(row.get("esic_employee") or 0)
+                    + float(row.get("pt") or 0)
+                    + float(row.get("tds") or 0)
+                    + float(row.get("other_deduction") or 0)
+                    + float(row.get("master_deduction") or 0)
+                    + float(row.get("advance_recovery") or 0), 2)
+                row["net"] = round(_kept_g472 - row["total_deduction"], 2)
         # Iter 310 — FREEZE SALARY (user directive): when the run is driven
         # by the IMPORTED sheet, the sheet's Gross Earning is authoritative
         # and gets FROZEN on the run. If Imported Gross > the gross
@@ -897,12 +935,11 @@ async def _compute_compliance_run(
             if _prev_imp is not None and _prev_imp.get("manual_override"):
                 # Restore the admin's saved figures AS-IS (they were kept
                 # consistent by the grid at edit time).
+                _fresh_g = round(float(row.get("gross_paid") or 0), 2)
                 row["ot_pay"] = round(float(_prev_imp.get("ot_pay") or 0), 2)
                 row["others"] = round(float(_prev_imp.get("others") or 0), 2)
                 _keep_g = round(float(_prev_imp.get("gross_paid") or 0), 2)
                 row["gross_paid"] = _keep_g
-                row["net"] = round(
-                    _keep_g - float(row.get("total_deduction") or 0), 2)
                 row["manual_override"] = True
                 # Iter 422 (user request) — manual ADVANCE edits survive a
                 # reprocess on imported (Freeze) runs too. manual_fields is
@@ -913,12 +950,48 @@ async def _compute_compliance_run(
                 if "advance_recovery" in _mf_imp:
                     _adv_prev = round(
                         float(_prev_imp.get("advance_recovery") or 0), 2)
-                    if _adv_prev != float(row.get("advance_recovery") or 0):
-                        _d = round(_adv_prev - float(row.get("advance_recovery") or 0), 2)
-                        row["advance_recovery"] = _adv_prev
-                        row["total_deduction"] = round(
-                            float(row.get("total_deduction") or 0) + _d, 2)
-                        row["net"] = round(float(row.get("net") or 0) - _d, 2)
+                    row["advance_recovery"] = _adv_prev
+                # Iter 472 (user request — "Days & Freeze stay the SAME but
+                # PF/ESIC must REFRESH per the latest master changes"): the
+                # kept gross is authoritative, but the statutory figures are
+                # RE-COMPUTED on that kept Gross Earning with the CURRENT
+                # Employee Master / Compliance Settings — so a master
+                # revision (rate basis, PF Basic, ESIC flags, %s) flows into
+                # PF / ESIC / PT on a reprocess without touching the days or
+                # the frozen gross / manual OT / Others.
+                _st4 = dict(_stats_final)
+                _gap4 = round(_keep_g - _fresh_g, 2)
+                if abs(_gap4) > 0.004:
+                    _st4["other_allowance_extra"] = _gap4
+                _row3 = compute_compliance_row(
+                    emp, merged_pol, int(month_days), _st4,
+                    company_structure_pct=payload.structure_pct,
+                    statutory_cfg=effective_statutory,
+                    firm_pf_enabled=_ff["pf"],
+                    firm_esic_enabled=_ff["esic"],
+                    firm_pt={"state": _fcp.get("pt_state"),
+                             "slabs": _fcp.get("pt_slabs")},
+                )
+                for _k in ("stat_wage_base", "pf_wages", "pf_employee",
+                           "pf_employer_epf", "pf_employer_eps",
+                           "pf_employer_total", "vpf_amount",
+                           "esic_wage_base", "esic_employee",
+                           "esic_employer", "calc_note"):
+                    if _k in _row3:
+                        row[_k] = _row3[_k]
+                # PT follows the refreshed gross unless the firm's deduction
+                # mask switched it OFF earlier.
+                if not (_ded_set is not None and "pt" not in _ded_set):
+                    row["pt"] = _row3.get("pt", row.get("pt"))
+                row["total_deduction"] = round(
+                    float(row.get("pf_employee") or 0)
+                    + float(row.get("esic_employee") or 0)
+                    + float(row.get("pt") or 0)
+                    + float(row.get("tds") or 0)
+                    + float(row.get("other_deduction") or 0)
+                    + float(row.get("master_deduction") or 0)
+                    + float(row.get("advance_recovery") or 0), 2)
+                row["net"] = round(_keep_g - row["total_deduction"], 2)
                 if _imp_g > 0:
                     row["imported_gross"] = _imp_g
                     row["calculated_gross"] = _keep_g

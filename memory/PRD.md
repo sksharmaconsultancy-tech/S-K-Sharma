@@ -3795,3 +3795,16 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   been deleted from DB); iter388 TestFinalizeGates 2 tests + iter408
   approval-pending test SKIPPED (Iter 423b never-block / Iter 425 no-approval
   user directives). Suites now 86 passed, 4 skipped.
+- Iter 472 (user request — "Salary Process → With Existing Data: Days &
+  Freeze stay the SAME but PF/ESIC must REFRESH per master changes"):
+  compliance_salary_runs.py — (a) FREEZE manual_override rows: reprocess
+  still restores the admin's OT/Others/kept gross AS-IS, but the statutory
+  block (stat_wage_base, pf_*, vpf, esic_*, pt, calc_note) is RE-COMPUTED on
+  that kept Gross Earning with CURRENT master/settings (gap routed via
+  other_allowance_extra so wage bases see the full kept gross);
+  total_deduction rebuilt (pf+esic+pt+tds+other+master+advance) and net =
+  kept gross − total. (b) Non-imported manual rows: after the Iter 374
+  others/ot_pay restores change the gross, same statutory refresh runs.
+  Verified E2E: freeze run + manual OT +500 + master pf_basic revision →
+  reprocess kept days 14.5 & gross 18500, PF went 0 → 1110 (wages 9250 =
+  50% of kept gross), ESIC 70 on kept gross. Full suites 69 passed 3 skipped.

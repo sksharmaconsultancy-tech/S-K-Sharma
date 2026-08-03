@@ -45,6 +45,15 @@
 #     WAITS for the login and AUTO-OPENS Payments >> ECR/Return Filing >>
 #     ECR Upload (your PC's runner self-updates on next launch).
 #
+# Iter 472 — REPROCESS "With EXISTING Data": Days & Freeze KEPT, PF/ESIC
+#   REFRESHED (user request):
+#   • On reprocess, manually edited rows keep the entered days, the frozen
+#     gross and the manual OT / Others exactly as saved — but PF / ESIC /
+#     PT are RE-CALCULATED on that kept Gross Earning using the CURRENT
+#     Employee Master & Compliance Settings, so master revisions (rate
+#     basis, PF Basic, ESIC flags, %s) flow into statutory without
+#     touching the days or the freeze.
+#
 # Run ON THE VPS as root/sksharma.
 set -e
 
@@ -135,6 +144,8 @@ echo -n "   Server Version badge /api/version (Iter 471) (must say OK): "
 grep -q 'APP_ITERATION' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
 echo -n "   ECR runner v10 auto-navigation (Iter 471) (must say OK): "
 grep -q 'RUNNER_VERSION = "10"' $APP_DIR/backend/routes/portal_extension.py && echo "OK" || echo "MISSING!"
+echo -n "   Reprocess keeps Days+Freeze, refreshes PF/ESIC (Iter 472) (must say OK): "
+grep -q 'Iter 472' $APP_DIR/backend/routes/compliance_salary_runs.py && echo "OK" || echo "MISSING!"
 echo -n "   Auto-reprocess after import FIXED (Iter 469) (must say OK): "
 grep -q 'from routes.compliance_salary_runs import' $APP_DIR/backend/routes/compliance_import.py && echo "OK" || echo "MISSING!"
 echo -n "   Dynamic deduction-head columns on the run (Iter 469) (must say OK): "
