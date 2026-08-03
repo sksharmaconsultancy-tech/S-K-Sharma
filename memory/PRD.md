@@ -3712,3 +3712,11 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   the current page (remount via ?_r nonce, stripped from stored routes)
   instead of doing nothing / jumping to Dashboard; inactive tab click still
   switches to that tab's own saved page.
+- Iter 466 (user: still same portal error): per official MC manual
+  (instruction 10) ALL columns incl. days/wages/reason are now TEXT strings
+  written into the official template (this mirrors exactly what Excel
+  produces when an employer types into the real template — its columns are
+  pre-formatted Text). Verified: headers + Instructions sheet intact, all
+  data cells t1 text, IP zfill, dd-mm-yyyy LWD. NOTE: unconfirmed whether
+  user redeployed after Iter 465; asked them to verify the deploy check
+  line "ESIC .xls uses OFFICIAL portal template (Iter 465): OK".

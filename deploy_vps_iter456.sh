@@ -67,6 +67,9 @@
 #
 # Iter 464 — clicking the ACTIVE workspace tab refreshes its current page.
 #
+# Iter 466 — ESIC data cells written as TEXT (portal manual instruction 10),
+# exactly like typing into the official template in Excel.
+#
 # Run ON THE VPS as root/sksharma.
 set -e
 

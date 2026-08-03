@@ -614,11 +614,15 @@ def _esic_xls_bytes(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> by
         if not r.get("esic_applicable") and not _zero:
             continue
         days, wages, reason, lwd = _esic_row_vals(r, u, run.get("month"))
+        # Iter 466 (portal manual, instruction 10) — when employers fill the
+        # official template in Excel, EVERY column (incl. days/wages) stays
+        # TEXT because the template pre-formats the columns as Text. Match
+        # that exactly: whole-number strings, no spaces, no decimals.
         ws.write(rownum, 0, _esic_ip_fmt(ip_no), _txt)
         ws.write(rownum, 1, _esic_name_fmt(r.get("name")), _txt)
-        ws.write(rownum, 2, days)
-        ws.write(rownum, 3, wages)
-        ws.write(rownum, 4, reason)
+        ws.write(rownum, 2, str(int(days)), _txt)
+        ws.write(rownum, 3, str(int(wages)), _txt)
+        ws.write(rownum, 4, str(int(reason)), _txt)
         if lwd:
             ws.write(rownum, 5, lwd, _txt)
         rownum += 1
