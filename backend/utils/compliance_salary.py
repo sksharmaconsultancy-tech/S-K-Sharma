@@ -423,6 +423,22 @@ def compute_compliance_row(
                 cfg[k] = _num(v)
 
     salary_mode = (policy.get("salary_mode") or "monthly").lower()
+    # Iter 471 (user bug — RATAN LAL: daily rate 450 × 20 days must be
+    # ₹9,000, not 450 × 20 ÷ 31) — the Employee Master's "Rate Basis
+    # (Compliance)" (Monthly / Daily / Hourly) governs THIS engine and WINS
+    # over the Actual-salary cadence carried on employee_policy. Falls back
+    # to the compliance structure's Basic row rate_type.
+    _cmode = str(user.get("compliance_salary_mode") or "").strip().lower()
+    if _cmode not in ("daily", "hourly", "monthly"):
+        _cmode = ""
+        for _r in (user.get("salary_structure_compliance") or []):
+            if isinstance(_r, dict) and str(_r.get("head", "")).strip().lower().startswith("basic"):
+                _rt = str(_r.get("rate_type") or "").strip().lower()
+                if _rt in ("daily", "hourly", "monthly"):
+                    _cmode = _rt
+                break
+    if _cmode:
+        salary_mode = _cmode
     # Iter 68 — Two salary structures on the employee master:
     #   * ``compliance_gross`` (aka Govt Salary) → used ONLY by the
     #     Compliance Salary Process for statutory calc (PF/ESIC/TDS/PT).
@@ -507,10 +523,19 @@ def compute_compliance_row(
     master_user = user           # for the full-month "Master" columns
     master_gross_override: Optional[float] = None
     if comp_basic > 0 and not user.get("basic_amount") and not (user.get("salary_structure_compliance") or []):
-        if salary_mode == "monthly":
-            factor = _safe_div(effective_present, max(1, month_days))
+        # Iter 471 — DAILY / HOURLY rate basis: the master's compliance
+        # amounts are PER-DAY / PER-HOUR figures, so the earned value is
+        # amount × present days (or duty hours); the full-month "Master"
+        # columns scale by the month's days (× daily hours).
+        if salary_mode == "daily":
+            factor = effective_present
+        elif salary_mode == "hourly":
+            factor = duty_hours
         else:
-            factor = 1.0
+            factor = _safe_div(effective_present, max(1, month_days))
+        _master_mult = (float(month_days) if salary_mode == "daily"
+                        else float(month_days) * full_day_hours
+                        if salary_mode == "hourly" else 1.0)
         prorated_basic = comp_basic * factor
         if allowances_master > 0:
             # Master structure is authoritative — rebuild the gross
@@ -543,22 +568,37 @@ def compute_compliance_row(
             }
             master_user = {
                 **master_user,
-                "basic_amount": round(comp_basic, 2),
-                "hra_amount": round(agg["hra"], 2),
-                "conv_amount": round(agg["conveyance"], 2),
-                "medical_amount": round(agg["medical"], 2),
-                "special_amount": round(agg["special"], 2),
-                "others_amount": round(agg["others"], 2),
+                "basic_amount": round(comp_basic * _master_mult, 2),
+                "hra_amount": round(agg["hra"] * _master_mult, 2),
+                "conv_amount": round(agg["conveyance"] * _master_mult, 2),
+                "medical_amount": round(agg["medical"] * _master_mult, 2),
+                "special_amount": round(agg["special"] * _master_mult, 2),
+                "others_amount": round(agg["others"] * _master_mult, 2),
             }
-            master_gross_override = comp_basic + allowances_master
+            master_gross_override = (comp_basic + allowances_master) * _master_mult
         else:
             user = {**user, "basic_amount": round(min(prorated_basic, monthly_gross) if monthly_gross > 0 else prorated_basic, 2)}
-            master_user = {**master_user, "basic_amount": round(comp_basic, 2)}
+            master_user = {**master_user, "basic_amount": round(comp_basic * _master_mult, 2)}
             if monthly_gross <= 0:
                 # No compliance_gross/salary on the master — Basic IS the gross.
                 monthly_gross = prorated_basic
-                master_gross_override = comp_basic
+                master_gross_override = comp_basic * _master_mult
     structure = resolve_structure(user, monthly_gross, company_structure_pct)
+    # Iter 471 — DAILY / HOURLY rate basis with saved compliance structure
+    # rows: the row amounts are PER-DAY / PER-HOUR figures, so the EARNED
+    # heads (and the max(Basic, 50% Gross) wage-base floor below) must use
+    # amount × present days (or duty hours).
+    _sc_rows_471 = user.get("salary_structure_compliance") or []
+    _sc_basic_471 = sum(
+        _num(_r.get("amount"), 0.0) for _r in _sc_rows_471
+        if isinstance(_r, dict)
+        and str(_r.get("head") or "").strip().lower().startswith("basic")
+        and "employer" not in str(_r.get("head") or "").strip().lower())
+    if salary_mode in ("daily", "hourly") and _sc_basic_471 > 0:
+        _earn_mult_471 = (effective_present if salary_mode == "daily"
+                          else duty_hours)
+        structure = {k: round(v * _earn_mult_471, 2)
+                     for k, v in structure.items()}
     basic = structure["basic"]
     hra = structure["hra"]
     conveyance = structure["conveyance"]
@@ -613,6 +653,14 @@ def compute_compliance_row(
     if master_gross_override is not None:
         monthly_gross_master = master_gross_override
     master_structure = resolve_structure(master_user, monthly_gross_master, company_structure_pct)
+    # Iter 471 — master (full-month) heads for DAILY / HOURLY structure-row
+    # employees scale the per-day/per-hour amounts to the full month.
+    if salary_mode in ("daily", "hourly") and _sc_basic_471 > 0 \
+            and (master_user.get("salary_structure_compliance") or []):
+        _mm_471 = (float(month_days) if salary_mode == "daily"
+                   else float(month_days) * full_day_hours)
+        master_structure = {k: round(v * _mm_471, 2)
+                            for k, v in master_structure.items()}
 
     # ---- PF ----
     # Iter 98 — firm-level EPF gate (Firm Master → EPF "Applicable") ANDed
@@ -657,13 +705,22 @@ def compute_compliance_row(
     _hi_active = False
     _hi_reason = ""
     if pf_applicable:
-        if salary_mode == "monthly":
+        # Iter 471 — DAILY / HOURLY rate basis: the PF Basic on the master
+        # is a PER-DAY / PER-HOUR figure. Earned PF Basic = rate × days
+        # (or hours); ceiling comparisons use the FULL-MONTH equivalent.
+        if salary_mode == "daily":
+            pf_basic_prorated = pf_basic_override * effective_present
+        elif salary_mode == "hourly":
+            pf_basic_prorated = pf_basic_override * duty_hours
+        else:
             # Iter 387 — configurable proration method (default replicates
             # the old present ÷ month-days behaviour).
             pf_basic_prorated = pf_basic_override * _proration_factor(
                 pf_proration_method, effective_present, max(1, month_days))
-        else:
-            pf_basic_prorated = pf_basic_override
+        _pf_basic_month = (
+            pf_basic_override * float(month_days) if salary_mode == "daily"
+            else pf_basic_override * float(month_days) * full_day_hours
+            if salary_mode == "hourly" else pf_basic_override)
         # Iter 376 (user rule, replaces Iter 254) — PF wage base:
         #   • PF Basic BELOW the ₹15,000 cap → the wage-base FLOOR applies:
         #     wages = max(PF Basic, floor_pct% of Gross Earning), capped
@@ -673,7 +730,7 @@ def compute_compliance_row(
         #     by attendance for monthly-rated staff).
         # Iter 387 — the floor only applies while the Wage Definition Rule
         # is enabled in Compliance Settings.
-        if pf_basic_override < cfg["pf_wage_cap"] and wage_rule_on:
+        if _pf_basic_month < cfg["pf_wage_cap"] and wage_rule_on:
             pf_base = max(pf_basic_prorated, gross_paid * (floor_pct / 100.0))
         else:
             pf_base = pf_basic_prorated
@@ -723,7 +780,7 @@ def compute_compliance_row(
         else:
             if _intl_worker:
                 capped_pf_wages = pf_base
-            elif pf_basic_override > cfg["pf_wage_cap"]:
+            elif _pf_basic_month > cfg["pf_wage_cap"]:
                 # Iter 456 (user final PF Engine spec) — PF Basic FILLED
                 # ABOVE the ₹15,000 ceiling on the Employee Master = ADOPTED
                 # HIGHER PF: PF on the FULL EARNED PF Basic (pro-rated by
@@ -822,6 +879,12 @@ def compute_compliance_row(
     # "Compliance Basic Salary" field when it is filled; falls back to the
     # derived full-month Basic otherwise.
     _esic_elig_basic = _num(user.get("compliance_basic"), 0.0)
+    # Iter 471 — DAILY / HOURLY rate basis: eligibility compares the
+    # FULL-MONTH equivalent of the per-day/per-hour Compliance Basic.
+    if _esic_elig_basic > 0 and salary_mode == "daily":
+        _esic_elig_basic *= float(month_days)
+    elif _esic_elig_basic > 0 and salary_mode == "hourly":
+        _esic_elig_basic *= float(month_days) * full_day_hours
     if _esic_elig_basic <= 0:
         _esic_elig_basic = master_structure["basic"]
     # Iter 370 — days-independent ESIC eligibility (see pf_eligible above).
@@ -1103,7 +1166,7 @@ def compute_compliance_row(
                    else (f" (capped from ₹{pf_base:,.0f} at ₹{cfg['pf_wage_cap']:,.0f})"
                          if pf_base > capped_pf_wages + 0.5 else ""))
                 + (f"; floor rule max(PF Basic ₹{pf_basic_prorated:,.0f}, "
-                   f"{floor_pct:g}% of Gross)" if (wage_rule_on and pf_basic_override < cfg["pf_wage_cap"]) else "")
+                   f"{floor_pct:g}% of Gross)" if (wage_rule_on and _pf_basic_month < cfg["pf_wage_cap"]) else "")
                 + ("; EPS on uncapped wages (Higher Pension)" if user.get("higher_pension") else "")
                 + ("; EPS = 0 (EPS Disabled)" if user.get("eps_disabled") else "")
                 + (f"; HIGHER PF — contribution on actual wages ₹{capped_pf_wages:,.0f}, "

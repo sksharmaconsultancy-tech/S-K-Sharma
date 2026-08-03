@@ -294,6 +294,9 @@ def test_finalize_validation_and_override(auth, state):
 
 # ---- 6. HIGHER_PF_APPROVAL_PENDING validation code ----
 @pytest.mark.dependency(name="pending_code", depends=["finalize_override"])
+@pytest.mark.skip(reason="Iter 425 (user directive) — Higher PF approval "
+                         "gating removed: employee type=higher + effective "
+                         "window is enough; no APPROVAL_PENDING validation.")
 def test_higher_pf_approval_pending_validation(auth, state):
     uid = state["test_uid"]
     # Set approval back to pending

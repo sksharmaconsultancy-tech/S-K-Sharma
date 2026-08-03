@@ -169,6 +169,9 @@ class TestFinalizeGates:
         _db.compliance_salary_runs.delete_many({"run_id": rid})
         _db.compliance_monthly_snapshots.delete_many({"run_id": rid})
 
+    @pytest.mark.skip(reason="Iter 423b (user directive) — Salary Lock is "
+                             "NEVER blocked; validation findings are only "
+                             "stamped on the run (errors_overridden).")
     def test_finalize_blocks_on_error(self, hdr):
         # pf_applicable True + pf_employee=0 with gross>0 => PF_ZERO error
         rows = [{
@@ -199,6 +202,8 @@ class TestFinalizeGates:
         finally:
             self._cleanup(rid)
 
+    @pytest.mark.skip(reason="Iter 423b (user directive) — Salary Lock is "
+                             "NEVER blocked; warnings no longer 409.")
     def test_finalize_warning_only_then_override(self, hdr):
         # higher_pension True + eps_disabled True (or eps=0) with pf_employee>0
         # => PF_HIGHER_PENSION_MISMATCH warning (level=warning), NO errors.

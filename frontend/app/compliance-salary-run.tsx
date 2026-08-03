@@ -1527,8 +1527,15 @@ export default function ComplianceSalaryRunScreen() {
             ? next.pf_eligible !== false : next.pf_applicable !== false)
             && pfBasicFull > 0 && grossEarn > 0;
           if (pfOn) {
-            const pfBasicPro = next.salary_mode === "monthly" ? pfBasicFull * ratio2 : pfBasicFull;
-            const pfBase = pfBasicFull < pfCap && wageRuleOn
+            // Iter 471 (user bug — daily-rate) — daily-rated rows: PF Basic
+            // is a PER-DAY figure; earned = rate × days, ceiling checks use
+            // the full-month equivalent (mirrors utils/compliance_salary.py).
+            const pd471b = Number(next.present_days) || 0;
+            const pfBasicPro = next.salary_mode === "monthly" ? pfBasicFull * ratio2
+              : next.salary_mode === "daily" ? pfBasicFull * pd471b : pfBasicFull;
+            const pfBasicMonth = next.salary_mode === "daily"
+              ? pfBasicFull * monthDays2 : pfBasicFull;
+            const pfBase = pfBasicMonth < pfCap && wageRuleOn
               ? Math.max(pfBasicPro, grossEarn * floorPct) : pfBasicPro;
             // Iter 456 (user final PF Engine spec) — PF Basic ≤ cap → PF
             // wage = max(earned PF Basic, floor% Gross) capped at the
@@ -1547,7 +1554,7 @@ export default function ComplianceSalaryRunScreen() {
                   : Math.max(pfBase, Number(next.basic || 0), grossEarn * floorPct)))
               : (next.intl_worker
                 ? pfBase
-                : (pfBasicFull > pfCap ? pfBasicPro : Math.min(pfBase, pfCap)));
+                : (pfBasicMonth > pfCap ? pfBasicPro : Math.min(pfBase, pfCap)));
             const pfEmpRate = Number(stat.pf_percent_employee ?? 12) / 100;
             const pfErEpfRate = Number(stat.pf_percent_employer_epf ?? 3.67) / 100;
             const pfErEpsRate = Number(stat.pf_percent_employer_eps ?? 8.33) / 100;
@@ -1695,12 +1702,18 @@ export default function ComplianceSalaryRunScreen() {
           ? (r as any).pf_eligible !== false
           : r.pf_applicable !== false;
         const pfOn = pfMasterOk && pfBasicFull > 0;
-        const pfBasicPro = (r as any).salary_mode === "monthly" ? pfBasicFull * ratio : pfBasicFull;
+        // Iter 471 (user bug — daily-rate) — daily rows: PF Basic is a
+        // PER-DAY figure; earned = rate × days, ceiling checks on the
+        // full-month equivalent (mirrors utils/compliance_salary.py).
+        const pfBasicPro = (r as any).salary_mode === "monthly" ? pfBasicFull * ratio
+          : (r as any).salary_mode === "daily" ? pfBasicFull * pd : pfBasicFull;
+        const pfBasicMonth = (r as any).salary_mode === "daily"
+          ? pfBasicFull * monthDays : pfBasicFull;
         const floorPct = Number(stat.stat_wage_floor_pct ?? 50) / 100;
         const grossEarn = grossPaid + Number((r as any).ot_pay || 0);
         // Iter 387 — Wage Definition Rule switch mirrors the engine.
         const wageRuleOn = stat.wage_definition_rule_enabled !== false;
-        const pfBase = pfBasicFull < pfCap && wageRuleOn
+        const pfBase = pfBasicMonth < pfCap && wageRuleOn
           ? Math.max(pfBasicPro, grossEarn * floorPct)
           : pfBasicPro;
         // Iter 387 — International Worker: EPF without the wage ceiling.
@@ -1727,7 +1740,7 @@ export default function ComplianceSalaryRunScreen() {
               // ceiling = ADOPTED Higher PF: PF on the FULL earned PF Basic
               // (no cap). Below/at the ceiling: PF wage = max(earned PF
               // Basic, floor% of Gross) capped at the ceiling.
-              : (pfBasicFull > pfCap
+              : (pfBasicMonth > pfCap
                 ? pfBasicPro
                 : Math.min(pfBase, pfCap))))
           : 0;
@@ -1771,7 +1784,13 @@ export default function ComplianceSalaryRunScreen() {
         // Master's Compliance Basic Salary ≤ the Compliance Settings limit
         // (falls back to full-month Basic when blank). Calculated ON
         // earned basic.
-        const esiEligBasic = Number((r as any).compliance_basic || 0) || fullByHead.basic;
+        // Iter 471 — daily/hourly rows carry a PER-DAY/PER-HOUR Compliance
+        // Basic: eligibility compares the FULL-MONTH equivalent.
+        const esiEligBasic0 = Number((r as any).compliance_basic || 0);
+        const esiEligBasic = esiEligBasic0 > 0
+          ? ((r as any).salary_mode === "daily" ? esiEligBasic0 * monthDays
+            : esiEligBasic0)
+          : fullByHead.basic;
         // Iter 370 — days-independent ESIC eligibility (see PF above).
         const esiMasterOk = (r as any).esic_eligible !== undefined
           ? (r as any).esic_eligible !== false

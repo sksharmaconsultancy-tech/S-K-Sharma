@@ -31,6 +31,20 @@
 #     (esic_wage_base → stat_wage_base → max(Basic earned, 50% × Gross)),
 #     so NO reprocess is needed — just re-download the ESIC Excel.
 #
+# Iter 471 — DAILY / MONTHLY RATE on the Compliance Salary Process
+#   (user bug — RATAN LAL, per-day 450 × 20 days must be ₹9,000):
+#   • The Employee Master "Rate Basis (Compliance)" (Monthly/Daily/Hourly)
+#     now governs the Compliance engine — daily-rated staff earn
+#     rate × present days (was wrongly rate × days ÷ month-days).
+#   • PF/ESIC for daily staff: earned PF Basic = per-day PF Basic × days;
+#     ceiling & ESIC-eligibility checks use the FULL-MONTH equivalent
+#     (rate × month days). Grid live-edits mirror the same math.
+#   • SERVER VERSION badge: the portal footer now shows "Server Iter 471"
+#     so you can instantly confirm the VPS runs the latest deploy.
+#   • ECR runner v10: after Sign In on the EPFO portal, the runner now
+#     WAITS for the login and AUTO-OPENS Payments >> ECR/Return Filing >>
+#     ECR Upload (your PC's runner self-updates on next launch).
+#
 # Run ON THE VPS as root/sksharma.
 set -e
 
@@ -115,6 +129,12 @@ echo -n "   Attendance-Sheet upload accepted as-is (Iter 469) (must say OK): "
 grep -q 'Iter 469' $APP_DIR/backend/routes/compliance_import.py && echo "OK" || echo "MISSING!"
 echo -n "   ESIC wages = WAGE BASE in file + preview + old runs (Iter 470) (must say OK): "
 grep -q '_esic_wages' $APP_DIR/backend/routes/challans.py && echo "OK" || echo "MISSING!"
+echo -n "   Daily/Monthly rate basis in Compliance engine (Iter 471) (must say OK): "
+grep -q 'Iter 471' $APP_DIR/backend/utils/compliance_salary.py && echo "OK" || echo "MISSING!"
+echo -n "   Server Version badge /api/version (Iter 471) (must say OK): "
+grep -q 'APP_ITERATION' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
+echo -n "   ECR runner v10 auto-navigation (Iter 471) (must say OK): "
+grep -q 'RUNNER_VERSION = "10"' $APP_DIR/backend/routes/portal_extension.py && echo "OK" || echo "MISSING!"
 echo -n "   Auto-reprocess after import FIXED (Iter 469) (must say OK): "
 grep -q 'from routes.compliance_salary_runs import' $APP_DIR/backend/routes/compliance_import.py && echo "OK" || echo "MISSING!"
 echo -n "   Dynamic deduction-head columns on the run (Iter 469) (must say OK): "

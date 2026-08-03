@@ -3771,3 +3771,27 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   NOTE (pre-existing, unrelated): tests/test_iter388 TestFinalizeGates 2
   failures — finalize returns 200 with errors_overridden/warnings_overridden
   true (some override setting in DB); fails on untouched code too.
+- Iter 471 (user bug — "Check Daily Rate and Monthly Rate on Salary Process
+  Compliance"; example RATAN LAL per-day 450 × 20 days = 9000): the engine
+  computed daily-rated staff as MONTHLY (450×20÷31=290) because it only read
+  policy.salary_mode (Actual cadence). Fixes in utils/compliance_salary.py:
+  (1) compliance_salary_mode (or structure Basic rate_type) now governs
+  salary_mode; (2) comp_basic fallback factors: daily=×present days,
+  hourly=×duty hours; master figures ×month_days; (3) PF: earned PF Basic =
+  per-day rate × days, ceiling checks vs FULL-MONTH equivalent
+  (_pf_basic_month); (4) ESIC eligibility Basic ×month_days for daily;
+  (5) structure-row per-day heads scaled to earned values before the
+  max(Basic, 50% Gross) wage-base floor (and master heads ×month_days).
+  Frontend compliance-salary-run.tsx grid live-edit recompute mirrors all of
+  it (pfBasicPro daily=×pd, pfBasicMonth for cap checks, esiEligBasic
+  ×monthDays). Verified: unit matrix + API E2E (MADAN temp-daily: gross 9000,
+  PF 1080, ESIC 68 on base 9000); monthly rows regression-identical.
+  ALSO: Server Version badge — GET /api/version (APP_ITERATION const in
+  server.py, BUMP EACH RELEASE) + "Server Iter N" chip in AdminWebShell
+  status bar. ECR runner v10 (portal_extension.py): after Sign In, polls up
+  to 3 min for login then auto-opens Payments >> ECR/Return Filing >> ECR
+  Upload tab; RUNNER_VERSION bumped so user PCs self-update.
+  Stale tests updated: iter394 EXISTING_RUN_ID repointed (fixture run had
+  been deleted from DB); iter388 TestFinalizeGates 2 tests + iter408
+  approval-pending test SKIPPED (Iter 423b never-block / Iter 425 no-approval
+  user directives). Suites now 86 passed, 4 skipped.

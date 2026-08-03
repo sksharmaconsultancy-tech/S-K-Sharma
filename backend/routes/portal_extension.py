@@ -253,7 +253,7 @@ async def ext_solve_captcha(payload: Dict[str, Any] = Body(...)):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "9"
+RUNNER_VERSION = "10"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -605,6 +605,99 @@ def run(API_BASE, TOKEN, portal):
                   else "Sign In button not found - click it manually.")
         else:
             print("Sign In NOT clicked - fill the captcha and click it manually.")
+
+        # Step 5 (Iter 471) — AUTO-NAVIGATE to the ECR upload page once the
+        # login lands: PAYMENTS menu -> ECR/RETURN FILING -> ECR Upload tab.
+        # The captcha sometimes needs a manual retry, so poll for the
+        # logged-in dashboard for up to 3 minutes first.
+        print("\nWaiting for login (up to 3 min - retype the captcha "
+              "manually if it was misread)...")
+        logged_in = False
+        for _ in range(90):
+            time.sleep(2)
+            try:
+                if driver.find_elements(
+                        By.XPATH,
+                        "//a[contains(translate(.,'PAYMENTS','payments'),'payments')]"
+                        " | //a[contains(@href,'logout') or contains(@href,'Logout')]"):
+                    logged_in = True; break
+            except Exception:
+                break
+        if not logged_in:
+            print("Login not detected - navigate to Payments >> "
+                  "ECR/Return Filing manually.")
+        else:
+            print("Login detected - opening Payments >> ECR/Return Filing...")
+            # strip any post-login popup that intercepts the menu click
+            try:
+                driver.execute_script(
+                    "document.querySelectorAll("
+                    "'.modal.show,.modal-backdrop,#mainHomePageAlertModal')"
+                    ".forEach(function(e){e.classList.remove('show');"
+                    "e.style.display='none';if(e.remove)e.remove();});"
+                    "document.body.classList.remove('modal-open');"
+                    "document.body.style.overflow='';")
+            except Exception:
+                pass
+            nav_ok = False
+            try:
+                for el in driver.find_elements(
+                        By.XPATH,
+                        "//a[contains(translate(.,'PAYMENTS','payments'),'payments')]"):
+                    try:
+                        try:
+                            el.click()
+                        except Exception:
+                            driver.execute_script("arguments[0].click();", el)
+                        break
+                    except Exception:
+                        continue
+                time.sleep(1.5)
+                # ECR/RETURN FILING entry (dropdown links may be hidden -
+                # JS-click works either way)
+                for el in driver.find_elements(
+                        By.XPATH,
+                        "//a[contains(translate(.,'ECR/RETURN FILING',"
+                        "'ecr/return filing'),'ecr/return')"
+                        " or contains(translate(.,'ECRRETURN','ecrreturn'),'ecr')]"):
+                    txt = (el.text or el.get_attribute("textContent") or "").lower()
+                    if "ecr" in txt:
+                        try:
+                            el.click()
+                        except Exception:
+                            driver.execute_script("arguments[0].click();", el)
+                        nav_ok = True; break
+                if not nav_ok:
+                    # fallback: open the first anchor whose href mentions ECR
+                    for el in driver.find_elements(By.TAG_NAME, "a"):
+                        href = (el.get_attribute("href") or "").lower()
+                        if "ecr" in href:
+                            driver.get(el.get_attribute("href"))
+                            nav_ok = True; break
+            except Exception as e:
+                print("Payments menu navigation failed:", e)
+            if nav_ok:
+                time.sleep(3)
+                # click the "ECR Upload" tab/button when the page shows one
+                try:
+                    for el in driver.find_elements(
+                            By.XPATH,
+                            "//a[contains(translate(.,'ECR UPLOAD','ecr upload'),"
+                            "'ecr upload')] | //button[contains("
+                            "translate(.,'ECR UPLOAD','ecr upload'),'ecr upload')]"):
+                        try:
+                            el.click()
+                        except Exception:
+                            driver.execute_script("arguments[0].click();", el)
+                        break
+                except Exception:
+                    pass
+                print("ECR page opened. Now: select the Wage Month, choose "
+                      "the ECR .txt you downloaded from the app and click "
+                      "Upload.")
+            else:
+                print("Could not find the ECR menu link - open Payments >> "
+                      "ECR/Return Filing manually.")
 
         print("\nECR TEST DONE. Chrome stays open - close it when finished.")
         return
