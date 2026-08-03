@@ -3720,3 +3720,9 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   data cells t1 text, IP zfill, dd-mm-yyyy LWD. NOTE: unconfirmed whether
   user redeployed after Iter 465; asked them to verify the deploy check
   line "ESIC .xls uses OFFICIAL portal template (Iter 465): OK".
+- Iter 467 (user request): ESIC Excel "Total Monthly Wages" now = row's
+  esic_wage_base (wage-base rules: max(Basic earned, 50% Gross) — the
+  wages ESIC contribution is deducted on) instead of gross_paid; fallback
+  to gross_paid when esic_wage_base missing (old runs). Verified:
+  RAJENDRA gross 11603 → SAL 5801 (wage base). Applies to both .xls & .xlsx
+  via shared _esic_row_vals.

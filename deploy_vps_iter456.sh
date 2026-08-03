@@ -70,6 +70,9 @@
 # Iter 466 — ESIC data cells written as TEXT (portal manual instruction 10),
 # exactly like typing into the official template in Excel.
 #
+# Iter 467 — ESIC "Total Monthly Wages" = WAGE BASE (max(Basic earned, 50%
+# Gross) — the wages ESIC was deducted on), no longer the gross paid.
+#
 # Run ON THE VPS as root/sksharma.
 set -e
 

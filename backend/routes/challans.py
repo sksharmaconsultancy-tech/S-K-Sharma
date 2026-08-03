@@ -392,7 +392,9 @@ async def _uan_esic_map(rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]
 def _esic_row_vals(r: Dict[str, Any], u: Dict[str, Any], month: Any):
     """Iter 456 — ESIC upload template rules (user's instructions sheet):
     • DAYS rounded UP to the next whole number (instruction 2).
-    • SAL = gross earned for the month, truncated to whole ₹.
+    • SAL = ESIC WAGE BASE for the month (Iter 467, user request — wage
+      base rules: max(Basic earned, 50% of Gross), same wages ESIC
+      contribution is deducted on), truncated to whole ₹.
     • 0-wage members: Reason 2 (Left Service) + Last Working Day dd-mm-yyyy
       (Iter 463 — the ESIC portal upload page demands dd-mm-yyyy with
       DASHES, "column format should be text") when the member exited on/
@@ -403,7 +405,10 @@ def _esic_row_vals(r: Dict[str, Any], u: Dict[str, Any], month: Any):
     import re as _re
     present = float(r.get("present_days") or 0)
     days = int(math.ceil(present - 1e-9))
-    wages = int(float(r.get("gross_paid") or 0))
+    # Iter 467 (user request) — Total Monthly Wages follows the WAGE BASE
+    # rules (the wages ESIC was actually deducted on), not the gross paid.
+    _esi_w = float(r.get("esic_wage_base") or 0)
+    wages = int(_esi_w if _esi_w > 0 else float(r.get("gross_paid") or 0))
     reason, lwd = 0, ""
     if days <= 0 or wages <= 0:
         days, wages = 0, 0
