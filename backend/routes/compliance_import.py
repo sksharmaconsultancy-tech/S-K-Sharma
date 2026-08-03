@@ -51,11 +51,20 @@ HEADER_MAP = {
     "pf_no": {"pfno", "pfnumber", "empfno"},
     "uan_no": {"uan", "uanno", "uannumber"},
     "esic_no": {"esicno", "esic", "esiipno", "ipno", "esino", "esicipno", "emesino"},
-    "name": {"name", "employeename", "empname", "emname"},
-    "present_days": {"presentdays", "present", "presentday", "payabledays", "days", "presentdaysmanual"},
+    "name": {"name", "employeename", "empname", "emname", "employename"},
+    "present_days": {"presentdays", "present", "presentday", "payabledays",
+                     "days", "presentdaysmanual",
+                     # Iter 462 (user column-issue report) — common variants.
+                     "workingdays", "paiddays", "totaldays", "noofdays",
+                     "attendance", "attndays", "pdays"},
     "deduction_head": {"deductionhead", "otherdeductionhead", "dedhead", "deductionshead"},
     "deduction_amount": {"deductionamount", "advancededuction", "dedamount", "advance", "deduction", "adv"},
-    "gross_earning": {"grossearning", "gross", "grossearnings", "grossearned", "employeesalary"},
+    "gross_earning": {"grossearning", "gross", "grossearnings", "grossearned",
+                      "employeesalary",
+                      # Iter 462 — common variants on client sheets.
+                      "salary", "totalsalary", "grosssalary", "grossamount",
+                      "totalgross", "grosswages", "grosspay", "totalearning",
+                      "totalearnings", "earnedgross"},
     # Iter 328 (user format) — extra columns on the client attendance sheet.
     "tds": {"tds", "tdsamount"},
     "other_less": {"otherless", "otherdeduction", "othded"},
@@ -116,12 +125,22 @@ def _parse_sheet(content: bytes, filename: str) -> list:
             col_idx = found
             break
     if header_row is None:
+        # Iter 462 — self-explaining error: show the sheet's own top row so
+        # the user immediately sees which column names did not match.
+        _seen = []
+        for i in range(min(4, len(raw))):
+            cells = [str(c).strip() for c in raw.iloc[i].tolist()
+                     if str(c).strip() and str(c).strip().lower() != "nan"]
+            if cells:
+                _seen = cells[:12]
+                break
         raise HTTPException(
             status_code=400,
             detail=(
                 "Could not find the header row. The sheet must use the "
                 "Attendance Master format (PF No, UAN, ESIC No, Emp ID, Name, "
-                "Present Days, Deduction Head, Deduction Amount, Gross Earning)."
+                "Present Days, Deduction Head, Deduction Amount, Gross Earning). "
+                + (f"Your sheet's first row was: {', '.join(_seen)}" if _seen else "")
             ),
         )
 

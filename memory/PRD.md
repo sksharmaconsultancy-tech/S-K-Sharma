@@ -3691,3 +3691,11 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
     sync · Auto Save On.
   * Verified E2E via 2-page playwright: toast + refresh + lock modal +
     take control all OK. Theme kept (user's Q3 default).
+- Iter 462 (user: "still not able to import excel in Compliance salary
+  process / column issue"): could NOT reproduce on preview — full UI flow
+  (button → picker → upload) imported 125/125 from user's Kankani Data.xls.
+  Root causes possible on VPS: (a) deploy456 nginx fix not applied yet,
+  (b) wrong-format file (daily punch sheet fails header detection —
+  correctly). Improvements shipped: more header aliases (workingdays/
+  paiddays/totaldays/salary/grosssalary/etc.) + 400 error now echoes the
+  sheet's own first row so users see the mismatched columns.
