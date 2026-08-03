@@ -33,6 +33,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { announceRecordUpdate, useRecordLock } from "../src/utils/workspaceSync";
 import DateField from "@/src/components/DateField";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
@@ -96,6 +97,9 @@ export default function EmployeeAddScreen() {
   // Master → "Edit All Details").
   const urlParams = useLocalSearchParams<{ user_id?: string }>();
   const editUserId = urlParams.user_id ? String(urlParams.user_id) : null;
+  // Iter 461 (Phase 3) — cooperative record locking across workspace tabs.
+  const { lockedElsewhere, readOnly: lockReadOnly, setReadOnly: setLockReadOnly, takeControl } =
+    useRecordLock(editUserId ? `employee:${editUserId}` : null);
   // Iter 189 — enterprise desktop shell
   const { width: winW, height: winH } = useWindowDimensions();
   const isWide = Platform.OS === "web" && winW >= 1024;
@@ -860,6 +864,8 @@ export default function EmployeeAddScreen() {
           body: payload,
         });
         await uploadPendingDocs(editUserId);
+        // Iter 461 (Phase 2) — tell every other workspace tab in real time.
+        announceRecordUpdate("Employee Master", form.name.trim().toUpperCase() || "Employee");
         if (Platform.OS === "web") window.alert("Employee details updated ✓");
         router.back();
         return;
@@ -872,6 +878,7 @@ export default function EmployeeAddScreen() {
       }>("/admin/employees", { method: "POST", body: payload });
       // Iter 275 — upload the optional photo/attachments for the new hire.
       if (r.user_id) await uploadPendingDocs(r.user_id);
+      announceRecordUpdate("Employee Master", form.name.trim().toUpperCase() || "New Employee");
       setResult({
         temp_pin: r.temp_pin,
         employee_code: r.employee_code,
@@ -954,6 +961,31 @@ export default function EmployeeAddScreen() {
 
   return (
     <View style={styles.root}>
+      {/* Iter 461 (Phase 3) — record locked in another workspace tab. */}
+      <Modal transparent visible={lockedElsewhere && !lockReadOnly} animationType="fade">
+        <View style={{ flex: 1, backgroundColor: "rgba(15,23,42,0.45)", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <View style={{ backgroundColor: colors.surface, borderRadius: 14, padding: 20, width: "100%", maxWidth: 430 }} testID="record-lock-modal">
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <Ionicons name="lock-closed" size={20} color="#D97706" />
+              <Text style={{ fontSize: 15, fontWeight: "800", color: colors.onSurface }}>Record locked</Text>
+            </View>
+            <Text style={{ fontSize: 13, color: colors.onSurfaceSecondary, marginTop: 8, lineHeight: 19 }}>
+              This employee is currently being edited in another tab. Choose how to continue:
+            </Text>
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 16, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <Pressable onPress={() => router.back()} style={{ paddingHorizontal: 14, paddingVertical: 9, borderRadius: 9, borderWidth: 1, borderColor: colors.border }} testID="lock-cancel">
+                <Text style={{ fontSize: 12.5, fontWeight: "700", color: colors.onSurfaceSecondary }}>Cancel</Text>
+              </Pressable>
+              <Pressable onPress={() => setLockReadOnly(true)} style={{ paddingHorizontal: 14, paddingVertical: 9, borderRadius: 9, backgroundColor: "#FEF3C7" }} testID="lock-readonly">
+                <Text style={{ fontSize: 12.5, fontWeight: "800", color: "#92400E" }}>Read Only</Text>
+              </Pressable>
+              <Pressable onPress={takeControl} style={{ paddingHorizontal: 14, paddingVertical: 9, borderRadius: 9, backgroundColor: colors.brandPrimary }} testID="lock-take-control">
+                <Text style={{ fontSize: 12.5, fontWeight: "800", color: "#fff" }}>Take Control</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
       {isWide ? (
         <View style={styles.entHeader}>
           <Pressable onPress={() => router.back()} hitSlop={8} style={styles.backBtn}>

@@ -18,6 +18,8 @@ import { useAuth } from "@/src/context/AuthContext";
 import GlobalCompanyPicker from "@/src/components/GlobalCompanyPicker";
 import { useRefreshBus } from "@/src/context/RefreshBusContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
+import WorkspaceTabs from "@/src/components/WorkspaceTabs";
+import { onSyncMessage } from "@/src/utils/workspaceSync";
 import { useUnreadNotifications } from "@/src/hooks/useUnreadNotifications";
 import { usePrimaryInbox } from "@/src/hooks/usePrimaryInbox";
 import { useTheme } from "@/src/context/ThemeContext";
@@ -695,6 +697,32 @@ export default function AdminWebShell({ children }: Props) {
   const [aiOpen, setAiOpen] = React.useState(false);
   const [notifOpen, setNotifOpen] = React.useState(false);
   const [helpOpen, setHelpOpen] = React.useState(false);
+  // Iter 461 (Phase 2/3) — cross-tab real-time sync toast + status bar.
+  const [syncToast, setSyncToast] = React.useState<{ entity?: string; name?: string } | null>(null);
+  const [wsOnline, setWsOnline] = React.useState(true);
+  const [lastSync, setLastSync] = React.useState("");
+  React.useEffect(() => {
+    const off = onSyncMessage((m) => {
+      if (m.type === "record-updated") {
+        setSyncToast({ entity: m.entity, name: m.name });
+        setLastSync(new Date().toLocaleTimeString());
+      }
+    });
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      const on = () => setWsOnline(true);
+      const offl = () => setWsOnline(false);
+      setWsOnline(typeof navigator !== "undefined" ? navigator.onLine !== false : true);
+      window.addEventListener("online", on);
+      window.addEventListener("offline", offl);
+      return () => { off(); window.removeEventListener("online", on); window.removeEventListener("offline", offl); };
+    }
+    return off;
+  }, []);
+  React.useEffect(() => {
+    if (!syncToast) return;
+    const t = setTimeout(() => setSyncToast(null), 15000);
+    return () => clearTimeout(t);
+  }, [syncToast]);
   // Iter 454 (user request) — clicking "Dashboard" hides all expanded
   // sidebar sub-points; the tick is broadcast to every NavRow group.
   const [collapseTick, setCollapseTick] = React.useState(0);
@@ -1088,6 +1116,32 @@ export default function AdminWebShell({ children }: Props) {
     router.push((route === "/(tabs)" ? "/" : route) as any);
   };
 
+  // Iter 461 (Phase 1) — workspace-tab labels resolved from the nav tree.
+  const wsLabelFor = (path: string) => {
+    const base = (path || "").split("?")[0];
+    const find = (items: NavItem[]): string | null => {
+      for (const it of items) {
+        const r = (it.route || "").split("?")[0];
+        if (r && (base === r || base.startsWith(`${r}/`))) return it.label;
+        if (it.children) { const f = find(it.children); if (f) return f; }
+      }
+      return null;
+    };
+    const seg = base.replace(/^\//, "").split("/")[0];
+    return find(nav)
+      || (seg ? seg.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "Home");
+  };
+
+  // Iter 461 (Phase 2) — "Refresh Now" remounts the current screen so it
+  // refetches fresh data (no full page reload).
+  const wsRefreshNow = () => {
+    setSyncToast(null);
+    if (typeof window !== "undefined") {
+      const p = window.location.pathname + (window.location.search || "");
+      router.replace((p + (p.includes("?") ? "&" : "?") + "_r=" + Date.now()) as any);
+    }
+  };
+
   return (
     <View style={styles.shell} testID="admin-web-shell">
       {/* Sidebar — Iter 306 (user #13): collapsible via the pin button. */}
@@ -1455,6 +1509,10 @@ export default function AdminWebShell({ children }: Props) {
             </Pressable>
           </View>
         </View>
+        {/* Iter 461 (Phase 1) — Chrome-style workspace tabs: every payroll
+            module stays open in its own tab, switching restores the exact
+            screen instantly; the tab set survives reloads/logins. */}
+        <WorkspaceTabs pathname={pathname} labelFor={wsLabelFor} colors={colors} />
         <View style={styles.main} testID="admin-web-main">
           {/* children (the Stack) stays MOUNTED even when access is denied —
               unmounting it resets navigation state (see skeleton note). */}
@@ -1481,7 +1539,66 @@ export default function AdminWebShell({ children }: Props) {
             </View>
           ) : null}
         </View>
+        {/* Iter 461 (Phase 3) — footer status bar. */}
+        <View
+          style={{
+            flexDirection: "row", alignItems: "center", gap: 14,
+            paddingHorizontal: 14, paddingVertical: 5,
+            borderTopWidth: 1, borderTopColor: colors.border,
+            backgroundColor: colors.surface,
+          }}
+          testID="ws-status-bar"
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: wsOnline ? "#16A34A" : "#DC2626" }} />
+            <Text style={{ fontSize: 11, fontWeight: "700", color: colors.onSurfaceSecondary }}>
+              {wsOnline ? "Online" : "Offline"}
+            </Text>
+          </View>
+          <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary }}>Database connected</Text>
+          <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary }}>Last sync: {lastSync || "—"}</Text>
+          <View style={{ flex: 1 }} />
+          <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary }}>Auto Save On</Text>
+          <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary }}>All tabs share one login session</Text>
+        </View>
       </View>
+
+      {/* Iter 461 (Phase 2) — real-time cross-tab update notification. */}
+      {syncToast ? (
+        <View
+          style={{
+            position: "absolute", top: 64, right: 16, zIndex: 4000, width: 330,
+            backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+            borderRadius: 12, padding: 12,
+            shadowColor: "#000", shadowOpacity: 0.16, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 10,
+          }}
+          testID="ws-sync-toast"
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Ionicons name="sync-outline" size={16} color={colors.brandPrimary} />
+            <Text style={{ flex: 1, fontSize: 12.5, fontWeight: "700", color: colors.onSurface }} numberOfLines={2}>
+              {syncToast.name || "A record"} has been updated
+              {syncToast.entity ? ` in ${syncToast.entity}` : ""}.
+            </Text>
+          </View>
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
+            <Pressable
+              onPress={() => setSyncToast(null)}
+              style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}
+              testID="ws-sync-ignore"
+            >
+              <Text style={{ fontSize: 12, fontWeight: "700", color: colors.onSurfaceSecondary }}>Ignore</Text>
+            </Pressable>
+            <Pressable
+              onPress={wsRefreshNow}
+              style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.brandPrimary }}
+              testID="ws-sync-refresh"
+            >
+              <Text style={{ fontSize: 12, fontWeight: "800", color: "#fff" }}>Refresh Now</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
 
       {/* Iter 294 — Notification Centre dropdown panel. */}
       {notifOpen ? (

@@ -46,6 +46,19 @@
 # with Reason 2). The previous all-text formatting was rejected by the
 # ESIC portal.
 #
+# Iter 461 — ENTERPRISE WORKSPACE (all 3 phases, user request):
+#   Phase 1: Chrome-style WORKSPACE TABS inside the portal — modules stay
+#     open as tabs, instant switching, tab set + active tab survive
+#     reloads/logins (localStorage).
+#   Phase 2: REAL-TIME CROSS-TAB SYNC (BroadcastChannel) — saving an
+#     employee in one browser tab pops "NAME has been updated in Employee
+#     Master" in every other tab with Refresh Now / Ignore buttons
+#     (Refresh remounts the screen, no page reload).
+#   Phase 3: RECORD LOCKING — opening the same employee in two tabs shows
+#     "currently being edited in another tab" with Read Only / Take
+#     Control / Cancel. Footer STATUS BAR: Online · Database connected ·
+#     Last sync · Auto Save On.
+#
 # Run ON THE VPS as root/sksharma.
 set -e
 
@@ -140,6 +153,8 @@ echo -n "   FIRMNAMEMMYYYY (no special chars) filenames / Iter 455 (must say OK)
 grep -q 'Iter 455' $APP_DIR/backend/routes/challans.py && echo "OK" || echo "MISSING!"
 echo -n "   Dashboard click collapses sidebar / Iter 454 (must say OK): "
 grep -q 'collapseTick' $APP_DIR/frontend/src/components/AdminWebShell.tsx && echo "OK" || echo "MISSING!"
+echo -n "   Workspace tabs + sync + locking (Iter 461) (must say OK): "
+grep -q 'WorkspaceTabs' $APP_DIR/frontend/src/components/AdminWebShell.tsx && echo "OK" || echo "MISSING!"
 echo -n "   ESIC .xls matches working sample (Iter 460) (must say OK): "
 grep -q 'Iter 460' $APP_DIR/backend/routes/challans.py && echo "OK" || echo "MISSING!"
 echo -n "   Zero-day members in ECR (Iter 459) (must say OK): "

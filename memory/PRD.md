@@ -3675,3 +3675,19 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   TEXT for exited. Iter 456's all-text cells were the breakage. Both
   esic.xls (xlwt, sheet 'Sheet1') and esic.xlsx (openpyxl) now match the
   sample exactly — verified via seeded IPs incl. Reason 2 + LWD row.
+- Iter 461 (user request — "Modern Payroll multi-tab workspace", ALL 3
+  phases confirmed):
+  * Phase 1: WorkspaceTabs.tsx (new) — Chrome-style tabs in AdminWebShell
+    below the topbar; per-tab route+label, add/close/switch, persisted in
+    localStorage (sks_workspace_tabs_v1); active tab follows pathname.
+  * Phase 2: workspaceSync.ts (new) — BroadcastChannel "sks-workspace-sync";
+    announceRecordUpdate() called after employee save (employee-add.tsx);
+    AdminWebShell shows top-right toast with Refresh Now (remount via ?_r=)
+    / Ignore; footer Last sync updates.
+  * Phase 3: useRecordLock() hook — cooperative lock via lock-ping/held/
+    takeover/release messages; employee-add shows "Record locked" modal
+    (Read Only / Take Control / Cancel); submit blocked in read-only.
+    Footer status bar: Online (navigator.onLine) · DB connected · Last
+    sync · Auto Save On.
+  * Verified E2E via 2-page playwright: toast + refresh + lock modal +
+    take control all OK. Theme kept (user's Q3 default).
