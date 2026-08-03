@@ -701,6 +701,14 @@ export default function AdminWebShell({ children }: Props) {
   const [syncToast, setSyncToast] = React.useState<{ entity?: string; name?: string } | null>(null);
   const [wsOnline, setWsOnline] = React.useState(true);
   const [lastSync, setLastSync] = React.useState("");
+  // Iter 471 (user request) — server version badge in the status bar so
+  // the user can confirm the server is running the latest deploy.
+  const [serverIter, setServerIter] = React.useState("");
+  React.useEffect(() => {
+    api<{ iteration?: string }>("/version")
+      .then((r) => setServerIter(String(r?.iteration || "")))
+      .catch(() => setServerIter(""));
+  }, []);
   React.useEffect(() => {
     const off = onSyncMessage((m) => {
       if (m.type === "record-updated") {
@@ -1558,6 +1566,21 @@ export default function AdminWebShell({ children }: Props) {
           <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary }}>Database connected</Text>
           <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary }}>Last sync: {lastSync || "—"}</Text>
           <View style={{ flex: 1 }} />
+          {serverIter ? (
+            <View
+              style={{
+                flexDirection: "row", alignItems: "center", gap: 4,
+                backgroundColor: colors.primary + "18",
+                borderRadius: 6, paddingHorizontal: 7, paddingVertical: 1,
+              }}
+              testID="ws-server-version"
+            >
+              <Ionicons name="server-outline" size={10} color={colors.primary} />
+              <Text style={{ fontSize: 10.5, fontWeight: "700", color: colors.primary }}>
+                Server Iter {serverIter}
+              </Text>
+            </View>
+          ) : null}
           <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary }}>Auto Save On</Text>
           <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary }}>All tabs share one login session</Text>
         </View>

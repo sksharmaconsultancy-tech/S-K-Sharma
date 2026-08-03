@@ -9147,6 +9147,18 @@ async def health():
     return {"status": "ok"}
 
 
+# Iter 471 (user request) — SERVER VERSION badge: the portal footer shows
+# which code iteration the server is running, so the user can instantly see
+# whether their VPS has the latest deploy before testing.
+# BUMP THIS on every release (keep in sync with the deploy script number).
+APP_ITERATION = "471"
+
+
+@api.get("/version")
+async def app_version():
+    return {"iteration": APP_ITERATION}
+
+
 @api.get("/healthz")
 async def healthz():
     return {"status": "ok"}
