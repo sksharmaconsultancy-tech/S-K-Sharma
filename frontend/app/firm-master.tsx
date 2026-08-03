@@ -475,6 +475,30 @@ export default function FirmMasterScreen() {
         </View>
       </View>
 
+      {/* Iter 476 — STICKY unsaved-changes banner. Lives OUTSIDE the
+          ScrollView so it stays pinned under the header no matter how far
+          the user scrolls — impossible to miss before navigating away. */}
+      {dirty ? (
+        <View style={styles.dirtyBanner}>
+          <Ionicons name="warning" size={16} color="#B45309" />
+          <Text style={styles.dirtyBannerTxt}>
+            Unsaved changes — they will be lost if you leave this page.
+          </Text>
+          <Pressable
+            onPress={save}
+            disabled={saving}
+            style={({ pressed }) => [styles.dirtyBannerBtn, (saving || pressed) && { opacity: 0.75 }]}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <Ionicons name="save-outline" size={13} color="#FFF" />
+            )}
+            <Text style={styles.dirtyBannerBtnTxt}>{saving ? "Saving..." : "Save Now"}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* 0. Firm Logo (synced with app + portal shell) --------------- */}
         <Section icon="image-outline" title="Firm Logo (Portal + App)">
@@ -1320,6 +1344,56 @@ export default function FirmMasterScreen() {
           ))}
         </Section>
 
+        {/* Iter 476 — Employee Rejoin (Rehire) policy */}
+        <Section icon="refresh-circle-outline" title="18. Employee Rejoin Policy">
+          {([
+            ["employee_code", "Employee Code on Rejoin", [
+              ["continue", "Continue existing code"],
+              ["new", "Generate NEW code (linked)"]]],
+            ["leave_balance", "Leave Balance on Rejoin", [
+              ["continue", "Continue previous balance"],
+              ["reset", "Reset to zero"],
+              ["manual", "Manual opening balance"]]],
+            ["gratuity_service", "Gratuity Service", [
+              ["continue", "Continue previous service"],
+              ["fresh", "Fresh employment"]]],
+          ] as [string, string, [string, string][]][]).map(([key, label, opts]) => (
+            <View key={key} style={{ marginBottom: 10 }}>
+              <Text style={{ fontSize: 12, fontWeight: "700", color: "#475569", marginBottom: 5 }}>{label}</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                {opts.map(([val, txt]) => {
+                  const cur = String((master.rejoin_policy || {})[key] || (key === "employee_code" ? "continue" : key === "leave_balance" ? "continue" : "continue"));
+                  const on = cur === val;
+                  return (
+                    <Pressable
+                      key={val}
+                      testID={`rejoin-policy-${key}-${val}`}
+                      onPress={() => {
+                        setMaster((m: any) => ({
+                          ...m,
+                          rejoin_policy: { ...(m.rejoin_policy || {}), [key]: val },
+                        }));
+                        setDirty(true);
+                      }}
+                      style={{
+                        borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6,
+                        borderColor: on ? "#059669" : "#CBD5E1",
+                        backgroundColor: on ? "#059669" : "#fff",
+                      }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: on ? "800" : "500", color: on ? "#fff" : "#475569" }}>{txt}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          ))}
+          <Text style={{ fontSize: 11.5, color: "#64748B", lineHeight: 16 }}>
+            UAN & ESIC IP ALWAYS continue on rejoin (never re-issued). Attendance
+            & payroll restart from the Rejoin Date; all history stays locked.
+          </Text>
+        </Section>
+
         {/* Sticky-ish footer */}
         <View style={styles.footer}>
           <Text style={styles.footerTxt}>
@@ -1547,6 +1621,29 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
   },
   footerTxt: { ...type.body, color: colors.onSurfaceSecondary },
+  // Iter 476 — sticky unsaved-changes banner
+  dirtyBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+    backgroundColor: "#FFFBEB",
+    borderBottomWidth: 1,
+    borderBottomColor: "#FDE68A",
+  },
+  dirtyBannerTxt: { flex: 1, minWidth: 200, fontSize: 12.5, fontWeight: "700", color: "#92400E" },
+  dirtyBannerBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#B45309",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  dirtyBannerBtnTxt: { color: "#FFF", fontSize: 12, fontWeight: "800" },
   logoPreview: {
     width: 120, height: 120,
     borderRadius: radius.md,
