@@ -941,8 +941,9 @@ async def _commit_job(job_id: str, admin: dict, targets: List[str],
         if auto_payroll and res["entries_written"]:
             await prog(80, "Processing payroll (PF/ESIC/PT/TDS)…")
             try:
-                from server import (_create_compliance_salary_run_core,
-                                    ComplianceSalaryRunCreate)
+                # Iter 469 — moved out of server.py (fix silent ImportError).
+                from routes.compliance_salary_runs import (
+                    _create_compliance_salary_run_core, ComplianceSalaryRunCreate)
                 resp = await _create_compliance_salary_run_core(
                     ComplianceSalaryRunCreate(
                         month=month, company_id=cid,

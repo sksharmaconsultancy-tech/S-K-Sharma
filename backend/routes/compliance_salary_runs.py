@@ -763,6 +763,34 @@ async def _compute_compliance_run(
             row["deduction_heads"] = _keep
             row["deduction_head_labels"] = _custom
 
+        # Iter 469 (user request — "deduction heads are dynamic") — the
+        # imported sheet may carry a COLUMN per enabled Firm-Master
+        # deduction head (UNIFORM / CLUB / CANTEEN / …). The sheet value is
+        # authoritative for that head and lands in the row's dynamic
+        # deduction column.
+        if _am and isinstance(_am.get("custom_deductions"), dict) \
+                and _am["custom_deductions"]:
+            _dh469 = dict(row.get("deduction_heads") or {})
+            _low469 = ({str(c).strip().lower() for c in _custom}
+                       if _custom is not None else None)
+            _add469 = 0.0
+            for _h469, _v469 in _am["custom_deductions"].items():
+                _v469 = round(float(_v469 or 0), 2)
+                if _v469 <= 0:
+                    continue
+                if _low469 is not None and \
+                        str(_h469).strip().lower() not in _low469:
+                    continue
+                _add469 += _v469 - float(_dh469.get(_h469) or 0)
+                _dh469[_h469] = _v469
+            if _add469:
+                row["master_deduction"] = round(
+                    float(row.get("master_deduction") or 0) + _add469, 2)
+                row["total_deduction"] = round(
+                    float(row.get("total_deduction") or 0) + _add469, 2)
+                row["net"] = round(float(row.get("net") or 0) - _add469, 2)
+            row["deduction_heads"] = _dh469
+
         # Iter 328 — imported sheet TDS is authoritative: applied AFTER the
         # firm deduction mask so an explicit TDS on the client sheet always
         # lands on the run.

@@ -362,8 +362,11 @@ def register_iter61_features(
         }
         await db.compliance_salary_batches.insert_one(doc)
 
-        compute_fn = server_module._compute_compliance_run
-        payload_cls = server_module.ComplianceSalaryRunCreate
+        # Iter 469 — the run core moved to routes.compliance_salary_runs;
+        # server_module no longer exposes these names.
+        from routes.compliance_salary_runs import (
+            _compute_compliance_run as compute_fn,
+            ComplianceSalaryRunCreate as payload_cls)
 
         async def _run():
             await _run_compliance_batch(

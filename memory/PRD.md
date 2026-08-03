@@ -3735,3 +3735,26 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   libreoffice-calc if soffice missing + new verification check.
 - User "still shows gross" report = VPS not redeployed since Iter 467
   (wage-base SAL verified here: gross 11603 -> SAL 5801).
+- Iter 469 (user request — "allow the DOWNLOADED Attendance Sheet to upload
+  in Compliance Salary Process; allowance/deduction heads are DYNAMIC"):
+  compliance_import.py header matching rewritten with per-field ALIAS
+  PRIORITY (ordered tuples) + right-most tie-break. Fixes: (1) "Employee
+  Salary" fill-in column is now the imported/Freeze gross — previously the
+  master "Gross Salary" column hijacked gross_earning; (2) dynamic
+  allowance-head columns (between Conv. and Gross Salary) can no longer
+  hijack fill-in fields (e.g. master "OVER TIME" vs fill-in "OVER_TIME");
+  (3) sheet columns matching an ENABLED Firm-Master deduction head
+  (UNIFORM/CLUB/CANTEEN/…) import per-head into the run's dynamic
+  deduction_heads columns (entry field custom_deductions; merged in
+  compliance_salary_runs.py after the Iter 420 custom filter, statutory
+  heads excluded). (4) MAJOR pre-existing bug fixed: the AUTO-REPROCESS
+  after every sheet import (Iter 335) was silently failing with
+  ImportError — _create_compliance_salary_run_core / ComplianceSalaryRunCreate
+  / _compute_compliance_run moved out of server.py long ago; imports fixed
+  in compliance_import.py, ai_universal_import.py, utils/iter61_features.py.
+  Verified E2E (upload -> auto-run -> imported_gross = Employee Salary,
+  UNIFORM 150 in its own column). pytest iter100 (14) + iter360 (9) pass —
+  iter100 test updated for Iter 335 auto-run + Iter 426 month-days lock
+  (override_month_days). deploy_vps_iter469.sh created; temp_bundle kind=script
+  now serves deploy469.sh. USER MUST REDEPLOY VPS (also carries Iter 467/468
+  ESIC wage-base fix they reported as "still showing gross").

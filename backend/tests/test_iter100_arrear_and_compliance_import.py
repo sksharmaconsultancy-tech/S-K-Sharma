@@ -157,7 +157,12 @@ class TestComplianceImport:
         r = s.post(f"{BASE_URL}/api/admin/compliance-salary-runs",
                    headers=H,
                    json={"month": "2026-05", "company_id": COMPANY_ID,
-                         "month_days": 26, "use_imported_sheet": True},
+                         # Iter 469 — the upload now AUTO-REPROCESSES the
+                         # month (Iter 335) and that run LOCKS the month
+                         # days (Iter 426); override so this reprocess uses
+                         # 26 days as the test expects.
+                         "month_days": 26, "override_month_days": True,
+                         "use_imported_sheet": True},
                    timeout=120)
         assert r.status_code == 200, f"{r.status_code} {r.text[:400]}"
         run = r.json().get("run") or r.json()
@@ -193,9 +198,10 @@ class TestComplianceImport:
                 dbh = cli[db_name]
                 await dbh.compliance_import_entries.delete_many(
                     {"company_id": COMPANY_ID, "month": "2026-05"})
-                if TestComplianceImport.created_run_id:
-                    await dbh.compliance_salary_runs.delete_one(
-                        {"run_id": TestComplianceImport.created_run_id})
+                # Iter 469 — the upload's AUTO-RUN (Iter 335) also creates
+                # a run for the month; remove every 2026-05 run.
+                await dbh.compliance_salary_runs.delete_many(
+                    {"company_id": COMPANY_ID, "month": "2026-05"})
                 cli.close()
 
             asyncio.get_event_loop().run_until_complete(_cleanup())

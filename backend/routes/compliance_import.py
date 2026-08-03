@@ -46,30 +46,45 @@ def _norm_header(h) -> str:
     return re.sub(r"[^a-z0-9]", "", str(h or "").lower())
 
 
+# Iter 469 (user request — "upload the downloaded Attendance Sheet as-is"):
+# aliases are now ORDERED tuples. When a sheet carries TWO columns that both
+# match a field (e.g. the system Attendance Sheet has the master "Gross
+# Salary" AND the fill-in "Employee Salary"), the alias that appears FIRST
+# in the tuple wins — so "Employee Salary" (the earned gross the client
+# fills in) is picked over the master "Gross Salary" reference column.
+# Ties on the same alias pick the RIGHT-most column (fill-in columns sit at
+# the right end of the sheet, after the master-rate columns).
 HEADER_MAP = {
-    "code": {"empid", "employeecode", "empcode", "code", "empno", "employeeid", "employeeno", "emcode"},
-    "pf_no": {"pfno", "pfnumber", "empfno"},
-    "uan_no": {"uan", "uanno", "uannumber"},
-    "esic_no": {"esicno", "esic", "esiipno", "ipno", "esino", "esicipno", "emesino"},
-    "name": {"name", "employeename", "empname", "emname", "employename"},
-    "present_days": {"presentdays", "present", "presentday", "payabledays",
-                     "days", "presentdaysmanual",
+    "code": ("emcode", "empid", "employeecode", "empcode", "code", "empno",
+             "employeeid", "employeeno"),
+    "pf_no": ("empfno", "pfno", "pfnumber"),
+    "uan_no": ("uanno", "uan", "uannumber"),
+    "esic_no": ("emesino", "esicno", "esic", "esiipno", "ipno", "esino", "esicipno"),
+    "name": ("emname", "name", "employeename", "empname", "employename"),
+    "present_days": ("presentdays", "presentday", "presentdaysmanual",
+                     "payabledays",
                      # Iter 462 (user column-issue report) — common variants.
-                     "workingdays", "paiddays", "totaldays", "noofdays",
-                     "attendance", "attndays", "pdays"},
-    "deduction_head": {"deductionhead", "otherdeductionhead", "dedhead", "deductionshead"},
-    "deduction_amount": {"deductionamount", "advancededuction", "dedamount", "advance", "deduction", "adv"},
-    "gross_earning": {"grossearning", "gross", "grossearnings", "grossearned",
-                      "employeesalary",
+                     "workingdays", "paiddays", "days", "totaldays", "noofdays",
+                     "attndays", "pdays", "attendance", "present"),
+    "deduction_head": ("deductionhead", "otherdeductionhead", "dedhead", "deductionshead"),
+    "deduction_amount": ("deductionamount", "advancededuction", "adv",
+                         "advance", "dedamount", "deduction"),
+    "gross_earning": ("employeesalary", "grossearning", "grossearnings",
+                      "grossearned", "earnedgross",
                       # Iter 462 — common variants on client sheets.
-                      "salary", "totalsalary", "grosssalary", "grossamount",
-                      "totalgross", "grosswages", "grosspay", "totalearning",
-                      "totalearnings", "earnedgross"},
+                      "grosssalary", "gross", "salary", "totalsalary",
+                      "grossamount", "totalgross", "grosswages", "grosspay",
+                      "totalearning", "totalearnings"),
     # Iter 328 (user format) — extra columns on the client attendance sheet.
-    "tds": {"tds", "tdsamount"},
-    "other_less": {"otherless", "otherdeduction", "othded"},
-    "ot_hours": {"overtime", "othours", "ot", "otwork", "overtimehours"},
+    "tds": ("tds", "tdsamount"),
+    "other_less": ("otherless", "otherdeduction", "othded"),
+    "ot_hours": ("overtime", "othours", "ot", "otwork", "overtimehours"),
 }
+
+# Every known alias — columns matching one of these but NOT chosen for a
+# field (e.g. the master "Gross Salary" when "Employee Salary" won) are
+# recognised reference columns, never dynamic heads.
+_ALL_ALIASES = {a for aliases in HEADER_MAP.values() for a in aliases}
 
 
 def _to_num(v) -> float:
@@ -109,20 +124,38 @@ def _parse_sheet(content: bytes, filename: str) -> list:
 
     # Locate the header row: first row (within the top 12) that matches
     # at least 2 known column headers.
+    # Iter 469 — per-field ALIAS PRIORITY (tuple order) with a right-most
+    # tie-break, so the system Attendance Sheet download maps its fill-in
+    # columns (Employee Salary / Present Days / OVER_TIME / Adv / TDS /
+    # Other Less) correctly even next to master reference columns and the
+    # firm's DYNAMIC allowance-head columns.
     header_row = None
     col_idx: dict = {}
+    extra_cols: list = []  # dynamic (unrecognised) head columns
     for i in range(min(12, len(raw))):
         cells = [_norm_header(c) for c in raw.iloc[i].tolist()]
-        found: dict = {}
+        cand: dict = {}  # field -> (rank, col)
         for j, cell in enumerate(cells):
             if not cell:
                 continue
             for field, aliases in HEADER_MAP.items():
-                if field not in found and cell in aliases:
-                    found[field] = j
-        if len(found) >= 2:
+                if cell in aliases:
+                    rank = aliases.index(cell)
+                    prev = cand.get(field)
+                    if prev is None or rank < prev[0] or \
+                            (rank == prev[0] and j > prev[1]):
+                        cand[field] = (rank, j)
+        if len(cand) >= 2:
             header_row = i
-            col_idx = found
+            col_idx = {f: rc[1] for f, rc in cand.items()}
+            # Iter 469 — DYNAMIC allowance / deduction head columns: any
+            # non-empty header that is neither a chosen field nor a known
+            # alias (dynamic Firm-Master heads like UNIFORM / CANTEEN).
+            chosen = set(col_idx.values())
+            hdr_texts = raw.iloc[i].tolist()
+            for j, cell in enumerate(cells):
+                if cell and j not in chosen and cell not in _ALL_ALIASES:
+                    extra_cols.append((j, _cell_str(hdr_texts[j])))
             break
     if header_row is None:
         # Iter 462 — self-explaining error: show the sheet's own top row so
@@ -137,9 +170,10 @@ def _parse_sheet(content: bytes, filename: str) -> list:
         raise HTTPException(
             status_code=400,
             detail=(
-                "Could not find the header row. The sheet must use the "
-                "Attendance Master format (PF No, UAN, ESIC No, Emp ID, Name, "
-                "Present Days, Deduction Head, Deduction Amount, Gross Earning). "
+                "Could not find the header row. Use the system's downloaded "
+                "Attendance Sheet (EM_PFNO, UAN_NO, EM_ESINO, EM_CODE, EM_NAME, "
+                "…, Present Days, OVER_TIME, Adv, TDS, Other Less, Employee "
+                "Salary) or the Attendance Master format. "
                 + (f"Your sheet's first row was: {', '.join(_seen)}" if _seen else "")
             ),
         )
@@ -161,6 +195,13 @@ def _parse_sheet(content: bytes, filename: str) -> list:
             continue
         if _norm_header(row.get("name")).startswith("total"):
             continue
+        # Iter 469 — carry the DYNAMIC head columns' values; the store step
+        # maps them against the firm's enabled deduction heads.
+        if extra_cols:
+            row["_extra"] = {
+                label: _to_num(r.iloc[j] if j < len(r) else None)
+                for j, label in extra_cols if label
+            }
         row["_row_no"] = i + 1
         rows.append(row)
     return rows
@@ -174,6 +215,20 @@ async def _store_import(admin: dict, company_id: str, month: str,
     company = await db.companies.find_one({"company_id": company_id}, {"_id": 0, "name": 1})
     if not company:
         raise HTTPException(status_code=404, detail="Firm not found")
+
+    # Iter 469 — DYNAMIC deduction heads: sheet columns whose header matches
+    # a deduction head ENABLED in the Firm Master (e.g. UNIFORM / CLUB /
+    # CANTEEN) import into the Other Deduction column. Statutory heads
+    # (PF / ESI / PT / TDS / I.Tax) are computed by the engine, never
+    # imported.
+    _fm = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "deductions": 1}) or {}
+    _stat_heads = {"pf", "esi", "esic", "pt", "itax", "tax", "incometax",
+                   "tds", "professionaltax", "providentfund", "epf"}
+    ded_heads: dict = {}  # normalised label -> Firm-Master label
+    for _head, _on in (_fm.get("deductions") or {}).items():
+        if _on and _norm_header(_head) not in _stat_heads:
+            ded_heads[_norm_header(_head)] = str(_head).strip()
 
     by_code: dict = {}
     by_uan: dict = {}
@@ -249,6 +304,14 @@ async def _store_import(admin: dict, company_id: str, month: str,
         if uid in seen:
             continue
         seen.add(uid)
+        # Iter 469 — DYNAMIC Firm-Master deduction head columns on the
+        # sheet (UNIFORM / CLUB / CANTEEN / …) import per-head; the run
+        # merges them into the row's dynamic deduction columns.
+        _custom_ded: dict = {}
+        for _lbl, _val in (row.get("_extra") or {}).items():
+            _n = _norm_header(_lbl)
+            if _n in ded_heads and float(_val or 0) > 0:
+                _custom_ded[ded_heads[_n]] = round(float(_val), 2)
         matched.append({
             "company_id": company_id,
             "month": month,
@@ -261,6 +324,7 @@ async def _store_import(admin: dict, company_id: str, month: str,
             "tds": float(row.get("tds") or 0),
             "other_less": float(row.get("other_less") or 0),
             "ot_hours": float(row.get("ot_hours") or 0),
+            "custom_deductions": _custom_ded,
         })
 
     # Replace the whole (firm, month) set on every import.
@@ -280,8 +344,11 @@ async def _store_import(admin: dict, company_id: str, month: str,
     auto_run = None
     if matched:
         try:
-            from server import (_create_compliance_salary_run_core,
-                                ComplianceSalaryRunCreate)
+            # Iter 469 — the run core moved out of server.py; importing it
+            # from `server` raised ImportError and the AUTO-REPROCESS after
+            # every sheet import silently failed ("Auto-process failed").
+            from routes.compliance_salary_runs import (
+                _create_compliance_salary_run_core, ComplianceSalaryRunCreate)
             resp = await _create_compliance_salary_run_core(
                 ComplianceSalaryRunCreate(
                     month=month, company_id=company_id,
