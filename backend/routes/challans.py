@@ -389,6 +389,24 @@ async def _uan_esic_map(rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]
     return {u["user_id"]: u for u in users}
 
 
+def _esic_wages(r: Dict[str, Any]) -> float:
+    """Iter 467/470 — Total Monthly Wages for the ESIC upload = the ESIC
+    WAGE BASE (wage-base rules: max(Basic earned, 50% of Gross) — the wages
+    ESIC contribution is actually deducted on), NEVER the gross paid.
+
+    Iter 470 (user: "still showing monthly gross") — rows from OLD runs
+    (processed before esic_wage_base was stored) now DERIVE the wage base
+    from the row itself instead of silently falling back to gross:
+      esic_wage_base → stat_wage_base → max(Basic earned, 50% × Gross)."""
+    w = float(r.get("esic_wage_base") or 0)
+    if w <= 0:
+        w = float(r.get("stat_wage_base") or 0)
+    if w <= 0:
+        _g = float(r.get("gross_paid") or 0)
+        w = max(float(r.get("basic") or 0), 0.5 * _g) if _g > 0 else 0.0
+    return w
+
+
 def _esic_row_vals(r: Dict[str, Any], u: Dict[str, Any], month: Any):
     """Iter 456 — ESIC upload template rules (user's instructions sheet):
     • DAYS rounded UP to the next whole number (instruction 2).
@@ -407,8 +425,7 @@ def _esic_row_vals(r: Dict[str, Any], u: Dict[str, Any], month: Any):
     days = int(math.ceil(present - 1e-9))
     # Iter 467 (user request) — Total Monthly Wages follows the WAGE BASE
     # rules (the wages ESIC was actually deducted on), not the gross paid.
-    _esi_w = float(r.get("esic_wage_base") or 0)
-    wages = int(_esi_w if _esi_w > 0 else float(r.get("gross_paid") or 0))
+    wages = int(_esic_wages(r))
     reason, lwd = 0, ""
     if days <= 0 or wages <= 0:
         days, wages = 0, 0
@@ -1269,7 +1286,9 @@ async def portal_preview(
                 "ip_no": str(ex.get("esi_ip_no") or "").strip(),
                 "name": (r.get("name") or "").upper(),
                 "days": int(days) if days.is_integer() else days,
-                "wages": round(float(r.get("gross_paid") or 0), 2),
+                # Iter 470 (user request) — the on-screen preview mirrors the
+                # upload file: ESIC WAGE BASE, not the monthly gross.
+                "wages": round(_esic_wages(r), 2),
                 "ee": int(round(float(r.get("esic_employee") or 0))),
                 "skipped": not str(ex.get("esi_ip_no") or "").strip(),
             })

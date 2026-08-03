@@ -22,6 +22,15 @@
 #     had been silently failing ("Auto-process failed: cannot import
 #     name…") — the salary now processes automatically on import again.
 #
+# Iter 470 — ESIC WAGES = WAGE BASE EVERYWHERE (user: "still showing
+#   monthly gross"):
+#   • The ON-SCREEN ESIC portal preview (before auto upload) also showed
+#     Monthly Gross — now shows the ESIC WAGE BASE like the file.
+#   • OLD runs processed before the wage-base field existed no longer fall
+#     back to gross: the wage base is derived from the row itself
+#     (esic_wage_base → stat_wage_base → max(Basic earned, 50% × Gross)),
+#     so NO reprocess is needed — just re-download the ESIC Excel.
+#
 # Run ON THE VPS as root/sksharma.
 set -e
 
@@ -104,6 +113,8 @@ curl -s http://localhost:8001/api/health >/dev/null && echo "   Backend healthy 
   echo "   ⚠ Backend health check failed — journalctl -u sksharma-backend -n 50"
 echo -n "   Attendance-Sheet upload accepted as-is (Iter 469) (must say OK): "
 grep -q 'Iter 469' $APP_DIR/backend/routes/compliance_import.py && echo "OK" || echo "MISSING!"
+echo -n "   ESIC wages = WAGE BASE in file + preview + old runs (Iter 470) (must say OK): "
+grep -q '_esic_wages' $APP_DIR/backend/routes/challans.py && echo "OK" || echo "MISSING!"
 echo -n "   Auto-reprocess after import FIXED (Iter 469) (must say OK): "
 grep -q 'from routes.compliance_salary_runs import' $APP_DIR/backend/routes/compliance_import.py && echo "OK" || echo "MISSING!"
 echo -n "   Dynamic deduction-head columns on the run (Iter 469) (must say OK): "

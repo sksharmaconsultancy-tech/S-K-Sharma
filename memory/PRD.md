@@ -3758,3 +3758,16 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   (override_month_days). deploy_vps_iter469.sh created; temp_bundle kind=script
   now serves deploy469.sh. USER MUST REDEPLOY VPS (also carries Iter 467/468
   ESIC wage-base fix they reported as "still showing gross").
+- Iter 470 (user: "ESIC Upload still showing Monthly Gross"): two residual
+  sources of gross found & fixed in challans.py via shared _esic_wages(r):
+  (1) the ON-SCREEN /challans-portal-preview?kind=esic showed gross_paid;
+  (2) OLD runs whose rows lack esic_wage_base fell back to gross — now
+  derived on the fly (esic_wage_base → stat_wage_base → max(basic, 50% of
+  gross)), so users do NOT need to reprocess old months, only re-download.
+  Verified locally: SURENDRA gross 19370 → SAL/preview 9685. Both .xls and
+  .xlsx + preview use the wage base. deploy_vps_iter469.sh updated with an
+  Iter 470 verification line (grep _esic_wages). REMINDER GIVEN AGAIN: user
+  must run the deploy script — their VPS never received Iter 467 either.
+  NOTE (pre-existing, unrelated): tests/test_iter388 TestFinalizeGates 2
+  failures — finalize returns 200 with errors_overridden/warnings_overridden
+  true (some override setting in DB); fails on untouched code too.
