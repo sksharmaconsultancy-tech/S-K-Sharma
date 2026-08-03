@@ -40,6 +40,12 @@
 # Only truly non-eligible employees (no PF Basic / Excluded / PF = No) are
 # left out of the file.
 #
+# Iter 460 — ESIC UPLOAD .XLS FIXED against the user's WORKING sample file
+# ("sample format of ESIC.xls"): ESI_CODE + NAME as TEXT cells, DAYS / SAL /
+# RE as NUMERIC cells, DATE blank (dd/mm/yyyy TEXT only for exited members
+# with Reason 2). The previous all-text formatting was rejected by the
+# ESIC portal.
+#
 # Run ON THE VPS as root/sksharma.
 set -e
 
@@ -134,6 +140,8 @@ echo -n "   FIRMNAMEMMYYYY (no special chars) filenames / Iter 455 (must say OK)
 grep -q 'Iter 455' $APP_DIR/backend/routes/challans.py && echo "OK" || echo "MISSING!"
 echo -n "   Dashboard click collapses sidebar / Iter 454 (must say OK): "
 grep -q 'collapseTick' $APP_DIR/frontend/src/components/AdminWebShell.tsx && echo "OK" || echo "MISSING!"
+echo -n "   ESIC .xls matches working sample (Iter 460) (must say OK): "
+grep -q 'Iter 460' $APP_DIR/backend/routes/challans.py && echo "OK" || echo "MISSING!"
 echo -n "   Zero-day members in ECR (Iter 459) (must say OK): "
 grep -q 'Iter 459' $APP_DIR/backend/routes/challans.py && echo "OK" || echo "MISSING!"
 echo -n "   Nginx 100M upload limit (Excel import, Iter 458) (must say OK): "

@@ -569,12 +569,14 @@ def _esic_xls_bytes(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> by
     ESIC-applicable member has an IP number."""
     import xlwt
     wb = xlwt.Workbook()
-    ws = wb.add_sheet("ESIC")
-    # Iter 456 (ESIC template instruction 10) — ALL columns must be in
-    # 'Text' format, values written as strings.
+    ws = wb.add_sheet("Sheet1")
+    # Iter 460 (user's WORKING "sample format of ESIC.xls") — the ESIC
+    # portal accepts: ESI_CODE + NAME as TEXT cells, DAYS / SAL / RE as
+    # NUMERIC cells (General format), DATE blank (or dd/mm/yyyy TEXT for
+    # exited members). Writing everything as text (Iter 456) was rejected.
     _txt = xlwt.easyxf(num_format_str="@")
     for col, h in enumerate(["ESI_CODE", "NAME", "DAYS", "SAL", "RE", "DATE"]):
-        ws.write(0, col, h)
+        ws.write(0, col, h, _txt)
     rownum = 1
     for r in run.get("rows") or []:
         u = extra.get(r.get("user_id"), {}) or {}
@@ -591,10 +593,11 @@ def _esic_xls_bytes(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> by
         days, wages, reason, lwd = _esic_row_vals(r, u, run.get("month"))
         ws.write(rownum, 0, ip_no, _txt)
         ws.write(rownum, 1, (r.get("name") or "").upper(), _txt)
-        ws.write(rownum, 2, str(days), _txt)
-        ws.write(rownum, 3, str(wages), _txt)
-        ws.write(rownum, 4, str(reason), _txt)
-        ws.write(rownum, 5, lwd, _txt)
+        ws.write(rownum, 2, days)
+        ws.write(rownum, 3, wages)
+        ws.write(rownum, 4, reason)
+        if lwd:
+            ws.write(rownum, 5, lwd, _txt)
         rownum += 1
     if rownum == 1:
         raise HTTPException(
@@ -891,13 +894,14 @@ async def download_esic_xlsx(
         # other ESIC-exempt members stay out.
         if not r.get("esic_applicable") and not _zero:
             continue
-        # Iter 456 — template rules: DAYS rounded UP, SAL = gross earned,
-        # Reason 2 + Last Working Day for exited members, all cells TEXT.
+        # Iter 460 (user's working sample) — IP/NAME as TEXT, DAYS/SAL/RE
+        # as NUMBERS, DATE dd/mm/yyyy text only for exited members.
         days, wages, reason, lwd = _esic_row_vals(r, u, run.get("month"))
         ws.append([ip_no or "MISSING IP NO", (r.get("name") or "").upper(),
-                   str(days), str(wages), str(reason), lwd])
-        for c in ws[ws.max_row]:
-            c.number_format = "@"
+                   days, wages, reason, lwd])
+        ws.cell(row=ws.max_row, column=1).number_format = "@"
+        ws.cell(row=ws.max_row, column=2).number_format = "@"
+        ws.cell(row=ws.max_row, column=6).number_format = "@"
         if not ip_no:
             for c in ws[ws.max_row]:
                 c.fill = warn_fill

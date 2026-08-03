@@ -3669,3 +3669,9 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   + Other Allowances (as-is), and ESIC also keeps including them (as-is).
   NO code change needed — documented behavior: typing OT/Other Allowance
   can raise PF for below-cap employees where 50% Gross > earned PF Basic.
+- Iter 460 (user: "still not able to upload ESIC Excel" + provided WORKING
+  "sample format of ESIC.xls"): the portal-accepted file has ESI_CODE+NAME
+  as TEXT ('@'), DAYS/SAL/RE as NUMERIC (General), DATE blank / dd/mm/yyyy
+  TEXT for exited. Iter 456's all-text cells were the breakage. Both
+  esic.xls (xlwt, sheet 'Sheet1') and esic.xlsx (openpyxl) now match the
+  sample exactly — verified via seeded IPs incl. Reason 2 + LWD row.
