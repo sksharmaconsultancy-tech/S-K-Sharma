@@ -113,6 +113,14 @@ if ! grep -q "^EMERGENT_LLM_KEY=" $APP_DIR/backend/.env; then
 fi
 
 echo "==> 3/7 Installing backend deps..."
+# Iter 468 — LibreOffice is used to re-write the ESIC .xls so its OLE
+# compound structure matches a genuine Excel 97-2003 file (the ESIC portal
+# rejected files missing the SummaryInformation streams).
+if ! command -v soffice >/dev/null 2>&1; then
+  echo "   Installing LibreOffice Calc (one-time, ~2-4 min)..."
+  sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libreoffice-calc >/dev/null 2>&1 || \
+    echo "   ⚠ LibreOffice install failed — ESIC .xls will use the fallback writer"
+fi
 grep -v "^litellm" $APP_DIR/backend/requirements.txt > /tmp/reqs.txt
 $PIP install -r /tmp/reqs.txt --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ -q || \
   echo "   (pip failed — safe to continue if requirements unchanged)"
@@ -169,6 +177,8 @@ echo -n "   Dashboard click collapses sidebar / Iter 454 (must say OK): "
 grep -q 'collapseTick' $APP_DIR/frontend/src/components/AdminWebShell.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Workspace tabs + sync + locking (Iter 461) (must say OK): "
 grep -q 'WorkspaceTabs' $APP_DIR/frontend/src/components/AdminWebShell.tsx && echo "OK" || echo "MISSING!"
+echo -n "   ESIC wages = WAGE BASE + LibreOffice launder (Iter 467/468) (must say OK): "
+grep -q 'Iter 468' $APP_DIR/backend/routes/challans.py && command -v soffice >/dev/null && echo "OK" || echo "MISSING!"
 echo -n "   ESIC .xls uses OFFICIAL portal template (Iter 465) (must say OK): "
 [ -f $APP_DIR/backend/assets/esic_mc_template.xls ] && grep -q 'Iter 465' $APP_DIR/backend/routes/challans.py && echo "OK" || echo "MISSING!"
 echo -n "   ESIC .xls matches working sample (Iter 460) (must say OK): "

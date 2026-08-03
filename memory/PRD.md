@@ -3726,3 +3726,12 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   to gross_paid when esic_wage_base missing (old runs). Verified:
   RAJENDRA gross 11603 → SAL 5801 (wage base). Applies to both .xls & .xlsx
   via shared _esic_row_vals.
+- Iter 468 (ROOT CAUSE of ESIC portal "not able to read"): xlwt output has
+  ONLY the "Workbook" OLE stream; every portal-accepted file also carries
+  SummaryInformation/DocumentSummaryInformation. _launder_xls() re-writes
+  the built .xls via headless LibreOffice (isolated profile, 90s timeout,
+  silent fallback to raw bytes). Verified via API: streams now CompObj/Ole/
+  DocSummary/Summary/Workbook, 0.9s response. deploy456.sh installs
+  libreoffice-calc if soffice missing + new verification check.
+- User "still shows gross" report = VPS not redeployed since Iter 467
+  (wage-base SAL verified here: gross 11603 -> SAL 5801).

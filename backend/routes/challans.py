@@ -638,7 +638,42 @@ def _esic_xls_bytes(run: Dict[str, Any], extra: Dict[str, Dict[str, Any]]) -> by
         )
     buf = io.BytesIO()
     wb.save(buf)
-    return buf.getvalue()
+    # Iter 468 (portal still rejecting) — xlwt writes only the "Workbook"
+    # OLE stream; every portal-ACCEPTED file also carries the
+    # SummaryInformation / DocumentSummaryInformation property streams.
+    # Launder the file through LibreOffice so the compound-file structure
+    # matches a genuine Excel 97-2003 file (falls back silently to the raw
+    # bytes when soffice is not installed).
+    return _launder_xls(buf.getvalue())
+
+
+def _launder_xls(data: bytes) -> bytes:
+    """Iter 468 — re-write .xls bytes with headless LibreOffice so strict
+    parsers (ESIC portal) accept them. Returns original bytes on failure."""
+    import shutil
+    import subprocess
+    import tempfile
+    if not shutil.which("soffice"):
+        return data
+    tmp = tempfile.mkdtemp(prefix="loxls_")
+    try:
+        src = os.path.join(tmp, "in.xls")
+        outdir = os.path.join(tmp, "out")
+        os.makedirs(outdir, exist_ok=True)
+        with open(src, "wb") as f:
+            f.write(data)
+        subprocess.run(
+            ["soffice", "--headless",
+             f"-env:UserInstallation=file://{tmp}/profile",
+             "--convert-to", "xls:MS Excel 97", "--outdir", outdir, src],
+            capture_output=True, timeout=90, check=True)
+        with open(os.path.join(outdir, "in.xls"), "rb") as f:
+            fixed = f.read()
+        return fixed if len(fixed) > 512 else data
+    except Exception:
+        return data
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 @router.get("/challans/ecr-check")
