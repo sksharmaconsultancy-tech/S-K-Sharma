@@ -3665,3 +3665,7 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   (no PF Basic / Excluded / PF=No) stay out. challans._ecr_lines filter
   changed to (pf_applicable or pf_eligible). Verified via synthetic
   zero-day row: "#~#0#~#0...#~#26#~#0" and ecr-check passes NCP sanity.
+- User confirmed (option 3): PF 50%-of-Gross floor KEEPS including Overtime
+  + Other Allowances (as-is), and ESIC also keeps including them (as-is).
+  NO code change needed — documented behavior: typing OT/Other Allowance
+  can raise PF for below-cap employees where 50% Gross > earned PF Basic.
