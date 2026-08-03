@@ -16,6 +16,7 @@ maps /api/* to the backend. When deploying, configure the device with:
 """
 import asyncio
 import base64
+import difflib
 import logging
 import random
 import re
@@ -1423,6 +1424,61 @@ async def resync_biometric_device(
     }
 
 
+@router.post("/biometric/devices/{device_id}/fetch-range")
+async def fetch_range_biometric_device(
+    device_id: str,
+    range: str = Query("current_month",
+                       description="current_month | last_month"),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 473 (user request — 'fetch at least the current month or one
+    month back'): queues a targeted ``DATA QUERY ATTLOG StartTime=…
+    EndTime=…`` push-protocol command so the machine re-uploads ONLY the
+    chosen month's punches (much lighter than the full 'Fetch old data'
+    re-sync). Duplicates are skipped by the idempotency guard."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    device = await db.biometric_devices.find_one({"device_id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    if admin["role"] == "company_admin" and device.get("company_id") != admin["company_id"]:
+        raise HTTPException(status_code=403, detail="Not authorised for this device")
+    # "today" in the MACHINE's configured timezone so month edges are right
+    mins = _parse_gmt_offset_minutes(device.get("gmt_offset"))
+    today = (datetime.now(timezone.utc) + timedelta(minutes=mins)).date()
+    if str(range).strip().lower() == "last_month":
+        first_this = today.replace(day=1)
+        end = first_this - timedelta(days=1)
+        start = end.replace(day=1)
+        label_month = start.strftime("%B %Y")
+    else:
+        start = today.replace(day=1)
+        end = today
+        label_month = start.strftime("%B %Y")
+    cmd = (f"DATA QUERY ATTLOG StartTime={start.isoformat()} 00:00:00\t"
+           f"EndTime={end.isoformat()} 23:59:59")
+    cmd_id = await _queue_cmd(
+        device["serial_number"], cmd, admin["user_id"],
+        f"Fetch punches — {label_month}")
+    # a CHECK right after makes some firmwares flush pending uploads faster
+    await _queue_cmd(device["serial_number"], "CHECK",
+                     admin["user_id"], "Flush after month fetch")
+    return {
+        "ok": True,
+        "cmd_id": cmd_id,
+        "from": start.isoformat(),
+        "to": end.isoformat(),
+        "message": (
+            f"Fetch queued for {label_month} ({start.strftime('%d-%m-%Y')} to "
+            f"{end.strftime('%d-%m-%Y')}). Keep the machine ON and online — "
+            "it picks the command up within ~1 minute and re-uploads that "
+            "month's punches. Already-imported punches are skipped. "
+            "If nothing arrives in 10 minutes your firmware may not support "
+            "month queries — use 'Fetch old data' instead (full re-upload)."
+        ),
+    }
+
+
 @router.post("/biometric/devices/resync-all")
 async def resync_all_biometric_devices(
     company_id: Optional[str] = Query(None),
@@ -1481,7 +1537,6 @@ async def biometric_connection_doctor(
     NEVER-CONNECTED verdict with plain-language advice. Also lists
     UNKNOWN serials that DID reach the server but are not registered
     (catches serial typos instantly, with a fuzzy-match hint)."""
-    import difflib
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     q: dict = {}
@@ -1536,26 +1591,35 @@ async def biometric_connection_doctor(
 
     # Unknown serials — machines that reached the server but aren't
     # registered (or were registered with a slightly different serial).
-    registered_sns = [str(d.get("serial_number") or "") for d in devices]
-    all_sns = {
+    unknown = await _unknown_devices_payload()
+    return {"devices": out, "unknown_devices": unknown, "checked_at": _now_iso_z()}
+
+
+async def _unknown_devices_payload() -> list:
+    """Iter 473 (user report — 'new machines not showing in the list'):
+    serials that reached the server but are NOT registered, with a typo
+    hint when a registered serial is close. Shown on the Machine List
+    itself (previously only inside the Connection Doctor)."""
+    registered = [
         str(x.get("serial_number") or "")
-        for x in await db.biometric_devices.find({}, {"_id": 0, "serial_number": 1}).to_list(500)
-    }
-    unknown = []
-    _unk_docs = await db.biometric_unknown.find(
+        for x in await db.biometric_devices.find(
+            {}, {"_id": 0, "serial_number": 1}).to_list(500)
+    ]
+    out = []
+    _docs = await db.biometric_unknown.find(
         {}, {"_id": 0}).sort("last_seen_at", -1).to_list(50)
-    for u in _unk_docs:
+    for u in _docs:
         sn = str(u.get("serial_number") or "")
-        if sn in all_sns:
+        if sn in registered:
             continue  # registered since — no longer a problem
         hint = None
-        close = difflib.get_close_matches(sn, registered_sns, n=1, cutoff=0.75)
+        close = difflib.get_close_matches(sn, registered, n=1, cutoff=0.75)
         if close:
             hint = (
                 f"Looks like a TYPO: the machine reports '{sn}' but you "
                 f"registered '{close[0]}'. Edit the device and fix the serial."
             )
-        unknown.append({
+        out.append({
             "serial_number": sn,
             "first_seen_at": u.get("first_seen_at"),
             "last_seen_at": u.get("last_seen_at"),
@@ -1565,7 +1629,7 @@ async def biometric_connection_doctor(
                 "Register it with this exact serial to start receiving punches."
             ),
         })
-    return {"devices": out, "unknown_devices": unknown, "checked_at": _now_iso_z()}
+    return out
 
 
 @router.get("/biometric/devices")
@@ -1594,7 +1658,10 @@ async def list_biometric_devices(
                 online = False
         d["online"] = online
     unmapped = await db.biometric_unmapped.count_documents({}) if devices else 0
-    return {"devices": devices, "unmapped_count": unmapped}
+    # Iter 473 — surface NEW (unregistered) machines on the list itself.
+    unknown = await _unknown_devices_payload()
+    return {"devices": devices, "unmapped_count": unmapped,
+            "unknown_devices": unknown}
 
 
 @router.patch("/biometric/devices/{device_id}")

@@ -106,6 +106,8 @@ export default function BiometricDevicesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
+  // Iter 473 — machines reaching the server but not registered yet.
+  const [unknownDevices, setUnknownDevices] = useState<any[]>([]);
   const [unmappedCount, setUnmappedCount] = useState(0);
   const [companies, setCompanies] = useState<Company[]>([]);
 
@@ -138,11 +140,12 @@ export default function BiometricDevicesScreen() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const r = await api<{ devices: Device[]; unmapped_count: number }>(
+      const r = await api<{ devices: Device[]; unmapped_count: number; unknown_devices?: any[] }>(
         "/biometric/devices",
       );
       setDevices(r.devices || []);
       setUnmappedCount(r.unmapped_count || 0);
+      setUnknownDevices(r.unknown_devices || []);
       if (isSuper) {
         try {
           const c = await api<{ companies: Company[] }>("/companies?lite=1");
@@ -191,6 +194,18 @@ export default function BiometricDevicesScreen() {
   const openCreate = () => {
     setEditing(null);
     setDraft({ ...emptyDraft, company_id: isSuper ? "" : (user?.company_id || "") });
+    setEditorOpen(true);
+  };
+
+  // Iter 473 — one-tap register for a machine that reached the server
+  // unregistered: the editor opens with the exact serial pre-filled.
+  const openRegisterUnknown = (sn: string) => {
+    setEditing(null);
+    setDraft({
+      ...emptyDraft,
+      serial_number: sn,
+      company_id: isSuper ? "" : (user?.company_id || ""),
+    });
     setEditorOpen(true);
   };
 
@@ -351,6 +366,23 @@ export default function BiometricDevicesScreen() {
       alertUser("Failed", e?.message || "Please try again.");
     } finally {
       setResyncing(null);
+    }
+  };
+
+  // Iter 473 (user request) — targeted month fetch: current or last month.
+  const [fetchingRange, setFetchingRange] = useState<string | null>(null);
+  const fetchRange = async (d: Device, range: "current_month" | "last_month") => {
+    setFetchingRange(`${d.device_id}:${range}`);
+    try {
+      const r = await api<{ ok: boolean; message: string }>(
+        `/biometric/devices/${d.device_id}/fetch-range?range=${range}`,
+        { method: "POST" },
+      );
+      alertUser("Month fetch queued", r.message);
+    } catch (e: any) {
+      alertUser("Failed", e?.message || "Please try again.");
+    } finally {
+      setFetchingRange(null);
     }
   };
 
@@ -699,6 +731,40 @@ export default function BiometricDevicesScreen() {
             <Text style={styles.addBtnTxt}>Connection Doctor — why is my machine not connecting?</Text>
           </Pressable>
 
+          {/* Iter 473 — NEW machines that reached the server but are not
+              registered yet: visible right on the list with 1-tap register */}
+          {unknownDevices.length > 0 && (
+            <View style={{ marginBottom: 12 }}>
+              <Text style={{ fontWeight: "800", color: "#DC2626", marginBottom: 8, fontSize: 13 }}>
+                🆕 New machines detected — not registered yet
+              </Text>
+              {unknownDevices.map((u: any) => (
+                <View
+                  key={u.serial_number}
+                  testID={`unknown-machine-${u.serial_number}`}
+                  style={{ borderWidth: 1, borderColor: "#FECACA", backgroundColor: "#FEF2F2", borderRadius: 12, padding: 12, marginBottom: 8 }}
+                >
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                    <View style={{ flex: 1, paddingRight: 8 }}>
+                      <Text style={{ fontWeight: "800", color: "#991B1B", fontSize: 14 }}>{u.serial_number}</Text>
+                      <Text style={{ marginTop: 3, fontSize: 12, color: "#7F1D1D", lineHeight: 17 }}>{u.hint}</Text>
+                      <Text style={{ marginTop: 3, fontSize: 11, color: "#B91C1C" }}>
+                        Last attempt: {String(u.last_seen_at || "").replace("T", " ").slice(0, 19)} · {u.hits} attempts
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={() => openRegisterUnknown(u.serial_number)}
+                      testID={`register-unknown-${u.serial_number}`}
+                      style={{ backgroundColor: "#DC2626", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10 }}
+                    >
+                      <Text style={{ color: "#fff", fontWeight: "800", fontSize: 12 }}>Register</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+
           {devices.length === 0 ? (
             <View style={styles.emptyBox}>
               <Ionicons name="finger-print" size={40} color={colors.brandPrimary} />
@@ -724,6 +790,8 @@ export default function BiometricDevicesScreen() {
                 onDelete={() => removeDevice(d)}
                 onSimulate={() => simulate(d)}
                 onResync={() => resyncDevice(d)}
+                fetchingRange={fetchingRange?.startsWith(d.device_id) ? fetchingRange.split(":")[1] : null}
+                onFetchRange={(range) => fetchRange(d, range)}
                 onCommand={(action) => sendCommand(d, action)}
                 onPushEmployees={() => pushEmployees(d)}
                 onFetchTemplates={() => fetchTemplates(d)}
@@ -1187,6 +1255,8 @@ function DeviceCard({
   onDelete,
   onSimulate,
   onResync,
+  fetchingRange,
+  onFetchRange,
   onCommand,
   onPushEmployees,
   onFetchTemplates,
@@ -1202,6 +1272,8 @@ function DeviceCard({
   onDelete: () => void;
   onSimulate: () => void;
   onResync: () => void;
+  fetchingRange?: string | null;
+  onFetchRange: (range: "current_month" | "last_month") => void;
   onCommand: (action: string) => void;
   onPushEmployees: () => void;
   onFetchTemplates: () => void;
@@ -1385,6 +1457,37 @@ function DeviceCard({
             <>
               <Ionicons name="cloud-download-outline" size={14} color={colors.brandPrimary} />
               <Text style={styles.actGhostTxt}>Fetch old data</Text>
+            </>
+          )}
+        </Pressable>
+        {/* Iter 473 (user request) — targeted month fetch */}
+        <Pressable
+          onPress={() => onFetchRange("current_month")}
+          disabled={fetchingRange === "current_month"}
+          style={[styles.actBtn, styles.actGhost, fetchingRange === "current_month" && { opacity: 0.6 }]}
+          testID={`fetch-current-month-${device.device_id}`}
+        >
+          {fetchingRange === "current_month" ? (
+            <ActivityIndicator color={colors.brandPrimary} size="small" />
+          ) : (
+            <>
+              <Ionicons name="calendar-outline" size={14} color={colors.brandPrimary} />
+              <Text style={styles.actGhostTxt}>Fetch this month</Text>
+            </>
+          )}
+        </Pressable>
+        <Pressable
+          onPress={() => onFetchRange("last_month")}
+          disabled={fetchingRange === "last_month"}
+          style={[styles.actBtn, styles.actGhost, fetchingRange === "last_month" && { opacity: 0.6 }]}
+          testID={`fetch-last-month-${device.device_id}`}
+        >
+          {fetchingRange === "last_month" ? (
+            <ActivityIndicator color={colors.brandPrimary} size="small" />
+          ) : (
+            <>
+              <Ionicons name="calendar-number-outline" size={14} color={colors.brandPrimary} />
+              <Text style={styles.actGhostTxt}>Fetch last month</Text>
             </>
           )}
         </Pressable>
