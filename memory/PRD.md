@@ -4023,3 +4023,20 @@ alternation; night OUT (01:10) landed next day as "in".
   22:08 pending → daily-verification showed "10:08 / -"; after decision
   approve → "10:08 / 22:08". Test records cleaned up.
 - APP_ITERATION=482; deploy_vps_iter482.sh.
+
+## Iter 483 — Auto-approve Mobile App Punches per firm (user: "Do it")
+- Firm Master → 8. Firm Settings → new Toggle "Auto-approve Mobile App
+  Punches (no admin review)" (settings.auto_approve_mobile_punches,
+  testID fm-auto-approve-app).
+- PATCH /api/admin/firm-master/{cid} mirrors flag to
+  companies.auto_approve_mobile_punches AND, when ON, bulk-approves the
+  firm's OLD pending punches (skips pending_reason=contractual_employee
+  and mock_location=True) with decision_by "system:firm-auto-approve".
+- POST /api/attendance/punch (attendance_core.py ~line 543): firm_auto
+  flag → status "approved" instantly. Mock-GPS punches stay pending;
+  contractual employees still demoted by apply_contractual_gate (the
+  system: decision_by preserves that contract).
+- E2E verified locally: sweep approved seeded pending punch, kept mock
+  pending; new app punch approved when ON, pending when OFF; contractual
+  TEST50 stayed pending as designed. Test data cleaned up.
+- APP_ITERATION=483; deploy_vps_iter483.sh; temp_bundle kind=script → 483.

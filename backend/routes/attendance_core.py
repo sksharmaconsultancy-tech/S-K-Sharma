@@ -541,16 +541,23 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
     _ = "auto" in src or "geofence" in src  # kept for audit reason text (unused after Iter 86)
     # Field mode auto-approves; every other app punch still needs approval.
     field_auto = bool(pol_decision.get("auto_approve")) and pol_mode == "field"
+    # Iter 483 (user request) — per-firm "Auto-approve Mobile App Punches"
+    # toggle (Firm Master → Firm Settings). When ON, every app punch lands
+    # as APPROVED instantly so it shows on the Attendance Grid without an
+    # admin decision. Contractual employees are still gated (see
+    # apply_contractual_gate — the system: decision_by keeps that contract).
+    firm_auto = bool(company.get("auto_approve_mobile_punches"))
     # Phase 3 — fake/mock GPS flagged punches ALWAYS need manual approval,
-    # even in auto-approving Field mode.
+    # even in auto-approving Field mode or firm auto-approve mode.
     if record.get("mock_location"):
         field_auto = False
-    needs_approval = not field_auto
+        firm_auto = False
+    needs_approval = not (field_auto or firm_auto)
     record["status"] = "pending" if needs_approval else "approved"
     # Expanded status workflow (Phase 1) — richer value for badges/reports;
     # `status` stays pending/approved/rejected for backward compatibility.
     record["attendance_status"] = (
-        "approved" if field_auto else pol_decision.get("attendance_status")
+        "approved" if (field_auto or firm_auto) else pol_decision.get("attendance_status")
         or "pending_manager_approval"
     )
     record["original_at"] = record["at"]  # immutable original punch time
@@ -558,8 +565,13 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
         # Manual / instantly-approved punches carry a synthetic decision so
         # audit trails remain uniform across the collection.
         record["decision_at"] = record["at"]
-        record["decision_by"] = user["user_id"]
-        if field_auto:
+        record["decision_by"] = (
+            "system:firm-auto-approve" if (firm_auto and not field_auto)
+            else user["user_id"]
+        )
+        if firm_auto and not field_auto:
+            record["decision_reason"] = "auto-approved (Firm Master: auto-approve mobile app punches)"
+        elif field_auto:
             record["decision_reason"] = "auto-approved (field-employee geofence policy)"
         elif src == "manual-nogps":
             record["decision_reason"] = (

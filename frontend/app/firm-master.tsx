@@ -741,7 +741,21 @@ export default function FirmMasterScreen() {
                     onChange={(v) => updateSection("settings", { allow_category_rate: v })} />
             <Toggle label="Auto Employee Code (lock manual entry)" value={!!st.auto_employee_code}
                     onChange={(v) => updateSection("settings", { auto_employee_code: v })} />
+            {/* Iter 483 (user request) — mobile App punches skip the admin
+                approval queue and show on the Grid instantly. Turning it ON
+                also auto-approves this firm's OLD pending app punches. */}
+            <Toggle label="Auto-approve Mobile App Punches (no admin review)" value={!!st.auto_approve_mobile_punches}
+                    testID="fm-auto-approve-app"
+                    onChange={(v) => updateSection("settings", { auto_approve_mobile_punches: v })} />
           </View>
+          {st.auto_approve_mobile_punches ? (
+            <Text style={{ fontSize: 11.5, color: colors.onSurfaceTertiary, marginTop: 4 }}>
+              App punches will be approved instantly (no admin review). On Save,
+              all of this firm&apos;s old PENDING app punches are approved too, so
+              they appear on the Attendance Grid immediately. Fake-GPS flagged
+              punches still require manual approval.
+            </Text>
+          ) : null}
 
           {/* Iter 91 — Attendance Policy selection (MANDATORY, pick one).
               The chosen policy is shown on every employee's Master page. */}

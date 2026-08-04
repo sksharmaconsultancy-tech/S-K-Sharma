@@ -512,6 +512,36 @@ async def upsert_firm_master(
                     "(offline_salary=%s, bio_matrix=%s)", company_id,
                     bool(_sp.get("offline_salary")),
                     bool(_sp.get("bio_matrix_attendance")))
+    # Iter 483 (user request) — "Auto-approve Mobile App Punches" toggle.
+    # Mirror onto the companies doc (the punch endpoint reads it there) and,
+    # when switched ON, instantly approve this firm's OLD pending app
+    # punches so they show on the Attendance Grid (contractual-employee
+    # pending punches keep their own approval contract).
+    _auto_app = bool((merged.get("settings") or {}).get("auto_approve_mobile_punches"))
+    await db.companies.update_one(
+        {"company_id": company_id},
+        {"$set": {"auto_approve_mobile_punches": _auto_app}},
+    )
+    if _auto_app:
+        _bulk = await db.attendance.update_many(
+            {
+                "company_id": company_id,
+                "status": "pending",
+                "pending_reason": {"$ne": "contractual_employee"},
+                "mock_location": {"$ne": True},
+            },
+            {"$set": {
+                "status": "approved",
+                "attendance_status": "approved",
+                "decision_by": "system:firm-auto-approve",
+                "decision_at": now_iso(),
+                "decision_reason": "auto-approved (Firm Master: auto-approve mobile app punches)",
+            }},
+        )
+        if _bulk.modified_count:
+            logger.info("[firm-master] %s — auto-approved %d old pending punches",
+                        company_id, _bulk.modified_count)
+
     # Iter 89 — Mirror the firm logo onto ``companies.logo_base64`` so
     # the admin shell + mobile app can render it via the standard
     # /api/companies feed without a second lookup.
