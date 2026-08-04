@@ -264,6 +264,34 @@ export default function PunchRepairModal({
                     </Text>
                   </View>
                   <Text style={st.srcTxt}>{srcLabel(p.source)}</Text>
+                  {/* Iter 482 (user bug — "both punches available but
+                      showing missing"): PENDING punches don't count in
+                      the grid until approved. Tag them + 1-tap Approve. */}
+                  {String(p.status || "") === "pending" ? (
+                    <Pressable
+                      onPress={async () => {
+                        setBusy(true);
+                        try {
+                          await api(`/attendance/punches/${p.record_id}/decision`, {
+                            method: "POST",
+                            body: { action: "approve", reason: "Approved via grid repair" },
+                          });
+                          setChanged(true);
+                          await load();
+                        } catch (e: any) {
+                          setErr(e?.message || "Approve failed");
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                      disabled={busy}
+                      style={st.pendingBtn}
+                      testID={`approve-${p.record_id}`}
+                    >
+                      <Ionicons name="checkmark-circle" size={13} color="#B45309" />
+                      <Text style={st.pendingTxt}>PENDING — tap to approve</Text>
+                    </Pressable>
+                  ) : null}
                   <View style={{ flex: 1 }} />
                   <Pressable onPress={() => openEdit(p)} hitSlop={8} style={st.iconBtn} disabled={busy}>
                     <Ionicons name="pencil" size={16} color={colors.primary} />
@@ -413,6 +441,19 @@ const st = StyleSheet.create({
   dateTxt: { fontSize: 10, color: colors.onSurfaceTertiary, marginTop: 1 },
   dateTxtDiff: { color: "#B45309", fontWeight: "800" },
   srcTxt: { fontSize: 11, color: colors.onSurfaceTertiary },
+  pendingBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#FEF3C7",
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginLeft: 6,
+  },
+  pendingTxt: { fontSize: 10, fontWeight: "800", color: "#92400E" },
   iconBtn: { padding: 6 },
   addRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md },
   addBtn: {

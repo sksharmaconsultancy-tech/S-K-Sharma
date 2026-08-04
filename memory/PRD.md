@@ -4010,3 +4010,16 @@ alternation; night OUT (01:10) landed next day as "in".
   22:00 IN + next-day 01:10 → OUT same day ✓, mobile kinds untouched ✓.
 - No DB migration: existing duplicates repaired on the fly at compute.
 - APP_ITERATION=481; deploy_vps_iter481.sh.
+
+## Iter 482 — "Both punches available but showing missing" (user bug, live VPS)
+- ROOT CAUSE: employee PWA/mobile punches stored with status "pending"
+  (Iter 83 rule); _compute_monthly_grid_data counts ONLY status approved
+  → pending App OUT invisible in grid while PunchRepairModal (reads
+  /admin/attendance/history, all statuses) shows both punches.
+- FIX: PunchRepairModal.tsx — pending punches get amber "PENDING — tap to
+  approve" button → POST /api/attendance/punches/{record_id}/decision
+  {action: approve} (roles: super/sub/company admin) → reload + setChanged.
+- E2E verified locally: synthetic machine IN 10:08 approved + mobile OUT
+  22:08 pending → daily-verification showed "10:08 / -"; after decision
+  approve → "10:08 / 22:08". Test records cleaned up.
+- APP_ITERATION=482; deploy_vps_iter482.sh.
