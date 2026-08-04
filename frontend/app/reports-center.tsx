@@ -16,6 +16,7 @@ import {
   Pressable,
   TextInput,
   ActivityIndicator,
+  Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -103,6 +104,11 @@ export default function ReportsCenterScreen() {
   const [loading, setLoading] = useState(false);
   // Iter 442 (user request) — Download / Mail directly from the Report Hub.
   const [shareOpen, setShareOpen] = useState(false);
+  // Iter 478 (user request) — portal-editable Government Register heading.
+  const [headOpen, setHeadOpen] = useState(false);
+  const [headText, setHeadText] = useState("");
+  const [headBusy, setHeadBusy] = useState(false);
+  const [headMsg, setHeadMsg] = useState("");
 
   const companyId =
     user?.role === "company_admin" ? user.company_id : selectedCompanyId;
@@ -479,25 +485,53 @@ export default function ReportsCenterScreen() {
         {loading && <ActivityIndicator style={{ marginVertical: 24 }} />}
         {!loading && data && sel && (
           <View style={shared.card}>
-            {(data as any).form_line
-              ? String((data as any).form_line)
-                  .split("\n")
-                  .map((ln: string, i: number) => (
-                    <Text
-                      key={i}
-                      style={{
-                        textAlign: "center",
-                        fontWeight: i === 0 ? "800" : "600",
-                        fontSize: i === 0 ? 13.5 : 11.5,
-                        color: colors.onSurface,
-                        marginBottom: 2,
-                      }}
-                      testID={i === 0 ? "rc-form-line" : undefined}
-                    >
-                      {ln}
+            {sel.group === "govt" ? (
+              <View style={{ position: "relative" }}>
+                {(data as any).form_line
+                  ? String((data as any).form_line)
+                      .split("\n")
+                      .map((ln: string, i: number) => (
+                        <Text
+                          key={i}
+                          style={{
+                            textAlign: "center",
+                            fontWeight: i === 0 ? "800" : "600",
+                            fontSize: i === 0 ? 13.5 : 11.5,
+                            color: colors.onSurface,
+                            marginBottom: 2,
+                          }}
+                          testID={i === 0 ? "rc-form-line" : undefined}
+                        >
+                          {ln}
+                        </Text>
+                      ))
+                  : null}
+                {user?.role === "super_admin" ? (
+                  <Pressable
+                    onPress={() => {
+                      setHeadText(String((data as any).form_line || ""));
+                      setHeadMsg("");
+                      setHeadOpen(true);
+                    }}
+                    hitSlop={8}
+                    style={{
+                      position: "absolute", right: 0, top: 0,
+                      flexDirection: "row", alignItems: "center", gap: 4,
+                      paddingVertical: 4, paddingHorizontal: 8,
+                      borderRadius: 6, borderWidth: 1,
+                      borderColor: colors.border,
+                      backgroundColor: colors.surfaceSecondary,
+                    }}
+                    testID="rc-edit-heading"
+                  >
+                    <Ionicons name="pencil-outline" size={12} color={colors.brandPrimary} />
+                    <Text style={{ fontSize: 10.5, fontWeight: "700", color: colors.brandPrimary }}>
+                      Edit heading
                     </Text>
-                  ))
-              : null}
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
             <Text style={shared.cardTitle}>
               {data.title}
               {data.subtitle ? ` — ${data.subtitle}` : ""}
@@ -525,6 +559,99 @@ export default function ReportsCenterScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Iter 478 (user request) — edit the statutory heading lines of the
+          selected Government Register (saved on the server; PDF/Excel/web
+          all use it; empty = reset to the built-in FORM text). */}
+      <Modal visible={headOpen} transparent animationType="fade" onRequestClose={() => setHeadOpen(false)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(15,23,42,0.55)", justifyContent: "center", alignItems: "center", padding: 16 }}>
+          <View style={{ width: "100%", maxWidth: 560, backgroundColor: colors.surface, borderRadius: 14, padding: 18, gap: 10 }}>
+            <Text style={{ fontSize: 15, fontWeight: "800", color: colors.onSurface }}>
+              Register Heading — {sel?.title || ""}
+            </Text>
+            <Text style={{ fontSize: 11.5, color: colors.onSurfaceSecondary, lineHeight: 16 }}>
+              These lines print centred above the register on screen, PDF and
+              Excel. One heading line per row (press Enter for a new line).
+              Leave empty and Save to restore the default FORM text.
+            </Text>
+            <TextInput
+              value={headText}
+              onChangeText={setHeadText}
+              multiline
+              numberOfLines={4}
+              placeholder="FORM B — WAGE REGISTER"
+              placeholderTextColor="#94A3B8"
+              style={{
+                borderWidth: 1, borderColor: colors.border, borderRadius: 8,
+                minHeight: 92, padding: 10, fontSize: 13, color: colors.onSurface,
+                textAlignVertical: "top",
+                ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as any) : null),
+              }}
+              testID="rc-heading-input"
+            />
+            {headMsg ? (
+              <Text style={{ fontSize: 11.5, fontWeight: "700", color: headMsg.startsWith("✓") ? "#059669" : "#DC2626" }}>
+                {headMsg}
+              </Text>
+            ) : null}
+            <View style={{ flexDirection: "row", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <Pressable
+                onPress={() => setHeadOpen(false)}
+                style={{ paddingVertical: 9, paddingHorizontal: 14, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}
+              >
+                <Text style={{ fontSize: 12.5, fontWeight: "700", color: colors.onSurfaceSecondary }}>Close</Text>
+              </Pressable>
+              <Pressable
+                disabled={headBusy}
+                onPress={async () => {
+                  if (!sel) return;
+                  setHeadBusy(true);
+                  setHeadMsg("");
+                  try {
+                    await api(`/admin/govt-registers/headings/${sel.kind}`, {
+                      method: "PUT", body: { lines: "" },
+                    });
+                    setHeadMsg("✓ Reset to default heading");
+                    await load();
+                  } catch (e: any) {
+                    setHeadMsg(e?.message || "Reset failed");
+                  } finally {
+                    setHeadBusy(false);
+                  }
+                }}
+                style={{ paddingVertical: 9, paddingHorizontal: 14, borderRadius: 8, borderWidth: 1, borderColor: "#FCA5A5" }}
+                testID="rc-heading-reset"
+              >
+                <Text style={{ fontSize: 12.5, fontWeight: "700", color: "#DC2626" }}>Reset to default</Text>
+              </Pressable>
+              <Pressable
+                disabled={headBusy}
+                onPress={async () => {
+                  if (!sel) return;
+                  setHeadBusy(true);
+                  setHeadMsg("");
+                  try {
+                    await api(`/admin/govt-registers/headings/${sel.kind}`, {
+                      method: "PUT", body: { lines: headText },
+                    });
+                    setHeadMsg("✓ Heading saved");
+                    await load();
+                  } catch (e: any) {
+                    setHeadMsg(e?.message || "Save failed");
+                  } finally {
+                    setHeadBusy(false);
+                  }
+                }}
+                style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 9, paddingHorizontal: 16, borderRadius: 8, backgroundColor: colors.brandPrimary, opacity: headBusy ? 0.6 : 1 }}
+                testID="rc-heading-save"
+              >
+                {headBusy ? <ActivityIndicator size="small" color="#FFF" /> : <Ionicons name="save-outline" size={13} color="#FFF" />}
+                <Text style={{ fontSize: 12.5, fontWeight: "800", color: "#FFF" }}>Save</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Iter 442 (user request) — Download / Mail the selected report
           (PDF / Excel) straight from the Report Hub. */}

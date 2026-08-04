@@ -3908,3 +3908,20 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   screenshots (Report Hub periodic toggle + FORM B heading; grid header
   order Present Days→OT Hrs→ESIC Leave with aligned bands).
 - Deploy: /app/deploy_vps_iter477.sh (kind=script). APP_ITERATION=477.
+
+## Iter 478 — Portal-editable Government Register headings
+- govt_audit_reports.py: _form_head(kind) reads db.app_settings key
+  "govt_register_heading:{kind}" (custom overrides built-in _FORM_HEAD;
+  empty = default). NEW endpoints (registered BEFORE the /{kind}
+  catch-all): GET /admin/govt-registers/headings (all roles) and
+  PUT /admin/govt-registers/headings/{kind} body {lines} (SUPER ADMIN
+  only; empty lines deletes the override). JSON + PDF + XLSX all flow
+  through _form_head.
+- reports-center.tsx: "Edit heading" pencil (testID rc-edit-heading,
+  super_admin only, govt group only) → modal (rc-heading-input /
+  rc-heading-save / rc-heading-reset) with multiline heading editor,
+  Save / Reset to default / Close; reloads the view after save.
+- Verified E2E: curl (GET headings, PUT custom → JSON+PDF show custom,
+  PUT empty → default restored) + UI screenshot flow (save custom →
+  rendered, reset → FORM B default back). APP_ITERATION=478;
+  deploy_vps_iter478.sh served via kind=script.

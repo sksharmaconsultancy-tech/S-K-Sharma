@@ -13,7 +13,7 @@ AUDIT REPORTS (from existing audit/log collections):
 from datetime import date, datetime
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Body, Header, HTTPException
 from fastapi.responses import StreamingResponse
 
 from server import db, get_user_from_token, require_role  # noqa: E402
@@ -249,12 +249,63 @@ _FORM_HEAD = {
 }
 
 
+async def _form_head(kind: str) -> str:
+    """Iter 478 (user request) — heading lines are EDITABLE from the
+    portal (Report Hub → pencil on a Government Register). A saved custom
+    heading in db.app_settings overrides the built-in FORM text; empty =
+    back to default."""
+    doc = await db.app_settings.find_one(
+        {"key": f"govt_register_heading:{kind}"}, {"_id": 0})
+    if doc and str(doc.get("lines") or "").strip():
+        return str(doc["lines"]).strip()
+    return _FORM_HEAD.get(kind, "")
+
+
 @govt_router.get("/list")
 async def govt_list(authorization: Optional[str] = Header(None)):
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "sub_admin", "company_admin"])
     return {"registers": [{"kind": k, "title": t}
                           for k, t in _GOVT_TITLES.items()]}
+
+
+# Iter 478 (user request) — portal-editable register headings. NOTE: must
+# be registered BEFORE the catch-all /{kind} route below.
+@govt_router.get("/headings")
+async def govt_headings(authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    out = []
+    for k, t in _GOVT_TITLES.items():
+        doc = await db.app_settings.find_one(
+            {"key": f"govt_register_heading:{k}"}, {"_id": 0})
+        custom = str((doc or {}).get("lines") or "").strip()
+        out.append({"kind": k, "title": t,
+                    "default_lines": _FORM_HEAD.get(k, ""),
+                    "custom_lines": custom,
+                    "effective": custom or _FORM_HEAD.get(k, "")})
+    return {"headings": out}
+
+
+@govt_router.put("/headings/{kind}")
+async def govt_heading_save(kind: str, payload: dict = Body(...),
+                            authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin"])
+    if kind not in _GOVT_TITLES:
+        raise HTTPException(status_code=404, detail="Unknown register")
+    lines = str((payload or {}).get("lines") or "").strip()
+    if lines:
+        await db.app_settings.update_one(
+            {"key": f"govt_register_heading:{kind}"},
+            {"$set": {"lines": lines,
+                      "updated_at": datetime.utcnow().isoformat(),
+                      "updated_by": admin.get("email") or admin.get("user_id")}},
+            upsert=True)
+    else:
+        await db.app_settings.delete_one(
+            {"key": f"govt_register_heading:{kind}"})
+    return {"ok": True, "effective": lines or _FORM_HEAD.get(kind, "")}
 
 
 @govt_router.get("/{kind}")
@@ -275,7 +326,7 @@ async def govt_json(kind: str, company_id: Optional[str] = None,
     title, cols, rows, totals = await _GOVT[kind](company_id, month, ctx)
     sub = _govt_period(month, ctx)
     return {"title": title, "subtitle": sub,
-            "form_line": _FORM_HEAD.get(kind, ""),
+            "form_line": await _form_head(kind),
             "columns": [{"key": k, "label": lb} for k, lb in cols],
             "rows": rows, "totals": totals,
             "empty_note": _govt_empty_note(kind, month, ctx) if not rows
@@ -316,7 +367,7 @@ async def _govt_exp(kind, company_id, month, authorization, fmt, ctx=None):
     return _stream(title, f"{c.get('name')} · {sub}", cols, rows, totals,
                    c.get("logo_base64"), fmt,
                    empty_note=_govt_empty_note(kind, month, ctx or {}),
-                   form_line=_FORM_HEAD.get(kind))
+                   form_line=await _form_head(kind))
 
 
 # ---------------------------------------------------------------------------
