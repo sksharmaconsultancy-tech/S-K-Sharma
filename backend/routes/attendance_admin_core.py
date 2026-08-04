@@ -60,13 +60,19 @@ async def admin_attendance_today(
     scope_company: Optional[str] = None
     if user["role"] == "company_admin":
         scope_company = user.get("company_id")
-    elif user["role"] == "super_admin" and company_id and company_id != "all":
+    elif user["role"] in ("super_admin", "sub_admin") and company_id and company_id != "all":
+        # Iter 484 (user bug) — sub_admin's ?company_id= filter was silently
+        # IGNORED, and their restricted firm scope was never applied, so the
+        # "Present today" list leaked employees of NON-allowed firms.
         scope_company = company_id
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     q: dict = {"date": today}
     if scope_company:
         q["company_id"] = scope_company
+    # Enforce the sub-admin's allowed-firms list (restricted scope) — also
+    # blocks a sub_admin passing a company_id outside their allow-list.
+    apply_sub_admin_company_scope(user, q)
     recs = await db.attendance.find(
         q, {"_id": 0, "selfie_base64": 0, "device_info": 0}
     ).sort("at", 1).to_list(20000)
@@ -84,6 +90,15 @@ async def admin_attendance_today(
         {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1, "company_id": 1},
     ).to_list(20000)
     users_by_id = {u["user_id"]: u for u in users}
+
+    # Iter 484 (user bug, belt & braces) — when a firm filter is active,
+    # drop employees whose CURRENT firm is different even if their punch was
+    # stamped with the filtered company (shared machine / bio-code overlap).
+    if scope_company:
+        by_user = {
+            uid: rs for uid, rs in by_user.items()
+            if (users_by_id.get(uid) or {}).get("company_id") in (scope_company, None)
+        }
 
     # Fetch company names for a small map (super admin cross-company view)
     company_ids = list({u.get("company_id") for u in users if u.get("company_id")})
@@ -181,13 +196,15 @@ async def admin_present_not_punched(
     scope_company: Optional[str] = None
     if user["role"] == "company_admin":
         scope_company = user.get("company_id")
-    elif user["role"] == "super_admin" and company_id and company_id != "all":
+    elif user["role"] in ("super_admin", "sub_admin") and company_id and company_id != "all":
         scope_company = company_id
 
     # Load candidate companies + build a fast lookup
     company_query: dict = {}
     if scope_company:
         company_query["company_id"] = scope_company
+    # Iter 484 (user bug) — enforce sub-admin restricted firm scope here too.
+    apply_sub_admin_company_scope(user, company_query)
     companies = await db.companies.find(
         company_query,
         {"_id": 0, "company_id": 1, "name": 1, "office_lat": 1,

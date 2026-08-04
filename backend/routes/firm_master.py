@@ -398,6 +398,36 @@ async def get_firm_master(
         if cat:
             hdr["category"] = f"{cat.title()}{' — ' + sub.title() if sub else ''}"
 
+    # Iter 484 — "General Information" section (ERP redesign). Seed sensible
+    # defaults from the company doc + legacy header so nothing is re-typed.
+    gen = doc.setdefault("general", {})
+    gen.setdefault("company_name", company.get("name") or "")
+    gen.setdefault("company_code", company.get("company_code") or "")
+    gen.setdefault("short_name", company.get("short_name") or "")
+    gen.setdefault("branch_code", "")
+    gen.setdefault("firm_start_date", hdr.get("start_date") or "")
+    gen.setdefault("company_category", "")
+    gen.setdefault("business_nature", hdr.get("business_nature") or "")
+    gen.setdefault("industry_type", hdr.get("category") or "")
+    gen.setdefault("establishment_type", "")
+    gen.setdefault("organization_type", "")
+    gen.setdefault("date_of_incorporation", "")
+    gen.setdefault("financial_year", "")
+    gen.setdefault("assessment_year", "")
+    gen.setdefault("currency", "INR")
+    gen.setdefault("timezone", "Asia/Kolkata")
+    gen.setdefault("language", "English")
+    gen.setdefault(
+        "company_status",
+        "Active" if (doc.get("settings") or {}).get("firm_active", True) else "Inactive",
+    )
+    gen.setdefault("color_theme", "")
+    # Last-modified metadata for the sticky action bar.
+    if doc.get("updated_by"):
+        _u = await db.users.find_one(
+            {"user_id": doc["updated_by"]}, {"_id": 0, "name": 1, "email": 1})
+        doc["updated_by_name"] = (_u or {}).get("name") or (_u or {}).get("email") or doc["updated_by"]
+
     # Iter 89 — Sections 5 (Allowances) & 6 (Deductions) are now linked
     # to the Masters registry so any custom heads the admin adds via
     # `/admin/masters?type=allowance` etc. appear here too. We merge the
@@ -471,6 +501,50 @@ async def upsert_firm_master(
 
     merged = _merge_master(existing, payload)
     merged["company_id"] = company_id
+
+    # Iter 484 — General Information validation + companies mirror.
+    _gen = merged.get("general") or {}
+    if _gen:
+        if not (_gen.get("company_name") or "").strip():
+            raise HTTPException(status_code=400, detail="Company Name is required.")
+        _sd = (_gen.get("firm_start_date") or "").strip()
+        if _sd:
+            try:
+                if datetime.fromisoformat(_sd).date() > datetime.now(timezone.utc).date():
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Firm Start Date cannot be in the future.")
+            except ValueError:
+                pass
+        _code = (_gen.get("company_code") or "").strip().upper()
+        if _code:
+            clash = await db.companies.find_one(
+                {"company_code": _code, "company_id": {"$ne": company_id}},
+                {"_id": 0, "name": 1})
+            if clash:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Company Code '{_code}' is already used by {clash.get('name')}.")
+            _gen["company_code"] = _code
+        # Mirror identity fields onto the companies doc so the rest of the
+        # portal (pickers, reports, mobile app) stays in sync.
+        _mirror: Dict[str, Any] = {}
+        if (_gen.get("company_name") or "").strip() and _gen["company_name"].strip() != company.get("name"):
+            _mirror["name"] = _gen["company_name"].strip()
+        if _code:
+            _mirror["company_code"] = _code
+        for _mk in ("short_name", "currency", "timezone", "language", "color_theme"):
+            if _gen.get(_mk) is not None:
+                _mirror[_mk] = _gen.get(_mk)
+        if _gen.get("company_status"):
+            _mirror["firm_status"] = _gen["company_status"]
+            merged.setdefault("settings", {})["firm_active"] = _gen["company_status"] == "Active"
+        if _mirror:
+            await db.companies.update_one(
+                {"company_id": company_id}, {"$set": _mirror})
+            if _mirror.get("name"):
+                company["name"] = _mirror["name"]
+
     merged["company_name"] = company.get("name", "")
     merged["updated_at"] = now_iso()
     merged["updated_by"] = user["user_id"]
@@ -563,6 +637,12 @@ async def upsert_firm_master(
     logger.info(
         "[firm-master] %s updated by %s (%s)",
         company_id, user["user_id"], user["role"],
+    )
+    # Iter 484 — audit trail entry with the section keys that changed.
+    from routes.firm_master_v2 import write_fm_audit
+    await write_fm_audit(
+        company_id, user, "master_saved",
+        sorted(k for k in payload.keys() if k not in ("company_id", "company_name")),
     )
     saved = await db.firm_masters.find_one({"company_id": company_id}, {"_id": 0})
     _mask_secrets(saved)

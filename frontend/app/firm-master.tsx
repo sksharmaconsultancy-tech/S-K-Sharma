@@ -8,10 +8,10 @@
  * Non-web platforms are redirected — this screen is desktop-only per the
  * client's requirement.
  */
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, TextInput,
-  ActivityIndicator, Platform, Switch, Image,
+  ActivityIndicator, Platform, Switch, useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -19,6 +19,10 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { api } from "@/src/api/client";
 import PolicyVariantPicker from "@/src/components/PolicyVariantPicker";
 import PolicyMasterSummary from "@/src/components/PolicyMasterSummary";
+import GeneralInfoSection from "@/src/components/firmMaster/GeneralInfoSection";
+import ContactDetailsSection from "@/src/components/firmMaster/ContactDetailsSection";
+import AuditLogSection from "@/src/components/firmMaster/AuditLogSection";
+import HealthSection from "@/src/components/firmMaster/HealthSection";
 import useEnterNav from "@/src/hooks/useEnterNav";
 import useSaveShortcut from "@/src/hooks/useSaveShortcut";
 import { useAuth } from "@/src/context/AuthContext";
@@ -26,6 +30,26 @@ import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import CompanyPicker from "@/src/components/CompanyPicker";
 import DateField from "@/src/components/DateField";
 import { colors, radius, spacing, type } from "@/src/theme";
+
+// Iter 484 — 16-section enterprise ERP layout (SAP / Zoho Payroll style).
+const NAV_SECTIONS: { id: string; num: number; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { id: "general", num: 1, label: "General Information", icon: "business-outline" },
+  { id: "registration", num: 2, label: "Registration Details", icon: "shield-checkmark-outline" },
+  { id: "address", num: 3, label: "Address Details", icon: "location-outline" },
+  { id: "contacts", num: 4, label: "Contact Details", icon: "people-outline" },
+  { id: "bank", num: 5, label: "Bank Details", icon: "card-outline" },
+  { id: "payroll", num: 6, label: "Payroll Settings", icon: "cash-outline" },
+  { id: "compliance", num: 7, label: "Compliance Settings", icon: "key-outline" },
+  { id: "attendance", num: 8, label: "Attendance & Shift", icon: "time-outline" },
+  { id: "leave", num: 9, label: "Leave & Holiday", icon: "calendar-outline" },
+  { id: "salary-structure", num: 10, label: "Salary Structure", icon: "layers-outline" },
+  { id: "integrations", num: 11, label: "Integrations", icon: "git-network-outline" },
+  { id: "documents", num: 12, label: "Documents", icon: "document-text-outline" },
+  { id: "approval", num: 13, label: "Approval Workflow", icon: "checkmark-done-outline" },
+  { id: "security", num: 14, label: "Security & Permissions", icon: "lock-closed-outline" },
+  { id: "audit", num: 15, label: "Audit Log", icon: "time-outline" },
+  { id: "health", num: 16, label: "AI Compliance Health", icon: "pulse-outline" },
+];
 
 type Master = any;
 type Catalogs = {
@@ -253,6 +277,15 @@ export default function FirmMasterScreen() {
   // Iter 175 — Policy variant mirrored from PolicyVariantPicker so the
   // Contractor Employees section only shows for Policy 2 firms.
   const [policyVariant, setPolicyVariant] = useState<string | null>(null);
+  // Iter 484 — ERP layout state: active section + auto-save machinery.
+  const { width } = useWindowDimensions();
+  const wide = width >= 1100;
+  const [activeSection, setActiveSection] = useState("general");
+  const [autoState, setAutoState] = useState<"" | "saving" | "saved" | "error">("");
+  const [autoErr, setAutoErr] = useState("");
+  const autoTimer = useRef<any>(null);
+  const savingRef = useRef(false);
+  const sec = (id: string) => activeSection === id;
 
   const load = useCallback(async () => {
     if (!companyId) return;
@@ -292,24 +325,86 @@ export default function FirmMasterScreen() {
 
   const save = async () => {
     if (!companyId || !master) return;
-    setSaving(true);    try {
-      await api(`/admin/firm-master/${companyId}`, {
+    setSaving(true);
+    try {
+      const r = await api<{ master: Master }>(`/admin/firm-master/${companyId}`, {
         method: "PATCH",
         body: master,
       });
+      if (r?.master) setMaster(r.master);
       setDirty(false);
-      // Iter 110 — after Save, reload and land on the Dashboard.
-      if (Platform.OS === "web") {
-        window.alert("Firm Master saved ✓");
-        window.location.href = "/";
-      } else {
-        router.replace("/(tabs)");
-      }
+      setAutoState("saved"); setAutoErr("");
     } catch (e: any) {
       if (Platform.OS === "web") window.alert(e?.message || "Save failed");
     } finally {
       setSaving(false);
     }
+  };
+
+  // Iter 484 — silent save used by auto-save (no alerts, no navigation).
+  const saveSilent = useCallback(async () => {
+    if (!companyId || !master || savingRef.current) return;
+    savingRef.current = true;
+    setAutoState("saving");
+    try {
+      await api(`/admin/firm-master/${companyId}`, { method: "PATCH", body: master });
+      setDirty(false);
+      setAutoState("saved"); setAutoErr("");
+    } catch (e: any) {
+      setAutoState("error");
+      setAutoErr(e?.message || "Auto-save failed");
+    } finally {
+      savingRef.current = false;
+    }
+  }, [companyId, master]);
+
+  // Auto-save: 2 seconds after the last edit.
+  useEffect(() => {
+    if (!dirty) return;
+    if (autoTimer.current) clearTimeout(autoTimer.current);
+    autoTimer.current = setTimeout(() => { void saveSilent(); }, 2000);
+    return () => { if (autoTimer.current) clearTimeout(autoTimer.current); };
+  }, [master, dirty, saveSilent]);
+
+  const saveAndContinue = async () => {
+    await saveSilent();
+    const idx = NAV_SECTIONS.findIndex((s) => s.id === activeSection);
+    if (idx >= 0 && idx < NAV_SECTIONS.length - 1) {
+      setActiveSection(NAV_SECTIONS[idx + 1].id);
+    }
+  };
+  const resetChanges = () => {
+    if (Platform.OS === "web" && dirty
+        && !window.confirm("Discard unsaved changes and reload from the server?")) return;
+    void load();
+  };
+  const cancelAndClose = () => {
+    if (Platform.OS === "web") window.location.href = "/";
+    else router.replace("/(tabs)");
+  };
+  const cloneCompany = async () => {
+    if (Platform.OS !== "web" || !companyId) return;
+    const name = window.prompt("Name for the cloned firm:", `${master?.company_name || "Firm"} (Copy)`);
+    if (!name) return;
+    try {
+      const r = await api<{ company_id: string; company_code: string }>(
+        `/admin/firm-master/${companyId}/clone`,
+        { method: "POST", body: { new_name: name } });
+      window.alert(`Firm cloned ✓\nNew firm: ${name}\nCode: ${r.company_code}`);
+    } catch (e: any) { window.alert(e?.message || "Clone failed"); }
+  };
+  const exportConfig = async () => {
+    if (Platform.OS !== "web" || !companyId) return;
+    try {
+      const data = await api<any>(`/admin/firm-master/${companyId}/export`);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = (globalThis as any).document.createElement("a");
+      a.href = url;
+      a.download = `firm-config-${(master?.company_name || companyId).replace(/\s+/g, "_")}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) { window.alert(e?.message || "Export failed"); }
   };
 
   // ---------- Same-as-firm mirroring for Office/Factory addresses ----------
@@ -318,22 +413,6 @@ export default function FirmMasterScreen() {
       same_as_firm: flag,
       ...(flag && master?.registered_address ? master.registered_address : {}),
     });
-  };
-
-  // ---------- Contact persons repeatable rows ----------
-  const addContact = () => {
-    const rows = [...(master?.contact_persons || []), { name: "", mobile: "", position: "" }];
-    update({ contact_persons: rows });
-  };
-  const removeContact = (idx: number) => {
-    const rows = [...(master?.contact_persons || [])];
-    rows.splice(idx, 1);
-    update({ contact_persons: rows });
-  };
-  const editContact = (idx: number, patch: Record<string, any>) => {
-    const rows = [...(master?.contact_persons || [])];
-    rows[idx] = { ...(rows[idx] || {}), ...patch };
-    update({ contact_persons: rows });
   };
 
   // ---------- Iter 175 — Contractor Employees (Policy 2) repeatable rows ----------
@@ -362,39 +441,6 @@ export default function FirmMasterScreen() {
     const rows = [...(master?.portal_logins || [])];
     rows[idx] = { ...(rows[idx] || {}), ...patch };
     update({ portal_logins: rows });
-  };
-
-  // Iter 89 — Web-only file picker for the firm logo. Reads the chosen
-  // image as a base64 data URL so it can be persisted directly on the
-  // firm_master doc and mirrored to ``companies.logo_base64``.
-  const pickLogo = () => {
-    if (Platform.OS !== "web") return;
-    const input = (globalThis as any).document?.createElement?.("input");
-    if (!input) return;
-    input.type = "file";
-    input.accept = "image/png,image/jpeg,image/webp";
-    input.onchange = (e: any) => {
-      const file = e?.target?.files?.[0];
-      if (!file) return;
-      // Cap at 2 MB so payloads stay small and Mongo doc size stays sane.
-      if (file.size > 2 * 1024 * 1024) {
-        window.alert("Logo must be under 2 MB. Please resize and try again.");
-        return;
-      }
-      const reader = new (globalThis as any).FileReader();
-      reader.onloadend = () => {
-        const dataUrl: string = reader.result;
-        updateSection("logo", {
-          image_base64: dataUrl,
-          mime_type: file.type,
-        });
-      };
-      reader.readAsDataURL(file);
-    };
-    input.click();
-  };
-  const clearLogo = () => {
-    updateSection("logo", { image_base64: null, mime_type: null });
   };
 
   if (Platform.OS !== "web") return null;
@@ -453,119 +499,93 @@ export default function FirmMasterScreen() {
               onChange={(id) => id && setCompanyId(id)}
             />
           ) : null}
-          <Pressable
-            onPress={save}
-            disabled={saving || !dirty}
-            style={({ pressed }) => [
-              styles.saveBtn,
-              (saving || !dirty) && { opacity: 0.5 },
-              pressed && { opacity: 0.85 },
-            ]}
-            testID="firm-master-save"
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color="#FFF" />
-            ) : (
-              <Ionicons name="save-outline" size={16} color="#FFF" />
-            )}
-            <Text style={styles.saveBtnTxt}>
-              {saving ? "Saving..." : dirty ? "Save Changes" : "Saved"}
+          {/* Auto-save state pill */}
+          <View style={styles.autoPill}>
+            <Ionicons
+              name={autoState === "saving" ? "sync" : autoState === "error" ? "warning" : dirty ? "ellipse" : "cloud-done-outline"}
+              size={12}
+              color={autoState === "error" ? colors.error : dirty ? "#D97706" : "#059669"} />
+            <Text style={[styles.autoPillTxt, autoState === "error" && { color: colors.error }]}>
+              {autoState === "saving" ? "Auto-saving…"
+                : autoState === "error" ? `Auto-save failed`
+                  : dirty ? "Unsaved changes" : "All changes saved"}
             </Text>
-          </Pressable>
+          </View>
         </View>
       </View>
-
-      {/* Iter 476 — STICKY unsaved-changes banner. Lives OUTSIDE the
-          ScrollView so it stays pinned under the header no matter how far
-          the user scrolls — impossible to miss before navigating away. */}
-      {dirty ? (
+      {autoState === "error" && autoErr ? (
         <View style={styles.dirtyBanner}>
           <Ionicons name="warning" size={16} color="#B45309" />
-          <Text style={styles.dirtyBannerTxt}>
-            Unsaved changes — they will be lost if you leave this page.
-          </Text>
-          <Pressable
-            onPress={save}
-            disabled={saving}
-            style={({ pressed }) => [styles.dirtyBannerBtn, (saving || pressed) && { opacity: 0.75 }]}
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color="#FFF" />
-            ) : (
-              <Ionicons name="save-outline" size={13} color="#FFF" />
-            )}
-            <Text style={styles.dirtyBannerBtnTxt}>{saving ? "Saving..." : "Save Now"}</Text>
-          </Pressable>
+          <Text style={styles.dirtyBannerTxt}>{autoErr}</Text>
         </View>
       ) : null}
 
-      <ScrollView contentContainerStyle={styles.scroll}>
-        {/* 0. Firm Logo (synced with app + portal shell) --------------- */}
-        <Section icon="image-outline" title="Firm Logo (Portal + App)">
-          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.lg, flexWrap: "wrap" }}>
-            <View style={styles.logoPreview}>
-              {master.logo?.image_base64 ? (
-                <Image
-                  source={{ uri: master.logo.image_base64 }}
-                  style={styles.logoImg}
-                  resizeMode="contain"
-                />
-              ) : (
-                <Ionicons name="business-outline" size={44} color={colors.onSurfaceTertiary} />
-              )}
-            </View>
-            <View style={{ flex: 1, minWidth: 240, gap: 8 }}>
-              <Text style={styles.logoHelp}>
-                Upload the firm logo. It appears on the Web Portal sidebar, the
-                mobile app header, salary slips, and email attachments.
-                PNG / JPEG / WebP, max 2 MB. Recommended: square 512×512.
-              </Text>
-              <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-                <Pressable onPress={pickLogo} style={styles.logoBtn}>
-                  <Ionicons name="cloud-upload-outline" size={14} color={colors.brandPrimary} />
-                  <Text style={styles.logoBtnTxt}>
-                    {master.logo?.image_base64 ? "Replace Logo" : "Upload Logo"}
-                  </Text>
+      {/* Body: side navigation + section content */}
+      <View style={{ flex: 1, flexDirection: wide ? "row" : "column" }}>
+        {wide ? (
+          <ScrollView style={styles.navCol} contentContainerStyle={{ paddingVertical: 8 }}>
+            {NAV_SECTIONS.map((s) => {
+              const on = activeSection === s.id;
+              return (
+                <Pressable key={s.id} onPress={() => setActiveSection(s.id)}
+                  style={[styles.navItem, on && styles.navItemOn]}
+                  testID={`fm-nav-${s.id}`}>
+                  <Text style={[styles.navNum, on && { color: colors.brandPrimary }]}>{s.num}</Text>
+                  <Ionicons name={s.icon} size={15}
+                            color={on ? colors.brandPrimary : colors.onSurfaceTertiary} />
+                  <Text style={[styles.navTxt, on && styles.navTxtOn]} numberOfLines={1}>{s.label}</Text>
                 </Pressable>
-                {master.logo?.image_base64 ? (
-                  <Pressable onPress={clearLogo} style={[styles.logoBtn, { borderColor: "#FCA5A5" }]}>
-                    <Ionicons name="trash-outline" size={14} color={colors.error} />
-                    <Text style={[styles.logoBtnTxt, { color: colors.error }]}>Remove</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-            </View>
-          </View>
-        </Section>
+              );
+            })}
+          </ScrollView>
+        ) : (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                      style={styles.navChipsRow}
+                      contentContainerStyle={{ gap: 6, paddingHorizontal: 8, paddingVertical: 6 }}>
+            {NAV_SECTIONS.map((s) => {
+              const on = activeSection === s.id;
+              return (
+                <Pressable key={s.id} onPress={() => setActiveSection(s.id)}
+                  style={[styles.navChip, on && styles.navChipOn]}
+                  testID={`fm-nav-${s.id}`}>
+                  <Text style={[styles.navChipTxt, on && { color: "#FFF" }]}>{s.num}. {s.label}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        )}
 
-        {/* 1. Firm Header ------------------------------------------------ */}
-        <Section icon="ribbon-outline" title="1. Firm Header">
-          <View style={styles.row}>
-            <View style={{ flex: 1, minWidth: 180 }}>
-              <Text style={styles.fieldLabel}>Firm Start Date</Text>
-              <DateField
-                value={toIsoDate(h.start_date || "")}
-                onChangeISO={(v) => updateSection("header", { start_date: v })}
-                placeholder="DD-MM-YYYY"
-              />
-            </View>
-            <Field label="Firm Category" value={h.category}
-                   onChange={(v) => updateSection("header", { category: v })} />
-            <Field label="Business Nature" value={h.business_nature}
-                   onChange={(v) => updateSection("header", { business_nature: v })} />
-          </View>
-          <View style={styles.row}>
-            <Field label="Firm Email" value={h.email_1}
-                   onChange={(v) => updateSection("header", { email_1: v })}
-                   keyboardType="email-address" />
-            <Field label="Email 2" value={h.email_2}
-                   onChange={(v) => updateSection("header", { email_2: v })}
-                   keyboardType="email-address" />
-          </View>
-        </Section>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll}>
+        {/* Active section heading */}
+        <View style={styles.secHeadBar}>
+          <Text style={styles.secHeadTxt}>
+            {NAV_SECTIONS.find((s) => s.id === activeSection)?.num}. {NAV_SECTIONS.find((s) => s.id === activeSection)?.label}
+          </Text>
+          {master.updated_at ? (
+            <Text style={styles.secHeadMeta}>
+              Last modified {String(master.updated_at).replace("T", " ").slice(0, 16)}
+              {master.updated_by_name ? ` · by ${master.updated_by_name}` : ""}
+            </Text>
+          ) : null}
+        </View>
 
-        {/* 2. Firm Registered Details ------------------------------------ */}
-        <Section icon="location-outline" title="2. Firm Registered Details">
+        {/* 1. GENERAL INFORMATION (Iter 484 ERP redesign) ---------------- */}
+        {sec("general") ? (
+          <GeneralInfoSection master={master} updateSection={updateSection} companyId={companyId} />
+        ) : null}
+
+        {/* 4. CONTACT DETAILS (Iter 484 — normalized contacts) ----------- */}
+        {sec("contacts") ? (
+          <ContactDetailsSection master={master} updateSection={updateSection} companyId={companyId} />
+        ) : null}
+
+        {/* 15. AUDIT LOG / 16. HEALTH ------------------------------------ */}
+        {sec("audit") ? <AuditLogSection companyId={companyId} /> : null}
+        {sec("health") ? <HealthSection master={master} /> : null}
+
+        {/* 3. ADDRESS DETAILS -------------------------------------------- */}
+        {sec("address") ? (<>
+        <Section icon="location-outline" title="Registered Address">
           <View style={styles.row}>
             <Field label="Address 1" value={ra.address1}
                    onChange={(v) => updateSection("registered_address", { address1: v })} />
@@ -586,10 +606,10 @@ export default function FirmMasterScreen() {
           </View>
         </Section>
 
-        {/* 3. Office & 4. Factory Address (side-by-side on wide screens) - */}
+        {/* Office & Factory Address (side-by-side on wide screens) ------ */}
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.md }}>
           <View style={{ flex: 1, minWidth: 380 }}>
-            <Section icon="business-outline" title="3. Office Address">
+            <Section icon="business-outline" title="Office Address">
               <Toggle
                 label="Same as Firm Address"
                 value={!!oa.same_as_firm}
@@ -616,7 +636,7 @@ export default function FirmMasterScreen() {
             </Section>
           </View>
           <View style={{ flex: 1, minWidth: 380 }}>
-            <Section icon="business" title="4. Factory Address">
+            <Section icon="business" title="Factory Address">
               <Toggle
                 label="Same as Firm Address"
                 value={!!fa.same_as_firm}
@@ -643,11 +663,26 @@ export default function FirmMasterScreen() {
             </Section>
           </View>
         </View>
+        </>) : null}
 
-        {/* 5. Allowances & 6. Deductions --------------------------------- */}
+        {/* 10. SALARY STRUCTURE — allowances / deductions / structure --- */}
+        {sec("salary-structure") ? (<>
+        <Section icon="layers-outline" title="Salary Structure & Heads">
+          <View style={styles.row}>
+            <Dropdown
+              label="Salary Structure"
+              value={st.salary_structure}
+              options={catalogs.salary_structures}
+              onChange={(v) => updateSection("settings", { salary_structure: v })}
+              width={260}
+            />
+            <Field label="Reference By" value={st.reference_by}
+                   onChange={(v) => updateSection("settings", { reference_by: v })} />
+          </View>
+        </Section>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.md }}>
           <View style={{ flex: 1, minWidth: 300 }}>
-            <Section icon="add-circle-outline" title="5. Allowances (Master-linked)">
+            <Section icon="add-circle-outline" title="Allowances (Master-linked)">
               <Text style={styles.masterLinkHint}>
                 Toggle any allowance head to enable it for this firm. Custom
                 heads added via Masters → Allowances appear here automatically.
@@ -673,7 +708,7 @@ export default function FirmMasterScreen() {
             </Section>
           </View>
           <View style={{ flex: 1, minWidth: 300 }}>
-            <Section icon="remove-circle-outline" title="6. Deductions (Master-linked)">
+            <Section icon="remove-circle-outline" title="Deductions (Master-linked)">
               <Text style={styles.masterLinkHint}>
                 Toggle any deduction head to enable it for this firm. Custom
                 heads added via Masters → Deductions appear here automatically.
@@ -698,8 +733,14 @@ export default function FirmMasterScreen() {
               ) : null}
             </Section>
           </View>
-          <View style={{ flex: 1, minWidth: 300 }}>
-            <Section icon="card-outline" title="7. Bank Details">
+        </View>
+        </>) : null}
+
+        {/* 5. BANK DETAILS ----------------------------------------------- */}
+        {sec("bank") ? (
+          <View style={{ flexDirection: "row" }}>
+          <View style={{ flex: 1, maxWidth: 560 }}>
+            <Section icon="card-outline" title="Bank Details">
               <Field label="Account No." value={bank.account_no}
                      onChange={(v) => updateSection("bank", { account_no: v })}
                      keyboardType="numeric" />
@@ -713,34 +754,75 @@ export default function FirmMasterScreen() {
                      onChange={(v) => updateSection("bank", { ifsc: v.toUpperCase() })} />
             </Section>
           </View>
-        </View>
-
-        {/* 8. Firm Settings --------------------------------------------- */}
-        <Section icon="settings-outline" title="8. Firm Settings">
-          <View style={styles.row}>
-            <Dropdown
-              label="Salary Structure"
-              value={st.salary_structure}
-              options={catalogs.salary_structures}
-              onChange={(v) => updateSection("settings", { salary_structure: v })}
-              width={260}
-            />
-            <Field label="Reference By" value={st.reference_by}
-                   onChange={(v) => updateSection("settings", { reference_by: v })} />
           </View>
+        ) : null}
+
+        {/* 8/13/14/11 — pieces of the old "Firm Settings" section -------- */}
+        {sec("security") ? (
+        <Section icon="lock-closed-outline" title="Security & Permissions">
           <View style={styles.rowWrap}>
             <Toggle label="Firm Active" value={!!st.firm_active}
                     onChange={(v) => updateSection("settings", { firm_active: v })} />
+          </View>
+          <Text style={styles.linkHint}>
+            Firm Active mirrors the Company Status on General Information.
+            Per-contact report permissions (who receives Payroll Reports, PF /
+            ESIC Notices, Bank Advice…) are managed on each contact card in
+            the Contact Details section. User roles &amp; access rights are
+            managed under Administration → Access Management.
+          </Text>
+          <Pressable onPress={() => router.push("/access-management" as any)} style={styles.masterLinkBtn}>
+            <Ionicons name="key-outline" size={12} color={colors.brandPrimary} />
+            <Text style={styles.masterLinkBtnTxt}>Open Access Management</Text>
+          </Pressable>
+        </Section>
+        ) : null}
+
+        {sec("integrations") ? (<>
+        <Section icon="git-network-outline" title="Communication Integrations">
+          <View style={styles.rowWrap}>
             <Toggle label="WhatsApp Enable" value={!!st.whatsapp_enable}
                     onChange={(v) => updateSection("settings", { whatsapp_enable: v })} />
             <Toggle label="Auto E-Mail Process" value={!!st.auto_email_process}
                     onChange={(v) => updateSection("settings", { auto_email_process: v })} />
             <Toggle label="eMail Enable" value={!!st.email_enable}
                     onChange={(v) => updateSection("settings", { email_enable: v })} />
+          </View>
+        </Section>
+        <Section icon="hardware-chip-outline" title="Connected Modules">
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            {([
+              ["/whatsapp-center", "logo-whatsapp", "WhatsApp Center"],
+              ["/attendance-email", "mail-outline", "Email Settings"],
+              ["/biometric-devices", "finger-print-outline", "Biometric Devices (ADMS)"],
+              ["/portal-automation", "globe-outline", "Portal RPA (EPFO / ESIC)"],
+            ] as [string, any, string][]).map(([path, icon, label]) => (
+              <Pressable key={path} onPress={() => router.push(path as any)} style={styles.integrationBtn}>
+                <Ionicons name={icon} size={15} color={colors.brandPrimary} />
+                <Text style={styles.integrationBtnTxt}>{label}</Text>
+                <Ionicons name="chevron-forward" size={13} color={colors.onSurfaceTertiary} />
+              </Pressable>
+            ))}
+          </View>
+        </Section>
+        </>) : null}
+
+        {/* 6. PAYROLL SETTINGS — misc toggles ---------------------------- */}
+        {sec("payroll") ? (
+        <Section icon="options-outline" title="Payroll Options">
+          <View style={styles.rowWrap}>
             <Toggle label="Allow CategoryRate" value={!!st.allow_category_rate}
                     onChange={(v) => updateSection("settings", { allow_category_rate: v })} />
             <Toggle label="Auto Employee Code (lock manual entry)" value={!!st.auto_employee_code}
                     onChange={(v) => updateSection("settings", { auto_employee_code: v })} />
+          </View>
+        </Section>
+        ) : null}
+
+        {/* 13. APPROVAL WORKFLOW ----------------------------------------- */}
+        {sec("approval") ? (
+        <Section icon="checkmark-done-outline" title="Punch Approval Workflow">
+          <View style={styles.rowWrap}>
             {/* Iter 483 (user request) — mobile App punches skip the admin
                 approval queue and show on the Grid instantly. Turning it ON
                 also auto-approves this firm's OLD pending app punches. */}
@@ -756,6 +838,12 @@ export default function FirmMasterScreen() {
               punches still require manual approval.
             </Text>
           ) : null}
+        </Section>
+        ) : null}
+
+        {/* 8. ATTENDANCE & SHIFT — policy preset ------------------------- */}
+        {sec("attendance") ? (<>
+        <Section icon="ribbon-outline" title="Attendance Policy Preset">
 
           {/* Iter 91 — Attendance Policy selection (MANDATORY, pick one).
               The chosen policy is shown on every employee's Master page. */}
@@ -811,51 +899,7 @@ export default function FirmMasterScreen() {
             </Text>
           ) : null}
         </Section>
-
-        {/* 9. Contact Persons ------------------------------------------- */}
-        <Section icon="people-outline" title="9. Contact Persons">
-          <View style={styles.gridHead}>
-            <Text style={[styles.gridHeadCell, { flex: 2 }]}>Contact Person Name</Text>
-            <Text style={[styles.gridHeadCell, { flex: 1.5 }]}>Mobile No</Text>
-            <Text style={[styles.gridHeadCell, { flex: 1.5 }]}>Position</Text>
-            <Text style={[styles.gridHeadCell, { width: 60 }]}> </Text>
-          </View>
-          {(master.contact_persons || []).map((row: any, idx: number) => (
-            <View key={idx} style={styles.gridRow}>
-              <TextInput
-                style={[styles.gridInput, { flex: 2 }]}
-                value={row.name || ""}
-                onChangeText={(v) => editContact(idx, { name: v })}
-              />
-              <TextInput
-                style={[styles.gridInput, { flex: 1.5 }]}
-                value={row.mobile || ""}
-                onChangeText={(v) => editContact(idx, { mobile: v })}
-                keyboardType="phone-pad"
-              />
-              <TextInput
-                style={[styles.gridInput, { flex: 1.5 }]}
-                value={row.position || ""}
-                onChangeText={(v) => editContact(idx, { position: v })}
-              />
-              <Pressable
-                onPress={() => removeContact(idx)}
-                style={styles.rowDelBtn}
-              >
-                <Ionicons name="trash-outline" size={14} color={colors.error} />
-              </Pressable>
-            </View>
-          ))}
-          <Pressable onPress={addContact} style={styles.addRowBtn}>
-            <Ionicons name="add-circle-outline" size={14} color={colors.brandPrimary} />
-            <Text style={styles.addRowTxt}>Add Contact</Text>
-          </Pressable>
-        </Section>
-
-        {/* 10-15. Payroll blocks --------------------------------------- */}
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.md }}>
-          <View style={{ flex: 1, minWidth: 380 }}>
-            <Section icon="time-outline" title="10a. Attendance Policy Variant">
+        <Section icon="time-outline" title="Attendance Policy Variant">
               {/* Iter 175 (user rule) — the Policy Selection option only
                   shows when an Industry Type is selected AND Off-roll
                   (Offline) Salary AND Biometric Attendance are enabled. */}
@@ -873,7 +917,7 @@ export default function FirmMasterScreen() {
 
             {/* Iter 175 — Contractor Employees (Policy 2 only). */}
             {policyVariant === "policy_2" ? (
-              <Section icon="briefcase-outline" title="10b. Contractor Employees (Policy 2)">
+              <Section icon="briefcase-outline" title="Contractor Employees (Policy 2)">
                 <Toggle
                   label="Contractual (Contractor) Employees Applicable"
                   value={!!st.contractor_employees}
@@ -941,8 +985,11 @@ export default function FirmMasterScreen() {
                 ) : null}
               </Section>
             ) : null}
+        </>) : null}
 
-            <Section icon="cash-outline" title="10. Salary Process Settings">
+        {/* 6. PAYROLL SETTINGS — salary process ------------------------- */}
+        {sec("payroll") ? (
+            <Section icon="cash-outline" title="Salary Process Settings">
               <View style={styles.rowWrap}>
                 <Toggle label="Online Salary → Compliance Salary Process" value={!!sp.online_salary} testID="fm-online-salary"
                         onChange={(v) => updateSection("salary_process", { online_salary: v })} />
@@ -1163,9 +1210,11 @@ export default function FirmMasterScreen() {
                 ))}
               </View>
             </Section>
-          </View>
-          <View style={{ flex: 1, minWidth: 380 }}>
-            <Section icon="calendar-outline" title="11. CL / PL Policy">
+        ) : null}
+
+        {/* 9. LEAVE & HOLIDAY -------------------------------------------- */}
+        {sec("leave") ? (
+            <Section icon="calendar-outline" title="CL / PL Policy">
               <Toggle label="CL/PL Applicable" value={!!lp.cl_pl_applicable}
                       onChange={(v) => updateSection("leave_policy", { cl_pl_applicable: v })} />
               <View style={styles.row}>
@@ -1177,13 +1226,13 @@ export default function FirmMasterScreen() {
                        keyboardType="numeric" width={160} maxLength={2} />
               </View>
             </Section>
-          </View>
-        </View>
+        ) : null}
 
-        {/* 12. EPF & 13. ESI ------------------------------------------- */}
+        {/* 2. REGISTRATION DETAILS — EPF & ESI --------------------------- */}
+        {sec("registration") ? (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.md }}>
           <View style={{ flex: 1, minWidth: 380 }}>
-            <Section icon="shield-checkmark-outline" title="12. EPF Details">
+            <Section icon="shield-checkmark-outline" title="EPF Registration">
               <Toggle label="EPF Applicable" value={!!epf.applicable}
                       onChange={(v) => updateSection("epf", { applicable: v })} />
               <View style={styles.row}>
@@ -1210,7 +1259,7 @@ export default function FirmMasterScreen() {
             </Section>
           </View>
           <View style={{ flex: 1, minWidth: 380 }}>
-            <Section icon="medkit-outline" title="13. ESI Details">
+            <Section icon="medkit-outline" title="ESI Registration">
               <Toggle label="ESI Applicable" value={!!esi.applicable}
                       onChange={(v) => updateSection("esi", { applicable: v })} />
               <View style={styles.row}>
@@ -1235,10 +1284,12 @@ export default function FirmMasterScreen() {
           </View>
         </View>
 
-        {/* 14. Bonus & 15. Report Order --------------------------------- */}
+        ) : null}
+        {/* Bonus (payroll group) ----------------------------------------- */}
+        {sec("payroll") ? (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.md }}>
           <View style={{ flex: 1, minWidth: 380 }}>
-            <Section icon="gift-outline" title="14. Bonus Settings">
+            <Section icon="gift-outline" title="Bonus Settings">
               <Toggle label="Monthly Bonus" value={!!bonus.monthly_bonus}
                       onChange={(v) => updateSection("bonus", { monthly_bonus: v })} />
               <View style={styles.rowWrap}>
@@ -1286,9 +1337,11 @@ export default function FirmMasterScreen() {
             {/* Iter 98 — "15. Report Order" removed per user request. */}
           </View>
         </View>
+        ) : null}
 
-        {/* 16. Compliance Documents ------------------------------------- */}
-        <Section icon="document-text-outline" title="16. Firm Compliance Documents">
+        {/* 12. DOCUMENTS ------------------------------------------------- */}
+        {sec("documents") ? (
+        <Section icon="document-text-outline" title="Firm Compliance Documents">
           <View style={styles.gridHead}>
             <Text style={[styles.gridHeadCell, { flex: 2 }]}>Description</Text>
             <Text style={[styles.gridHeadCell, { flex: 1.5 }]}>Number</Text>
@@ -1318,9 +1371,11 @@ export default function FirmMasterScreen() {
             </View>
           ))}
         </Section>
+        ) : null}
 
-        {/* 17. Portal Login Credentials --------------------------------- */}
-        <Section icon="key-outline" title="17. Portal Login Credentials">
+        {/* 7. COMPLIANCE SETTINGS — portal logins ------------------------ */}
+        {sec("compliance") ? (
+        <Section icon="key-outline" title="Portal Login Credentials">
           <View style={styles.gridHead}>
             <Text style={[styles.gridHeadCell, { flex: 1.2 }]}>Login Type</Text>
             <Text style={[styles.gridHeadCell, { flex: 1.5 }]}>User Name</Text>
@@ -1357,9 +1412,11 @@ export default function FirmMasterScreen() {
             </View>
           ))}
         </Section>
+        ) : null}
 
-        {/* Iter 476 — Employee Rejoin (Rehire) policy */}
-        <Section icon="refresh-circle-outline" title="18. Employee Rejoin Policy">
+        {/* 13. APPROVAL — Employee Rejoin (Rehire) policy ---------------- */}
+        {sec("approval") ? (
+        <Section icon="refresh-circle-outline" title="Employee Rejoin Policy">
           {([
             ["employee_code", "Employee Code on Rejoin", [
               ["continue", "Continue existing code"],
@@ -1407,29 +1464,52 @@ export default function FirmMasterScreen() {
             & payroll restart from the Rejoin Date; all history stays locked.
           </Text>
         </Section>
-
-        {/* Sticky-ish footer */}
-        <View style={styles.footer}>
-          <Text style={styles.footerTxt}>
-            {dirty
-              ? "⚠️ Unsaved changes — click Save Changes to persist"
-              : "All changes saved"}
-          </Text>
-          <Pressable
-            onPress={save}
-            disabled={saving || !dirty}
-            style={({ pressed }) => [
-              styles.saveBtn,
-              (saving || !dirty) && { opacity: 0.5 },
-              pressed && { opacity: 0.85 },
-            ]}
-          >
-            {saving ? <ActivityIndicator size="small" color="#FFF" /> : <Ionicons name="save-outline" size={16} color="#FFF" />}
-            <Text style={styles.saveBtnTxt}>{saving ? "Saving..." : "Save Changes"}</Text>
-          </Pressable>
-        </View>
-        <View style={{ height: 80 }} />
+        ) : null}
+        <View style={{ height: 90 }} />
       </ScrollView>
+      </View>
+
+      {/* Iter 484 — sticky bottom action bar (Save / Save & Continue /
+          Reset / Cancel / Clone / Export + last-modified metadata). */}
+      <View style={styles.actionBar}>
+        <Pressable onPress={save} disabled={saving || !dirty}
+          style={[styles.actionBtn, (saving || !dirty) && { opacity: 0.5 }]}
+          testID="firm-master-save">
+          {saving ? <ActivityIndicator size="small" color="#FFF" /> : <Ionicons name="save-outline" size={15} color="#FFF" />}
+          <Text style={styles.actionBtnTxt}>{saving ? "Saving…" : "Save"}</Text>
+        </Pressable>
+        <Pressable onPress={() => void saveAndContinue()}
+          style={[styles.actionBtn, { backgroundColor: "#059669" }]}
+          testID="fm-save-continue">
+          <Ionicons name="arrow-forward-circle-outline" size={15} color="#FFF" />
+          <Text style={styles.actionBtnTxt}>Save & Continue</Text>
+        </Pressable>
+        <Pressable onPress={resetChanges} style={styles.actionGhost} testID="fm-reset">
+          <Ionicons name="refresh-outline" size={14} color={colors.onSurfaceSecondary} />
+          <Text style={styles.actionGhostTxt}>Reset</Text>
+        </Pressable>
+        <Pressable onPress={cancelAndClose} style={styles.actionGhost} testID="fm-cancel">
+          <Ionicons name="close-outline" size={14} color={colors.onSurfaceSecondary} />
+          <Text style={styles.actionGhostTxt}>Cancel</Text>
+        </Pressable>
+        {isSuper ? (
+          <Pressable onPress={() => void cloneCompany()} style={styles.actionGhost} testID="fm-clone">
+            <Ionicons name="copy-outline" size={14} color={colors.onSurfaceSecondary} />
+            <Text style={styles.actionGhostTxt}>Clone Company</Text>
+          </Pressable>
+        ) : null}
+        <Pressable onPress={() => void exportConfig()} style={styles.actionGhost} testID="fm-export">
+          <Ionicons name="download-outline" size={14} color={colors.onSurfaceSecondary} />
+          <Text style={styles.actionGhostTxt}>Export Configuration</Text>
+        </Pressable>
+        <View style={{ flex: 1 }} />
+        {master.updated_at ? (
+          <Text style={styles.actionMeta}>
+            Last modified {String(master.updated_at).replace("T", " ").slice(0, 16)}
+            {master.updated_by_name ? ` · ${master.updated_by_name}` : ""}
+          </Text>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -1439,6 +1519,68 @@ export default function FirmMasterScreen() {
 /* -------------------------------------------------------------------- */
 
 const styles = StyleSheet.create({
+  // Iter 484 — ERP shell: side nav, chips, action bar, auto-save pill.
+  navCol: {
+    width: 232, borderRightWidth: 1, borderRightColor: colors.divider,
+    backgroundColor: colors.surfaceSecondary, flexGrow: 0,
+  },
+  navItem: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingHorizontal: 12, paddingVertical: 9, marginHorizontal: 6,
+    borderRadius: 8, marginBottom: 1,
+  },
+  navItemOn: { backgroundColor: colors.brandTertiary },
+  navNum: { width: 18, fontSize: 10.5, fontWeight: "800", color: colors.onSurfaceTertiary, textAlign: "right" },
+  navTxt: { fontSize: 12, color: colors.onSurfaceSecondary, flex: 1 },
+  navTxtOn: { color: colors.brandPrimary, fontWeight: "800" },
+  navChipsRow: {
+    flexGrow: 0, borderBottomWidth: 1, borderBottomColor: colors.divider,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  navChip: {
+    borderWidth: 1, borderColor: colors.border, borderRadius: 999,
+    paddingHorizontal: 12, paddingVertical: 6, backgroundColor: colors.surface,
+  },
+  navChipOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  navChipTxt: { fontSize: 11.5, fontWeight: "700", color: colors.onSurfaceSecondary },
+  secHeadBar: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    flexWrap: "wrap", gap: 6,
+  },
+  secHeadTxt: { fontSize: 16, fontWeight: "900", color: colors.onSurface },
+  secHeadMeta: { fontSize: 10.5, color: colors.onSurfaceTertiary },
+  autoPill: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    borderWidth: 1, borderColor: colors.border, borderRadius: 999,
+    paddingHorizontal: 10, paddingVertical: 5, backgroundColor: colors.surface,
+  },
+  autoPillTxt: { fontSize: 11, fontWeight: "700", color: colors.onSurfaceSecondary },
+  integrationBtn: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    borderWidth: 1, borderColor: colors.border, borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 10, backgroundColor: colors.surface,
+    minWidth: 220,
+  },
+  integrationBtnTxt: { fontSize: 12.5, fontWeight: "700", color: colors.onSurface, flex: 1 },
+  actionBar: {
+    flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap",
+    paddingHorizontal: spacing.md, paddingVertical: 8,
+    borderTopWidth: 1, borderTopColor: colors.divider,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  actionBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: colors.brandPrimary, borderRadius: 8,
+    paddingHorizontal: 14, paddingVertical: 9,
+  },
+  actionBtnTxt: { fontSize: 12.5, fontWeight: "800", color: "#FFF" },
+  actionGhost: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    borderWidth: 1, borderColor: colors.border, borderRadius: 8,
+    paddingHorizontal: 11, paddingVertical: 8, backgroundColor: colors.surface,
+  },
+  actionGhostTxt: { fontSize: 12, fontWeight: "700", color: colors.onSurfaceSecondary },
+  actionMeta: { fontSize: 10.5, color: colors.onSurfaceTertiary },
   subLbl: { color: colors.onSurfaceSecondary, fontSize: 12, fontWeight: "700", marginTop: 8, marginBottom: 6 },
   // Iter 110 — salary process linkage helper text
   linkHint: { color: colors.onSurfaceTertiary, fontSize: 11, marginTop: 8, lineHeight: 16 },

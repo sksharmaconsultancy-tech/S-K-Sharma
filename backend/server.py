@@ -11794,6 +11794,7 @@ from routes.compliance_docs import router as compliance_docs_router  # noqa: E40
 from routes.shift_masters import router as shift_masters_router  # noqa: E402
 from routes.messages import router as messages_router  # noqa: E402
 from routes.firm_master import router as firm_master_router  # noqa: E402
+from routes.firm_master_v2 import router as firm_master_v2_router  # noqa: E402
 from routes.portal_generation import router as portal_generation_router  # noqa: E402
 from routes.employee_salary import router as employee_salary_router  # noqa: E402
 from routes.master_data_report import router as master_data_report_router  # noqa: E402
@@ -11839,6 +11840,7 @@ app.include_router(compliance_docs_router)
 app.include_router(shift_masters_router)
 app.include_router(messages_router)
 app.include_router(firm_master_router)
+app.include_router(firm_master_v2_router)
 app.include_router(portal_generation_router)
 app.include_router(employee_salary_router)
 app.include_router(master_data_report_router)
