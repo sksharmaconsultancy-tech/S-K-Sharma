@@ -185,18 +185,22 @@ async def _ingest_attlog_line(
             "seen_at": _now_iso_z(),
         })
         return False, f"unmapped_user:{device_user_id}"
-    # Iter 481 (user request) — IGNORE duplicate punches within 5 minutes
-    # on the SAME machine (employees double-punch back-to-back, which used
-    # to flip the IN/OUT alternation and corrupt the whole day).
+    # Iter 481 (user request) — duplicate punches within 5 minutes.
+    # Iter 488 (user: "Multi Punch Within the Same time") — the guard was
+    # scoped to the SAME machine, so the same punch arriving from a second
+    # registered device / webhook / re-sync was stored AGAIN at the same
+    # time. Now ANY existing punch for the employee within ±5 minutes
+    # (any device, app or manual) marks the new machine punch as a
+    # DUPLICATE. Per user rule the raw punch is still STORED in the punch
+    # log (never deleted) — it is simply excluded from every calculation.
     _win_lo = (dt - timedelta(minutes=5)).isoformat()
     _win_hi = (dt + timedelta(minutes=5)).isoformat()
     _dup5 = await db.attendance.find_one({
         "user_id": user["user_id"],
-        "device_serial": device["serial_number"],
         "at": {"$gte": _win_lo, "$lte": _win_hi},
+        "status": {"$in": ["approved", "pending"]},
     }, {"_id": 0, "record_id": 1})
-    if _dup5:
-        return True, "duplicate_within_5min_ignored"
+    _is_duplicate = bool(_dup5)
     record_id = f"zk_{uuid.uuid4().hex[:12]}"
     # Iter 486 (user bug — "Still Facing Issue", missing OUT everywhere) —
     # honour the MACHINE'S OWN punch-state (ATTLOG col 3). ZKTeco/BIOFACE
@@ -222,6 +226,9 @@ async def _ingest_attlog_line(
                     "user_id": user["user_id"],
                     "date": dt.strftime("%Y-%m-%d"),
                     "kind": {"$in": ["in", "out"]},
+                    # Iter 488 — duplicate-marked punches must not flip
+                    # the IN/OUT alternation.
+                    "status": "approved",
                     "at": {"$lt": dt.isoformat()},
                 },
                 {"_id": 0, "kind": 1},
@@ -250,10 +257,14 @@ async def _ingest_attlog_line(
         "source": f"zkteco:{device['serial_number']}",
         "outside_geofence": False,
         # Machine punches are considered trusted → auto-approved (user chose 4B)
-        "status": "approved",
+        "status": "duplicate" if _is_duplicate else "approved",
         "decision_by": "system:zkteco",
         "decision_at": _now_iso_z(),
-        "decision_reason": f"Auto-approved from ZKTeco device '{device.get('name')}'",
+        "decision_reason": (
+            "Duplicate punch within 5 min of an existing punch — stored in "
+            "the punch log but ignored in attendance calculations."
+            if _is_duplicate else
+            f"Auto-approved from ZKTeco device '{device.get('name')}'"),
         "device_serial": device["serial_number"],
         "device_id": device["device_id"],
         "device_verify_type": verify_type or None,
@@ -269,9 +280,11 @@ async def _ingest_attlog_line(
     if exists:
         return True, "duplicate_ignored"
     # Iter 175 — contractual employees: machine punches must be approved
-    # by the company first (Contractor Punch approvals).
-    from routes.attendance_core import apply_contractual_gate
-    await apply_contractual_gate(record)
+    # by the company first (Contractor Punch approvals). Duplicates keep
+    # their "duplicate" status (never enter any approval queue).
+    if not _is_duplicate:
+        from routes.attendance_core import apply_contractual_gate
+        await apply_contractual_gate(record)
     # Iter 250 — attach a parked machine photo (ATTPHOTO that arrived
     # before this ATTLOG line) to the new punch record.
     try:
@@ -287,7 +300,7 @@ async def _ingest_attlog_line(
     except Exception:
         pass
     await db.attendance.insert_one(record)
-    return True, None
+    return True, ("duplicate_within_5min_stored" if _is_duplicate else None)
 
 
 def _resync_active(device: dict) -> bool:

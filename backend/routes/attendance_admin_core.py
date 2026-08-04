@@ -134,6 +134,75 @@ async def attendance_grid_debug(
     }
 
 
+@api.post("/admin/attendance/cleanup-duplicate-punches")
+async def cleanup_duplicate_punches(
+    company_id: Optional[str] = Query(None),
+    month: Optional[str] = Query(None, description="YYYY-MM (optional — all history if omitted)"),
+    dry_run: bool = Query(False),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 488 (user: "Multi Punch Within the Same time") — mark ALREADY
+    STORED duplicate MACHINE punches: any zkteco-source approved punch
+    within 5 minutes of the previous kept punch of the same employee gets
+    ``status="duplicate"`` so it stays in the raw punch log (user rule:
+    NEVER delete raw punches) but is ignored by every calculation.
+    Manual / mobile-app punches are never touched."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    if admin["role"] == "company_admin":
+        company_id = admin.get("company_id")
+    if not company_id:
+        raise HTTPException(status_code=400, detail="company_id is required")
+    if not sub_admin_can_touch_company(admin, company_id):
+        raise HTTPException(status_code=403, detail="Firm is outside your assigned scope")
+    q: dict = {"company_id": company_id, "status": "approved"}
+    if month:
+        q["date"] = {"$gte": f"{month}-01", "$lte": f"{month}-31"}
+    by_user: Dict[str, List[dict]] = {}
+    async for p in db.attendance.find(
+            q, {"_id": 0, "record_id": 1, "user_id": 1, "at": 1,
+                "source": 1, "kind": 1, "date": 1}).sort("at", 1):
+        by_user.setdefault(p["user_id"], []).append(p)
+    dupes: List[dict] = []
+    for _uid, rows in by_user.items():
+        last_at = None
+        for p in sorted(rows, key=lambda x: x.get("at") or ""):
+            try:
+                t = datetime.fromisoformat(str(p.get("at")).replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                continue
+            src = str(p.get("source") or "")
+            if (last_at is not None and src.startswith("zkteco")
+                    and abs((t - last_at).total_seconds()) < 5 * 60):
+                dupes.append(p)
+                continue  # marked punches do NOT advance the window
+            last_at = t
+    marked = 0
+    if not dry_run and dupes:
+        ids = [d["record_id"] for d in dupes]
+        r = await db.attendance.update_many(
+            {"record_id": {"$in": ids}},
+            {"$set": {
+                "status": "duplicate",
+                "dup_marked_at": now_iso(),
+                "dup_marked_by": admin.get("user_id"),
+                "decision_reason": (
+                    "Duplicate punch within 5 min — kept in the punch log "
+                    "but ignored in attendance calculations (Iter 488 cleanup)."),
+            }})
+        marked = r.modified_count
+        logger.info("[dedupe-cleanup] company=%s month=%s marked=%d by=%s",
+                    company_id, month, marked, admin.get("user_id"))
+    return {
+        "ok": True,
+        "dry_run": dry_run,
+        "duplicates_found": len(dupes),
+        "marked": marked,
+        "sample": [{"user_id": d["user_id"], "date": d["date"],
+                    "at": d["at"], "kind": d["kind"]} for d in dupes[:20]],
+    }
+
+
 @api.get("/admin/attendance/today")
 async def admin_attendance_today(
     company_id: Optional[str] = None,

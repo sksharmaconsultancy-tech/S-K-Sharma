@@ -4140,3 +4140,36 @@ ITER 487 — EXPIRING DOCUMENTS EMAIL ALERTS (DONE, tested):
   subject/body; second run → "All alerts already sent" (idempotent); UI
   button click e2e → alert dialog. Test data cleaned up.
 - APP_ITERATION=487; deploy_vps_iter487.sh; temp_bundle script → 487.
+
+ITER 488 — DUPLICATE PUNCH FIX (DONE, tested; user: "Multi Punch Within
+the Same time — ignore duplicates within 5 min by default"):
+- Ingestion (_ingest_attlog_line): ±5-min duplicate guard now checks ANY
+  existing punch of the employee (was same-device only). Per user rule
+  duplicates are STORED with status="duplicate" (never dropped/deleted),
+  excluded from all calcs; both-mode alternation query now filters
+  status=approved so dupes can't flip IN/OUT.
+- Display (dedupe_close_punches): machine punches dedupe against previous
+  kept punch from ANY source (manual/app punches keep same-source-only
+  rule — an admin repair punch is never dropped).
+- New API: POST /api/admin/attendance/cleanup-duplicate-punches
+  ?company_id=&month=&dry_run= → marks stored approved zkteco dupes
+  status="duplicate" (never deletes). deploy488.sh runs this once for ALL
+  firms via inline Mongo script.
+- PunchRepairModal hides status=duplicate rows.
+- Tested: ABDUL RAZA KHAN replica (10:23×2 + 22:13×2 two devices) → grid
+  pairs 10:23 IN→22:13 OUT; ingestion stores 3rd-device dup as
+  status=duplicate; cleanup dry-run+real marks 2; nothing deleted.
+- APP_ITERATION=488; deploy_vps_iter488.sh; temp_bundle script → 488.
+
+NEXT (user spec, Iter 489 — SINGLE MACHINE ATTENDANCE MODE, large):
+Company-level attendance_config in Firm Master (device mode radio:
+separate/single_machine/mobile/gps/qr; interpretation A alternate /
+B first-last; duplicate window 0/1/2/5/10 min; lunch: ignore_middle/
+actual_break/fixed 30/45/60). Engine branch ONLY when single_machine.
+Reconnaissance done: hook = dedupe_close_punches(company_cfg) at call
+sites server.py:9283/9751/10460 + attendance_admin_core grid-debug +
+attendance_doctor; firm_master PATCH mirrors settings to companies doc
+(pattern: auto_approve_mobile_punches); grid day-cell fields to add:
+punch_pattern, calc_mode, dupes_ignored, machine names; FirmMaster UI
+section 8 "attendance" lives in frontend/app/firm-master.tsx (~line 845).
+Fixed-lunch deduction needs hours-level hook (grid compute ~line 10030).

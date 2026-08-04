@@ -1816,9 +1816,17 @@ def dedupe_close_punches(
                 kept.append(p)
                 continue
             src = str(p.get("source") or "")
-            if (last_at is not None and src and src == last_src
+            # Iter 488 (user: "Multi Punch Within the Same time — ignore
+            # duplicates within 5 min by default") — machine punches are
+            # now deduped against the previous kept punch from ANY source
+            # (a second registered device produced same-time duplicates).
+            # Non-machine punches keep the original same-source-only rule
+            # so an admin's manual repair punch is never dropped.
+            is_machine = src.startswith("zkteco")
+            if (last_at is not None
+                    and (is_machine or (src and src == last_src))
                     and abs((t - last_at).total_seconds()) < window_min * 60):
-                continue  # duplicate burst on the same machine — drop
+                continue  # duplicate burst — drop
             kept.append(p)
             last_at, last_src = t, src
         # Iter 486 (user bug) — the all-same-kind repair now covers EVERY
@@ -9235,7 +9243,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "487"
+APP_ITERATION = "488"
 
 
 @api.get("/version")

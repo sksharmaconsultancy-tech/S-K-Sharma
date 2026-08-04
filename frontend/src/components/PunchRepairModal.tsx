@@ -85,9 +85,9 @@ export default function PunchRepairModal({
       const r = await api<{ records: Punch[] }>(
         `/admin/attendance/history?user_id=${userId}&date_from=${dateIso}&date_to=${dateIso}&limit=100`,
       );
-      // Show real punches only (hide rejected / auto-ignored noise).
+      // Show real punches only (hide rejected / auto-ignored / duplicate noise).
       const visible = (r.records || []).filter(
-        (p) => !["rejected", "auto_ignored"].includes(String(p.status || "")),
+        (p) => !["rejected", "auto_ignored", "duplicate"].includes(String(p.status || "")),
       );
       setPunches(visible.sort((a, b) => (a.at || "").localeCompare(b.at || "")));
     } catch {
