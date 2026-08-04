@@ -11981,8 +11981,12 @@ app.include_router(factory_router)
 from routes.payroll_reports import router as payroll_reports_router  # noqa: E402
 app.include_router(payroll_reports_router)
 from routes.govt_audit_reports import govt_router, audit_router  # noqa: E402
+from routes.contractors import router as contractors_router  # noqa: E402
+from routes.clra_labour_reports import router as clra_reports_router  # noqa: E402
 app.include_router(govt_router)
 app.include_router(audit_router)
+app.include_router(contractors_router)
+app.include_router(clra_reports_router)
 
 # Iter 359 — PF & ESIC Claims Management.
 from routes.claims_management import router as claims_router  # noqa: E402

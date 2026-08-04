@@ -121,6 +121,9 @@ export default function DailyVerificationScreen() {
   const [empStatus, setEmpStatus] = useState("active");
   const [source, setSource] = useState(""); const [machine, setMachine] = useState("");
   const [q, setQ] = useState(""); const [exOnly, setExOnly] = useState(false);
+  // Iter 479 (user request) — show only PRESENT employees (a single punch
+  // counts as present).
+  const [presentOnly, setPresentOnly] = useState(false);
 
   const [rows, setRows] = useState<Row[]>([]);
   const [summary, setSummary] = useState<Summary>({});
@@ -149,9 +152,10 @@ export default function DailyVerificationScreen() {
     if (machine) p.set("machine", machine);
     if (q.trim()) p.set("q", q.trim());
     if (exOnly) p.set("exceptions_only", "true");
+    if (presentOnly) p.set("present_only", "true");
     Object.entries(extra || {}).forEach(([k, v]) => p.set(k, v));
     return p.toString();
-  }, [companyId, date, dept, desig, contr, cat, shift, grp, empStatus, source, machine, q, exOnly]);
+  }, [companyId, date, dept, desig, contr, cat, shift, grp, empStatus, source, machine, q, exOnly, presentOnly]);
 
   const load = useCallback(async (off = 0) => {
     if (!companyId || !date) return;
@@ -333,6 +337,10 @@ export default function DailyVerificationScreen() {
           <View style={{ alignItems: "center" }}>
             <Text style={st.lbl}>Only Exceptions</Text>
             <Switch value={exOnly} onValueChange={setExOnly} />
+          </View>
+          <View style={{ alignItems: "center" }}>
+            <Text style={st.lbl}>Only Present</Text>
+            <Switch value={presentOnly} onValueChange={setPresentOnly} />
           </View>
           <Pressable style={st.applyBtn} onPress={() => load(0)} disabled={loading}>
             {loading ? <ActivityIndicator color="#fff" size="small" /> : (

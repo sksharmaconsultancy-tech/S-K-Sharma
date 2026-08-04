@@ -231,6 +231,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/companies", label: "Company Master", icon: "business-outline" },
       { route: "/admin", label: "Employee Master", icon: "people-outline" },
       { route: "/masters", label: "General Masters", icon: "layers-outline" },
+      { route: "/contractor-master", label: "Contractor Master", icon: "people-circle-outline" },
       { route: "/masters?tab=department", label: "Department Master", icon: "business-outline" },
       { route: "/masters?tab=designation", label: "Designation Master", icon: "ribbon-outline" },
       { route: "/masters?tab=holiday", label: "Holiday Master", icon: "calendar-outline" },
@@ -597,6 +598,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
     icon: "settings-outline",
     children: [
       { route: "/masters", label: "General Masters", icon: "layers-outline" },
+      { route: "/contractor-master", label: "Contractor Master", icon: "people-circle-outline" },
       { route: "/masters?tab=department", label: "Department Master", icon: "business-outline" },
       { route: "/masters?tab=designation", label: "Designation Master", icon: "ribbon-outline" },
       { route: "/masters?tab=holiday", label: "Holiday Master", icon: "calendar-outline" },

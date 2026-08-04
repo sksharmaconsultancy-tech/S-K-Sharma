@@ -490,6 +490,13 @@ async def email_hub_report(payload: Dict[str, Any] = Body(default={}),
         period = _govt_period(month, gctx)
         if not rows:
             empty_note = _govt_empty_note(kind, month, gctx)
+    elif group == "clra":
+        # Iter 479 — CLRA / Labour Code registers emailable from the hub.
+        from routes.clra_labour_reports import _CLRA, _mlabel as _clra_ml
+        if kind not in _CLRA:
+            raise HTTPException(status_code=404, detail="Unknown report")
+        title, cols, rows, totals = await _CLRA[kind](company_id, month)
+        period = _clra_ml(month)
     else:
         if kind not in _REPORTS:
             raise HTTPException(status_code=404, detail="Unknown report")

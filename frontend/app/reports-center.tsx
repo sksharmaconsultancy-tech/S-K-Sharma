@@ -47,6 +47,7 @@ const EXISTING = [
 const GROUP_BASE: Record<string, string> = {
   payroll: "/admin/payroll-reports",
   govt: "/admin/govt-registers",
+  clra: "/admin/clra-reports",
   audit: "/admin/audit-reports",
 };
 // which reports need month vs FY params
@@ -127,6 +128,13 @@ export default function ReportsCenterScreen() {
         const g = await api<any>("/admin/govt-registers/list");
         (g.registers || []).forEach((r: any) =>
           all.push({ ...r, group: "govt" }),
+        );
+      } catch {}
+      // Iter 479 (user spec) — CLRA / Labour Code registers.
+      try {
+        const cl = await api<any>("/admin/clra-reports/list");
+        (cl.reports || []).forEach((r: any) =>
+          all.push({ ...r, group: "clra" }),
         );
       } catch {}
       if (isSuper) {
@@ -226,6 +234,7 @@ export default function ReportsCenterScreen() {
   const groups: [string, string][] = [
     ["payroll", "Payroll Reports"],
     ["govt", "Government Registers"],
+    ["clra", "CLRA / Labour Code"],
     ["audit", "Audit Reports"],
   ];
 

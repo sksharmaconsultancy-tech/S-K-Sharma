@@ -126,7 +126,8 @@ async def _build(company_id: str, date: str,
                  machine: Optional[str] = None,
                  employee_code: Optional[str] = None,
                  q: Optional[str] = None,
-                 exceptions_only: bool = False) -> Dict[str, Any]:
+                 exceptions_only: bool = False,
+                 present_only: bool = False) -> Dict[str, Any]:
     from server import db, _compute_monthly_grid_data
     try:
         datetime.strptime(date, "%Y-%m-%d")
@@ -142,6 +143,12 @@ async def _build(company_id: str, date: str,
     company = await db.companies.find_one(
         {"company_id": company_id},
         {"_id": 0, "name": 1, "logo_base64": 1, "attendance_policy": 1})
+    # Iter 479 (user request) — Bio Code shown on the PDF instead of the
+    # Emp Code.
+    bio_map: Dict[str, str] = {}
+    async for _u in db.users.find({"company_id": company_id},
+                                  {"_id": 0, "user_id": 1, "bio_code": 1}):
+        bio_map[_u["user_id"]] = str(_u.get("bio_code") or "")
     policy = (company or {}).get("attendance_policy") or {}
     half_day_hours = float(policy.get("half_day_hours") or 4.0)
     ot_daily_limit = policy.get("ot_daily_max_hours")  # optional cap
@@ -299,12 +306,18 @@ async def _build(company_id: str, date: str,
         exception = color in ("red", "orange", "yellow", "blue") or st == "Absent"
         if exceptions_only and not exception:
             continue
+        # Iter 479 (user request) — "Only Present" filter: any employee
+        # with at least ONE punch (even a single/missing-out punch) counts
+        # as present.
+        if present_only and not (has_in or has_out):
+            continue
 
         v = verif.get(uid) or {}
         has_ot = _hm(ot_h) != "-"
         rows.append({
             "user_id": uid,
             "employee_code": emp.get("employee_code") or "",
+            "bio_code": bio_map.get(uid) or "",
             "name": emp.get("name") or "",
             "department": dept, "designation": desig,
             "contractor": contr, "category": etype, "shift": shf,
@@ -409,6 +422,7 @@ async def daily_verification_json(
     employee_code: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
     exceptions_only: bool = Query(False),
+    present_only: bool = Query(False),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     authorization: Optional[str] = Header(None),
@@ -416,7 +430,7 @@ async def daily_verification_json(
     _admin, cid = await _auth(authorization, company_id)
     data = await _build(cid, date, department, designation, contractor,
                         category, shift, group, status, source, machine,
-                        employee_code, q, exceptions_only)
+                        employee_code, q, exceptions_only, present_only)
     rows = data["rows"]
     data["total_rows"] = len(rows)
     data["rows"] = rows[offset:offset + limit]
@@ -602,21 +616,45 @@ def _build_pdf(data: dict, orientation: str = "landscape") -> bytes:
     from reportlab.lib.units import mm
     from reportlab.platypus import (Paragraph, SimpleDocTemplate, Spacer,
                                     Table, TableStyle)
-    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     pagesize = landscape(A4) if orientation != "portrait" else A4
     buf = io.BytesIO()
+    # Iter 479 (user request) — summary block moved to the BOTTOM of every
+    # page (with page number), so the bottom margin reserves room for it.
     doc = SimpleDocTemplate(buf, pagesize=pagesize, leftMargin=8 * mm,
                             rightMargin=8 * mm, topMargin=8 * mm,
-                            bottomMargin=8 * mm)
+                            bottomMargin=17 * mm)
     styles = getSampleStyleSheet()
-    story = [Paragraph(
-        f"<b>Daily In/Out &amp; OT Verification</b> — {data['company']['name']}"
-        f" — {data['date']} ({data['weekday']})", styles["Title"])]
-    for ln in _summary_lines(data):
-        story.append(Paragraph(ln, styles["Normal"]))
-    story.append(Spacer(1, 4 * mm))
+    avail = pagesize[0] - 16 * mm
+    # Iter 479 (user request) — header: "Daily Report" + date on the RIGHT,
+    # company name on the SECOND row.
+    head_tbl = Table(
+        [[Paragraph("<b>Daily Report</b>", ParagraphStyle(
+            "t", parent=styles["Title"], alignment=0, fontSize=15,
+            leading=18, spaceAfter=0)),
+          Paragraph(f"{data['date']} ({data['weekday']})", ParagraphStyle(
+              "d", parent=styles["Normal"], alignment=2, fontSize=10,
+              leading=18, fontName="Helvetica-Bold"))],
+         [Paragraph(str(data["company"]["name"]), ParagraphStyle(
+             "c", parent=styles["Normal"], fontSize=11, leading=14,
+             fontName="Helvetica-Bold")), ""]],
+        colWidths=[avail * 0.62, avail * 0.38])
+    head_tbl.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+        ("TOPPADDING", (0, 0), (-1, -1), 1),
+    ]))
+    story = [head_tbl, Spacer(1, 3 * mm)]
     fs = 6.4 if orientation != "portrait" else 5.2
-    tdata = [HEADERS]
+    # Iter 479 (user request) — PDF drops Verified / Verified By / Remarks
+    # and shows the BIO CODE instead of the Emp Code.
+    pdf_headers = ["Sr", "Bio Code", "Employee Name", "Department",
+                   "Designation", "Contractor", "Punch In", "Punch Out",
+                   "Work Hrs", "OT In", "OT Out", "OT Hrs",
+                   "Total Duty Hrs", "Attendance Status", "Signature"]
+    tdata = [pdf_headers]
     tstyle = [
         ("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#1E293B")),
         ("TEXTCOLOR", (0, 0), (-1, 0), rl.white),
@@ -627,18 +665,38 @@ def _build_pdf(data: dict, orientation: str = "landscape") -> bytes:
         ("ALIGN", (2, 1), (2, -1), "LEFT"),
     ]
     for i, r in enumerate(data["rows"], start=1):
-        tdata.append([str(v) for v in _row_values(i, r)])
+        st = r["status"] + ("" if not r["markers"]
+                            else " · " + ", ".join(r["markers"]))
+        tdata.append([str(v) for v in [
+            i, r.get("bio_code") or r["employee_code"], r["name"],
+            r["department"], r["designation"], r["contractor"],
+            r["punch_in"], r["punch_out"], r["work_hours"],
+            r["ot_in"], r["ot_out"], r["ot_hours"], r["total_hours"],
+            st, ""]])
         tstyle.append(("BACKGROUND", (0, i), (-1, i),
                        rl.HexColor("#" + ROW_COLORS[r["color"]])))
     tbl = Table(tdata, repeatRows=1)
     tbl.setStyle(TableStyle(tstyle))
     story.append(tbl)
-    story.append(Spacer(1, 6 * mm))
+    story.append(Spacer(1, 4 * mm))
     story.append(Paragraph(
         "Legend: RED missing punch · ORANGE unapproved OT · YELLOW late/early"
         " · BLUE manual · GREEN normal · GREY absent/WO/holiday/leave",
         styles["Normal"]))
-    doc.build(story)
+    sum_lines = _summary_lines(data)
+
+    def _footer(canvas, _doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 6.8)
+        y = 4 * mm
+        for j, ln in enumerate(reversed(sum_lines)):
+            canvas.drawString(8 * mm, y + j * 9, ln)
+        canvas.setFont("Helvetica-Bold", 7.5)
+        canvas.drawRightString(pagesize[0] - 8 * mm, y,
+                               f"Page {canvas.getPageNumber()}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
     return buf.getvalue()
 
 
@@ -665,6 +723,7 @@ async def daily_verification_xlsx(
     status: str = Query("active"), source: Optional[str] = Query(None),
     machine: Optional[str] = Query(None), employee_code: Optional[str] = Query(None),
     q: Optional[str] = Query(None), exceptions_only: bool = Query(False),
+    present_only: bool = Query(False),
     authorization: Optional[str] = Header(None),
 ):
     admin, cid, data = await _export_data(
@@ -672,7 +731,7 @@ async def daily_verification_xlsx(
         designation=designation, contractor=contractor, category=category,
         shift=shift, group=group, status=status, source=source,
         machine=machine, employee_code=employee_code, q=q,
-        exceptions_only=exceptions_only)
+        exceptions_only=exceptions_only, present_only=present_only)
     await _audit("report_export", admin, cid, date, "XLSX export")
     return Response(
         content=_build_xlsx(data),
@@ -690,6 +749,7 @@ async def daily_verification_csv(
     status: str = Query("active"), source: Optional[str] = Query(None),
     machine: Optional[str] = Query(None), employee_code: Optional[str] = Query(None),
     q: Optional[str] = Query(None), exceptions_only: bool = Query(False),
+    present_only: bool = Query(False),
     authorization: Optional[str] = Header(None),
 ):
     admin, cid, data = await _export_data(
@@ -697,7 +757,7 @@ async def daily_verification_csv(
         designation=designation, contractor=contractor, category=category,
         shift=shift, group=group, status=status, source=source,
         machine=machine, employee_code=employee_code, q=q,
-        exceptions_only=exceptions_only)
+        exceptions_only=exceptions_only, present_only=present_only)
     await _audit("report_export", admin, cid, date, "CSV export")
     return Response(content=_build_csv(data), media_type="text/csv",
                     headers={"Content-Disposition":
@@ -714,6 +774,7 @@ async def daily_verification_pdf(
     status: str = Query("active"), source: Optional[str] = Query(None),
     machine: Optional[str] = Query(None), employee_code: Optional[str] = Query(None),
     q: Optional[str] = Query(None), exceptions_only: bool = Query(False),
+    present_only: bool = Query(False),
     authorization: Optional[str] = Header(None),
 ):
     admin, cid, data = await _export_data(
@@ -721,7 +782,7 @@ async def daily_verification_pdf(
         designation=designation, contractor=contractor, category=category,
         shift=shift, group=group, status=status, source=source,
         machine=machine, employee_code=employee_code, q=q,
-        exceptions_only=exceptions_only)
+        exceptions_only=exceptions_only, present_only=present_only)
     await _audit("report_export", admin, cid, date, f"PDF export ({orientation})")
     return Response(content=_build_pdf(data, orientation),
                     media_type="application/pdf",

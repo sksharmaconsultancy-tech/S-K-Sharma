@@ -15,6 +15,7 @@ import { useLiveSync } from "@/src/api/live-sync";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import CompanyPicker from "@/src/components/CompanyPicker";
+import FirmDropdown from "@/src/components/FirmDropdown";
 import SalaryUpdateModal from "@/src/components/SalaryUpdateModal";
 import { EmployeeStatsBar, EmployeeListSkeleton } from "@/src/components/EmployeeStatsBar";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
@@ -930,51 +931,28 @@ export default function AdminScreen() {
                   </View>
 
                   <Text style={styles.label}>Company</Text>
-                  <View style={styles.typeRow}>
-                    {isLocked ? null : (
-                      <Pressable
-                        onPress={() => setAssignedCompany(null)}
-                        style={[
-                          styles.typeChip,
-                          assignedCompany === null && styles.typeChipActive,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.typeChipTxt,
-                            assignedCompany === null && styles.typeChipTxtActive,
-                          ]}
-                        >
-                          Unassigned
-                        </Text>
-                      </Pressable>
-                    )}
-                    {effectiveCompanies.map((c) => (
-                      <Pressable
-                        key={c.company_id}
-                        onPress={() => setAssignedCompany(c.company_id)}
-                        style={[
-                          styles.typeChip,
-                          assignedCompany === c.company_id && styles.typeChipActive,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.typeChipTxt,
-                            assignedCompany === c.company_id && styles.typeChipTxtActive,
-                          ]}
-                        >
-                          {c.name}
-                        </Text>
-                      </Pressable>
-                    ))}
-                    {isLocked && (
+                  {/* Iter 479 (user request) — firm picker is always a
+                      DROPDOWN LIST (chips overflowed with many firms). */}
+                  {isLocked ? (
+                    <View style={styles.typeRow}>
                       <View style={styles.lockPill}>
                         <Ionicons name="lock-closed" size={11} color="#fff" />
                         <Text style={styles.lockPillTxt}>Locked - logout to switch</Text>
                       </View>
-                    )}
-                  </View>
+                    </View>
+                  ) : (
+                    <FirmDropdown
+                      value={assignedCompany}
+                      onChange={(cid) => setAssignedCompany(cid)}
+                      options={effectiveCompanies.map((c) => ({
+                        company_id: c.company_id,
+                        name: c.name,
+                      }))}
+                      allowNull
+                      nullLabel="Unassigned"
+                      testID="admin-company-dropdown"
+                    />
+                  )}
                   {companies.length === 0 && (
                     <Text style={styles.hint}>
                       No companies yet.{" "}
@@ -1020,6 +998,37 @@ export default function AdminScreen() {
                 Setting a past or today&apos;s date will immediately block this
                 employee from accessing the app.
               </Text>
+
+              {/* Iter 479 (user request) — Rejoin (Rehire) button right
+                  beside the Exit / Left date for resigned employees. */}
+              {Boolean(
+                exitDate ||
+                (selected as any)?.exit_date ||
+                (selected as any)?.resign_date ||
+                (selected as any)?.active === false ||
+                ["resigned", "terminated", "retired", "absconded", "exited", "left"]
+                  .includes(String((selected as any)?.employment_status || "").toLowerCase()),
+              ) && (
+                <Pressable
+                  onPress={() => {
+                    const uid = selected?.user_id;
+                    setSelected(null);
+                    router.push(`/employee-rejoin?user_id=${uid}`);
+                  }}
+                  style={{
+                    flexDirection: "row", alignItems: "center",
+                    justifyContent: "center", gap: 8,
+                    backgroundColor: "#059669", borderRadius: 10,
+                    paddingVertical: 12, marginTop: 10,
+                  }}
+                  testID="admin-rejoin-btn"
+                >
+                  <Ionicons name="refresh-circle-outline" size={17} color="#fff" />
+                  <Text style={{ color: "#fff", fontWeight: "800", fontSize: 13.5 }}>
+                    Rejoin Employee (Rehire)
+                  </Text>
+                </Pressable>
+              )}
 
               <Pressable
                 testID="live-in-toggle"
