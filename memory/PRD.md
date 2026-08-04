@@ -3963,3 +3963,30 @@ reports, CLRA-vs-Labour-Code mode. Digital signature = SKIPPED (user).
   frontend flows PASS. APP_ITERATION=479; deploy_vps_iter479.sh (kind=script).
 - NOTE: gotcha — parallel search_replace batches on the same file sometimes
   drop one edit silently; verify with grep after batch edits.
+
+## Iter 480 — CLRA/Labour Code Phase 2 (statutory field enhancements)
+- govt_audit_reports.py `_wage_register`: Form B now splits allowances
+  (conveyance/medical/special/others) + deductions (pf/esic/pt/tds/
+  other_ded) + Bank A/c-IFSC (from users), periodic aggregation kept.
+  `_gratuity_register`: + eligible_service, wage_def, exempt (≤₹20L) /
+  taxable split, payment_date.
+- clra_labour_reports.py NEW kinds: pf-register (UAN/PF-EPS wages/EPF-EE/
+  VPF/EPS-ER/EPF-ER/EDLI/NCP/DOJ-DOE-rejoin), esic-register (IP/wage base/
+  0.75-3.25%/contribution+benefit period via _esic_periods/TIC),
+  lwf-register (_LWF_SLABS 16 states, firm state from companies.state or
+  firm_masters.registered_address.state, contribution-month aware, due
+  dates), leave-register (EL ledger: opening=users.leave_opening_balance,
+  earned=FY present_days//20 from compliance runs, availed=db.leaves
+  approved, closing). Filename header sanitised to ASCII (em-dash in
+  title crashed Content-Disposition latin-1 encode — FIXED).
+- labour_reports.py daily_attendance: + Contractor/Shift/Source/Late Min/
+  Early Out Min columns (from _day_summary + emps projection).
+- NOTE: _company() in labour_statistics projects only name+logo — do NOT
+  use it for state; query companies/firm_masters directly.
+- Verified via curl (all kinds JSON + pdf/xlsx 200; LWF tested with
+  temp Maharashtra state then reverted; daily_attendance via
+  POST /admin/labour-reports/generate report_key+filters) + Report Hub
+  screenshot (10 CLRA chips, PF Register table renders).
+- APP_ITERATION=480; deploy_vps_iter480.sh (kind=script).
+- Phase 3 pending: Inspection Register (CRUD), Digital Document Register,
+  scheduled email reports, CLRA vs Labour Code mode toggle.

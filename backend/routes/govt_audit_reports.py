@@ -67,45 +67,57 @@ def _months_range(month: str, month_to: str) -> List[str]:
 # ---------------------------------------------------------------------------
 
 async def _wage_register(company_id, month, ctx=None):
-    """Iter 477 (user request) — Month-wise OR Periodic (month..month_to):
-    months in the range are AGGREGATED per employee (days/earnings summed,
-    rate = latest month's rate)."""
+    """Iter 477 (user request) — Month-wise OR Periodic (month..month_to).
+    Iter 480 (user spec — Phase 2) — statutory columns: allowances split
+    (Conveyance / Medical / Special / Others), deductions split
+    (PF / ESIC / PT / TDS / Other incl. advance), Bank details."""
     months = _months_range(month, (ctx or {}).get("month_to") or "")
     users = {u["user_id"]: u for u in await _users(company_id)}
+    banks: Dict[str, str] = {}
+    async for _b in db.users.find(
+            {"company_id": company_id, "role": "employee"},
+            {"_id": 0, "user_id": 1, "bank_account_no": 1, "bank_ifsc": 1}):
+        if _b.get("bank_account_no"):
+            banks[_b["user_id"]] = (f"{_b['bank_account_no']} / "
+                                    f"{_b.get('bank_ifsc') or ''}").strip(" /")
+    _SUM = ("days", "basic", "hra", "conveyance", "medical", "special",
+            "others", "overtime", "gross", "pf", "esic", "pt", "tds",
+            "other_ded", "deductions", "net")
     agg: Dict[str, dict] = {}
     for mo in months:
         rows_by_uid = await _run_rows(company_id, mo)
         for uid, r in rows_by_uid.items():
             u = users.get(uid) or {}
-            d = agg.setdefault(uid, {
-                "employee_code": u.get("employee_code"),
-                "name": u.get("name"),
-                "designation": u.get("designation"),
-                "rate": 0.0, "days": 0.0, "basic": 0.0, "hra": 0.0,
-                "other_allowances": 0.0, "overtime": 0.0, "gross": 0.0,
-                "deductions": 0.0, "net": 0.0})
+            d = agg.setdefault(uid, dict(
+                {k: 0.0 for k in _SUM},
+                employee_code=u.get("employee_code"), name=u.get("name"),
+                designation=u.get("designation"), rate=0.0,
+                bank=banks.get(uid, "")))
             d["rate"] = _f(r.get("rate")) or d["rate"]
-            d["days"] = round(d["days"] + _f(r.get("present_days")), 2)
-            d["basic"] = round(d["basic"] + _f(r.get("basic")), 2)
-            d["hra"] = round(d["hra"] + _f(r.get("hra")), 2)
-            d["other_allowances"] = round(
-                d["other_allowances"] + _f(r.get("conveyance"))
-                + _f(r.get("special")) + _f(r.get("medical"))
-                + _f(r.get("others")), 2)
-            d["overtime"] = round(d["overtime"] + _f(r.get("ot_pay")), 2)
-            d["gross"] = round(d["gross"] + _f(r.get("gross_paid")), 2)
-            d["deductions"] = round(
-                d["deductions"] + _f(r.get("total_deduction")), 2)
-            d["net"] = round(d["net"] + _f(r.get("net")), 2)
+            for k, src in (("days", "present_days"), ("basic", "basic"),
+                           ("hra", "hra"), ("conveyance", "conveyance"),
+                           ("medical", "medical"), ("special", "special"),
+                           ("others", "others"), ("overtime", "ot_pay"),
+                           ("gross", "gross_paid"), ("pf", "pf_employee"),
+                           ("esic", "esic_employee"), ("pt", "pt"),
+                           ("tds", "tds"), ("other_ded", "other_deduction"),
+                           ("deductions", "total_deduction"),
+                           ("net", "net")):
+                d[k] = round(d[k] + _f(r.get(src)), 2)
     out = list(agg.values())
     cols = [("employee_code", "Emp Code"), ("name", "Employee Name"),
             ("designation", "Designation"), ("rate", "Rate of Wages"),
             ("days", "Days Worked"), ("basic", "Basic"), ("hra", "HRA"),
-            ("other_allowances", "Other Allowances"),
+            ("conveyance", "Conveyance"), ("medical", "Medical"),
+            ("special", "Special All."), ("others", "Other All."),
             ("overtime", "Overtime"), ("gross", "Gross Wages"),
-            ("deductions", "Deductions"), ("net", "Net Wages Paid")]
+            ("pf", "PF"), ("esic", "ESIC"), ("pt", "PT"), ("tds", "TDS"),
+            ("other_ded", "Adv/Other Ded."),
+            ("deductions", "Total Deduction"), ("net", "Net Wages Paid"),
+            ("bank", "Bank A/c / IFSC")]
     totals = {"name": "TOTAL"}
-    for k in ("basic", "hra", "other_allowances", "overtime", "gross",
+    for k in ("basic", "hra", "conveyance", "medical", "special", "others",
+              "overtime", "gross", "pf", "esic", "pt", "tds", "other_ded",
               "deductions", "net"):
         totals[k] = round(sum(r[k] for r in out), 2)
     return "Wage Register (Form B)", cols, _srt(out), totals
@@ -197,16 +209,29 @@ async def _gratuity_register(company_id, month, ctx=None):
         basic = _f((rows_by_uid.get(u["user_id"]) or {}).get("basic")) or \
             _f(u.get("compliance_gross") or u.get("salary_monthly")) * 0.5
         accrued = round(basic * 15 / 26 * int(yrs), 2) if yrs >= 5 else 0
+        # Iter 480 (user spec — Phase 2): taxable / exempt split (exempt
+        # up to ₹20,00,000 u/s 10(10)), wage definition + payment date.
+        exempt = round(min(accrued, 2000000), 2)
         out.append({"employee_code": u.get("employee_code"),
                     "name": u.get("name"), "doj": u.get("doj"),
                     "service_years": round(yrs, 1),
                     "eligible": "Yes" if yrs >= 5 else "No",
+                    "eligible_service": int(yrs) if yrs >= 5 else 0,
+                    "wage_def": "Basic + DA (last drawn)",
                     "last_basic": round(basic, 2),
-                    "accrued_gratuity": accrued})
+                    "accrued_gratuity": accrued,
+                    "exempt": exempt,
+                    "taxable": round(accrued - exempt, 2),
+                    "payment_date": ""})
     cols = [("employee_code", "Emp Code"), ("name", "Employee Name"),
-            ("doj", "DOJ"), ("service_years", "Service (yrs)"),
-            ("eligible", "Eligible (5+ yrs)"), ("last_basic", "Basic Wages"),
-            ("accrued_gratuity", "Accrued Gratuity (15/26 × yrs)")]
+            ("doj", "DOJ"), ("service_years", "Total Service (yrs)"),
+            ("eligible", "Eligible (5+ yrs)"),
+            ("eligible_service", "Eligible Service (yrs)"),
+            ("wage_def", "Wage Definition"),
+            ("last_basic", "Last Drawn Wages"),
+            ("accrued_gratuity", "Gratuity Amount (15/26 × yrs)"),
+            ("exempt", "Exempt Amount"), ("taxable", "Taxable Amount"),
+            ("payment_date", "Payment Date")]
     totals = {"name": "TOTAL", "accrued_gratuity": round(
         sum(r["accrued_gratuity"] for r in out), 2)}
     return "Gratuity Register", cols, _srt(out), totals

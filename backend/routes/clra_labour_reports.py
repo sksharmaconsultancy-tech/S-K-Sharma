@@ -219,8 +219,13 @@ async def _contract_labour(company_id, month, ctx=None):
 # ---------------------------------------------------------------------------
 
 async def _pt_register(company_id, month, ctx=None):
-    c = await _company(company_id) or {}
-    state = c.get("state") or ""
+    c = await db.companies.find_one(
+        {"company_id": company_id}, {"_id": 0, "state": 1}) or {}
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id},
+        {"_id": 0, "registered_address": 1}) or {}
+    state = (c.get("state")
+             or (fm.get("registered_address") or {}).get("state") or "")
     rows_by_uid = await _run_rows(company_id, month)
     users = {u["user_id"]: u for u in await _users(company_id)}
     out = []
@@ -357,11 +362,251 @@ async def _compliance_dashboard(company_id, month, ctx=None):
     return "Compliance Dashboard", cols, out, None
 
 
+# ---------------------------------------------------------------------------
+# 7. PF Register (Iter 480 — Phase 2, user spec)
+# ---------------------------------------------------------------------------
+
+async def _pf_register(company_id, month, ctx=None):
+    rows_by_uid = await _run_rows(company_id, month)
+    users = {u["user_id"]: u for u in await _users(company_id)}
+    out = []
+    for uid, r in rows_by_uid.items():
+        if not (_f(r.get("pf_employee")) or _f(r.get("pf_wages"))):
+            continue
+        u = users.get(uid) or {}
+        pf_w = _f(r.get("pf_wages"))
+        eps_w = 0 if r.get("eps_disabled") else min(pf_w, 15000)
+        edli_w = min(pf_w, 15000)
+        ncp = max(_f(r.get("month_days")) - _f(r.get("present_days")), 0)
+        hist = []  # rejoin date from users master
+        out.append({
+            "employee_code": u.get("employee_code") or r.get("employee_code"),
+            "name": u.get("name") or r.get("name"),
+            "uan": r.get("uan_no") or u.get("uan_no") or "",
+            "pf_no": r.get("pf_no") or u.get("pf_no") or "",
+            "pf_wages": pf_w, "eps_wages": eps_w,
+            "epf_ee": _f(r.get("pf_employee")),
+            "vpf": _f(r.get("vpf_amount")),
+            "eps_er": _f(r.get("pf_employer_eps")),
+            "epf_er": _f(r.get("pf_employer_epf")),
+            "er_total": _f(r.get("pf_employer_total")),
+            "edli_wages": edli_w,
+            "edli": round(edli_w * 0.005, 2),
+            "ncp_days": int(round(ncp)),
+            "doj": u.get("doj") or "",
+            "doe": u.get("exit_date") or u.get("resign_date") or "",
+            "rejoin": (u.get("rejoin_date") or
+                       (hist and hist[-1].get("rejoin_date")) or "")})
+    out.sort(key=lambda r: str(r.get("employee_code") or "").zfill(8))
+    cols = [("employee_code", "Emp Code"), ("name", "Employee Name"),
+            ("uan", "UAN"), ("pf_no", "PF No."),
+            ("pf_wages", "PF Wages"), ("eps_wages", "EPS Wages"),
+            ("epf_ee", "EPF Contribution (EE)"), ("vpf", "VPF"),
+            ("eps_er", "EPS Contribution (ER)"),
+            ("epf_er", "EPF Contribution (ER)"),
+            ("er_total", "Employer Total"),
+            ("edli_wages", "EDLI Wages"), ("edli", "EDLI (0.5%)"),
+            ("ncp_days", "NCP Days"), ("doj", "DOJ"), ("doe", "DOE"),
+            ("rejoin", "Rejoin Date")]
+    totals = {"name": "TOTAL"}
+    for k in ("pf_wages", "epf_ee", "vpf", "eps_er", "epf_er", "er_total",
+              "edli"):
+        totals[k] = round(sum(r[k] for r in out), 2)
+    return "PF Register", cols, out, totals
+
+
+# ---------------------------------------------------------------------------
+# 8. ESIC Register (Iter 480 — Phase 2, user spec)
+# ---------------------------------------------------------------------------
+
+def _esic_periods(month: str):
+    y, m = int(month[:4]), int(month[5:7])
+    if 4 <= m <= 9:
+        return (f"Apr {y} – Sep {y}", f"Jan {y + 1} – Jun {y + 1}")
+    start_y = y if m >= 10 else y - 1
+    return (f"Oct {start_y} – Mar {start_y + 1}",
+            f"Jul {start_y + 1} – Dec {start_y + 1}")
+
+
+async def _esic_register(company_id, month, ctx=None):
+    rows_by_uid = await _run_rows(company_id, month)
+    users = {u["user_id"]: u for u in await _users(company_id)}
+    cp, bp = _esic_periods(month)
+    out = []
+    for uid, r in rows_by_uid.items():
+        if not (_f(r.get("esic_employee")) or _f(r.get("esic_employer"))):
+            continue
+        u = users.get(uid) or {}
+        out.append({
+            "employee_code": u.get("employee_code") or r.get("employee_code"),
+            "name": u.get("name") or r.get("name"),
+            "esic_ip": r.get("esi_ip_no") or u.get("esi_ip_no") or "",
+            "days": _f(r.get("present_days")),
+            "esic_wages": _f(r.get("esic_wage_base"))
+            or _f(r.get("gross_paid")),
+            "ee": _f(r.get("esic_employee")),
+            "er": _f(r.get("esic_employer")),
+            "total": round(_f(r.get("esic_employee"))
+                           + _f(r.get("esic_employer")), 2),
+            "cp": cp, "bp": bp,
+            "tic": "TIC" if not (r.get("esi_ip_no")
+                                 or u.get("esi_ip_no")) else "Regular IP"})
+    out.sort(key=lambda r: str(r.get("employee_code") or "").zfill(8))
+    cols = [("employee_code", "Emp Code"), ("name", "Employee Name"),
+            ("esic_ip", "ESIC IP"), ("days", "Days"),
+            ("esic_wages", "ESIC Wages"),
+            ("ee", "Employee Contribution (0.75%)"),
+            ("er", "Employer Contribution (3.25%)"), ("total", "Total"),
+            ("cp", "Contribution Period"), ("bp", "Benefit Period"),
+            ("tic", "TIC Status")]
+    totals = {"name": "TOTAL"}
+    for k in ("ee", "er", "total"):
+        totals[k] = round(sum(r[k] for r in out), 2)
+    return "ESIC Register", cols, out, totals
+
+
+# ---------------------------------------------------------------------------
+# 9. LWF Register (Iter 480 — Phase 2, user: "build for other states";
+#    Rajasthan has no LWF Act)
+# ---------------------------------------------------------------------------
+
+_LWF_SLABS = {
+    # state → EE ₹, ER ₹, contribution months (calendar month numbers)
+    "maharashtra": (12, 36, [6, 12]),
+    "gujarat": (6, 12, [6, 12]),
+    "karnataka": (20, 40, [12]),
+    "tamil nadu": (10, 20, [12]),
+    "madhya pradesh": (10, 30, [6, 12]),
+    "delhi": (0.75, 2.25, [6, 12]),
+    "haryana": (31, 62, list(range(1, 13))),
+    "punjab": (5, 20, list(range(1, 13))),
+    "chandigarh": (5, 20, list(range(1, 13))),
+    "west bengal": (3, 15, [6, 12]),
+    "andhra pradesh": (30, 70, [12]),
+    "telangana": (2, 5, [12]),
+    "kerala": (45, 45, list(range(1, 13))),
+    "goa": (60, 180, [6, 12]),
+    "chhattisgarh": (15, 45, [6, 12]),
+    "odisha": (10, 20, [6, 12]),
+}
+_LWF_DUE = {6: "15 July", 12: "15 January"}
+
+
+async def _lwf_register(company_id, month, ctx=None):
+    c = await db.companies.find_one(
+        {"company_id": company_id},
+        {"_id": 0, "state": 1}) or {}
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id},
+        {"_id": 0, "registered_address": 1}) or {}
+    state = str(c.get("state")
+                or (fm.get("registered_address") or {}).get("state")
+                or "").strip()
+    slab = _LWF_SLABS.get(state.lower())
+    title = f"Labour Welfare Fund Register — {state or 'State not set'}"
+    cols = [("employee_code", "Emp Code"), ("name", "Employee Name"),
+            ("state", "State"), ("month", "Month"),
+            ("ee", "Employee Share"), ("er", "Employer Share"),
+            ("total", "Total"), ("due", "Due Date"),
+            ("challan", "Challan No.")]
+    if not slab:
+        return (f"{title} (LWF NOT APPLICABLE)", cols, [], None)
+    ee, er, due_months = slab
+    m = int(month[5:7])
+    if m not in due_months:
+        nxt = min([x for x in due_months if x >= m] or [due_months[0]])
+        return (f"{title} — {_mlabel(month)} is not a contribution month "
+                f"(next: month {nxt:02d})", cols, [], None)
+    rows_by_uid = await _run_rows(company_id, month)
+    users = {u["user_id"]: u for u in await _users(company_id)}
+    due = _LWF_DUE.get(m, "As per state rules")
+    out = []
+    ids = rows_by_uid.keys() or [
+        u["user_id"] for u in users.values() if u.get("active")]
+    for uid in ids:
+        u = users.get(uid) or {}
+        out.append({"employee_code": u.get("employee_code"),
+                    "name": u.get("name"), "state": state,
+                    "month": _mlabel(month), "ee": ee, "er": er,
+                    "total": round(ee + er, 2), "due": due, "challan": ""})
+    out.sort(key=lambda r: str(r.get("employee_code") or "").zfill(8))
+    totals = {"name": "TOTAL",
+              "ee": round(sum(r["ee"] for r in out), 2),
+              "er": round(sum(r["er"] for r in out), 2),
+              "total": round(sum(r["total"] for r in out), 2)}
+    return title, cols, out, totals
+
+
+# ---------------------------------------------------------------------------
+# 10. Leave Register (Iter 480 — Phase 2, user spec): EL ledger for the
+#     financial year up to the selected month.
+#       Earned  = 1 EL per 20 days worked (Factories Act s.79 style)
+#       Availed = approved leaves in the FY window
+#       Closing = Opening + Earned − Availed − Encashed
+# ---------------------------------------------------------------------------
+
+async def _leave_register(company_id, month, ctx=None):
+    y, m = int(month[:4]), int(month[5:7])
+    fy_start = f"{y if m >= 4 else y - 1}-04"
+    months = []
+    cy, cm = int(fy_start[:4]), 4
+    while f"{cy:04d}-{cm:02d}" <= month:
+        months.append(f"{cy:04d}-{cm:02d}")
+        cm += 1
+        if cm > 12:
+            cm, cy = 1, cy + 1
+    days_worked: Dict[str, float] = {}
+    for mo in months:
+        for uid, r in (await _run_rows(company_id, mo)).items():
+            days_worked[uid] = days_worked.get(uid, 0) \
+                + _f(r.get("present_days"))
+    availed: Dict[str, float] = {}
+    async for lv in db.leaves.find(
+            {"company_id": company_id, "status": "approved",
+             "from_date": {"$gte": f"{fy_start}-01",
+                           "$lte": f"{month}-31"}},
+            {"_id": 0, "user_id": 1, "from_date": 1, "to_date": 1}):
+        d1, d2 = _dt(lv.get("from_date")), _dt(lv.get("to_date"))
+        n = ((d2 - d1).days + 1) if d1 and d2 else 1
+        availed[lv["user_id"]] = availed.get(lv["user_id"], 0) + n
+    opening: Dict[str, float] = {}
+    async for _u in db.users.find(
+            {"company_id": company_id, "role": "employee"},
+            {"_id": 0, "user_id": 1, "leave_opening_balance": 1}):
+        opening[_u["user_id"]] = _f(_u.get("leave_opening_balance"))
+    users = {u["user_id"]: u for u in await _users(company_id)}
+    out = []
+    for uid in set(list(days_worked) + list(availed)):
+        u = users.get(uid) or {}
+        op = opening.get(uid, 0)
+        earned = int(days_worked.get(uid, 0) // 20)
+        av = availed.get(uid, 0)
+        closing = round(op + earned - av, 1)
+        out.append({"employee_code": u.get("employee_code"),
+                    "name": u.get("name"), "opening": op,
+                    "days_worked": round(days_worked.get(uid, 0), 1),
+                    "earned": earned, "availed": av, "encashed": 0,
+                    "carry_forward": max(closing, 0), "closing": closing})
+    out.sort(key=lambda r: str(r.get("employee_code") or "").zfill(8))
+    cols = [("employee_code", "Emp Code"), ("name", "Employee Name"),
+            ("opening", "Opening Balance"),
+            ("days_worked", "Days Worked (FY)"),
+            ("earned", "Earned (1/20 days)"), ("availed", "Availed"),
+            ("encashed", "Encashed"), ("carry_forward", "Carry Forward"),
+            ("closing", "Closing Balance")]
+    return (f"Leave Register (EL Ledger — FY from {fy_start})",
+            cols, out, None)
+
+
 _CLRA = {
     "contractor-register": _contractor_register,
     "principal-employer": _principal_employer,
     "contract-labour-register": _contract_labour,
     "pt-register": _pt_register,
+    "pf-register": _pf_register,
+    "esic-register": _esic_register,
+    "lwf-register": _lwf_register,
+    "leave-register": _leave_register,
     "rejoin-history": _rejoin_history,
     "compliance-dashboard": _compliance_dashboard,
 }
@@ -370,6 +615,10 @@ _TITLES = {
     "principal-employer": "Principal Employer Register",
     "contract-labour-register": "Contract Labour Register",
     "pt-register": "Professional Tax Register",
+    "pf-register": "PF Register",
+    "esic-register": "ESIC Register",
+    "lwf-register": "Labour Welfare Fund Register",
+    "leave-register": "Leave Register (EL Ledger)",
     "rejoin-history": "Employee Rejoin History",
     "compliance-dashboard": "Compliance Dashboard",
 }
@@ -420,5 +669,6 @@ async def _clra_exp(kind, company_id, month, authorization, fmt):
                            c.get("logo_base64"))
         mt = "application/pdf"
     fn = f"{title.replace(' ', '_')}.{fmt}"
+    fn = fn.encode("ascii", "ignore").decode().replace("\u2014", "-")
     return StreamingResponse(buf, media_type=mt, headers={
         "Content-Disposition": f'attachment; filename="{fn}"'})

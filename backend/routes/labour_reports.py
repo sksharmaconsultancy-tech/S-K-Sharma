@@ -287,8 +287,24 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
         return cols, rows
 
     if key == "daily_attendance":
-        return day_rows(lambda s, d, e: True, ["OT Hrs", "Status"],
-                        lambda s, d, e: [s["ot_hours"], s["status"]])
+        # Iter 480 (user spec — Phase 2 statutory fields): + Contractor,
+        # Shift, Punch Source, Late/Early minutes.
+        def _shift_lbl(e):
+            return (e.get("shift_name")
+                    or (f"{e.get('shift_start')}-{e.get('shift_end')}"
+                        if e.get("shift_start") and e.get("shift_end")
+                        else ""))
+        return day_rows(
+            lambda s, d, e: True,
+            ["Contractor", "Shift", "Source", "Late Min", "Early Out Min",
+             "OT Hrs", "Status"],
+            lambda s, d, e: [
+                e.get("contractor_name") or "", _shift_lbl(e),
+                ", ".join(sorted({(r.get("source") or "")[:14]
+                                  for r in s["recs"]
+                                  if r.get("source")})),
+                s["late_by"] or "", s["early_by"] or "",
+                s["ot_hours"], s["status"]])
 
     if key == "in_out_punch":
         cols = ["Date"] + EMP_HEAD + ["Punch Time", "Type", "Source", "Method"]
