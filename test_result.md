@@ -321,3 +321,10 @@ See `/app/memory/test_credentials.md`. Super admin
 - Sub-admin present-today scope: restricted sub_admin blocked from
   non-allowed firm (with and without ?company_id).
 - PF/ESIC calc engine untouched (git diff clean on utils/compliance_salary.py).
+
+ITER 487 (doc-expiry alerts):
+- Backend curl E2E: run-now found=2 (60/30/7 buckets), SMTP guard msg OK,
+  real send via local SMTP sink OK (1 email/2 alerts), idempotency OK.
+- Sub-admin scope guard added to scheduled_reports._adm (unit-verified).
+- UI: "Check Expiring Docs Now" button works e2e (screenshot verified,
+  Server Iter 487 badge visible). Test data cleaned.

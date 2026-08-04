@@ -4120,3 +4120,23 @@ KNOWN/DISCUSSION ITEMS: pending app punches still excluded from grid
 unless approved/auto-approve ON (by design); SMTP must be configured for
 scheduled emails; WhatsApp blocked on user's Meta account; server.py +
 compliance-salary-run.tsx refactor pending.
+
+ITER 487 — EXPIRING DOCUMENTS EMAIL ALERTS (DONE, tested):
+- scheduled_reports.py: run_doc_expiry_alerts() — scans firm_masters.
+  compliance_docs + contractors CLRA licences; buckets 60/30/7/0 days;
+  recipients = company_contacts with recipient_permissions.compliance_reports
+  + communication.compliance_email/official_email; gated by comm_prefs.
+  send_compliance_alerts; exactly-once via db.doc_expiry_alerts alert_key;
+  daily scan in scheduled_reports_loop after 08:00 IST.
+- Manual trigger: POST /api/admin/doc-expiry-alerts/run-now?company_id=
+  (force=True bypasses the pref toggle for testing).
+- UI: ContactDetailsSection → Communication Preferences card now has the
+  60/30/7 explanation + "Check Expiring Docs Now" button (cd-check-expiry).
+- SECURITY: _adm() in scheduled_reports.py now enforces
+  sub_admin_can_touch_company (was missing — sub-admin scope leak);
+  firm_master_v2.py verified already scoped via _assert_firm_access.
+- TESTED: seeded 30d firm doc + 7d contractor licence; run-now w/o SMTP →
+  correct guard msg; with local aiosmtpd sink → 1 email, 2 alerts, correct
+  subject/body; second run → "All alerts already sent" (idempotent); UI
+  button click e2e → alert dialog. Test data cleaned up.
+- APP_ITERATION=487; deploy_vps_iter487.sh; temp_bundle script → 487.

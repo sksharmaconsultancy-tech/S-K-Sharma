@@ -37,6 +37,11 @@ async def _adm(authorization, company_id):
         company_id = admin.get("company_id")
     if not company_id:
         raise HTTPException(status_code=400, detail="company_id is required")
+    if admin["role"] == "sub_admin":
+        from server import sub_admin_can_touch_company
+        if not sub_admin_can_touch_company(admin, company_id):
+            raise HTTPException(status_code=403,
+                                detail="Firm is outside your assigned scope")
     return admin, company_id
 
 
@@ -217,4 +222,137 @@ async def scheduled_reports_loop():
                             s["schedule_id"], s["report_kind"], detail)
         except Exception:
             logger.exception("[report-schedules] loop iteration failed")
+        # Iter 487 — expiring documents alerts (after 08:00 IST, alert-level
+        # idempotency prevents duplicates; retries if SMTP was missing).
+        try:
+            if datetime.now(IST).hour >= 8:
+                async for comp in db.companies.find({}, {"_id": 0, "company_id": 1, "name": 1}):
+                    await run_doc_expiry_alerts(comp["company_id"], comp.get("name") or "")
+        except Exception:
+            logger.exception("[doc-expiry] scan failed")
         await asyncio.sleep(300)
+
+
+# ---------------------------------------------------------------------------
+# Iter 487 (user request) — EXPIRING DOCUMENTS EMAIL ALERTS.
+# 60 / 30 / 7 days before (and on the day of) expiry of any Firm Master
+# compliance document or contractor CLRA licence, an email alert goes to
+# every contact with the "Compliance Reports" permission. Controlled by the
+# firm's Contact Details → Communication Preferences → "Send Compliance
+# Alerts" checkbox. Each alert fires exactly once per document per bucket.
+# ---------------------------------------------------------------------------
+ALERT_BUCKETS = (60, 30, 7, 0)
+
+
+async def _expiring_docs(company_id: str):
+    """[(holder, doc, number, expiry_iso, days_left), ...] for alert buckets."""
+    from datetime import date as _date
+    today = _date.today()
+    out = []
+
+    def check(holder, doc, number, expiry):
+        exp = str(expiry or "")[:10]
+        if not exp:
+            return
+        try:
+            days = (_date.fromisoformat(exp) - today).days
+        except ValueError:
+            return
+        if days in ALERT_BUCKETS:
+            out.append((holder, doc or "", number or "", exp, days))
+
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id},
+        {"_id": 0, "compliance_docs": 1, "comm_prefs": 1}) or {}
+    for d in fm.get("compliance_docs") or []:
+        check("FIRM", d.get("description"), d.get("number"), d.get("expiry_date"))
+    async for c in db.contractors.find({"company_id": company_id}, {"_id": 0}):
+        check(f"CONTRACTOR — {c.get('name') or ''}", "CLRA Labour Licence",
+              c.get("licence_no"), c.get("licence_expiry_date"))
+    return out, bool((fm.get("comm_prefs") or {}).get("send_compliance_alerts"))
+
+
+async def _compliance_recipients(company_id: str):
+    recips = set()
+    async for c in db.company_contacts.find(
+            {"company_id": company_id,
+             "recipient_permissions.compliance_reports": True},
+            {"_id": 0, "email": 1}):
+        if (c.get("email") or "").strip():
+            recips.add(c["email"].strip())
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "communication": 1}) or {}
+    comm = fm.get("communication") or {}
+    for k in ("compliance_email", "official_email"):
+        if (comm.get(k) or "").strip():
+            recips.add(comm[k].strip())
+    return sorted(recips)
+
+
+async def run_doc_expiry_alerts(company_id: str, company_name: str = "",
+                                force: bool = False) -> Dict[str, Any]:
+    """Scan one firm and email any NEW bucket alerts. Idempotent."""
+    docs, enabled = await _expiring_docs(company_id)
+    if not docs:
+        return {"found": 0, "sent": 0, "detail": "No documents in an alert window."}
+    if not enabled and not force:
+        return {"found": len(docs), "sent": 0,
+                "detail": "'Send Compliance Alerts' is OFF for this firm "
+                          "(Contact Details → Communication Preferences)."}
+    fresh = []
+    for holder, doc, number, exp, days in docs:
+        akey = f"{holder}|{doc}|{number}|{exp}|{days}"
+        dup = await db.doc_expiry_alerts.find_one(
+            {"company_id": company_id, "alert_key": akey}, {"_id": 1})
+        if not dup:
+            fresh.append((akey, holder, doc, number, exp, days))
+    if not fresh:
+        return {"found": len(docs), "sent": 0, "detail": "All alerts already sent."}
+    recips = await _compliance_recipients(company_id)
+    if not recips:
+        return {"found": len(docs), "sent": 0,
+                "detail": "No compliance recipients — tick 'Compliance Reports' "
+                          "on a contact in Contact Details."}
+    from routes.email_notifications import _get_settings, _smtp_send
+    settings = await _get_settings()
+    if not settings:
+        return {"found": len(docs), "sent": 0,
+                "detail": "SMTP is not configured (Email Settings)."}
+
+    def _line(h, d, n, e, days):
+        when = ("EXPIRES TODAY" if days == 0 else f"expires in {days} days")
+        return f"• {d}{f' ({n})' if n else ''} — {h} — {when} (on {e})"
+
+    body = (f"⚠ Document expiry alert — {company_name or company_id}\n\n"
+            + "\n".join(_line(h, d, n, e, days) for _, h, d, n, e, days in fresh)
+            + "\n\nPlease renew these documents before the due date."
+              "\n— Automated alert from your compliance portal.")
+    subject = (f"[{company_name or 'Compliance'}] {len(fresh)} document(s) "
+               f"nearing expiry")
+    sent = 0
+    for to in recips:
+        try:
+            await _smtp_send(settings, to, subject, body)
+            sent += 1
+        except Exception as e:
+            logger.warning("[doc-expiry] send to %s failed: %s", to, e)
+    if sent:
+        now = datetime.now(IST).isoformat()
+        for akey, *_rest in fresh:
+            await db.doc_expiry_alerts.update_one(
+                {"company_id": company_id, "alert_key": akey},
+                {"$set": {"sent_at": now}}, upsert=True)
+    return {"found": len(docs), "new_alerts": len(fresh), "sent": sent,
+            "recipients": recips,
+            "detail": f"{len(fresh)} alert(s) emailed to {sent}/{len(recips)} recipient(s)."}
+
+
+@router.post("/doc-expiry-alerts/run-now")
+async def doc_expiry_run_now(company_id: Optional[str] = None,
+                             authorization: Optional[str] = Header(None)):
+    """Manual trigger (testing / on-demand) — respects idempotency."""
+    _, company_id = await _adm(authorization, company_id)
+    comp = await db.companies.find_one(
+        {"company_id": company_id}, {"_id": 0, "name": 1}) or {}
+    res = await run_doc_expiry_alerts(company_id, comp.get("name") or "", force=True)
+    return {"ok": True, **res}

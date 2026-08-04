@@ -182,6 +182,15 @@ export default function ContactDetailsSection({
       window.alert(r.detail || (r.ok ? "Test message queued ✓" : "Could not send"));
     } catch (e: any) { window.alert(e?.message || "Test failed"); }
   };
+  // Iter 487 — manual trigger for the 60/30/7-day document expiry alerts.
+  const checkExpiringDocs = async () => {
+    if (Platform.OS !== "web") return;
+    try {
+      const r = await api<{ detail?: string; found?: number; sent?: number }>(
+        `/admin/doc-expiry-alerts/run-now?company_id=${companyId}`, { method: "POST" });
+      window.alert(r.detail || `${r.found ?? 0} document(s) in an alert window; ${r.sent ?? 0} email(s) sent.`);
+    } catch (e: any) { window.alert(e?.message || "Check failed"); }
+  };
   const copyContact = (c: Contact) => {
     if (Platform.OS !== "web") return;
     const txt = `${c.name}${c.designation ? ` (${c.designation})` : ""}\nMobile: ${c.country_code || "+91"} ${c.mobile}\nEmail: ${c.email}`;
@@ -374,6 +383,17 @@ export default function ContactDetailsSection({
           SMS notifications are not configured (no SMS provider) — WhatsApp &
           Email channels are used instead.
         </Text>
+        <Text style={st.emptyTxt}>
+          With &quot;Send Compliance Alerts&quot; ON, an email goes automatically 60 / 30 /
+          7 days before (and on the day) any Firm Master compliance document or
+          contractor CLRA licence expires — to every contact ticked for
+          &quot;Compliance Reports&quot; plus the Compliance / Official email above.
+          Requires SMTP (Communication → Email Settings).
+        </Text>
+        <View style={{ flexDirection: "row", marginTop: 6 }}>
+          <MiniBtn icon="alarm-outline" label="Check Expiring Docs Now"
+                   onPress={checkExpiringDocs} testID="cd-check-expiry" />
+        </View>
       </Card>
     </View>
   );
