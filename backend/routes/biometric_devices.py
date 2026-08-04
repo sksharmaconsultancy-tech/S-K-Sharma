@@ -185,6 +185,18 @@ async def _ingest_attlog_line(
             "seen_at": _now_iso_z(),
         })
         return False, f"unmapped_user:{device_user_id}"
+    # Iter 481 (user request) — IGNORE duplicate punches within 5 minutes
+    # on the SAME machine (employees double-punch back-to-back, which used
+    # to flip the IN/OUT alternation and corrupt the whole day).
+    _win_lo = (dt - timedelta(minutes=5)).isoformat()
+    _win_hi = (dt + timedelta(minutes=5)).isoformat()
+    _dup5 = await db.attendance.find_one({
+        "user_id": user["user_id"],
+        "device_serial": device["serial_number"],
+        "at": {"$gte": _win_lo, "$lte": _win_hi},
+    }, {"_id": 0, "record_id": 1})
+    if _dup5:
+        return True, "duplicate_within_5min_ignored"
     record_id = f"zk_{uuid.uuid4().hex[:12]}"
     # Iter 143 (user spec) — single-machine "Both IN/OUT" mode: the punch
     # direction alternates per employee per day (first punch = IN, next =

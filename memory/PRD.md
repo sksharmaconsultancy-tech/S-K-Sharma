@@ -3990,3 +3990,23 @@ reports, CLRA-vs-Labour-Code mode. Digital signature = SKIPPED (user).
 - APP_ITERATION=480; deploy_vps_iter480.sh (kind=script).
 - Phase 3 pending: Inspection Register (CRUD), Digital Document Register,
   scheduled email reports, CLRA vs Labour Code mode toggle.
+
+## Iter 481 — Punch dedup (5 min) + alternation repair + night-shift pairing
+USER ISSUE (live VPS, RANJAN FABRICS): almost all grid cells "missing OUT"
+— employees DO punch twice but double-punch bursts flipped ADMS IN/OUT
+alternation; night OUT (01:10) landed next day as "in".
+- biometric_devices.py ingestion: skip punch if same user+device has any
+  punch within ±5 min ("duplicate_within_5min_ignored").
+- server.py NEW dedupe_close_punches(punches_by_day): (1) drop punches
+  <5 min after previous kept punch from SAME source; (2) re-kind machine
+  days whose punches are all same-kind (zkteco/import sources only,
+  mobile/manual untouched): first<08:00 → "out" (night candidate), rest
+  alternate in/out.
+- stitch_cross_day_ot extended: next-day first punch kind "in" before
+  08:00 after unpaired IN → re-kinded "out" + pulled back (was out-only).
+- Wired at ALL 4 call sites: _compute_monthly_grid_data, server.py:9264
+  (by_day), server.py:10428 (OT matrix pipeline), attendance_doctor._stitch.
+- Unit-tested via ast-extracted functions: burst dedupe ✓, night pairing
+  22:00 IN + next-day 01:10 → OUT same day ✓, mobile kinds untouched ✓.
+- No DB migration: existing duplicates repaired on the fly at compute.
+- APP_ITERATION=481; deploy_vps_iter481.sh.

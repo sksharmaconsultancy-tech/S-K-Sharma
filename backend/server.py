@@ -1786,6 +1786,64 @@ def has_unpaired_punches(day_punches: List[dict]) -> bool:
 
 
 
+def dedupe_close_punches(
+    punches_by_day: Dict[str, List[dict]],
+    window_min: int = 5,
+) -> Dict[str, List[dict]]:
+    """Iter 481 (user request) — repair stored machine-punch data:
+
+    1. DROP duplicate punches within ``window_min`` minutes of the
+       previous kept punch from the SAME machine/source (double-punching
+       at the device used to flip the IN/OUT alternation).
+    2. RE-KIND corrupted machine days: when a day's remaining MACHINE
+       punches are all the same kind (all "in" or all "out") and there
+       are 2+, re-assign alternately IN → OUT → IN … in time order.
+       Mobile / manual punches keep their explicit kinds.
+
+    Returns a NEW dict (does not mutate the input).
+    """
+    from datetime import datetime as _dt
+    out: Dict[str, List[dict]] = {}
+    last_at = None
+    last_src = None
+    for dk in sorted(punches_by_day.keys()):
+        kept: List[dict] = []
+        for p in sorted(punches_by_day.get(dk) or [],
+                        key=lambda x: x.get("at") or ""):
+            try:
+                t = _dt.fromisoformat(str(p.get("at")).replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                kept.append(p)
+                continue
+            src = str(p.get("source") or "")
+            if (last_at is not None and src and src == last_src
+                    and abs((t - last_at).total_seconds()) < window_min * 60):
+                continue  # duplicate burst on the same machine — drop
+            kept.append(p)
+            last_at, last_src = t, src
+        machine = [p for p in kept
+                   if str(p.get("source") or "").startswith(("zkteco", "import"))]
+        kinds = {(p.get("kind") or "").lower() for p in machine}
+        if machine and (kinds <= {"in"} or kinds <= {"out"}):
+            seq = sorted(machine, key=lambda x: x.get("at") or "")
+            start = 0
+            try:
+                _t0 = _dt.fromisoformat(
+                    str(seq[0].get("at")).replace("Z", "+00:00"))
+                if _t0.hour < 8:
+                    # Early-morning first punch = candidate NIGHT-SHIFT
+                    # OUT (cross-day stitch pairs it to yesterday's IN).
+                    seq[0]["kind"] = "out"
+                    start = 1
+            except (ValueError, TypeError):
+                pass
+            if len(seq) - start >= 2:
+                for i, p in enumerate(seq[start:]):
+                    p["kind"] = "in" if i % 2 == 0 else "out"
+        out[dk] = kept
+    return out
+
+
 def stitch_cross_day_ot(
     punches_by_day: Dict[str, List[dict]],
     max_hours: int = 16,
@@ -1836,8 +1894,22 @@ def stitch_cross_day_ot(
             continue
         nxt_sorted = sorted(nxt, key=lambda p: p.get("at") or "")
         first = nxt_sorted[0]
-        if (first.get("kind") or "").lower() != "out":
-            continue
+        first_kind = (first.get("kind") or "").lower()
+        # Iter 481 (user request) — a next-day EARLY-MORNING punch (before
+        # 08:00) following an unpaired IN also counts as the night-shift
+        # OUT even when the machine mislabelled it "in" (alternation
+        # corruption). Re-kind it to "out" and pull it back.
+        if first_kind != "out":
+            _early_relabel = False
+            if first_kind == "in":
+                try:
+                    _t = _dt.fromisoformat(
+                        str(first["at"]).replace("Z", "+00:00"))
+                    _early_relabel = _t.hour < 8
+                except (ValueError, TypeError, KeyError):
+                    pass
+            if not _early_relabel:
+                continue
         try:
             in_at = _dt.fromisoformat(str(cur_sorted[-1]["at"]).replace("Z", "+00:00"))
             out_at = _dt.fromisoformat(str(first["at"]).replace("Z", "+00:00"))
@@ -1847,6 +1919,7 @@ def stitch_cross_day_ot(
             continue
         moved = dict(first)
         moved["date"] = dk
+        moved["kind"] = "out"
         moved["_cross_day"] = True
         out_map[dk] = cur_sorted + [moved]
         out_map[next_dk] = nxt_sorted[1:]
@@ -9151,7 +9224,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "480"
+APP_ITERATION = "481"
 
 
 @api.get("/version")
@@ -9188,7 +9261,7 @@ def _policy2_biometric_stats(att_rows: List[dict], policy: dict, emp_full: dict)
         d = r.get("date")
         if d:
             by_day.setdefault(d, []).append(r)
-    by_day = stitch_cross_day_ot(by_day)
+    by_day = stitch_cross_day_ot(dedupe_close_punches(by_day))
     present = 0.0
     duty_min = 0.0
     for date_key, punches in by_day.items():
@@ -9643,12 +9716,14 @@ async def _compute_monthly_grid_data(
         ).sort([("user_id", 1), ("at", 1)]):
             uid = r["user_id"]
             punches_by_user_day.setdefault(uid, {}).setdefault(r["date"], []).append(r)
+        # Iter 481 (user request) — drop 5-min duplicate machine punches
+        # and repair corrupted IN/OUT alternation BEFORE cross-day stitch.
         # Iter 77y — Stitch cross-day OT (night-shift OUT punches that
         # land on the next calendar day get moved back to the day the
         # session started so the OT window can be paired correctly).
         for _uid_key in list(punches_by_user_day.keys()):
             punches_by_user_day[_uid_key] = stitch_cross_day_ot(
-                punches_by_user_day[_uid_key],
+                dedupe_close_punches(punches_by_user_day[_uid_key]),
             )
 
     # ----- Working-hour thresholds for OT calculation --------------------
@@ -10349,9 +10424,10 @@ async def _build_ot_report_rows(
     ).sort([("user_id", 1), ("at", 1)]):
         punches_by_user_day.setdefault(r["user_id"], {}).setdefault(r["date"], []).append(r)
     # Iter 77y — Same cross-day OT stitching as the grid pipeline.
+    # Iter 481 — plus 5-min duplicate/alternation repair.
     for _uid_k in list(punches_by_user_day.keys()):
         punches_by_user_day[_uid_k] = stitch_cross_day_ot(
-            punches_by_user_day[_uid_k],
+            dedupe_close_punches(punches_by_user_day[_uid_k]),
         )
 
     pol = company.get("attendance_policy") or {}
