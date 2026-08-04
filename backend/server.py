@@ -1821,8 +1821,12 @@ def dedupe_close_punches(
                 continue  # duplicate burst on the same machine — drop
             kept.append(p)
             last_at, last_src = t, src
-        machine = [p for p in kept
-                   if str(p.get("source") or "").startswith(("zkteco", "import"))]
+        # Iter 486 (user bug) — the all-same-kind repair now covers EVERY
+        # source (machine + app + manual + import) so a day whose punches
+        # all landed as "in" (or all "out") is re-kinded earliest=IN →
+        # latest=OUT regardless of which device/app recorded them.
+        # Mixed-kind days keep their explicit kinds untouched.
+        machine = [p for p in kept if (p.get("kind") or "").lower() in ("in", "out")]
         kinds = {(p.get("kind") or "").lower() for p in machine}
         if machine and (kinds <= {"in"} or kinds <= {"out"}):
             seq = sorted(machine, key=lambda x: x.get("at") or "")
@@ -2833,6 +2837,13 @@ async def startup():
         asyncio.create_task(daily_attendance_report_loop())
     except Exception:
         logger.exception("[startup] daily attendance report scheduler failed to start")
+
+    # Iter 486 — CLRA Phase 3: scheduled register emails (daily/weekly/monthly).
+    try:
+        from routes.scheduled_reports import scheduled_reports_loop
+        asyncio.create_task(scheduled_reports_loop())
+    except Exception:
+        logger.exception("[startup] scheduled reports loop failed to start")
 
     # Iter 146 — geofence punch reminder: web-push employees who are inside
     # the office geofence but haven't punched in yet (max 1/day, 10-min scan).
@@ -9224,7 +9235,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "485"
+APP_ITERATION = "486"
 
 
 @api.get("/version")
@@ -9702,6 +9713,13 @@ async def _compute_monthly_grid_data(
     punches_by_user_day: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
     if employees:
         user_ids = [e["user_id"] for e in employees]
+        # Iter 486 (user bug — "Still Facing Issue") — CROSS-MONTH night
+        # shifts: load ±1 day around the window so a night-shift OUT that
+        # lands on the 1st can stitch back to the previous month's last
+        # day (and the last day's OUT on the 1st of next month is found).
+        # Out-of-range day keys are dropped again after stitching.
+        _q_from = (datetime.strptime(date_from, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+        _q_to = (datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
         async for r in db.attendance.find(
             # Iter 83-final — Per user rule: only APPROVED punches count
             # toward the attendance grid / IN-OUT sheet. Pending punches
@@ -9710,7 +9728,7 @@ async def _compute_monthly_grid_data(
             # edits already set ``status="approved"`` automatically so
             # they're included seamlessly.
             {"user_id": {"$in": user_ids},
-             "date": {"$gte": date_from, "$lte": date_to},
+             "date": {"$gte": _q_from, "$lte": _q_to},
              "status": "approved"},
             {"_id": 0, "user_id": 1, "date": 1, "kind": 1, "at": 1, "source": 1},
         ).sort([("user_id", 1), ("at", 1)]):
@@ -9722,9 +9740,14 @@ async def _compute_monthly_grid_data(
         # land on the next calendar day get moved back to the day the
         # session started so the OT window can be paired correctly).
         for _uid_key in list(punches_by_user_day.keys()):
-            punches_by_user_day[_uid_key] = stitch_cross_day_ot(
+            _repaired = stitch_cross_day_ot(
                 dedupe_close_punches(punches_by_user_day[_uid_key]),
             )
+            # Drop the ±1-day helper keys after stitching (Iter 486).
+            punches_by_user_day[_uid_key] = {
+                dk: v for dk, v in _repaired.items()
+                if date_from <= dk <= date_to
+            }
 
     # ----- Working-hour thresholds for OT calculation --------------------
     pol = company.get("attendance_policy") or {}
@@ -12061,10 +12084,12 @@ app.include_router(payroll_reports_router)
 from routes.govt_audit_reports import govt_router, audit_router  # noqa: E402
 from routes.contractors import router as contractors_router  # noqa: E402
 from routes.clra_labour_reports import router as clra_reports_router  # noqa: E402
+from routes.scheduled_reports import router as scheduled_reports_router  # noqa: E402
 app.include_router(govt_router)
 app.include_router(audit_router)
 app.include_router(contractors_router)
 app.include_router(clra_reports_router)
+app.include_router(scheduled_reports_router)
 
 # Iter 359 — PF & ESIC Claims Management.
 from routes.claims_management import router as claims_router  # noqa: E402

@@ -198,22 +198,42 @@ async def _ingest_attlog_line(
     if _dup5:
         return True, "duplicate_within_5min_ignored"
     record_id = f"zk_{uuid.uuid4().hex[:12]}"
+    # Iter 486 (user bug — "Still Facing Issue", missing OUT everywhere) —
+    # honour the MACHINE'S OWN punch-state (ATTLOG col 3). ZKTeco/BIOFACE
+    # devices with IN/OUT function keys send: 0=Check-In, 1=Check-Out,
+    # 2=Break-Out, 3=Break-In, 4=OT-In, 5=OT-Out. Previously this column
+    # was IGNORED and every punch took the device-level kind (default
+    # "in"), so a single-machine site produced IN-only days.
+    _state_raw = parts[2].strip() if len(parts) > 2 else ""
+    _STATE_KIND = {"0": "in", "1": "out", "2": "out",
+                   "3": "in", "4": "in", "5": "out"}
+    machine_kind = _STATE_KIND.get(_state_raw)
     # Iter 143 (user spec) — single-machine "Both IN/OUT" mode: the punch
     # direction alternates per employee per day (first punch = IN, next =
     # OUT, then IN again …), based on the latest earlier punch that day.
     punch_kind = device.get("kind", "in")
     if punch_kind == "both":
-        last = await db.attendance.find_one(
-            {
-                "user_id": user["user_id"],
-                "date": dt.strftime("%Y-%m-%d"),
-                "kind": {"$in": ["in", "out"]},
-                "at": {"$lt": dt.isoformat()},
-            },
-            {"_id": 0, "kind": 1},
-            sort=[("at", -1)],
-        )
-        punch_kind = "out" if (last and last.get("kind") == "in") else "in"
+        if machine_kind:
+            # Machine reported a direction → use it directly.
+            punch_kind = machine_kind
+        else:
+            last = await db.attendance.find_one(
+                {
+                    "user_id": user["user_id"],
+                    "date": dt.strftime("%Y-%m-%d"),
+                    "kind": {"$in": ["in", "out"]},
+                    "at": {"$lt": dt.isoformat()},
+                },
+                {"_id": 0, "kind": 1},
+                sort=[("at", -1)],
+            )
+            punch_kind = "out" if (last and last.get("kind") == "in") else "in"
+    elif machine_kind and machine_kind != punch_kind and _state_raw != "0":
+        # Fixed-direction device BUT the worker pressed an EXPLICIT
+        # non-default state key (Check-Out / Break / OT) — trust the
+        # machine. State "0" is the ambiguous default on state-less
+        # devices, so it never overrides the admin's device config.
+        punch_kind = machine_kind
     record = {
         "record_id": record_id,
         "user_id": user["user_id"],

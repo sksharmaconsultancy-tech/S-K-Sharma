@@ -4083,3 +4083,40 @@ alternation; night OUT (01:10) landed next day as "in".
      in salary_audit_log.
 - Testing: iteration_485.json — 14/14 backend + 5/5 frontend PASS.
 - APP_ITERATION=485; deploy_vps_iter485.sh; temp_bundle → 485.
+
+## Iter 486 — Attendance engine fixes + CLRA Phase 3 (final)
+ATTENDANCE ("Still Facing Issue" bug):
+- biometric_devices.py: ATTLOG punch-state (col 3) now honoured
+  (_STATE_KIND 0=in,1=out,2/3=break,4/5=OT). kind="both" devices use
+  machine state first, alternation fallback; fixed-kind devices honour
+  explicit non-zero states.
+- server.py dedupe_close_punches: all-same-kind day repair now covers ALL
+  sources (was machine-only) → earliest=IN, latest=OUT.
+- server.py monthly grid: punch query extended ±1 day for CROSS-MONTH
+  night stitching; helper day keys dropped after stitch. Verified E2E:
+  Jul-31 20:00→Aug-1 01:10 pairs on July grid, Aug-1 orphan gone.
+- attendance_admin_core.py: GET /admin/attendance/grid-debug?user_id&date —
+  full trace (raw punches all statuses, excluded reasons e.g. pending,
+  processed pipeline, selected IN/OUT, out_missing_reason).
+- PunchRepairModal approve → onSaved() → grid refreshes instantly.
+CLRA PHASE 3:
+- clra_labour_reports.py: _inspection_register + _document_register kinds;
+  inspections CRUD (/admin/clra-reports/inspections, BEFORE /{kind});
+  compliance_act_line() → subtitles cite CLRA 1970 vs Labour Codes based
+  on firm_masters.settings.compliance_mode.
+- routes/scheduled_reports.py: /admin/report-schedules CRUD + send-now +
+  scheduled_reports_loop (5-min, IST, idempotent last_sent_key; daily/
+  weekly/monthly; use_previous_month; uses _smtp_send attachments).
+  Started in server.py startup.
+- frontend: ClraPhase3Panel.tsx (schedules panel + inspection entries)
+  mounted in reports-center; firm-master Compliance Settings →
+  compliance_mode radio (fm-compliance-mode-*); compliance-salary-run
+  header MASTER SNAPSHOT badge (testID snapshot-badge, reads
+  master-snapshot-info, refreshes after Refresh Master).
+- All E2E tested via curl (registers, CRUD, mode toggle, schedules,
+  send-now SMTP guard, pdf/xlsx exports) + UI screenshot. Test data
+  cleaned. APP_ITERATION=486; deploy_vps_iter486.sh; temp_bundle → 486.
+KNOWN/DISCUSSION ITEMS: pending app punches still excluded from grid
+unless approved/auto-approve ON (by design); SMTP must be configured for
+scheduled emails; WhatsApp blocked on user's Meta account; server.py +
+compliance-salary-run.tsx refactor pending.

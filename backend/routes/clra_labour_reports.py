@@ -598,6 +598,87 @@ async def _leave_register(company_id, month, ctx=None):
             cols, out, None)
 
 
+# ---------------------------------------------------------------------------
+# Iter 486 (Phase 3) — Inspection Register + Digital Document Register
+# ---------------------------------------------------------------------------
+
+async def _inspection_register(company_id, month, ctx=None):
+    """Cumulative register of statutory inspections (entries maintained via
+    the Report Hub's ➕ Inspection Entry form)."""
+    rows = []
+    async for e in db.clra_inspections.find(
+            {"company_id": company_id}, {"_id": 0}).sort("date", -1):
+        rows.append({
+            "date": e.get("date") or "",
+            "inspector": e.get("inspector_name") or "",
+            "designation": e.get("designation") or "",
+            "authority": e.get("authority") or "",
+            "observations": e.get("observations") or "",
+            "action_taken": e.get("action_taken") or "",
+            "status": (e.get("status") or "open").upper(),
+        })
+    cols = [("date", "Date of Inspection"),
+            ("inspector", "Name of Inspector"),
+            ("designation", "Designation"),
+            ("authority", "Authority / Department"),
+            ("observations", "Observations / Remarks"),
+            ("action_taken", "Action Taken"),
+            ("status", "Status")]
+    return ("Inspection Register", cols, rows, None)
+
+
+async def _document_register(company_id, month, ctx=None):
+    """Every statutory document the firm holds (Firm Master compliance
+    documents + contractor licences) with live validity status."""
+    today = date.today().isoformat()
+    soon = (date.today() + timedelta(days=60)).isoformat()
+
+    def _status(num, exp):
+        if not (num or "").strip():
+            return "MISSING"
+        if exp and exp < today:
+            return "EXPIRED"
+        if exp and exp <= soon:
+            return "EXPIRING SOON"
+        return "VALID"
+
+    rows = []
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "compliance_docs": 1}) or {}
+    for d in fm.get("compliance_docs") or []:
+        num = d.get("number") or ""
+        exp = str(d.get("expiry_date") or "")[:10] or None
+        rows.append({
+            "holder": "FIRM",
+            "doc": d.get("description") or "",
+            "number": num,
+            "issue_date": str(d.get("issue_date") or "")[:10],
+            "expiry_date": exp or "—",
+            "status": _status(num, exp),
+        })
+    async for c in db.contractors.find(
+            {"company_id": company_id}, {"_id": 0}):
+        exp = str(c.get("licence_expiry_date") or "")[:10] or None
+        rows.append({
+            "holder": f"CONTRACTOR — {c.get('name') or ''}",
+            "doc": "CLRA Labour Licence",
+            "number": c.get("licence_no") or "",
+            "issue_date": str(c.get("licence_issue_date") or "")[:10],
+            "expiry_date": exp or "—",
+            "status": _status(c.get("licence_no"), exp),
+        })
+    cols = [("holder", "Holder"),
+            ("doc", "Document"),
+            ("number", "Number"),
+            ("issue_date", "Issue Date"),
+            ("expiry_date", "Expiry Date"),
+            ("status", "Status")]
+    totals = {"holder": "TOTAL DOCUMENTS", "doc": str(len(rows)),
+              "status": (f"{sum(1 for r in rows if r['status'] == 'EXPIRED')} expired · "
+                         f"{sum(1 for r in rows if r['status'] == 'EXPIRING SOON')} expiring")}
+    return ("Digital Document Register", cols, rows, totals)
+
+
 _CLRA = {
     "contractor-register": _contractor_register,
     "principal-employer": _principal_employer,
@@ -609,6 +690,8 @@ _CLRA = {
     "leave-register": _leave_register,
     "rejoin-history": _rejoin_history,
     "compliance-dashboard": _compliance_dashboard,
+    "inspection-register": _inspection_register,
+    "document-register": _document_register,
 }
 _TITLES = {
     "contractor-register": "Contractor Register",
@@ -621,7 +704,23 @@ _TITLES = {
     "leave-register": "Leave Register (EL Ledger)",
     "rejoin-history": "Employee Rejoin History",
     "compliance-dashboard": "Compliance Dashboard",
+    "inspection-register": "Inspection Register",
+    "document-register": "Digital Document Register",
 }
+
+
+# ---------------------------------------------------------------------------
+# Iter 486 (Phase 3) — CLRA vs Labour Code mode: the firm setting decides
+# which Act every register cites in its heading (format unchanged).
+# ---------------------------------------------------------------------------
+async def compliance_act_line(company_id: str) -> str:
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "settings": 1}) or {}
+    mode = str((fm.get("settings") or {}).get("compliance_mode") or "clra")
+    if mode == "labour_code":
+        return ("Under the Occupational Safety, Health & Working Conditions "
+                "Code, 2020 and the Code on Wages, 2019")
+    return "Under the Contract Labour (Regulation & Abolition) Act, 1970 & Rules"
 
 
 @router.get("/list")
@@ -630,6 +729,54 @@ async def clra_list(authorization: Optional[str] = Header(None)):
     require_role(admin, ["super_admin", "sub_admin", "company_admin"])
     return {"reports": [{"kind": k, "title": t}
                         for k, t in _TITLES.items()]}
+
+
+# ---- Iter 486 — Inspection entries CRUD (declared BEFORE /{kind}) --------
+@router.get("/inspections")
+async def inspections_list(company_id: Optional[str] = None,
+                           authorization: Optional[str] = Header(None)):
+    company_id = await _adm(authorization, company_id)
+    rows = await db.clra_inspections.find(
+        {"company_id": company_id}, {"_id": 0}).sort("date", -1).to_list(500)
+    return {"inspections": rows}
+
+
+@router.post("/inspections")
+async def inspections_add(payload: dict,
+                          company_id: Optional[str] = None,
+                          authorization: Optional[str] = Header(None)):
+    import uuid as _uuid
+    company_id = await _adm(authorization, company_id or payload.get("company_id"))
+    if not (payload.get("date") or "").strip():
+        raise HTTPException(status_code=400, detail="Inspection date is required")
+    if not (payload.get("inspector_name") or "").strip():
+        raise HTTPException(status_code=400, detail="Inspector name is required")
+    doc = {
+        "inspection_id": payload.get("inspection_id") or f"insp_{_uuid.uuid4().hex[:10]}",
+        "company_id": company_id,
+        "date": str(payload.get("date"))[:10],
+        "inspector_name": (payload.get("inspector_name") or "").strip(),
+        "designation": (payload.get("designation") or "").strip(),
+        "authority": (payload.get("authority") or "").strip(),
+        "observations": (payload.get("observations") or "").strip(),
+        "action_taken": (payload.get("action_taken") or "").strip(),
+        "status": (payload.get("status") or "open").lower(),
+        "updated_at": datetime.now().isoformat(),
+    }
+    await db.clra_inspections.update_one(
+        {"company_id": company_id, "inspection_id": doc["inspection_id"]},
+        {"$set": doc}, upsert=True)
+    return {"ok": True, "inspection": doc}
+
+
+@router.delete("/inspections/{inspection_id}")
+async def inspections_delete(inspection_id: str,
+                             company_id: Optional[str] = None,
+                             authorization: Optional[str] = Header(None)):
+    company_id = await _adm(authorization, company_id)
+    r = await db.clra_inspections.delete_one(
+        {"company_id": company_id, "inspection_id": inspection_id})
+    return {"ok": True, "deleted": r.deleted_count}
 
 
 @router.get("/{kind}")
@@ -645,7 +792,8 @@ async def clra_json(kind: str, company_id: Optional[str] = None,
     company_id = await _adm(authorization, company_id)
     month = month or date.today().strftime("%Y-%m")
     title, cols, rows, totals = await _CLRA[kind](company_id, month)
-    return {"title": title, "subtitle": _mlabel(month),
+    return {"title": title,
+            "subtitle": f"{_mlabel(month)} · {await compliance_act_line(company_id)}",
             "columns": [{"key": k, "label": lb} for k, lb in cols],
             "rows": rows, "totals": totals}
 
@@ -659,6 +807,7 @@ async def _clra_exp(kind, company_id, month, authorization, fmt):
     title, cols, rows, totals = await _CLRA[kind](company_id, month)
     columns = [{"key": k, "label": lb} for k, lb in cols]
     sub = (f"{c.get('name')} · {_mlabel(month)} · "
+           f"{await compliance_act_line(company_id)} · "
            f"Generated {datetime.now():%d-%m-%Y}")
     if fmt == "xlsx":
         buf = register_xlsx(title, sub, columns, rows, totals)

@@ -28,6 +28,7 @@ import RegisterTable, {
   shared,
 } from "@/src/components/RegisterTable";
 import ReportsShareModal from "@/src/components/salary/ReportsShareModal";
+import ClraPhase3Panel from "@/src/components/ClraPhase3Panel";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors } from "@/src/theme";
@@ -443,6 +444,13 @@ export default function ReportsCenterScreen() {
             </View>
           </View>
         )}
+
+        {/* Iter 486 — CLRA Phase 3: schedules + inspection entries */}
+        <ClraPhase3Panel
+          kind={sel?.kind || null}
+          companyId={companyId || null}
+          reportKinds={kinds.filter((k) => k.group === "clra")}
+        />
 
         {sel && EMP_KINDS.has(sel.kind) && (
           <View style={{ marginBottom: 10 }}>

@@ -47,6 +47,93 @@ api = router
 _PUNCH_EDIT_LOOKBACK_DAYS = 90
 
 
+@api.get("/admin/attendance/grid-debug")
+async def attendance_grid_debug(
+    user_id: str = Query(...),
+    date: str = Query(..., description="YYYY-MM-DD"),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 486 (user bug) — full per-day trace of the attendance engine:
+    every stored punch (ALL statuses), what the grid pipeline kept after
+    dedupe / re-kind / night-shift stitch, the selected IN & OUT, and the
+    exact reason a punch was excluded (e.g. status=pending)."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    emp = await db.users.find_one(
+        {"user_id": user_id},
+        {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1, "company_id": 1})
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if admin["role"] == "company_admin" and emp.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised")
+    if admin["role"] == "sub_admin" and not sub_admin_can_touch_company(admin, emp.get("company_id")):
+        raise HTTPException(status_code=403, detail="Not authorised")
+
+    from server import dedupe_close_punches, stitch_cross_day_ot
+    day = _parse_any_date(date)
+    if not day:
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+    if isinstance(day, datetime):
+        day = day.date()
+    d_prev = (day - timedelta(days=1)).isoformat()
+    d_next = (day + timedelta(days=1)).isoformat()
+    date = day.isoformat()
+
+    raw = await db.attendance.find(
+        {"user_id": user_id, "date": {"$in": [d_prev, date, d_next]}},
+        {"_id": 0, "record_id": 1, "date": 1, "kind": 1, "at": 1,
+         "source": 1, "status": 1, "pending_reason": 1, "mock_location": 1},
+    ).sort("at", 1).to_list(200)
+
+    stored = []
+    excluded = []
+    by_day: Dict[str, List[dict]] = {}
+    for r in raw:
+        entry = {**r}
+        if r.get("status") != "approved":
+            entry["excluded_reason"] = (
+                f"status={r.get('status')}"
+                + (f" ({r.get('pending_reason')})" if r.get("pending_reason") else "")
+                + " — only APPROVED punches count on the grid. Approve it in the "
+                  "Repair modal, or enable Firm Master → Approval Workflow → "
+                  "'Auto-approve Mobile App Punches' for app punches.")
+            excluded.append(entry)
+        else:
+            by_day.setdefault(r["date"], []).append(dict(r))
+            stored.append(entry)
+
+    processed = stitch_cross_day_ot(dedupe_close_punches(by_day))
+    day_punches = processed.get(date, [])
+    ins = [p for p in day_punches if (p.get("kind") or "").lower() == "in"]
+    outs = [p for p in day_punches if (p.get("kind") or "").lower() == "out"]
+    sel_in = min(ins, key=lambda p: p.get("at") or "") if ins else None
+    sel_out = max(outs, key=lambda p: p.get("at") or "") if outs else None
+    reason = None
+    if not sel_out:
+        if any(e.get("kind") == "out" for e in excluded if e.get("date") == date):
+            reason = ("An OUT punch EXISTS for this date but is not APPROVED "
+                      "— see excluded_punches for the exact status.")
+        elif not day_punches:
+            reason = "No approved punches stored for this date."
+        else:
+            reason = ("All approved punches on this date resolved to IN — no "
+                      "OUT recorded (machine may be IN-only, or the OUT "
+                      "landed on another date).")
+    logger.info("[grid-debug] %s %s — raw=%d approved=%d in=%s out=%s reason=%s",
+                user_id, date, len(raw), len(stored),
+                (sel_in or {}).get("at"), (sel_out or {}).get("at"), reason)
+    return {
+        "employee": emp,
+        "date": date,
+        "raw_punches": raw,
+        "excluded_punches": excluded,
+        "processed_day_punches": day_punches,
+        "selected_in": sel_in,
+        "selected_out": sel_out,
+        "out_missing_reason": reason,
+    }
+
+
 @api.get("/admin/attendance/today")
 async def admin_attendance_today(
     company_id: Optional[str] = None,

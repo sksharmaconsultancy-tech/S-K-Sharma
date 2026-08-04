@@ -278,6 +278,7 @@ export default function PunchRepairModal({
                           });
                           setChanged(true);
                           await load();
+                          onSaved?.(); // Iter 486 — refresh the grid instantly
                         } catch (e: any) {
                           setErr(e?.message || "Approve failed");
                         } finally {

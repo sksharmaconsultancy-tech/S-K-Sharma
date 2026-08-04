@@ -1374,7 +1374,33 @@ export default function FirmMasterScreen() {
         ) : null}
 
         {/* 7. COMPLIANCE SETTINGS — portal logins ------------------------ */}
-        {sec("compliance") ? (
+        {sec("compliance") ? (<>
+        <Section icon="ribbon-outline" title="Compliance Mode (Register Headings)">
+          <Text style={{ fontSize: 11.5, color: colors.onSurfaceTertiary, marginBottom: 8 }}>
+            Decides which Act every CLRA / Labour register cites in its
+            heading — the report formats stay identical.
+          </Text>
+          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+            {([["clra", "CLRA Act, 1970"], ["labour_code", "Labour Codes (OSH 2020 / Wages 2019)"]] as [string, string][]).map(([v, lbl]) => {
+              const on = (st.compliance_mode || "clra") === v;
+              return (
+                <Pressable key={v} testID={`fm-compliance-mode-${v}`}
+                  onPress={() => updateSection("settings", { compliance_mode: v })}
+                  style={{
+                    flexDirection: "row", alignItems: "center", gap: 6,
+                    borderWidth: 1.5, borderColor: on ? colors.brandPrimary : colors.border,
+                    backgroundColor: on ? colors.brandTertiary : colors.surface,
+                    borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8,
+                  }}>
+                  <Ionicons name={on ? "radio-button-on" : "radio-button-off"} size={14}
+                            color={on ? colors.brandPrimary : colors.onSurfaceTertiary} />
+                  <Text style={{ fontSize: 12.5, fontWeight: on ? "800" : "500",
+                                 color: on ? colors.brandPrimary : colors.onSurfaceSecondary }}>{lbl}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </Section>
         <Section icon="key-outline" title="Portal Login Credentials">
           <View style={styles.gridHead}>
             <Text style={[styles.gridHeadCell, { flex: 1.2 }]}>Login Type</Text>
@@ -1412,7 +1438,7 @@ export default function FirmMasterScreen() {
             </View>
           ))}
         </Section>
-        ) : null}
+        </>) : null}
 
         {/* 13. APPROVAL — Employee Rejoin (Rehire) policy ---------------- */}
         {sec("approval") ? (

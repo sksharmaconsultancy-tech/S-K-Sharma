@@ -980,6 +980,19 @@ export default function ComplianceSalaryRunScreen() {
   // snapshot with the CURRENT Employee Master (new version, full history
   // kept) and reprocess the sheet on the refreshed values.
   const [refreshingSnap, setRefreshingSnap] = useState(false);
+  // Iter 486 — snapshot badge data for the run header.
+  const [snapInfo, setSnapInfo] = useState<any>(null);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!run?.run_id) { setSnapInfo(null); return; }
+      try {
+        const r = await api<any>(`/admin/compliance-salary-runs/${run.run_id}/master-snapshot-info`);
+        if (alive) setSnapInfo(r);
+      } catch { if (alive) setSnapInfo(null); }
+    })();
+    return () => { alive = false; };
+  }, [run?.run_id, refreshingSnap]);
   const refreshMasterSnapshot = async () => {
     if (!run || !isSuper) return;
     const ok = await confirmYesNo(
@@ -2418,6 +2431,17 @@ export default function ComplianceSalaryRunScreen() {
                   · net · month_days · PF/ESIC/TDS totals) moved to the sticky
                   FOOTER strip at the bottom of the screen. */}
               <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
+                {/* Iter 486 — Master Snapshot badge: which frozen master
+                    version this sheet was calculated on. */}
+                {snapInfo?.exists ? (
+                  <View testID="snapshot-badge" style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "#E0F2FE", borderRadius: 999 }}>
+                    <Ionicons name="lock-closed" size={12} color="#0369A1" />
+                    <Text style={{ fontSize: 11, fontWeight: "800", color: "#0369A1" }}>
+                      MASTER SNAPSHOT v{snapInfo.version} — frozen {String(snapInfo.created_at || "").slice(0, 10).split("-").reverse().join("-")}
+                      {snapInfo.source === "refresh_master" ? " (refreshed)" : ""}
+                    </Text>
+                  </View>
+                ) : null}
                 {(run as any).frozen ? (
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "#EDE9FE", borderRadius: 999 }}>
                     <Ionicons name="snow-outline" size={12} color="#5B21B6" />
