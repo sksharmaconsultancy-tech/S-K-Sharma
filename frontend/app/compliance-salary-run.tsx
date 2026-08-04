@@ -976,6 +976,36 @@ export default function ComplianceSalaryRunScreen() {
     }
   };
 
+  // Iter 485 — SUPER-ADMIN ONLY: replace the frozen payroll master
+  // snapshot with the CURRENT Employee Master (new version, full history
+  // kept) and reprocess the sheet on the refreshed values.
+  const [refreshingSnap, setRefreshingSnap] = useState(false);
+  const refreshMasterSnapshot = async () => {
+    if (!run || !isSuper) return;
+    const ok = await confirmYesNo(
+      "This action will replace the existing payroll snapshot with the current Employee Master. Historical payroll values may change. Continue?",
+    );
+    if (!ok) return;
+    let reason: string | null = null;
+    if (Platform.OS === "web") {
+      reason = window.prompt("Reason for refreshing the master snapshot (recorded in the audit trail):", "");
+      if (reason === null) return; // cancelled
+    }
+    setRefreshingSnap(true);
+    try {
+      const j = await api<{ run: CompRun; snapshot: any }>(
+        `/admin/compliance-salary-runs/${run.run_id}/refresh-master-snapshot`,
+        { method: "POST", body: { reason } });
+      hydratedRunsRef.current[run.run_id] = true;
+      setRun(j.run);
+      showMsg(`Master snapshot refreshed ✓ — now on version v${j.snapshot?.new_version}. Sheet reprocessed on the current Employee Master.`);
+    } catch (e: any) {
+      showMsg(e?.message || "Refresh Master failed");
+    } finally {
+      setRefreshingSnap(false);
+    }
+  };
+
   // Iter 230 (user request) — Delete the salary run (asks TWICE).
   const deleteRun = async () => {
     if (!run) return;
@@ -2437,6 +2467,10 @@ export default function ComplianceSalaryRunScreen() {
                         Reprocess / Delete / Finalize & Lock. */}
                     <ActionBtn icon="save-outline" label="Save" onPress={saveAsDraft} />
                     <ActionBtn icon="refresh-circle-outline" label="Reprocess" onPress={reprocessRun} />
+                    {isSuper ? (
+                      <ActionBtn icon="sync-circle-outline" label="Refresh Master"
+                                 busy={refreshingSnap} onPress={refreshMasterSnapshot} />
+                    ) : null}
                     <ActionBtn icon="trash-outline" label="Delete" onPress={deleteRun} />
                     <ActionBtn icon="checkmark-done-outline" label="Finalize & Lock" busy={finalizing} onPress={finalizeRun} primary />
                   </>

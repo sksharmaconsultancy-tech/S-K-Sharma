@@ -10,7 +10,7 @@ import re
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Header, HTTPException, Query
+from fastapi import APIRouter, Body, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from server import (  # noqa: E402
@@ -79,6 +79,7 @@ async def _compute_compliance_run(
     admin: dict,
     payload: ComplianceSalaryRunCreate,
     prev_rows: Optional[Dict[str, dict]] = None,
+    allow_snapshot_create: bool = True,
 ) -> dict:
     """Shared compute path for compliance salary runs. Mirrors the base
     salary run pipeline (same attendance stats + policy merge) but uses
@@ -139,6 +140,49 @@ async def _compute_compliance_run(
 
     employees = await db.users.find(q, {"_id": 0}).to_list(2000)
 
+    # ---- Iter 485 — MASTER DATA SNAPSHOT (enterprise payroll freeze) ----
+    # First generation of firm+month+group freezes every salary-related
+    # master value. Reprocess / Delete+Generate read the snapshot instead
+    # of the live Employee Master; attendance/OT/leave/advances stay live.
+    from utils.master_snapshot import (
+        load_master_snapshot, create_master_snapshot, append_new_employees,
+        overlay_snapshot,
+    )
+    _snap_cid = q.get("company_id")
+    _snap_map: Dict[str, dict] = {}
+    _snap_meta: Optional[dict] = None
+    if _snap_cid:
+        _snap_map = await load_master_snapshot(
+            db, _snap_cid, payload.month, run_type, payload.employee_type)
+    if _snap_map:
+        _seen_uids = set()
+        _overlaid = []
+        for e in employees:
+            sd = _snap_map.get(e.get("user_id"))
+            if sd is not None:
+                _seen_uids.add(e["user_id"])
+                _overlaid.append(overlay_snapshot(e, sd.get("data") or {}))
+            else:
+                _overlaid.append(e)  # new joiner — live master (frozen below)
+        # Employees REMOVED from the master (or moved out of the group)
+        # after the snapshot: resurrect from the snapshot so a
+        # Delete + Generate-Again reproduces the identical payroll.
+        for _uid, sd in _snap_map.items():
+            if _uid not in _seen_uids:
+                _ghost = dict(sd.get("data") or {})
+                _ghost["user_id"] = _uid
+                _ghost.setdefault("company_id", _snap_cid)
+                _ghost.setdefault("employee_code", sd.get("employee_code"))
+                _ghost["role"] = "employee"
+                employees_ghost = _ghost  # keep lint happy inline
+                _overlaid.append(employees_ghost)
+        employees = _overlaid
+        _snap_meta = {
+            "used": True,
+            "version": int(next(iter(_snap_map.values())).get("version") or 1),
+            "employees": len(_snap_map),
+        }
+
     # Iter 167 — "Resigned this month" summary: capture who gets auto-
     # excluded because they resigned/exited before the run month starts,
     # so the Compliance Salary screen can show the list.
@@ -155,6 +199,29 @@ async def _compute_compliance_run(
     employees = [e for e in employees if not _month_is_before_doj(e, payload.month)
                  and not _month_is_after_exit(e, payload.month)
                  and e.get("disabled") is not True]  # Iter 166/168
+
+    # Iter 485 — snapshot bookkeeping AFTER the scope filters, so the
+    # frozen set matches exactly who is in the run.
+    if _snap_cid:
+        if not _snap_map and allow_snapshot_create and employees:
+            # FIRST generation → freeze v1. NEVER created on reprocess.
+            _n = await create_master_snapshot(
+                db, _snap_cid, payload.month, run_type,
+                payload.employee_type, employees, admin)
+            _snap_meta = {"used": False, "created": True, "version": 1,
+                          "employees": _n}
+        elif _snap_map:
+            # New joiners after the freeze: append THEM to the active
+            # version (frozen from now on) — spec: read master once.
+            _new = [e for e in employees
+                    if e.get("user_id") not in _snap_map]
+            if _new:
+                await append_new_employees(
+                    db, _snap_cid, payload.month, run_type,
+                    payload.employee_type, _new, admin,
+                    version=int(_snap_meta["version"]) if _snap_meta else 1)
+                if _snap_meta:
+                    _snap_meta["appended"] = len(_new)
 
     # Iter 127f/g — statutory config precedence: global Standard Compliance
     # Settings < firm-specific overrides (Firm Master) < per-run cfg.
@@ -1181,6 +1248,9 @@ async def _compute_compliance_run(
         "frozen": bool(payload.use_imported_sheet) or _fag_used,
 
         "totals": totals,
+        # Iter 485 — master snapshot metadata (additive; None for scopes
+        # without a firm filter where no snapshot applies).
+        "master_snapshot": _snap_meta,
         "generated_by": admin["user_id"],
         "generated_at": now_iso(),
     }
@@ -1693,6 +1763,17 @@ async def _create_compliance_salary_run_core(
         else f"Processed {len(run.get('rows') or [])} employees"
     )
     await write_salary_audit(admin, "process", run, _audit_msg)
+    # Iter 485 — audit the master-snapshot lifecycle events.
+    _sm = run.get("master_snapshot") or {}
+    if _sm.get("created"):
+        await write_salary_audit(
+            admin, "snapshot_created", run,
+            f"Master snapshot v1 frozen ({_sm.get('employees')} employees)")
+    elif _sm.get("appended"):
+        await write_salary_audit(
+            admin, "snapshot_appended", run,
+            f"{_sm['appended']} new employee(s) appended to snapshot "
+            f"v{_sm.get('version')}")
     return {"ok": True, "run": {k: v for k, v in run.items() if k != "_id"}}
 
 
@@ -2112,7 +2193,11 @@ async def reprocess_compliance_salary_run(
         use_imported_sheet=bool(body.get("use_imported_sheet", False)),
         copy_last_month=bool(body.get("copy_last_month", False)),
     )
-    run = await _compute_compliance_run(admin, payload)
+    # Iter 485 — reprocess NEVER creates the master snapshot (spec): it
+    # uses the existing one; a legacy month without a snapshot keeps the
+    # old live-master behaviour until its next Generate.
+    run = await _compute_compliance_run(admin, payload,
+                                        allow_snapshot_create=False)
     run["run_id"] = run_id
     run["reprocessed_from_at"] = existing.get("generated_at")
     # Advance Management — re-apply (idempotent) advance deductions so the
@@ -2132,6 +2217,122 @@ async def reprocess_compliance_salary_run(
         run["totals"] = t
     await db.compliance_salary_runs.replace_one({"run_id": run_id}, run)
     return {"ok": True, "run": {k: v for k, v in run.items() if k != "_id"}}
+
+
+@api.post("/admin/compliance-salary-runs/{run_id}/refresh-master-snapshot")
+async def refresh_master_snapshot_endpoint(
+    run_id: str,
+    request: Request,
+    body: Optional[Dict[str, Any]] = Body(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 485 — SUPER-ADMIN ONLY escape hatch: replace the frozen payroll
+    snapshot with the CURRENT Employee Master (new version — the previous
+    version is kept forever), then reprocess the run on the new values."""
+    admin = await get_user_from_token(authorization)
+    if admin.get("role") not in ("super_admin", "sub_admin"):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a Super Admin / Sub Super Admin can refresh the master snapshot.")
+    existing = await db.compliance_salary_runs.find_one(
+        {"run_id": run_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Compliance salary run not found")
+    if existing.get("finalized"):
+        raise HTTPException(
+            status_code=409,
+            detail="Run is finalized and read-only. Unlock it first.")
+    _cid = existing.get("company_id")
+    if not _cid:
+        raise HTTPException(status_code=400,
+                            detail="Run has no firm scope — snapshot not applicable.")
+    body = body or {}
+    reason = (body.get("reason") or "").strip() or None
+    run_type = (existing.get("run_type") or "compliance").lower()
+
+    # Live employees for the same scope (mirrors the compute's own query).
+    from utils.master_snapshot import refresh_master_snapshot as _refresh
+    q: Dict[str, Any] = {"role": "employee", "company_id": _cid}
+    _et = (existing.get("employee_type") or "").strip()
+    if _et and _et.lower() != "all":
+        q["employee_type"] = {"$in": [_et.title(), _et, _et.lower(), _et.upper()]}
+    live = await db.users.find(q, {"_id": 0}).to_list(5000)
+    live = [e for e in live if not _month_is_before_doj(e, existing["month"])
+            and not _month_is_after_exit(e, existing["month"])
+            and e.get("disabled") is not True]
+    res = await _refresh(db, _cid, existing["month"], run_type,
+                         existing.get("employee_type"), live, admin, reason)
+
+    # Full audit trail (who / when / why / from where).
+    from routes.salary_audit import write_salary_audit
+    await write_salary_audit(
+        admin, "refresh_master_snapshot", existing,
+        f"Snapshot v{res['old_version']} → v{res['new_version']} "
+        f"({res['employees']} employees){' — ' + reason if reason else ''}",
+        extra={"ip": (request.client.host if request.client else None),
+               "user_agent": request.headers.get("user-agent", "")[:160],
+               "reason": reason,
+               "old_version": res["old_version"],
+               "new_version": res["new_version"]})
+
+    # Reprocess the run so the sheet reflects the refreshed master.
+    payload = ComplianceSalaryRunCreate(
+        month=existing["month"],
+        company_id=_cid,
+        month_days=existing.get("month_days"),
+        employee_type=existing.get("employee_type"),
+        structure_pct=existing.get("structure_pct"),
+        statutory_cfg=existing.get("statutory_cfg"),
+    )
+    run = await _compute_compliance_run(admin, payload,
+                                        allow_snapshot_create=False)
+    run["run_id"] = run_id
+    run["reprocessed_from_at"] = existing.get("generated_at")
+    from routes.advances import apply_advance_recovery as _adv_fn
+    _adv_rows = [r for r in run["rows"]
+                 if r.get("enabled_deductions") is None
+                 or "advance" in r["enabled_deductions"]]
+    await _adv_fn(_cid, existing["month"], "compliance", run_id, _adv_rows)
+    await db.compliance_salary_runs.replace_one({"run_id": run_id}, run)
+    return {"ok": True, "snapshot": res,
+            "run": {k: v for k, v in run.items() if k != "_id"}}
+
+
+@api.get("/admin/compliance-salary-runs/{run_id}/master-snapshot-info")
+async def get_master_snapshot_info(
+    run_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 485 — snapshot status badge for the grid header."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    run = await db.compliance_salary_runs.find_one(
+        {"run_id": run_id},
+        {"_id": 0, "company_id": 1, "month": 1, "employee_type": 1,
+         "run_type": 1})
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised")
+    from utils.master_snapshot import snapshot_scope_key
+    if not run.get("company_id"):
+        return {"exists": False}
+    key = snapshot_scope_key(run["company_id"], run["month"],
+                             (run.get("run_type") or "compliance"),
+                             run.get("employee_type"))
+    cur = await db.compliance_master_snapshots.find_one(
+        {**key, "active": True},
+        {"_id": 0, "version": 1, "created_at": 1, "created_by_name": 1,
+         "source": 1},
+        sort=[("version", -1)])
+    if not cur:
+        return {"exists": False}
+    count = await db.compliance_master_snapshots.count_documents(
+        {**key, "active": True})
+    return {"exists": True, "version": cur.get("version"),
+            "created_at": cur.get("created_at"),
+            "created_by": cur.get("created_by_name"),
+            "source": cur.get("source"), "employees": count}
 
 
 async def _ensure_firm_head_masks(run: dict) -> dict:
