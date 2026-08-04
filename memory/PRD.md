@@ -3925,3 +3925,41 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   PUT empty → default restored) + UI screenshot flow (save custom →
   rendered, reset → FORM B default back). APP_ITERATION=478;
   deploy_vps_iter478.sh served via kind=script.
+
+## Iter 479 — CLRA/Labour Code Phase 1 + Daily Report PDF + UX
+USER SPEC: massive 19-register CLRA/Labour Code prompt. Phased plan agreed:
+Phase 1 built now; Phase 2 = field enhancements to existing registers +
+LWF register (user: build LWF for other states — Rajasthan has none);
+Phase 3 = Inspection Register, Digital Document Register, QR/scheduled
+reports, CLRA-vs-Labour-Code mode. Digital signature = SKIPPED (user).
+- NEW /app/backend/routes/contractors.py: db.contractors CRUD
+  (licence/PAN/GSTIN/EPF/ESIC/deposit/max_labour/agreement/status),
+  auto-seed from firm_masters.contractors, active-labour counts from
+  users.contractor_name, renewal flags (60-day lookahead), rename syncs
+  users.contractor_name.
+- NEW /app/backend/routes/clra_labour_reports.py (/api/admin/clra-reports):
+  contractor-register, principal-employer, contract-labour-register,
+  pt-register, rejoin-history, compliance-dashboard — JSON + .xlsx/.pdf,
+  same pattern as govt_audit_reports. Email via payroll_reports
+  email-report group=="clra" branch.
+- NEW /app/frontend/app/contractor-master.tsx (CRUD UI, status pills,
+  expiry warnings) + sidebar "Contractor Master" under Masters (both menu
+  defs in AdminWebShell). Report Hub group "CLRA / Labour Code" added
+  (GROUP_BASE.clra) with all 6 chips.
+- Daily In/Out & OT Verification (user request): PDF (landscape+portrait)
+  renamed "Daily Report", company 2nd row, date right-aligned; columns
+  Verified/Verified By/Remarks REMOVED; Emp Code → Bio Code (users.bio_code,
+  falls back to employee_code); summary block now in the FOOTER of every
+  page + "Page N"; bottomMargin 17mm. XLSX/CSV unchanged. NEW present_only
+  filter (single punch counts as present) in _build + JSON + all exports +
+  "Only Present" switch in daily-verification.tsx.
+- admin.tsx: green "Rejoin Employee (Rehire)" button (testid
+  admin-rejoin-btn) under Exit/Left date when employee separated.
+- NEW /app/frontend/src/components/FirmDropdown.tsx (user: "Always show
+  firm picker as dropdown list") — inline-expanding searchable dropdown;
+  replaced company CHIPS in admin.tsx sheet (testid admin-company-dropdown;
+  locked state keeps lock pill). Used in contractor-master too.
+- TESTED: testing_agent iteration_479.json — 25/25 backend pytest + all
+  frontend flows PASS. APP_ITERATION=479; deploy_vps_iter479.sh (kind=script).
+- NOTE: gotcha — parallel search_replace batches on the same file sometimes
+  drop one edit silently; verify with grep after batch edits.
