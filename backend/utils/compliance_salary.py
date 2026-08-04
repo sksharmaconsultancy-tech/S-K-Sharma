@@ -182,6 +182,8 @@ V2_REGISTER_COLUMNS: List[Any] = [
     ("gross", "GROSS", 15, True),
     ("pf", "PF", 12, True),
     ("esi", "ESI", 11, True),
+    # Iter 489 (user bug) — Advance has its OWN column (was inside Other).
+    ("advance", "Advance", 12, True),
     ("other_ded", "Other Ded.", 12, True),
     ("tds", "TDS", 11, True),
     ("total_ded", "TOTAL DED.", 15, True),
@@ -1415,16 +1417,25 @@ def build_compliance_register_pdf(
         return float(r.get("pf_employee") or 0) + float(r.get("vpf_amount") or 0)
 
     def other_ded(r: Dict[str, Any]) -> float:
+        # Iter 489 (user bug) — ADVANCE has its OWN column: it no longer
+        # hides inside OTHER.
         return (float(r.get("other_deduction") or 0)
                 + float(r.get("master_deduction") or 0)
-                + float(r.get("advance_recovery") or 0)
                 + float(r.get("pt") or 0))
+
+    def adv_ded(r: Dict[str, Any]) -> float:
+        return float(r.get("advance_recovery") or 0)
 
     # Iter 401 — show the Other columns whenever any row actually carries a
     # value there, even if the head is not in the firm's enabled allowances
     # (daily-rated firms keep medical/special only on the master).
     show_oth_m = show_oth_m or any(abs(other_master(r)) >= 0.5 for r in rows)
     show_oth_e = show_oth_e or any(abs(other_earn(r)) >= 0.5 for r in rows)
+    # Iter 489 (user request) — DEDUCTION columns fully dynamic per the
+    # compliance salary process: ADVANCE / OTHER appear only when the head
+    # is enabled in the Firm Master or a row actually carries a value.
+    show_adv = _has_d("advance") or any(abs(adv_ded(r)) >= 0.5 for r in rows)
+    show_othd = (_ed is None) or any(abs(other_ded(r)) >= 0.5 for r in rows)
 
     # ---- header (drawn on every page) ------------------------------------
     W, H = landscape(A4)
@@ -1511,7 +1522,10 @@ def build_compliance_register_pdf(
         d_cols.append(("P.F.", "pf"))
     if show_esi:
         d_cols.append(("E.S.I.", "esi"))
-    d_cols += [("ADVANCE", "adv"), ("OTHER", "othd")]
+    if show_adv:
+        d_cols.append(("ADVANCE", "adv"))
+    if show_othd:
+        d_cols.append(("OTHER", "othd"))
     if show_tds:
         d_cols.append(("TDS", "tds"))
     d_cols.append(("TOTAL", "ded"))
@@ -1593,6 +1607,7 @@ def build_compliance_register_pdf(
         oth_e = other_earn(r)
         pf_v = pf_ded(r)
         oth_d = other_ded(r)
+        adv_v = adv_ded(r)
         gross = float(r.get("gross_paid") or 0)
         m_sal = float(r.get("basic_master") or 0)
         m_hra = float(r.get("hra_master") or 0)
@@ -1607,6 +1622,7 @@ def build_compliance_register_pdf(
             ("conv", float(r.get("conveyance") or 0)), ("oth", oth_e),
             ("gross", gross),
             ("pf", pf_v), ("esi", float(r.get("esic_employee") or 0)),
+            ("adv", adv_v),
             ("othd", oth_d), ("tds", float(r.get("tds") or 0)),
             ("ded", float(r.get("total_deduction") or 0)),
             ("net", float(r.get("net") or 0)),
@@ -1636,7 +1652,7 @@ def build_compliance_register_pdf(
             "m_oth": m_oth, "m_tot": m_tot,
             "sal": r.get("basic"), "hra": r.get("hra"),
             "conv": r.get("conveyance"), "oth": oth_e, "gross": gross,
-            "pf": pf_v, "esi": r.get("esic_employee"), "adv": 0,
+            "pf": pf_v, "esi": r.get("esic_employee"), "adv": adv_v,
             "othd": oth_d, "tds": r.get("tds"), "ded": r.get("total_deduction"),
         }
         data.append(
@@ -1981,6 +1997,13 @@ def build_compliance_register_pdf_v2(
         # end) even on layouts saved before it existed.
         if "sign" not in {c["key"] for c in cols_spec}:
             cols_spec.append({"key": "sign"})
+        # Iter 489 (user bug) — ADVANCE column injected into layouts saved
+        # before it existed (right before Other Ded. / after ESI).
+        if "advance" not in {c["key"] for c in cols_spec}:
+            _apos = next((i for i, c in enumerate(cols_spec)
+                          if c["key"] in ("other_ded", "tds", "total_ded")),
+                         len(cols_spec) - 1)
+            cols_spec.insert(_apos, {"key": "advance"})
     # Iter 372 (user request) — heads DYNAMIC per firm: drop columns whose
     # head is disabled in the Firm Master (same masks as the grid).
     _r0v2 = rows[0] if rows else {}
@@ -2006,6 +2029,16 @@ def build_compliance_register_pdf_v2(
         "hra": _has_a2("hra"), "conv": _has_a2("conveyance"),
         "other_earn": _show_oth2, "pf": _has_d2("pf"),
         "esi": _has_d2("esi"), "tds": _has_d2("tds"),
+        # Iter 489 — Advance / Other Ded. dynamic per the compliance
+        # salary process (enabled head OR an actual value on any row).
+        "advance": (_has_d2("advance")
+                    or any(abs(float(r.get("advance_recovery") or 0)) >= 0.5
+                           for r in rows)),
+        "other_ded": ((_edv2 is None)
+                      or any(abs(float(r.get("other_deduction") or 0)
+                                 + float(r.get("master_deduction") or 0)
+                                 + float(r.get("pt") or 0)) >= 0.5
+                             for r in rows)),
     }
     cols_spec = [c for c in cols_spec if _col_ok.get(c["key"], True)]
     col_keys = [c["key"] for c in cols_spec]
@@ -2028,13 +2061,16 @@ def build_compliance_register_pdf_v2(
                 + float(r.get("others") or 0) + float(r.get("ot_pay") or 0))
 
     def other_ded(r):
+        # Iter 489 (user bug) — ADVANCE shown in its own column, not Other.
         return (float(r.get("other_deduction") or 0)
                 + float(r.get("master_deduction") or 0)
-                + float(r.get("advance_recovery") or 0)
                 + float(r.get("pt") or 0))
 
+    def adv_ded2(r):
+        return float(r.get("advance_recovery") or 0)
+
     tot = {k: 0.0 for k in ("days", "basic", "hra", "conv", "oth", "gross",
-                            "pf", "esi", "othd", "tds", "ded", "net",
+                            "pf", "esi", "adv", "othd", "tds", "ded", "net",
                             "hrs", "sal", "hra_e", "conv_e", "oth_e",
                             "pf_wages", "gross_pf", "gross_nonpf",
                             "esi_base", "nonesi_base")}
@@ -2084,6 +2120,7 @@ def build_compliance_register_pdf_v2(
         oth_e = other_earn(r)
         pf_v = float(r.get("pf_employee") or 0) + float(r.get("vpf_amount") or 0)
         oth_d = other_ded(r)
+        adv_v2 = adv_ded2(r)
         _pairs = (
             ("days", days),
             # Iter 329 (user check) — EARNED figures so the earnings columns
@@ -2095,6 +2132,7 @@ def build_compliance_register_pdf_v2(
             ("gross", float(r.get("gross_paid") or 0)),
             ("pf", pf_v),
             ("esi", float(r.get("esic_employee") or 0)),
+            ("adv", adv_v2),
             ("othd", oth_d),
             ("tds", float(r.get("tds") or 0)),
             ("ded", float(r.get("total_deduction") or 0)),
@@ -2135,7 +2173,8 @@ def build_compliance_register_pdf_v2(
             "basic": A(r.get("basic")), "hra": A(r.get("hra")),
             "conv": A(r.get("conveyance")), "other_earn": A(oth_e),
             "gross": A(r.get("gross_paid")), "pf": A(pf_v),
-            "esi": A(r.get("esic_employee")), "other_ded": A(oth_d),
+            "esi": A(r.get("esic_employee")), "advance": A(adv_v2),
+            "other_ded": A(oth_d),
             "tds": A(r.get("tds")), "total_ded": A(r.get("total_deduction")),
             "net": A(r.get("net")),
             "sign": "",
@@ -2149,7 +2188,8 @@ def build_compliance_register_pdf_v2(
         "uan": "", "pf_no": "", "esi_no": "",
         "days": f"{tot['days']:g}", "basic": A(tot["basic"]), "hra": A(tot["hra"]),
         "conv": A(tot["conv"]), "other_earn": A(tot["oth"]), "gross": A(tot["gross"]),
-        "pf": A(tot["pf"]), "esi": A(tot["esi"]), "other_ded": A(tot["othd"]),
+        "pf": A(tot["pf"]), "esi": A(tot["esi"]), "advance": A(tot["adv"]),
+        "other_ded": A(tot["othd"]),
         "tds": A(tot["tds"]), "total_ded": A(tot["ded"]), "net": A(tot["net"]),
         "sign": "",
     }

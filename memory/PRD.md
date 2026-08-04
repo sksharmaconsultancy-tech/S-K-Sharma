@@ -4173,3 +4173,21 @@ attendance_doctor; firm_master PATCH mirrors settings to companies doc
 punch_pattern, calc_mode, dupes_ignored, machine names; FirmMaster UI
 section 8 "attendance" lives in frontend/app/firm-master.tsx (~line 845).
 Fixed-lunch deduction needs hours-level hook (grid compute ~line 10030).
+
+ITER 489 — REGISTER PDF ADVANCE COLUMN FIX (DONE, tested; user: "Advance
+Amount Show into the PDF Report in Other"):
+- utils/compliance_salary.py: Format 1 (build_compliance_register_pdf)
+  had "adv": 0 hardcoded + other_ded() included advance_recovery →
+  advance printed under OTHER, ADVANCE always 0. Fixed: adv_ded() own
+  column, other_ded() excludes advance; totals accumulate "adv".
+- Columns now DYNAMIC: ADVANCE/OTHER deduction columns appear only when
+  head enabled in Firm Master mask or a row carries a value.
+- Format 2 (v2): new ("advance","Advance",12,True) in V2_REGISTER_COLUMNS
+  (between esi & other_ded); saved layouts get advance injected before
+  other_ded/tds/total_ded; _col_ok gates advance+other_ded; totals/group
+  subtotals include it. Layout editor catalog comes from backend → auto.
+- CSV/XLSX (dynamic_csv_columns) already had separate advance_recovery.
+- Tested via pdfplumber: v1 (adv 2500/other 300 correct, no-adv firm hides
+  ADVANCE col), v2 (new + old saved layouts both show Advance), totals OK.
+- APP_ITERATION=489; deploy_vps_iter489.sh (cumulative w/ 488 dup fix +
+  one-time dup cleanup); temp_bundle script → 489.
