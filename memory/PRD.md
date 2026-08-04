@@ -3867,3 +3867,44 @@ User supplied mockups (enterprise admin portal + ESS mobile + login). Implemente
   Backlog from spec (NOT yet built): rejoin-policy Firm Master UI screen
   (API ready), multi-period report annotations, notifications to HR/
   manager beyond ws broadcast.
+
+## Iter 476 (fork) — Firm Master sticky banner + ADMS port-80 nginx fix
+- firm-master.tsx: sticky amber "Unsaved changes" banner pinned under the
+  page header (outside ScrollView) with Save Now button; shows only when
+  dirty. Screenshot-verified (stays pinned while scrolling).
+- deploy476.sh: NEW nginx conf.d/sks-adms.conf — catch-all :80 server
+  proxying /iclock/ + /api/iclock/ straight to backend:8001 so BIOFACE/
+  ZKTeco machines NEVER receive a 301 HTTPS redirect (root cause of the
+  "machines online but no data" issue when VPS forces HTTPS).
+- NOTE: /admin-login does NOT exist — login page is /admin-pin-login
+  (Password tab). Testing via localStorage key `llc_session_token`.
+
+## Iter 477 — Govt Registers FORM headings + periodic; grid OT Hrs / ESIC Leave
+- govt_audit_reports.py: (a) statutory FORM heading restored on ALL 5
+  Government Registers — _FORM_HEAD dict (FORM B — WAGE REGISTER; FORM C —
+  REGISTER OF LOANS/RECOVERIES for fine/deduction/advance; Gratuity Act
+  line) + rules-2017 line; delivered via new form_line param in
+  register_pdf/register_xlsx (utils/register_export.py — "\n"-split lines,
+  dynamic freeze pane) and "form_line" field in the JSON view. Titles now
+  "(Form B)"/"(Form C)" (were "(Form)"). Iter 433 empty-note line kept.
+  (b) PERIODIC month..month_to on ALL 5 (was fine/advance only): wage +
+  deduction aggregate per-employee across months; gratuity takes Basic
+  from the latest processed month in range.
+- reports-center.tsx: MONTH_RANGE_KINDS = all 5 govt registers (generic
+  Month wise/Periodic toggle reused); form_line rendered centred above the
+  result title (testID rc-form-line).
+- compliance-salary-run.tsx (user request): OT Hrs column MOVED right
+  after Present Days (was OT Amt*→OT Hrs→Gross). infoW now 9 cols
+  (i<9 width checks), INFO_W band += CELL_W, calcCount -1; body cell +
+  totals cell moved to match. OT Hrs stays editable-on-normal-runs /
+  read-only-on-freeze as before (Iter 340 logic untouched).
+- ESIC Leave column (user request): grid cell now READ-ONLY text — days
+  auto-fetched from ESIC Leave Master. compliance_salary_runs.py: when
+  esic_leave settings enabled+link_compliance the master map is
+  AUTHORITATIVE (sets 0 when no approved entry); module off → legacy
+  behaviour (preserved values kept).
+- Verified: curl (JSON form_line + periodic subtitle "June 2026 to July
+  2026" + aggregated rows; PDF/XLSX headings via pypdf/openpyxl), UI
+  screenshots (Report Hub periodic toggle + FORM B heading; grid header
+  order Present Days→OT Hrs→ESIC Leave with aligned bands).
+- Deploy: /app/deploy_vps_iter477.sh (kind=script). APP_ITERATION=477.

@@ -67,23 +67,37 @@ def _months_range(month: str, month_to: str) -> List[str]:
 # ---------------------------------------------------------------------------
 
 async def _wage_register(company_id, month, ctx=None):
-    rows_by_uid = await _run_rows(company_id, month)
+    """Iter 477 (user request) — Month-wise OR Periodic (month..month_to):
+    months in the range are AGGREGATED per employee (days/earnings summed,
+    rate = latest month's rate)."""
+    months = _months_range(month, (ctx or {}).get("month_to") or "")
     users = {u["user_id"]: u for u in await _users(company_id)}
-    out = []
-    for uid, r in rows_by_uid.items():
-        u = users.get(uid) or {}
-        out.append({
-            "employee_code": u.get("employee_code"), "name": u.get("name"),
-            "designation": u.get("designation"),
-            "rate": _f(r.get("rate")), "days": _f(r.get("present_days")),
-            "basic": _f(r.get("basic")), "hra": _f(r.get("hra")),
-            "other_allowances": round(
-                _f(r.get("conveyance")) + _f(r.get("special"))
-                + _f(r.get("medical")) + _f(r.get("others")), 2),
-            "overtime": _f(r.get("ot_pay")),
-            "gross": _f(r.get("gross_paid")),
-            "deductions": _f(r.get("total_deduction")),
-            "net": _f(r.get("net"))})
+    agg: Dict[str, dict] = {}
+    for mo in months:
+        rows_by_uid = await _run_rows(company_id, mo)
+        for uid, r in rows_by_uid.items():
+            u = users.get(uid) or {}
+            d = agg.setdefault(uid, {
+                "employee_code": u.get("employee_code"),
+                "name": u.get("name"),
+                "designation": u.get("designation"),
+                "rate": 0.0, "days": 0.0, "basic": 0.0, "hra": 0.0,
+                "other_allowances": 0.0, "overtime": 0.0, "gross": 0.0,
+                "deductions": 0.0, "net": 0.0})
+            d["rate"] = _f(r.get("rate")) or d["rate"]
+            d["days"] = round(d["days"] + _f(r.get("present_days")), 2)
+            d["basic"] = round(d["basic"] + _f(r.get("basic")), 2)
+            d["hra"] = round(d["hra"] + _f(r.get("hra")), 2)
+            d["other_allowances"] = round(
+                d["other_allowances"] + _f(r.get("conveyance"))
+                + _f(r.get("special")) + _f(r.get("medical"))
+                + _f(r.get("others")), 2)
+            d["overtime"] = round(d["overtime"] + _f(r.get("ot_pay")), 2)
+            d["gross"] = round(d["gross"] + _f(r.get("gross_paid")), 2)
+            d["deductions"] = round(
+                d["deductions"] + _f(r.get("total_deduction")), 2)
+            d["net"] = round(d["net"] + _f(r.get("net")), 2)
+    out = list(agg.values())
     cols = [("employee_code", "Emp Code"), ("name", "Employee Name"),
             ("designation", "Designation"), ("rate", "Rate of Wages"),
             ("days", "Days Worked"), ("basic", "Basic"), ("hra", "HRA"),
@@ -94,7 +108,7 @@ async def _wage_register(company_id, month, ctx=None):
     for k in ("basic", "hra", "other_allowances", "overtime", "gross",
               "deductions", "net"):
         totals[k] = round(sum(r[k] for r in out), 2)
-    return "Wage Register (Form)", cols, _srt(out), totals
+    return "Wage Register (Form B)", cols, _srt(out), totals
 
 
 async def _amount_register(company_id, month, key_fn, label, ctx=None):
@@ -124,24 +138,33 @@ async def _amount_register(company_id, month, key_fn, label, ctx=None):
     totals = {"name": "TOTAL",
               "amount": round(sum(r["amount"] for r in out), 2),
               "recovered": round(sum(r["recovered"] for r in out), 2)}
-    return f"{label} Register (Form)", cols, _srt(out), totals
+    return f"{label} Register (Form C)", cols, _srt(out), totals
 
 
 async def _deduction_register(company_id, month, ctx=None):
-    rows_by_uid = await _run_rows(company_id, month)
+    """Iter 477 (user request) — Month-wise OR Periodic (month..month_to)."""
+    months = _months_range(month, (ctx or {}).get("month_to") or "")
     users = {u["user_id"]: u for u in await _users(company_id)}
-    out = []
-    for uid, r in rows_by_uid.items():
-        u = users.get(uid) or {}
-        td = _f(r.get("total_deduction"))
-        if td <= 0:
-            continue
-        out.append({"employee_code": u.get("employee_code"),
-                    "name": u.get("name"), "pf": _f(r.get("pf_employee")),
-                    "esic": _f(r.get("esic_employee")), "pt": _f(r.get("pt")),
-                    "tds": _f(r.get("tds")),
-                    "other": _f(r.get("other_deduction")),
-                    "total": td, "net": _f(r.get("net"))})
+    agg: Dict[str, dict] = {}
+    for mo in months:
+        rows_by_uid = await _run_rows(company_id, mo)
+        for uid, r in rows_by_uid.items():
+            td = _f(r.get("total_deduction"))
+            if td <= 0:
+                continue
+            u = users.get(uid) or {}
+            d = agg.setdefault(uid, {
+                "employee_code": u.get("employee_code"),
+                "name": u.get("name"), "pf": 0.0, "esic": 0.0, "pt": 0.0,
+                "tds": 0.0, "other": 0.0, "total": 0.0, "net": 0.0})
+            d["pf"] = round(d["pf"] + _f(r.get("pf_employee")), 2)
+            d["esic"] = round(d["esic"] + _f(r.get("esic_employee")), 2)
+            d["pt"] = round(d["pt"] + _f(r.get("pt")), 2)
+            d["tds"] = round(d["tds"] + _f(r.get("tds")), 2)
+            d["other"] = round(d["other"] + _f(r.get("other_deduction")), 2)
+            d["total"] = round(d["total"] + td, 2)
+            d["net"] = round(d["net"] + _f(r.get("net")), 2)
+    out = list(agg.values())
     cols = [("employee_code", "Emp Code"), ("name", "Employee Name"),
             ("pf", "PF"), ("esic", "ESIC"), ("pt", "PT"), ("tds", "TDS"),
             ("other", "Other/Fines"), ("total", "Total Deduction"),
@@ -149,13 +172,17 @@ async def _deduction_register(company_id, month, ctx=None):
     totals = {"name": "TOTAL"}
     for k in ("pf", "esic", "pt", "tds", "other", "total", "net"):
         totals[k] = round(sum(r[k] for r in out), 2)
-    return "Deduction Register (Form)", cols, _srt(out), totals
+    return "Deduction Register (Form C)", cols, _srt(out), totals
 
 
 async def _gratuity_register(company_id, month, ctx=None):
+    """Iter 477 (user request) — Periodic: Basic Wages picked from the
+    LATEST month in the range that has a processed run row."""
     users = await _users(company_id)
     emp_ids = set((ctx or {}).get("employee_ids") or [])
-    rows_by_uid = await _run_rows(company_id, month)
+    rows_by_uid: Dict[str, dict] = {}
+    for mo in _months_range(month, (ctx or {}).get("month_to") or ""):
+        rows_by_uid.update(await _run_rows(company_id, mo))
     today = date.today()
     out = []
     for u in users:
@@ -203,6 +230,23 @@ _GOVT_TITLES = {
     "advance-register": "Advance Register",
     "gratuity-register": "Gratuity Register",
 }
+# Iter 477 (user request — "roll back the format heading") — statutory
+# FORM heading printed above every Government Register (PDF + Excel + web
+# view), per the Ease of Compliance to Maintain Registers under various
+# Labour Laws Rules, 2017 (FORM B = Wage Register, FORM C = Register of
+# Loans / Recoveries).
+_FORM_RULE = ("[Ease of Compliance to Maintain Registers under various "
+              "Labour Laws Rules, 2017]")
+_FORM_HEAD = {
+    "wage-register": f"FORM B — WAGE REGISTER\n{_FORM_RULE}",
+    "fine-register": ("FORM C — REGISTER OF LOANS / RECOVERIES (FINE)\n"
+                      f"{_FORM_RULE}"),
+    "deduction-register": ("FORM C — REGISTER OF LOANS / RECOVERIES "
+                           f"(DEDUCTIONS)\n{_FORM_RULE}"),
+    "advance-register": ("FORM C — REGISTER OF LOANS / RECOVERIES "
+                         f"(ADVANCES)\n{_FORM_RULE}"),
+    "gratuity-register": "[Under the Payment of Gratuity Act, 1972]",
+}
 
 
 @govt_router.get("/list")
@@ -231,6 +275,7 @@ async def govt_json(kind: str, company_id: Optional[str] = None,
     title, cols, rows, totals = await _GOVT[kind](company_id, month, ctx)
     sub = _govt_period(month, ctx)
     return {"title": title, "subtitle": sub,
+            "form_line": _FORM_HEAD.get(kind, ""),
             "columns": [{"key": k, "label": lb} for k, lb in cols],
             "rows": rows, "totals": totals,
             "empty_note": _govt_empty_note(kind, month, ctx) if not rows
@@ -270,7 +315,8 @@ async def _govt_exp(kind, company_id, month, authorization, fmt, ctx=None):
     sub = _govt_period(month, ctx or {})
     return _stream(title, f"{c.get('name')} · {sub}", cols, rows, totals,
                    c.get("logo_base64"), fmt,
-                   empty_note=_govt_empty_note(kind, month, ctx or {}))
+                   empty_note=_govt_empty_note(kind, month, ctx or {}),
+                   form_line=_FORM_HEAD.get(kind))
 
 
 # ---------------------------------------------------------------------------
@@ -376,16 +422,18 @@ async def _audit_exp(kind, company_id, limit, authorization, fmt):
                    None, fmt)
 
 
-def _stream(title, sub, cols, rows, totals, logo, fmt, empty_note=None):
+def _stream(title, sub, cols, rows, totals, logo, fmt, empty_note=None,
+            form_line=None):
     columns = [{"key": k, "label": lb} for k, lb in cols]
     sub = f"{sub} · Generated {datetime.now():%d-%m-%Y}"
     if fmt == "xlsx":
-        buf = register_xlsx(title, sub, columns, rows, totals)
+        buf = register_xlsx(title, sub, columns, rows, totals,
+                            form_line=form_line)
         mt = ("application/vnd.openxmlformats-officedocument"
               ".spreadsheetml.sheet")
     else:
         buf = register_pdf(title, sub, columns, rows, totals, logo,
-                           empty_note=empty_note)
+                           empty_note=empty_note, form_line=form_line)
         mt = "application/pdf"
     fn_ = f"{title.replace(' ', '_')}.{fmt}"
     return StreamingResponse(buf, media_type=mt, headers={

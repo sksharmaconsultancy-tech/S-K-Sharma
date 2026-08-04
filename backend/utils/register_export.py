@@ -9,7 +9,8 @@ from typing import Any, Dict, List, Optional
 
 
 def register_xlsx(title: str, subtitle: str, columns: List[Dict[str, str]],
-                  rows: List[dict], totals: Optional[dict] = None) -> BytesIO:
+                  rows: List[dict], totals: Optional[dict] = None,
+                  form_line: Optional[str] = None) -> BytesIO:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
@@ -22,17 +23,31 @@ def register_xlsx(title: str, subtitle: str, columns: List[Dict[str, str]],
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=n)
     ws.cell(1, 1, title).font = Font(bold=True, size=13)
     ws.cell(1, 1).alignment = Alignment(horizontal="center")
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=n)
-    ws.cell(2, 1, subtitle).alignment = Alignment(horizontal="center")
+    # Iter 477 — optional statutory FORM heading line(s) between the title
+    # and the subtitle ("\n"-separated → one merged row per line).
+    r_sub = 2
+    for ln in (form_line or "").split("\n"):
+        if not ln.strip():
+            continue
+        ws.merge_cells(start_row=r_sub, start_column=1,
+                       end_row=r_sub, end_column=n)
+        c = ws.cell(r_sub, 1, ln.strip())
+        c.font = Font(bold=True, size=11)
+        c.alignment = Alignment(horizontal="center")
+        r_sub += 1
+    ws.merge_cells(start_row=r_sub, start_column=1,
+                   end_row=r_sub, end_column=n)
+    ws.cell(r_sub, 1, subtitle).alignment = Alignment(horizontal="center")
+    r_head = r_sub + 2
     for j, c in enumerate(columns, 1):
-        cell = ws.cell(4, j, c["label"])
+        cell = ws.cell(r_head, j, c["label"])
         cell.font = Font(bold=True)
         cell.fill = PatternFill("solid", fgColor="DDEBF7")
         cell.border = border
         cell.alignment = Alignment(horizontal="center", wrap_text=True)
         ws.column_dimensions[get_column_letter(j)].width = max(
             11, min(28, len(c["label"]) + 4))
-    r = 5
+    r = r_head + 1
     for row in rows:
         for j, c in enumerate(columns, 1):
             v = row.get(c["key"])
@@ -55,7 +70,7 @@ def register_xlsx(title: str, subtitle: str, columns: List[Dict[str, str]],
             if isinstance(v, (int, float)):
                 cell.number_format = "#,##0.##"
                 cell.alignment = Alignment(horizontal="right")
-    ws.freeze_panes = "A5"
+    ws.freeze_panes = f"A{r_head + 1}"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.paperSize = 8
     buf = BytesIO()
@@ -67,7 +82,8 @@ def register_xlsx(title: str, subtitle: str, columns: List[Dict[str, str]],
 def register_pdf(title: str, subtitle: str, columns: List[Dict[str, str]],
                  rows: List[dict], totals: Optional[dict] = None,
                  logo_b64: Optional[str] = None,
-                 empty_note: Optional[str] = None) -> BytesIO:
+                 empty_note: Optional[str] = None,
+                 form_line: Optional[str] = None) -> BytesIO:
     import base64
     from reportlab.lib import colors as rl
     from reportlab.lib.pagesizes import A3, landscape
@@ -92,6 +108,14 @@ def register_pdf(title: str, subtitle: str, columns: List[Dict[str, str]],
     story.append(Paragraph(title, ParagraphStyle(
         "h", fontSize=16, leading=20, fontName="Helvetica-Bold",
         alignment=1)))
+    # Iter 477 — optional statutory FORM heading line(s) between the title
+    # and the subtitle ("\n"-separated).
+    for ln in (form_line or "").split("\n"):
+        if not ln.strip():
+            continue
+        story.append(Paragraph(ln.strip(), ParagraphStyle(
+            "f", fontSize=11, leading=14, fontName="Helvetica-Bold",
+            alignment=1)))
     story.append(Paragraph(subtitle, ParagraphStyle(
         "s", fontSize=10, leading=13, alignment=1)))
     story.append(Spacer(1, 4 * mm))

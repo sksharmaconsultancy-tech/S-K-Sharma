@@ -2572,15 +2572,18 @@ export default function ComplianceSalaryRunScreen() {
                   const CELL_W = colW.num;
                   // Iter 379 (user request) — column order: Sr → UAN →
                   // ESIC → Name → Father → Designation.
-                  const INFO_W = colW.sr + colW.uan + colW.esi + colW.name + colW.father + colW.desg + colW.pd + colW.el;
+                  // Iter 477 (user request) — OT Hrs column moved right
+                  // after Present Days, so its width belongs to the info
+                  // zone and the CALC band shrinks by one cell.
+                  const INFO_W = colW.sr + colW.uan + colW.esi + colW.name + colW.father + colW.desg + colW.pd + CELL_W + colW.el;
                   const FROZEN_W = colW.sr + colW.uan + colW.esi + colW.name;
                   const optKeys = ["basic","hra","conveyance","medical","special","others"].filter((k) => has(k));
                   const masterCount = optKeys.length + 1; // +M.Gross
                   // Iter 306 — +Gross AND +OT Amt (the band was one cell
                   // short, so DEDUCTIONS & NET started over the OT column).
                   // Iter 335 — +Freeze Salary column beside Gross on
-                  // imported (frozen) runs. Iter 340 — +OT Hrs column.
-                  const calcCount = optKeys.length + 3 + (hasFrz ? 1 : 0);
+                  // imported (frozen) runs. Iter 477 — OT Hrs moved to info.
+                  const calcCount = optKeys.length + 2 + (hasFrz ? 1 : 0);
                   // Iter 171 — deduction columns follow Firm Master Deductions
                   const ed = ((run.rows[0] as any)?.enabled_deductions ?? fmMask.ed) as string[] | undefined;
                   const hasDed = (k: string) => !ed || ed.includes(k);
@@ -2625,6 +2628,9 @@ export default function ComplianceSalaryRunScreen() {
                     { label: "Father Name", group: "info" },
                     { label: "Designation", group: "info" },
                     { label: "Present Days", group: "info" },
+                    // Iter 477 (user request) — OT Hrs shifted right after
+                    // Present Days (was between OT Amt* and Gross).
+                    { label: "OT Hrs", group: "calc" },
                     // Iter 306 (user #20) — editable ESIC Leave days.
                     { label: "ESIC Leave", group: "info" },
                   ];
@@ -2644,8 +2650,6 @@ export default function ComplianceSalaryRunScreen() {
                   // Iter 230 (user request) — editable OT Amount column.
                   // Iter 339c (user request) — OT Amt* moved BEFORE Gross.
                   headers.push({ label: "OT Amt*", group: "calc" });
-                  // Iter 340 (user request) — OT Hours derived from OT Amt.
-                  headers.push({ label: "OT Hrs", group: "calc" });
                   headers.push({ label: "Gross", group: "calc" });
                   // Iter 335 (user request) — Freeze Salary column right
                   // next to Gross (imported/frozen gross per employee).
@@ -2667,7 +2671,7 @@ export default function ComplianceSalaryRunScreen() {
                     "Total Ded.", "Net",
                   ];
                   for (const d of dedLabels) headers.push({ label: d, group: "ded" });
-                  const infoW = [colW.sr, colW.uan, colW.esi, colW.name, colW.father, colW.desg, colW.pd, colW.el];
+                  const infoW = [colW.sr, colW.uan, colW.esi, colW.name, colW.father, colW.desg, colW.pd, colW.num, colW.el];
                   const stickyOff = [0, colW.sr, colW.sr + colW.uan, colW.sr + colW.uan + colW.esi];
                   return (
                     <>
@@ -2681,7 +2685,7 @@ export default function ComplianceSalaryRunScreen() {
                           onPress={() => toggleColSort(h.label)}
                           style={[
                             styles.tblCell,
-                            { width: i < 8 ? infoW[i] : colW.num },
+                            { width: i < 9 ? infoW[i] : colW.num },
                             styles.tblHeaderTxt,
                             i >= 6 && { textAlign: "right" },
                             h.group === "master" && styles.groupHdrCellHeaderMaster,
@@ -2707,7 +2711,7 @@ export default function ComplianceSalaryRunScreen() {
                         <View
                           key={i}
                           style={[
-                            { width: i < 8 ? infoW[i] : colW.num, paddingHorizontal: 2, paddingVertical: 2 },
+                            { width: i < 9 ? infoW[i] : colW.num, paddingHorizontal: 2, paddingVertical: 2 },
                             i < 4 && stickyCol(stickyOff[i], "#EFF6FF"),
                           ]}
                         >
@@ -2784,19 +2788,42 @@ export default function ComplianceSalaryRunScreen() {
                         if (next) focusCell(next, idx);
                       }}
                     />
-                    {/* Iter 306 (user #20) — editable ESIC Leave days
-                        (record-keeping for ESIC sickness-benefit leave;
-                        does not change pay). */}
-                    <TextInput
-                      value={String((r as any).esic_leave_days ?? 0)}
-                      onChangeText={(v) => {
-                        const n = Number(v.replace(/[^0-9.]/g, ""));
-                        if (!Number.isNaN(n)) updateRowField(r.user_id, "esic_leave_days", n);
-                      }}
-                      keyboardType="decimal-pad"
-                      selectTextOnFocus
-                      style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.el }]}
-                    />
+                    {/* Iter 340 (user request) — OT Hours: READ-ONLY on
+                        imported (Freeze) runs (auto: OT Amt ÷ per-hour OT
+                        rate); MANUALLY editable on normal runs when Firm
+                        Master Overtime is allowed (hours × rate → OT Amt).
+                        Iter 477 (user request) — shifted right after the
+                        Present Days column. */}
+                    {(() => {
+                      const hrRate = Number((r as any).ot_hourly_rate) || 0;
+                      const otHrs = hrRate > 0
+                        ? (Number(r.ot_pay) || 0) / hrRate
+                        : Number((r as any).ot_hours) || 0;
+                      const canEditHrs = !hasFrz && !!(r as any).firm_ot_allowed && hrRate > 0;
+                      if (canEditHrs) {
+                        return (
+                          <OTHoursCell
+                            width={colW.num}
+                            value={Math.round(otHrs * 100) / 100}
+                            onCommit={(n) => updateRowField(
+                              r.user_id, "ot_pay",
+                              Math.round(n * hrRate * 100) / 100)}
+                          />
+                        );
+                      }
+                      return (
+                        <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, color: "#5B21B6", fontWeight: "600" }]}>
+                          {otHrs > 0 ? otHrs.toFixed(1) : "0"}
+                        </Text>
+                      );
+                    })()}
+                    {/* Iter 306 (user #20) — ESIC Leave days.
+                        Iter 477 (user request) — READ-ONLY: days are
+                        fetched from the ESIC Leave Master (approved
+                        entries) at process time, not typed here. */}
+                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.el, color: "#0369A1", fontWeight: "600" }]}>
+                      {Number((r as any).esic_leave_days || 0) || 0}
+                    </Text>
                     {/* Iter 85 pt 1 — Master (full-month) heads,
                         conditionally rendered per firm allowance mask. */}
                     {(() => {
@@ -2848,33 +2875,6 @@ export default function ComplianceSalaryRunScreen() {
                       selectTextOnFocus
                       style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
                     />
-                    {/* Iter 340 (user request) — OT Hours: READ-ONLY on
-                        imported (Freeze) runs (auto: OT Amt ÷ per-hour OT
-                        rate); MANUALLY editable on normal runs when Firm
-                        Master Overtime is allowed (hours × rate → OT Amt). */}
-                    {(() => {
-                      const hrRate = Number((r as any).ot_hourly_rate) || 0;
-                      const otHrs = hrRate > 0
-                        ? (Number(r.ot_pay) || 0) / hrRate
-                        : Number((r as any).ot_hours) || 0;
-                      const canEditHrs = !hasFrz && !!(r as any).firm_ot_allowed && hrRate > 0;
-                      if (canEditHrs) {
-                        return (
-                          <OTHoursCell
-                            width={colW.num}
-                            value={Math.round(otHrs * 100) / 100}
-                            onCommit={(n) => updateRowField(
-                              r.user_id, "ot_pay",
-                              Math.round(n * hrRate * 100) / 100)}
-                          />
-                        );
-                      }
-                      return (
-                        <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, color: "#5B21B6", fontWeight: "600" }]}>
-                          {otHrs > 0 ? otHrs.toFixed(1) : "0"}
-                        </Text>
-                      );
-                    })()}
                     {/* Iter 379 (user request) — Gross column HIGHLIGHTED;
                         red when it differs from the Freeze Salary. */}
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "800" },
@@ -2990,6 +2990,14 @@ export default function ComplianceSalaryRunScreen() {
                   <Text style={[styles.tblCell, { width: colW.desg }]}>—</Text>
                   {/* Iter 370 (user request) — totals under EVERY column. */}
                   <Text style={[styles.tblCell, styles.rightCell, { width: colW.pd, fontWeight: "700" }]}>{fmtDaysTotal(sumCol("present_days"))}</Text>
+                  {/* Iter 340 — OT Hours total.
+                      Iter 477 (user request) — shifted after Present Days. */}
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>
+                    {(run.rows || []).reduce((s, r) => {
+                      const hr = Number((r as any).ot_hourly_rate) || 0;
+                      return s + (hr > 0 ? (Number(r.ot_pay) || 0) / hr : Number((r as any).ot_hours) || 0);
+                    }, 0).toFixed(1)}
+                  </Text>
                   <Text style={[styles.tblCell, styles.rightCell, { width: colW.el, fontWeight: "700" }]}>{fmtDaysTotal(sumCol("esic_leave_days"))}</Text>
                   {/* Iter 171 — totals row follows the same column masks so
                       every figure lands under its own header. */}
@@ -3012,13 +3020,6 @@ export default function ComplianceSalaryRunScreen() {
                         {opt.map((k) => <React.Fragment key={`tc-${k}`}>{num((run.totals as any)?.[k])}</React.Fragment>)}
                         {/* Iter 339c — OT Amt total BEFORE Gross. */}
                         {num(run.totals?.ot_pay)}
-                        {/* Iter 340 — OT Hours total. */}
-                        <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>
-                          {(run.rows || []).reduce((s, r) => {
-                            const hr = Number((r as any).ot_hourly_rate) || 0;
-                            return s + (hr > 0 ? (Number(r.ot_pay) || 0) / hr : Number((r as any).ot_hours) || 0);
-                          }, 0).toFixed(1)}
-                        </Text>
                         {num(run.totals?.gross_paid)}
                         {/* Iter 335 — Freeze Salary total next to Gross. */}
                         {hasFrz ? num((run.totals as any)?.imported_gross) : null}

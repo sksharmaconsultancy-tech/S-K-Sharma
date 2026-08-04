@@ -333,9 +333,13 @@ async def _compute_compliance_run(
     # Iter 313 — ESIC Leave Module: auto-import APPROVED ESIC leave days
     # into the run (per firm, honours enabled + link_compliance settings).
     from routes.esic_leave import esic_leave_days_map as _esic_map_fn
+    from routes.esic_leave import get_esic_settings as _esic_st_fn
     _esic_maps: Dict[str, Dict[str, float]] = {}
+    _esic_on: Dict[str, bool] = {}
     for _cid_ in {e.get("company_id") for e in employees if e.get("company_id")}:
         _esic_maps[_cid_] = await _esic_map_fn(_cid_, payload.month)
+        _st_ = await _esic_st_fn(_cid_)
+        _esic_on[_cid_] = bool(_st_.get("enabled") and _st_.get("link_compliance"))
     for emp in employees:
         emp = dict(emp)
         emp.pop("pin_hash", None)
@@ -1122,10 +1126,14 @@ async def _compute_compliance_run(
         if (_oth_rate > 0 and float(row.get("ot_pay") or 0) > 0
                 and float(row.get("ot_hours") or 0) <= 0):
             row["ot_hours"] = round(float(row["ot_pay"]) / _oth_rate, 2)
-        # Iter 313 — ESIC Leave Module auto-import (fills the editable
-        # esic_leave_days column when approved entries exist this month).
+        # Iter 313 — ESIC Leave Module auto-import.
+        # Iter 477 (user request) — the ESIC Leave Master is AUTHORITATIVE:
+        # when the module is linked, the column always mirrors the approved
+        # entries (0 when none) — the grid cell is no longer editable.
         _esic_d = (_esic_maps.get(emp.get("company_id")) or {}).get(emp.get("user_id"))
-        if _esic_d:
+        if _esic_on.get(emp.get("company_id")):
+            row["esic_leave_days"] = round(float(_esic_d or 0), 1)
+        elif _esic_d:
             row["esic_leave_days"] = round(float(_esic_d), 1)
         rows.append(row)
 

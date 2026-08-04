@@ -67,7 +67,14 @@ const EMP_KINDS = new Set([
 // Iter 433 (user request) — Daily / Periodic (date range) instead of month
 const DATE_KINDS = new Set(["ot-daily", "ot-department"]);
 // Iter 433 (user request) — Month wise / Periodic month range
-const MONTH_RANGE_KINDS = new Set(["fine-register"]);
+// Iter 477 (user request) — extended to ALL 5 government registers
+const MONTH_RANGE_KINDS = new Set([
+  "wage-register",
+  "fine-register",
+  "deduction-register",
+  "advance-register",
+  "gratuity-register",
+]);
 
 type EmpLite = { user_id: string; name?: string; employee_code?: string };
 
@@ -472,6 +479,25 @@ export default function ReportsCenterScreen() {
         {loading && <ActivityIndicator style={{ marginVertical: 24 }} />}
         {!loading && data && sel && (
           <View style={shared.card}>
+            {(data as any).form_line
+              ? String((data as any).form_line)
+                  .split("\n")
+                  .map((ln: string, i: number) => (
+                    <Text
+                      key={i}
+                      style={{
+                        textAlign: "center",
+                        fontWeight: i === 0 ? "800" : "600",
+                        fontSize: i === 0 ? 13.5 : 11.5,
+                        color: colors.onSurface,
+                        marginBottom: 2,
+                      }}
+                      testID={i === 0 ? "rc-form-line" : undefined}
+                    >
+                      {ln}
+                    </Text>
+                  ))
+              : null}
             <Text style={shared.cardTitle}>
               {data.title}
               {data.subtitle ? ` — ${data.subtitle}` : ""}
