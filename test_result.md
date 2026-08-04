@@ -311,3 +311,13 @@ See `/app/memory/test_credentials.md`. Super admin
   keeps manual other_ded 111; fresh=True → stays 26, edits discarded; deleted.
 - Screenshot: 4 buttons removed, firm banner gone, month-days 🔒 note, group
   mandatory dropdown; grid renders fine (run csrun_bca09c4a4cec).
+
+## Iter 485
+- Firm Master 16-section ERP + Contact Details + auto-save: backend 14/14
+  pytest PASS (tests/test_iter485_firm_master_and_snapshot.py), frontend 5/5
+  Playwright flows PASS (report /app/test_reports/iteration_485.json).
+- Master snapshot lifecycle E2E: generate→v1 freeze, master edit, reprocess
+  frozen, delete+generate frozen, refresh-master→v2 + audit w/ IP; cleanup done.
+- Sub-admin present-today scope: restricted sub_admin blocked from
+  non-allowed firm (with and without ?company_id).
+- PF/ESIC calc engine untouched (git diff clean on utils/compliance_salary.py).

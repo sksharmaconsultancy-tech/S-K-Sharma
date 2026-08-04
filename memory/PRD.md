@@ -4040,3 +4040,46 @@ alternation; night OUT (01:10) landed next day as "in".
   pending; new app punch approved when ON, pending when OFF; contractual
   TEST50 stayed pending as designed. Test data cleaned up.
 - APP_ITERATION=483; deploy_vps_iter483.sh; temp_bundle kind=script → 483.
+
+## Iter 484-485 — Firm Master ERP redesign + Sub-admin leak fix + Master Snapshot
+1) FIRM MASTER 16-SECTION ERP LAYOUT (user request, full restructure approved):
+   - firm-master.tsx: left side-nav (NAV_SECTIONS, testID fm-nav-{id}),
+     sections render conditionally via sec(id). Sticky action bar: Save /
+     Save & Continue / Reset / Cancel / Clone Company / Export Configuration.
+     AUTO-SAVE 2s debounce (saveSilent), auto-state pill in header.
+   - NEW components /src/components/firmMaster/: primitives.tsx (Card,
+     FieldV2, DropdownV2, CheckRow, MiniBtn), GeneralInfoSection.tsx
+     (identity-only, 2-col, drag&drop logo + crop-to-square, code unique
+     check via /admin/firm-master-check-code, status chips, colour swatches),
+     ContactDetailsSection.tsx (normalized cards primary/hr/payroll/
+     compliance/accounts + Company Communication + prefs + per-contact
+     Receives permissions + Copy/vCard/click-to-call + Test Email/WhatsApp),
+     AuditLogSection.tsx, HealthSection.tsx (health score).
+   - Backend routes/firm_master_v2.py: GET/PUT /admin/firm-master/{cid}/contacts
+     (db.company_contacts normalized, legacy auto-migrate), audit list,
+     export JSON, clone (super only), check-code, test-whatsapp, vcard.
+   - firm_master.py: GET seeds master.general defaults; PATCH validates
+     (name required, start date <= today, company_code unique), mirrors
+     general → companies, writes firm_master_audit entries.
+   - Old "Firm Header" emails + Contact Persons grid REMOVED (migrated).
+2) P0 SECURITY FIX: sub_admin saw ALL firms on Present Today.
+   attendance_admin_core.py /admin/attendance/today + present-not-punched
+   now honour ?company_id for sub_admin and call
+   apply_sub_admin_company_scope; belt&braces current-firm row filter.
+3) COMPLIANCE MASTER DATA SNAPSHOT (user spec "Develop Accordingly"):
+   - utils/master_snapshot.py: FROZEN_MASTER_FIELDS (~60 fields),
+     db.compliance_master_snapshots one doc PER EMPLOYEE, versioned
+     (active flag, history kept), indexed cms_scope_active_user.
+   - _compute_compliance_run: overlay snapshot before DOJ/exit filters,
+     resurrect ghosts, first-generate creates v1 (allow_snapshot_create
+     param; reprocess passes False), new joiners appended.
+   - POST /admin/compliance-salary-runs/{id}/refresh-master-snapshot
+     (super_admin + sub_admin only, reason + IP audit, version+1) and
+     GET .../master-snapshot-info. Frontend "Refresh Master" ActionBtn
+     (isSuper) with mandated confirmation text.
+   - PF/ESIC calc engine utils/compliance_salary.py: ZERO changes (user
+     explicit directive).
+   - Audits: snapshot_created / snapshot_appended / refresh_master_snapshot
+     in salary_audit_log.
+- Testing: iteration_485.json — 14/14 backend + 5/5 frontend PASS.
+- APP_ITERATION=485; deploy_vps_iter485.sh; temp_bundle → 485.

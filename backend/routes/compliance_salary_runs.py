@@ -2226,9 +2226,10 @@ async def refresh_master_snapshot_endpoint(
     body: Optional[Dict[str, Any]] = Body(None),
     authorization: Optional[str] = Header(None),
 ):
-    """Iter 485 — SUPER-ADMIN ONLY escape hatch: replace the frozen payroll
-    snapshot with the CURRENT Employee Master (new version — the previous
-    version is kept forever), then reprocess the run on the new values."""
+    """Iter 485 — SUPER ADMIN / SUB SUPER ADMIN ONLY escape hatch: replace
+    the frozen payroll snapshot with the CURRENT Employee Master (new
+    version — the previous version is kept forever), then reprocess the run
+    on the new values."""
     admin = await get_user_from_token(authorization)
     if admin.get("role") not in ("super_admin", "sub_admin"):
         raise HTTPException(
