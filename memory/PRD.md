@@ -4331,3 +4331,34 @@ prefs BOTH localStorage+server, PDF engine to ALL reports eventually):
   repeatRows, Paragraph-wrap) then migrate known-broken PDFs first.
 NEXT (unchanged): Single Machine Attendance Mode (Message 148 spec);
 WhatsApp API (blocked on user Meta credentials); SMTP config by user.
+
+ITER 497 — UNIVERSAL REPORT ENGINE PHASE 2+3 + SCREEN-MATCHING PDF (DONE,
+tested: backend 6/6 pytest + 5 screens live via testing_agent,
+iteration_497.json):
+- ReportTable.tsx: BANDED headers (ReportCol.band {key,label,color} →
+  merged sticky band row above header, header sticky top=BAND_H, native
+  stickyHeaderIndices [0,1]) + universal PDF toolbar button (pdfTitle/
+  pdfSubtitle props → POSTs visible cols/widths/values+footer to
+  /api/report-export/pdf, downloads blob; web-only, rows>0 gate).
+- NEW backend utils/report_pdf.py build_report_pdf(): landscape auto page
+  (A4→legal→A3→A2), col widths proportional to screen, repeatRows 1-2,
+  Paragraph wrap for overflowing left-aligned text, zebra, footer
+  highlight, band SPANs. routes/report_export.py POST /api/report-export/
+  pdf (roles super/sub/company admin, max 20k rows/80 cols).
+- MIGRATED: salary-register.tsx (rtCols banded via GROUP_COLORS, layout-
+  editor width→min=max, sticky __sn/code/name, onSort kept, rtFooter;
+  removed GridScroller/bands/colWidth), bank-sheet.tsx (BS_COLS),
+  salary-day-sheet.tsx (HDR now ReportCol[], removed W const),
+  contribution-sheets.tsx (monthly dynamic cols + yearly with per-month
+  cols, footers; reportKeys contrib_{pf|esic}_{monthly|yearly}).
+- Footer label placement trick: pass values {sn:" "} so label lands on
+  the Name column.
+- NOT migrated (deliberate): compliance-salary-run.tsx grid (interactive
+  editable cells + GridFreeze already frozen — high risk), attendance-
+  grid/monthly matrix (interactive day-cell matrix), employee-master
+  (management list), clra-registers (uses shared RegisterTable),
+  advances/loans (card-based UIs, not tables).
+- APP_ITERATION=497; deploy_vps_iter497.sh; temp_bundle → 497.
+NEXT: Single Machine Attendance Mode — NEED user to re-share full spec
+(Message 148 of old session not available in fork); WhatsApp API blocked
+on user Meta credentials; SMTP config by user.
