@@ -4362,3 +4362,20 @@ iteration_497.json):
 NEXT: Single Machine Attendance Mode — NEED user to re-share full spec
 (Message 148 of old session not available in fork); WhatsApp API blocked
 on user Meta credentials; SMTP config by user.
+
+ITER 498 — ONE-SHOT PUNCH REPAIR (IN + OUT + OT together) (DONE, e2e
+verified via playwright screenshots on live grid, test punches restored):
+- PunchRepairModal.tsx: new "⚡ Fix IN + OUT Together (one save)" flow —
+  IN + OUT time fields side by side, prefilled from existing punches;
+  ONE Save updates existing punches (PATCH /admin/attendance/{id}) or
+  creates missing ones (POST /admin/attendance/manual-punch).
+- Pairing logic: duty pair = 1st IN + last OUT before OT-IN (or last OUT
+  overall); OT pair = 2nd IN + OUT after it (Iter 419 convention) so the
+  duty OUT never clobbers the OT OUT.
+- OT repair (user follow-up): "Also repair OT punch" toggle → OT In/OT
+  Out fields in the SAME form, saved in the same click.
+- Night shift: OUT < IN → OUT auto-saved next day with 🌙 note; OT pair
+  rolls to next day similarly (otInIsNextDay/otOutIsNextDay).
+- Bug fixed during dev: leftover `lastOut` ref crashed modal (renamed to
+  dutyOut).
+- APP_ITERATION=498; deploy_vps_iter498.sh; temp_bundle → 498.

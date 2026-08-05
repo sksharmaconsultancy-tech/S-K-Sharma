@@ -72,6 +72,16 @@ export default function PunchRepairModal({
   const [editId, setEditId] = useState<string | null>(null);
   const [kind, setKind] = useState<"in" | "out">("in");
   const [time, setTime] = useState("");
+  // Iter 498 (user request) — repair the FULL day in ONE go: IN time +
+  // OUT time entered together, saved with a single button.
+  const [bothOpen, setBothOpen] = useState(false);
+  const [inTime, setInTime] = useState("");
+  const [outTime, setOutTime] = useState("");
+  // Iter 498b (user request) — OT punches (2nd IN→OUT pair) repairable in
+  // the SAME one-shot save, when applicable.
+  const [otOpen, setOtOpen] = useState(false);
+  const [otInTime, setOtInTime] = useState("");
+  const [otOutTime, setOtOutTime] = useState("");
   // Iter 295 (user request) — punch DATE is editable too (ISO, edited via
   // the WebDateField calendar picker), so night-shift/wrong-day punches
   // can be placed on the correct date.
@@ -103,6 +113,32 @@ export default function PunchRepairModal({
 
   const hasIn = punches.some((p) => p.kind === "in");
   const hasOut = punches.some((p) => p.kind === "out");
+  // Iter 498 — pair mapping for the one-shot repair:
+  //   duty pair = 1st IN + last OUT before the OT IN (or last OUT overall)
+  //   OT pair (Iter 419 convention) = 2nd IN + the OUT after it.
+  const ins = punches.filter((p) => p.kind === "in");
+  const outs = punches.filter((p) => p.kind === "out");
+  const firstIn = ins[0] || null;
+  const otInPunch = ins[1] || null;
+  const dutyOut = otInPunch
+    ? [...outs].reverse().find((p) => (p.at || "") < (otInPunch.at || "")) || null
+    : (outs.length ? outs[outs.length - 1] : null);
+  const otOutPunch = otInPunch
+    ? [...outs].reverse().find((p) => (p.at || "") > (otInPunch.at || "")) || null
+    : null;
+
+  const openBoth = () => {
+    setInTime(firstIn ? (firstIn.at || "").slice(11, 16) : "");
+    setOutTime(dutyOut ? (dutyOut.at || "").slice(11, 16) : "");
+    setOtInTime(otInPunch ? (otInPunch.at || "").slice(11, 16) : "");
+    setOtOutTime(otOutPunch ? (otOutPunch.at || "").slice(11, 16) : "");
+    setOtOpen(!!otInPunch || !!otOutPunch);
+    setPDate(dateIso);
+    setReason("Full day punch repair");
+    setErr("");
+    setFormOpen(false);
+    setBothOpen(true);
+  };
 
   const openAdd = (k: "in" | "out") => {
     setEditId(null);
@@ -126,6 +162,88 @@ export default function PunchRepairModal({
   const fmtTimeInput = (raw: string) => {
     const digits = raw.replace(/\D/g, "").slice(0, 4);
     setTime(digits.length > 2 ? `${digits.slice(0, 2)}:${digits.slice(2)}` : digits);
+  };
+  const fmtTimeRaw = (raw: string): string => {
+    const digits = raw.replace(/\D/g, "").slice(0, 4);
+    return digits.length > 2 ? `${digits.slice(0, 2)}:${digits.slice(2)}` : digits;
+  };
+
+  const validTime = (t: string) => {
+    if (!/^\d{2}:\d{2}$/.test(t)) return false;
+    const [hh, mm] = t.split(":").map(Number);
+    return hh <= 23 && mm <= 59;
+  };
+
+  const nextDay = (iso: string): string => {
+    const d = new Date(`${iso}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().slice(0, 10);
+  };
+
+  // Night shift helper — OUT earlier than IN means the OUT lands next day.
+  const outIsNextDay =
+    validTime(inTime) && validTime(outTime) && outTime < inTime;
+  // OT pair lands after the duty OUT; roll to next day when the shift or
+  // the OT pair crosses midnight.
+  const otInIsNextDay =
+    validTime(otInTime) && validTime(outTime) &&
+    (outIsNextDay || otInTime < outTime);
+  const otOutIsNextDay =
+    validTime(otOutTime) && validTime(otInTime) &&
+    (otInIsNextDay || otOutTime < otInTime);
+
+  // Iter 498 — ONE save that repairs BOTH punches (updates existing IN/OUT
+  // or creates the missing ones). Iter 498b — OT pair too, if provided.
+  const saveBoth = async () => {
+    if (!inTime && !outTime && !otInTime && !otOutTime) {
+      setErr("Enter at least one time to repair");
+      return;
+    }
+    for (const [lbl, t] of [["IN", inTime], ["OUT", outTime], ["OT IN", otInTime], ["OT OUT", otOutTime]] as const) {
+      if (t && !validTime(t)) {
+        setErr(`${lbl} time must be HH:MM (24-hour), e.g. 09:05`);
+        return;
+      }
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(pDate)) {
+      setErr("Please pick the punch date");
+      return;
+    }
+    if (!reason.trim()) {
+      setErr("Reason is required for audit");
+      return;
+    }
+    setBusy(true);
+    setErr("");
+    try {
+      const why = reason.trim();
+      const upsert = async (t: string, k: "in" | "out", existing: Punch | null, date: string) => {
+        const at = `${date}T${t}:00`;
+        if (existing) {
+          await api(`/admin/attendance/${existing.record_id}`, {
+            method: "PATCH",
+            body: { at, kind: k, reason: why },
+          });
+        } else {
+          await api(`/admin/attendance/manual-punch`, {
+            method: "POST",
+            body: { user_id: userId, kind: k, at, reason: why },
+          });
+        }
+      };
+      if (inTime) await upsert(inTime, "in", firstIn, pDate);
+      if (outTime) await upsert(outTime, "out", dutyOut, outIsNextDay ? nextDay(pDate) : pDate);
+      if (otInTime) await upsert(otInTime, "in", otInPunch, otInIsNextDay ? nextDay(pDate) : pDate);
+      if (otOutTime) await upsert(otOutTime, "out", otOutPunch, otOutIsNextDay ? nextDay(pDate) : pDate);
+      setChanged(true);
+      setBothOpen(false);
+      await load();
+      onSaved?.(); // refresh the grid behind the modal immediately
+    } catch (e: any) {
+      setErr(e?.message || "Failed to save punches");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const save = async () => {
@@ -306,16 +424,165 @@ export default function PunchRepairModal({
           )}
 
           {/* Add buttons */}
-          {!formOpen && (
-            <View style={st.addRow}>
-              <Pressable style={[st.addBtn, { backgroundColor: "#DCFCE7" }]} onPress={() => openAdd("in")}>
-                <Ionicons name="add" size={16} color="#15803D" />
-                <Text style={[st.addBtnTxt, { color: "#15803D" }]}>Add IN</Text>
+          {!formOpen && !bothOpen && (
+            <>
+              {/* Iter 498 (user request) — repair the whole day in ONE go */}
+              <Pressable
+                style={st.bothBtn}
+                onPress={openBoth}
+                testID="repair-both-btn"
+              >
+                <Ionicons name="flash" size={16} color="#fff" />
+                <Text style={st.bothBtnTxt}>
+                  Fix IN + OUT Together (one save)
+                </Text>
               </Pressable>
-              <Pressable style={[st.addBtn, { backgroundColor: "#FEE2E2" }]} onPress={() => openAdd("out")}>
-                <Ionicons name="add" size={16} color="#B91C1C" />
-                <Text style={[st.addBtnTxt, { color: "#B91C1C" }]}>Add OUT</Text>
-              </Pressable>
+              <View style={st.addRow}>
+                <Pressable style={[st.addBtn, { backgroundColor: "#DCFCE7" }]} onPress={() => openAdd("in")}>
+                  <Ionicons name="add" size={16} color="#15803D" />
+                  <Text style={[st.addBtnTxt, { color: "#15803D" }]}>Add IN</Text>
+                </Pressable>
+                <Pressable style={[st.addBtn, { backgroundColor: "#FEE2E2" }]} onPress={() => openAdd("out")}>
+                  <Ionicons name="add" size={16} color="#B91C1C" />
+                  <Text style={[st.addBtnTxt, { color: "#B91C1C" }]}>Add OUT</Text>
+                </Pressable>
+              </View>
+            </>
+          )}
+
+          {/* Iter 498 — one-shot IN + OUT repair form */}
+          {bothOpen && (
+            <View style={st.form}>
+              <Text style={st.formTitle}>
+                Fix full attendance — {firstIn ? "update" : "add"} IN · {dutyOut ? "update" : "add"} OUT
+              </Text>
+              <View style={st.formRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={st.bothLbl}>IN time</Text>
+                  <TextInput
+                    style={[st.timeInput, { borderColor: "#86EFAC" }]}
+                    value={inTime}
+                    onChangeText={(v) => setInTime(fmtTimeRaw(v))}
+                    placeholder="HH:MM"
+                    placeholderTextColor={colors.onSurfaceTertiary}
+                    keyboardType="number-pad"
+                    maxLength={5}
+                    autoFocus
+                    testID="repair-in-time"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={st.bothLbl}>OUT time</Text>
+                  <TextInput
+                    style={[st.timeInput, { borderColor: "#FCA5A5" }]}
+                    value={outTime}
+                    onChangeText={(v) => setOutTime(fmtTimeRaw(v))}
+                    placeholder="HH:MM"
+                    placeholderTextColor={colors.onSurfaceTertiary}
+                    keyboardType="number-pad"
+                    maxLength={5}
+                    testID="repair-out-time"
+                  />
+                </View>
+              </View>
+              {outIsNextDay ? (
+                <Text style={st.nightHint}>
+                  🌙 OUT is earlier than IN — it will be saved on the NEXT day
+                  ({nextDay(pDate).split("-").reverse().join("-")}) as a night shift.
+                </Text>
+              ) : null}
+              {/* Iter 498b — OT pair (2nd IN→OUT), repairable in the same save */}
+              {!otOpen ? (
+                <Pressable
+                  style={st.otToggle}
+                  onPress={() => setOtOpen(true)}
+                  testID="repair-ot-toggle"
+                >
+                  <Ionicons name="add-circle-outline" size={14} color="#B45309" />
+                  <Text style={st.otToggleTxt}>Also repair OT punch (OT In / OT Out)</Text>
+                </Pressable>
+              ) : (
+                <View style={st.otBox}>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                    <Text style={st.otTitle}>⏱ OT punches (2nd IN → OUT pair)</Text>
+                    <Pressable
+                      onPress={() => { setOtOpen(false); setOtInTime(""); setOtOutTime(""); }}
+                      hitSlop={8}
+                    >
+                      <Ionicons name="close-circle-outline" size={16} color={colors.onSurfaceTertiary} />
+                    </Pressable>
+                  </View>
+                  <View style={[st.formRow, { marginTop: 6 }]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={st.bothLbl}>OT In</Text>
+                      <TextInput
+                        style={[st.timeInput, { borderColor: "#FCD34D" }]}
+                        value={otInTime}
+                        onChangeText={(v) => setOtInTime(fmtTimeRaw(v))}
+                        placeholder="HH:MM"
+                        placeholderTextColor={colors.onSurfaceTertiary}
+                        keyboardType="number-pad"
+                        maxLength={5}
+                        testID="repair-otin-time"
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={st.bothLbl}>OT Out</Text>
+                      <TextInput
+                        style={[st.timeInput, { borderColor: "#FCD34D" }]}
+                        value={otOutTime}
+                        onChangeText={(v) => setOtOutTime(fmtTimeRaw(v))}
+                        placeholder="HH:MM"
+                        placeholderTextColor={colors.onSurfaceTertiary}
+                        keyboardType="number-pad"
+                        maxLength={5}
+                        testID="repair-otout-time"
+                      />
+                    </View>
+                  </View>
+                  {otInIsNextDay || otOutIsNextDay ? (
+                    <Text style={st.nightHint}>
+                      🌙 {otInIsNextDay ? "OT In and OT Out" : "OT Out"} will be saved on the
+                      next day ({nextDay(pDate).split("-").reverse().join("-")}).
+                    </Text>
+                  ) : null}
+                </View>
+              )}
+              <View style={{ marginTop: 8 }}>
+                <WebDateField
+                  value={pDate}
+                  onChange={setPDate}
+                  testID="repair-both-date"
+                />
+              </View>
+              <TextInput
+                style={st.reasonInput}
+                value={reason}
+                onChangeText={setReason}
+                placeholder="Reason (audit)"
+                placeholderTextColor={colors.onSurfaceTertiary}
+              />
+              {err ? <Text style={st.errTxt}>{err}</Text> : null}
+              <View style={st.formActions}>
+                <Pressable style={st.cancelBtn} onPress={() => setBothOpen(false)} disabled={busy}>
+                  <Text style={st.cancelTxt}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[st.saveBtn, busy && { opacity: 0.6 }]}
+                  onPress={saveBoth}
+                  disabled={busy}
+                  testID="repair-both-save"
+                >
+                  {busy ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons name="checkmark-done" size={16} color="#fff" />
+                      <Text style={st.saveTxt}>Save IN + OUT</Text>
+                    </>
+                  )}
+                </Pressable>
+              </View>
             </View>
           )}
 
@@ -381,7 +648,7 @@ export default function PunchRepairModal({
           )}
 
           {/* Footer — Save & Close (applies changes + refreshes the grid) */}
-          {!formOpen && (
+          {!formOpen && !bothOpen && (
             <Pressable
               style={[st.doneBtn, busy && { opacity: 0.6 }]}
               onPress={() => onClose(changed)}
@@ -456,7 +723,37 @@ const st = StyleSheet.create({
   },
   pendingTxt: { fontSize: 10, fontWeight: "800", color: "#92400E" },
   iconBtn: { padding: 6 },
-  addRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md },
+  addRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm },
+  bothBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#1E3A8A",
+    borderRadius: radius.md,
+    paddingVertical: 11,
+    marginTop: spacing.md,
+  },
+  bothBtnTxt: { fontSize: 13.5, fontWeight: "800", color: "#fff" },
+  bothLbl: { fontSize: 11, fontWeight: "800", color: colors.onSurfaceSecondary, marginBottom: 4 },
+  nightHint: { fontSize: 11.5, color: "#B45309", fontWeight: "700", marginTop: 8 },
+  otToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 10,
+    alignSelf: "flex-start",
+  },
+  otToggleTxt: { fontSize: 12, fontWeight: "800", color: "#B45309" },
+  otBox: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    backgroundColor: "rgba(253,230,138,0.15)",
+    borderRadius: radius.md,
+    padding: spacing.sm,
+  },
+  otTitle: { fontSize: 12, fontWeight: "800", color: "#92400E" },
   addBtn: {
     flexDirection: "row",
     alignItems: "center",
