@@ -920,6 +920,10 @@ async def delete_employee_record(user_id: str, actor: str = "system") -> Dict[st
     for col in ("attendance", "leaves", "tickets", "payslips", "notifications", "user_sessions"):
         r = await db[col].delete_many({"user_id": user_id})
         cascade[col] = r.deleted_count
+    # Iter 491 (user bug) — drop the employee's frozen salary snapshots so
+    # a reprocessed Compliance Salary run can never resurrect them.
+    r = await db.compliance_master_snapshots.delete_many({"user_id": user_id})
+    cascade["master_snapshots"] = r.deleted_count
     await db.users.delete_one({"user_id": user_id})
     logger.info(f"[DELETE employee] {user_id} by {actor} cascade={cascade}")
     # Iter 267 — Sync Engine: remove the employee from all machines. The

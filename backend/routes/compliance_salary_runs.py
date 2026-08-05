@@ -167,15 +167,28 @@ async def _compute_compliance_run(
         # Employees REMOVED from the master (or moved out of the group)
         # after the snapshot: resurrect from the snapshot so a
         # Delete + Generate-Again reproduces the identical payroll.
+        # Iter 491 (user bug — "Employees Was Delete From Firm Master ...
+        # Still Show in Compliance Salary") — resurrect ONLY employees
+        # that still EXIST in the Employee Master (e.g. moved out of the
+        # group / filters). An employee DELETED from the master data must
+        # NEVER re-appear in the salary run.
+        _ghost_uids = [u for u in _snap_map if u not in _seen_uids]
+        _alive_uids: set = set()
+        if _ghost_uids:
+            async for _au in db.users.find(
+                    {"user_id": {"$in": _ghost_uids}}, {"_id": 0, "user_id": 1}):
+                _alive_uids.add(_au["user_id"])
         for _uid, sd in _snap_map.items():
-            if _uid not in _seen_uids:
-                _ghost = dict(sd.get("data") or {})
-                _ghost["user_id"] = _uid
-                _ghost.setdefault("company_id", _snap_cid)
-                _ghost.setdefault("employee_code", sd.get("employee_code"))
-                _ghost["role"] = "employee"
-                employees_ghost = _ghost  # keep lint happy inline
-                _overlaid.append(employees_ghost)
+            if _uid in _seen_uids:
+                continue
+            if _uid not in _alive_uids:
+                continue  # deleted from the master — stays out of the run
+            _ghost = dict(sd.get("data") or {})
+            _ghost["user_id"] = _uid
+            _ghost.setdefault("company_id", _snap_cid)
+            _ghost.setdefault("employee_code", sd.get("employee_code"))
+            _ghost["role"] = "employee"
+            _overlaid.append(_ghost)
         employees = _overlaid
         _snap_meta = {
             "used": True,

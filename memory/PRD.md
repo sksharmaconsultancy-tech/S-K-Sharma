@@ -4204,3 +4204,20 @@ ITER 490 — DELETE EMPLOYEE, SUPER ADMIN ONLY (DONE, tested):
   cascade; UI screenshot verified.
 - APP_ITERATION=490; deploy_vps_iter490.sh (cumulative 488+489+490);
   temp_bundle script → 490.
+
+ITER 491 — DELETED EMPLOYEE GHOST IN COMPLIANCE SALARY (DONE, tested;
+user: "Employees Was Delete From Firm Master ... Still Show"):
+- ROOT CAUSE: snapshot ghost-resurrection (Iter 485) re-added employees
+  deleted from db.users on Reprocess (frozen data has no exit_date so the
+  resign filter couldn't catch them either).
+- FIX 1 compliance_salary_runs.py: ghosts resurrected ONLY if user_id
+  still exists in db.users (_alive_uids batch check).
+- FIX 2 employees_admin.py delete_employee_record cascade now deletes
+  compliance_master_snapshots docs for the user.
+- NOTE for tests: POST /api/admin/compliance-salary-runs and /reprocess
+  return {"ok":true,"run":{...}} NESTED — rows at resp["run"]["rows"].
+- Tested E2E (Kankani 2026-06 STAFF): generate 18 rows w/ ghost + snap v1
+  → delete (cascade master_snapshots:1) → reprocess 17 rows, ghost gone.
+  Test data cleaned.
+- APP_ITERATION=491; deploy_vps_iter491.sh (cumulative 488-491);
+  temp_bundle script → 491.
