@@ -4221,3 +4221,22 @@ user: "Employees Was Delete From Firm Master ... Still Show"):
   Test data cleaned.
 - APP_ITERATION=491; deploy_vps_iter491.sh (cumulative 488-491);
   temp_bundle script → 491.
+
+ITER 492 — EMPLOYEE MASTER PDF + SALARY CERTIFICATE PERIOD (DONE, tested):
+- utils/employee_pdf.py: family table one-line (Relation|Name|DOB|Aadhaar),
+  _fmt_mdy() MM-DD-YYYY for DOB/DOJ/family DOB (user EXPLICITLY asked
+  MM-DD-YYYY, flagged in reply in case they meant DD-MM), Aadhaar FULL
+  (unmasked), Salary Details += salary_structure_actual heads +
+  actual_salary_allowances + salary_structure_compliance, policy page
+  gated on firm_masters.salary_process.offline_salary AND
+  .bio_matrix_attendance (param firm_salary_process passed from
+  employee_documents.py single + bulk endpoints).
+- Salary Certificate: employee-master.tsx new certMonth input (YYYY-MM,
+  testID cert-month-input) → ?month=; salary_runs.py endpoint resolves
+  ACTUAL figures: finalized compliance run row > legacy_salary_history
+  (kind online→offline, "Old DB records — LOCKED") > master fallback;
+  utils/salary_certificate.py new actual= param renders real
+  basic/gross/net/present-days table + source.
+- Tested via pdfplumber: all assertions pass (flags on/off, old-db month,
+  fallback month). Test data cleaned/restored.
+- APP_ITERATION=492; deploy_vps_iter492.sh (cumulative 488-492).

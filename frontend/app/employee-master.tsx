@@ -403,12 +403,21 @@ export default function EmployeeMasterScreen() {
   };
 
   const [certDownloading, setCertDownloading] = useState(false);
+  // Iter 492 (user request) — certificate PERIOD selector (YYYY-MM).
+  const [certMonth, setCertMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
   const downloadSalaryCertificate = async () => {
     if (!targetUserId) return;
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(certMonth.trim())) {
+      showMsg("Enter the period as YYYY-MM (e.g. 2026-03)", "Salary Certificate");
+      return;
+    }
     setCertDownloading(true);
     try {
       const res = await apiBinary(
-        `/admin/employees/${targetUserId}/salary-certificate.pdf`,
+        `/admin/employees/${targetUserId}/salary-certificate.pdf?month=${certMonth.trim()}`,
       );
       const safe = (emp?.name || targetUserId).replace(/[^a-z0-9]/gi, "_");
       if (Platform.OS === "web") {
@@ -832,6 +841,26 @@ export default function EmployeeMasterScreen() {
                   </>
                 )}
               </Pressable>
+              {/* Iter 492 (user request) — pick the certificate PERIOD.
+                  Locked months (finalized runs / Old-DB history) print the
+                  REAL processed figures for that month. */}
+              <View style={{ flexDirection: "row", alignItems: "center", marginTop: 10, gap: 8 }}>
+                <Text style={[styles.cardHint, { marginTop: 0 }]}>Certificate period:</Text>
+                <TextInput
+                  testID="cert-month-input"
+                  value={certMonth}
+                  onChangeText={setCertMonth}
+                  placeholder="YYYY-MM"
+                  placeholderTextColor="#9AA3AE"
+                  style={{
+                    width: 110, paddingVertical: 6, paddingHorizontal: 10,
+                    borderWidth: 1, borderColor: "#D5DAE1", borderRadius: 8,
+                    fontSize: 13, color: "#1F2937", backgroundColor: "#fff",
+                  }}
+                  maxLength={7}
+                  autoCapitalize="none"
+                />
+              </View>
               <Pressable
                 testID="download-salary-cert"
                 onPress={downloadSalaryCertificate}

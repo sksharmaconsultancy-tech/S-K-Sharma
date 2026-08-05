@@ -131,12 +131,21 @@ async def download_employee_master_pdf(
         {"_id": 0, "base64": 0},  # metadata only for PDF listing
     ).sort("uploaded_at", 1).to_list(200)
 
+    # Iter 492 — the Salary & Attendance Policy page prints only when the
+    # firm has Offline Salary + Bio-Matrix Attendance enabled.
+    _fsp = {}
+    if emp.get("company_id"):
+        _fsp = ((await db.firm_masters.find_one(
+            {"company_id": emp["company_id"]}, {"_id": 0, "salary_process": 1})
+        ) or {}).get("salary_process") or {}
+
     from utils.employee_pdf import build_employee_master_pdf
     pdf_bytes = build_employee_master_pdf(
         user=emp,
         company=company,
         policy=(emp.get("employee_policy") or {}),
         documents=docs,
+        firm_salary_process=_fsp,
     )
 
     # Persist a snapshot copy for the record (base64 for portability)
@@ -207,6 +216,15 @@ async def download_employees_master_pdf_bulk(
         ):
             docs_by_user.setdefault(d["user_id"], []).append(d)
 
+    # Iter 492 — firm salary_process flags gate the policy page.
+    _fsp_by_cid: dict[str, dict] = {}
+    if company_ids:
+        async for fm in db.firm_masters.find(
+            {"company_id": {"$in": company_ids}},
+            {"_id": 0, "company_id": 1, "salary_process": 1},
+        ):
+            _fsp_by_cid[fm["company_id"]] = fm.get("salary_process") or {}
+
     items = []
     for u in users:
         items.append({
@@ -214,6 +232,7 @@ async def download_employees_master_pdf_bulk(
             "company": companies.get(u.get("company_id")),
             "policy": u.get("employee_policy") or {},
             "documents": docs_by_user.get(u["user_id"], []),
+            "firm_salary_process": _fsp_by_cid.get(u.get("company_id")) or {},
         })
 
     from utils.employee_pdf import build_employees_master_pdf_bulk

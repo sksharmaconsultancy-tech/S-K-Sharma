@@ -201,6 +201,30 @@ def _mask_aadhar(v: Optional[str]) -> str:
     return v
 
 
+def _fmt_mdy(v: Any) -> str:
+    """Iter 492 (user request) — print DOB / DOJ as MM-DD-YYYY.
+
+    Handles ISO ``YYYY-MM-DD`` and the Indian ``DD-MM-YYYY`` / ``DD/MM/YYYY``
+    forms found in the master. Unparseable values print as-is.
+    """
+    if not v:
+        return "—"
+    s = str(v).strip()[:10].replace("/", "-")
+    p = s.split("-")
+    try:
+        if len(p) == 3 and len(p[0]) == 4:          # YYYY-MM-DD
+            y, m, d = int(p[0]), int(p[1]), int(p[2])
+        elif len(p) == 3 and len(p[2]) == 4:        # DD-MM-YYYY
+            d, m, y = int(p[0]), int(p[1]), int(p[2])
+        else:
+            return s
+        if not (1 <= m <= 12 and 1 <= d <= 31):
+            return s
+        return f"{m:02d}-{d:02d}-{y:04d}"
+    except (ValueError, TypeError):
+        return s
+
+
 def _kv_table(rows: List[Tuple[str, Any]], styles: dict, col_widths=None) -> Table:
     """Two-column label/value grid. Accepts a flat list of (label, value)
     tuples and renders them in 2 pairs per row (=4 columns).
@@ -369,6 +393,7 @@ def build_employee_master_pdf(
     company: Optional[dict] = None,
     policy: Optional[dict] = None,
     documents: Optional[List[dict]] = None,
+    firm_salary_process: Optional[dict] = None,
 ) -> bytes:
     """Return the PDF as raw bytes.
 
@@ -417,7 +442,7 @@ def build_employee_master_pdf(
     story.append(_kv_table([
         ("Full Name", user.get("name")),
         ("Father's Name", user.get("father_name")),
-        ("Date of Birth", user.get("dob")),
+        ("Date of Birth", _fmt_mdy(user.get("dob"))),
         ("Gender", user.get("gender")),
         ("Blood Group", user.get("blood_group")),
         ("Marital Status", user.get("marital_status")),
@@ -430,18 +455,40 @@ def build_employee_master_pdf(
         ("Emergency Phone", user.get("emergency_contact_phone")),
     ], styles))
 
-    # --- FAMILY DETAILS (Iter 109) ---
+    # --- FAMILY DETAILS (Iter 109; Iter 492 — one line per member:
+    #     Name | DOB | Aadhaar No.) ---
     fam = [f for f in (user.get("family_members") or []) if (f or {}).get("name")]
     if fam:
         story.append(_section_header(styles, "FAMILY DETAILS"))
-        story.append(_kv_table([
-            (f"{(f.get('relation') or 'Member').title()}"
-             f"{' (Nominee)' if f.get('is_nominee') else ''}",
-             f"{f.get('name')}"
-             f"{('  ·  DOB: ' + f['dob']) if f.get('dob') else ''}"
-             f"{('  ·  Aadhaar: ' + str(f['aadhaar_no'])) if f.get('aadhaar_no') else ''}")
-            for f in fam
-        ], styles))
+        _fam_rows = [[
+            Paragraph("<b>Relation</b>", styles["label"]),
+            Paragraph("<b>Name</b>", styles["label"]),
+            Paragraph("<b>DOB</b>", styles["label"]),
+            Paragraph("<b>Aadhaar No.</b>", styles["label"]),
+        ]]
+        for f in fam:
+            _rel = (f.get("relation") or "Member").title()
+            if f.get("is_nominee"):
+                _rel += " (Nominee)"
+            _fam_rows.append([
+                Paragraph(_rel, styles["value"]),
+                Paragraph(str(f.get("name") or "—"), styles["value"]),
+                Paragraph(_fmt_mdy(f.get("dob")), styles["value"]),
+                Paragraph(str(f.get("aadhaar_no") or f.get("aadhar_no") or "—"),
+                          styles["value"]),
+            ])
+        story.append(Table(
+            _fam_rows, colWidths=[38 * mm, 62 * mm, 32 * mm, 38 * mm],
+            style=TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EEF2F7")),
+                ("LINEBELOW", (0, 0), (-1, -1), 0.4, LINE),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]),
+        ))
 
     # --- EMPLOYMENT ---
     story.append(_section_header(styles, "EMPLOYMENT DETAILS"))
@@ -453,7 +500,7 @@ def build_employee_master_pdf(
         ("Designation", user.get("designation") or user.get("position")),
         ("Employee Group", user.get("employee_group") or user.get("employee_type")),
         ("On-Roll", bool(user.get("is_onroll"))),
-        ("Date of Joining", user.get("doj") or user.get("join_date")),
+        ("Date of Joining", _fmt_mdy(user.get("doj") or user.get("join_date"))),
         ("Shift Start", user.get("shift_start") or policy.get("shift_name")),
         ("Shift End", user.get("shift_end") or policy.get("shift_dummy")),
         ("Bio-metric Code", user.get("bio_code") or policy.get("bio_code")),
@@ -464,17 +511,32 @@ def build_employee_master_pdf(
 
     # --- SALARY (from Employee Master) ---
     story.append(_section_header(styles, "SALARY DETAILS"))
-    story.append(_kv_table([
+    _sal_rows: List[Tuple[str, Any]] = [
         ("Salary Mode", (user.get("salary_mode") or "").title()),
         ("Actual Salary (Monthly)", user.get("salary_monthly")),
         ("Compliance Gross", user.get("compliance_gross")),
         ("Pay Mode", user.get("pay_mode")),
-    ], styles))
+    ]
+    # Iter 492 (user request) — show the salary structure ALLOWANCES too.
+    for _st in (user.get("salary_structure_actual") or []):
+        if (_st or {}).get("head") and _st.get("amount") not in (None, ""):
+            _lab = str(_st["head"])
+            if _st.get("rate_type"):
+                _lab += f" ({_st['rate_type']})"
+            _sal_rows.append((_lab, _st.get("amount")))
+    for _al in (user.get("actual_salary_allowances") or []):
+        if (_al or {}).get("head") and _al.get("amount") not in (None, ""):
+            _sal_rows.append((f"Allowance — {_al['head']}", _al.get("amount")))
+    for _cs in (user.get("salary_structure_compliance") or []):
+        if (_cs or {}).get("head") and _cs.get("amount") not in (None, ""):
+            _sal_rows.append((f"Compliance — {_cs['head']}", _cs.get("amount")))
+    story.append(_kv_table(_sal_rows, styles))
 
     # --- KYC ---
     story.append(_section_header(styles, "KYC / IDENTITY"))
     story.append(_kv_table([
-        ("Aadhaar (masked)", _mask_aadhar(user.get("aadhar_number") or user.get("aadhaar_no"))),
+        ("Aadhaar No.",
+         (user.get("aadhar_number") or user.get("aadhaar_no") or "—")),
         ("Name (as per Aadhaar)", user.get("name_as_per_aadhar")),
         ("PAN", user.get("pan_number") or user.get("pan_no")),
         ("Name (as per PAN)", user.get("name_as_per_pan")),
@@ -500,8 +562,12 @@ def build_employee_master_pdf(
     story.append(PageBreak())
 
     # --- SALARY POLICY ---
-    story.append(_section_header(styles, "SALARY & ATTENDANCE POLICY"))
-    story.append(_kv_table([
+    # Iter 492 (user request) — this page prints ONLY when the Firm Master
+    # has BOTH Offline Salary and Bio-Matrix (Biometric) Attendance enabled.
+    _fsp = firm_salary_process or {}
+    if _fsp.get("offline_salary") and _fsp.get("bio_matrix_attendance"):
+        story.append(_section_header(styles, "SALARY & ATTENDANCE POLICY"))
+        story.append(_kv_table([
         ("Monthly Salary (₹)", policy.get("salary") or user.get("salary_monthly")),
         ("Tier 1 Bonus (₹)", policy.get("salary_1")),
         ("Tier 1 min Days", policy.get("day_1")),
@@ -573,6 +639,7 @@ def build_employees_master_pdf_bulk(
     parts: List[bytes] = [
         build_employee_master_pdf(
             u.get("user", {}), u.get("company"), u.get("policy"), u.get("documents"),
+            firm_salary_process=u.get("firm_salary_process"),
         )
         for u in users_with_context
     ]

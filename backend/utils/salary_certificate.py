@@ -144,6 +144,7 @@ def build_salary_certificate_pdf(
     company: Dict[str, Any],
     policy: Dict[str, Any],
     month: str,
+    actual: Optional[Dict[str, Any]] = None,
     signatory_name: Optional[str] = None,
     signatory_role: Optional[str] = None,
     certificate_id: Optional[str] = None,
@@ -258,36 +259,74 @@ def build_salary_certificate_pdf(
         f"<b>{employee.get('designation') or '—'}</b> in the "
         f"<b>{employee.get('department') or '—'}</b> department since "
         f"<b>{employee.get('doj') or '—'}</b> ({_tenure_str(employee.get('doj'))}). "
-        f"Their current monthly gross salary is <b>{_amt(employee.get('salary_monthly'))}</b>."
+        + (
+            f"Their gross salary for <b>{month}</b> was "
+            f"<b>{_amt(actual.get('gross'))}</b> (net paid "
+            f"<b>{_amt(actual.get('net'))}</b>) as per the "
+            f"{actual.get('source') or 'processed salary records'}."
+            if actual else
+            f"Their current monthly gross salary is <b>{_amt(employee.get('salary_monthly'))}</b>."
+        )
     )
     flow.append(Paragraph(body_txt, styles["body"]))
     flow.append(Spacer(1, 4 * mm))
 
     # Salary breakdown table
-    gross = float(employee.get("salary_monthly") or 0)
-    b = _breakdown(gross, policy or {})
-    breakdown_rows = [
-        [Paragraph("<b>Salary component</b>", styles["label"]),
-         Paragraph("<b>Monthly (INR)</b>", styles["label"])],
-        ["Basic", _amt(b["basic"])],
-        ["HRA", _amt(b["hra"])],
-        ["Conveyance", _amt(b["conveyance"])],
-        ["Medical", _amt(b["medical"])],
-        ["Special", _amt(b["special"])],
-        ["Others", _amt(b["others"])],
-        [Paragraph("<b>Gross Monthly</b>", ParagraphStyle(
-            "bold", fontName=bold, fontSize=10.5, textColor=INK,
-        )),
-         Paragraph(f"<b>{_amt(gross)}</b>", ParagraphStyle(
-            "boldR", fontName=bold, fontSize=10.5, textColor=INK, alignment=TA_RIGHT,
-         ))],
-        [Paragraph("<b>Annual Gross</b>", ParagraphStyle(
-            "bold2", fontName=bold, fontSize=10.5, textColor=INK,
-        )),
-         Paragraph(f"<b>{_amt(gross * 12)}</b>", ParagraphStyle(
-            "bold2R", fontName=bold, fontSize=10.5, textColor=INK, alignment=TA_RIGHT,
-         ))],
-    ]
+    if actual:
+        # Iter 492 (user request) — REAL figures from the processed month
+        # (locked Compliance Salary run or Old-DB legacy history).
+        _bold_s = ParagraphStyle("boldA", fontName=bold, fontSize=10.5, textColor=INK)
+        _bold_r = ParagraphStyle("boldAR", fontName=bold, fontSize=10.5,
+                                 textColor=INK, alignment=TA_RIGHT)
+        _wht_r = ParagraphStyle("whtAR", fontName=bold, fontSize=10.5,
+                                textColor=colors.white, alignment=TA_RIGHT)
+        _wht_l = ParagraphStyle("whtAL", fontName=bold, fontSize=10.5,
+                                textColor=colors.white)
+        breakdown_rows = [
+            [Paragraph(f"<b>Salary for {month} — {actual.get('source') or ''}</b>",
+                       styles["label"]),
+             Paragraph("<b>Amount (INR)</b>", styles["label"])],
+        ]
+        for _lab, _key in (("Basic", "basic"), ("HRA", "hra"),
+                           ("Conveyance", "conveyance"),
+                           ("Other Allowances", "other"),
+                           ("Present Days", "present_days")):
+            _v = actual.get(_key)
+            if _v in (None, ""):
+                continue
+            breakdown_rows.append(
+                [_lab, (str(_v) if _key == "present_days" else _amt(_v))])
+        breakdown_rows.append(
+            [Paragraph("<b>Gross Paid</b>", _bold_s),
+             Paragraph(f"<b>{_amt(actual.get('gross'))}</b>", _bold_r)])
+        breakdown_rows.append(
+            [Paragraph("<b>Net Paid</b>", _wht_l),
+             Paragraph(f"<b>{_amt(actual.get('net'))}</b>", _wht_r)])
+    else:
+        gross = float(employee.get("salary_monthly") or 0)
+        b = _breakdown(gross, policy or {})
+        breakdown_rows = [
+            [Paragraph("<b>Salary component</b>", styles["label"]),
+             Paragraph("<b>Monthly (INR)</b>", styles["label"])],
+            ["Basic", _amt(b["basic"])],
+            ["HRA", _amt(b["hra"])],
+            ["Conveyance", _amt(b["conveyance"])],
+            ["Medical", _amt(b["medical"])],
+            ["Special", _amt(b["special"])],
+            ["Others", _amt(b["others"])],
+            [Paragraph("<b>Gross Monthly</b>", ParagraphStyle(
+                "bold", fontName=bold, fontSize=10.5, textColor=INK,
+            )),
+             Paragraph(f"<b>{_amt(gross)}</b>", ParagraphStyle(
+                "boldR", fontName=bold, fontSize=10.5, textColor=INK, alignment=TA_RIGHT,
+             ))],
+            [Paragraph("<b>Annual Gross</b>", ParagraphStyle(
+                "bold2", fontName=bold, fontSize=10.5, textColor=INK,
+            )),
+             Paragraph(f"<b>{_amt(gross * 12)}</b>", ParagraphStyle(
+                "bold2R", fontName=bold, fontSize=10.5, textColor=INK, alignment=TA_RIGHT,
+             ))],
+        ]
     breakdown_tbl = Table(
         breakdown_rows, colWidths=[88 * mm, 62 * mm],
         style=TableStyle([

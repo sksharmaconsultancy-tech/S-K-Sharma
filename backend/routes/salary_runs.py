@@ -508,11 +508,57 @@ async def download_salary_certificate_pdf(
     ) or {}
     policy = company.get("compliance_policy") or {}
     ref_month = month or (datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%Y-%m"))
+
+    # Iter 492 (user request) — PERIOD-AWARE certificate: pull the ACTUAL
+    # processed salary for the selected month. Priority:
+    #   1. Compliance Salary run row (LOCKED/finalized preferred)
+    #   2. Old-DB imported legacy history (locked, kind online→offline)
+    #   3. fallback — live master salary_monthly (previous behaviour)
+    actual = None
+    _cands = await db.compliance_salary_runs.find(
+        {"company_id": emp.get("company_id"), "month": ref_month,
+         "rows.user_id": user_id},
+        {"_id": 0, "rows.$": 1, "finalized": 1, "generated_at": 1},
+    ).to_list(20)
+    _cands.sort(key=lambda r: str(r.get("generated_at") or ""), reverse=True)
+    _cands.sort(key=lambda r: bool(r.get("finalized")), reverse=True)
+    if _cands:
+        _row = (_cands[0].get("rows") or [{}])[0]
+        actual = {
+            "basic": _row.get("basic"), "hra": _row.get("hra"),
+            "conveyance": _row.get("conveyance"),
+            "other": _row.get("other_allowance"),
+            "gross": _row.get("gross_paid"), "net": _row.get("net"),
+            "present_days": _row.get("present_days"),
+            "source": ("Processed Salary — LOCKED"
+                       if _cands[0].get("finalized") else
+                       "Processed Salary (draft)"),
+        }
+    if actual is None:
+        _lq = {"month": ref_month,
+               "$or": [{"user_id": user_id}]}
+        if emp.get("employee_code"):
+            _lq["$or"].append({"emp_code": str(emp.get("employee_code"))})
+        if emp.get("company_id"):
+            _lq["company_id"] = emp.get("company_id")
+        for _kind in ("online", "offline"):
+            _h = await db.legacy_salary_history.find_one(
+                {**_lq, "kind": _kind}, {"_id": 0})
+            if _h:
+                actual = {
+                    "basic": _h.get("basic"), "gross": _h.get("gross"),
+                    "net": _h.get("net"),
+                    "present_days": _h.get("present_days"),
+                    "source": "Old DB records — LOCKED",
+                }
+                break
+
     pdf_bytes = build_salary_certificate_pdf(
         employee=emp,
         company=company,
         policy=policy,
         month=ref_month,
+        actual=actual,
         signatory_name=signatory_name,
         signatory_role=signatory_role,
         title=await _title_for_report("salary_certificate", "SALARY CERTIFICATE"),
