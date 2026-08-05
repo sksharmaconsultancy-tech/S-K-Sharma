@@ -4379,3 +4379,33 @@ verified via playwright screenshots on live grid, test punches restored):
 - Bug fixed during dev: leftover `lastOut` ref crashed modal (renamed to
   dutyOut).
 - APP_ITERATION=498; deploy_vps_iter498.sh; temp_bundle → 498.
+
+ITER 499 — 4 ITEMS (DONE, tested via testing_agent: backend 13/13 +
+frontend 5 flows, iteration_499.json):
+1. GROUP FILTER BUG (attendance report): ROOT CAUSE — list_employee_groups
+   merged Masters groups WITHOUT group_id → all chips undefined id, no
+   filter. Fix: server.py returns master_id + byname:<NAME> safety id
+   (resolved in _resolve_group_employee_ids), attendance-grid.tsx de-dupe
+   prefers entries with ids & drops id-less. Verified LABOUR=108/STAFF=16.
+2. PRIORITY TASKS strip on portal-dashboard Overview (PriorityTasks.tsx +
+   GET /api/admin/portal-tasks/priority in portal_phase2.py — overdue→
+   high→due_today max 8 + today's statutory schedule; click → Tasks/
+   Calendar tab; refetch via tabVisits counter). Existing layout untouched.
+3. FACTORY & BOILER ANNUAL RETURN: routes/factory_returns.py + utils/
+   factory_return_pdf.py + app/factory-annual-return.tsx (menu:
+   Compliance). Unified data layer: compliance_salary_runs (current) +
+   compliance_import_entries (legacy, READ-ONLY) merged per user+month,
+   current wins. Sources combined|current|legacy. Details saved on
+   companies.factory_details (occupier/manager/license/welfare/accidents
+   per year). Exports: Form-style Factory PDF, Boiler PDF, openpyxl xlsx
+   (added to requirements.txt). Uses Rs. not ₹ in PDFs (Helvetica).
+4. MENU SEARCH: AdminWebShell flatNavDeep (matches label+parent, shows
+   section path) + repCat lazy fetch of Report-Hub kinds (payroll/govt/
+   clra/audit lists) → deep link /reports-center?kind=X (param handled in
+   reports-center.tsx).
+- APP_ITERATION=499; deploy_vps_iter499.sh; temp_bundle → 499.
+PENDING USER VERIFICATION: deploys 498 & 499 on VPS.
+NEXT: Single Machine Attendance Mode (need user to re-share spec);
+WhatsApp API (Meta block); SMTP config by user. Spec section 3 of the
+Factory-return request ("source selector on ALL existing reports") only
+implemented on the new module — phased rollout pending if user wants it.
