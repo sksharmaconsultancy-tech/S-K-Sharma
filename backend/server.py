@@ -9253,7 +9253,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "499"
+APP_ITERATION = "500"
 
 
 @api.get("/version")
@@ -11939,6 +11939,10 @@ app.include_router(report_export_router)
 # Iter 499 — Factory & Boiler Annual Return (unified current+legacy data).
 from routes.factory_returns import router as factory_returns_router  # noqa: E402
 app.include_router(factory_returns_router)
+
+# Iter 500 — CTC Management module Phase 1 (additive; Gross engine untouched).
+from routes.ctc_module import router as ctc_router  # noqa: E402
+app.include_router(ctc_router)
 from routes.web_push import router as web_push_router  # noqa: E402
 app.include_router(web_push_router)
 from routes.sheet_verification import router as sheet_verification_router  # noqa: E402

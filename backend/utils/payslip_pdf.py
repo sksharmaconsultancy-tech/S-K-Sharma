@@ -391,6 +391,45 @@ def _flow_for_employee(
         f"<b>In words:</b> Rupees {net_words}",
         styles["body"],
     ))
+    # Iter 500 — CTC MODE annexure: employer-side contributions + Monthly
+    # CTC so a CTC-structured employee sees the full cost-to-company.
+    if row.get("ctc_mode"):
+        flow.append(Spacer(1, 4 * mm))
+        ctc_rows = [[Paragraph(
+            "<b>CTC ANNEXURE — EMPLOYER CONTRIBUTIONS</b>",
+            ParagraphStyle("ctch", parent=styles["label"],
+                           textColor=colors.white)), ""]]
+        for c in (row.get("ctc_employer_contributions") or []):
+            ctc_rows.append([
+                Paragraph(str(c.get("label") or ""), styles["value_l"]),
+                Paragraph(_amt(c.get("amount")), styles["value_r"]),
+            ])
+        ctc_rows.append([
+            Paragraph("<b>Total Employer Contribution</b>", styles["value_l"]),
+            Paragraph(f"<b>{_amt(row.get('ctc_employer_total'))}</b>",
+                      styles["value_r"]),
+        ])
+        ctc_rows.append([
+            Paragraph("<b>Monthly CTC (Gross + Employer)</b>",
+                      styles["value_l"]),
+            Paragraph(f"<b>{_amt(row.get('monthly_ctc'))}</b>",
+                      styles["value_r"]),
+        ])
+        flow.append(Table(
+            ctc_rows,
+            colWidths=[100 * mm, 74 * mm],
+            style=TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), BRAND),
+                ("SPAN", (0, 0), (-1, 0)),
+                ("BACKGROUND", (0, -2), (-1, -1), BRAND_LIGHT),
+                ("BOX", (0, 0), (-1, -1), 0.4, LINE),
+                ("INNERGRID", (0, 0), (-1, -1), 0.4, LINE),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]),
+        ))
     flow.append(Spacer(1, 12 * mm))
 
     # Signatory footer

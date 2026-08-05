@@ -420,6 +420,19 @@ async def _compute_compliance_run(
         _esic_maps[_cid_] = await _esic_map_fn(_cid_, payload.month)
         _st_ = await _esic_st_fn(_cid_)
         _esic_on[_cid_] = bool(_st_.get("enabled") and _st_.get("link_compliance"))
+    # Iter 500 — CTC MODE (additive): preload the CTC structures assigned to
+    # CTC-mode employees so their compliance gross can be derived from the
+    # Monthly CTC (gross = CTC − employer cost). Gross-mode employees are
+    # completely untouched.
+    from routes.ctc_module import calc_ctc_breakup as _ctc_calc
+    _ctc_smap: Dict[str, dict] = {}
+    _ctc_sids = {e.get("ctc_structure_id") for e in employees
+                 if str(e.get("salary_mode") or "").lower() == "ctc"
+                 and e.get("ctc_structure_id")}
+    if _ctc_sids:
+        async for _s_ in db.ctc_structures.find(
+                {"structure_id": {"$in": list(_ctc_sids)}}, {"_id": 0}):
+            _ctc_smap[_s_["structure_id"]] = _s_
     for emp in employees:
         emp = dict(emp)
         emp.pop("pin_hash", None)
@@ -436,6 +449,31 @@ async def _compute_compliance_run(
             "ot_allowed", emp.get("ot_applicable"))
         if _emp_ot is not None:
             merged_pol["ot_allowed"] = bool(_emp_ot)
+        # Iter 500 — CTC MODE: derive this employee's compliance gross from
+        # the Monthly CTC via the assigned CTC structure. The engine then
+        # runs EXACTLY as before on that gross (proration, PF/ESIC/PT, OT —
+        # all unchanged); the CTC employer-side figures ride along on the
+        # row for the register / payslips / reports.
+        _ctc_meta = None
+        if (str(emp.get("salary_mode") or "").lower() == "ctc"
+                and float(emp.get("monthly_ctc") or 0) > 0):
+            _s_ctc = _ctc_smap.get(emp.get("ctc_structure_id") or "")
+            if _s_ctc:
+                _bk = _ctc_calc(float(emp.get("monthly_ctc") or 0),
+                                _s_ctc.get("components") or [])
+                merged_pol = dict(merged_pol)
+                merged_pol["salary"] = _bk["gross"]
+                emp["compliance_gross"] = _bk["gross"]
+                emp["salary_monthly"] = _bk["gross"]
+                emp["compliance_salary_mode"] = "monthly"
+                _ctc_meta = {
+                    "monthly_ctc": _bk["monthly_ctc"],
+                    "ctc_structure_id": _s_ctc["structure_id"],
+                    "ctc_structure_name": _s_ctc.get("name") or "",
+                    "ctc_gross_derived": _bk["gross"],
+                    "ctc_employer_total": _bk["employer_total"],
+                    "ctc_employer_contributions": _bk["employer_contributions"],
+                }
         att_rows = attendance_by_user.get(emp["user_id"], [])
         _pm_202 = (att_pol.get("policy_master") or {})
         if (att_pol.get("policy_variant") or "").strip() == "policy_2":
@@ -1215,6 +1253,12 @@ async def _compute_compliance_run(
             row["esic_leave_days"] = round(float(_esic_d or 0), 1)
         elif _esic_d:
             row["esic_leave_days"] = round(float(_esic_d), 1)
+        # Iter 500 — CTC MODE: stamp the CTC figures on the row so the
+        # register / payslip / reports can show them. Gross-mode rows carry
+        # nothing new (100% backward compatible).
+        if _ctc_meta:
+            row["ctc_mode"] = True
+            row.update(_ctc_meta)
         rows.append(row)
 
     totals = {
@@ -2922,6 +2966,14 @@ async def generate_compliance_payslips_from_run(
                 "month_days": r.get("month_days"),
             },
         }
+        # Iter 500 — CTC MODE: carry the CTC annexure onto the slip.
+        if r.get("ctc_mode"):
+            slip["ctc_mode"] = True
+            slip["breakup"]["monthly_ctc"] = r.get("monthly_ctc")
+            slip["breakup"]["ctc_structure_name"] = r.get("ctc_structure_name")
+            slip["breakup"]["ctc_employer_total"] = r.get("ctc_employer_total")
+            slip["breakup"]["ctc_employer_contributions"] = \
+                r.get("ctc_employer_contributions")
         await db.payslips.insert_one(slip)
         created += 1
         # Iter 395 — WhatsApp "salary processed" + payslip-PDF notifications
