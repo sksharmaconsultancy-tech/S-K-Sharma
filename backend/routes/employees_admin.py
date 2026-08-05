@@ -26,6 +26,7 @@ from server import (  # noqa: E402
     logger,
     now_iso,
     require_role,
+    require_super_admin_strict,
 )
 
 from shared.dates import _parse_any_date  # noqa: E402
@@ -941,13 +942,14 @@ async def delete_employee(user_id: str,
                           authorization: Optional[str] = Header(None)):
     """Remove an employee (and their attendance, leaves, tickets, payslips).
 
-    - Super admin can delete any employee.
-    - Company admin can only delete employees in their own company.
-    - Sub admin deletions are queued for SUPER ADMIN approval (Iter 306).
+    Iter 490 (user request) — SUPER ADMIN ONLY. Company admins and
+    Sub (Super) Admins can no longer delete employees.
     - Super admins cannot be deleted via this endpoint (safety guard).
     """
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
+    # Iter 490 — STRICT: sub_admin normally inherits super_admin reach via
+    # require_role, so use the strict guard to keep them out of deletes.
+    require_super_admin_strict(admin)
     target = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     if not target:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -961,14 +963,9 @@ async def delete_employee(user_id: str,
             detail=("This employee is LOCKED — the firm's Legacy Salary "
                     "Records are locked. Click UNDO on the Legacy Import "
                     "first to unlock, then delete."))
-    if admin["role"] == "company_admin":
-        if not admin.get("company_id") or target.get("company_id") != admin["company_id"]:
-            raise HTTPException(status_code=403, detail="Not allowed to delete employees outside your company")
     if admin.get("user_id") == user_id:
         raise HTTPException(status_code=400, detail="You cannot delete your own account")
 
-    # Iter 344 (user request) — Sub Super Admin deletes DIRECTLY, no
-    # Super Admin approval queue anymore (was Iter 306).
     result = await delete_employee_record(user_id, actor=admin.get("email") or admin.get("user_id"))
     return {"ok": True, **result}
 

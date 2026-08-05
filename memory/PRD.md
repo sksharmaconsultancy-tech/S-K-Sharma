@@ -4191,3 +4191,16 @@ Amount Show into the PDF Report in Other"):
   ADVANCE col), v2 (new + old saved layouts both show Advance), totals OK.
 - APP_ITERATION=489; deploy_vps_iter489.sh (cumulative w/ 488 dup fix +
   one-time dup cleanup); temp_bundle script → 489.
+
+ITER 490 — DELETE EMPLOYEE, SUPER ADMIN ONLY (DONE, tested):
+- employees_admin.py DELETE /api/admin/employees/{user_id}: now uses
+  require_super_admin_strict (require_role lets sub_admin inherit
+  super_admin — verified sub_admin got 200 before fix!). company_admin
+  branch removed. Guards kept: legacy_locked, super_admin target, self.
+- employee-master.tsx: red "Delete Employee (Super Admin only)" button
+  (testID em-delete-employee) below Login Credentials, visible only for
+  role=super_admin; confirm dialog; cascade note; router.back() after.
+- Tested E2E: company_admin 403, sub_admin 403, super_admin 200 +
+  cascade; UI screenshot verified.
+- APP_ITERATION=490; deploy_vps_iter490.sh (cumulative 488+489+490);
+  temp_bundle script → 490.

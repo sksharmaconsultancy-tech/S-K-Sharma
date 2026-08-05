@@ -143,6 +143,7 @@ export default function EmployeeMasterScreen() {
   const [downloading, setDownloading] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const isAdmin =
     user?.role === "company_admin" ||
@@ -565,6 +566,37 @@ export default function EmployeeMasterScreen() {
     }
   };
 
+  // Iter 490 (user request) — DELETE EMPLOYEE from the master data.
+  // SUPER ADMIN ONLY (backend enforces it too). Cascade-deletes the
+  // employee's attendance, leaves, tickets and payslips.
+  const doDeleteEmployee = () => {
+    if (!emp) return;
+    const proceed = async () => {
+      setDeleting(true);
+      try {
+        await api(`/admin/employees/${emp.user_id}`, { method: "DELETE" });
+        showMsg(`${emp.name} deleted from the master data.`, "Employee deleted");
+        router.back();
+      } catch (e: any) {
+        showMsg(e?.message || "Delete failed");
+      } finally {
+        setDeleting(false);
+      }
+    };
+    const msg =
+      `DELETE ${emp.name} (${emp.employee_code || emp.user_id}) permanently?\n\n` +
+      "This removes the employee from the master data along with their " +
+      "attendance, leaves, tickets and payslips. This cannot be undone.";
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined" && window.confirm(msg)) proceed();
+    } else {
+      Alert.alert("Delete employee", msg, [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete permanently", style: "destructive", onPress: proceed },
+      ]);
+    }
+  };
+
   if (!isAdmin) {
     return (
       <View style={styles.root}>
@@ -682,6 +714,24 @@ export default function EmployeeMasterScreen() {
                 hasPassword={(emp as any).has_password}
                 onSaved={() => load()}
               />
+
+              {/* Iter 490 (user request) — DELETE EMPLOYEE, SUPER ADMIN ONLY.
+                  Sub (Super) Admins and Company Admins never see this. */}
+              {user?.role === "super_admin" && (
+                <Pressable
+                  onPress={doDeleteEmployee}
+                  disabled={deleting}
+                  style={[styles.editAllBtn,
+                          { backgroundColor: "#DC2626", marginTop: 8,
+                            opacity: deleting ? 0.6 : 1 }]}
+                  testID="em-delete-employee"
+                >
+                  <Ionicons name="trash-outline" size={16} color="#fff" />
+                  <Text style={styles.editAllTxt}>
+                    {deleting ? "Deleting…" : "Delete Employee (Super Admin only)"}
+                  </Text>
+                </Pressable>
+              )}
               <View style={styles.companyLockedRow}>
                 <Ionicons
                   name="information-circle-outline"
