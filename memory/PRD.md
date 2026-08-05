@@ -4409,3 +4409,40 @@ NEXT: Single Machine Attendance Mode (need user to re-share spec);
 WhatsApp API (Meta block); SMTP config by user. Spec section 3 of the
 Factory-return request ("source selector on ALL existing reports") only
 implemented on the new module — phased rollout pending if user wants it.
+
+## Iter 500 — Employee-wise CTC Module (ALL 3 PHASES) ✅
+User request: comprehensive CTC module supporting Gross/CTC/Mixed modes in the
+same company; existing Gross processing 100% untouched.
+
+**Phase 1 — Masters** (`backend/routes/ctc_module.py`, `frontend/app/ctc-management.tsx`):
+- Firm salary mode: GET/PUT /api/admin/ctc/firm-mode/{cid} (gross|ctc|mixed) → companies.salary_structure_mode
+- CTC Structure Master (ctc_structures collection): components typed earning/employer/deduction,
+  calc = percent (of basic/gross/ctc, base_cap for PF 15000 / ESIC 21000 eligibility) | fixed | balance;
+  min/max clamps, seq ordering, hidden flag. Fixed-point iteration: gross = CTC − employer cost.
+- 3 default templates auto-seeded per company (idempotent): Standard Office CTC ⭐,
+  Compliance / Labour CTC, Flexible / Custom (blank).
+- POST /api/admin/ctc/preview — live breakup (gross + employer == CTC to the rupee, verified).
+
+**Phase 2 — Assignment + Payroll**:
+- POST /api/admin/ctc/assign (gross↔ctc per employee; users.salary_mode/monthly_ctc/annual_ctc/
+  ctc_structure_id/ctc_effective_date) + ctc_revisions history + ctc_audit_log.
+- Compliance Salary engine hook (compliance_salary_runs.py ~line 425/440/1245): CTC-mode employees'
+  gross auto-derived from structure; engine then runs unchanged (PF/ESIC/PT/proration/OT).
+  Row stamped ctc_mode/monthly_ctc/ctc_gross_derived/ctc_employer_total/ctc_employer_contributions.
+  Gross-mode rows carry NO new fields — backward compatibility test-verified on 127-employee run.
+
+**Phase 3 — Reports/Payslips/Dashboard**:
+- GET /api/admin/ctc/summary — dashboard cards (CTC employees, monthly/annual CTC, employer cost,
+  net payout, avg, by_structure).
+- Employee CTC Register + Revision History via universal ReportTable (PDF/Excel export included).
+- Payslip "CTC ANNEXURE" table (utils/payslip_pdf.py) for ctc_mode rows; compliance payslip
+  breakup carries ctc fields.
+- Menu: Payroll → Salary Process → CTC Management (both nav trees in AdminWebShell).
+
+Testing: 12/12 backend pytest (tests/test_iter500_ctc_module.py) + frontend flows pass
+(test_reports/iteration_500.json). All test data cleaned (revisions/audit purged, firm mode gross).
+Deploy: deploy_vps_iter500.sh, temp_bundle kind=script → deploy500.sh, APP_ITERATION="500".
+
+Pending backlog after Iter 500: Single Machine Attendance Mode (P2, Message 148 spec),
+WhatsApp API (blocked on Meta creds), SMTP config for expiring-doc emails (user-side),
+AI WhatsApp chatbot (P4), Multi-language EN/HI (P5).
