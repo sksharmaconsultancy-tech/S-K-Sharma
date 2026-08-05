@@ -4240,3 +4240,14 @@ ITER 492 — EMPLOYEE MASTER PDF + SALARY CERTIFICATE PERIOD (DONE, tested):
 - Tested via pdfplumber: all assertions pass (flags on/off, old-db month,
   fallback month). Test data cleaned/restored.
 - APP_ITERATION=492; deploy_vps_iter492.sh (cumulative 488-492).
+
+ITER 493 — FIRM SWITCH ALWAYS REFRESHES (DONE, tested; user: "After
+Change the Firm Always Refresh the Data ... Don't Show Wrong Data"):
+- SelectedCompanyContext.switchCompany(cid, opts?): on web, after
+  persisting selection (localStorage + PATCH), does location.assign("/")
+  after 250ms → FULL document reload, all screens refetch for new firm.
+  firm-select.tsx passes {reload:false} (it navigates itself).
+- Cannot key-remount the Stack (Iter 197 warning) — reload is the safe
+  global guarantee. Tested with window marker: marker wiped → real
+  reload; dashboard refetched (All firms scope).
+- APP_ITERATION=493; deploy_vps_iter493.sh (cumulative 488-493).

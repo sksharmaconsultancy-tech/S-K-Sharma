@@ -48,7 +48,7 @@ type Ctx = {
   // Iter 123 — Explicit switch from the header picker. Unlike
   // setSelectedCompanyId this ALWAYS applies (overrides the session lock)
   // because the operator deliberately chose a firm from the dropdown.
-  switchCompany: (cid: string | null) => void;
+  switchCompany: (cid: string | null, opts?: { reload?: boolean }) => void;
   reloadCompanies: () => Promise<void>;
   // Iter 77 - Once the operator picks a specific firm (not "All firms"),
   // that firm is locked to the session. Switching requires a full logout.
@@ -265,7 +265,12 @@ export function SelectedCompanyProvider({ children }: { children: React.ReactNod
   // The session lock exists to stop ACCIDENTAL drift, but an explicit
   // pick from the dropdown is deliberate — apply it and re-lock onto
   // the new firm ("All firms" clears the lock).
-  const switchCompany = useCallback((cid: string | null) => {
+  // Iter 493 (user: "After Change the Firm Always Refresh the Data") —
+  // on web a mid-session firm switch HARD-RELOADS the app onto the
+  // dashboard, so every open screen re-fetches for the NEW firm and can
+  // never keep showing the previous firm's data. The firm-select gate
+  // passes {reload:false} because it navigates itself right after.
+  const switchCompany = useCallback((cid: string | null, opts?: { reload?: boolean }) => {
     setSelected(cid);
     setIsLocked(!!cid);
     // Explicit pick — remember it for the next login ("All firms" = null).
@@ -280,6 +285,16 @@ export function SelectedCompanyProvider({ children }: { children: React.ReactNod
           (globalThis as any).localStorage?.removeItem(LOCK_KEY);
         }
       } catch { /* noop */ }
+      if (opts?.reload !== false) {
+        // Small delay so the PATCH /me/last-company request gets a chance
+        // to leave (the selection itself is already in localStorage).
+        setTimeout(() => {
+          try {
+            // "/" routes per role/platform (desktop → portal dashboard).
+            (globalThis as any).location?.assign("/");
+          } catch { /* noop */ }
+        }, 250);
+      }
     }
   }, [persistLastCompany]);
 

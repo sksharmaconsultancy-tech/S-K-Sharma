@@ -84,7 +84,7 @@ export default function FirmSelectScreen() {
     // ALWAYS land in the global Firm Selection (header picker), even when a
     // previous session lock exists. switchCompany overrides the lock and
     // persists the firm for the next login.
-    switchCompany(cid);
+    switchCompany(cid, { reload: false });
     router.replace("/");
   };
 
