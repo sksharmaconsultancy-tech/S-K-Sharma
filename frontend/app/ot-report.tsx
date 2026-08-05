@@ -16,7 +16,6 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   Pressable,
   ActivityIndicator,
   Platform,
@@ -28,6 +27,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { api } from "@/src/api/client";
 import { useLiveSync } from "@/src/api/live-sync";
+import ReportTable, { ReportCol } from "@/src/components/ReportTable";
 import { colors, spacing, type as typeScale } from "@/src/theme";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 
@@ -65,32 +65,29 @@ function fmtHM(v?: number | null): string {
   return `${h}:${String(m).padStart(2, "0")}`;
 }
 
-// Iter 77m — tap-to-sort table header cell
-function SortableTh<T extends string>({
-  label,
-  col,
-  w,
-  sortBy,
-  sortDir,
-  onSort,
-}: {
-  label: string;
-  col: T;
-  w: number;
-  sortBy: T;
-  sortDir: "asc" | "desc";
-  onSort: (c: T) => void;
-}) {
-  const active = sortBy === col;
-  return (
-    <Pressable onPress={() => onSort(col)} style={{ width: w }}>
-      <Text style={styles.th}>
-        {label}
-        {active ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
-      </Text>
-    </Pressable>
-  );
-}
+// Iter 496 — Universal Report Table columns (auto width, sticky code+name).
+const OT_COLS: ReportCol<OTRow>[] = [
+  { key: "employee_code", label: "Code", type: "center", min: 76, sticky: true },
+  { key: "name", label: "Name", min: 200, max: 300, sticky: true },
+  { key: "designation", label: "Designation", min: 110, max: 220 },
+  { key: "date", label: "Date", type: "date" },
+  { key: "day_label", label: "Day", type: "center", min: 60 },
+  { key: "in", label: "In", type: "center", min: 72 },
+  { key: "out", label: "Out", type: "center", min: 72 },
+  { key: "ot_in", label: "OT In", type: "center", min: 72 },
+  { key: "ot_out", label: "OT Out", type: "center", min: 76 },
+  { key: "duty_hours", label: "Duty", type: "num", min: 76, value: (r) => fmtHM(r.duty_hours) },
+  {
+    key: "ot_hours", label: "OT", type: "num", min: 72,
+    value: (r) => fmtHM(r.ot_hours),
+    textStyle: () => ({ color: "#B45309", fontWeight: "800" }),
+  },
+  {
+    key: "total_hours", label: "Total", type: "num", min: 80,
+    value: (r) => fmtHM(r.total_hours),
+    textStyle: () => ({ fontWeight: "800" }),
+  },
+];
 
 function ymNow(): string {
   const now = new Date();
@@ -202,14 +199,12 @@ export default function OTReportScreen() {
     };
   }, [data]);
 
-  // Iter 77m — Tap-to-sort on every OT-Report column.
-  type OTSortCol =
-    | "code" | "name" | "desig" | "date" | "day"
-    | "in" | "out" | "duty" | "ot" | "total";
-  const [sortBy, setSortBy] = useState<OTSortCol>("date");
+  // Iter 77m — Tap-to-sort on every OT-Report column (Iter 496: keys now
+  // match the ReportTable column keys).
+  const [sortBy, setSortBy] = useState<string>("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const toggleSort = useCallback(
-    (col: OTSortCol) => {
+    (col: string) => {
       if (col === sortBy) {
         setSortDir((d) => (d === "asc" ? "desc" : "asc"));
       } else {
@@ -225,20 +220,13 @@ export default function OTReportScreen() {
     const s = (v: unknown) =>
       v === null || v === undefined ? "" : String(v).toLowerCase();
     const n = (v: unknown) => Number(v) || 0;
+    const numeric = ["duty_hours", "ot_hours", "total_hours"];
     rows.sort((a, b) => {
-      switch (sortBy) {
-        case "code":  return s(a.employee_code).localeCompare(s(b.employee_code), "en", { numeric: true }) * dir;
-        case "name":  return s(a.name).localeCompare(s(b.name)) * dir;
-        case "desig": return s(a.designation).localeCompare(s(b.designation)) * dir;
-        case "date":  return s(a.date).localeCompare(s(b.date)) * dir;
-        case "day":   return s(a.day_label).localeCompare(s(b.day_label)) * dir;
-        case "in":    return s(a.in).localeCompare(s(b.in)) * dir;
-        case "out":   return s(a.out).localeCompare(s(b.out)) * dir;
-        case "duty":  return (n(a.duty_hours) - n(b.duty_hours)) * dir;
-        case "ot":    return (n(a.ot_hours) - n(b.ot_hours)) * dir;
-        case "total": return (n(a.total_hours) - n(b.total_hours)) * dir;
-        default:      return 0;
+      if (numeric.includes(sortBy)) {
+        return (n((a as any)[sortBy]) - n((b as any)[sortBy])) * dir;
       }
+      return s((a as any)[sortBy]).localeCompare(
+        s((b as any)[sortBy]), "en", { numeric: sortBy === "employee_code" }) * dir;
     });
     return rows;
   }, [data, sortBy, sortDir]);
@@ -315,70 +303,28 @@ export default function OTReportScreen() {
           <Text style={styles.emptyTxt}>No OT recorded in this period.</Text>
         </View>
       ) : (
-        <ScrollView>
-          <ScrollView horizontal showsHorizontalScrollIndicator>
-            <View>
-              {/* Header — Iter 77m: tap column headers to sort */}
-              <View style={styles.tblHdr}>
-                <SortableTh label="Code" col="code" w={76} sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
-                <SortableTh label="Name" col="name" w={170} sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
-                <SortableTh label="Designation" col="desig" w={110} sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
-                <SortableTh label="Date" col="date" w={100} sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
-                <SortableTh label="Day" col="day" w={60} sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
-                <SortableTh label="In" col="in" w={72} sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
-                <SortableTh label="Out" col="out" w={72} sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
-                <SortableTh label="OT In" col="otin" w={72} sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
-                <SortableTh label="OT Out" col="otout" w={72} sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
-                <SortableTh label="Duty" col="duty" w={68} sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
-                <SortableTh label="OT" col="ot" w={68} sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
-                <SortableTh label="Total" col="total" w={74} sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
-              </View>
-              {sortedRows.map((row, i) => (
-                <View
-                  key={`${row.user_id}-${row.date}`}
-                  style={[styles.tblRow, i % 2 === 0 && styles.tblRowAlt]}
-                >
-                  <Text style={[styles.td, { width: 76 }]}>{row.employee_code || "—"}</Text>
-                  <Text style={[styles.td, { width: 170 }]} numberOfLines={1}>
-                    {row.name || "—"}
-                  </Text>
-                  <Text style={[styles.td, { width: 110 }]} numberOfLines={1}>
-                    {row.designation || "—"}
-                  </Text>
-                  <Text style={[styles.td, { width: 100 }]}>{row.date}</Text>
-                  <Text style={[styles.td, { width: 60 }]}>{row.day_label}</Text>
-                  <Text style={[styles.td, { width: 72 }]}>{row.in || "—"}</Text>
-                  <Text style={[styles.td, { width: 72 }]}>{row.out || "—"}</Text>
-                  <Text style={[styles.td, { width: 72 }]}>{row.ot_in || "—"}</Text>
-                  <Text style={[styles.td, { width: 72 }]}>{row.ot_out || "—"}</Text>
-                  <Text style={[styles.td, styles.tdNum, { width: 68 }]}>
-                    {fmtHM(row.duty_hours)}
-                  </Text>
-                  <Text style={[styles.td, styles.tdNum, styles.tdOt, { width: 68 }]}>
-                    {fmtHM(row.ot_hours)}
-                  </Text>
-                  <Text style={[styles.td, styles.tdNum, styles.tdTotal, { width: 74 }]}>
-                    {fmtHM(row.total_hours)}
-                  </Text>
-                </View>
-              ))}
-              {/* Totals */}
-              <View style={styles.totalsRow}>
-                <Text style={[styles.totalLbl, { width: 732 }]}>TOTAL</Text>
-                <Text style={[styles.totalVal, { width: 68 }]}>{fmtHM(grandTotals.duty)}</Text>
-                <Text style={[styles.totalVal, styles.tdOt, { width: 68 }]}>
-                  {fmtHM(grandTotals.ot)}
-                </Text>
-                <Text style={[styles.totalVal, styles.tdTotal, { width: 74 }]}>
-                  {fmtHM(grandTotals.total)}
-                </Text>
-              </View>
-              <Text style={styles.foot}>
-                {grandTotals.days} OT day(s). Duty HRS = policy-adjusted excluding OT. Total = Duty + OT.
-              </Text>
-            </View>
-          </ScrollView>
-        </ScrollView>
+        <View style={{ flex: 1 }}>
+          {/* Iter 496 — Universal Report Table engine */}
+          <ReportTable<OTRow>
+            reportKey="ot_report"
+            columns={OT_COLS}
+            rows={sortedRows}
+            sortBy={sortBy}
+            sortDir={sortDir}
+            onHeaderPress={toggleSort}
+            footer={{
+              label: "TOTAL",
+              values: {
+                duty_hours: fmtHM(grandTotals.duty),
+                ot_hours: fmtHM(grandTotals.ot),
+                total_hours: fmtHM(grandTotals.total),
+              },
+            }}
+          />
+          <Text style={styles.foot}>
+            {grandTotals.days} OT day(s). Duty HRS = policy-adjusted excluding OT. Total = Duty + OT.
+          </Text>
+        </View>
       )}
     </SafeAreaView>
   );

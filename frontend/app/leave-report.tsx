@@ -18,6 +18,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Redirect, useRouter } from "expo-router";
 
 import { api } from "@/src/api/client";
+import ReportTable, { ReportCol } from "@/src/components/ReportTable";
 import { useAuth } from "@/src/context/AuthContext";
 import { colors, radius, spacing, type } from "@/src/theme";
 
@@ -50,6 +51,32 @@ type Report = {
 
 const THIS_YEAR = new Date().getFullYear();
 const YEARS = [THIS_YEAR, THIS_YEAR - 1, THIS_YEAR - 2];
+
+// Iter 496 — Universal Report Table columns.
+const LEAVE_COLS: ReportCol<LeaveRow>[] = [
+  { key: "employee_code", label: "Code", type: "center", min: 64, sticky: true },
+  {
+    key: "name", label: "Name", min: 200, max: 300, sticky: true,
+    textStyle: () => ({ fontWeight: "700" }),
+  },
+  { key: "cl_allowed", label: "CL Allow", type: "num", min: 84 },
+  { key: "cl_taken", label: "CL Taken", type: "num", min: 84 },
+  {
+    key: "cl_balance", label: "CL Bal", type: "num", min: 80,
+    textStyle: (r) => ({ fontWeight: "700", color: r.cl_balance > 0 ? "#166534" : colors.onSurface }),
+  },
+  { key: "pl_allowed", label: "PL Allow", type: "num", min: 84 },
+  { key: "pl_taken", label: "PL Taken", type: "num", min: 84 },
+  {
+    key: "pl_balance", label: "PL Bal", type: "num", min: 80,
+    textStyle: (r) => ({ fontWeight: "700", color: r.pl_balance > 0 ? "#166534" : colors.onSurface }),
+  },
+  { key: "other_taken", label: "Other", type: "num", min: 72 },
+  {
+    key: "total_taken", label: "Total", type: "num", min: 76,
+    textStyle: () => ({ fontWeight: "800" }),
+  },
+];
 
 export default function LeaveReportScreen() {
   const router = useRouter();
@@ -204,38 +231,14 @@ export default function LeaveReportScreen() {
               ) : null}
             </View>
 
-            <ScrollView horizontal>
-              <View>
-                <View style={[styles.tr, styles.trHead]}>
-                  <Text style={[styles.th, { width: 60 }]}>Code</Text>
-                  <Text style={[styles.th, { width: 180, textAlign: "left" }]}>Name</Text>
-                  <Text style={[styles.th, { width: 80 }]}>CL Allow</Text>
-                  <Text style={[styles.th, { width: 80 }]}>CL Taken</Text>
-                  <Text style={[styles.th, { width: 80 }]}>CL Bal</Text>
-                  <Text style={[styles.th, { width: 80 }]}>PL Allow</Text>
-                  <Text style={[styles.th, { width: 80 }]}>PL Taken</Text>
-                  <Text style={[styles.th, { width: 80 }]}>PL Bal</Text>
-                  <Text style={[styles.th, { width: 80 }]}>Other</Text>
-                  <Text style={[styles.th, { width: 80 }]}>Total</Text>
-                </View>
-                {report.rows.map((r, i) => (
-                  <View key={r.user_id} style={[styles.tr, i % 2 === 1 && styles.trOdd]}>
-                    <Text style={[styles.td, { width: 60 }]}>{r.employee_code || "—"}</Text>
-                    <Text style={[styles.td, { width: 180, textAlign: "left", fontWeight: "700" }]} numberOfLines={1}>
-                      {r.name}
-                    </Text>
-                    <Text style={[styles.td, { width: 80 }]}>{r.cl_allowed}</Text>
-                    <Text style={[styles.td, { width: 80 }]}>{r.cl_taken}</Text>
-                    <Text style={[styles.td, { width: 80, fontWeight: "700", color: r.cl_balance > 0 ? "#166534" : colors.onSurface }]}>{r.cl_balance}</Text>
-                    <Text style={[styles.td, { width: 80 }]}>{r.pl_allowed}</Text>
-                    <Text style={[styles.td, { width: 80 }]}>{r.pl_taken}</Text>
-                    <Text style={[styles.td, { width: 80, fontWeight: "700", color: r.pl_balance > 0 ? "#166534" : colors.onSurface }]}>{r.pl_balance}</Text>
-                    <Text style={[styles.td, { width: 80 }]}>{r.other_taken}</Text>
-                    <Text style={[styles.td, { width: 80, fontWeight: "800" }]}>{r.total_taken}</Text>
-                  </View>
-                ))}
-              </View>
-            </ScrollView>
+            {/* Iter 496 — Universal Report Table engine */}
+            <ReportTable<LeaveRow>
+              reportKey="leave_report"
+              columns={LEAVE_COLS}
+              rows={report.rows}
+              maxHeight={560}
+              emptyText="No employees found for this firm."
+            />
           </>
         )}
         <View style={{ height: 40 }} />

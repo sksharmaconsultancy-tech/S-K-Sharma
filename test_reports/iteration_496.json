@@ -1,0 +1,32 @@
+{
+  "summary": "Iter 496 Universal ReportTable engine + report-prefs API tested end-to-end. Backend: 6/6 pytest passed (auth-required on GET/PUT, PUT-then-GET persistence verified, upsert overwrites, unknown key -> null, punch-log endpoint reachable). Frontend: all 4 migrated screens (punch-log-report, ot-report, leave-report, bank-transfer) render without crash. Verified blue sticky header, frozen leading cols (photo/code/name on punch log; code/name on leave), right-aligned numeric CL/PL columns, Columns show/hide panel toggles a column and 'Reset layout' appears + restores, XLSX Download Excel button still present. OT report shows empty state (no OT data seeded for Kankani in any month) — ReportTable wiring (footer TOTAL, onHeaderPress sort) is present in code but could not be exercised with live data. Bank Transfer preview grid is correctly hidden when no compliance salary run exists (page renders 'company_id is required for Super Admin' message, no crash).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter496_report_prefs.py",
+    "/app/test_reports/pytest/iter496.xml"
+  ],
+  "action_items": [
+    "OT report TOTAL footer + tap-to-sort could not be visually verified because Kankani has zero OT rows across all months (2026-01..2026-08). Code wiring in /app/frontend/app/ot-report.tsx L308-323 is correct (footer + onHeaderPress passed). If E1 wants visual confirmation, seed OT punches for Kankani or point to a firm that has OT data.",
+    "Minor console noise (unrelated to Iter 496): '[expo-notifications] Listening to push token changes is not yet fully supported on web' and 'shadow* style props deprecated. Use boxShadow' — pre-existing platform warnings, not introduced by ReportTable."
+  ],
+  "critical_code_review_comments": [
+    "ReportTable.tsx (686 lines) is dense but cohesive; consider extracting the preferences hook and virtual-window math into helpers if it grows further, but not required now.",
+    "position:sticky is applied via inline style cast (as any) — expected for RN-Web; works correctly in Chromium (verified in screenshots).",
+    "Server prefs endpoint uses updated_at but returns only {w,hide,t}; the 't' timestamp is client-supplied — fine for last-writer-wins conflict resolution across devices."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter496_report_prefs.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "None. Existing 1927 punches + 127 Kankani employees were sufficient for punch-log & leave-report verification.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Test creds: sksharmaconsultancy@gmail.com / sharma123 via POST /api/auth/admin-password-login; localStorage key 'llc_session_token'. Kankani company_id=cmp_527fecdd7c. ReportTable testIDs: 'rt-cols-{reportKey}' and 'rt-reset-{reportKey}'. Kankani has NO OT data in any month — pick a different firm if OT footer needs visual verification.",
+  "rca_of_issue": "N/A — no bugs found."
+}

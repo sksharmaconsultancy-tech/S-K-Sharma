@@ -15,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Stack } from "expo-router";
 
 import { api, apiBinary } from "@/src/api/client";
+import ReportTable, { ReportCol } from "@/src/components/ReportTable";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors, radius, spacing } from "@/src/theme";
 
@@ -25,6 +26,23 @@ type Row = {
 };
 
 const FILE_TYPES = ["xlsx", "csv", "txt", "xml"];
+
+// Iter 496 — Universal Report Table columns for the preview grid.
+const BT_COLS: ReportCol<Row>[] = [
+  { key: "sn", label: "S.No", type: "center", min: 56, max: 70 },
+  {
+    key: "name", label: "Name (as per bank)", min: 220, max: 320, sticky: true,
+    value: (r) => r.name_as_per_bank || r.name || "",
+  },
+  { key: "bank_name", label: "Bank", min: 140, max: 240 },
+  { key: "ifsc", label: "IFSC", type: "center", min: 110 },
+  { key: "account_no", label: "Account No", type: "center", min: 140 },
+  {
+    key: "net_salary", label: "Net ₹", type: "num", min: 110,
+    value: (r) => (r.net_salary || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    textStyle: () => ({ fontWeight: "700" }),
+  },
+];
 
 function monthOptions(): { value: string; label: string }[] {
   const out: { value: string; label: string }[] = [];
@@ -196,25 +214,22 @@ export default function BankTransferScreen() {
           corporate portal templates can differ per account setup.
         </Text>
 
-        {/* Preview */}
+        {/* Preview — Iter 496: Universal Report Table engine */}
         {busy ? <ActivityIndicator style={{ marginTop: 16 }} color={colors.brandPrimary} /> : (
           rows.length > 0 ? (
-            <View style={styles.table}>
-              <View style={[styles.tr, styles.trHead]}>
-                {["S.No", "Name", "Bank", "IFSC", "Account No", "Net ₹"].map((h) => (
-                  <Text key={h} style={[styles.th, h === "Name" && { flex: 2 }]}>{h}</Text>
-                ))}
-              </View>
-              {rows.slice(0, 100).map((r) => (
-                <View key={r.sn} style={styles.tr}>
-                  <Text style={styles.td}>{r.sn}</Text>
-                  <Text style={[styles.td, { flex: 2 }]}>{r.name_as_per_bank || r.name}</Text>
-                  <Text style={styles.td}>{r.bank_name}</Text>
-                  <Text style={styles.td}>{r.ifsc}</Text>
-                  <Text style={styles.td}>{r.account_no}</Text>
-                  <Text style={[styles.td, { fontWeight: "700" }]}>{r.net_salary.toFixed(2)}</Text>
-                </View>
-              ))}
+            <View style={[styles.table, { minHeight: 200 }]}>
+              <ReportTable<Row>
+                reportKey="bank_transfer"
+                columns={BT_COLS}
+                rows={rows}
+                maxHeight={520}
+                footer={{
+                  label: `TOTAL (${rows.length} employees)`,
+                  values: {
+                    net_salary: total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+                  },
+                }}
+              />
             </View>
           ) : null
         )}

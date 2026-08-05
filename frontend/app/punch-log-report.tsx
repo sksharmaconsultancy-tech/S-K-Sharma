@@ -12,7 +12,6 @@ import {
   StyleSheet,
   Pressable,
   ActivityIndicator,
-  ScrollView,
   Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -21,6 +20,7 @@ import { useRouter } from "expo-router";
 
 import { api, apiBinary } from "@/src/api/client";
 import EmployeePhoto from "@/src/components/EmployeePhoto";
+import ReportTable, { ReportCol } from "@/src/components/ReportTable";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors, radius, spacing, type } from "@/src/theme";
@@ -58,24 +58,64 @@ function daysAgoIso(n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-const COLS: { key: keyof Row; label: string; w: number }[] = [
-  // Iter 494 — employee photo thumbnail (tap → preview).
-  { key: "user_id", label: "", w: 44 },
-  { key: "date", label: "Date", w: 96 },
-  { key: "time", label: "Time", w: 76 },
-  { key: "kind", label: "IN/OUT", w: 64 },
-  // Iter 419 — OT punches (2nd IN→OUT pair of the day) marked.
-  { key: "ot", label: "OT", w: 80 },
-  { key: "employee_code", label: "Code", w: 60 },
-  { key: "name", label: "Employee", w: 180 },
-  // Iter 419 — employee name as stored ON the machine (from machine sync).
-  { key: "name_in_machine", label: "Name in Machine", w: 150 },
-  { key: "bio_code", label: "Bio", w: 50 },
-  { key: "machine_name", label: "Machine Name", w: 120 },
-  { key: "machine", label: "Machine / Source", w: 160 },
-  { key: "company_name", label: "Firm", w: 170 },
-  { key: "status", label: "Status", w: 90 },
-  { key: "has_photo", label: "Photo", w: 56 },
+// Iter 496 — Universal Report Table engine columns (auto width, sticky
+// code+name, ellipsis+tooltip, saved layout).
+const COLS: ReportCol<Row>[] = [
+  {
+    key: "user_id", label: "", type: "center", min: 44, max: 44, sticky: true,
+    render: (r) => (
+      <View style={{ alignItems: "center", justifyContent: "center" }}>
+        <EmployeePhoto
+          userId={r.user_id}
+          name={r.name}
+          code={r.employee_code || r.bio_code}
+          machine={r.machine_name || r.machine}
+          size={28}
+        />
+      </View>
+    ),
+  },
+  { key: "employee_code", label: "Code", type: "center", min: 64, sticky: true },
+  {
+    key: "name", label: "Employee", min: 200, max: 300, sticky: true,
+    value: (r) =>
+      r.flag === "not_found"
+        ? `⛔ ${r.name || "NOT FOUND"}`
+        : r.flag === "new_registration"
+          ? `${r.name} 🆕 NEW`
+          : r.name || "—",
+    textStyle: (r) =>
+      r.flag === "not_found"
+        ? { fontWeight: "800", color: "#B91C1C" }
+        : r.flag === "new_registration"
+          ? { fontWeight: "800", color: "#15803D" }
+          : null,
+  },
+  { key: "date", label: "Date", type: "date" },
+  { key: "time", label: "Time", type: "center", min: 72 },
+  {
+    key: "kind", label: "IN/OUT", type: "center", min: 72,
+    value: (r) => (r.kind || "").toUpperCase(),
+    textStyle: (r) => ({
+      fontWeight: "800",
+      color: r.kind === "in" ? "#15803D" : "#B45309",
+    }),
+  },
+  {
+    key: "ot", label: "OT", type: "center", min: 90,
+    value: (r) => (r.ot ? "⏱ OT PUNCH" : "—"),
+    textStyle: (r) => (r.ot ? { fontWeight: "800", color: "#B45309" } : null),
+  },
+  { key: "name_in_machine", label: "Name in Machine", min: 140, max: 240 },
+  { key: "bio_code", label: "Bio", type: "center", min: 54 },
+  { key: "machine_name", label: "Machine Name", min: 110, max: 200 },
+  { key: "machine", label: "Machine / Source", min: 130, max: 240 },
+  { key: "company_name", label: "Firm", min: 130, max: 240 },
+  { key: "status", label: "Status", type: "center", min: 84 },
+  {
+    key: "has_photo", label: "Photo", type: "center", min: 56,
+    value: (r) => (r.has_photo ? "📷" : "—"),
+  },
 ];
 
 export default function PunchLogReportScreen() {
@@ -289,87 +329,21 @@ export default function PunchLogReportScreen() {
         </Text>
       </View>
 
-      {/* Grid */}
-      {loading ? (
-        <ActivityIndicator style={{ marginTop: 40 }} color={colors.brandPrimary} />
-      ) : (
-        <ScrollView horizontal style={{ flex: 1 }} contentContainerStyle={{ minWidth: "100%" }}>
-          <ScrollView style={{ flex: 1 }} stickyHeaderIndices={[0]}>
-            <View style={styles.headRow}>
-              {COLS.map((c) => (
-                <Text key={c.key} style={[styles.headCell, { width: c.w }]}>{c.label}</Text>
-              ))}
-            </View>
-            {rows.map((r, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.row,
-                  i % 2 === 1 && styles.rowAlt,
-                  r.flag === "not_found" && { backgroundColor: "#FEF2F2" },
-                  r.flag === "new_registration" && { backgroundColor: "#F0FDF4" },
-                ]}
-              >
-                {COLS.map((c) => (
-                  c.key === "user_id" ? (
-                    <View key="user_id" style={{ width: c.w, alignItems: "center", justifyContent: "center" }}>
-                      {/* Iter 494 — 32px thumbnail, tap for large preview.
-                          Unknown-employee avatar when no master match. */}
-                      <EmployeePhoto
-                        userId={r.user_id}
-                        name={r.name}
-                        code={r.employee_code || r.bio_code}
-                        machine={r.machine_name || r.machine}
-                        size={32}
-                      />
-                    </View>
-                  ) : (
-                  <Text
-                    key={c.key}
-                    numberOfLines={1}
-                    style={[
-                      styles.cell,
-                      { width: c.w },
-                      c.key === "kind" && {
-                        fontWeight: "800",
-                        color: r.kind === "in" ? "#15803D" : "#B45309",
-                      },
-                      c.key === "ot" && r.ot && {
-                        fontWeight: "800", color: "#B45309",
-                      },
-                      c.key === "name" && r.flag === "not_found" && {
-                        fontWeight: "800", color: "#B91C1C",
-                      },
-                      c.key === "name" && r.flag === "new_registration" && {
-                        fontWeight: "800", color: "#15803D",
-                      },
-                    ]}
-                  >
-                    {c.key === "kind"
-                      ? (r.kind || "").toUpperCase()
-                      : c.key === "ot"
-                        ? (r.ot ? "⏱ OT PUNCH" : "—")
-                        : c.key === "has_photo"
-                        ? (r.has_photo ? "📷" : "—")
-                        : c.key === "name"
-                          ? (r.flag === "not_found"
-                            ? `⛔ ${r.name || "NOT FOUND"}`
-                            : r.flag === "new_registration"
-                              ? `${r.name} 🆕 NEW`
-                              : r.name || "—")
-                          : (r as any)[c.key] || "—"}
-                  </Text>
-                  )
-                ))}
-              </View>
-            ))}
-            {rows.length === 0 ? (
-              <Text style={styles.empty}>No punches found for the selected filters.</Text>
-            ) : null}
-            <View style={{ height: 60 }} />
-          </ScrollView>
-        </ScrollView>
-      )}
+      {/* Grid — Iter 496: Universal Report Table engine */}
+      <ReportTable<Row>
+        reportKey="punch_log"
+        columns={COLS}
+        rows={rows}
+        loading={loading}
+        emptyText="No punches found for the selected filters."
+        rowStyle={(r) =>
+          r.flag === "not_found"
+            ? { backgroundColor: "#FEF2F2" }
+            : r.flag === "new_registration"
+              ? { backgroundColor: "#F0FDF4" }
+              : null
+        }
+      />
     </SafeAreaView>
   );
 }
