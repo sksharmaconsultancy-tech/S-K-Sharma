@@ -20,7 +20,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { Redirect, useRouter } from "expo-router";
+import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 
 import { api, apiBinary } from "@/src/api/client";
 import RegisterTable, {
@@ -83,6 +83,7 @@ type EmpLite = { user_id: string; name?: string; employee_code?: string };
 
 export default function ReportsCenterScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ kind?: string }>();
   const { user, loading: authLoading } = useAuth();
   const { selectedCompanyId } = useSelectedCompany();
   const [kinds, setKinds] = useState<Kind[]>([]);
@@ -150,6 +151,16 @@ export default function ReportsCenterScreen() {
       setSel(all[0] || null);
     })();
   }, [isSuper]);
+
+  // Iter 499 (user request) — deep link from the global search:
+  // /reports-center?kind=<kind> opens that report directly.
+  useEffect(() => {
+    const wanted = typeof params?.kind === "string" ? params.kind : "";
+    if (!wanted || !kinds.length) return;
+    const hit = kinds.find((k) => k.kind === wanted);
+    if (hit) setSel(hit);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params?.kind, kinds]);
 
   const fy = useMemo(() => {
     const y = Number(month.slice(0, 4));

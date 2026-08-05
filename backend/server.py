@@ -8493,7 +8493,7 @@ async def list_employee_groups(
     have = {(g.get("name") or "").strip().upper() for g in groups}
     async for m in db.masters.find(
         {"type": "group", "company_id": {"$in": [target_cid, "__global__", None]}},
-        {"_id": 0, "name": 1},
+        {"_id": 0, "name": 1, "master_id": 1},
     ):
         nm = (m.get("name") or "").strip().upper()
         if nm and nm not in have:
@@ -8502,8 +8502,18 @@ async def list_employee_groups(
                 "role": "employee",
                 "employee_group": {"$regex": f"^{re.escape(nm)}$", "$options": "i"},
             })
-            groups.append({"name": nm, "member_count": cnt, "company_id": target_cid})
+            # Iter 499 (user bug: "click on any group — all groups select")
+            # ROOT CAUSE: these merged Masters groups were returned WITHOUT a
+            # group_id, so every chip carried ``undefined`` → clicking any
+            # chip matched ALL chips and the filter param was never sent.
+            groups.append({"group_id": m.get("master_id"),
+                           "name": nm, "member_count": cnt,
+                           "company_id": target_cid})
             have.add(nm)
+    # Safety net — NEVER return a group without a usable id.
+    for g in groups:
+        if not g.get("group_id"):
+            g["group_id"] = f"byname:{(g.get('name') or '').strip()}"
     groups.sort(key=lambda g: str(g.get("name") or ""))
 
     return {"groups": groups, "company_id": target_cid}
@@ -9350,6 +9360,19 @@ async def _resolve_group_employee_ids(company_id: str, group_id: Optional[str]) 
     """
     if not group_id:
         return None
+    # Iter 499 — synthetic name-based ids (``byname:<NAME>``) from the
+    # employee-groups list endpoint: match directly on the group name.
+    if group_id.startswith("byname:"):
+        nm = group_id[len("byname:"):].strip()
+        if not nm:
+            return []
+        rx = {"$regex": f"^{re.escape(nm)}$", "$options": "i"}
+        docs = await db.users.find(
+            {"company_id": company_id, "role": "employee",
+             "$or": [{"employee_group": rx}, {"employee_type": rx}]},
+            {"_id": 0, "user_id": 1},
+        ).to_list(4000)
+        return [u["user_id"] for u in docs]
     grp = await db.masters.find_one(
         {"master_id": group_id, "type": "group",
          # Iter 412 (user bug: group-wise sheet blank) — legacy masters can
@@ -11912,6 +11935,10 @@ app.include_router(report_prefs_router)
 # Iter 497 — Universal Report PDF export (screen-matching landscape PDFs).
 from routes.report_export import router as report_export_router  # noqa: E402
 app.include_router(report_export_router)
+
+# Iter 499 — Factory & Boiler Annual Return (unified current+legacy data).
+from routes.factory_returns import router as factory_returns_router  # noqa: E402
+app.include_router(factory_returns_router)
 from routes.web_push import router as web_push_router  # noqa: E402
 app.include_router(web_push_router)
 from routes.sheet_verification import router as sheet_verification_router  # noqa: E402

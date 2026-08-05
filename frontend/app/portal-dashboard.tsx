@@ -15,7 +15,6 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
 
 import { api } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
@@ -27,6 +26,7 @@ import DocumentExpiryPanel from "@/src/components/portal/DocumentExpiryPanel";
 import CalendarPanel from "@/src/components/portal/CalendarPanel";
 import AlertsModal from "@/src/components/portal/AlertsModal";
 import OverviewPremium from "@/src/components/portal/OverviewPremium";
+import PriorityTasks from "@/src/components/portal/PriorityTasks";
 
 const TABS: { key: string; label: string; icon: string }[] = [
   { key: "overview", label: "Overview", icon: "grid-outline" },
@@ -47,7 +47,14 @@ export default function PortalDashboardScreen() {
 
   const [dash, setDash] = useState<Dash | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("overview");
+  const [tab, setTabRaw] = useState("overview");
+  // Iter 499 — bump a counter each time the user returns to Overview so the
+  // Priority Tasks strip refetches (auto-refresh after task status changes).
+  const [tabVisits, setTabVisits] = useState(0);
+  const setTab = useCallback((k: string) => {
+    setTabRaw(k);
+    if (k === "overview") setTabVisits((n) => n + 1);
+  }, []);
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [alertCount, setAlertCount] = useState(0);
 
@@ -127,6 +134,14 @@ export default function PortalDashboardScreen() {
           contentContainerStyle={{ padding: spacing.md, paddingBottom: 60 }}
           refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}
         >
+          {/* Iter 499 — compact Priority Tasks highlight (prepended only;
+              existing dashboard below is untouched). */}
+          <PriorityTasks
+            companyId={selectedCompanyId}
+            refreshKey={tabVisits}
+            onOpenTasks={() => setTab("tasks")}
+            onOpenCalendar={() => setTab("calendar")}
+          />
           <OverviewPremium
             dash={dash}
             alertsCount={alertCount}

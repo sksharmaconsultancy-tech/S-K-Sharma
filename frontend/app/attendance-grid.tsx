@@ -339,14 +339,18 @@ export default function AttendanceGridScreen() {
           ...(egp.groups || []),
           ...(legacy.items || []).map((m) => ({ group_id: m.master_id, name: m.name })),
         ];
-        // de-dupe by name (Masters + policy groups may overlap)
-        const seen = new Set<string>();
-        const unique = combined.filter((g) => {
+        // de-dupe by name (Masters + policy groups may overlap).
+        // Iter 499 (user bug) — PREFER the entry that actually has a
+        // group_id and drop id-less entries entirely: chips with an
+        // undefined id made "all groups look selected" and never filtered.
+        const byName = new Map<string, { group_id: string; name: string }>();
+        for (const g of combined) {
           const k = (g.name || "").trim().toLowerCase();
-          if (!k || seen.has(k)) return false;
-          seen.add(k);
-          return true;
-        });
+          if (!k) continue;
+          const cur = byName.get(k);
+          if (!cur || (!cur.group_id && g.group_id)) byName.set(k, g);
+        }
+        const unique = [...byName.values()].filter((g) => !!g.group_id);
         if (!cancelled) setGroups(unique);
       } catch {
         if (!cancelled) setGroups([]);

@@ -1,0 +1,28 @@
+{
+  "summary": "Iter 499 (4 items) tested end-to-end. Backend: 13/13 pytest pass (test_iter499_features.py). Employee-groups: all 9 groups have non-empty group_id. Priority-tasks: returns overdue/high/due-today items (0 done/low), max 8, 401 on unauth. Factory-return JSON /pdf /boiler.pdf /xlsx all 200; combined summary employees_total=126 >= current; PUT details persists factory_license_no=RJ/FACT/1234; unauth returns 403. Attendance monthly-grid regression: All=127, LABOUR=108, STAFF=17. Frontend on 1920x1080 (super admin sksharmaconsultancy@gmail.com/sharma123): (1) /attendance-grid?company_id=cmp_527fecdd7c&month=2026-07 — chips render 'All (127) LABOUR (108) STAFF (16)'. Click STAFF (16) → chip highlights blue rgb(37,99,235), only STAFF employees show: AFZAL HUSSAIN visible, AJAB SINGH NOT visible; click All → 127 back. (2) /portal-dashboard — 'Priority Tasks' strip (data-testid=priority-tasks) at top of Overview showing 4 red OVERDUE rows (TDS deposit, PF ECR, ESIC contribution, Professional Tax) with 'Kankani Enterprises · Was due DD-MM-YYYY' subtitles; existing dashboard unchanged below (Welcome banner, KPI cards, Compliance Overview, Payroll Overview, Upcoming Due Dates). (3) /factory-annual-return — firm chips (City Care/Kankani/TEST_ITER98), year chips (2026-2022), source chips (Combined/Current/Legacy) all render. Factory Particulars card shows license RJ/FACT/1234 (persisted from PUT). KPI cards render (0.4 Avg Daily, 126 Max, 121/3 Male/Female, 1 Contract, 26 Man Days, ₹21000 Wages, 10 OT Hrs, 126 workers). Factory Return PDF, Boiler Return PDF, Excel buttons present. 4 tabs: Monthly Statistics (2 rows for 2026-06 & 2026-07 — sparse data expected), Employee Statistics (126), Department-wise, Category-wise. (4) Global search (input[data-testid=web-global-search]): 'wage' returns 'Wage Register — Report Hub › GOVT' item with orange doc icon; 'compliance' returns 10 sub-point menu items with section-path subtitles (Compliance Salary — Payroll › Salary Process, PF Reports — Compliance, Factory & Boiler Annual Return — Compliance, Compliance Dashboard — Report Hub › CLRA, etc). Regression: /punch-log-report and /salary-register still render without errors. No red-screen, no react-native deprecations flagged in this iteration's touched code.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter499_features.py",
+    "/app/test_reports/pytest/iter499.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Grid endpoint pluralization: canonical URL is /api/admin/attendance/monthly-grid/{company_id}/{month}, not /api/admin/attendance-grid — helpful to document for future testers.",
+    "Factory return payload nests statutory particulars under 'firm' (not 'particulars') and totals under 'summary' — testers should use these keys."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter499_features.py (new — 13 tests)"
+  ],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "100% (4/4 flows verified)"},
+  "seed_data_creation": "None. Used existing Kankani cmp_527fecdd7c 2026-07 data (127 employees, 108 LABOUR + 16 STAFF + 3 other) and the PUT-persisted factory license RJ/FACT/1234.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Env var is EXPO_PUBLIC_BACKEND_URL (not EXPO_BACKEND_URL) at https://emplo-connect-1.preview.emergentagent.com. Login POST /api/auth/admin-password-login {email,password} returns {session_token,user}; localStorage keys 'llc_session_token' + 'llc_user' (JSON). Attendance grid endpoint is /api/admin/attendance/monthly-grid/{cid}/{YYYY-MM}?group_id=. Factory return: /api/admin/factory-return/{cid}/{year} (JSON, +?source=current|legacy|combined), .pdf, /boiler.pdf, .xlsx; PUT /api/admin/factory-return/details/{cid} accepts factory_license_no/factory_name/occupier_name/etc. Global search testID='web-global-search' on the AdminWebShell top bar (visible on all admin routes ≥1920 desktop). Frontend group chip click: match by regex /^(All|LABOUR|STAFF)\\s*\\(\\d+\\)/ with offsetHeight 10-60 to avoid picking the same text inside row badges. Portal Dashboard route is /portal-dashboard; Priority Tasks testID='priority-tasks'.",
+  "rca_of_issue": "N/A — no bugs found in Iter 499 code."
+}

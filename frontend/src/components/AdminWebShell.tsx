@@ -182,6 +182,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/pf-reports?kind=esic", label: "ESIC Reports", icon: "medkit-outline" },
       { route: "/claims-management", label: "PF & ESIC Claims", icon: "folder-open-outline" },
       { route: "/statutory-reports", label: "PT / LWF / Gratuity / MIS", icon: "receipt-outline" },
+      { route: "/factory-annual-return", label: "Factory & Boiler Annual Return", icon: "business-outline" },
       { route: "/clra-registers", label: "CLRA Registers (Form XII\u2013XV)", icon: "documents-outline" },
       { route: "/challans", label: "PF / ESIC Upload", icon: "receipt-outline" },
       { route: "/challan-summary", label: "Monthly Challan Summary", icon: "documents-outline" },
@@ -557,6 +558,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
       { route: "/pf-reports?kind=esic", label: "ESIC Reports", icon: "medkit-outline" },
       { route: "/claims-management", label: "PF & ESIC Claims", icon: "folder-open-outline" },
       { route: "/statutory-reports", label: "PT / LWF / Gratuity / MIS", icon: "receipt-outline" },
+      { route: "/factory-annual-return", label: "Factory & Boiler Annual Return", icon: "business-outline" },
       { route: "/clra-registers", label: "CLRA Registers (Form XII\u2013XV)", icon: "documents-outline" },
       { route: "/challan-summary", label: "Monthly Challan Summary", icon: "documents-outline" },
     ],
@@ -974,6 +976,46 @@ export default function AdminWebShell({ children }: Props) {
     return out;
   }, [gatedNav]);
 
+  // Iter 499 (user request) — search MENU POINTS, SUB-POINTS *and* REPORTS.
+  // Sub-points carry their parent section so the query also matches the
+  // section name (e.g. "compliance" lists every compliance sub-point).
+  const flatNavDeep = useMemo(() => {
+    const out: { item: NavItem; parent: string }[] = [];
+    const walk = (items: NavItem[], parent: string) => {
+      for (const it of items) {
+        if (it.route) out.push({ item: it, parent });
+        if (it.children) walk(it.children, parent ? `${parent} › ${it.label}` : it.label);
+      }
+    };
+    walk(gatedNav, "");
+    return out;
+  }, [gatedNav]);
+
+  // Report-Hub inner reports (payroll / govt / CLRA / audit kinds) — lazily
+  // fetched the first time the user types in the search box.
+  const [repCat, setRepCat] = React.useState<{ kind: string; title: string; group: string }[] | null>(null);
+  React.useEffect(() => {
+    if (!navQuery.trim() || repCat !== null) return;
+    setRepCat([]); // guard against duplicate fetches
+    (async () => {
+      const all: { kind: string; title: string; group: string }[] = [];
+      const srcs: [string, string, string][] = [
+        ["/admin/payroll-reports/list", "reports", "payroll"],
+        ["/admin/govt-registers/list", "registers", "govt"],
+        ["/admin/clra-reports/list", "reports", "clra"],
+        ["/admin/audit-reports/list", "reports", "audit"],
+      ];
+      for (const [url, key, group] of srcs) {
+        try {
+          const r = await api<any>(url);
+          (r[key] || []).forEach((x: any) =>
+            all.push({ kind: x.kind, title: x.title, group }));
+        } catch { /* endpoint gated for this role — skip */ }
+      }
+      setRepCat(all);
+    })();
+  }, [navQuery, repCat]);
+
   // RBAC Phase 2 — FRONTEND ROUTE PROTECTION. Hiding a sidebar button is
   // not enough: a staff/sub-admin user could type the URL directly. Any
   // route that exists in the master nav universe but is NOT in this user's
@@ -1318,10 +1360,14 @@ export default function AdminWebShell({ children }: Props) {
             </View>
             {navQuery.trim() ? (
               <View style={styles.gsResults}>
-                {flatNav
-                  .filter((n) => !n.disabled && n.label.toLowerCase().includes(navQuery.trim().toLowerCase()))
-                  .slice(0, 8)
-                  .map((n) => (
+                {/* Iter 499 — menu points + SUB-POINTS (matches item OR its
+                    parent section) with the section path shown under each */}
+                {flatNavDeep
+                  .filter(({ item, parent }) => !item.disabled &&
+                    (`${item.label} ${parent}`).toLowerCase()
+                      .includes(navQuery.trim().toLowerCase()))
+                  .slice(0, 9)
+                  .map(({ item: n, parent }) => (
                     <Pressable
                       key={n.route}
                       onPress={() => { setNavQuery(""); router.push(n.route as any); }}
@@ -1331,7 +1377,37 @@ export default function AdminWebShell({ children }: Props) {
                     >
                       <Ionicons name={(n as any).icon || "chevron-forward"} size={14}
                         color={colors.brandPrimary} />
-                      <Text style={styles.gsItemTxt}>{n.label}</Text>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.gsItemTxt} numberOfLines={1}>{n.label}</Text>
+                        {parent ? (
+                          <Text style={styles.gsItemSub} numberOfLines={1}>{parent}</Text>
+                        ) : null}
+                      </View>
+                    </Pressable>
+                  ))}
+                {/* Iter 499 — REPORT-HUB inner reports are searchable too */}
+                {(repCat || [])
+                  .filter((r) => r.title.toLowerCase()
+                    .includes(navQuery.trim().toLowerCase()))
+                  .slice(0, 6)
+                  .map((r) => (
+                    <Pressable
+                      key={`rep-${r.group}-${r.kind}`}
+                      onPress={() => {
+                        setNavQuery("");
+                        router.push(`/reports-center?kind=${encodeURIComponent(r.kind)}` as any);
+                      }}
+                      style={({ hovered }: any) => [
+                        styles.gsItem, hovered && { backgroundColor: colors.surfaceTertiary }]}
+                      testID={`gs-report-${r.kind}`}
+                    >
+                      <Ionicons name="document-text-outline" size={14} color="#B45309" />
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.gsItemTxt} numberOfLines={1}>{r.title}</Text>
+                        <Text style={styles.gsItemSub} numberOfLines={1}>
+                          Report Hub › {r.group.toUpperCase()}
+                        </Text>
+                      </View>
                     </Pressable>
                   ))}
                 {/* Iter 294 — data-wide results: employees + firms. */}
@@ -1374,7 +1450,8 @@ export default function AdminWebShell({ children }: Props) {
                     ))}
                   </>
                 ) : null}
-                {flatNav.filter((n) => n.label.toLowerCase().includes(navQuery.trim().toLowerCase())).length === 0 &&
+                {flatNavDeep.filter(({ item, parent }) => (`${item.label} ${parent}`).toLowerCase().includes(navQuery.trim().toLowerCase())).length === 0 &&
+                 !(repCat || []).some((r) => r.title.toLowerCase().includes(navQuery.trim().toLowerCase())) &&
                  !gsData?.employees?.length && !gsData?.companies?.length ? (
                   <Text style={styles.gsEmpty}>No screens match “{navQuery.trim()}”</Text>
                 ) : null}

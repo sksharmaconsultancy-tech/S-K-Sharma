@@ -314,6 +314,58 @@ async def list_tasks(
     return {"tasks": tasks, "counts": counts}
 
 
+@router.get("/portal-tasks/priority")
+async def priority_tasks(
+    company_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 499 (user request) — compact Priority-Tasks highlight for the
+    dashboard. Returns ONLY urgent items (max 8): overdue → high priority →
+    due today → today's statutory schedule. Completed / low-priority tasks
+    are never included. Lightweight: no recurring generation, small
+    projection, capped scan."""
+    admin = await _admin(authorization)
+    cid = _scope(admin, company_id)
+    today = _now().strftime("%Y-%m-%d")
+    q: Dict[str, Any] = {"status": {"$ne": "done"}}
+    if cid:
+        q["company_id"] = cid
+    q["$or"] = [
+        {"due_date": {"$ne": None, "$lte": today}},
+        {"priority": "high"},
+    ]
+    proj = {"_id": 0, "task_id": 1, "title": 1, "company_name": 1,
+            "assignee_name": 1, "due_date": 1, "priority": 1, "status": 1}
+    items: List[Dict[str, Any]] = []
+    async for t in db.portal_tasks.find(q, proj).sort("due_date", 1).limit(60):
+        due = t.get("due_date")
+        if due and due < today:
+            bucket, rank = "overdue", 0
+        elif t.get("priority") == "high":
+            bucket, rank = "high", 1
+        elif due == today:
+            bucket, rank = "due_today", 2
+        else:
+            continue
+        items.append({**t, "bucket": bucket, "_rank": rank})
+    items.sort(key=lambda x: (x["_rank"], x.get("due_date") or "9999"))
+    for it in items:
+        it.pop("_rank", None)
+
+    # Today's statutory schedule (not yet ticked in the calendar)
+    schedule: List[Dict[str, Any]] = []
+    month = today[:7]
+    scope_key = cid or "__all__"
+    done_keys = {c["item_key"] async for c in db.calendar_completions.find(
+        {"month": month, "scope": scope_key}, {"_id": 0, "item_key": 1})}
+    for it in _statutory_items(month):
+        if it.get("date") == today and it["key"] not in done_keys:
+            schedule.append({"key": it["key"], "title": it["title"],
+                             "kind": it.get("kind"), "date": it["date"]})
+
+    return {"items": items[:8], "schedule": schedule[:4], "today": today}
+
+
 @router.post("/portal-tasks")
 async def create_task(payload: TaskCreate, authorization: Optional[str] = Header(None)):
     admin = await _admin(authorization)
