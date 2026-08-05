@@ -770,6 +770,18 @@ async def iclock_getrequest(
             **_parse_info(INFO),
         }},
     )
+    # Iter 494 (user: "Name in Machine — some companies' data not showing
+    # on NEW registered machines") — automatically ask every machine ONCE
+    # for its user database (PIN + Name) so the Punch Log's "Name in
+    # Machine" column fills without the manual 'Fetch from machine' step.
+    if not device.get("userinfo_query_sent"):
+        await _queue_cmd(SN, "DATA QUERY USERINFO", "system:auto",
+                         "Auto user-name sync (new machine)")
+        await db.biometric_devices.update_one(
+            {"serial_number": SN},
+            {"$set": {"userinfo_query_sent": True,
+                      "userinfo_query_sent_at": _now_iso_z()}},
+        )
     if _resync_active(device) and not device.get("resync_check_sent"):
         await db.biometric_devices.update_one(
             {"serial_number": SN},
@@ -1375,6 +1387,8 @@ async def biometric_live_feed(
         feed.append({
             "at": r.get("at"), "date": r.get("date"), "kind": r.get("kind"),
             "status": r.get("status"),
+            # Iter 494 — user_id lets the UI show the employee photo.
+            "user_id": r.get("user_id") if u else None,
             "name": u.get("name") or r["user_id"],
             "bio_code": u.get("bio_code"),
             "device": dev_names.get(r.get("device_serial")) or r.get("device_serial"),

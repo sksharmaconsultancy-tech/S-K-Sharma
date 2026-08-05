@@ -129,7 +129,12 @@ async def _query_rows(
     async for mu in db.biometric_machine_users.find(
         {}, {"_id": 0, "company_id": 1, "pin": 1, "name": 1},
     ):
-        _mu_map[(mu.get("company_id"), str(mu.get("pin") or "").strip())] = mu.get("name") or ""
+        _p = str(mu.get("pin") or "").strip()
+        _mu_map[(mu.get("company_id"), _p)] = mu.get("name") or ""
+        # Iter 494 — some machines zero-pad the PIN ("050" vs bio "50"):
+        # index the normalized form too so the name always resolves.
+        if _p.lstrip("0") and _p.lstrip("0") != _p:
+            _mu_map.setdefault((mu.get("company_id"), _p.lstrip("0")), mu.get("name") or "")
 
     def _serial_of(rec: dict) -> str:
         s = str(rec.get("device_serial") or "")
@@ -182,13 +187,17 @@ async def _query_rows(
         _pin = str(u.get("bio_code") or "").strip() or (r.get("user_id") or "" if not u else "")
         rows.append({
             "record_id": r.get("record_id"),
+            # Iter 494 — employee photo support (None when NOT FOUND).
+            "user_id": r.get("user_id") if u else None,
             "date": r.get("date") or at[:10],
             "time": at[11:19] if len(at) >= 19 else at[11:16],
             "kind": r.get("kind"),
             "ot": _is_ot(r),
             "employee_code": u.get("employee_code") or "",
             "name": u.get("name") or ("NOT FOUND" if not u else r.get("user_id") or ""),
-            "name_in_machine": _mu_map.get((r.get("company_id"), _pin), ""),
+            "name_in_machine": (_mu_map.get((r.get("company_id"), _pin))
+                                or _mu_map.get((r.get("company_id"), _pin.lstrip("0")))
+                                or ""),
             "bio_code": u.get("bio_code") or ("" if u else (r.get("user_id") or "")),
             "machine_name": (_dev_map.get(_serial) or {}).get("name") or "",
             "machine": mlabel,

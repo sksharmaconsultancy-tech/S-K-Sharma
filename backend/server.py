@@ -9243,7 +9243,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "493"
+APP_ITERATION = "494"
 
 
 @api.get("/version")
@@ -11902,6 +11902,8 @@ from routes.ot_salary import router as ot_salary_router  # noqa: E402
 app.include_router(ot_salary_router)
 from routes.punch_logs import router as punch_logs_router  # noqa: E402
 app.include_router(punch_logs_router)
+from routes.employee_photos import router as employee_photos_router  # noqa: E402
+app.include_router(employee_photos_router)
 from routes.web_push import router as web_push_router  # noqa: E402
 app.include_router(web_push_router)
 from routes.sheet_verification import router as sheet_verification_router  # noqa: E402

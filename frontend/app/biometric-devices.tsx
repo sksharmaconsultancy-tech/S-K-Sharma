@@ -21,6 +21,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 import { api, apiBinary } from "@/src/api/client";
 import { useLiveSync } from "@/src/api/live-sync";
+import EmployeePhoto from "@/src/components/EmployeePhoto";
 import { useAuth } from "@/src/context/AuthContext";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
 
@@ -54,6 +55,7 @@ type FeedRow = {
   date: string;
   kind: "in" | "out";
   status?: string;
+  user_id?: string | null;
   name: string;
   bio_code?: string | null;
   device?: string | null;
@@ -660,6 +662,14 @@ export default function BiometricDevicesScreen() {
               ) : (
                 feed.slice(0, 12).map((f, i) => (
                   <View key={`${f.at}-${i}`} style={styles.liveRow}>
+                    {/* Iter 494 — employee photo beside every live punch */}
+                    <EmployeePhoto
+                      userId={f.user_id}
+                      name={f.name}
+                      code={f.bio_code}
+                      machine={f.device}
+                      size={30}
+                    />
                     <Text style={styles.liveTime}>{fmtFeedTime(f.at)}</Text>
                     <View
                       style={[

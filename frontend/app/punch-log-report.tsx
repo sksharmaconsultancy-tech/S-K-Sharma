@@ -20,12 +20,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 
 import { api, apiBinary } from "@/src/api/client";
+import EmployeePhoto from "@/src/components/EmployeePhoto";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors, radius, spacing, type } from "@/src/theme";
 import DateField from "@/src/components/DateField";
 
 type Row = {
+  record_id?: string;
+  user_id?: string | null;
   date: string;
   time: string;
   kind: string;
@@ -56,6 +59,8 @@ function daysAgoIso(n: number): string {
 }
 
 const COLS: { key: keyof Row; label: string; w: number }[] = [
+  // Iter 494 — employee photo thumbnail (tap → preview).
+  { key: "user_id", label: "", w: 44 },
   { key: "date", label: "Date", w: 96 },
   { key: "time", label: "Time", w: 76 },
   { key: "kind", label: "IN/OUT", w: 64 },
@@ -306,6 +311,19 @@ export default function PunchLogReportScreen() {
                 ]}
               >
                 {COLS.map((c) => (
+                  c.key === "user_id" ? (
+                    <View key="user_id" style={{ width: c.w, alignItems: "center", justifyContent: "center" }}>
+                      {/* Iter 494 — 32px thumbnail, tap for large preview.
+                          Unknown-employee avatar when no master match. */}
+                      <EmployeePhoto
+                        userId={r.user_id}
+                        name={r.name}
+                        code={r.employee_code || r.bio_code}
+                        machine={r.machine_name || r.machine}
+                        size={32}
+                      />
+                    </View>
+                  ) : (
                   <Text
                     key={c.key}
                     numberOfLines={1}
@@ -341,6 +359,7 @@ export default function PunchLogReportScreen() {
                               : r.name || "—")
                           : (r as any)[c.key] || "—"}
                   </Text>
+                  )
                 ))}
               </View>
             ))}

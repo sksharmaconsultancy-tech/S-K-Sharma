@@ -31,6 +31,7 @@ import { useLiveSync } from "@/src/api/live-sync";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import CompanyPicker from "@/src/components/CompanyPicker";
+import EmployeePhoto from "@/src/components/EmployeePhoto";
 import PunchRepairModal from "@/src/components/PunchRepairModal";
 import * as FileSystemNS from "expo-file-system";
 import * as Sharing from "expo-sharing";
@@ -1211,11 +1212,15 @@ function GridRow({
       <View style={[styles.cell, { width: COL.sno }, stickyCol(LEFT.sno), frozenBg]}>
         <Text style={styles.deptTxt}>{sno}</Text>
       </View>
-      <View style={[styles.cell, { width: COL.name }, stickyCol(LEFT.name), frozenBg]}>
-        <Text style={styles.nameTxt} numberOfLines={1}>{emp.name}</Text>
-        {emp.employee_group ? (
-          <Text style={styles.subTxt} numberOfLines={1}>{emp.employee_group}</Text>
-        ) : null}
+      <View style={[styles.cell, { width: COL.name, flexDirection: "row", alignItems: "center", gap: 5 }, stickyCol(LEFT.name), frozenBg]}>
+        {/* Iter 494 — photo for visual attendance verification */}
+        <EmployeePhoto userId={emp.user_id} name={emp.name} code={emp.employee_code} size={26} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.nameTxt} numberOfLines={1}>{emp.name}</Text>
+          {emp.employee_group ? (
+            <Text style={styles.subTxt} numberOfLines={1}>{emp.employee_group}</Text>
+          ) : null}
+        </View>
       </View>
       <View style={[styles.cell, { width: COL.father }, stickyCol(LEFT.father), frozenBg]}>
         <Text style={styles.deptTxt} numberOfLines={1}>{emp.father_name || "—"}</Text>

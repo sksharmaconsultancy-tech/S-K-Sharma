@@ -18,6 +18,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { api, apiBinary } from "@/src/api/client";
+import EmployeePhoto from "@/src/components/EmployeePhoto";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors, radius, type } from "@/src/theme";
@@ -407,8 +408,14 @@ export default function DailyVerificationScreen() {
                   }
                   if (c.key === "name") {
                     return (
-                      <Pressable key="name" style={{ width: c.w }} onPress={() => openDrill(r)}>
-                        <Text style={[st.td, st.link]} numberOfLines={1}>{r.name}</Text>
+                      <Pressable
+                        key="name"
+                        style={{ width: c.w, flexDirection: "row", alignItems: "center", gap: 6 }}
+                        onPress={() => openDrill(r)}
+                      >
+                        {/* Iter 494 — photo beside the name for quick visual verification */}
+                        <EmployeePhoto userId={r.user_id} name={r.name} code={r.employee_code} size={28} />
+                        <Text style={[st.td, st.link, { flex: 1 }]} numberOfLines={1}>{r.name}</Text>
                       </Pressable>
                     );
                   }

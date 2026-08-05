@@ -15,6 +15,7 @@ import { useLiveSync } from "@/src/api/live-sync";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import CompanyPicker from "@/src/components/CompanyPicker";
+import EmployeePhoto from "@/src/components/EmployeePhoto";
 import FirmDropdown from "@/src/components/FirmDropdown";
 import SalaryUpdateModal from "@/src/components/SalaryUpdateModal";
 import { EmployeeStatsBar, EmployeeListSkeleton } from "@/src/components/EmployeeStatsBar";
@@ -632,9 +633,8 @@ export default function AdminScreen() {
                 openEditor(e);
               }}
             >
-              <View style={styles.avatar}>
-                <Text style={styles.avatarTxt}>{(e.name || "?")[0]}</Text>
-              </View>
+              {/* Iter 494 — real photo (thumb) with initials fallback */}
+              <EmployeePhoto userId={e.user_id} name={e.name} code={e.employee_code} size={40} preview={false} />
               <View style={{ flex: 1 }}>
                 <View style={styles.empHeadRow}>
                   <Text style={styles.empName} numberOfLines={1}>

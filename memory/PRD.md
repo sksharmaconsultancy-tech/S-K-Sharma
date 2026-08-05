@@ -4251,3 +4251,27 @@ Change the Firm Always Refresh the Data ... Don't Show Wrong Data"):
   global guarantee. Tested with window marker: marker wiped → real
   reload; dashboard refetched (All firms scope).
 - APP_ITERATION=493; deploy_vps_iter493.sh (cumulative 488-493).
+
+ITER 494 — EMPLOYEE PHOTOS IN ATTENDANCE MODULE (DONE, tested; user spec
+"enhancement only, don't touch sync engine"):
+- NEW routes/employee_photos.py: POST /api/admin/employee-photos/thumbs
+  (batch ≤300, lazy 96px JPEG thumbs cached in users.profile_photo_thumb,
+  regen when profile_photo_updated_at newer) + GET .../{uid}/full.
+  Role-gated (company_admin scoped to own firm). Registered in server.py.
+- NEW src/components/EmployeePhoto.tsx: module-level cache + debounced
+  batch loader, initials avatar fallback, unknown-employee icon (no uid),
+  tap → full preview modal (name/code/machine).
+- Wired: biometric-devices.tsx live feed (+user_id in backend feed rows),
+  punch-log-report.tsx new photo col (+user_id in rows), daily-
+  verification.tsx name cell, attendance-grid.tsx name cell, admin.tsx
+  employee search list (replaced initials-only avatar).
+- Photos source: existing Employee Master → Documents → Photo (syncs to
+  users.profile_photo_base64) — no schema change.
+- BONUS FIX (user: "Name in Machine not showing for NEW machines"):
+  getrequest now auto-queues DATA QUERY USERINFO ONCE per device
+  (userinfo_query_sent flag); punch-log _mu_map also indexes PINs with
+  leading zeros stripped.
+- Tested: thumbs (1KB thumb, cached, None for no-photo), full (11KB),
+  live-feed + punch-log rows expose user_id (1941 rows), UI avatars
+  render on Punch Log (screenshot). Sync engine untouched.
+- APP_ITERATION=494; deploy_vps_iter494.sh (cumulative 488-494).
