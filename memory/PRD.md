@@ -4302,3 +4302,32 @@ ITER 495 — MACHINE SDK PHOTOS + NEW-MACHINE USER FETCH + GROUP IN/OUT
 - APP_ITERATION=495; deploy_vps_iter495.sh; temp_bundle kind=script → 495.
 NEXT: Single Machine Attendance Mode (big spec, Message 148); WhatsApp
 API (blocked on user Meta credentials); SMTP config by user.
+
+ITER 496 — UNIVERSAL REPORT TABLE ENGINE, PHASE 1 (DONE, tested: backend
+6/6 pytest + frontend 4 screens via testing_agent, iteration_496.json):
+- NEW src/components/ReportTable.tsx: one common renderer — auto col width
+  (content-measured, min/max per type), sticky header, frozen leading
+  cols (position:sticky web), ellipsis + hover/tap tooltip, num→right /
+  date→center / text→left alignment, responsive font 14/13/12 (min 11),
+  consistent row height, virtual scrolling >120 rows, drag col-resize
+  (web), Columns show/hide panel + Reset layout.
+- NEW routes/report_prefs.py: GET/PUT /api/report-prefs/{key} — per-user
+  per-report saved layout {w,hide,t} in db.report_ui_prefs; frontend
+  caches in localStorage (rt:{key}) + debounced server sync; newer t wins.
+- MIGRATED Phase 1: punch-log-report (punch_log; photo col render, sticky
+  photo/code/name, flag colors kept), ot-report (ot_report; tap-sort keys
+  now = column keys, TOTAL footer pinned), leave-report (leave_report),
+  bank-transfer preview (bank_transfer; TOTAL footer).
+- APP_ITERATION=496; deploy_vps_iter496.sh; temp_bundle kind=script → 496.
+REMAINING PHASES (user approved full rollout — his words "check all",
+prefs BOTH localStorage+server, PDF engine to ALL reports eventually):
+- Phase 2: salary-register.tsx (banded 2-row header — needs engine
+  support for column groups), bank-sheet, wage register, salary sheet,
+  compliance-salary-run results grid.
+- Phase 3: attendance-grid, monthly attendance, inout-ot-matrix,
+  daily-verification, employee-master list, advances, loans, PF/ESIC/
+  bonus/gratuity registers, contractor/department-wise.
+- PDF phase: shared utils/report_pdf.py builder (landscape, auto width,
+  repeatRows, Paragraph-wrap) then migrate known-broken PDFs first.
+NEXT (unchanged): Single Machine Attendance Mode (Message 148 spec);
+WhatsApp API (blocked on user Meta credentials); SMTP config by user.
