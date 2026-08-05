@@ -25,7 +25,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import CompanyPicker from "@/src/components/CompanyPicker";
 import MonthPicker from "@/src/components/MonthPicker";
-import { GridScroller, stickyCol, stickyHeader } from "@/src/components/GridFreeze";
+import ReportTable, { ReportCol } from "@/src/components/ReportTable";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
 type Col = { key: string; label: string; group: string; type: "text" | "num" | "int" };
@@ -53,16 +53,6 @@ const fmtNum = (v: any) => {
   return n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 const fmtMoney = (v: any) => `₹${fmtNum(v)}`;
-
-function colWidth(c: Col): number {
-  // Iter 309 — saved layout width (mm-ish units from the editor → px).
-  const w = (c as any).width;
-  if (w && Number(w) > 0) return Math.round(Number(w) * 4);
-  if (c.key === "name") return 170;
-  if (c.key === "father_name" || c.key === "designation" || c.key === "contractor_name") return 130;
-  if (c.type === "text") return 100;
-  return 92;
-}
 
 export default function SalaryRegisterScreen() {
   const { user } = useAuth();
@@ -226,7 +216,6 @@ export default function SalaryRegisterScreen() {
   };
 
   // ---- grid geometry ------------------------------------------------------
-  const SR_W = 44, CODE_W = 72, NAME_W = 170;
   const nameCol = columns.find((c) => c.key === "name");
   const codeCol = columns.find((c) => c.key === "employee_code");
   const scrollCols = useMemo(
@@ -234,24 +223,68 @@ export default function SalaryRegisterScreen() {
     [columns],
   );
 
-  // banded header segments for the scrollable columns
-  const bands = useMemo(() => {
-    const out: { group: string; label: string; width: number }[] = [];
+  const pages = Math.max(1, Math.ceil(totalRows / pageSize));
+
+  // ---- Iter 497: Universal Report Table columns (banded) ------------------
+  const rtCols = useMemo<ReportCol<any>[]>(() => {
+    const bandOf = (g: string) => ({
+      key: g,
+      label: groups.find((x) => x.key === g)?.label || g,
+      color: GROUP_COLORS[g] || "#1F4E79",
+    });
+    const empBand = { key: "__emp", label: "Employee", color: "#44546A" };
+    const out: ReportCol<any>[] = [
+      {
+        key: "__sn", label: "Sr", type: "center", min: 44, max: 56,
+        sticky: true, band: empBand, value: (r) => String(r.__sn ?? ""),
+      },
+      {
+        key: "employee_code", label: codeCol?.label || "Code", type: "center",
+        min: 72, max: 110, sticky: true, band: empBand,
+      },
+      {
+        key: "name", label: nameCol?.label || "Name", min: 200, max: 300,
+        sticky: true, band: empBand,
+        textStyle: () => ({ fontWeight: "600" }),
+      },
+    ];
     for (const c of scrollCols) {
-      const last = out[out.length - 1];
-      if (last && last.group === c.group) last.width += colWidth(c);
-      else {
-        out.push({
-          group: c.group,
-          label: groups.find((g) => g.key === c.group)?.label || c.group,
-          width: colWidth(c),
-        });
-      }
+      const fixed = (c as any).width && Number((c as any).width) > 0
+        ? Math.round(Number((c as any).width) * 4) : 0;
+      out.push({
+        key: c.key,
+        label: c.label,
+        type: c.type === "text" ? "text" : "num",
+        band: bandOf(c.group),
+        ...(fixed
+          ? { min: fixed, max: fixed }
+          : c.type === "text"
+            ? { min: 100, max: 220 }
+            : { min: 92, max: 150 }),
+        value: (r) =>
+          c.type === "num" ? fmtNum(r[c.key])
+            : c.type === "int" ? String(Math.round(Number(r[c.key] || 0)))
+            : String(r[c.key] ?? ""),
+        textStyle: c.group === "net"
+          ? () => ({ fontWeight: "800", color: "#1F4E79" })
+          : undefined,
+      });
     }
     return out;
-  }, [scrollCols, groups]);
+  }, [scrollCols, groups, codeCol, nameCol]);
 
-  const pages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const rtRows = useMemo(
+    () => rows.map((r, i) => ({ ...r, __sn: (page - 1) * pageSize + i + 1 })),
+    [rows, page, pageSize],
+  );
+
+  const rtFooter = useMemo(() => {
+    const values: Record<string, string> = { __sn: " ", employee_code: " " };
+    for (const c of scrollCols) {
+      values[c.key] = c.type === "text" ? " " : fmtNum(totals[c.key]);
+    }
+    return { label: `TOTAL (${totalRows} emp)`, values };
+  }, [scrollCols, totals, totalRows]);
 
   const chipRow = (
     label: string, values: string[], sel: string, onSel: (v: string) => void,
@@ -515,136 +548,23 @@ export default function SalaryRegisterScreen() {
 
             {!!err && <Text style={styles.errTxt}>{err}</Text>}
 
-            {/* ---- grid ---- */}
+            {/* ---- grid — Iter 497: Universal Report Table engine ---- */}
             <View style={styles.gridCard}>
-              <GridScroller maxHeight={620}>
-                {/* banded group header */}
-                <View style={[{ flexDirection: "row" }, stickyHeader(colors.surface)]}>
-                  <View style={{ flexDirection: "row" }}>
-                    <View style={[styles.bandCell, { width: SR_W, backgroundColor: "#44546A" },
-                      stickyCol(0, "#44546A")]} />
-                    <View style={[styles.bandCell, { width: CODE_W + NAME_W, backgroundColor: "#44546A" },
-                      stickyCol(SR_W, "#44546A")]}>
-                      <Text style={styles.bandTxt}>Employee</Text>
-                    </View>
-                    {bands.map((b, i) => (
-                      <View
-                        key={`${b.group}-${i}`}
-                        style={[styles.bandCell, {
-                          width: b.width,
-                          backgroundColor: GROUP_COLORS[b.group] || "#1F4E79",
-                        }]}
-                      >
-                        <Text style={styles.bandTxt}>{b.label}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-                {/* column header */}
-                <View style={[{ flexDirection: "row" }, Platform.OS === "web"
-                  ? ({ position: "sticky", top: 26, zIndex: 9 } as any) : null]}>
-                  <View style={[styles.headCell, { width: SR_W }, stickyCol(0, "#1F4E79")]}>
-                    <Text style={styles.headTxt}>Sr</Text>
-                  </View>
-                  <Pressable
-                    onPress={() => onSort("employee_code")}
-                    style={[styles.headCell, { width: CODE_W }, stickyCol(SR_W, "#1F4E79")]}
-                  >
-                    <Text style={styles.headTxt}>
-                      {codeCol?.label || "Code"}{sortBy === "employee_code" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => onSort("name")}
-                    style={[styles.headCell, { width: NAME_W, alignItems: "flex-start" },
-                      stickyCol(SR_W + CODE_W, "#1F4E79")]}
-                  >
-                    <Text style={styles.headTxt}>
-                      {nameCol?.label || "Name"}{sortBy === "name" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
-                    </Text>
-                  </Pressable>
-                  {scrollCols.map((c) => (
-                    <Pressable
-                      key={c.key}
-                      testID={`col-${c.key}`}
-                      onPress={() => onSort(c.key)}
-                      style={[styles.headCell, {
-                        width: colWidth(c),
-                        alignItems: c.type === "text" ? "flex-start" : "flex-end",
-                      }]}
-                    >
-                      <Text style={styles.headTxt} numberOfLines={2}>
-                        {c.label}{sortBy === c.key ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-                {/* data rows */}
-                {rows.map((r, i) => {
-                  const zebra = i % 2 === 1;
-                  const rowBg = zebra ? colors.surfaceSecondary : colors.surface;
-                  return (
-                    <View key={`${r.employee_code}-${i}`} style={[styles.dataRow, { backgroundColor: rowBg }]}>
-                      <View style={[styles.cell, { width: SR_W }, stickyCol(0, rowBg)]}>
-                        <Text style={styles.cellTxtMuted}>{(page - 1) * pageSize + i + 1}</Text>
-                      </View>
-                      <View style={[styles.cell, { width: CODE_W }, stickyCol(SR_W, rowBg)]}>
-                        <Text style={styles.cellTxt}>{r.employee_code ?? ""}</Text>
-                      </View>
-                      <View style={[styles.cell, { width: NAME_W, alignItems: "flex-start" },
-                        stickyCol(SR_W + CODE_W, rowBg)]}>
-                        <Text style={[styles.cellTxt, { fontWeight: "600" }]} numberOfLines={1}>
-                          {r.name ?? ""}
-                        </Text>
-                      </View>
-                      {scrollCols.map((c) => (
-                        <View
-                          key={c.key}
-                          style={[styles.cell, {
-                            width: colWidth(c),
-                            alignItems: c.type === "text" ? "flex-start" : "flex-end",
-                          }]}
-                        >
-                          <Text
-                            style={[
-                              styles.cellTxt,
-                              c.type !== "text" && styles.numTxt,
-                              c.group === "net" && styles.netTxt,
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {c.type === "num" ? fmtNum(r[c.key])
-                              : c.type === "int" ? String(Math.round(Number(r[c.key] || 0)))
-                              : String(r[c.key] ?? "")}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-                  );
-                })}
-                {/* totals row */}
-                <View style={[styles.dataRow, styles.totalRow]}>
-                  <View style={[styles.cell, { width: SR_W }, stickyCol(0, "#FFF3CD")]} />
-                  <View style={[styles.cell, { width: CODE_W }, stickyCol(SR_W, "#FFF3CD")]} />
-                  <View style={[styles.cell, { width: NAME_W, alignItems: "flex-start" },
-                    stickyCol(SR_W + CODE_W, "#FFF3CD")]}>
-                    <Text style={styles.totalTxt}>TOTAL ({totalRows} emp)</Text>
-                  </View>
-                  {scrollCols.map((c) => (
-                    <View
-                      key={c.key}
-                      style={[styles.cell, {
-                        width: colWidth(c),
-                        alignItems: c.type === "text" ? "flex-start" : "flex-end",
-                      }]}
-                    >
-                      <Text style={styles.totalTxt} numberOfLines={1}>
-                        {c.type === "text" ? "" : fmtNum(totals[c.key])}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </GridScroller>
+              <View style={{ minHeight: 240, maxHeight: 660 }}>
+                <ReportTable
+                  reportKey="salary_register"
+                  columns={rtCols}
+                  rows={rtRows}
+                  maxHeight={620}
+                  sortBy={sortBy}
+                  sortDir={sortDir}
+                  onHeaderPress={(k) => { if (k !== "__sn") onSort(k); }}
+                  footer={rtFooter}
+                  pdfTitle={`Salary Register — ${month || runMeta?.month || ""}`}
+                  pdfSubtitle={`${source === "compliance" ? "Compliance" : "Actual"} salary · ${totalRows} employees`}
+                  emptyText="No salary rows for the selected filters."
+                />
+              </View>
 
               {/* ---- pagination footer ---- */}
               <View style={styles.pagerRow}>

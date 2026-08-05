@@ -11908,6 +11908,10 @@ app.include_router(employee_photos_router)
 # Iter 496 — Universal Report Table engine: per-user saved layouts.
 from routes.report_prefs import router as report_prefs_router  # noqa: E402
 app.include_router(report_prefs_router)
+
+# Iter 497 — Universal Report PDF export (screen-matching landscape PDFs).
+from routes.report_export import router as report_export_router  # noqa: E402
+app.include_router(report_export_router)
 from routes.web_push import router as web_push_router  # noqa: E402
 app.include_router(web_push_router)
 from routes.sheet_verification import router as sheet_verification_router  # noqa: E402

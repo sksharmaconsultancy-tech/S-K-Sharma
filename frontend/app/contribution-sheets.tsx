@@ -20,6 +20,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Redirect, useRouter, useLocalSearchParams } from "expo-router";
 
 import { api, apiBinary } from "@/src/api/client";
+import ReportTable, { ReportCol } from "@/src/components/ReportTable";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import MonthPicker from "@/src/components/MonthPicker";
@@ -230,48 +231,42 @@ export default function ContributionSheetsScreen() {
                   {numFmt(monthly.totals.total)}
                 </Text>
               </View>
-              <ScrollView horizontal>
-                <View>
-                  <View style={[styles.tr, styles.trHead]}>
-                    {monthly.columns.map((c) => (
-                      <Text
-                        key={c.key}
-                        style={[styles.th, { width: c.key === "name" ? 180 : c.key === "sr" ? 44 : 110 },
-                          c.key === "name" && { textAlign: "left" }]}
-                      >
-                        {c.label}
-                      </Text>
-                    ))}
-                  </View>
-                  {monthly.rows.map((r, i) => (
-                    <View key={r.user_id || i} style={[styles.tr, i % 2 === 1 && styles.trOdd]}>
-                      {monthly.columns.map((c) => (
-                        <Text
-                          key={c.key}
-                          style={[styles.td, { width: c.key === "name" ? 180 : c.key === "sr" ? 44 : 110 },
-                            c.key === "name" && { textAlign: "left", fontWeight: "700" },
-                            c.key === "total" && { fontWeight: "800" }]}
-                          numberOfLines={1}
-                        >
-                          {c.key === "name" || c.key === "sr" || c.key === "uan_no" || c.key === "esi_ip_no"
-                            ? (r[c.key] || "—")
-                            : numFmt(r[c.key])}
-                        </Text>
-                      ))}
-                    </View>
-                  ))}
-                  <View style={[styles.tr, styles.trTotal]}>
-                    {monthly.columns.map((c, ci) => (
-                      <Text
-                        key={c.key}
-                        style={[styles.td, styles.tdTotal, { width: c.key === "name" ? 180 : c.key === "sr" ? 44 : 110 }]}
-                      >
-                        {ci === 1 ? "TOTAL" : monthly.totals[c.key] != null ? numFmt(monthly.totals[c.key]) : ""}
-                      </Text>
-                    ))}
-                  </View>
-                </View>
-              </ScrollView>
+              {/* Iter 497 — Universal Report Table engine (monthly) */}
+              <ReportTable
+                reportKey={`contrib_${kind}_monthly`}
+                columns={monthly.columns.map((c): ReportCol<any> => ({
+                  key: c.key,
+                  label: c.label,
+                  type: c.key === "name" ? "text"
+                    : c.key === "sr" ? "center"
+                    : (c.key === "uan_no" || c.key === "esi_ip_no") ? "center" : "num",
+                  ...(c.key === "name" ? { min: 200, max: 300, sticky: true }
+                    : c.key === "sr" ? { min: 44, max: 60, sticky: true }
+                    : { min: 100, max: 150 }),
+                  value: (r) =>
+                    c.key === "name" || c.key === "sr" || c.key === "uan_no" || c.key === "esi_ip_no"
+                      ? String(r[c.key] || "—")
+                      : numFmt(r[c.key]),
+                  textStyle: c.key === "name"
+                    ? () => ({ fontWeight: "700" })
+                    : c.key === "total" ? () => ({ fontWeight: "800" }) : undefined,
+                }))}
+                rows={monthly.rows}
+                maxHeight={560}
+                pdfTitle={`${kind === "pf" ? "PF" : "ESIC"} Contribution Sheet — ${month}`}
+                pdfSubtitle={selectedCompany?.name || ""}
+                footer={{
+                  label: "TOTAL",
+                  values: {
+                    sr: " ",
+                    ...Object.fromEntries(
+                      monthly.columns
+                        .filter((c) => monthly.totals[c.key] != null)
+                        .map((c) => [c.key, numFmt(monthly.totals[c.key])]),
+                    ),
+                  },
+                }}
+              />
             </>
           )
         ) : !yearly ? (
@@ -291,59 +286,44 @@ export default function ContributionSheetsScreen() {
                 {" "}Grand Total: ₹{numFmt(yearly.totals.grand_total)}
               </Text>
             </View>
-            <ScrollView horizontal>
-              <View>
-                <View style={[styles.tr, styles.trHead]}>
-                  <Text style={[styles.th, { width: 44 }]}>Sr.</Text>
-                  <Text style={[styles.th, { width: 70 }]}>Code</Text>
-                  <Text style={[styles.th, { width: 170, textAlign: "left" }]}>Name</Text>
-                  <Text style={[styles.th, { width: 110 }]}>{kind === "pf" ? "UAN No." : "ESIC IP No."}</Text>
-                  {yearly.months.map((m) => (
-                    <Text key={m.key} style={[styles.th, { width: 80 }]}>{m.label}</Text>
-                  ))}
-                  <Text style={[styles.th, { width: 100 }]}>Wages Total</Text>
-                  <Text style={[styles.th, { width: 100 }]}>EE Total</Text>
-                  <Text style={[styles.th, { width: 100 }]}>ER Total</Text>
-                  <Text style={[styles.th, { width: 110 }]}>Grand Total</Text>
-                </View>
-                {yearly.rows.map((r, i) => (
-                  <View key={r.user_id || i} style={[styles.tr, i % 2 === 1 && styles.trOdd]}>
-                    <Text style={[styles.td, { width: 44 }]}>{r.sr}</Text>
-                    <Text style={[styles.td, { width: 70 }]}>{r.employee_code || "—"}</Text>
-                    <Text style={[styles.td, { width: 170, textAlign: "left", fontWeight: "700" }]} numberOfLines={1}>
-                      {r.name}
-                    </Text>
-                    <Text style={[styles.td, { width: 110 }]}>
-                      {(kind === "pf" ? r.uan_no : r.esi_ip_no) || "—"}
-                    </Text>
-                    {yearly.months.map((m) => (
-                      <Text key={m.key} style={[styles.td, { width: 80 }]}>
-                        {numFmt(r.monthly?.[m.key] || 0)}
-                      </Text>
-                    ))}
-                    <Text style={[styles.td, { width: 100 }]}>{numFmt(r.wages_total)}</Text>
-                    <Text style={[styles.td, { width: 100 }]}>{numFmt(r.ee_total)}</Text>
-                    <Text style={[styles.td, { width: 100 }]}>{numFmt(r.er_total)}</Text>
-                    <Text style={[styles.td, { width: 110, fontWeight: "800" }]}>{numFmt(r.grand_total)}</Text>
-                  </View>
-                ))}
-                <View style={[styles.tr, styles.trTotal]}>
-                  <Text style={[styles.td, styles.tdTotal, { width: 44 }]} />
-                  <Text style={[styles.td, styles.tdTotal, { width: 70 }]} />
-                  <Text style={[styles.td, styles.tdTotal, { width: 170, textAlign: "left" }]}>TOTAL</Text>
-                  <Text style={[styles.td, styles.tdTotal, { width: 110 }]} />
-                  {yearly.months.map((m) => (
-                    <Text key={m.key} style={[styles.td, styles.tdTotal, { width: 80 }]}>
-                      {numFmt(yearly.totals.monthly?.[m.key] || 0)}
-                    </Text>
-                  ))}
-                  <Text style={[styles.td, styles.tdTotal, { width: 100 }]}>{numFmt(yearly.totals.wages_total)}</Text>
-                  <Text style={[styles.td, styles.tdTotal, { width: 100 }]}>{numFmt(yearly.totals.ee_total)}</Text>
-                  <Text style={[styles.td, styles.tdTotal, { width: 100 }]}>{numFmt(yearly.totals.er_total)}</Text>
-                  <Text style={[styles.td, styles.tdTotal, { width: 110 }]}>{numFmt(yearly.totals.grand_total)}</Text>
-                </View>
-              </View>
-            </ScrollView>
+            {/* Iter 497 — Universal Report Table engine (yearly) */}
+            <ReportTable
+              reportKey={`contrib_${kind}_yearly`}
+              columns={[
+                { key: "sr", label: "Sr.", type: "center", min: 44, max: 60, sticky: true },
+                { key: "employee_code", label: "Code", type: "center", min: 64, sticky: true },
+                { key: "name", label: "Name", min: 200, max: 300, sticky: true, textStyle: () => ({ fontWeight: "700" }) },
+                {
+                  key: "__id", label: kind === "pf" ? "UAN No." : "ESIC IP No.", type: "center", min: 110,
+                  value: (r: any) => String((kind === "pf" ? r.uan_no : r.esi_ip_no) || "—"),
+                },
+                ...yearly.months.map((m): ReportCol<any> => ({
+                  key: `m_${m.key}`, label: m.label, type: "num", min: 80, max: 120,
+                  value: (r: any) => numFmt(r.monthly?.[m.key] || 0),
+                })),
+                { key: "wages_total", label: "Wages Total", type: "num", min: 100, value: (r: any) => numFmt(r.wages_total) },
+                { key: "ee_total", label: "EE Total", type: "num", min: 96, value: (r: any) => numFmt(r.ee_total) },
+                { key: "er_total", label: "ER Total", type: "num", min: 96, value: (r: any) => numFmt(r.er_total) },
+                { key: "grand_total", label: "Grand Total", type: "num", min: 110, value: (r: any) => numFmt(r.grand_total), textStyle: () => ({ fontWeight: "800" }) },
+              ]}
+              rows={yearly.rows}
+              maxHeight={560}
+              pdfTitle={`${kind === "pf" ? "PF" : "ESIC"} Yearly Contribution — ${yearly.fy_label}`}
+              pdfSubtitle={selectedCompany?.name || ""}
+              footer={{
+                label: "TOTAL",
+                values: {
+                  sr: " ", employee_code: " ",
+                  ...Object.fromEntries(yearly.months.map((m) => [
+                    `m_${m.key}`, numFmt(yearly.totals.monthly?.[m.key] || 0),
+                  ])),
+                  wages_total: numFmt(yearly.totals.wages_total),
+                  ee_total: numFmt(yearly.totals.ee_total),
+                  er_total: numFmt(yearly.totals.er_total),
+                  grand_total: numFmt(yearly.totals.grand_total),
+                },
+              }}
+            />
           </>
         )}
         <View style={{ height: 40 }} />

@@ -16,13 +16,13 @@ import {
   StyleSheet,
   Pressable,
   ActivityIndicator,
-  ScrollView,
   TextInput,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { api } from "@/src/api/client";
+import ReportTable, { ReportCol } from "@/src/components/ReportTable";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import WebDateField from "@/src/components/WebDateField";
 import { colors, radius, spacing, type } from "@/src/theme";
@@ -106,11 +106,6 @@ function shiftMonth(m: string, delta: number): string {
   const d = new Date(y, mo - 1 + delta, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
-
-const W = {
-  date: 74, code: 52, name: 160, desig: 104,
-  t: 58, hrs: 58, salary: 88,
-};
 
 export default function SalaryDaySheetScreen() {
   const insets = useSafeAreaInsets();
@@ -215,19 +210,27 @@ export default function SalaryDaySheetScreen() {
     return { duty, ot, total, salary };
   }, [rows]);
 
-  const HDR: { w: number; txt: string }[] = [
-    { w: W.code, txt: "Code" },
-    { w: W.name, txt: "Name" },
-    { w: W.desig, txt: "Designation" },
-    { w: W.date, txt: "Date" },
-    { w: W.t, txt: "In Punch" },
-    { w: W.t, txt: "Out Punch" },
-    { w: W.hrs, txt: "Duty HRS" },
-    { w: W.t, txt: "OT In" },
-    { w: W.t, txt: "OT Out" },
-    { w: W.hrs, txt: "OT HRS" },
-    { w: W.hrs, txt: "Total HRS" },
-    { w: W.salary, txt: "Day Salary" },
+  const HDR: ReportCol<any>[] = [
+    { key: "code", label: "Code", type: "center", min: 60, sticky: true, value: (r) => r.emp.employee_code || "—" },
+    { key: "name", label: "Name", min: 200, max: 300, sticky: true, value: (r) => r.emp.name || "", textStyle: () => ({ fontWeight: "600" }) },
+    { key: "desig", label: "Designation", min: 110, max: 200, value: (r) => r.emp.designation || "—" },
+    {
+      key: "date", label: "Date", type: "date",
+      value: (r) => r.dateFull
+        ? `${r.dateFull.slice(8, 10)}-${r.dateFull.slice(5, 7)}`
+        : `${r.date}/${month.slice(5, 7)}`,
+    },
+    { key: "in", label: "In Punch", type: "center", min: 72, value: (r) => r.cell.in || "—" },
+    { key: "out", label: "Out Punch", type: "center", min: 76, value: (r) => r.cell.out || "—" },
+    { key: "duty", label: "Duty HRS", type: "num", min: 80, value: (r) => fmtH(r.cell.duty_hours) },
+    { key: "ot_in", label: "OT In", type: "center", min: 68, value: (r) => r.cell.ot_in || "—", textStyle: () => ({ color: colors.accent }) },
+    { key: "ot_out", label: "OT Out", type: "center", min: 72, value: (r) => r.cell.ot_out || "—", textStyle: () => ({ color: colors.accent }) },
+    {
+      key: "ot", label: "OT HRS", type: "num", min: 72, value: (r) => fmtH(r.cell.ot_hours),
+      textStyle: (r) => ({ color: (r.cell.ot_hours || 0) > 0 ? colors.accent : colors.onSurfaceTertiary }),
+    },
+    { key: "total", label: "Total HRS", type: "num", min: 84, value: (r) => fmtH(r.cell.hours), textStyle: () => ({ fontWeight: "700" }) },
+    { key: "salary", label: "Day Salary", type: "num", min: 96, value: (r) => fmtRs(r.cell.salary), textStyle: () => ({ color: "#15803D", fontWeight: "800" }) },
   ];
 
   return (
@@ -337,67 +340,27 @@ export default function SalaryDaySheetScreen() {
           </Pressable>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ padding: spacing.md }}>
-          <ScrollView horizontal showsHorizontalScrollIndicator>
-            <View>
-              {/* Header */}
-              <View style={styles.hdrRow}>
-                {HDR.map((c) => (
-                  <Text key={c.txt} style={[styles.hdrCell, { width: c.w }]}>{c.txt}</Text>
-                ))}
-              </View>
-              {rows.length === 0 ? (
-                <Text style={styles.emptyTxt}>No attendance / salary data for {month}.</Text>
-              ) : (
-                rows.map((r, i) => (
-                  <View key={r.key} style={[styles.row, i % 2 === 0 && styles.rowAlt]}>
-                    <Text style={[styles.cell, { width: W.code }]}>{r.emp.employee_code || "—"}</Text>
-                    <Text style={[styles.cell, { width: W.name, fontWeight: "600" }]} numberOfLines={1}>
-                      {r.emp.name}
-                    </Text>
-                    <Text style={[styles.cell, { width: W.desig }]} numberOfLines={1}>
-                      {r.emp.designation || "—"}
-                    </Text>
-                    <Text style={[styles.cell, { width: W.date }]}>
-                      {r.dateFull
-                        ? `${r.dateFull.slice(8, 10)}-${r.dateFull.slice(5, 7)}`
-                        : `${r.date}/${month.slice(5, 7)}`}
-                    </Text>
-                    <Text style={[styles.cell, { width: W.t }]}>{r.cell.in || "—"}</Text>
-                    <Text style={[styles.cell, { width: W.t }]}>{r.cell.out || "—"}</Text>
-                    <Text style={[styles.cell, styles.num, { width: W.hrs }]}>{fmtH(r.cell.duty_hours)}</Text>
-                    <Text style={[styles.cell, { width: W.t, color: colors.accent }]}>{r.cell.ot_in || "—"}</Text>
-                    <Text style={[styles.cell, { width: W.t, color: colors.accent }]}>{r.cell.ot_out || "—"}</Text>
-                    <Text style={[styles.cell, styles.num, { width: W.hrs, color: (r.cell.ot_hours || 0) > 0 ? colors.accent : colors.onSurfaceTertiary }]}>
-                      {fmtH(r.cell.ot_hours)}
-                    </Text>
-                    <Text style={[styles.cell, styles.num, { width: W.hrs, fontWeight: "700" }]}>
-                      {fmtH(r.cell.hours)}
-                    </Text>
-                    <Text style={[styles.cell, styles.num, { width: W.salary, color: "#15803D", fontWeight: "800" }]}>
-                      {fmtRs(r.cell.salary)}
-                    </Text>
-                  </View>
-                ))
-              )}
-              {/* BOTTOM — grand totals */}
-              <View style={[styles.row, styles.totalRow]} testID="sds-total-row">
-                <Text style={[styles.cell, { width: W.code + W.name + W.desig + W.date, fontWeight: "900", color: "#15803D" }]}>
-                  TOTAL ({rows.length} rows)
-                </Text>
-                <Text style={[styles.cell, { width: W.t * 2 }]} />
-                <Text style={[styles.cell, styles.num, { width: W.hrs, fontWeight: "800" }]}>{fmtH(totals.duty)}</Text>
-                <Text style={[styles.cell, { width: W.t * 2 }]} />
-                <Text style={[styles.cell, styles.num, { width: W.hrs, fontWeight: "800", color: colors.accent }]}>{fmtH(totals.ot)}</Text>
-                <Text style={[styles.cell, styles.num, { width: W.hrs, fontWeight: "800" }]}>{fmtH(totals.total)}</Text>
-                <Text style={[styles.cell, styles.num, { width: W.salary, fontWeight: "900", color: "#15803D" }]}>
-                  {fmtRs(totals.salary)}
-                </Text>
-              </View>
-            </View>
-          </ScrollView>
-          <View style={{ height: 40 }} />
-        </ScrollView>
+        <View style={{ flex: 1, padding: spacing.md }}>
+          {/* Iter 497 — Universal Report Table engine */}
+          <ReportTable
+            reportKey="salary_day_sheet"
+            columns={HDR}
+            rows={rows}
+            emptyText={`No attendance / salary data for ${month}.`}
+            pdfTitle={`Day-wise Salary Sheet — ${month}`}
+            pdfSubtitle={selectedCompany?.name || ""}
+            footer={{
+              label: `TOTAL (${rows.length} rows)`,
+              values: {
+                code: " ",
+                duty: fmtH(totals.duty),
+                ot: fmtH(totals.ot),
+                total: fmtH(totals.total),
+                salary: fmtRs(totals.salary),
+              },
+            }}
+          />
+        </View>
       )}
     </View>
   );

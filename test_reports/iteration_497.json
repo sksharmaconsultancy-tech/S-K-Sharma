@@ -1,0 +1,32 @@
+{
+  "summary": "Iter 497 Universal Report PDF export + 4 migrated screens tested end-to-end. Backend POST /api/report-export/pdf: 6/6 pytest passed — 401 unauth, 400 empty columns, 400 >80 cols, 200 valid PDF for basic + banded-header + long-text-wrap payloads (all responses begin with %PDF magic, Content-Type application/pdf, filename in Content-Disposition). Frontend /salary-register (Kankani, July FY 2026-27): 18 rows render with banded headers (Employee/Attendance/Earnings groups visible in screenshot), TOTAL footer row pinned, toolbar shows '18 rows' + PDF (testID=rt-pdf-salary_register) + Columns (testID=rt-cols-salary_register); clicking PDF triggers a real download of 5677 bytes valid %PDF; header tap on 'Emp Code' shows sort arrow indicator; Columns panel opens and toggles column visibility. Frontend /bank-sheet (Jul 2026, Kankani): 17 employees table renders (S.No/Name/Father/Bank/IFSC/Account/Net Salary), TOTAL row visible, PDF download works (testID=rt-pdf-bank_sheet, 3560 bytes valid PDF). Frontend /salary-day-sheet (Kankani auto-picked from top firm selector): Day-wise table renders with 12 cols, TOTAL (n rows) footer, PDF (testID=rt-pdf-salary_day_sheet) + Columns present. Frontend /contribution-sheets?kind=pf month-wise (Jul 2026): PF table renders with columns Sr/Employee Name/UAN/PF Wages/Employee PF/Employer EPS/Employer EPF/Employer Total/Total Contribution + TOTAL footer (all zero — no PF-eligible employees in Kankani for 2026-07); Employee-wise Yearly mode shows 'No Compliance Salary runs found in FY 2026-27' message (data-driven, not a crash). Same for kind=esic. Regression /punch-log-report + /ot-report still render (2 rows / 0 rows). No red-screen errors, no console errors introduced by Iter 497.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter497_report_export_pdf.py",
+    "/app/test_reports/pytest/iter497.xml"
+  ],
+  "action_items": [
+    "PF/ESIC monthly PDF button could not be visually exercised because Kankani has 0 PF/ESIC-eligible employees in 2026-07 (0 rows -> PDF button conditionally hidden by ReportTable — this is the intended behavior). If E1 wants live PDF verification for those two reports, seed a firm/month combo that has PF & ESIC rows.",
+    "Yearly mode for /contribution-sheets?kind=pf|esic returned 'No Compliance Salary runs found in FY 2026-27' for Kankani. Backend responded correctly (no exceptions); yearly PDF path is not exercised. If yearly render/PDF must be verified, provide seed data."
+  ],
+  "critical_code_review_comments": [
+    "report_pdf.py band-merge logic (lines 71-89) treats consecutive columns with the SAME band label AND color as a single segment. This matches the on-screen bandSegs logic in ReportTable.tsx (267-289). Verified with the banded pytest payload — all three segments (Employee, Attendance, Earnings) span the correct column ranges in the generated PDF.",
+    "report_pdf.py picks A4 → legal → A3 → A2 landscape based on 0.75× on-screen width fit; a further post-scale renormalises columns to exactly fill page width. Column min clamp of 28 pt is safe for the current screens (>=20 columns still readable at font=6).",
+    "report_export.py uses require_role(['super_admin','sub_admin','company_admin']) — 401/403 for unauth and other roles work. _MAX_ROWS=20000 & _MAX_COLS=80 caps are consistent between frontend (rows.slice(0,20000)) and backend."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter497_report_export_pdf.py (new)"
+  ],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "100% (5/5 screens render, PDF download verified on 2 screens with data)"},
+  "seed_data_creation": "None. Existing Kankani July FY 2026-27 compliance run (18 salary-register rows, 17 bank-sheet rows) was sufficient.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Test creds sksharmaconsultancy@gmail.com / sharma123 via POST /api/auth/admin-password-login; localStorage 'llc_session_token'. Kankani cmp_527fecdd7c is selected via top-bar 'All firms' dropdown (bank-sheet / salary-day-sheet / contribution-sheets use the GLOBAL firm; salary-register has its own in-page Firm/Company selector). Salary Register month/FY is via two native <select>s (month value '7' = July, FY value '2026' = FY 2026-27). Bank Sheet uses chip buttons like 'Jul 2026'. Contribution Sheets Month-wise uses two native selects; Employee-wise Yearly uses only FY chip buttons. ReportTable testIDs: rt-cols-{key}, rt-pdf-{key}, rt-reset-{key} where key is salary_register / bank_sheet / salary_day_sheet / pf_contrib / esic_contrib / pf_yearly / esic_yearly. PDF button is conditionally rendered ONLY when Platform.OS === 'web' AND pdfTitle is set AND rows.length > 0 (see ReportTable.tsx line 602).",
+  "rca_of_issue": "N/A — no bugs found in Iter 497 code."
+}

@@ -13,6 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Stack, useRouter } from "expo-router";
 
 import { api, apiBinary } from "@/src/api/client";
+import ReportTable, { ReportCol } from "@/src/components/ReportTable";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors, radius, spacing, type } from "@/src/theme";
 
@@ -21,6 +22,22 @@ type Row = {
   name_as_per_bank: string; ifsc: string; account_no: string; net_salary: number;
 };
 type Resp = { rows: Row[]; count: number; total_net: number; banks: string[]; has_compliance: boolean };
+
+// Iter 497 — Universal Report Table columns.
+const BS_COLS: ReportCol<Row>[] = [
+  { key: "sn", label: "S.No", type: "center", min: 48, max: 64, sticky: true },
+  { key: "name", label: "Name", min: 200, max: 300, sticky: true },
+  { key: "father_name", label: "Father Name", min: 140, max: 240 },
+  { key: "bank_name", label: "Bank Name", min: 140, max: 240 },
+  { key: "name_as_per_bank", label: "Name as per Bank", min: 150, max: 260 },
+  { key: "ifsc", label: "IFSC", type: "center", min: 110 },
+  { key: "account_no", label: "Account No.", type: "center", min: 140 },
+  {
+    key: "net_salary", label: "Net Salary", type: "num", min: 110,
+    value: (r) => `₹${(r.net_salary || 0).toLocaleString("en-IN")}`,
+    textStyle: () => ({ fontWeight: "700" }),
+  },
+];
 
 function financeYears(): { label: string; startYear: number }[] {
   const now = new Date();
@@ -165,44 +182,22 @@ export default function BankSheetScreen() {
               <Text style={styles.summaryTxt}>{data.count} employees</Text>
               <Text style={styles.summaryTotal}>Total: ₹{data.total_net.toLocaleString("en-IN")}</Text>
             </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={true}>
-              <View>
-                <View style={[styles.tr, styles.trHead]}>
-                  <Text style={[styles.th, { width: 44 }]}>S.No</Text>
-                  <Text style={[styles.th, { width: 150 }]}>Name</Text>
-                  <Text style={[styles.th, { width: 140 }]}>Father Name</Text>
-                  <Text style={[styles.th, { width: 140 }]}>Bank Name</Text>
-                  <Text style={[styles.th, { width: 150 }]}>Name as per Bank</Text>
-                  <Text style={[styles.th, { width: 120 }]}>IFSC</Text>
-                  <Text style={[styles.th, { width: 140 }]}>Account No.</Text>
-                  <Text style={[styles.th, { width: 100, textAlign: "right" }]}>Net Salary</Text>
-                </View>
-                {data.rows.map((r) => (
-                  <View key={r.sn} style={styles.tr}>
-                    <Text style={[styles.td, { width: 44 }]}>{r.sn}</Text>
-                    <Text style={[styles.td, { width: 150 }]} numberOfLines={1}>{r.name}</Text>
-                    <Text style={[styles.td, { width: 140 }]} numberOfLines={1}>{r.father_name || "—"}</Text>
-                    <Text style={[styles.td, { width: 140 }]} numberOfLines={1}>{r.bank_name || "—"}</Text>
-                    <Text style={[styles.td, { width: 150 }]} numberOfLines={1}>{r.name_as_per_bank || "—"}</Text>
-                    <Text style={[styles.td, { width: 120 }]} numberOfLines={1}>{r.ifsc || "—"}</Text>
-                    <Text style={[styles.td, { width: 140 }]} numberOfLines={1}>{r.account_no || "—"}</Text>
-                    <Text style={[styles.td, { width: 100, textAlign: "right", fontWeight: "700" }]}>
-                      ₹{r.net_salary.toLocaleString("en-IN")}
-                    </Text>
-                  </View>
-                ))}
-                {/* Iter 291 (user request) — Net Payable TOTAL row at the bottom. */}
-                <View style={[styles.tr, styles.trTotal]} testID="bank-sheet-total-row">
-                  <Text style={[styles.tdTotal, { width: 44 }]} />
-                  <Text style={[styles.tdTotal, { width: 150 + 140 + 140 + 150 + 120 + 140 }]}>
-                    TOTAL NET PAYABLE ({data.count} employees)
-                  </Text>
-                  <Text style={[styles.tdTotal, { width: 100, textAlign: "right" }]}>
-                    ₹{data.total_net.toLocaleString("en-IN")}
-                  </Text>
-                </View>
-              </View>
-            </ScrollView>
+            {/* Iter 497 — Universal Report Table engine */}
+            <ReportTable<Row>
+              reportKey="bank_sheet"
+              columns={BS_COLS}
+              rows={data.rows}
+              maxHeight={560}
+              pdfTitle={`Bank Sheet — ${month}`}
+              pdfSubtitle={`${data.count} employees · Total ₹${data.total_net.toLocaleString("en-IN")}`}
+              footer={{
+                label: `TOTAL NET PAYABLE (${data.count} employees)`,
+                values: {
+                  sn: " ",
+                  net_salary: `₹${data.total_net.toLocaleString("en-IN")}`,
+                },
+              }}
+            />
           </View>
         )}
       </ScrollView>

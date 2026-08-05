@@ -43,6 +43,8 @@ export type ReportCol<T = any> = {
   max?: number;
   /** Freeze this column while scrolling horizontally (leading cols only). */
   sticky?: boolean;
+  /** Banded (grouped) header segment above the column — e.g. Earnings. */
+  band?: { key: string; label: string; color?: string };
   /** Display string for the cell (default: String(row[key])). */
   value?: (row: T) => string;
   /** Fully custom cell renderer (photo thumbs etc.). */
@@ -72,6 +74,11 @@ type Props<T = any> = {
   onHeaderPress?: (colKey: string) => void;
   /** Hide the Columns/Reset toolbar (rarely needed). */
   hideToolbar?: boolean;
+  /** When set, a PDF button appears — exports the CURRENT on-screen layout
+   *  (visible columns, widths, order) via the shared landscape PDF engine
+   *  so PDF/print always match the screen. */
+  pdfTitle?: string;
+  pdfSubtitle?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -145,6 +152,8 @@ export default function ReportTable<T = any>({
   sortDir,
   onHeaderPress,
   hideToolbar,
+  pdfTitle,
+  pdfSubtitle,
 }: Props<T>) {
   const { width: winW } = useWindowDimensions();
   const fontSize = responsiveFont(winW);
@@ -253,6 +262,31 @@ export default function ReportTable<T = any>({
     () => visCols.reduce((s, c) => s + (widths[c.key] || 0), 0),
     [visCols, widths],
   );
+
+  // ---- banded (grouped) header segments -----------------------------------
+  const BAND_H = fontSize + 12;
+  const hasBands = visCols.some((c) => !!c.band);
+  const bandSegs = React.useMemo(() => {
+    if (!hasBands) return [];
+    const segs: { key: string; label: string; color: string; width: number; stickyLeft: number | null }[] = [];
+    visCols.forEach((c, i) => {
+      const bKey = c.band?.key ?? `__solo_${i}`;
+      const last = segs[segs.length - 1];
+      const w = widths[c.key] || 0;
+      if (last && last.key === bKey && c.band) {
+        last.width += w;
+      } else {
+        segs.push({
+          key: bKey,
+          label: c.band?.label ?? "",
+          color: c.band?.color ?? "#1E3A8A",
+          width: w,
+          stickyLeft: c.key in stickyLefts ? stickyLefts[c.key] : null,
+        });
+      }
+    });
+    return segs;
+  }, [hasBands, visCols, widths, stickyLefts]);
 
   // ---- column resize (web drag) ------------------------------------------
   const onResizeStart = React.useCallback(
@@ -494,12 +528,92 @@ export default function ReportTable<T = any>({
     );
   };
 
+  // ---- universal PDF export (matches the on-screen layout exactly) --------
+  const [pdfBusy, setPdfBusy] = React.useState(false);
+  const exportPdf = React.useCallback(async () => {
+    if (Platform.OS !== "web" || pdfBusy) return;
+    setPdfBusy(true);
+    try {
+      const cols = visCols.map((c) => ({
+        label: c.label,
+        align: alignFor(c.type),
+        width: widths[c.key] || 100,
+        band: c.band ? { label: c.band.label, color: c.band.color || "#1E3A8A" } : null,
+      }));
+      const dataRows = rows.slice(0, 20000).map((r) =>
+        visCols.map((c) => {
+          if (c.render && !c.value) return "";
+          const v = c.value ? c.value(r) : String((r as any)[c.key] ?? "");
+          return v === "null" || v === "undefined" ? "" : v;
+        }),
+      );
+      let footRow: string[] | null = null;
+      if (footer) {
+        let labelDone = false;
+        footRow = visCols.map((c) => {
+          const val = footer.values[c.key];
+          if (val) return val;
+          if (!labelDone) {
+            labelDone = true;
+            return footer.label;
+          }
+          return "";
+        });
+      }
+      const token = globalThis.localStorage?.getItem("llc_session_token") || "";
+      const base = (process.env.EXPO_PUBLIC_BACKEND_URL as string) || "";
+      const res = await fetch(`${base}/api/report-export/pdf`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          title: pdfTitle || reportKey,
+          subtitle: pdfSubtitle || "",
+          columns: cols,
+          rows: dataRows,
+          footer: footRow,
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `${(pdfTitle || reportKey).replace(/\s+/g, "_")}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+    } catch (e: any) {
+      globalThis.alert?.(e?.message || "PDF export failed");
+    } finally {
+      setPdfBusy(false);
+    }
+  }, [visCols, widths, rows, footer, pdfTitle, pdfSubtitle, reportKey, pdfBusy]);
+
   // ---- toolbar (columns / reset) -----------------------------------------
   const toolbar = hideToolbar ? null : (
     <View style={{ flexDirection: "row", justifyContent: "flex-end", alignItems: "center", gap: 10, paddingHorizontal: 8, paddingVertical: 4 }}>
       <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary || "#94A3B8" }}>
         {rows.length.toLocaleString("en-IN")} row{rows.length === 1 ? "" : "s"}
       </Text>
+      {pdfTitle && Platform.OS === "web" && rows.length > 0 ? (
+        <Pressable
+          onPress={exportPdf}
+          disabled={pdfBusy}
+          style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: colors.border || "#E2E8F0", opacity: pdfBusy ? 0.5 : 1 }}
+          testID={`rt-pdf-${reportKey}`}
+        >
+          {pdfBusy ? (
+            <ActivityIndicator size={12} color="#B91C1C" />
+          ) : (
+            <Ionicons name="document-text-outline" size={13} color="#B91C1C" />
+          )}
+          <Text style={{ fontSize: 11, fontWeight: "700", color: "#B91C1C" }}>PDF</Text>
+        </Pressable>
+      ) : null}
       <Pressable
         onPress={() => setColsOpen((o) => !o)}
         style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: colors.border || "#E2E8F0" }}
@@ -585,16 +699,51 @@ export default function ReportTable<T = any>({
   }
 
   const headerRow = (
-    <View
-      style={[
-        { flexDirection: "row", width: totalW },
-        Platform.OS === "web"
-          ? ({ position: "sticky", top: 0, zIndex: 10 } as any)
-          : null,
-      ]}
-    >
-      {visCols.map(renderHeadCell)}
-    </View>
+    <>
+      {hasBands ? (        <View
+          style={[
+            { flexDirection: "row", width: totalW },
+            Platform.OS === "web"
+              ? ({ position: "sticky", top: 0, zIndex: 11 } as any)
+              : null,
+          ]}
+        >
+          {bandSegs.map((b, i) => (
+            <View
+              key={`${b.key}-${i}`}
+              style={[
+                {
+                  width: b.width,
+                  height: BAND_H,
+                  justifyContent: "center",
+                  alignItems: "center",
+                  backgroundColor: b.color,
+                  borderRightWidth: 1,
+                  borderRightColor: "rgba(255,255,255,0.2)",
+                },
+                b.stickyLeft !== null && Platform.OS === "web"
+                  ? ({ position: "sticky", left: b.stickyLeft, zIndex: 13 } as any)
+                  : null,
+              ]}
+            >
+              <Text numberOfLines={1} style={{ color: "#fff", fontWeight: "800", fontSize: Math.max(10, fontSize - 2) }}>
+                {b.label}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+      <View
+        style={[
+          { flexDirection: "row", width: totalW },
+          Platform.OS === "web"
+            ? ({ position: "sticky", top: hasBands ? BAND_H : 0, zIndex: 10 } as any)
+            : null,
+        ]}
+      >
+        {visCols.map(renderHeadCell)}
+      </View>
+    </>
   );
 
   const bodyRows = (
@@ -670,7 +819,7 @@ export default function ReportTable<T = any>({
         <ScrollView horizontal contentContainerStyle={{ minWidth: "100%" }}>
           <ScrollView
             style={maxHeight ? { maxHeight } : { flex: 1 }}
-            stickyHeaderIndices={[0]}
+            stickyHeaderIndices={hasBands ? [0, 1] : [0]}
             onScroll={onScroll}
             scrollEventThrottle={16}
             onLayout={onLayout}
