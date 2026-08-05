@@ -420,6 +420,44 @@ async def _ingest_templates(raw: str, device: dict) -> int:
                 )
                 saved += 1
             continue
+        # Iter 495 (user request — "use SDK to get photo of registered
+        # employee") — capture USERPIC / BIOPHOTO pushes: the face photo
+        # registered ON THE MACHINE. Stored on the machine-user row and
+        # synced into the Employee Master photo when the employee has no
+        # portal photo yet, so the Punch Log / grids show real faces.
+        if re.match(r"^(USERPIC|BIOPHOTO)\s+PIN=", line, re.IGNORECASE):
+            _kw, _, _rest = line.partition(" ")
+            pf = _kv_parse(_rest.strip())
+            ppin = (pf.get("pin") or "").strip()
+            pb64 = (pf.get("content") or "").strip()
+            if ppin and pb64:
+                await db.biometric_machine_users.update_one(
+                    {"company_id": device.get("company_id"), "pin": ppin},
+                    {"$set": {
+                        "company_id": device.get("company_id"),
+                        "pin": ppin,
+                        "photo_b64": pb64,
+                        "photo_wire": _kw.lower(),
+                        "photo_at": _now_iso_z(),
+                        "device_serial": device.get("serial_number"),
+                    }},
+                    upsert=True,
+                )
+                _emp = await _match_employee_for_bio(ppin, device.get("company_id"))
+                if not _emp and ppin.lstrip("0") and ppin.lstrip("0") != ppin:
+                    _emp = await _match_employee_for_bio(
+                        ppin.lstrip("0"), device.get("company_id"))
+                if _emp and not _emp.get("profile_photo_base64"):
+                    await db.users.update_one(
+                        {"user_id": _emp["user_id"]},
+                        {"$set": {
+                            "profile_photo_base64": pb64,
+                            "profile_photo_source": "machine",
+                            "profile_photo_updated_at": _now_iso_z(),
+                        },
+                         "$unset": {"profile_photo_thumb": ""}})
+                saved += 1
+            continue
         m = _TMPL_LINE_RE.match(line)
         if m:
             prefix = m.group(1).upper()
@@ -690,11 +728,14 @@ async def iclock_push(
     else:
         # Iter 261 — Phase 2: OPERLOG / BIODATA pushes may carry enrolled
         # fingerprint / face templates — capture them for cross-device sync.
-        if (table or "").upper() in ("OPERLOG", "BIODATA"):
-            try:
-                await _ingest_templates(raw, device)
-            except Exception:
-                logger.warning("[zkteco] template ingest failed", exc_info=True)
+        # Iter 495 — run the parser for EVERY non-ATTLOG/ATTPHOTO table
+        # (some firmwares answer DATA QUERY USERINFO with table=USERINFO or
+        # no table at all). The parser is prefix-guarded so unknown lines
+        # are simply skipped.
+        try:
+            await _ingest_templates(raw, device)
+        except Exception:
+            logger.warning("[zkteco] template ingest failed", exc_info=True)
         # OPERLOG / EnrollUser etc. — log the receipt.
         await db.biometric_operlog.insert_one({
             "device_serial": SN,
@@ -781,6 +822,19 @@ async def iclock_getrequest(
             {"serial_number": SN},
             {"$set": {"userinfo_query_sent": True,
                       "userinfo_query_sent_at": _now_iso_z()}},
+        )
+    # Iter 495 (user request) — also ask ONCE for the registered employee
+    # PHOTOS on the machine (USERPIC / BIOPHOTO) so the Punch Log & grids
+    # can show real faces without portal uploads.
+    if not device.get("userpic_query_sent"):
+        await _queue_cmd(SN, "DATA QUERY USERPIC", "system:auto",
+                         "Auto user-photo sync (registered face photos)")
+        await _queue_cmd(SN, "DATA QUERY BIOPHOTO", "system:auto",
+                         "Auto bio-photo sync (registered face photos)")
+        await db.biometric_devices.update_one(
+            {"serial_number": SN},
+            {"$set": {"userpic_query_sent": True,
+                      "userpic_query_sent_at": _now_iso_z()}},
         )
     if _resync_active(device) and not device.get("resync_check_sent"):
         await db.biometric_devices.update_one(

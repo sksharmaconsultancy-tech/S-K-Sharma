@@ -4275,3 +4275,30 @@ ITER 494 — EMPLOYEE PHOTOS IN ATTENDANCE MODULE (DONE, tested; user spec
   live-feed + punch-log rows expose user_id (1941 rows), UI avatars
   render on Punch Log (screenshot). Sync engine untouched.
 - APP_ITERATION=494; deploy_vps_iter494.sh (cumulative 488-494).
+
+ITER 495 — MACHINE SDK PHOTOS + NEW-MACHINE USER FETCH + GROUP IN/OUT
+(DONE, tested via tests/check_iter495_photo_sync.py — all pass):
+- USERPIC/BIOPHOTO capture in _ingest_templates (biometric_devices.py):
+  photo stored on biometric_machine_users.photo_b64 + synced to
+  users.profile_photo_base64 when employee matched (via
+  _match_employee_for_bio incl. lstrip-0) and has no portal photo.
+- ROOT CAUSE new machines "not fetching users": firmwares reply to
+  DATA QUERY USERINFO with table=USERINFO (or blank) — server only parsed
+  table=OPERLOG/BIODATA/USERPIC/BIOPHOTO. Fix: iclock_push now runs
+  _ingest_templates for EVERY non-ATTLOG/ATTPHOTO table (prefix-guarded).
+- getrequest auto-queues DATA QUERY USERPIC + BIOPHOTO once per device
+  (userpic_query_sent flag).
+- employee_photos.py: _machine_photo_backfill — thumbs/full endpoints
+  fall back to machine-registered face when user has no portal photo
+  (persisted with profile_photo_source="machine").
+- GROUP-WISE monthly IN/OUT verified working e2e (frontend attendance-
+  sheet.tsx sends group_id; _resolve_group_employee_ids filters — LABOUR
+  export 44KB vs full 52KB). No backend change needed.
+- Deploy script one-time step: unsets userinfo_query_sent +
+  userpic_query_sent on ALL devices so existing machines re-send user DB
+  + photos on next poll (replies now parsed correctly).
+- White screen issue (P0 from handoff): user confirmed RESOLVED ("All
+  Done Please Ignore").
+- APP_ITERATION=495; deploy_vps_iter495.sh; temp_bundle kind=script → 495.
+NEXT: Single Machine Attendance Mode (big spec, Message 148); WhatsApp
+API (blocked on user Meta credentials); SMTP config by user.

@@ -496,9 +496,15 @@ export default function AttendanceGridScreen() {
       try {
         const kind = view === "inout" ? "InOut" : view === "ot" ? "OTDutyHRS" : "Hours";
         const slug = view === "inout" ? "monthly-inout" : view === "ot" ? "monthly-ot" : "monthly-hours";
-        const path = `/admin/attendance/${slug}/${effectiveCid}/${month}.${fmt}`;
+        // Iter 495 (user bug: "IN/OUT Report — not able to see group wise")
+        // — the monthly download ignored the selected Employee Group.
+        const gq = groupId ? `?group_id=${encodeURIComponent(groupId)}` : "";
+        const path = `/admin/attendance/${slug}/${effectiveCid}/${month}.${fmt}${gq}`;
         const res = await apiBinary(path);
-        const fname = `MonthlyAttendance_${kind}_${month}.${fmt}`;
+        const gname = groupId
+          ? "_" + (groups.find((g) => g.group_id === groupId)?.name || "group").replace(/\s+/g, "-")
+          : "";
+        const fname = `MonthlyAttendance_${kind}${gname}_${month}.${fmt}`;
         const mime = fmt === "xlsx"
           ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           : "application/pdf";
@@ -521,7 +527,7 @@ export default function AttendanceGridScreen() {
         setExporting(false);
       }
     },
-    [effectiveCid, exporting, month, view],
+    [effectiveCid, exporting, month, view, groupId, groups],
   );
 
   // Iter 111 — Daily-basis report (single date, one row per employee).

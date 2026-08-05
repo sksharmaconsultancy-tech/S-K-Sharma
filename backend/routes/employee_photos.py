@@ -50,6 +50,38 @@ def _make_thumb(raw_b64: str) -> Optional[str]:
         return None
 
 
+async def _machine_photo_backfill(u: dict) -> Optional[str]:
+    """Iter 495 — employee has NO portal photo: fall back to the face photo
+    registered ON THE BIOMETRIC MACHINE (captured into
+    ``biometric_machine_users.photo_b64`` by the ADMS USERPIC/BIOPHOTO
+    ingest). When found it is persisted onto the user so subsequent loads
+    are a plain indexed read."""
+    pins = [str(p).strip() for p in
+            (u.get("bio_code"), u.get("employee_code")) if p]
+    variants: List[str] = []
+    for p in pins:
+        variants += [p, p.lstrip("0")]
+    variants = [v for v in dict.fromkeys(variants) if v]
+    if not variants or not u.get("company_id"):
+        return None
+    row = await db.biometric_machine_users.find_one(
+        {"company_id": u["company_id"], "pin": {"$in": variants},
+         "photo_b64": {"$nin": [None, ""]}},
+        {"_id": 0, "photo_b64": 1})
+    if not row:
+        return None
+    photo = row["photo_b64"]
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    await db.users.update_one(
+        {"user_id": u["user_id"]},
+        {"$set": {"profile_photo_base64": photo,
+                  "profile_photo_source": "machine",
+                  "profile_photo_updated_at": now},
+         "$unset": {"profile_photo_thumb": ""}})
+    return photo
+
+
 class ThumbsBody(BaseModel):
     user_ids: List[str]
 
@@ -70,7 +102,8 @@ async def employee_photo_thumbs(
         q["company_id"] = admin["company_id"]
     need_gen: List[dict] = []
     async for u in db.users.find(
-            q, {"_id": 0, "user_id": 1, "profile_photo_thumb": 1,
+            q, {"_id": 0, "user_id": 1, "company_id": 1, "bio_code": 1,
+                "employee_code": 1, "profile_photo_thumb": 1,
                 "profile_photo_updated_at": 1, "profile_photo_thumb_at": 1,
                 "profile_photo_base64": 1}):
         thumb = u.get("profile_photo_thumb")
@@ -80,7 +113,13 @@ async def employee_photo_thumbs(
         elif u.get("profile_photo_base64"):
             need_gen.append(u)
         else:
-            out[u["user_id"]] = None
+            # Iter 495 — no portal photo: try the machine-registered face.
+            mp = await _machine_photo_backfill(u)
+            if mp:
+                u["profile_photo_base64"] = mp
+                need_gen.append(u)
+            else:
+                out[u["user_id"]] = None
     for u in need_gen:
         thumb = _make_thumb(u["profile_photo_base64"])
         out[u["user_id"]] = thumb
@@ -103,9 +142,10 @@ async def employee_photo_full(
         q["company_id"] = admin["company_id"]
     u = await db.users.find_one(
         q, {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1,
-            "profile_photo_base64": 1})
+            "company_id": 1, "bio_code": 1, "profile_photo_base64": 1})
     if not u:
         raise HTTPException(status_code=404, detail="Employee not found")
+    photo = u.get("profile_photo_base64") or await _machine_photo_backfill(u)
     return {"user_id": u["user_id"], "name": u.get("name"),
             "employee_code": u.get("employee_code"),
-            "photo": u.get("profile_photo_base64")}
+            "photo": photo}
