@@ -899,6 +899,128 @@ export default function FirmMasterScreen() {
             </Text>
           ) : null}
         </Section>
+        {/* Iter 503 — SINGLE MACHINE ATTENDANCE MODE (user spec). */}
+        <Section icon="finger-print-outline" title="Attendance Capture / Device Mode">
+          {(() => {
+            const ac = (st.attendance_config || {}) as Record<string, any>;
+            const acMode = ac.device_mode || "separate";
+            const setAC = (patch: Record<string, any>) =>
+              updateSection("settings", {
+                attendance_config: {
+                  device_mode: acMode,
+                  interpretation: ac.interpretation || "alternate",
+                  dup_window_min: ac.dup_window_min ?? 5,
+                  lunch_mode: ac.lunch_mode || "ignore_middle",
+                  lunch_fixed_min: ac.lunch_fixed_min ?? 30,
+                  ...patch,
+                },
+              });
+            const radio = (
+              on: boolean, label: string, sub: string, onPress: () => void, tid: string,
+            ) => (
+              <Pressable key={tid} onPress={onPress} testID={tid}
+                style={{
+                  flexGrow: 1, minWidth: 150, borderWidth: 2, borderRadius: 10,
+                  padding: 10, gap: 2,
+                  borderColor: on ? colors.brandPrimary : colors.border,
+                  backgroundColor: on ? "#EEF2FF" : colors.surface,
+                }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Ionicons name={on ? "radio-button-on" : "radio-button-off"} size={15}
+                    color={on ? colors.brandPrimary : colors.onSurfaceTertiary} />
+                  <Text style={{ fontSize: 12.5, fontWeight: "800", color: on ? colors.brandPrimary : colors.onSurface }}>
+                    {label}
+                  </Text>
+                </View>
+                {sub ? <Text style={{ fontSize: 10.5, color: colors.onSurfaceSecondary }}>{sub}</Text> : null}
+              </Pressable>
+            );
+            const chip = (on: boolean, label: string, onPress: () => void, tid: string) => (
+              <Pressable key={tid} onPress={onPress} testID={tid}
+                style={{
+                  borderWidth: 1.5, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7,
+                  borderColor: on ? colors.brandPrimary : colors.border,
+                  backgroundColor: on ? colors.brandPrimary : colors.surface,
+                }}>
+                <Text style={{ fontSize: 11.5, fontWeight: "800", color: on ? "#fff" : colors.onSurfaceSecondary }}>
+                  {label}
+                </Text>
+              </Pressable>
+            );
+            return (
+              <>
+                <Text style={styles.subLbl}>How does this firm record punches?</Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  {radio(acMode === "separate", "Separate IN/OUT Machines",
+                    "Dedicated IN device + OUT device (default)",
+                    () => setAC({ device_mode: "separate" }), "fm-ac-separate")}
+                  {radio(acMode === "single_machine", "Single Machine (shared)",
+                    "One device — everyone punches IN & OUT on it",
+                    () => setAC({ device_mode: "single_machine" }), "fm-ac-single")}
+                  {radio(acMode === "mobile", "Mobile App", "GPS selfie punches from the app",
+                    () => setAC({ device_mode: "mobile" }), "fm-ac-mobile")}
+                  {radio(acMode === "gps", "GPS Only", "Location-based punches",
+                    () => setAC({ device_mode: "gps" }), "fm-ac-gps")}
+                  {radio(acMode === "qr", "QR Code", "Scan a site QR to punch",
+                    () => setAC({ device_mode: "qr" }), "fm-ac-qr")}
+                </View>
+                {acMode === "single_machine" ? (
+                  <>
+                    <Text style={[styles.subLbl, { marginTop: 12 }]}>
+                      Punch interpretation
+                    </Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                      {radio((ac.interpretation || "alternate") === "alternate",
+                        "A — Alternate", "1st punch = IN · 2nd = OUT · 3rd = IN …",
+                        () => setAC({ interpretation: "alternate" }), "fm-ac-alt")}
+                      {radio(ac.interpretation === "first_last",
+                        "B — First IN · Last OUT", "Duty = last punch − first punch",
+                        () => setAC({ interpretation: "first_last" }), "fm-ac-firstlast")}
+                    </View>
+                    <Text style={[styles.subLbl, { marginTop: 12 }]}>
+                      Ignore duplicate punches within (minutes)
+                    </Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                      {[0, 1, 2, 5, 10].map((m) =>
+                        chip((ac.dup_window_min ?? 5) === m, m === 0 ? "Off" : `${m} min`,
+                          () => setAC({ dup_window_min: m }), `fm-ac-dup-${m}`))}
+                    </View>
+                    {ac.interpretation === "first_last" ? (
+                      <>
+                        <Text style={[styles.subLbl, { marginTop: 12 }]}>
+                          Lunch / middle punches handling
+                        </Text>
+                        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                          {radio((ac.lunch_mode || "ignore_middle") === "ignore_middle",
+                            "Ignore middle punches", "Duty = last − first (no break deduction)",
+                            () => setAC({ lunch_mode: "ignore_middle" }), "fm-ac-lunch-ignore")}
+                          {radio(ac.lunch_mode === "actual_break",
+                            "Actual break", "Middle punches = lunch OUT/IN — real break deducted",
+                            () => setAC({ lunch_mode: "actual_break" }), "fm-ac-lunch-actual")}
+                          {radio(ac.lunch_mode === "fixed",
+                            "Fixed deduction", "Deduct a fixed lunch from every day's duty",
+                            () => setAC({ lunch_mode: "fixed" }), "fm-ac-lunch-fixed")}
+                        </View>
+                        {ac.lunch_mode === "fixed" ? (
+                          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                            {[30, 45, 60].map((m) =>
+                              chip((ac.lunch_fixed_min ?? 30) === m, `${m} min`,
+                                () => setAC({ lunch_fixed_min: m }), `fm-ac-lunchmin-${m}`))}
+                          </View>
+                        ) : null}
+                      </>
+                    ) : null}
+                    <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary, marginTop: 10 }}>
+                      Single Machine Mode re-interprets this firm&apos;s biometric
+                      punches only. Mobile-app and manual punches keep their
+                      recorded IN/OUT. Other firms are not affected. Save to apply.
+                    </Text>
+                  </>
+                ) : null}
+              </>
+            );
+          })()}
+        </Section>
         <Section icon="time-outline" title="Attendance Policy Variant">
               {/* Iter 175 (user rule) — the Policy Selection option only
                   shows when an Industry Type is selected AND Off-roll

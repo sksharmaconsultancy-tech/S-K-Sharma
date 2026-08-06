@@ -596,6 +596,51 @@ async def upsert_firm_master(
         {"company_id": company_id},
         {"$set": {"auto_approve_mobile_punches": _auto_app}},
     )
+    # Iter 503 — SINGLE MACHINE ATTENDANCE MODE (user spec, Message 148):
+    # mirror the Firm Master attendance capture config onto the companies
+    # doc (the attendance engine reads it there). Values are validated to
+    # the allowed sets; anything else falls back to safe defaults.
+    _ac_raw = (merged.get("settings") or {}).get("attendance_config")
+    if isinstance(_ac_raw, dict):
+        _ac_mode = str(_ac_raw.get("device_mode") or "separate")
+        if _ac_mode not in ("separate", "single_machine", "mobile", "gps", "qr"):
+            _ac_mode = "separate"
+        _ac_interp = str(_ac_raw.get("interpretation") or "alternate")
+        if _ac_interp not in ("alternate", "first_last"):
+            _ac_interp = "alternate"
+        try:
+            _ac_dup = int(_ac_raw.get("dup_window_min", 5))
+        except (TypeError, ValueError):
+            _ac_dup = 5
+        if _ac_dup not in (0, 1, 2, 5, 10):
+            _ac_dup = 5
+        _ac_lunch = str(_ac_raw.get("lunch_mode") or "ignore_middle")
+        if _ac_lunch not in ("ignore_middle", "actual_break", "fixed"):
+            _ac_lunch = "ignore_middle"
+        try:
+            _ac_lunch_min = int(_ac_raw.get("lunch_fixed_min", 30))
+        except (TypeError, ValueError):
+            _ac_lunch_min = 30
+        if _ac_lunch_min not in (30, 45, 60):
+            _ac_lunch_min = 30
+        _ac_clean = {
+            "device_mode": _ac_mode,
+            "interpretation": _ac_interp,
+            "dup_window_min": _ac_dup,
+            "lunch_mode": _ac_lunch,
+            "lunch_fixed_min": _ac_lunch_min,
+        }
+        merged.setdefault("settings", {})["attendance_config"] = _ac_clean
+        await db.companies.update_one(
+            {"company_id": company_id},
+            {"$set": {"attendance_config": _ac_clean}},
+        )
+        await db.firm_masters.update_one(
+            {"company_id": company_id},
+            {"$set": {"settings.attendance_config": _ac_clean}},
+        )
+        logger.info("[firm-master] %s — attendance_config mirrored: %s",
+                    company_id, _ac_clean)
     if _auto_app:
         _bulk = await db.attendance.update_many(
             {

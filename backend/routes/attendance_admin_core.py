@@ -70,6 +70,11 @@ async def attendance_grid_debug(
         raise HTTPException(status_code=403, detail="Not authorised")
 
     from server import dedupe_close_punches, stitch_cross_day_ot
+    # Iter 503 — honour the firm's Single Machine Attendance Mode config.
+    _comp = await db.companies.find_one(
+        {"company_id": emp.get("company_id")},
+        {"_id": 0, "attendance_config": 1}) or {}
+    _att_cfg = _comp.get("attendance_config")
     day = _parse_any_date(date)
     if not day:
         raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
@@ -102,7 +107,7 @@ async def attendance_grid_debug(
             by_day.setdefault(r["date"], []).append(dict(r))
             stored.append(entry)
 
-    processed = stitch_cross_day_ot(dedupe_close_punches(by_day))
+    processed = stitch_cross_day_ot(dedupe_close_punches(by_day, company_cfg=_att_cfg))
     day_punches = processed.get(date, [])
     ins = [p for p in day_punches if (p.get("kind") or "").lower() == "in"]
     outs = [p for p in day_punches if (p.get("kind") or "").lower() == "out"]
@@ -125,6 +130,7 @@ async def attendance_grid_debug(
     return {
         "employee": emp,
         "date": date,
+        "attendance_config": _att_cfg,
         "raw_punches": raw,
         "excluded_punches": excluded,
         "processed_day_punches": day_punches,

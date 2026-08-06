@@ -45,6 +45,9 @@
 #    • 📷 photos are now CLICKABLE in the Punch Log Report — including
 #      NOT-FOUND rows: the machine photo parked for the unknown user is
 #      shown so you can identify who punched.
+#    • ONE-CLICK "➕ Register" button on every NOT-FOUND row — opens Add
+#      New Employee with the machine Bio Code (+ name in machine, if
+#      known) already pre-filled.
 #
 # 2c) NEW TASK → Firm dropdown now has a 🔍 FILTER box (your request).
 #
@@ -141,6 +144,8 @@ echo -n "   Punch Log NOT-FOUND + photo viewer (must say OK): "
 grep -q 'Unregistered Device' $APP_DIR/backend/routes/punch_logs.py && grep -q 'punch-logs/photo' $APP_DIR/backend/routes/punch_logs.py && grep -q '__punchPhotoOpen' $APP_DIR/frontend/app/punch-log-report.tsx && echo "OK" || echo "MISSING!"
 echo -n "   New Task firm filter (must say OK): "
 grep -q 'pd-task-firm-filter' $APP_DIR/frontend/src/components/portal/TasksPanel.tsx && echo "OK" || echo "MISSING!"
+echo -n "   One-click Register on NOT-FOUND rows (must say OK): "
+grep -q '__punchRegister' $APP_DIR/frontend/app/punch-log-report.tsx && grep -q 'prefill_bio' $APP_DIR/frontend/app/employee-add.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Stay-on-page after firm switch (must say OK): "
 grep -q 'loc.pathname + (loc.search' $APP_DIR/frontend/src/context/SelectedCompanyContext.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Iter 501 Client Attendance Import still present (must say OK): "

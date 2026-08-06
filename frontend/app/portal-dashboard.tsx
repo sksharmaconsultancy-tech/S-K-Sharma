@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useLocalSearchParams } from "expo-router";
 
 import { api } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
@@ -47,7 +48,14 @@ export default function PortalDashboardScreen() {
 
   const [dash, setDash] = useState<Dash | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTabRaw] = useState("overview");
+  // Iter 503 (user bug — "PWA Task Management not showing") — the mobile
+  // home now deep-links here with ?tab=tasks, so honour the query param.
+  const params = useLocalSearchParams<{ tab?: string }>();
+  const initialTab =
+    typeof params.tab === "string" && TABS.some((t) => t.key === params.tab)
+      ? (params.tab as string)
+      : "overview";
+  const [tab, setTabRaw] = useState(initialTab);
   // Iter 499 — bump a counter each time the user returns to Overview so the
   // Priority Tasks strip refetches (auto-refresh after task status changes).
   const [tabVisits, setTabVisits] = useState(0);

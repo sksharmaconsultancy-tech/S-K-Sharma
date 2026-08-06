@@ -1786,9 +1786,116 @@ def has_unpaired_punches(day_punches: List[dict]) -> bool:
 
 
 
+def _single_machine_normalize(
+    punches_by_day: Dict[str, List[dict]],
+    cfg: dict,
+) -> Dict[str, List[dict]]:
+    """Iter 503 — SINGLE MACHINE ATTENDANCE MODE (user spec, Message 148).
+
+    When a firm runs ONE shared biometric device for both IN and OUT the
+    stored punch kinds are unreliable (many devices report every punch as
+    check-in). This branch re-interprets each employee-day's MACHINE
+    punches per the firm's Firm Master → Attendance & Shift settings:
+
+      • ``dup_window_min`` (0/1/2/5/10) — drop punch bursts within N min.
+      • ``interpretation``:
+          "alternate"  — 1st=IN, 2nd=OUT, 3rd=IN … (default, mode A)
+          "first_last" — first punch=IN, last punch=OUT (mode B); middle
+                         punches handled per ``lunch_mode``.
+      • ``lunch_mode`` (mode B only):
+          "ignore_middle" — middles dropped (duty = last − first)
+          "actual_break"  — middles alternate OUT/IN (real break windows
+                            are deducted by the normal pairing engine)
+          "fixed"         — middles dropped; a fixed 30/45/60-min lunch
+                            is deducted at the hours level (grid compute).
+
+    Mobile-app / manual punches keep their explicit kinds untouched.
+    Returns a NEW dict. The first kept machine punch of each day carries
+    an ``_smm`` metadata dict (calc_mode / dupes_ignored / punch_pattern)
+    that surfaces on the attendance-grid day cells for transparency.
+    """
+    from datetime import datetime as _dt
+    try:
+        window_min = int(cfg.get("dup_window_min", 5))
+    except (TypeError, ValueError):
+        window_min = 5
+    interp = str(cfg.get("interpretation") or "alternate")
+    lunch_mode = str(cfg.get("lunch_mode") or "ignore_middle")
+
+    def _hhmm(p: dict) -> str:
+        try:
+            return _dt.fromisoformat(
+                str(p.get("at")).replace("Z", "+00:00")).strftime("%H:%M")
+        except (ValueError, TypeError):
+            return "?"
+
+    def _is_mach(p: dict) -> bool:
+        return str(p.get("source") or "").startswith("zkteco")
+
+    out: Dict[str, List[dict]] = {}
+    last_at = None
+    for dk in sorted(punches_by_day.keys()):
+        kept: List[dict] = []
+        dropped = 0
+        for p in sorted(punches_by_day.get(dk) or [],
+                        key=lambda x: x.get("at") or ""):
+            try:
+                t = _dt.fromisoformat(str(p.get("at")).replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                kept.append(p)
+                continue
+            if (window_min > 0 and last_at is not None and _is_mach(p)
+                    and abs((t - last_at).total_seconds()) < window_min * 60):
+                dropped += 1
+                continue  # duplicate burst on the shared device — drop
+            kept.append(p)
+            last_at = t
+
+        machine = sorted((p for p in kept if _is_mach(p)),
+                         key=lambda x: x.get("at") or "")
+        middles_ignored = 0
+        if machine:
+            if interp == "first_last" and len(machine) >= 2:
+                machine[0]["kind"] = "in"
+                machine[-1]["kind"] = "out"
+                middle = machine[1:-1]
+                if lunch_mode == "actual_break":
+                    for i, p in enumerate(middle):
+                        p["kind"] = "out" if i % 2 == 0 else "in"
+                else:  # ignore_middle / fixed — drop middle punches
+                    middles_ignored = len(middle)
+                    _mid_ids = {id(p) for p in middle}
+                    kept = [p for p in kept if id(p) not in _mid_ids]
+            else:  # alternate (mode A) — also covers 1-punch days
+                for i, p in enumerate(machine):
+                    p["kind"] = "in" if i % 2 == 0 else "out"
+            final_machine = sorted((p for p in kept if _is_mach(p)),
+                                   key=lambda x: x.get("at") or "")
+            if final_machine:
+                if interp == "first_last":
+                    _mode = "B · First IN — Last OUT"
+                    if lunch_mode == "actual_break":
+                        _mode += " + actual break"
+                    elif lunch_mode == "fixed":
+                        _mode += f" + fixed lunch {int(cfg.get('lunch_fixed_min') or 30)}m"
+                else:
+                    _mode = "A · Alternate IN/OUT"
+                final_machine[0]["_smm"] = {
+                    "calc_mode": _mode,
+                    "dupes_ignored": dropped,
+                    "middles_ignored": middles_ignored,
+                    "punch_pattern": " → ".join(
+                        f"{_hhmm(p)} {(p.get('kind') or '?').upper()}"
+                        for p in final_machine),
+                }
+        out[dk] = kept
+    return out
+
+
 def dedupe_close_punches(
     punches_by_day: Dict[str, List[dict]],
     window_min: int = 5,
+    company_cfg: Optional[dict] = None,
 ) -> Dict[str, List[dict]]:
     """Iter 481 (user request) — repair stored machine-punch data:
 
@@ -1801,7 +1908,14 @@ def dedupe_close_punches(
        Mobile / manual punches keep their explicit kinds.
 
     Returns a NEW dict (does not mutate the input).
+
+    Iter 503 — when the firm's ``attendance_config.device_mode`` is
+    "single_machine" the SINGLE MACHINE MODE branch takes over entirely
+    (all other firms keep this exact legacy behaviour, 100% unchanged).
     """
+    _cfg = company_cfg or {}
+    if str(_cfg.get("device_mode") or "") == "single_machine":
+        return _single_machine_normalize(punches_by_day, _cfg)
     from datetime import datetime as _dt
     out: Dict[str, List[dict]] = {}
     last_at = None
@@ -9253,7 +9367,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "502"
+APP_ITERATION = "503"
 
 
 @api.get("/version")
@@ -9271,7 +9385,8 @@ async def healthz():
 # Dedicated statutory-side payroll (PF / ESIC / PT / TDS). Runs beside
 # the base salary process — completely separate persistence + payslips.
 # ---------------------------------------------------------------------------
-def _policy2_biometric_stats(att_rows: List[dict], policy: dict, emp_full: dict) -> dict:
+def _policy2_biometric_stats(att_rows: List[dict], policy: dict, emp_full: dict,
+                             company_cfg: Optional[dict] = None) -> dict:
     """Iter 129c — Textile *Policy 2* firms: auto-sync Present Days for the
     Compliance Salary run from the SAME biometric pipeline as the
     attendance grid (``compute_textile_day``: 8 hrs = 1 day, under-hours
@@ -9290,7 +9405,7 @@ def _policy2_biometric_stats(att_rows: List[dict], policy: dict, emp_full: dict)
         d = r.get("date")
         if d:
             by_day.setdefault(d, []).append(r)
-    by_day = stitch_cross_day_ot(dedupe_close_punches(by_day))
+    by_day = stitch_cross_day_ot(dedupe_close_punches(by_day, company_cfg=company_cfg))
     present = 0.0
     duty_min = 0.0
     for date_key, punches in by_day.items():
@@ -9666,7 +9781,8 @@ async def _compute_monthly_grid_data(
 
     company = await db.companies.find_one(
         {"company_id": company_id},
-        {"_id": 0, "company_id": 1, "name": 1, "attendance_policy": 1},
+        {"_id": 0, "company_id": 1, "name": 1, "attendance_policy": 1,
+         "attendance_config": 1},
     )
     if company is None:
         raise HTTPException(status_code=404, detail="Company not found")
@@ -9772,7 +9888,10 @@ async def _compute_monthly_grid_data(
         # session started so the OT window can be paired correctly).
         for _uid_key in list(punches_by_user_day.keys()):
             _repaired = stitch_cross_day_ot(
-                dedupe_close_punches(punches_by_user_day[_uid_key]),
+                dedupe_close_punches(
+                    punches_by_user_day[_uid_key],
+                    company_cfg=company.get("attendance_config"),
+                ),
             )
             # Drop the ±1-day helper keys after stitching (Iter 486).
             punches_by_user_day[_uid_key] = {
@@ -9783,6 +9902,14 @@ async def _compute_monthly_grid_data(
     # ----- Working-hour thresholds for OT calculation --------------------
     pol = company.get("attendance_policy") or {}
     pol = await inject_firm_ot_flag(dict(pol), company.get("company_id"))
+    # Iter 503 — Single Machine Mode firm config (fixed-lunch hours hook).
+    _smm_cfg = company.get("attendance_config") or {}
+    _smm_fixed_lunch = (
+        int(_smm_cfg.get("lunch_fixed_min") or 30)
+        if (str(_smm_cfg.get("device_mode") or "") == "single_machine"
+            and str(_smm_cfg.get("lunch_mode") or "") == "fixed")
+        else 0
+    )
     full_day_hours = float(pol.get("full_day_hours") or 8.0)
     # Iter 202 (user request) — "Count Present Day @ 8 HRS" sub-point:
     # when ON (and Salary Allowed includes Compliance), the Day-wise
@@ -10055,6 +10182,12 @@ async def _compute_monthly_grid_data(
                 _duty_min = (reg_out_dt - reg_in_dt).total_seconds() / 60.0
                 _duty_min = _round_minutes(_duty_min, _round_step)
                 duty_only_hrs = round(_duty_min / 60.0, 2)
+            # Iter 503 — SINGLE MACHINE MODE fixed-lunch deduction: the
+            # shared device records only first-IN / last-OUT, so a fixed
+            # 30/45/60-min lunch is deducted from the day's duty hours.
+            if _smm_fixed_lunch and duty_only_hrs * 60.0 > _smm_fixed_lunch:
+                duty_only_hrs = round(
+                    (duty_only_hrs * 60.0 - _smm_fixed_lunch) / 60.0, 2)
             ot_hrs = 0.0
             if ot_in_dt and ot_out_dt:
                 _ot_min = (ot_out_dt - ot_in_dt).total_seconds() / 60.0
@@ -10248,6 +10381,17 @@ async def _compute_monthly_grid_data(
                 # Iter 94 — day-wise earned salary (basic-rate based).
                 "salary": day_sal,
             }
+            # Iter 503 — Single Machine Mode transparency fields on the
+            # day cell (calc mode / duplicate drops / punch pattern).
+            _smm_meta = next(
+                (p.get("_smm") for p in day_punches
+                 if isinstance(p.get("_smm"), dict)), None)
+            if _smm_meta:
+                days_cell[key].update({
+                    "calc_mode": _smm_meta.get("calc_mode"),
+                    "dupes_ignored": _smm_meta.get("dupes_ignored"),
+                    "punch_pattern": _smm_meta.get("punch_pattern"),
+                })
             # Iter 236 — accumulate overhaul totals for the row summary.
             total_punches_cnt += len(day_punches)
             total_net_min += day_min
@@ -10413,7 +10557,8 @@ async def _build_ot_report_rows(
     # below.
     company = await db.companies.find_one(
         {"company_id": company_id},
-        {"_id": 0, "company_id": 1, "name": 1, "attendance_policy": 1},
+        {"_id": 0, "company_id": 1, "name": 1, "attendance_policy": 1,
+         "attendance_config": 1},
     )
     if company is None:
         raise HTTPException(status_code=404, detail="Company not found")
@@ -10481,11 +10626,22 @@ async def _build_ot_report_rows(
     # Iter 481 — plus 5-min duplicate/alternation repair.
     for _uid_k in list(punches_by_user_day.keys()):
         punches_by_user_day[_uid_k] = stitch_cross_day_ot(
-            dedupe_close_punches(punches_by_user_day[_uid_k]),
+            dedupe_close_punches(
+                punches_by_user_day[_uid_k],
+                company_cfg=company.get("attendance_config"),
+            ),
         )
 
     pol = company.get("attendance_policy") or {}
     pol = await inject_firm_ot_flag(dict(pol), company.get("company_id"))
+    # Iter 503 — Single Machine Mode fixed-lunch config (matches the grid).
+    _smm_cfg_ot = company.get("attendance_config") or {}
+    _smm_fixed_lunch_ot = (
+        int(_smm_cfg_ot.get("lunch_fixed_min") or 30)
+        if (str(_smm_cfg_ot.get("device_mode") or "") == "single_machine"
+            and str(_smm_cfg_ot.get("lunch_mode") or "") == "fixed")
+        else 0
+    )
     shifts_by_id, shifts_list = await load_shift_masters_map()
     full_emp_docs = await db.users.find(
         {"user_id": {"$in": user_ids}},
@@ -10543,6 +10699,10 @@ async def _build_ot_report_rows(
                 _duty_min = (reg_out_dt - reg_in_dt).total_seconds() / 60.0
                 _duty_min = _round_minutes(_duty_min, _round_step)
                 duty_only = round(_duty_min / 60.0, 2)
+            # Iter 503 — Single Machine Mode fixed-lunch deduction.
+            if _smm_fixed_lunch_ot and duty_only * 60.0 > _smm_fixed_lunch_ot:
+                duty_only = round(
+                    (duty_only * 60.0 - _smm_fixed_lunch_ot) / 60.0, 2)
             ot = 0.0
             if ot_in_dt and ot_out_dt:
                 _ot_min = (ot_out_dt - ot_in_dt).total_seconds() / 60.0
@@ -12169,4 +12329,5 @@ maybe_start_wa_worker(app, db, logger)
 @app.on_event("shutdown")
 async def shutdown():
     client.close()
+
 

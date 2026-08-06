@@ -95,8 +95,24 @@ export default function EmployeeAddScreen() {
   // Iter 91 — EDIT MODE: this same one-page form edits an EXISTING
   // employee when opened as /employee-add?user_id=… (from Employee
   // Master → "Edit All Details").
-  const urlParams = useLocalSearchParams<{ user_id?: string }>();
+  const urlParams = useLocalSearchParams<{ user_id?: string; prefill_bio?: string; prefill_name?: string }>();
   const editUserId = urlParams.user_id ? String(urlParams.user_id) : null;
+  // Iter 503 (user request) — one-click "Register this employee" from the
+  // Punch Log's NOT-FOUND rows: pre-fill the machine Bio Code (+ name in
+  // machine if known) into this form.
+  useEffect(() => {
+    if (editUserId) return;
+    const pb = urlParams.prefill_bio ? String(urlParams.prefill_bio) : "";
+    const pn = urlParams.prefill_name ? String(urlParams.prefill_name) : "";
+    if (pb || pn) {
+      setForm((f) => ({
+        ...f,
+        bio_code: pb || f.bio_code,
+        name: pn || f.name,
+      }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Iter 461 (Phase 3) — cooperative record locking across workspace tabs.
   const { lockedElsewhere, readOnly: lockReadOnly, setReadOnly: setLockReadOnly, takeControl } =
     useRecordLock(editUserId ? `employee:${editUserId}` : null);

@@ -304,6 +304,8 @@ async def _compute_compliance_run(
                 # Iter 85 — include compliance_policy so enabled_allowances
                 # toggles can be applied when computing rows.
                 "compliance_policy": 1,
+                # Iter 503 — Single Machine Attendance Mode config.
+                "attendance_config": 1,
             },
         ):
             company_policies[c["company_id"]] = c
@@ -479,7 +481,9 @@ async def _compute_compliance_run(
         if (att_pol.get("policy_variant") or "").strip() == "policy_2":
             # Iter 129c — Textile Policy 2: Present Days auto-synced from
             # biometrics via the grid's textile pipeline (8 hrs = 1 day).
-            stats = _policy2_biometric_stats(att_rows, merged_pol, emp)
+            stats = _policy2_biometric_stats(
+                att_rows, merged_pol, emp,
+                company_cfg=company_doc.get("attendance_config"))
         else:
             # Iter 202 — "Count Present Day @ 8 HRS" sub-point: compliance
             # runs count 1 Present Day per 8 worked hrs (extra hrs → OT)

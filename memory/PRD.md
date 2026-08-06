@@ -4546,3 +4546,55 @@ Deploy: deploy_vps_iter502.sh, temp_bundle → deploy502.sh, APP_ITERATION=502.
    ±120s of the unmapped punch). Punch Log Report 📷 is now clickable with
    a full-screen photo viewer (photo_ref field added to rows).
 3. New Task Firm dropdown got a 🔍 filter box (pd-task-firm-filter). Verified.
+
+## Iter 503c (in deploy502) — One-click Register from NOT-FOUND rows
+- punch-log-report.tsx: Employee column renders "➕ Register" chip on
+  flag=not_found rows → router.push /employee-add?prefill_bio=<pin>&
+  prefill_name=<name_in_machine> (globalThis.__punchRegister handler).
+- employee-add.tsx: accepts prefill_bio / prefill_name query params (create
+  mode only) and seeds form.bio_code + form.name on mount.
+- Verified via deep-link screenshot: name prefilled, bio code seeded.
+
+## Iter 503 — Single Machine Attendance Mode + PWA Task Management ✅
+1. PWA bug (user: "Task Management Option Not Showing" for Super Admin):
+   (tabs)/index.tsx Quick actions now start with "Task Management"
+   (row-task-management → /portal-dashboard?tab=tasks) + "Portal
+   Dashboard" for all admin roles. portal-dashboard.tsx honours ?tab=
+   query param via useLocalSearchParams. Verified via mobile screenshots.
+2. SINGLE MACHINE ATTENDANCE MODE (Message 148 spec, P0):
+   - companies.attendance_config = {device_mode: separate|single_machine|
+     mobile|gps|qr, interpretation: alternate|first_last, dup_window_min:
+     0/1/2/5/10, lunch_mode: ignore_middle|actual_break|fixed,
+     lunch_fixed_min: 30/45/60}. Firm Master PATCH validates + mirrors to
+     companies doc AND firm_masters.settings (routes/firm_master.py).
+   - Engine: server.py dedupe_close_punches(company_cfg=) branches to NEW
+     _single_machine_normalize ONLY when device_mode=single_machine (all
+     other firms 100% legacy). Mode A alternate re-kinds machine punches
+     IN/OUT/IN…; Mode B first=IN last=OUT, middles per lunch_mode
+     (actual_break → OUT/IN pairs; ignore/fixed → dropped). dup window
+     drops bursts (0=off). Manual/mobile punches never re-kinded. Meta
+     _smm {calc_mode,dupes_ignored,punch_pattern} on first machine punch.
+   - Fixed-lunch hours hook: grid compute + OT report deduct
+     lunch_fixed_min from duty_only when duty*60 > lunch mins.
+   - Wired call sites (cfg passed): grid _compute_monthly_grid_data,
+     _build_ot_report_rows, _policy2_biometric_stats (compliance run,
+     projection + call updated), attendance_admin_core grid-debug
+     (returns attendance_config in response), attendance_doctor _stitch.
+   - Grid day cells now include calc_mode / dupes_ignored / punch_pattern
+     when single-machine meta present.
+   - Firm Master UI: section 8 new "Attendance Capture / Device Mode"
+     card (fm-ac-separate/single/mobile/gps/qr, fm-ac-alt/firstlast,
+     fm-ac-dup-N chips, fm-ac-lunch-* radios, fm-ac-lunchmin-N chips).
+   - GOTCHA fixed: companies projections in grid + OT report had to add
+     "attendance_config": 1 or cfg silently absent.
+   - NOTE: a tool glitch during editing appended garbage at server.py EOF
+     and silently dropped 2 edits — repaired; verify file tail if editing
+     server.py in bulk.
+   - Tested: engine unit tests (A alternate + dup drop + meta, B ignore
+     middle, B actual break, window off, legacy unchanged, manual kept);
+     e2e: PATCH firm-master mirror verified in DB; monthly-grid API on
+     seeded 5-punch day → punches=2, in 09:00 out 18:00, 9h − 45m lunch
+     = 8.25 (duty 7.25 + OT 1.0), calc_mode/pattern fields present;
+     grid-debug shows cfg + _smm meta. Test data cleaned; Kankani
+     attendance_config unset (user must opt-in per firm).
+Deploy: deploy_vps_iter503.sh, temp_bundle → deploy503.sh, APP_ITERATION=503.

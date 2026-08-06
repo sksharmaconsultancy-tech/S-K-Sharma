@@ -684,6 +684,25 @@ export default function Dashboard() {
 
             <SectionHeader title="Quick actions" />
             <View style={styles.actions}>
+              {/* Iter 503 (user bug — "In PWA of Super Admin Login Task
+                  Management Option is Not Showing") — mobile home now links
+                  straight to Portal Dashboard → Tasks tab for all admins. */}
+              {user?.role !== "employee" && (
+                <ActionRow
+                  testID="row-task-management"
+                  icon="clipboard-outline"
+                  label="Task Management"
+                  onPress={() => router.push("/portal-dashboard?tab=tasks" as any)}
+                />
+              )}
+              {user?.role !== "employee" && (
+                <ActionRow
+                  testID="row-portal-dashboard"
+                  icon="home-outline"
+                  label="Portal Dashboard"
+                  onPress={() => router.push("/portal-dashboard" as any)}
+                />
+              )}
               <ActionRow
                 icon="document-text-outline"
                 label="Payslips & documents"

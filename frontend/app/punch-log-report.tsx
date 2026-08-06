@@ -81,6 +81,39 @@ const COLS: ReportCol<Row>[] = [
   { key: "employee_code", label: "Code", type: "center", min: 64, sticky: true },
   {
     key: "name", label: "Employee", min: 200, max: 300, sticky: true,
+    // Iter 503 (user request) — one-click "Register" on NOT-FOUND rows:
+    // opens Add New Employee with Bio Code (+ machine name) pre-filled.
+    render: (r) =>
+      r.flag === "not_found" ? (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <Text style={{ fontSize: 11.5, fontWeight: "800", color: "#B91C1C" }} numberOfLines={1}>
+            ⛔ {r.name || "NOT FOUND"}
+          </Text>
+          <Pressable
+            onPress={() => (globalThis as any).__punchRegister?.(r)}
+            hitSlop={6}
+            testID={`plr-register-${r.bio_code}`}
+            style={{
+              flexDirection: "row", alignItems: "center",
+              borderWidth: 1, borderColor: "#15803D", borderRadius: 999,
+              paddingHorizontal: 8, paddingVertical: 2, backgroundColor: "#F0FDF4",
+            }}
+          >
+            <Text style={{ fontSize: 10.5, fontWeight: "800", color: "#15803D" }}>➕ Register</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <Text
+          numberOfLines={1}
+          style={{
+            fontSize: 12,
+            color: r.flag === "new_registration" ? "#15803D" : "#1E2A2A",
+            fontWeight: r.flag === "new_registration" ? "800" : "400",
+          }}
+        >
+          {r.flag === "new_registration" ? `${r.name} 🆕 NEW` : r.name || "—"}
+        </Text>
+      ),
     value: (r) =>
       r.flag === "not_found"
         ? `⛔ ${r.name || "NOT FOUND"}`
@@ -172,6 +205,16 @@ export default function PunchLogReportScreen() {
     };
     return () => { (globalThis as any).__punchPhotoOpen = undefined; };
   }, []);
+  // Iter 503 — one-click "Register this employee" from a NOT-FOUND row.
+  useEffect(() => {
+    (globalThis as any).__punchRegister = (r: Row) => {
+      const qs = new URLSearchParams();
+      if (r.bio_code) qs.set("prefill_bio", r.bio_code);
+      if (r.name_in_machine) qs.set("prefill_name", r.name_in_machine);
+      router.push(`/employee-add?${qs.toString()}` as any);
+    };
+    return () => { (globalThis as any).__punchRegister = undefined; };
+  }, [router]);
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
 

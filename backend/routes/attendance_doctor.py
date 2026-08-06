@@ -73,11 +73,12 @@ def _pair_day(punches: List[Dict[str, Any]]):
     return pairs, unpaired, duty_min
 
 
-def _stitch(by_day: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
+def _stitch(by_day: Dict[str, List[Dict[str, Any]]],
+            company_cfg: Optional[dict] = None) -> Dict[str, List[Dict[str, Any]]]:
     """Same shape as server.stitch_cross_day_ot (kept local to avoid a
     circular import of the 20k-line module's private helpers)."""
     from server import dedupe_close_punches, stitch_cross_day_ot
-    return stitch_cross_day_ot(dedupe_close_punches(by_day))
+    return stitch_cross_day_ot(dedupe_close_punches(by_day, company_cfg=company_cfg))
 
 
 @router.get("")
@@ -102,6 +103,10 @@ async def attendance_doctor(
     emp_by_id = {e["user_id"]: e for e in employees}
 
     date_from, date_to = f"{month}-01", f"{month}-31"
+    # Iter 503 — Single Machine Attendance Mode firm config.
+    _comp = await db.companies.find_one(
+        {"company_id": company_id}, {"_id": 0, "attendance_config": 1}) or {}
+    _att_cfg = _comp.get("attendance_config")
     all_by_user_day: Dict[str, Dict[str, List[Dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
     async for p in db.attendance.find(
         {"user_id": {"$in": uids}, "date": {"$gte": date_from, "$lte": date_to}},
@@ -116,7 +121,7 @@ async def attendance_doctor(
             d: [p for p in ps if p.get("status") == "approved"]
             for d, ps in days.items()
         }
-        stitched = _stitch({d: ps for d, ps in approved_by_day.items() if ps})
+        stitched = _stitch({d: ps for d, ps in approved_by_day.items() if ps}, _att_cfg)
         for d in sorted(days.keys()):
             raw = days[d]
             appr = stitched.get(d, [])
