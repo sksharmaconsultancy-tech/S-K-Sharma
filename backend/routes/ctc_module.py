@@ -414,6 +414,101 @@ async def ctc_summary(company_id: str = Query(...),
                                    key=lambda b: -b["monthly_ctc"])}
 
 
+@router.get("/yearly-projection")
+async def yearly_projection(company_id: str = Query(...),
+                            fy_start: int = Query(...),
+                            authorization: Optional[str] = Header(None)):
+    """Appraisal-season report: per employee — projected annual cost (CTC /
+    Gross ×12) vs the ACTUAL paid + employer statutory cost YTD, aggregated
+    from the Compliance Salary runs of the financial year (Apr–Mar)."""
+    await _auth(authorization)
+    months = [f"{fy_start}-{m:02d}" for m in range(4, 13)] + \
+             [f"{fy_start + 1}-{m:02d}" for m in range(1, 4)]
+    # Latest run row per (user, month) — later generated_at wins.
+    paid: Dict[str, Dict[str, dict]] = {}
+    async for run in db.compliance_salary_runs.find(
+            {"company_id": company_id, "month": {"$in": months}},
+            {"_id": 0, "month": 1, "rows": 1}).sort("generated_at", 1):
+        for r in run.get("rows") or []:
+            uid = r.get("user_id")
+            if uid:
+                paid.setdefault(uid, {})[run["month"]] = r
+
+    smap = {s["structure_id"]: s async for s in db.ctc_structures.find(
+        {"company_id": company_id, "status": {"$ne": "deleted"}}, {"_id": 0})}
+    rows: List[Dict[str, Any]] = []
+    async for u in db.users.find(
+            {"company_id": company_id, "role": "employee",
+             "deleted": {"$ne": True}},
+            {"_id": 0, "user_id": 1, "employee_code": 1, "name": 1,
+             "department": 1, "designation": 1, "salary_mode": 1,
+             "monthly_ctc": 1, "ctc_structure_id": 1, "compliance_gross": 1,
+             "salary_monthly": 1, "gross_salary": 1,
+             "monthly_salary": 1}).sort("name", 1):
+        is_ctc = str(u.get("salary_mode") or "").lower() == "ctc" \
+            and float(u.get("monthly_ctc") or 0) > 0
+        if is_ctc:
+            monthly_cost = round(float(u["monthly_ctc"]), 2)
+            _s = smap.get(u.get("ctc_structure_id") or "")
+            proj_employer = calc_ctc_breakup(
+                monthly_cost, _s.get("components") or [])["employer_total"] \
+                if _s else 0.0
+        else:
+            monthly_cost = round(float(
+                u.get("compliance_gross") or u.get("salary_monthly")
+                or u.get("gross_salary") or u.get("monthly_salary") or 0), 2)
+            proj_employer = 0.0
+        mrows = paid.get(u["user_id"], {})
+        if monthly_cost <= 0 and mrows:
+            # Daily-rated / structure-only masters: fall back to the
+            # engine's full-month gross from the latest processed run.
+            _last = mrows[max(mrows.keys())]
+            monthly_cost = round(float(_last.get("monthly_gross") or 0), 2)
+        months_paid = len(mrows)
+        gross_ytd = round(sum(float(r.get("gross_paid") or 0)
+                              for r in mrows.values()), 2)
+        net_ytd = round(sum(float(r.get("net") or 0)
+                            for r in mrows.values()), 2)
+        employer_ytd = round(sum(
+            float(r.get("pf_employer_total") or 0)
+            + float(r.get("esic_employer") or 0)
+            for r in mrows.values()), 2)
+        total_cost_ytd = round(gross_ytd + employer_ytd, 2)
+        if monthly_cost <= 0 and months_paid == 0:
+            continue
+        projected_ytd = round(months_paid * monthly_cost, 2)
+        # CTC already includes the employer side → compare against total
+        # cost; Gross projection excludes it → compare gross-to-gross.
+        actual_basis = total_cost_ytd if is_ctc else gross_ytd
+        projected_annual = round(monthly_cost * 12, 2)
+        rows.append({
+            "user_id": u["user_id"],
+            "employee_code": u.get("employee_code") or "",
+            "name": u.get("name") or "",
+            "department": u.get("department") or "",
+            "designation": u.get("designation") or "",
+            "salary_mode": "ctc" if is_ctc else "gross",
+            "monthly_cost": monthly_cost,
+            "projected_annual": projected_annual,
+            "projected_employer_monthly": proj_employer,
+            "months_paid": months_paid,
+            "gross_paid_ytd": gross_ytd,
+            "net_paid_ytd": net_ytd,
+            "employer_ytd": employer_ytd,
+            "total_cost_ytd": total_cost_ytd,
+            "projected_ytd": projected_ytd,
+            "variance_ytd": round(projected_ytd - actual_basis, 2),
+            "utilization_pct": round(actual_basis / projected_annual * 100, 1)
+            if projected_annual > 0 else 0.0,
+        })
+    totals = {k: round(sum(float(r[k]) for r in rows), 2)
+              for k in ("monthly_cost", "projected_annual", "gross_paid_ytd",
+                        "net_paid_ytd", "employer_ytd", "total_cost_ytd",
+                        "projected_ytd", "variance_ytd")}
+    return {"fy": f"{fy_start}-{str(fy_start + 1)[2:]}", "months": months,
+            "rows": rows, "totals": totals}
+
+
 @router.get("/revisions")
 async def revisions(company_id: str = Query(...),
                     user_id: Optional[str] = Query(None),

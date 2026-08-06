@@ -4446,3 +4446,15 @@ Deploy: deploy_vps_iter500.sh, temp_bundle kind=script → deploy500.sh, APP_ITE
 Pending backlog after Iter 500: Single Machine Attendance Mode (P2, Message 148 spec),
 WhatsApp API (blocked on Meta creds), SMTP config for expiring-doc emails (user-side),
 AI WhatsApp chatbot (P4), Multi-language EN/HI (P5).
+
+## Iter 500b — Yearly CTC Projection report (appraisal season)
+- GET /api/admin/ctc/yearly-projection?company_id&fy_start — FY Apr–Mar aggregation
+  from compliance_salary_runs (latest run per user+month wins). Per employee:
+  monthly_cost (CTC or master gross; falls back to run's full-month gross for
+  daily-rated masters), projected_annual, months_paid, gross/net/employer YTD,
+  total_cost_ytd, projected_ytd, variance_ytd (CTC compares vs total cost;
+  Gross vs gross paid), utilization_pct + totals.
+- Frontend: 4th tab "Yearly Projection" on /ctc-management with FY chips
+  (current + 2 previous), ReportTable grid + TOTAL footer + universal PDF export.
+- Verified: backend curl (18 rows FY 2026-27 Kankani) + screenshot (grid,
+  FY chips, PDF button all render). Deploy script + verification updated.

@@ -31,6 +31,10 @@
 #       Employer Cost, Net Payout, Avg CTC + per-structure distribution.
 #     • Employee CTC Register + Revision History grids with the universal
 #       PDF/Excel export buttons.
+#     • YEARLY PROJECTION (appraisal report): per employee — projected
+#       annual cost (CTC / Gross × 12) vs ACTUAL paid + employer statutory
+#       cost YTD from the FY's Compliance runs (Apr–Mar), with months
+#       paid, variance and % of annual used + TOTAL footer + PDF export.
 #     • Payslips of CTC employees get a "CTC ANNEXURE" section showing
 #       employer contributions + Monthly CTC (Gross + Employer).
 #
@@ -114,6 +118,8 @@ echo -n "   CTC hook in Compliance Salary engine (must say OK): "
 grep -q 'CTC MODE (additive)' $APP_DIR/backend/routes/compliance_salary_runs.py && echo "OK" || echo "MISSING!"
 echo -n "   Payslip CTC Annexure (must say OK): "
 grep -q 'CTC ANNEXURE' $APP_DIR/backend/utils/payslip_pdf.py && echo "OK" || echo "MISSING!"
+echo -n "   Yearly CTC Projection report (must say OK): "
+grep -q 'yearly-projection' $APP_DIR/backend/routes/ctc_module.py && grep -q 'ctc_yearly_projection' $APP_DIR/frontend/app/ctc-management.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Iter 499 features still present (must say OK): "
 [ -f $APP_DIR/backend/routes/factory_returns.py ] && grep -q 'flatNavDeep' $APP_DIR/frontend/src/components/AdminWebShell.tsx && echo "OK" || echo "MISSING!"
 echo ""
@@ -132,3 +138,6 @@ echo "      tab records the change."
 echo "   5. Run the Compliance Salary for that month — the CTC employee's"
 echo "      gross auto-derives from CTC; all other employees unchanged."
 echo "   6. That employee's payslip now ends with the CTC ANNEXURE table."
+echo "   7. CTC Management → 'Yearly Projection' tab → pick FY → per-"
+echo "      employee projected annual vs actual paid + employer cost YTD"
+echo "      with variance & totals; PDF button exports the grid."

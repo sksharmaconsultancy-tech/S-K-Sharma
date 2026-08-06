@@ -38,12 +38,17 @@ export default function CtcManagementScreen() {
   const { selectedCompanyId, companies } = useSelectedCompany();
   const [cid, setCid] = useState<string | null>(selectedCompanyId);
   const [mode, setMode] = useState("gross");
-  const [tab, setTab] = useState<"structures" | "employees" | "revisions">("structures");
+  const [tab, setTab] = useState<"structures" | "employees" | "revisions" | "projection">("structures");
   const [structures, setStructures] = useState<any[]>([]);
   const [rows, setRows] = useState<any[]>([]);
   const [revs, setRevs] = useState<any[]>([]);
   const [summary, setSummary] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  // yearly projection (appraisal report)
+  const curFy = new Date().getMonth() + 1 >= 4 ? new Date().getFullYear() : new Date().getFullYear() - 1;
+  const [fy, setFy] = useState(curFy);
+  const [proj, setProj] = useState<any>(null);
+  const [projLoading, setProjLoading] = useState(false);
   // builder
   const [bOpen, setBOpen] = useState(false);
   const [bForm, setBForm] = useState<any>(null);
@@ -74,6 +79,15 @@ export default function CtcManagementScreen() {
     setLoading(false);
   }, [cid]);
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (tab !== "projection" || !cid) return;
+    setProjLoading(true);
+    api(`/admin/ctc/yearly-projection?company_id=${cid}&fy_start=${fy}`)
+      .then((r: any) => setProj(r))
+      .catch(() => setProj(null))
+      .finally(() => setProjLoading(false));
+  }, [tab, fy, cid]);
 
   const setFirmMode = async (m: string) => {
     if (!cid) return;
@@ -195,6 +209,33 @@ export default function CtcManagementScreen() {
     { key: "approved_by", label: "Approved By", min: 120, max: 200 },
   ];
 
+  const PROJ_COLS: ReportCol<any>[] = [
+    { key: "employee_code", label: "Code", type: "center", min: 64, sticky: true },
+    { key: "name", label: "Name", min: 190, max: 290, sticky: true },
+    { key: "department", label: "Department", min: 100, max: 180 },
+    {
+      key: "salary_mode", label: "Mode", type: "center", min: 70,
+      value: (r) => (r.salary_mode === "ctc" ? "CTC" : "GROSS"),
+      textStyle: (r) => ({ fontWeight: "800", color: r.salary_mode === "ctc" ? "#7C2D12" : "#1E3A8A" }),
+    },
+    { key: "monthly_cost", label: "Monthly ₹", type: "num", min: 96, value: (r) => fmt(r.monthly_cost) },
+    { key: "projected_annual", label: "Annual Projection ₹", type: "num", min: 130, value: (r) => fmt(r.projected_annual) },
+    { key: "months_paid", label: "Months Paid", type: "center", min: 88 },
+    { key: "gross_paid_ytd", label: "Gross Paid YTD ₹", type: "num", min: 122, value: (r) => fmt(r.gross_paid_ytd) },
+    { key: "employer_ytd", label: "Employer Cost YTD ₹", type: "num", min: 138, value: (r) => fmt(r.employer_ytd) },
+    { key: "total_cost_ytd", label: "Total Cost YTD ₹", type: "num", min: 122, value: (r) => fmt(r.total_cost_ytd) },
+    { key: "projected_ytd", label: "Projected YTD ₹", type: "num", min: 118, value: (r) => fmt(r.projected_ytd) },
+    {
+      key: "variance_ytd", label: "Variance ₹", type: "num", min: 100,
+      value: (r) => fmt(r.variance_ytd),
+      textStyle: (r) => ({ fontWeight: "800", color: (r.variance_ytd || 0) >= 0 ? "#15803D" : "#B91C1C" }),
+    },
+    {
+      key: "utilization_pct", label: "% of Annual Used", type: "num", min: 118,
+      value: (r) => `${fmt(r.utilization_pct)}%`,
+    },
+  ];
+
   return (
     <SafeAreaView style={st.root} edges={["top"]}>
       <View style={st.head}>
@@ -250,7 +291,7 @@ export default function CtcManagementScreen() {
         </View>
 
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-          {[["structures", `CTC Structures (${structures.length})`], ["employees", `Employee Register (${rows.length})`], ["revisions", `Revision History (${revs.length})`]].map(([k, l]) => (
+          {[["structures", `CTC Structures (${structures.length})`], ["employees", `Employee Register (${rows.length})`], ["revisions", `Revision History (${revs.length})`], ["projection", "Yearly Projection"]].map(([k, l]) => (
             <Pressable key={k} onPress={() => setTab(k as any)} style={[st.chip, tab === k && st.chipOn]}>
               <Text style={[st.chipTxt, tab === k && st.chipTxtOn]}>{l}</Text>
             </Pressable>
@@ -290,6 +331,41 @@ export default function CtcManagementScreen() {
             <ReportTable reportKey="ctc_register" columns={EMP_COLS} rows={rows}
               maxHeight={600} emptyText="No employees."
               pdfTitle="Employee CTC Register" pdfSubtitle={companies.find((c: any) => c.company_id === cid)?.name || ""} />
+          </View>
+        ) : tab === "projection" ? (
+          <View>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 8, alignItems: "center" }}>
+              <Text style={[st.chipTxt, { marginRight: 2 }]}>Financial Year:</Text>
+              {[curFy - 2, curFy - 1, curFy].map((y) => (
+                <Pressable key={y} onPress={() => setFy(y)}
+                  style={[st.chip, fy === y && st.chipOn]} testID={`ctc-fy-${y}`}>
+                  <Text style={[st.chipTxt, fy === y && st.chipTxtOn]}>{`FY ${y}-${String(y + 1).slice(2)}`}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={[st.dim2, { marginBottom: 8 }]}>
+              Projected annual cost (CTC / Gross × 12) vs actual paid + employer statutory cost, from the Compliance Salary runs of Apr {fy} – Mar {fy + 1}. CTC-mode variance compares against Total Cost; Gross-mode against Gross Paid.
+            </Text>
+            {projLoading ? <ActivityIndicator style={{ marginTop: 30 }} color={colors.brandPrimary} /> : (
+              <View style={{ minHeight: 300, maxHeight: 640 }}>
+                <ReportTable reportKey="ctc_yearly_projection" columns={PROJ_COLS} rows={proj?.rows || []}
+                  maxHeight={600} emptyText="No employees / processed months in this financial year."
+                  footer={proj?.totals ? {
+                    label: "TOTAL",
+                    values: {
+                      monthly_cost: fmt(proj.totals.monthly_cost),
+                      projected_annual: fmt(proj.totals.projected_annual),
+                      gross_paid_ytd: fmt(proj.totals.gross_paid_ytd),
+                      employer_ytd: fmt(proj.totals.employer_ytd),
+                      total_cost_ytd: fmt(proj.totals.total_cost_ytd),
+                      projected_ytd: fmt(proj.totals.projected_ytd),
+                      variance_ytd: fmt(proj.totals.variance_ytd),
+                    },
+                  } : undefined}
+                  pdfTitle={`Yearly CTC Projection — FY ${fy}-${String(fy + 1).slice(2)}`}
+                  pdfSubtitle={companies.find((c: any) => c.company_id === cid)?.name || ""} />
+              </View>
+            )}
           </View>
         ) : (
           <View style={{ minHeight: 300, maxHeight: 640 }}>
