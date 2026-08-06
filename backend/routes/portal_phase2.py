@@ -594,9 +594,31 @@ async def update_task(task_id: str, payload: TaskUpdate,
                                     {"_id": 0, "name": 1, "role": 1})
         upd["assignee_name"] = (u or {}).get("name")
         upd["assignee_role"] = (u or {}).get("role")
+    # Iter 505 (user request — "Edit Content of Task … maintain log") —
+    # field-by-field EDIT LOG for every content change.
+    _edit_changes: List[str] = []
+    _edit_fields = {"title": "Title", "description": "Description",
+                    "due_date": "Due date", "priority": "Priority",
+                    "company_id": "Firm"}
+    for _f, _lbl in _edit_fields.items():
+        if _f in upd and (t.get(_f) or None) != (upd.get(_f) or None):
+            if _f == "company_id":
+                _old = t.get("company_name") or "None"
+                _new = upd.get("company_name") or "None"
+            else:
+                _old = t.get(_f) if t.get(_f) not in (None, "") else "—"
+                _new = upd.get(_f) if upd.get(_f) not in (None, "") else "—"
+            _edit_changes.append(f"{_lbl}: “{_old}” → “{_new}”")
+    if _edit_changes:
+        upd["last_edited_at"] = _now().isoformat()
+        upd["last_edited_by"] = admin["user_id"]
+        upd["last_edited_by_name"] = admin.get("name") or admin.get("email")
+        upd["edited_count"] = int(t.get("edited_count") or 0) + 1
     upd["updated_at"] = _now().isoformat()
     await db.portal_tasks.update_one({"task_id": task_id}, {"$set": upd})
     t2 = await db.portal_tasks.find_one({"task_id": task_id}, {"_id": 0})
+    if _edit_changes:
+        await _task_audit(admin, "edited", t2, " · ".join(_edit_changes))
     if payload.status is not None:
         await _task_audit(admin, f"status:{payload.status}", t2)
         await _sync_calendar_from_task(admin, t2)

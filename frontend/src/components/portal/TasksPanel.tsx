@@ -23,6 +23,9 @@ type Task = {
   due_date?: string | null; priority: string; status: string;
   created_by?: string | null;
   created_by_name?: string | null; source_rtask_id?: string | null;
+  // Iter 505 — content-edit tracking
+  edited_count?: number; last_edited_by_name?: string | null;
+  last_edited_at?: string | null;
 };
 type RTask = {
   rtask_id: string; title: string; company_id?: string | null;
@@ -120,29 +123,68 @@ export default function TasksPanel({
 
   useEffect(() => { load(); }, [load]);
 
+  // Iter 505 — edit-task modal state + per-task edit history viewer.
+  const [editFor, setEditFor] = useState<Task | null>(null);
+  const [historyFor, setHistoryFor] = useState<Task | null>(null);
+  const [historyItems, setHistoryItems] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
   const createTask = async () => {
     if (!form.title.trim()) return;
     setSaving(true);
     try {
-      await api("/admin/portal-tasks", {
-        method: "POST",
-        body: {
-          title: form.title, description: form.description || null,
-          due_date: form.due_date || null, priority: form.priority,
-          company_id: form.company_id || null,
-          company_ids: multiCids.length ? multiCids : (form.company_id ? [form.company_id] : []),
-          assignee_id: assigneeId || null,
-        },
-      });
-      setShowAdd(false);
+      if (editFor) {
+        // Iter 505 (user request) — EDIT task content; backend keeps a
+        // field-by-field edit log in the task audit trail.
+        await api(`/admin/portal-tasks/${editFor.task_id}`, {
+          method: "PATCH",
+          body: {
+            title: form.title, description: form.description || "",
+            due_date: form.due_date || "", priority: form.priority,
+            company_id: form.company_id || "",
+          },
+        });
+      } else {
+        await api("/admin/portal-tasks", {
+          method: "POST",
+          body: {
+            title: form.title, description: form.description || null,
+            due_date: form.due_date || null, priority: form.priority,
+            company_id: form.company_id || null,
+            company_ids: multiCids.length ? multiCids : (form.company_id ? [form.company_id] : []),
+            assignee_id: assigneeId || null,
+          },
+        });
+      }
+      setShowAdd(false); setEditFor(null);
       setForm({ title: "", description: "", due_date: "", priority: "medium", company_id: companyId || "" });
       setAssigneeId(""); setMultiCids([]);
       load(); loadHub();
     } catch (e: any) {
-      const msg = e?.message || "Failed to create task";
+      const msg = e?.message || (editFor ? "Failed to save changes" : "Failed to create task");
       if (Platform.OS === "web") window.alert(msg); else Alert.alert("Error", msg);
     }
     setSaving(false);
+  };
+
+  // Iter 505 — edit-task modal helpers.
+  const openEdit = (t: Task) => {
+    setEditFor(t);
+    setForm({
+      title: t.title || "", description: t.description || "",
+      due_date: t.due_date || "", priority: t.priority || "medium",
+      company_id: t.company_id || "",
+    });
+    setShowAdd(true);
+  };
+
+  const openHistory = async (t: Task) => {
+    setHistoryFor(t); setHistoryItems([]); setHistoryLoading(true);
+    try {
+      const r = await api<{ audit: any[] }>(`/admin/portal-tasks/${t.task_id}/audit`);
+      setHistoryItems(r.audit || []);
+    } catch { /* noop */ }
+    setHistoryLoading(false);
   };
 
   // Iter 503 — attachments (photo / PDF evidence)
@@ -416,7 +458,11 @@ export default function TasksPanel({
           <Text style={st.recTxt}>Recurring</Text>
         </Pressable>
         {canCreate ? (
-          <Pressable onPress={() => setShowAdd(true)} style={st.addBtn} testID="pd-task-add">
+          <Pressable onPress={() => {
+            setEditFor(null);
+            setForm({ title: "", description: "", due_date: "", priority: "medium", company_id: companyId || "" });
+            setShowAdd(true);
+          }} style={st.addBtn} testID="pd-task-add">
             <Ionicons name="add" size={15} color="#fff" />
             <Text style={st.addTxt}>New Task</Text>
           </Pressable>
@@ -478,6 +524,15 @@ export default function TasksPanel({
                       📅 {t.due_date}{overdue ? " (overdue)" : ""}
                     </Text>
                   ) : null}
+                  {/* Iter 505 — edited badge → tap for the full edit log */}
+                  {(t.edited_count || 0) > 0 ? (
+                    <Pressable onPress={() => openHistory(t)} hitSlop={6}
+                      testID={`pd-task-history-${t.task_id}`}>
+                      <Text style={[st.meta, { color: "#B45309", fontWeight: "800" }]}>
+                        ✎ edited ×{t.edited_count} — view log
+                      </Text>
+                    </Pressable>
+                  ) : null}
                 </View>
               </View>
               <View style={{ gap: 6, alignItems: "flex-end" }}>
@@ -521,6 +576,11 @@ export default function TasksPanel({
                   </Pressable>
                 ) : null}
                 <View style={{ flexDirection: "row", gap: 10 }}>
+                  {/* Iter 505 (user request) — EDIT task content any time */}
+                  <Pressable onPress={() => openEdit(t)} hitSlop={8}
+                    testID={`pd-task-edit-${t.task_id}`}>
+                    <Ionicons name="create-outline" size={16} color={colors.brandPrimary} />
+                  </Pressable>
                   <Pressable onPress={() => openAttachments(t)} hitSlop={8}
                     testID={`pd-task-att-${t.task_id}`}
                     style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
@@ -547,11 +607,17 @@ export default function TasksPanel({
         })
       )}
 
-      {/* Add modal */}
-      <Modal visible={showAdd} transparent animationType="fade" onRequestClose={() => setShowAdd(false)}>
+      {/* Add / Edit modal */}
+      <Modal visible={showAdd} transparent animationType="fade"
+        onRequestClose={() => { setShowAdd(false); setEditFor(null); }}>
         <View style={st.overlay}>
           <View style={st.modal}>
-            <Text style={st.modalTitle}>New Task</Text>
+            <Text style={st.modalTitle}>{editFor ? "Edit Task" : "New Task"}</Text>
+            {editFor ? (
+              <Text style={[st.meta, { marginBottom: 6 }]}>
+                Changes are saved to the task&apos;s edit log (who / when / what).
+              </Text>
+            ) : null}
             <ScrollView style={{ maxHeight: 420 }}>
               <Text style={st.lbl}>Title *</Text>
               <TextInput style={st.input} value={form.title}
@@ -576,8 +642,8 @@ export default function TasksPanel({
                   </Pressable>
                 ))}
               </View>
-              {/* Iter 502 — hierarchy: assign-to */}
-              {canCreate && (isSuper || isSub) ? (
+              {/* Iter 502 — hierarchy: assign-to (creation only) */}
+              {!editFor && canCreate && (isSuper || isSub) ? (
                 <>
                   <Text style={st.lbl}>
                     {isSuper ? "Assign to Sub Super Admin (optional)" : "Assign to team member (optional)"}
@@ -634,7 +700,7 @@ export default function TasksPanel({
                 </>
               ) : null}
               {/* Iter 502 — multi-company selection when assigning to a Sub Super Admin */}
-              {isSuper && assigneeId && assigneeKind === "sub_admins" ? (
+              {!editFor && isSuper && assigneeId && assigneeKind === "sub_admins" ? (
                 <>
                   <Text style={st.lbl}>Companies for this task (one or many)</Text>
                   <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
@@ -717,16 +783,61 @@ export default function TasksPanel({
               ) : null}
             </ScrollView>
             <View style={{ flexDirection: "row", gap: 8, marginTop: 14 }}>
-              <Pressable onPress={() => setShowAdd(false)} style={[st.mBtn, st.mBtnGhost]}>
+              <Pressable onPress={() => { setShowAdd(false); setEditFor(null); }} style={[st.mBtn, st.mBtnGhost]}>
                 <Text style={st.mBtnGhostTxt}>Cancel</Text>
               </Pressable>
               <Pressable onPress={createTask} disabled={saving || !form.title.trim()}
                 style={[st.mBtn, st.mBtnPrimary, (!form.title.trim() || saving) && { opacity: 0.5 }]}
                 testID="pd-task-save">
                 {saving ? <ActivityIndicator color="#fff" size="small" />
-                  : <Text style={st.mBtnPrimaryTxt}>Create Task</Text>}
+                  : <Text style={st.mBtnPrimaryTxt}>{editFor ? "Save Changes" : "Create Task"}</Text>}
               </Pressable>
             </View>
+          </View>
+        </View>
+      </Modal>
+      {/* Iter 505 — edit-log / history modal */}
+      <Modal visible={!!historyFor} transparent animationType="fade" onRequestClose={() => setHistoryFor(null)}>
+        <View style={st.overlay}>
+          <View style={st.modal}>
+            <Text style={st.modalTitle} numberOfLines={1}>
+              Edit Log — {historyFor?.title}
+            </Text>
+            {historyLoading ? (
+              <ActivityIndicator color={colors.brandPrimary} style={{ marginVertical: 20 }} />
+            ) : (
+              <ScrollView style={{ maxHeight: 420 }}>
+                {historyItems.length === 0 ? (
+                  <Text style={st.dim}>No history recorded yet.</Text>
+                ) : historyItems.map((h) => (
+                  <View key={h.audit_id} style={{
+                    borderBottomWidth: StyleSheet.hairlineWidth,
+                    borderBottomColor: colors.divider, paddingVertical: 8, gap: 2,
+                  }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <Text style={[st.prioChip, {
+                        color: h.action === "edited" ? "#B45309" : colors.brandPrimary,
+                        backgroundColor: h.action === "edited" ? "#FFFBEB" : "#EFF6FF",
+                      }]}>
+                        {String(h.action || "").toUpperCase()}
+                      </Text>
+                      <Text style={st.meta}>
+                        {h.actor_name} · {(h.at || "").slice(0, 16).replace("T", " ")}
+                      </Text>
+                    </View>
+                    {h.details ? (
+                      <Text style={{ fontSize: 11.5, color: colors.onSurfaceSecondary }}>
+                        {h.details}
+                      </Text>
+                    ) : null}
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+            <Pressable onPress={() => setHistoryFor(null)}
+              style={[st.mBtn, st.mBtnGhost, { marginTop: 12 }]} testID="pd-history-close">
+              <Text style={st.mBtnGhostTxt}>Close</Text>
+            </Pressable>
           </View>
         </View>
       </Modal>
