@@ -4617,3 +4617,32 @@ with New Task). deploy_vps_iter504.sh (copies public/sw.js to web root +
 verifies tasks-tab-screen inside built JS), temp_bundle → deploy504.sh,
 APP_ITERATION=504. User phone steps: close+reopen PWA twice (or reinstall
 icon) after deploy.
+
+## Iter 505 — Task Edit + Edit Log, PWA assign fix, global-task visibility ✅
+1. EDIT TASK CONTENT + LOG (user request): portal_phase2.py update_task
+   now records field-by-field edit log (Title/Description/Due date/
+   Priority/Firm old→new) as audit action "edited"; task gets
+   last_edited_at/by/by_name + edited_count (no-op edits don't log).
+   TasksPanel.tsx: ✏️ pencil (pd-task-edit-<id>) opens the Add modal in
+   edit mode (prefilled; Assign-to & multi-firm hidden while editing;
+   "Save Changes" → PATCH). Amber "✎ edited ×N — view log" chip
+   (pd-task-history-<id>) opens Edit Log modal (GET /portal-tasks/{id}/
+   audit; pd-history-close). "New Task" button resets edit state.
+2. PWA ASSIGN BUG (user: "Not able to assign task from PWA"): root cause
+   — form silently attached the CURRENTLY SELECTED firm even when outside
+   the Sub Super Admin's scope → backend 400 "Selected firm(s) are not
+   assigned…". Fix: picking an assignee auto-preselects an in-scope firm
+   (current firm if allowed, else their first firm; null scope = all);
+   createTask sends company_id:null + only multiCids when a scoped
+   assignee is chosen (scopedAssign flag). Verified via curl.
+3. GLOBAL TASK VISIBILITY (testing-agent finding): list endpoint firm
+   filter now ORs {company_id:null, company_ids:{$in:[null,[]]}} so
+   no-firm tasks always appear (PWA always has a firm selected).
+4. PWA install issue (user msg): manifest.json/icons/sw.js on VPS all
+   verified reachable+valid (manifest injected dynamically by +html.tsx);
+   awaiting user detail on exact symptom.
+Testing: backend flows via curl (edit log entries, edited_count, no-op,
+assign-with-scope, global visibility). testing_agent iteration_505.json —
+UI testIDs render; full E2E clicks blocked by Cloudflare 429 on preview
+(known env artifact). Deploy: deploy_vps_iter505.sh, temp_bundle →
+deploy505.sh, APP_ITERATION=505.

@@ -145,13 +145,20 @@ export default function TasksPanel({
           },
         });
       } else {
+        // Iter 506 (user bug — "Not able to assign task from PWA"):
+        // when assigning to a scoped Sub Super Admin, NEVER silently fall
+        // back to the currently selected firm (it may be outside the
+        // assignee's scope → backend 400). Send only the picked firms.
+        const scopedAssign = !!assigneeId && assigneeKind === "sub_admins";
         await api("/admin/portal-tasks", {
           method: "POST",
           body: {
             title: form.title, description: form.description || null,
             due_date: form.due_date || null, priority: form.priority,
-            company_id: form.company_id || null,
-            company_ids: multiCids.length ? multiCids : (form.company_id ? [form.company_id] : []),
+            company_id: scopedAssign ? null : (form.company_id || null),
+            company_ids: scopedAssign
+              ? multiCids
+              : (multiCids.length ? multiCids : (form.company_id ? [form.company_id] : [])),
             assignee_id: assigneeId || null,
           },
         });
@@ -676,7 +683,20 @@ export default function TasksPanel({
                           .slice(0, 60)
                           .map((a) => (
                             <Pressable key={a.user_id}
-                              onPress={() => { setAssigneeId(a.user_id); setAssigneeDd(false); }}
+                              onPress={() => {
+                                setAssigneeId(a.user_id); setAssigneeDd(false);
+                                // Iter 506 — auto-preselect firms inside the
+                                // assignee's scope so Create can't 400.
+                                if (isSuper && assigneeKind === "sub_admins") {
+                                  if (a.company_ids === null) {
+                                    setMultiCids(form.company_id ? [form.company_id] : []);
+                                  } else if (form.company_id && (a.company_ids || []).includes(form.company_id)) {
+                                    setMultiCids([form.company_id]);
+                                  } else {
+                                    setMultiCids((a.company_ids || []).slice(0, 1));
+                                  }
+                                }
+                              }}
                               style={[st.ddOpt, assigneeId === a.user_id && st.ddOptOn]}
                               testID={`pd-task-assignee-${a.user_id}`}>
                               <View style={{ flex: 1, marginRight: 8 }}>

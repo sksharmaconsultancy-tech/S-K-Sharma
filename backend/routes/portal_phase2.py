@@ -345,7 +345,14 @@ async def list_tasks(
     cid = _scope(admin, company_id)
     q: Dict[str, Any] = {}
     if cid:
-        q["$or"] = [{"company_id": cid}, {"company_ids": cid}]
+        # Iter 505 — also include GLOBAL tasks (no firm attached), else
+        # they become unreachable whenever a firm filter is active (PWA
+        # always has the selected firm applied).
+        q["$or"] = [
+            {"company_id": cid},
+            {"company_ids": cid},
+            {"company_id": None, "company_ids": {"$in": [None, []]}},
+        ]
     if status and status != "all":
         q["status"] = status
     if assignee_id and admin.get("role") == "super_admin":
