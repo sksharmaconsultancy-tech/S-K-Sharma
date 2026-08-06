@@ -4728,3 +4728,17 @@ Testing: testing_agent iteration_507.json — backend 10/10 pytest
 (/app/backend/tests/test_iter508_task_workflow.py) + all frontend
 scenarios PASS; edit-lock verified via curl after that run. Deploy:
 deploy_vps_iter509.sh, temp_bundle → deploy509.sh, APP_ITERATION=509.
+
+## Iter 510 (2026-08-06) — "PWA/Web Portal not opening" investigation
+User reported portal won't open post-Iter-509. Verified in workspace:
+Super Admin (password sharma123) + Sub Admin (testsub@sksharma.co) login,
+Web Portal, and PWA (tabs) ALL WORK on Iter 509 code — in dev AND in a
+production `expo export -p web` build served statically. Conclusion: the
+fault is on the VPS (suspects: build OOM/disk-full during 509 deploy,
+backend not restarting, or stale PWA service-worker shell).
+Fix shipped: deploy_vps_iter510.sh — RECOVERY deploy with STEP-0
+diagnostics block (disk/mem/backend logs/nginx/web dir), safe cache
+cleanup, auto 2GB swap, backend restart BEFORE build, build published
+only after dist verification (rollback-safe, .prev backup), sw.js cache
+bumped v5→v6, APP_ITERATION=510, temp_bundle kind=script → deploy510.sh.
+Awaiting user to run script on VPS and report the diagnostics if it still fails.
