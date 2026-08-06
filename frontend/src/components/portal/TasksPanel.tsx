@@ -646,11 +646,14 @@ export default function TasksPanel({
                   </Pressable>
                 ) : null}
                 <View style={{ flexDirection: "row", gap: 10 }}>
-                  {/* Iter 505 (user request) — EDIT task content any time */}
-                  <Pressable onPress={() => openEdit(t)} hitSlop={8}
-                    testID={`pd-task-edit-${t.task_id}`}>
-                    <Ionicons name="create-outline" size={16} color={colors.brandPrimary} />
-                  </Pressable>
+                  {/* Iter 505/509 — EDIT is for the Super Admin / task
+                      creator only; the allotted member cannot edit. */}
+                  {(isSuper || t.created_by === myUserId) ? (
+                    <Pressable onPress={() => openEdit(t)} hitSlop={8}
+                      testID={`pd-task-edit-${t.task_id}`}>
+                      <Ionicons name="create-outline" size={16} color={colors.brandPrimary} />
+                    </Pressable>
+                  ) : null}
                   <Pressable onPress={() => openAttachments(t)} hitSlop={8}
                     testID={`pd-task-att-${t.task_id}`}
                     style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>

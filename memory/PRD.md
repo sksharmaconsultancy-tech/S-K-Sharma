@@ -4697,3 +4697,34 @@ PASS (incl. create with scoped firm + cleanup). Deploy:
 deploy_vps_iter507.sh, temp_bundle → deploy507.sh, APP_ITERATION=507.
 NOTE: main-agent screenshot tool was fully Cloudflare-blocked this
 session — use testing_agent for UI verification when that happens.
+
+## Iter 508+509 — Sub Admin task discipline + edit lock + tappable counts ✅
+Backend (portal_phase2.py):
+- TASK_STATUSES += "later". PATCH rejects status="later" (must use POST
+  /portal-tasks/{id}/later with mandatory reason → later_reason/by/at,
+  audit "marked_later").
+- GET /portal-tasks/overdue-block (sub_admin): assigned tasks past due
+  without overdue_ack_due == due_date. POST /portal-tasks/{id}/
+  overdue-reason → overdue_reason_log[], last_overdue_reason,
+  overdue_ack_due=due_date (audit "overdue_reason"). Due-date change
+  re-triggers the gate.
+- 24h rule: create task without due_date → due tomorrow.
+- Super admin firm-filter bypass (created_by/assigned_by/assignee = me) —
+  fixes "Allotted Tasks Not Showing In Super Admin Login".
+- status=overdue list filter; counts include "later".
+- Iter 509 EDIT LOCK: content edits (title/desc/due/priority/firm) only
+  by super_admin or created_by==me (_wants_content_edit 403). Assignee
+  keeps status/Later/attachments. Verified via curl (5 scenarios).
+Frontend:
+- TasksPanel: FILTERS + later/overdue chips; ALL hub + status counters
+  tappable (pd-count-*, pd-hub-*) → setFilter; "⏸ Later…" button
+  (pd-task-later-<id>) + reason modal (pd-later-reason/save); "▶ Resume";
+  "⏸ LATER" chip + later_reason + "⚠ Late reason" lines on cards
+  (visible to super); ✏️ edit button only for isSuper || created_by==me.
+- NEW src/components/portal/OverdueGate.tsx — full-screen blocking modal
+  (overdue-gate, overdue-reason-<id>, overdue-submit-<id>) mounted in
+  (tabs)/_layout for sub_admin; fail-open on network errors.
+Testing: testing_agent iteration_507.json — backend 10/10 pytest
+(/app/backend/tests/test_iter508_task_workflow.py) + all frontend
+scenarios PASS; edit-lock verified via curl after that run. Deploy:
+deploy_vps_iter509.sh, temp_bundle → deploy509.sh, APP_ITERATION=509.

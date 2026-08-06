@@ -579,6 +579,19 @@ async def update_task(task_id: str, payload: TaskUpdate,
     if admin.get("role") == "sub_admin" and not _is_task_owner(admin, t):
         raise HTTPException(status_code=403,
                             detail="Not your task — belongs to another Sub Super Admin")
+    # Iter 509 (user request — "DON'T Allow the Task-Allotted Member to
+    # EDIT the Task"): only the Super Admin or the task's CREATOR may edit
+    # the task content. The allotted assignee can still work the task
+    # (status / Done / Later / attachments) but cannot change its content.
+    _wants_content_edit = any(
+        getattr(payload, f) is not None
+        for f in ("title", "description", "due_date", "priority", "company_id"))
+    if (_wants_content_edit
+            and admin.get("role") != "super_admin"
+            and t.get("created_by") != admin["user_id"]):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the Super Admin or the task creator can edit this task")
     upd: Dict[str, Any] = {}
     for f in ["title", "description", "due_date"]:
         v = getattr(payload, f)
