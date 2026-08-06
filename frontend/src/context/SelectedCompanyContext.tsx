@@ -290,8 +290,16 @@ export function SelectedCompanyProvider({ children }: { children: React.ReactNod
         // to leave (the selection itself is already in localStorage).
         setTimeout(() => {
           try {
-            // "/" routes per role/platform (desktop → portal dashboard).
-            (globalThis as any).location?.assign("/");
+            // Iter 502 (user request) — STAY on the current screen after a
+            // firm switch: refresh the SAME page so it refetches for the
+            // new firm. Only the root / firm-select routes go home.
+            const loc = (globalThis as any).location;
+            if (!loc) return;
+            if (loc.pathname === "/" || loc.pathname === "/firm-select") {
+              loc.assign("/");
+            } else {
+              loc.assign(loc.pathname + (loc.search || ""));
+            }
           } catch { /* noop */ }
         }, 250);
       }

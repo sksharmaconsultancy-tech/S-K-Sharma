@@ -250,6 +250,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/bulk-employee-correction", label: "Bulk Employee Correction", icon: "people-outline" },
       { route: "/bulk-operations", label: "Bulk Operations", icon: "layers-outline" },
       { route: "/employee-bulk-import", label: "Bulk Import (Excel)", icon: "cloud-upload-outline" },
+      { route: "/client-attendance-import", label: "Client Attendance Import", icon: "calendar-outline" },
       { route: "/uan-esic-import", label: "Import UAN / ESIC No", icon: "id-card-outline" },
       { route: "/zk-dat-import", label: "Import Biometric (.dat)", icon: "finger-print-outline" },
       { route: "/join-qr", label: "QR Codes (Join / App)", icon: "qr-code-outline" },
@@ -615,6 +616,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
     children: [
       { route: "/bulk-employee-correction", label: "Bulk Employee Correction", icon: "people-outline" },
       { route: "/employee-bulk-import", label: "Bulk Import (Excel)", icon: "cloud-upload-outline" },
+      { route: "/client-attendance-import", label: "Client Attendance Import", icon: "calendar-outline" },
       { route: "/uan-esic-import", label: "Import UAN / ESIC No", icon: "id-card-outline" },
       { route: "/zk-dat-import", label: "Import Biometric (.dat)", icon: "finger-print-outline" },
       { route: "/legacy-explorer", label: "Legacy SQL Explorer", icon: "server-outline" },

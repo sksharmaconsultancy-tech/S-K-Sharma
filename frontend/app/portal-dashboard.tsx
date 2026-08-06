@@ -118,7 +118,10 @@ export default function PortalDashboardScreen() {
       {tab !== "overview" ? (
         <ScrollView contentContainerStyle={{ padding: spacing.md, paddingBottom: 60 }}>
           {tab === "tasks" ? (
-            <TasksPanel companyId={selectedCompanyId} companies={companies} canPickFirm={canPickFirm} />
+            <TasksPanel companyId={selectedCompanyId} companies={companies}
+              canPickFirm={canPickFirm}
+              canCreate={user?.role === "super_admin" || user?.role === "sub_admin"}
+              role={user?.role || ""} myUserId={user?.user_id || ""} />
           ) : tab === "clients" ? (
             <ClientHealthPanel />
           ) : tab === "documents" ? (

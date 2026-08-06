@@ -97,18 +97,18 @@ export default function WorkspaceTabs({
   }, [pathname, active]);
 
   const switchTab = (t: WorkspaceTab) => {
-    if (t.id === active) {
-      // Iter 464 (user request) — clicking the ACTIVE tab REFRESHES the
-      // page it is already on (remount + refetch), never jumps elsewhere.
-      switching.current = t.route;
-      const p = t.route.split("?")[0];
-      router.replace((p + "?_r=" + Date.now()) as any);
-      return;
+    // Iter 464 + Iter 502 (user request) — clicking ANY tab (active or an
+    // old one) REFRESHES that tab's own page (remount + refetch for the
+    // current firm) and STAYS there — never jumps to the dashboard.
+    const [p, q] = t.route.split("?");
+    const qs = (q || "").replace(/(^|&)_r=\d+/g, "").replace(/^&/, "");
+    const fresh = p + "?" + (qs ? qs + "&" : "") + "_r=" + Date.now();
+    if (t.id !== active) {
+      setActive(t.id);
+      saveState(tabs, t.id);
     }
-    setActive(t.id);
-    saveState(tabs, t.id);
     switching.current = t.route;
-    router.replace(t.route as any);
+    router.replace(fresh as any);
   };
 
   const addTab = () => {

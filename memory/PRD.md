@@ -4470,3 +4470,55 @@ AI WhatsApp chatbot (P4), Multi-language EN/HI (P5).
 - Verified E2E: created test revisions on PAN TEST EMP (30000→36000), PDF text
   extracted OK ("increase of ₹6,000 (20.0%)", both breakups). UI screenshot OK.
   All test data cleaned (user reverted to gross, revisions + audit purged).
+
+## Iter 501 — Client Attendance Import (Attendance Summary Excel) ✅
+User spec (16 points) — NEW module, existing Punch Import / Biometric Sync /
+engines verified untouched (zero diff).
+- Backend: routes/client_attendance_import.py (/api/admin/client-attendance/*):
+  template, preview (auto header-row + column detection w/ synonyms, manual
+  mapping, staging re-validate without re-upload), commit (duplicate modes
+  replace|skip|merge; replace deletes ONLY client_import punches; batched
+  insert_many 1000/chunk; idempotent via staging.consumed), logs + error xlsx
+  + DELETE=rollback, days viewer, mapping templates (header-name based).
+- Data: db.attendance punches (source=client_import, approved, import_batch_id),
+  db.client_attendance_days (client values AS-IS, never recalculated),
+  db.client_attendance_imports (log), db.client_import_templates,
+  db.client_import_staging. Optional opt-in: compliance_import_entries
+  present_days sync per month.
+- Status logic: Present>0 / Absent>0 / leave codes CL SL PL EL OD CO WO WH H
+  LWP ML HD / per-code columns / WO / Holiday / times→present.
+- Frontend: app/client-attendance-import.tsx — drop zone, stats cards,
+  mapping modal + templates, invalid grid, first-15 preview, dup-mode radio,
+  compliance sync switch, Import History tab (error download + rollback).
+  Menu: Import / Export → Client Attendance Import (both nav trees).
+- Tested: 15+ backend assertions PASS (auto-map 17 cols, invalid date,
+  missing employee, missing OUT flag, CL mapping, commit, idempotent commit,
+  error xlsx, dup detect, skip / merge (fills only OUT) / replace (fresh
+  punches), rollback; DB verified clean after). UI screenshot verified.
+- Deploy: deploy_vps_iter501.sh, temp_bundle → deploy501.sh, APP_ITERATION=501.
+
+## Iter 502 — Task Hierarchy + stay-on-page fixes ✅
+1. Company-wise Task Assignment Hierarchy (user spec, portal_phase2.py + TasksPanel.tsx):
+   - Statuses extended: open|in_progress|submitted|done|approved (100% backward compat).
+   - RBAC: super_admin assigns ONLY to sub_admins (employee direct assign → 400),
+     multi-company (company_ids validated ⊆ assignee's sub_admin_company_ids).
+     sub_admin: internal tasks + delegate to team of scoped firms only; sees only
+     own/created/own-firm tasks; other admins' tasks → 403. company_admin cannot create.
+   - Workflow: sub submits (done blocked w/ hint) → super approves (sub approve → 403).
+   - POST /portal-tasks/{id}/delegate (child task + parent_task_id + delegated_count).
+   - GET /portal-tasks/assignees (role-aware), GET /portal-tasks/hub-dashboard
+     (super: companies/subs/awaiting/overdue/escalated + by_company; sub: firms/
+     pending/completed/high/upcoming/team progress), GET /portal-tasks/{id}/audit.
+   - db.task_audit_log: assigned/reassigned/delegated/status:*/deleted with actor+ts.
+   - UI: hub stat cards, Submitted/Approved filters+badges, assignee dropdown w/ search,
+     multi-company tick chips (scoped), delegate modal (👤+), Submit/Approve buttons.
+   - Tested: 9-step backend flow PASS (assign scope 400, sub done 400, approve gates
+     403/200, cross-admin 403, delegate, hubs, audit trail). UI screenshot verified.
+2. Punch Approvals bug (user): Pending badge counts all dates vs date-filtered list →
+   empty state now shows "N pending punches found on <dates> — Show them" jump button.
+3. Firm switch stays on current page (SelectedCompanyContext reloads pathname+search;
+   only / and /firm-select go home). Workspace tab clicks (active OR old) refresh that
+   tab's own page in place (WorkspaceTabs.switchTab).
+4. Iter 501 (same session): Client Attendance Import module; Firm dropdown in New Task;
+   task creation super-admin-only then extended per hierarchy spec.
+Deploy: deploy_vps_iter502.sh, temp_bundle → deploy502.sh, APP_ITERATION=502.

@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/admin", tags=["portal-phase2"])
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
-TASK_STATUSES = ["open", "in_progress", "done"]
+TASK_STATUSES = ["open", "in_progress", "submitted", "done", "approved"]
 TASK_PRIORITIES = ["low", "medium", "high"]
 DOC_TYPES = ["license", "registration", "insurance", "contract", "certificate", "other"]
 
@@ -34,11 +34,55 @@ async def _admin(authorization: Optional[str]):
     return admin
 
 
+async def _super_only(authorization: Optional[str]):
+    """Iter 501 (user request) — task CREATION (incl. recurring) is a
+    Super Admin-only feature, on web and PWA alike. Strict: sub_admins
+    are rejected too."""
+    from server import require_super_admin_strict
+    admin = await get_user_from_token(authorization)
+    require_super_admin_strict(admin)
+    return admin
+
+
 def _scope(admin: dict, company_id: Optional[str]) -> Optional[str]:
     """company_admin is always locked to their own firm."""
     if admin.get("role") == "company_admin":
         return admin.get("company_id")
     return company_id or None
+
+
+# ------- Iter 502 — company-wise task-assignment hierarchy helpers -------
+
+def _sub_scope_ids(admin: dict) -> Optional[List[str]]:
+    """Sub-admin's assigned company ids; None = all firms."""
+    if admin.get("role") != "sub_admin":
+        return None
+    if (admin.get("sub_admin_company_scope") or "all") == "all":
+        return None
+    return list(admin.get("sub_admin_company_ids") or [])
+
+
+async def _task_audit(actor: dict, action: str, task: dict,
+                      details: str = "") -> None:
+    """Every assignment / reassignment / status / approval action lands in
+    the audit log with timestamp + user."""
+    await db.task_audit_log.insert_one({
+        "audit_id": f"taud_{uuid.uuid4().hex[:12]}",
+        "at": _now().isoformat(),
+        "action": action,
+        "task_id": task.get("task_id"),
+        "task_title": task.get("title"),
+        "actor_id": actor.get("user_id"),
+        "actor_name": actor.get("name") or actor.get("email"),
+        "actor_role": actor.get("role"),
+        "details": details,
+    })
+
+
+def _is_task_owner(admin: dict, t: dict) -> bool:
+    """Sub-admin may act on tasks assigned TO them or created BY them."""
+    return t.get("assignee_id") == admin["user_id"] \
+        or t.get("created_by") == admin["user_id"]
 
 
 # ============================= TASKS ================================
@@ -47,6 +91,7 @@ class TaskCreate(BaseModel):
     title: str
     description: Optional[str] = None
     company_id: Optional[str] = None
+    company_ids: Optional[List[str]] = None   # Iter 502 — multi-company
     assignee_id: Optional[str] = None
     due_date: Optional[str] = None        # YYYY-MM-DD
     priority: str = "medium"
@@ -168,7 +213,7 @@ async def list_recurring_tasks(authorization: Optional[str] = Header(None)):
 @router.post("/portal-recurring-tasks")
 async def create_recurring_task(payload: RecurringCreate,
                                 authorization: Optional[str] = Header(None)):
-    admin = await _admin(authorization)
+    admin = await _super_only(authorization)
     title = (payload.title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="Title is required")
@@ -208,7 +253,7 @@ async def create_recurring_task(payload: RecurringCreate,
 async def seed_statutory_recurring(authorization: Optional[str] = Header(None)):
     """One-click: add the 4 standard statutory recurring to-dos.
     Super admin → all firms; company admin → own firm. Idempotent."""
-    admin = await _admin(authorization)
+    admin = await _super_only(authorization)
     is_ca = admin.get("role") == "company_admin"
     cid = admin.get("company_id") if is_ca else None
     company_name = None
@@ -292,6 +337,7 @@ async def delete_recurring_task(rtask_id: str,
 async def list_tasks(
     status: Optional[str] = Query(None),
     company_id: Optional[str] = Query(None),
+    assignee_id: Optional[str] = Query(None),
     authorization: Optional[str] = Header(None),
 ):
     admin = await _admin(authorization)
@@ -299,17 +345,39 @@ async def list_tasks(
     cid = _scope(admin, company_id)
     q: Dict[str, Any] = {}
     if cid:
-        q["company_id"] = cid
+        q["$or"] = [{"company_id": cid}, {"company_ids": cid}]
     if status and status != "all":
         q["status"] = status
+    if assignee_id and admin.get("role") == "super_admin":
+        q["assignee_id"] = assignee_id
+    # Iter 502 — a sub_admin sees ONLY: tasks assigned to them, tasks they
+    # created (internal / delegated), and unassigned tasks of their firms.
+    role_or: Optional[List[Dict[str, Any]]] = None
+    if admin.get("role") == "sub_admin":
+        role_or = [{"assignee_id": admin["user_id"]},
+                   {"created_by": admin["user_id"]}]
+        scope = _sub_scope_ids(admin)
+        if scope is None:
+            role_or.append({"assignee_id": None})
+        else:
+            role_or.append({"assignee_id": None,
+                            "$or": [{"company_id": {"$in": scope}},
+                                    {"company_ids": {"$in": scope}}]})
+        if "$or" in q:
+            q = {"$and": [{"$or": q.pop("$or")}, {"$or": role_or}, q]}
+        else:
+            q["$or"] = role_or
     tasks = await db.portal_tasks.find(q, {"_id": 0}).sort(
         [("status", 1), ("due_date", 1), ("created_at", -1)]).to_list(500)
     today = _now().strftime("%Y-%m-%d")
-    counts = {"open": 0, "in_progress": 0, "done": 0, "overdue": 0}
-    all_q = {"company_id": cid} if cid else {}
+    counts = {"open": 0, "in_progress": 0, "submitted": 0, "done": 0,
+              "approved": 0, "overdue": 0}
+    all_q = dict(q)
+    all_q.pop("status", None)
     async for t in db.portal_tasks.find(all_q, {"_id": 0, "status": 1, "due_date": 1}):
         counts[t.get("status", "open")] = counts.get(t.get("status", "open"), 0) + 1
-        if t.get("status") != "done" and t.get("due_date") and t["due_date"] < today:
+        if t.get("status") not in ("done", "approved") \
+                and t.get("due_date") and t["due_date"] < today:
             counts["overdue"] += 1
     return {"tasks": tasks, "counts": counts}
 
@@ -368,29 +436,88 @@ async def priority_tasks(
 
 @router.post("/portal-tasks")
 async def create_task(payload: TaskCreate, authorization: Optional[str] = Header(None)):
-    admin = await _admin(authorization)
+    """Iter 502 — hierarchical assignment:
+      * super_admin  → may assign ONLY to Sub Super Admins (never directly
+        to employees), across one or multiple companies.
+      * sub_admin    → may create INTERNAL tasks and assign them to team
+        members (employees / company admins) of THEIR assigned companies.
+      * company_admin → cannot create tasks (Iter 501 user request).
+    """
+    admin = await get_user_from_token(authorization)
+    if admin.get("role") not in ("super_admin", "sub_admin"):
+        raise HTTPException(status_code=403,
+                            detail="Only Super Admin / Sub Super Admins can create tasks")
     title = (payload.title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="Title is required")
     if payload.priority not in TASK_PRIORITIES:
         raise HTTPException(status_code=400, detail="Invalid priority")
-    cid = _scope(admin, payload.company_id)
-    company_name = None
-    if cid:
-        c = await db.companies.find_one({"company_id": cid}, {"_id": 0, "name": 1})
-        company_name = (c or {}).get("name")
-    assignee_name = None
+
+    # ---- companies (single or multiple) ----
+    cids: List[str] = [c for c in (payload.company_ids or []) if c]
+    if not cids and payload.company_id:
+        cids = [payload.company_id]
+    my_scope = _sub_scope_ids(admin)
+    if admin.get("role") == "sub_admin" and my_scope is not None:
+        bad = [c for c in cids if c not in my_scope]
+        if bad:
+            raise HTTPException(status_code=403,
+                                detail="Firm not in your assigned scope")
+    company_names: List[str] = []
+    for c in cids:
+        doc = await db.companies.find_one({"company_id": c}, {"_id": 0, "name": 1})
+        if doc:
+            company_names.append(doc["name"])
+
+    # ---- assignee validation (RBAC hierarchy) ----
+    assignee = None
     if payload.assignee_id:
-        u = await db.users.find_one({"user_id": payload.assignee_id}, {"_id": 0, "name": 1})
-        assignee_name = (u or {}).get("name")
+        assignee = await db.users.find_one(
+            {"user_id": payload.assignee_id},
+            {"_id": 0, "user_id": 1, "name": 1, "email": 1, "role": 1,
+             "company_id": 1, "sub_admin_company_scope": 1,
+             "sub_admin_company_ids": 1})
+        if not assignee:
+            raise HTTPException(status_code=404, detail="Assignee not found")
+        if admin.get("role") == "super_admin":
+            if assignee.get("role") != "sub_admin":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Super Admin can assign tasks only to Sub Super Admins")
+            a_scope = _sub_scope_ids(assignee)
+            if a_scope is not None:
+                bad = [c for c in cids if c not in a_scope]
+                if bad:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Selected firm(s) are not assigned to this Sub Super Admin")
+        else:  # sub_admin delegating internally
+            if assignee.get("role") == "sub_admin" \
+                    and assignee["user_id"] != admin["user_id"]:
+                raise HTTPException(
+                    status_code=403,
+                    detail="You can assign only to your own team members")
+            if assignee.get("role") in ("employee", "company_admin"):
+                a_cid = assignee.get("company_id")
+                if my_scope is not None and a_cid not in my_scope:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="This member is not in your assigned companies")
+
     task = {
         "task_id": f"task_{uuid.uuid4().hex[:12]}",
         "title": title,
         "description": (payload.description or "").strip() or None,
-        "company_id": cid,
-        "company_name": company_name,
-        "assignee_id": payload.assignee_id or None,
-        "assignee_name": assignee_name,
+        "company_id": cids[0] if cids else None,
+        "company_name": company_names[0] if company_names else None,
+        "company_ids": cids,
+        "company_names": company_names,
+        "assignee_id": (assignee or {}).get("user_id"),
+        "assignee_name": (assignee or {}).get("name") or (assignee or {}).get("email"),
+        "assignee_role": (assignee or {}).get("role"),
+        "assigned_by": admin["user_id"],
+        "assigned_by_name": admin.get("name") or admin.get("email"),
+        "assigned_by_role": admin.get("role"),
         "due_date": payload.due_date or None,
         "priority": payload.priority,
         "status": "open",
@@ -400,6 +527,9 @@ async def create_task(payload: TaskCreate, authorization: Optional[str] = Header
         "updated_at": _now().isoformat(),
     }
     await db.portal_tasks.insert_one(dict(task))
+    await _task_audit(admin, "assigned" if assignee else "created", task,
+                      f"→ {(assignee or {}).get('name') or 'unassigned'} · "
+                      f"{', '.join(company_names) or 'general'}")
     return {"ok": True, "task": task}
 
 
@@ -412,6 +542,11 @@ async def update_task(task_id: str, payload: TaskUpdate,
         raise HTTPException(status_code=404, detail="Task not found")
     if admin.get("role") == "company_admin" and t.get("company_id") != admin.get("company_id"):
         raise HTTPException(status_code=403, detail="Not your firm's task")
+    # Iter 502 — a sub_admin may act only on their own tasks (assigned to
+    # them or created by them). Another Sub Super Admin's tasks are off-limits.
+    if admin.get("role") == "sub_admin" and not _is_task_owner(admin, t):
+        raise HTTPException(status_code=403,
+                            detail="Not your task — belongs to another Sub Super Admin")
     upd: Dict[str, Any] = {}
     for f in ["title", "description", "due_date"]:
         v = getattr(payload, f)
@@ -424,23 +559,50 @@ async def update_task(task_id: str, payload: TaskUpdate,
     if payload.status is not None:
         if payload.status not in TASK_STATUSES:
             raise HTTPException(status_code=400, detail="Invalid status")
+        # Iter 502 — workflow gates:
+        #   approve        → super_admin only
+        #   super-assigned → the sub_admin SUBMITS for review (cannot self-done)
+        if payload.status == "approved" and admin.get("role") != "super_admin":
+            raise HTTPException(status_code=403,
+                                detail="Only the Super Admin can approve & close tasks")
+        if (payload.status == "done"
+                and admin.get("role") == "sub_admin"
+                and t.get("assigned_by_role") == "super_admin"
+                and t.get("assignee_id") == admin["user_id"]):
+            raise HTTPException(
+                status_code=400,
+                detail="Submit this task for the Super Admin's review instead")
         upd["status"] = payload.status
         if payload.status == "done":
             upd["completed_at"] = _now().isoformat()
             upd["completed_by"] = admin["user_id"]
+        elif payload.status == "submitted":
+            upd["submitted_at"] = _now().isoformat()
+            upd["submitted_by"] = admin["user_id"]
+            upd["submitted_by_name"] = admin.get("name") or admin.get("email")
+        elif payload.status == "approved":
+            upd["approved_at"] = _now().isoformat()
+            upd["approved_by"] = admin["user_id"]
+            upd["approved_by_name"] = admin.get("name") or admin.get("email")
     if payload.company_id is not None and admin.get("role") != "company_admin":
         upd["company_id"] = payload.company_id or None
         c = await db.companies.find_one({"company_id": payload.company_id}, {"_id": 0, "name": 1})
         upd["company_name"] = (c or {}).get("name")
     if payload.assignee_id is not None:
         upd["assignee_id"] = payload.assignee_id or None
-        u = await db.users.find_one({"user_id": payload.assignee_id}, {"_id": 0, "name": 1})
+        u = await db.users.find_one({"user_id": payload.assignee_id},
+                                    {"_id": 0, "name": 1, "role": 1})
         upd["assignee_name"] = (u or {}).get("name")
+        upd["assignee_role"] = (u or {}).get("role")
     upd["updated_at"] = _now().isoformat()
     await db.portal_tasks.update_one({"task_id": task_id}, {"$set": upd})
     t2 = await db.portal_tasks.find_one({"task_id": task_id}, {"_id": 0})
     if payload.status is not None:
+        await _task_audit(admin, f"status:{payload.status}", t2)
         await _sync_calendar_from_task(admin, t2)
+    if payload.assignee_id is not None:
+        await _task_audit(admin, "reassigned", t2,
+                          f"→ {upd.get('assignee_name') or 'unassigned'}")
     return {"ok": True, "task": t2}
 
 
@@ -497,8 +659,204 @@ async def delete_task(task_id: str, authorization: Optional[str] = Header(None))
         raise HTTPException(status_code=404, detail="Task not found")
     if admin.get("role") == "company_admin" and t.get("company_id") != admin.get("company_id"):
         raise HTTPException(status_code=403, detail="Not your firm's task")
+    if admin.get("role") == "sub_admin" and not _is_task_owner(admin, t):
+        raise HTTPException(status_code=403,
+                            detail="Not your task — belongs to another Sub Super Admin")
     await db.portal_tasks.delete_one({"task_id": task_id})
+    await _task_audit(admin, "deleted", t)
     return {"ok": True}
+
+
+# ---------- Iter 502 — hierarchy: assignees, delegation, dashboards ----------
+
+@router.get("/portal-tasks/assignees")
+async def task_assignees(authorization: Optional[str] = Header(None)):
+    """Who can I assign tasks to?
+      * super_admin → the Sub Super Admins (with their assigned firms).
+      * sub_admin   → team members (employees / company admins) of THEIR
+        assigned companies only."""
+    admin = await _admin(authorization)
+    if admin.get("role") == "super_admin":
+        out = []
+        async for u in db.users.find(
+                {"role": "sub_admin", "deleted": {"$ne": True}},
+                {"_id": 0, "user_id": 1, "name": 1, "email": 1, "role": 1,
+                 "sub_admin_company_scope": 1, "sub_admin_company_ids": 1}):
+            scope = _sub_scope_ids(u)
+            names: List[str] = []
+            if scope is not None:
+                async for c in db.companies.find(
+                        {"company_id": {"$in": scope}}, {"_id": 0, "name": 1}):
+                    names.append(c["name"])
+            out.append({"user_id": u["user_id"],
+                        "name": u.get("name") or u.get("email"),
+                        "role": "sub_admin",
+                        "company_ids": scope,     # None = all firms
+                        "company_names": names})
+        return {"assignees": out, "kind": "sub_admins"}
+    if admin.get("role") == "sub_admin":
+        scope = _sub_scope_ids(admin)
+        q: Dict[str, Any] = {"role": {"$in": ["employee", "company_admin"]},
+                             "deleted": {"$ne": True}}
+        if scope is not None:
+            q["company_id"] = {"$in": scope}
+        out = []
+        async for u in db.users.find(
+                q, {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1,
+                    "designation": 1, "role": 1, "company_id": 1}).limit(800):
+            out.append({"user_id": u["user_id"],
+                        "name": u.get("name") or "",
+                        "employee_code": u.get("employee_code") or "",
+                        "designation": u.get("designation") or "",
+                        "role": u.get("role"),
+                        "company_id": u.get("company_id")})
+        return {"assignees": out, "kind": "team"}
+    return {"assignees": [], "kind": "none"}
+
+
+class DelegateBody(BaseModel):
+    assignee_id: str
+    note: Optional[str] = None
+    due_date: Optional[str] = None
+    priority: Optional[str] = None
+
+
+@router.post("/portal-tasks/{task_id}/delegate")
+async def delegate_task(task_id: str, payload: DelegateBody,
+                        authorization: Optional[str] = Header(None)):
+    """Iter 502 — a Sub Super Admin distributes a received task to a team
+    member within their assigned companies (creates a linked child task)."""
+    admin = await _admin(authorization)
+    if admin.get("role") not in ("sub_admin", "super_admin"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    t = await db.portal_tasks.find_one({"task_id": task_id}, {"_id": 0})
+    if not t:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if admin.get("role") == "sub_admin" and not _is_task_owner(admin, t):
+        raise HTTPException(status_code=403,
+                            detail="Not your task — belongs to another Sub Super Admin")
+    assignee = await db.users.find_one(
+        {"user_id": payload.assignee_id},
+        {"_id": 0, "user_id": 1, "name": 1, "role": 1, "company_id": 1})
+    if not assignee:
+        raise HTTPException(status_code=404, detail="Team member not found")
+    if admin.get("role") == "super_admin" and assignee.get("role") != "sub_admin":
+        raise HTTPException(status_code=400,
+                            detail="Super Admin can assign tasks only to Sub Super Admins")
+    scope = _sub_scope_ids(admin)
+    if admin.get("role") == "sub_admin" and scope is not None \
+            and assignee.get("role") in ("employee", "company_admin") \
+            and assignee.get("company_id") not in scope:
+        raise HTTPException(status_code=403,
+                            detail="This member is not in your assigned companies")
+    child = {
+        **{k: t.get(k) for k in ("title", "company_id", "company_name",
+                                 "company_ids", "company_names")},
+        "task_id": f"task_{uuid.uuid4().hex[:12]}",
+        "description": (payload.note or "").strip() or t.get("description"),
+        "assignee_id": assignee["user_id"],
+        "assignee_name": assignee.get("name"),
+        "assignee_role": assignee.get("role"),
+        "assigned_by": admin["user_id"],
+        "assigned_by_name": admin.get("name") or admin.get("email"),
+        "assigned_by_role": admin.get("role"),
+        "parent_task_id": task_id,
+        "due_date": payload.due_date or t.get("due_date"),
+        "priority": payload.priority if payload.priority in TASK_PRIORITIES else t.get("priority", "medium"),
+        "status": "open",
+        "created_by": admin["user_id"],
+        "created_by_name": admin.get("name"),
+        "created_at": _now().isoformat(),
+        "updated_at": _now().isoformat(),
+    }
+    await db.portal_tasks.insert_one(dict(child))
+    await db.portal_tasks.update_one(
+        {"task_id": task_id},
+        {"$inc": {"delegated_count": 1},
+         "$set": {"updated_at": _now().isoformat()}})
+    await _task_audit(admin, "delegated", child,
+                      f"from {task_id} → {assignee.get('name')}")
+    return {"ok": True, "task": child}
+
+
+@router.get("/portal-tasks/hub-dashboard")
+async def task_hub_dashboard(authorization: Optional[str] = Header(None)):
+    """Role-aware hierarchy dashboard counters."""
+    admin = await _admin(authorization)
+    today = _now().strftime("%Y-%m-%d")
+    week = (_now() + timedelta(days=7)).strftime("%Y-%m-%d")
+    if admin.get("role") == "super_admin":
+        total_companies = await db.companies.count_documents(
+            {"deleted": {"$ne": True}})
+        total_subs = await db.users.count_documents(
+            {"role": "sub_admin", "deleted": {"$ne": True}})
+        by_company: Dict[str, Dict[str, Any]] = {}
+        overdue = escalated = submitted = 0
+        async for t in db.portal_tasks.find(
+                {}, {"_id": 0, "status": 1, "due_date": 1, "priority": 1,
+                     "company_name": 1}):
+            st_ = t.get("status", "open")
+            key = t.get("company_name") or "General"
+            b = by_company.setdefault(key, {"company": key, "pending": 0, "completed": 0})
+            if st_ in ("done", "approved"):
+                b["completed"] += 1
+            else:
+                b["pending"] += 1
+                if t.get("due_date") and t["due_date"] < today:
+                    overdue += 1
+                    if t.get("priority") == "high":
+                        escalated += 1
+            if st_ == "submitted":
+                submitted += 1
+        return {"role": "super_admin", "total_companies": total_companies,
+                "total_sub_admins": total_subs,
+                "overdue": overdue, "escalated": escalated,
+                "awaiting_review": submitted,
+                "by_company": sorted(by_company.values(),
+                                     key=lambda b: -b["pending"])[:12]}
+    if admin.get("role") == "sub_admin":
+        scope = _sub_scope_ids(admin)
+        names: List[str] = []
+        if scope is not None:
+            async for c in db.companies.find({"company_id": {"$in": scope}},
+                                             {"_id": 0, "name": 1}):
+                names.append(c["name"])
+        me = admin["user_id"]
+        pending = completed = high = upcoming = 0
+        deleg_total = deleg_done = 0
+        async for t in db.portal_tasks.find(
+                {"$or": [{"assignee_id": me}, {"created_by": me}]},
+                {"_id": 0, "status": 1, "due_date": 1, "priority": 1,
+                 "assignee_id": 1, "created_by": 1, "parent_task_id": 1}):
+            st_ = t.get("status", "open")
+            mine = t.get("assignee_id") == me
+            if t.get("created_by") == me and not mine:
+                deleg_total += 1
+                if st_ in ("done", "approved"):
+                    deleg_done += 1
+            if st_ in ("done", "approved"):
+                completed += 1
+            else:
+                pending += 1
+                if t.get("priority") == "high":
+                    high += 1
+                if t.get("due_date") and today <= t["due_date"] <= week:
+                    upcoming += 1
+        return {"role": "sub_admin",
+                "assigned_companies": names if scope is not None else ["All firms"],
+                "pending": pending, "completed": completed,
+                "high_priority": high, "upcoming_deadlines": upcoming,
+                "team_total": deleg_total, "team_done": deleg_done}
+    return {"role": admin.get("role")}
+
+
+@router.get("/portal-tasks/{task_id}/audit")
+async def task_audit_trail(task_id: str,
+                           authorization: Optional[str] = Header(None)):
+    await _admin(authorization)
+    items = await db.task_audit_log.find(
+        {"task_id": task_id}, {"_id": 0}).sort("at", -1).to_list(100)
+    return {"audit": items}
 
 
 # ======================= TRACKED DOCUMENTS ==========================

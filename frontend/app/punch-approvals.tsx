@@ -1714,6 +1714,36 @@ export default function PunchApprovalsScreen() {
               ? `No ${tab === "auto" ? "auto-punch" : tab === "manual" ? "manual entry" : tab} records for ${selectedDate}${dateMode === "period" ? ` – ${toDate}` : ""}. Try another date or tab.`
               : "Pick a date and tap Show to load punches."}
           </Text>
+          {/* Iter 502 (user bug) — the "Pending N" badge counts ALL dates,
+              but the list is filtered to the picked range. When the
+              pending punches sit OUTSIDE the range, jump to them. */}
+          {(() => {
+            if (tab !== "pending" || !hasLoadedOnce) return null;
+            const pend = records
+              .filter((r) => (r.status || "") === "pending")
+              .map((r) => (r.at || "").slice(0, 10))
+              .filter(Boolean)
+              .sort();
+            if (!pend.length) return null;
+            const lo = pend[0];
+            const hi = pend[pend.length - 1];
+            return (
+              <Pressable
+                onPress={() => {
+                  setDateMode("period");
+                  setSelectedDate(lo);
+                  setToDate(hi);
+                }}
+                style={styles.jumpBtn}
+                testID="pending-jump-btn"
+              >
+                <Ionicons name="calendar-outline" size={14} color="#fff" />
+                <Text style={styles.jumpBtnTxt}>
+                  {pend.length} pending punch{pend.length === 1 ? "" : "es"} found on {lo === hi ? fmtDate(lo) : `${fmtDate(lo)} – ${fmtDate(hi)}`} — Show them
+                </Text>
+              </Pressable>
+            );
+          })()}
         </View>
       ) : (
         /* Iter 93 — Same day-summary table as the Updated tab, for every
@@ -2155,6 +2185,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     minWidth: 130,
   },
+  jumpBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: colors.brandPrimary, borderRadius: radius.md,
+    paddingHorizontal: 14, paddingVertical: 9, marginTop: 14,
+  },
+  jumpBtnTxt: { fontSize: 12, fontWeight: "800", color: "#fff" },
   dateModeChip: {
     paddingHorizontal: 10, paddingVertical: 6,
     borderRadius: 999,
