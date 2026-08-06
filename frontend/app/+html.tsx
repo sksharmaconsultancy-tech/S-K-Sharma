@@ -96,6 +96,66 @@ export default function Root({ children }: PropsWithChildren) {
                   navigator.serviceWorker.register('/sw.js').catch(function () {});
                 });
               }
+              // Iter 511 — BLANK-PAGE SELF-HEAL. If the app fails to boot
+              // (stale service-worker shell pointing at a deleted JS bundle,
+              // or a half-deployed build), automatically unregister the SW,
+              // purge all caches and reload ONCE — no manual cache clearing
+              // needed on any device. Max 2 attempts per session to avoid
+              // reload loops.
+              (function () {
+                var KEY = 'sks-selfheal-count';
+                var healed = false;
+                function heal() {
+                  if (healed) return;
+                  healed = true;
+                  var n = 0;
+                  try { n = parseInt(sessionStorage.getItem(KEY) || '0', 10); } catch (e) {}
+                  if (n >= 2) return;
+                  try { sessionStorage.setItem(KEY, String(n + 1)); } catch (e) {}
+                  var reloaded = false;
+                  var done = function () {
+                    if (reloaded) return;
+                    reloaded = true;
+                    var u = window.location.pathname + window.location.search;
+                    window.location.replace(u + (u.indexOf('?') === -1 ? '?' : '&') + 'skshl=' + Date.now());
+                  };
+                  var ps = [];
+                  try {
+                    if ('serviceWorker' in navigator) {
+                      ps.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+                        return Promise.all(rs.map(function (r) { return r.unregister(); }));
+                      }).catch(function () {}));
+                    }
+                    if (window.caches && caches.keys) {
+                      ps.push(caches.keys().then(function (ks) {
+                        return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+                      }).catch(function () {}));
+                    }
+                  } catch (e) {}
+                  Promise.all(ps).then(done, done);
+                  setTimeout(done, 3000);
+                }
+                // Entry JS bundle 404/failed → heal immediately.
+                window.addEventListener('error', function (e) {
+                  var t = e && e.target;
+                  if (t && t.tagName === 'SCRIPT' && t.src) heal();
+                }, true);
+                // App never mounted (splash still up after 15s) → heal.
+                window.addEventListener('load', function () {
+                  setTimeout(function () {
+                    var s = document.getElementById('sks-splash');
+                    if (s && s.parentNode) heal();
+                  }, 15000);
+                });
+                // App booted fine → reset the heal counter.
+                var okTimer = setInterval(function () {
+                  var s = document.getElementById('sks-splash');
+                  if (!s || !s.parentNode) {
+                    try { sessionStorage.removeItem(KEY); } catch (e) {}
+                    clearInterval(okTimer);
+                  }
+                }, 2000);
+              })();
             `,
           }}
         />

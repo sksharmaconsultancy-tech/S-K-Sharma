@@ -4742,3 +4742,16 @@ cleanup, auto 2GB swap, backend restart BEFORE build, build published
 only after dist verification (rollback-safe, .prev backup), sw.js cache
 bumped v5→v6, APP_ITERATION=510, temp_bundle kind=script → deploy510.sh.
 Awaiting user to run script on VPS and report the diagnostics if it still fails.
+
+## Iter 511 (2026-08-06) — "Employer PWA blank page"
+Reproduced NOTHING broken in code: employer login (admin@kankani.local,
+PIN reset to 123456 — 6-digit now required), all PWA tabs, /employer
+install entry all render in dev AND production build. Root cause = stale
+PWA shell on user device (cached HTML → deleted JS bundle → blank).
+PERMANENT FIX: blank-page SELF-HEAL inline script in app/+html.tsx
+(sks-selfheal-count): on entry-script 404 or splash stuck >15s →
+unregister SW + purge all caches + auto-reload (max 2/session, counter
+resets on successful boot). Verified: fires correctly on simulated
+bundle 404 (2 attempts then stops), zero false triggers on normal boot.
+sw.js cache v6→v7, APP_ITERATION=511, deploy_vps_iter511.sh,
+temp_bundle kind=script → deploy511.sh.
