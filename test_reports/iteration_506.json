@@ -1,0 +1,32 @@
+{
+  "summary": "Frontend UI verification for New Task modal 'Assign to Sub Super Admin → Firms multi-select' feature (TasksPanel.tsx). All 6 acceptance steps PASSED on mobile viewport 390x844.",
+  "steps_verified": {
+    "step1_no_assignee_shows_firm_dd": "PASS — pd-task-firm-dd present (text: 'Kankani Enterprises'), pd-task-mc-all NOT rendered.",
+    "step2_select_sub_admin_swaps_to_multiselect": "PASS — After selecting Test SubAdmin (sub_623b8a106846), pd-task-firm-dd disappears; multi-select section appears with label 'Firms for this task — Test SubAdmin\\'s firms only  (1 selected)'. Only 'City Care Hospital' row (pd-task-mc-cmp_adddad3f65) is shown, pre-checked (auto-preselected). Select-All chip pd-task-mc-all present.",
+    "step3_toggle_row_and_all": "PASS — Toggling pd-task-mc-cmp_adddad3f65 off removes '(1 selected)' suffix; toggling on brings it back. pd-task-mc-all click #1 clears selection (label loses count), click #2 re-selects all (count returns to 1).",
+    "step4_create_task": "PASS — Filled title 'Scoped firm test task', clicked pd-task-save. Modal closed cleanly, no 'firm not assigned' or error keywords in body. Verified via GET /api/admin/portal-tasks: task_id=task_3d2184579700 persisted with assignee_user_id=sub_623b8a106846 (Test SubAdmin), company_id=cmp_adddad3f65, company_ids=['cmp_adddad3f65'], company_name=City Care Hospital.",
+    "step5_reselect_not_assigned_restores_single_firm_dd": "PASS — After re-opening modal, selecting sub-admin (mc-all appears), then selecting 'Not assigned — my own task' option: pd-task-firm-dd returns and pd-task-mc-all is gone. State reset correctly.",
+    "step6_cleanup": "PASS — DELETE /api/admin/portal-tasks/task_3d2184579700 → 200. Task removed."
+  },
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "critical_code_review_comments": [
+    "Minor: 'Not assigned — my own task' Pressable at TasksPanel.tsx:676 does NOT have a testID (only the assigned-user rows do). Adding testID=\"pd-task-assignee-none\" would make future test automation deterministic; today it must be located by visible text.",
+    "Minor: RN Web console noise — 'shadow* style props are deprecated. Use boxShadow' and 'props.pointerEvents is deprecated' warnings appearing across the app (not blocking, but worth cleanup pass)."
+  ],
+  "test_report_links": [],
+  "action_items": [
+    "OPTIONAL (nice-to-have): add testID=\"pd-task-assignee-none\" to the 'Not assigned' Pressable in TasksPanel.tsx around line 676 for future E2E stability. Not blocking — current feature works as designed."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only)", "frontend": "100%"},
+  "seed_data_creation": "Created task_3d2184579700 during test flow and cleaned it up via DELETE at end. No residual data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Feature 'assign-to-sub-admin swaps firm dropdown to scoped multi-select' is fully working end-to-end. Verified on mobile 390x844 via real login (sksharmaconsultancy@gmail.com/sharma123 → llc_session_token in localStorage) and the resulting POST /api/admin/portal-tasks with company_ids=['cmp_adddad3f65'] persisted correctly (assignee=Test SubAdmin, firm=City Care Hospital, no 400 firm-scope error). testIDs used: pd-task-add, pd-task-assignee-dd, pd-task-assignee-sub_623b8a106846, pd-task-firm-dd, pd-task-mc-all, pd-task-mc-cmp_adddad3f65, pd-task-title-input, pd-task-save. Note: React Native Web Pressable clicks required page.locator().click() (Playwright's default) instead of page.click(..., force=True) — the latter silently no-op'd. Use locator API for future RN tests."
+}

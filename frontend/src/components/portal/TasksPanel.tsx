@@ -69,6 +69,8 @@ export default function TasksPanel({
   });
   const [firmDdOpen, setFirmDdOpen] = useState(false);
   const [firmQ, setFirmQ] = useState("");
+  // Iter 507 — filter box for the assignee-scoped firm multi-select.
+  const [mcQ, setMcQ] = useState("");
   // Iter 502 — hierarchy: assignees + multi-company + delegation + hub stats
   const isSuper = role === "super_admin";
   const isSub = role === "sub_admin";
@@ -671,7 +673,7 @@ export default function TasksPanel({
                           placeholderTextColor={colors.onSurfaceTertiary} />
                       ) : null}
                       <ScrollView style={{ maxHeight: 180 }} nestedScrollEnabled>
-                        <Pressable onPress={() => { setAssigneeId(""); setMultiCids([]); setAssigneeDd(false); }}
+                        <Pressable onPress={() => { setAssigneeId(""); setMultiCids([]); setMcQ(""); setAssigneeDd(false); }}
                           style={[st.ddOpt, !assigneeId && st.ddOptOn]}>
                           <Text style={[st.ddOptTxt, !assigneeId && st.ddOptTxtOn]}>
                             {isSuper ? "Not assigned — my own task" : "Not assigned — internal task"}
@@ -684,7 +686,7 @@ export default function TasksPanel({
                           .map((a) => (
                             <Pressable key={a.user_id}
                               onPress={() => {
-                                setAssigneeId(a.user_id); setAssigneeDd(false);
+                                setAssigneeId(a.user_id); setAssigneeDd(false); setMcQ("");
                                 // Iter 506 — auto-preselect firms inside the
                                 // assignee's scope so Create can't 400.
                                 if (isSuper && assigneeKind === "sub_admins") {
@@ -719,32 +721,72 @@ export default function TasksPanel({
                   ) : null}
                 </>
               ) : null}
-              {/* Iter 502 — multi-company selection when assigning to a Sub Super Admin */}
+              {/* Iter 502/507 — firm selection when assigning to a Sub Super
+                  Admin: switches to a searchable multi-select restricted to
+                  THAT sub admin's assigned firms (user: "After the Selection
+                  of Sub Super Admin Firm Selection Option May Change"). */}
               {!editFor && isSuper && assigneeId && assigneeKind === "sub_admins" ? (
-                <>
-                  <Text style={st.lbl}>Companies for this task (one or many)</Text>
-                  <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
-                    {(() => {
-                      const a = assignees.find((x) => x.user_id === assigneeId);
-                      const allowed = a?.company_ids === null
-                        ? companies
-                        : companies.filter((c) => (a?.company_ids || []).includes(c.company_id));
-                      if (!allowed.length) return <Text style={st.meta}>No firms assigned to this Sub Super Admin.</Text>;
-                      return allowed.map((c) => {
-                        const on = multiCids.includes(c.company_id);
-                        return (
-                          <Pressable key={c.company_id}
-                            onPress={() => setMultiCids((m) => on ? m.filter((x) => x !== c.company_id) : [...m, c.company_id])}
-                            style={[st.chip, on && st.chipOn]} testID={`pd-task-mc-${c.company_id}`}>
-                            <Text style={[st.chipTxt, on && st.chipTxtOn]} numberOfLines={1}>
-                              {on ? "✓ " : ""}{c.name}
-                            </Text>
-                          </Pressable>
-                        );
-                      });
-                    })()}
-                  </View>
-                </>
+                (() => {
+                  const a = assignees.find((x) => x.user_id === assigneeId);
+                  const allowed = a?.company_ids === null
+                    ? companies
+                    : companies.filter((c) => (a?.company_ids || []).includes(c.company_id));
+                  const shown = allowed.filter((c) => !mcQ.trim()
+                    || c.name.toLowerCase().includes(mcQ.trim().toLowerCase()));
+                  return (
+                    <>
+                      <Text style={st.lbl}>
+                        Firms for this task — {a?.name || "assignee"}&apos;s firms only
+                        {multiCids.length ? `  (${multiCids.length} selected)` : ""}
+                      </Text>
+                      {!allowed.length ? (
+                        <Text style={st.meta}>No firms assigned to this Sub Super Admin.</Text>
+                      ) : (
+                        <View style={st.mcBox}>
+                          <View style={{ flexDirection: "row", gap: 6, alignItems: "center", padding: 6 }}>
+                            {allowed.length > 6 ? (
+                              <TextInput style={[st.input, { flex: 1, marginVertical: 0 }]} value={mcQ}
+                                onChangeText={setMcQ} placeholder="🔍 Filter firms…"
+                                placeholderTextColor={colors.onSurfaceTertiary}
+                                testID="pd-task-mc-filter" />
+                            ) : <View style={{ flex: 1 }} />}
+                            <Pressable
+                              onPress={() => setMultiCids(
+                                multiCids.length === allowed.length ? [] : allowed.map((c) => c.company_id))}
+                              style={[st.chip, multiCids.length === allowed.length && st.chipOn]}
+                              testID="pd-task-mc-all">
+                              <Text style={[st.chipTxt, multiCids.length === allowed.length && st.chipTxtOn]}>
+                                {multiCids.length === allowed.length ? "✓ All" : `All (${allowed.length})`}
+                              </Text>
+                            </Pressable>
+                          </View>
+                          <ScrollView style={{ maxHeight: 170 }} nestedScrollEnabled>
+                            {shown.map((c) => {
+                              const on = multiCids.includes(c.company_id);
+                              return (
+                                <Pressable key={c.company_id}
+                                  onPress={() => setMultiCids((m) => on
+                                    ? m.filter((x) => x !== c.company_id) : [...m, c.company_id])}
+                                  style={[st.ddOpt, on && st.ddOptOn]}
+                                  testID={`pd-task-mc-${c.company_id}`}>
+                                  <Ionicons name={on ? "checkbox" : "square-outline"} size={16}
+                                    color={on ? colors.brandPrimary : colors.onSurfaceTertiary} />
+                                  <Text style={[st.ddOptTxt, { flex: 1, marginLeft: 8 }, on && st.ddOptTxtOn]}
+                                    numberOfLines={1}>
+                                    {c.name}
+                                  </Text>
+                                </Pressable>
+                              );
+                            })}
+                            {!shown.length ? (
+                              <Text style={[st.meta, { padding: 10 }]}>No firm matches “{mcQ}”.</Text>
+                            ) : null}
+                          </ScrollView>
+                        </View>
+                      )}
+                    </>
+                  );
+                })()
               ) : canPickFirm ? (
                 <>
                   <Text style={st.lbl}>Firm (optional)</Text>
@@ -1181,6 +1223,11 @@ const st = StyleSheet.create({
   },
   ddValue: { fontSize: 12.5, color: colors.onSurface, flex: 1, marginRight: 8 },
   ddList: {
+    borderWidth: 1, borderColor: colors.divider, borderRadius: radius.md,
+    backgroundColor: colors.surface, marginTop: 4, overflow: "hidden",
+  },
+  // Iter 507 — container for the assignee-scoped firm multi-select.
+  mcBox: {
     borderWidth: 1, borderColor: colors.divider, borderRadius: radius.md,
     backgroundColor: colors.surface, marginTop: 4, overflow: "hidden",
   },
