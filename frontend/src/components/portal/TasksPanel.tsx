@@ -26,6 +26,9 @@ type Task = {
   // Iter 505 — content-edit tracking
   edited_count?: number; last_edited_by_name?: string | null;
   last_edited_at?: string | null;
+  // Iter 508 — Later + overdue-reason workflow
+  later_reason?: string | null; later_by_name?: string | null;
+  last_overdue_reason?: string | null;
 };
 type RTask = {
   rtask_id: string; title: string; company_id?: string | null;
@@ -43,6 +46,8 @@ const FILTERS = [
   { key: "all", label: "All" },
   { key: "open", label: "Open" },
   { key: "in_progress", label: "In Progress" },
+  { key: "later", label: "Later" },
+  { key: "overdue", label: "Overdue" },
   { key: "submitted", label: "Submitted" },
   { key: "done", label: "Done" },
   { key: "approved", label: "Approved" },
@@ -124,6 +129,27 @@ export default function TasksPanel({
   }, [filter, companyId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Iter 508 — "Later" (with mandatory reason) modal state.
+  const [laterFor, setLaterFor] = useState<Task | null>(null);
+  const [laterReason, setLaterReason] = useState("");
+  const [laterSaving, setLaterSaving] = useState(false);
+
+  const submitLater = async () => {
+    if (!laterFor || !laterReason.trim()) return;
+    setLaterSaving(true);
+    try {
+      await api(`/admin/portal-tasks/${laterFor.task_id}/later`, {
+        method: "POST", body: { reason: laterReason.trim() },
+      });
+      setLaterFor(null); setLaterReason("");
+      load(); loadHub();
+    } catch (e: any) {
+      const msg = e?.message || "Failed to mark Later";
+      if (Platform.OS === "web") window.alert(msg); else Alert.alert("Error", msg);
+    }
+    setLaterSaving(false);
+  };
 
   // Iter 505 — edit-task modal state + per-task edit history viewer.
   const [editFor, setEditFor] = useState<Task | null>(null);
@@ -398,36 +424,41 @@ export default function TasksPanel({
 
   return (
     <View testID="pd-tasks-panel">
-      {/* Iter 502 — hierarchy hub stats */}
+      {/* Iter 502 — hierarchy hub stats (Iter 508: counts are tappable and
+          open the matching task list below) */}
       {hub?.role === "super_admin" ? (
         <View style={[st.countRow, { marginBottom: 8 }]}>
           {[
             { label: "Companies", v: hub.total_companies, c: "#1D4ED8" },
             { label: "Sub Super Admins", v: hub.total_sub_admins, c: "#7C3AED" },
-            { label: "Awaiting Review", v: hub.awaiting_review, c: "#B45309" },
-            { label: "Overdue", v: hub.overdue, c: "#B91C1C" },
-            { label: "Escalated (High)", v: hub.escalated, c: "#B91C1C" },
-          ].map((x) => (
-            <View key={x.label} style={st.countCard}>
+            { label: "Awaiting Review", v: hub.awaiting_review, c: "#B45309", f: "submitted" },
+            { label: "Overdue", v: hub.overdue, c: "#B91C1C", f: "overdue" },
+            { label: "Escalated (High)", v: hub.escalated, c: "#B91C1C", f: "overdue" },
+          ].map((x: any) => (
+            <Pressable key={x.label} style={st.countCard}
+              disabled={!x.f} onPress={() => x.f && setFilter(x.f)}
+              testID={`pd-hub-${x.label.replace(/\W+/g, "-").toLowerCase()}`}>
               <Text style={[st.countVal, { color: x.c }]}>{x.v ?? 0}</Text>
               <Text style={st.countLbl}>{x.label}</Text>
-            </View>
+            </Pressable>
           ))}
         </View>
       ) : hub?.role === "sub_admin" ? (
         <View style={{ marginBottom: 8 }}>
           <View style={st.countRow}>
             {[
-              { label: "Pending", v: hub.pending, c: "#1D4ED8" },
-              { label: "Completed", v: hub.completed, c: "#16A34A" },
+              { label: "Pending", v: hub.pending, c: "#1D4ED8", f: "open" },
+              { label: "Completed", v: hub.completed, c: "#16A34A", f: "done" },
               { label: "High Priority", v: hub.high_priority, c: "#B91C1C" },
               { label: "Due in 7 days", v: hub.upcoming_deadlines, c: "#B45309" },
               { label: "Team Progress", v: `${hub.team_done ?? 0}/${hub.team_total ?? 0}`, c: "#7C3AED" },
-            ].map((x) => (
-              <View key={x.label} style={st.countCard}>
+            ].map((x: any) => (
+              <Pressable key={x.label} style={st.countCard}
+                disabled={!x.f} onPress={() => x.f && setFilter(x.f)}
+                testID={`pd-hub-${x.label.replace(/\W+/g, "-").toLowerCase()}`}>
                 <Text style={[st.countVal, { color: x.c }]}>{String(x.v ?? 0)}</Text>
                 <Text style={st.countLbl}>{x.label}</Text>
-              </View>
+              </Pressable>
             ))}
           </View>
           <Text style={st.meta}>
@@ -436,19 +467,22 @@ export default function TasksPanel({
         </View>
       ) : null}
 
-      {/* counters */}
+      {/* counters — Iter 508: tap a number to open that list */}
       <View style={st.countRow}>
         {[
           { k: "open", label: "Open", c: "#1D4ED8" },
           { k: "in_progress", label: "In Progress", c: "#B45309" },
+          { k: "later", label: "Later", c: "#6B7280" },
           { k: "submitted", label: "Submitted", c: "#7C3AED" },
           { k: "done", label: "Done", c: "#16A34A" },
           { k: "overdue", label: "Overdue", c: "#B91C1C" },
         ].map((x) => (
-          <View key={x.k} style={st.countCard}>
+          <Pressable key={x.k} onPress={() => setFilter(x.k)}
+            style={[st.countCard, filter === x.k && { borderColor: x.c, borderWidth: 1.5 }]}
+            testID={`pd-count-${x.k}`}>
             <Text style={[st.countVal, { color: x.c }]}>{counts[x.k] ?? 0}</Text>
             <Text style={st.countLbl}>{x.label}</Text>
-          </View>
+          </Pressable>
         ))}
       </View>
 
@@ -512,9 +546,22 @@ export default function TasksPanel({
                     <Text style={[st.prioChip, { color: "#7C3AED", backgroundColor: "#F5F3FF" }]}>SUBMITTED FOR REVIEW</Text>
                   ) : t.status === "approved" ? (
                     <Text style={[st.prioChip, { color: "#15803D", backgroundColor: "#F0FDF4" }]}>✓ APPROVED</Text>
+                  ) : t.status === "later" ? (
+                    <Text style={[st.prioChip, { color: "#374151", backgroundColor: "#F3F4F6" }]}>⏸ LATER</Text>
                   ) : null}
                 </View>
                 {t.description ? <Text style={st.taskDesc} numberOfLines={2}>{t.description}</Text> : null}
+                {/* Iter 508 — reasons visible to the Super Admin */}
+                {t.status === "later" && t.later_reason ? (
+                  <Text style={[st.meta, { color: "#374151", marginTop: 2 }]} numberOfLines={2}>
+                    ⏸ Later{t.later_by_name ? ` (${t.later_by_name})` : ""}: {t.later_reason}
+                  </Text>
+                ) : null}
+                {t.last_overdue_reason ? (
+                  <Text style={[st.meta, { color: "#B45309", marginTop: 2 }]} numberOfLines={2}>
+                    ⚠ Late reason: {t.last_overdue_reason}
+                  </Text>
+                ) : null}
                 <View style={{ flexDirection: "row", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
                   {firms ? <Text style={st.meta}>🏢 {firms}</Text> : null}
                   {t.assignee_name ? (
@@ -562,6 +609,20 @@ export default function TasksPanel({
                       <Text style={[st.stBtnTxt, { color: "#16A34A" }]}>✓ Done</Text>
                     </Pressable>
                   )
+                ) : null}
+                {/* Iter 508 — allotted Sub Admin: Done OR Later w/ reason */}
+                {!closed && t.status !== "submitted" && t.status !== "later"
+                  && isSub && t.assignee_id === myUserId ? (
+                  <Pressable onPress={() => { setLaterFor(t); setLaterReason(""); }}
+                    style={st.stBtn} testID={`pd-task-later-${t.task_id}`}>
+                    <Text style={st.stBtnTxt}>⏸ Later…</Text>
+                  </Pressable>
+                ) : null}
+                {t.status === "later" && (isSuper || t.assignee_id === myUserId) ? (
+                  <Pressable onPress={() => setStatus(t, "in_progress")}
+                    style={st.stBtn} testID={`pd-task-resume-${t.task_id}`}>
+                    <Text style={st.stBtnTxt}>▶ Resume</Text>
+                  </Pressable>
                 ) : null}
                 {t.status === "submitted" ? (
                   isSuper ? (
@@ -854,6 +915,36 @@ export default function TasksPanel({
                 testID="pd-task-save">
                 {saving ? <ActivityIndicator color="#fff" size="small" />
                   : <Text style={st.mBtnPrimaryTxt}>{editFor ? "Save Changes" : "Create Task"}</Text>}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      {/* Iter 508 — Mark as Later (reason required) */}
+      <Modal visible={!!laterFor} transparent animationType="fade"
+        onRequestClose={() => setLaterFor(null)}>
+        <View style={st.overlay}>
+          <View style={st.modal}>
+            <Text style={st.modalTitle} numberOfLines={1}>
+              ⏸ Mark as Later — {laterFor?.title}
+            </Text>
+            <Text style={st.lbl}>Reason (required — the Super Admin will see this)</Text>
+            <TextInput
+              style={[st.input, { minHeight: 70, textAlignVertical: "top" }]}
+              value={laterReason} onChangeText={setLaterReason} multiline
+              placeholder="e.g. Awaiting client documents / senior approval…"
+              placeholderTextColor={colors.onSurfaceTertiary}
+              testID="pd-later-reason"
+            />
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+              <Pressable onPress={() => setLaterFor(null)} style={[st.mBtn, st.mBtnGhost]}>
+                <Text style={st.mBtnGhostTxt}>Cancel</Text>
+              </Pressable>
+              <Pressable onPress={submitLater} disabled={laterSaving || !laterReason.trim()}
+                style={[st.mBtn, st.mBtnPrimary, (!laterReason.trim() || laterSaving) && { opacity: 0.5 }]}
+                testID="pd-later-save">
+                {laterSaving ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={st.mBtnPrimaryTxt}>Mark Later</Text>}
               </Pressable>
             </View>
           </View>

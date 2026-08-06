@@ -3,6 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { ActivityIndicator, View, StyleSheet, Pressable } from "react-native";
 import { useAuth } from "@/src/context/AuthContext";
 import FingerprintUnlockGate from "@/src/components/FingerprintUnlockGate";
+import OverdueGate from "@/src/components/portal/OverdueGate";
 import { colors, shadow, spacing } from "@/src/theme";
 
 export default function TabsLayout() {
@@ -138,14 +139,23 @@ export default function TabsLayout() {
     </Tabs>
   );
 
+  // Iter 508 — Sub Super Admin overdue-task login gate: blocks the app
+  // until a reason is recorded for every task pending past its due date.
+  const withGate = (
+    <>
+      {tabs}
+      {user.role === "sub_admin" ? <OverdueGate /> : null}
+    </>
+  );
+
   if (needsFpGate) {
     return (
       <FingerprintUnlockGate userId={user.user_id} userName={user.name || ""}>
-        {tabs}
+        {withGate}
       </FingerprintUnlockGate>
     );
   }
-  return tabs;
+  return withGate;
 }
 
 const styles = StyleSheet.create({

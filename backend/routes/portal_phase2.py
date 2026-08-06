@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/admin", tags=["portal-phase2"])
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
-TASK_STATUSES = ["open", "in_progress", "submitted", "done", "approved"]
+TASK_STATUSES = ["open", "in_progress", "submitted", "done", "approved", "later"]
 TASK_PRIORITIES = ["low", "medium", "high"]
 DOC_TYPES = ["license", "registration", "insurance", "contract", "certificate", "other"]
 
@@ -361,8 +361,19 @@ async def list_tasks(
         if admin.get("role") == "sub_admin":
             _company_or += [{"assignee_id": admin["user_id"]},
                             {"created_by": admin["user_id"]}]
+        elif admin.get("role") == "super_admin":
+            # Iter 508 (user bug — "Allotted Tasks Not Showing In Super
+            # Admin Login"): tasks the Super Admin created or allotted stay
+            # visible regardless of the currently selected firm.
+            _company_or += [{"created_by": admin["user_id"]},
+                            {"assigned_by": admin["user_id"]},
+                            {"assignee_id": admin["user_id"]}]
         q["$or"] = _company_or
-    if status and status != "all":
+    if status == "overdue":
+        # Iter 508 — clickable Overdue counter: not-done tasks past due.
+        q["status"] = {"$nin": ["done", "approved"]}
+        q["due_date"] = {"$lt": _now().strftime("%Y-%m-%d"), "$nin": [None, ""]}
+    elif status and status != "all":
         q["status"] = status
     if assignee_id and admin.get("role") == "super_admin":
         q["assignee_id"] = assignee_id
@@ -387,7 +398,7 @@ async def list_tasks(
         [("status", 1), ("due_date", 1), ("created_at", -1)]).to_list(500)
     today = _now().strftime("%Y-%m-%d")
     counts = {"open": 0, "in_progress": 0, "submitted": 0, "done": 0,
-              "approved": 0, "overdue": 0}
+              "approved": 0, "later": 0, "overdue": 0}
     all_q = dict(q)
     all_q.pop("status", None)
     async for t in db.portal_tasks.find(all_q, {"_id": 0, "status": 1, "due_date": 1}):
@@ -534,7 +545,12 @@ async def create_task(payload: TaskCreate, authorization: Optional[str] = Header
         "assigned_by": admin["user_id"],
         "assigned_by_name": admin.get("name") or admin.get("email"),
         "assigned_by_role": admin.get("role"),
-        "due_date": payload.due_date or None,
+        # Iter 508 (user spec — "all the task have time of 24 HRS"): every
+        # task gets a 24-hour window by default — if no due date is picked,
+        # it falls due TOMORROW. Complete it in time or the assignee must
+        # record a reason why not (overdue login gate).
+        "due_date": payload.due_date
+        or (_now() + timedelta(days=1)).strftime("%Y-%m-%d"),
         "priority": payload.priority,
         "status": "open",
         "created_by": admin["user_id"],
@@ -581,6 +597,11 @@ async def update_task(task_id: str, payload: TaskUpdate,
         if payload.status == "approved" and admin.get("role") != "super_admin":
             raise HTTPException(status_code=403,
                                 detail="Only the Super Admin can approve & close tasks")
+        # Iter 508 — "Later" requires a reason: use POST /portal-tasks/{id}/later
+        if payload.status == "later":
+            raise HTTPException(
+                status_code=400,
+                detail="Mark as Later requires a reason — use the Later action")
         if (payload.status == "done"
                 and admin.get("role") == "sub_admin"
                 and t.get("assigned_by_role") == "super_admin"
@@ -687,6 +708,113 @@ async def _sync_calendar_from_task(admin: dict, task: dict) -> None:
         await db.calendar_completions.delete_many(
             {"month": month, "item_key": item_key,
              "scope": {"$in": [firm_scope, "__all__"]}})
+
+
+class ReasonBody(BaseModel):
+    reason: str
+
+
+@router.post("/portal-tasks/{task_id}/later")
+async def mark_task_later(task_id: str, payload: ReasonBody,
+                          authorization: Optional[str] = Header(None)):
+    """Iter 508 (user spec) — the allotted Sub Super Admin can either DONE/
+    submit a task or mark it LATER with a mandatory reason. The reason is
+    stored on the task and in the audit trail so the Super Admin sees it."""
+    admin = await _admin(authorization)
+    reason = (payload.reason or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400,
+                            detail="Please enter the reason for marking Later")
+    t = await db.portal_tasks.find_one({"task_id": task_id})
+    if not t:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if admin.get("role") == "sub_admin" and not _is_task_owner(admin, t):
+        raise HTTPException(status_code=403,
+                            detail="Not your task — belongs to another Sub Super Admin")
+    if admin.get("role") == "company_admin" and t.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not your firm's task")
+    if t.get("status") in ("done", "approved"):
+        raise HTTPException(status_code=400, detail="Task is already completed")
+    upd = {
+        "status": "later",
+        "later_reason": reason,
+        "later_by": admin["user_id"],
+        "later_by_name": admin.get("name") or admin.get("email"),
+        "later_at": _now().isoformat(),
+        "updated_at": _now().isoformat(),
+    }
+    await db.portal_tasks.update_one({"task_id": task_id}, {"$set": upd})
+    t2 = await db.portal_tasks.find_one({"task_id": task_id}, {"_id": 0})
+    await _task_audit(admin, "marked_later", t2, f"Reason: {reason}")
+    return {"task": await _task_out(t2)}
+
+
+@router.get("/portal-tasks/overdue-block")
+async def overdue_block(authorization: Optional[str] = Header(None)):
+    """Iter 508 (user spec) — tasks allotted to the current Sub Super Admin
+    that are PENDING MORE THAN ONE DAY past their due date and still have no
+    explanation for the current due date. The PWA blocks the sub admin on
+    login until a reason is entered for each ("why was this not completed
+    on time"), after which normal work resumes."""
+    admin = await _admin(authorization)
+    if admin.get("role") != "sub_admin":
+        return {"tasks": []}
+    today = _now().strftime("%Y-%m-%d")
+    out = []
+    async for t in db.portal_tasks.find(
+        {
+            "assignee_id": admin["user_id"],
+            "status": {"$nin": ["done", "approved"]},
+            "due_date": {"$lt": today, "$nin": [None, ""]},
+        },
+        {"_id": 0, "task_id": 1, "title": 1, "due_date": 1, "priority": 1,
+         "company_name": 1, "company_names": 1, "overdue_ack_due": 1},
+    ).sort("due_date", 1):
+        # Already explained for this due date → not blocked again.
+        if t.get("overdue_ack_due") == t.get("due_date"):
+            continue
+        t.pop("overdue_ack_due", None)
+        out.append(t)
+    return {"tasks": out}
+
+
+@router.post("/portal-tasks/{task_id}/overdue-reason")
+async def overdue_reason(task_id: str, payload: ReasonBody,
+                         authorization: Optional[str] = Header(None)):
+    """Iter 508 — store the sub admin's explanation for a late task and
+    release the login block for that task. Visible to the Super Admin on
+    the task card and in the edit log."""
+    admin = await _admin(authorization)
+    reason = (payload.reason or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400,
+                            detail="Please enter why the task was not completed on time")
+    t = await db.portal_tasks.find_one({"task_id": task_id})
+    if not t:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if t.get("assignee_id") != admin["user_id"] and admin.get("role") != "super_admin":
+        raise HTTPException(status_code=403, detail="Not your task")
+    entry = {
+        "reason": reason,
+        "by": admin["user_id"],
+        "by_name": admin.get("name") or admin.get("email"),
+        "at": _now().isoformat(),
+        "due_date": t.get("due_date"),
+    }
+    await db.portal_tasks.update_one(
+        {"task_id": task_id},
+        {"$set": {
+            "overdue_ack_due": t.get("due_date"),
+            "last_overdue_reason": reason,
+            "last_overdue_reason_at": entry["at"],
+            "updated_at": entry["at"],
+        },
+         "$push": {"overdue_reason_log": entry}},
+    )
+    t2 = await db.portal_tasks.find_one({"task_id": task_id}, {"_id": 0})
+    await _task_audit(admin, "overdue_reason", t2,
+                      f"Late reason (due {t.get('due_date')}): {reason}")
+    return {"task": await _task_out(t2)}
 
 
 @router.delete("/portal-tasks/{task_id}")
