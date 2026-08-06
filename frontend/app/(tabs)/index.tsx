@@ -466,6 +466,16 @@ export default function Dashboard() {
               </>
             ) : (
             <View style={styles.bento}>
+              {/* Iter 504 (user bug — PWA Task Management not visible) —
+                  prominent tile straight to the Tasks tab. */}
+              <BentoTile
+                testID="bento-tasks"
+                icon="clipboard-outline"
+                value="Tasks"
+                label="Task Management"
+                variant="accent"
+                onPress={() => router.push("/(tabs)/tasks" as any)}
+              />
               <BentoTile
                 testID="bento-leaves"
                 icon="calendar-outline"

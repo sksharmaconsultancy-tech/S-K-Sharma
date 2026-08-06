@@ -4598,3 +4598,22 @@ Deploy: deploy_vps_iter502.sh, temp_bundle → deploy502.sh, APP_ITERATION=502.
      grid-debug shows cfg + _smm meta. Test data cleaned; Kankani
      attendance_config unset (user must opt-in per firm).
 Deploy: deploy_vps_iter503.sh, temp_bundle → deploy503.sh, APP_ITERATION=503.
+
+## Iter 504 — PWA Task Management visibility (user: "Still Not Showing") ✅
+Root cause: user's VPS WAS on 503 with the fix in the built JS (verified
+by fetching smartpayrolling.com route chunks — row-task-management present
+in index chunk), but the installed PWA served a CACHED OLD shell: sw.js
+races network vs 3.5s timeout on navigations → slow mobile connections get
+the stale cached index.html + old bundles.
+Fixes:
+1. public/sw.js CACHE bumped sks-pwa-v4 → v5 (activate purges old cache).
+2. NEW admin-only "Tasks" BOTTOM TAB: app/(tabs)/tasks.tsx
+   (tasks-tab-screen, wraps TasksPanel), registered in (tabs)/_layout.tsx
+   (href null for employees).
+3. Big "Tasks · Task Management" BentoTile (bento-tasks) first on admin
+   home + Iter 503 quick actions retained.
+Verified via mobile screenshots (tile at top, /tasks tab renders panel
+with New Task). deploy_vps_iter504.sh (copies public/sw.js to web root +
+verifies tasks-tab-screen inside built JS), temp_bundle → deploy504.sh,
+APP_ITERATION=504. User phone steps: close+reopen PWA twice (or reinstall
+icon) after deploy.

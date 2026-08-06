@@ -103,6 +103,18 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="tasks"
+        options={{
+          title: "Tasks",
+          // Iter 504 (user bug — "PWA Task Management not showing") —
+          // admin-only TASKS tab so Task Management is one tap away.
+          href: user.role === "employee" ? null : undefined,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="clipboard-outline" color={color} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="documents"
         options={{
           title: "Documents",
