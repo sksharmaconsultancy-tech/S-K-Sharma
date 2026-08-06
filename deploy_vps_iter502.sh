@@ -22,6 +22,11 @@
 #        Priority, Due-in-7-days, Team Progress (delegated done/total).
 #    • Every assignment / reassignment / delegation / status change /
 #      approval is recorded in the task audit log with timestamp + user.
+#    • TASK ATTACHMENTS (proof of completion): 📎 on every task card —
+#      upload photos / PDFs (≤10 MB, up to 10 per task), preview images,
+#      download PDFs. "Submit for Review" nudges the Sub Super Admin to
+#      attach evidence first. Upload/delete are audit-logged; only the
+#      uploader or the Super Admin can delete.
 #    • New Task modal: "Assign to Sub Super Admin" DROPDOWN (searchable)
 #      + multi-company tick-chips limited to that admin's firms; the
 #      Firm field is a proper dropdown list now (Iter 501 request).
@@ -117,6 +122,8 @@ echo -n "   Task hierarchy backend (must say OK): "
 grep -q 'hub-dashboard' $APP_DIR/backend/routes/portal_phase2.py && grep -q '_task_audit' $APP_DIR/backend/routes/portal_phase2.py && echo "OK" || echo "MISSING!"
 echo -n "   Task hierarchy UI (must say OK): "
 grep -q 'pd-task-assignee-dd' $APP_DIR/frontend/src/components/portal/TasksPanel.tsx && echo "OK" || echo "MISSING!"
+echo -n "   Task attachments (must say OK): "
+grep -q 'task_attachments' $APP_DIR/backend/routes/portal_phase2.py && grep -q 'pd-att-upload' $APP_DIR/frontend/src/components/portal/TasksPanel.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Punch Approvals pending-jump fix (must say OK): "
 grep -q 'pending-jump-btn' $APP_DIR/frontend/app/punch-approvals.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Stay-on-page after firm switch (must say OK): "

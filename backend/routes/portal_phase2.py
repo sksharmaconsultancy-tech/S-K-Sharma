@@ -859,6 +859,118 @@ async def task_audit_trail(task_id: str,
     return {"audit": items}
 
 
+# ---------- Iter 503 — task attachments (photo / PDF evidence) ----------
+
+MAX_ATT_BYTES = 10 * 1024 * 1024   # 10 MB per file
+MAX_ATT_PER_TASK = 10
+ATT_MIMES = ("image/", "application/pdf")
+
+
+class AttachmentBody(BaseModel):
+    filename: str
+    mime: str
+    file_base64: str
+
+
+@router.post("/portal-tasks/{task_id}/attachments")
+async def add_attachment(task_id: str, payload: AttachmentBody,
+                         authorization: Optional[str] = Header(None)):
+    """Attach proof (photo / PDF) to a task — e.g. evidence a Sub Super
+    Admin uploads before 'Submit for Review'."""
+    admin = await _admin(authorization)
+    t = await db.portal_tasks.find_one({"task_id": task_id}, {"_id": 0})
+    if not t:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if admin.get("role") == "sub_admin" and not _is_task_owner(admin, t):
+        raise HTTPException(status_code=403,
+                            detail="Not your task — belongs to another Sub Super Admin")
+    if admin.get("role") == "company_admin" \
+            and t.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not your firm's task")
+    mime = (payload.mime or "").lower()
+    if not any(mime.startswith(m) for m in ATT_MIMES):
+        raise HTTPException(status_code=400,
+                            detail="Only images and PDF files are allowed")
+    import base64 as _b64
+    try:
+        raw_len = len(_b64.b64decode(payload.file_base64 or ""))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid file data")
+    if raw_len == 0:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if raw_len > MAX_ATT_BYTES:
+        raise HTTPException(status_code=400, detail="File exceeds the 10 MB limit")
+    n = await db.task_attachments.count_documents({"task_id": task_id})
+    if n >= MAX_ATT_PER_TASK:
+        raise HTTPException(status_code=400,
+                            detail=f"Maximum {MAX_ATT_PER_TASK} attachments per task")
+    att = {
+        "att_id": f"tatt_{uuid.uuid4().hex[:12]}",
+        "task_id": task_id,
+        "filename": (payload.filename or "file")[:120],
+        "mime": mime,
+        "size": raw_len,
+        "uploaded_by": admin["user_id"],
+        "uploaded_by_name": admin.get("name") or admin.get("email"),
+        "uploaded_by_role": admin.get("role"),
+        "at": _now().isoformat(),
+    }
+    await db.task_attachments.insert_one({**att, "data_b64": payload.file_base64})
+    await db.portal_tasks.update_one(
+        {"task_id": task_id},
+        {"$inc": {"attachments_count": 1},
+         "$set": {"updated_at": _now().isoformat()}})
+    await _task_audit(admin, "attachment_added", t,
+                      f"{att['filename']} ({round(raw_len / 1024)} KB)")
+    return {"ok": True, "attachment": att}
+
+
+@router.get("/portal-tasks/{task_id}/attachments")
+async def list_attachments(task_id: str,
+                           authorization: Optional[str] = Header(None)):
+    admin = await _admin(authorization)
+    t = await db.portal_tasks.find_one({"task_id": task_id}, {"_id": 0})
+    if not t:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if admin.get("role") == "sub_admin" and not _is_task_owner(admin, t):
+        raise HTTPException(status_code=403, detail="Not your task")
+    items = await db.task_attachments.find(
+        {"task_id": task_id}, {"_id": 0, "data_b64": 0}).sort("at", 1).to_list(50)
+    return {"attachments": items}
+
+
+@router.get("/portal-tasks/attachments/{att_id}")
+async def get_attachment(att_id: str,
+                         authorization: Optional[str] = Header(None)):
+    admin = await _admin(authorization)
+    a = await db.task_attachments.find_one({"att_id": att_id}, {"_id": 0})
+    if not a:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    t = await db.portal_tasks.find_one({"task_id": a["task_id"]}, {"_id": 0})
+    if t and admin.get("role") == "sub_admin" and not _is_task_owner(admin, t):
+        raise HTTPException(status_code=403, detail="Not your task")
+    return {"filename": a["filename"], "mime": a["mime"],
+            "file_base64": a.get("data_b64") or ""}
+
+
+@router.delete("/portal-tasks/attachments/{att_id}")
+async def delete_attachment(att_id: str,
+                            authorization: Optional[str] = Header(None)):
+    admin = await _admin(authorization)
+    a = await db.task_attachments.find_one({"att_id": att_id}, {"_id": 0, "data_b64": 0})
+    if not a:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    if admin.get("role") != "super_admin" and a.get("uploaded_by") != admin["user_id"]:
+        raise HTTPException(status_code=403,
+                            detail="Only the uploader or the Super Admin can delete this")
+    await db.task_attachments.delete_one({"att_id": att_id})
+    await db.portal_tasks.update_one(
+        {"task_id": a["task_id"]}, {"$inc": {"attachments_count": -1}})
+    t = await db.portal_tasks.find_one({"task_id": a["task_id"]}, {"_id": 0}) or {"task_id": a["task_id"]}
+    await _task_audit(admin, "attachment_removed", t, a.get("filename") or "")
+    return {"ok": True}
+
+
 # ======================= TRACKED DOCUMENTS ==========================
 
 class TrackedDocCreate(BaseModel):

@@ -4522,3 +4522,14 @@ engines verified untouched (zero diff).
 4. Iter 501 (same session): Client Attendance Import module; Firm dropdown in New Task;
    task creation super-admin-only then extended per hierarchy spec.
 Deploy: deploy_vps_iter502.sh, temp_bundle → deploy502.sh, APP_ITERATION=502.
+
+## Iter 503 (shipped inside deploy502) — Task Attachments (proof/evidence)
+- Backend (portal_phase2.py): db.task_attachments (base64, ≤10MB, ≤10/task,
+  images+PDF only). POST/GET /portal-tasks/{id}/attachments, GET/DELETE
+  /portal-tasks/attachments/{att_id}. RBAC: sub_admin only own tasks; delete
+  = uploader or super_admin. attachments_count on task; audit
+  attachment_added/removed. Tested: upload 200, bad mime 400, roundtrip,
+  count, super delete, audit events — all PASS.
+- Frontend (TasksPanel): 📎 + count on cards, attachments modal (upload via
+  DocumentPicker image/pdf, image preview overlay, PDF download, delete),
+  Submit-for-Review nudges to attach evidence when none. UI verified.

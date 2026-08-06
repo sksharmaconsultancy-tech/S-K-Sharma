@@ -2,9 +2,10 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, Pressable, TextInput, Modal,
-  ActivityIndicator, ScrollView, Alert, Platform,
+  ActivityIndicator, ScrollView, Alert, Platform, Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as DocumentPicker from "expo-document-picker";
 
 import { api } from "@/src/api/client";
 import { colors, radius, spacing } from "@/src/theme";
@@ -18,6 +19,7 @@ type Task = {
   assigned_by?: string | null; assigned_by_name?: string | null;
   assigned_by_role?: string | null;
   parent_task_id?: string | null; delegated_count?: number;
+  attachments_count?: number;
   due_date?: string | null; priority: string; status: string;
   created_by?: string | null;
   created_by_name?: string | null; source_rtask_id?: string | null;
@@ -140,6 +142,96 @@ export default function TasksPanel({
       if (Platform.OS === "web") window.alert(msg); else Alert.alert("Error", msg);
     }
     setSaving(false);
+  };
+
+  // Iter 503 — attachments (photo / PDF evidence)
+  const [attFor, setAttFor] = useState<Task | null>(null);
+  const [attList, setAttList] = useState<any[]>([]);
+  const [attLoading, setAttLoading] = useState(false);
+  const [attUploading, setAttUploading] = useState(false);
+  const [attPreview, setAttPreview] = useState<{ name: string; uri: string } | null>(null);
+
+  const openAttachments = async (t: Task) => {
+    setAttFor(t); setAttList([]); setAttLoading(true);
+    try {
+      const r = await api<{ attachments: any[] }>(`/admin/portal-tasks/${t.task_id}/attachments`);
+      setAttList(r.attachments || []);
+    } catch { /* noop */ }
+    setAttLoading(false);
+  };
+
+  const uploadAttachment = async () => {
+    if (!attFor) return;
+    const res = await DocumentPicker.getDocumentAsync({
+      type: ["image/*", "application/pdf"], copyToCacheDirectory: true,
+    });
+    if (res.canceled || !res.assets?.length) return;
+    const asset = res.assets[0];
+    if ((asset.size || 0) > 10 * 1024 * 1024) {
+      const m = "File exceeds the 10 MB limit";
+      if (Platform.OS === "web") window.alert(m); else Alert.alert("Error", m);
+      return;
+    }
+    setAttUploading(true);
+    try {
+      const blob = await (await fetch(asset.uri)).blob();
+      const b64 = await new Promise<string>((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => { const s = String(fr.result || ""); resolve(s.includes(",") ? s.split(",")[1] : s); };
+        fr.onerror = reject;
+        fr.readAsDataURL(blob);
+      });
+      await api(`/admin/portal-tasks/${attFor.task_id}/attachments`, {
+        method: "POST",
+        body: { filename: asset.name, mime: asset.mimeType || blob.type || "application/octet-stream", file_base64: b64 },
+      });
+      await openAttachments(attFor);
+      load();
+    } catch (e: any) {
+      const m = e?.message || "Upload failed";
+      if (Platform.OS === "web") window.alert(m); else Alert.alert("Error", m);
+    }
+    setAttUploading(false);
+  };
+
+  const viewAttachment = async (a: any) => {
+    try {
+      const r = await api<any>(`/admin/portal-tasks/attachments/${a.att_id}`);
+      const uri = `data:${r.mime};base64,${r.file_base64}`;
+      if ((r.mime || "").startsWith("image/")) {
+        setAttPreview({ name: r.filename, uri });
+      } else if (Platform.OS === "web") {
+        const bytes = atob(r.file_base64);
+        const arr = new Uint8Array(bytes.length);
+        for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+        const url = URL.createObjectURL(new Blob([arr], { type: r.mime }));
+        const link = document.createElement("a");
+        link.href = url; link.download = r.filename; link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 30000);
+      }
+    } catch { /* noop */ }
+  };
+
+  const deleteAttachment = async (a: any) => {
+    try {
+      await api(`/admin/portal-tasks/attachments/${a.att_id}`, { method: "DELETE" });
+      if (attFor) await openAttachments(attFor);
+      load();
+    } catch (e: any) {
+      const m = e?.message || "Delete failed";
+      if (Platform.OS === "web") window.alert(m); else Alert.alert("Error", m);
+    }
+  };
+
+  const submitForReview = (t: Task) => {
+    // Nudge for evidence before submitting to the Super Admin.
+    if (!(t.attachments_count || 0)) {
+      const msg = "No proof attached yet. Attach a photo / PDF as evidence before submitting?";
+      if (Platform.OS === "web") {
+        if (window.confirm(msg)) { openAttachments(t); return; }
+      }
+    }
+    setStatus(t, "submitted");
   };
 
   const submitDelegate = async () => {
@@ -395,7 +487,7 @@ export default function TasksPanel({
                 ) : null}
                 {!closed && t.status !== "submitted" ? (
                   assignedToMeBySuper ? (
-                    <Pressable onPress={() => setStatus(t, "submitted")}
+                    <Pressable onPress={() => submitForReview(t)}
                       style={[st.stBtn, { borderColor: "#7C3AED" }]} testID={`pd-task-submit-${t.task_id}`}>
                       <Text style={[st.stBtnTxt, { color: "#7C3AED" }]}>Submit for Review</Text>
                     </Pressable>
@@ -428,6 +520,16 @@ export default function TasksPanel({
                   </Pressable>
                 ) : null}
                 <View style={{ flexDirection: "row", gap: 10 }}>
+                  <Pressable onPress={() => openAttachments(t)} hitSlop={8}
+                    testID={`pd-task-att-${t.task_id}`}
+                    style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+                    <Ionicons name="attach-outline" size={16} color={colors.brandPrimary} />
+                    {(t.attachments_count || 0) > 0 ? (
+                      <Text style={[st.meta, { color: colors.brandPrimary, fontWeight: "800" }]}>
+                        {t.attachments_count}
+                      </Text>
+                    ) : null}
+                  </Pressable>
                   {!closed && (isSuper || isSub) ? (
                     <Pressable onPress={() => { setDelegateFor(t); loadAssignees(); }} hitSlop={8}
                       testID={`pd-task-delegate-${t.task_id}`}>
@@ -670,6 +772,76 @@ export default function TasksPanel({
         </View>
       </Modal>
 
+      {/* Iter 503 — attachments modal */}
+      <Modal visible={!!attFor} transparent animationType="fade" onRequestClose={() => setAttFor(null)}>
+        <View style={st.overlay}>
+          <View style={st.modal}>
+            <Text style={st.modalTitle}>📎 Attachments — Proof / Evidence</Text>
+            <Text style={st.taskDesc} numberOfLines={2}>📌 {attFor?.title}</Text>
+            {attLoading ? (
+              <ActivityIndicator style={{ marginVertical: 24 }} color={colors.brandPrimary} />
+            ) : (
+              <ScrollView style={{ maxHeight: 280, marginTop: 10 }} nestedScrollEnabled>
+                {attList.length === 0 ? (
+                  <Text style={[st.meta, { paddingVertical: 14 }]}>
+                    No attachments yet. Upload a photo or PDF as proof of completion.
+                  </Text>
+                ) : attList.map((a) => (
+                  <View key={a.att_id} style={st.attRow}>
+                    <Ionicons
+                      name={(a.mime || "").startsWith("image/") ? "image-outline" : "document-text-outline"}
+                      size={18} color={colors.brandPrimary} />
+                    <View style={{ flex: 1, marginHorizontal: 8 }}>
+                      <Text style={st.ddOptTxt} numberOfLines={1}>{a.filename}</Text>
+                      <Text style={st.meta} numberOfLines={1}>
+                        {Math.round((a.size || 0) / 1024)} KB · {a.uploaded_by_name} · {(a.at || "").slice(0, 16).replace("T", " ")}
+                      </Text>
+                    </View>
+                    <Pressable onPress={() => viewAttachment(a)} hitSlop={8} style={{ marginRight: 10 }}
+                      testID={`pd-att-view-${a.att_id}`}>
+                      <Ionicons name={(a.mime || "").startsWith("image/") ? "eye-outline" : "download-outline"}
+                        size={16} color={colors.brandPrimary} />
+                    </Pressable>
+                    <Pressable onPress={() => deleteAttachment(a)} hitSlop={8}
+                      testID={`pd-att-del-${a.att_id}`}>
+                      <Ionicons name="trash-outline" size={15} color="#B91C1C" />
+                    </Pressable>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 14 }}>
+              <Pressable onPress={() => setAttFor(null)} style={[st.mBtn, st.mBtnGhost]}>
+                <Text style={st.mBtnGhostTxt}>Close</Text>
+              </Pressable>
+              <Pressable onPress={uploadAttachment} disabled={attUploading}
+                style={[st.mBtn, st.mBtnPrimary, attUploading && { opacity: 0.5 }]}
+                testID="pd-att-upload">
+                {attUploading ? <ActivityIndicator color="#fff" size="small" /> : (
+                  <Text style={st.mBtnPrimaryTxt}>+ Upload Photo / PDF</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* image preview */}
+      <Modal visible={!!attPreview} transparent animationType="fade" onRequestClose={() => setAttPreview(null)}>
+        <Pressable style={[st.overlay, { justifyContent: "center" }]} onPress={() => setAttPreview(null)}>
+          <View style={{ alignItems: "center", padding: 10 }}>
+            {attPreview ? (
+              <Image source={{ uri: attPreview.uri }}
+                style={{ width: 640, height: 480, maxWidth: "96%", borderRadius: 10, backgroundColor: "#000" }}
+                resizeMode="contain" />
+            ) : null}
+            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700", marginTop: 8 }}>
+              {attPreview?.name} — tap anywhere to close
+            </Text>
+          </View>
+        </Pressable>
+      </Modal>
+
       {/* Recurring templates modal */}
       <Modal visible={showRec} transparent animationType="fade" onRequestClose={() => setShowRec(false)}>
         <View style={st.overlay}>
@@ -876,6 +1048,10 @@ const st = StyleSheet.create({
   ddOptOn: { backgroundColor: `${colors.brandPrimary}10` },
   ddOptTxt: { fontSize: 12, color: colors.onSurface, flex: 1, marginRight: 8 },
   ddOptTxtOn: { fontWeight: "800", color: colors.brandPrimary },
+  attRow: {
+    flexDirection: "row", alignItems: "center", paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider,
+  },
   mBtn: { flex: 1, borderRadius: radius.md, paddingVertical: 11, alignItems: "center" },
   mBtnGhost: { borderWidth: 1, borderColor: colors.divider },
   mBtnGhostTxt: { fontSize: 12.5, fontWeight: "700", color: colors.onSurfaceSecondary },
