@@ -4646,3 +4646,39 @@ assign-with-scope, global visibility). testing_agent iteration_505.json —
 UI testIDs render; full E2E clicks blocked by Cloudflare 429 on preview
 (known env artifact). Deploy: deploy_vps_iter505.sh, temp_bundle →
 deploy505.sh, APP_ITERATION=505.
+
+## Iter 506 — Alloted-task visibility + 2 CRITICAL app-wide fixes + Bonus Excel ✅
+1. USER BUG "Alloted Task Not Showing In Main Screen" (sub admin):
+   a. Backend portal_phase2 list: for sub_admin the firm-filter $or now
+      also matches {assignee_id: me} / {created_by: me} — alloted tasks
+      visible regardless of currently selected firm (verified 3 scenarios
+      via curl as testsub@sksharma.co / testsub123, sub_623b8a106846).
+   b. (tabs)/index.tsx: new "My tasks (N open)" home section
+      (home-my-tasks, home-task-<id>, home-tasks-viewall) — top 3 open
+      tasks w/ firm, due date, overdue red, assigned-by; fetched by
+      loadMyTasks() OUTSIDE load()'s big try (3 retries) with NO firm
+      param on purpose.
+2. CRITICAL FIX — sub admin BLANK screen on cold load: app/index.tsx fired
+   Redirect→/firm-select then flipped to /(tabs) mid "remember-my-firm"
+   restore → expo-router dead-ended on empty tree. Fix:
+   SelectedCompanyContext exposes firmRestoreDone (set on all terminal
+   paths + 8s failsafe); index gate shows spinner (firm-restore-wait)
+   until done, then ONE final redirect. Verified: sub admin cold "/"
+   renders home.
+3. CRITICAL FIX — infinite refresh loop (whole app): AuthContext.refresh
+   did setUser(new object) every call → load useCallback (deps user)
+   recreated → useFocusEffect([load, refresh]) re-ran → refresh again →
+   endless loop, seq reached 24+, 94 CF "Security check" errors per
+   session, server hammered (830 portal-tasks hits). Fix: setUser keeps
+   SAME identity when JSON-equal. After fix: 0 errors, loop gone. This
+   loop likely caused earlier "Pending punch mismatch"/"blank"-style
+   flakiness reports.
+4. Bonus Yearly Summary Excel = display format (user request):
+   contribution_reports.py bonus-yearly-summary.xlsx rebuilt with openpyxl
+   custom two-row header — month spans Days|Earned interleaved pairs,
+   merged fixed cols, heads (Yr), bold yellow TOTAL, freeze panes, dd-mm-
+   yyyy DOJ. GOTCHA: use get_column_letter (merged cell .column_letter
+   crashes → 'MergedCell' has no attribute). Verified via openpyxl parse
+   (no data rows in preview DB — no compliance runs — structure OK).
+Verified super admin home regression-clean. Deploy: deploy_vps_iter506.sh,
+temp_bundle → deploy506.sh, APP_ITERATION=506.

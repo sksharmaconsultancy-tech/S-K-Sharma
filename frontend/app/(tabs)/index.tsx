@@ -64,6 +64,10 @@ export default function Dashboard() {
   }, [isMultiFirmAdmin, selectedCompanyId, companies, setSelectedCompanyId]);
   const [pendingEmpCount, setPendingEmpCount] = useState<number>(0);
   const [pendingReqCount, setPendingReqCount] = useState<number>(0);
+  // Iter 506 (user bug — "Alloted Task Not Showing In Main Screen") —
+  // open tasks for the logged-in admin, shown directly on the home screen.
+  const [myTasks, setMyTasks] = useState<any[]>([]);
+  const [myTasksOpen, setMyTasksOpen] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState<number>(0);
   const [attSummary, setAttSummary] = useState<{
     days: {
@@ -84,11 +88,37 @@ export default function Dashboard() {
   // Iter 187b — monotonic sequence for load() so stale responses are dropped.
   const loadSeqRef = useRef(0);
 
+  // Iter 506 — allotted tasks on the main screen. Fetched independently of
+  // load()'s big try-block so one failing dashboard call can't hide tasks.
+  // NO firm filter on purpose: a sub admin must see tasks alloted to them
+  // across ALL their firms, regardless of the currently selected firm.
+  const loadMyTasks = useCallback(async (seq: number) => {
+    if (!user || user.role === "employee") return;
+    // Up to 3 attempts — this list is the main reason admins open the app,
+    // so a transient network hiccup must not blank the section.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const tk = await api<{ tasks: any[] }>("/admin/portal-tasks");
+        const open = (tk.tasks || []).filter(
+          (t: any) => !["done", "approved"].includes(t.status));
+        if (seq === loadSeqRef.current) {
+          setMyTasksOpen(open.length);
+          setMyTasks(open.slice(0, 3));
+        }
+        return;
+      } catch {
+        await new Promise((r) => setTimeout(r, 2500));
+        if (seq !== loadSeqRef.current) return; // superseded — stop
+      }
+    }
+  }, [user]);
+
   const load = useCallback(async () => {
     // Iter 187b — stale-response guard: switching firms fires a new load()
     // while the previous one may still be in flight; without this the OLD
     // firm's stats can land last and overwrite the newly selected firm.
     const seq = ++loadSeqRef.current;
+    void loadMyTasks(seq);
     try {
       const isSuper = user?.role === "super_admin";
       const [t, l, n, s] = await Promise.all([
@@ -178,7 +208,7 @@ export default function Dashboard() {
       const u = await api<{ unread: number }>("/messages/unread-count");
       setUnreadMessages(u.unread || 0);
     } catch {}
-  }, [user, companyFilter, companies.length]);
+  }, [user, companyFilter, companies.length, loadMyTasks]);
 
   // Iter 77 - Also refresh the logged-in user record whenever the Dashboard
   // gains focus OR the operator pulls-to-refresh. This makes admin-side
@@ -692,6 +722,61 @@ export default function Dashboard() {
               </>
             )}
 
+            {/* Iter 506 — Allotted tasks directly on the main screen */}
+            {user?.role !== "employee" && myTasksOpen > 0 ? (
+              <>
+                <SectionHeader title={`My tasks (${myTasksOpen} open)`} />
+                <View style={styles.actions} testID="home-my-tasks">
+                  {myTasks.map((t: any) => {
+                    const todayIso = new Date().toISOString().slice(0, 10);
+                    const overdue = t.due_date && t.due_date < todayIso;
+                    return (
+                      <Pressable
+                        key={t.task_id}
+                        style={styles.actionRow}
+                        onPress={() => router.push("/(tabs)/tasks" as any)}
+                        testID={`home-task-${t.task_id}`}
+                      >
+                        <View style={{
+                          width: 34, height: 34, borderRadius: 10, alignItems: "center",
+                          justifyContent: "center",
+                          backgroundColor: t.priority === "high" ? "#FEF2F2" : "#EEF2FF",
+                        }}>
+                          <Ionicons name="clipboard-outline" size={17}
+                            color={t.priority === "high" ? "#DC2626" : colors.brandPrimary} />
+                        </View>
+                        <View style={{ flex: 1, marginRight: 8 }}>
+                          <Text numberOfLines={1} style={{
+                            fontSize: 13.5, fontWeight: "700", color: colors.onSurface,
+                          }}>
+                            {t.title}
+                          </Text>
+                          <Text numberOfLines={1} style={{
+                            fontSize: 11, marginTop: 1,
+                            color: overdue ? "#B91C1C" : colors.onSurfaceSecondary,
+                            fontWeight: overdue ? "800" : "400",
+                          }}>
+                            {(t.company_names || []).join(" · ") || t.company_name || "All firms"}
+                            {t.due_date ? ` · due ${t.due_date}${overdue ? " (overdue)" : ""}` : ""}
+                            {t.assigned_by_name ? ` · by ${t.assigned_by_name}` : ""}
+                          </Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={16} color={colors.onSurfaceTertiary} />
+                      </Pressable>
+                    );
+                  })}
+                  {myTasksOpen > myTasks.length ? (
+                    <Pressable onPress={() => router.push("/(tabs)/tasks" as any)}
+                      style={{ alignSelf: "flex-end", paddingVertical: 4 }}
+                      testID="home-tasks-viewall">
+                      <Text style={{ fontSize: 12, fontWeight: "800", color: colors.brandPrimary }}>
+                        View all {myTasksOpen} tasks →
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              </>
+            ) : null}
             <SectionHeader title="Quick actions" />
             <View style={styles.actions}>
               {/* Iter 503 (user bug — "In PWA of Super Admin Login Task

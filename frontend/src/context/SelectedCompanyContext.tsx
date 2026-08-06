@@ -54,6 +54,12 @@ type Ctx = {
   // that firm is locked to the session. Switching requires a full logout.
   isLocked: boolean;
   clearLock: () => void; // internal helper for logout / dev
+  // Iter 506 — true once the one-time "remember my firm" restore has
+  // SETTLED (restored, not applicable, or given up). app/index.tsx holds
+  // its sub-admin firm-select redirect until this flips, otherwise two
+  // competing <Redirect>s fire mid-restore and the router dead-ends on a
+  // blank screen (the "sub admin blank home on cold load" bug).
+  firmRestoreDone: boolean;
 };
 
 const SelectedCompanyContext = createContext<Ctx | null>(null);
@@ -71,6 +77,27 @@ export function SelectedCompanyProvider({ children }: { children: React.ReactNod
   // Iter 124 — remember-my-firm: only attempt the server-side restore once
   // per login so an explicit "All firms" pick isn't overridden later.
   const restoredForUser = React.useRef<string | null>(null);
+  // Iter 506 — see Ctx.firmRestoreDone.
+  const [firmRestoreDone, setFirmRestoreDone] = useState(false);
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user) { setFirmRestoreDone(false); return; }
+    if (user.role !== "super_admin" && user.role !== "sub_admin") {
+      setFirmRestoreDone(true);
+      return;
+    }
+    if (selectedCompanyId) { setFirmRestoreDone(true); return; }
+    if (restoredForUser.current === user.user_id) {
+      setFirmRestoreDone(true);
+    }
+  }, [authLoading, user, selectedCompanyId]);
+  // Failsafe: never hold navigation more than 8s (e.g. /companies or
+  // /me/last-company hanging on a flaky network).
+  useEffect(() => {
+    if (firmRestoreDone || !user || authLoading) return;
+    const t = setTimeout(() => setFirmRestoreDone(true), 8000);
+    return () => clearTimeout(t);
+  }, [firmRestoreDone, user, authLoading]);
 
   // Iter 124 — persist the admin's current firm on the backend so the SAME
   // firm is auto-selected after their next login (per super/sub admin).
@@ -172,6 +199,8 @@ export function SelectedCompanyProvider({ children }: { children: React.ReactNod
           }
         }
       } catch { /* best-effort */ }
+      // Iter 506 — restore settled (found or not) — release route gates.
+      setFirmRestoreDone(true);
     })();
   }, [user, companies, selectedCompanyId]);
 
@@ -350,8 +379,9 @@ export function SelectedCompanyProvider({ children }: { children: React.ReactNod
       // button can clear the current firm and re-open the picker.
       isLocked,
       clearLock,
+      firmRestoreDone,
     }),
-    [companies, loading, selectedCompanyId, selectedCompany, setSelectedCompanyId, switchCompany, reloadCompanies, isLocked, clearLock],
+    [companies, loading, selectedCompanyId, selectedCompany, setSelectedCompanyId, switchCompany, reloadCompanies, isLocked, clearLock, firmRestoreDone],
   );
 
   return (
@@ -374,6 +404,7 @@ export function useSelectedCompany(): Ctx {
       reloadCompanies: async () => {},
       isLocked: false,
       clearLock: () => {},
+      firmRestoreDone: true,
     };
   }
   return c;

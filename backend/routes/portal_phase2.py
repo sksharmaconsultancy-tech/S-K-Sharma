@@ -348,11 +348,20 @@ async def list_tasks(
         # Iter 505 — also include GLOBAL tasks (no firm attached), else
         # they become unreachable whenever a firm filter is active (PWA
         # always has the selected firm applied).
-        q["$or"] = [
+        _company_or: List[Dict[str, Any]] = [
             {"company_id": cid},
             {"company_ids": cid},
             {"company_id": None, "company_ids": {"$in": [None, []]}},
         ]
+        # Iter 506 (user bug — "Alloted Task Not Showing on Sub Admin
+        # dashboard"): tasks assigned to me / created by me must NEVER
+        # be hidden by the firm filter — the PWA always has one firm
+        # selected, which hid tasks alloted for the sub admin's OTHER
+        # firms.
+        if admin.get("role") == "sub_admin":
+            _company_or += [{"assignee_id": admin["user_id"]},
+                            {"created_by": admin["user_id"]}]
+        q["$or"] = _company_or
     if status and status != "all":
         q["status"] = status
     if assignee_id and admin.get("role") == "super_admin":

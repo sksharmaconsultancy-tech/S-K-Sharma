@@ -497,28 +497,122 @@ async def bonus_yearly_summary_xlsx(
     cid = _resolve_company(admin, company_id)
     fy = fy_start_year or (date.today().year if date.today().month >= 4 else date.today().year - 1)
     data = await _bonus_yearly_summary(cid, fy)
-    header = (["Sr.", "Emp Code", "Employee Name", "Father Name", "Date of Join"]
-              + [f"{m['label']} Days" for m in data["months"]]
-              + [f"{m['label']} Earned" for m in data["months"]]
-              + [h["label"] + " (Yr)" for h in data["heads"]]
-              + ["Total Working Days", "Total Earned"])
-    rows = []
+
+    # Iter 506 (user request — "Download Same Format As Display"): the
+    # sheet mirrors the on-screen table exactly — a two-row header with
+    # each month spanning its Days + Earned sub-columns (interleaved per
+    # month, NOT all-Days-then-all-Earned), fixed columns merged
+    # vertically, and a bold yellow TOTAL footer.
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Bonus Yearly Summary"
+    months = data["months"]
+    heads = data["heads"]
+
+    thin = Side(style="thin", color="D1D5DB")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    hdr_font = Font(bold=True, color="FFFFFF", size=10)
+    hdr_fill = PatternFill("solid", fgColor="1E3A8A")
+    sub_fill = PatternFill("solid", fgColor="3B5BC4")
+    tot_fill = PatternFill("solid", fgColor="FEF9C3")
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left = Alignment(horizontal="left", vertical="center")
+
+    fixed_cols = ["Sr.", "Code", "Employee Name", "Father Name", "Date of Join"]
+    ncols = len(fixed_cols) + len(months) * 2 + len(heads) + 2
+
+    # Title
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
+    c = ws.cell(row=1, column=1,
+                value=f"Bonus Yearly Summary — {data['fy_label']} — {data.get('company_name') or ''}")
+    c.font = Font(bold=True, size=13, color="1E3A8A")
+    c.alignment = Alignment(horizontal="center")
+
+    # Two-row header (rows 3 & 4) — exactly like the display
+    h1, h2 = 3, 4
+    col = 1
+    for lbl in fixed_cols:
+        ws.merge_cells(start_row=h1, start_column=col, end_row=h2, end_column=col)
+        cell = ws.cell(row=h1, column=col, value=lbl)
+        cell.font, cell.fill, cell.alignment = hdr_font, hdr_fill, center
+        ws.cell(row=h2, column=col).fill = hdr_fill
+        col += 1
+    for m in months:
+        ws.merge_cells(start_row=h1, start_column=col, end_row=h1, end_column=col + 1)
+        cell = ws.cell(row=h1, column=col, value=m["label"])
+        cell.font, cell.fill, cell.alignment = hdr_font, hdr_fill, center
+        ws.cell(row=h1, column=col + 1).fill = hdr_fill
+        for j, sub in enumerate(("Days", "Earned")):
+            sc = ws.cell(row=h2, column=col + j, value=sub)
+            sc.font, sc.fill, sc.alignment = hdr_font, sub_fill, center
+        col += 2
+    for h in heads:
+        ws.merge_cells(start_row=h1, start_column=col, end_row=h2, end_column=col)
+        cell = ws.cell(row=h1, column=col, value=f"{h['label']} (Yr)")
+        cell.font, cell.fill, cell.alignment = hdr_font, hdr_fill, center
+        ws.cell(row=h2, column=col).fill = hdr_fill
+        col += 1
+    for lbl in ("Total Days", "Total Earned"):
+        ws.merge_cells(start_row=h1, start_column=col, end_row=h2, end_column=col)
+        cell = ws.cell(row=h1, column=col, value=lbl)
+        cell.font, cell.fill, cell.alignment = hdr_font, hdr_fill, center
+        ws.cell(row=h2, column=col).fill = hdr_fill
+        col += 1
+
+    def _dd_mm(v: str) -> str:
+        s = str(v or "")
+        return f"{s[8:10]}-{s[5:7]}-{s[0:4]}" if len(s) >= 10 and s[4] == "-" else (s or "—")
+
+    # Data rows — months interleaved Days/Earned per month, like on screen
+    ri = h2 + 1
     for r in data["rows"]:
-        rows.append(
-            [r["sr"], r["employee_code"], r["name"], r["father_name"], r["doj"]]
-            + [(r["monthly"].get(m["key"]) or {}).get("days") or 0 for m in data["months"]]
-            + [(r["monthly"].get(m["key"]) or {}).get("earned") or 0 for m in data["months"]]
-            + [r.get(h["key"]) or 0 for h in data["heads"]]
-            + [r["total_days"], r["total_earned"]]
-        )
+        vals = [r["sr"], r["employee_code"] or "", r["name"], r["father_name"] or "",
+                _dd_mm(r["doj"])]
+        for m in months:
+            cellm = r["monthly"].get(m["key"]) or {}
+            vals += [cellm.get("days") or 0, cellm.get("earned") or 0]
+        vals += [r.get(h["key"]) or 0 for h in heads]
+        vals += [r["total_days"], r["total_earned"]]
+        for ci, v in enumerate(vals, start=1):
+            cell = ws.cell(row=ri, column=ci, value=v)
+            cell.border = border
+            if ci == 3 or ci == 4:
+                cell.alignment = left
+            else:
+                cell.alignment = Alignment(horizontal="center")
+        ri += 1
+
+    # TOTAL footer — bold on yellow, mirrors the display's total strip
+    tvals: List[Any] = ["", "", "TOTAL", "", ""]
     t = data["totals"]
-    totals_row = (["", "", "TOTAL", "", ""]
-                  + [(t["monthly"].get(m["key"]) or {}).get("days") or 0 for m in data["months"]]
-                  + [(t["monthly"].get(m["key"]) or {}).get("earned") or 0 for m in data["months"]]
-                  + [t.get(h["key"]) or 0 for h in data["heads"]]
-                  + [t["total_days"], t["total_earned"]])
-    return _xlsx_response(
-        f"Bonus Yearly Summary — {data['fy_label']} — {data.get('company_name') or ''}",
-        header, rows, totals_row,
-        f"Bonus_Yearly_Summary_{fy}.xlsx",
+    for m in months:
+        cellm = t["monthly"].get(m["key"]) or {}
+        tvals += [cellm.get("days") or 0, cellm.get("earned") or 0]
+    tvals += [t.get(h["key"]) or 0 for h in heads]
+    tvals += [t["total_days"], t["total_earned"]]
+    for ci, v in enumerate(tvals, start=1):
+        cell = ws.cell(row=ri, column=ci, value=v)
+        cell.font = Font(bold=True)
+        cell.fill = tot_fill
+        cell.border = border
+        cell.alignment = Alignment(horizontal="center") if ci != 3 else left
+
+    # Column widths (match display proportions) + freeze panes
+    from openpyxl.utils import get_column_letter
+    widths = [6, 9, 24, 20, 12] + [8, 12] * len(months) + [12] * len(heads) + [11, 14]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = ws.cell(row=h2 + 1, column=6)
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition":
+                 f'attachment; filename="Bonus_Yearly_Summary_{fy}.xlsx"'},
     )

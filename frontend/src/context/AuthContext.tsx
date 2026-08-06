@@ -169,7 +169,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refresh = useCallback(async () => {
     try {
       const res = await api<{ user: AuthUser }>("/auth/me");
-      setUser(res.user);
+      // Iter 506 (critical) — keep the SAME object identity when nothing
+      // changed. `refresh()` used to setUser(new object) on every call,
+      // which recreated every useCallback depending on `user`, re-ran
+      // useFocusEffect(..., [load, refresh]) hooks, which called refresh()
+      // again → INFINITE api loop (hammered the server until Cloudflare
+      // rate-limited the session and dashboards went blank/empty).
+      setUser((prev) =>
+        prev && JSON.stringify(prev) === JSON.stringify(res.user) ? prev : res.user,
+      );
     } catch (e: any) {
       // Only sign the user out on a true authentication failure (401 /
       // "Invalid token"). Transient issues (network drops, 5xx, offline)

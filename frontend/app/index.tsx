@@ -13,7 +13,7 @@ import { DESKTOP_MIN } from "@/src/components/AdminWebShell";
 
 export default function Landing() {
   const { user, loading, authError, clearAuthError } = useAuth();
-  const { selectedCompanyId } = useSelectedCompany();
+  const { selectedCompanyId, firmRestoreDone } = useSelectedCompany();
   const router = useRouter();
   const pathname = usePathname();
   const { width } = useWindowDimensions();
@@ -60,7 +60,21 @@ export default function Landing() {
     // Iter 67 — SUB-ADMIN ONLY firm-select gate.  Super Admin & Company
     // Admin flows are unchanged (they land on the dashboard directly).
     const isSubAdmin = (user.role as string) === "sub_admin";
-    if (isSubAdmin && !selectedCompanyId) return <Redirect href="/firm-select" />;
+    if (isSubAdmin && !selectedCompanyId) {
+      // Iter 506 (bug — sub admin BLANK screen on cold load): while the
+      // "remember my firm" restore is still in flight, do NOT navigate.
+      // Redirecting to /firm-select and then flipping to /(tabs) a moment
+      // later dead-ended the router on an empty tree. Hold with a spinner
+      // and issue ONE final redirect once the restore has settled.
+      if (!firmRestoreDone) {
+        return (
+          <View style={styles.center} testID="firm-restore-wait">
+            <ActivityIndicator color={colors.brandPrimary} size="large" />
+          </View>
+        );
+      }
+      return <Redirect href="/firm-select" />;
+    }
     // Deep-link restore — during the auth bootstrap the Stack navigator
     // remounts (bare tree → admin shell) and RESETS to this index route,
     // wiping whatever direct URL the user opened (e.g. /salary-run).
