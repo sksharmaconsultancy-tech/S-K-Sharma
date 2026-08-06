@@ -37,6 +37,17 @@
 #    actually are and gives a one-tap "Show them" button that jumps the
 #    date range to those punches.
 #
+# 2b) PUNCH LOG REPORT — "NOT FOUND IN MASTER" fixes (your bug + request):
+#    • Unknown punches from machines that are NOT registered in the
+#      Devices master were silently dropped when a firm was selected —
+#      they now ALWAYS show, marked "⚠ Unregistered Device" (old + new
+#      machines both covered).
+#    • 📷 photos are now CLICKABLE in the Punch Log Report — including
+#      NOT-FOUND rows: the machine photo parked for the unknown user is
+#      shown so you can identify who punched.
+#
+# 2c) NEW TASK → Firm dropdown now has a 🔍 FILTER box (your request).
+#
 # 3) STAY ON THE SAME PAGE (your request):
 #    • Switching the ACTIVE FIRM now refreshes the CURRENT page in place
 #      (fresh data for the new firm) — no more jumping to the Dashboard.
@@ -126,6 +137,10 @@ echo -n "   Task attachments (must say OK): "
 grep -q 'task_attachments' $APP_DIR/backend/routes/portal_phase2.py && grep -q 'pd-att-upload' $APP_DIR/frontend/src/components/portal/TasksPanel.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Punch Approvals pending-jump fix (must say OK): "
 grep -q 'pending-jump-btn' $APP_DIR/frontend/app/punch-approvals.tsx && echo "OK" || echo "MISSING!"
+echo -n "   Punch Log NOT-FOUND + photo viewer (must say OK): "
+grep -q 'Unregistered Device' $APP_DIR/backend/routes/punch_logs.py && grep -q 'punch-logs/photo' $APP_DIR/backend/routes/punch_logs.py && grep -q '__punchPhotoOpen' $APP_DIR/frontend/app/punch-log-report.tsx && echo "OK" || echo "MISSING!"
+echo -n "   New Task firm filter (must say OK): "
+grep -q 'pd-task-firm-filter' $APP_DIR/frontend/src/components/portal/TasksPanel.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Stay-on-page after firm switch (must say OK): "
 grep -q 'loc.pathname + (loc.search' $APP_DIR/frontend/src/context/SelectedCompanyContext.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Iter 501 Client Attendance Import still present (must say OK): "

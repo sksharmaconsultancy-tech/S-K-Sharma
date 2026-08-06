@@ -65,6 +65,7 @@ export default function TasksPanel({
     company_id: companyId || "",
   });
   const [firmDdOpen, setFirmDdOpen] = useState(false);
+  const [firmQ, setFirmQ] = useState("");
   // Iter 502 — hierarchy: assignees + multi-company + delegation + hub stats
   const isSuper = role === "super_admin";
   const isSub = role === "sub_admin";
@@ -673,9 +674,18 @@ export default function TasksPanel({
                   </Pressable>
                   {firmDdOpen ? (
                     <View style={st.ddList}>
+                      {/* Iter 503 (user request) — filter/search firms */}
+                      <TextInput
+                        style={[st.input, { margin: 6 }]}
+                        value={firmQ}
+                        onChangeText={setFirmQ}
+                        placeholder="🔍 Filter firms…"
+                        placeholderTextColor={colors.onSurfaceTertiary}
+                        testID="pd-task-firm-filter"
+                      />
                       <ScrollView style={{ maxHeight: 190 }} nestedScrollEnabled>
                         <Pressable
-                          onPress={() => { setForm({ ...form, company_id: "" }); setFirmDdOpen(false); }}
+                          onPress={() => { setForm({ ...form, company_id: "" }); setFirmDdOpen(false); setFirmQ(""); }}
                           style={[st.ddOpt, !form.company_id && st.ddOptOn]}
                           testID="pd-task-firm-none">
                           <Text style={[st.ddOptTxt, !form.company_id && st.ddOptTxtOn]}>
@@ -685,9 +695,12 @@ export default function TasksPanel({
                             <Ionicons name="checkmark" size={14} color={colors.brandPrimary} />
                           ) : null}
                         </Pressable>
-                        {companies.map((c) => (
+                        {companies
+                          .filter((c) => !firmQ.trim()
+                            || c.name.toLowerCase().includes(firmQ.trim().toLowerCase()))
+                          .map((c) => (
                           <Pressable key={c.company_id}
-                            onPress={() => { setForm({ ...form, company_id: c.company_id }); setFirmDdOpen(false); }}
+                            onPress={() => { setForm({ ...form, company_id: c.company_id }); setFirmDdOpen(false); setFirmQ(""); }}
                             style={[st.ddOpt, form.company_id === c.company_id && st.ddOptOn]}
                             testID={`pd-task-firm-${c.company_id}`}>
                             <Text style={[st.ddOptTxt, form.company_id === c.company_id && st.ddOptTxtOn]}

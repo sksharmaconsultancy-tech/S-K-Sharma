@@ -206,6 +206,8 @@ async def _query_rows(
             "status": "not found" if _flag == "not_found" else (r.get("status") or ""),
             "source": r.get("source") or "",
             "has_photo": r.get("record_id") in photo_ids,
+            "photo_ref": (r.get("record_id")
+                          if r.get("record_id") in photo_ids else None),
             "flag": _flag,
         })
     # Iter 341 (user request) — device punches whose BIO CODE matched NO
@@ -229,12 +231,37 @@ async def _query_rows(
             {"_id": 0, "company_id": 1, "name": 1},
         ):
             firms[c["company_id"]] = c.get("name") or c["company_id"]
+    # Iter 503 (user bug + request) — parked machine photos (ATTPHOTO that
+    # matched no employee) so a NOT-FOUND punch can still show its photo.
+    _park: Dict[tuple, List[str]] = {}
+    async for p_ in db.biometric_photos.find(
+            _unm_q, {"_id": 0, "device_serial": 1, "device_user_id": 1,
+                     "at": 1}).limit(4000):
+        _park.setdefault((str(p_.get("device_serial") or ""),
+                          str(p_.get("device_user_id") or "")),
+                         []).append(str(p_.get("at") or ""))
+
+    def _parked_photo_at(serial: str, pin: str, at: str) -> Optional[str]:
+        for pat in _park.get((serial, pin), []):
+            try:
+                d1 = datetime.fromisoformat(pat.replace("Z", "+00:00"))
+                d2 = datetime.fromisoformat(at.replace("Z", "+00:00"))
+                if abs((d1 - d2).total_seconds()) <= 120:
+                    return pat
+            except ValueError:
+                continue
+        return None
+
     async for m_ in db.biometric_unmapped.find(
         _unm_q, {"_id": 0, "device_serial": 1, "device_user_id": 1, "at": 1},
     ).sort([("at", -1)]).limit(2000):
         d = _dev_map.get(str(m_.get("device_serial") or ""), {})
         _cid = d.get("company_id")
-        if _allowed is not None and _cid not in _allowed:
+        # Iter 503 (user bug: "NOT FOUND not working on some machines") —
+        # punches from a machine that is NOT registered in the Devices
+        # master have no firm, so the firm filter silently dropped them.
+        # They now ALWAYS show, marked "Unregistered Device".
+        if _allowed is not None and _cid is not None and _cid not in _allowed:
             continue
         _serial = str(m_.get("device_serial") or "")
         mkey = f"device:{_serial}" if _serial else "app"
@@ -243,6 +270,8 @@ async def _query_rows(
         mlabel = f"Device {_serial}" if _serial else "Device"
         machines.setdefault(mkey, mlabel)
         at = str(m_.get("at") or "")
+        _pin = str(m_.get("device_user_id") or "")
+        _ph_at = _parked_photo_at(_serial, _pin, at)
         rows.append({
             "record_id": None,
             "date": at[:10],
@@ -252,15 +281,19 @@ async def _query_rows(
             "employee_code": "",
             "name": "NOT FOUND IN MASTER",
             "name_in_machine": _mu_map.get(
-                (_cid, str(m_.get("device_user_id") or "").strip()), ""),
-            "bio_code": str(m_.get("device_user_id") or ""),
+                (_cid, _pin.strip()), ""),
+            "bio_code": _pin,
             "machine_name": d.get("name") or "",
             "machine": mlabel,
             "machine_key": mkey,
-            "company_name": firms.get(_cid or "", "") or (d.get("name") or ""),
+            "company_name": firms.get(_cid or "", "")
+            or (d.get("name") or "")
+            or "⚠ Unregistered Device",
             "status": "not found",
             "source": "device",
-            "has_photo": False,
+            "has_photo": bool(_ph_at),
+            "photo_ref": (f"unmapped|{_serial}|{_pin}|{_ph_at}"
+                          if _ph_at else None),
             "flag": "not_found",
         })
     rows.sort(key=lambda x: (x.get("date") or "", x.get("time") or ""), reverse=True)
@@ -290,6 +323,46 @@ async def punch_logs(
             {"key": k, "label": v} for k, v in sorted(data["machines"].items())
         ],
     }
+
+
+@router.get("/punch-logs/photo")
+async def punch_log_photo(
+    ref: str = Query(..., description="record_id or unmapped|serial|pin|at"),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 503 (user request) — view the machine photo of a punch row,
+    INCLUDING 'NOT FOUND IN MASTER' rows (parked ATTPHOTO of an unmapped
+    device user)."""
+    admin = await get_user_from_token(authorization)
+    if admin.get("role") not in ("super_admin", "sub_admin", "company_admin"):
+        raise HTTPException(403, "Admin only")
+    if ref.startswith("unmapped|"):
+        try:
+            _, serial, pin, at = ref.split("|", 3)
+        except ValueError:
+            raise HTTPException(400, "Bad photo reference")
+        p = await db.biometric_photos.find_one(
+            {"device_serial": serial, "device_user_id": pin, "at": at},
+            {"_id": 0, "photo_base64": 1, "at": 1})
+        if not p or not p.get("photo_base64"):
+            raise HTTPException(404, "Photo not found")
+        return {"photo_base64": p["photo_base64"], "at": p.get("at"),
+                "caption": f"Machine user {pin} · {serial}"}
+    rec = await db.attendance.find_one(
+        {"record_id": ref},
+        {"_id": 0, "selfie_base64": 1, "at": 1, "user_id": 1, "company_id": 1})
+    if not rec or not rec.get("selfie_base64"):
+        raise HTTPException(404, "Photo not found")
+    if admin.get("role") == "company_admin" \
+            and rec.get("company_id") != admin.get("company_id"):
+        raise HTTPException(403, "Not your firm's punch")
+    if admin.get("role") == "sub_admin" \
+            and not sub_admin_can_touch_company(admin, rec.get("company_id")):
+        raise HTTPException(403, "Firm not in your scope")
+    u = await db.users.find_one({"user_id": rec.get("user_id")},
+                                {"_id": 0, "name": 1, "employee_code": 1})
+    return {"photo_base64": rec["selfie_base64"], "at": rec.get("at"),
+            "caption": f"{(u or {}).get('name') or ''} ({(u or {}).get('employee_code') or ''})"}
 
 
 @router.get("/daily-attendance")

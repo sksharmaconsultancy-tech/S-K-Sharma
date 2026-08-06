@@ -13,6 +13,8 @@ import {
   Pressable,
   ActivityIndicator,
   Platform,
+  Modal,
+  Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -43,6 +45,7 @@ type Row = {
   company_name: string;
   status: string;
   has_photo?: boolean;
+  photo_ref?: string | null;
   // Iter 341 — "not_found" | "new_registration" | ""
   flag?: string;
 };
@@ -114,6 +117,22 @@ const COLS: ReportCol<Row>[] = [
   { key: "status", label: "Status", type: "center", min: 84 },
   {
     key: "has_photo", label: "Photo", type: "center", min: 56,
+    // Iter 503 (user request) — tap 📷 to VIEW the machine photo, incl.
+    // "NOT FOUND IN MASTER" rows (parked ATTPHOTO of the unknown user).
+    render: (r) => (
+      r.has_photo && r.photo_ref ? (
+        <Pressable
+          onPress={() => (globalThis as any).__punchPhotoOpen?.(r)}
+          hitSlop={8}
+          style={{ alignItems: "center" }}
+          testID={`plr-photo-${r.photo_ref}`}
+        >
+          <Text style={{ fontSize: 13 }}>📷</Text>
+        </Pressable>
+      ) : (
+        <Text style={{ fontSize: 11, color: "#94A3B8", textAlign: "center" }}>—</Text>
+      )
+    ),
     value: (r) => (r.has_photo ? "📷" : "—"),
   },
 ];
@@ -133,6 +152,26 @@ export default function PunchLogReportScreen() {
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
   const [truncated, setTruncated] = useState(false);
+  // Iter 503 — punch photo viewer (works for NOT FOUND rows too)
+  const [photo, setPhoto] = useState<{ uri: string; caption: string } | null>(null);
+  const [photoLoading, setPhotoLoading] = useState(false);
+  useEffect(() => {
+    (globalThis as any).__punchPhotoOpen = async (r: Row) => {
+      if (!r.photo_ref) return;
+      setPhotoLoading(true); setPhoto(null);
+      try {
+        const resp = await api<any>(`/admin/punch-logs/photo?ref=${encodeURIComponent(r.photo_ref)}`);
+        setPhoto({
+          uri: `data:image/jpeg;base64,${resp.photo_base64}`,
+          caption: `${resp.caption || r.name} · ${r.date} ${r.time}`,
+        });
+      } catch {
+        setPhoto(null);
+      }
+      setPhotoLoading(false);
+    };
+    return () => { (globalThis as any).__punchPhotoOpen = undefined; };
+  }, []);
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
 
@@ -344,6 +383,26 @@ export default function PunchLogReportScreen() {
               : null
         }
       />
+      {/* Iter 503 — punch photo viewer */}
+      <Modal visible={!!photo || photoLoading} transparent animationType="fade"
+        onRequestClose={() => { setPhoto(null); setPhotoLoading(false); }}>
+        <Pressable
+          style={{ flex: 1, backgroundColor: "rgba(15,23,42,0.82)", alignItems: "center", justifyContent: "center", padding: 14 }}
+          onPress={() => { setPhoto(null); setPhotoLoading(false); }}>
+          {photoLoading ? (
+            <ActivityIndicator size="large" color="#fff" />
+          ) : photo ? (
+            <View style={{ alignItems: "center" }}>
+              <Image source={{ uri: photo.uri }} resizeMode="contain"
+                style={{ width: 520, height: 520, maxWidth: "95%", borderRadius: 10, backgroundColor: "#000" }} />
+              <Text style={{ color: "#fff", fontSize: 12.5, fontWeight: "700", marginTop: 10, textAlign: "center" }}>
+                {photo.caption}
+              </Text>
+              <Text style={{ color: "#CBD5E1", fontSize: 11, marginTop: 3 }}>tap anywhere to close</Text>
+            </View>
+          ) : null}
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }

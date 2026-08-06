@@ -4533,3 +4533,16 @@ Deploy: deploy_vps_iter502.sh, temp_bundle → deploy502.sh, APP_ITERATION=502.
 - Frontend (TasksPanel): 📎 + count on cards, attachments modal (upload via
   DocumentPicker image/pdf, image preview overlay, PDF download, delete),
   Submit-for-Review nudges to attach evidence when none. UI verified.
+
+## Iter 503b (in deploy502) — Punch Log NOT-FOUND fixes + firm filter
+1. Bug (user): "NOT FOUND IN MASTER not working on some machines" — root
+   cause: unmapped punches from devices NOT registered in biometric_devices
+   have no company_id, so the firm filter dropped them. Fix (punch_logs.py):
+   unregistered-device rows always show, company label "⚠ Unregistered
+   Device". Verified: 2 hidden SEC2-1 rows now visible under Kankani filter.
+2. Photo viewing (user request): GET /admin/punch-logs/photo?ref= —
+   ref=record_id (attendance.selfie_base64, RBAC-scoped) or
+   ref=unmapped|serial|pin|at (parked db.biometric_photos ATTPHOTO within
+   ±120s of the unmapped punch). Punch Log Report 📷 is now clickable with
+   a full-screen photo viewer (photo_ref field added to rows).
+3. New Task Firm dropdown got a 🔍 filter box (pd-task-firm-filter). Verified.
