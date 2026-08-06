@@ -674,6 +674,7 @@ export default function TasksPanel({
                       ) : null}
                       <ScrollView style={{ maxHeight: 180 }} nestedScrollEnabled>
                         <Pressable onPress={() => { setAssigneeId(""); setMultiCids([]); setMcQ(""); setAssigneeDd(false); }}
+                          testID="pd-task-assignee-none"
                           style={[st.ddOpt, !assigneeId && st.ddOptOn]}>
                           <Text style={[st.ddOptTxt, !assigneeId && st.ddOptTxtOn]}>
                             {isSuper ? "Not assigned — my own task" : "Not assigned — internal task"}

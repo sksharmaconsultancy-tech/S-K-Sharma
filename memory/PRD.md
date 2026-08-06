@@ -4682,3 +4682,18 @@ deploy505.sh, APP_ITERATION=505.
    (no data rows in preview DB — no compliance runs — structure OK).
 Verified super admin home regression-clean. Deploy: deploy_vps_iter506.sh,
 temp_bundle → deploy506.sh, APP_ITERATION=506.
+
+## Iter 507 — Assignee-scoped firm multi-select in New Task ✅
+User: "After the Selection of Sub Super Admin Firm Selection Option May
+Change Please Check". TasksPanel.tsx: when a Sub Super Admin is selected,
+the plain chip-wall is replaced by a searchable multi-select checklist
+restricted to that sub admin's firms — label "Firms for this task —
+<name>'s firms only (N selected)", Select-All chip (pd-task-mc-all),
+🔍 filter (mcQ state, shows when >6 firms), checkbox rows
+(pd-task-mc-<cid>), mcBox style. mcQ reset on assignee change/clear;
+pd-task-assignee-none testID added. Clearing assignee restores the
+Firm (optional) dropdown. testing_agent iteration_506.json: all 6 steps
+PASS (incl. create with scoped firm + cleanup). Deploy:
+deploy_vps_iter507.sh, temp_bundle → deploy507.sh, APP_ITERATION=507.
+NOTE: main-agent screenshot tool was fully Cloudflare-blocked this
+session — use testing_agent for UI verification when that happens.
