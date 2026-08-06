@@ -14,7 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 
-import { api } from "@/src/api/client";
+import { api, apiBinary } from "@/src/api/client";
 import ReportTable, { ReportCol } from "@/src/components/ReportTable";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors, radius, spacing } from "@/src/theme";
@@ -154,6 +154,22 @@ export default function CtcManagementScreen() {
     setSaving(false);
   };
 
+  const [letterBusy, setLetterBusy] = useState<string | null>(null);
+  const downloadLetter = async (r: any) => {
+    setLetterBusy(r.rev_id);
+    try {
+      const res = await apiBinary(`/admin/ctc/increment-letter/${r.rev_id}.pdf`);
+      if (Platform.OS === "web" && res.webBlobUrl) {
+        const a = document.createElement("a");
+        a.href = res.webBlobUrl;
+        a.download = `Increment_Letter_${(r.employee_name || "emp").replace(/ /g, "_")}_${(r.effective_date || "").slice(0, 10)}.pdf`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 30000);
+      }
+    } catch (e: any) { alert(e?.message || "Letter download failed"); }
+    setLetterBusy(null);
+  };
+
   const EMP_COLS: ReportCol<any>[] = [
     { key: "employee_code", label: "Code", type: "center", min: 64, sticky: true },
     { key: "name", label: "Name", min: 200, max: 300, sticky: true },
@@ -207,6 +223,17 @@ export default function CtcManagementScreen() {
     { key: "effective_date", label: "Effective", type: "date" },
     { key: "reason", label: "Reason", min: 140, max: 260 },
     { key: "approved_by", label: "Approved By", min: 120, max: 200 },
+    {
+      key: "__letter", label: "Letter", type: "center", min: 64,
+      render: (r) => (
+        <Pressable onPress={() => downloadLetter(r)} disabled={letterBusy === r.rev_id}
+          style={{ alignSelf: "center" }} testID={`ctc-letter-${r.rev_id}`}>
+          {letterBusy === r.rev_id
+            ? <ActivityIndicator size="small" color={colors.brandPrimary} />
+            : <Ionicons name="document-text-outline" size={16} color={colors.brandPrimary} />}
+        </Pressable>
+      ),
+    },
   ];
 
   const PROJ_COLS: ReportCol<any>[] = [

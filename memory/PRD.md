@@ -4458,3 +4458,15 @@ AI WhatsApp chatbot (P4), Multi-language EN/HI (P5).
   (current + 2 previous), ReportTable grid + TOTAL footer + universal PDF export.
 - Verified: backend curl (18 rows FY 2026-27 Kankani) + screenshot (grid,
   FY chips, PDF button all render). Deploy script + verification updated.
+
+## Iter 500c — One-click Increment Letter from CTC revision
+- GET /api/admin/ctc/increment-letter/{rev_id}.pdf (utils/ctc_increment_letter.py):
+  firm letterhead, increment/revision wording (auto: increase shows amount + %),
+  OLD vs NEW CTC breakup table (earnings, gross, employer contributions,
+  Monthly/Annual CTC, est. net, colored difference row), reason, effective date,
+  employee acknowledgement + authorised signatory + punchline footer.
+- Frontend: 📄 Letter column in Revision History tab (apiBinary download,
+  testID ctc-letter-{rev_id}).
+- Verified E2E: created test revisions on PAN TEST EMP (30000→36000), PDF text
+  extracted OK ("increase of ₹6,000 (20.0%)", both breakups). UI screenshot OK.
+  All test data cleaned (user reverted to gross, revisions + audit purged).

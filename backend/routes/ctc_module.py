@@ -509,6 +509,47 @@ async def yearly_projection(company_id: str = Query(...),
             "rows": rows, "totals": totals}
 
 
+@router.get("/increment-letter/{rev_id}.pdf")
+async def increment_letter_pdf(rev_id: str,
+                               authorization: Optional[str] = Header(None)):
+    """One-click Salary Increment / Revision letter from a CTC revision:
+    firm letterhead + OLD vs NEW CTC breakup + difference + signatory."""
+    from fastapi.responses import Response
+    from utils.ctc_increment_letter import build_increment_letter_pdf
+    await _auth(authorization)
+    rev = await db.ctc_revisions.find_one({"rev_id": rev_id}, {"_id": 0})
+    if not rev:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    emp = await db.users.find_one({"user_id": rev["user_id"]}, {
+        "_id": 0, "name": 1, "employee_code": 1, "designation": 1,
+        "department": 1}) or {}
+    company = await db.companies.find_one(
+        {"company_id": rev["company_id"]},
+        {"_id": 0, "name": 1, "address": 1, "phone": 1, "email": 1}) or {}
+
+    async def _bk(ctc: float, sid: str):
+        if ctc <= 0 or not sid:
+            return None
+        s = await db.ctc_structures.find_one({"structure_id": sid},
+                                             {"_id": 0, "components": 1})
+        return calc_ctc_breakup(ctc, s["components"]) if s else None
+
+    old_bk = await _bk(float(rev.get("old_ctc") or 0),
+                       rev.get("old_structure_id") or "")
+    new_bk = await _bk(float(rev.get("new_ctc") or 0),
+                       rev.get("new_structure_id") or "")
+    s_new = await db.ctc_structures.find_one(
+        {"structure_id": rev.get("new_structure_id") or ""},
+        {"_id": 0, "name": 1}) or {}
+    pdf = build_increment_letter_pdf(
+        employee=emp, company=company, revision=rev,
+        old_breakup=old_bk, new_breakup=new_bk,
+        new_structure_name=s_new.get("name") or "")
+    fn = f"Increment_Letter_{emp.get('employee_code') or rev['user_id']}_{(rev.get('effective_date') or '')[:10]}.pdf"
+    return Response(pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+
+
 @router.get("/revisions")
 async def revisions(company_id: str = Query(...),
                     user_id: Optional[str] = Query(None),

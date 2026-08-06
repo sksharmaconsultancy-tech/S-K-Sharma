@@ -35,6 +35,11 @@
 #       annual cost (CTC / Gross × 12) vs ACTUAL paid + employer statutory
 #       cost YTD from the FY's Compliance runs (Apr–Mar), with months
 #       paid, variance and % of annual used + TOTAL footer + PDF export.
+#     • ONE-CLICK INCREMENT LETTER: in Revision History, the 📄 Letter
+#       button generates a Salary Increment / Revision letter PDF on the
+#       firm letterhead — OLD vs NEW CTC breakup side-by-side (Basic, HRA,
+#       employer PF/ESIC…), increase amount + %, reason, effective date,
+#       employee acknowledgement + authorised signatory.
 #     • Payslips of CTC employees get a "CTC ANNEXURE" section showing
 #       employer contributions + Monthly CTC (Gross + Employer).
 #
@@ -120,6 +125,8 @@ echo -n "   Payslip CTC Annexure (must say OK): "
 grep -q 'CTC ANNEXURE' $APP_DIR/backend/utils/payslip_pdf.py && echo "OK" || echo "MISSING!"
 echo -n "   Yearly CTC Projection report (must say OK): "
 grep -q 'yearly-projection' $APP_DIR/backend/routes/ctc_module.py && grep -q 'ctc_yearly_projection' $APP_DIR/frontend/app/ctc-management.tsx && echo "OK" || echo "MISSING!"
+echo -n "   Increment Letter PDF (must say OK): "
+[ -f $APP_DIR/backend/utils/ctc_increment_letter.py ] && grep -q 'increment-letter' $APP_DIR/frontend/app/ctc-management.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Iter 499 features still present (must say OK): "
 [ -f $APP_DIR/backend/routes/factory_returns.py ] && grep -q 'flatNavDeep' $APP_DIR/frontend/src/components/AdminWebShell.tsx && echo "OK" || echo "MISSING!"
 echo ""
@@ -141,3 +148,6 @@ echo "   6. That employee's payslip now ends with the CTC ANNEXURE table."
 echo "   7. CTC Management → 'Yearly Projection' tab → pick FY → per-"
 echo "      employee projected annual vs actual paid + employer cost YTD"
 echo "      with variance & totals; PDF button exports the grid."
+echo "   8. Revision History tab → 📄 Letter icon on any revision →"
+echo "      downloads the Increment Letter PDF (old vs new CTC breakup"
+echo "      on the firm letterhead, increase % and signatory block)."
