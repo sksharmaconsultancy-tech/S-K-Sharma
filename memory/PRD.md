@@ -4939,3 +4939,15 @@ tests/test_iter520_backend.py); UI screenshots (esic, challan badges,
 report-hub periodic tabs + default month 2026-07). APP_ITERATION=520,
 deploy_vps_iter520.sh (step 10 = live-DB forensic "machine but not in DB"
 report), temp_bundle kind=script → deploy520.sh.
+
+## Iter 521 (2026-08-07) — Present/Absent Report per attendance policy
+NEW /app/backend/routes/present_absent_report.py: GET /api/admin/reports/
+present-absent (+.xlsx/.pdf) — P/HD/A/WO/H matrix from
+_compute_monthly_grid_data cells (present credit 1/0.5, weekly_off/holiday
+flags — incl. Iter 520 empty-day stamping); present_days =
+totals.present_days_policy (payroll 1:1); dept filter/search, day_counts
+footer, colour xlsx (openpyxl) + landscape pdf. Registered in server.py
+after inout_ot_matrix. Frontend /app/frontend/app/present-absent-report.tsx
+(+ AdminWebShell nav x2 "Present / Absent Report"). Verified: JSON 127 emps
+Kankani, WO on Sundays, future days blank; xlsx/pdf 200; screenshot OK.
+APP_ITERATION=521, deploy_vps_iter521.sh, temp_bundle → deploy521.sh.

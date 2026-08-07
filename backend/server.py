@@ -9416,7 +9416,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "520"
+APP_ITERATION = "521"
 
 
 @api.get("/version")
@@ -12309,6 +12309,9 @@ app.include_router(sync_engine_router)
 # Iter 292 — Monthly In/Out & OT Matrix report + Employee Reports hub.
 from routes.inout_ot_matrix import router as inout_ot_matrix_router  # noqa: E402
 app.include_router(inout_ot_matrix_router)
+# Iter 521 (user request) — Present/Absent report per firm attendance policy.
+from routes.present_absent_report import router as present_absent_router  # noqa: E402
+app.include_router(present_absent_router)
 from routes.daily_verification import router as daily_verification_router  # noqa: E402
 app.include_router(daily_verification_router)
 from routes.pf_contribution_report import router as pf_contribution_router  # noqa: E402
