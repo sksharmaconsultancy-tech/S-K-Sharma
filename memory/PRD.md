@@ -4778,3 +4778,16 @@ CHECK + vendor/last-pull/auto info. NOTE: errors use HTTP 400 (502 gets
 swallowed by Cloudflare). Tests: backend/tests/test_iter512_sdk_pull.py ALL
 PASS (stub adapter: ingest, cursor, dedupe, unmapped). UI smoke-tested.
 Deploy: deploy_vps_iter512.sh, APP_ITERATION=512, pyzk==0.9 in requirements.
+
+## Iter 513 (2026-08-07) — Machine-vs-Master list not showing for NCD machines
+User: NCD8251000531/591/569 "Not Registered In masters Data not Getting".
+Checked LIVE prod (smartpayrolling.com, password Sharma@2026 still valid):
+all 3 machines registered+online+pushing (85k/92k/55k punches). ROOT CAUSE:
+attendance_sync_dashboard machine_only aggregation had NO company filter —
+every firm saw the same global 300 most-recent unmapped pins (SAMARPAN TBS
+machines dominated), crowding out NCD rows. Prod has 110k unmapped punches
+total. FIX: when company_id given, scope biometric_unmapped agg to that
+firm's device serials (_firm_sns). Exports + master_pending KPI fixed too
+(export reuses same fn). Verified locally (scoped=0 for Kankani vs global
+row from SEC2-1). APP_ITERATION=513, deploy_vps_iter513.sh (superset of
+512 SDK feature + 511 self-heal). User still hasn't deployed 511/512.

@@ -191,6 +191,14 @@ async def attendance_sync_dashboard(
     umq: Dict[str, Any] = {}
     if machine:
         umq["device_serial"] = machine
+    elif company_id:
+        # Iter 513 (user bug — NCD machines "Not Registered In Masters data
+        # not getting") — this list was GLOBAL: every firm saw the same 300
+        # most-recent unmapped pins, so busy firms crowded everyone else
+        # out. Scope to the selected firm's OWN machines.
+        _firm_sns = [d["serial_number"] async for d in db.biometric_devices.find(
+            {"company_id": company_id}, {"_id": 0, "serial_number": 1})]
+        umq["device_serial"] = {"$in": _firm_sns}
     machine_only: List[Dict[str, Any]] = []
     async for m in db.biometric_unmapped.aggregate([
         {"$match": umq},
