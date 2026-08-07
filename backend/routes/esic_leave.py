@@ -239,6 +239,9 @@ async def create_entry(payload: Dict[str, Any] = Body(...),
         "to_date": t.isoformat(),
         "days": float((t - f).days + 1),
         "remarks": str(payload.get("remarks") or "").strip() or None,
+        # Iter 520 (user request) — ESIC Leave Reason dropdown.
+        "reason": str(payload.get("reason") or "").strip() or None,
+        "reason_other": str(payload.get("reason_other") or "").strip() or None,
         "certificate_base64": cert,
         "certificate_name": (payload.get("certificate_name") or None) if cert else None,
         "has_certificate": bool(cert),
@@ -336,7 +339,10 @@ async def approve_entry(entry_id: str,
             "leave_type": "esic",
             "from_date": e["from_date"],
             "to_date": e["to_date"],
-            "reason": e.get("remarks") or "ESIC medical leave",
+            "reason": ((f"{e.get('reason')}: {e.get('reason_other')}"
+                        if (e.get("reason") or "").startswith("Other") and e.get("reason_other")
+                        else e.get("reason"))
+                       or e.get("remarks") or "ESIC medical leave"),
             "status": "approved",
             "approved_by": admin["user_id"],
             "source": "esic_leave_module",

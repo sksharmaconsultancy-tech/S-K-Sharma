@@ -136,10 +136,36 @@ def register_pdf(title: str, subtitle: str, columns: List[Dict[str, str]],
             (f"{v:,.2f}".rstrip("0").rstrip(".") if isinstance(v, float)
              else ("" if v is None else str(v)))
             for v in (row.get(c["key"]) for c in columns)])
+    # Iter 520 (user bug — wage register heading/data OVERLAPPING) —
+    # WRAP text instead of letting it draw over the next column:
+    #   • every header label becomes a wrapping Paragraph;
+    #   • long non-numeric data cells wrap too (names, bank A/c + IFSC);
+    #   • font auto-shrinks when the register has many columns.
+    n_cols = max(1, len(columns))
+    base_fs = 10 if n_cols <= 12 else (8.5 if n_cols <= 18 else 7.5)
+    _head_st = ParagraphStyle(
+        "th", fontSize=base_fs, leading=base_fs + 1.5,
+        fontName="Helvetica-Bold", alignment=1)
+    _cell_c = ParagraphStyle("tdc", fontSize=base_fs,
+                             leading=base_fs + 1.5, alignment=1)
+    _cell_l = ParagraphStyle("tdl", fontSize=base_fs,
+                             leading=base_fs + 1.5, alignment=0)
+
+    def _is_numlike(s: str) -> bool:
+        return (s.replace(",", "").replace(".", "")
+                .replace("-", "").replace("%", "").isdigit())
+
+    data[0] = [Paragraph(str(c["label"]), _head_st) for c in columns]
+    for ri in range(1, len(data)):
+        for j, c in enumerate(columns):
+            s = data[ri][j]
+            if isinstance(s, str) and len(s) > 11 and not _is_numlike(s):
+                _left = "name" in str(c.get("key") or "").lower()
+                data[ri][j] = Paragraph(s, _cell_l if _left else _cell_c)
     # Iter 432 (user request) — bigger print font, FIGURES CENTRED with a
     # tighter column gap; the Employee Name column is RIGHT-aligned.
     styles = [
-        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("FONTSIZE", (0, 0), (-1, -1), base_fs),
         ("GRID", (0, 0), (-1, -1), 0.4, rl.HexColor("#9AA0A6")),
         ("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#DDEBF7")),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
@@ -169,14 +195,17 @@ def register_pdf(title: str, subtitle: str, columns: List[Dict[str, str]],
              rl.HexColor("#FFF2CC")),
             ("FONTNAME", (0, len(data) - 1), (-1, len(data) - 1),
              "Helvetica-Bold")]
-    # Narrow serial / code columns, wider name columns.
+    # Narrow serial / code columns, wider name + bank columns.
     weights = []
     for c in columns:
         k = str(c.get("key") or "").lower()
+        lbl = str(c.get("label") or "").lower()
         if k in ("sno", "s_no", "serial"):
             weights.append(0.45)
         elif "name" in k:
             weights.append(1.7)
+        elif "bank" in k or "ifsc" in k or "bank" in lbl or "ifsc" in lbl:
+            weights.append(1.5)  # Iter 520 — Bank A/c / IFSC needs room
         else:
             weights.append(1.0)
     tw = sum(weights)

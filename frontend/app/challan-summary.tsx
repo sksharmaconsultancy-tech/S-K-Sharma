@@ -47,6 +47,8 @@ type Row = {
   esic_by_name: string;
   pf_date: string | null;
   esic_date: string | null;
+  pf_status?: "paid" | "pending" | "failed";
+  esic_status?: "paid" | "pending" | "failed";
   reg_email: string;
   reg_whatsapp: string;
 };
@@ -293,11 +295,11 @@ export default function ChallanSummaryScreen() {
         r.salary_status === "draft" ? "DRAFT" : "NOT PROCESSED";
       let l = `• ${r.firm_name} — Salary: ${status}`;
       l += r.pf_amount != null
-        ? ` | PF: ₹${r.pf_amount}${r.pf_by_name ? ` (${r.pf_by_name})` : ""}`
-        : " | PF: —";
+        ? ` | PF: ₹${r.pf_amount} [${(r.pf_status || "pending").toUpperCase()}]${r.pf_by_name ? ` (${r.pf_by_name})` : ""}`
+        : ` | PF: — [${(r.pf_status || "pending").toUpperCase()}]`;
       l += r.esic_amount != null
-        ? ` | ESIC: ₹${r.esic_amount}${r.esic_by_name ? ` (${r.esic_by_name})` : ""}`
-        : " | ESIC: —";
+        ? ` | ESIC: ₹${r.esic_amount} [${(r.esic_status || "pending").toUpperCase()}]${r.esic_by_name ? ` (${r.esic_by_name})` : ""}`
+        : ` | ESIC: — [${(r.esic_status || "pending").toUpperCase()}]`;
       if (r.remark) l += ` | Remark: ${r.remark}`;
       if (r.is_audit) l += " | ⚠ AUDIT LOCK";
       lines.push(l);
@@ -336,6 +338,42 @@ export default function ChallanSummaryScreen() {
         setBanner({ kind: "err", msg: "Could not open WhatsApp" }),
       );
     }
+  };
+
+  // Iter 520 (user request) — PF/ESIC payment status, tap to cycle
+  // Pending → Paid → Failed (re-updatable at any time).
+  const PAY_ORDER = ["pending", "paid", "failed"] as const;
+  const PAY_UI = {
+    paid: { txt: "PAID", bg: "#DCFCE7", fg: "#166534" },
+    pending: { txt: "PENDING", bg: "#FEF3C7", fg: "#92400E" },
+    failed: { txt: "FAILED", bg: "#FEE2E2", fg: "#991B1B" },
+  } as const;
+  const cyclePayStatus = async (row: Row, key: "pf_status" | "esic_status") => {
+    const cur = (row[key] || "pending") as (typeof PAY_ORDER)[number];
+    const nxt = PAY_ORDER[(PAY_ORDER.indexOf(cur) + 1) % 3];
+    setRows((prev) =>
+      prev.map((r) => (r.company_id === row.company_id ? { ...r, [key]: nxt } : r)),
+    );
+    try {
+      await api(`/admin/challan-summary/${row.company_id}/${month}`, {
+        method: "PATCH",
+        body: { [key]: nxt },
+      });
+    } catch (err: any) {
+      setBanner({ kind: "err", msg: err?.message || "Could not update payment status" });
+    }
+  };
+  const payBadge = (row: Row, key: "pf_status" | "esic_status", locked: boolean) => {
+    const m = PAY_UI[(row[key] || "pending") as keyof typeof PAY_UI];
+    return (
+      <Pressable
+        onPress={() => !locked && cyclePayStatus(row, key)}
+        style={[styles.badge, { backgroundColor: m.bg, marginTop: 4, alignSelf: "flex-start" }]}
+        testID={`${key}-${row.company_id}`}
+      >
+        <Text style={[styles.badgeTxt, { color: m.fg }]}>{m.txt} ▾</Text>
+      </Pressable>
+    );
   };
 
   const statusBadge = (s: Row["salary_status"]) => {
@@ -504,6 +542,7 @@ export default function ChallanSummaryScreen() {
                           testID={`pf-date-${row.company_id}`}
                         />
                       </View>
+                      {payBadge(row, "pf_status", locked)}
                       {row.pf_by_name ? (
                         <Text style={styles.byTxt} numberOfLines={1}>
                           {row.pf_source === "auto" ? "⤓ " : ""}by {row.pf_by_name}
@@ -533,6 +572,7 @@ export default function ChallanSummaryScreen() {
                           testID={`esic-date-${row.company_id}`}
                         />
                       </View>
+                      {payBadge(row, "esic_status", locked)}
                       {row.esic_by_name ? (
                         <Text style={styles.byTxt} numberOfLines={1}>
                           {row.esic_source === "auto" ? "⤓ " : ""}by {row.esic_by_name}

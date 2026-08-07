@@ -2107,34 +2107,76 @@ def split_regular_ot_times(
 
     reg_in, reg_out = pairs[0]
 
-    # Iter 402 (user rule) — an "OT-In" punch that happens BEFORE the duty
-    # window is complete is a BREAK RETURN, not the start of overtime.
-    # Merge every pair whose IN falls before (first-IN + duty quota) into
-    # the REGULAR window; OT starts only with the first pair that begins
-    # AFTER the duty quota is over. (Before: the 2nd pair was always OT,
-    # so a lunch-break re-entry wrongly turned the afternoon into OT.)
-    if len(pairs) >= 2:
-        if split_after_minutes > 0:
-            boundary = reg_in + _td(minutes=split_after_minutes)
-            ot_pairs: List[Tuple[datetime, datetime]] = []
-            for pin, pout in pairs[1:]:
-                if not ot_pairs and pin < boundary:
-                    reg_out = max(reg_out, pout)
-                else:
-                    ot_pairs.append((pin, pout))
-            if ot_pairs:
-                return reg_in, reg_out, ot_pairs[0][0], ot_pairs[-1][1]
-            # All pairs were duty sessions — fall through to the
-            # arithmetic split below using the MERGED duty window.
-        else:
-            return reg_in, reg_out, pairs[1][0], pairs[-1][1]
+    # Iter 520 (user: "Set this report as per the FIRM ATTENDANCE POLICY")
+    # — OT starts only after the policy's full-day WORKED hours.
+    # Classification is by ACCUMULATED WORKED MINUTES across the day's
+    # IN→OUT pairs (break gaps between pairs never count), so:
+    #   • a lunch-break re-entry stays DUTY, never OT;
+    #   • break time can no longer spill into OT (before: the merged
+    #     regular WINDOW was wall-clock, so a 1-hr lunch inside an
+    #     8-hr-worked day wrongly produced 1 hr OT);
+    #   • a pair that crosses the quota is split at the exact crossing.
+    if split_after_minutes > 0:
+        quota = float(split_after_minutes)
+        acc = 0.0
+        reg_pairs: List[Tuple[datetime, datetime]] = []
+        ot_pairs: List[Tuple[datetime, datetime]] = []
+        for pin, pout in pairs:
+            dur = (pout - pin).total_seconds() / 60.0
+            if acc >= quota:
+                ot_pairs.append((pin, pout))
+            elif acc + dur <= quota:
+                reg_pairs.append((pin, pout))
+                acc += dur
+            else:
+                cut = pin + _td(minutes=quota - acc)
+                reg_pairs.append((pin, cut))
+                ot_pairs.append((cut, pout))
+                acc = quota
+        reg_in, reg_out = reg_pairs[0][0], reg_pairs[-1][1]
+        if ot_pairs:
+            return reg_in, reg_out, ot_pairs[0][0], ot_pairs[-1][1]
+        return reg_in, reg_out, None, None
 
-    # Single-window day → arithmetic OT split if the shift is over-length.
-    total_min = (reg_out - reg_in).total_seconds() / 60.0
-    if split_after_minutes > 0 and total_min > split_after_minutes:
-        boundary = reg_in + _td(minutes=split_after_minutes)
-        return reg_in, boundary, boundary, reg_out
+    # No quota configured — legacy rule: 1st pair regular, rest OT.
+    if len(pairs) >= 2:
+        return reg_in, reg_out, pairs[1][0], pairs[-1][1]
     return reg_in, reg_out, None, None
+
+
+def worked_minutes_in_window(
+    day_punches: List[dict],
+    w_from: Optional[datetime],
+    w_to: Optional[datetime],
+) -> float:
+    """Iter 520 — SUM of paired IN→OUT durations clipped to
+    ``[w_from, w_to]``. Unlike ``(w_to - w_from)`` this EXCLUDES the break
+    gaps between pairs, so duty/OT hours follow the firm attendance
+    policy's WORKED-hours rule instead of the wall-clock window."""
+    if not w_from or not w_to or w_to <= w_from:
+        return 0.0
+    ps = sorted(
+        (p for p in day_punches if p.get("at") and (p.get("kind") in ("in", "out"))),
+        key=lambda p: p["at"],
+    )
+    total = 0.0
+    open_in: Optional[datetime] = None
+    for p in ps:
+        try:
+            at = datetime.fromisoformat((p["at"] or "").replace("Z", "+00:00"))
+        except Exception:
+            continue
+        kind = (p.get("kind") or "").lower()
+        if kind == "in":
+            if open_in is None:
+                open_in = at
+        elif kind == "out":
+            if open_in is not None and at > open_in:
+                lo, hi = max(open_in, w_from), min(at, w_to)
+                if hi > lo:
+                    total += (hi - lo).total_seconds() / 60.0
+            open_in = None
+    return total
 
 
 def compute_day_punch_metrics(
@@ -9374,7 +9416,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "519"
+APP_ITERATION = "520"
 
 
 @api.get("/version")
@@ -10014,6 +10056,17 @@ async def _compute_monthly_grid_data(
                 _shift = shifts_by_id.get(_ov.get("shift_id"))
             _sh_hrs = _shift_duration_hours(_shift) if _shift else None
             emp_daily_hrs = float(_sh_hrs or full_day_hours or 8.0)
+        # Iter 520 — effective weekly-off weekday set for THIS employee
+        # (per-employee override replaces the firm policy list) so days
+        # WITHOUT punches can still be flagged Weekly Off / Holiday on
+        # the grid + In/Out & OT Matrix (per the firm attendance policy).
+        _wo_emp_lst = emp_full.get("weekly_off_days_override")
+        if isinstance(_wo_emp_lst, list) and len(_wo_emp_lst) > 0:
+            _emp_weekoffs = {int(x) for x in _wo_emp_lst
+                             if isinstance(x, (int, float)) and 0 <= int(x) <= 6}
+        else:
+            _emp_weekoffs = {int(x) for x in (pol.get("weekly_off_days") or [])
+                             if isinstance(x, (int, float)) and 0 <= int(x) <= 6}
         by_day = punches_by_user_day.get(uid, {})
         days_cell: Dict[str, Dict[str, Any]] = {}
         total_present_days = 0
@@ -10068,6 +10121,9 @@ async def _compute_monthly_grid_data(
                     "sources": [], "punches": 0,
                     "break_hours": 0.0, "net_hours": 0.0,
                     "late_min": 0, "early_min": 0,
+                    # Iter 520 — policy flags stamped on NO-PUNCH days too.
+                    "weekly_off": datetime(yy, mm, dd).weekday() in _emp_weekoffs,
+                    "holiday": date_key_iso in _holiday_dates,
                 }
                 continue
             # Iter 77z-fix — Skip days with UNPAIRED punches (user rule:
@@ -10100,6 +10156,9 @@ async def _compute_monthly_grid_data(
                     "late_min": 0, "early_min": 0,
                     "anomaly": True,
                     "anomaly_reason": "missing_punch",
+                    # Iter 520 — policy flags on anomaly days too.
+                    "weekly_off": datetime(yy, mm, dd).weekday() in _emp_weekoffs,
+                    "holiday": date_key_iso in _holiday_dates,
                 }
                 total_punches_cnt += len(day_punches)
                 continue
@@ -10186,7 +10245,11 @@ async def _compute_monthly_grid_data(
             _round_step = int(eff_policy.get("duty_hours_rounding_minutes") or 0)
             duty_only_hrs = 0.0
             if reg_in_dt and reg_out_dt:
-                _duty_min = (reg_out_dt - reg_in_dt).total_seconds() / 60.0
+                # Iter 520 — duty = WORKED minutes inside the regular
+                # window (pair-sum; break gaps excluded) so break time
+                # never spills into OT — per the firm-policy rule "OT
+                # counts only beyond full-day WORKED hours".
+                _duty_min = worked_minutes_in_window(day_punches, reg_in_dt, reg_out_dt)
                 _duty_min = _round_minutes(_duty_min, _round_step)
                 duty_only_hrs = round(_duty_min / 60.0, 2)
             # Iter 503 — SINGLE MACHINE MODE fixed-lunch deduction: the
@@ -10712,7 +10775,7 @@ async def _build_ot_report_rows(
                     (duty_only * 60.0 - _smm_fixed_lunch_ot) / 60.0, 2)
             ot = 0.0
             if ot_in_dt and ot_out_dt:
-                _ot_min = (ot_out_dt - ot_in_dt).total_seconds() / 60.0
+                _ot_min = worked_minutes_in_window(day_punches, ot_in_dt, ot_out_dt)
                 _ot_min = _round_minutes(_ot_min, _round_step)
                 ot = round(_ot_min / 60.0, 2)
             # Cap duty at shift length; spillover joins OT.

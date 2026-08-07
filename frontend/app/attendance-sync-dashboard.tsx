@@ -255,7 +255,7 @@ export default function AttendanceSyncDashboard() {
               {filt(data.machine_only).slice(0, 60).map((r: any, i: number) => (
                 <View key={i}>
                   <Row
-                    r={`Machine ID ${r.machine_id} · ${r.machine_name || r.machine}`}
+                    r={`Machine ID ${r.machine_id}${r.name_in_machine ? ` · ${r.name_in_machine}` : ""} · ${r.machine_name || r.machine}`}
                     sub={`Punches ${r.punch_count} · First ${r.first_punch} · Last ${r.last_punch}\n${r.remark}`}
                     right={r.suggested_match ? `≈ ${r.suggested_match}` : ""}
                     color="red"

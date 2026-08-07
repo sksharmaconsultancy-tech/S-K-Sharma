@@ -19,6 +19,7 @@ import { Redirect, useRouter } from "expo-router";
 
 import { api } from "@/src/api/client";
 import ReportTable, { ReportCol } from "@/src/components/ReportTable";
+import CompanyPicker from "@/src/components/CompanyPicker";
 import { useAuth } from "@/src/context/AuthContext";
 import { colors, radius, spacing, type } from "@/src/theme";
 
@@ -179,19 +180,16 @@ export default function LeaveReportScreen() {
       <ScrollView contentContainerStyle={styles.body}>
         {/* Firm + Year selectors */}
         {user.role === "super_admin" ? (
-          <View style={styles.chipWrap}>
-            {companies.map((c) => (
-              <Pressable
-                key={c.company_id}
-                onPress={() => setCompanyId(c.company_id)}
-                style={[styles.chip, companyId === c.company_id && styles.chipActive]}
-                testID={`lr-firm-${c.company_id}`}
-              >
-                <Text style={[styles.chipTxt, companyId === c.company_id && styles.chipTxtActive]}>
-                  {c.name}
-                </Text>
-              </Pressable>
-            ))}
+          /* Iter 520 (user request) — firm name as searchable DROPDOWN */
+          <View style={{ marginBottom: 8 }}>
+            <CompanyPicker
+              value={companyId || "all"}
+              onChange={(v) => setCompanyId(v === "all" ? "" : v)}
+              companies={companies}
+              allowAll={false}
+              label="Firm"
+              testID="lr-firm-dd"
+            />
           </View>
         ) : null}
         <View style={styles.chipWrap}>

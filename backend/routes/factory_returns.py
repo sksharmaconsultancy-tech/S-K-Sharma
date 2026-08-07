@@ -39,6 +39,24 @@ DETAIL_FIELDS = [
 WELFARE_FIELDS = ["canteen", "rest_room", "creche", "first_aid",
                   "ambulance_room", "drinking_water", "washing_facility"]
 
+# Iter 520 (user upload — official FORM NO. 23, Rule 105(i)) — statutory
+# particulars that cannot be computed from payroll data. Saved on the firm
+# under factory_details.form23 and printed on the Form 23 PDF.
+FORM23_FIELDS = [
+    "application_no", "area", "dangerous_process",
+    "safety_officers_required", "safety_officers_appointed",
+    "ambulance_room", "canteen", "canteen_departmental", "canteen_contractor",
+    "rest_rooms", "lunch_rooms", "creche",
+    "welfare_officers_required", "welfare_officers_appointed",
+    "safety_trainings", "safety_trained_male", "safety_trained_female",
+    "acc_ret_same_count", "acc_ret_same_mandays",
+    "acc_ret_prev_count", "acc_ret_prev_mandays",
+    "acc_not_ret_count", "acc_not_ret_mandays",
+    "fines", "deduction_damage", "deduction_breach",
+    "bonus_paid", "money_concessions",
+    "left_service", "wages_in_lieu_paid",
+]
+
 
 async def _admin(authorization: Optional[str]):
     user = await get_user_from_token(authorization)
@@ -60,6 +78,8 @@ def _details_of(c: Dict[str, Any]) -> Dict[str, Any]:
     out["factory_address"] = out["factory_address"] or c.get("address") or ""
     out["welfare"] = {k: bool((fd.get("welfare") or {}).get(k)) for k in WELFARE_FIELDS}
     out["accidents"] = fd.get("accidents") or {}
+    out["form23"] = {k: str((fd.get("form23") or {}).get(k) or "")
+                     for k in FORM23_FIELDS}
     return out
 
 
@@ -76,6 +96,8 @@ async def put_details(company_id: str, body: Dict[str, Any],
     await _company(company_id)
     fd: Dict[str, Any] = {k: str(body.get(k) or "").strip() for k in DETAIL_FIELDS}
     fd["welfare"] = {k: bool((body.get("welfare") or {}).get(k)) for k in WELFARE_FIELDS}
+    fd["form23"] = {k: str((body.get("form23") or {}).get(k) or "").strip()
+                    for k in FORM23_FIELDS}
     acc = body.get("accidents") or {}
     fd["accidents"] = {
         str(y): {
@@ -162,8 +184,8 @@ async def _compute_return(cid: str, year: int, source: str) -> Dict[str, Any]:
     per_user: Dict[str, Dict[str, float]] = defaultdict(
         lambda: {"man_days": 0.0, "wages": 0.0, "ot_hours": 0.0,
                  "ot_pay": 0.0, "leave": 0.0, "months": 0.0})
-    tot = {"man_days": 0.0, "wages": 0.0, "ot_hours": 0.0, "ot_pay": 0.0,
-           "leave": 0.0, "working_days": 0.0}
+    tot = {"man_days": 0.0, "wages": 0.0, "basic": 0.0, "ot_hours": 0.0,
+           "ot_pay": 0.0, "leave": 0.0, "working_days": 0.0}
     max_emp = 0
     for m in sorted(data.keys()):
         rows = data[m]
@@ -171,6 +193,7 @@ async def _compute_return(cid: str, year: int, source: str) -> Dict[str, Any]:
             continue
         md = sum(r["present_days"] for r in rows.values())
         wg = sum(r["gross"] for r in rows.values())
+        bs = sum(r["basic"] for r in rows.values())
         oh = sum(r["ot_hours"] for r in rows.values())
         op = sum(r["ot_pay"] for r in rows.values())
         lv = sum(r["leave_days"] for r in rows.values())
@@ -187,6 +210,7 @@ async def _compute_return(cid: str, year: int, source: str) -> Dict[str, Any]:
         max_emp = max(max_emp, len(rows))
         tot["man_days"] += md
         tot["wages"] += wg
+        tot["basic"] += bs
         tot["ot_hours"] += oh
         tot["ot_pay"] += op
         tot["leave"] += lv
@@ -201,6 +225,11 @@ async def _compute_return(cid: str, year: int, source: str) -> Dict[str, Any]:
             pu["months"] += 1
 
     male = female = contract = 0
+    # Iter 520 — FORM 23 gender-wise accumulators.
+    md_men = md_women = 0.0
+    oh_men = oh_women = 0.0
+    ent_men = ent_women = 0    # entitled to annual leave (240+ days)
+    gr_men = gr_women = 0      # granted leave during the year
     employees: List[Dict[str, Any]] = []
     dept = defaultdict(lambda: {"employees": 0, "man_days": 0.0, "wages": 0.0})
     cat = defaultdict(lambda: {"employees": 0, "man_days": 0.0, "wages": 0.0})
@@ -209,8 +238,19 @@ async def _compute_return(cid: str, year: int, source: str) -> Dict[str, Any]:
         g = (u.get("gender") or "").strip().lower()
         if g.startswith("m"):
             male += 1
+            md_men += pu["man_days"]
+            oh_men += pu["ot_hours"]
+            ent_men += 1 if pu["man_days"] >= 240 else 0
+            gr_men += 1 if pu["leave"] > 0 else 0
         elif g.startswith("f"):
             female += 1
+            md_women += pu["man_days"]
+            oh_women += pu["ot_hours"]
+            ent_women += 1 if pu["man_days"] >= 240 else 0
+            gr_women += 1 if pu["leave"] > 0 else 0
+        else:
+            md_men += pu["man_days"]  # unspecified counted with men
+            oh_men += pu["ot_hours"]
         et = (u.get("employee_type") or "").strip() or "UNSPECIFIED"
         if "contract" in et.lower() or u.get("contractor_name"):
             contract += 1
@@ -240,6 +280,43 @@ async def _compute_return(cid: str, year: int, source: str) -> Dict[str, Any]:
 
     acc = (details.get("accidents") or {}).get(str(year)) or {
         "fatal": 0, "nonfatal": 0, "mandays_lost": 0}
+
+    # ---- Iter 520 — FORM NO. 23 (Rule 105(i)) computed data points ----
+    _fdh = float((c.get("attendance_policy") or {}).get("full_day_hours") or 8.0)
+    _days_worked = int(round(tot["working_days"]))
+    _avg_men = round(md_men / _days_worked, 0) if _days_worked else 0
+    _avg_women = round(md_women / _days_worked, 0) if _days_worked else 0
+    form23 = {
+        "manual": details.get("form23") or {},
+        "days_worked": _days_worked,
+        "man_days": {"men": round(md_men, 1), "women": round(md_women, 1),
+                     "children": 0,
+                     "total": round(md_men + md_women, 1)},
+        "avg_daily": {"men": int(_avg_men), "women": int(_avg_women),
+                      "children": 0, "total": int(_avg_men + _avg_women)},
+        "man_hours": {"men": round(md_men * _fdh + oh_men),
+                      "women": round(md_women * _fdh + oh_women),
+                      "children": 0,
+                      "total": round((md_men + md_women) * _fdh
+                                     + oh_men + oh_women)},
+        "avg_week_hours": {"men": round(_fdh * 6) if md_men else 0,
+                           "women": round(_fdh * 6) if md_women else 0},
+        "leave": {
+            "employed": {"men": male, "women": female, "children": 0,
+                         "total": male + female},
+            "entitled": {"men": ent_men, "women": ent_women, "children": 0,
+                         "total": ent_men + ent_women},
+            "granted": {"men": gr_men, "women": gr_women, "children": 0,
+                        "total": gr_men + gr_women},
+        },
+        "wages": {
+            "gross": round(tot["wages"], 2),
+            "basic": round(tot["basic"], 2),
+            "da_allowances": round(max(tot["wages"] - tot["basic"], 0.0), 2),
+            "arrears": 0,
+            "ot_amount": round(tot["ot_pay"], 2),
+        },
+    }
     return {
         "year": year,
         "source": source,
@@ -269,6 +346,7 @@ async def _compute_return(cid: str, year: int, source: str) -> Dict[str, Any]:
         "employees": employees,
         "accidents": acc,
         "welfare": details.get("welfare") or {},
+        "form23": form23,
     }
 
 
@@ -301,6 +379,21 @@ async def boiler_return_pdf(company_id: str, year: int,
     return Response(content=pdf, media_type="application/pdf", headers={
         "Content-Disposition":
             f'attachment; filename="boiler-annual-return-{year}.pdf"'})
+
+
+@router.get("/{company_id}/{year}/form23.pdf")
+async def form23_pdf(company_id: str, year: int,
+                     source: Optional[str] = Query(None),
+                     authorization: Optional[str] = Header(None)):
+    """Iter 520 (user upload) — official FORM NO. 23 Annual Return
+    (Prescribed under Rule 105(i), Factories Act / Payment of Wages Act)."""
+    await _admin(authorization)
+    d = await _compute_return(company_id, year, _src(source))
+    from utils.factory_return_pdf import build_form23_pdf
+    pdf = build_form23_pdf(d)
+    return Response(content=pdf, media_type="application/pdf", headers={
+        "Content-Disposition":
+            f'attachment; filename="form23-annual-return-{year}.pdf"'})
 
 
 @router.get("/{company_id}/{year}.xlsx")

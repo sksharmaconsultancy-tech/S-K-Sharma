@@ -20,6 +20,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 
 import { api } from "@/src/api/client";
+import CompanyPicker from "@/src/components/CompanyPicker";
 
 const C = {
   bg: "#F4F7F9",
@@ -119,20 +120,15 @@ export default function RectifiedPunchesScreen() {
         </Text>
 
         <Text style={styles.label}>Firm</Text>
-        <View style={styles.chipsRow}>
-          {firms.map((f) => (
-            <Pressable
-              key={f.company_id}
-              onPress={() => setFirmId(f.company_id)}
-              style={[styles.chip, firmId === f.company_id && styles.chipOn]}
-              testID={`rp-firm-${f.company_id}`}
-            >
-              <Text style={[styles.chipTxt, firmId === f.company_id && { color: "#fff" }]}>
-                {f.name}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        {/* Iter 520 (user request) — firm list as searchable DROPDOWN */}
+        <CompanyPicker
+          value={firmId || "all"}
+          onChange={(v) => setFirmId(v === "all" ? "" : (v as string))}
+          companies={firms as any}
+          allowAll={false}
+          label="Firm"
+          testID="rp-firm-dd"
+        />
 
         <Text style={styles.label}>Month</Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>

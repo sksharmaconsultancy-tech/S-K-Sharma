@@ -1,0 +1,18 @@
+{
+  "summary": "Iter 520 backend-only testing complete. 11/11 pytest tests PASS covering all requested features: last-finalized-month, periodic salary-comparison (JSON+xlsx+pdf with '2026-01→2026-02 vs 2026-05→2026-06' subtitle and range-labeled columns), salary-revision (dynamic firm-master allowance Old/New columns), In/Out & OT Matrix policy.line 'Firm Attendance Policy...' (+xlsx +pdf), attendance policy OT engine (8h worked with 1h lunch → OT=0 duty=8; 9h worked → OT=1 duty=8; Sunday no-punch cell has weekly_off=true), attendance-sync-dashboard machine_only rows containing (a) '⚠ Unregistered Device' row from biometric_unmapped and (b) zero-punch never-punched row from biometric_machine_users with name_in_machine populated, challan-summary PATCH pf_status='failed' persists (readable via GET) and 'xyz' → HTTP 400, ESIC leave POST with reason='Maternity Benefit' and reason='Other (Specify)' + reason_other stored and returned in list, factory-return /form23.pdf 200 application/pdf + PUT details.form23 {application_no,area} persists via GET, regression: /api/version=520 and /api/admin/punch-logs=200.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": [], "react_native_issues": []},
+  "test_report_links": ["/app/backend/tests/test_iter520_backend.py", "/app/test_reports/pytest/iter520.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "/app/backend/routes/payroll_reports.py is 679 lines — approaching the 700-line split threshold; consider modularizing builders per report group.",
+    "Attendance-sync-dashboard.py is 695 lines with a very large builder function — consider splitting sections (new_joining/machine_only/master_only/missing) into helpers for readability."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "not tested (backend-only per request)"},
+  "seed_data_creation": "Test fixture creates isolated cmp_test_*/user_test_* + 8 attendance punches (2026-06-01 & 02) + biometric_unmapped doc (UNREG serial) + biometric_machine_users doc — all tagged with test_tag prefix TEST_iter520_* and cleaned up in fixture teardown. ESIC leave entries also cleaned via DELETE endpoint. Challan status restored to 'pending' after test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Attendance grid loads punches from db.attendance filtered by status=='approved' with fields date (YYYY-MM-DD) and at (ISO). When seeding punches for grid tests, MUST include status='approved' AND both 'date' + 'at' + 'kind' (in/out). Firm Kankani cmp_527fecdd7c has firm_masters allowances configured (Basic Salary etc.) — salary-revision returns Old/New pairs for each enabled head. Auth: POST /api/auth/admin-password-login returns session_token, use as Bearer.",
+  "rca_of_issue": "N/A — no bugs found. Initial fixture attempt used wrong field names (type/timestamp) causing grid to skip test punches; corrected to date/at/kind and test passes verifying OT engine works on accumulated worked minutes (lunch break no longer produces phantom OT)."
+}

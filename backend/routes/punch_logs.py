@@ -243,7 +243,10 @@ async def _query_rows(
     elif _allowed is not None:
         _firm_sns = [sn for sn, d in _dev_map.items()
                      if d.get("company_id") in _allowed]
-        _all_sns = [sn for sn in _dev_map.keys() if sn]
+        # Iter 520 — a registered device with NO firm assigned behaves like
+        # an unregistered one: its NOT-FOUND punches always show.
+        _all_sns = [sn for sn, d in _dev_map.items()
+                    if sn and d.get("company_id")]
         _unm_q["$or"] = [
             {"device_serial": {"$in": _firm_sns}},
             {"device_serial": {"$nin": _all_sns}},  # unregistered devices

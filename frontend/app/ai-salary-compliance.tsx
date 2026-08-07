@@ -6,7 +6,7 @@
  * Sr. No. in every table. Strictly ADDITIVE — the Import Excel / Freeze
  * Salary process is untouched.
  */
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -26,6 +26,7 @@ import { shared } from "@/src/components/RegisterTable";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors } from "@/src/theme";
+import EmployeeDropdown from "@/src/components/EmployeeDropdown";
 
 const ATT_FIELDS: [string, string][] = [
   ["working_days", "Working Days"],
@@ -55,6 +56,9 @@ export default function AiSalaryComplianceScreen() {
   const { companies } = useSelectedCompany();
   const [companyId, setCompanyId] = useState("");
   const [empCode, setEmpCode] = useState("");
+  // Iter 520 (user request) — employee NAME dropdown with search.
+  const [emps, setEmps] = useState<any[]>([]);
+  const [selEmpIds, setSelEmpIds] = useState<string[]>([]);
   const [month, setMonth] = useState("");
   const [form, setForm] = useState<Record<string, string>>({});
   const [allow, setAllow] = useState<{ head: string; amount: string }[]>([]);
@@ -68,10 +72,24 @@ export default function AiSalaryComplianceScreen() {
   const set = (k: string, v: string) =>
     setForm((p) => ({ ...p, [k]: v }));
 
+  // Iter 520 — load the firm's employees for the name dropdown.
+  useEffect(() => {
+    const cid = isCompanyAdmin ? user?.company_id : companyId;
+    if (!cid) { setEmps([]); setSelEmpIds([]); setEmpCode(""); return; }
+    (async () => {
+      try {
+        const r = await api<any>(`/admin/employees?company_id=${cid}`);
+        setEmps(r.employees || []);
+      } catch { setEmps([]); }
+    })();
+    setSelEmpIds([]);
+    setEmpCode("");
+  }, [companyId, isCompanyAdmin, user?.company_id]);
+
   const loadEmployee = async () => {
     const cid = isCompanyAdmin ? user?.company_id : companyId;
     if (!cid || !empCode || !month) {
-      setErr("Select company, employee code and month first");
+      setErr("Select company, employee and month first");
       return;
     }
     setLoading(true);
@@ -227,13 +245,19 @@ export default function AiSalaryComplianceScreen() {
                 ))}
               </select>
             )}
-            <TextInput
-              style={[shared.input, { maxWidth: 140 }]}
-              value={empCode}
-              onChangeText={setEmpCode}
-              placeholder="Emp Code"
-              testID="sc-empcode"
-            />
+            <View style={{ minWidth: 260, flexGrow: 1, maxWidth: 380 }}>
+              <EmployeeDropdown
+                employees={emps}
+                value={selEmpIds}
+                onChange={(ids) => {
+                  setSelEmpIds(ids);
+                  const e = emps.find((x) => x.user_id === ids[0]);
+                  setEmpCode(e?.employee_code ? String(e.employee_code) : "");
+                }}
+                placeholder="Select employee (search by name)…"
+                testID="sc-emp-dd"
+              />
+            </View>
             {Platform.OS === "web" && (
               <input
                 data-testid="sc-month"
@@ -262,7 +286,6 @@ export default function AiSalaryComplianceScreen() {
           <Text style={shared.cardTitle}>Employee & Salary Structure</Text>
           <View style={st.grid}>
             {([["employee_name", "Employee Name"],
-              ["employee_id", "Employee ID"],
               ["payroll_month", "Payroll Month (YYYY-MM)"],
               ["basic", "Basic Salary (₹) *"],
               ["rate_basis", "Rate Basis (monthly / daily)"]] as const)

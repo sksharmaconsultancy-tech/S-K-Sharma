@@ -188,6 +188,11 @@ async def attendance_sync_dashboard(
 
     # ---------------- Section 2 — Machine only (Rule 1) ----------------
     codes = [str(u.get("employee_code") or "") for u in users if u.get("employee_code")]
+    # Iter 520 — device catalogue loaded once (also reused below).
+    _all_dev = await db.biometric_devices.find(
+        {}, {"_id": 0, "serial_number": 1, "company_id": 1, "name": 1},
+    ).to_list(2000)
+    _dev_by_sn = {str(d.get("serial_number") or ""): d for d in _all_dev}
     umq: Dict[str, Any] = {}
     if machine:
         umq["device_serial"] = machine
@@ -196,9 +201,49 @@ async def attendance_sync_dashboard(
         # not getting") — this list was GLOBAL: every firm saw the same 300
         # most-recent unmapped pins, so busy firms crowded everyone else
         # out. Scope to the selected firm's OWN machines.
-        _firm_sns = [d["serial_number"] async for d in db.biometric_devices.find(
-            {"company_id": company_id}, {"_id": 0, "serial_number": 1})]
-        umq["device_serial"] = {"$in": _firm_sns}
+        # Iter 520 (user bug — NEW machine users still not showing):
+        # punches from machines that are UNREGISTERED or registered WITHOUT
+        # a firm were silently dropped by the firm scope. They now always
+        # show (marked ⚠ Unregistered), same rule as the Punch Log Report.
+        _firm_sns = [sn for sn, d in _dev_by_sn.items()
+                     if d.get("company_id") == company_id]
+        _assigned_sns = [sn for sn, d in _dev_by_sn.items()
+                         if sn and d.get("company_id")]
+        umq["$or"] = [
+            {"device_serial": {"$in": _firm_sns}},
+            {"device_serial": {"$nin": _assigned_sns}},
+        ]
+    # Iter 520 — employee bio/emp-code catalogue of the scope (firm or all)
+    # used to (a) resolve machine-user rows without a Master, (b) show the
+    # machine's own stored name next to each PIN.
+    _bio_q: Dict[str, Any] = {"role": "employee"}
+    if company_id:
+        _bio_q["company_id"] = company_id
+    _known_codes: set = set()
+    async for u_ in db.users.find(
+            _bio_q, {"_id": 0, "bio_code": 1, "employee_code": 1}):
+        for v_ in (u_.get("bio_code"), u_.get("employee_code")):
+            v_ = str(v_ or "").strip()
+            if v_:
+                _known_codes.add(v_)
+                if v_.lstrip("0"):
+                    _known_codes.add(v_.lstrip("0"))
+    _mu_q: Dict[str, Any] = {}
+    if machine:
+        _mu_q["device_serial"] = machine
+    elif company_id:
+        _mu_q["$or"] = [{"company_id": company_id}, {"company_id": None}]
+    _machine_users: List[Dict[str, Any]] = await db.biometric_machine_users.find(
+        _mu_q, {"_id": 0, "pin": 1, "name": 1, "company_id": 1,
+                "device_serial": 1, "captured_at": 1},
+    ).to_list(5000)
+    _mu_name: Dict[str, str] = {}
+    for mu_ in _machine_users:
+        _p = str(mu_.get("pin") or "").strip()
+        if _p and mu_.get("name"):
+            _mu_name.setdefault(_p, mu_["name"])
+            if _p.lstrip("0") and _p.lstrip("0") != _p:
+                _mu_name.setdefault(_p.lstrip("0"), mu_["name"])
     machine_only: List[Dict[str, Any]] = []
     async for m in db.biometric_unmapped.aggregate([
         {"$match": umq},
@@ -209,18 +254,47 @@ async def attendance_sync_dashboard(
     ]):
         pin = str(m["_id"]["pin"] or "")
         close = difflib.get_close_matches(pin, codes, n=1, cutoff=0.7)
-        dev = await db.biometric_devices.find_one(
-            {"serial_number": m["_id"]["sn"]}, {"_id": 0, "name": 1, "company_id": 1})
+        dev = _dev_by_sn.get(str(m["_id"]["sn"] or ""))
         machine_only.append({
             "machine_id": pin, "machine": m["_id"]["sn"],
             "machine_name": (dev or {}).get("name"),
-            "company": comp_names.get((dev or {}).get("company_id")),
+            "name_in_machine": _mu_name.get(pin)
+            or _mu_name.get(pin.lstrip("0")) or "",
+            "company": (comp_names.get((dev or {}).get("company_id"))
+                        if dev is not None else "⚠ Unregistered Device"),
             "first_punch": str(m["first"])[:16], "last_punch": str(m["last"])[:16],
             "punch_count": m["count"],
             "suggested_match": close[0] if close else None,
             "remark": ("Possible duplicate machine registration — code close to "
                        f"employee {close[0]}." if close
                        else "Employee probably not enrolled in payroll — create the Employee Master."),
+        })
+    # Iter 520 (user question — "Who Registered In Machine But Not in
+    # Database?") — machine users harvested via USERINFO sync who have NO
+    # matching Employee Master show here too, even if they NEVER punched.
+    _seen_pins = {(str(r.get("machine") or ""), r.get("machine_id"))
+                  for r in machine_only}
+    _seen_any_pin = {r.get("machine_id") for r in machine_only}
+    for mu_ in _machine_users:
+        pin = str(mu_.get("pin") or "").strip()
+        if not pin:
+            continue
+        sn = str(mu_.get("device_serial") or "")
+        if (sn, pin) in _seen_pins or pin in _seen_any_pin:
+            continue
+        if pin in _known_codes or (pin.lstrip("0") or pin) in _known_codes:
+            continue  # mapped to an Employee Master — not "machine only"
+        dev = _dev_by_sn.get(sn)
+        close = difflib.get_close_matches(pin, codes, n=1, cutoff=0.7)
+        machine_only.append({
+            "machine_id": pin, "machine": sn,
+            "machine_name": (dev or {}).get("name"),
+            "name_in_machine": mu_.get("name") or "",
+            "company": comp_names.get(mu_.get("company_id")),
+            "first_punch": "—", "last_punch": "—",
+            "punch_count": 0,
+            "suggested_match": close[0] if close else None,
+            "remark": "Registered on the machine (never punched) — create the Employee Master.",
         })
 
     # ---------------- Section 3 — Master only (Rule 2) ----------------
@@ -451,9 +525,11 @@ async def attendance_sync_export(
                           r.get("first_punch") or "—", r.get("status")]
                          for r in data["new_joining"]]),
         "machine_only": ("Registered in Machine but NOT in Master",
-                         ["Machine ID", "Machine", "First Punch", "Last Punch",
+                         ["Machine ID", "Name In Machine", "Machine",
+                          "First Punch", "Last Punch",
                           "Punches", "Suggested Match", "Remark"],
-                         [[r.get("machine_id"), r.get("machine_name") or r.get("machine"),
+                         [[r.get("machine_id"), r.get("name_in_machine") or "—",
+                           r.get("machine_name") or r.get("machine"),
                            r.get("first_punch"), r.get("last_punch"),
                            r.get("punch_count"), r.get("suggested_match") or "—",
                            r.get("remark")] for r in data["machine_only"]]),

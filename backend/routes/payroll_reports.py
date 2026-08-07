@@ -70,10 +70,41 @@ def _emp_sort(rows):
 # each builder → (columns[(key,label)], rows, totals|None, subtitle_extra)
 # ctx (Iter 433) = {"employee_ids": [..], "from_date": "", "to_date": ""}
 
+async def _run_rows_period(company_id: str, m_from: str, m_to: str) -> Dict[str, dict]:
+    """Iter 520 (user request — PERIODIC salary comparison) — aggregate
+    run rows (gross_paid / net summed) across a month range, inclusive."""
+    months: List[str] = []
+    cur = m_from
+    while cur <= m_to and len(months) < 24:
+        months.append(cur)
+        y, m = int(cur[:4]), int(cur[5:7])
+        cur = f"{y + (m == 12):04d}-{(m % 12) + 1:02d}"
+    agg: Dict[str, dict] = {}
+    for mo in months:
+        for uid, r in (await _run_rows(company_id, mo)).items():
+            d = agg.setdefault(uid, {"gross_paid": 0.0, "net": 0.0})
+            d["gross_paid"] = round(d["gross_paid"] + _f(r.get("gross_paid")), 2)
+            d["net"] = round(d["net"] + _f(r.get("net")), 2)
+    return agg
+
+
 async def _salary_comparison(company_id, month, month_b, fy, ctx=None):
     m_a = month_b or _prev_month(month)
-    rows_a = await _run_rows(company_id, m_a)
-    rows_b = await _run_rows(company_id, month)
+    # Iter 520 — PERIODIC mode: compare period A (month_b → month_b_to)
+    # with period B (month → month_to). Falls back to single months.
+    m_to = str((ctx or {}).get("month_to") or "").strip()
+    m_b_to = str((ctx or {}).get("month_b_to") or "").strip()
+    if m_to or m_b_to:
+        a_to = m_b_to if m_b_to >= m_a else m_a
+        b_to = m_to if m_to >= month else month
+        rows_a = await _run_rows_period(company_id, m_a, a_to)
+        rows_b = await _run_rows_period(company_id, month, b_to)
+        lbl_a = m_a if a_to == m_a else f"{m_a}→{a_to}"
+        lbl_b = month if b_to == month else f"{month}→{b_to}"
+    else:
+        rows_a = await _run_rows(company_id, m_a)
+        rows_b = await _run_rows(company_id, month)
+        lbl_a, lbl_b = m_a, month
     users = {u["user_id"]: u for u in await _users(company_id)}
     out = []
     for uid in set(rows_a) | set(rows_b):
@@ -90,14 +121,14 @@ async def _salary_comparison(company_id, month, month_b, fy, ctx=None):
                     "net_diff": round(nb - na, 2),
                     "change_pct": round((gb - ga) * 100 / ga, 1) if ga else 0})
     cols = [("employee_code", "Emp Code"), ("name", "Employee Name"),
-            ("gross_a", f"Gross {m_a}"), ("gross_b", f"Gross {month}"),
-            ("gross_diff", "Gross Diff"), ("net_a", f"Net {m_a}"),
-            ("net_b", f"Net {month}"), ("net_diff", "Net Diff"),
+            ("gross_a", f"Gross {lbl_a}"), ("gross_b", f"Gross {lbl_b}"),
+            ("gross_diff", "Gross Diff"), ("net_a", f"Net {lbl_a}"),
+            ("net_b", f"Net {lbl_b}"), ("net_diff", "Net Diff"),
             ("change_pct", "Change %")]
     totals = {"name": "TOTAL"}
     for k in ("gross_a", "gross_b", "gross_diff", "net_a", "net_b", "net_diff"):
         totals[k] = round(sum(r[k] for r in out), 2)
-    return cols, _emp_sort(out), totals, f"{m_a} vs {month}"
+    return cols, _emp_sort(out), totals, f"{lbl_a} vs {lbl_b}"
 
 
 async def _gross_vs_net(company_id, month, month_b, fy, ctx=None):
@@ -126,8 +157,30 @@ async def _revision(company_id, month, month_b, fy, increments_only=False):
     by_month = await _fy_rows(company_id, fy)
     users = {u["user_id"]: u for u in await _users(company_id)}
     months = [m for m in _fy_months(fy) if m in by_month]
+    # Iter 520 (user request) — DYNAMIC allowance columns: every allowance
+    # head ENABLED on the Firm Master shows its Old/New amount at each
+    # revision (OVER TIME excluded — variable pay, not a revision head).
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "allowances": 1})
+    heads = [k for k, v in ((fm or {}).get("allowances") or {}).items()
+             if v and str(k).strip().upper().replace(" ", "")
+             not in ("OVERTIME", "OVER-TIME")]
+
+    def _nh(s) -> str:
+        return (str(s or "").lower().replace("-", "")
+                .replace(" ", "").replace(".", ""))
+    nheads = [_nh(h) for h in heads]
+
+    def _allow_map(r) -> Dict[str, float]:
+        amap: Dict[str, float] = {}
+        for a in r.get("allowances") or []:
+            n = _nh(a.get("head"))
+            if n:
+                amap[n] = round(amap.get(n, 0.0) + _f(a.get("amount")), 2)
+        return amap
     last_gross: Dict[str, float] = {}
     last_month: Dict[str, str] = {}
+    last_allow: Dict[str, Dict[str, float]] = {}
     out = []
     for m in months:
         for r in by_month[m]:
@@ -138,20 +191,29 @@ async def _revision(company_id, month, month_b, fy, increments_only=False):
                 diff = round(g - last_gross[uid], 2)
                 if not increments_only or diff > 0:
                     u = users.get(uid) or {}
-                    out.append({
+                    row = {
                         "employee_code": u.get("employee_code"),
                         "name": u.get("name"),
                         "from_month": last_month[uid], "to_month": m,
                         "old_gross": last_gross[uid], "new_gross": g,
                         "difference": diff,
-                        "change_pct": round(diff * 100 / last_gross[uid], 1)})
+                        "change_pct": round(diff * 100 / last_gross[uid], 1)}
+                    am_old = last_allow.get(uid) or {}
+                    am_new = _allow_map(r)
+                    for i, nh in enumerate(nheads):
+                        row[f"a{i}_old"] = round(am_old.get(nh, 0.0), 2)
+                        row[f"a{i}_new"] = round(am_new.get(nh, 0.0), 2)
+                    out.append(row)
             if g:
                 last_gross[uid] = g
                 last_month[uid] = m
+                last_allow[uid] = _allow_map(r)
     cols = [("employee_code", "Emp Code"), ("name", "Employee Name"),
             ("from_month", "From Month"), ("to_month", "Effective Month"),
             ("old_gross", "Old Gross"), ("new_gross", "New Gross"),
             ("difference", "Difference"), ("change_pct", "Change %")]
+    for i, h in enumerate(heads):
+        cols += [(f"a{i}_old", f"{h} Old"), (f"a{i}_new", f"{h} New")]
     return cols, _emp_sort(out), None, f"FY {fy}-{str(fy + 1)[-2:]}"
 
 
@@ -503,7 +565,10 @@ async def email_hub_report(payload: Dict[str, Any] = Body(default={}),
         fy = _fy_or_now(int(payload.get("fy_start_year") or 0))
         ctx = {"employee_ids": emp_ids,
                "from_date": str(payload.get("from_date") or "").strip(),
-               "to_date": str(payload.get("to_date") or "").strip()}
+               "to_date": str(payload.get("to_date") or "").strip(),
+               # Iter 520 — periodic salary comparison (PDF/Excel/email too).
+               "month_to": str(payload.get("month_to") or "").strip(),
+               "month_b_to": str(payload.get("month_b_to") or "").strip()}
         title, fn = _REPORTS[kind]
         cols, rows, totals, extra = await fn(
             company_id, month, payload.get("month_b"), fy, ctx)
@@ -539,15 +604,39 @@ async def email_hub_report(payload: Dict[str, Any] = Body(default={}),
             "message": f"{title} ({fmt_txt}) emailed to {rcpts}"}
 
 
+@router.get("/last-finalized-month")
+async def last_finalized_month(company_id: Optional[str] = None,
+                               authorization: Optional[str] = Header(None)):
+    """Iter 520 (user request) — the LAST salary month PROCESSED &
+    FINALIZED for the firm. The Report Hub defaults every report's Month
+    to this (payroll is processed one month behind the calendar)."""
+    company_id = await _adm(authorization, company_id)
+    doc = await db.compliance_salary_runs.find_one(
+        {"company_id": company_id,
+         "$or": [{"finalized": True}, {"frozen": True}]},
+        {"_id": 0, "month": 1}, sort=[("month", -1)])
+    finalized = bool(doc)
+    if not doc:  # no finalized run yet — latest run of any status
+        doc = await db.compliance_salary_runs.find_one(
+            {"company_id": company_id}, {"_id": 0, "month": 1},
+            sort=[("month", -1)])
+    month = ((doc or {}).get("month")
+             or _prev_month(date.today().strftime("%Y-%m")))
+    return {"month": month, "finalized": finalized}
+
+
 @router.get("/{kind}")
 async def report_json(kind: str, company_id: Optional[str] = None,
                       month: Optional[str] = None,
                       month_b: Optional[str] = None, fy_start_year: int = 0,
                       employee_ids: str = "", from_date: str = "",
-                      to_date: str = "",
+                      to_date: str = "", month_to: str = "",
+                      month_b_to: str = "",
                       authorization: Optional[str] = Header(None)):
     ctx = {"employee_ids": [e for e in (employee_ids or "").split(",") if e],
-           "from_date": from_date.strip(), "to_date": to_date.strip()}
+           "from_date": from_date.strip(), "to_date": to_date.strip(),
+           # Iter 520 — periodic salary comparison ranges.
+           "month_to": month_to.strip(), "month_b_to": month_b_to.strip()}
     for ext in ("xlsx", "pdf"):
         if kind.endswith(f".{ext}"):
             return await _exp(kind[: -len(ext) - 1], company_id, month,

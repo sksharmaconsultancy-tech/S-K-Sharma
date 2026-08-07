@@ -29,6 +29,7 @@ import RegisterTable, {
 } from "@/src/components/RegisterTable";
 import ReportsShareModal from "@/src/components/salary/ReportsShareModal";
 import ClraPhase3Panel from "@/src/components/ClraPhase3Panel";
+import EmployeeDropdown from "@/src/components/EmployeeDropdown";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors } from "@/src/theme";
@@ -93,6 +94,8 @@ export default function ReportsCenterScreen() {
   );
   const [monthB, setMonthB] = useState("");
   const [monthTo, setMonthTo] = useState(""); // fine-register periodic
+  const [monthBTo, setMonthBTo] = useState(""); // Iter 520 — comparison base period "to"
+  const [cmpMode, setCmpMode] = useState<"month" | "periodic">("month");
   const [fineMode, setFineMode] = useState<"month" | "periodic">("month");
   const [otMode, setOtMode] = useState<"daily" | "periodic">("daily");
   const [dateFrom, setDateFrom] = useState(() =>
@@ -183,6 +186,20 @@ export default function ReportsCenterScreen() {
     setSelEmps([]);
   }, [companyId]);
 
+  // Iter 520 (user request) — default Month = LAST salary month PROCESSED
+  // & FINALIZED for the selected firm (payroll runs one month behind).
+  useEffect(() => {
+    if (!companyId) return;
+    (async () => {
+      try {
+        const r = await api<{ month?: string }>(
+          `/admin/payroll-reports/last-finalized-month?company_id=${companyId}`,
+        );
+        if (r?.month && /^\d{4}-\d{2}$/.test(r.month)) setMonth(r.month);
+      } catch {}
+    })();
+  }, [companyId]);
+
   const qs = useCallback(() => {
     if (!sel) return "";
     const p = new URLSearchParams();
@@ -196,8 +213,15 @@ export default function ReportsCenterScreen() {
       p.append("fy_start_year", String(fy));
     } else {
       p.append("month", month);
-      if (sel.kind === "salary-comparison" && monthB)
-        p.append("month_b", monthB);
+      if (sel.kind === "salary-comparison") {
+        if (monthB) p.append("month_b", monthB);
+        // Iter 520 — PERIODIC comparison: base period (month_b→month_b_to)
+        // vs current period (month→month_to).
+        if (cmpMode === "periodic") {
+          if (/^\d{4}-\d{2}$/.test(monthTo)) p.append("month_to", monthTo);
+          if (/^\d{4}-\d{2}$/.test(monthBTo)) p.append("month_b_to", monthBTo);
+        }
+      }
       if (
         MONTH_RANGE_KINDS.has(sel.kind) &&
         fineMode === "periodic" &&
@@ -214,6 +238,8 @@ export default function ReportsCenterScreen() {
     month,
     monthB,
     monthTo,
+    monthBTo,
+    cmpMode,
     fineMode,
     otMode,
     dateFrom,
@@ -453,6 +479,56 @@ export default function ReportsCenterScreen() {
                 </>
               )}
             </View>
+            {/* Iter 520 (user request) — PERIODIC salary comparison */}
+            {sel.kind === "salary-comparison" && (
+              <View style={{ marginTop: 6 }}>
+                <View style={[shared.row, { marginBottom: 6 }]}>
+                  {(["month", "periodic"] as const).map((m) => (
+                    <Pressable
+                      key={m}
+                      onPress={() => setCmpMode(m)}
+                      style={[shared.tab, cmpMode === m && shared.tabActive]}
+                      testID={`rc-cmpmode-${m}`}
+                    >
+                      <Text
+                        style={[
+                          shared.tabTxt,
+                          cmpMode === m && shared.tabTxtActive,
+                        ]}
+                      >
+                        {m === "month" ? "Month wise" : "Periodic"}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+                {cmpMode === "periodic" && (
+                  <View style={shared.row}>
+                    <Text style={shared.meta}>Base To:</Text>
+                    <TextInput
+                      style={shared.input}
+                      value={monthBTo}
+                      onChangeText={setMonthBTo}
+                      placeholder="YYYY-MM"
+                      testID="rc-month-b-to"
+                    />
+                    <Text style={shared.meta}>Current To:</Text>
+                    <TextInput
+                      style={shared.input}
+                      value={monthTo}
+                      onChangeText={setMonthTo}
+                      placeholder="YYYY-MM"
+                      testID="rc-cmp-month-to"
+                    />
+                  </View>
+                )}
+                {cmpMode === "periodic" && (
+                  <Text style={[shared.meta, { marginTop: 4 }]}>
+                    Base period: {monthB || "prev month"} → {monthBTo || monthB || "…"} · Current
+                    period: {month} → {monthTo || month}
+                  </Text>
+                )}
+              </View>
+            )}
           </View>
         )}
 
@@ -465,48 +541,16 @@ export default function ReportsCenterScreen() {
 
         {sel && EMP_KINDS.has(sel.kind) && (
           <View style={{ marginBottom: 10 }}>
-            <Text style={[shared.meta, { marginBottom: 6 }]}>
-              Employees ({selEmps.length ? `${selEmps.length} selected` : "All"}
-              ):
-            </Text>
-            <View style={shared.tabs}>
-              <Pressable
-                onPress={() => setSelEmps([])}
-                style={[shared.tab, !selEmps.length && shared.tabActive]}
-                testID="rc-emp-all"
-              >
-                <Text
-                  style={[
-                    shared.tabTxt,
-                    !selEmps.length && shared.tabTxtActive,
-                  ]}
-                >
-                  All Employees
-                </Text>
-              </Pressable>
-              {emps.map((e) => {
-                const on = selEmps.includes(e.user_id);
-                return (
-                  <Pressable
-                    key={e.user_id}
-                    onPress={() =>
-                      setSelEmps((prev) =>
-                        on
-                          ? prev.filter((x) => x !== e.user_id)
-                          : [...prev, e.user_id],
-                      )
-                    }
-                    style={[shared.tab, on && shared.tabActive]}
-                    testID={`rc-emp-${e.user_id}`}
-                  >
-                    <Text style={[shared.tabTxt, on && shared.tabTxtActive]}>
-                      {e.employee_code ? `${e.employee_code} · ` : ""}
-                      {e.name || e.user_id}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            {/* Iter 520 (user request) — employees as a searchable DROPDOWN */}
+            <EmployeeDropdown
+              employees={emps}
+              value={selEmps}
+              onChange={setSelEmps}
+              multi
+              label={`Employees (${selEmps.length ? `${selEmps.length} selected` : "All"})`}
+              placeholder="All Employees — tap to pick specific ones…"
+              testID="rc-emp-dd"
+            />
           </View>
         )}
 
@@ -701,11 +745,17 @@ export default function ReportsCenterScreen() {
             company_id: companyId || "",
             month,
             month_b: sel.kind === "salary-comparison" ? monthB : "",
+            month_b_to:
+              sel.kind === "salary-comparison" && cmpMode === "periodic"
+                ? monthBTo
+                : "",
             fy_start_year: FY_KINDS.has(sel.kind) ? fy : 0,
             month_to:
               MONTH_RANGE_KINDS.has(sel.kind) && fineMode === "periodic"
                 ? monthTo
-                : "",
+                : sel.kind === "salary-comparison" && cmpMode === "periodic"
+                  ? monthTo
+                  : "",
             employee_ids: EMP_KINDS.has(sel.kind) ? selEmps.join(",") : "",
             from_date: DATE_KINDS.has(sel.kind) ? dateFrom : "",
             to_date: DATE_KINDS.has(sel.kind)

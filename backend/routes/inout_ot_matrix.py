@@ -228,8 +228,45 @@ async def _build(
 
     company = data.get("company") or {}
     comp_doc = await db.companies.find_one(
-        {"company_id": company_id}, {"_id": 0, "name": 1, "logo_base64": 1})
+        {"company_id": company_id},
+        {"_id": 0, "name": 1, "logo_base64": 1, "attendance_policy": 1})
     y, m = month[:4], month[5:7]
+
+    # Iter 520 (user request — "Set this report as per the FIRM ATTENDANCE
+    # POLICY") — surface the firm's effective policy on the report header
+    # (screen + Excel + PDF) so every figure is verifiable against it.
+    _pol = (comp_doc or {}).get("attendance_policy") or {}
+    from server import inject_firm_ot_flag
+    _pol = await inject_firm_ot_flag(dict(_pol), company_id)
+    _wd_names = ["Monday", "Tuesday", "Wednesday", "Thursday",
+                 "Friday", "Saturday", "Sunday"]
+    _wo_names = ", ".join(
+        _wd_names[int(i)] for i in (_pol.get("weekly_off_days") or [])
+        if isinstance(i, (int, float)) and 0 <= int(i) <= 6) or "None"
+    _fd_h = float(_pol.get("full_day_hours")
+                  or _pol.get("standard_working_hours") or 8.0)
+    _grace = int(float(_pol.get("grace_minutes_late") or 0))
+    _round_m = int(float(_pol.get("duty_hours_rounding_minutes") or 0))
+    _slab = (_pol.get("policy_master") or {}).get("ot_slab_minutes")
+    _slab = int(_slab) if _slab in (0, 30, 60) else 30
+    _ot_on = _pol.get("firm_ot_allowed") is not False
+    policy_summary = {
+        "full_day_hours": _fd_h,
+        "half_day_hours": float(_pol.get("half_day_hours") or 4.0),
+        "grace_minutes_late": _grace,
+        "duty_hours_rounding_minutes": _round_m,
+        "ot_slab_minutes": _slab,
+        "weekly_off": _wo_names,
+        "ot_allowed": _ot_on,
+        "line": (
+            f"Firm Attendance Policy — Full Day {_fd_h:g} hrs · "
+            + (f"OT beyond {_fd_h:g} worked hrs"
+               + (f" (slab {_slab} min)" if _slab else " (exact)")
+               if _ot_on else "OT OFF (firm master)")
+            + f" · Late grace {_grace} min"
+            + f" · Rounding {_round_m} min" + f" · Weekly Off: {_wo_names}"
+        ),
+    }
 
     # Iter 403 (user accepted) — day-wise OT totals across the FILTERED
     # employee set so supervisors spot heavy-OT days at a glance.
@@ -251,6 +288,7 @@ async def _build(
                     "logo_base64": (comp_doc or {}).get("logo_base64")},
         "month": month, "year": y, "month_number": m,
         "payroll_period": f"01-{m}-{y} to {len(day_labels):02d}-{m}-{y}",
+        "policy": policy_summary,
         "day_labels": day_labels, "weekday_labels": weekday_labels,
         "employees": out_rows,
         "day_ot_totals": {dl: _fmt_hm(mn / 60.0) for dl, mn in day_ot_min.items()},
@@ -346,6 +384,12 @@ async def inout_ot_matrix_xlsx(
     thin = Border(*[Side(style="thin", color="CBD5E1")] * 4)
     center = Alignment(horizontal="center", vertical="center")
     r = 1
+    # Iter 520 — firm attendance policy line on top of the sheet.
+    _pol_line = (data.get("policy") or {}).get("line")
+    if _pol_line:
+        ws.cell(row=r, column=1, value=_pol_line).font = Font(
+            bold=True, size=9, color="0F3B5C")
+        r += 2
     for emp in emps:
         for li, line in enumerate(_header_lines(data, emp)):
             ws.cell(row=r, column=1, value=line).font = Font(bold=(li == 0), size=10)
@@ -509,6 +553,9 @@ async def inout_ot_matrix_pdf(
         "<font backcolor='#E2E8F0'> Holiday </font> "
         "<font backcolor='#DCFCE7'> Weekly off </font> "
         "<font backcolor='#FED7AA'> Leave </font>", h2))
+    # Iter 520 — firm attendance policy line under the legend.
+    if (data.get("policy") or {}).get("line"):
+        flow.append(Paragraph(data["policy"]["line"], h2))
     flow.append(Spacer(1, 2 * mm))
     for emp in emps:
         block: List[Any] = []

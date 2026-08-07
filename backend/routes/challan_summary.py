@@ -135,6 +135,12 @@ async def get_challan_summary(
             "esic_source": "manual" if esic_amount is not None else ("auto" if esic_auto else None),
             "esic_by_name": m.get("esic_by_name") or await _nm(esic_auto.get("by")),
             "esic_date": m.get("esic_date") or esic_auto.get("date"),
+            # Iter 520 (user request) — payment status per challan
+            # (paid / pending / failed), re-updatable at any time.
+            "pf_status": m.get("pf_status")
+            or ("paid" if (m.get("pf_date") or pf_auto.get("date")) else "pending"),
+            "esic_status": m.get("esic_status")
+            or ("paid" if (m.get("esic_date") or esic_auto.get("date")) else "pending"),
             "reg_email": reg_email,
             "reg_whatsapp": reg_wa,
             "updated_at": m.get("updated_at"),
@@ -178,6 +184,16 @@ async def save_challan_summary_row(
         upd["pf_date"] = str(payload.get("pf_date") or "").strip() or None
     if "esic_date" in payload:
         upd["esic_date"] = str(payload.get("esic_date") or "").strip() or None
+    # Iter 520 — payment status (paid / pending / failed), re-updatable.
+    for _sk in ("pf_status", "esic_status"):
+        if _sk in payload:
+            _sv = str(payload.get(_sk) or "").strip().lower()
+            if _sv not in ("paid", "pending", "failed"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Payment status must be paid / pending / failed")
+            upd[_sk] = _sv
+            upd[f"{_sk}_by_name"] = name
     if "remark" in payload:
         remark = (payload.get("remark") or "").strip()
         upd["remark"] = remark

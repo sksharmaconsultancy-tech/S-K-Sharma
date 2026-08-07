@@ -10,7 +10,7 @@
  * attendance · lock after payroll freeze · require certificate ·
  * backdated entry limit · separate Salary Register column.
  */
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Switch,
   Text, TextInput, View,
@@ -23,6 +23,7 @@ import { api, apiBinary } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import CompanyPicker from "@/src/components/CompanyPicker";
+import EmployeeDropdown from "@/src/components/EmployeeDropdown";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
 const BRAND = "#0F3B5C";
@@ -59,6 +60,35 @@ const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
   rejected: { bg: "#FEE2E2", fg: "#991B1B" },
 };
 
+// Iter 520 (user request) — ESIC Leave Reason catalogue.
+const ESIC_REASONS = [
+  "Sickness Benefit",
+  "Extended Sickness Benefit",
+  "Enhanced Sickness Benefit",
+  "Temporary Disablement",
+  "Employment Injury",
+  "Occupational Disease",
+  "Maternity Benefit",
+  "Hospitalization",
+  "Medical Observation",
+  "Recovery After Surgery",
+  "ESIC Medical Rest",
+  "Rehabilitation",
+  "Other (Specify)",
+];
+
+// Iter 520 — DD-MM-YYYY date entry helpers.
+const maskDmy = (v: string) => {
+  const d = v.replace(/[^0-9]/g, "").slice(0, 8);
+  if (d.length <= 2) return d;
+  if (d.length <= 4) return `${d.slice(0, 2)}-${d.slice(2)}`;
+  return `${d.slice(0, 2)}-${d.slice(2, 4)}-${d.slice(4)}`;
+};
+const dmyToIso = (s: string): string | null => {
+  const m = s.trim().match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
+};
+
 export default function EsicLeaveScreen() {
   const { user } = useAuth();
   const { selectedCompanyId: globalCid } = useSelectedCompany();
@@ -72,10 +102,12 @@ export default function EsicLeaveScreen() {
   const [savingSettings, setSavingSettings] = useState(false);
 
   const [emps, setEmps] = useState<Emp[]>([]);
-  const [empSearch, setEmpSearch] = useState("");
   const [selEmp, setSelEmp] = useState<Emp | null>(null);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [reason, setReason] = useState("");
+  const [reasonOther, setReasonOther] = useState("");
+  const [reasonOpen, setReasonOpen] = useState(false);
   const [remarks, setRemarks] = useState("");
   const [cert, setCert] = useState<{ name: string; data: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -120,14 +152,6 @@ export default function EsicLeaveScreen() {
   }, [cid, month, statusFilter]);
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  const filteredEmps = useMemo(() => {
-    const s = empSearch.trim().toLowerCase();
-    if (!s) return emps.slice(0, 40);
-    return emps.filter((e) =>
-      (e.name || "").toLowerCase().includes(s) ||
-      String(e.employee_code || "").toLowerCase().includes(s)).slice(0, 40);
-  }, [emps, empSearch]);
-
   // ---- actions ----
   const saveSettings = async () => {
     if (!cid || !settings) return;
@@ -160,20 +184,30 @@ export default function EsicLeaveScreen() {
   };
 
   const submitEntry = async () => {
-    if (!cid || !selEmp) { flash(null, "Select an employee"); return; }
-    if (!fromDate.trim() || !toDate.trim()) { flash(null, "Enter From & To dates (YYYY-MM-DD)"); return; }
+    if (!cid) { flash(null, "Select a firm first (mandatory)"); return; }
+    if (!selEmp) { flash(null, "Select an employee"); return; }
+    const fIso = dmyToIso(fromDate);
+    const tIso = dmyToIso(toDate);
+    if (!fIso || !tIso) { flash(null, "Enter From & To dates as DD-MM-YYYY"); return; }
+    if (!reason) { flash(null, "Select the ESIC Leave Reason"); return; }
+    if (reason === "Other (Specify)" && !reasonOther.trim()) {
+      flash(null, "Please specify the reason"); return;
+    }
     setSubmitting(true);
     try {
       await api(`/admin/esic-leave`, {
         method: "POST",
         body: {
           company_id: cid, user_id: selEmp.user_id,
-          from_date: fromDate.trim(), to_date: toDate.trim(),
+          from_date: fIso, to_date: tIso,
+          reason,
+          reason_other: reason === "Other (Specify)" ? reasonOther.trim() : undefined,
           remarks: remarks.trim() || undefined,
           certificate_base64: cert?.data, certificate_name: cert?.name,
         },
       });
-      setSelEmp(null); setFromDate(""); setToDate(""); setRemarks(""); setCert(null);
+      setSelEmp(null); setFromDate(""); setToDate(""); setRemarks("");
+      setReason(""); setReasonOther(""); setCert(null);
       flash("ESIC Leave entry created (pending approval)");
       loadAll();
     } catch (e: any) { flash(null, e?.message); } finally { setSubmitting(false); }
@@ -215,6 +249,7 @@ export default function EsicLeaveScreen() {
 
         {isSuper ? (
           <View style={styles.card}>
+            <Text style={styles.fieldLbl}>Firm (mandatory) *</Text>
             <CompanyPicker value={companyId} onChange={setCompanyId} includeAll={false} />
           </View>
         ) : null}
@@ -273,47 +308,56 @@ export default function EsicLeaveScreen() {
               <Text style={styles.cardTitle}>
                 <Ionicons name="medkit-outline" size={14} color={ACCENT} />  New ESIC Leave Entry
               </Text>
-              <View style={styles.searchRow}>
-                <Ionicons name="search-outline" size={14} color={colors.onSurfaceTertiary} />
-                <TextInput
-                  value={selEmp ? `${selEmp.employee_code || ""} · ${selEmp.name || ""}` : empSearch}
-                  onChangeText={(v) => { setSelEmp(null); setEmpSearch(v); }}
-                  placeholder="Search employee by name or code…"
-                  placeholderTextColor={colors.onSurfaceTertiary}
-                  style={styles.searchInput}
-                  testID="esic-emp-search"
-                />
-                {selEmp ? (
-                  <Pressable onPress={() => { setSelEmp(null); setEmpSearch(""); }} hitSlop={6}>
-                    <Ionicons name="close-circle" size={16} color={colors.onSurfaceTertiary} />
-                  </Pressable>
-                ) : null}
-              </View>
-              {!selEmp ? (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-                  <View style={{ flexDirection: "row", gap: 6 }}>
-                    {filteredEmps.map((e) => (
-                      <Pressable key={e.user_id} onPress={() => setSelEmp(e)} style={styles.chip} testID={`esic-emp-${e.employee_code || e.user_id}`}>
-                        <Text style={styles.chipTxt} numberOfLines={1}>
-                          {e.employee_code ? `${e.employee_code} · ` : ""}{e.name || "—"}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </ScrollView>
-              ) : null}
+              <EmployeeDropdown
+                employees={emps}
+                value={selEmp ? [selEmp.user_id] : []}
+                onChange={(ids) =>
+                  setSelEmp(ids.length ? (emps.find((e) => e.user_id === ids[0]) || null) : null)}
+                label="Employee *"
+                placeholder="Select employee (search by name / code)…"
+                testID="esic-emp-dd"
+              />
               <View style={styles.dateRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLbl}>From (YYYY-MM-DD)</Text>
-                  <TextInput value={fromDate} onChangeText={setFromDate} placeholder="2026-07-01"
+                  <Text style={styles.fieldLbl}>From (DD-MM-YYYY) *</Text>
+                  <TextInput value={fromDate} onChangeText={(v) => setFromDate(maskDmy(v))}
+                    placeholder="01-07-2026" keyboardType="numeric" maxLength={10}
                     placeholderTextColor={colors.onSurfaceTertiary} style={styles.input} testID="esic-from" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLbl}>To (YYYY-MM-DD)</Text>
-                  <TextInput value={toDate} onChangeText={setToDate} placeholder="2026-07-05"
+                  <Text style={styles.fieldLbl}>To (DD-MM-YYYY) *</Text>
+                  <TextInput value={toDate} onChangeText={(v) => setToDate(maskDmy(v))}
+                    placeholder="05-07-2026" keyboardType="numeric" maxLength={10}
                     placeholderTextColor={colors.onSurfaceTertiary} style={styles.input} testID="esic-to" />
                 </View>
               </View>
+              {/* Iter 520 — ESIC Leave Reason dropdown */}
+              <Text style={styles.fieldLbl}>ESIC Leave Reason *</Text>
+              <Pressable style={styles.reasonField} onPress={() => setReasonOpen((v) => !v)} testID="esic-reason-dd">
+                <Text style={[styles.reasonTxt, !reason && { color: colors.onSurfaceTertiary }]}>
+                  {reason || "Select ESIC Leave Reason…"}
+                </Text>
+                <Ionicons name={reasonOpen ? "chevron-up" : "chevron-down"} size={15} color={colors.onSurfaceSecondary} />
+              </Pressable>
+              {reasonOpen ? (
+                <View style={styles.reasonPanel}>
+                  {ESIC_REASONS.map((r) => (
+                    <Pressable key={r} style={[styles.reasonRow, reason === r && { backgroundColor: "#EFF6FF" }]}
+                      onPress={() => { setReason(r); setReasonOpen(false); }}
+                      testID={`esic-reason-${r.replace(/[^a-zA-Z]/g, "")}`}>
+                      <Ionicons name={reason === r ? "radio-button-on" : "radio-button-off"} size={14}
+                        color={reason === r ? BRAND : colors.onSurfaceTertiary} />
+                      <Text style={styles.reasonTxt}>{r}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
+              {reason === "Other (Specify)" ? (
+                <TextInput value={reasonOther} onChangeText={setReasonOther}
+                  placeholder="Specify the reason…"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  style={[styles.input, { marginTop: 6 }]} testID="esic-reason-other" />
+              ) : null}
               <Text style={styles.fieldLbl}>Remarks</Text>
               <TextInput value={remarks} onChangeText={setRemarks} placeholder="Sickness / accident details…"
                 placeholderTextColor={colors.onSurfaceTertiary} style={styles.input} testID="esic-remarks" />
@@ -370,6 +414,11 @@ export default function EsicLeaveScreen() {
                       <Text style={styles.entryMeta}>
                         {dmy(e.from_date)} → {dmy(e.to_date)} · {e.days} day(s){e.esi_ip_no ? ` · IP ${e.esi_ip_no}` : ""}
                       </Text>
+                      {(e as any).reason ? (
+                        <Text style={[styles.entryMeta, { color: "#0F3B5C", fontWeight: "700" }]} numberOfLines={1}>
+                          {(e as any).reason}{(e as any).reason_other ? `: ${(e as any).reason_other}` : ""}
+                        </Text>
+                      ) : null}
                       {e.remarks ? <Text style={styles.entryMeta} numberOfLines={1}>“{e.remarks}”</Text> : null}
                       {e.status === "rejected" && e.reject_reason ? (
                         <Text style={[styles.entryMeta, { color: "#991B1B" }]}>Reason: {e.reject_reason}</Text>
@@ -479,6 +528,21 @@ const styles = StyleSheet.create({
   },
   chipTxt: { fontSize: 11.5, fontWeight: "600", color: colors.onSurfaceSecondary },
   dateRow: { flexDirection: "row", gap: 10, marginTop: 10 },
+  reasonField: {
+    flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1,
+    borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10,
+    paddingVertical: 9, backgroundColor: colors.surface,
+  },
+  reasonPanel: {
+    borderWidth: 1, borderColor: colors.border, borderRadius: 10,
+    marginTop: 4, overflow: "hidden", backgroundColor: colors.surface,
+  },
+  reasonRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingHorizontal: 10, paddingVertical: 8,
+    borderBottomWidth: 0.5, borderBottomColor: colors.border,
+  },
+  reasonTxt: { flex: 1, fontSize: 12.5, color: colors.onSurface },
   fieldLbl: { fontSize: 11, fontWeight: "700", color: colors.onSurfaceSecondary, marginTop: 8, marginBottom: 4 },
   input: {
     borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10,

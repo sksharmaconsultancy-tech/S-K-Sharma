@@ -222,6 +222,9 @@ export default function InOutOtMatrixScreen() {
             <Text style={s.metaTxt}>
               {data.total_employees} employee(s) · page {data.page}/{data.total_pages} · {data.payroll_period}
             </Text>
+            {data.policy?.line ? (
+              <Text style={s.policyTxt}>{data.policy.line}</Text>
+            ) : null}
             {(data.employees || []).map((emp: any) => (
               <EmployeeMatrix key={emp.user_id} data={data} emp={emp} onCell={openDetail} />
             ))}
@@ -510,6 +513,11 @@ const s = StyleSheet.create({
   err: { color: "#DC2626", marginTop: 10, fontSize: 13 },
   muted: { color: colors.onSurfaceTertiary, marginTop: 10, fontSize: 13 },
   metaTxt: { color: colors.onSurfaceSecondary, fontSize: 12, marginVertical: 8 },
+  policyTxt: {
+    color: "#0F3B5C", fontSize: 11.5, fontWeight: "700", marginBottom: 8,
+    backgroundColor: "#EFF6FF", borderRadius: 8, paddingHorizontal: 10,
+    paddingVertical: 6, borderWidth: 1, borderColor: "#BFDBFE",
+  },
   empCard: {
     backgroundColor: colors.surface, borderRadius: 12, borderWidth: 1,
     borderColor: colors.border, marginBottom: 16, overflow: "hidden",

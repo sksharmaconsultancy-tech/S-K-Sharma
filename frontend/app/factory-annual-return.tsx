@@ -23,6 +23,7 @@ import { useRouter } from "expo-router";
 
 import { api, apiBinary } from "@/src/api/client";
 import ReportTable, { ReportCol } from "@/src/components/ReportTable";
+import CompanyPicker from "@/src/components/CompanyPicker";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors, radius, spacing } from "@/src/theme";
 
@@ -52,6 +53,40 @@ const WELFARE_LABELS: { key: string; label: string }[] = [
   { key: "ambulance_room", label: "Ambulance Room" },
   { key: "drinking_water", label: "Drinking Water" },
   { key: "washing_facility", label: "Washing Facility" },
+];
+
+// Iter 520 (user upload — official FORM NO. 23) — statutory particulars.
+const FORM23_LABELS: { key: string; label: string }[] = [
+  { key: "application_no", label: "Application No." },
+  { key: "area", label: "Area (e.g. Mandal)" },
+  { key: "dangerous_process", label: "Dangerous process u/s 87 (or blank = No)" },
+  { key: "safety_officers_required", label: "Safety Officers required (Sec 40-B)" },
+  { key: "safety_officers_appointed", label: "Safety Officers appointed" },
+  { key: "ambulance_room", label: "Ambulance Room (Sec 45) — YES / NA" },
+  { key: "canteen", label: "Canteen (Sec 46) — YES / NA" },
+  { key: "canteen_departmental", label: "Canteen managed departmentally — YES / NA" },
+  { key: "canteen_contractor", label: "Canteen through contractor — YES / NA" },
+  { key: "rest_rooms", label: "Shelters / Rest Rooms (Sec 47) — YES / NA" },
+  { key: "lunch_rooms", label: "Lunch Rooms (Sec 47) — YES / NA" },
+  { key: "creche", label: "Crèche (Sec 48) — YES / NA" },
+  { key: "welfare_officers_required", label: "Welfare Officers required (Sec 49)" },
+  { key: "welfare_officers_appointed", label: "Welfare Officers appointed" },
+  { key: "safety_trainings", label: "Safety trainings conducted (year)" },
+  { key: "safety_trained_male", label: "Workers safety-trained — Male" },
+  { key: "safety_trained_female", label: "Workers safety-trained — Female" },
+  { key: "acc_ret_same_count", label: "Accidents — returned same year (count)" },
+  { key: "acc_ret_same_mandays", label: "Accidents — returned same year (man-days lost)" },
+  { key: "acc_ret_prev_count", label: "Prev-year accidents — returned this year (count)" },
+  { key: "acc_ret_prev_mandays", label: "Prev-year accidents — man-days lost" },
+  { key: "acc_not_ret_count", label: "Accidents — NOT returned (count)" },
+  { key: "acc_not_ret_mandays", label: "Accidents — NOT returned (man-days lost)" },
+  { key: "fines", label: "Deductions — Fines (₹)" },
+  { key: "deduction_damage", label: "Deductions — Damage or Loss (₹)" },
+  { key: "deduction_breach", label: "Deductions — Breach of Contract (₹)" },
+  { key: "bonus_paid", label: "Profit-sharing Bonus paid (₹)" },
+  { key: "money_concessions", label: "Money value of concessions (₹)" },
+  { key: "left_service", label: "Workers discharged / quit / died in service" },
+  { key: "wages_in_lieu_paid", label: "Workers paid wages in lieu of leave" },
 ];
 
 const EMP_COLS: ReportCol<any>[] = [
@@ -134,6 +169,7 @@ export default function FactoryAnnualReturnScreen() {
     setForm({
       ...Object.fromEntries(DETAIL_LABELS.map((d) => [d.key, f[d.key] || ""])),
       welfare: { ...(f.welfare || {}) },
+      form23: { ...(f.form23 || {}) },
       accidents: {
         ...(f.accidents || {}),
         [String(year)]: (f.accidents || {})[String(year)] || { fatal: 0, nonfatal: 0, mandays_lost: 0 },
@@ -155,16 +191,20 @@ export default function FactoryAnnualReturnScreen() {
     setSaving(false);
   };
 
-  const download = async (kind: "pdf" | "boiler" | "xlsx") => {
+  const download = async (kind: "pdf" | "boiler" | "form23" | "xlsx") => {
     if (!cid || dl) return;
     setDl(kind);
     try {
       const path = kind === "boiler"
         ? `/admin/factory-return/${cid}/${year}/boiler.pdf?source=${source}`
-        : `/admin/factory-return/${cid}/${year}.${kind}?source=${source}`;
+        : kind === "form23"
+          ? `/admin/factory-return/${cid}/${year}/form23.pdf?source=${source}`
+          : `/admin/factory-return/${cid}/${year}.${kind}?source=${source}`;
       const name = kind === "boiler"
         ? `boiler-annual-return-${year}.pdf`
-        : `factory-annual-return-${year}.${kind}`;
+        : kind === "form23"
+          ? `form23-annual-return-${year}.pdf`
+          : `factory-annual-return-${year}.${kind}`;
       const r = await apiBinary(path);
       if (Platform.OS === "web" && r.webBlobUrl) {
         const a = document.createElement("a");
@@ -197,18 +237,17 @@ export default function FactoryAnnualReturnScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: spacing.md, paddingBottom: 60 }}>
-        {/* firm picker */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.chips}>
-          {companies.map((c: any) => (
-            <Pressable key={c.company_id}
-              onPress={() => setCid(c.company_id)}
-              style={[st.chip, cid === c.company_id && st.chipOn]}>
-              <Text style={[st.chipTxt, cid === c.company_id && st.chipTxtOn]} numberOfLines={1}>
-                {c.name}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
+        {/* firm picker — Iter 520 (user request): searchable DROPDOWN */}
+        <View style={{ marginBottom: 8 }}>
+          <CompanyPicker
+            value={cid || "all"}
+            onChange={(v) => setCid(v === "all" ? null : v)}
+            companies={companies as any}
+            allowAll={false}
+            label="Firm"
+            testID="far-firm-dd"
+          />
+        </View>
 
         {/* year + source */}
         <View style={st.rowWrap}>
@@ -281,6 +320,7 @@ export default function FactoryAnnualReturnScreen() {
             {/* downloads */}
             <View style={st.dlRow}>
               {[
+                ["form23", "FORM 23 (Official)", "ribbon-outline", "#1D4ED8"],
                 ["pdf", "Factory Return PDF", "document-text-outline", "#B91C1C"],
                 ["boiler", "Boiler Return PDF", "flame-outline", "#C2410C"],
                 ["xlsx", "Excel", "grid-outline", "#15803D"],
@@ -395,6 +435,23 @@ export default function FactoryAnnualReturnScreen() {
                   </View>
                 ))}
               </View>
+              <Text style={[st.mLbl, { marginTop: 10, fontWeight: "800" }]}>
+                FORM 23 — Statutory Particulars (printed on the official form)
+              </Text>
+              {FORM23_LABELS.map((ff) => (
+                <View key={ff.key} style={{ marginBottom: 8 }}>
+                  <Text style={st.mLbl}>{ff.label}</Text>
+                  <TextInput
+                    style={st.mInput}
+                    value={String(form.form23?.[ff.key] ?? "")}
+                    onChangeText={(v) => setForm((f: any) => ({
+                      ...f, form23: { ...f.form23, [ff.key]: v },
+                    }))}
+                    placeholderTextColor={colors.onSurfaceTertiary}
+                    testID={`far-f23-${ff.key}`}
+                  />
+                </View>
+              ))}
             </ScrollView>
             <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 12 }}>
               <Pressable onPress={() => setEditOpen(false)} style={st.mCancel} disabled={saving}>

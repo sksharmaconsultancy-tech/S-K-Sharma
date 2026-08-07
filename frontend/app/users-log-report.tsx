@@ -30,6 +30,7 @@ import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors, radius, spacing, type } from "@/src/theme";
 import { formatDateTime } from "@/src/utils/date";
 import DateField from "@/src/components/DateField";
+import CompanyPicker from "@/src/components/CompanyPicker";
 
 type LogEvent = {
   at?: string;
@@ -223,22 +224,17 @@ export default function UsersLogReportScreen() {
           {user?.role !== "company_admin" ? (
             <View style={styles.filterRow}>
               <View style={styles.filterCol}>
-                <Text style={styles.label}>Firm</Text>
-                <View style={styles.chipStrip}>
-                  <Chip
-                    label="All firms"
-                    active={!firmId}
-                    onPress={() => setFirmId("")}
-                  />
-                  {(companies || []).map((c) => (
-                    <Chip
-                      key={c.company_id}
-                      label={c.name || c.company_id}
-                      active={firmId === c.company_id}
-                      onPress={() => setFirmId(c.company_id)}
-                    />
-                  ))}
-                </View>
+                {/* Iter 520 (user request) — firm as OPTIONAL dropdown:
+                    "All firms" shows Super/Sub-admin activity too. */}
+                <Text style={styles.label}>Firm (optional — All shows Super/Sub-admin logs)</Text>
+                <CompanyPicker
+                  value={firmId || "all"}
+                  onChange={(v) => setFirmId(v === "all" ? "" : v)}
+                  companies={companies}
+                  allowAll
+                  label="Firm"
+                  testID="ulr-firm-dd"
+                />
               </View>
             </View>
           ) : null}
