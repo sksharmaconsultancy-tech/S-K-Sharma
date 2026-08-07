@@ -157,10 +157,14 @@ echo "==> 8/9 Publishing new build (with rollback safety)..."
 sudo mkdir -p $WEB_DIR
 sudo rm -rf ${WEB_DIR}.prev
 sudo cp -r $WEB_DIR ${WEB_DIR}.prev 2>/dev/null || true
-# clean publish: remove old hashed bundles so the folder can't mix versions
-sudo find $WEB_DIR -mindepth 1 -maxdepth 1 ! -name '.well-known' -exec rm -rf {} +
+# WHITE-SCREEN FIX: old hashed JS bundles are KEPT (not deleted) so phones
+# still holding a stale cached shell keep booting the previous version
+# instead of hitting 404 → white screen. Everything else is clean-replaced.
+sudo find $WEB_DIR -mindepth 1 -maxdepth 1 ! -name '.well-known' ! -name '_expo' -exec rm -rf {} +
 sudo cp -r dist/* $WEB_DIR/
 sudo cp public/sw.js $WEB_DIR/sw.js 2>/dev/null || true
+# prune bundles older than 45 days so the folder never balloons
+sudo find $WEB_DIR/_expo -type f -mtime +45 -delete 2>/dev/null || true
 sudo nginx -t && sudo systemctl reload nginx
 
 echo "==> 9/9 Verification..."
