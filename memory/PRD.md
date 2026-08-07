@@ -4818,3 +4818,13 @@ from FastAPI. Machine settings: Cloud Server smartpayrolling.com port 8090,
 HTTPS OFF, then register serial from Unknown-Devices list. Also noted prod
 unknown device CN4C231160062 (8087 hits, stopped 07-30) still unregistered.
 APP_ITERATION=515.
+
+## Iter 515 follow-up (user: "Not Showing Online Still")
+Prod on 515; user registered CQIK231260072 (essl, OUT, KISHANGARH,
+cmp_3c815a9b1b) but last_seen_at=None. Port 8090: CONNECTION REFUSED on prod
+(listener not installed — likely nginx -t rollback). BUT discovered:
+http://165.99.223.52/iclock/cdata (IP host header, port 80) reaches FastAPI
+with NO 301 redirect — PROBE-IP80 logged in unknown_devices. So machine fix
+needs NO deploy: eSSL Cloud Server → Domain Name OFF, Server Address
+165.99.223.52, Port 80, HTTPS OFF. Told user. If still absent → device-side
+network (no internet/DNS/ADMS option).
