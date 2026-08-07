@@ -223,6 +223,21 @@ async def _query_rows(
         _unm_q.setdefault("at", {})["$gte"] = f"{from_date}T00:00:00"
     if to_date:
         _unm_q.setdefault("at", {})["$lte"] = f"{to_date}T23:59:59.999999"
+    # Iter 516 (user bug — NCD machines' NOT-FOUND rows missing) — the
+    # 2000-row cap was applied on the GLOBAL newest-first list, so the
+    # busiest firm's machines crowded everyone else out BEFORE the firm/
+    # machine filter ran. Scope the DB query itself instead. Punches from
+    # UNREGISTERED devices still always show (Iter 503 rule).
+    if machine and machine.startswith("device:"):
+        _unm_q["device_serial"] = machine.split(":", 1)[1]
+    elif _allowed is not None:
+        _firm_sns = [sn for sn, d in _dev_map.items()
+                     if d.get("company_id") in _allowed]
+        _all_sns = [sn for sn in _dev_map.keys() if sn]
+        _unm_q["$or"] = [
+            {"device_serial": {"$in": _firm_sns}},
+            {"device_serial": {"$nin": _all_sns}},  # unregistered devices
+        ]
     _dev_cids = {d.get("company_id") for d in _dev_map.values()
                  if d.get("company_id") and d.get("company_id") not in firms}
     if _dev_cids:

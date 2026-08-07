@@ -4828,3 +4828,15 @@ with NO 301 redirect — PROBE-IP80 logged in unknown_devices. So machine fix
 needs NO deploy: eSSL Cloud Server → Domain Name OFF, Server Address
 165.99.223.52, Port 80, HTTPS OFF. Told user. If still absent → device-side
 network (no internet/DNS/ADMS option).
+
+## Iter 516 (2026-08-07) — Punch Log NOT-FOUND rows missing for NCD machines
+Same crowding pattern as Iter 513: punch_logs.py _query_rows loaded
+biometric_unmapped sort(at desc).limit(2000) GLOBALLY, firm/machine filter
+applied after → busy firm crowded NCD rows out. FIX: scope _unm_q at DB
+level — machine param → device_serial direct; company filter → $or
+[serial in firm's devices, serial nin all registered] (preserves Iter 503
+"unregistered devices always show"). biometric_photos parked-photo query
+inherits same scoping. Verified on preview: firm filter shows own device
+881 + unregistered SEC2-1, excludes other-firm 777; unfiltered shows all.
+xlsx export same engine. APP_ITERATION=516, deploy_vps_iter516.sh.
+Note: user said "use SDK if required" — not needed here, was a query bug.
