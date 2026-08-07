@@ -1894,6 +1894,92 @@ async def biometric_unmapped_punches(
     return {"unmapped": logs}
 
 
+@router.post("/biometric/create-master-from-pin")
+async def create_master_from_pin(
+    payload: dict = Body(...),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 514 (user request) — ONE-TAP Employee Master creation from an
+    unmapped machine PIN. Creates a minimal, already-approved employee
+    (bio_code = machine PIN, name pre-filled from the machine's own user
+    table when captured) under the device's firm, then RE-MAPS all of that
+    PIN's parked unmapped punches into attendance. The admin completes the
+    remaining master details (phone, salary, DOJ…) in Employee Master."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    sn = str(payload.get("device_serial") or "").strip()
+    pin = str(payload.get("device_user_id") or "").strip()
+    if not sn or not pin:
+        raise HTTPException(status_code=400, detail="device_serial and device_user_id are required")
+    device = await db.biometric_devices.find_one({"serial_number": sn}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail=f"Device {sn} is not registered")
+    if admin["role"] == "company_admin" and device.get("company_id") != admin["company_id"]:
+        raise HTTPException(status_code=403, detail="Not authorised for this device")
+    cid = device.get("company_id")
+    if not cid:
+        raise HTTPException(status_code=400, detail="Device has no company — assign it to a firm first")
+
+    created = False
+    user = await _match_employee_for_bio(pin, cid)
+    if not user:
+        # Name: prefer the machine's own user table (USERINFO capture).
+        mu = await db.biometric_machine_users.find_one(
+            {"company_id": cid, "pin": pin}, {"_id": 0, "name": 1})
+        name = (str(payload.get("name") or "").strip()
+                or (mu or {}).get("name") or f"EMP {pin}").strip().upper()
+        emp_code = (str(payload.get("employee_code") or "").strip() or pin)
+        if await db.users.find_one({"company_id": cid, "employee_code": emp_code},
+                                   {"_id": 0, "user_id": 1}):
+            emp_code = None  # code taken — bio_code still maps the punches
+        from server import now_iso  # same helper employees_admin uses
+        user = {
+            "user_id": f"user_{uuid.uuid4().hex[:12]}",
+            "email": None, "phone": None, "picture": None,
+            "name": name, "role": "employee", "company_id": cid,
+            "employee_code": emp_code, "bio_code": pin,
+            "is_onroll": True, "pay_mode": "Bank",
+            "onboarded": True, "onboarded_at": now_iso(),
+            "approval_status": "approved", "approved_at": now_iso(),
+            "approved_by": admin.get("user_id"),
+            "has_pin": False,
+            "created_at": now_iso(),
+            "created_by_admin": admin.get("user_id"),
+            "created_from_machine_pin": sn,
+        }
+        await db.users.insert_one(dict(user))
+        user.pop("_id", None)
+        created = True
+
+    # Re-map ALL parked punches for this PIN across the firm's machines.
+    firm_devices = {
+        d["serial_number"]: d
+        async for d in db.biometric_devices.find({"company_id": cid}, {"_id": 0})
+    }
+    remapped = 0
+    failed = 0
+    unmapped_rows = await db.biometric_unmapped.find({
+        "device_user_id": pin,
+        "device_serial": {"$in": list(firm_devices.keys())},
+    }).sort("seen_at", 1).to_list(5000)
+    for doc in unmapped_rows:
+        dev = firm_devices.get(doc.get("device_serial"))
+        if not dev:
+            failed += 1
+            continue
+        ok, _reason = await _ingest_attlog_line(doc.get("raw") or "", dev)
+        if ok:
+            await db.biometric_unmapped.delete_one({"_id": doc["_id"]})
+            remapped += 1
+        else:
+            failed += 1
+    logger.info("[create-master-from-pin] pin=%s firm=%s created=%s remapped=%d failed=%d",
+                pin, cid, created, remapped, failed)
+    return {"ok": True, "created": created, "user_id": user["user_id"],
+            "name": user.get("name"), "employee_code": user.get("employee_code"),
+            "bio_code": pin, "remapped": remapped, "still_unmapped": failed}
+
+
 @router.post("/biometric/remap-unmapped")
 async def biometric_remap_unmapped(
     company_id: Optional[str] = Query(None),

@@ -9,7 +9,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator,
-  TextInput, Platform,
+  TextInput, Platform, Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -47,6 +47,40 @@ export default function AttendanceSyncDashboard() {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<Record<string, boolean>>({ s4: true });
   const [busyExp, setBusyExp] = useState<string | null>(null);
+  // Iter 514 — one-tap "Create Master from machine PIN".
+  const [busyCreate, setBusyCreate] = useState<string | null>(null);
+  const createMaster = (r: any) => {
+    const key = `${r.machine}:${r.machine_id}`;
+    const go = async () => {
+      setBusyCreate(key);
+      try {
+        const res = await api<any>("/biometric/create-master-from-pin", {
+          method: "POST",
+          body: { device_serial: r.machine, device_user_id: String(r.machine_id) },
+        });
+        const msg = `${res.created ? "Employee created" : "Employee already existed"}: ${res.name}`
+          + ` (code ${res.employee_code || "—"}, bio ${res.bio_code}).`
+          + ` ${res.remapped} old punch(es) pulled into attendance.`
+          + ` Complete phone / salary / DOJ in Employee Master.`;
+        if (Platform.OS === "web") window.alert(msg); else Alert.alert("Done ✅", msg);
+        load();
+      } catch (e: any) {
+        const m = e?.message || "Failed to create the employee.";
+        if (Platform.OS === "web") window.alert(m); else Alert.alert("Failed", m);
+      } finally {
+        setBusyCreate(null);
+      }
+    };
+    const q = `Create Employee Master for machine PIN ${r.machine_id} (${r.machine_name || r.machine}) and pull their old punches into attendance?`;
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined" && window.confirm(q)) go();
+    } else {
+      Alert.alert("Create Master", q, [
+        { text: "Cancel", style: "cancel" },
+        { text: "Create", onPress: go },
+      ]);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
@@ -219,13 +253,30 @@ export default function AttendanceSyncDashboard() {
             {/* Section 2 — Machine only */}
             <Section id="s2" title="2 · Registered in Machine, NOT in Master" count={data.machine_only.length} exportKey="machine_only">
               {filt(data.machine_only).slice(0, 60).map((r: any, i: number) => (
-                <Row key={i}
-                  r={`Machine ID ${r.machine_id} · ${r.machine_name || r.machine}`}
-                  sub={`Punches ${r.punch_count} · First ${r.first_punch} · Last ${r.last_punch}\n${r.remark}`}
-                  right={r.suggested_match ? `≈ ${r.suggested_match}` : "Create Master"}
-                  color="red"
-                  onPress={() => router.push("/employee-add" as any)}
-                />
+                <View key={i}>
+                  <Row
+                    r={`Machine ID ${r.machine_id} · ${r.machine_name || r.machine}`}
+                    sub={`Punches ${r.punch_count} · First ${r.first_punch} · Last ${r.last_punch}\n${r.remark}`}
+                    right={r.suggested_match ? `≈ ${r.suggested_match}` : ""}
+                    color="red"
+                    onPress={() => router.push("/employee-add" as any)}
+                  />
+                  <Pressable
+                    onPress={() => createMaster(r)}
+                    disabled={!!busyCreate}
+                    style={[styles.createBtn, busyCreate === `${r.machine}:${r.machine_id}` && { opacity: 0.6 }]}
+                    testID={`asd-create-${r.machine}-${r.machine_id}`}
+                  >
+                    {busyCreate === `${r.machine}:${r.machine_id}` ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Ionicons name="person-add-outline" size={13} color="#fff" />
+                        <Text style={styles.createTxt}>Create Master from PIN {r.machine_id}</Text>
+                      </>
+                    )}
+                  </Pressable>
+                </View>
               ))}
               {data.machine_only.length === 0 ? <Text style={styles.empty}>No unmapped machine users. ✓</Text> : null}
             </Section>
@@ -340,6 +391,13 @@ export default function AttendanceSyncDashboard() {
 }
 
 const styles = StyleSheet.create({
+  // Iter 514 — one-tap Create Master button under machine-only rows.
+  createBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    backgroundColor: "#DC2626", borderRadius: 8, paddingVertical: 8,
+    marginHorizontal: 12, marginBottom: 8, minHeight: 34,
+  },
+  createTxt: { color: "#fff", fontSize: 12, fontWeight: "800" },
   safe: { flex: 1, backgroundColor: "#F4F7FB" },
   header: {
     flexDirection: "row", alignItems: "center", gap: 12,

@@ -4791,3 +4791,16 @@ firm's device serials (_firm_sns). Exports + master_pending KPI fixed too
 (export reuses same fn). Verified locally (scoped=0 for Kankani vs global
 row from SEC2-1). APP_ITERATION=513, deploy_vps_iter513.sh (superset of
 512 SDK feature + 511 self-heal). User still hasn't deployed 511/512.
+
+## Iter 514 (2026-08-07) — One-tap "Create Master from machine PIN" (user accepted improvement)
+Backend: POST /api/biometric/create-master-from-pin (routes/biometric_devices.py,
+above remap-unmapped). Creates minimal approved employee (bio_code=pin,
+employee_code=pin if free else None, name from biometric_machine_users USERINFO
+capture else "EMP <pin>", onboarded/approved, has_pin False,
+created_from_machine_pin=<sn>) then remaps ALL parked biometric_unmapped rows
+for that pin across the firm's devices via _ingest_attlog_line (cap 5000,
+deletes remapped rows). Idempotent: existing bio match → created:false, just
+remaps. Tested E2E on preview (create+remap+delete unmapped, idempotent).
+Frontend: attendance-sync-dashboard.tsx section-2 rows get red "Create Master
+from PIN <id>" button (confirm → API → alert result → reload); row press still
+opens /employee-add. APP_ITERATION=514, deploy_vps_iter514.sh (superset 511-513).
