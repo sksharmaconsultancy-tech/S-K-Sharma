@@ -4883,3 +4883,20 @@ forces direction); OUT machine JYK8240100174 OFFLINE since 02-08 (last IP
    (user's "update attendance report to verify" request; monthly grid reads
    db.attendance so repaired days show real IN/OUT automatically).
 APP_ITERATION=518, deploy_vps_iter518.sh.
+
+## Iter 519 (2026-08-07) — Daily Present Count footer (user enhancement spec)
+attendance-grid.tsx: dailySummary useMemo (single pass over
+filteredEmployees × day_labels; present credit c.present incl 0.5,
+else weekly_off/holiday/absent; missing = in xor out). PresentCountFooter
+rewritten: FooterStatRow per stat, sticky identity cols preserved; now fed
+by FILTERED data (was server-global day_present_counts). "☐ Daily Summary"
+toggle chip (toggle-daily-summary testID) adds Absent/Weekly Off/Holiday/
+Missing Punch rows. Footer added to BOTH web + native grid branches.
+Backend utils/monthly_attendance.py: compute_daily_summary(grid) +
+write_daily_summary_rows(ws,...) appended to build_grid_view_xlsx (inout)
+and build_hours_only_grid_xlsx. utils/monthly_attendance_pdf.py
+build_monthly_inout_pdf: 5 footer rows per page (_sumrow, %g format).
+Verified: xlsx rows 387-391 present, pdf 200, UI screenshot (toggle+rows).
+NOTE: Leave counts not in grid cells (leave flag absent) — omitted from
+summary; can add when leave module marks grid cells.
+APP_ITERATION=519, deploy_vps_iter519.sh.

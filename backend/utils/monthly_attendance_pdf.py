@@ -191,6 +191,10 @@ def build_monthly_inout_pdf(grid: Dict[str, Any], fmt: Dict[str, Any] | None = N
     # Report-Format override) still chunks.
     idx_pages = _iter_pages_by_days(days_n, chunk=days_n if is_land else 6)
 
+    # Iter 519 (user enhancement) — day-wise footer stats (same as portal).
+    from utils.monthly_attendance import compute_daily_summary
+    _daily = compute_daily_summary(grid)
+
     for page_idx, day_idx_1based in enumerate(idx_pages):
         idxs = [i - 1 for i in day_idx_1based]
         header = _header_top_row(day_labels, weekday_labels, idxs)
@@ -226,6 +230,20 @@ def build_monthly_inout_pdf(grid: Dict[str, Any], fmt: Dict[str, Any] | None = N
             if is_last_page:
                 row += _emp_trailing_row(emp.get("totals") or {})
             rows.append(row)
+
+        # Iter 519 — Present / summary footer rows under the last employee.
+        def _sumrow(label: str, counts) -> List[str]:
+            r_ = ["", label, "", "", "", "", ""]
+            for i in idxs:
+                r_.append(f"{counts.get(day_labels[i], 0):g}")
+            if is_last_page:
+                r_ += [""] * len(_TRAIL_LABELS)
+            return r_
+        rows.append(_sumrow("Daily Present", _daily["present"]))
+        rows.append(_sumrow("Absent", _daily["absent"]))
+        rows.append(_sumrow("Weekly Off", _daily["weekly_off"]))
+        rows.append(_sumrow("Holiday", _daily["holiday"]))
+        rows.append(_sumrow("Missing Punch", _daily["missing"]))
 
         # Column widths — tightened so 31 day columns + identity + summary
         # all fit the landscape-legal usable width (~343 mm).

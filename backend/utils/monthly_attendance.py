@@ -499,6 +499,77 @@ def build_monthly_inout_xlsx(
 # ---------------------------------------------------------------------------
 
 
+def compute_daily_summary(grid: Dict[str, Any]) -> Dict[str, Dict[str, float]]:
+    """Iter 519 (user enhancement) — day-wise footer stats for the monthly
+    grid exports: Present (0.5 half-day credits included), Absent, Weekly
+    Off, Holiday and Missing-Punch counts per day column. Mirrors the
+    on-screen footer logic exactly."""
+    days = grid.get("day_labels") or []
+    stats: Dict[str, Dict[str, float]] = {
+        k: {d: 0.0 for d in days}
+        for k in ("present", "absent", "weekly_off", "holiday", "missing")
+    }
+    for e in grid.get("employees") or []:
+        cells = e.get("days") or {}
+        for d in days:
+            c = cells.get(d) or None
+            if not c:
+                stats["absent"][d] += 1
+                continue
+            p = float(c.get("present") or 0)
+            if p > 0:
+                stats["present"][d] += p
+            elif c.get("weekly_off"):
+                stats["weekly_off"][d] += 1
+            elif c.get("holiday"):
+                stats["holiday"][d] += 1
+            else:
+                stats["absent"][d] += 1
+            if (c.get("in") and not c.get("out")) or (c.get("out") and not c.get("in")):
+                stats["missing"][d] += 1
+    return stats
+
+
+def _fmt_count(v: float):
+    return round(v, 1) if v % 1 else int(v)
+
+
+def write_daily_summary_rows(ws, grid: Dict[str, Any], start_row: int,
+                             day_col0: int, days_n: int, border, total_font) -> int:
+    """Append the day-wise footer block (Present + summary rows) to an XLSX
+    grid sheet. ``day_col0`` = column index of day 1. Returns next free row."""
+    from openpyxl.styles import Alignment, Font, PatternFill
+    center = Alignment(horizontal="center", vertical="center")
+    stats = compute_daily_summary(grid)
+    days = grid.get("day_labels") or []
+    rows = [
+        ("Daily Present Employees", stats["present"], True),
+        ("Absent", stats["absent"], False),
+        ("Weekly Off", stats["weekly_off"], False),
+        ("Holiday", stats["holiday"], False),
+        ("Missing Punch", stats["missing"], False),
+    ]
+    r = start_row
+    for label, counts, strong in rows:
+        fill = PatternFill("solid", fgColor="DCE8E8" if strong else "F1F5F5")
+        lc = ws.cell(row=r, column=1, value=label)
+        lc.font = total_font if strong else Font(size=9, bold=False)
+        for j, d in enumerate(days):
+            c = ws.cell(row=r, column=day_col0 + j, value=_fmt_count(counts.get(d, 0)))
+            c.alignment = center
+            c.font = Font(size=9, bold=strong)
+        tot = ws.cell(row=r, column=day_col0 + days_n,
+                      value=_fmt_count(sum(counts.values())))
+        tot.alignment = center
+        tot.font = Font(size=9, bold=True)
+        for c_ in range(1, day_col0 + days_n + 2):
+            ws.cell(row=r, column=c_).fill = fill
+            ws.cell(row=r, column=c_).border = border
+        ws.row_dimensions[r].height = 16
+        r += 1
+    return r
+
+
 def build_grid_view_xlsx(grid: Dict[str, Any]) -> bytes:
     """Build the multi-row Grid-View XLSX from a JSON grid payload.
 
@@ -745,6 +816,9 @@ def build_grid_view_xlsx(grid: Dict[str, Any]) -> bytes:
         c.alignment = center
         c.number_format = "0.##"
 
+        # Iter 519 (user enhancement) — day-wise Present + summary footer.
+        write_daily_summary_rows(ws, grid, footer_row + 1, 6, days_n, border, total_font)
+
     # Iter 205 (user request) — separate day-wise OT HRS sheet for
     # cross-verification of the OT totals.
     write_ot_hours_sheet(wb.create_sheet("OT HRS"), grid)
@@ -970,6 +1044,9 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
             c.alignment = center
             if k == 3:
                 c.number_format = "0.##"
+
+    # Iter 519 (user enhancement) — day-wise Present + summary footer.
+    cur = write_daily_summary_rows(ws, grid, cur + 1, 6, days_n, border, total_font)
 
     # Iter 205 (user request) — separate day-wise OT HRS sheet for
     # cross-verification of the OT totals.

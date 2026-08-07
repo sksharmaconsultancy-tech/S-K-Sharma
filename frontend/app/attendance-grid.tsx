@@ -519,6 +519,33 @@ export default function AttendanceGridScreen() {
     return out;
   }, [filteredEmployees, sortBy]);
 
+  // Iter 519 (user enhancement) — day-wise footer stats computed ONCE from
+  // the FILTERED dataset (single pass, no per-cell work while rendering).
+  const [showSummary, setShowSummary] = useState(false);
+  const dailySummary = useMemo(() => {
+    const days = data?.day_labels || [];
+    const mk = () => {
+      const o: Record<string, number> = {};
+      for (const d of days) o[d] = 0;
+      return o;
+    };
+    const S = { present: mk(), absent: mk(), weekly_off: mk(), holiday: mk(), missing: mk() };
+    for (const e of filteredEmployees) {
+      const cells: any = e.days || {};
+      for (const d of days) {
+        const c = cells[d];
+        if (!c) { S.absent[d] += 1; continue; }
+        const p = Number(c.present || 0);
+        if (p > 0) S.present[d] += p;
+        else if (c.weekly_off) S.weekly_off[d] += 1;
+        else if (c.holiday) S.holiday[d] += 1;
+        else S.absent[d] += 1;
+        if ((c.in && !c.out) || (!c.in && c.out)) S.missing[d] += 1;
+      }
+    }
+    return S;
+  }, [filteredEmployees, data]);
+
   const downloadReport = useCallback(
     async (fmt: "xlsx" | "pdf") => {
       if (!effectiveCid || exporting) return;
@@ -866,6 +893,19 @@ export default function AttendanceGridScreen() {
           </Pressable>
         ))}
 
+        {/* Iter 519 (user enhancement) — day-wise footer summary toggle */}
+        {(view === "inout" || view === "hours") && !hideDays ? (
+          <Pressable
+            onPress={() => setShowSummary((v) => !v)}
+            style={[styles.groupChip, showSummary && styles.groupChipOn]}
+            testID="toggle-daily-summary"
+          >
+            <Text style={[styles.groupChipTxt, showSummary && styles.groupChipTxtOn]}>
+              {showSummary ? "☑" : "☐"} Daily Summary
+            </Text>
+          </Pressable>
+        ) : null}
+
         {/* Iter 77 - Group Wise filter */}
         <View style={styles.groupBox}>
           <Text style={styles.rangeLabel}>Group</Text>
@@ -1006,6 +1046,7 @@ export default function AttendanceGridScreen() {
                   onCellPress={(uid, name, date) => setRepair({ userId: uid, name, date })}
                 />
               ))}
+            <PresentCountFooter data={data} view={view} hideDays={hideDays} summary={dailySummary} showSummary={showSummary} />
           </View>
         </View>
       ) : (
@@ -1037,7 +1078,7 @@ export default function AttendanceGridScreen() {
                     onCellPress={(uid, name, date) => setRepair({ userId: uid, name, date })}
                   />
                 ))}
-              <PresentCountFooter data={data} view={view} hideDays={hideDays} />
+              <PresentCountFooter data={data} view={view} hideDays={hideDays} summary={dailySummary} showSummary={showSummary} />
             </View>
           </ScrollView>
         </ScrollView>
@@ -1094,31 +1135,53 @@ const ROW_FIT: any = Platform.OS === "web" ? { minWidth: "max-content" } : null;
 
 // Iter 291 (user request) — Day-wise Present Count footer row for the
 // In/Out and Total-Duty-HRS reports: shows how many employees were present
-// on each day at the bottom of every day column.
-function PresentCountFooter({
-  data, view, hideDays,
-}: { data: GridResp; view: GridView; hideDays?: boolean }) {
-  if (hideDays || (view !== "inout" && view !== "hours")) return null;
-  const counts = data.day_present_counts || {};
+// on each day at the bottom of every day column. Iter 519 — counts follow
+// the FILTERED rows (search/department) and an optional Daily Summary adds
+// Absent / Weekly Off / Holiday / Missing-Punch rows.
+type DaySummary = Record<string, Record<string, number>>;
+
+function FooterStatRow({
+  data, view, label, counts, strong,
+}: { data: GridResp; view: GridView; label: string; counts: Record<string, number>; strong?: boolean }) {
   const dayW = view === "inout" ? COL.day : COL.dayHours;
+  const fmt = (v: number) => (v % 1 ? v.toFixed(1) : String(v));
   const total = data.day_labels.reduce((s, d) => s + (counts[d] || 0), 0);
   return (
-    <View style={[styles.row, styles.footRow, ROW_FIT]} testID="present-count-footer">
+    <View style={[styles.row, styles.footRow, ROW_FIT]} testID={`footer-${label}`}>
       <View style={[styles.cell, styles.footBg, { width: COL.sno }, stickyCol(LEFT.sno)]} />
       <View style={[styles.cell, styles.footBg, { width: COL.name }, stickyCol(LEFT.name)]}>
-        <Text style={styles.footLbl}>Day-wise Present Count</Text>
+        <Text style={[styles.footLbl, !strong && { fontWeight: "600" }]}>{label}</Text>
       </View>
       <View style={[styles.cell, styles.footBg, { width: COL.father }, stickyCol(LEFT.father)]} />
       <View style={[styles.cell, styles.footBg, { width: COL.dept }, stickyCol(LEFT.dept)]} />
       <View style={[styles.cell, styles.footBg, { width: COL.bio }, stickyCol(LEFT.bio)]} />
       {data.day_labels.map((d) => (
         <View key={d} style={[styles.cell, styles.footBg, { width: dayW, alignItems: "center" }]}>
-          <Text style={styles.footCnt}>{counts[d] || 0}</Text>
+          <Text style={[styles.footCnt, !strong && { fontWeight: "600" }]}>{fmt(counts[d] || 0)}</Text>
         </View>
       ))}
       <View style={[styles.cell, styles.footBg, { width: COL.sum, alignItems: "center" }]}>
-        <Text style={styles.footCnt}>{total}</Text>
+        <Text style={styles.footCnt}>{fmt(total)}</Text>
       </View>
+    </View>
+  );
+}
+
+function PresentCountFooter({
+  data, view, hideDays, summary, showSummary,
+}: { data: GridResp; view: GridView; hideDays?: boolean; summary: DaySummary; showSummary?: boolean }) {
+  if (hideDays || (view !== "inout" && view !== "hours")) return null;
+  return (
+    <View testID="present-count-footer">
+      <FooterStatRow data={data} view={view} label="Daily Present Employees" counts={summary.present || {}} strong />
+      {showSummary ? (
+        <>
+          <FooterStatRow data={data} view={view} label="Absent" counts={summary.absent || {}} />
+          <FooterStatRow data={data} view={view} label="Weekly Off" counts={summary.weekly_off || {}} />
+          <FooterStatRow data={data} view={view} label="Holiday" counts={summary.holiday || {}} />
+          <FooterStatRow data={data} view={view} label="Missing Punch" counts={summary.missing || {}} />
+        </>
+      ) : null}
     </View>
   );
 }
