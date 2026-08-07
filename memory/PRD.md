@@ -4840,3 +4840,25 @@ inherits same scoping. Verified on preview: firm filter shows own device
 881 + unregistered SEC2-1, excludes other-firm 777; unfiltered shows all.
 xlsx export same engine. APP_ITERATION=516, deploy_vps_iter516.sh.
 Note: user said "use SDK if required" — not needed here, was a query bug.
+
+## Iter 517 (2026-08-07) — grid grouping + punch log search + label fix
+User reports resolved:
+1. RANJAN FABRICS "missing punches but 2 in record": prod data showed 95
+   machine punches ALL kind=in on Aug-3 (evening 19-20h punches on IN
+   machine JYK8240100297), OUT machine JYK8240100174 receives ZERO punches;
+   the 2nd record = server_auto_close (+12h synthetic). Told user to check
+   OUT machine; offered opt-in smart direction-correction (NOT built yet —
+   needs user approval, would change attendance engine).
+2. punch_logs.py: server_auto_close now labeled "Auto-Close (System)"
+   (was fallback "Mobile App"); machine_key "auto_close".
+3. attendance-grid.tsx: department/designation sort now renders group bands
+   (deptBand, "YARN · 23 employees"), gridItems memo, S.No continues.
+   Verified via screenshot (Kankani: NO DEPARTMENT/SECURITY/WEAVING bands).
+4. punch-log-report.tsx: free-text Search box (client-side across
+   name/code/bio/machine/firm/date/time/kind/status), count shows "X of N".
+5. "NCD NOT FOUND still missing": their unmapped rows are Apr-2026-old;
+   default 7-day range shows none — instructed to widen date range (data
+   verified on prod: since Aug-06 NCD has 0 new unmapped).
+6. Sub admin CAN access punch-log-report (verified preview screenshot);
+   if hidden on prod → menu_rights toggle in Sub Admins screen.
+APP_ITERATION=517, deploy_vps_iter517.sh.

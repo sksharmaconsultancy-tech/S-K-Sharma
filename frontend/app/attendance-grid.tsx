@@ -493,6 +493,32 @@ export default function AttendanceGridScreen() {
     return sorted;
   }, [data, q, sortBy, sortDir]);
 
+  // Iter 517 (user request) — Department/Designation-wise sort GROUPS the
+  // rows with a named band above each group (e.g. "YARN (23)").
+  type GridItem = { header: string; count: number } | { emp: Emp; sno: number; zebra: boolean };
+  const gridItems = useMemo<GridItem[]>(() => {
+    const grouped = sortBy === "department" || sortBy === "designation";
+    const out: GridItem[] = [];
+    let last: string | null = null;
+    filteredEmployees.forEach((e, idx) => {
+      if (grouped) {
+        const g = ((sortBy === "department" ? e.department : e.designation) || "").trim().toUpperCase()
+          || (sortBy === "department" ? "NO DEPARTMENT" : "NO DESIGNATION");
+        if (g !== last) {
+          const count = filteredEmployees.filter((x) => {
+            const xg = ((sortBy === "department" ? x.department : x.designation) || "").trim().toUpperCase()
+              || (sortBy === "department" ? "NO DEPARTMENT" : "NO DESIGNATION");
+            return xg === g;
+          }).length;
+          out.push({ header: g, count });
+          last = g;
+        }
+      }
+      out.push({ emp: e, sno: idx + 1, zebra: idx % 2 === 1 });
+    });
+    return out;
+  }, [filteredEmployees, sortBy]);
+
   const downloadReport = useCallback(
     async (fmt: "xlsx" | "pdf") => {
       if (!effectiveCid || exporting) return;
@@ -963,18 +989,23 @@ export default function AttendanceGridScreen() {
               sortDir={sortDir}
               onSort={toggleSort as any}
             />
-            {filteredEmployees.map((e, idx) => (
-              <GridRow
-                key={e.user_id}
-                emp={e}
-                sno={idx + 1}
-                data={data}
-                view={view}
-                hideDays={hideDays}
-                zebra={idx % 2 === 1}
-                onCellPress={(uid, name, date) => setRepair({ userId: uid, name, date })}
-              />
-            ))}
+            {gridItems.map((item, idx) =>
+              "header" in item ? (
+                <View key={`grp-${item.header}-${idx}`} style={styles.deptBand}>
+                  <Text style={styles.deptBandTxt}>{item.header}  ·  {item.count} employee{item.count === 1 ? "" : "s"}</Text>
+                </View>
+              ) : (
+                <GridRow
+                  key={item.emp.user_id}
+                  emp={item.emp}
+                  sno={item.sno}
+                  data={data}
+                  view={view}
+                  hideDays={hideDays}
+                  zebra={item.zebra}
+                  onCellPress={(uid, name, date) => setRepair({ userId: uid, name, date })}
+                />
+              ))}
           </View>
         </View>
       ) : (
@@ -989,18 +1020,23 @@ export default function AttendanceGridScreen() {
                 sortDir={sortDir}
                 onSort={toggleSort as any}
               />
-              {filteredEmployees.map((e, idx) => (
-                <GridRow
-                  key={e.user_id}
-                  emp={e}
-                  sno={idx + 1}
-                  data={data}
-                  view={view}
-                  hideDays={hideDays}
-                  zebra={idx % 2 === 1}
-                  onCellPress={(uid, name, date) => setRepair({ userId: uid, name, date })}
-                />
-              ))}
+              {gridItems.map((item, idx) =>
+                "header" in item ? (
+                  <View key={`grp-${item.header}-${idx}`} style={styles.deptBand}>
+                    <Text style={styles.deptBandTxt}>{item.header}  ·  {item.count} employee{item.count === 1 ? "" : "s"}</Text>
+                  </View>
+                ) : (
+                  <GridRow
+                    key={item.emp.user_id}
+                    emp={item.emp}
+                    sno={item.sno}
+                    data={data}
+                    view={view}
+                    hideDays={hideDays}
+                    zebra={item.zebra}
+                    onCellPress={(uid, name, date) => setRepair({ userId: uid, name, date })}
+                  />
+                ))}
               <PresentCountFooter data={data} view={view} hideDays={hideDays} />
             </View>
           </ScrollView>
@@ -1709,6 +1745,19 @@ const styles = StyleSheet.create({
 
   // Grid ------------------------------------------------------------------
   gridRoot: { padding: 8 },
+  // Iter 517 — department/designation group band in the monthly grid.
+  deptBand: {
+    backgroundColor: "#0F2E3D",
+    borderRadius: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    marginTop: 8,
+    marginBottom: 2,
+    alignSelf: "flex-start",
+    minWidth: 420,
+    ...(Platform.OS === "web" ? ({ position: "sticky", left: 8 } as any) : {}),
+  },
+  deptBandTxt: { color: "#fff", fontSize: 12.5, fontWeight: "800", letterSpacing: 0.4 },
   headerRow: {
     flexDirection: "row",
     backgroundColor: colors.brandPrimary,

@@ -15,6 +15,7 @@ import {
   Platform,
   Modal,
   Image,
+  TextInput,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -183,6 +184,17 @@ export default function PunchLogReportScreen() {
   const [machine, setMachine] = useState<string>("");
   const [machines, setMachines] = useState<Machine[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
+  // Iter 517 (user request) — free-text search across the loaded log.
+  const [search, setSearch] = useState("");
+  const shownRows = React.useMemo(() => {
+    const s = search.trim().toLowerCase();
+    if (!s) return rows;
+    return rows.filter((r: any) =>
+      [r.name, r.employee_code, r.bio_code, r.name_in_machine, r.machine,
+       r.machine_name, r.company_name, r.date, r.time, r.kind, r.status]
+        .some((v) => String(v || "").toLowerCase().includes(s)),
+    );
+  }, [rows, search]);
   const [total, setTotal] = useState(0);
   const [truncated, setTruncated] = useState(false);
   // Iter 503 — punch photo viewer (works for NOT FOUND rows too)
@@ -404,9 +416,22 @@ export default function PunchLogReportScreen() {
             <Ionicons name="search-outline" size={15} color="#fff" />
             <Text style={styles.applyTxt}>Apply</Text>
           </Pressable>
+          {/* Iter 517 (user request) — search any data in the loaded log. */}
+          <View style={{ minWidth: 220, flexGrow: 1 }}>
+            <Text style={styles.lbl}>Search</Text>
+            <TextInput
+              testID="plog-search"
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Name / code / bio / machine / firm…"
+              placeholderTextColor={colors.onSurfaceTertiary}
+              autoCapitalize="none"
+              style={styles.searchInput}
+            />
+          </View>
         </View>
         <Text style={styles.countTxt}>
-          {loading ? "Loading…" : `${total} punch${total === 1 ? "" : "es"}`}
+          {loading ? "Loading…" : `${search.trim() ? `${shownRows.length} of ` : ""}${total} punch${total === 1 ? "" : "es"}`}
           {truncated ? " (showing first 2000 — use Download Excel for the full log)" : ""}
         </Text>
       </View>
@@ -415,7 +440,7 @@ export default function PunchLogReportScreen() {
       <ReportTable<Row>
         reportKey="punch_log"
         columns={COLS}
-        rows={rows}
+        rows={shownRows}
         loading={loading}
         emptyText="No punches found for the selected filters."
         rowStyle={(r) =>
@@ -503,6 +528,13 @@ const styles = StyleSheet.create({
   },
   applyTxt: { color: "#fff", fontWeight: "800", fontSize: type.sm },
   countTxt: { marginTop: 8, fontSize: type.xs, color: colors.onSurfaceSecondary },
+  // Iter 517 — search box in the filter card.
+  searchInput: {
+    borderWidth: 1, borderColor: colors.outline, borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: Platform.OS === "web" ? 8 : 6,
+    fontSize: type.sm, color: colors.onSurface, backgroundColor: colors.surface,
+    minHeight: 36,
+  },
   headRow: {
     flexDirection: "row",
     backgroundColor: colors.surfaceSecondary,

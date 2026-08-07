@@ -43,6 +43,10 @@ def _source_label(rec: dict) -> str:
         return "Manual (Admin)"
     if src == "roster":
         return "Roster"
+    # Iter 517 (user bug) — 12-hour auto-closed OUT punches were mislabeled
+    # "Mobile App"; they are server-generated.
+    if src == "server_auto_close":
+        return "Auto-Close (System)"
     return "Mobile App"
 
 
@@ -57,6 +61,8 @@ def _machine_key(rec: dict) -> str:
         return f"device:{src.split(':', 1)[1]}"
     if src == "manual_admin":
         return "manual_admin"
+    if src == "server_auto_close":
+        return "auto_close"
     return "app"
 
 
