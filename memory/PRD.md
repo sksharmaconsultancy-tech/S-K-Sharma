@@ -4900,3 +4900,42 @@ Verified: xlsx rows 387-391 present, pdf 200, UI screenshot (toggle+rows).
 NOTE: Leave counts not in grid cells (leave flag absent) — omitted from
 summary; can add when leave module marks grid cells.
 APP_ITERATION=519, deploy_vps_iter519.sh.
+
+## Iter 520 (2026-08-07) — Policy-true OT engine + Machine-not-in-DB visibility + 10 user requests
+ENGINE (server.py): split_regular_ot_times rewritten — pairs classified by
+ACCUMULATED WORKED MINUTES vs full_day quota (mid-pair split at crossing);
+new worked_minutes_in_window() used at both duty/OT calc sites (grid +
+OT report) so breaks NEVER count as duty/OT (lunch no longer creates
+phantom OT). Empty + anomaly day cells now stamped weekly_off/holiday
+(_emp_weekoffs from weekly_off_days_override || policy weekly_off_days).
+inout_ot_matrix.py: "policy" block + header line (screen/xlsx/pdf).
+UNMAPPED VISIBILITY: attendance_sync_dashboard machine_only — unregistered
+devices + no-firm devices always show (⚠ Unregistered Device); merges
+biometric_machine_users w/o master (punch_count=0 "never punched",
+name_in_machine); punch_logs _all_sns = firm-assigned serials only.
+ESIC form: EmployeeDropdown (new src/components/EmployeeDropdown.tsx,
+single+multi search dropdown), DD-MM-YYYY masks, mandatory firm, 13-reason
+dropdown + Other(Specify); backend stores reason/reason_other → leave reason.
+REPORTS HUB: GET /admin/payroll-reports/last-finalized-month (finalized||
+frozen csrun max month) → default Month on firm change; salary-comparison
+periodic (month_to/month_b_to via ctx, _run_rows_period agg, works JSON/
+xlsx/pdf/email); salary-revision dynamic allowance Old/New cols from
+firm_masters.allowances (OVER TIME excluded).
+register_export.py register_pdf: wrapped Paragraph headers+long cells,
+font auto-shrink (10/8.5/7.5 by col count), bank/ifsc width 1.5 (fixes
+wage-register overlap per user PDF).
+FORM 23 (user upload): factory_returns.py FORM23_FIELDS manual particulars
+(factory_details.form23), _compute_return form23 block (gender man-days/
+man-hours/avg-daily, leave-with-wages entitled=240+ days, wages basic/DA),
+GET /{cid}/{year}/form23.pdf (build_form23_pdf in factory_return_pdf.py);
+frontend FORM 23 button + statutory particulars editor block.
+CHALLAN SUMMARY: pf_status/esic_status paid|pending|failed (PATCH re-
+updatable, 400 on bad value), tap-to-cycle badges, status in email/WA text.
+FIRM DROPDOWNS: leave-report, comp-off-ledger, factory-annual-return,
+rectified-punches (CompanyPicker); users-log-report optional All-firms;
+ai-salary-compliance employee-name dropdown (emp code input/field removed).
+TESTED: testing agent backend 11/11 PASS (/app/test_reports/iteration_508.json,
+tests/test_iter520_backend.py); UI screenshots (esic, challan badges,
+report-hub periodic tabs + default month 2026-07). APP_ITERATION=520,
+deploy_vps_iter520.sh (step 10 = live-DB forensic "machine but not in DB"
+report), temp_bundle kind=script → deploy520.sh.

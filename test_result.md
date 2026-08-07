@@ -328,3 +328,15 @@ ITER 487 (doc-expiry alerts):
 - Sub-admin scope guard added to scheduled_reports._adm (unit-verified).
 - UI: "Check Expiring Docs Now" button works e2e (screenshot verified,
   Server Iter 487 badge visible). Test data cleaned.
+
+## Iter 520
+- Backend testing agent: 11/11 PASS (test_reports/iteration_508.json;
+  backend/tests/test_iter520_backend.py). Engine OT policy cases: 8h worked
+  +1h lunch → OT 0 (was 1h phantom); 9h → duty 8/OT 1; Sunday no-punch
+  weekly_off=true. Sync dashboard shows unregistered-device + never-punched
+  machine users. Challan pf_status persists, 400 on invalid. ESIC reason
+  stored. FORM 23 PDF 200. Periodic salary comparison subtitle/cols correct
+  incl. xlsx/pdf. /api/version=520.
+- UI screenshots: ESIC form (dropdown/DD-MM-YYYY/reason), Challan PENDING▾
+  badges, Report Hub Month-wise|Periodic tabs + default month from
+  last-finalized-month. Server Iter 520 badge visible.
