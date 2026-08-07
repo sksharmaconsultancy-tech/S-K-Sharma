@@ -4755,3 +4755,26 @@ resets on successful boot). Verified: fires correctly on simulated
 bundle 404 (2 attempts then stops), zero false triggers on normal boot.
 sw.js cache v6→v7, APP_ITERATION=511, deploy_vps_iter511.sh,
 temp_bundle kind=script → deploy511.sh.
+
+## Iter 512 (2026-08-07) — Vendor SDK Direct-Pull Channel (user request, option B)
+ADDITIVE only — ADMS push untouched. Plug-in framework backend/sdk_adapters/
+(base.py BaseDeviceAdapter + @register auto-discovery registry; add vendor =
+add file). REAL adapter zk_family.py via pyzk (TCP 4370): ZKTeco Standalone,
+eSSL Legacy, FingerTec, Ronald Jack, BioMax, Realtime T&A. Pending slots
+(implemented=False): Suprema, Nitgen, Virdi, Anviz, BioEnable, Matrix Legacy,
+Hikvision, Dahua (Hik/Dahua skipped per user choice B).
+Endpoints (routes/biometric_sdk.py): GET /api/biometric/sdks,
+POST /api/biometric/devices/{id}/sdk-test, POST .../sdk-pull; background
+sdk_auto_pull_loop (60s scan, auto_pull_minutes per device). Pull reuses
+_ingest_attlog_line → full parity (bio_code match, IN/OUT alternation,
+5-min dup rule, contractor gate, source zkteco:<SN>). Device fields added:
+connection_mode(push|sdk), sdk_vendor, device_ip, device_port, comm_key,
+auto_pull_minutes (+sdk_last_pull_at/_inserted/_error, sdk_pull_cursor).
+Frontend: biometric-devices.tsx editor (Connection Mode chips, vendor picker
+w/ pending greyed, IP/Port/CommKey/auto-pull, port-forward hint), device card
+(SDK PULL chip, SDK VENDOR/LAST PULL facts, Test connection + Pull punches
+buttons, error line). attendance-sync-dashboard: SDK machines show PULL OK/
+CHECK + vendor/last-pull/auto info. NOTE: errors use HTTP 400 (502 gets
+swallowed by Cloudflare). Tests: backend/tests/test_iter512_sdk_pull.py ALL
+PASS (stub adapter: ingest, cursor, dedupe, unmapped). UI smoke-tested.
+Deploy: deploy_vps_iter512.sh, APP_ITERATION=512, pyzk==0.9 in requirements.

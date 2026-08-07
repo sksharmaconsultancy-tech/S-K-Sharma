@@ -47,6 +47,29 @@ type Device = {
   model?: string;
   total_pushes?: number;
   total_punches_ingested?: number;
+  // Iter 512 — Direct SDK pull channel
+  connection_mode?: string;      // push | sdk
+  sdk_vendor?: string | null;
+  device_ip?: string | null;
+  device_port?: number | null;
+  comm_key?: string | null;
+  auto_pull_minutes?: number | null;
+  sdk_last_pull_at?: string | null;
+  sdk_last_pull_inserted?: number;
+  sdk_last_pull_fetched?: number;
+  sdk_last_error?: string | null;
+  sdk_last_test_ok?: boolean;
+  sdk_device_info?: any;
+};
+
+// Iter 512 — vendor SDK adapter descriptor from GET /biometric/sdks.
+type SdkAdapter = {
+  vendor: string;
+  label: string;
+  transport: string;
+  default_port: number;
+  implemented: boolean;
+  notes?: string;
 };
 
 // Iter 261 — Live Dashboard punch feed row.
@@ -73,6 +96,13 @@ const emptyDraft = {
   gmt_offset: "+05:30", // Iter 263 — machine time zone (India default)
   brand: "zkteco",      // Iter 294 — device brand
   enabled: true,
+  // Iter 512 — Direct SDK pull channel (additive; push/ADMS unchanged)
+  connection_mode: "push" as "push" | "sdk",
+  sdk_vendor: "",
+  device_ip: "",
+  device_port: "",
+  comm_key: "",
+  auto_pull_minutes: "0",
 };
 
 // Iter 294 — supported device brands. ZKTeco & eSSL use the same
@@ -108,6 +138,9 @@ export default function BiometricDevicesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
+  // Iter 512 — vendor SDK adapters (plug-in registry) + per-device busy state.
+  const [sdkAdapters, setSdkAdapters] = useState<SdkAdapter[]>([]);
+  const [sdkBusy, setSdkBusy] = useState<string | null>(null); // "<id>:test" | "<id>:pull"
   // Iter 473 — machines reaching the server but not registered yet.
   const [unknownDevices, setUnknownDevices] = useState<any[]>([]);
   const [unmappedCount, setUnmappedCount] = useState(0);
@@ -148,6 +181,10 @@ export default function BiometricDevicesScreen() {
       setDevices(r.devices || []);
       setUnmappedCount(r.unmapped_count || 0);
       setUnknownDevices(r.unknown_devices || []);
+      try {
+        const s = await api<{ adapters: SdkAdapter[] }>("/biometric/sdks");
+        setSdkAdapters(s.adapters || []);
+      } catch {}
       if (isSuper) {
         try {
           const c = await api<{ companies: Company[] }>("/companies?lite=1");
@@ -223,6 +260,12 @@ export default function BiometricDevicesScreen() {
       gmt_offset: d.gmt_offset || "+05:30",
       brand: d.brand || "zkteco",
       enabled: d.enabled,
+      connection_mode: (d.connection_mode as any) || "push",
+      sdk_vendor: d.sdk_vendor || "",
+      device_ip: d.device_ip || "",
+      device_port: d.device_port != null ? String(d.device_port) : "",
+      comm_key: d.comm_key || "",
+      auto_pull_minutes: d.auto_pull_minutes != null ? String(d.auto_pull_minutes) : "0",
     });
     setEditorOpen(true);
   };
@@ -236,6 +279,23 @@ export default function BiometricDevicesScreen() {
       alertUser("Company required", "Please pick which firm this device belongs to.");
       return;
     }
+    if (draft.connection_mode === "sdk" && !draft.sdk_vendor) {
+      alertUser("Vendor SDK required", "Pick which vendor SDK the server should use to connect to this machine.");
+      return;
+    }
+    if (draft.connection_mode === "sdk" && !draft.device_ip.trim()) {
+      alertUser("Device IP required", "Enter the machine's IP address / DDNS host so the server can reach it.");
+      return;
+    }
+    // Iter 512 — SDK pull fields sent on both create + update.
+    const sdkFields = {
+      connection_mode: draft.connection_mode,
+      sdk_vendor: draft.sdk_vendor || undefined,
+      device_ip: draft.device_ip.trim() || undefined,
+      device_port: draft.device_port.trim() ? parseInt(draft.device_port, 10) : undefined,
+      comm_key: draft.comm_key.trim() || undefined,
+      auto_pull_minutes: draft.auto_pull_minutes.trim() ? parseInt(draft.auto_pull_minutes, 10) : 0,
+    };
     setSaving(true);
     try {
       if (editing) {
@@ -250,6 +310,7 @@ export default function BiometricDevicesScreen() {
             gmt_offset: draft.gmt_offset.trim() || "+05:30",
             brand: draft.brand,
             enabled: draft.enabled,
+            ...sdkFields,
           },
         });
       } else {
@@ -265,6 +326,7 @@ export default function BiometricDevicesScreen() {
             gmt_offset: draft.gmt_offset.trim() || "+05:30",
             brand: draft.brand,
             enabled: draft.enabled,
+            ...sdkFields,
           },
         });
       }
@@ -274,6 +336,41 @@ export default function BiometricDevicesScreen() {
       alertUser("Save failed", e?.message || "Please try again.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Iter 512 — Direct SDK pull: live test + pull punches now.
+  const sdkTest = async (d: Device) => {
+    setSdkBusy(`${d.device_id}:test`);
+    try {
+      const r = await api<any>(`/biometric/devices/${d.device_id}/sdk-test`, { method: "POST" });
+      const i = r.info || {};
+      alertUser(
+        "Connected ✅",
+        `Serial: ${i.serial || "—"}\nModel: ${i.device_name || "—"}\nFirmware: ${i.firmware || "—"}\nUsers on device: ${i.users_on_device ?? "—"}\nLogs on device: ${i.punches_on_device ?? "—"}\nDevice time: ${i.device_time || "—"}`,
+      );
+      await load();
+    } catch (e: any) {
+      alertUser("Connection failed", e?.message || "Could not reach the device.");
+    } finally {
+      setSdkBusy(null);
+    }
+  };
+
+  const sdkPull = async (d: Device) => {
+    setSdkBusy(`${d.device_id}:pull`);
+    try {
+      const r = await api<any>(`/biometric/devices/${d.device_id}/sdk-pull`, { method: "POST" });
+      alertUser(
+        "Punches pulled ✅",
+        `Fetched ${r.fetched} log(s) from the machine — ${r.inserted} new punch(es) added, ${r.skipped} already known/skipped.`,
+      );
+      await load();
+      loadFeed();
+    } catch (e: any) {
+      alertUser("Pull failed", e?.message || "Could not pull punches from the device.");
+    } finally {
+      setSdkBusy(null);
     }
   };
 
@@ -808,6 +905,9 @@ export default function BiometricDevicesScreen() {
                 onSyncTemplates={() => syncTemplates(d)}
                 onToggleLock={() => toggleLock(d)}
                 onToggleIpLock={() => toggleIpLock(d)}
+                sdkBusy={sdkBusy?.startsWith(d.device_id) ? sdkBusy.split(":")[1] : null}
+                onSdkTest={() => sdkTest(d)}
+                onSdkPull={() => sdkPull(d)}
               />
             ))
           )}
@@ -1027,6 +1127,119 @@ export default function BiometricDevicesScreen() {
                 ? "ZKTeco / eSSL machines connect via the ADMS (iClock) push protocol — point the device's Cloud Server to this portal."
                 : "Matrix / Mantra / other devices push punches as JSON to a per-device Webhook URL — shown on the device card after saving."}
             </Text>
+
+            {/* Iter 512 — Connection Mode: push (ADMS, unchanged) or direct SDK pull. */}
+            <Text style={styles.lbl}>Connection Mode</Text>
+            <View style={{ flexDirection: "row", gap: 6, marginBottom: 4 }}>
+              {([
+                ["push", "cloud-upload-outline", "Push (ADMS)"],
+                ["sdk", "git-pull-request-outline", "Direct (SDK Pull)"],
+              ] as [string, any, string][]).map(([mode, icon, label]) => (
+                <Pressable
+                  key={mode}
+                  onPress={() => setDraft({ ...draft, connection_mode: mode as any })}
+                  style={[styles.field, { paddingVertical: 8, paddingHorizontal: 12, width: undefined, flexDirection: "row", gap: 6 },
+                    draft.connection_mode === mode && { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary }]}
+                  testID={`d-connmode-${mode}`}
+                >
+                  <Ionicons name={icon} size={14}
+                    color={draft.connection_mode === mode ? colors.brandPrimary : colors.onSurfaceSecondary} />
+                  <Text style={[styles.fieldTxt, draft.connection_mode === mode && { color: colors.brandPrimary, fontWeight: "800" }]}>
+                    {label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.hint}>
+              {draft.connection_mode === "sdk"
+                ? "The SERVER connects to the machine over the vendor's own SDK protocol and pulls punches. The machine must be reachable from the internet: port-forward the device port on the site router, or use a static/DDNS IP."
+                : "The machine pushes punches to this portal (current ADMS/webhook behaviour — nothing changes)."}
+            </Text>
+
+            {draft.connection_mode === "sdk" ? (
+              <>
+                <Text style={styles.lbl}>Vendor SDK</Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 4 }}>
+                  {sdkAdapters.map((a) => (
+                    <Pressable
+                      key={a.vendor}
+                      onPress={() => {
+                        if (!a.implemented) {
+                          alertUser("Adapter pending", `${a.label} is a plug-in slot — the adapter is not enabled yet. ${a.notes || ""}`);
+                          return;
+                        }
+                        setDraft({
+                          ...draft, sdk_vendor: a.vendor,
+                          device_port: draft.device_port || String(a.default_port),
+                        });
+                      }}
+                      style={[styles.field, { paddingVertical: 8, paddingHorizontal: 12, width: undefined },
+                        !a.implemented && { opacity: 0.45 },
+                        draft.sdk_vendor === a.vendor && { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary }]}
+                      testID={`d-sdk-${a.vendor}`}
+                    >
+                      <Text style={[styles.fieldTxt, draft.sdk_vendor === a.vendor && { color: colors.brandPrimary, fontWeight: "800" }]}>
+                        {a.label}{a.implemented ? "" : " (pending)"}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+                {draft.sdk_vendor ? (
+                  <Text style={styles.hint}>
+                    {sdkAdapters.find((a) => a.vendor === draft.sdk_vendor)?.notes || ""}
+                  </Text>
+                ) : null}
+
+                <Text style={styles.lbl}>Device IP / Host</Text>
+                <TextInput
+                  testID="d-sdk-ip"
+                  value={draft.device_ip}
+                  onChangeText={(t) => setDraft({ ...draft, device_ip: t })}
+                  placeholder="E.g. 103.24.56.78 or factory.ddns.net"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  autoCapitalize="none"
+                  style={styles.input}
+                />
+
+                <Text style={styles.lbl}>Port</Text>
+                <TextInput
+                  testID="d-sdk-port"
+                  value={draft.device_port}
+                  onChangeText={(t) => setDraft({ ...draft, device_port: t.replace(/[^0-9]/g, "") })}
+                  placeholder="4370"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  keyboardType="number-pad"
+                  style={styles.input}
+                />
+
+                <Text style={styles.lbl}>Comm Key (optional)</Text>
+                <TextInput
+                  testID="d-sdk-key"
+                  value={draft.comm_key}
+                  onChangeText={(t) => setDraft({ ...draft, comm_key: t })}
+                  placeholder="Device menu → Comm → Security (0 = none)"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  autoCapitalize="none"
+                  style={styles.input}
+                />
+
+                <Text style={styles.lbl}>Auto-pull every (minutes, 0 = manual only)</Text>
+                <TextInput
+                  testID="d-sdk-autopull"
+                  value={draft.auto_pull_minutes}
+                  onChangeText={(t) => setDraft({ ...draft, auto_pull_minutes: t.replace(/[^0-9]/g, "") })}
+                  placeholder="0"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  keyboardType="number-pad"
+                  style={styles.input}
+                />
+                <Text style={styles.hint}>
+                  E.g. 10 = the server pulls new punches from this machine every
+                  10 minutes automatically. Leave 0 to pull only via the
+                  &quot;Pull punches&quot; button.
+                </Text>
+              </>
+            ) : null}
 
             <Text style={styles.lbl}>Location (optional)</Text>
             <TextInput
@@ -1273,6 +1486,9 @@ function DeviceCard({
   onSyncTemplates,
   onToggleLock,
   onToggleIpLock,
+  sdkBusy,
+  onSdkTest,
+  onSdkPull,
 }: {
   device: Device;
   busy: boolean;
@@ -1290,8 +1506,12 @@ function DeviceCard({
   onSyncTemplates: () => void;
   onToggleLock: () => void;
   onToggleIpLock: () => void;
+  sdkBusy?: string | null;      // "test" | "pull" | null
+  onSdkTest: () => void;
+  onSdkPull: () => void;
 }) {
   const kindColor = device.kind === "in" ? colors.brandPrimary : colors.accent;
+  const isSdk = device.connection_mode === "sdk";
   return (
     <View style={styles.card} testID={`device-${device.device_id}`}>
       <View style={styles.cardHead}>
@@ -1308,6 +1528,7 @@ function DeviceCard({
           <Text style={styles.sn}>
             SN · {device.serial_number}
             {device.brand && device.brand !== "zkteco" ? `  ·  ${device.brand.toUpperCase()}` : ""}
+            {isSdk ? "  ·  SDK PULL" : ""}
           </Text>
         </View>
         <View style={styles.dot}>
@@ -1367,7 +1588,62 @@ function DeviceCard({
         <Fact label="FINGERPRINTS" value={(device as any).fp_count != null ? String((device as any).fp_count) : "—"} />
         <Fact label="LOGS ON DEVICE" value={(device as any).att_log_count != null ? String((device as any).att_log_count) : "—"} />
         <Fact label="DEVICE IP" value={(device as any).device_ip || "—"} />
+        {isSdk ? (
+          <>
+            <Fact label="SDK VENDOR" value={device.sdk_vendor || "—"} />
+            <Fact
+              label="LAST PULL"
+              value={device.sdk_last_pull_at
+                ? `${fmtRelative(device.sdk_last_pull_at)} · +${device.sdk_last_pull_inserted ?? 0}`
+                : "Never"}
+              accent
+            />
+          </>
+        ) : null}
       </View>
+
+      {/* Iter 512 — Direct SDK pull controls (server → device). */}
+      {isSdk ? (
+        <>
+          <View style={styles.actions}>
+            <Pressable
+              onPress={onSdkTest}
+              disabled={!!sdkBusy}
+              style={[styles.actBtn, styles.actGhost, sdkBusy === "test" && { opacity: 0.6 }]}
+              testID={`sdk-test-${device.device_id}`}
+            >
+              {sdkBusy === "test" ? (
+                <ActivityIndicator color={colors.brandPrimary} size="small" />
+              ) : (
+                <>
+                  <Ionicons name="pulse-outline" size={14} color={colors.brandPrimary} />
+                  <Text style={styles.actGhostTxt}>Test connection</Text>
+                </>
+              )}
+            </Pressable>
+            <Pressable
+              onPress={onSdkPull}
+              disabled={!!sdkBusy}
+              style={[styles.actBtn, styles.actGhost, sdkBusy === "pull" && { opacity: 0.6 }]}
+              testID={`sdk-pull-${device.device_id}`}
+            >
+              {sdkBusy === "pull" ? (
+                <ActivityIndicator color={colors.brandPrimary} size="small" />
+              ) : (
+                <>
+                  <Ionicons name="download-outline" size={14} color={colors.brandPrimary} />
+                  <Text style={styles.actGhostTxt}>Pull punches</Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+          {device.sdk_last_error ? (
+            <Text style={{ fontSize: 11, color: colors.error, marginTop: 4 }} numberOfLines={2}>
+              ⚠ {device.sdk_last_error}
+            </Text>
+          ) : null}
+        </>
+      ) : null}
 
       {/* Iter 258 — remote device controls (executed within seconds while
           the machine is online; queued until it connects otherwise). */}

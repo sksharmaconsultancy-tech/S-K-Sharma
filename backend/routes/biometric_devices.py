@@ -49,6 +49,13 @@ class BiometricDeviceCreate(BaseModel):
     gmt_offset: Optional[str] = "+05:30"   # Iter 263 — machine time zone
     brand: Optional[str] = None            # Iter 294 — multi-brand (zkteco/essl/matrix/mantra/other)
     branch_name: Optional[str] = None      # Iter 298 — two-branch firms: punches from this machine count as this branch's duty
+    # Iter 512 — Direct SDK pull channel (ADDITIVE — push/ADMS unchanged)
+    connection_mode: Optional[str] = "push"  # push (ADMS) | sdk (server pulls)
+    sdk_vendor: Optional[str] = None         # adapter id from /biometric/sdks
+    device_ip: Optional[str] = None          # device IP / DDNS host
+    device_port: Optional[int] = None        # vendor default when empty
+    comm_key: Optional[str] = None           # device comm key / password
+    auto_pull_minutes: Optional[int] = 0     # 0 = manual pulls only
 
 
 class BiometricDeviceUpdate(BaseModel):
@@ -60,6 +67,13 @@ class BiometricDeviceUpdate(BaseModel):
     gmt_offset: Optional[str] = None       # Iter 263 — machine time zone
     brand: Optional[str] = None            # Iter 294 — multi-brand
     branch_name: Optional[str] = None      # Iter 298 — branch tag
+    # Iter 512 — Direct SDK pull channel fields
+    connection_mode: Optional[str] = None
+    sdk_vendor: Optional[str] = None
+    device_ip: Optional[str] = None
+    device_port: Optional[int] = None
+    comm_key: Optional[str] = None
+    auto_pull_minutes: Optional[int] = None
 
 
 # Iter 263 — GMT / time-zone handling for machines.
@@ -1488,6 +1502,13 @@ async def register_biometric_device(
         "gmt_offset": (payload.gmt_offset or "+05:30").strip() or "+05:30",
         # Iter 294 — multi-brand + JSON webhook key (Matrix / Mantra push).
         "brand": payload.brand or "zkteco",
+        # Iter 512 — Direct SDK pull channel (additive; ADMS push unchanged)
+        "connection_mode": payload.connection_mode or "push",
+        "sdk_vendor": (payload.sdk_vendor or "").strip() or None,
+        "device_ip": (payload.device_ip or "").strip() or None,
+        "device_port": payload.device_port,
+        "comm_key": (payload.comm_key or "").strip() or None,
+        "auto_pull_minutes": int(payload.auto_pull_minutes or 0),
         "webhook_key": secrets.token_hex(12),
         "created_at": _now_iso_z(),
         "created_by": admin["user_id"],

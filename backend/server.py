@@ -2997,6 +2997,13 @@ async def startup():
     except Exception:
         logger.exception("[startup] sync engine loop failed to start")
 
+    # Iter 512 — Direct SDK pull channel: auto-pull scheduler.
+    try:
+        from routes.biometric_sdk import sdk_auto_pull_loop
+        asyncio.create_task(sdk_auto_pull_loop())
+    except Exception:
+        logger.exception("[startup] sdk auto-pull loop failed to start")
+
 
 async def _bg_enforce_geofence_defaults():
     """Iter 68 — Enforce the new default: geofence ON + strict rejection
@@ -9367,7 +9374,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "511"
+APP_ITERATION = "512"
 
 
 @api.get("/version")
@@ -12018,6 +12025,7 @@ from routes.employee_kyc import router as employee_kyc_router  # noqa: E402
 from routes.ocr import router as ocr_router  # noqa: E402
 from routes.challans import router as challans_router  # noqa: E402
 from routes.biometric_devices import router as biometric_devices_router  # noqa: E402
+from routes.biometric_sdk import router as biometric_sdk_router  # noqa: E402
 from routes.super_admins import router as super_admins_router  # noqa: E402
 from routes.admin_credentials import router as admin_credentials_router  # noqa: E402
 from routes.hr_letters import router as hr_letters_router  # noqa: E402
@@ -12066,6 +12074,7 @@ from routes.ocr import user_router as ocr_user_router  # noqa: E402
 app.include_router(ocr_user_router)
 app.include_router(challans_router)
 app.include_router(biometric_devices_router)
+app.include_router(biometric_sdk_router)
 app.include_router(super_admins_router)
 app.include_router(admin_credentials_router)
 app.include_router(hr_letters_router)

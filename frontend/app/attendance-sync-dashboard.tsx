@@ -294,9 +294,12 @@ export default function AttendanceSyncDashboard() {
               <Text style={[styles.secTitle, { paddingHorizontal: 12, paddingTop: 10, fontSize: 12 }]}>Machine Synchronization</Text>
               {(data.machines || []).map((m: any) => (
                 <Row key={m.serial_number}
-                  r={`${m.name || m.serial_number} (${m.serial_number})`}
-                  sub={m.remark || `Last seen ${String(m.last_seen_at || "never").replace("T", " ").slice(0, 16)}`}
-                  right={m.online ? "ONLINE" : "OFFLINE"} color={m.online ? "green" : "red"}
+                  r={`${m.name || m.serial_number} (${m.serial_number})${m.connection_mode === "sdk" ? " · SDK PULL" : ""}`}
+                  sub={m.connection_mode === "sdk"
+                    ? (m.remark || `${m.sdk_vendor || "SDK"} · last pull ${String(m.sdk_last_pull_at || "never").replace("T", " ").slice(0, 16)}${m.auto_pull_minutes ? ` · auto every ${m.auto_pull_minutes} min` : " · manual"}`)
+                    : (m.remark || `Last seen ${String(m.last_seen_at || "never").replace("T", " ").slice(0, 16)}`)}
+                  right={m.connection_mode === "sdk" ? (m.online ? "PULL OK" : "CHECK") : (m.online ? "ONLINE" : "OFFLINE")}
+                  color={m.online ? "green" : "red"}
                   onPress={() => router.push("/biometric-devices" as any)}
                 />
               ))}

@@ -299,7 +299,10 @@ async def attendance_sync_dashboard(
     sync_ok = 0
     for d in await db.biometric_devices.find(dq, {
             "_id": 0, "serial_number": 1, "name": 1, "company_id": 1,
-            "last_seen_at": 1, "enabled": 1}).to_list(200):
+            "last_seen_at": 1, "enabled": 1,
+            # Iter 512 — Direct SDK pull channel fields
+            "connection_mode": 1, "sdk_vendor": 1, "sdk_last_pull_at": 1,
+            "sdk_last_error": 1, "auto_pull_minutes": 1}).to_list(200):
         seen = d.get("last_seen_at")
         online = False
         secs = None
@@ -310,15 +313,32 @@ async def attendance_sync_dashboard(
                 online = secs < 180
             except ValueError:
                 pass
+        is_sdk = (d.get("connection_mode") == "sdk")
+        if is_sdk:
+            # SDK-pull machines are contacted BY the server — "healthy" means
+            # the last pull/test worked (they don't hold a live connection).
+            online = bool(d.get("sdk_last_pull_at")) and not d.get("sdk_last_error")
         if online:
             sync_ok += 1
+        if is_sdk:
+            _remark = (
+                d.get("sdk_last_error")
+                or (None if d.get("sdk_last_pull_at")
+                    else "SDK pull device — never pulled yet. Use 'Pull punches' on the device card."))
+        else:
+            _remark = None if online else (
+                "Biometric device may not be synchronised — check power/network."
+                if seen else "Attendance synchronisation failed — device never connected.")
         machines.append({
             "serial_number": d.get("serial_number"), "name": d.get("name"),
             "company": comp_names.get(d.get("company_id")),
             "last_seen_at": seen, "online": online,
-            "remark": None if online else (
-                "Biometric device may not be synchronised — check power/network."
-                if seen else "Attendance synchronisation failed — device never connected."),
+            # Iter 512 — SDK pull surfacing
+            "connection_mode": d.get("connection_mode") or "push",
+            "sdk_vendor": d.get("sdk_vendor"),
+            "sdk_last_pull_at": d.get("sdk_last_pull_at"),
+            "auto_pull_minutes": d.get("auto_pull_minutes") or 0,
+            "remark": _remark,
         })
 
     # ---------------- KPIs / health ----------------
