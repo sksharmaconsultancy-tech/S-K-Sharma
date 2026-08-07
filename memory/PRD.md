@@ -4804,3 +4804,17 @@ remaps. Tested E2E on preview (create+remap+delete unmapped, idempotent).
 Frontend: attendance-sync-dashboard.tsx section-2 rows get red "Create Master
 from PIN <id>" button (confirm → API → alert result → reload); row press still
 opens /employee-add. APP_ITERATION=514, deploy_vps_iter514.sh (superset 511-513).
+
+## Iter 515 (2026-08-07) — eSSL CQIK231260072 cannot connect
+Checked LIVE prod: machine NEVER reached server (absent from unknown_devices
+log which records every unregistered hit — probes PROBE-TEST-1/2/3 confirmed
+/iclock paths reach FastAPI over HTTPS, and nginx proxies /iclock→/api/iclock).
+ROOT CAUSE: plain HTTP :80 returns 301→HTTPS; eSSL/old-ZK ADMS firmware cannot
+follow redirects or do TLS → dies silently. FIX in deploy_vps_iter515.sh:
+adds nginx listener :8090 (sks-adms-http.conf, plain HTTP, no redirect,
+/iclock/→127.0.0.1:8001/api/iclock/, /api/ too for Matrix webhooks), ufw
+allow 8090, rollback if nginx -t fails, verification curl expects 404/200
+from FastAPI. Machine settings: Cloud Server smartpayrolling.com port 8090,
+HTTPS OFF, then register serial from Unknown-Devices list. Also noted prod
+unknown device CN4C231160062 (8087 hits, stopped 07-30) still unregistered.
+APP_ITERATION=515.
