@@ -255,6 +255,40 @@ async def _ingest_attlog_line(
         # machine. State "0" is the ambiguous default on state-less
         # devices, so it never overrides the admin's device config.
         punch_kind = machine_kind
+    _direction_corrected = False
+    if punch_kind == "in" and device.get("kind") == "in" and _state_raw in ("", "0"):
+        # Iter 518 (user choice C — RANJAN case) — SMART DIRECTION
+        # CORRECTION, opt-in per firm: when the OUT machine is down,
+        # workers punch their evening OUT on the IN machine. A state-less
+        # punch landing >= N hours (default 4) after the employee's
+        # day-first IN is recorded as the OUT instead.
+        try:
+            _sdc_comp = await db.companies.find_one(
+                {"company_id": device.get("company_id")},
+                {"_id": 0, "attendance_config": 1}) or {}
+            _sdc_cfg = _sdc_comp.get("attendance_config") or {}
+            if _sdc_cfg.get("smart_direction"):
+                _gap_h = float(_sdc_cfg.get("smart_direction_gap_hrs") or 4)
+                _first_in = await db.attendance.find_one({
+                    "user_id": user["user_id"],
+                    "date": dt.strftime("%Y-%m-%d"),
+                    "kind": "in",
+                    "status": "approved",
+                    "at": {"$lt": dt.isoformat()},
+                }, {"_id": 0, "at": 1}, sort=[("at", 1)])
+                if _first_in:
+                    _fdt = datetime.fromisoformat(
+                        str(_first_in["at"]).replace("Z", "+00:00"))
+                    _cur = datetime.fromisoformat(dt.isoformat())
+                    if _fdt.tzinfo is None and _cur.tzinfo is not None:
+                        _fdt = _fdt.replace(tzinfo=_cur.tzinfo)
+                    if _cur.tzinfo is None and _fdt.tzinfo is not None:
+                        _cur = _cur.replace(tzinfo=_fdt.tzinfo)
+                    if (_cur - _fdt).total_seconds() >= _gap_h * 3600:
+                        punch_kind = "out"
+                        _direction_corrected = True
+        except Exception:
+            logger.exception("[smart-direction] check failed for %s", user.get("user_id"))
     record = {
         "record_id": record_id,
         "user_id": user["user_id"],
@@ -263,6 +297,7 @@ async def _ingest_attlog_line(
         "branch_name": device.get("location") or device.get("name"),
         "date": dt.strftime("%Y-%m-%d"),
         "kind": punch_kind,
+        "direction_corrected": _direction_corrected,  # Iter 518 audit flag
         "at": dt.isoformat(),
         "original_at": dt.isoformat(),
         "latitude": None,
@@ -1892,6 +1927,77 @@ async def biometric_unmapped_punches(
         q["device_serial"] = {"$in": my_sns}
     logs = await db.biometric_unmapped.find(q, {"_id": 0}).sort("seen_at", -1).to_list(limit)
     return {"unmapped": logs}
+
+
+@router.post("/biometric/smart-direction-repair")
+async def smart_direction_repair(
+    payload: dict = Body(...),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 518 (user choice C) — repair PAST days broken by the down OUT
+    machine: for each employee-day in the range that has 2+ machine IN
+    punches from an IN-kind device and NO machine OUT, the LAST IN punch
+    (>= gap hours after the first) is converted to the OUT, and that day's
+    synthetic server_auto_close OUT records are removed."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    cid = str(payload.get("company_id") or "").strip()
+    d_from = str(payload.get("from_date") or "").strip()
+    d_to = str(payload.get("to_date") or "").strip()
+    dry_run = bool(payload.get("dry_run"))
+    if not cid or not d_from or not d_to:
+        raise HTTPException(status_code=400, detail="company_id, from_date and to_date are required")
+    if admin["role"] == "company_admin" and cid != admin["company_id"]:
+        raise HTTPException(status_code=403, detail="Not authorised for this firm")
+    comp = await db.companies.find_one({"company_id": cid}, {"_id": 0, "attendance_config": 1}) or {}
+    gap_h = float((comp.get("attendance_config") or {}).get("smart_direction_gap_hrs") or 4)
+    in_serials = [d["serial_number"] async for d in db.biometric_devices.find(
+        {"company_id": cid, "kind": "in"}, {"_id": 0, "serial_number": 1})]
+    if not in_serials:
+        raise HTTPException(status_code=400, detail="This firm has no IN-kind machine")
+    srcs = [f"zkteco:{sn}" for sn in in_serials]
+    # group machine punches per user-day
+    pipeline = [
+        {"$match": {"company_id": cid, "date": {"$gte": d_from, "$lte": d_to},
+                    "status": "approved", "kind": {"$in": ["in", "out"]},
+                    "source": {"$regex": "^zkteco:"}}},
+        {"$group": {"_id": {"u": "$user_id", "d": "$date"},
+                    "punches": {"$push": {"record_id": "$record_id", "at": "$at",
+                                          "kind": "$kind", "source": "$source"}}}},
+    ]
+    fixed = skipped = 0
+    async for grp in db.attendance.aggregate(pipeline):
+        punches = sorted(grp["punches"], key=lambda p: p["at"])
+        outs = [p for p in punches if p["kind"] == "out"]
+        ins = [p for p in punches if p["kind"] == "in" and p["source"] in srcs]
+        if outs or len(ins) < 2:
+            skipped += 1
+            continue
+        first, last = ins[0], ins[-1]
+        try:
+            _f = datetime.fromisoformat(str(first["at"]).replace("Z", "+00:00"))
+            _l = datetime.fromisoformat(str(last["at"]).replace("Z", "+00:00"))
+            if (_l - _f).total_seconds() < gap_h * 3600:
+                skipped += 1
+                continue
+        except ValueError:
+            skipped += 1
+            continue
+        fixed += 1
+        if dry_run:
+            continue
+        await db.attendance.update_one(
+            {"record_id": last["record_id"]},
+            {"$set": {"kind": "out", "direction_corrected": True,
+                      "direction_corrected_at": _now_iso_z(),
+                      "direction_corrected_by": admin["user_id"]}})
+        await db.attendance.delete_many({
+            "user_id": grp["_id"]["u"], "date": grp["_id"]["d"],
+            "source": "server_auto_close"})
+    logger.info("[smart-direction-repair] firm=%s %s..%s fixed=%d skipped=%d dry=%s",
+                cid, d_from, d_to, fixed, skipped, dry_run)
+    return {"ok": True, "fixed_days": fixed, "skipped_days": skipped,
+            "gap_hours": gap_h, "dry_run": dry_run}
 
 
 @router.post("/biometric/create-master-from-pin")

@@ -94,7 +94,7 @@ async def _query_rows(
         q,
         {"_id": 0, "record_id": 1, "user_id": 1, "company_id": 1, "date": 1,
          "at": 1, "kind": 1, "source": 1, "device_serial": 1, "status": 1,
-         "branch_name": 1},
+         "branch_name": 1, "direction_corrected": 1},
     ).sort([("at", -1)]).to_list(MAX_XLSX_ROWS)
 
     # Machine filter applied post-query (source label is derived).
@@ -209,7 +209,11 @@ async def _query_rows(
             "machine": mlabel,
             "machine_key": mkey,
             "company_name": firms.get(r.get("company_id") or "", ""),
-            "status": "not found" if _flag == "not_found" else (r.get("status") or ""),
+            "status": ("not found" if _flag == "not_found"
+                       # Iter 518 — verification aid: auto-corrected OUT
+                       # punches (Smart Direction Correction) are marked.
+                       else ("auto-out ✔" if r.get("direction_corrected")
+                             else (r.get("status") or ""))),
             "source": r.get("source") or "",
             "has_photo": r.get("record_id") in photo_ids,
             "photo_ref": (r.get("record_id")

@@ -4862,3 +4862,24 @@ User reports resolved:
 6. Sub admin CAN access punch-log-report (verified preview screenshot);
    if hidden on prod → menu_rights toggle in Sub Admins screen.
 APP_ITERATION=517, deploy_vps_iter517.sh.
+
+## Iter 518 (2026-08-07) — Smart Direction Correction (user choice C)
+Forensic (prod RANJAN): both punches saved, BOTH kind=in (device kind=in
+forces direction); OUT machine JYK8240100174 OFFLINE since 02-08 (last IP
+27.58.185.151); auto_close makes synthetic OUT +12h. Built:
+1. Ingest (biometric_devices.py _ingest_attlog_line): opt-in per firm
+   (companies.attendance_config.smart_direction + smart_direction_gap_hrs
+   default 4): state-less punch on kind=in device >= gap hrs after day-first
+   approved IN → kind=out + direction_corrected=True. Tested: 8h→out ✅,
+   2h gap stays in ✅.
+2. POST /api/biometric/smart-direction-repair {company_id,from,to,dry_run}:
+   per user-day 2+ zkteco INs from in-kind serials & no zkteco OUT & gap>=cfg
+   → last IN converted to OUT + server_auto_close rows deleted. Tested dry+
+   real ✅ (auto_close deleted).
+3. firm-master.tsx Attendance Capture section: SDC radios (fm-sdc-on/off),
+   gap chips 3/4/5/6/8, "Repair past days (this month)" button (fm-sdc-repair);
+   setAC base preserves the new keys. UI verified via screenshot.
+4. punch_logs.py: rows with direction_corrected show status "auto-out ✔"
+   (user's "update attendance report to verify" request; monthly grid reads
+   db.attendance so repaired days show real IN/OUT automatically).
+APP_ITERATION=518, deploy_vps_iter518.sh.

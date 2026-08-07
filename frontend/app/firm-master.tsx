@@ -11,7 +11,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, TextInput,
-  ActivityIndicator, Platform, Switch, useWindowDimensions,
+  ActivityIndicator, Platform, Switch, useWindowDimensions, Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -912,6 +912,9 @@ export default function FirmMasterScreen() {
                   dup_window_min: ac.dup_window_min ?? 5,
                   lunch_mode: ac.lunch_mode || "ignore_middle",
                   lunch_fixed_min: ac.lunch_fixed_min ?? 30,
+                  // Iter 518 — Smart Direction Correction (preserved on save)
+                  smart_direction: !!ac.smart_direction,
+                  smart_direction_gap_hrs: ac.smart_direction_gap_hrs ?? 4,
                   ...patch,
                 },
               });
@@ -964,6 +967,72 @@ export default function FirmMasterScreen() {
                   {radio(acMode === "qr", "QR Code", "Scan a site QR to punch",
                     () => setAC({ device_mode: "qr" }), "fm-ac-qr")}
                 </View>
+                {acMode === "separate" ? (
+                  <>
+                    {/* Iter 518 (user choice C) — Smart Direction Correction */}
+                    <Text style={[styles.subLbl, { marginTop: 12 }]}>
+                      Smart Direction Correction (OUT-machine down safety)
+                    </Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                      {radio(!ac.smart_direction, "OFF (default)",
+                        "Every punch keeps its machine's registered direction",
+                        () => setAC({ smart_direction: false }), "fm-sdc-off")}
+                      {radio(!!ac.smart_direction, "ON — auto OUT",
+                        "Punch on the IN machine ≥ gap hrs after first IN records as OUT",
+                        () => setAC({ smart_direction: true }), "fm-sdc-on")}
+                    </View>
+                    {ac.smart_direction ? (
+                      <>
+                        <Text style={[styles.subLbl, { marginTop: 12 }]}>
+                          Minimum gap before auto-OUT (hours)
+                        </Text>
+                        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                          {[3, 4, 5, 6, 8].map((h) =>
+                            chip((ac.smart_direction_gap_hrs ?? 4) === h, `${h} hrs`,
+                              () => setAC({ smart_direction_gap_hrs: h }), `fm-sdc-gap-${h}`))}
+                        </View>
+                        <Pressable
+                          testID="fm-sdc-repair"
+                          onPress={async () => {
+                            const now = new Date();
+                            const from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+                            const to = now.toISOString().slice(0, 10);
+                            const q = `Repair past days (${from} → ${to})? Days with 2+ IN-machine punches and no OUT will get the last punch converted to OUT; the 12-hr auto-close records for those days are removed.`;
+                            const go = async () => {
+                              try {
+                                const r = await api<any>("/biometric/smart-direction-repair", {
+                                  method: "POST",
+                                  body: { company_id: companyId, from_date: from, to_date: to },
+                                });
+                                const msg = `Repaired ${r.fixed_days} day(s) (gap ≥ ${r.gap_hours} hrs). ${r.skipped_days} day(s) untouched.`;
+                                if (Platform.OS === "web") window.alert(msg); else Alert.alert("Done ✅", msg);
+                              } catch (e: any) {
+                                const m = e?.message || "Repair failed";
+                                if (Platform.OS === "web") window.alert(m); else Alert.alert("Failed", m);
+                              }
+                            };
+                            if (Platform.OS === "web") { if (window.confirm(q)) go(); }
+                            else Alert.alert("Repair past days", q, [{ text: "Cancel", style: "cancel" }, { text: "Repair", onPress: go }]);
+                          }}
+                          style={{
+                            marginTop: 12, alignSelf: "flex-start", flexDirection: "row",
+                            alignItems: "center", gap: 6, backgroundColor: colors.brandPrimary,
+                            borderRadius: 8, paddingHorizontal: 14, paddingVertical: 9,
+                          }}
+                        >
+                          <Ionicons name="build-outline" size={14} color="#fff" />
+                          <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>
+                            Repair past days (this month)
+                          </Text>
+                        </Pressable>
+                        <Text style={{ fontSize: 10.5, color: colors.onSurfaceSecondary, marginTop: 6 }}>
+                          Save the firm first so the switch is active, then run repair.
+                          New punches are corrected automatically from now on.
+                        </Text>
+                      </>
+                    ) : null}
+                  </>
+                ) : null}
                 {acMode === "single_machine" ? (
                   <>
                     <Text style={[styles.subLbl, { marginTop: 12 }]}>
