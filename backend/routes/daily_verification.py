@@ -44,7 +44,7 @@ ROW_COLORS = {          # hex fills shared by screen + xlsx + pdf
     "muted": "E2E8F0",   # absent / WO / holiday / leave
 }
 
-HEADERS = ["Sr", "Emp Code", "Employee Name", "Department", "Designation",
+HEADERS = ["S.No.", "Emp Code", "Employee Name", "Department", "Designation",
            "Contractor", "Punch In", "Punch Out", "Work Hrs", "OT In",
            "OT Out", "OT Hrs", "Total Duty Hrs", "Attendance Status",
            "Signature", "Verified", "Verified By", "Remarks"]
@@ -621,13 +621,18 @@ def _build_pdf(data: dict, orientation: str = "landscape") -> bytes:
     buf = io.BytesIO()
     # Iter 479 (user request) — summary block moved to the BOTTOM of every
     # page (with page number), so the bottom margin reserves room for it.
-    doc = SimpleDocTemplate(buf, pagesize=pagesize, leftMargin=8 * mm,
-                            rightMargin=8 * mm, topMargin=8 * mm,
+    # Iter 523 (user request) — left/right margins reduced 8mm → 4mm.
+    doc = SimpleDocTemplate(buf, pagesize=pagesize, leftMargin=4 * mm,
+                            rightMargin=4 * mm, topMargin=8 * mm,
                             bottomMargin=17 * mm)
     styles = getSampleStyleSheet()
-    avail = pagesize[0] - 16 * mm
+    avail = pagesize[0] - 8 * mm
     # Iter 479 (user request) — header: "Daily Report" + date on the RIGHT,
     # company name on the SECOND row.
+    # Iter 523 (user request) — company ADDRESS printed with the firm name.
+    _comp_addr = ", ".join(
+        s for s in (str(data["company"].get("address") or "").strip(),
+                    str(data["company"].get("city") or "").strip()) if s)
     head_tbl = Table(
         [[Paragraph("<b>Daily Report</b>", ParagraphStyle(
             "t", parent=styles["Title"], alignment=0, fontSize=15,
@@ -635,9 +640,12 @@ def _build_pdf(data: dict, orientation: str = "landscape") -> bytes:
           Paragraph(f"{data['date']} ({data['weekday']})", ParagraphStyle(
               "d", parent=styles["Normal"], alignment=2, fontSize=10,
               leading=18, fontName="Helvetica-Bold"))],
-         [Paragraph(str(data["company"]["name"]), ParagraphStyle(
-             "c", parent=styles["Normal"], fontSize=11, leading=14,
-             fontName="Helvetica-Bold")), ""]],
+         [Paragraph(
+             str(data["company"]["name"])
+             + (f"<br/><font size=8>{_comp_addr}</font>" if _comp_addr else ""),
+             ParagraphStyle(
+                 "c", parent=styles["Normal"], fontSize=11, leading=13,
+                 fontName="Helvetica-Bold")), ""]],
         colWidths=[avail * 0.62, avail * 0.38])
     head_tbl.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -647,13 +655,18 @@ def _build_pdf(data: dict, orientation: str = "landscape") -> bytes:
         ("TOPPADDING", (0, 0), (-1, -1), 1),
     ]))
     story = [head_tbl, Spacer(1, 3 * mm)]
-    fs = 6.4 if orientation != "portrait" else 5.2
+    fs = 7.0 if orientation != "portrait" else 5.8
     # Iter 479 (user request) — PDF drops Verified / Verified By / Remarks
     # and shows the BIO CODE instead of the Emp Code.
-    pdf_headers = ["Sr", "Bio Code", "Employee Name", "Department",
-                   "Designation", "Contractor", "Punch In", "Punch Out",
-                   "Work Hrs", "OT In", "OT Out", "OT Hrs",
-                   "Total Duty Hrs", "Attendance Status", "Signature"]
+    # Iter 523 (user request) — Attendance Status column REMOVED; the
+    # Contractor column only prints when the firm actually uses
+    # contractors; taller rows + wide Signature column for signing.
+    _has_contr = any((r.get("contractor") or "").strip()
+                     for r in data["rows"])
+    pdf_headers = ["S.No.", "Bio Code", "Employee Name", "Department",
+                   "Designation"] + (["Contractor"] if _has_contr else []) + \
+                  ["Punch In", "Punch Out", "Work Hrs", "OT In", "OT Out",
+                   "OT Hrs", "Total Duty Hrs", "Signature"]
     tdata = [pdf_headers]
     tstyle = [
         ("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#1E293B")),
@@ -665,24 +678,31 @@ def _build_pdf(data: dict, orientation: str = "landscape") -> bytes:
         ("ALIGN", (2, 1), (2, -1), "LEFT"),
     ]
     for i, r in enumerate(data["rows"], start=1):
-        st = r["status"] + ("" if not r["markers"]
-                            else " · " + ", ".join(r["markers"]))
-        tdata.append([str(v) for v in [
-            i, r.get("bio_code") or r["employee_code"], r["name"],
-            r["department"], r["designation"], r["contractor"],
-            r["punch_in"], r["punch_out"], r["work_hours"],
-            r["ot_in"], r["ot_out"], r["ot_hours"], r["total_hours"],
-            st, ""]])
-        tstyle.append(("BACKGROUND", (0, i), (-1, i),
-                       rl.HexColor("#" + ROW_COLORS[r["color"]])))
-    tbl = Table(tdata, repeatRows=1)
+        tdata.append([str(v) for v in (
+            [i, r.get("bio_code") or r["employee_code"], r["name"],
+             r["department"], r["designation"]]
+            + ([r["contractor"]] if _has_contr else [])
+            + [r["punch_in"], r["punch_out"], r["work_hours"],
+               r["ot_in"], r["ot_out"], r["ot_hours"], r["total_hours"],
+               ""])])
+        # Iter 523 (user request) — rows with BOTH punches are NOT
+        # highlighted; only problem rows keep their colour (missing punch
+        # red, absent/WO/holiday grey, etc.).
+        _both = r["punch_in"] != "-" and r["punch_out"] != "-"
+        if not _both and r["color"] != "green":
+            tstyle.append(("BACKGROUND", (0, i), (-1, i),
+                           rl.HexColor("#" + ROW_COLORS[r["color"]])))
+    # Iter 523 (user request) — taller rows so employees can sign properly.
+    _row_h = 9 * mm if orientation != "portrait" else 8 * mm
+    # Signature column gets a fixed generous width; the rest auto-size.
+    _sig_w = 34 * mm if orientation != "portrait" else 26 * mm
+    tbl = Table(tdata, repeatRows=1,
+                rowHeights=[None] + [_row_h] * len(data["rows"]),
+                colWidths=[None] * (len(pdf_headers) - 1) + [_sig_w])
     tbl.setStyle(TableStyle(tstyle))
     story.append(tbl)
     story.append(Spacer(1, 4 * mm))
-    story.append(Paragraph(
-        "Legend: RED missing punch · ORANGE unapproved OT · YELLOW late/early"
-        " · BLUE manual · GREEN normal · GREY absent/WO/holiday/leave",
-        styles["Normal"]))
+    # Iter 523 (user request) — legend line removed from the print.
     sum_lines = _summary_lines(data)
 
     def _footer(canvas, _doc):
@@ -690,9 +710,9 @@ def _build_pdf(data: dict, orientation: str = "landscape") -> bytes:
         canvas.setFont("Helvetica", 6.8)
         y = 4 * mm
         for j, ln in enumerate(reversed(sum_lines)):
-            canvas.drawString(8 * mm, y + j * 9, ln)
+            canvas.drawString(4 * mm, y + j * 9, ln)
         canvas.setFont("Helvetica-Bold", 7.5)
-        canvas.drawRightString(pagesize[0] - 8 * mm, y,
+        canvas.drawRightString(pagesize[0] - 4 * mm, y,
                                f"Page {canvas.getPageNumber()}")
         canvas.restoreState()
 

@@ -4965,3 +4965,17 @@ biometric_unmapped(serial,at / at / pin,serial), biometric_machine_users
 holidays(company,date). GZip already active. Dead styles removed
 (esic-leave searchRow/searchInput). APP_ITERATION=522,
 deploy_vps_iter522.sh, temp_bundle → deploy522.sh.
+
+## Iter 523 (2026-08-07) — Daily Verification PDF redesign (user PDF upload)
+daily_verification.py _build_pdf (BOTH orientations): margins 8→4mm;
+company address+city under firm name (projection extended); Attendance
+Status col removed; Contractor col only when any row has contractor;
+rows with BOTH punches NOT highlighted (only missing-punch red / muted
+absent kept, green never); rowHeights 9mm (8mm portrait) + fixed wide
+Signature col (34/26mm); legend paragraph removed; fs 7.0/5.8; header
+"Sr"→"S.No." (also HEADERS xlsx/csv). present_absent_report.py PDF:
+S.No. col added (offsets/styles/colWidths shifted). Frontend
+daily-verification.tsx: Contractor filter only when contractors exist.
+OT-after-12h per policy = engine (520/522), no extra change. Verified:
+pdftoppm renders correct for landscape+portrait+present-absent.
+APP_ITERATION=523, deploy_vps_iter523.sh, temp_bundle → deploy523.sh.

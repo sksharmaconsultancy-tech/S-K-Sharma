@@ -229,7 +229,8 @@ async def present_absent_pdf(company_id: str = Query(...), month: str = Query(..
         Paragraph(f"PRESENT / ABSENT REPORT — {d['company'].get('name') or ''} — {month}", h1),
         Paragraph(d["policy_line"], h2), Spacer(1, 3 * mm)]
     n_days = len(d["day_labels"])
-    head = ["Code", "Employee"] + [str(int(str(dl)[:2])) for dl in d["day_labels"]] + \
+    head = ["S.No.", "Code", "Employee"] + \
+        [str(int(str(dl)[:2])) for dl in d["day_labels"]] + \
         ["P", "HD", "A", "WO", "H", "Days"]
     body = [head]
     _fill = {"P": "#DCFCE7", "HD": "#FEF9C3", "A": "#FEE2E2",
@@ -240,7 +241,8 @@ async def present_absent_pdf(company_id: str = Query(...), month: str = Query(..
         ("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#0F3B5C")),
         ("TEXTCOLOR", (0, 0), (-1, 0), rl.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("ALIGN", (2, 0), (-1, -1), "CENTER"),
+        ("ALIGN", (0, 0), (0, -1), "CENTER"),
+        ("ALIGN", (3, 0), (-1, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 1.2),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 1.2),
@@ -248,19 +250,20 @@ async def present_absent_pdf(company_id: str = Query(...), month: str = Query(..
         ("RIGHTPADDING", (0, 0), (-1, -1), 1.2),
     ]
     for ri, e in enumerate(d["employees"], start=1):
-        row = [str(e.get("employee_code") or ""), (e.get("name") or "")[:22]]
+        row = [str(ri), str(e.get("employee_code") or ""),
+               (e.get("name") or "")[:22]]
         for ci, dl in enumerate(d["day_labels"]):
             st = e["days"].get(dl, "")
             row.append(st)
             f = _fill.get(st)
             if f:
-                styles.append(("BACKGROUND", (2 + ci, ri), (2 + ci, ri),
+                styles.append(("BACKGROUND", (3 + ci, ri), (3 + ci, ri),
                                rl.HexColor(f)))
         row += [str(e["totals"][s]) for s in STATUS_ORDER] + \
             [f"{e.get('present_days'):g}" if e.get("present_days") is not None else ""]
         body.append(row)
     # daily present footer
-    foot = ["", "Daily Present"]
+    foot = ["", "", "Daily Present"]
     for dl in d["day_labels"]:
         dc = d["day_counts"][dl]
         foot.append(str(dc["P"] + dc["HD"]))
@@ -268,11 +271,12 @@ async def present_absent_pdf(company_id: str = Query(...), month: str = Query(..
     body.append(foot)
     styles.append(("FONTNAME", (0, len(body) - 1), (-1, len(body) - 1),
                    "Helvetica-Bold"))
-    name_w = W * 0.11
-    code_w = W * 0.045
+    name_w = W * 0.105
+    code_w = W * 0.042
+    sno_w = W * 0.028
     tot_w = W * 0.021 * 6
-    day_w = (W - name_w - code_w - tot_w) / max(n_days, 1)
-    t = Table(body, colWidths=[code_w, name_w] + [day_w] * n_days
+    day_w = (W - name_w - code_w - sno_w - tot_w) / max(n_days, 1)
+    t = Table(body, colWidths=[sno_w, code_w, name_w] + [day_w] * n_days
               + [W * 0.021] * 6, repeatRows=1)
     t.setStyle(TableStyle(styles))
     flow.append(t)

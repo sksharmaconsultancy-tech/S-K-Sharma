@@ -316,8 +316,12 @@ export default function DailyVerificationScreen() {
             options={(opts?.departments || []).map((v) => ({ v, l: v }))} />
           <Sel label="Designation" value={desig} onChange={setDesig} width={140}
             options={(opts?.designations || []).map((v) => ({ v, l: v }))} />
-          <Sel label="Contractor" value={contr} onChange={setContr} width={140}
-            options={(opts?.contractors || []).map((v) => ({ v, l: v }))} />
+          {(opts?.contractors || []).length > 0 ? (
+            /* Iter 523 (user request) — Contractor filter only when the
+               firm actually has contractors. */
+            <Sel label="Contractor" value={contr} onChange={setContr} width={140}
+              options={(opts?.contractors || []).map((v) => ({ v, l: v }))} />
+          ) : null}
           <Sel label="Category" value={cat} onChange={setCat} width={120}
             options={(opts?.categories || []).map((v) => ({ v, l: v }))} />
           <Sel label="Shift" value={shift} onChange={setShift} width={120}
