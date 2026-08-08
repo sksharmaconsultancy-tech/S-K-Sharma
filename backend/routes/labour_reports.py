@@ -272,6 +272,70 @@ def _emp_cols(e: dict) -> List[str]:
 EMP_HEAD = ["Code", "Employee Name", "Department", "Designation"]
 
 
+def _rate_of(e: dict) -> tuple:
+    """(rate, mode) as per Employee Policy / Master — mirrors the
+    compliance salary engine's rate resolution."""
+    epol = e.get("employee_policy") or {}
+    mode = str(e.get("compliance_salary_mode") or "").strip().lower()
+    if mode not in ("daily", "hourly", "monthly"):
+        mode = ""
+    try:
+        rate = float(epol.get("salary") or e.get("compliance_gross")
+                     or e.get("salary_monthly") or 0)
+    except (TypeError, ValueError):
+        rate = 0.0
+    if rate <= 0 or not mode:
+        for src in ("salary_structure_compliance", "salary_structure_actual"):
+            for r_ in (e.get(src) or []):
+                if isinstance(r_, dict) and str(
+                        r_.get("head", "")).strip().lower().startswith("basic"):
+                    try:
+                        amt = float(r_.get("amount") or 0)
+                    except (TypeError, ValueError):
+                        amt = 0.0
+                    if rate <= 0 and amt > 0:
+                        rate = amt
+                    rt = str(r_.get("rate_type") or "").strip().lower()
+                    if not mode and rt in ("daily", "hourly", "monthly"):
+                        mode = rt
+                    break
+            if rate > 0 and mode:
+                break
+    return rate, (mode or "monthly")
+
+
+def _day_cost(e: dict, policy: dict, d: str, present_days: float,
+              hours: float, ot_hours: float) -> float:
+    """Iter 525/526 — that day's pay for the employee as per the Firm
+    Master + Employee Policy: base (Monthly/Daily/Hourly rate basis) +
+    OT at the policy OT multiplier."""
+    from calendar import monthrange
+    rate, mode = _rate_of(e)
+    full_h = float(policy.get("full_day_hours")
+                   or policy.get("standard_working_hours") or 8.0)
+    epol = e.get("employee_policy") or {}
+    try:
+        ot_mult = float(epol.get("ot_multiplier")
+                        or policy.get("ot_multiplier") or 1.5)
+    except (TypeError, ValueError):
+        ot_mult = 1.5
+    dim = monthrange(int(d[:4]), int(d[5:7]))[1]
+    if mode == "daily":
+        base = rate * present_days
+        phr = rate / full_h if full_h else 0.0
+    elif mode == "hourly":
+        base = rate * hours
+        phr = rate
+    else:  # monthly
+        base = rate * present_days / dim
+        phr = rate / (dim * full_h) if full_h else 0.0
+    return round(base + ot_hours * phr * ot_mult, 2)
+
+
+def _present_of_status(status: str) -> float:
+    return 1.0 if status == "P" else 0.5 if status == "HD" else 0.0
+
+
 def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
     weekly_offs = set(policy.get("weekly_off_days") or [])
     night_start = policy.get("night_shift_start") or "22:00"
@@ -403,8 +467,14 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
         return day_rows(lambda s, d, e: s["status"] == "HD", ["Shortfall"],
                         lambda s, d, e: [f"{s['hours']}h worked"])
     if key == "overtime_register":
-        return day_rows(lambda s, d, e: s["ot_hours"] > 0, ["OT Hours", "Normal Hours"],
-                        lambda s, d, e: [s["ot_hours"], round(s["hours"] - s["ot_hours"], 2)])
+        # Iter 526 (user request) — Cost column: that day's pay (base +
+        # OT at the policy multiplier) per Firm Master + Employee Policy.
+        return day_rows(lambda s, d, e: s["ot_hours"] > 0,
+                        ["OT Hours", "Normal Hours", "Cost"],
+                        lambda s, d, e: [
+                            s["ot_hours"], round(s["hours"] - s["ot_hours"], 2),
+                            _day_cost(e, policy, d, _present_of_status(s["status"]),
+                                      s["hours"], s["ot_hours"])])
     if key == "double_shift":
         return day_rows(lambda s, d, e: s["pairs"] >= 2, ["Shifts (in-out cycles)"],
                         lambda s, d, e: [s["pairs"]])
@@ -455,54 +525,18 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
         #   OT paid at the policy OT multiplier).
         # • Optional grouping (Department / Designation wise) with band
         #   rows + per-group subtotals — display and ALL downloads follow.
-        from calendar import monthrange
-
         from server import compute_textile_day
 
         group_by = str(policy.get("_group_by") or "").strip().lower()
         if group_by not in ("department", "designation"):
             group_by = ""
 
-        def _rate_of(e: dict) -> tuple:
-            """(rate, mode) as per Employee Policy / Master — mirrors the
-            compliance salary engine's rate resolution."""
-            epol = e.get("employee_policy") or {}
-            mode = str(e.get("compliance_salary_mode") or "").strip().lower()
-            if mode not in ("daily", "hourly", "monthly"):
-                mode = ""
-            try:
-                rate = float(epol.get("salary") or e.get("compliance_gross")
-                             or e.get("salary_monthly") or 0)
-            except (TypeError, ValueError):
-                rate = 0.0
-            if rate <= 0 or not mode:
-                for src in ("salary_structure_compliance", "salary_structure_actual"):
-                    for r_ in (e.get(src) or []):
-                        if isinstance(r_, dict) and str(
-                                r_.get("head", "")).strip().lower().startswith("basic"):
-                            try:
-                                amt = float(r_.get("amount") or 0)
-                            except (TypeError, ValueError):
-                                amt = 0.0
-                            if rate <= 0 and amt > 0:
-                                rate = amt
-                            rt = str(r_.get("rate_type") or "").strip().lower()
-                            if not mode and rt in ("daily", "hourly", "monthly"):
-                                mode = rt
-                            break
-                    if rate > 0 and mode:
-                        break
-            return rate, (mode or "monthly")
-
-        full_h = float(policy.get("full_day_hours")
-                       or policy.get("standard_working_hours") or 8.0)
         cols = ["S.No.", "Code", "Employee Name", "Father Name", "Department",
                 "Designation", "Contractor", "In", "Out", "Hours", "OT Hrs",
                 "Cost", "Status"]
         data = []  # (sort_keys..., row_values)
         for d in dates:
             wd = date.fromisoformat(d).weekday()
-            dim = monthrange(int(d[:4]), int(d[5:7]))[1]
             for e in emps:
                 recs = recs_by.get((e["user_id"], d))
                 if not recs:
@@ -510,23 +544,7 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
                 s = _day_summary(recs, policy, e)
                 eng = compute_textile_day(recs, policy, e, wd)
                 hours, ot, pd_ = eng["duty_hours"], eng["ot_hours"], eng["present_days"]
-                rate, mode = _rate_of(e)
-                epol = e.get("employee_policy") or {}
-                try:
-                    ot_mult = float(epol.get("ot_multiplier")
-                                    or policy.get("ot_multiplier") or 1.5)
-                except (TypeError, ValueError):
-                    ot_mult = 1.5
-                if mode == "daily":
-                    base = rate * pd_
-                    phr = rate / full_h if full_h else 0.0
-                elif mode == "hourly":
-                    base = rate * hours
-                    phr = rate
-                else:  # monthly
-                    base = rate * pd_ / dim
-                    phr = rate / (dim * full_h) if full_h else 0.0
-                cost = round(base + ot * phr * ot_mult, 2)
+                cost = _day_cost(e, policy, d, pd_, hours, ot)
                 # Status follows the SAME policy engine as Hours/OT.
                 status = ("P" if pd_ >= 1.0 else "HD" if pd_ >= 0.5
                           else "OT" if ot > 0 else "P" if hours > 0
@@ -628,7 +646,8 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
         agg: Dict[str, dict] = {}
         for e in emps:
             g = (e.get(fld) or "").strip() or "— Not set —"
-            a = agg.setdefault(g, {"emps": set(), "days": 0, "hours": 0.0, "ot": 0.0})
+            a = agg.setdefault(g, {"emps": set(), "days": 0, "hours": 0.0,
+                                   "ot": 0.0, "cost": 0.0})
             for d in dates:
                 recs = recs_by.get((e["user_id"], d))
                 if not recs:
@@ -638,10 +657,15 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
                 a["days"] += 1 if s["status"] in ("P", "HD") else 0
                 a["hours"] += s["hours"]
                 a["ot"] += s["ot_hours"]
+                # Iter 526 (user request) — group labour cost per policy.
+                a["cost"] += _day_cost(e, policy, d,
+                                       _present_of_status(s["status"]),
+                                       s["hours"], s["ot_hours"])
         cols = [label, "Employees", "Days Present", "Total Hours",
-                "OT Hours", "Normal Hours"]
+                "OT Hours", "Normal Hours", "Cost"]
         rows = [[g, len(a["emps"]), a["days"], round(a["hours"], 1),
-                 round(a["ot"], 1), round(a["hours"] - a["ot"], 1)]
+                 round(a["ot"], 1), round(a["hours"] - a["ot"], 1),
+                 round(a["cost"], 2)]
                 for g, a in sorted(agg.items()) if a["emps"]]
         return cols, rows
     if key == "night_shift":

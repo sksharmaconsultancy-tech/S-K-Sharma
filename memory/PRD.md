@@ -5066,3 +5066,12 @@ User approved potential improvement: verified via /tmp/check_all_pdfs.py
 dummy_shift correctly 400 (firm policy off). Portrait layout (department
 _wise) visually checked — no overlap. No code change needed (shared
 _pdf_bytes).
+
+## Iter 526c — Cost column on OT Register + Dept/Contractor Wise (approved
+potential improvement). labour_reports.py: _rate_of + _day_cost +
+_present_of_status extracted to MODULE level (shift_deployment builder
+de-duplicated to use them). overtime_register: +Cost col (day pay incl OT
+at policy multiplier, present from _day_summary status). department_wise/
+contractor_wise: +Cost col (sum of per-employee-day _day_cost). Verified
+via curl all 4 reports incl. shift_deployment regression (identical
+costs). deploy525.sh notes item 15 added.

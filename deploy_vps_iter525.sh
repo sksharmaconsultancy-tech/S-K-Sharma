@@ -35,6 +35,10 @@
 # 14. BUG FIX — "Out punch not showing": In/Out now match the
 #     ATTENDANCE REPORT engine (±1-day window, duplicate cleanup and
 #     night-shift OUT stitching back to the day the shift started).
+# 15. COST column also added to the OVERTIME REGISTER (per-day pay
+#     incl. OT at policy multiplier) and to the DEPARTMENT WISE +
+#     CONTRACTOR WISE summaries (group labour cost) — screen + PDF /
+#     Excel / CSV.
 #
 # ═════════════ ALSO INCLUDED (Iter 524) ═════════════
 #
