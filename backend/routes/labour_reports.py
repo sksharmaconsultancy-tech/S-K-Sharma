@@ -541,9 +541,10 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
         data.sort(key=lambda x: (x[0], x[1], x[2]))
 
         def _sum_row(label: str, n_emps: int, h: float, o: float, c: float) -> list:
+            # Iter 526 (user request) — label sits in col 0 and the empty
+            # cells up to "Hours" are MERGED in the PDF/Excel exports.
             r = [""] * len(cols)
-            r[2] = label
-            r[6] = f"{n_emps} deployed"
+            r[0] = f"{label}  ·  {n_emps} deployed"
             r[9] = round(h, 2)
             r[10] = round(o, 2)
             r[11] = round(c, 2)
@@ -569,7 +570,8 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
                 _flush_group()
                 cur = grp
                 band = [""] * len(cols)
-                band[1] = f"▶ {group_by.upper()}: {grp}"
+                # col 0 so the whole band row merges into ONE cell.
+                band[0] = f"▶ {group_by.upper()}: {grp}"
                 rows.append(band)
             sno += 1
             r[0] = sno
@@ -752,9 +754,16 @@ def _row_kind(row) -> str:
         s = str(v or "")
         if s.startswith("▶"):
             return "band"
-        if s.startswith("SUBTOTAL —") or s == "GRAND TOTAL":
+        if s.startswith("SUBTOTAL —") or s.startswith("GRAND TOTAL"):
             return "total"
     return ""
+
+
+def _merge_end(row) -> int:
+    """Iter 526 — band/total rows: merge col 0 up to (but not including)
+    the first non-empty cell, so the label reads as ONE merged cell."""
+    nz = [i for i, v in enumerate(row) if i > 0 and str(v or "").strip()]
+    return (min(nz) - 1) if nz else len(row) - 1
 
 
 def _excel_bytes(title, header_lines, columns, rows) -> bytes:
@@ -770,8 +779,8 @@ def _excel_bytes(title, header_lines, columns, rows) -> bytes:
     r_i += 1
     for c_i, c in enumerate(columns, start=1):
         cell = ws.cell(row=r_i, column=c_i, value=c)
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor="1D4ED8")
+        # Iter 526 (user request) — heading row plain WHITE (no blue fill).
+        cell.font = Font(bold=True)
     _band_fill = PatternFill("solid", fgColor="475569")
     _tot_fill = PatternFill("solid", fgColor="E2E8F0")
     for row in rows:
@@ -785,6 +794,12 @@ def _excel_bytes(title, header_lines, columns, rows) -> bytes:
             elif kind == "total":
                 cell.font = Font(bold=True)
                 cell.fill = _tot_fill
+        # Iter 526 — band/total label cells MERGED into one.
+        if kind:
+            me = _merge_end(row)
+            if me > 0:
+                ws.merge_cells(start_row=r_i, start_column=1,
+                               end_row=r_i, end_column=me + 1)
         # Iter 214 — signature reports get taller rows to sign in.
         if "Signature" in columns:
             ws.row_dimensions[r_i].height = 26
@@ -800,20 +815,62 @@ def _pdf_bytes(title, company, header_meta, columns, rows, verify_id) -> bytes:
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors as rl_colors
     from reportlab.lib.units import mm
-    from reportlab.platypus import (
-        SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage)
+    from reportlab.lib.utils import ImageReader
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.graphics.barcode import qr as rl_qr
     from reportlab.graphics.shapes import Drawing
+    from reportlab.graphics import renderPDF
 
     buf = io.BytesIO()
     page = landscape(A4) if len(columns) > 8 else A4
 
+    # Iter 526 (user request) — firm name (BIG), address, date/period and
+    # the report title repeat on EVERY page header; "Verify:" text removed
+    # (the QR still carries the verification code); Generated time prints
+    # at the page bottom.
+    logo_reader = None
+    if company.get("logo_base64"):
+        try:
+            logo_reader = ImageReader(
+                io.BytesIO(base64.b64decode(company["logo_base64"])))
+        except Exception:
+            logo_reader = None
+    qr_widget = rl_qr.QrCodeWidget(f"SKS-REPORT:{verify_id}")
+    b = qr_widget.getBounds()
+    dr = Drawing(16 * mm, 16 * mm,
+                 transform=[16 * mm / (b[2] - b[0]), 0, 0, 16 * mm / (b[3] - b[1]), 0, 0])
+    dr.add(qr_widget)
+
     def on_page(canvas, doc):
         canvas.saveState()
+        top = page[1] - 6 * mm
+        if logo_reader is not None:
+            try:
+                canvas.drawImage(logo_reader, 10 * mm, top - 16 * mm,
+                                 16 * mm, 16 * mm,
+                                 preserveAspectRatio=True, mask="auto")
+            except Exception:
+                pass
+        renderPDF.draw(dr, canvas, page[0] - 26 * mm, top - 16 * mm)
+        canvas.setFillColor(rl_colors.black)
+        canvas.setFont("Helvetica-Bold", 14)
+        canvas.drawCentredString(page[0] / 2, top - 5.5 * mm,
+                                 company.get("name") or "")
+        canvas.setFont("Helvetica", 8)
+        canvas.drawCentredString(page[0] / 2, top - 9.5 * mm,
+                                 company.get("address") or "")
+        canvas.drawCentredString(page[0] / 2, top - 13 * mm, header_meta)
+        canvas.setFont("Helvetica-Bold", 10.5)
+        canvas.drawCentredString(page[0] / 2, top - 17.5 * mm, title)
+        canvas.setStrokeColor(rl_colors.HexColor("#94A3B8"))
+        canvas.setLineWidth(0.5)
+        canvas.line(10 * mm, top - 19.5 * mm, page[0] - 10 * mm, top - 19.5 * mm)
+        # footer
         canvas.setFont("Helvetica", 7)
         canvas.drawRightString(page[0] - 12 * mm, 8 * mm, f"Page {doc.page}")
-        canvas.drawString(12 * mm, 8 * mm, f"Verify: {verify_id}")
+        _gen = datetime.now(IST).strftime("%d-%m-%Y %I:%M %p")
+        canvas.drawString(12 * mm, 8 * mm, f"Generated: {_gen} IST")
         # Iter 182 — brand punch line on every statutory report page
         canvas.setFont("Helvetica-Oblique", 7.5)
         canvas.setFillColorRGB(0.145, 0.388, 0.922)  # #2563EB
@@ -823,35 +880,10 @@ def _pdf_bytes(title, company, header_meta, columns, rows, verify_id) -> bytes:
 
     doc = SimpleDocTemplate(buf, pagesize=page,
                             leftMargin=10 * mm, rightMargin=10 * mm,
-                            topMargin=8 * mm, bottomMargin=14 * mm)
+                            topMargin=28 * mm, bottomMargin=14 * mm)
     styles = getSampleStyleSheet()
-    h1 = ParagraphStyle("h1", parent=styles["Heading1"], fontSize=13, spaceAfter=1)
-    small = ParagraphStyle("small", parent=styles["Normal"], fontSize=7.5, leading=9.5)
 
     story: list = []
-    # header row: logo | company block | QR
-    logo_cell: Any = ""
-    if company.get("logo_base64"):
-        try:
-            logo_cell = RLImage(io.BytesIO(base64.b64decode(company["logo_base64"])),
-                                width=18 * mm, height=18 * mm)
-        except Exception:
-            logo_cell = ""
-    qr_widget = rl_qr.QrCodeWidget(f"SKS-REPORT:{verify_id}")
-    b = qr_widget.getBounds()
-    dr = Drawing(18 * mm, 18 * mm,
-                 transform=[18 * mm / (b[2] - b[0]), 0, 0, 18 * mm / (b[3] - b[1]), 0, 0])
-    dr.add(qr_widget)
-    comp_block = Paragraph(
-        f"<b>{company.get('name') or ''}</b><br/>{company.get('address') or ''}<br/>"
-        f"{header_meta}", small)
-    head_tbl = Table(
-        [[logo_cell, comp_block, dr]],
-        colWidths=[22 * mm, page[0] - 20 * mm - 22 * mm - 22 * mm, 22 * mm])
-    head_tbl.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
-    story.append(head_tbl)
-    story.append(Paragraph(title, h1))
-    story.append(Spacer(1, 3))
 
     cell_style = ParagraphStyle("cell", parent=styles["Normal"], fontSize=6.8, leading=8.2)
     data = [[Paragraph(f"<b>{c}</b>", cell_style) for c in columns]]
@@ -862,6 +894,8 @@ def _pdf_bytes(title, company, header_meta, columns, rows, verify_id) -> bytes:
         if kind:
             data.append([Paragraph(f"<b>{v}</b>" if str(v or "") else "", cell_style)
                          for v in r])
+            # Iter 526 — merge the label cells into ONE (band = whole row).
+            extra_styles.append(("SPAN", (0, ri), (_merge_end(r), ri)))
             if kind == "band":
                 extra_styles += [
                     ("BACKGROUND", (0, ri), (-1, ri), rl_colors.HexColor("#475569")),
@@ -884,15 +918,16 @@ def _pdf_bytes(title, company, header_meta, columns, rows, verify_id) -> bytes:
         col_widths[columns.index("Signature")] = sig_w
     tbl = Table(data, repeatRows=1, colWidths=col_widths)
     tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor("#1D4ED8")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
+        # Iter 526 (user request) — heading row WHITE (no blue background).
+        ("BACKGROUND", (0, 0), (-1, 0), rl_colors.white),
+        ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.black),
         ("GRID", (0, 0), (-1, -1), 0.4, rl_colors.HexColor("#94A3B8")),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor("#F1F5F9")]),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ] + ([
         ("TOPPADDING", (0, 1), (-1, -1), 7),
         ("BOTTOMPADDING", (0, 1), (-1, -1), 7),
-    ] if has_sig else [])))
+    ] if has_sig else []) + extra_styles))
     story.append(tbl)
     doc.build(story, onFirstPage=on_page, onLaterPages=on_page)
     return buf.getvalue()
@@ -989,6 +1024,38 @@ async def generate(payload: Dict[str, Any] = Body(...),
     # Designation wise) through to the builder.
     if key == "shift_deployment":
         policy["_group_by"] = str(filters.get("group_by") or "")
+        # Iter 526 (user bug — "Out Punch not showing") — In/Out punches
+        # must match the ATTENDANCE REPORT (grid engine): re-fetch with a
+        # ±1-day window, drop duplicate machine punches and STITCH
+        # night-shift OUT punches (that land on the next calendar day)
+        # back to the day the session started.
+        from server import dedupe_close_punches, stitch_cross_day_ot
+        _comp = await db.companies.find_one(
+            {"company_id": company_id}, {"_id": 0, "attendance_config": 1})
+        _uids = [e["user_id"] for e in emps]
+        _qf = (date.fromisoformat(from_date) - timedelta(days=1)).isoformat()
+        _qt = (date.fromisoformat(to_date) + timedelta(days=1)).isoformat()
+        _aq: Dict[str, Any] = {
+            "user_id": {"$in": _uids}, "date": {"$gte": _qf, "$lte": _qt},
+            "kind": {"$in": ["in", "out"]}, "status": "approved",
+        }
+        _branch = (filters.get("branch_id") or "").strip()
+        if _branch:
+            _aq["$or"] = [{"branch_id": _branch}, {"worksite_id": _branch}]
+        _by_user: Dict[str, Dict[str, list]] = {}
+        async for r in db.attendance.find(
+            _aq, {"_id": 0, "user_id": 1, "date": 1, "kind": 1, "at": 1,
+                  "source": 1},
+        ).sort([("user_id", 1), ("at", 1)]):
+            _by_user.setdefault(r["user_id"], {}).setdefault(
+                r["date"], []).append(r)
+        recs_by = {}
+        for _uid, _daymap in _by_user.items():
+            _rep = stitch_cross_day_ot(dedupe_close_punches(
+                _daymap, company_cfg=(_comp or {}).get("attendance_config")))
+            for _dk, _plist in _rep.items():
+                if from_date <= _dk <= to_date:
+                    recs_by[(_uid, _dk)] = _plist
     columns, rows = build_report(key, emps, recs_by, policy, dates)
     label = next(c["label"] for c in CATALOGUE if c["key"] == key)
 
@@ -1004,8 +1071,13 @@ async def generate(payload: Dict[str, Any] = Body(...),
         "generated_by": admin.get("user_id"), "generated_by_name": gen_by,
         "generated_at": now_iso(),
     })
-    header_meta = (f"Period: {from_date} to {to_date} &nbsp;·&nbsp; "
-                   f"Generated: {gen_at} IST &nbsp;·&nbsp; Generated by: {gen_by}")
+    # Iter 526 (user request) — PDF heading: single day shows "Date: …"
+    # (not "Period: X to X"); Generated time moves to the page bottom and
+    # "Generated by" is removed from the print.
+    def _dmy(s: str) -> str:
+        return f"{s[8:10]}-{s[5:7]}-{s[:4]}" if len(s or "") == 10 else s
+    header_meta = (f"Date: {_dmy(from_date)}" if from_date == to_date
+                   else f"Period: {_dmy(from_date)} to {_dmy(to_date)}")
 
     if fmt == "json":
         return {"report_key": key, "label": label, "columns": columns,
