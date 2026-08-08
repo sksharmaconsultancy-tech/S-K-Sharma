@@ -5160,3 +5160,17 @@ looked misplaced. labour-reports.tsx: special rows now render MERGED-cell
 style on screen (label width = 108×span until first non-empty cell,
 remaining sums under their exact columns) — matches PDF/Excel merge.
 Screenshot verified.
+
+## Iter 532c — Live diagnostics for 2 open user issues (photos + ARAMS)
+User issues on LIVE VPS (cannot inspect from here): (1) Punch Log shows
+"✕ No Photo" for everyone; (2) ARAMS TEXTILES (KISHANGARH)/machine 062036:
+NOT-FOUND-IN-MASTER rows missing. Code paths audited and correct locally
+(handshake sends ATTPHOTOStamp + TransFlag AttPhoto; _ingest_attphoto
+parses PIN=<14dig>-<pin>.jpg + parks unmatched; unmapped rows Iter 503/
+516/520 rules OK). Likely live causes: photos = machines never send
+ATTPHOTO (capture OFF / no camera); ARAMS = either device assigned to a
+different firm record, PINs all matching via employee_code fallback, or
+device NOT REGISTERED (cdata 404s, nothing stored). deploy525.sh now has a
+"MACHINE DIAGNOSTIC" block: per device → firm assigned, last push, 7d
+punches, 7d unmapped (+distinct PINs), photos attached/parked + verdict
+hints. Awaiting user to run deploy and send the diagnostic block.

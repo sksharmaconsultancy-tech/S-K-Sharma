@@ -250,6 +250,66 @@ else
 fi
 
 echo ""
+echo "════════════════════════════════════════════════════════════"
+echo "  MACHINE DIAGNOSTIC (last 7 days) — send me this block!"
+echo "  Answers: why 'No Photo' on punches + why NOT-FOUND rows"
+echo "  are missing for a firm (e.g. ARAMS TEXTILES / 062036)."
+echo "════════════════════════════════════════════════════════════"
+$APP_DIR/backend/venv/bin/python - <<'PYEOF'
+import os, re, asyncio
+from datetime import datetime, timedelta
+from motor.motor_asyncio import AsyncIOMotorClient
+
+envp = "/home/sksharma/app/backend/.env"
+env = {}
+for line in open(envp):
+    m = re.match(r'^([A-Z_]+)="?([^"\n]*)"?', line.strip())
+    if m:
+        env[m.group(1)] = m.group(2)
+
+async def main():
+    db = AsyncIOMotorClient(env.get("MONGO_URL", "mongodb://localhost:27017"))[
+        env.get("DB_NAME", "hrms_production")]
+    since = (datetime.utcnow() - timedelta(days=7)).isoformat()
+    firms = {c["company_id"]: c.get("name") or c["company_id"]
+             async for c in db.companies.find({}, {"company_id": 1, "name": 1})}
+    async for d in db.biometric_devices.find({}, {"serial_number": 1,
+            "company_id": 1, "name": 1, "last_push_at": 1}):
+        sn = d.get("serial_number") or ""
+        firm = firms.get(d.get("company_id"), "⚠ NO FIRM ASSIGNED")
+        punches = await db.attendance.count_documents(
+            {"device_serial": sn, "at": {"$gte": since}})
+        unmapped = await db.biometric_unmapped.count_documents(
+            {"device_serial": sn, "at": {"$gte": since}})
+        photos_att = await db.attendance.count_documents(
+            {"device_serial": sn, "at": {"$gte": since},
+             "photo_source": "zkteco_attphoto"})
+        parked = await db.biometric_photos.count_documents(
+            {"device_serial": sn})
+        print(f"\n■ Machine {sn}  ({d.get('name') or ''})")
+        print(f"   Firm assigned : {firm}")
+        print(f"   Last push     : {d.get('last_push_at') or 'NEVER'}")
+        print(f"   Punches (7d)  : {punches}   Not-found rows (7d): {unmapped}")
+        print(f"   Punch photos attached (7d): {photos_att}   parked in queue: {parked}")
+        if photos_att == 0 and parked == 0:
+            print("   → 📷 This machine NEVER sent a punch photo. Reason 'No")
+            print("      Photo' = photo push is OFF on the device (or the model")
+            print("      has no camera). On the machine: Menu → Comm/Cloud")
+            print("      Server (ADMS) → enable 'Attendance Photo'/'Capture'.")
+        if punches > 0 and unmapped == 0:
+            print("   → Every PIN matched an employee (bio_code / employee_code)")
+            print("      — that is why NO 'NOT FOUND IN MASTER' rows appear.")
+        if unmapped > 0:
+            pins = await db.biometric_unmapped.distinct(
+                "device_user_id", {"device_serial": sn, "at": {"$gte": since}})
+            print(f"   → {unmapped} NOT-FOUND punches from PINs: {sorted(pins)[:15]}")
+            print("      These show in the Punch Log Report ONLY under the firm")
+            print(f"      the machine is assigned to ({firm}). If you filter a")
+            print("      DIFFERENT firm they are hidden — check the Devices")
+            print("      master assignment if the firm looks wrong.")
+asyncio.run(main())
+PYEOF
+echo ""
 echo "✅ Deploy Iter 525 complete!"
 echo ""
 echo "   ON EACH DEVICE: desktop hard-refresh (Ctrl+Shift+R); phone PWA —"
