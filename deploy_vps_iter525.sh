@@ -39,6 +39,10 @@
 #     incl. OT at policy multiplier) and to the DEPARTMENT WISE +
 #     CONTRACTOR WISE summaries (group labour cost) — screen + PDF /
 #     Excel / CSV.
+# 16. NEW SCREEN — Reports → "Labour Cost Dashboard": today's total
+#     labour cost, employees present, total/OT hours, month-to-date
+#     cost, a daily cost trend chart and the department-wise cost
+#     split — all using the same cost engine as the reports.
 #
 # ═════════════ ALSO INCLUDED (Iter 524) ═════════════
 #
@@ -192,6 +196,10 @@ echo -n "   Cost column calc (must say OK): "
 grep -q '_rate_of' $APP_DIR/backend/routes/labour_reports.py && echo "OK" || echo "MISSING!"
 echo -n "   Grouped export styling (must say OK): "
 grep -q '_row_kind' $APP_DIR/backend/routes/labour_reports.py && echo "OK" || echo "MISSING!"
+echo -n "   Labour Cost Dashboard API (must say OK): "
+grep -q 'labour-cost/dashboard' $APP_DIR/backend/routes/labour_cost.py && echo "OK" || echo "MISSING!"
+echo -n "   Labour Cost Dashboard screen (must say OK): "
+[ -f $APP_DIR/frontend/app/labour-cost-dashboard.tsx ] && echo "OK" || echo "MISSING!"
 echo -n "   Day/Period UI (must say OK): "
 grep -q 'DAY_OR_PERIOD_KEYS' $APP_DIR/frontend/app/labour-reports.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Photo capture feature — Iter 524 (must say OK): "

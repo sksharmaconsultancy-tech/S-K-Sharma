@@ -5075,3 +5075,16 @@ at policy multiplier, present from _day_summary status). department_wise/
 contractor_wise: +Cost col (sum of per-employee-day _day_cost). Verified
 via curl all 4 reports incl. shift_deployment regression (identical
 costs). deploy525.sh notes item 15 added.
+
+## Iter 527 — Daily Labour Cost Dashboard (approved potential improvement)
+NEW /app/backend/routes/labour_cost.py: GET /api/admin/labour-cost/
+dashboard?company_id&day → {total_cost, employees_present, total_hours,
+ot_hours, mtd_cost, departments[], trend[]} — month-to-date loop with the
+same pipeline (approved punches ±1d, dedupe+stitch, compute_textile_day +
+labour_reports._day_cost); registered in server.py after labour_reports.
+NEW /app/frontend/app/labour-cost-dashboard.tsx: 5 metric cards, MTD
+daily-cost bar chart (selected day purple), department-wise cost bars,
+date+firm filters. Menu "Labour Cost Dashboard" added after Labour Reports
+in BOTH AdminWebShell menus. Verified: API totals match Shift Deployment
+grand total (48389.88/47) + populated screenshot. deploy525.sh item 16 +
+verification greps added.

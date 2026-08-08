@@ -12289,6 +12289,8 @@ from routes.contractor_punches import router as contractor_punches_router  # noq
 app.include_router(contractor_punches_router)
 from routes.labour_reports import router as labour_reports_router  # noqa: E402
 app.include_router(labour_reports_router)
+from routes.labour_cost import router as labour_cost_router  # noqa: E402
+app.include_router(labour_cost_router)
 from routes.portal_dashboard import router as portal_dashboard_router  # noqa: E402
 app.include_router(portal_dashboard_router)
 from routes.portal_phase2 import router as portal_phase2_router  # noqa: E402

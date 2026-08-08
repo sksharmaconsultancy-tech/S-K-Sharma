@@ -214,6 +214,7 @@ export const NAV_SUPER: NavItem[] = [
     children: [
       { route: "/reports-center", label: "Report Hub", icon: "library-outline" },
       { route: "/labour-reports", label: "Labour Reports", icon: "documents-outline" },
+      { route: "/labour-cost-dashboard", label: "Labour Cost Dashboard", icon: "trending-up-outline" },
       { route: "/attendance-grid", label: "Attendance Reports", icon: "grid-outline" },
       { route: "/daily-verification", label: "Daily In/Out & OT Verification", icon: "checkbox-outline" },
       { route: "/attendance-sync-dashboard", label: "Attendance Sync Dashboard", icon: "sync-outline" },
@@ -590,6 +591,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
     children: [
       { route: "/reports-center", label: "Report Hub", icon: "library-outline" },
       { route: "/labour-reports", label: "Labour Reports", icon: "documents-outline" },
+      { route: "/labour-cost-dashboard", label: "Labour Cost Dashboard", icon: "trending-up-outline" },
       { route: "/attendance-grid", label: "Attendance Reports", icon: "grid-outline" },
       { route: "/daily-verification", label: "Daily In/Out & OT Verification", icon: "checkbox-outline" },
       { route: "/attendance-sync-dashboard", label: "Attendance Sync Dashboard", icon: "sync-outline" },
