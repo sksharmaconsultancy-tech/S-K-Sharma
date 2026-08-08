@@ -25,7 +25,7 @@ from server import (  # noqa: E402
     dedupe_close_punches,
     stitch_cross_day_ot,
 )
-from routes.labour_reports import _auth, _day_cost  # noqa: E402
+from routes.labour_reports import _apply_compliance_8hr, _auth, _day_cost  # noqa: E402
 
 router = APIRouter(prefix="/api/admin")
 
@@ -93,8 +93,8 @@ async def labour_cost_dashboard(
                 continue
             eng = compute_textile_day(
                 plist, policy, e, date.fromisoformat(dk).weekday())
-            hours, ot = eng["duty_hours"], eng["ot_hours"]
-            cost = _day_cost(e, policy, dk, eng["present_days"], hours, ot)
+            hours, ot, pd_ = _apply_compliance_8hr(policy, e, eng)
+            cost = _day_cost(e, policy, dk, pd_, hours, ot)
             trend[dk] += cost
             if dk == day:
                 day_total["cost"] += cost

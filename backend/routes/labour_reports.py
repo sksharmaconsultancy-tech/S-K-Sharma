@@ -336,6 +336,62 @@ def _present_of_status(status: str) -> float:
     return 1.0 if status == "P" else 0.5 if status == "HD" else 0.0
 
 
+def _compliance_8hr_on(policy: dict) -> bool:
+    """Iter 528 (user bug) — firm policy "Count Present Day @ 8 HRS —
+    Compliance Salary only" is ON and Salary Allowed includes Compliance."""
+    pm = policy.get("policy_master") or {}
+    return bool(pm.get("compliance_present_8hr")
+                and str(policy.get("salary_allowed") or "both")
+                in ("compliance", "both"))
+
+
+def _ot_allowed(e: dict, policy: dict) -> bool:
+    """Same OT gates as the attendance engine: firm gate → per-employee
+    override → legacy ot_applicable (default ON)."""
+    if policy.get("firm_ot_allowed") is False:
+        return False
+    ov = e.get("attendance_policy_override") or {}
+    if ov.get("ot_allowed") is not None:
+        return bool(ov["ot_allowed"])
+    v = e.get("ot_applicable")
+    return True if v is None else bool(v)
+
+
+def _apply_compliance_8hr(policy: dict, e: dict, eng: dict) -> tuple:
+    """Iter 528 — when the firm's "Count Present Day @ 8 HRS" policy is
+    YES: 8+ WORKED hrs = 1 Present Day, duty shown capped at 8 hrs, extra
+    worked hrs → OT. Mirrors the Monthly Attendance Grid's
+    ``_pm_8hr_reports`` rule so all reports agree.
+
+    NOTE: ``compute_textile_day`` returns duty_hours = TOTAL worked hours
+    (OT is a subset of it), so the split here is off the duty figure.
+    Week-off / holiday special days ("all hours → OT") stay untouched.
+    """
+    hours, ot, present = (eng["duty_hours"], eng["ot_hours"],
+                          eng["present_days"])
+    if not _compliance_8hr_on(policy):
+        return hours, ot, present
+    worked = round(hours, 2)
+    # Week-off / holiday SPECIAL transformations (week-off worked modes,
+    # "all hours → OT", holiday-present rules) keep their own OT/present
+    # math — only the DISPLAYED duty is capped at 8 hrs so Hours never
+    # show above the policy full day.
+    special = any(
+        ("week_off" in (n_l := str(n).lower()) or "week-off" in n_l
+         or "holiday" in n_l)
+        for n in eng.get("notes") or [])
+    if special:
+        if worked > 0 and ot >= worked:  # all hours went to OT
+            return 0.0, ot, present
+        return round(min(worked, 8.0), 2), ot, present
+    duty = round(min(worked, 8.0), 2)
+    extra = round(max(0.0, worked - 8.0), 2)
+    ot_new = extra if _ot_allowed(e, policy) else 0.0
+    half_h = float(policy.get("half_day_hours") or 4.0)
+    p = 1.0 if worked >= 8.0 else 0.5 if worked >= half_h else 0.0
+    return duty, ot_new, p
+
+
 def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
     weekly_offs = set(policy.get("weekly_off_days") or [])
     night_start = policy.get("night_shift_start") or "22:00"
@@ -414,6 +470,11 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
         return cols, rows
 
     if key == "monthly_register":
+        # Iter 528 (user bug) — Hours / OT / Present now come from the
+        # firm-master attendance-policy engine (compute_textile_day) plus
+        # the "Count Present Day @ 8 HRS — Compliance" rule, so the
+        # Monthly Attendance Register matches the Attendance Grid.
+        from server import compute_textile_day
         cols = EMP_HEAD + ["Present", "Half Days", "Absent", "WO", "Total Hours", "OT Hours", "Late Days"]
         rows = []
         for e in emps:
@@ -424,10 +485,12 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
                 recs = recs_by.get((e["user_id"], d))
                 if recs:
                     s = _day_summary(recs, policy, e)
-                    p += s["status"] == "P"
-                    hd += s["status"] == "HD"
-                    th += s["hours"]
-                    ot += s["ot_hours"]
+                    eng = compute_textile_day(recs, policy, e, wd)
+                    hours_d, ot_d, pd_ = _apply_compliance_8hr(policy, e, eng)
+                    p += pd_ >= 1.0
+                    hd += pd_ == 0.5
+                    th += hours_d
+                    ot += ot_d
                     late += 1 if s["late_by"] > 0 else 0
                 elif wd in weekly_offs:
                     wo += 1
@@ -543,7 +606,8 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
                     continue
                 s = _day_summary(recs, policy, e)
                 eng = compute_textile_day(recs, policy, e, wd)
-                hours, ot, pd_ = eng["duty_hours"], eng["ot_hours"], eng["present_days"]
+                # Iter 528 — honour "Count Present Day @ 8 HRS" firm policy.
+                hours, ot, pd_ = _apply_compliance_8hr(policy, e, eng)
                 cost = _day_cost(e, policy, d, pd_, hours, ot)
                 # Status follows the SAME policy engine as Hours/OT.
                 status = ("P" if pd_ >= 1.0 else "HD" if pd_ >= 0.5

@@ -43,6 +43,11 @@
 #     labour cost, employees present, total/OT hours, month-to-date
 #     cost, a daily cost trend chart and the department-wise cost
 #     split — all using the same cost engine as the reports.
+# 17. BUG FIX — firm policy "Count Present Day @ 8 HRS — Compliance
+#     Salary only" now honoured in the Shift Deployment Report, the
+#     Monthly Attendance Register AND the Labour Cost Dashboard:
+#     Hours capped at 8, extra worked hrs → OT, 8+ hrs = 1 Present
+#     Day (week-off / holiday special rules keep their own OT math).
 #
 # ═════════════ ALSO INCLUDED (Iter 524) ═════════════
 #

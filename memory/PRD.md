@@ -5088,3 +5088,19 @@ date+firm filters. Menu "Labour Cost Dashboard" added after Labour Reports
 in BOTH AdminWebShell menus. Verified: API totals match Shift Deployment
 grand total (48389.88/47) + populated screenshot. deploy525.sh item 16 +
 verification greps added.
+
+## Iter 528 — "Count Present Day @ 8 HRS" honoured in reports (user bug)
+labour_reports.py: _compliance_8hr_on(policy) (policy_master.
+compliance_present_8hr && salary_allowed in compliance/both), _ot_allowed
+(firm gate → override.ot_allowed → ot_applicable), _apply_compliance_8hr
+(policy, e, eng): NOTE compute_textile_day duty_hours = TOTAL worked (OT
+subset). Normal days: duty=min(worked,8), extra→OT (if allowed), present
+1.0/@8, 0.5/@half. Days where week-off/holiday SPECIAL rules fired
+(detected via eng notes containing week_off/week-off/holiday): engine
+OT+present kept, displayed duty still capped at 8 (all-OT days → duty 0).
+Applied in: shift_deployment builder, monthly_register (rewritten to use
+compute_textile_day + rule; late days still from _day_summary), and
+labour_cost.py dashboard. Verified Kankani (flag ON, policy_2, WO=Sun):
+Fri 12h→8+4OT, Sun (week_off_worked mode) 12h→8+4OT P, monthly VINIT
+136h/67.5OT/17P. Grand-total cost unchanged (48389.88). deploy525.sh
+item 17.
