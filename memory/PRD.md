@@ -5140,3 +5140,23 @@ excluded for shift_deployment). Verified: grouped daily_attendance json +
 GT sums, verify HTML 200/404, excel A-width 6, PDF title suffix, 26-key
 PDF regression 25 OK, screenshot of Group Wise UI. deploy525.sh items
 19-23.
+
+## Iter 532 — Late/Early vs actual Shift Master timing (approved improv.)
+labour_reports.py: _load_dataset loads policy["_shift_map"] {name:(start,
+end)} from shift_masters. _day_summary: shift resolution = emp.shift_start
+→ assigned Shift Master (emp.shift_name lookup) → firm default 09:00-18:00.
+Late/Early now WRAP-AWARE ((a-b)%1440, sane window ≤720min) for night
+shifts; workers with NO known shift (_known_shift False) only flagged when
+diff ≤360min → phantom 600+ min lates for unassigned night workers GONE
+(VIKRAM 667/599 → 0; assigned "Night Shift" 20:00-08:00 → in 20:07 within
+grace, not late ✓; genuine day lates 26-58min still detected, 77 rows/20d).
+
+## Iter 532b — GRAND TOTAL display fix (user bug)
+Backend totals verified mathematically exact (sum==GT for hours/ot/cost,
+PDF/Excel alignment confirmed via analyze tool). Root cause of "wrong":
+WEB preview rendered every cell fixed 108px + numberOfLines=1, so the
+"GRAND TOTAL · 48 deployed" label truncated in the S.No. cell and sums
+looked misplaced. labour-reports.tsx: special rows now render MERGED-cell
+style on screen (label width = 108×span until first non-empty cell,
+remaining sums under their exact columns) — matches PDF/Excel merge.
+Screenshot verified.

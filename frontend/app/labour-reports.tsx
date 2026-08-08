@@ -428,12 +428,31 @@ export default function LabourReportsScreen() {
                   // Iter 530 (user request) — show the FULL report on screen.
                   return rows.map((r, ri) => {
                     const sp = isSpecial(r);
+                    if (sp) {
+                      // Iter 532 — merged-label rendering on screen too
+                      // (matches the PDF/Excel merge): the band/total
+                      // label spans the empty cells, so sums line up
+                      // under their exact columns.
+                      let span = r.length;
+                      for (let i = 1; i < r.length; i++) {
+                        if (String(r[i] ?? "").trim() !== "") { span = i; break; }
+                      }
+                      return (
+                        <View key={ri} style={[st.tRow, { backgroundColor: "#E2E8F0" }]}>
+                          <Text style={[st.tCell, { width: 108 * span, fontWeight: "800" }]} numberOfLines={1}>
+                            {String(r[0] ?? "")}
+                          </Text>
+                          {r.slice(span).map((v, ci) => (
+                            <Text key={ci} style={[st.tCell, { fontWeight: "800" }]} numberOfLines={1}>{String(v ?? "")}</Text>
+                          ))}
+                        </View>
+                      );
+                    }
                     return (
                       <View key={ri} style={[st.tRow,
-                        ri % 2 === 1 && !sp && { backgroundColor: colors.background },
-                        sp && { backgroundColor: "#E2E8F0" }]}>
+                        ri % 2 === 1 && { backgroundColor: colors.background }]}>
                         {r.map((v, ci) => (
-                          <Text key={ci} style={[st.tCell, sp && { fontWeight: "800" }]} numberOfLines={1}>{String(v ?? "")}</Text>
+                          <Text key={ci} style={st.tCell} numberOfLines={1}>{String(v ?? "")}</Text>
                         ))}
                       </View>
                     );

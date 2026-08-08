@@ -198,6 +198,15 @@ async def _load_dataset(company_id: str, filters: Dict[str, Any]):
     comp = await db.companies.find_one(
         {"company_id": company_id}, {"_id": 0, "attendance_policy": 1})
     policy = (comp or {}).get("attendance_policy") or {}
+    # Iter 532 (user request) — Late/Early measured against the worker's
+    # ACTUAL Shift Master timing (employee's own timing → assigned Shift
+    # Master → firm default).
+    policy["_shift_map"] = {
+        s["name"].strip(): (s.get("start") or "", s.get("end") or "")
+        async for s in db.shift_masters.find(
+            {}, {"_id": 0, "name": 1, "start": 1, "end": 1})
+        if (s.get("name") or "").strip()
+    }
     if not policy:
         policy = await db.attendance_policies.find_one(
             {"company_id": company_id}, {"_id": 0}) or {}
@@ -224,19 +233,32 @@ def _day_summary(recs: List[dict], policy: dict, emp: dict) -> dict:
                 hours += (m2 - m1) / 60.0
                 pairs += 1
             stack = None
-    shift_start = emp.get("shift_start") or policy.get("shift_start") or "09:00"
-    shift_end = emp.get("shift_end") or policy.get("shift_end") or "18:00"
+    # Iter 532 (user request) — Late/Early against the worker's ACTUAL
+    # shift: employee's own timing → assigned Shift Master timing → firm
+    # default. Cross-midnight (night) shifts handled with wrap-around
+    # math; workers with NO known shift never get phantom 600+ min lates.
+    _sm = (policy.get("_shift_map") or {}).get(
+        (emp.get("shift_name") or "").strip())
+    shift_start = (emp.get("shift_start") or (_sm and _sm[0])
+                   or policy.get("shift_start") or "09:00")
+    shift_end = (emp.get("shift_end") or (_sm and _sm[1])
+                 or policy.get("shift_end") or "18:00")
+    _known_shift = bool(emp.get("shift_start") or (_sm and _sm[0]))
     grace = int(policy.get("grace_minutes_late") or 0)
     late_by = 0
     if first_in:
         a, b = _mins(first_in), _mins(shift_start)
-        if a is not None and b is not None and a > b + grace:
-            late_by = a - b
+        if a is not None and b is not None:
+            diff = (a - b) % 1440  # wrap-aware (night shifts)
+            if grace < diff <= 720 and (_known_shift or diff <= 360):
+                late_by = diff
     early_by = 0
     if last_out:
         a, b = _mins(last_out), _mins(shift_end)
-        if a is not None and b is not None and a < b:
-            early_by = b - a
+        if a is not None and b is not None:
+            diff = (b - a) % 1440  # wrap-aware (night shifts)
+            if 0 < diff <= 720 and (_known_shift or diff <= 360):
+                early_by = diff
     full_h = float(policy.get("full_day_hours") or policy.get("standard_working_hours") or 8.0)
     half_h = float(policy.get("half_day_hours") or 4.0)
     # Iter 215 — OT threshold follows the EMPLOYEE's own duty hours when
