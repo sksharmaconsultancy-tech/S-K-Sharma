@@ -5104,3 +5104,39 @@ labour_cost.py dashboard. Verified Kankani (flag ON, policy_2, WO=Sun):
 Fri 12h→8+4OT, Sun (week_off_worked mode) 12h→8+4OT P, monthly VINIT
 136h/67.5OT/17P. Grand-total cost unchanged (48389.88). deploy525.sh
 item 17.
+
+## Iter 529 — All day-wise reports on the policy engine (approved improv.)
+labour_reports.py: compute_textile_day now module-level import (local
+imports removed). day_rows() overlays s["hours"]/s["ot_hours"]/s["status"]
+from compute_textile_day + _apply_compliance_8hr; when 8hr flag OFF and
+engine folds OT into duty (ot>0 and duty>=ot) → display duty = duty-ot.
+Status: P>=1, HD>=0.5, OT if only-OT, P if hrs>0, else _day_summary
+fallback (keeps OUT-only miss-punch rows visible). overtime_register cols
+now [OT Hours, Total Worked Hrs, Cost] ("Normal Hours" removed — base
+Hours col IS regular duty now). Affects daily_attendance, overtime_
+register, late_coming, early_going, miss_punch, half_day, double_shift,
+night_shift, weekly_off, holiday_attendance, face_attendance, in_out.
+Verified: daily_attendance & OT register Fri 8h+4OT; all-26-key PDF
+regression 25 OK/0 fail. deploy525.sh item 18.
+
+## Iter 530/531 — Report UX batch (user requests)
+labour_reports.py: (a) shift_deployment Cost round figures (row round(),
+_sum_row r[11]=round(c)). (b) GENERIC Group Wise post-processing in
+generate(): filters.group_by department|designation|contractor → if that
+column exists (and key != shift_deployment): ▶ band + SUBTOTAL (sums of
+all-numeric columns via num_idx) + GRAND TOTAL; works in preview/pdf/
+excel/csv since rows mutate pre-format. (c) label suffix "— X Wise".
+(d) S.No. slim: Excel width 6, PDF col_widths 9mm (has_sig block extended
+with has_sno). (e) QR FIX: encodes URL {APP_PUBLIC_URL}/api/admin/
+labour-reports/verify/{id} (fallback SKS-REPORT:); verification doc now
+stores report_label+company_name; verify endpoint returns HTML page
+(✅ GENUINE with details / ❌ 404 forged) or ?format=json. _pdf_bytes
+gained verify_url param. Frontend labour-reports.tsx: FILTER_FIELDS/text
+filters REMOVED → GROUP_OPTIONS chips (None/Dept/Desig/Contractor, hidden
+for shift_deployment which has native chips); full rows shown on screen
+(100-cap removed), special rows styled bold grey, GRAND TOTAL pinned on
+sort, totals hidden when searching; buildBody sends group_by (contractor
+excluded for shift_deployment). Verified: grouped daily_attendance json +
+GT sums, verify HTML 200/404, excel A-width 6, PDF title suffix, 26-key
+PDF regression 25 OK, screenshot of Group Wise UI. deploy525.sh items
+19-23.

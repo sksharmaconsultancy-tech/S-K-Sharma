@@ -37,12 +37,12 @@ type Preview = {
   verify_id: string;
 };
 
-const FILTER_FIELDS: { key: string; label: string; placeholder: string }[] = [
-  { key: "department", label: "Department", placeholder: "e.g. Production" },
-  { key: "designation", label: "Designation", placeholder: "e.g. Operator" },
-  { key: "employee_category", label: "Employee Category", placeholder: "e.g. Staff / Labour" },
-  { key: "gender", label: "Gender", placeholder: "Male / Female" },
-  { key: "contractor", label: "Contractor", placeholder: "Contractor name" },
+// Iter 530 (user request) — text filters replaced by a Group Wise option.
+const GROUP_OPTIONS: { key: string; label: string }[] = [
+  { key: "", label: "No Grouping" },
+  { key: "department", label: "Department Wise" },
+  { key: "designation", label: "Designation Wise" },
+  { key: "contractor", label: "Contractor Wise" },
 ];
 
 function monthNow() {
@@ -71,8 +71,6 @@ export default function LabourReportsScreen() {
   const [month, setMonth] = useState<string>(monthNow());
   const [fromDate, setFromDate] = useState<string>("");
   const [toDate, setToDate] = useState<string>("");
-  const [filters, setFilters] = useState<Record<string, string>>({});
-  const [showFilters, setShowFilters] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -124,9 +122,10 @@ export default function LabourReportsScreen() {
             ? { from_date: reportDate, to_date: reportDate }
             : { from_date: fromDate, to_date: toDate })
           : fromDate && toDate ? { from_date: fromDate, to_date: toDate } : { month }),
-      ...(isDayOrPeriod && groupBy ? { group_by: groupBy } : {}),
+      ...(isDayOrPeriod
+        ? (groupBy && groupBy !== "contractor" ? { group_by: groupBy } : {})
+        : (groupBy ? { group_by: groupBy } : {})),
       ...(shiftSel ? { shift: shiftSel } : {}),
-      ...Object.fromEntries(Object.entries(filters).filter(([, v]) => (v || "").trim())),
     },
   });
 
@@ -144,7 +143,7 @@ export default function LabourReportsScreen() {
       setPreview(null);
     } finally { setBusy(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCompanyId, reportKey, month, fromDate, toDate, filters, reportDate, shiftSel, periodMode, groupBy]);
+  }, [selectedCompanyId, reportKey, month, fromDate, toDate, reportDate, shiftSel, periodMode, groupBy]);
 
   const download = async (format: "pdf" | "excel" | "csv") => {
     if (!selectedCompanyId) return;
@@ -322,27 +321,21 @@ export default function LabourReportsScreen() {
             </View>
           ) : null}
 
-          <Pressable onPress={() => setShowFilters((v) => !v)} style={st.filterToggle} testID="lr-filters-toggle">
-            <Ionicons name="funnel-outline" size={13} color={colors.brandPrimary} />
-            <Text style={st.filterToggleTxt}>
-              Filters (Department · Designation · Category · Gender · Contractor)
-            </Text>
-            <Ionicons name={showFilters ? "chevron-up" : "chevron-down"} size={13} color={colors.brandPrimary} />
-          </Pressable>
-          {showFilters ? (
-            <View style={st.rowWrap}>
-              {FILTER_FIELDS.map((f) => (
-                <View key={f.key} style={st.field}>
-                  <Text style={st.fieldLbl}>{f.label}</Text>
-                  <TextInput
-                    value={filters[f.key] || ""}
-                    onChangeText={(v) => setFilters((p) => ({ ...p, [f.key]: v }))}
-                    style={st.input} placeholder={f.placeholder}
-                    placeholderTextColor={colors.onSurfaceTertiary}
-                    testID={`lr-filter-${f.key}`}
-                  />
-                </View>
-              ))}
+          {/* Iter 530 (user request) — Group Wise formatting for every
+              report (Shift Deployment has its own Group/Format chips):
+              display AND PDF/Excel/CSV downloads follow the grouping. */}
+          {!isDayOrPeriod ? (
+            <View style={{ marginTop: 8 }}>
+              <Text style={st.fieldLbl}>Group Wise</Text>
+              <View style={[st.chipsWrap, { marginTop: 4 }]}>
+                {GROUP_OPTIONS.map((g) => (
+                  <Pressable key={g.key} onPress={() => setGroupBy(g.key)}
+                    style={[st.chip, groupBy === g.key && st.chipOn]}
+                    testID={`lr-groupwise-${g.key || "none"}`}>
+                    <Text style={[st.chipTxt, groupBy === g.key && { color: "#fff" }]}>{g.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
             </View>
           ) : null}
 
@@ -406,13 +399,23 @@ export default function LabourReportsScreen() {
                   ))}
                 </View>
                 {(() => {
+                  // Iter 530 — band (▶), SUBTOTAL and GRAND TOTAL rows.
+                  const isSpecial = (r: any[]) => r.some((v) => {
+                    const s = String(v ?? "");
+                    return s.startsWith("▶") || s.startsWith("SUBTOTAL —") || s.startsWith("GRAND TOTAL");
+                  });
                   let rows = preview.rows;
                   const needle = q.trim().toLowerCase();
                   if (needle) {
-                    rows = rows.filter((r) => r.some((v) => String(v ?? "").toLowerCase().includes(needle)));
+                    // searching: totals no longer match the subset — hide them
+                    rows = rows.filter((r) => !isSpecial(r)
+                      && r.some((v) => String(v ?? "").toLowerCase().includes(needle)));
                   }
                   if (sortCol != null) {
-                    rows = [...rows].sort((a, b) => {
+                    // sorting: keep GRAND TOTAL pinned at the bottom; band /
+                    // subtotal rows would land in wrong places — drop them.
+                    const gt = rows.filter((r) => String(r[0] ?? "").startsWith("GRAND TOTAL"));
+                    rows = rows.filter((r) => !isSpecial(r)).sort((a, b) => {
                       const av = a[sortCol]; const bv = b[sortCol];
                       const an = Number(av); const bn = Number(bv);
                       const cmp = !Number.isNaN(an) && !Number.isNaN(bn) && String(av).trim() !== "" && String(bv).trim() !== ""
@@ -420,19 +423,26 @@ export default function LabourReportsScreen() {
                         : String(av ?? "").localeCompare(String(bv ?? ""));
                       return sortAsc ? cmp : -cmp;
                     });
+                    rows = [...rows, ...gt];
                   }
-                  return rows.slice(0, 100).map((r, ri) => (
-                    <View key={ri} style={[st.tRow, ri % 2 === 1 && { backgroundColor: colors.background }]}>
-                      {r.map((v, ci) => (
-                        <Text key={ci} style={st.tCell} numberOfLines={1}>{String(v ?? "")}</Text>
-                      ))}
-                    </View>
-                  ));
+                  // Iter 530 (user request) — show the FULL report on screen.
+                  return rows.map((r, ri) => {
+                    const sp = isSpecial(r);
+                    return (
+                      <View key={ri} style={[st.tRow,
+                        ri % 2 === 1 && !sp && { backgroundColor: colors.background },
+                        sp && { backgroundColor: "#E2E8F0" }]}>
+                        {r.map((v, ci) => (
+                          <Text key={ci} style={[st.tCell, sp && { fontWeight: "800" }]} numberOfLines={1}>{String(v ?? "")}</Text>
+                        ))}
+                      </View>
+                    );
+                  });
                 })()}
               </View>
             </ScrollView>
-            {preview.total_rows > 100 ? (
-              <Text style={st.metaTxt}>Showing first 100 of {preview.total_rows} rows — use Excel/PDF for the full report.</Text>
+            {preview.total_rows > preview.rows.length ? (
+              <Text style={st.metaTxt}>Showing first {preview.rows.length} of {preview.total_rows} rows — use Excel/PDF for the full report.</Text>
             ) : null}
           </View>
         ) : null}

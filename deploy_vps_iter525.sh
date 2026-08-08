@@ -48,6 +48,28 @@
 #     Monthly Attendance Register AND the Labour Cost Dashboard:
 #     Hours capped at 8, extra worked hrs → OT, 8+ hrs = 1 Present
 #     Day (week-off / holiday special rules keep their own OT math).
+# 18. ALL day-wise labour reports (Daily Attendance, OT Register,
+#     Late/Early, Half-Day, Night Shift, Weekly-Off, Holiday, etc.)
+#     now take Hours / OT / Status from the SAME firm-master
+#     attendance-policy engine — every report matches the Attendance
+#     Grid. OT Register shows Hours (regular) · OT · Total Worked ·
+#     Cost.
+# 19. Shift Deployment Cost now shows in ROUND figures.
+# 20. On-screen preview shows the FULL report (no more "first 100
+#     rows"); GRAND TOTAL stays pinned at the bottom when sorting.
+# 21. Old text Filters (Department/Designation/Category/Gender/
+#     Contractor) REPLACED by a "Group Wise" option on EVERY report:
+#     No Grouping / Department / Designation / Contractor Wise —
+#     band rows + per-group SUBTOTALS of all numeric columns + GRAND
+#     TOTAL, identical on screen and in PDF / Excel / CSV; the
+#     grouping name also prints in the report heading.
+# 22. Slim S.No. column in PDF + Excel.
+# 23. QR CODE FIXED + EXPLAINED — the QR on every report is the
+#     AUTHENTICITY SEAL: scanning it now opens a public verification
+#     page (✅ GENUINE REPORT — report name, firm, period, rows,
+#     generated when/by whom; ❌ if the code is fake). It now encodes
+#     a real URL (uses APP_PUBLIC_URL from backend/.env) so any phone
+#     camera can open it.
 #
 # ═════════════ ALSO INCLUDED (Iter 524) ═════════════
 #

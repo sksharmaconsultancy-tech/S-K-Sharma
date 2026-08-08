@@ -20,6 +20,7 @@ Endpoints:
 import base64
 import csv
 import io
+import os
 import uuid
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
@@ -27,7 +28,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Header, HTTPException
 
-from server import db, get_user_from_token, require_role, now_iso  # noqa: E402
+from server import db, get_user_from_token, require_role, now_iso, compute_textile_day  # noqa: E402
 
 router = APIRouter(prefix="/api/admin/labour-reports", tags=["labour-reports"])
 
@@ -402,11 +403,28 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
         cols = ["Date"] + EMP_HEAD + ["In", "Out", "Hours"] + extra_cols
         rows = []
         for d in dates:
+            wd = date.fromisoformat(d).weekday()
             for e in emps:
                 recs = recs_by.get((e["user_id"], d))
                 if not recs:
                     continue
                 s = _day_summary(recs, policy, e)
+                # Iter 529 (user request) — Hours / OT / Status come from
+                # the firm-master attendance-policy engine (incl. the
+                # "Count Present Day @ 8 HRS" rule) so EVERY report in the
+                # hub matches the Attendance Grid.
+                eng = compute_textile_day(recs, policy, e, wd)
+                if _compliance_8hr_on(policy):
+                    h_, o_, p_ = _apply_compliance_8hr(policy, e, eng)
+                else:
+                    h_, o_, p_ = (eng["duty_hours"], eng["ot_hours"],
+                                  eng["present_days"])
+                    if o_ > 0 and h_ >= o_:
+                        h_ = round(h_ - o_, 2)  # engine folds OT into duty
+                s["hours"], s["ot_hours"] = h_, o_
+                s["status"] = ("P" if p_ >= 1.0 else "HD" if p_ >= 0.5
+                               else "OT" if o_ > 0
+                               else "P" if h_ > 0 else s["status"])
                 if not pred(s, d, e):
                     continue
                 rows.append([d] + _emp_cols(e) + [s["first_in"], s["last_out"], s["hours"]]
@@ -474,7 +492,6 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
         # firm-master attendance-policy engine (compute_textile_day) plus
         # the "Count Present Day @ 8 HRS — Compliance" rule, so the
         # Monthly Attendance Register matches the Attendance Grid.
-        from server import compute_textile_day
         cols = EMP_HEAD + ["Present", "Half Days", "Absent", "WO", "Total Hours", "OT Hours", "Late Days"]
         rows = []
         for e in emps:
@@ -530,12 +547,13 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
         return day_rows(lambda s, d, e: s["status"] == "HD", ["Shortfall"],
                         lambda s, d, e: [f"{s['hours']}h worked"])
     if key == "overtime_register":
-        # Iter 526 (user request) — Cost column: that day's pay (base +
-        # OT at the policy multiplier) per Firm Master + Employee Policy.
+        # Iter 526/529 — OT from the policy engine; Cost = that day's pay
+        # (base + OT at the policy multiplier) per Firm Master + Employee
+        # Policy. "Hours" col = regular duty; Total Worked = duty + OT.
         return day_rows(lambda s, d, e: s["ot_hours"] > 0,
-                        ["OT Hours", "Normal Hours", "Cost"],
+                        ["OT Hours", "Total Worked Hrs", "Cost"],
                         lambda s, d, e: [
-                            s["ot_hours"], round(s["hours"] - s["ot_hours"], 2),
+                            s["ot_hours"], round(s["hours"] + s["ot_hours"], 2),
                             _day_cost(e, policy, d, _present_of_status(s["status"]),
                                       s["hours"], s["ot_hours"])])
     if key == "double_shift":
@@ -588,7 +606,6 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
         #   OT paid at the policy OT multiplier).
         # • Optional grouping (Department / Designation wise) with band
         #   rows + per-group subtotals — display and ALL downloads follow.
-        from server import compute_textile_day
 
         group_by = str(policy.get("_group_by") or "").strip().lower()
         if group_by not in ("department", "designation"):
@@ -608,7 +625,8 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
                 eng = compute_textile_day(recs, policy, e, wd)
                 # Iter 528 — honour "Count Present Day @ 8 HRS" firm policy.
                 hours, ot, pd_ = _apply_compliance_8hr(policy, e, eng)
-                cost = _day_cost(e, policy, d, pd_, hours, ot)
+                # Iter 530 (user request) — Cost shown in ROUND figures.
+                cost = round(_day_cost(e, policy, d, pd_, hours, ot))
                 # Status follows the SAME policy engine as Hours/OT.
                 status = ("P" if pd_ >= 1.0 else "HD" if pd_ >= 0.5
                           else "OT" if ot > 0 else "P" if hours > 0
@@ -629,7 +647,7 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
             r[0] = f"{label}  ·  {n_emps} deployed"
             r[9] = round(h, 2)
             r[10] = round(o, 2)
-            r[11] = round(c, 2)
+            r[11] = round(c)  # Iter 530 — round-figure cost
             return r
 
         rows = []
@@ -893,13 +911,16 @@ def _excel_bytes(title, header_lines, columns, rows) -> bytes:
             ws.row_dimensions[r_i].height = 26
     for c_i, col_name in enumerate(columns, start=1):
         letter = ws.cell(row=1, column=c_i).column_letter
-        ws.column_dimensions[letter].width = 28 if col_name == "Signature" else 16
+        # Iter 530 (user request) — slim S.No. column.
+        ws.column_dimensions[letter].width = (
+            28 if col_name == "Signature" else 6 if col_name == "S.No." else 16)
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()
 
 
-def _pdf_bytes(title, company, header_meta, columns, rows, verify_id) -> bytes:
+def _pdf_bytes(title, company, header_meta, columns, rows, verify_id,
+               verify_url: Optional[str] = None) -> bytes:
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors as rl_colors
     from reportlab.lib.units import mm
@@ -924,7 +945,7 @@ def _pdf_bytes(title, company, header_meta, columns, rows, verify_id) -> bytes:
                 io.BytesIO(base64.b64decode(company["logo_base64"])))
         except Exception:
             logo_reader = None
-    qr_widget = rl_qr.QrCodeWidget(f"SKS-REPORT:{verify_id}")
+    qr_widget = rl_qr.QrCodeWidget(verify_url or f"SKS-REPORT:{verify_id}")
     b = qr_widget.getBounds()
     dr = Drawing(16 * mm, 16 * mm,
                  transform=[16 * mm / (b[2] - b[0]), 0, 0, 16 * mm / (b[3] - b[1]), 0, 0])
@@ -998,12 +1019,19 @@ def _pdf_bytes(title, company, header_meta, columns, rows, verify_id) -> bytes:
     # box and taller rows so it prints properly for physical sign-off.
     col_widths = None
     has_sig = "Signature" in columns
-    if has_sig:
+    has_sno = "S.No." in columns
+    if has_sig or has_sno:
+        # Iter 530 (user request) — slim S.No. column in the PDF too.
         avail = page[0] - 20 * mm
-        sig_w = 34 * mm
-        other = (avail - sig_w) / max(1, len(columns) - 1)
+        sig_w = 34 * mm if has_sig else 0
+        sno_w = 9 * mm if has_sno else 0
+        n_other = len(columns) - int(has_sig) - int(has_sno)
+        other = (avail - sig_w - sno_w) / max(1, n_other)
         col_widths = [other] * len(columns)
-        col_widths[columns.index("Signature")] = sig_w
+        if has_sig:
+            col_widths[columns.index("Signature")] = sig_w
+        if has_sno:
+            col_widths[columns.index("S.No.")] = sno_w
     tbl = Table(data, repeatRows=1, colWidths=col_widths)
     tbl.setStyle(TableStyle([
         # Iter 526 (user request) — heading row WHITE (no blue background).
@@ -1145,7 +1173,46 @@ async def generate(payload: Dict[str, Any] = Body(...),
                 if from_date <= _dk <= to_date:
                     recs_by[(_uid, _dk)] = _plist
     columns, rows = build_report(key, emps, recs_by, policy, dates)
+    # Iter 530 (user request) — generic "Group Wise" formatting (all
+    # reports; Shift Deployment has its own native grouping): ▶ band rows
+    # + per-group SUBTOTALS of every numeric column + GRAND TOTAL. The
+    # on-screen preview AND the PDF / Excel / CSV downloads all follow it.
+    _gb = str(filters.get("group_by") or "").strip().lower()
+    _gb_col = {"department": "Department", "designation": "Designation",
+               "contractor": "Contractor"}.get(_gb)
+    if key != "shift_deployment" and _gb_col and _gb_col in columns and rows:
+        gi = columns.index(_gb_col)
+        num_idx = [i for i in range(len(columns))
+                   if i != gi and all(isinstance(r[i], (int, float))
+                                      and not isinstance(r[i], bool)
+                                      for r in rows)]
+        groups: Dict[str, list] = {}
+        for r in rows:
+            groups.setdefault(str(r[gi] or "").strip() or "— Not Set —",
+                              []).append(r)
+
+        def _tot_row(lbl: str, rs: list) -> list:
+            t: list = [""] * len(columns)
+            t[0] = f"{lbl}  ·  {len(rs)} rows"
+            for i in num_idx:
+                t[i] = round(sum(float(r[i]) for r in rs), 2)
+            return t
+
+        new_rows: list = []
+        for g in sorted(groups):
+            band: list = [""] * len(columns)
+            band[0] = f"▶ {_gb_col.upper()}: {g}"
+            new_rows.append(band)
+            new_rows.extend(groups[g])
+            new_rows.append(_tot_row(f"SUBTOTAL — {g}", groups[g]))
+        new_rows.append(_tot_row("GRAND TOTAL", rows))
+        rows = new_rows
     label = next(c["label"] for c in CATALOGUE if c["key"] == key)
+    # Iter 531 (user request) — grouped reports show the grouping name in
+    # the heading of the PDF / Excel / preview too.
+    _gb_label = str(filters.get("group_by") or "").strip().lower()
+    if _gb_label in ("department", "designation", "contractor"):
+        label = f"{label} — {_gb_label.capitalize()} Wise"
 
     company = await db.companies.find_one(
         {"company_id": company_id},
@@ -1154,11 +1221,19 @@ async def generate(payload: Dict[str, Any] = Body(...),
     gen_by = admin.get("name") or admin.get("email") or "Admin"
     verify_id = f"lrv_{uuid.uuid4().hex[:10]}"
     await db.report_verifications.insert_one({
-        "verify_id": verify_id, "report_key": key, "company_id": company_id,
+        "verify_id": verify_id, "report_key": key, "report_label": label,
+        "company_id": company_id, "company_name": (company or {}).get("name") or "",
         "from_date": from_date, "to_date": to_date, "rows": len(rows),
         "generated_by": admin.get("user_id"), "generated_by_name": gen_by,
         "generated_at": now_iso(),
     })
+    # Iter 531 (user question) — the QR is the report AUTHENTICITY seal:
+    # scanning it opens a public verification page proving this exact
+    # print was generated by the portal (report, firm, period, row count,
+    # generated when/by whom). Encode a real URL so any phone camera works.
+    _base = (os.environ.get("APP_PUBLIC_URL") or "").rstrip("/")
+    verify_url = (f"{_base}/api/admin/labour-reports/verify/{verify_id}"
+                  if _base else f"SKS-REPORT:{verify_id}")
     # Iter 526 (user request) — PDF heading: single day shows "Date: …"
     # (not "Period: X to X"); Generated time moves to the page bottom and
     # "Generated by" is removed from the print.
@@ -1187,14 +1262,60 @@ async def generate(payload: Dict[str, Any] = Body(...),
     if fmt == "pdf":
         return {"filename": f"{stem}.pdf",
                 "file_base64": base64.b64encode(
-                    _pdf_bytes(label, company or {}, header_meta, columns, rows, verify_id)).decode()}
+                    _pdf_bytes(label, company or {}, header_meta, columns, rows, verify_id, verify_url)).decode()}
     raise HTTPException(status_code=400, detail="format must be json|csv|excel|pdf")
 
 
 @router.get("/verify/{verify_id}")
-async def verify_report(verify_id: str):
-    """Public verification endpoint for the QR code on printed reports."""
+async def verify_report(verify_id: str, format: Optional[str] = None):
+    """Iter 531 — public verification page for the QR printed on every
+    report. Scanning the QR opens this page: it proves the print is a
+    GENUINE portal-generated report (which report, firm, period, rows,
+    generated when and by whom). ?format=json returns machine-readable."""
+    from fastapi.responses import HTMLResponse
     doc = await db.report_verifications.find_one({"verify_id": verify_id}, {"_id": 0})
+    if format == "json":
+        if not doc:
+            raise HTTPException(status_code=404, detail="Unknown verification code")
+        return {"ok": True, "verification": doc}
     if not doc:
-        raise HTTPException(status_code=404, detail="Unknown verification code")
-    return {"ok": True, "verification": doc}
+        return HTMLResponse(status_code=404, content="""
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Report Verification</title></head>
+<body style="font-family:system-ui,Arial;background:#FEF2F2;margin:0;padding:24px;text-align:center">
+<div style="max-width:420px;margin:40px auto;background:#fff;border:2px solid #DC2626;border-radius:14px;padding:28px">
+<div style="font-size:44px">❌</div>
+<h2 style="color:#DC2626;margin:8px 0">NOT A VALID REPORT CODE</h2>
+<p style="color:#475569">This verification code was not issued by the S.K. Sharma &amp; Co. portal.
+The document may be forged or tampered with.</p></div></body></html>""")
+
+    def _dmy(s):
+        s = str(s or "")
+        return f"{s[8:10]}-{s[5:7]}-{s[:4]}" if len(s) >= 10 else s
+    period = (_dmy(doc.get("from_date"))
+              if doc.get("from_date") == doc.get("to_date")
+              else f"{_dmy(doc.get('from_date'))} to {_dmy(doc.get('to_date'))}")
+    rows_html = "".join(
+        f"<tr><td style='padding:6px 10px;color:#64748B'>{k}</td>"
+        f"<td style='padding:6px 10px;font-weight:700;color:#0F172A'>{v}</td></tr>"
+        for k, v in [
+            ("Report", doc.get("report_label") or doc.get("report_key")),
+            ("Firm", doc.get("company_name") or doc.get("company_id")),
+            ("Period", period),
+            ("Data rows", doc.get("rows")),
+            ("Generated by", doc.get("generated_by_name")),
+            ("Generated at", _dmy(str(doc.get("generated_at") or "")[:10])
+             + " " + str(doc.get("generated_at") or "")[11:16]),
+            ("Verification code", verify_id),
+        ])
+    return HTMLResponse(content=f"""
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Genuine Report — S.K. Sharma &amp; Co.</title></head>
+<body style="font-family:system-ui,Arial;background:#F0FDF4;margin:0;padding:24px">
+<div style="max-width:460px;margin:30px auto;background:#fff;border:2px solid #16A34A;border-radius:14px;padding:26px;text-align:center">
+<div style="font-size:44px">✅</div>
+<h2 style="color:#15803D;margin:8px 0">GENUINE REPORT</h2>
+<p style="color:#475569;margin:0 0 14px">This document was generated by the S.K. Sharma &amp; Co. HRMS portal.</p>
+<table style="margin:0 auto;text-align:left;border-collapse:collapse">{rows_html}</table>
+<p style="color:#94A3B8;font-size:12px;margin-top:16px">"Your Satisfaction is Our First Ambition"</p>
+</div></body></html>""")
