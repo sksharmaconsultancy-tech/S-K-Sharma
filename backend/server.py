@@ -3151,6 +3151,25 @@ async def _create_core_indexes():
         await db.legacy_salary_history.create_index([("company_id", 1), ("month", 1)])
         await db.punch_logs.create_index([("company_id", 1), ("punched_at", -1)])
         await db.device_commands.create_index([("device_id", 1), ("status", 1)])
+        # Iter 521 (user: "increase speed of system") — indexes for the
+        # heaviest remaining query patterns:
+        #   • grid punch load: user_id $in + date range, sorted (user_id, at)
+        await db.attendance.create_index(
+            [("user_id", 1), ("date", 1), ("at", 1)])
+        #   • punch-log NOT-FOUND rows + sync-dashboard machine_only group
+        await db.biometric_unmapped.create_index(
+            [("device_serial", 1), ("at", -1)])
+        await db.biometric_unmapped.create_index([("at", -1)])
+        await db.biometric_unmapped.create_index(
+            [("device_user_id", 1), ("device_serial", 1)])
+        #   • machine-user harvest lookups (name-in-machine / never-punched)
+        await db.biometric_machine_users.create_index(
+            [("device_serial", 1), ("pin", 1)])
+        await db.biometric_machine_users.create_index("company_id")
+        #   • biometric PIN → employee master matching
+        await db.users.create_index([("company_id", 1), ("bio_code", 1)])
+        await db.biometric_devices.create_index("serial_number")
+        await db.holidays.create_index([("company_id", 1), ("date", 1)])
     except Exception as _idx_err:  # noqa: BLE001
         logger.warning(f"[startup] index creation warning: {_idx_err}")
 
@@ -9416,7 +9435,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "521"
+APP_ITERATION = "522"
 
 
 @api.get("/version")
@@ -10260,7 +10279,9 @@ async def _compute_monthly_grid_data(
                     (duty_only_hrs * 60.0 - _smm_fixed_lunch) / 60.0, 2)
             ot_hrs = 0.0
             if ot_in_dt and ot_out_dt:
-                _ot_min = (ot_out_dt - ot_in_dt).total_seconds() / 60.0
+                # Iter 521 (code review) — OT window also uses WORKED
+                # minutes so a break during overtime never counts as OT.
+                _ot_min = worked_minutes_in_window(day_punches, ot_in_dt, ot_out_dt)
                 _ot_min = _round_minutes(_ot_min, _round_step)
                 ot_hrs = round(_ot_min / 60.0, 2)
             # Cap regular duty at the shift length. Any spillover joins OT.
@@ -10766,7 +10787,11 @@ async def _build_ot_report_rows(
             _round_step = int(eff_policy.get("duty_hours_rounding_minutes") or 0)
             duty_only = 0.0
             if reg_in_dt and reg_out_dt:
-                _duty_min = (reg_out_dt - reg_in_dt).total_seconds() / 60.0
+                # Iter 521 (code review) — duty = WORKED minutes (pair-sum,
+                # lunch/break gaps excluded), mirroring the grid so the OT
+                # Report can never turn a lunch break into OT via the
+                # shift-length spillover below.
+                _duty_min = worked_minutes_in_window(day_punches, reg_in_dt, reg_out_dt)
                 _duty_min = _round_minutes(_duty_min, _round_step)
                 duty_only = round(_duty_min / 60.0, 2)
             # Iter 503 — Single Machine Mode fixed-lunch deduction.

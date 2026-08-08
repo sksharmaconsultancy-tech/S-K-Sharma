@@ -513,15 +513,6 @@ const styles = StyleSheet.create({
     maxWidth: 260,
   },
   outlineBtnTxt: { fontSize: 12, fontWeight: "700", color: BRAND, flexShrink: 1 },
-  searchRow: {
-    flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1,
-    borderColor: colors.border, borderRadius: 999, paddingHorizontal: 12,
-    paddingVertical: 8, backgroundColor: colors.surfaceSecondary,
-  },
-  searchInput: {
-    flex: 1, fontSize: 13, color: colors.onSurface, paddingVertical: 0,
-    ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as any) : null),
-  },
   chip: {
     paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1,
     borderColor: colors.border, backgroundColor: colors.surface, maxWidth: 220,

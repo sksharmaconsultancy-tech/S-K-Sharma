@@ -4951,3 +4951,17 @@ after inout_ot_matrix. Frontend /app/frontend/app/present-absent-report.tsx
 (+ AdminWebShell nav x2 "Present / Absent Report"). Verified: JSON 127 emps
 Kankani, WO on Sundays, future days blank; xlsx/pdf 200; screenshot OK.
 APP_ITERATION=521, deploy_vps_iter521.sh, temp_bundle → deploy521.sh.
+
+## Iter 522 (2026-08-07) — Code review fixes + speed
+code_review_agent full review found 2 real bugs (both fixed in server.py):
+(a) HIGH — OT Report duty still wall-clock (line ~10769) so lunch spilled
+into OT via shift cap; now worked_minutes_in_window. (b) MEDIUM — grid OT
+window (line ~10263) wall-clock counted gaps between OT sessions; now
+worked. All 4 duty/OT sites use worked_minutes_in_window (verified
+grep-count 4 + math test: 10h worked/1h lunch/8h shift → duty 480, OT 120).
+SPEED (user request): 10 new startup indexes — attendance(user,date,at),
+biometric_unmapped(serial,at / at / pin,serial), biometric_machine_users
+(serial,pin / company), users(company,bio_code), biometric_devices(serial),
+holidays(company,date). GZip already active. Dead styles removed
+(esic-leave searchRow/searchInput). APP_ITERATION=522,
+deploy_vps_iter522.sh, temp_bundle → deploy522.sh.
