@@ -2988,6 +2988,41 @@ async def startup():
     asyncio.create_task(_bg_apply_textile_default())
     asyncio.create_task(_bg_enforce_geofence_defaults())
 
+    async def _bg_speed_indexes():
+        """Iter 523c — the Iter-521 'speed' indexes MUST build in the
+        BACKGROUND: building them synchronously in startup blocked uvicorn
+        from answering for minutes on the live VPS (large attendance /
+        biometric_unmapped collections) and the deploy health-check
+        reported 'BACKEND NOT ANSWERING'."""
+        await asyncio.sleep(5)
+        try:
+            # grid punch load: user_id $in + date range, sorted (user_id, at)
+            await db.attendance.create_index(
+                [("user_id", 1), ("date", 1), ("at", 1)], background=True)
+            # punch-log NOT-FOUND rows + sync-dashboard machine_only group
+            await db.biometric_unmapped.create_index(
+                [("device_serial", 1), ("at", -1)], background=True)
+            await db.biometric_unmapped.create_index(
+                [("at", -1)], background=True)
+            await db.biometric_unmapped.create_index(
+                [("device_user_id", 1), ("device_serial", 1)], background=True)
+            # machine-user harvest lookups (name-in-machine / never-punched)
+            await db.biometric_machine_users.create_index(
+                [("device_serial", 1), ("pin", 1)], background=True)
+            await db.biometric_machine_users.create_index(
+                "company_id", background=True)
+            # biometric PIN → employee master matching
+            await db.users.create_index(
+                [("company_id", 1), ("bio_code", 1)], background=True)
+            await db.biometric_devices.create_index(
+                "serial_number", background=True)
+            await db.holidays.create_index(
+                [("company_id", 1), ("date", 1)], background=True)
+            logger.info("[iter523] speed indexes ready")
+        except Exception:
+            logger.exception("[iter523] speed index build failed")
+    asyncio.create_task(_bg_speed_indexes())
+
     # Iter 92 — monthly Master-Data email to firm admins (1st of month).
     try:
         from routes.master_data_report import monthly_master_data_email_loop
@@ -3151,25 +3186,6 @@ async def _create_core_indexes():
         await db.legacy_salary_history.create_index([("company_id", 1), ("month", 1)])
         await db.punch_logs.create_index([("company_id", 1), ("punched_at", -1)])
         await db.device_commands.create_index([("device_id", 1), ("status", 1)])
-        # Iter 521 (user: "increase speed of system") — indexes for the
-        # heaviest remaining query patterns:
-        #   • grid punch load: user_id $in + date range, sorted (user_id, at)
-        await db.attendance.create_index(
-            [("user_id", 1), ("date", 1), ("at", 1)])
-        #   • punch-log NOT-FOUND rows + sync-dashboard machine_only group
-        await db.biometric_unmapped.create_index(
-            [("device_serial", 1), ("at", -1)])
-        await db.biometric_unmapped.create_index([("at", -1)])
-        await db.biometric_unmapped.create_index(
-            [("device_user_id", 1), ("device_serial", 1)])
-        #   • machine-user harvest lookups (name-in-machine / never-punched)
-        await db.biometric_machine_users.create_index(
-            [("device_serial", 1), ("pin", 1)])
-        await db.biometric_machine_users.create_index("company_id")
-        #   • biometric PIN → employee master matching
-        await db.users.create_index([("company_id", 1), ("bio_code", 1)])
-        await db.biometric_devices.create_index("serial_number")
-        await db.holidays.create_index([("company_id", 1), ("date", 1)])
     except Exception as _idx_err:  # noqa: BLE001
         logger.warning(f"[startup] index creation warning: {_idx_err}")
 

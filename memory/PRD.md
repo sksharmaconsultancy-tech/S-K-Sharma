@@ -4986,3 +4986,11 @@ father_name. PDF: Department col → removed; groupby department (sorted
 dept+code) grey SPAN band rows (5.5mm), continuous S.No., Father Name col
 after name; rowHeights list per band/data row. HEADERS/_row_values (xlsx/
 csv) add Father Name (col widths 19 letters). Verified via pdftoppm.
+
+## Iter 523c — VPS deploy failures explained/fixed
+User's VPS deploy reported (a) "BACKEND STILL NOT ANSWERING": Iter-521
+speed indexes were built SYNCHRONOUSLY in @startup → blocked uvicorn for
+minutes on live data. Moved to _bg_speed_indexes() create_task (sleep 5,
+background=True). (b) "Portal responds through nginx: HTTP 301 ❌": nginx
+HTTP→HTTPS redirect (SSL) — NOT an error; deploy523.sh now retries health
+12x5s and follows the redirect (301/302 → checks https, marks OK).

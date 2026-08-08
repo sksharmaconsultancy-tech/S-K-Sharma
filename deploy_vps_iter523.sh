@@ -222,8 +222,13 @@ sudo supervisorctl stop sksharma-backend 2>/dev/null || true
 sudo fuser -k 8001/tcp 2>/dev/null || true
 sleep 2
 sudo supervisorctl start sksharma-backend 2>/dev/null || sudo systemctl restart sksharma-backend 2>/dev/null || true
-sleep 4
-HEALTH=$(curl -s -m 8 http://localhost:8001/api/health)
+HEALTH=""
+for i in $(seq 1 12); do
+  sleep 5
+  HEALTH=$(curl -s -m 8 http://localhost:8001/api/health)
+  [ -n "$HEALTH" ] && break
+  echo "   waiting for backend... (${i}0s)"
+done
 if [ -n "$HEALTH" ]; then
   echo "   Backend healthy ✅  ($HEALTH)"
 else
@@ -290,8 +295,15 @@ echo -n "   Backend /api/health: "
 curl -s -m 5 http://localhost:8001/api/health || echo "❌ NOT ANSWERING"
 echo ""
 echo -n "   Portal responds through nginx: "
-CODE=$(curl -s -m 8 -o /dev/null -w "%{http_code}" http://localhost/ )
-echo "HTTP $CODE $( [ "$CODE" = "200" ] && echo '✅' || echo '❌' )"
+CODE=$(curl -s -k -L -m 10 -o /dev/null -w "%{http_code}" http://localhost/ )
+if [ "$CODE" = "200" ]; then
+  echo "HTTP $CODE ✅"
+elif [ "$CODE" = "301" ] || [ "$CODE" = "302" ]; then
+  CODE2=$(curl -s -k -m 10 -o /dev/null -w "%{http_code}" https://localhost/ )
+  echo "HTTP $CODE → HTTPS $CODE2 $( [ "$CODE2" = "200" ] && echo '✅ (HTTP→HTTPS redirect is normal with SSL)' || echo '❌' )"
+else
+  echo "HTTP $CODE ❌"
+fi
 
 echo ""
 echo "==> 10/10 FORENSIC REPORT — Registered IN MACHINE but NOT in Database"
