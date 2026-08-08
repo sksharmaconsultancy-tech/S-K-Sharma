@@ -4994,3 +4994,25 @@ minutes on live data. Moved to _bg_speed_indexes() create_task (sleep 5,
 background=True). (b) "Portal responds through nginx: HTTP 301 ❌": nginx
 HTTP→HTTPS redirect (SSL) — NOT an error; deploy523.sh now retries health
 12x5s and follows the redirect (301/302 → checks https, marks OK).
+
+## Iter 524 (2026-06) — Punch-Time Photo Capture & Display (user feature)
+Backend punch_logs.py (fixed missing imports base64/Response that broke
+boot): rows carry photo_status captured|pending|missing (pending = parked
+ATTPHOTO in biometric_photos for same serial+PIN ±90s); GET /admin/
+punch-logs?photo=available|missing|pending filter; GET /admin/punch-logs/
+photo.jpg?ref&token= raw JPEG for <img> thumbnails (auth via query token);
+GET /admin/punch-logs.pdf?include_photos=0|1 (RLImage thumbnails, cap 400
+rows w/ photos, 1500 w/o); GET /admin/punch-photos/reconciliation (total/
+received/pending/missing/failed>48h/parked); POST /admin/punch-photos/
+retry-match re-runs parked-photo queue (verified E2E: pending→captured).
+ATTPHOTO ingest in biometric_devices.py was already async/non-blocking.
+Frontend punch-log-report.tsx: Punch Photo col = inline thumbnail
+(✓ Captured, tap→modal) / ⏳ Sync Pending / ✕ No Photo; token stashed in
+__plrToken before fetch; Punch Photo filter dropdown; PDF + PDF+Photos +
+Photo Sync header buttons. NEW app/photo-sync.tsx: 6 metric cards +
+coverage bar + firm/date filters + Retry Photo Sync. AdminWebShell menu
+entry after Punch Log Report. Testing agent: 15/15 backend pytest
+(tests/test_iter524_punch_photos.py) + frontend E2E PASS
+(test_reports/iteration_524.json). APP_ITERATION=524,
+deploy_vps_iter524.sh, temp_bundle → deploy524.sh (step 9 prints live
+photo-coverage stats + machine 'Attendance Photo' enable hint).
