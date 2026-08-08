@@ -5058,3 +5058,11 @@ _compute_monthly_grid_data) → night-shift OUT on next calendar day now
 shows; verified VINIT 19:57→08:03 12h. pypdf verified header on all 26
 pages, no Verify text. Deploy script deploy_vps_iter525.sh notes updated
 (items 10-14). APP_ITERATION stays 525.
+
+## Iter 526b — All 22 labour report PDFs verified with new header
+User approved potential improvement: verified via /tmp/check_all_pdfs.py
+(pypdf) that ALL 26 catalogue report keys render the new every-page header
+(firm on p1+last, Date/Period, Generated footer, NO Verify text): 25 OK,
+dummy_shift correctly 400 (firm policy off). Portrait layout (department
+_wise) visually checked — no overlap. No code change needed (shared
+_pdf_bytes).
