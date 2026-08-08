@@ -20,6 +20,10 @@
 #  9. Legend line removed from the print.
 # 10. "S.No." column before the Employee Code (Daily Verification PDF/
 #     Excel/CSV + Present/Absent Report PDF).
+# 11. Department COLUMN removed from the print — rows are now GROUPED
+#     department-wise with a grey band per department.
+# 12. FATHER NAME column added next to the employee name (PDF + Excel
+#     + CSV).
 #
 # ═════════════ ALSO INCLUDED (Iter 522) ═════════════
 #

@@ -44,7 +44,8 @@ ROW_COLORS = {          # hex fills shared by screen + xlsx + pdf
     "muted": "E2E8F0",   # absent / WO / holiday / leave
 }
 
-HEADERS = ["S.No.", "Emp Code", "Employee Name", "Department", "Designation",
+HEADERS = ["S.No.", "Emp Code", "Employee Name", "Father Name", "Department",
+           "Designation",
            "Contractor", "Punch In", "Punch Out", "Work Hrs", "OT In",
            "OT Out", "OT Hrs", "Total Duty Hrs", "Attendance Status",
            "Signature", "Verified", "Verified By", "Remarks"]
@@ -164,7 +165,8 @@ async def _build(company_id: str, date: str,
         {"_id": 0, "user_id": 1, "employee_code": 1, "department": 1,
          "designation": 1, "position": 1, "employee_type": 1,
          "contractor_name": 1, "shift_name": 1, "employee_group": 1,
-         "exit_date": 1, "employment_status": 1, "ot_applicable": 1},
+         "exit_date": 1, "employment_status": 1, "ot_applicable": 1,
+         "father_name": 1},
     ):
         extra[u["user_id"]] = u
 
@@ -319,6 +321,7 @@ async def _build(company_id: str, date: str,
             "employee_code": emp.get("employee_code") or "",
             "bio_code": bio_map.get(uid) or "",
             "name": emp.get("name") or "",
+            "father_name": (ex.get("father_name") or emp.get("father_name") or ""),
             "department": dept, "designation": desig,
             "contractor": contr, "category": etype, "shift": shf,
             "group": grp,
@@ -562,7 +565,8 @@ def _summary_lines(data: dict) -> List[str]:
 
 def _row_values(i: int, r: dict) -> list:
     st = r["status"] + ("" if not r["markers"] else " · " + ", ".join(r["markers"]))
-    return [i, r["employee_code"], r["name"], r["department"], r["designation"],
+    return [i, r["employee_code"], r["name"], r.get("father_name") or "",
+            r["department"], r["designation"],
             r["contractor"], r["punch_in"], r["punch_out"], r["work_hours"],
             r["ot_in"], r["ot_out"], r["ot_hours"], r["total_hours"], st,
             "", "YES" if r["verified"] else "",
@@ -592,8 +596,8 @@ def _build_xlsx(data: dict) -> bytes:
         fill = PatternFill("solid", fgColor=ROW_COLORS[r["color"]])
         for c in ws[ws.max_row]:
             c.fill = fill
-    for col, w in zip("ABCDEFGHIJKLMNOPQR",
-                      [5, 9, 24, 14, 14, 16, 9, 9, 9, 9, 9, 8, 10, 30, 14, 9, 16, 20]):
+    for col, w in zip("ABCDEFGHIJKLMNOPQRS",
+                      [5, 9, 24, 20, 14, 14, 16, 9, 9, 9, 9, 9, 8, 10, 30, 14, 9, 16, 20]):
         ws.column_dimensions[col].width = w
     out = io.BytesIO()
     wb.save(out)
@@ -663,10 +667,14 @@ def _build_pdf(data: dict, orientation: str = "landscape") -> bytes:
     # contractors; taller rows + wide Signature column for signing.
     _has_contr = any((r.get("contractor") or "").strip()
                      for r in data["rows"])
-    pdf_headers = ["S.No.", "Bio Code", "Employee Name", "Department",
+    # Iter 524 (user request) — Department COLUMN removed; the print is
+    # GROUPED department-wise with a grey band per department, and the
+    # employee's FATHER NAME is shown next to the name.
+    pdf_headers = ["S.No.", "Bio Code", "Employee Name", "Father Name",
                    "Designation"] + (["Contractor"] if _has_contr else []) + \
                   ["Punch In", "Punch Out", "Work Hrs", "OT In", "OT Out",
                    "OT Hrs", "Total Duty Hrs", "Signature"]
+    n_cols = len(pdf_headers)
     tdata = [pdf_headers]
     tstyle = [
         ("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#1E293B")),
@@ -677,28 +685,48 @@ def _build_pdf(data: dict, orientation: str = "landscape") -> bytes:
         # Iter 435 (user request) — Employee Name column LEFT-aligned.
         ("ALIGN", (2, 1), (2, -1), "LEFT"),
     ]
-    for i, r in enumerate(data["rows"], start=1):
-        tdata.append([str(v) for v in (
-            [i, r.get("bio_code") or r["employee_code"], r["name"],
-             r["department"], r["designation"]]
-            + ([r["contractor"]] if _has_contr else [])
-            + [r["punch_in"], r["punch_out"], r["work_hours"],
-               r["ot_in"], r["ot_out"], r["ot_hours"], r["total_hours"],
-               ""])])
-        # Iter 523 (user request) — rows with BOTH punches are NOT
-        # highlighted; only problem rows keep their colour (missing punch
-        # red, absent/WO/holiday grey, etc.).
-        _both = r["punch_in"] != "-" and r["punch_out"] != "-"
-        if not _both and r["color"] != "green":
-            tstyle.append(("BACKGROUND", (0, i), (-1, i),
-                           rl.HexColor("#" + ROW_COLORS[r["color"]])))
     # Iter 523 (user request) — taller rows so employees can sign properly.
     _row_h = 9 * mm if orientation != "portrait" else 8 * mm
+    row_heights: list = [None]
+    from itertools import groupby
+    rows_sorted = sorted(
+        data["rows"],
+        key=lambda r: ((r.get("department") or "~").lower(),
+                       str(r.get("employee_code") or "")))
+    ridx = 0
+    sno = 0
+    for dept, grp in groupby(rows_sorted,
+                             key=lambda r: r.get("department") or ""):
+        ridx += 1
+        tdata.append([f"DEPARTMENT — {dept or 'No Department'}"]
+                     + [""] * (n_cols - 1))
+        tstyle += [
+            ("SPAN", (0, ridx), (-1, ridx)),
+            ("BACKGROUND", (0, ridx), (-1, ridx), rl.HexColor("#CBD5E1")),
+            ("FONTNAME", (0, ridx), (-1, ridx), "Helvetica-Bold"),
+        ]
+        row_heights.append(5.5 * mm)
+        for r in grp:
+            ridx += 1
+            sno += 1
+            tdata.append([str(v) for v in (
+                [sno, r.get("bio_code") or r["employee_code"], r["name"],
+                 r.get("father_name") or "", r["designation"]]
+                + ([r["contractor"]] if _has_contr else [])
+                + [r["punch_in"], r["punch_out"], r["work_hours"],
+                   r["ot_in"], r["ot_out"], r["ot_hours"],
+                   r["total_hours"], ""])])
+            row_heights.append(_row_h)
+            # Iter 523 (user request) — rows with BOTH punches are NOT
+            # highlighted; only problem rows keep their colour.
+            _both = r["punch_in"] != "-" and r["punch_out"] != "-"
+            if not _both and r["color"] != "green":
+                tstyle.append(("BACKGROUND", (0, ridx), (-1, ridx),
+                               rl.HexColor("#" + ROW_COLORS[r["color"]])))
     # Signature column gets a fixed generous width; the rest auto-size.
     _sig_w = 34 * mm if orientation != "portrait" else 26 * mm
-    tbl = Table(tdata, repeatRows=1,
-                rowHeights=[None] + [_row_h] * len(data["rows"]),
-                colWidths=[None] * (len(pdf_headers) - 1) + [_sig_w])
+    tbl = Table(tdata, repeatRows=1, rowHeights=row_heights,
+                colWidths=[None] * (n_cols - 1) + [_sig_w])
     tbl.setStyle(TableStyle(tstyle))
     story.append(tbl)
     story.append(Spacer(1, 4 * mm))

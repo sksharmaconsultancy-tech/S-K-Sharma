@@ -4979,3 +4979,10 @@ daily-verification.tsx: Contractor filter only when contractors exist.
 OT-after-12h per policy = engine (520/522), no extra change. Verified:
 pdftoppm renders correct for landscape+portrait+present-absent.
 APP_ITERATION=523, deploy_vps_iter523.sh, temp_bundle → deploy523.sh.
+
+## Iter 523b — Daily Verification dept grouping + father name
+daily_verification.py: users projection +father_name; rows carry
+father_name. PDF: Department col → removed; groupby department (sorted
+dept+code) grey SPAN band rows (5.5mm), continuous S.No., Father Name col
+after name; rowHeights list per band/data row. HEADERS/_row_values (xlsx/
+csv) add Father Name (col widths 19 letters). Verified via pdftoppm.
