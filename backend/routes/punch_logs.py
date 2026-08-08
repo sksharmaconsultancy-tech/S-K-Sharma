@@ -14,7 +14,9 @@ from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query
+import base64
+
+from fastapi import APIRouter, Header, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 
 from server import (  # noqa: E402
@@ -156,6 +158,32 @@ async def _query_rows(
     # the JSON payload.
     photo_ids = set(await db.attendance.distinct(
         "record_id", {**q, "selfie_base64": {"$exists": True, "$nin": [None, ""]}}))
+    # Iter 524 (user request) — "⏳ Photo Sync Pending": parked ATTPHOTOs
+    # (photo received, punch not matched yet / vice-versa) in the window.
+    _parked: Dict[tuple, List[str]] = {}
+    _pk_q: Dict[str, Any] = {}
+    if from_date:
+        _pk_q.setdefault("at", {})["$gte"] = f"{from_date}T00:00:00"
+    if to_date:
+        _pk_q.setdefault("at", {})["$lte"] = f"{to_date}T23:59:59.999999"
+    async for _pp in db.biometric_photos.find(
+            _pk_q, {"_id": 0, "device_serial": 1, "device_user_id": 1,
+                    "at": 1}).limit(5000):
+        _parked.setdefault(
+            (str(_pp.get("device_serial") or ""),
+             str(_pp.get("device_user_id") or "")), []).append(str(_pp["at"]))
+
+    def _parked_near(serial: str, pin: str, at_iso: str) -> bool:
+        for cand in (_parked.get((serial, pin)) or []) + \
+                (_parked.get((serial, pin.lstrip("0"))) or [] if pin else []):
+            try:
+                d1 = datetime.fromisoformat(cand.replace("Z", "+00:00"))
+                d2 = datetime.fromisoformat(at_iso.replace("Z", "+00:00"))
+                if abs((d1 - d2).total_seconds()) <= 90:
+                    return True
+            except Exception:
+                continue
+        return False
     # Iter 419 (user request) — flag OT punches: the system convention is
     # that a 2nd IN→OUT pair on the same day is the OT session (same rule
     # as the Day-wise Present/OT count). Everything from the 2nd IN of the
@@ -218,6 +246,10 @@ async def _query_rows(
             "has_photo": r.get("record_id") in photo_ids,
             "photo_ref": (r.get("record_id")
                           if r.get("record_id") in photo_ids else None),
+            # Iter 524 — ✓ captured / ⏳ pending / ✕ not available
+            "photo_status": ("captured" if r.get("record_id") in photo_ids
+                             else ("pending" if _serial and _parked_near(_serial, _pin, at)
+                                   else "missing")),
             "flag": _flag,
         })
     # Iter 341 (user request) — device punches whose BIO CODE matched NO
@@ -322,6 +354,7 @@ async def _query_rows(
             "has_photo": bool(_ph_at),
             "photo_ref": (f"unmapped|{_serial}|{_pin}|{_ph_at}"
                           if _ph_at else None),
+            "photo_status": "captured" if _ph_at else "missing",
             "flag": "not_found",
         })
     rows.sort(key=lambda x: (x.get("date") or "", x.get("time") or ""), reverse=True)
@@ -334,6 +367,7 @@ async def punch_logs(
     machine: Optional[str] = Query(None),
     from_date: Optional[str] = Query(None),
     to_date: Optional[str] = Query(None),
+    photo: Optional[str] = Query(None, description="available | missing | pending"),
     authorization: Optional[str] = Header(None),
 ):
     admin = await get_user_from_token(authorization)
@@ -343,6 +377,11 @@ async def punch_logs(
         company_id = admin.get("company_id")
     data = await _query_rows(admin, company_id, machine, from_date, to_date, MAX_JSON_ROWS)
     rows = data["rows"]
+    # Iter 524 (user request) — Photo Available / Missing / Pending filter.
+    if photo in ("available", "missing", "pending"):
+        rows = [r for r in rows
+                if (r.get("photo_status") or ("captured" if r.get("has_photo") else "missing"))
+                == ("captured" if photo == "available" else photo)]
     return {
         "total": len(rows),
         "truncated": len(rows) > MAX_JSON_ROWS,
@@ -391,6 +430,197 @@ async def punch_log_photo(
                                 {"_id": 0, "name": 1, "employee_code": 1})
     return {"photo_base64": rec["selfie_base64"], "at": rec.get("at"),
             "caption": f"{(u or {}).get('name') or ''} ({(u or {}).get('employee_code') or ''})"}
+
+
+@router.get("/punch-logs/photo.jpg")
+async def punch_log_photo_jpg(
+    ref: str = Query(...),
+    token: str = Query(""),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 524 (user request) — RAW punch-photo bytes for inline
+    THUMBNAILS (<img> tags cannot send Authorization headers, so the
+    session token may come as a query param — still fully auth-gated,
+    never a public URL)."""
+    auth = authorization or (f"Bearer {token}" if token else None)
+    data = await punch_log_photo(ref=ref, authorization=auth)
+    try:
+        img = base64.b64decode(data["photo_base64"])
+    except Exception:
+        raise HTTPException(404, "Photo not found")
+    return Response(content=img, media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=3600"})
+
+
+MAX_PDF_ROWS = 1500
+MAX_PDF_PHOTO_ROWS = 400
+
+
+@router.get("/punch-logs.pdf")
+async def punch_logs_pdf(
+    company_id: Optional[str] = Query(None),
+    machine: Optional[str] = Query(None),
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+    photo: Optional[str] = Query(None),
+    include_photos: int = Query(0),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 524 (user request) — Punch Log PDF export, WITH or WITHOUT the
+    actual punch-time photos."""
+    admin = await get_user_from_token(authorization)
+    if admin.get("role") not in ("super_admin", "sub_admin", "company_admin"):
+        raise HTTPException(403, "Admin only")
+    if admin.get("role") == "company_admin":
+        company_id = admin.get("company_id")
+    cap = MAX_PDF_PHOTO_ROWS if include_photos else MAX_PDF_ROWS
+    data = await _query_rows(admin, company_id, machine, from_date, to_date, cap)
+    rows = data["rows"]
+    if photo in ("available", "missing", "pending"):
+        rows = [r for r in rows
+                if (r.get("photo_status") or ("captured" if r.get("has_photo") else "missing"))
+                == ("captured" if photo == "available" else photo)]
+    rows = rows[:cap]
+    # bulk-load photos for embedded thumbnails
+    _photos: Dict[str, str] = {}
+    if include_photos:
+        _ids = [r["record_id"] for r in rows if r.get("has_photo") and r.get("record_id")]
+        async for rec_ in db.attendance.find(
+                {"record_id": {"$in": _ids[:MAX_PDF_PHOTO_ROWS]}},
+                {"_id": 0, "record_id": 1, "selfie_base64": 1}):
+            if rec_.get("selfie_base64"):
+                _photos[rec_["record_id"]] = rec_["selfie_base64"]
+
+    import io as _io
+    from reportlab.lib import colors as rl
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (Image as RLImage, Paragraph,
+                                    SimpleDocTemplate, Spacer, Table,
+                                    TableStyle)
+    buf = _io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=6 * mm,
+                            rightMargin=6 * mm, topMargin=8 * mm,
+                            bottomMargin=8 * mm, title="Punch Log")
+    W = landscape(A4)[0] - 12 * mm
+    h1 = ParagraphStyle("h1", fontSize=13, leading=16, alignment=1,
+                        fontName="Helvetica-Bold")
+    h2 = ParagraphStyle("h2", fontSize=8.5, leading=11, alignment=1,
+                        textColor=rl.HexColor("#475569"))
+    flow = [Paragraph("BIOMETRIC PUNCH LOG", h1),
+            Paragraph(f"{from_date or '…'} → {to_date or '…'} · "
+                      f"{len(rows)} punches · "
+                      + ("WITH punch-time photos" if include_photos
+                         else "without photos"), h2),
+            Spacer(1, 3 * mm)]
+    head = ["S.No.", "Date", "Time", "IN/OUT", "Emp Code", "Employee Name",
+            "Bio", "Machine", "Firm", "Status", "Punch Photo"]
+    body: List[list] = [head]
+    styles = [
+        ("GRID", (0, 0), (-1, -1), 0.3, rl.HexColor("#94A3B8")),
+        ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#1E293B")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), rl.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+    ]
+    for i, r in enumerate(rows, start=1):
+        st = r.get("photo_status") or ("captured" if r.get("has_photo") else "missing")
+        if include_photos and r.get("record_id") in _photos:
+            try:
+                cell = RLImage(_io.BytesIO(base64.b64decode(_photos[r["record_id"]])),
+                               width=11 * mm, height=11 * mm)
+            except Exception:
+                cell = "✕ Photo Not Available"
+        else:
+            cell = {"captured": "✓ Photo Captured",
+                    "pending": "⏳ Photo Sync Pending"}.get(st, "✕ Photo Not Available")
+        body.append([str(i), r["date"], r["time"], (r["kind"] or "").upper(),
+                     r["employee_code"], r["name"], r["bio_code"],
+                     (r.get("machine_name") or r["machine"])[:22],
+                     (r["company_name"] or "")[:20], r["status"], cell])
+    t = Table(body, repeatRows=1,
+              colWidths=[W * w for w in
+                         (0.045, 0.08, 0.065, 0.06, 0.07, 0.17, 0.06,
+                          0.13, 0.12, 0.09, 0.11)])
+    t.setStyle(TableStyle(styles))
+    flow.append(t)
+    doc.build(flow)
+    return Response(content=buf.getvalue(), media_type="application/pdf",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="punch-log-{from_date}-{to_date}'
+                             f'{"-photos" if include_photos else ""}.pdf"'})
+
+
+@router.get("/punch-photos/reconciliation")
+async def punch_photo_reconciliation(
+    company_id: Optional[str] = Query(None),
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 524 (user request) — Photo Sync / Reconciliation dashboard:
+    Total Punches · Photos Received · Pending · Missing · Failed."""
+    admin = await get_user_from_token(authorization)
+    if admin.get("role") not in ("super_admin", "sub_admin", "company_admin"):
+        raise HTTPException(403, "Admin only")
+    if admin.get("role") == "company_admin":
+        company_id = admin.get("company_id")
+    data = await _query_rows(admin, company_id, None, from_date, to_date, 10000)
+    rows = [r for r in data["rows"] if str(r.get("source") or "").startswith("zkteco")
+            or r.get("flag") == "not_found"]
+    received = sum(1 for r in rows if r.get("has_photo"))
+    pending = sum(1 for r in rows if r.get("photo_status") == "pending")
+    missing = sum(1 for r in rows if not r.get("has_photo")
+                  and r.get("photo_status") != "pending")
+    # FAILED = parked photos older than 48h that never matched any punch.
+    _cut = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+    failed = await db.biometric_photos.count_documents({"at": {"$lt": _cut}})
+    parked_total = await db.biometric_photos.count_documents({})
+    return {"total_punches": len(rows), "photos_received": received,
+            "photos_pending": pending, "photos_missing": missing,
+            "failed_photo_sync": failed, "parked_photos": parked_total}
+
+
+@router.post("/punch-photos/retry-match")
+async def punch_photo_retry_match(authorization: Optional[str] = Header(None)):
+    """Iter 524 (user request) — re-run the async Photo Matching Queue:
+    every parked ATTPHOTO is re-matched against its punch (same machine +
+    PIN, timestamp ±90s). Attendance is never blocked by this."""
+    admin = await get_user_from_token(authorization)
+    if admin.get("role") not in ("super_admin", "sub_admin"):
+        raise HTTPException(403, "Super/Sub admin only")
+    from routes.biometric_devices import _match_employee_for_bio
+    matched = scanned = 0
+    async for ph in db.biometric_photos.find({}).limit(2000):
+        scanned += 1
+        dev = await db.biometric_devices.find_one(
+            {"serial_number": ph.get("device_serial")},
+            {"_id": 0, "company_id": 1})
+        user = await _match_employee_for_bio(
+            str(ph.get("device_user_id") or ""), (dev or {}).get("company_id"))
+        if not user:
+            continue
+        try:
+            dt = datetime.fromisoformat(str(ph["at"]).replace("Z", "+00:00"))
+        except Exception:
+            continue
+        rec = await db.attendance.find_one(
+            {"user_id": user["user_id"],
+             "device_serial": ph.get("device_serial"),
+             "at": {"$gte": (dt - timedelta(seconds=90)).isoformat(),
+                    "$lte": (dt + timedelta(seconds=90)).isoformat()}},
+            {"_id": 0, "record_id": 1, "selfie_base64": 1}, sort=[("at", 1)])
+        if rec and not rec.get("selfie_base64") and ph.get("photo_base64"):
+            await db.attendance.update_one(
+                {"record_id": rec["record_id"]},
+                {"$set": {"selfie_base64": ph["photo_base64"],
+                          "photo_source": "zkteco_attphoto"}})
+            await db.biometric_photos.delete_one({"_id": ph["_id"]})
+            matched += 1
+    return {"ok": True, "scanned": scanned, "matched": matched}
 
 
 @router.get("/daily-attendance")

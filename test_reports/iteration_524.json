@@ -1,0 +1,44 @@
+{
+  "summary": "Iter 524 Punch-Time Photo Capture: 15/15 backend tests PASS, all frontend E2E flows verified. Punch-log list returns photo_status field (captured/pending/missing) and photo filter works; seeded record zk_1ecabfb2c771 correctly returns photo_status=captured with has_photo=true. Photo JSON + photo.jpg endpoints work (query-token auth confirmed; missing token → 401/403). PDF export valid with/without include_photos=1 (valid %PDF header, size grows with embedded images). Reconciliation totals are consistent (received+pending+missing == total_punches; seed guarantees ≥1 captured). Retry-match returns {ok, scanned, matched}, tolerates empty queue, requires auth. XLSX regression OK. Frontend: Punch Log Report shows Sync from machines / Photo Sync / PDF / PDF+Photos / Download Excel header buttons; Punch Photo filter dropdown offers All/Available/Pending/Missing. Photo Sync screen shows all 6 metric cards (Total Punches=1, Photos Received=1, Pending=0, Missing=0, Failed=0, Parked=0 for Kankani Aug 2026 window), coverage bar (100%), date + firm + Apply filters, and Retry Photo Sync produces 'Re-scanned 0 parked photos · matched 0 to punches'. Sidebar entry defined in AdminWebShell.tsx line 139 (/photo-sync).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/punch-log-report",
+       "issues": ["Punch Photo column appears far right of a wide table; users may need horizontal scroll to see thumbnails. Consider making it sticky or reordering."]}
+    ],
+    "react_native_issues": [
+      {"component": "Web-only <select> element in /photo-sync",
+       "issue": "photo-sync.tsx uses a raw HTML <select> guarded by Platform.OS === 'web' for the Firm filter. Native (iOS/Android via Expo Go) will render NO firm filter at all. Reference: /app/frontend/app/photo-sync.tsx:180-193"},
+      {"component": "Deprecated style props",
+       "issue": "Runtime warnings: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' and 'Image: style.resizeMode is deprecated. Please use props.resizeMode.' — surfacing on both screens, not introduced by iter 524 but present."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter524_punch_photos.py",
+    "/app/test_reports/pytest/iter524.xml"
+  ],
+  "action_items": [
+    "(optional) Add native (mobile) fallback for the Firm dropdown in /photo-sync — currently only web renders the select.",
+    "(optional) Consider making the 'Punch Photo' column sticky or moving it left so thumbnails are visible without horizontal scroll on the Punch Log Report."
+  ],
+  "critical_code_review_comments": [
+    "punch_logs.py is 1004 lines — nearing the 700-line split threshold; consider extracting PDF/XLSX exporters into helper modules.",
+    "retry-match scans up to 2000 photos per call; a very large parked queue may need pagination or a background task. Attendance ingestion is not affected."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter524_punch_photos.py (new)",
+    "/app/test_reports/pytest/iter524.xml (new)",
+    "/app/test_reports/iteration_524.json (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "None. Used pre-seeded record zk_1ecabfb2c771 (SARUK KHAN, 2026-06-20, selfie_base64 present) as directed. Did not delete it.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend suite /app/backend/tests/test_iter524_punch_photos.py covers all iter 524 endpoints. Uses super-admin password login (sksharmaconsultancy@gmail.com / sharma123). Rely on seeded record zk_1ecabfb2c771 for the 'captured' assertions; if this seed is ever deleted, seed will need re-creation. photo.jpg endpoint accepts token via query param (image tags cannot send Authorization header) — this is by design.",
+  "rca_of_issue": "N/A — all features verified working."
+}

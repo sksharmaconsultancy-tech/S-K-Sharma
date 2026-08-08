@@ -21,7 +21,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 
-import { api, apiBinary } from "@/src/api/client";
+import { api, apiBinary, getApiBaseUrl, readAuthToken } from "@/src/api/client";
 import EmployeePhoto from "@/src/components/EmployeePhoto";
 import ReportTable, { ReportCol } from "@/src/components/ReportTable";
 import { useAuth } from "@/src/context/AuthContext";
@@ -47,6 +47,8 @@ type Row = {
   status: string;
   has_photo?: boolean;
   photo_ref?: string | null;
+  // Iter 524 — "captured" | "pending" | "missing"
+  photo_status?: string;
   // Iter 341 — "not_found" | "new_registration" | ""
   flag?: string;
 };
@@ -150,24 +152,51 @@ const COLS: ReportCol<Row>[] = [
   { key: "company_name", label: "Firm", min: 130, max: 240 },
   { key: "status", label: "Status", type: "center", min: 84 },
   {
-    key: "has_photo", label: "Photo", type: "center", min: 56,
-    // Iter 503 (user request) — tap 📷 to VIEW the machine photo, incl.
-    // "NOT FOUND IN MASTER" rows (parked ATTPHOTO of the unknown user).
-    render: (r) => (
-      r.has_photo && r.photo_ref ? (
-        <Pressable
-          onPress={() => (globalThis as any).__punchPhotoOpen?.(r)}
-          hitSlop={8}
-          style={{ alignItems: "center" }}
-          testID={`plr-photo-${r.photo_ref}`}
-        >
-          <Text style={{ fontSize: 13 }}>📷</Text>
-        </Pressable>
-      ) : (
-        <Text style={{ fontSize: 11, color: "#94A3B8", textAlign: "center" }}>—</Text>
-      )
-    ),
-    value: (r) => (r.has_photo ? "📷" : "—"),
+    key: "has_photo", label: "Punch Photo", type: "center", min: 92,
+    // Iter 524 (user request) — inline THUMBNAIL of the actual punch-time
+    // photo (tap to enlarge) + sync status:
+    //   ✓ Photo Captured · ⏳ Photo Sync Pending · ✕ Photo Not Available
+    render: (r) => {
+      const st = r.photo_status || (r.has_photo ? "captured" : "missing");
+      if (r.has_photo && r.photo_ref) {
+        const tok = (globalThis as any).__plrToken || "";
+        return (
+          <Pressable
+            onPress={() => (globalThis as any).__punchPhotoOpen?.(r)}
+            hitSlop={8}
+            style={{ alignItems: "center", gap: 2 }}
+            testID={`plr-photo-${r.photo_ref}`}
+          >
+            {tok ? (
+              <Image
+                source={{
+                  uri: `${getApiBaseUrl()}/admin/punch-logs/photo.jpg?ref=${encodeURIComponent(r.photo_ref)}&token=${encodeURIComponent(tok)}`,
+                }}
+                style={{ width: 36, height: 36, borderRadius: 6, backgroundColor: "#E2E8F0" }}
+              />
+            ) : (
+              <Text style={{ fontSize: 15 }}>📷</Text>
+            )}
+            <Text style={{ fontSize: 9, fontWeight: "800", color: "#15803D" }}>✓ Captured</Text>
+          </Pressable>
+        );
+      }
+      if (st === "pending") {
+        return (
+          <Text style={{ fontSize: 10, fontWeight: "800", color: "#B45309", textAlign: "center" }}>
+            ⏳ Sync{"\n"}Pending
+          </Text>
+        );
+      }
+      return (
+        <Text style={{ fontSize: 10, color: "#94A3B8", textAlign: "center" }}>✕ No Photo</Text>
+      );
+    },
+    value: (r) => {
+      const st = r.photo_status || (r.has_photo ? "captured" : "missing");
+      return st === "captured" ? "✓ Photo Captured"
+        : st === "pending" ? "⏳ Photo Sync Pending" : "✕ Photo Not Available";
+    },
   },
 ];
 
@@ -182,6 +211,8 @@ export default function PunchLogReportScreen() {
   const [toDate, setToDate] = useState<string>(todayIso());
   const [firmId, setFirmId] = useState<string>(selectedCompanyId || "");
   const [machine, setMachine] = useState<string>("");
+  // Iter 524 (user request) — Photo Available / Missing / Pending filter.
+  const [photoFilter, setPhotoFilter] = useState<string>("");
   const [machines, setMachines] = useState<Machine[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   // Iter 517 (user request) — free-text search across the loaded log.
@@ -240,12 +271,19 @@ export default function PunchLogReportScreen() {
     if (toDate) p.set("to_date", toDate);
     if (firmId) p.set("company_id", firmId);
     if (withMachine && machine) p.set("machine", machine);
+    if (photoFilter) p.set("photo", photoFilter);
     return p.toString();
   };
 
   const fetchLog = async (withMachine = true) => {
     setLoading(true);
     try {
+      // Iter 524 — thumbnails need the session token as an <img> query
+      // param (headers are impossible on <img>); stash it BEFORE rows land
+      // so the Photo column renders authenticated thumbnail URLs.
+      if (!(globalThis as any).__plrToken) {
+        (globalThis as any).__plrToken = (await readAuthToken()) || "";
+      }
       const r = await api<{
         rows: Row[];
         total: number;
@@ -317,6 +355,28 @@ export default function PunchLogReportScreen() {
     }
   };
 
+  // Iter 524 (user request) — PDF export, WITH or WITHOUT punch photos.
+  const [pdfBusy, setPdfBusy] = useState<0 | 1 | 2>(0); // 1=plain 2=photos
+  const downloadPdf = async (withPhotos: boolean) => {
+    if (pdfBusy) return;
+    setPdfBusy(withPhotos ? 2 : 1);
+    try {
+      const res = await apiBinary(
+        `/admin/punch-logs.pdf?${qs(true)}&include_photos=${withPhotos ? 1 : 0}`);
+      if (Platform.OS === "web" && res.webBlobUrl) {
+        const a = document.createElement("a");
+        a.href = res.webBlobUrl;
+        a.download = `Punch_Log_${fromDate}_${toDate}${withPhotos ? "_photos" : ""}.pdf`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 30000);
+      }
+    } catch (e: any) {
+      showMsg(e?.message || "PDF download failed");
+    } finally {
+      setPdfBusy(0);
+    }
+  };
+
   if (!isAdmin) {
     return (
       <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -349,6 +409,40 @@ export default function PunchLogReportScreen() {
             <Ionicons name="sync-outline" size={16} color="#fff" />
           )}
           <Text style={styles.dlBtnTxt}>Sync from machines</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => router.push("/photo-sync" as any)}
+          style={[styles.dlBtn, { backgroundColor: "#7C3AED" }]}
+          testID="plog-photo-sync"
+        >
+          <Ionicons name="images-outline" size={16} color="#fff" />
+          <Text style={styles.dlBtnTxt}>Photo Sync</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => downloadPdf(false)}
+          style={[styles.dlBtn, { backgroundColor: "#DC2626" }, pdfBusy === 1 && { opacity: 0.6 }]}
+          disabled={!!pdfBusy}
+          testID="plog-pdf"
+        >
+          {pdfBusy === 1 ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Ionicons name="document-outline" size={16} color="#fff" />
+          )}
+          <Text style={styles.dlBtnTxt}>PDF</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => downloadPdf(true)}
+          style={[styles.dlBtn, { backgroundColor: "#B91C1C" }, pdfBusy === 2 && { opacity: 0.6 }]}
+          disabled={!!pdfBusy}
+          testID="plog-pdf-photos"
+        >
+          {pdfBusy === 2 ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Ionicons name="camera-outline" size={16} color="#fff" />
+          )}
+          <Text style={styles.dlBtnTxt}>PDF + Photos</Text>
         </Pressable>
         <Pressable
           onPress={downloadXlsx}
@@ -409,6 +503,22 @@ export default function PunchLogReportScreen() {
                     {m.label}
                   </option>
                 ))}
+              </select>
+            ) : null}
+          </View>
+          <View style={{ minWidth: 160 }}>
+            <Text style={styles.lbl}>Punch Photo</Text>
+            {Platform.OS === "web" ? (
+              <select
+                value={photoFilter}
+                onChange={(e) => setPhotoFilter((e.target as HTMLSelectElement).value)}
+                style={styles.select as any}
+                data-testid="plog-photo-filter"
+              >
+                <option value="">All punches</option>
+                <option value="available">✓ Photo Available</option>
+                <option value="pending">⏳ Photo Sync Pending</option>
+                <option value="missing">✕ Photo Missing</option>
               </select>
             ) : null}
           </View>
@@ -480,6 +590,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
     alignItems: "center",
+    flexWrap: "wrap",
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
