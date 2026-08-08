@@ -5016,3 +5016,26 @@ entry after Punch Log Report. Testing agent: 15/15 backend pytest
 (test_reports/iteration_524.json). APP_ITERATION=524,
 deploy_vps_iter524.sh, temp_bundle → deploy524.sh (step 9 prints live
 photo-coverage stats + machine 'Attendance Photo' enable hint).
+
+## Iter 525 (2026-06) — Shift Deployment Report redesign (user requests)
+labour_reports.py shift_deployment builder rewritten: Shift/Shift Timing/
+Machine-Device/Date columns REMOVED (date+firm on heading); S.No. added;
+Hours/OT/Status from compute_textile_day (firm-master policy engine, same
+as Grid); NEW Cost column = day pay per Firm Master + Employee Policy
+(rate resolution mirrors compute_compliance_row: epol.salary →
+compliance_gross → salary_monthly → structure Basic row; mode
+daily/hourly/monthly; OT at policy ot_multiplier 1.5 default; monthly
+divisor = calendar days of that month). Optional group_by=department|
+designation (passed via policy["_group_by"]): ▶ band rows + SUBTOTAL per
+group + GRAND TOTAL (deployed count, hours, OT, cost sums). generate():
+shift_deployment requires from_date (single day or from–to period), month
+rejected. _row_kind() styles band (#475569 white bold) / total (#E2E8F0
+bold) rows in BOTH _excel_bytes and _pdf_bytes generically. _load_dataset
+emps projection extended (+employee_policy, compliance_gross,
+salary_monthly, salary_structure_*, compliance_salary_mode, ot_applicable,
+attendance_policy_override, week_off flags). Frontend labour-reports.tsx:
+DAY_OR_PERIOD_KEYS={shift_deployment} → Period Type chips (Single Day /
+Periodic From–To, no Month) + Group/Format chips (No Grouping/Department
+Wise/Designation Wise). Verified via curl (json/pdf/excel/csv + 400 on
+month-only) + screenshot + PDF extraction. APP_ITERATION=525,
+deploy_vps_iter525.sh, temp_bundle → deploy525.sh.

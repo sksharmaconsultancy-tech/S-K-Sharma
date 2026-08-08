@@ -56,6 +56,8 @@ function todayISO() {
 
 // Iter 215 — single-day muster reports.
 const SINGLE_DAY_KEYS = new Set(["shift_report", "dummy_shift"]);
+// Iter 525 — Shift Deployment: NO month — single day OR explicit period.
+const DAY_OR_PERIOD_KEYS = new Set(["shift_deployment"]);
 
 export default function LabourReportsScreen() {
   const router = useRouter();
@@ -83,8 +85,12 @@ export default function LabourReportsScreen() {
   const [q, setQ] = useState("");
   const [sortCol, setSortCol] = useState<number | null>(null);
   const [sortAsc, setSortAsc] = useState(true);
+  // Iter 525 — Shift Deployment: Single Day / Periodic mode + grouping.
+  const [periodMode, setPeriodMode] = useState<"day" | "range">("day");
+  const [groupBy, setGroupBy] = useState<string>("");
 
   const isSingleDay = SINGLE_DAY_KEYS.has(reportKey);
+  const isDayOrPeriod = DAY_OR_PERIOD_KEYS.has(reportKey);
 
   useEffect(() => {
     if (!selectedCompanyId) return;
@@ -113,7 +119,12 @@ export default function LabourReportsScreen() {
     filters: {
       ...(isSingleDay
         ? { from_date: reportDate, to_date: reportDate }
-        : fromDate && toDate ? { from_date: fromDate, to_date: toDate } : { month }),
+        : isDayOrPeriod
+          ? (periodMode === "day"
+            ? { from_date: reportDate, to_date: reportDate }
+            : { from_date: fromDate, to_date: toDate })
+          : fromDate && toDate ? { from_date: fromDate, to_date: toDate } : { month }),
+      ...(isDayOrPeriod && groupBy ? { group_by: groupBy } : {}),
       ...(shiftSel ? { shift: shiftSel } : {}),
       ...Object.fromEntries(Object.entries(filters).filter(([, v]) => (v || "").trim())),
     },
@@ -133,7 +144,7 @@ export default function LabourReportsScreen() {
       setPreview(null);
     } finally { setBusy(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCompanyId, reportKey, month, fromDate, toDate, filters, reportDate, shiftSel]);
+  }, [selectedCompanyId, reportKey, month, fromDate, toDate, filters, reportDate, shiftSel, periodMode, groupBy]);
 
   const download = async (format: "pdf" | "excel" | "csv") => {
     if (!selectedCompanyId) return;
@@ -211,6 +222,40 @@ export default function LabourReportsScreen() {
                 <Text style={st.fieldLbl}>Report Date (single day)</Text>
                 <WebDateField value={reportDate} onChange={setReportDate} testID="lr-report-date" />
               </View>
+            ) : isDayOrPeriod ? (
+              /* Iter 525 — Shift Deployment: Single Day OR Periodic. */
+              <>
+                <View style={{ minWidth: 200 }}>
+                  <Text style={st.fieldLbl}>Period Type</Text>
+                  <View style={[st.chipsWrap, { marginTop: 2 }]}>
+                    <Pressable onPress={() => setPeriodMode("day")}
+                      style={[st.chip, periodMode === "day" && st.chipOn]} testID="lr-mode-day">
+                      <Text style={[st.chipTxt, periodMode === "day" && { color: "#fff" }]}>Single Day</Text>
+                    </Pressable>
+                    <Pressable onPress={() => setPeriodMode("range")}
+                      style={[st.chip, periodMode === "range" && st.chipOn]} testID="lr-mode-range">
+                      <Text style={[st.chipTxt, periodMode === "range" && { color: "#fff" }]}>Periodic (From – To)</Text>
+                    </Pressable>
+                  </View>
+                </View>
+                {periodMode === "day" ? (
+                  <View style={st.field}>
+                    <Text style={st.fieldLbl}>Report Date</Text>
+                    <WebDateField value={reportDate} onChange={setReportDate} testID="lr-report-date" />
+                  </View>
+                ) : (
+                  <>
+                    <View style={st.field}>
+                      <Text style={st.fieldLbl}>From</Text>
+                      <WebDateField value={fromDate} onChange={setFromDate} testID="lr-from" />
+                    </View>
+                    <View style={st.field}>
+                      <Text style={st.fieldLbl}>To</Text>
+                      <WebDateField value={toDate} onChange={setToDate} testID="lr-to" />
+                    </View>
+                  </>
+                )}
+              </>
             ) : (
               <>
                 <View style={st.field}>
@@ -229,6 +274,23 @@ export default function LabourReportsScreen() {
               </>
             )}
           </View>
+
+          {/* Iter 525 — Shift Deployment: grouping choice (display AND all
+              downloads follow the grouped format). */}
+          {isDayOrPeriod ? (
+            <View style={{ marginTop: 8 }}>
+              <Text style={st.fieldLbl}>Group / Format</Text>
+              <View style={[st.chipsWrap, { marginTop: 4 }]}>
+                {([["", "No Grouping"], ["department", "Department Wise"],
+                  ["designation", "Designation Wise"]] as const).map(([v, lbl]) => (
+                  <Pressable key={v} onPress={() => setGroupBy(v)}
+                    style={[st.chip, groupBy === v && st.chipOn]} testID={`lr-group-${v || "none"}`}>
+                    <Text style={[st.chipTxt, groupBy === v && { color: "#fff" }]}>{lbl}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          ) : null}
 
           {/* Iter 215 — Shift filter: only shifts actually assigned to
               ACTIVE employees in the Employee Master. */}

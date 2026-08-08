@@ -155,6 +155,13 @@ async def _load_dataset(company_id: str, filters: Dict[str, Any]):
         "designation": 1, "employee_type": 1, "gender": 1, "contractor_name": 1,
         "shift_start": 1, "shift_end": 1, "shift_name": 1, "dummy_shift": 1,
         "father_name": 1, "is_contractual": 1,
+        # Iter 525 — Shift Deployment: policy-true hours/OT + day cost need
+        # the employee's pay + policy-override fields.
+        "employee_policy": 1, "compliance_gross": 1, "salary_monthly": 1,
+        "salary_structure_actual": 1, "salary_structure_compliance": 1,
+        "compliance_salary_mode": 1, "ot_applicable": 1,
+        "attendance_policy_override": 1, "week_off_full_day": 1,
+        "week_off_govt_holiday_enabled": 1,
     }).sort("employee_code", 1).to_list(5000)
     shift_f = (filters.get("shift") or "").strip()
     if shift_f:
@@ -436,64 +443,144 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
         return cols, rows
 
     if key == "shift_deployment":
-        # Iter 286 (user request) — Statutory Shift Deployment Register.
-        # No new masters: shift comes from the Shift Master assignment on
-        # the Employee Master, contractor from the employee record, punch
-        # machine/device from the attendance source, hours/OT follow the
-        # payroll attendance policy.
-        multi = len(dates) > 1
-        sm_map = policy.get("_shift_masters") or {}
+        # Iter 525 (user request) — redesigned:
+        # • Shift / Shift Timing / Machine-Device / Date columns removed
+        #   (date + firm show in the report heading instead).
+        # • S.No. column added.
+        # • Hours & OT Hrs come from the FIRM MASTER attendance-policy
+        #   engine (compute_textile_day — same engine as the Attendance
+        #   Grid / payroll).
+        # • NEW "Cost" column — that day's pay for the employee as per the
+        #   Firm Master + Employee Policy (rate basis monthly/daily/hourly,
+        #   OT paid at the policy OT multiplier).
+        # • Optional grouping (Department / Designation wise) with band
+        #   rows + per-group subtotals — display and ALL downloads follow.
+        from calendar import monthrange
 
-        def _machine(recs):
-            out = set()
-            for r in recs:
-                src = (r.get("source") or "").lower()
-                if any(t in src for t in ("zk", "device", "import", "biometric")):
-                    out.add("Biometric Machine")
-                elif "manual_admin" in src or src.startswith("manual"):
-                    out.add("System (Manual)")
-                else:
-                    out.add("Mobile / PWA")
-            return ", ".join(sorted(out))
+        from server import compute_textile_day
 
-        cols = ((["Date"] if multi else [])
-                + ["Shift", "Shift Timing", "Code", "Employee Name",
-                   "Father Name", "Department", "Designation", "Contractor",
-                   "In", "Out", "Hours", "OT Hrs", "Machine / Device", "Status"])
-        rows = []
+        group_by = str(policy.get("_group_by") or "").strip().lower()
+        if group_by not in ("department", "designation"):
+            group_by = ""
+
+        def _rate_of(e: dict) -> tuple:
+            """(rate, mode) as per Employee Policy / Master — mirrors the
+            compliance salary engine's rate resolution."""
+            epol = e.get("employee_policy") or {}
+            mode = str(e.get("compliance_salary_mode") or "").strip().lower()
+            if mode not in ("daily", "hourly", "monthly"):
+                mode = ""
+            try:
+                rate = float(epol.get("salary") or e.get("compliance_gross")
+                             or e.get("salary_monthly") or 0)
+            except (TypeError, ValueError):
+                rate = 0.0
+            if rate <= 0 or not mode:
+                for src in ("salary_structure_compliance", "salary_structure_actual"):
+                    for r_ in (e.get(src) or []):
+                        if isinstance(r_, dict) and str(
+                                r_.get("head", "")).strip().lower().startswith("basic"):
+                            try:
+                                amt = float(r_.get("amount") or 0)
+                            except (TypeError, ValueError):
+                                amt = 0.0
+                            if rate <= 0 and amt > 0:
+                                rate = amt
+                            rt = str(r_.get("rate_type") or "").strip().lower()
+                            if not mode and rt in ("daily", "hourly", "monthly"):
+                                mode = rt
+                            break
+                    if rate > 0 and mode:
+                        break
+            return rate, (mode or "monthly")
+
+        full_h = float(policy.get("full_day_hours")
+                       or policy.get("standard_working_hours") or 8.0)
+        cols = ["S.No.", "Code", "Employee Name", "Father Name", "Department",
+                "Designation", "Contractor", "In", "Out", "Hours", "OT Hrs",
+                "Cost", "Status"]
+        data = []  # (sort_keys..., row_values)
         for d in dates:
+            wd = date.fromisoformat(d).weekday()
+            dim = monthrange(int(d[:4]), int(d[5:7]))[1]
             for e in emps:
                 recs = recs_by.get((e["user_id"], d))
                 if not recs:
                     continue
                 s = _day_summary(recs, policy, e)
-                shift_name = (e.get("shift_name") or "").strip() or "— Unassigned —"
-                sm = sm_map.get(shift_name)
-                timing = (f"{sm['start']} – {sm['end']}" if sm
-                          else (f"{e.get('shift_start')} – {e.get('shift_end')}"
-                                if e.get("shift_start") and e.get("shift_end") else ""))
-                rows.append(([d] if multi else []) + [
-                    shift_name, timing,
-                    str(e.get("employee_code") or ""), e.get("name") or "",
-                    e.get("father_name") or "",
-                    e.get("department") or "", e.get("designation") or "",
-                    e.get("contractor_name") or "",
-                    s["first_in"], s["last_out"], s["hours"], s["ot_hours"],
-                    _machine(recs), s["status"],
-                ])
-        rows.sort(key=(lambda r: (r[0], r[1], r[3])) if multi
-                  else (lambda r: (r[0], r[2])))
-        # Deployment strength summary per shift at the end.
-        strength: Dict[str, set] = defaultdict(set)
-        i_shift = 1 if multi else 0
-        i_code = 3 if multi else 2
-        for r in rows:
-            strength[r[i_shift]].add(r[i_code])
-        for g in sorted(strength):
-            total_row = [""] * len(cols)
-            total_row[i_shift] = f"TOTAL — {g}"
-            total_row[i_code + 1] = f"{len(strength[g])} deployed"
-            rows.append(total_row)
+                eng = compute_textile_day(recs, policy, e, wd)
+                hours, ot, pd_ = eng["duty_hours"], eng["ot_hours"], eng["present_days"]
+                rate, mode = _rate_of(e)
+                epol = e.get("employee_policy") or {}
+                try:
+                    ot_mult = float(epol.get("ot_multiplier")
+                                    or policy.get("ot_multiplier") or 1.5)
+                except (TypeError, ValueError):
+                    ot_mult = 1.5
+                if mode == "daily":
+                    base = rate * pd_
+                    phr = rate / full_h if full_h else 0.0
+                elif mode == "hourly":
+                    base = rate * hours
+                    phr = rate
+                else:  # monthly
+                    base = rate * pd_ / dim
+                    phr = rate / (dim * full_h) if full_h else 0.0
+                cost = round(base + ot * phr * ot_mult, 2)
+                # Status follows the SAME policy engine as Hours/OT.
+                status = ("P" if pd_ >= 1.0 else "HD" if pd_ >= 0.5
+                          else "OT" if ot > 0 else "P" if hours > 0
+                          else s["status"])
+                grp = ((e.get(group_by) or "— Not Set —") if group_by else "")
+                data.append((grp, str(e.get("employee_code") or ""), d, [
+                    0, str(e.get("employee_code") or ""), e.get("name") or "",
+                    e.get("father_name") or "", e.get("department") or "",
+                    e.get("designation") or "", e.get("contractor_name") or "",
+                    s["first_in"], s["last_out"], hours, ot, cost, status,
+                ]))
+        data.sort(key=lambda x: (x[0], x[1], x[2]))
+
+        def _sum_row(label: str, n_emps: int, h: float, o: float, c: float) -> list:
+            r = [""] * len(cols)
+            r[2] = label
+            r[6] = f"{n_emps} deployed"
+            r[9] = round(h, 2)
+            r[10] = round(o, 2)
+            r[11] = round(c, 2)
+            return r
+
+        rows = []
+        sno = 0
+        g_h = g_o = g_c = 0.0
+        g_emps: set = set()
+        cur = object()
+        c_h = c_o = c_c = 0.0
+        c_emps: set = set()
+
+        def _flush_group():
+            nonlocal c_h, c_o, c_c, c_emps
+            if group_by and c_emps:
+                rows.append(_sum_row(f"SUBTOTAL — {cur}", len(c_emps), c_h, c_o, c_c))
+            c_h = c_o = c_c = 0.0
+            c_emps = set()
+
+        for grp, code_, d, r in data:
+            if group_by and grp != cur:
+                _flush_group()
+                cur = grp
+                band = [""] * len(cols)
+                band[1] = f"▶ {group_by.upper()}: {grp}"
+                rows.append(band)
+            sno += 1
+            r[0] = sno
+            rows.append(r)
+            c_h += r[9]; c_o += r[10]; c_c += r[11]
+            c_emps.add(code_)
+            g_h += r[9]; g_o += r[10]; g_c += r[11]
+            g_emps.add(code_)
+        _flush_group()
+        if rows:
+            rows.append(_sum_row("GRAND TOTAL", len(g_emps), g_h, g_o, g_c))
         return cols, rows
 
     if key == "dummy_shift":
@@ -658,6 +745,18 @@ def _csv_bytes(columns, rows) -> bytes:
     return buf.getvalue().encode("utf-8-sig")
 
 
+def _row_kind(row) -> str:
+    """Iter 525 — grouped reports: '▶ …' band rows and SUBTOTAL / GRAND
+    TOTAL rows get distinct styling in Excel + PDF exports."""
+    for v in row:
+        s = str(v or "")
+        if s.startswith("▶"):
+            return "band"
+        if s.startswith("SUBTOTAL —") or s == "GRAND TOTAL":
+            return "total"
+    return ""
+
+
 def _excel_bytes(title, header_lines, columns, rows) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
@@ -673,10 +772,19 @@ def _excel_bytes(title, header_lines, columns, rows) -> bytes:
         cell = ws.cell(row=r_i, column=c_i, value=c)
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="1D4ED8")
+    _band_fill = PatternFill("solid", fgColor="475569")
+    _tot_fill = PatternFill("solid", fgColor="E2E8F0")
     for row in rows:
         r_i += 1
+        kind = _row_kind(row)
         for c_i, v in enumerate(row, start=1):
-            ws.cell(row=r_i, column=c_i, value=v)
+            cell = ws.cell(row=r_i, column=c_i, value=v)
+            if kind == "band":
+                cell.font = Font(bold=True, color="FFFFFF")
+                cell.fill = _band_fill
+            elif kind == "total":
+                cell.font = Font(bold=True)
+                cell.fill = _tot_fill
         # Iter 214 — signature reports get taller rows to sign in.
         if "Signature" in columns:
             ws.row_dimensions[r_i].height = 26
@@ -747,8 +855,23 @@ def _pdf_bytes(title, company, header_meta, columns, rows, verify_id) -> bytes:
 
     cell_style = ParagraphStyle("cell", parent=styles["Normal"], fontSize=6.8, leading=8.2)
     data = [[Paragraph(f"<b>{c}</b>", cell_style) for c in columns]]
+    extra_styles = []
     for r in rows[:4000]:
-        data.append([Paragraph(str(v), cell_style) for v in r])
+        kind = _row_kind(r)
+        ri = len(data)
+        if kind:
+            data.append([Paragraph(f"<b>{v}</b>" if str(v or "") else "", cell_style)
+                         for v in r])
+            if kind == "band":
+                extra_styles += [
+                    ("BACKGROUND", (0, ri), (-1, ri), rl_colors.HexColor("#475569")),
+                    ("TEXTCOLOR", (0, ri), (-1, ri), rl_colors.white),
+                ]
+            else:
+                extra_styles.append(
+                    ("BACKGROUND", (0, ri), (-1, ri), rl_colors.HexColor("#E2E8F0")))
+        else:
+            data.append([Paragraph(str(v), cell_style) for v in r])
     # Iter 214 — signature reports: give the Signature column a wide fixed
     # box and taller rows so it prints properly for physical sign-off.
     col_widths = None
@@ -839,6 +962,16 @@ async def generate(payload: Dict[str, Any] = Body(...),
                 status_code=400,
                 detail="This report is a single-day report — pick one date.")
         filters = {**filters, "from_date": f_d, "to_date": f_d, "month": None}
+    # Iter 525 (user request) — Shift Deployment: NO month input — a single
+    # day or an explicit From–To period only.
+    if key == "shift_deployment":
+        f_d = (filters.get("from_date") or "").strip()
+        t_d = (filters.get("to_date") or "").strip() or f_d
+        if not f_d:
+            raise HTTPException(
+                status_code=400,
+                detail="Pick a date (single day) or a From–To period.")
+        filters = {**filters, "from_date": f_d, "to_date": t_d, "month": None}
     if key == "dummy_shift":
         comp_pol = await db.companies.find_one(
             {"company_id": company_id},
@@ -852,15 +985,10 @@ async def generate(payload: Dict[str, Any] = Body(...),
                         "'Dummy Shift Allowed' in the Attendance Policy first."))
 
     emps, recs_by, policy, dates, from_date, to_date = await _load_dataset(company_id, filters)
-    # Iter 286 — Shift Deployment: shift timings come straight from the
-    # Shift Master (fallback: the timing mirrored on the employee).
+    # Iter 525 — Shift Deployment: pass the grouping choice (Department /
+    # Designation wise) through to the builder.
     if key == "shift_deployment":
-        policy["_shift_masters"] = {
-            s["name"]: {"start": s.get("start") or "", "end": s.get("end") or ""}
-            async for s in db.shift_masters.find(
-                {}, {"_id": 0, "name": 1, "start": 1, "end": 1})
-            if s.get("name")
-        }
+        policy["_group_by"] = str(filters.get("group_by") or "")
     columns, rows = build_report(key, emps, recs_by, policy, dates)
     label = next(c["label"] for c in CATALOGUE if c["key"] == key)
 
