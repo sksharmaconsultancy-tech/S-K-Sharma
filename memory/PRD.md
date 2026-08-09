@@ -5174,3 +5174,27 @@ device NOT REGISTERED (cdata 404s, nothing stored). deploy525.sh now has a
 "MACHINE DIAGNOSTIC" block: per device → firm assigned, last push, 7d
 punches, 7d unmapped (+distinct PINs), photos attached/parked + verdict
 hints. Awaiting user to run deploy and send the diagnostic block.
+
+## Iter 527 — Grouped Salary Comparison + Central Contractor Wage Registers (Form A–D) + P/A+OT web view
+1. SALARY COMPARISON (user request): name-wise rows REMOVED; grouped
+   Department-wise + Designation-wise with "No. of Employees" and
+   Attendance (present days) columns for both compared periods.
+   Report Hub chips: Dept + Designation / Department Wise / Designation
+   Wise (group_by param end-to-end incl. xlsx/pdf/email).
+2. NEW MODULE routes/central_wage_registers.py + app/central-wage-registers.tsx
+   (Compliance menu → "Contractor Registers — Central Wages (Form A–D)"):
+   Form A Employee Register, Form B Wage Register (approved compliance
+   salary run + attendance engine, same 8-hr OT policy), Form C
+   Deductions/Advances/Recoveries (advances module auto rows + manual
+   entries, configurable categories, lock-guarded), Form D Muster Roll
+   (landscape month grid + totals). Masters: cwr_principal_employers,
+   cwr_work_orders, cwr_emp_map (Employee Master never modified).
+   Workflow Draft→Verified→Approved→Locked + unlock audit (cwr_status).
+   Wage period = month OR custom from/to. Excel/PDF via register_export.
+3. Present/Absent + Daily OT report FRONTEND finished (dual-row per
+   employee: Status + OT; S.No/Name/Father/Designation merged; summary
+   bar). Old report untouched. Also fixed leftover syntax error in
+   present_absent_ot.py that crashed backend startup.
+4. Tests: 26/26 pytest backend/tests/test_iter527_central_wage_and_salary_compare.py
+   + frontend flows PASS (test_reports/iteration_527.json).
+5. deploy_vps_iter527.sh created; temp_bundle points to it; APP_ITERATION=527.

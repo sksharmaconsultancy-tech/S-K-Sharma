@@ -340,3 +340,13 @@ ITER 487 (doc-expiry alerts):
 - UI screenshots: ESIC form (dropdown/DD-MM-YYYY/reason), Challan PENDING▾
   badges, Report Hub Month-wise|Periodic tabs + default month from
   last-finalized-month. Server Iter 520 badge visible.
+
+## Iter 527
+- Backend: 26/26 pytest PASS (tests/test_iter527_central_wage_and_salary_compare.py):
+  grouped salary comparison (both/department/designation + totals + xlsx/pdf),
+  central wage registers Form A-D JSON/xlsx/pdf, workflow transitions + audit,
+  Form C 409 when locked, masters CRUD + employee-map reflected in Form A,
+  Form D custom period slices to exact day columns.
+- Frontend: /central-wage-registers tabs + Setup render; Report Hub group-by
+  chips (rc-cmpgroup-*) switch correctly; /present-absent-report OT format
+  dual-row table renders, old format unchanged. (test_reports/iteration_527.json)
