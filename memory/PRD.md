@@ -5198,3 +5198,9 @@ hints. Awaiting user to run deploy and send the diagnostic block.
 4. Tests: 26/26 pytest backend/tests/test_iter527_central_wage_and_salary_compare.py
    + frontend flows PASS (test_reports/iteration_527.json).
 5. deploy_vps_iter527.sh created; temp_bundle points to it; APP_ITERATION=527.
+
+## Iter 528 — Register links shifted into Report Hub (user request)
+"Contractor Registers — Central Wages (Form A–D)" and "CLRA Registers
+(Form XII–XV)" REMOVED from the Compliance sidebar and added to the
+Report Hub "Already Available (open page)" link row (reports-center.tsx
+EXISTING list). Screenshot-verified: both chips render and navigate.

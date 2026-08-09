@@ -44,6 +44,9 @@ const EXISTING = [
   { title: "Labour Statistics & HR Analytics", route: "/labour-statistics" },
   { title: "Annual Returns", route: "/annual-returns" },
   { title: "Factory & Boilers Registers", route: "/factory-compliance" },
+  // Iter 528 (user request) — shifted here from the Compliance sidebar.
+  { title: "Contractor Registers — Central Wages (Form A–D)", route: "/central-wage-registers" },
+  { title: "CLRA Registers (Form XII–XV)", route: "/clra-registers" },
 ];
 
 const GROUP_BASE: Record<string, string> = {
