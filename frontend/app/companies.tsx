@@ -576,7 +576,9 @@ export default function CompaniesScreen() {
               <View style={styles.geoRow}>
                 <Ionicons name="location-outline" size={12} color={colors.onSurfaceTertiary} />
                 <Text style={styles.geoTxt}>
-                  {c.office_lat.toFixed(4)}, {c.office_lng.toFixed(4)} · {c.geofence_radius_m}m
+                  {typeof c.office_lat === "number" && typeof c.office_lng === "number"
+                    ? `${c.office_lat.toFixed(4)}, ${c.office_lng.toFixed(4)} · ${c.geofence_radius_m}m`
+                    : "No geofence set"}
                 </Text>
               </View>
             </Pressable>

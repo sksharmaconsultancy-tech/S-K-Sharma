@@ -5227,3 +5227,22 @@ CONTRACTOR_REGISTERS const in reports-center.tsx). Screenshot verified.
 3. Report Hub: separate "Contractor Registers" section (Iter 528).
 4. Tests: 12/12 pytest tests/test_iter530_monthly_payroll_and_manual.py
    + all frontend flows PASS. APP_ITERATION=530, deploy_vps_iter530.sh.
+
+## Iter 531 — Auto-updating User Manual (user request)
+1. Manual rebuilds LIVE per download: version = APP_ITERATION, date =
+   today, "What's New" page from db.manual_updates (seeded, POST
+   /api/admin/user-manual/log-update to append), extra sections from
+   db.manual_sections (no code changes needed for new features).
+2. POST /api/admin/user-manual/refresh-screenshots (super admin) runs
+   backend/manual_capture.py in background; GET .../status reports
+   freshness; frontend has Refresh Screenshots button + status line.
+3. manual_capture.py hardened per user directives: NEVER saves error
+   screens (red overlay markers) or BLANK screens ("No data...", "No
+   leave requests"...); seeds temporary SAMPLE leaves/ESIC entries
+   (manual_sample:true, cleaned up in finally); payslip captured for
+   the employee with most present days via live payroll/run API;
+   OT report clicked to the data month.
+4. FIXED BUG: /companies crashed (office_lat.toFixed on undefined) →
+   guarded, shows "No geofence set" (this was the wrong firm-master
+   screenshot user reported).
+5. APP_ITERATION=531, deploy_vps_iter531.sh, temp_bundle updated.

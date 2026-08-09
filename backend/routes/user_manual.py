@@ -1,23 +1,33 @@
-"""Iter 530 (user request) — QUICK USER MANUAL PDF (super admin ONLY).
+"""Iter 530/531 (user request) — QUICK USER MANUAL PDF (super admin ONLY).
 
-Modern SaaS-style short user manual (~20 pages) for the Payroll &
-Compliance portal, generated with REAL portal screenshots stored in
-/app/backend/assets/manual/*.png. Blue/teal corporate theme, cover page,
-table of contents, numbered sections, screenshot callouts, quick steps,
-important-note boxes, compliance-vs-actual comparison table and a final
-one-page payroll workflow chart.
+Modern SaaS-style short user manual (~22 pages) generated with REAL portal
+screenshots stored in /app/backend/assets/manual/*.png.
+
+AUTO-UPDATE (Iter 531): the manual is rebuilt LIVE on every download —
+  * software version + last-updated date come from the running server
+    (APP_ITERATION), never hard-coded;
+  * a "What's New" page is generated from the ``manual_updates``
+    collection (new payroll features are logged there);
+  * extra feature sections can be added via the ``manual_sections``
+    collection without touching this file;
+  * POST /api/admin/user-manual/refresh-screenshots re-captures every
+    screenshot from the CURRENT portal UI (playwright, background job);
+  * GET  /api/admin/user-manual/status reports capture freshness.
 
 GET /api/admin/user-manual.pdf   → 403 for anyone except super_admin.
 """
+import json
 import os
-from datetime import date
+import subprocess
+import sys
+from datetime import date, datetime
 from io import BytesIO
 from typing import List, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Body, Header, HTTPException, Query
 from fastapi.responses import Response
 
-from server import get_user_from_token, require_role  # noqa: E402
+from server import APP_ITERATION, db, get_user_from_token, require_role  # noqa: E402
 
 from reportlab.lib import colors as rl
 from reportlab.lib.pagesizes import A4
@@ -160,6 +170,14 @@ def _section(story, no, title, nav, shot, callouts, steps, note=None,
     story.append(PageBreak())
 
 
+def _shot_meta() -> dict:
+    try:
+        with open(os.path.join(ASSETS, ".last_capture.json")) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
 def _cover(cv, doc):
     cv.saveState()
     cv.setFillColor(NAVY)
@@ -189,11 +207,13 @@ def _cover(cv, doc):
                   "Compliance · Payroll · Manpower")
     cv.setFont("Helvetica", 10)
     y = 62 * mm
+    shots_at = str(_shot_meta().get("at") or "")[:10] or "bundled"
     for line in (
             "Product          :  S.K. Sharma & Co. Payroll & Compliance Portal",
-            "Software Version :  Server Iter 527",
-            "Document Version :  1.0",
+            f"Software Version :  Server Iter {APP_ITERATION}",
+            "Document Version :  auto (rebuilt on every download)",
             f"Last Updated     :  {date.today():%d-%m-%Y}",
+            f"Screenshots As Of:  {shots_at}",
             "Prepared By      :  S.K. Sharma & Co."):
         cv.drawString(20 * mm, y, line)
         y -= 6.5 * mm
@@ -222,7 +242,8 @@ def _page(cv, doc):
     cv.restoreState()
 
 
-def build_manual() -> BytesIO:
+def build_manual(updates: Optional[list] = None,
+                 extras: Optional[list] = None) -> BytesIO:
     buf = BytesIO()
     doc = _Doc(buf, pagesize=A4, title="Quick User Manual")
     fr = Frame(15 * mm, 14 * mm, CW, H - 32 * mm, id="f")
@@ -239,6 +260,34 @@ def build_manual() -> BytesIO:
     toc.dotsMinLevel = 0
     story.append(toc)
     story.append(PageBreak())
+
+    # -------- What's New (auto-generated from the feature changelog)
+    if updates:
+        story.append(Paragraph("What's New — Recent Payroll Updates", S_H1))
+        story.append(Paragraph(
+            "This manual rebuilds itself on every download — the latest "
+            "portal features are listed below automatically.", S_BODY))
+        story.append(Spacer(1, 4))
+        wn_rows = [[Paragraph("<b>Date</b>", S_BODY),
+                    Paragraph("<b>Feature</b>", S_BODY),
+                    Paragraph("<b>Where</b>", S_BODY)]]
+        for u in updates[:12]:
+            wn_rows.append([
+                Paragraph(str(u.get("date") or "")[:10], S_BODY),
+                Paragraph(f"<b>{u.get('title', '')}</b><br/>"
+                          f"{u.get('desc', '')}", S_BODY),
+                Paragraph(u.get("nav", ""), S_BODY)])
+        wt = Table(wn_rows, colWidths=[CW * 0.14, CW * 0.58, CW * 0.28])
+        wt.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+            ("GRID", (0, 0), (-1, -1), 0.6, GREY),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl.white, TEAL_BG]),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("VALIGN", (0, 0), (-1, -1), "TOP")]))
+        story.append(wt)
+        story.append(PageBreak())
 
     _section(story, 1, "Login", "Portal URL → Admin Sign In", "login",
              ["Choose 'Admin sign in'", "Enter User ID / Email",
@@ -461,8 +510,18 @@ def build_manual() -> BytesIO:
              body="Every report follows the same pattern: "
                   "<b>Filter → Generate → Export Excel / PDF</b>.")
 
+    # -------- dynamic extra sections (manual_sections collection) so new
+    # payroll features extend the manual WITHOUT code changes
+    n = 19
+    for ex in (extras or []):
+        _section(story, n, ex.get("title", "New Feature"),
+                 ex.get("nav", ""), ex.get("shot") or None,
+                 ex.get("callouts") or [], ex.get("steps") or [],
+                 note=ex.get("note") or None)
+        n += 1
+
     # -------- troubleshooting
-    story.append(Paragraph("19. Basic Troubleshooting", S_H1))
+    story.append(Paragraph(f"{n}. Basic Troubleshooting", S_H1))
     tt = Table([
         [Paragraph("<b>Problem</b>", S_BODY),
          Paragraph("<b>What to do</b>", S_BODY)],
@@ -494,7 +553,7 @@ def build_manual() -> BytesIO:
     story.append(PageBreak())
 
     # -------- final one-page workflow
-    story.append(Paragraph("20. Payroll Quick Workflow", S_H1))
+    story.append(Paragraph(f"{n + 1}. Payroll Quick Workflow", S_H1))
     story.append(Paragraph(
         "The complete monthly cycle at a glance:", S_BODY))
     story.append(Spacer(1, 4))
@@ -532,6 +591,45 @@ def build_manual() -> BytesIO:
     return buf
 
 
+_SEED_UPDATES = [
+    {"date": "2026-08-09", "title": "Monthly Payroll Attendance & Salary Report",
+     "desc": "One landscape report: employee details, attendance 1–31, "
+             "payable days, compliance/actual gross, deductions, net "
+             "payable and bank details with Excel/PDF export.",
+     "nav": "Reports → Monthly Payroll Report"},
+    {"date": "2026-08-09", "title": "Quick User Manual (PDF)",
+     "desc": "Client-ready manual with real screenshots — auto-rebuilds "
+             "with the latest version, features and screenshots.",
+     "nav": "Administration → User Manual (PDF)"},
+    {"date": "2026-08-09", "title": "Central Contractor Wage Registers (Form A–D)",
+     "desc": "Form A Employee Register, Form B Wage Register, Form C "
+             "Deductions/Advances, Form D Muster Roll with approval "
+             "workflow and Excel/PDF export.",
+     "nav": "Report Hub → Contractor Registers"},
+    {"date": "2026-08-09", "title": "Salary Comparison — Department / Designation wise",
+     "desc": "Grouped comparison with No. of Employees and Total "
+             "Attendance columns (name-wise rows removed).",
+     "nav": "Report Hub → Salary Comparison"},
+    {"date": "2026-08-08", "title": "Present / Absent + Daily OT Report",
+     "desc": "New format: two rows per employee — daily status and that "
+             "day's OT hours, with monthly totals.",
+     "nav": "Reports → Present / Absent Report"},
+]
+
+
+async def _manual_data():
+    """Live data for the auto-updating manual (changelog + extra
+    sections). Seeds the changelog once so it is never empty."""
+    if not await db.manual_updates.count_documents({}):
+        await db.manual_updates.insert_many(
+            [dict(u) for u in _SEED_UPDATES])
+    updates = await db.manual_updates.find({}, {"_id": 0}).to_list(200)
+    updates.sort(key=lambda u: str(u.get("date") or ""), reverse=True)
+    extras = await db.manual_sections.find({}, {"_id": 0}).to_list(100)
+    extras.sort(key=lambda x: x.get("order") or 0)
+    return updates, extras
+
+
 @router.get("/user-manual.pdf")
 async def user_manual_pdf(token: Optional[str] = Query(None),
                           authorization: Optional[str] = Header(None)):
@@ -540,7 +638,88 @@ async def user_manual_pdf(token: Optional[str] = Query(None),
     require_role(admin, ["super_admin"])  # SUPER ADMIN ONLY
     if admin.get("role") != "super_admin":
         raise HTTPException(status_code=403, detail="Super admin only")
-    buf = build_manual()
+    updates, extras = await _manual_data()
+    buf = build_manual(updates, extras)
     return Response(content=buf.getvalue(), media_type="application/pdf",
                     headers={"Content-Disposition":
                              'inline; filename="Payroll_Quick_User_Manual.pdf"'})
+
+
+# ---------------------------------------------------------------------------
+# Iter 531 — auto-update helpers: screenshot refresh + changelog logging
+# ---------------------------------------------------------------------------
+_PID_FILE = os.path.join(ASSETS, ".capture.pid")
+
+
+def _capture_running() -> bool:
+    try:
+        with open(_PID_FILE) as f:
+            pid = int(f.read().strip())
+        os.kill(pid, 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+@router.post("/user-manual/refresh-screenshots")
+async def refresh_screenshots(authorization: Optional[str] = Header(None)):
+    """Re-capture every manual screenshot from the CURRENT portal UI so the
+    manual reflects newly shipped payroll features (super admin only)."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin"])
+    try:
+        import playwright  # noqa: F401
+    except ImportError:
+        raise HTTPException(
+            status_code=501,
+            detail="Screenshot engine not installed on this server. "
+                   "Screenshots ship pre-bundled and can be refreshed from "
+                   "the development workspace.")
+    if _capture_running():
+        return {"ok": True, "status": "already-running"}
+    base = (os.environ.get("PORTAL_BASE_URL")
+            or "https://emplo-connect-1.preview.emergentagent.com")
+    raw_token = (authorization or "").replace("Bearer ", "").strip()
+    script = os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "manual_capture.py")
+    proc = subprocess.Popen(
+        [sys.executable, script, "--base", base, "--token", raw_token],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True)
+    os.makedirs(ASSETS, exist_ok=True)
+    with open(_PID_FILE, "w") as f:
+        f.write(str(proc.pid))
+    return {"ok": True, "status": "started",
+            "note": "Capture takes ~2 minutes; check status, then "
+                    "re-download the manual."}
+
+
+@router.get("/user-manual/status")
+async def manual_status(authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin"])
+    shots = [f[:-4] for f in sorted(os.listdir(ASSETS))
+             if f.endswith(".png")] if os.path.isdir(ASSETS) else []
+    updates, extras = await _manual_data()
+    return {"screenshots": len(shots), "capture_running": _capture_running(),
+            "last_capture": _shot_meta(),
+            "server_version": APP_ITERATION,
+            "whats_new_entries": len(updates),
+            "extra_sections": len(extras)}
+
+
+@router.post("/user-manual/log-update")
+async def log_update(payload: dict = Body(default={}),  # noqa: B008
+                     authorization: Optional[str] = Header(None)):
+    """Append a feature to the manual's What's New changelog (used every
+    time a new payroll feature ships)."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin"])
+    doc = {"date": str(payload.get("date") or date.today().isoformat())[:10],
+           "title": str(payload.get("title") or "").strip(),
+           "desc": str(payload.get("desc") or "").strip(),
+           "nav": str(payload.get("nav") or "").strip()}
+    if not doc["title"]:
+        raise HTTPException(status_code=400, detail="title required")
+    await db.manual_updates.insert_one(doc)
+    return {"ok": True}

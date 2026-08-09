@@ -357,3 +357,9 @@ ITER 487 (doc-expiry alerts):
   bank masking (super vs sub admin), user-manual.pdf 200/401/403.
 - Frontend: Report Hub separate Contractor Registers section placement,
   monthly payroll grid + basis toggle, user manual screen — ALL PASS.
+
+## Iter 531
+- Auto-update manual verified: 23-page PDF with What's New page + live
+  version/screenshot dates; refresh-screenshots endpoint captured 15/15
+  with sample-data seeding + cleanup (0 leftovers), blank/error screens
+  rejected; /companies crash fixed and re-captured correctly.
