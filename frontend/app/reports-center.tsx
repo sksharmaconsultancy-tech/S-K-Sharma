@@ -44,8 +44,16 @@ const EXISTING = [
   { title: "Labour Statistics & HR Analytics", route: "/labour-statistics" },
   { title: "Annual Returns", route: "/annual-returns" },
   { title: "Factory & Boilers Registers", route: "/factory-compliance" },
-  // Iter 528 (user request) — shifted here from the Compliance sidebar.
-  { title: "Contractor Registers — Central Wages (Form A–D)", route: "/central-wage-registers" },
+];
+
+// Iter 528 (user request) — SEPARATE Report-Hub section (not part of
+// "Already Available"): contractor register modules shifted from the
+// Compliance sidebar.
+const CONTRACTOR_REGISTERS = [
+  {
+    title: "Contractor Registers — Central Wages (Form A–D)",
+    route: "/central-wage-registers",
+  },
   { title: "CLRA Registers (Form XII–XV)", route: "/clra-registers" },
 ];
 
@@ -357,6 +365,27 @@ export default function ReportsCenterScreen() {
             </View>
           );
         })}
+
+        {/* Iter 528 (user request) — separate Contractor Registers section */}
+        <View style={{ marginBottom: 8 }}>
+          <Text style={[shared.cardTitle, { marginBottom: 6 }]}>
+            Contractor Registers
+          </Text>
+          <View style={shared.tabs}>
+            {CONTRACTOR_REGISTERS.map((e) => (
+              <Pressable
+                key={e.route}
+                onPress={() => router.push(e.route as any)}
+                style={[shared.tab, { borderColor: "#166534" }]}
+                testID={`rc-ctr-reg-${e.route.replace("/", "")}`}
+              >
+                <Text style={[shared.tabTxt, { color: "#166534" }]}>
+                  ↗ {e.title}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
 
         <View style={{ marginBottom: 8 }}>
           <Text style={[shared.cardTitle, { marginBottom: 6 }]}>

@@ -5204,3 +5204,6 @@ hints. Awaiting user to run deploy and send the diagnostic block.
 (Form XII–XV)" REMOVED from the Compliance sidebar and added to the
 Report Hub "Already Available (open page)" link row (reports-center.tsx
 EXISTING list). Screenshot-verified: both chips render and navigate.
+Update: user asked to move the 2 links OUT of "Already Available" — they
+now render in a SEPARATE "Contractor Registers" section (green chips,
+CONTRACTOR_REGISTERS const in reports-center.tsx). Screenshot verified.
