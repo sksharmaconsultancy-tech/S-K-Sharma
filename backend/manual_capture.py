@@ -80,10 +80,17 @@ def seed_samples(db, ctx) -> None:
     emps = ctx["emps"]
     if not emps:
         return
+    # the employee used for the Employee Quick Guide must ALSO have a
+    # sample leave so their "My Leave" capture is never blank
+    star = db.users.find_one(
+        {"user_id": ctx.get("payslip_uid")},
+        {"_id": 0, "user_id": 1, "name": 1, "email": 1,
+         "employee_code": 1})
+    pick = ([star] if star else []) + emps
     leaves = []
     for i, (lt, d0, d1) in enumerate((("casual", 3, 4), ("sick", 10, 12),
                                       ("earned", 18, 20))):
-        e = emps[i % len(emps)]
+        e = pick[i % len(pick)]
         leaves.append({
             "leave_id": f"lv_{uuid.uuid4().hex[:12]}",
             "user_id": e["user_id"], "company_id": ctx["company_id"],
@@ -130,6 +137,73 @@ def _page_problem(pg) -> str:
     return ""
 
 
+def _employee_ctx(db, ctx) -> dict:
+    """Pick an onboarded employee for the Employee Quick Guide captures
+    and mint a TEMPORARY session for them (removed after capture)."""
+    q = {"company_id": ctx["company_id"], "role": "employee",
+         "onboarded": True, "active": {"$ne": False}}
+    emp = (db.users.find_one({**q, "user_id": ctx["payslip_uid"]})
+           or db.users.find_one(q))
+    if not emp:
+        return {}
+    tok = f"manual_emp_{uuid.uuid4().hex}"
+    db.user_sessions.insert_one({
+        "session_token": tok, "user_id": emp["user_id"],
+        "created_at": datetime.now().isoformat(),
+        "expires_at": datetime.utcnow() + timedelta(hours=1),
+        "manual_sample": True})
+    return {"token": tok, "user_id": emp["user_id"],
+            "name": emp.get("name")}
+
+
+def capture_employee(b, base: str, emp: dict, ok: list, fail: list,
+                     month: str = "") -> None:
+    """Phone-size (390x844) captures of the EMPLOYEE app for the
+    Employee Quick Guide."""
+    vp = {"width": 390, "height": 844}
+    # employee landing / sign-in (unauthenticated)
+    cx = b.new_context(viewport=vp)
+    lp = cx.new_page()
+    try:
+        lp.goto(base + "/", wait_until="domcontentloaded", timeout=60000)
+        lp.wait_for_timeout(5000)
+        if not _page_problem(lp):
+            lp.screenshot(path=f"{OUT}/emp_login.png")
+            ok.append("emp_login")
+    except Exception as e:  # noqa: BLE001
+        fail.append(f"emp_login: {str(e)[:80]}")
+    cx.close()
+    if not emp.get("token"):
+        fail.append("employee captures skipped: no onboarded employee")
+        return
+    cx = b.new_context(viewport=vp)
+    cx.add_init_script(
+        "window.localStorage.setItem('llc_session_token', "
+        f"'{emp['token']}');")
+    pg = cx.new_page()
+    mq = (f"?month={int(month[5:7])}&year={int(month[:4])}"
+          if len(month) == 7 else "")
+    for name, route, wait_ms in (
+            ("emp_home", "/", 9000),
+            ("emp_attendance", "/attendance", 8000),
+            ("emp_leave", "/leave", 7000),
+            ("emp_payslip", f"/payslip{mq}", 8000),
+            ("emp_profile", "/profile", 7000)):
+        try:
+            pg.goto(base + route, wait_until="domcontentloaded",
+                    timeout=60000)
+            pg.wait_for_timeout(wait_ms)
+            problem = _page_problem(pg)
+            if problem:
+                fail.append(f"{name}: {problem}")
+                continue
+            pg.screenshot(path=f"{OUT}/{name}.png")
+            ok.append(name)
+        except Exception as e:  # noqa: BLE001
+            fail.append(f"{name}: {str(e)[:80]}")
+    cx.close()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", required=True)
@@ -167,6 +241,7 @@ def main() -> int:
     ]
     ok, fail = [], []
     seed_samples(db, ctx)
+    emp = _employee_ctx(db, ctx)
     try:
         with sync_playwright() as p:
             b = p.chromium.launch()
@@ -209,9 +284,11 @@ def main() -> int:
                     ok.append(name)
                 except Exception as e:  # noqa: BLE001
                     fail.append(f"{name}: {str(e)[:80]}")
+            capture_employee(b, args.base, emp, ok, fail, month=m)
             b.close()
     finally:
         cleanup_samples(db)
+        db.user_sessions.delete_many({"manual_sample": True})
     with open(f"{OUT}/.last_capture.json", "w") as f:
         json.dump({"at": datetime.now().isoformat(timespec="seconds"),
                    "month_used": m, "ok": ok, "failed": fail}, f)

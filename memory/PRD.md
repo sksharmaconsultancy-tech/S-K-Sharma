@@ -5252,3 +5252,16 @@ Section "19. Install as an App (PWA)" added to the manual: install table
 (Android Chrome / iPhone Safari / desktop Chrome-Edge), benefits bullets,
 post-update reopen warning. Manual now 24 pages; TOC + What's New
 changelog entry auto-included; frontend section chips updated.
+
+## Iter 533 — Employee Quick Guide PDF (user-approved improvement)
+1. GET /api/admin/employee-guide.pdf (super admin only): 9-page
+   phone-first guide — teal cover, install (PWA), sign in, punch in/out,
+   attendance, leave, payslip, profile, help table. Real 390x844 phone
+   screenshots (emp_*.png) captured via temporary employee session
+   (minted+cleaned in manual_capture.py) with sample leave for that
+   employee so no screen is blank.
+2. FIXED BUG: /admin/payroll/run now allows role=employee scoped to SELF
+   (was 403 → employee Payslip tab always showed "No data"). Payslip tab
+   now functional for employees.
+3. user-manual screen: second button "Employee Quick Guide (PDF)";
+   changelog entries logged for PWA guide + employee guide.

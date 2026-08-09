@@ -326,7 +326,20 @@ async def admin_payroll_run(
     """Compute a lightweight monthly payroll run for every eligible
     employee in scope. See `_compute_payroll_run` for details."""
     user = await get_user_from_token(authorization)
-    require_role(user, ["company_admin", "super_admin", "sub_admin"])
+    require_role(user, ["company_admin", "super_admin", "sub_admin",
+                        "employee"])
+    if user.get("role") == "employee":
+        # Iter 533 — employees may read ONLY their own payslip row,
+        # scoped to their firm (fixes the always-blank payslip tab).
+        data = await _compute_payroll_run(
+            {**user, "role": "company_admin"}, year, month,
+            user.get("company_id"))
+        data["rows"] = [r for r in data.get("rows") or []
+                        if r.get("user_id") == user.get("user_id")]
+        data["attendance"] = [a for a in data.get("attendance") or []
+                              if a.get("user_id") == user.get("user_id")]
+        data["totals"] = {}
+        return data
     return await _compute_payroll_run(user, year, month, company_id)
 
 

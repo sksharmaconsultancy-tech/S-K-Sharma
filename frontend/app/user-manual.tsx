@@ -63,11 +63,11 @@ export default function UserManualScreen() {
     }
   };
 
-  const download = async () => {
+  const download = async (kind: "user-manual" | "employee-guide" = "user-manual") => {
     setBusy(true);
     setErr("");
     try {
-      const r = await apiBinary("/admin/user-manual.pdf");
+      const r = await apiBinary(`/admin/${kind}.pdf`);
       if (Platform.OS === "web" && r.webBlobUrl)
         window.open(r.webBlobUrl, "_blank");
     } catch (e: any) {
@@ -91,7 +91,7 @@ export default function UserManualScreen() {
             screenshot callouts, compliance-vs-actual comparison and a
             one-page payroll workflow chart.
           </Text>
-          <Pressable style={s.btn} onPress={download} disabled={busy}
+          <Pressable style={s.btn} onPress={() => download("user-manual")} disabled={busy}
             testID="manual-download">
             {busy ? <ActivityIndicator color="#fff" /> : (
               <>
@@ -99,6 +99,13 @@ export default function UserManualScreen() {
                 <Text style={s.btnTxt}>Generate &amp; Open PDF</Text>
               </>
             )}
+          </Pressable>
+          {/* Iter 533 — employee-facing quick guide */}
+          <Pressable style={[s.btn, { backgroundColor: "#155E75", marginTop: 10 }]}
+            onPress={() => download("employee-guide")} disabled={busy}
+            testID="employee-guide-download">
+            <Ionicons name="phone-portrait-outline" size={16} color="#fff" />
+            <Text style={s.btnTxt}>Employee Quick Guide (PDF)</Text>
           </Pressable>
           {/* Iter 531 — auto-update controls */}
           <Pressable style={[s.btn, s.btnGhost]} onPress={refreshShots}

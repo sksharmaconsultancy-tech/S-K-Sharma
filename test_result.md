@@ -363,3 +363,10 @@ ITER 487 (doc-expiry alerts):
   version/screenshot dates; refresh-screenshots endpoint captured 15/15
   with sample-data seeding + cleanup (0 leftovers), blank/error screens
   rejected; /companies crash fixed and re-captured correctly.
+
+## Iter 533
+- Employee Quick Guide: 9-page PDF verified (cover + punch page rendered),
+  200 super admin / 401 unauth. manual_capture now 21/21 good captures
+  incl. 6 employee phone shots; temp employee session + samples cleaned.
+- payroll/run employee self-scope fix verified via emp_payslip capture
+  showing real data (20 present days).

@@ -88,11 +88,13 @@ def _img(name: str, max_h: float = 96 * mm):
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("BACKGROUND", (0, 0), (-1, -1), rl.HexColor("#F1F5F9"))]))
         return t
+    from reportlab.lib.utils import ImageReader
+    iw, ih = ImageReader(path).getSize()
     w = CW
-    h = w * 900 / 1440
+    h = w * ih / iw
     if h > max_h:
         h = max_h
-        w = h * 1440 / 900
+        w = h * iw / ih
     img = Image(path, width=w, height=h)
     frame = Table([[img]], colWidths=[w + 2])
     frame.setStyle(TableStyle([
@@ -224,6 +226,44 @@ def _cover(cv, doc):
     cv.restoreState()
 
 
+def _cover_emp(cv, doc):
+    cv.saveState()
+    cv.setFillColor(TEAL)
+    cv.rect(0, 0, W, H, fill=1, stroke=0)
+    cv.setFillColor(NAVY)
+    cv.rect(0, H - 58 * mm, W, 16 * mm, fill=1, stroke=0)
+    cv.setFillColor(rl.HexColor("#155E75"))
+    cv.circle(W - 18 * mm, 24 * mm, 34 * mm, fill=1, stroke=0)
+    cv.setFillColor(NAVY)
+    cv.circle(W - 34 * mm, 12 * mm, 20 * mm, fill=1, stroke=0)
+    cv.setFillColor(rl.white)
+    cv.setFont("Helvetica-Bold", 26)
+    cv.drawString(20 * mm, H - 90 * mm, "EMPLOYEE")
+    cv.drawString(20 * mm, H - 101 * mm, "QUICK GUIDE")
+    cv.setFillColor(rl.HexColor("#BAE6FD"))
+    cv.setFont("Helvetica-Bold", 15)
+    cv.drawString(20 * mm, H - 116 * mm,
+                  "Punch In · Attendance · Leave · Payslip")
+    cv.setFillColor(rl.HexColor("#E0F2FE"))
+    cv.setFont("Helvetica", 11.5)
+    cv.drawString(20 * mm, H - 126 * mm,
+                  "Everything you need — right on your phone")
+    cv.setFont("Helvetica-Bold", 13)
+    cv.setFillColor(rl.white)
+    cv.drawString(20 * mm, H - 50 * mm, "S.K. SHARMA & CO.")
+    cv.setFont("Helvetica", 9)
+    cv.drawString(20 * mm, H - 55 * mm, "Compliance · Payroll · Manpower")
+    cv.setFont("Helvetica", 10)
+    y = 62 * mm
+    for line in (
+            f"Software Version :  Server Iter {APP_ITERATION}",
+            f"Last Updated     :  {date.today():%d-%m-%Y}",
+            "Prepared By      :  S.K. Sharma & Co."):
+        cv.drawString(20 * mm, y, line)
+        y -= 6.5 * mm
+    cv.restoreState()
+
+
 def _page(cv, doc):
     cv.saveState()
     cv.setStrokeColor(TEAL)
@@ -232,7 +272,8 @@ def _page(cv, doc):
     cv.setFont("Helvetica-Bold", 8)
     cv.setFillColor(NAVY)
     cv.drawString(15 * mm, H - 10 * mm,
-                  "PAYROLL & COMPLIANCE PORTAL — QUICK USER MANUAL")
+                  getattr(doc, "_hdr_title",
+                          "PAYROLL & COMPLIANCE PORTAL — QUICK USER MANUAL"))
     cv.drawRightString(W - 15 * mm, H - 10 * mm, "S.K. SHARMA & CO.")
     cv.setFont("Helvetica", 8)
     cv.setFillColor(GREY)
@@ -693,6 +734,136 @@ async def user_manual_pdf(token: Optional[str] = Query(None),
     return Response(content=buf.getvalue(), media_type="application/pdf",
                     headers={"Content-Disposition":
                              'inline; filename="Payroll_Quick_User_Manual.pdf"'})
+
+
+def build_employee_guide() -> BytesIO:
+    """Iter 533 — short phone-first EMPLOYEE Quick Guide (~8 pages):
+    install → sign in → punch → attendance → leave → payslip → profile."""
+    buf = BytesIO()
+    doc = _Doc(buf, pagesize=A4, title="Employee Quick Guide")
+    doc._hdr_title = "EMPLOYEE QUICK GUIDE — PAYROLL PORTAL"
+    fr = Frame(15 * mm, 14 * mm, CW, H - 32 * mm, id="f")
+    doc.addPageTemplates([
+        PageTemplate(id="cover", frames=[fr], onPage=_cover_emp),
+        PageTemplate(id="body", frames=[fr], onPage=_page)])
+    story: list = [NextPageTemplate("body"), PageBreak()]
+
+    _section(story, 1, "Install the App on Your Phone",
+             "Open the portal link your employer shared", None,
+             ["Android: 3-dot menu → Install app",
+              "iPhone: Share → Add to Home Screen"],
+             ["Open the portal link in your phone browser.",
+              "<b>Android (Chrome):</b> tap the 3-dot menu → "
+              "<b>Install app</b> / \"Add to Home screen\".",
+              "<b>iPhone (Safari):</b> tap <b>Share</b> → "
+              "<b>Add to Home Screen</b>.",
+              "Open the new icon — the portal now works like a mobile "
+              "app."],
+             note="No Play Store / App Store download is needed.")
+
+    _section(story, 2, "Sign In", "App icon → Sign In", "emp_login",
+             ["Enter mobile / email", "Enter your PIN", "Tap Sign In"],
+             ["Open the app and choose the employee sign-in.",
+              "Enter your registered <b>mobile number / email</b>.",
+              "Enter your <b>PIN</b> and tap Sign In.",
+              "Forgot your PIN? Contact your HR / admin."],
+             img_h=88 * mm)
+
+    _section(story, 3, "Home — Punch In / Punch Out", "Home tab",
+             "emp_home",
+             ["Big Punch In / Out button", "Today's punch times",
+              "Duty hours summary", "My services shortcuts"],
+             ["Allow <b>location</b> (and camera if asked) so your punch "
+              "is verified.",
+              "Tap the big <b>Punch In</b> button when duty starts.",
+              "Tap <b>Punch Out</b> when duty ends.",
+              "Your punch time, working hours and shift show instantly."],
+             note="Punch works only near your assigned site if your firm "
+                  "uses geo-fencing.", img_h=88 * mm)
+
+    _section(story, 4, "My Attendance", "Attendance tab", "emp_attendance",
+             ["Month view", "P / A / WO / Holiday marks",
+              "Worked hours & OT"],
+             ["Open the <b>Attendance</b> tab.",
+              "See each day: Present, Absent, Weekly Off, Holiday or "
+              "Leave.",
+              "Check your total present days, hours and OT.",
+              "Report any mismatch to HR immediately."],
+             img_h=88 * mm)
+
+    _section(story, 5, "Apply Leave", "Leave tab", "emp_leave",
+             ["Apply Leave button", "Type & dates", "Status: Pending / "
+              "Approved"],
+             ["Open the <b>Leave</b> tab and tap Apply.",
+              "Choose the leave type (Casual / Sick / Earned) and dates.",
+              "Add a short reason and submit.",
+              "Track the status — approved leave reflects in attendance "
+              "automatically."],
+             img_h=88 * mm)
+
+    _section(story, 6, "My Payslip", "Payslip tab", "emp_payslip",
+             ["Month selector", "Attendance summary", "Gross salary"],
+             ["Open the <b>Payslip</b> tab.",
+              "See your present days, hours and salary for the month.",
+              "Use the month arrows to view previous months.",
+              "Questions about amounts? Contact your HR / employer."],
+             img_h=88 * mm)
+
+    _section(story, 7, "My Profile & Documents", "Profile tab",
+             "emp_profile",
+             ["Personal details", "Bank & IDs", "My documents"],
+             ["Open the <b>Profile</b> tab.",
+              "Verify your name, mobile, bank account and UAN/ESIC "
+              "details.",
+              "Upload / view documents when requested.",
+              "Wrong details? Ask HR to update them."],
+             img_h=88 * mm)
+
+    # help page
+    story.append(Paragraph("8. Help & Tips", S_H1))
+    ht = Table([
+        [Paragraph("<b>Problem</b>", S_BODY),
+         Paragraph("<b>What to do</b>", S_BODY)],
+        [Paragraph("Punch button not working", S_BODY),
+         Paragraph("Turn ON location (GPS) and give the app location "
+                   "permission, then try again.", S_BODY)],
+        [Paragraph("Forgot PIN", S_BODY),
+         Paragraph("Use Forgot PIN on the sign-in screen or contact HR.",
+                   S_BODY)],
+        [Paragraph("Payslip shows no data", S_BODY),
+         Paragraph("Salary for that month may not be processed yet — "
+                   "check the previous month.", S_BODY)],
+        [Paragraph("App shows old screens", S_BODY),
+         Paragraph("Close the app fully and reopen it twice.", S_BODY)],
+    ], colWidths=[CW * 0.38, CW * 0.62])
+    ht.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), TEAL),
+        ("GRID", (0, 0), (-1, -1), 0.6, GREY),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl.white, TEAL_BG]),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("VALIGN", (0, 0), (-1, -1), "TOP")]))
+    story.append(ht)
+    story.append(Spacer(1, 8))
+    story.append(_note("Daily routine: Punch In when duty starts → work → "
+                       "Punch Out → check attendance → payslip at month "
+                       "end. That's it!"))
+    doc.multiBuild(story)
+    buf.seek(0)
+    return buf
+
+
+@router.get("/employee-guide.pdf")
+async def employee_guide_pdf(token: Optional[str] = Query(None),
+                             authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(
+        authorization or (f"Bearer {token}" if token else None))
+    require_role(admin, ["super_admin"])  # SUPER ADMIN ONLY
+    buf = build_employee_guide()
+    return Response(content=buf.getvalue(), media_type="application/pdf",
+                    headers={"Content-Disposition":
+                             'inline; filename="Employee_Quick_Guide.pdf"'})
 
 
 # ---------------------------------------------------------------------------
