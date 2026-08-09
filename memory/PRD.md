@@ -5246,3 +5246,9 @@ CONTRACTOR_REGISTERS const in reports-center.tsx). Screenshot verified.
    guarded, shows "No geofence set" (this was the wrong firm-master
    screenshot user reported).
 5. APP_ITERATION=531, deploy_vps_iter531.sh, temp_bundle updated.
+
+## Iter 532 — PWA section in User Manual (user request)
+Section "19. Install as an App (PWA)" added to the manual: install table
+(Android Chrome / iPhone Safari / desktop Chrome-Edge), benefits bullets,
+post-update reopen warning. Manual now 24 pages; TOC + What's New
+changelog entry auto-included; frontend section chips updated.

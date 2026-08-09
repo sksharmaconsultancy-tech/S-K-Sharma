@@ -21,7 +21,7 @@ const SECTIONS = [
   "Salary Processing", "Compliance Salary", "Compliance vs Actual",
   "Deductions", "Payroll Finalization", "Salary Slip", "Bank Payment",
   "Reports", "Monthly Payroll Report", "Excel / PDF Export",
-  "Troubleshooting", "Payroll Quick Workflow",
+  "Install as an App (PWA)", "Troubleshooting", "Payroll Quick Workflow",
 ];
 
 export default function UserManualScreen() {

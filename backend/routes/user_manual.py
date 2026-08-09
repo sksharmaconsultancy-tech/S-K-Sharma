@@ -510,9 +510,59 @@ def build_manual(updates: Optional[list] = None,
              body="Every report follows the same pattern: "
                   "<b>Filter → Generate → Export Excel / PDF</b>.")
 
+    # -------- PWA — install the portal as an app (user request Iter 532)
+    story.append(Paragraph("19. Install as an App (PWA)", S_H1))
+    story.append(Paragraph(
+        "The portal is a <b>Progressive Web App</b> — install it on any "
+        "phone, tablet or computer directly from the browser. No Play "
+        "Store / App Store download is needed, and it always opens the "
+        "latest version.", S_BODY))
+    story.append(Spacer(1, 5))
+    pwa_t = Table([
+        [Paragraph("<b>Device</b>", S_BODY),
+         Paragraph("<b>How to install</b>", S_BODY)],
+        [Paragraph("Android phone / tablet (Chrome)", S_BODY),
+         Paragraph("Open the portal link → tap the <b>3-dot menu</b> "
+                   "(top-right) → <b>Install app</b> (or \"Add to Home "
+                   "screen\") → Install. The portal icon appears on your "
+                   "home screen.", S_BODY)],
+        [Paragraph("iPhone / iPad (Safari)", S_BODY),
+         Paragraph("Open the portal link → tap the <b>Share</b> button "
+                   "(square with arrow) → <b>Add to Home Screen</b> → "
+                   "Add.", S_BODY)],
+        [Paragraph("Windows / Mac desktop (Chrome or Edge)", S_BODY),
+         Paragraph("Open the portal → click the <b>install icon</b> in "
+                   "the address bar → Install. The portal "
+                   "opens in its own window like a desktop app.", S_BODY)],
+    ], colWidths=[CW * 0.32, CW * 0.68])
+    pwa_t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+        ("GRID", (0, 0), (-1, -1), 0.6, GREY),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl.white, TEAL_BG]),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("VALIGN", (0, 0), (-1, -1), "TOP")]))
+    story.append(pwa_t)
+    story.append(Spacer(1, 6))
+    for b in ("Full-screen app experience with its own home-screen icon "
+              "and splash screen.",
+              "Faster loading — the app shell is cached on your device.",
+              "Employees can use the same install for punch-in, payslips "
+              "and leave requests.",
+              "Works on any device with a modern browser — nothing to "
+              "publish or update through app stores."):
+        story.append(Paragraph(f"<font color='#0E7490'><b>•</b></font> {b}",
+                               S_STEP))
+    story.append(Spacer(1, 4))
+    story.append(_note("After a software update, close the installed app "
+                       "FULLY and reopen it twice (desktop: Ctrl+Shift+R) "
+                       "so the new version loads.", warn=True))
+    story.append(PageBreak())
+
     # -------- dynamic extra sections (manual_sections collection) so new
     # payroll features extend the manual WITHOUT code changes
-    n = 19
+    n = 20
     for ex in (extras or []):
         _section(story, n, ex.get("title", "New Feature"),
                  ex.get("nav", ""), ex.get("shot") or None,
