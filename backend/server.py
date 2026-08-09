@@ -9451,7 +9451,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "527"
+APP_ITERATION = "530"
 
 
 @api.get("/version")
@@ -12430,6 +12430,10 @@ app.include_router(cwr_router)
 # Iter 529 — Monthly Payroll Attendance & Salary Report.
 from routes.monthly_payroll_report import router as monthly_payroll_router  # noqa: E402
 app.include_router(monthly_payroll_router)
+
+# Iter 530 — Quick User Manual PDF (super admin only).
+from routes.user_manual import router as user_manual_router  # noqa: E402
+app.include_router(user_manual_router)
 
 # Iter 359 — PF & ESIC Claims Management.
 from routes.claims_management import router as claims_router  # noqa: E402

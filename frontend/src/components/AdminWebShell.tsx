@@ -301,6 +301,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/super-admin-access", label: "Super Admin Rights", icon: "star-outline" },
       { route: "/proposals", label: "Sales \u00b7 Proposals", icon: "document-text-outline" },
       { route: "/appearance", label: "Appearance / Theme", icon: "color-palette-outline" },
+      { route: "/user-manual", label: "User Manual (PDF)", icon: "book-outline" },
     ],
   },
   // User directive — AI Insights lives at the very END of the sidebar.
