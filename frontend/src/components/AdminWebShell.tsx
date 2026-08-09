@@ -212,6 +212,7 @@ export const NAV_SUPER: NavItem[] = [
     icon: "bar-chart-outline",
     children: [
       { route: "/reports-center", label: "Report Hub", icon: "library-outline" },
+      { route: "/monthly-payroll-report", label: "Monthly Payroll Report", icon: "calendar-number-outline" },
       { route: "/labour-reports", label: "Labour Reports", icon: "documents-outline" },
       { route: "/labour-cost-dashboard", label: "Labour Cost Dashboard", icon: "trending-up-outline" },
       { route: "/attendance-grid", label: "Attendance Reports", icon: "grid-outline" },
@@ -588,6 +589,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
     icon: "bar-chart-outline",
     children: [
       { route: "/reports-center", label: "Report Hub", icon: "library-outline" },
+      { route: "/monthly-payroll-report", label: "Monthly Payroll Report", icon: "calendar-number-outline" },
       { route: "/labour-reports", label: "Labour Reports", icon: "documents-outline" },
       { route: "/labour-cost-dashboard", label: "Labour Cost Dashboard", icon: "trending-up-outline" },
       { route: "/attendance-grid", label: "Attendance Reports", icon: "grid-outline" },

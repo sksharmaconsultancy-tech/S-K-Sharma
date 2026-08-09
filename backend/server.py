@@ -12427,6 +12427,10 @@ app.include_router(scheduled_reports_router)
 from routes.central_wage_registers import router as cwr_router  # noqa: E402
 app.include_router(cwr_router)
 
+# Iter 529 — Monthly Payroll Attendance & Salary Report.
+from routes.monthly_payroll_report import router as monthly_payroll_router  # noqa: E402
+app.include_router(monthly_payroll_router)
+
 # Iter 359 — PF & ESIC Claims Management.
 from routes.claims_management import router as claims_router  # noqa: E402
 app.include_router(claims_router)
