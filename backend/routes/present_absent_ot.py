@@ -309,6 +309,3 @@ async def pa_ot_pdf(company_id: str = Query(...), month: str = Query(...),
     return Response(content=buf.getvalue(), media_type="application/pdf",
                     headers={"Content-Disposition":
                              f'inline; filename="present-absent-ot-{month}.pdf"'})
-etvalue(), media_type="application/pdf",
-                    headers={"Content-Disposition":
-                             f'inline; filename="present-absent-ot-{month}.pdf"'})

@@ -12423,6 +12423,10 @@ app.include_router(contractors_router)
 app.include_router(clra_reports_router)
 app.include_router(scheduled_reports_router)
 
+# Iter 527 — Central Contractor Wage Registers (Form A–D).
+from routes.central_wage_registers import router as cwr_router  # noqa: E402
+app.include_router(cwr_router)
+
 # Iter 359 — PF & ESIC Claims Management.
 from routes.claims_management import router as claims_router  # noqa: E402
 app.include_router(claims_router)

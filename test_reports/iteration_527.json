@@ -1,0 +1,31 @@
+{
+  "summary": "Iter 527 tested end-to-end. Backend: 26/26 pytests pass — Salary Comparison grouped output (both/department/designation) has 'employees' + attendance columns, section headers, xlsx/pdf exports return 200 binary; Central Wage Registers /filters, /register/form-{a,b,c,d} JSON + xlsx + pdf all 200; workflow prepare→verify→approve→lock→unlock transitions correctly with growing history audit; POST form-c-entries returns 409 when Form C period is approved/locked and 200 when draft (delete also 409 when approved); masters CRUD (principal-employers, work-orders, employee-map) works and Form A reflects mapped PE name/site for employees (cleanup successful); Form D custom period 2026-07-01 → 2026-07-15 slices exactly 15 day columns. Present/Absent old + new-OT endpoints (JSON, xlsx, pdf) all 200. Frontend: super-admin session-token injection into localStorage works, /central-wage-registers loads with sidebar entry 'Contractor Registers — Central Wages (Form A–D)', all 4 form tabs + Setup render, workflow bar shows DRAFT chip + Mark Prepared / Verify + PDF / Excel buttons, Setup tab shows Principal Employer + Work Order + Employee-Mapping forms; /reports-center Salary Comparison card renders new group-by chips (rc-cmpgroup-both/department/designation) and 'No. of Employees' column appears in output; /present-absent-report loads with OLD status-matrix as default plus 'Present / Absent + Daily OT Report' chip visible and Excel/PDF buttons present. No deprecated Expo packages found in the three touched screens. No blocking issues.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter527_central_wage_and_salary_compare.py",
+    "/app/test_reports/pytest/iter527.xml"
+  ],
+  "action_items": [
+    "Optional: consider aligning Report Hub default month with backend last-finalized-month response (currently defaulted to 2026-07 in UI; salary run is 2026-07 with zero values as pre-noted).",
+    "Optional: chip testIDs on Present/Absent screen are 'par-fmt-old' / 'par-fmt-ot' — main agent may want to document them so future testers use the correct keys (chips ARE functional on screen)."
+  ],
+  "critical_code_review_comments": [
+    "central_wage_registers.py cleanly separates data (masters cwr_* collections) from Employee Master — good design; workflow audit history is preserved on unlock (downstream sign-offs cleared as expected).",
+    "payroll_reports.py salary-comparison _grouped() correctly aggregates gross/net/attendance per group and computes deltas; totals row uses department universe (documented in code); no _id leakage.",
+    "Both routers exclude MongoDB _id via projection ({\"_id\": 0}) — good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter527_central_wage_and_salary_compare.py (new)"
+  ],
+  "success_rate": {"backend": "100% (26/26)", "frontend": "100% (all critical flows render + testIDs present)"},
+  "seed_data_creation": "TestMastersCRUD creates one PE 'TEST_PE_pytest', one WO 'TEST_WO_PY', maps 2 employees, then deletes everything — cleaned up. TestFormCEntriesLock creates 1 Form C entry and deletes it after unlock — cleaned up.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend base URL: https://emplo-connect-1.preview.emergentagent.com. Super admin login via /api/auth/admin-password-login {email:'sksharmaconsultancy@gmail.com', password:'sharma123'} — returns session_token. Frontend requires token to be set at three localStorage keys ('llc_session_token','sksharma_admin_token','admin_session_token'). Test firm Kankani cmp_527fecdd7c, salary run exists ONLY for 2026-07 (zeros are expected — attendance not run into it). Central Wage Registers URL /central-wage-registers; workflow endpoint /api/admin/central-wage-registers/status; Form C entries at /form-c-entries; masters at /principal-employers, /work-orders, /employee-map. Present/Absent chip testIDs are par-fmt-old (default) and par-fmt-ot (dual-row). Salary Comparison group-by chips are rc-cmpgroup-both/department/designation."
+}

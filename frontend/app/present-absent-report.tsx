@@ -176,7 +176,7 @@ export default function PresentAbsentReport() {
           <Text style={s.empty}>No employees found for {month}.</Text>
         ) : null}
 
-        {!loading && emps.length ? (
+        {!loading && emps.length && fmt === "old" ? (
           <ScrollView horizontal showsHorizontalScrollIndicator style={{ marginTop: 10 }}>
             <View>
               {/* header */}
@@ -237,6 +237,97 @@ export default function PresentAbsentReport() {
               </View>
             </View>
           </ScrollView>
+        ) : null}
+
+        {/* Iter 533 (user request) — NEW "Present / Absent + Daily OT"
+            layout: 2 rows per employee (Row 1 = P/A status, Row 2 = that
+            day's OT hours). S.No + Name + Father + Designation merged
+            across both rows. Old layout above is untouched. */}
+        {!loading && emps.length && fmt === "ot" ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator style={{ marginTop: 10 }}>
+            <View>
+              <View style={s.row}>
+                <View style={[s.snoCell, s.hCell]}><Text style={s.hTxt}>S.No</Text></View>
+                <View style={[s.nameCell, s.hCell]}><Text style={s.hTxt}>Employee Name</Text></View>
+                <View style={[s.fatherCell, s.hCell]}><Text style={s.hTxt}>Father Name</Text></View>
+                <View style={[s.desigCell, s.hCell]}><Text style={s.hTxt}>Designation</Text></View>
+                <View style={[s.rowLblCell, s.hCell]}><Text style={s.hTxt}>Row</Text></View>
+                {dayLabels.map((dl, i) => (
+                  <View key={dl} style={[s.dayCell, s.hCell]}>
+                    <Text style={s.hTxt}>{parseInt(String(dl).slice(0, 2), 10)}</Text>
+                    <Text style={s.wdTxt}>{(data.weekday_labels || [])[i] || ""}</Text>
+                  </View>
+                ))}
+                {["Present", "Absent", "OT Hrs"].map((t) => (
+                  <View key={t} style={[s.totCell, s.hCell]}><Text style={s.hTxt}>{t}</Text></View>
+                ))}
+              </View>
+              {emps.map((e: any, idx: number) => (
+                <View key={e.employee_code || e.name} style={s.row}>
+                  <View style={s.snoCell}><Text style={s.totTxt}>{idx + 1}</Text></View>
+                  <View style={s.nameCell}>
+                    <Text style={s.nameTxt} numberOfLines={2}>
+                      {e.employee_code ? `${e.employee_code} · ` : ""}{e.name}
+                    </Text>
+                  </View>
+                  <View style={s.fatherCell}>
+                    <Text style={s.nameTxt} numberOfLines={2}>{e.father_name || ""}</Text>
+                  </View>
+                  <View style={s.desigCell}>
+                    <Text style={s.nameTxt} numberOfLines={2}>{e.designation || ""}</Text>
+                  </View>
+                  <View>
+                    <View style={s.row}>
+                      <View style={[s.rowLblCell, { backgroundColor: "#F1F5F9" }]}>
+                        <Text style={s.rowLblTxt}>Status</Text>
+                      </View>
+                      {dayLabels.map((dl) => {
+                        const cell = e.days?.[dl] || {};
+                        const ui = ST_UI[cell.st];
+                        return (
+                          <View key={dl} style={[s.dayCellHalf, ui && { backgroundColor: ui.bg }]}>
+                            <Text style={[s.stTxt, ui && { color: ui.fg }]}>{cell.st || ""}</Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                    <View style={s.row}>
+                      <View style={[s.rowLblCell, { backgroundColor: "#F1F5F9" }]}>
+                        <Text style={s.rowLblTxt}>OT</Text>
+                      </View>
+                      {dayLabels.map((dl) => {
+                        const cell = e.days?.[dl] || {};
+                        return (
+                          <View key={dl} style={s.dayCellHalf}>
+                            <Text style={s.otTxt}>{cell.ot ? cell.ot : ""}</Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                  <View style={s.totCell}>
+                    <Text style={[s.totTxt, { color: "#166534" }]}>{e.present_days}</Text>
+                  </View>
+                  <View style={s.totCell}>
+                    <Text style={[s.totTxt, { color: "#991B1B" }]}>{e.absent_days}</Text>
+                  </View>
+                  <View style={s.totCell}>
+                    <Text style={[s.totTxt, { color: "#7C3AED" }]}>{e.ot_total}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </ScrollView>
+        ) : null}
+
+        {!loading && emps.length && fmt === "ot" && data?.grand_totals ? (
+          <View style={s.otSummary}>
+            <Text style={s.otSummaryTxt}>
+              Total Present Days: {data.grand_totals.present_days}   ·   Total
+              Absent Days: {data.grand_totals.absent_days}   ·   Total OT
+              Hours: {data.grand_totals.ot_total}
+            </Text>
+          </View>
         ) : null}
 
         {!loading && emps.length ? (
@@ -304,6 +395,35 @@ const s = StyleSheet.create({
     justifyContent: "center", paddingVertical: 4, backgroundColor: colors.surface,
   },
   totTxt: { fontSize: 10.5, fontWeight: "700", color: colors.onSurface },
+  // Iter 533 — new "+ Daily OT" layout cells
+  snoCell: {
+    width: 40, borderWidth: 0.5, borderColor: "#CBD5E1", alignItems: "center",
+    justifyContent: "center", paddingVertical: 4, backgroundColor: colors.surface,
+  },
+  fatherCell: {
+    width: 130, borderWidth: 0.5, borderColor: "#CBD5E1", paddingHorizontal: 6,
+    paddingVertical: 4, justifyContent: "center", backgroundColor: colors.surface,
+  },
+  desigCell: {
+    width: 120, borderWidth: 0.5, borderColor: "#CBD5E1", paddingHorizontal: 6,
+    paddingVertical: 4, justifyContent: "center", backgroundColor: colors.surface,
+  },
+  rowLblCell: {
+    width: 44, borderWidth: 0.5, borderColor: "#CBD5E1", alignItems: "center",
+    justifyContent: "center", paddingVertical: 4, backgroundColor: colors.surface,
+  },
+  rowLblTxt: { fontSize: 8.5, fontWeight: "800", color: "#475569" },
+  dayCellHalf: {
+    width: 30, borderWidth: 0.5, borderColor: "#CBD5E1", alignItems: "center",
+    justifyContent: "center", paddingVertical: 3, backgroundColor: colors.surface,
+  },
+  otTxt: { fontSize: 8.5, fontWeight: "700", color: "#7C3AED" },
+  otSummary: {
+    marginTop: 10, backgroundColor: "#F5F3FF", borderRadius: 8,
+    borderWidth: 1, borderColor: "#DDD6FE", paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  otSummaryTxt: { fontSize: 12, fontWeight: "800", color: "#4C1D95" },
   legend: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 12 },
   legItem: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 },
   legTxt: { fontSize: 10.5, fontWeight: "700" },
