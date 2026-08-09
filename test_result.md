@@ -350,3 +350,10 @@ ITER 487 (doc-expiry alerts):
 - Frontend: /central-wage-registers tabs + Setup render; Report Hub group-by
   chips (rc-cmpgroup-*) switch correctly; /present-absent-report OT format
   dual-row table renders, old format unchanged. (test_reports/iteration_527.json)
+
+## Iter 530
+- 12/12 pytest PASS (tests/test_iter530_monthly_payroll_and_manual.py):
+  monthly payroll report JSON/xlsx/pdf + filters + null-note behaviour +
+  bank masking (super vs sub admin), user-manual.pdf 200/401/403.
+- Frontend: Report Hub separate Contractor Registers section placement,
+  monthly payroll grid + basis toggle, user manual screen — ALL PASS.

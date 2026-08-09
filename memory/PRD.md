@@ -5207,3 +5207,23 @@ EXISTING list). Screenshot-verified: both chips render and navigate.
 Update: user asked to move the 2 links OUT of "Already Available" — they
 now render in a SEPARATE "Contractor Registers" section (green chips,
 CONTRACTOR_REGISTERS const in reports-center.tsx). Screenshot verified.
+
+## Iter 529-530 — Monthly Payroll Report + Quick User Manual PDF
+1. NEW routes/monthly_payroll_report.py + app/monthly-payroll-report.tsx
+   (sidebar Reports → Monthly Payroll Report): one landscape report —
+   employee details, attendance 1-31 (P/A/WO/HO/CL/PL/EL/SL/ESIC/HD via
+   grid engine + approved leaves overlay), policy payable days, OT,
+   Compliance/Actual gross (independent), Final Salary basis selector,
+   PF/ESIC/PT/LWF/TDS/Advance/Other deductions from the basis run,
+   Net Payable, bank details (masked for non-super-admin), footer
+   totals, frozen identity columns (GridFreeze), Excel + custom A3 PDF,
+   "Salary Not Calculated"/"Attendance Pending" notes (no fake zeros).
+2. NEW routes/user_manual.py + app/user-manual.tsx (sidebar
+   Administration → User Manual (PDF), SUPER ADMIN ONLY, 403 others):
+   22-page SaaS-style Quick User Manual with REAL screenshots
+   (/app/backend/assets/manual/*.png, captured via playwright script
+   /tmp/capture_manual.py), navy/teal theme, cover, TOC w/ page nums,
+   callouts, steps, notes, compliance-vs-actual table, workflow chart.
+3. Report Hub: separate "Contractor Registers" section (Iter 528).
+4. Tests: 12/12 pytest tests/test_iter530_monthly_payroll_and_manual.py
+   + all frontend flows PASS. APP_ITERATION=530, deploy_vps_iter530.sh.
