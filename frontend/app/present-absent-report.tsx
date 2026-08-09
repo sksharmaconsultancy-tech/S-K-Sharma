@@ -40,6 +40,10 @@ export default function PresentAbsentReport() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [exporting, setExporting] = useState("");
+  // Iter 533 (user request) — NEW format selector. "old" keeps the
+  // existing report 100% unchanged; "ot" opens the new 2-row-per-employee
+  // "Present / Absent + Daily OT" report (separate endpoints).
+  const [fmt, setFmt] = useState<"old" | "ot">("old");
 
   useEffect(() => {
     if (user?.role === "company_admin") setCid(user.company_id || "");
@@ -59,14 +63,16 @@ export default function PresentAbsentReport() {
     setLoading(true);
     setErr("");
     try {
-      const r = await api<any>(`/admin/reports/present-absent?${qs}`);
+      const r = await api<any>(fmt === "ot"
+        ? `/admin/reports/present-absent-ot?${qs}`
+        : `/admin/reports/present-absent?${qs}`);
       setData(r);
     } catch (e: any) {
       setErr(e?.message || "Failed to load");
     } finally {
       setLoading(false);
     }
-  }, [cid, month, qs]);
+  }, [cid, month, qs, fmt]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -74,7 +80,9 @@ export default function PresentAbsentReport() {
     if (!cid) return;
     setExporting(kind);
     try {
-      const r = await apiBinary(`/admin/reports/present-absent.${kind}?${qs}`);
+      const r = await apiBinary(fmt === "ot"
+        ? `/admin/reports/present-absent-ot.${kind}?${qs}`
+        : `/admin/reports/present-absent.${kind}?${qs}`);
       if (Platform.OS === "web" && r.webBlobUrl) {
         if (kind === "pdf") window.open(r.webBlobUrl, "_blank");
         else {
@@ -112,6 +120,17 @@ export default function PresentAbsentReport() {
             />
           </View>
         ) : null}
+
+        {/* Iter 533 — Report Format selector (old report untouched) */}
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+          {([["old", "Existing Present / Absent Report"],
+            ["ot", "Present / Absent + Daily OT Report"]] as const).map(([k, lbl]) => (
+            <Pressable key={k} onPress={() => setFmt(k)}
+              style={[s.chip, fmt === k && s.chipOn]} testID={`par-fmt-${k}`}>
+              <Text style={[s.chipTxt, fmt === k && { color: "#fff" }]}>{lbl}</Text>
+            </Pressable>
+          ))}
+        </View>
 
         <View style={s.filterRow}>
           <TextInput

@@ -82,9 +82,12 @@ async def _run_rows_period(company_id: str, m_from: str, m_to: str) -> Dict[str,
     agg: Dict[str, dict] = {}
     for mo in months:
         for uid, r in (await _run_rows(company_id, mo)).items():
-            d = agg.setdefault(uid, {"gross_paid": 0.0, "net": 0.0})
+            d = agg.setdefault(uid, {"gross_paid": 0.0, "net": 0.0,
+                                     "present_days": 0.0})
             d["gross_paid"] = round(d["gross_paid"] + _f(r.get("gross_paid")), 2)
             d["net"] = round(d["net"] + _f(r.get("net")), 2)
+            d["present_days"] = round(
+                d["present_days"] + _f(r.get("present_days")), 2)
     return agg
 
 
@@ -106,29 +109,66 @@ async def _salary_comparison(company_id, month, month_b, fy, ctx=None):
         rows_b = await _run_rows(company_id, month)
         lbl_a, lbl_b = m_a, month
     users = {u["user_id"]: u for u in await _users(company_id)}
-    out = []
-    for uid in set(rows_a) | set(rows_b):
-        u = users.get(uid) or {}
-        ga = _f((rows_a.get(uid) or {}).get("gross_paid"))
-        gb = _f((rows_b.get(uid) or {}).get("gross_paid"))
-        na = _f((rows_a.get(uid) or {}).get("net"))
-        nb = _f((rows_b.get(uid) or {}).get("net"))
-        out.append({"employee_code": u.get("employee_code"),
-                    "name": u.get("name"),
-                    "gross_a": ga, "gross_b": gb,
-                    "gross_diff": round(gb - ga, 2),
-                    "net_a": na, "net_b": nb,
-                    "net_diff": round(nb - na, 2),
-                    "change_pct": round((gb - ga) * 100 / ga, 1) if ga else 0})
-    cols = [("employee_code", "Emp Code"), ("name", "Employee Name"),
+    # Iter 526 (user request) — Name-wise rows REMOVED. Comparison is
+    # GROUPED Department-wise / Designation-wise with No. of Employees
+    # and Total Attendance (present days) columns.
+    group_by = str((ctx or {}).get("group_by") or "both").lower()
+
+    def _grouped(field: str, fallback: str) -> List[dict]:
+        agg: Dict[str, dict] = {}
+        for uid in set(rows_a) | set(rows_b):
+            u = users.get(uid) or {}
+            key = str(u.get(field) or "").strip() or fallback
+            d = agg.setdefault(key, {
+                "group": key, "employees": 0, "att_a": 0.0, "att_b": 0.0,
+                "gross_a": 0.0, "gross_b": 0.0, "net_a": 0.0, "net_b": 0.0})
+            ra, rb = rows_a.get(uid) or {}, rows_b.get(uid) or {}
+            d["employees"] += 1
+            d["att_a"] = round(d["att_a"] + _f(ra.get("present_days")), 2)
+            d["att_b"] = round(d["att_b"] + _f(rb.get("present_days")), 2)
+            d["gross_a"] = round(d["gross_a"] + _f(ra.get("gross_paid")), 2)
+            d["gross_b"] = round(d["gross_b"] + _f(rb.get("gross_paid")), 2)
+            d["net_a"] = round(d["net_a"] + _f(ra.get("net")), 2)
+            d["net_b"] = round(d["net_b"] + _f(rb.get("net")), 2)
+        rows = []
+        for key in sorted(agg, key=str.lower):
+            d = agg[key]
+            d["gross_diff"] = round(d["gross_b"] - d["gross_a"], 2)
+            d["net_diff"] = round(d["net_b"] - d["net_a"], 2)
+            d["change_pct"] = (round(d["gross_diff"] * 100 / d["gross_a"], 1)
+                               if d["gross_a"] else 0)
+            rows.append(d)
+        return rows
+
+    out: List[dict] = []
+    if group_by in ("department", "both"):
+        if group_by == "both":
+            out.append({"group": "— DEPARTMENT WISE —"})
+        out += _grouped("department", "(No Department)")
+    if group_by in ("designation", "both"):
+        if group_by == "both":
+            out.append({"group": "— DESIGNATION WISE —"})
+        out += _grouped("designation", "(No Designation)")
+    glabel = {"department": "Department",
+              "designation": "Designation"}.get(group_by,
+                                                "Department / Designation")
+    cols = [("group", glabel), ("employees", "No. of Employees"),
+            ("att_a", f"Attendance {lbl_a}"), ("att_b", f"Attendance {lbl_b}"),
             ("gross_a", f"Gross {lbl_a}"), ("gross_b", f"Gross {lbl_b}"),
             ("gross_diff", "Gross Diff"), ("net_a", f"Net {lbl_a}"),
             ("net_b", f"Net {lbl_b}"), ("net_diff", "Net Diff"),
             ("change_pct", "Change %")]
-    totals = {"name": "TOTAL"}
-    for k in ("gross_a", "gross_b", "gross_diff", "net_a", "net_b", "net_diff"):
-        totals[k] = round(sum(r[k] for r in out), 2)
-    return cols, _emp_sort(out), totals, f"{lbl_a} vs {lbl_b}"
+    # totals over ONE grouping only (both sections total the same universe)
+    base = _grouped("department", "(No Department)")
+    totals = {"group": "TOTAL"}
+    for k in ("employees", "att_a", "att_b", "gross_a", "gross_b",
+              "gross_diff", "net_a", "net_b", "net_diff"):
+        totals[k] = round(sum(_f(r.get(k)) for r in base), 2)
+    totals["employees"] = int(totals["employees"])
+    totals["change_pct"] = (round(totals["gross_diff"] * 100
+                                  / totals["gross_a"], 1)
+                            if totals["gross_a"] else 0)
+    return cols, out, totals, f"{lbl_a} vs {lbl_b}"
 
 
 async def _gross_vs_net(company_id, month, month_b, fy, ctx=None):
@@ -568,7 +608,8 @@ async def email_hub_report(payload: Dict[str, Any] = Body(default={}),
                "to_date": str(payload.get("to_date") or "").strip(),
                # Iter 520 — periodic salary comparison (PDF/Excel/email too).
                "month_to": str(payload.get("month_to") or "").strip(),
-               "month_b_to": str(payload.get("month_b_to") or "").strip()}
+               "month_b_to": str(payload.get("month_b_to") or "").strip(),
+               "group_by": str(payload.get("group_by") or "").strip()}
         title, fn = _REPORTS[kind]
         cols, rows, totals, extra = await fn(
             company_id, month, payload.get("month_b"), fy, ctx)
@@ -631,12 +672,14 @@ async def report_json(kind: str, company_id: Optional[str] = None,
                       month_b: Optional[str] = None, fy_start_year: int = 0,
                       employee_ids: str = "", from_date: str = "",
                       to_date: str = "", month_to: str = "",
-                      month_b_to: str = "",
+                      month_b_to: str = "", group_by: str = "",
                       authorization: Optional[str] = Header(None)):
     ctx = {"employee_ids": [e for e in (employee_ids or "").split(",") if e],
            "from_date": from_date.strip(), "to_date": to_date.strip(),
            # Iter 520 — periodic salary comparison ranges.
-           "month_to": month_to.strip(), "month_b_to": month_b_to.strip()}
+           "month_to": month_to.strip(), "month_b_to": month_b_to.strip(),
+           # Iter 526 — grouped comparison (department/designation/both).
+           "group_by": group_by.strip()}
     for ext in ("xlsx", "pdf"):
         if kind.endswith(f".{ext}"):
             return await _exp(kind[: -len(ext) - 1], company_id, month,

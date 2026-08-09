@@ -12355,6 +12355,8 @@ app.include_router(inout_ot_matrix_router)
 # Iter 521 (user request) — Present/Absent report per firm attendance policy.
 from routes.present_absent_report import router as present_absent_router  # noqa: E402
 app.include_router(present_absent_router)
+from routes.present_absent_ot import router as present_absent_ot_router  # noqa: E402
+app.include_router(present_absent_ot_router)
 from routes.daily_verification import router as daily_verification_router  # noqa: E402
 app.include_router(daily_verification_router)
 from routes.pf_contribution_report import router as pf_contribution_router  # noqa: E402

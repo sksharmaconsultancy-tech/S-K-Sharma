@@ -96,6 +96,10 @@ export default function ReportsCenterScreen() {
   const [monthTo, setMonthTo] = useState(""); // fine-register periodic
   const [monthBTo, setMonthBTo] = useState(""); // Iter 520 — comparison base period "to"
   const [cmpMode, setCmpMode] = useState<"month" | "periodic">("month");
+  // Iter 526 — grouped salary comparison (dept / designation / both)
+  const [cmpGroupBy, setCmpGroupBy] = useState<
+    "both" | "department" | "designation"
+  >("both");
   const [fineMode, setFineMode] = useState<"month" | "periodic">("month");
   const [otMode, setOtMode] = useState<"daily" | "periodic">("daily");
   const [dateFrom, setDateFrom] = useState(() =>
@@ -214,6 +218,7 @@ export default function ReportsCenterScreen() {
     } else {
       p.append("month", month);
       if (sel.kind === "salary-comparison") {
+        p.append("group_by", cmpGroupBy);
         if (monthB) p.append("month_b", monthB);
         // Iter 520 — PERIODIC comparison: base period (month_b→month_b_to)
         // vs current period (month→month_to).
@@ -240,6 +245,7 @@ export default function ReportsCenterScreen() {
     monthTo,
     monthBTo,
     cmpMode,
+    cmpGroupBy,
     fineMode,
     otMode,
     dateFrom,
@@ -482,6 +488,32 @@ export default function ReportsCenterScreen() {
             {/* Iter 520 (user request) — PERIODIC salary comparison */}
             {sel.kind === "salary-comparison" && (
               <View style={{ marginTop: 6 }}>
+                {/* Iter 526 (user request) — grouped comparison selector */}
+                <View style={[shared.row, { marginBottom: 6 }]}>
+                  {(
+                    [
+                      ["both", "Dept + Designation"],
+                      ["department", "Department Wise"],
+                      ["designation", "Designation Wise"],
+                    ] as const
+                  ).map(([k, lb]) => (
+                    <Pressable
+                      key={k}
+                      onPress={() => setCmpGroupBy(k)}
+                      style={[shared.tab, cmpGroupBy === k && shared.tabActive]}
+                      testID={`rc-cmpgroup-${k}`}
+                    >
+                      <Text
+                        style={[
+                          shared.tabTxt,
+                          cmpGroupBy === k && shared.tabTxtActive,
+                        ]}
+                      >
+                        {lb}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
                 <View style={[shared.row, { marginBottom: 6 }]}>
                   {(["month", "periodic"] as const).map((m) => (
                     <Pressable
@@ -745,6 +777,7 @@ export default function ReportsCenterScreen() {
             company_id: companyId || "",
             month,
             month_b: sel.kind === "salary-comparison" ? monthB : "",
+            group_by: sel.kind === "salary-comparison" ? cmpGroupBy : "",
             month_b_to:
               sel.kind === "salary-comparison" && cmpMode === "periodic"
                 ? monthBTo
