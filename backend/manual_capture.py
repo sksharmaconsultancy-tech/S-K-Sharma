@@ -230,9 +230,14 @@ def main() -> int:
     shots = [
         ("dashboard", "/", 8000, None),
         ("firm_master", "/companies", 6000, None),
+        # Firm Master setup editor — used by the "Add New Firm" section
+        ("firm_add", f"/firm-master?company_id={ctx['company_id']}",
+         9000, None),
         # Employee Master section must show the EMPLOYEE LIST — the
         # /admin page is scrolled down to its "Employees" section below
         ("employee_master", "/admin", 9000, None),
+        # Add New Employee form — used by the "Add New Employee" section
+        ("employee_add", "/employee-add", 9000, None),
         # force the month that actually HAS punch data
         ("attendance", f"/attendance-grid?month={m}", 9000, None),
         ("biometric", "/biometric-devices", 6000, None),

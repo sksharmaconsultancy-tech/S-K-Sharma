@@ -382,3 +382,11 @@ ITER 487 (doc-expiry alerts):
 - Frontend /user-manual: refresh button gone, download buttons + status
   line work (screenshot verified). Playwright chromium-headless-shell
   reinstalled after fork (browsers wiped).
+
+## Iter 533 (manual sections)
+- capture re-run 23/23 ok; firm_add.png (Firm Master 16-step editor,
+  General Information) and employee_add.png (Add New Employee form with
+  OCR buttons) visually verified.
+- user-manual.pdf: 25 pages; TOC + body have "4. Add New Firm" (page 6)
+  and "6. Add New Employee" (page 8); no Software Version on either
+  cover; employee-guide.pdf cover verified too.

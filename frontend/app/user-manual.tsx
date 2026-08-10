@@ -16,11 +16,12 @@ import { useAuth } from "@/src/context/AuthContext";
 import { colors } from "@/src/theme";
 
 const SECTIONS = [
-  "Login", "Dashboard", "Company / Firm Master", "Employee Master",
-  "Attendance", "Biometric Punch", "Leave & ESIC Leave", "Overtime",
-  "Salary Processing", "Compliance Salary", "Compliance vs Actual",
-  "Deductions", "Payroll Finalization", "Salary Slip", "Bank Payment",
-  "Reports", "Monthly Payroll Report", "Excel / PDF Export",
+  "Login", "Dashboard", "Company / Firm Master", "Add New Firm",
+  "Employee Master", "Add New Employee", "Attendance", "Biometric Punch",
+  "Leave & ESIC Leave", "Overtime", "Salary Processing",
+  "Compliance Salary", "Compliance vs Actual", "Deductions",
+  "Payroll Finalization", "Salary Slip", "Bank Payment", "Reports",
+  "Monthly Payroll Report", "Excel / PDF Export",
   "Install as an App (PWA)", "Troubleshooting", "Payroll Quick Workflow",
 ];
 

@@ -211,7 +211,6 @@ def _cover(cv, doc):
     y = 62 * mm
     for line in (
             "Product By       :  S.K. Sharma & Co. Payroll & Compliance Portal",
-            f"Software Version :  Server Iter {APP_ITERATION}",
             "Prepared By      :  Ankit Sharma"):
         cv.drawString(20 * mm, y, line)
         y -= 6.5 * mm
@@ -253,7 +252,6 @@ def _cover_emp(cv, doc):
     y = 62 * mm
     for line in (
             "Product By       :  S.K. Sharma & Co.",
-            f"Software Version :  Server Iter {APP_ITERATION}",
             "Prepared By      :  Ankit Sharma"):
         cv.drawString(20 * mm, y, line)
         y -= 6.5 * mm
@@ -337,7 +335,24 @@ def build_manual(extras: Optional[list] = None) -> BytesIO:
               "Present Day @ 8 HRS) per firm.",
               "Save — the policy automatically drives attendance & payroll."])
 
-    _section(story, 4, "Employee Master", "Employees → Employee Master",
+    _section(story, 4, "Add New Firm (Firm Master Setup)",
+             "Firms → Firm Master → Add company", "firm_add",
+             ["16-step setup sections", "General information",
+              "Company code", "Save & Continue"],
+             ["Open <b>Firm Master</b> and click <b>Add company</b> "
+              "(or pick an existing firm to complete its setup).",
+              "Fill <b>General Information</b>: Company Name, Code, "
+              "Category, Industry Type and Financial Year.",
+              "Move through the numbered sections — Registration, "
+              "Address, Contact, Bank, Payroll Settings, Compliance "
+              "Settings, Attendance & Shift, Leave & Holiday and "
+              "Salary Structure.",
+              "Click <b>Save &amp; Continue</b> after each section — "
+              "changes are saved automatically."],
+             note="Complete the Payroll & Compliance Settings before "
+                  "processing the firm's first salary run.")
+
+    _section(story, 5, "Employee Master", "Employees → Employee Master",
              "employee_master",
              ["Employee search", "Add Employee", "Profile fields",
               "Bank & statutory IDs"],
@@ -351,7 +366,24 @@ def build_manual(extras: Optional[list] = None) -> BytesIO:
              note="UAN, ESIC and Bank details are mandatory for error-free "
                   "challans and salary payment files.")
 
-    _section(story, 5, "Attendance", "Attendance & Shift → Attendance Grid",
+    _section(story, 6, "Add New Employee",
+             "Employees → Add New Employee", "employee_add",
+             ["Add Under Firm", "Identity / OCR scan",
+              "Personal → Salary tabs", "Create Employee"],
+             ["Open <b>Add New Employee</b> and choose the firm — the "
+              "employee code is auto-assigned.",
+              "Use the <b>OCR scan</b> buttons (Aadhaar / PAN / Voter "
+              "ID / Driving License) to auto-fill identity details, or "
+              "type them manually.",
+              "Complete the tabs: <b>Personal, Employment, Salary, "
+              "Compliance, Statutory &amp; Bank, Family</b> — the "
+              "completion tracker shows what is pending.",
+              "Click <b>Create Employee</b> (or <b>Save Draft</b> to "
+              "finish later)."],
+             note="Full name, Father's name, Mobile and Date of Joining "
+                  "are the minimum required fields.")
+
+    _section(story, 7, "Attendance", "Attendance & Shift → Attendance Grid",
              "attendance",
              ["Month selector", "Day-wise P/A/WO/HO grid",
               "Policy present days", "OT hours"],
@@ -365,7 +397,7 @@ def build_manual(extras: Optional[list] = None) -> BytesIO:
              note="Payable days are calculated by the firm's attendance "
                   "policy — never by a fixed formula.")
 
-    _section(story, 6, "Biometric Punch", "Devices & Integration → "
+    _section(story, 8, "Biometric Punch", "Devices & Integration → "
              "Biometric Devices", "biometric",
              ["Registered devices", "Live status", "Punch logs",
               "Employee mapping"],
@@ -375,7 +407,7 @@ def build_manual(extras: Optional[list] = None) -> BytesIO:
               "Open punch logs to verify IN/OUT times and photos.",
               "Map any 'Not Registered' employees to their profile."])
 
-    _section(story, 7, "Leave & ESIC Leave",
+    _section(story, 9, "Leave & ESIC Leave",
              "Payroll → Leaves · ESIC Leave", "leave",
              ["Leave entry", "Approval", "Balance", "Attendance impact"],
              ["Record leave with type (<b>CL / SL / EL</b>) and dates.",
@@ -385,7 +417,7 @@ def build_manual(extras: Optional[list] = None) -> BytesIO:
               "For ESIC sickness benefit, use the <b>ESIC Leave</b> screen "
               "— those days are marked ESIC in reports."])
 
-    _section(story, 8, "Overtime (OT)", "Reports → OT Report", "overtime",
+    _section(story, 10, "Overtime (OT)", "Reports → OT Report", "overtime",
              ["OT hours per day", "OT rate", "OT amount",
               "Payroll integration"],
              ["OT is computed by the firm policy (e.g. hours beyond 8/day "
@@ -395,7 +427,7 @@ def build_manual(extras: Optional[list] = None) -> BytesIO:
               "The same OT automatically appears in salary processing — "
               "no re-entry."])
 
-    _section(story, 9, "Salary Processing (Actual Salary)",
+    _section(story, 11, "Salary Processing (Actual Salary)",
              "Payroll → Salary Process → Actual Salary", "actual_salary",
              ["Month selection", "Attendance-based payable days",
               "Earnings & OT", "Process / Save run"],
@@ -406,7 +438,7 @@ def build_manual(extras: Optional[list] = None) -> BytesIO:
              note="Workflow: Attendance → Payable Days → Salary → OT → "
                   "Deductions → Net Payable.")
 
-    _section(story, 10, "Compliance Salary",
+    _section(story, 12, "Compliance Salary",
              "Payroll → Salary Process → Compliance Salary",
              "compliance_salary",
              ["Statutory wage calculation", "PF / ESIC / PT / TDS",
@@ -419,7 +451,7 @@ def build_manual(extras: Optional[list] = None) -> BytesIO:
               "reports read from this run."])
 
     # ---- comparison table
-    story.append(Paragraph("11. Compliance Salary vs Actual Salary", S_H1))
+    story.append(Paragraph("13. Compliance Salary vs Actual Salary", S_H1))
     cmp_t = Table([
         [Paragraph("<b>Compliance Salary</b>", S_BODY),
          Paragraph("<b>Actual Salary</b>", S_BODY)],
@@ -450,7 +482,7 @@ def build_manual(extras: Optional[list] = None) -> BytesIO:
                        "Basis decides the final payable salary.", warn=False))
     story.append(PageBreak())
 
-    _section(story, 12, "Deductions",
+    _section(story, 14, "Deductions",
              "Payroll → Salary Process / Advance Module", None,
              ["PF & ESIC (auto)", "TDS / PT", "Advance & EMI",
               "Other deductions"],
@@ -463,7 +495,7 @@ def build_manual(extras: Optional[list] = None) -> BytesIO:
              body="All deductions flow from the existing payroll "
                   "calculation engine and firm settings.")
 
-    _section(story, 13, "Payroll Finalization", "Salary Run → Finalize",
+    _section(story, 15, "Payroll Finalization", "Salary Run → Finalize",
              None,
              ["Draft", "Verify", "Approve", "Finalize / Lock"],
              ["Process the run — it starts as <b>Draft</b>.",
@@ -474,7 +506,7 @@ def build_manual(extras: Optional[list] = None) -> BytesIO:
                   "authorised unlock / correction procedure. Every unlock "
                   "is recorded in the audit trail.", warn=True)
 
-    _section(story, 14, "Salary Slip", "Payroll → Payslip", "payslip",
+    _section(story, 16, "Salary Slip", "Payroll → Payslip", "payslip",
              ["Employee & month", "Earnings", "Deductions",
               "Net payable"],
              ["Open <b>Payslip</b>, choose employee and month.",
@@ -483,7 +515,7 @@ def build_manual(extras: Optional[list] = None) -> BytesIO:
               "Download PDF or share with the employee.",
               "Slips always reflect the finalized payroll."])
 
-    _section(story, 15, "Bank Payment", "Payroll → Bank Transfer", "bank",
+    _section(story, 17, "Bank Payment", "Payroll → Bank Transfer", "bank",
              ["Bank sheet", "Account validation", "Export for bank",
               "Payment mode"],
              ["Generate the <b>bank sheet</b> for the finalized month.",
@@ -492,7 +524,7 @@ def build_manual(extras: Optional[list] = None) -> BytesIO:
               "Employees without bank details are listed for cash "
               "payment."])
 
-    _section(story, 16, "Reports (Report Hub)", "Reports → Report Hub",
+    _section(story, 18, "Reports (Report Hub)", "Reports → Report Hub",
              "reports",
              ["Report groups", "Month & filters", "Contractor registers",
               "Excel / PDF buttons"],
@@ -503,7 +535,7 @@ def build_manual(extras: Optional[list] = None) -> BytesIO:
               "Preview on screen.",
               "Export via the Excel / PDF buttons."])
 
-    _section(story, 17, "Monthly Payroll Report",
+    _section(story, 19, "Monthly Payroll Report",
              "Reports → Monthly Payroll Report", "monthly_payroll",
              ["Filters & salary basis", "Attendance 1–31",
               "Salary & deductions", "Net payable + bank"],
@@ -513,7 +545,7 @@ def build_manual(extras: Optional[list] = None) -> BytesIO:
               "Scroll — employee columns stay frozen.",
               "Export Excel / PDF (landscape) with footer totals."])
 
-    _section(story, 18, "Excel / PDF Export", "Any report screen", None,
+    _section(story, 20, "Excel / PDF Export", "Any report screen", None,
              ["Filter", "Generate", "Export Excel", "Export PDF"],
              ["Set the filters (firm, month, department…).",
               "Generate / preview the report.",
@@ -525,7 +557,7 @@ def build_manual(extras: Optional[list] = None) -> BytesIO:
                   "<b>Filter → Generate → Export Excel / PDF</b>.")
 
     # -------- PWA — install the portal as an app (user request Iter 532)
-    story.append(Paragraph("19. Install as an App (PWA)", S_H1))
+    story.append(Paragraph("21. Install as an App (PWA)", S_H1))
     story.append(Paragraph(
         "The portal is a <b>Progressive Web App</b> — install it on any "
         "phone, tablet or computer directly from the browser. No Play "
@@ -576,7 +608,7 @@ def build_manual(extras: Optional[list] = None) -> BytesIO:
 
     # -------- dynamic extra sections (manual_sections collection) so new
     # payroll features extend the manual WITHOUT code changes
-    n = 20
+    n = 22
     for ex in (extras or []):
         _section(story, n, ex.get("title", "New Feature"),
                  ex.get("nav", ""), ex.get("shot") or None,

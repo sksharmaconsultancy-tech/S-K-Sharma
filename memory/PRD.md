@@ -5288,3 +5288,15 @@ changelog entry auto-included; frontend section chips updated.
    screenshots…" button removed from user-manual.tsx (backend
    /refresh-screenshots endpoint kept for dev workspace use).
 5. APP_ITERATION=532, deploy_vps_iter532.sh, temp_bundle pointer updated.
+
+## Iter 533 — Two new manual sections + cover cleanup (user request)
+1. NEW manual sections with real screenshots: "4. Add New Firm (Firm
+   Master Setup)" (capture firm_add.png = /firm-master?company_id=…) and
+   "6. Add New Employee" (employee_add.png = /employee-add). All later
+   sections renumbered 7–21; comparison=13, PWA=21, extras start n=22.
+   Frontend SECTIONS chips updated. Manual now 25 pages, 23 screenshots.
+2. "Software Version" line removed from BOTH covers (user request) —
+   covers now show only Product By + Prepared By (Ankit Sharma).
+3. APP_ITERATION=533, deploy_vps_iter533.sh, temp_bundle pointer updated.
+NOTE: /pw-browsers is wiped on pod restarts — rerun
+`python -m playwright install chromium-headless-shell` before capture.
