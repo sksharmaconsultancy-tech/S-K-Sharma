@@ -122,6 +122,11 @@ export default function MonthlyPayrollReport() {
   const [err, setErr] = useState("");
   const [exporting, setExporting] = useState("");
   const loadSeq = React.useRef(0);
+  const skipNext = React.useRef("");
+  // Iter 538 — very large firms (500+ employees × 60 cols) froze the
+  // browser rendering 30,000+ cells at once; render in chunks instead.
+  const [visibleRows, setVisibleRows] = useState(150);
+  useEffect(() => { setVisibleRows(150); }, [data]);
 
   useEffect(() => {
     if (user?.role === "company_admin") setCid(user.company_id || "");
@@ -159,12 +164,21 @@ export default function MonthlyPayrollReport() {
   useEffect(() => {
     if (!cid) return;
     if (month && !/^\d{4}-\d{2}$/.test(month)) return; // typing in progress
+    // Iter 538 — adopting the backend default month must NOT refire the
+    // same heavy query (the report was loading TWICE on every open).
+    if (skipNext.current && month === skipNext.current) {
+      skipNext.current = "";
+      return;
+    }
     const t = setTimeout(() => { void load(qs); }, 600);
     return () => clearTimeout(t);
   }, [cid, month, qs, load]);
   // adopt the backend-resolved default month into the input
   useEffect(() => {
-    if (!month && data?.month) setMonth(data.month);
+    if (!month && data?.month) {
+      skipNext.current = data.month;
+      setMonth(data.month);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
@@ -262,7 +276,7 @@ export default function MonthlyPayrollReport() {
               </View>
             ))}
           </View>
-          {rows.map((r, ri) => (
+          {rows.slice(0, visibleRows).map((r, ri) => (
             <View key={r.employee_code || ri}
               style={[s.tr, ri % 2 ? { backgroundColor: "#F8FAFC" } : null]}>
               {cols.map((c) => cell(c, r, ri))}
@@ -284,7 +298,7 @@ export default function MonthlyPayrollReport() {
       </GridScroller>
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, offsets]);
+  }, [data, offsets, visibleRows]);
 
   return (
     <SafeAreaView style={s.root} edges={["top"]}>
@@ -377,6 +391,15 @@ export default function MonthlyPayrollReport() {
 
         {!loading && rows.length ? grid : null}
 
+        {!loading && rows.length > visibleRows ? (
+          <Pressable style={s.moreBtn} testID="mpr-show-more"
+            onPress={() => setVisibleRows((v) => v + 150)}>
+            <Text style={s.moreTxt}>
+              Show more ({rows.length - visibleRows} more employees)
+            </Text>
+          </Pressable>
+        ) : null}
+
         {!loading && rows.length ? (
           <View style={s.legend}>
             <View style={[s.legItem, { backgroundColor: HRS_UI.bg }]}>
@@ -423,6 +446,11 @@ const s = StyleSheet.create({
     paddingHorizontal: 8, justifyContent: "center", alignItems: "center",
     backgroundColor: colors.surface, minHeight: 36,
   },
+  moreBtn: {
+    marginTop: 10, alignSelf: "center", backgroundColor: "#0F3B5C",
+    borderRadius: 8, paddingHorizontal: 18, paddingVertical: 10,
+  },
+  moreTxt: { color: "#fff", fontWeight: "800", fontSize: 13 },
   pickBtn: {
     flexDirection: "row", alignItems: "center", gap: 5, borderWidth: 1,
     borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10,

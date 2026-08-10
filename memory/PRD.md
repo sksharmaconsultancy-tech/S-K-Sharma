@@ -5351,3 +5351,24 @@ use the policy engine's duty_hours + ot_hours (fallback to hours only
 when the engine cell has no split). att_mode now constant "HRS+OT";
 legend chip made unconditional. Verified d1=8+3 (11h @ 8h policy),
 worked-WO day shows its hours ("7").
+
+## Iter 538/539 — Portal hang fix + Punch-Sequence attendance (user)
+1. HANG FIX: monthly_payroll_report.py _build_cached (TTL 120s, LRU 10)
+   used by json/xlsx/pdf endpoints; frontend skipNext ref kills the
+   double-load on open; rows render in chunks of 150 (+Show more).
+2. PUNCH-SEQUENCE mode — rides on policy sub-point
+   attendance_by_duty_hours (_pm_seq_mode) in BOTH pipelines
+   (_compute_monthly_grid_data + _build_ot_report_rows):
+   - dedupe_same_kind_punches(5 min) helper in server.py (~line 2147)
+   - split_regular_ot_times(punches, 0) → 1st pair duty, later pairs
+     pure OT (incl. next-morning OUT via existing cross-day stitch)
+   - standard_h = pol.full_day_hours (RAW firm policy, NOT the resolved
+     shift length, NOT _pm_8hr forced 8) → dynamic split 8+3 / 8+4
+   - division mode divides by firm duty hrs in seq mode
+   Verified: RAJENDRA 11h→8+3; VINIT 4-punch day→3 duty + 8.5 OT
+   (23:29→next-morning 08:03); flag OFF firms byte-identical (8+3).
+   Kankani demo flag restored OFF after testing.
+3. attendance-policy.tsx sub-point label documents the sequence rule.
+4. APP_ITERATION=539, deploy_vps_iter539.sh, pointer updated.
+PENDING: user hasn't yet confirmed shift timings question for
+daily-verification display; punch-sequence rule was their answer.

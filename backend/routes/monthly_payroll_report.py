@@ -35,6 +35,34 @@ from utils.register_export import register_xlsx  # noqa: E402
 
 router = APIRouter(prefix="/api/admin/reports", tags=["monthly-payroll"])
 
+# ---------------------------------------------------------------------------
+# Iter 538 (user report "portal hangs after Monthly Payroll Report") —
+# short-lived response cache. Every open/filter/stepper change was doing a
+# FULL grid + payroll recompute; concurrent heavy calls saturated the
+# backend worker and stalled the whole portal. Repeat queries within the
+# TTL are now served instantly from memory.
+# ---------------------------------------------------------------------------
+_CACHE: Dict[tuple, tuple] = {}
+_CACHE_TTL = 120.0   # seconds
+_CACHE_MAX = 10
+
+
+async def _build_cached(company_id: str, month: str, flt: Dict[str, str],
+                        basis: str, salary_type: str,
+                        mask_bank: bool) -> Dict[str, Any]:
+    import time as _t
+    key = (company_id, month, basis, salary_type, mask_bank,
+           tuple(sorted((k, v) for k, v in flt.items() if v)))
+    now = _t.time()
+    hit = _CACHE.get(key)
+    if hit and now - hit[0] < _CACHE_TTL:
+        return hit[1]
+    data = await _build(company_id, month, flt, basis, salary_type, mask_bank)
+    if len(_CACHE) >= _CACHE_MAX:
+        _CACHE.pop(min(_CACHE, key=lambda k: _CACHE[k][0]), None)
+    _CACHE[key] = (now, data)
+    return data
+
 LEAVE_CODE = {"casual": "CL", "sick": "SL", "earned": "EL",
               "paid": "PL", "privilege": "PL"}
 
@@ -476,7 +504,7 @@ async def monthly_payroll(company_id: Optional[str] = None,
     if salary_type not in ("compliance", "actual", "both"):
         salary_type = "both"
     mask = admin.get("role") not in ("super_admin",)
-    return await _build(company_id, month,
+    return await _build_cached(company_id, month,
                         _flt(branch, department, designation, employee_type,
                              contractor, search, employee_ids),
                         basis, salary_type, mask)
@@ -497,7 +525,7 @@ async def monthly_payroll_xlsx(company_id: Optional[str] = None,
     month = _s(month)[:7] or await _default_month(company_id)
     basis = "actual" if basis == "actual" else "compliance"
     mask = admin.get("role") not in ("super_admin",)
-    d = await _build(company_id, month,
+    d = await _build_cached(company_id, month,
                      _flt(branch, department, designation, employee_type,
                           contractor, search, employee_ids),
                      basis, salary_type if salary_type in
@@ -529,7 +557,7 @@ async def monthly_payroll_pdf(company_id: Optional[str] = None,
     month = _s(month)[:7] or await _default_month(company_id)
     basis = "actual" if basis == "actual" else "compliance"
     mask = admin.get("role") not in ("super_admin",)
-    d = await _build(company_id, month,
+    d = await _build_cached(company_id, month,
                      _flt(branch, department, designation, employee_type,
                           contractor, search, employee_ids),
                      basis, salary_type if salary_type in

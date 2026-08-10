@@ -1324,7 +1324,7 @@ const PM_FLAGS: { key: string; label: string }[] = [
   // Iter 215 — report-only dummy shifts (SHIFT A1/B1/C1, A/B/C, GENERAL).
   { key: "dummy_shift_allowed", label: "Dummy Shift Allowed (report-only — shows a Dummy Shift picker in Employee Master and enables the Dummy Shift Report in Labour Law Reports)" },
   // Iter 200 (user request) — dynamic attendance calculation points.
-  { key: "attendance_by_duty_hours", label: "Attendance Calculation as per Duty HRS (Days = Total Duty HRS ÷ Daily Duty HRS from Firm Master)" },
+  { key: "attendance_by_duty_hours", label: "Attendance Calculation as per Duty HRS (Days = Total Duty HRS ÷ Daily Duty HRS from Firm Master) — Punch Sequence rule: 5-min duplicate punches ignored; IN → OUT pair splits dynamically at the Firm Master Daily Duty HRS (extra worked hrs → OT); any punch AFTER the OUT = OT IN, and its partner OUT (even next-day morning) = OT OUT" },
   { key: "weekoff_present_add_ot", label: "Week-off Day Worked → Add hours in OT (not counted Present)" },
   { key: "holiday_present_add_ot", label: "Holiday (Holiday Master) Worked → Present + hours in OT" },
   { key: "compliance_present_8hr", label: "Count Present Day @ 8 HRS — Compliance Salary only (8+ worked hrs = 1 Present Day, extra hrs → OT; applies when Salary Allowed includes Compliance)" },

@@ -2144,6 +2144,29 @@ def split_regular_ot_times(
     return reg_in, reg_out, None, None
 
 
+def dedupe_same_kind_punches(day_punches: List[dict],
+                             window_min: float = 5.0) -> List[dict]:
+    """Iter 538 (user rule, Punch-Sequence mode) — ignore duplicate punches
+    of the SAME kind (in/out) within ``window_min`` minutes, regardless of
+    which machine recorded them. Keeps the FIRST punch of each burst."""
+    out: List[dict] = []
+    last: Dict[str, datetime] = {}
+    for p in sorted(day_punches, key=lambda x: x.get("at") or ""):
+        kind = (p.get("kind") or "").lower()
+        try:
+            at = datetime.fromisoformat(
+                (p.get("at") or "").replace("Z", "+00:00"))
+        except ValueError:
+            out.append(p)
+            continue
+        prev = last.get(kind)
+        if prev is not None and (at - prev).total_seconds() < window_min * 60.0:
+            continue
+        last[kind] = at
+        out.append(p)
+    return out
+
+
 def worked_minutes_in_window(
     day_punches: List[dict],
     w_from: Optional[datetime],
@@ -9451,7 +9474,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "537"
+APP_ITERATION = "539"
 
 
 @api.get("/version")
@@ -10007,6 +10030,14 @@ async def _compute_monthly_grid_data(
     # "Present Days" column (user request: every report shows Present Days
     # calculated per the firm's attendance policy).
     _pm_firm = pol.get("policy_master") or {}
+    # Iter 538 (user rule) — PUNCH-SEQUENCE mode rides on the existing
+    # "Attendance Calculation as per Duty HRS" policy sub-point:
+    #   • duplicate punches of the same kind within 5 min are ignored;
+    #   • 1st IN → OUT pair = FULL Duty HRS (no arithmetic 8-hr split);
+    #   • any punch AFTER that OUT = OT IN, its partner (incl. the
+    #     next-morning OUT via cross-day stitching) = OT OUT;
+    #   • Days = Total Duty HRS ÷ Daily Duty HRS (division mode below).
+    _pm_seq_mode = bool(_pm_firm.get("attendance_by_duty_hours"))
     # Iter 200 — Holiday Master dates (for holiday_present_add_ot).
     _holiday_dates = await holiday_dates_for_company(company_id)
     # Iter 77e — Load the GLOBAL Shift Master catalogue once so we can
@@ -10149,6 +10180,10 @@ async def _compute_monthly_grid_data(
             # Iter 77w — Merge OUT->IN "bounces" (device stutter within
             # 60 seconds) so they are treated as one continuous session.
             day_punches = merge_out_in_bounces(day_punches, 60)
+            if _pm_seq_mode:
+                # Iter 538 (user rule) — ignore same-kind duplicate
+                # punches within 5 minutes across ALL machines.
+                day_punches = dedupe_same_kind_punches(day_punches, 5)
             if not day_punches:
                 days_cell[key] = {
                     "in": None, "out": None, "ot_in": None, "ot_out": None,
@@ -10261,7 +10296,14 @@ async def _compute_monthly_grid_data(
             # Iter 288 (user bug) — split at EXACTLY 8: firms whose full-day
             # hours are UNDER 8 were splitting duty/OT too early, so OT and
             # Present Days disagreed with the Compliance Salary run.
-            if _pm_8hr_reports:
+            # Iter 539 (user) — Punch-Sequence mode splits DYNAMICALLY at
+            # the FIRM MASTER daily duty hours, even when the resolved
+            # shift is longer (never a hardcoded 8).
+            if _pm_seq_mode:
+                standard_h = float(pol.get("full_day_hours")
+                                   or pol.get("standard_working_hours")
+                                   or standard_h)
+            elif _pm_8hr_reports:
                 standard_h = 8.0
             # Iter 77z-fix — PAIR-BASED time & hour derivation.
             #   • Regular duty comes from the FIRST paired IN→OUT.
@@ -10271,7 +10313,10 @@ async def _compute_monthly_grid_data(
             #     regular pair, NOT the raw last-OUT (which for cross-day
             #     shifts would show the next-morning punch).
             reg_in_dt, reg_out_dt, ot_in_dt, ot_out_dt = split_regular_ot_times(
-                day_punches, standard_h * 60.0,
+                # Iter 538 — Punch-Sequence mode: quota 0 keeps the 1st
+                # IN→OUT pair as the FULL duty window and treats later
+                # pairs (evening IN → next-morning OUT) as OT.
+                day_punches, 0.0 if _pm_seq_mode else standard_h * 60.0,
             )
             # Iter 77z-final — Apply the firm's rounding policy
             # (``duty_hours_rounding_minutes``: 0/5/10/15/30) to BOTH
@@ -10301,6 +10346,10 @@ async def _compute_monthly_grid_data(
                 _ot_min = _round_minutes(_ot_min, _round_step)
                 ot_hrs = round(_ot_min / 60.0, 2)
             # Cap regular duty at the shift length. Any spillover joins OT.
+            # Iter 539 (user) — also in Punch-Sequence mode: the first
+            # pair splits at the Firm Master daily duty hours (dynamic),
+            # e.g. 12 worked hrs @ 8-hr policy = 8 duty + 4 OT. Punches
+            # AFTER the OUT remain pure OT (sequence rule).
             if duty_only_hrs > standard_h:
                 _spill = round(duty_only_hrs - standard_h, 2)
                 ot_hrs = round(ot_hrs + _spill, 2)
@@ -10530,7 +10579,9 @@ async def _compute_monthly_grid_data(
         total_hours = round(total_hours_min / 60.0, 4)
         total_ot_hours = round(total_ot_min / 60.0, 4)
         total_duty_only = round(total_duty_only_min / 60.0, 4)
-        _div_min = int(round((8.0 if _pm_8hr_reports else emp_daily_hrs) * 60))
+        _div_min = int(round(
+            (8.0 if (_pm_8hr_reports and not _pm_seq_mode) else emp_daily_hrs)
+            * 60))
         _division_mode = bool(
             _pm_firm.get("attendance_by_duty_hours")
             and not _pm_firm.get("halfday_threshold_rule")
@@ -10741,6 +10792,8 @@ async def _build_ot_report_rows(
 
     pol = company.get("attendance_policy") or {}
     pol = await inject_firm_ot_flag(dict(pol), company.get("company_id"))
+    # Iter 538 — Punch-Sequence mode (same flag as the grid pipeline).
+    _pm_seq_mode = bool((pol.get("policy_master") or {}).get("attendance_by_duty_hours"))
     # Iter 503 — Single Machine Mode fixed-lunch config (matches the grid).
     _smm_cfg_ot = company.get("attendance_config") or {}
     _smm_fixed_lunch_ot = (
@@ -10778,6 +10831,8 @@ async def _build_ot_report_rows(
             day_punches = dedupe_same_machine_punches(day_punches, 15)
             # Iter 77w — Bounce-merge OUT→IN within 60s (device stutter)
             day_punches = merge_out_in_bounces(day_punches, 60)
+            if _pm_seq_mode:
+                day_punches = dedupe_same_kind_punches(day_punches, 5)
             if not day_punches:
                 continue
             # Iter 77z-fix — Anomaly days (unpaired punches) don't count OT.
@@ -10796,9 +10851,14 @@ async def _build_ot_report_rows(
                 or eff_policy.get("standard_working_hours")
                 or 8.0
             )
+            if _pm_seq_mode:
+                # Iter 539 — split at the Firm Master daily duty hours.
+                standard_h = float(pol.get("full_day_hours")
+                                   or pol.get("standard_working_hours")
+                                   or standard_h)
             # Iter 77z-fix — Pair-based duty/OT derivation (matches grid).
             reg_in_dt, reg_out_dt, ot_in_dt, ot_out_dt = split_regular_ot_times(
-                day_punches, standard_h * 60.0,
+                day_punches, 0.0 if _pm_seq_mode else standard_h * 60.0,
             )
             _round_step = int(eff_policy.get("duty_hours_rounding_minutes") or 0)
             duty_only = 0.0
@@ -10820,6 +10880,7 @@ async def _build_ot_report_rows(
                 _ot_min = _round_minutes(_ot_min, _round_step)
                 ot = round(_ot_min / 60.0, 2)
             # Cap duty at shift length; spillover joins OT.
+            # Iter 539 — sequence mode splits at Firm Master duty hours.
             if duty_only > standard_h:
                 ot = round(ot + (duty_only - standard_h), 2)
                 duty_only = standard_h

@@ -412,3 +412,9 @@ ITER 487 (doc-expiry alerts):
 ## Iter 537
 - RAJENDRA 2026-07: d1 8+3, d3 8+2.5, d5 7 (worked WO), d10 8+1.5 —
   matches _compute_monthly_grid_data duty/ot split exactly. UI verified.
+
+## Iter 538/539
+- Cache: 1st call 0.104s, 2nd 0.028s. Legacy (flag OFF) unchanged 8+3.
+- Seq mode ON test: full-duty split at firm hrs, explicit OT pair pure OT,
+  next-morning OT OUT stitched. Grid/OT-report/daily-verification all via
+  same engine. UI screenshot OK (Show more hidden under 150 rows).
