@@ -25,9 +25,7 @@ import { colors } from "@/src/theme";
 const currentMonth = () => new Date().toISOString().slice(0, 7);
 
 const CODE_UI: Record<string, { bg: string; fg: string }> = {
-  P: { bg: "#DCFCE7", fg: "#166534" },
-  HD: { bg: "#FEF9C3", fg: "#854D0E" },
-  A: { bg: "#FEE2E2", fg: "#991B1B" },
+  "-": { bg: "#FEE2E2", fg: "#991B1B" },
   WO: { bg: "#E0F2FE", fg: "#075985" },
   HO: { bg: "#FED7AA", fg: "#9A3412" },
   CL: { bg: "#EDE9FE", fg: "#5B21B6" },
@@ -36,6 +34,8 @@ const CODE_UI: Record<string, { bg: string; fg: string }> = {
   SL: { bg: "#FCE7F3", fg: "#9D174D" },
   ESIC: { bg: "#FCE7F3", fg: "#9D174D" },
 };
+// hour cells ("8", "12.5", "8+4") get the "present" green tint
+const HRS_UI = { bg: "#DCFCE7", fg: "#166534" };
 
 // column widths (px) — identity block is FROZEN while day columns scroll
 const W: Record<string, number> = {
@@ -49,7 +49,7 @@ const W: Record<string, number> = {
   acct_name: 120, acct_no: 104, ifsc: 88, bank_name: 100, bank_branch: 90,
   payment_mode: 52,
 };
-const DAY_W = 30;
+const DAY_W = 40;
 const FROZEN = ["sr", "employee_code", "name"]; // stay pinned on the left
 
 function colW(key: string): number {
@@ -121,6 +121,7 @@ export default function MonthlyPayrollReport() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [exporting, setExporting] = useState("");
+  const loadSeq = React.useRef(0);
 
   useEffect(() => {
     if (user?.role === "company_admin") setCid(user.company_id || "");
@@ -139,19 +140,26 @@ export default function MonthlyPayrollReport() {
     return p.toString();
   }, [cid, month, branch, dept, desig, etype, ctr, salaryType, basis, q]);
 
-  const load = useCallback(async () => {
-    if (!cid || !/^\d{4}-\d{2}$/.test(month)) return;
+  const load = useCallback(async (query: string) => {
     setLoading(true);
     setErr("");
+    const seq = ++loadSeq.current;
     try {
-      setData(await api<any>(`/admin/reports/monthly-payroll?${qs}`));
+      const d = await api<any>(`/admin/reports/monthly-payroll?${query}`);
+      if (seq === loadSeq.current) setData(d); // ignore stale responses
     } catch (e: any) {
-      setErr(e?.message || "Failed to load");
+      if (seq === loadSeq.current) setErr(e?.message || "Failed to load");
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
-  }, [cid, month, qs]);
-  useEffect(() => { load(); }, [load]);
+  }, []);
+  // Iter 534 (perf fix) — DEBOUNCE: typing in search/month fired one heavy
+  // report computation per keystroke, hanging the server & the grid.
+  useEffect(() => {
+    if (!cid || !/^\d{4}-\d{2}$/.test(month)) return;
+    const t = setTimeout(() => { void load(qs); }, 600);
+    return () => clearTimeout(t);
+  }, [cid, month, qs, load]);
 
   const doExport = async (kind: "xlsx" | "pdf") => {
     if (!cid) return;
@@ -190,7 +198,8 @@ export default function MonthlyPayrollReport() {
     const k = c.key;
     const v = r[k];
     const day = /^d\d+$/.test(k);
-    const ui = day ? CODE_UI[v] : undefined;
+    const hrs = day && typeof v === "string" && /^\d/.test(v);
+    const ui = day ? (hrs ? HRS_UI : CODE_UI[v]) : undefined;
     const frozen = FROZEN.includes(k);
     const noteCell = k === "final_salary" && r.status_note;
     return (
@@ -201,7 +210,7 @@ export default function MonthlyPayrollReport() {
           noteCell && { backgroundColor: "#FEF3C7" }]}>
         <Text numberOfLines={2}
           style={[s.tdTxt,
-            day && { fontSize: 8.5, fontWeight: "700" },
+            day && { fontSize: 8, fontWeight: "700" },
             day && ui && { color: ui.fg },
             k === "net" && { fontWeight: "800", color: "#166534" },
             noteCell && { color: "#92400E", fontWeight: "700", fontSize: 8.5 }]}>
@@ -210,6 +219,48 @@ export default function MonthlyPayrollReport() {
       </View>
     );
   };
+
+  // Iter 534 (perf fix) — the grid (~130 rows × 60 cols ≈ 8,000 cells) was
+  // re-rendered on EVERY keystroke in the filter inputs, freezing the page.
+  // Memoise it so it only re-renders when the report data changes.
+  const grid = useMemo(() => {
+    if (!rows.length) return null;
+    return (
+      <GridScroller maxHeight={620}>
+        <View>
+          <View style={[s.tr, stickyHeader("#0F3B5C")]}>
+            {cols.map((c) => (
+              <View key={c.key}
+                style={[s.td, s.th, { width: colW(c.key) },
+                  FROZEN.includes(c.key) && stickyCol(offsets[c.key], "#0F3B5C"),
+                  FROZEN.includes(c.key) && { zIndex: 11 }]}>
+                <Text style={s.thTxt} numberOfLines={2}>{c.label}</Text>
+              </View>
+            ))}
+          </View>
+          {rows.map((r, ri) => (
+            <View key={r.employee_code || ri}
+              style={[s.tr, ri % 2 ? { backgroundColor: "#F8FAFC" } : null]}>
+              {cols.map((c) => cell(c, r, ri))}
+            </View>
+          ))}
+          {/* footer totals */}
+          <View style={[s.tr, { backgroundColor: "#FFF7E0" }]}>
+            {cols.map((c) => (
+              <View key={c.key}
+                style={[s.td, { width: colW(c.key) },
+                  FROZEN.includes(c.key) && stickyCol(offsets[c.key], "#FFF7E0")]}>
+                <Text style={[s.tdTxt, { fontWeight: "800" }]}>
+                  {c.key === "name" ? "TOTAL" : fmt(data.totals?.[c.key])}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      </GridScroller>
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, offsets]);
 
   return (
     <SafeAreaView style={s.root} edges={["top"]}>
@@ -292,47 +343,21 @@ export default function MonthlyPayrollReport() {
           <Text style={s.empty}>No employees found for {month}.</Text>
         ) : null}
 
-        {!loading && rows.length ? (
-          <GridScroller maxHeight={620}>
-            <View>
-              <View style={[s.tr, stickyHeader("#0F3B5C")]}>
-                {cols.map((c) => (
-                  <View key={c.key}
-                    style={[s.td, s.th, { width: colW(c.key) },
-                      FROZEN.includes(c.key) && stickyCol(offsets[c.key], "#0F3B5C"),
-                      FROZEN.includes(c.key) && { zIndex: 11 }]}>
-                    <Text style={s.thTxt} numberOfLines={2}>{c.label}</Text>
-                  </View>
-                ))}
-              </View>
-              {rows.map((r, ri) => (
-                <View key={r.employee_code || ri}
-                  style={[s.tr, ri % 2 ? { backgroundColor: "#F8FAFC" } : null]}>
-                  {cols.map((c) => cell(c, r, ri))}
-                </View>
-              ))}
-              {/* footer totals */}
-              <View style={[s.tr, { backgroundColor: "#FFF7E0" }]}>
-                {cols.map((c) => (
-                  <View key={c.key}
-                    style={[s.td, { width: colW(c.key) },
-                      FROZEN.includes(c.key) && stickyCol(offsets[c.key], "#FFF7E0")]}>
-                    <Text style={[s.tdTxt, { fontWeight: "800" }]}>
-                      {c.key === "name" ? "TOTAL" : fmt(data.totals?.[c.key])}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-          </GridScroller>
-        ) : null}
+        {!loading && rows.length ? grid : null}
 
         {!loading && rows.length ? (
           <View style={s.legend}>
+            <View style={[s.legItem, { backgroundColor: HRS_UI.bg }]}>
+              <Text style={[s.legTxt, { color: HRS_UI.fg }]}>
+                {data?.att_mode === "HRS+OT"
+                  ? "8+4 = Duty HRS + OT HRS (attendance policy)"
+                  : "8 = Duty HRS (attendance policy)"}
+              </Text>
+            </View>
             {Object.entries({
-              P: "Present", HD: "Half Day", A: "Absent", WO: "Weekly Off",
-              HO: "Holiday", CL: "Casual Leave", PL: "Paid Leave",
-              EL: "Earned Leave", SL: "Sick Leave", ESIC: "ESIC Leave",
+              "-": "Absent / No Punch", WO: "Weekly Off", HO: "Holiday",
+              CL: "Casual Leave", PL: "Paid Leave", EL: "Earned Leave",
+              SL: "Sick Leave", ESIC: "ESIC Leave",
             }).map(([k, lbl]) => {
               const ui = CODE_UI[k] || { bg: "#F1F5F9", fg: "#334155" };
               return (

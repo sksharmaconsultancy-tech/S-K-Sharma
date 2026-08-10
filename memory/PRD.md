@@ -5300,3 +5300,21 @@ changelog entry auto-included; frontend section chips updated.
 3. APP_ITERATION=533, deploy_vps_iter533.sh, temp_bundle pointer updated.
 NOTE: /pw-browsers is wiped on pod restarts — rerun
 `python -m playwright install chromium-headless-shell` before capture.
+
+## Iter 534 — Monthly Payroll Report perf + HRS day cells; cover layout (user requests)
+1. PERF FIX (report "hangs"): monthly-payroll-report.tsx — every keystroke
+   in search/month refired the heavy /admin/reports/monthly-payroll call
+   AND re-rendered ~8,000 grid cells. Now: 600ms debounce + loadSeq stale
+   guard; grid body memoised (useMemo on [data, offsets]). Backend API
+   itself is fast (~0.12s for 127 emps).
+2. DAY CELLS (user request "don't show Present/Absent"): backend _build
+   now emits hours per attendance policy — att_mode="HRS+OT" when
+   attendance_policy.overtime_threshold_hours>0 → "8+4" (duty+OT), else
+   plain hours; absent="-"; WO/HO/CL/PL/EL/SL/ESIC codes kept. Summary
+   count columns unchanged. Excel/PDF share values; PDF subtitle notes
+   the mode; DAY_W 30→40, legend updated.
+3. Manual covers (user request): Product By + Prepared By moved to cover
+   BOTTOM (y=34mm); punch line centred in PAGE CENTRE of cover (15pt,
+   y=150mm) and centred in every page footer.
+4. APP_ITERATION=534, deploy_vps_iter534.sh (also carries Iter 533 manual
+   sections), temp_bundle pointer updated.

@@ -390,3 +390,11 @@ ITER 487 (doc-expiry alerts):
 - user-manual.pdf: 25 pages; TOC + body have "4. Add New Firm" (page 6)
   and "6. Add New Employee" (page 8); no Software Version on either
   cover; employee-guide.pdf cover verified too.
+
+## Iter 534
+- API /admin/reports/monthly-payroll: 127 rows in 0.12s; att_mode=HRS+OT;
+  day cells "8+4.5"/"8+4"/"-"/WO verified; xlsx+pdf 200.
+- UI: grid rendered ~5s full load, typing in search 0.1s responsive
+  (was hanging); legend shows "8+4 = Duty HRS + OT HRS"; screenshot OK.
+- Manual cover: punch line centred mid-page, Product By/Prepared By at
+  bottom, footer punch line centred (pypdf text-order verified).

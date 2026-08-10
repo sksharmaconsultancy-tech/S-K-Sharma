@@ -207,17 +207,18 @@ def _cover(cv, doc):
     cv.setFont("Helvetica", 9)
     cv.drawString(20 * mm, H - 55 * mm,
                   "Compliance · Payroll · Manpower")
+    cv.setFont("Helvetica-BoldOblique", 15)
+    cv.setFillColor(rl.HexColor("#7DD3FC"))
+    cv.drawCentredString(W / 2, 150 * mm,
+                         '"Your Satisfaction is our First Ambition"')
     cv.setFont("Helvetica", 10)
-    y = 62 * mm
+    cv.setFillColor(rl.white)
+    y = 34 * mm
     for line in (
             "Product By       :  S.K. Sharma & Co. Payroll & Compliance Portal",
             "Prepared By      :  Ankit Sharma"):
         cv.drawString(20 * mm, y, line)
         y -= 6.5 * mm
-    cv.setFont("Helvetica-BoldOblique", 10.5)
-    cv.setFillColor(rl.HexColor("#7DD3FC"))
-    cv.drawString(20 * mm, 18 * mm,
-                  '"Your Satisfaction is our First Ambition"')
     cv.restoreState()
 
 
@@ -248,17 +249,18 @@ def _cover_emp(cv, doc):
     cv.drawString(20 * mm, H - 50 * mm, "S.K. SHARMA & CO.")
     cv.setFont("Helvetica", 9)
     cv.drawString(20 * mm, H - 55 * mm, "Compliance · Payroll · Manpower")
+    cv.setFont("Helvetica-BoldOblique", 15)
+    cv.setFillColor(rl.HexColor("#E0F2FE"))
+    cv.drawCentredString(W / 2, 150 * mm,
+                         '"Your Satisfaction is our First Ambition"')
     cv.setFont("Helvetica", 10)
-    y = 62 * mm
+    cv.setFillColor(rl.white)
+    y = 34 * mm
     for line in (
             "Product By       :  S.K. Sharma & Co.",
             "Prepared By      :  Ankit Sharma"):
         cv.drawString(20 * mm, y, line)
         y -= 6.5 * mm
-    cv.setFont("Helvetica-BoldOblique", 10.5)
-    cv.setFillColor(rl.HexColor("#E0F2FE"))
-    cv.drawString(20 * mm, 18 * mm,
-                  '"Your Satisfaction is our First Ambition"')
     cv.restoreState()
 
 
@@ -275,8 +277,8 @@ def _page(cv, doc):
     cv.drawRightString(W - 15 * mm, H - 10 * mm, "S.K. SHARMA & CO.")
     cv.setFont("Helvetica-BoldOblique", 8.5)
     cv.setFillColor(TEAL)
-    cv.drawString(15 * mm, 8 * mm,
-                  '"Your Satisfaction is our First Ambition"')
+    cv.drawCentredString(W / 2, 8 * mm,
+                         '"Your Satisfaction is our First Ambition"')
     cv.setFont("Helvetica", 8)
     cv.setFillColor(GREY)
     cv.drawRightString(W - 15 * mm, 8 * mm, f"Page {cv.getPageNumber()}")

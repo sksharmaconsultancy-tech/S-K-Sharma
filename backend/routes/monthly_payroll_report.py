@@ -128,6 +128,20 @@ async def _build(company_id: str, month: str, flt: Dict[str, str],
     today_iso = date.today().isoformat()
     by_uid_att = {e.get("user_id"): e for e in grid.get("employees") or []}
 
+    # Iter 534 (user request) — day cells show HOURS per the firm's
+    # attendance policy instead of P/A codes: "8+4" (Duty HRS + OT HRS)
+    # when the policy tracks OT, plain duty hours otherwise.
+    comp_c = await db.companies.find_one(
+        {"company_id": company_id},
+        {"_id": 0, "name": 1, "address": 1, "logo_base64": 1,
+         "attendance_policy": 1})
+    pol = (comp_c or {}).get("attendance_policy") or {}
+    ot_mode = _f(pol.get("overtime_threshold_hours")) > 0
+    att_mode = "HRS+OT" if ot_mode else "HRS"
+
+    def _hrs(v: float) -> str:
+        return f"{v:g}"
+
     comp_run = await _latest_run(db.compliance_salary_runs, company_id, month)
     act_run = await _latest_run(db.salary_runs, company_id, month)
     comp = {r.get("user_id"): r for r in (comp_run or {}).get("rows") or []}
@@ -172,7 +186,8 @@ async def _build(company_id: str, month: str, flt: Dict[str, str],
             "doj": _s(u.get("doj"))[:10],
             "uan": _s(u.get("uan_no")), "esic_ip": _s(u.get("esi_ip_no")),
         }
-        # ------- daily attendance 1..n (existing engine + leave overlay)
+        # ------- daily attendance 1..n — HOURS per policy (Iter 534),
+        # leave/off codes kept; counts still drive the summary columns
         cnt = {"P": 0.0, "L": 0, "WO": 0, "HO": 0, "A": 0}
         any_att = False
         for i, dl in enumerate(day_labels):
@@ -182,7 +197,18 @@ async def _build(company_id: str, month: str, flt: Dict[str, str],
             if st == "A" and iso in lv:
                 st = lv[iso]  # CL / PL / EL / SL / ESIC
             code = {"H": "HO"}.get(st, st)
-            row[f"d{i + 1}"] = code
+            if code in ("P", "HD"):
+                duty = _f(cell.get("duty_hours"))
+                ot = _f(cell.get("ot_hours"))
+                if ot_mode:
+                    val = f"{_hrs(duty)}+{_hrs(ot)}" if ot else _hrs(duty)
+                else:
+                    val = _hrs(_f(cell.get("hours")) or duty)
+                row[f"d{i + 1}"] = val
+            elif code == "A":
+                row[f"d{i + 1}"] = "-"
+            else:
+                row[f"d{i + 1}"] = code
             if code == "P":
                 cnt["P"] += 1
                 any_att = True
@@ -291,9 +317,7 @@ async def _build(company_id: str, month: str, flt: Dict[str, str],
               "total_ded", "net"):
         totals[k] = round(sum(_f(r.get(k)) for r in rows
                               if r.get(k) is not None), 2)
-    comp_c = await db.companies.find_one(
-        {"company_id": company_id},
-        {"_id": 0, "name": 1, "address": 1, "logo_base64": 1})
+    comp_c = comp_c or {}
     all_u = users
     meta = {
         "departments": sorted({_s(x.get("department")) for x in all_u} - {""}),
@@ -308,6 +332,7 @@ async def _build(company_id: str, month: str, flt: Dict[str, str],
                     "address": (comp_c or {}).get("address") or "",
                     "logo_base64": (comp_c or {}).get("logo_base64")},
         "month": month, "basis": basis, "salary_type": salary_type,
+        "att_mode": att_mode,
         "day_labels": day_labels,
         "weekday_labels": grid.get("weekday_labels") or [],
         "compliance_run": bool(comp_run),
@@ -348,7 +373,9 @@ def _pdf(d: Dict[str, Any]) -> BytesIO:
             "c", fontSize=14, leading=17, fontName="Helvetica-Bold",
             alignment=1)),
         Paragraph(f"{d['title']} — {d['month']} · Salary Basis: "
-                  f"{d['basis'].title()}", ParagraphStyle(
+                  f"{d['basis'].title()} · Day cells: "
+                  f"{'Duty HRS + OT HRS' if d.get('att_mode') == 'HRS+OT' else 'Duty HRS'}"
+                  " (as per attendance policy)", ParagraphStyle(
                       "t", fontSize=10, leading=13, alignment=1)),
         Spacer(1, 3 * mm)]
     hs = ParagraphStyle("h", fontSize=5.4, leading=6.4,
@@ -372,7 +399,7 @@ def _pdf(d: Dict[str, Any]) -> BytesIO:
     for c in cols:
         k = c["key"]
         if k.startswith("d") and k[1:].isdigit():
-            widths.append(11.0)
+            widths.append(15.0)
         elif k in ("name", "acct_name"):
             widths.append(52.0)
         elif k in ("father_name", "designation", "bank_name"):
