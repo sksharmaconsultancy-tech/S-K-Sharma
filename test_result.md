@@ -370,3 +370,15 @@ ITER 487 (doc-expiry alerts):
   incl. 6 employee phone shots; temp employee session + samples cleaned.
 - payroll/run employee self-scope fix verified via emp_payslip capture
   showing real data (20 present days).
+
+## Iter 532 (rev 2)
+- manual_capture re-run: 21/21 ok. Visually verified employee_master
+  (employee list), attendance 2026-07 (real punches), monthly_payroll
+  2026-07 (P/A codes, finalized run), bank Jul 2026 chip, payslip
+  ₹22,100 (MADAN KEER).
+- user-manual.pdf: 23 pages, cover has Product By/Prepared By Ankit
+  Sharma only, no CONFIDENTIAL, footer punch line on every page, no
+  What's New page/TOC entry. employee-guide.pdf 9 pages OK.
+- Frontend /user-manual: refresh button gone, download buttons + status
+  line work (screenshot verified). Playwright chromium-headless-shell
+  reinstalled after fork (browsers wiped).

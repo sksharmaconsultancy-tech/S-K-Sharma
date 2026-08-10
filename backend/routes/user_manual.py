@@ -209,20 +209,16 @@ def _cover(cv, doc):
                   "Compliance · Payroll · Manpower")
     cv.setFont("Helvetica", 10)
     y = 62 * mm
-    shots_at = str(_shot_meta().get("at") or "")[:10] or "bundled"
     for line in (
-            "Product          :  S.K. Sharma & Co. Payroll & Compliance Portal",
+            "Product By       :  S.K. Sharma & Co. Payroll & Compliance Portal",
             f"Software Version :  Server Iter {APP_ITERATION}",
-            "Document Version :  auto (rebuilt on every download)",
-            f"Last Updated     :  {date.today():%d-%m-%Y}",
-            f"Screenshots As Of:  {shots_at}",
-            "Prepared By      :  S.K. Sharma & Co."):
+            "Prepared By      :  Ankit Sharma"):
         cv.drawString(20 * mm, y, line)
         y -= 6.5 * mm
-    cv.setFont("Helvetica-Oblique", 8.5)
-    cv.setFillColor(rl.HexColor("#94A3B8"))
+    cv.setFont("Helvetica-BoldOblique", 10.5)
+    cv.setFillColor(rl.HexColor("#7DD3FC"))
     cv.drawString(20 * mm, 18 * mm,
-                  "CONFIDENTIAL — for authorised client users only.")
+                  '"Your Satisfaction is our First Ambition"')
     cv.restoreState()
 
 
@@ -256,11 +252,15 @@ def _cover_emp(cv, doc):
     cv.setFont("Helvetica", 10)
     y = 62 * mm
     for line in (
+            "Product By       :  S.K. Sharma & Co.",
             f"Software Version :  Server Iter {APP_ITERATION}",
-            f"Last Updated     :  {date.today():%d-%m-%Y}",
-            "Prepared By      :  S.K. Sharma & Co."):
+            "Prepared By      :  Ankit Sharma"):
         cv.drawString(20 * mm, y, line)
         y -= 6.5 * mm
+    cv.setFont("Helvetica-BoldOblique", 10.5)
+    cv.setFillColor(rl.HexColor("#E0F2FE"))
+    cv.drawString(20 * mm, 18 * mm,
+                  '"Your Satisfaction is our First Ambition"')
     cv.restoreState()
 
 
@@ -275,16 +275,17 @@ def _page(cv, doc):
                   getattr(doc, "_hdr_title",
                           "PAYROLL & COMPLIANCE PORTAL — QUICK USER MANUAL"))
     cv.drawRightString(W - 15 * mm, H - 10 * mm, "S.K. SHARMA & CO.")
+    cv.setFont("Helvetica-BoldOblique", 8.5)
+    cv.setFillColor(TEAL)
+    cv.drawString(15 * mm, 8 * mm,
+                  '"Your Satisfaction is our First Ambition"')
     cv.setFont("Helvetica", 8)
     cv.setFillColor(GREY)
-    cv.drawString(15 * mm, 8 * mm,
-                  "Prepared by S.K. Sharma & Co. · Confidential")
     cv.drawRightString(W - 15 * mm, 8 * mm, f"Page {cv.getPageNumber()}")
     cv.restoreState()
 
 
-def build_manual(updates: Optional[list] = None,
-                 extras: Optional[list] = None) -> BytesIO:
+def build_manual(extras: Optional[list] = None) -> BytesIO:
     buf = BytesIO()
     doc = _Doc(buf, pagesize=A4, title="Quick User Manual")
     fr = Frame(15 * mm, 14 * mm, CW, H - 32 * mm, id="f")
@@ -301,34 +302,6 @@ def build_manual(updates: Optional[list] = None,
     toc.dotsMinLevel = 0
     story.append(toc)
     story.append(PageBreak())
-
-    # -------- What's New (auto-generated from the feature changelog)
-    if updates:
-        story.append(Paragraph("What's New — Recent Payroll Updates", S_H1))
-        story.append(Paragraph(
-            "This manual rebuilds itself on every download — the latest "
-            "portal features are listed below automatically.", S_BODY))
-        story.append(Spacer(1, 4))
-        wn_rows = [[Paragraph("<b>Date</b>", S_BODY),
-                    Paragraph("<b>Feature</b>", S_BODY),
-                    Paragraph("<b>Where</b>", S_BODY)]]
-        for u in updates[:12]:
-            wn_rows.append([
-                Paragraph(str(u.get("date") or "")[:10], S_BODY),
-                Paragraph(f"<b>{u.get('title', '')}</b><br/>"
-                          f"{u.get('desc', '')}", S_BODY),
-                Paragraph(u.get("nav", ""), S_BODY)])
-        wt = Table(wn_rows, colWidths=[CW * 0.14, CW * 0.58, CW * 0.28])
-        wt.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), NAVY),
-            ("GRID", (0, 0), (-1, -1), 0.6, GREY),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl.white, TEAL_BG]),
-            ("TOPPADDING", (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-            ("LEFTPADDING", (0, 0), (-1, -1), 8),
-            ("VALIGN", (0, 0), (-1, -1), "TOP")]))
-        story.append(wt)
-        story.append(PageBreak())
 
     _section(story, 1, "Login", "Portal URL → Admin Sign In", "login",
              ["Choose 'Admin sign in'", "Enter User ID / Email",
@@ -729,8 +702,8 @@ async def user_manual_pdf(token: Optional[str] = Query(None),
     require_role(admin, ["super_admin"])  # SUPER ADMIN ONLY
     if admin.get("role") != "super_admin":
         raise HTTPException(status_code=403, detail="Super admin only")
-    updates, extras = await _manual_data()
-    buf = build_manual(updates, extras)
+    extras = (await _manual_data())[1]
+    buf = build_manual(extras)
     return Response(content=buf.getvalue(), media_type="application/pdf",
                     headers={"Content-Disposition":
                              'inline; filename="Payroll_Quick_User_Manual.pdf"'})

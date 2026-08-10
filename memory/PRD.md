@@ -5265,3 +5265,26 @@ changelog entry auto-included; frontend section chips updated.
    now functional for employees.
 3. user-manual screen: second button "Employee Quick Guide (PDF)";
    changelog entries logged for PWA guide + employee guide.
+
+## Iter 532 (rev 2) — Manual screenshot/heading fix + cover cleanup + rollback (user request)
+1. FIXED heading↔screenshot mismatches in manual_capture.py:
+   - employee_master: /admin scrolled to "Employees" list (search box via
+     get_by_placeholder scroll_into_view) — was Admin Panel stats.
+   - attendance: /attendance-grid?month=<data month> (was blank current month).
+   - monthly_payroll: /monthly-payroll-report?month=<data month> (added
+     useLocalSearchParams month support to monthly-payroll-report.tsx).
+   - bank: clicks the salary-run month chip ("Jul 2026").
+   - payslip: _best_payslip_uid prefers gross>0 rows (no more ₹0 slip).
+   All 21 screenshots re-captured & visually verified.
+2. Cover page (user request): "Product By : S.K. Sharma & Co. Payroll &
+   Compliance Portal", "Prepared By : Ankit Sharma"; REMOVED Document
+   Version / Last Updated / Screenshots As Of / CONFIDENTIAL. Employee
+   guide cover matched. Punch line on EVERY page footer:
+   "Your Satisfaction is our First Ambition".
+3. REMOVED the "What's New — Recent Payroll Updates" page + TOC entry
+   (build_manual now takes extras only; manual_updates collection kept
+   for the /status endpoint).
+4. ROLLBACK (user request): "Refresh Screenshots / Re-capturing
+   screenshots…" button removed from user-manual.tsx (backend
+   /refresh-screenshots endpoint kept for dev workspace use).
+5. APP_ITERATION=532, deploy_vps_iter532.sh, temp_bundle pointer updated.

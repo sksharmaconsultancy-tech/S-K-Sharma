@@ -12,7 +12,7 @@ import {
   Text, TextInput, View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Stack } from "expo-router";
+import { Stack, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
 import { api, apiBinary } from "@/src/api/client";
@@ -102,8 +102,13 @@ function Pick({ label, value, options, onChange }: {
 export default function MonthlyPayrollReport() {
   const { user } = useAuth();
   const { selectedCompanyId } = useSelectedCompany();
+  const params = useLocalSearchParams<{ month?: string }>();
   const [cid, setCid] = useState("");
-  const [month, setMonth] = useState(currentMonth());
+  const [month, setMonth] = useState(
+    typeof params.month === "string" && /^\d{4}-\d{2}$/.test(params.month)
+      ? params.month
+      : currentMonth(),
+  );
   const [branch, setBranch] = useState("");
   const [dept, setDept] = useState("");
   const [desig, setDesig] = useState("");

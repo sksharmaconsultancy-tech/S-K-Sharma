@@ -65,8 +65,12 @@ def _best_payslip_uid(_base: str, token: str, ctx: dict) -> str:
             url, headers={"Authorization": f"Bearer {token}"})
         rows = json.loads(urllib.request.urlopen(
             req, timeout=60).read()).get("rows") or []
-        rows.sort(key=lambda r: -(float(r.get("present_days") or 0)
-                                  + 0.5 * float(r.get("half_days") or 0)))
+        # prefer employees with a REAL salary amount (never a ₹0 payslip),
+        # then the most present days
+        rows.sort(key=lambda r: (-(1 if float(r.get("gross") or 0) > 0
+                                   else 0),
+                                 -(float(r.get("present_days") or 0)
+                                   + 0.5 * float(r.get("half_days") or 0))))
         if rows and float(rows[0].get("present_days") or 0) > 0:
             return rows[0]["user_id"]
     except Exception as e:  # noqa: BLE001
@@ -221,11 +225,16 @@ def main() -> int:
     m = ctx["month"]
     mm, yy = int(m[5:7]), int(m[:4])
     # (name, route, wait_ms, click_text_or_None)
+    # label of the data month as shown on the Bank Transfer month chips
+    bank_chip = date(yy, mm, 1).strftime("%b %Y")
     shots = [
         ("dashboard", "/", 8000, None),
         ("firm_master", "/companies", 6000, None),
+        # Employee Master section must show the EMPLOYEE LIST — the
+        # /admin page is scrolled down to its "Employees" section below
         ("employee_master", "/admin", 9000, None),
-        ("attendance", "/attendance-grid", 9000, None),
+        # force the month that actually HAS punch data
+        ("attendance", f"/attendance-grid?month={m}", 9000, None),
         ("biometric", "/biometric-devices", 6000, None),
         ("leave", "/leaves", 6000, "All requests"),
         ("esic_leave", "/esic-leave", 7000, None),
@@ -235,9 +244,11 @@ def main() -> int:
         ("payslip",
          f"/payslip?user_id={ctx['payslip_uid']}&month={mm}&year={yy}",
          8000, None),
-        ("bank", "/bank-transfer", 6000, None),
+        # click the chip of the month that HAS a finalized salary run
+        ("bank", "/bank-transfer", 6000, bank_chip),
         ("reports", "/reports-center", 7000, None),
-        ("monthly_payroll", "/monthly-payroll-report", 9000, None),
+        ("monthly_payroll", f"/monthly-payroll-report?month={m}",
+         9000, None),
     ]
     ok, fail = [], []
     seed_samples(db, ctx)
@@ -273,6 +284,16 @@ def main() -> int:
                             pg.get_by_text(click, exact=True).first.click(
                                 force=True, timeout=5000)
                             pg.wait_for_timeout(4000)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    if name == "employee_master":
+                        # scroll to the employee list (search box) so the
+                        # screenshot shows employees — not the stats cards
+                        try:
+                            pg.get_by_placeholder(
+                                "Search name / code / phone / dept",
+                            ).first.scroll_into_view_if_needed(timeout=8000)
+                            pg.wait_for_timeout(2500)
                         except Exception:  # noqa: BLE001
                             pass
                     problem = _page_problem(pg)

@@ -27,7 +27,6 @@ const SECTIONS = [
 export default function UserManualScreen() {
   const { user, loading } = useAuth();
   const [busy, setBusy] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [status, setStatus] = useState<any>(null);
   const [err, setErr] = useState("");
 
@@ -40,28 +39,8 @@ export default function UserManualScreen() {
     if (user?.role === "super_admin") void loadStatus();
   }, [user, loadStatus]);
 
-  // poll while a screenshot capture is running
-  useEffect(() => {
-    if (!status?.capture_running) return;
-    const t = setInterval(loadStatus, 10000);
-    return () => clearInterval(t);
-  }, [status?.capture_running, loadStatus]);
-
   if (loading) return null;
   if (!user || user.role !== "super_admin") return <Redirect href="/" />;
-
-  const refreshShots = async () => {
-    setRefreshing(true);
-    setErr("");
-    try {
-      await api("/admin/user-manual/refresh-screenshots", { method: "POST" });
-      await loadStatus();
-    } catch (e: any) {
-      setErr(e?.message || "Refresh failed");
-    } finally {
-      setRefreshing(false);
-    }
-  };
 
   const download = async (kind: "user-manual" | "employee-guide" = "user-manual") => {
     setBusy(true);
@@ -107,29 +86,13 @@ export default function UserManualScreen() {
             <Ionicons name="phone-portrait-outline" size={16} color="#fff" />
             <Text style={s.btnTxt}>Employee Quick Guide (PDF)</Text>
           </Pressable>
-          {/* Iter 531 — auto-update controls */}
-          <Pressable style={[s.btn, s.btnGhost]} onPress={refreshShots}
-            disabled={refreshing || status?.capture_running}
-            testID="manual-refresh">
-            {refreshing ? <ActivityIndicator color="#7DD3FC" /> : (
-              <>
-                <Ionicons name="camera-outline" size={16} color="#7DD3FC" />
-                <Text style={[s.btnTxt, { color: "#7DD3FC" }]}>
-                  {status?.capture_running
-                    ? "Re-capturing screenshots…"
-                    : "Refresh Screenshots (current UI)"}
-                </Text>
-              </>
-            )}
-          </Pressable>
+          {/* Iter 531 — auto-update status */}
           {status ? (
             <Text style={s.statusTxt}>
-              Auto-update: version Iter {status.server_version} · What&apos;s
-              New entries {status.whats_new_entries} · {status.screenshots}
-              {" "}screenshots{status.last_capture?.at
+              Auto-update: version Iter {status.server_version} ·{" "}
+              {status.screenshots} screenshots{status.last_capture?.at
                 ? ` (captured ${String(status.last_capture.at).slice(0, 10)})`
                 : " (bundled)"}
-              {status.capture_running ? " · capture in progress…" : ""}
             </Text>
           ) : null}
           {err ? <Text style={s.err}>{err}</Text> : null}
@@ -147,10 +110,9 @@ export default function UserManualScreen() {
           ))}
         </View>
         <Text style={s.note}>
-          The manual auto-updates on every download: software version,
-          date, the What&apos;s New page and any new feature sections are
-          generated live. Use &quot;Refresh Screenshots&quot; after new
-          payroll features ship so the images match the current UI.
+          The manual auto-updates on every download: software version and
+          any new feature sections are generated live with the latest
+          portal screenshots.
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -179,10 +141,6 @@ const s = StyleSheet.create({
     justifyContent: "center",
   },
   btnTxt: { color: "#fff", fontWeight: "800", fontSize: 14 },
-  btnGhost: {
-    backgroundColor: "transparent", borderWidth: 1.2, borderColor: "#7DD3FC",
-    marginTop: 10,
-  },
   statusTxt: {
     color: "#94A3B8", fontSize: 11, marginTop: 10, textAlign: "center",
   },
