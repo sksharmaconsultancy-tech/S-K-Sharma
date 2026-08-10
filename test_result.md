@@ -398,3 +398,7 @@ ITER 487 (doc-expiry alerts):
   (was hanging); legend shows "8+4 = Duty HRS + OT HRS"; screenshot OK.
 - Manual cover: punch line centred mid-page, Product By/Prepared By at
   bottom, footer punch line centred (pypdf text-order verified).
+
+## Iter 535
+- API without month param returns month=2026-07 (finalized) while current
+  month is 2026-08; UI month input auto-fills 2026-07, grid loads.

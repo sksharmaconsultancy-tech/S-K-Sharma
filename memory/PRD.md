@@ -5318,3 +5318,11 @@ NOTE: /pw-browsers is wiped on pod restarts — rerun
    y=150mm) and centred in every page footer.
 4. APP_ITERATION=534, deploy_vps_iter534.sh (also carries Iter 533 manual
    sections), temp_bundle pointer updated.
+
+## Iter 535 — Monthly Payroll Report default month (user request)
+Month selector defaults to the LAST salary-finalized month, never the
+current month: backend _default_month(company_id) (finalized/frozen
+compliance run → latest compliance run → latest actual run → today);
+all 3 endpoints use it when month param empty. Frontend starts with
+month="" and adopts data.month into the input after the first load.
+APP_ITERATION=535, deploy_vps_iter535.sh, temp_bundle pointer updated.

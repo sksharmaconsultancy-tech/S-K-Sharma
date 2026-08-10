@@ -22,8 +22,6 @@ import CompanyPicker from "@/src/components/CompanyPicker";
 import { GridScroller, stickyCol, stickyHeader } from "@/src/components/GridFreeze";
 import { colors } from "@/src/theme";
 
-const currentMonth = () => new Date().toISOString().slice(0, 7);
-
 const CODE_UI: Record<string, { bg: string; fg: string }> = {
   "-": { bg: "#FEE2E2", fg: "#991B1B" },
   WO: { bg: "#E0F2FE", fg: "#075985" },
@@ -104,10 +102,12 @@ export default function MonthlyPayrollReport() {
   const { selectedCompanyId } = useSelectedCompany();
   const params = useLocalSearchParams<{ month?: string }>();
   const [cid, setCid] = useState("");
+  // Iter 535 (user request) — default month = LAST salary-finalized
+  // month (resolved by the backend), never the current month.
   const [month, setMonth] = useState(
     typeof params.month === "string" && /^\d{4}-\d{2}$/.test(params.month)
       ? params.month
-      : currentMonth(),
+      : "",
   );
   const [branch, setBranch] = useState("");
   const [dept, setDept] = useState("");
@@ -129,7 +129,8 @@ export default function MonthlyPayrollReport() {
   }, [user, selectedCompanyId]);
 
   const qs = useMemo(() => {
-    const p = new URLSearchParams({ month, salary_type: salaryType, basis });
+    const p = new URLSearchParams({ salary_type: salaryType, basis });
+    if (month) p.set("month", month);
     if (cid) p.set("company_id", cid);
     if (branch) p.set("branch", branch);
     if (dept) p.set("department", dept);
@@ -156,10 +157,16 @@ export default function MonthlyPayrollReport() {
   // Iter 534 (perf fix) — DEBOUNCE: typing in search/month fired one heavy
   // report computation per keystroke, hanging the server & the grid.
   useEffect(() => {
-    if (!cid || !/^\d{4}-\d{2}$/.test(month)) return;
+    if (!cid) return;
+    if (month && !/^\d{4}-\d{2}$/.test(month)) return; // typing in progress
     const t = setTimeout(() => { void load(qs); }, 600);
     return () => clearTimeout(t);
   }, [cid, month, qs, load]);
+  // adopt the backend-resolved default month into the input
+  useEffect(() => {
+    if (!month && data?.month) setMonth(data.month);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
 
   const doExport = async (kind: "xlsx" | "pdf") => {
     if (!cid) return;

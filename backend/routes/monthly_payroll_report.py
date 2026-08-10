@@ -75,6 +75,24 @@ async def _latest_run(coll, company_id: str, month: str):
         sort=[("generated_at", -1)])
 
 
+async def _default_month(company_id: str) -> str:
+    """Iter 535 (user request) — month selector defaults to the LAST
+    salary-FINALIZED month, never the current month."""
+    r = await db.compliance_salary_runs.find_one(
+        {"company_id": company_id,
+         "$or": [{"finalized": True}, {"frozen": True}]},
+        {"_id": 0, "month": 1}, sort=[("month", -1)])
+    if not r:  # no finalized run yet → latest processed run
+        r = await db.compliance_salary_runs.find_one(
+            {"company_id": company_id}, {"_id": 0, "month": 1},
+            sort=[("month", -1)])
+    if not r:
+        r = await db.salary_runs.find_one(
+            {"company_id": company_id}, {"_id": 0, "month": 1},
+            sort=[("month", -1)])
+    return _s((r or {}).get("month"))[:7] or date.today().strftime("%Y-%m")
+
+
 async def _leave_days(company_id: str, month: str) -> Dict[str, Dict[str, str]]:
     """user_id → {iso_date: leave code} for APPROVED leaves in the month."""
     m0, m1 = f"{month}-01", f"{month}-31"
@@ -448,7 +466,7 @@ async def monthly_payroll(company_id: Optional[str] = None,
                           authorization: Optional[str] = Header(None)):
     admin, company_id = await _adm(
         authorization or (f"Bearer {token}" if token else None), company_id)
-    month = _s(month)[:7] or date.today().strftime("%Y-%m")
+    month = _s(month)[:7] or await _default_month(company_id)
     basis = "actual" if basis == "actual" else "compliance"
     if salary_type not in ("compliance", "actual", "both"):
         salary_type = "both"
@@ -471,7 +489,7 @@ async def monthly_payroll_xlsx(company_id: Optional[str] = None,
                                authorization: Optional[str] = Header(None)):
     admin, company_id = await _adm(
         authorization or (f"Bearer {token}" if token else None), company_id)
-    month = _s(month)[:7] or date.today().strftime("%Y-%m")
+    month = _s(month)[:7] or await _default_month(company_id)
     basis = "actual" if basis == "actual" else "compliance"
     mask = admin.get("role") not in ("super_admin",)
     d = await _build(company_id, month,
@@ -503,7 +521,7 @@ async def monthly_payroll_pdf(company_id: Optional[str] = None,
                               authorization: Optional[str] = Header(None)):
     admin, company_id = await _adm(
         authorization or (f"Bearer {token}" if token else None), company_id)
-    month = _s(month)[:7] or date.today().strftime("%Y-%m")
+    month = _s(month)[:7] or await _default_month(company_id)
     basis = "actual" if basis == "actual" else "compliance"
     mask = admin.get("role") not in ("super_admin",)
     d = await _build(company_id, month,
