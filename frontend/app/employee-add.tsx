@@ -467,7 +467,6 @@ export default function EmployeeAddScreen() {
   // (= Compliance Basic + Σ compliance allowances).
   const sumLines = (lines: SalaryLine[]) =>
     lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
-  const actualAllowTotal = sumLines(form.actual_allowances);
   const complAllowTotal = sumLines(form.compliance_allowances);
   const complGrossComputed = (Number(form.compliance_basic) || 0) + complAllowTotal;
   // Iter 245 (user sequence) — Compliance allowance heads always show in
@@ -833,12 +832,11 @@ export default function EmployeeAddScreen() {
         // rows that have neither a head nor an amount so the DB stays
         // clean.  Amount is coerced to a number so downstream salary
         // engines don't have to string-parse.
-        actual_salary_allowances: form.actual_allowances
-          .filter((l) => l.head && l.amount)
-          .map((l) => ({ head: l.head, amount: Number(l.amount) })),
-        actual_salary_deductions: form.actual_deductions
-          .filter((l) => l.head && l.amount)
-          .map((l) => ({ head: l.head, amount: Number(l.amount) })),
+        // Iter 536 (user request) — Actual Salary carries NO allowance /
+        // deduction heads: only Basic + Salary 1/2/3 with days. Saved
+        // values are cleared so the salary engine uses basics only.
+        actual_salary_allowances: [],
+        actual_salary_deductions: [],
         compliance_salary_allowances: form.compliance_allowances
           .filter((l) => l.head && l.amount)
           .map((l) => ({ head: l.head, amount: Number(l.amount) })),
@@ -1834,11 +1832,8 @@ export default function EmployeeAddScreen() {
           {/* Iter 137 (user directive) — Total of allowances + gross moved
               AFTER the Allowances section. (Allowance/Deduction heads moved
               below Rate Basis (Compliance) per user request.) */}
-          {orderedAllowHeads.length > 0 ? (
-            <Text style={[styles.smallNote, { fontWeight: "800" }]}>
-              Total Allowances (Actual): ₹{actualAllowTotal.toLocaleString()}
-            </Text>
-          ) : null}
+          {/* Iter 536 — "Total Allowances (Actual)" note removed together
+              with the Actual-Salary allowance heads (user request). */}
           <TwoCol>
             <Field
               label="Off-Line gross / month (₹)"
@@ -2244,45 +2239,10 @@ export default function EmployeeAddScreen() {
           ))}
           </>)}
 
-          {/* Iter 200 (user request) — Allowance / Deduction heads (Actual,
-              from Firm Master). Saved as actual_salary_allowances /
-              actual_salary_deductions — unchanged storage. */}
-          {showActualSalary && orderedAllowHeads.length > 0 ? (
-            <>
-              <Text style={styles.lbl}>Allowances — Actual Salary (from Firm Master)</Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {orderedAllowHeads.map((h) => (
-                  <View key={h} style={{ minWidth: 150, flexGrow: 1, flexBasis: "30%" }}>
-                    <Field
-                      label={h}
-                      value={lineAmount(form.actual_allowances, h)}
-                      onChange={(v) => setLineAmount("actual_allowances", h, v)}
-                      placeholder="0"
-                      keyboardType="numeric"
-                    />
-                  </View>
-                ))}
-              </View>
-            </>
-          ) : null}
-          {showActualSalary && allDeductionHeads.length > 0 ? (
-            <>
-              <Text style={styles.lbl}>Deductions — Actual Salary (from Firm Master)</Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {allDeductionHeads.map((h) => (
-                  <View key={h} style={{ minWidth: 150, flexGrow: 1, flexBasis: "30%" }}>
-                    <Field
-                      label={h}
-                      value={lineAmount(form.actual_deductions, h)}
-                      onChange={(v) => setLineAmount("actual_deductions", h, v)}
-                      placeholder="0"
-                      keyboardType="numeric"
-                    />
-                  </View>
-                ))}
-              </View>
-            </>
-          ) : null}
+          {/* Iter 536 (user request) — Actual Salary has NO allowance /
+              deduction heads: only Basic Salary + Salary 1/2/3 with days.
+              The former "— Actual Salary (from Firm Master)" blocks were
+              removed; saving now clears any previously stored values. */}
 
           {/* Iter 126g — Pay Mode moved into the Compliance Salary section */}
           <Text style={[styles.lbl, { marginTop: 4 }]}>Pay Mode</Text>

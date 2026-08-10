@@ -5326,3 +5326,18 @@ compliance run → latest compliance run → latest actual run → today);
 all 3 endpoints use it when month param empty. Frontend starts with
 month="" and adopts data.month into the input after the first load.
 APP_ITERATION=535, deploy_vps_iter535.sh, temp_bundle pointer updated.
+
+## Iter 536 — Month stepper + Actual Salary simplification (user requests)
+1. Monthly Payroll Report: run_months (distinct months of compliance +
+   actual runs) in the API; ‹ › stepper beside the month box jumps to
+   prev/next month having a run (calendar fallback when none).
+2. Employee Master (user request "In Actual Salary no allowances
+   required"): removed "Allowances — Actual Salary" and "Deductions —
+   Actual Salary" blocks + "Total Allowances (Actual)" note from
+   employee-add.tsx. Payload now saves actual_salary_allowances: [] /
+   actual_salary_deductions: [] (clears legacy values on save). Actual
+   Salary = Basic + Salary 1/2/3 with Days only. Compliance blocks and
+   both salary engines untouched. NOTE: user first asked to merge the
+   two blocks, then chose "keep both as-is", then finally asked to
+   remove the Actual block — final state implemented.
+3. APP_ITERATION=536, deploy_vps_iter536.sh, temp_bundle pointer updated.

@@ -402,3 +402,9 @@ ITER 487 (doc-expiry alerts):
 ## Iter 535
 - API without month param returns month=2026-07 (finalized) while current
   month is 2026-08; UI month input auto-fills 2026-07, grid loads.
+
+## Iter 536
+- Stepper: start 2026-07 → prev 2026-06 → next 2026-07 (run months
+  2026-03/06/07/08) verified via playwright.
+- /employee-add: Actual allowance/deduction blocks + (Actual) total gone,
+  Compliance blocks intact, lint clean, screenshot verified.
