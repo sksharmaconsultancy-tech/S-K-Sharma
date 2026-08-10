@@ -146,16 +146,15 @@ async def _build(company_id: str, month: str, flt: Dict[str, str],
     today_iso = date.today().isoformat()
     by_uid_att = {e.get("user_id"): e for e in grid.get("employees") or []}
 
-    # Iter 534 (user request) — day cells show HOURS per the firm's
-    # attendance policy instead of P/A codes: "8+4" (Duty HRS + OT HRS)
-    # when the policy tracks OT, plain duty hours otherwise.
+    # Iter 537 (user report "Attendance Showing Wrong") — day cells now
+    # ALWAYS use the attendance-policy engine's split directly:
+    # duty_hours (capped at the policy full-day hours) + ot_hours (beyond
+    # the policy threshold). No dependence on raw policy fields, so every
+    # firm's cells match its Attendance Policy exactly: "8+3" or "8".
     comp_c = await db.companies.find_one(
         {"company_id": company_id},
-        {"_id": 0, "name": 1, "address": 1, "logo_base64": 1,
-         "attendance_policy": 1})
-    pol = (comp_c or {}).get("attendance_policy") or {}
-    ot_mode = _f(pol.get("overtime_threshold_hours")) > 0
-    att_mode = "HRS+OT" if ot_mode else "HRS"
+        {"_id": 0, "name": 1, "address": 1, "logo_base64": 1})
+    att_mode = "HRS+OT"
 
     def _hrs(v: float) -> str:
         return f"{v:g}"
@@ -225,10 +224,9 @@ async def _build(company_id: str, month: str, flt: Dict[str, str],
             if code in ("P", "HD"):
                 duty = _f(cell.get("duty_hours"))
                 ot = _f(cell.get("ot_hours"))
-                if ot_mode:
-                    val = f"{_hrs(duty)}+{_hrs(ot)}" if ot else _hrs(duty)
-                else:
-                    val = _hrs(_f(cell.get("hours")) or duty)
+                if not duty and not ot:  # engine cell without split
+                    duty = _f(cell.get("hours"))
+                val = f"{_hrs(duty)}+{_hrs(ot)}" if ot > 0 else _hrs(duty)
                 row[f"d{i + 1}"] = val
             elif code == "A":
                 row[f"d{i + 1}"] = "-"

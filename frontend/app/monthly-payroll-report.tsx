@@ -381,9 +381,7 @@ export default function MonthlyPayrollReport() {
           <View style={s.legend}>
             <View style={[s.legItem, { backgroundColor: HRS_UI.bg }]}>
               <Text style={[s.legTxt, { color: HRS_UI.fg }]}>
-                {data?.att_mode === "HRS+OT"
-                  ? "8+4 = Duty HRS + OT HRS (attendance policy)"
-                  : "8 = Duty HRS (attendance policy)"}
+                8 / 8+4 = Duty HRS + OT HRS (as per Attendance Policy)
               </Text>
             </View>
             {Object.entries({

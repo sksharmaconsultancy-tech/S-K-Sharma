@@ -5341,3 +5341,13 @@ APP_ITERATION=535, deploy_vps_iter535.sh, temp_bundle pointer updated.
    two blocks, then chose "keep both as-is", then finally asked to
    remove the Actual block — final state implemented.
 3. APP_ITERATION=536, deploy_vps_iter536.sh, temp_bundle pointer updated.
+
+## Iter 537 — Attendance day cells strictly per policy engine (user report)
+User: "Attendance Showing Wrong — show as per Firm Attendance Policy
+1-31". Root cause: cells only used the duty+OT split when
+attendance_policy.overtime_threshold_hours was set; otherwise fell back
+to raw total hours (e.g. "11" instead of "8+3"). Fix: day cells ALWAYS
+use the policy engine's duty_hours + ot_hours (fallback to hours only
+when the engine cell has no split). att_mode now constant "HRS+OT";
+legend chip made unconditional. Verified d1=8+3 (11h @ 8h policy),
+worked-WO day shows its hours ("7").
