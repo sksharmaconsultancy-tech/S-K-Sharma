@@ -168,6 +168,23 @@ export default function MonthlyPayrollReport() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
+  // ‹ › stepper — jump between months that HAVE a salary run
+  const stepMonth = (dir: -1 | 1) => {
+    const list: string[] = data?.run_months || [];
+    const cur = month || data?.month || "";
+    if (list.length) {
+      const c = dir === -1 ? list.filter((x) => x < cur) : list.filter((x) => x > cur);
+      const next = dir === -1 ? c[c.length - 1] : c[0];
+      if (next) setMonth(next);
+      return;
+    }
+    if (/^\d{4}-\d{2}$/.test(cur)) { // no runs yet → plain calendar step
+      const [y, m] = cur.split("-").map(Number);
+      const d = new Date(y, m - 1 + dir, 1);
+      setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    }
+  };
+
   const doExport = async (kind: "xlsx" | "pdf") => {
     if (!cid) return;
     setExporting(kind);
@@ -288,9 +305,17 @@ export default function MonthlyPayrollReport() {
         ) : null}
 
         <View style={s.filterRow}>
+          <Pressable style={s.stepBtn} onPress={() => stepMonth(-1)}
+            testID="mpr-month-prev">
+            <Ionicons name="chevron-back" size={16} color="#0F3B5C" />
+          </Pressable>
           <TextInput value={month} onChangeText={setMonth} placeholder="YYYY-MM"
             placeholderTextColor="#94A3B8" style={[s.input, { maxWidth: 100 }]}
             testID="mpr-month" />
+          <Pressable style={s.stepBtn} onPress={() => stepMonth(1)}
+            testID="mpr-month-next">
+            <Ionicons name="chevron-forward" size={16} color="#0F3B5C" />
+          </Pressable>
           <Pick label="Branch / Unit" value={branch} options={meta.branches || []} onChange={setBranch} />
           <Pick label="Department" value={dept} options={meta.departments || []} onChange={setDept} />
           <Pick label="Designation" value={desig} options={meta.designations || []} onChange={setDesig} />
@@ -394,6 +419,11 @@ const s = StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 8, fontSize: 13,
     color: colors.onSurface, backgroundColor: colors.surface,
     ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as any) : null),
+  },
+  stepBtn: {
+    borderWidth: 1, borderColor: colors.border, borderRadius: 8,
+    paddingHorizontal: 8, justifyContent: "center", alignItems: "center",
+    backgroundColor: colors.surface, minHeight: 36,
   },
   pickBtn: {
     flexDirection: "row", alignItems: "center", gap: 5, borderWidth: 1,

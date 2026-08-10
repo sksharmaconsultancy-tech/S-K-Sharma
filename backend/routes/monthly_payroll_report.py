@@ -162,6 +162,13 @@ async def _build(company_id: str, month: str, flt: Dict[str, str],
 
     comp_run = await _latest_run(db.compliance_salary_runs, company_id, month)
     act_run = await _latest_run(db.salary_runs, company_id, month)
+    # Iter 536 — months that actually HAVE a salary run (for the ‹ › stepper)
+    run_months = sorted(
+        {_s(m)[:7] for m in
+         (await db.compliance_salary_runs.distinct(
+             "month", {"company_id": company_id}))
+         + (await db.salary_runs.distinct(
+             "month", {"company_id": company_id})) if _s(m)})
     comp = {r.get("user_id"): r for r in (comp_run or {}).get("rows") or []}
     act = {r.get("user_id"): r for r in (act_run or {}).get("rows") or []}
     leaves = await _leave_days(company_id, month)
@@ -350,7 +357,7 @@ async def _build(company_id: str, month: str, flt: Dict[str, str],
                     "address": (comp_c or {}).get("address") or "",
                     "logo_base64": (comp_c or {}).get("logo_base64")},
         "month": month, "basis": basis, "salary_type": salary_type,
-        "att_mode": att_mode,
+        "att_mode": att_mode, "run_months": run_months,
         "day_labels": day_labels,
         "weekday_labels": grid.get("weekday_labels") or [],
         "compliance_run": bool(comp_run),
