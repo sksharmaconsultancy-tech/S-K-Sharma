@@ -135,6 +135,8 @@ export default function DailyVerificationScreen() {
   const [busy, setBusy] = useState(false);
   const [drill, setDrill] = useState<Drill | null>(null);
   const [drillName, setDrillName] = useState("");
+  // Iter 540 — firm attendance calculation mode (header badge)
+  const [punchSeq, setPunchSeq] = useState<boolean | null>(null);
   const LIMIT = 200;
 
   const showMsg = (m: string) => { if (Platform.OS === "web") globalThis.alert(m); };
@@ -167,6 +169,7 @@ export default function DailyVerificationScreen() {
       setRows((prev) => (off > 0 ? [...prev, ...(d.rows || [])] : d.rows || []));
       setSummary(d.summary || {});
       setOpts(d.filter_options || null);
+      setPunchSeq(d.punch_sequence == null ? null : !!d.punch_sequence);
       setTotalRows(d.total_rows || 0);
       setOffset(off);
     } catch (e: any) {
@@ -282,6 +285,17 @@ export default function DailyVerificationScreen() {
           <Text style={st.title}>Daily In/Out & OT Verification</Text>
           <Text style={st.sub}>Physically verify attendance against punch records — {date}</Text>
         </View>
+        {/* Iter 540 — attendance calculation mode badge */}
+        {punchSeq != null ? (
+          <View style={[st.ruleBadge, punchSeq && st.ruleBadgeSeq]}
+            testID="dv-rule-badge">
+            <Ionicons name={punchSeq ? "git-branch-outline" : "time-outline"}
+              size={12} color={punchSeq ? "#166534" : "#075985"} />
+            <Text style={[st.ruleTxt, punchSeq && { color: "#166534" }]}>
+              {punchSeq ? "Rule: Punch Sequence" : "Rule: Standard (Shift HRS)"}
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 12, paddingBottom: 40 }}>
@@ -556,6 +570,13 @@ const st = StyleSheet.create({
     backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   title: { fontSize: type.lg, fontWeight: "800", color: colors.onSurface },
+  ruleBadge: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: "#E0F2FE", borderRadius: 999,
+    paddingHorizontal: 10, paddingVertical: 5,
+  },
+  ruleBadgeSeq: { backgroundColor: "#DCFCE7" },
+  ruleTxt: { fontSize: 11, fontWeight: "800", color: "#075985" },
   sub: { fontSize: type.sm, color: colors.onSurfaceSecondary },
   filters: {
     flexDirection: "row", flexWrap: "wrap", gap: 10, alignItems: "flex-end",

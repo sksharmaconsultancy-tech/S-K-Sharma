@@ -418,3 +418,7 @@ ITER 487 (doc-expiry alerts):
 - Seq mode ON test: full-duty split at firm hrs, explicit OT pair pure OT,
   next-morning OT OUT stitched. Grid/OT-report/daily-verification all via
   same engine. UI screenshot OK (Show more hidden under 150 rows).
+
+## Iter 540
+- API punch_sequence=False for demo firm; badge renders in header
+  (screenshot verified, testID dv-rule-badge).

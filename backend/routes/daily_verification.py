@@ -383,6 +383,10 @@ async def _build(company_id: str, date: str,
         "company": {"company_id": company_id,
                     "name": (company or {}).get("name") or "",
                     "logo_base64": (company or {}).get("logo_base64")},
+        # Iter 540 — attendance calculation mode badge for operators.
+        "punch_sequence": bool(
+            (((company or {}).get("attendance_policy") or {})
+             .get("policy_master") or {}).get("attendance_by_duty_hours")),
         "date": date, "weekday": weekday,
         "rows": rows, "summary": summary,
         "filter_options": {

@@ -5372,3 +5372,10 @@ worked-WO day shows its hours ("7").
 4. APP_ITERATION=539, deploy_vps_iter539.sh, pointer updated.
 PENDING: user hasn't yet confirmed shift timings question for
 daily-verification display; punch-sequence rule was their answer.
+
+## Iter 540 — Rule badge on Daily In/Out & OT Verification (user accepted)
+Backend _build (routes/daily_verification.py) returns "punch_sequence"
+(from attendance_policy.policy_master.attendance_by_duty_hours);
+daily-verification.tsx shows header badge: green "Rule: Punch Sequence"
+/ blue "Rule: Standard (Shift HRS)". APP_ITERATION=540,
+deploy_vps_iter540.sh, pointer updated.
