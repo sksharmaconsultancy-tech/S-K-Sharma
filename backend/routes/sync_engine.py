@@ -584,6 +584,91 @@ async def sync_employee_api(payload: dict = Body(...),
     return {"ok": True, "job_id": job_id}
 
 
+def _left_query(cid: str) -> dict:
+    """Employees marked LEFT (resigned/exited) who still have a Bio Code."""
+    return {
+        "company_id": cid, "role": "employee",
+        "bio_code": {"$nin": [None, ""]},
+        "$or": [
+            {"exit_date": {"$nin": [None, ""]}},
+            {"resign_date": {"$nin": [None, ""]}},
+            {"employment_status": {"$in": [
+                "resigned", "exited", "left", "terminated",
+                "Resigned", "Exited", "Left", "Terminated"]}},
+            {"active": False},
+        ],
+    }
+
+
+@router.post("/sync/delete-employee")
+async def sync_delete_employee_api(payload: dict = Body(...),
+                                   authorization: Optional[str] = Header(None)):
+    """Iter 541 (user request) — DELETE one employee from all sync-enabled
+    machines. Body: {company_id?, user_id? | employee_code? | bio_code?,
+    dry_run?}. dry_run resolves and returns the employee without queueing."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    cid = _scope_company(admin, payload.get("company_id"))
+    q: dict = {"company_id": cid, "role": "employee"}
+    if payload.get("user_id"):
+        q["user_id"] = payload["user_id"]
+    elif payload.get("employee_code"):
+        q["employee_code"] = str(payload["employee_code"]).strip()
+    elif payload.get("bio_code"):
+        q["bio_code"] = str(payload["bio_code"]).strip()
+    else:
+        raise HTTPException(status_code=400,
+                            detail="user_id, employee_code or bio_code required")
+    emp = await db.users.find_one(q, {"_id": 0, "user_id": 1, "name": 1,
+                                      "employee_code": 1, "bio_code": 1})
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if not str(emp.get("bio_code") or "").strip():
+        raise HTTPException(status_code=400,
+                            detail="Employee has no Bio Code — nothing to "
+                                   "delete on the machines.")
+    if payload.get("dry_run"):
+        return {"ok": True, "dry_run": True, "employee": emp}
+    job_id = await enqueue_employee_sync(
+        cid, emp["user_id"], "delete", actor=admin["user_id"], force=True)
+    if not job_id:
+        raise HTTPException(status_code=400,
+                            detail="No sync-enabled machine registered for "
+                                   "this firm.")
+    return {"ok": True, "job_id": job_id, "employee": emp}
+
+
+@router.post("/sync/delete-left")
+async def sync_delete_left_api(payload: dict = Body(None),
+                               authorization: Optional[str] = Header(None)):
+    """Iter 541 (user request) — remove ALL employees marked LEFT
+    (exit/resign date, resigned/left status or inactive) from the firm's
+    machines. Body: {company_id?, dry_run?}. dry_run lists the candidates."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    payload = payload or {}
+    cid = _scope_company(admin, payload.get("company_id"))
+    emps = await db.users.find(
+        _left_query(cid),
+        {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1,
+         "bio_code": 1, "exit_date": 1, "employment_status": 1},
+    ).to_list(5000)
+    if payload.get("dry_run"):
+        return {"ok": True, "dry_run": True, "count": len(emps),
+                "employees": emps[:200]}
+    queued, skipped = [], 0
+    for e in emps:
+        job_id = await enqueue_employee_sync(
+            cid, e["user_id"], "delete", actor=admin["user_id"], force=True)
+        if job_id:
+            queued.append({"job_id": job_id, "name": e.get("name"),
+                           "employee_code": e.get("employee_code")})
+        else:
+            skipped += 1
+    return {"ok": True, "queued": len(queued), "skipped": skipped,
+            "jobs": queued[:200]}
+
+
 @router.post("/sync/all")
 async def sync_all_api(payload: dict = Body(None),
                        authorization: Optional[str] = Header(None)):

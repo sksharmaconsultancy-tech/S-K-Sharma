@@ -245,11 +245,39 @@ async def create_entry(payload: Dict[str, Any] = Body(...),
         "certificate_base64": cert,
         "certificate_name": (payload.get("certificate_name") or None) if cert else None,
         "has_certificate": bool(cert),
-        "status": "pending",
+        # Iter 541 (user request) — no approval step: every saved entry
+        # is APPROVED by default (submitter recorded as approver).
+        "status": "approved",
+        "approved_by": admin["user_id"],
+        "approved_by_name": admin.get("name") or admin.get("email"),
+        "approved_at": now_iso(),
         "created_by": admin["user_id"],
         "created_by_name": admin.get("name") or admin.get("email"),
         "created_at": now_iso(),
     }
+    # Auto-mark attendance immediately (same behaviour the old Approve
+    # button had) so grids / leave reports pick the ESIC days up.
+    if st["auto_mark_attendance"]:
+        leave_id = f"lv_{uuid.uuid4().hex[:12]}"
+        await db.leaves.insert_one({
+            "leave_id": leave_id,
+            "user_id": user_id,
+            "company_id": cid,
+            "leave_type": "esic",
+            "from_date": entry["from_date"],
+            "to_date": entry["to_date"],
+            "reason": ((f"{entry.get('reason')}: {entry.get('reason_other')}"
+                        if (entry.get("reason") or "").startswith("Other")
+                        and entry.get("reason_other")
+                        else entry.get("reason"))
+                       or entry.get("remarks") or "ESIC medical leave"),
+            "status": "approved",
+            "approved_by": admin["user_id"],
+            "source": "esic_leave_module",
+            "esic_entry_id": entry["entry_id"],
+            "created_at": now_iso(),
+        })
+        entry["linked_leave_id"] = leave_id
     await db.esic_leaves.insert_one(dict(entry))
     entry.pop("certificate_base64", None)
     return {"ok": True, "entry": entry}

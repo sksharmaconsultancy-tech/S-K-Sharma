@@ -224,6 +224,71 @@ export default function SyncEngineScreen() {
     setTimeout(() => setBanner(null), 4000);
   };
 
+  // Iter 541 — delete-from-machine helpers
+  const [delCode, setDelCode] = useState("");
+  const cidBody = () =>
+    (isSuper && companyId ? { company_id: companyId } : {});
+  const deleteOneFromMachines = async () => {
+    const code = delCode.trim();
+    if (!code) { flash("Enter the Emp Code or Bio Code first"); return; }
+    setBusy(true);
+    try {
+      // resolve first (try employee code, then bio code) for a named confirm
+      let r: any;
+      try {
+        r = await api<any>("/sync/delete-employee", {
+          method: "POST",
+          body: { ...cidBody(), employee_code: code, dry_run: true } });
+      } catch {
+        r = await api<any>("/sync/delete-employee", {
+          method: "POST",
+          body: { ...cidBody(), bio_code: code, dry_run: true } });
+      }
+      const emp = r.employee;
+      const ok = Platform.OS === "web"
+        ? window.confirm(
+            `Delete "${emp.name}" (Code ${emp.employee_code} · Bio ${emp.bio_code}) ` +
+            "from ALL sync-enabled machines of this firm?\n\n" +
+            "They will no longer be able to punch. Portal data is NOT touched.")
+        : true;
+      if (!ok) return;
+      const res = await api<any>("/sync/delete-employee", {
+        method: "POST", body: { ...cidBody(), user_id: emp.user_id } });
+      flash(`Delete queued for ${res.employee?.name || code}`);
+      setDelCode("");
+      loadAll();
+    } catch (e: any) {
+      flash(e?.message || "Employee not found");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const deleteLeftFromMachines = async () => {
+    setBusy(true);
+    try {
+      const r = await api<any>("/sync/delete-left", {
+        method: "POST", body: { ...cidBody(), dry_run: true } });
+      if (!r.count) { flash("No LEFT employees with a Bio Code found"); return; }
+      const names = (r.employees || []).slice(0, 10)
+        .map((e: any) => `${e.employee_code} ${e.name}`).join("\n");
+      const ok = Platform.OS === "web"
+        ? window.confirm(
+            `${r.count} LEFT employee(s) will be DELETED from all machines:\n\n` +
+            names + (r.count > 10 ? `\n…and ${r.count - 10} more` : "") +
+            "\n\nProceed?")
+        : true;
+      if (!ok) return;
+      const res = await api<any>("/sync/delete-left", {
+        method: "POST", body: cidBody() });
+      flash(`Queued machine-delete for ${res.queued} LEFT employee(s)`);
+      loadAll();
+    } catch (e: any) {
+      flash(e?.message || "Action failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const runManual = async (path: string, body: any, label: string) => {
     setBusy(true);
     try {
@@ -378,6 +443,25 @@ export default function SyncEngineScreen() {
               </View>
 
               <FilterSync busy={busy} onSync={(f) => runManual("/sync/all", f, "Filtered sync")} />
+
+              {/* Iter 541 (user request) — delete employees FROM machines */}
+              <Text style={styles.section}>Remove from machines</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+                <TextInput
+                  value={delCode} onChangeText={setDelCode}
+                  placeholder="Emp Code or Bio Code"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  style={styles.delInput} testID="sync-del-code" />
+                <ActionBtn icon="person-remove-outline" label="Delete From Machines"
+                  busy={busy} onPress={deleteOneFromMachines} />
+                <ActionBtn icon="exit-outline" label="Remove All LEFT Employees"
+                  busy={busy} ghost onPress={deleteLeftFromMachines} />
+              </View>
+              <Text style={styles.delNote}>
+                Queues a DELETE USERINFO command to every sync-enabled machine
+                of this firm — the employee can no longer punch. Portal data
+                (Employee Master, attendance, salary) is NOT touched.
+              </Text>
             </>
           )}
 
@@ -635,6 +719,15 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 4,
     borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm,
     paddingHorizontal: 10, paddingVertical: 6,
+  },
+  delInput: {
+    borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm,
+    paddingHorizontal: 12, paddingVertical: 9, fontSize: type.sm,
+    color: colors.onSurface, backgroundColor: colors.surface, minWidth: 180,
+    ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as any) : null),
+  },
+  delNote: {
+    fontSize: 11, color: colors.onSurfaceTertiary, marginTop: 8, lineHeight: 15,
   },
   reportTxt: { color: colors.brandPrimary, fontWeight: "700", fontSize: type.sm },
   firmDdWrap: {

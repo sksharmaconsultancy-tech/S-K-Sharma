@@ -117,10 +117,10 @@ export default function DailyVerificationScreen() {
   useEffect(() => { if (selectedCompanyId) setCompanyId(selectedCompanyId); }, [selectedCompanyId]);
   const [date, setDate] = useState(todayIso());
   const [dept, setDept] = useState(""); const [desig, setDesig] = useState("");
-  const [contr, setContr] = useState(""); const [cat, setCat] = useState("");
-  const [shift, setShift] = useState(""); const [grp, setGrp] = useState("");
+  const [contr, setContr] = useState("");
+  const [grp, setGrp] = useState("");
   const [empStatus, setEmpStatus] = useState("active");
-  const [source, setSource] = useState(""); const [machine, setMachine] = useState("");
+  const [machine, setMachine] = useState("");
   const [q, setQ] = useState(""); const [exOnly, setExOnly] = useState(false);
   // Iter 479 (user request) — show only PRESENT employees (a single punch
   // counts as present).
@@ -147,18 +147,15 @@ export default function DailyVerificationScreen() {
     if (dept) p.set("department", dept);
     if (desig) p.set("designation", desig);
     if (contr) p.set("contractor", contr);
-    if (cat) p.set("category", cat);
-    if (shift) p.set("shift", shift);
     if (grp) p.set("group", grp);
     if (empStatus) p.set("status", empStatus);
-    if (source) p.set("source", source);
     if (machine) p.set("machine", machine);
     if (q.trim()) p.set("q", q.trim());
     if (exOnly) p.set("exceptions_only", "true");
     if (presentOnly) p.set("present_only", "true");
     Object.entries(extra || {}).forEach(([k, v]) => p.set(k, v));
     return p.toString();
-  }, [companyId, date, dept, desig, contr, cat, shift, grp, empStatus, source, machine, q, exOnly, presentOnly]);
+  }, [companyId, date, dept, desig, contr, grp, empStatus, machine, q, exOnly, presentOnly]);
 
   const load = useCallback(async (off = 0) => {
     if (!companyId || !date) return;
@@ -336,16 +333,12 @@ export default function DailyVerificationScreen() {
             <Sel label="Contractor" value={contr} onChange={setContr} width={140}
               options={(opts?.contractors || []).map((v) => ({ v, l: v }))} />
           ) : null}
-          <Sel label="Category" value={cat} onChange={setCat} width={120}
-            options={(opts?.categories || []).map((v) => ({ v, l: v }))} />
-          <Sel label="Shift" value={shift} onChange={setShift} width={120}
-            options={(opts?.shifts || []).map((v) => ({ v, l: v }))} />
-          <Sel label="Unit / Group" value={grp} onChange={setGrp} width={130}
+          {/* Iter 541 (user request) — Category / Shift / Punch Source
+              filters removed; "Unit / Group" renamed to "Group". */}
+          <Sel label="Group" value={grp} onChange={setGrp} width={130}
             options={(opts?.groups || []).map((v) => ({ v, l: v }))} />
           <Sel label="Employee Status" value={empStatus} onChange={(v) => setEmpStatus(v || "active")}
             width={120} options={[{ v: "active", l: "Active" }, { v: "resigned", l: "Inactive" }, { v: "all", l: "All" }]} />
-          <Sel label="Punch Source" value={source} onChange={setSource} width={140}
-            options={(opts?.sources || []).map((v) => ({ v, l: v }))} />
           <Sel label="Punch Machine" value={machine} onChange={setMachine} width={150}
             options={(opts?.machines || []).map((m) => ({ v: m.serial, l: m.name || m.serial }))} />
           <View style={{ minWidth: 170 }}>

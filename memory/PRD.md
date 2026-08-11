@@ -5379,3 +5379,24 @@ Backend _build (routes/daily_verification.py) returns "punch_sequence"
 daily-verification.tsx shows header badge: green "Rule: Punch Sequence"
 / blue "Rule: Standard (Shift HRS)". APP_ITERATION=540,
 deploy_vps_iter540.sh, pointer updated.
+
+## Iter 541 — Sync deletes, ESIC auto-approve, DV filters/margins (user)
+1. sync_engine.py: POST /api/sync/delete-employee (resolve by user_id/
+   employee_code/bio_code, dry_run supported, force=True bypass of
+   auto-sync toggle) + POST /api/sync/delete-left (bulk delete LEFT
+   employees: exit_date/resign_date/status resigned-left-terminated/
+   active:false with bio_code). sync-engine.tsx "Remove from machines"
+   section (input + 2 buttons, named confirms via window.confirm).
+2. esic_leave.py create_entry: entries now status=approved on save +
+   auto-mark attendance (db.leaves insert) at create; approve endpoint
+   kept for legacy pending rows. esic-leave.tsx Module Settings card
+   removed (SETTING_ROWS/saveSettings/Switch cleaned).
+3. daily-verification.tsx: Category/Shift/Punch Source filters removed;
+   "Unit / Group" → "Group". daily_verification.py PDF: portrait side
+   margins 12mm (landscape stays 4mm), avail = width - 2*side.
+4. APP_ITERATION=541, deploy_vps_iter541.sh, pointer updated.
+PENDING/OPEN: (a) Punch PHOTO not arriving from machines (ATTPHOTO
+ingest exists in biometric_devices.py ~line 360-800; handshake sends
+ATTPHOTOStamp; next step: check TransFlag AttPhoto in handshake +
+device "capture photo on punch" setting + add ingest diagnostics).
+(b) Punch-sequence shift-timing question to user still unanswered.

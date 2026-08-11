@@ -422,3 +422,10 @@ ITER 487 (doc-expiry alerts):
 ## Iter 540
 - API punch_sequence=False for demo firm; badge renders in header
   (screenshot verified, testID dv-rule-badge).
+
+## Iter 541
+- delete-employee dry_run resolves by code/bio; real call queued job
+  (cleaned after test). delete-left dry_run count=0 on demo (no left).
+- ESIC create → status approved + linked_leave_id true (test entry
+  cleaned). DV portrait PDF 200 @ A4 portrait with 12mm margins.
+- sync-engine UI shows "Remove from machines" section (screenshot).

@@ -630,11 +630,14 @@ def _build_pdf(data: dict, orientation: str = "landscape") -> bytes:
     # Iter 479 (user request) — summary block moved to the BOTTOM of every
     # page (with page number), so the bottom margin reserves room for it.
     # Iter 523 (user request) — left/right margins reduced 8mm → 4mm.
-    doc = SimpleDocTemplate(buf, pagesize=pagesize, leftMargin=4 * mm,
-                            rightMargin=4 * mm, topMargin=8 * mm,
+    # Iter 541 (user request) — PORTRAIT gets proper 12mm side margins so
+    # the table no longer touches the page edges; landscape keeps 4mm.
+    _side = 12 * mm if orientation == "portrait" else 4 * mm
+    doc = SimpleDocTemplate(buf, pagesize=pagesize, leftMargin=_side,
+                            rightMargin=_side, topMargin=8 * mm,
                             bottomMargin=17 * mm)
     styles = getSampleStyleSheet()
-    avail = pagesize[0] - 8 * mm
+    avail = pagesize[0] - 2 * _side
     # Iter 479 (user request) — header: "Daily Report" + date on the RIGHT,
     # company name on the SECOND row.
     # Iter 523 (user request) — company ADDRESS printed with the firm name.

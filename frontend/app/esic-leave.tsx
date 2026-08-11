@@ -12,7 +12,7 @@
  */
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Switch,
+  ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet,
   Text, TextInput, View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -43,16 +43,6 @@ type Settings = {
   allow_backdated: boolean; max_backdate_days: number;
   show_separate_register: boolean;
 };
-
-const SETTING_ROWS: { key: keyof Settings; label: string }[] = [
-  { key: "enabled", label: "Enable ESIC Leave Module" },
-  { key: "link_compliance", label: "Link ESIC Leave with Compliance Salary Process" },
-  { key: "auto_mark_attendance", label: "Auto-mark Attendance as ESIC Leave" },
-  { key: "lock_after_freeze", label: "Lock Attendance after Payroll Freeze" },
-  { key: "require_certificate", label: "Require Medical Certificate" },
-  { key: "allow_backdated", label: "Allow Backdated ESIC Leave Entry" },
-  { key: "show_separate_register", label: "Show ESIC Leave Separately on Salary Register" },
-];
 
 const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
   pending: { bg: "#FEF3C7", fg: "#92400E" },
@@ -98,8 +88,6 @@ export default function EsicLeaveScreen() {
   const cid = isSuper ? (companyId === "all" ? "" : companyId) : (user?.company_id || "");
 
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [savingSettings, setSavingSettings] = useState(false);
 
   const [emps, setEmps] = useState<Emp[]>([]);
   const [selEmp, setSelEmp] = useState<Emp | null>(null);
@@ -153,16 +141,6 @@ export default function EsicLeaveScreen() {
   useEffect(() => { loadAll(); }, [loadAll]);
 
   // ---- actions ----
-  const saveSettings = async () => {
-    if (!cid || !settings) return;
-    setSavingSettings(true);
-    try {
-      await api(`/admin/esic-leave/settings`, {
-        method: "PUT", body: { company_id: cid, ...settings },
-      });
-      flash("Settings saved");
-    } catch (e: any) { flash(null, e?.message); } finally { setSavingSettings(false); }
-  };
 
   const pickCertificate = async () => {
     try {
@@ -261,47 +239,8 @@ export default function EsicLeaveScreen() {
           <Text style={styles.hint}>Select a firm to manage ESIC Leave.</Text>
         ) : (
           <>
-            {/* Settings */}
-            <View style={styles.card}>
-              <Pressable style={styles.secToggle} onPress={() => setSettingsOpen((v) => !v)} testID="esic-settings-toggle">
-                <Ionicons name="settings-outline" size={16} color={BRAND} />
-                <Text style={styles.secToggleTxt}>Module Settings</Text>
-                <Ionicons name={settingsOpen ? "chevron-up" : "chevron-down"} size={16} color={colors.onSurfaceSecondary} />
-              </Pressable>
-              {settingsOpen && settings ? (
-                <View style={{ marginTop: 8 }}>
-                  {SETTING_ROWS.map((r) => (
-                    <View key={r.key} style={styles.setRow}>
-                      <Text style={styles.setLbl}>{r.label}</Text>
-                      <Switch
-                        value={!!settings[r.key]}
-                        onValueChange={(v) => setSettings((s) => (s ? { ...s, [r.key]: v } : s))}
-                        trackColor={{ true: BRAND, false: "#CBD5E1" }}
-                        thumbColor="#fff"
-                        testID={`esic-set-${r.key}`}
-                      />
-                    </View>
-                  ))}
-                  {settings.allow_backdated ? (
-                    <View style={styles.setRow}>
-                      <Text style={styles.setLbl}>Maximum Backdated Days</Text>
-                      <TextInput
-                        value={String(settings.max_backdate_days ?? 0)}
-                        onChangeText={(v) => setSettings((s) => (s ? { ...s, max_backdate_days: Number(v.replace(/[^0-9]/g, "")) || 0 } : s))}
-                        keyboardType="numeric"
-                        style={styles.numInput}
-                        testID="esic-set-maxdays"
-                      />
-                    </View>
-                  ) : null}
-                  <Pressable onPress={saveSettings} style={styles.primaryBtn} disabled={savingSettings} testID="esic-settings-save">
-                    {savingSettings ? <ActivityIndicator size="small" color="#fff" /> : (
-                      <Text style={styles.primaryBtnTxt}>Save Settings</Text>
-                    )}
-                  </Pressable>
-                </View>
-              ) : null}
-            </View>
+            {/* Iter 541 (user request) — Module Settings hidden from the
+                ESIC Leave screen (backend defaults still apply). */}
 
             {/* New entry */}
             <View style={styles.card}>
