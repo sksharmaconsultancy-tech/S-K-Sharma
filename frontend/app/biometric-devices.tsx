@@ -1588,6 +1588,14 @@ function DeviceCard({
         <Fact label="FINGERPRINTS" value={(device as any).fp_count != null ? String((device as any).fp_count) : "—"} />
         <Fact label="LOGS ON DEVICE" value={(device as any).att_log_count != null ? String((device as any).att_log_count) : "—"} />
         <Fact label="DEVICE IP" value={(device as any).device_ip || "—"} />
+        {/* Iter 543 — punch-photo diagnostics */}
+        <Fact
+          label="PUNCH PHOTOS"
+          value={(device as any).photo_recv_count
+            ? `${(device as any).photo_saved_count || 0}/${(device as any).photo_recv_count} saved · ${fmtRelative((device as any).photo_last_at)}`
+            : "None received"}
+          accent={!!(device as any).photo_recv_count}
+        />
         {isSdk ? (
           <>
             <Fact label="SDK VENDOR" value={device.sdk_vendor || "—"} />
@@ -1601,6 +1609,14 @@ function DeviceCard({
           </>
         ) : null}
       </View>
+      {(device as any).photo_last_error ? (
+        <Text style={{ marginTop: 6, fontSize: 11, color: "#B45309" }}>
+          ⚠ Last photo issue: {(device as any).photo_last_error}
+          {(device as any).photo_last_head
+            ? `  ·  header: ${String((device as any).photo_last_head).slice(0, 80)}`
+            : ""}
+        </Text>
+      ) : null}
 
       {/* Iter 512 — Direct SDK pull controls (server → device). */}
       {isSdk ? (

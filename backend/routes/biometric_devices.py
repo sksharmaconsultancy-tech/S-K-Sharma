@@ -376,6 +376,10 @@ async def _ingest_attphoto(raw: bytes, device: dict) -> int:
     header = raw[:jpg_at].decode("utf-8", errors="ignore")
     m = re.search(r"PIN=(\d{14})-([^.\s&]+)\.jpg", header)
     if not m:
+        # Iter 543 — firmware variants omit the "PIN=" prefix and just
+        # send the photo filename: 20260811093012-42.jpg
+        m = re.search(r"(\d{14})-([0-9A-Za-z_]+)\.jpg", header)
+    if not m:
         return 0
     ts_raw, pin = m.group(1), m.group(2)
     try:
@@ -770,10 +774,31 @@ async def iclock_push(
                         reasons.append(reason)
     elif (table or "").upper() == "ATTPHOTO":
         # Iter 250 — punch photos from the machine (attached to the punch).
+        # Iter 543 — photo DIAGNOSTICS: count every ATTPHOTO push and keep
+        # the last header + error on the device doc so admins can see
+        # exactly what the machine sends (Biometric Devices screen).
+        _ph_err = None
         try:
             inserted = await _ingest_attphoto(raw_bytes, device)
-        except Exception:
+            if not inserted:
+                _ph_err = ("no JPEG marker in body"
+                           if raw_bytes.find(b"\xff\xd8\xff") < 0
+                           else "photo header did not match any known "
+                                "PIN/filename format")
+        except Exception as e:  # noqa: BLE001
+            _ph_err = str(e)[:200]
             logger.warning("[zkteco] ATTPHOTO ingest failed", exc_info=True)
+        _jpg_i = raw_bytes.find(b"\xff\xd8\xff")
+        _head = raw_bytes[:_jpg_i if _jpg_i > 0 else 200][:200]
+        await db.biometric_devices.update_one(
+            {"serial_number": SN},
+            {"$inc": {"photo_recv_count": 1,
+                      "photo_saved_count": 1 if inserted else 0},
+             "$set": {"photo_last_at": _now_iso_z(),
+                      "photo_last_error": _ph_err,
+                      "photo_last_head": _head.decode("utf-8",
+                                                      errors="ignore")}},
+        )
     else:
         # Iter 261 — Phase 2: OPERLOG / BIODATA pushes may carry enrolled
         # fingerprint / face templates — capture them for cross-device sync.
@@ -824,6 +849,43 @@ async def iclock_push(
         SN, table, inserted, skipped, reasons[:5],
     )
     return PlainTextResponse(f"OK: {inserted}\n")
+
+
+@router.post("/iclock/fdata")
+async def iclock_fdata(
+    request: Request,
+    SN: str = Query(...),
+    table: Optional[str] = Query(None),
+):
+    """Iter 543 — some eSSL / ZKTeco firmware uploads punch PHOTOS to
+    /iclock/fdata instead of /iclock/cdata?table=ATTPHOTO. Accept both:
+    if the body carries a JPEG we run the same ATTPHOTO ingest (with the
+    same diagnostics counters); anything else is acknowledged."""
+    device = await _get_device_or_404(SN)
+    raw_bytes = await request.body()
+    if raw_bytes.find(b"\xff\xd8\xff") >= 0:
+        _ph_err = None
+        saved = 0
+        try:
+            saved = await _ingest_attphoto(raw_bytes, device)
+            if not saved:
+                _ph_err = ("photo header did not match any known "
+                           "PIN/filename format (fdata)")
+        except Exception as e:  # noqa: BLE001
+            _ph_err = str(e)[:200]
+            logger.warning("[zkteco] fdata photo ingest failed",
+                           exc_info=True)
+        _jpg_i = raw_bytes.find(b"\xff\xd8\xff")
+        await db.biometric_devices.update_one(
+            {"serial_number": SN},
+            {"$inc": {"photo_recv_count": 1,
+                      "photo_saved_count": 1 if saved else 0},
+             "$set": {"photo_last_at": _now_iso_z(),
+                      "photo_last_error": _ph_err,
+                      "photo_last_head": raw_bytes[:_jpg_i][:200].decode(
+                          "utf-8", errors="ignore")}},
+        )
+    return PlainTextResponse("OK")
 
 
 @router.get("/iclock/getrequest")

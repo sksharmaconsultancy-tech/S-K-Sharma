@@ -5408,3 +5408,18 @@ tag). admin.tsx employee row shows green machineDelPill when field set
 (list endpoint /admin/employees returns full docs, no projection change
 needed). Verified visually via manual stamp (cleaned after test).
 APP_ITERATION=542, deploy_vps_iter542.sh, pointer updated.
+
+## Iter 543 — Punch-photo diagnostics & ingest fixes (open user issue)
+1. biometric_devices.py ATTPHOTO branch: per-device counters
+   photo_recv_count/photo_saved_count + photo_last_at/error/head
+   (header prefix before JPEG marker) on every push, incl. failures.
+2. _ingest_attphoto fallback regex: filename without "PIN=" prefix.
+3. NEW POST /iclock/fdata — accepts photo uploads (JPEG in body) from
+   firmware that posts there; same ingest + diagnostics.
+4. biometric-devices.tsx DeviceCard: "PUNCH PHOTOS x/y saved · ago"
+   Fact + amber last-error line with raw header.
+Tested by simulating cdata ATTPHOTO (ok), garbage body (error captured),
+fdata (ok); test data cleaned. Handshake already sends TransFlag with
+AttPhoto + ATTPHOTOStamp, timestamps consistent (naive device-local).
+NEXT: user must confirm machine "capture photo on punch" setting; the
+device card now proves whether photos arrive at the server.

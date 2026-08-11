@@ -433,3 +433,7 @@ ITER 487 (doc-expiry alerts):
 ## Iter 542
 - Tag verified in /admin list (screenshot, SURENDRA SINGH). Stamp/unstamp
   logic in _maybe_finish_job paths for delete vs add/update actions.
+
+## Iter 543
+- Simulated pushes: cdata ATTPHOTO OK:1, garbage OK:0 with error stored,
+  fdata OK — counters 3 recv / 2 saved on device doc. Cleaned after.
