@@ -652,6 +652,15 @@ export default function AdminScreen() {
                       </Text>
                     </View>
                   ) : null}
+                  {/* Iter 542 — machine removal confirmation tag */}
+                  {e.machine_deleted_at ? (
+                    <View style={styles.machineDelPill}>
+                      <Ionicons name="checkmark-circle" size={11} color="#166534" />
+                      <Text style={styles.machineDelPillTxt}>
+                        Deleted from machine ✓
+                      </Text>
+                    </View>
+                  ) : null}
                 </View>
                 <View style={styles.metaRow}>
                   {e.designation ? (
@@ -1490,6 +1499,16 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: radius.pill,
   },
+  machineDelPill: {
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  machineDelPillTxt: { fontSize: 10, fontWeight: "800", color: "#166534" },
   resignedPillTxt: {
     fontSize: 10,
     fontWeight: "800",

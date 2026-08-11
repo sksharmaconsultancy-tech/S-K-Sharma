@@ -5400,3 +5400,11 @@ ingest exists in biometric_devices.py ~line 360-800; handshake sends
 ATTPHOTOStamp; next step: check TransFlag AttPhoto in handshake +
 device "capture photo on punch" setting + add ingest diagnostics).
 (b) Punch-sequence shift-timing question to user still unanswered.
+
+## Iter 542 — "Deleted from machine ✓" tag (user accepted improvement)
+sync_engine.py job-completion handler: delete job success → users.
+machine_deleted_at stamped; add/update success → $unset (re-sync clears
+tag). admin.tsx employee row shows green machineDelPill when field set
+(list endpoint /admin/employees returns full docs, no projection change
+needed). Verified visually via manual stamp (cleaned after test).
+APP_ITERATION=542, deploy_vps_iter542.sh, pointer updated.

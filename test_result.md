@@ -429,3 +429,7 @@ ITER 487 (doc-expiry alerts):
 - ESIC create → status approved + linked_leave_id true (test entry
   cleaned). DV portrait PDF 200 @ A4 portrait with 12mm margins.
 - sync-engine UI shows "Remove from machines" section (screenshot).
+
+## Iter 542
+- Tag verified in /admin list (screenshot, SURENDRA SINGH). Stamp/unstamp
+  logic in _maybe_finish_job paths for delete vs add/update actions.

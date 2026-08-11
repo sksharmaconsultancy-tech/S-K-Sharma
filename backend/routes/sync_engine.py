@@ -328,6 +328,18 @@ async def _reconcile_job(job: dict) -> None:
             {"$set": {"status": "success", "updated_at": _now(),
                       "synced_at": _now(), "error": None}},
         )
+        # Iter 542 (user request) — stamp the employee so the Employee
+        # Master list can show a "Deleted from machine" tag (a later
+        # add/update re-sync clears the stamp again).
+        if job.get("user_id"):
+            if job.get("action") == "delete":
+                await db.users.update_one(
+                    {"user_id": job["user_id"]},
+                    {"$set": {"machine_deleted_at": _now()}})
+            elif job.get("action") in ("add", "update"):
+                await db.users.update_one(
+                    {"user_id": job["user_id"]},
+                    {"$unset": {"machine_deleted_at": ""}})
         return
     # Some device command failed.
     if settings.get("retry_failed") and job.get("attempts", 0) < job.get("max_attempts", 3):
