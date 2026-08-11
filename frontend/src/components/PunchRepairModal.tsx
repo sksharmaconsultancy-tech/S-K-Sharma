@@ -188,9 +188,12 @@ export default function PunchRepairModal({
   const otInIsNextDay =
     validTime(otInTime) && validTime(outTime) &&
     (outIsNextDay || otInTime < outTime);
+  // Iter 544 — when OT In is blank, the OT Out rolls over based on the
+  // duty OUT instead (OT starts right after duty ends).
+  const otBase = otInTime || outTime;
   const otOutIsNextDay =
-    validTime(otOutTime) && validTime(otInTime) &&
-    (otInIsNextDay || otOutTime < otInTime);
+    validTime(otOutTime) && validTime(otBase) &&
+    ((otInTime ? otInIsNextDay : outIsNextDay) || otOutTime < otBase);
 
   // Iter 498 — ONE save that repairs BOTH punches (updates existing IN/OUT
   // or creates the missing ones). Iter 498b — OT pair too, if provided.
@@ -233,7 +236,24 @@ export default function PunchRepairModal({
       };
       if (inTime) await upsert(inTime, "in", firstIn, pDate);
       if (outTime) await upsert(outTime, "out", dutyOut, outIsNextDay ? nextDay(pDate) : pDate);
-      if (otInTime) await upsert(otInTime, "in", otInPunch, otInIsNextDay ? nextDay(pDate) : pDate);
+      if (otInTime) {
+        await upsert(otInTime, "in", otInPunch, otInIsNextDay ? nextDay(pDate) : pDate);
+      } else if (otOutTime && !otInPunch) {
+        // Iter 544 (user bug) — an OT OUT without an OT IN never forms a
+        // pair, so duty/OT reports silently dropped it AND flagged the
+        // day unpaired. Auto-add the OT IN 1 minute after the duty OUT
+        // (OT starts when duty ends).
+        const dutyOutDate = outIsNextDay ? nextDay(pDate) : pDate;
+        const dutyOutHHMM = outTime || (dutyOut ? (dutyOut.at || "").slice(11, 16) : "");
+        if (!dutyOutHHMM) {
+          setErr("OT Out needs an OT In time (or a duty OUT) to pair with — enter OT In.");
+          setBusy(false);
+          return;
+        }
+        const d = new Date(`${dutyOutDate}T${dutyOutHHMM}:00Z`);
+        d.setUTCMinutes(d.getUTCMinutes() + 1);
+        await upsert(d.toISOString().slice(11, 16), "in", null, d.toISOString().slice(0, 10));
+      }
       if (otOutTime) await upsert(otOutTime, "out", otOutPunch, otOutIsNextDay ? nextDay(pDate) : pDate);
       setChanged(true);
       setBothOpen(false);

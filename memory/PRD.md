@@ -5423,3 +5423,24 @@ fdata (ok); test data cleaned. Handshake already sends TransFlag with
 AttPhoto + ATTPHOTOStamp, timestamps consistent (naive device-local).
 NEXT: user must confirm machine "capture photo on punch" setting; the
 device card now proves whether photos arrive at the server.
+
+## Iter 544 — Attendance Doctor OT punch "auto remove" fix (user P0 bug)
+User: "OT Punch Never Save if We click on Save IN + OUT OT Out Punch Auto Remove".
+Root cause (2 bugs):
+1. Engine: OT OUT saved WITHOUT an OT IN never forms a pair —
+   split_regular_ot_times skips unpaired OUTs and has_unpaired_punches
+   flags the day, so OT dropped + duty blank.
+2. PunchRepairModal mapping: with 1 IN + 2 OUTs, dutyOut picked the LAST
+   out (the OT OUT) and otOutPunch=null → form reopened with OT blank
+   ("auto removed") and re-save PATCHed the OT punch to the duty time,
+   creating duplicate OUT punches.
+Fixes:
+- PunchRepairModal.tsx: mapping fix (no 2nd IN + ≥2 outs → first OUT =
+  duty, last OUT = OT OUT; otIn tie uses <=). saveBoth auto-adds the OT
+  IN punch 1 min after duty OUT when OT Out given without OT In (+ UI
+  hint). otOutIsNextDay now derives from duty OUT when OT In blank.
+- attendance_admin_core.py manual-punch: idempotent — identical
+  approved punch (user+kind+at) returned with deduped=true, no dup insert.
+Verified by API simulation of the fixed saveBoth: 4 punches saved,
+engine returns OT pair 18:01→20:00, day cleanly paired, re-save
+idempotent. APP_ITERATION=544, deploy_vps_iter544.sh, pointer updated.

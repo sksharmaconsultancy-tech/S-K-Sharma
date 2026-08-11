@@ -1456,6 +1456,18 @@ async def create_manual_punch(
     when = _parse_manual_at(payload.at)
     _enforce_lookback(admin, when)
 
+    # Iter 544 — idempotent: an identical approved punch (same employee,
+    # kind and exact time) is returned as-is instead of inserting a
+    # duplicate (repeat "Save" clicks in the repair modal created dupes).
+    _at_iso = when.isoformat().replace("+00:00", "Z")
+    dup = await db.attendance.find_one(
+        {"user_id": payload.user_id, "kind": payload.kind,
+         "at": {"$in": [_at_iso, _at_iso.rstrip("Z")]}, "status": "approved"},
+        {"_id": 0, "selfie_base64": 0},
+    )
+    if dup:
+        return {"ok": True, "record": dup, "deduped": True}
+
     record_id = f"att_{uuid.uuid4().hex[:12]}"
     record = {
         "record_id": record_id,
