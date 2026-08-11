@@ -5444,3 +5444,36 @@ Fixes:
 Verified by API simulation of the fixed saveBoth: 4 punches saved,
 engine returns OT pair 18:01→20:00, day cleanly paired, re-save
 idempotent. APP_ITERATION=544, deploy_vps_iter544.sh, pointer updated.
+
+## Iter 545 — Configurable Multiple Punch & Maximum Punch Policy (user spec)
+Policy Master (attendance_policy.policy_master) new fields:
+maximum_punches_per_day (default 4, clamp 2-20), punch_sequence
+("in_out_alternate"), extra_punch_action (reject|exception, default
+reject), invalid_sequence_action (reject|exception). multiple_punch_allowed
+is now FUNCTIONAL: No = one IN→OUT cycle (2 punches).
+Backend:
+- utils/punch_policy.py: resolve_punch_policy (employee override → firm →
+  default; unset max = 0 = unlimited legacy), counted_punches,
+  log_punch_exception → punch_exceptions collection.
+- attendance_core.py /attendance/punch: max/multiple check before accept
+  (clear messages per spec), sequence rejections now log exceptions;
+  extra/invalid action "exception" also stores attempt as
+  status="exception" punch. Manual admin punches bypass (Case 7).
+- biometric_devices.py ingest: over-limit machine punch stored with
+  status="exception" + logged (never dropped); skips contractual gate.
+- routes/punch_policy_report.py: GET /api/admin/multi-punch/report
+  (punch register: pairs, duty/break/OT vs firm full_day quota,
+  punches n/max, only_multiple filter) + /exceptions (log).
+Frontend:
+- attendance-policy.tsx: ATTENDANCE PUNCH POLICY section (chips 2-10 +
+  numeric input, sequence row, action choices, tooltip).
+- NEW /multi-punch-report screen (Punch Register + Exceptions tabs,
+  firm chips, month, search, only-multiple toggle).
+- AdminWebShell: Reports → "Multiple Punch Report" (both menus).
+- PolicyMasterSummary: Max Punches/Day + Extra Punch Action rows.
+Testing: /app/test_mpp_545.py 25/25 PASS (spec tests A-H + exception
+action + legacy unlimited + report math G/H + clamping). Frontend tested
+by testing_agent 5/5 PASS (iteration_545.json), Kankani policy restored.
+Backward compat: firms with unsaved policy = unlimited; saving policy
+bakes default 4. Historical attendance never recalculated.
+APP_ITERATION=545, deploy_vps_iter545.sh, bundle pointer updated.

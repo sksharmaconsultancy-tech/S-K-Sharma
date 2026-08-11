@@ -1211,6 +1211,12 @@ def _validate_policy(raw: dict) -> dict:
         _punch_types = ["biometric", "mobile"]
     _punch_types = [p for p in ("biometric", "mobile", "manual", "gps")
                     if p in [str(x).lower() for x in _punch_types]]
+    # Iter 545 — Maximum Punches Per Day: default 4, min 2, max 20.
+    try:
+        _max_punches_per_day = int(pm_raw.get("maximum_punches_per_day", 4) or 4)
+    except (TypeError, ValueError):
+        _max_punches_per_day = 4
+    _max_punches_per_day = max(2, min(20, _max_punches_per_day))
     policy_master = {
         "attendance_basis": _choice("attendance_basis", ["monthly", "daily", "hourly"], "monthly"),
         "shift_type": _choice("shift_type", ["fixed", "rotational", "open"], "fixed"),
@@ -1259,6 +1265,13 @@ def _validate_policy(raw: dict) -> dict:
             if pm_raw.get("ot_slab_minutes") in (0, 30, 60, "0", "30", "60")
             else 30
         ),
+        # Iter 545 (user spec) — Configurable Multiple Punch & Maximum
+        # Punch policy. Enforced on NEW app + machine punches only;
+        # historical attendance is never recalculated.
+        "maximum_punches_per_day": _max_punches_per_day,
+        "punch_sequence": "in_out_alternate",
+        "extra_punch_action": _choice("extra_punch_action", ["reject", "exception"], "reject"),
+        "invalid_sequence_action": _choice("invalid_sequence_action", ["reject", "exception"], "reject"),
     }
 
     # Iter 204 (user request) — Employee Shift Change Management config.
@@ -9474,7 +9487,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "544"
+APP_ITERATION = "545"
 
 
 @api.get("/version")
@@ -12292,6 +12305,9 @@ from routes.pf_reports import router as pf_reports_router  # noqa: E402
 app.include_router(pf_reports_router)
 from routes.attendance_doctor import router as attendance_doctor_router  # noqa: E402
 app.include_router(attendance_doctor_router)
+# Iter 545 — Multiple Punch Report + Punch Exception Log.
+from routes.punch_policy_report import router as punch_policy_report_router  # noqa: E402
+app.include_router(punch_policy_report_router)
 from routes.portal_rpa import router as portal_rpa_router  # noqa: E402
 app.include_router(portal_rpa_router)
 from routes.uan_esic_import import router as uan_esic_import_router  # noqa: E402

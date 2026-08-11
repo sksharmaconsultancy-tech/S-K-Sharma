@@ -29,6 +29,11 @@ from server import (  # noqa: E402
     now_iso,
 )
 from routes.attendance_location_api import _compute_location_status  # noqa: E402
+from utils.punch_policy import (  # noqa: E402
+    counted_punches,
+    log_punch_exception,
+    resolve_punch_policy,
+)
 
 router = APIRouter(prefix="/api")
 api = router
@@ -462,20 +467,70 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
     # approval — enforced further down by ``needs_approval`` which folds
     # in ``is_auto_source``.
 
+    # -----------------------------------------------------------------------
+    # Iter 545 (user spec) — CONFIGURABLE MULTIPLE PUNCH & MAXIMUM PUNCH
+    # policy, checked BEFORE accepting the punch. Multiple Punch = NO →
+    # one IN → OUT cycle (2 punches); otherwise Maximum Punches Per Day
+    # from the Attendance Policy (0 / unset = unlimited, legacy firms).
+    # -----------------------------------------------------------------------
+    _ppol = resolve_punch_policy(user, company)
+    _pcount = len(counted_punches(today_recs))
+    _pmax = int(_ppol.get("effective_max") or 0)
+    _punch_at_try = punch_at_iso or ist_wallclock_iso()
+
+    async def _policy_block(exc_type: str, msg: str, action: str) -> None:
+        """Log the exception; optionally store the attempt as a visible
+        non-counted EXCEPTION punch; always reject with a clear message."""
+        await log_punch_exception(
+            db, user=user, company_id=user.get("company_id"), date=today,
+            at=_punch_at_try, kind=payload.kind, exception_type=exc_type,
+            reason=msg, policy=_ppol, existing_count=_pcount,
+            source=(payload.source or "manual"))
+        if action == "exception":
+            await db.attendance.insert_one({
+                "record_id": f"att_{uuid.uuid4().hex[:12]}",
+                "user_id": user["user_id"],
+                "company_id": user["company_id"],
+                "date": today,
+                "kind": payload.kind,
+                "at": _punch_at_try,
+                "source": payload.source or "manual",
+                "status": "exception",
+                "exception_type": exc_type,
+                "decision_reason": msg,
+                "created_at": now_iso(),
+            })
+        raise HTTPException(status_code=400, detail=msg)
+
+    if _pmax and _pcount >= _pmax:
+        if not _ppol["multiple_punch_allowed"]:
+            await _policy_block(
+                "multiple_punch_not_allowed",
+                "Multiple punches are not allowed — only one IN → OUT cycle "
+                "per day is permitted by your Attendance Policy.",
+                _ppol["extra_punch_action"])
+        await _policy_block(
+            "max_punch_limit",
+            f"Punch Limit Reached — you have already completed the maximum "
+            f"{_pmax} punches allowed for today (Attendance Policy).",
+            _ppol["extra_punch_action"])
+
     # Toggle idempotency for INSIDE-geofence punches: prevent double-IN and
     # double-OUT (which would break shift pairing). Auto-punch retries and
     # rapid double-taps in the UI must be no-ops rather than duplicate rows.
     if not outside:
         if payload.kind == "in" and last_kind == "in":
-            raise HTTPException(
-                status_code=400,
-                detail="You are already punched in. Punch out before punching in again.",
-            )
+            await _policy_block(
+                "duplicate_in",
+                "Invalid punch sequence — you are already punched in. "
+                "Punch out before punching in again.",
+                _ppol["invalid_sequence_action"])
         if payload.kind == "out" and last_kind != "in":
-            raise HTTPException(
-                status_code=400,
-                detail="You are not currently punched in. Punch in before punching out.",
-            )
+            await _policy_block(
+                "duplicate_out" if last_kind == "out" else "missing_in",
+                "Invalid punch sequence — you are not currently punched in. "
+                "Punch in before punching out.",
+                _ppol["invalid_sequence_action"])
 
     record_id = f"att_{uuid.uuid4().hex[:12]}"
     # Iter 64 — location_status: "inside" / "outside" / "no-gps". This is the

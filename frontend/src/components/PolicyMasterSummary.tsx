@@ -54,6 +54,8 @@ export default function PolicyMasterSummary({ companyId }: { companyId: string |
     ["Site-wise Attendance", YN(pm.site_wise_attendance)],
     ["Client-wise Attendance", YN(pm.client_wise_attendance)],
     ["Multiple Punch", YN(pm.multiple_punch_allowed !== false)],
+    ["Max Punches/Day", pm.maximum_punches_per_day ? String(pm.maximum_punches_per_day) : "Unlimited"],
+    ["Extra Punch Action", (pm.extra_punch_action || "reject") === "reject" ? "Reject" : "Exception"],
     ["Auto Shift Detection", YN(pm.auto_shift_detection)],
     ["WFH Allowed", YN(pm.wfh_allowed)],
     ["Geo-fencing Required", YN(pm.geofencing_required !== false)],

@@ -1521,6 +1521,58 @@ function PolicyMasterSubPoints({
           })}
         </View>
       </View>
+      {/* Iter 545 (user spec) — ATTENDANCE PUNCH POLICY */}
+      <View style={pmStyles.punchPolicyHead}>
+        <Text style={pmStyles.punchPolicyTitle}>⏱ ATTENDANCE PUNCH POLICY</Text>
+        <Text style={pmStyles.note}>
+          Multiple Punch allows employees to complete more than one IN/OUT
+          cycle during the same working day. Maximum Punches Per Day controls
+          the total number of punches permitted. Enforced on new app +
+          machine punches — historical attendance is never recalculated.
+        </Text>
+      </View>
+      <View style={pmStyles.row}>
+        <Text style={pmStyles.lbl}>
+          Maximum Punches Per Day — total IN + OUT punches per employee per
+          day (min 2). Multiple Punch = No always limits to one IN → OUT
+          cycle (2 punches)
+        </Text>
+        <View style={pmStyles.chips}>
+          {[2, 4, 6, 8, 10].map((n) => {
+            const cur = value.maximum_punches_per_day === undefined ? 4 : Number(value.maximum_punches_per_day);
+            const on = cur === n;
+            return (
+              <Pressable key={n} onPress={() => set({ maximum_punches_per_day: n })}
+                style={[pmStyles.chip, on && pmStyles.chipOn]} testID={`pm-maxpunch-${n}`}>
+                <Text style={[pmStyles.chipTxt, on && { color: "#fff" }]}>{n}</Text>
+              </Pressable>
+            );
+          })}
+          <TextInput
+            style={pmStyles.numInput}
+            value={String(value.maximum_punches_per_day === undefined ? 4 : value.maximum_punches_per_day)}
+            onChangeText={(v) => {
+              const n = parseInt(v.replace(/\D/g, ""), 10);
+              set({ maximum_punches_per_day: Number.isFinite(n) ? Math.max(2, Math.min(20, n)) : 4 });
+            }}
+            keyboardType="number-pad"
+            maxLength={2}
+            testID="pm-maxpunch-input"
+          />
+        </View>
+      </View>
+      <View style={pmStyles.row}>
+        <Text style={pmStyles.lbl}>Punch Sequence</Text>
+        <Text style={pmStyles.seqTxt}>IN → OUT → IN → OUT</Text>
+      </View>
+      <Choice
+        label="Extra Punch Action — a punch beyond the limit is: Reject = blocked with a message (attempt logged in the Punch Exception Report) · Exception = also stored as a visible non-counted EXCEPTION punch"
+        k="extra_punch_action" options={["reject", "exception"]} def="reject"
+      />
+      <Choice
+        label="Invalid Sequence Action — double IN / OUT-without-IN app punches: Reject = blocked · Exception = blocked + stored as EXCEPTION punch"
+        k="invalid_sequence_action" options={["reject", "exception"]} def="reject"
+      />
       <Text style={pmStyles.note}>
         These sub-points are saved with the Attendance Policy and shown in the
         Firm Master (linked). Grace Time, Late Mark, Half-Day, OT, Weekly Off
@@ -1557,6 +1609,18 @@ const pmStyles = StyleSheet.create({
   },
   chipOn: { backgroundColor: colors.brandPrimary },
   chipTxt: { fontSize: 11.5, fontWeight: "700", color: colors.brandPrimary },
+  numInput: {
+    borderWidth: 1, borderColor: colors.divider, borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 5, minWidth: 48,
+    fontSize: 12.5, fontWeight: "700", color: colors.onSurface,
+    textAlign: "center",
+  },
+  punchPolicyHead: {
+    marginTop: 10, paddingTop: 8,
+    borderTopWidth: 1, borderTopColor: colors.divider,
+  },
+  punchPolicyTitle: { fontSize: 12.5, fontWeight: "800", color: colors.brandPrimary },
+  seqTxt: { fontSize: 12, fontWeight: "800", color: colors.onSurfaceSecondary },
   note: { fontSize: 10.5, color: colors.onSurfaceTertiary, marginTop: 8, lineHeight: 15 },
 });
 

@@ -437,3 +437,19 @@ ITER 487 (doc-expiry alerts):
 ## Iter 543
 - Simulated pushes: cdata ATTPHOTO OK:1, garbage OK:0 with error stored,
   fdata OK — counters 3 recv / 2 saved on device doc. Cleaned after.
+
+## Iter 544
+- Attendance Doctor OT punch fix: modal mapping (1 IN + 2 OUT → first
+  OUT=duty, last=OT), auto OT-IN +1min after duty OUT, manual-punch
+  idempotency. API-simulated saveBoth: 4 punches, engine OT pair OK.
+
+## Iter 545 (backend verified by main agent script test_mpp_545.py — 25/25 PASS)
+- Multiple Punch & Max Punch policy: policy_master new fields
+  (maximum_punches_per_day default 4 min 2 max 20, extra_punch_action,
+  invalid_sequence_action, punch_sequence). App punch endpoint enforces
+  max/multiple/sequence + logs punch_exceptions; biometric ingest stores
+  over-limit machine punches as status="exception" (never dropped).
+- NEW /api/admin/multi-punch/report + /exceptions endpoints (spec tests
+  G/H duty-break-OT math verified). Legacy firms (field unset) unlimited.
+- Frontend NOT yet tested: attendance-policy.tsx new ATTENDANCE PUNCH
+  POLICY section, /multi-punch-report screen, AdminWebShell menu links.

@@ -289,6 +289,50 @@ async def _ingest_attlog_line(
                         _direction_corrected = True
         except Exception:
             logger.exception("[smart-direction] check failed for %s", user.get("user_id"))
+    # Iter 545 (user spec) — Maximum Punch / Multiple Punch policy for
+    # MACHINE punches. Machine data is NEVER dropped: a punch beyond the
+    # firm's limit is stored with status="exception" (visible in the punch
+    # log + Punch Exception Report) but excluded from every attendance
+    # calculation.
+    _policy_exception: Optional[str] = None
+    _policy_reason: Optional[str] = None
+    if not _is_duplicate:
+        try:
+            from utils.punch_policy import (
+                log_punch_exception, resolve_punch_policy)
+            _pp_comp = await db.companies.find_one(
+                {"company_id": user.get("company_id")},
+                {"_id": 0, "attendance_policy.policy_master": 1}) or {}
+            _ppol = resolve_punch_policy(user, _pp_comp)
+            _pmax = int(_ppol.get("effective_max") or 0)
+            if _pmax:
+                _pcount = await db.attendance.count_documents({
+                    "user_id": user["user_id"],
+                    "date": dt.strftime("%Y-%m-%d"),
+                    "kind": {"$in": ["in", "out"]},
+                    "status": {"$in": ["approved", "pending"]},
+                })
+                if _pcount >= _pmax:
+                    _policy_exception = (
+                        "multiple_punch_not_allowed"
+                        if not _ppol["multiple_punch_allowed"]
+                        else "max_punch_limit")
+                    _policy_reason = (
+                        f"Maximum {_pmax} punches allowed per day by the "
+                        f"Attendance Policy — this machine punch is stored "
+                        f"as an EXCEPTION and ignored in attendance "
+                        f"calculations.")
+                    await log_punch_exception(
+                        db, user=user, company_id=user.get("company_id"),
+                        date=dt.strftime("%Y-%m-%d"), at=dt.isoformat(),
+                        kind=punch_kind, exception_type=_policy_exception,
+                        reason=_policy_reason, policy=_ppol,
+                        existing_count=_pcount,
+                        source=f"zkteco:{device['serial_number']}",
+                        device_serial=device["serial_number"])
+        except Exception:
+            logger.exception("[punch-policy] machine punch check failed")
+
     record = {
         "record_id": record_id,
         "user_id": user["user_id"],
@@ -306,14 +350,17 @@ async def _ingest_attlog_line(
         "source": f"zkteco:{device['serial_number']}",
         "outside_geofence": False,
         # Machine punches are considered trusted → auto-approved (user chose 4B)
-        "status": "duplicate" if _is_duplicate else "approved",
+        "status": ("duplicate" if _is_duplicate
+                   else ("exception" if _policy_exception else "approved")),
+        "exception_type": _policy_exception,
         "decision_by": "system:zkteco",
         "decision_at": _now_iso_z(),
         "decision_reason": (
             "Duplicate punch within 5 min of an existing punch — stored in "
             "the punch log but ignored in attendance calculations."
             if _is_duplicate else
-            f"Auto-approved from ZKTeco device '{device.get('name')}'"),
+            (_policy_reason if _policy_exception else
+             f"Auto-approved from ZKTeco device '{device.get('name')}'")),
         "device_serial": device["serial_number"],
         "device_id": device["device_id"],
         "device_verify_type": verify_type or None,
@@ -331,7 +378,7 @@ async def _ingest_attlog_line(
     # Iter 175 — contractual employees: machine punches must be approved
     # by the company first (Contractor Punch approvals). Duplicates keep
     # their "duplicate" status (never enter any approval queue).
-    if not _is_duplicate:
+    if not _is_duplicate and not _policy_exception:
         from routes.attendance_core import apply_contractual_gate
         await apply_contractual_gate(record)
     # Iter 250 — attach a parked machine photo (ATTPHOTO that arrived

@@ -1,0 +1,24 @@
+{
+  "summary": "Iter 545 frontend acceptance PASS. Super-admin password login (sksharmaconsultancy@gmail.com / sharma123) works and lands on /portal-dashboard with llc_session_token set. /attendance-policy for Kankani Enterprises (KEPS · cmp_527fecdd7c) renders the new 'ATTENDANCE PUNCH POLICY' section inside Policy Master Sub Points — all required testIDs present: pm-maxpunch-{2,4,6,8,10}, pm-maxpunch-input, pm-extra_punch_action-{reject,exception}, pm-invalid_sequence_action-{reject,exception}. Punch Sequence row shows 'IN → OUT → IN → OUT'. Round-trip verified: changed maximum_punches_per_day to 6 + extra_punch_action to 'exception' → Save → page reload → values persisted (input=6, exception chip highlighted rgb(37,99,235), reject chip transparent). Restored to max=4 + extra=reject → Save → reload → persisted (input=4, reject chip highlighted, exception chip transparent). Kankani firm state is CLEAN as required. /multi-punch-report renders firm chips (City Care Hospital, Kankani, TEST_ITER98_T6B303), month input (mpr-month), search, refresh (mpr-load), tabs (mpr-tab-punches, mpr-tab-exceptions) and toggle (mpr-only-multiple). For Kankani + 2026-06 + 'All punched days' the Punch Register tab lists 14 rows (e.g. DIPPU SINGH · 265, MAN SINGH · 382, SARUK KHAN · 384) each with 'OUT hh:mm' / 'IN hh:mm' chip, Duty/Break/OT stats and 'Punches: 1 / 4' pill; Exceptions tab shows clean empty state 'No punch exceptions recorded for 2026-06. 🎉' — no crash. Sidebar 'Reports' group contains 'Multiple Punch Report' entry and navigates to /multi-punch-report correctly. Regression: /daily-verification still loads with 127 employees and no white screen. No console red-screen errors observed (only pre-existing 401 pings on unauthenticated pages and a benign expo-router 'REPLACE index' dev warning). Backend not tested (per instruction — 25/25 already passing via /app/test_mpp_545.py).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "multi-punch-report.tsx cleanly separates PunchRow / ExcRow types and reads /admin/multi-punch/{report,exceptions}; empty-state and error paths handled.",
+    "PolicyMasterSubPoints in attendance-policy.tsx clamps maximum_punches_per_day to [2,20] on manual input and defaults to 4 when undefined — matches backend spec.",
+    "AdminWebShell.tsx: 'Multiple Punch Report' entry present in the Reports children (line 220) so sidebar routing works consistently across shell variants."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (not retested)", "frontend": "100% (all 5 acceptance items green)"},
+  "seed_data_creation": "None. Temporarily changed Kankani policy to max=6/extra=exception for round-trip test, then restored to max=4/extra=reject as required.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Kankani (cmp_527fecdd7c) June 2026 has 14 punched days visible in Punch Register (single OUT-only rows, no exceptions). Toggle default is 'Multi-punch days only' (returns 0 for June). Use 'All punched days' to see rows. Super admin password login is the reliable entry (PIN 246810 is dev-only). testIDs for maxpunch chips are numeric (pm-maxpunch-6 etc.); extra_punch_action chips use pattern pm-extra_punch_action-reject|exception.",
+  "rca_of_issue": "N/A — no failures."
+}
