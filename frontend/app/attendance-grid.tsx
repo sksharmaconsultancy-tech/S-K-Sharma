@@ -1554,22 +1554,32 @@ function DayCell({
   }
   // Iter 77h — IN/OUT view: compact 2-line In/Out + total duty hrs.
   // Iter 283 (user request) — hours = IN→OUT span; L/E/B metric line removed.
-  // Iter 547 (user request) — MERGED sheet: the IN/OUT view now also shows
-  // the OT punches (OT In–OT Out · hrs) on the same day cell, so all 4
-  // punches live in ONE sheet (the separate OT IN/OUT tab remains).
+  // Iter 548 (user request) — MERGED sheet layout, exact order:
+  //   In Time → Out Time → Total Duty HRS → OT In → OT Out →
+  //   Total Duty HRS Including OT (only OT days grow to 6 lines).
   const otH = cell.ot_hours || 0;
+  const totalH = cell.hours || 0; // engine total = duty + OT
+  const dutyH = otH > 0 ? Math.max(0, totalH - otH) : spanHours;
   return (
     <View style={[styles.cell, { width, alignItems: "center", paddingVertical: 4 }]}>
       <Text style={styles.dayIn}>{cell.in || "—"}</Text>
       <Text style={styles.dayOut}>{cell.out || "—"}</Text>
-      {otH > 0 && (
-        <Text style={{ fontSize: 8, color: colors.accent, fontWeight: "800" }}>
-          OT {cell.ot_in || "—"}–{cell.ot_out || "—"} · {fmtHoursHM(otH)}
-        </Text>
-      )}
-      <Text style={[styles.dayHoursSm, spanHours > fullDay && styles.dayHoursOt]}>
-        {spanHours > 0 ? fmtHoursHM(spanHours) : "—"}
+      <Text style={[styles.dayHoursSm, dutyH > fullDay && styles.dayHoursOt]}>
+        {dutyH > 0 ? fmtHoursHM(dutyH) : "—"}
       </Text>
+      {otH > 0 && (
+        <>
+          <Text style={{ fontSize: 8.5, color: colors.accent, fontWeight: "800" }}>
+            OT {cell.ot_in || "—"}
+          </Text>
+          <Text style={{ fontSize: 8.5, color: colors.accent, fontWeight: "800" }}>
+            {cell.ot_out || "—"}
+          </Text>
+          <Text style={{ fontSize: 8.5, color: colors.onSurface, fontWeight: "900" }}>
+            Tot {fmtHoursHM(totalH)}
+          </Text>
+        </>
+      )}
       {cell.sources && cell.sources.length > 0 && (
         <View style={styles.badgeRow}>
           {cell.sources.map((s) => (

@@ -5500,3 +5500,13 @@ in one sheet. Same pattern as inout_salary view (cell data already had
 ot_in/ot_out/ot_hours). Separate OT IN/OUT tab unchanged. Exports
 (Excel/PDF InOut) unchanged — extend on request. attendance-grid.tsx
 only. APP_ITERATION=547, deploy_vps_iter547.sh, pointer updated.
+
+## Iter 548 — IN/OUT cell layout per user spec
+Cell order: In / Out / Total Duty HRS / OT In / OT Out / "Tot" (duty incl
+OT). dutyH = hours - ot_hours on OT days, spanHours otherwise (Iter 283
+preserved). Screenshot-verified locally. Also this session: repaired
+VINIT LODI data DIRECTLY on VPS via admin API (restored machine IN
+20:02 from duplicate, deleted corrupt manual OUT 20:00 on 09-Aug);
+doctor verified 08=duty+OT(20:05-08:00), 09/10 paired. Prod super admin
+password Sharma@2026 still active — advised user to change.
+APP_ITERATION=548, deploy_vps_iter548.sh, pointer updated.
