@@ -459,3 +459,8 @@ ITER 487 (doc-expiry alerts):
   when day ends with unpaired IN. API-simulated both cases: OUT kind →
   4-punch list + OT Out prefill 08:00 (+1); wrong IN kind → still shown
   so admin can flip kind. Lint clean.
+
+## Iter 547
+- IN/OUT grid cell + OT line merge (frontend only, mirrors working
+  inout_salary pattern). Lint clean. Not screenshot-verified locally
+  (no OT seed data in dev); user verifies on VPS after deploy.

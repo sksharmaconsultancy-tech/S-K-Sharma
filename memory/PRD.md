@@ -5492,3 +5492,11 @@ Verified via API simulation (correct + corrupted-kind cases).
 DATA repair steps for VINIT (user must do on VPS UI): 09-Aug punch 08:00
 → kind OUT; punch 20:00 → kind IN. APP_ITERATION=546,
 deploy_vps_iter546.sh, bundle pointer updated.
+
+## Iter 547 — Merged IN/OUT + OT sheet (user request)
+Attendance Report IN/OUT view day cells now also render the OT line
+"OT {ot_in}–{ot_out} · hrs" (amber, only when ot_hours>0) — all 4 punches
+in one sheet. Same pattern as inout_salary view (cell data already had
+ot_in/ot_out/ot_hours). Separate OT IN/OUT tab unchanged. Exports
+(Excel/PDF InOut) unchanged — extend on request. attendance-grid.tsx
+only. APP_ITERATION=547, deploy_vps_iter547.sh, pointer updated.
