@@ -5477,3 +5477,18 @@ by testing_agent 5/5 PASS (iteration_545.json), Kankani policy restored.
 Backward compat: firms with unsaved policy = unlimited; saving policy
 bakes default 4. Historical attendance never recalculated.
 APP_ITERATION=545, deploy_vps_iter545.sh, bundle pointer updated.
+
+## Iter 546 — Night-OT repair window fix (user bug: VINIT LODI 08-Aug)
+User: OT not showing in OT IN/OUT; repair window missing the OT Out punch.
+Root cause: PunchRepairModal loaded only the tapped date — a night/OT
+session's OUT lives on the NEXT date, invisible → admins edited the wrong
+punch (audit "IN 20:00 → 08:00" kept kind=in), breaking cross-day stitch.
+Fix (PunchRepairModal.tsx load()): fetch dateIso..next day; when the day
+ends with an unpaired trailing IN, pull the next day's first morning punch
+(<12:00) into the list (amber next-day date). Correct-kind OUT prefills
+OT Out and saves cross-midnight; wrong-kind punch is now visible so the
+admin can flip IN↔OUT via pencil (kind chips already exist).
+Verified via API simulation (correct + corrupted-kind cases).
+DATA repair steps for VINIT (user must do on VPS UI): 09-Aug punch 08:00
+→ kind OUT; punch 20:00 → kind IN. APP_ITERATION=546,
+deploy_vps_iter546.sh, bundle pointer updated.

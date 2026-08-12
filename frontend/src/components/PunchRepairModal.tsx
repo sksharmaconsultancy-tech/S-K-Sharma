@@ -92,14 +92,35 @@ export default function PunchRepairModal({
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      // Iter 546 (user bug — night OT) — fetch this day AND the next day:
+      // a night/OT session ends the NEXT morning, so its OUT punch lives
+      // on the next date and was invisible here before.
+      const nd = (() => {
+        const d = new Date(`${dateIso}T12:00:00Z`);
+        d.setUTCDate(d.getUTCDate() + 1);
+        return d.toISOString().slice(0, 10);
+      })();
       const r = await api<{ records: Punch[] }>(
-        `/admin/attendance/history?user_id=${userId}&date_from=${dateIso}&date_to=${dateIso}&limit=100`,
+        `/admin/attendance/history?user_id=${userId}&date_from=${dateIso}&date_to=${nd}&limit=200`,
       );
       // Show real punches only (hide rejected / auto-ignored / duplicate noise).
-      const visible = (r.records || []).filter(
-        (p) => !["rejected", "auto_ignored", "duplicate"].includes(String(p.status || "")),
-      );
-      setPunches(visible.sort((a, b) => (a.at || "").localeCompare(b.at || "")));
+      const visible = (r.records || [])
+        .filter((p) => !["rejected", "auto_ignored", "duplicate"].includes(String(p.status || "")))
+        .sort((a, b) => (a.at || "").localeCompare(b.at || ""));
+      const day = visible.filter((p) => (p.at || "").slice(0, 10) === dateIso);
+      // Cross-midnight: when the day ends with an UNPAIRED trailing IN,
+      // pull the next day's FIRST morning punch (< 12:00) into the list —
+      // that is the night/OT OUT (or a wrongly-kinded punch the admin can
+      // now see and correct). Shown with its real (amber) next-day date.
+      let bal = 0;
+      for (const p of day) bal += p.kind === "in" ? 1 : -1;
+      if (bal > 0 && day[day.length - 1]?.kind === "in") {
+        const morning = visible.find(
+          (p) => (p.at || "").slice(0, 10) === nd && (p.at || "").slice(11, 16) < "12:00",
+        );
+        if (morning) day.push(morning);
+      }
+      setPunches(day);
     } catch {
       setPunches([]);
     } finally {

@@ -453,3 +453,9 @@ ITER 487 (doc-expiry alerts):
   G/H duty-break-OT math verified). Legacy firms (field unset) unlimited.
 - Frontend NOT yet tested: attendance-policy.tsx new ATTENDANCE PUNCH
   POLICY section, /multi-punch-report screen, AdminWebShell menu links.
+
+## Iter 546
+- Night-OT repair window: modal now pulls next-morning punch (<12:00)
+  when day ends with unpaired IN. API-simulated both cases: OUT kind →
+  4-punch list + OT Out prefill 08:00 (+1); wrong IN kind → still shown
+  so admin can flip kind. Lint clean.
