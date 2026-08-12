@@ -221,10 +221,24 @@ def build_monthly_inout_pdf(grid: Dict[str, Any], fmt: Dict[str, Any] | None = N
                     # Missing-punch day — no duty counted (firm policy rule).
                     row.append(f"{d.get('in') or '-'}\n{d.get('out') or '-'}\nMISS")
                 elif d.get("in") or d.get("out"):
-                    row.append(
-                        f"{d.get('in') or '-'}\n{d.get('out') or '-'}\n"
-                        f"{_fmt_hhmm(float(d.get('hours') or 0.0))}"
-                    )
+                    # Iter 549 (user request) — printed register matches the
+                    # on-screen merged sheet: In / Out / Duty HRS, and on OT
+                    # days also OT In / OT Out / Tot (duty incl OT).
+                    _ot = float(d.get("ot_hours") or 0.0)
+                    _tot = float(d.get("hours") or 0.0)
+                    _duty = max(0.0, _tot - _ot)
+                    if _ot > 0:
+                        row.append(
+                            f"{d.get('in') or '-'}\n{d.get('out') or '-'}\n"
+                            f"{_fmt_hhmm(_duty)}\n"
+                            f"OT {d.get('ot_in') or '-'}\n{d.get('ot_out') or '-'}\n"
+                            f"T {_fmt_hhmm(_tot)}"
+                        )
+                    else:
+                        row.append(
+                            f"{d.get('in') or '-'}\n{d.get('out') or '-'}\n"
+                            f"{_fmt_hhmm(_tot)}"
+                        )
                 else:
                     row.append("-")
             if is_last_page:

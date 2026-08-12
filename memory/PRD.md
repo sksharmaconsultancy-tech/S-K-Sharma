@@ -5510,3 +5510,14 @@ VINIT LODI data DIRECTLY on VPS via admin API (restored machine IN
 doctor verified 08=duty+OT(20:05-08:00), 09/10 paired. Prod super admin
 password Sharma@2026 still active — advised user to change.
 APP_ITERATION=548, deploy_vps_iter548.sh, pointer updated.
+
+## Iter 549 — IN/OUT exports match merged sheet (user accepted improvement)
+- build_grid_view_xlsx: 6 rows/employee (D-In, D-Out, T-Hrs, OT-In,
+  OT-Out amber, Tot-Hrs bold incl OT). Monthly summary: duty on T-Hrs,
+  OT total on OT-Out, combined on Tot-Hrs.
+- BONUS pre-existing bug fixed: per-row summary written at col 5+days_n
+  (overwrote last day col, e.g. D31) → now 6+days_n aligned to headers.
+- build_monthly_inout_pdf: OT days print 6-line cell (In/Out/Duty/
+  OT in/OT out/T total); normal days 3 lines.
+- Verified: XLSX block correct via openpyxl; PDF text contains OT+T
+  lines via pypdf. APP_ITERATION=549, deploy_vps_iter549.sh, pointer set.

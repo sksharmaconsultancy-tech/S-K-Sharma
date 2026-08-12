@@ -677,15 +677,17 @@ def build_grid_view_xlsx(grid: Dict[str, Any]) -> bytes:
     ws.freeze_panes = f"F{header_row + 1}"
 
     # ---- Per-employee blocks ----------------------------------------------
-    # Iter 77z-final — In/Out sheet now shows ONLY regular duty. OT
-    # timestamps and hours belong to the dedicated OT report. So every
-    # employee gets exactly 3 rows: D-In, D-Out, T-Hrs (duty-only totals).
+    # Iter 77z-final — In/Out sheet showed ONLY regular duty.
+    # Iter 549 (user request) — printed register now matches the on-screen
+    # merged sheet: 6 rows per employee — D-In, D-Out, T-Hrs (duty only),
+    # OT-In, OT-Out, Tot-Hrs (duty INCLUDING OT).
     cur_row = header_row + 1
+    ot_font = Font(size=9, color="B45309", bold=True)
     for idx, emp in enumerate(employees):
         days_cell = emp.get("days") or {}
         totals = emp.get("totals") or {}
 
-        row_types = ["D-In", "D-Out", "T-Hrs"]
+        row_types = ["D-In", "D-Out", "T-Hrs", "OT-In", "OT-Out", "Tot-Hrs"]
 
         fill = zebra_a if idx % 2 == 0 else zebra_b
 
@@ -721,6 +723,14 @@ def build_grid_view_xlsx(grid: Dict[str, Any]) -> bytes:
                     val = d.get("in") or ""
                 elif row_type == "D-Out":
                     val = d.get("out") or ""
+                elif row_type == "OT-In":
+                    val = d.get("ot_in") or ""
+                elif row_type == "OT-Out":
+                    val = d.get("ot_out") or ""
+                elif row_type == "Tot-Hrs":
+                    # Duty INCLUDING OT (grid "hours" is the combined total).
+                    th = float(d.get("hours") or 0.0)
+                    val = _hhmm_from_hours(th) if th > 0 else "00:00"
                 elif row_type == "T-Hrs":
                     # Duty-only HRS per day (no OT — that lives in the OT sheet).
                     dh = float(d.get("duty_hours") or 0.0)
@@ -736,7 +746,8 @@ def build_grid_view_xlsx(grid: Dict[str, Any]) -> bytes:
                 c = ws.cell(row=r, column=col, value=val)
                 c.alignment = center
                 c.border = border
-                c.font = Font(size=9)
+                c.font = ot_font if row_type in ("OT-In", "OT-Out") else (
+                    total_font if row_type == "Tot-Hrs" else Font(size=9))
 
             # Trailing summary columns
             tot_wrk = ""
@@ -754,19 +765,31 @@ def build_grid_view_xlsx(grid: Dict[str, Any]) -> bytes:
                 # Iter 205 — clock-timing totals (HH:MM, not decimals).
                 tot_wrk = _hhmm_from_hours(duty_only_total)
                 day_total = float(_pdp)
+            elif row_type == "OT-Out":
+                # Monthly OT total on the OT-Out row.
+                tot_wrk = _hhmm_from_hours(round(ot, 2)) if ot > 0 else ""
+                day_total = ""
+            elif row_type == "Tot-Hrs":
+                # Monthly duty INCLUDING OT.
+                tot_wrk = _hhmm_from_hours(round(combined, 2))
+                day_total = ""
             else:  # D-In
                 tot_wrk = ""
                 day_total = ""
 
-            sc = ws.cell(row=r, column=5 + days_n, value=tot_wrk)
+            # Iter 549 fix — summary values must sit UNDER their headers
+            # ("Duty HRS" = col 6+days_n, "Present Days" = 6+days_n+1);
+            # they previously landed one column left, overwriting the
+            # last day column.
+            sc = ws.cell(row=r, column=6 + days_n, value=tot_wrk)
             sc.alignment = center
             sc.border = border
-            if row_type == "T-Hrs":
+            if row_type in ("T-Hrs", "Tot-Hrs"):
                 sc.font = total_font
             if isinstance(tot_wrk, (int, float)):
                 sc.number_format = "0.00"
 
-            dc = ws.cell(row=r, column=5 + days_n + 1, value=day_total)
+            dc = ws.cell(row=r, column=6 + days_n + 1, value=day_total)
             dc.alignment = center
             dc.border = border
             if row_type == "T-Hrs":
@@ -775,7 +798,7 @@ def build_grid_view_xlsx(grid: Dict[str, Any]) -> bytes:
                 dc.number_format = "0.##"
 
             # Apply zebra fill + borders to all cells in the row.
-            for c_ in range(1, 5 + days_n + 2):
+            for c_ in range(1, 6 + days_n + 2):
                 cell = ws.cell(row=r, column=c_)
                 cell.fill = fill
                 cell.border = border
