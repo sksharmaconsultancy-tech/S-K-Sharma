@@ -5521,3 +5521,13 @@ APP_ITERATION=548, deploy_vps_iter548.sh, pointer updated.
   OT in/OT out/T total); normal days 3 lines.
 - Verified: XLSX block correct via openpyxl; PDF text contains OT+T
   lines via pypdf. APP_ITERATION=549, deploy_vps_iter549.sh, pointer set.
+
+## Iter 550 — "OT —" dashes cleanup (user question)
+Cause explained: OT earned INSIDE the duty pair (worked beyond quota, no
+separate OT punches) → ot_hours>0 but ot_in/ot_out null → cell printed
+"OT — / —". Fix: grid cell + IN/OUT PDF now show single amber "+OT hh:mm"
+line for intra-pair OT; real OT-punch days keep full OT In/Out lines.
+Verified via pypdf unit test both branches. Also this session: verified
+548 6-line cell LIVE on smartpayrolling.com via prod screenshot (token
+login). VPS was on 549 at last check. APP_ITERATION=550,
+deploy_vps_iter550.sh, pointer updated.

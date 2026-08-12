@@ -227,11 +227,20 @@ def build_monthly_inout_pdf(grid: Dict[str, Any], fmt: Dict[str, Any] | None = N
                     _ot = float(d.get("ot_hours") or 0.0)
                     _tot = float(d.get("hours") or 0.0)
                     _duty = max(0.0, _tot - _ot)
-                    if _ot > 0:
+                    if _ot > 0 and (d.get("ot_in") or d.get("ot_out")):
                         row.append(
                             f"{d.get('in') or '-'}\n{d.get('out') or '-'}\n"
                             f"{_fmt_hhmm(_duty)}\n"
                             f"OT {d.get('ot_in') or '-'}\n{d.get('ot_out') or '-'}\n"
+                            f"T {_fmt_hhmm(_tot)}"
+                        )
+                    elif _ot > 0:
+                        # Iter 550 — OT earned inside the duty pair (no
+                        # separate OT punches): print +OT instead of dashes.
+                        row.append(
+                            f"{d.get('in') or '-'}\n{d.get('out') or '-'}\n"
+                            f"{_fmt_hhmm(_duty)}\n"
+                            f"+OT {_fmt_hhmm(_ot)}\n"
                             f"T {_fmt_hhmm(_tot)}"
                         )
                     else:

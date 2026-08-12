@@ -1569,12 +1569,23 @@ function DayCell({
       </Text>
       {otH > 0 && (
         <>
-          <Text style={{ fontSize: 8.5, color: colors.accent, fontWeight: "800" }}>
-            OT {cell.ot_in || "—"}
-          </Text>
-          <Text style={{ fontSize: 8.5, color: colors.accent, fontWeight: "800" }}>
-            {cell.ot_out || "—"}
-          </Text>
+          {/* Iter 550 — OT earned INSIDE the duty pair (worked beyond the
+              duty quota, no separate OT punches) has no OT In/Out times;
+              show "+OT hh:mm" instead of confusing "OT — / —" dashes. */}
+          {cell.ot_in || cell.ot_out ? (
+            <>
+              <Text style={{ fontSize: 8.5, color: colors.accent, fontWeight: "800" }}>
+                OT {cell.ot_in || "—"}
+              </Text>
+              <Text style={{ fontSize: 8.5, color: colors.accent, fontWeight: "800" }}>
+                {cell.ot_out || "—"}
+              </Text>
+            </>
+          ) : (
+            <Text style={{ fontSize: 8.5, color: colors.accent, fontWeight: "800" }}>
+              +OT {fmtHoursHM(otH)}
+            </Text>
+          )}
           <Text style={{ fontSize: 8.5, color: colors.onSurface, fontWeight: "900" }}>
             Tot {fmtHoursHM(totalH)}
           </Text>
