@@ -33,9 +33,19 @@ def _norm_bio(v: Any) -> str:
 def _parse_date_cell(v: Any) -> Optional[str]:
     if isinstance(v, datetime):
         return v.strftime("%Y-%m-%d")
-    s = str(v or "").strip()[:10].replace("/", "-").replace(".", "-")
-    if not s:
+    s0 = str(v or "").strip()
+    if not s0:
         return None
+    # Iter 560 (user sheet) — "01 Aug 2026" / "01-Aug-2026" style dates
+    # from Monthly Performance exports (the old [:10] truncation chopped
+    # the year off and every row failed with "Invalid/missing date").
+    for fmt in ("%d %b %Y", "%d %B %Y", "%d-%b-%Y", "%d-%B-%Y",
+                "%d %b %y", "%d-%b-%y"):
+        try:
+            return datetime.strptime(re.sub(r"\s+", " ", s0), fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    s = s0[:10].replace("/", "-").replace(".", "-")
     try:
         return datetime.fromisoformat(s).strftime("%Y-%m-%d")
     except Exception:
@@ -197,17 +207,36 @@ def _parse_sheet(data: bytes) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
             detail=("Could not find a header row. The sheet needs columns: "
                     "Bio Code (or Name), Date, In Time, Out Time."))
     out: List[Dict[str, Any]] = []
+    # Iter 560 (user sheet) — Monthly Performance exports repeat the
+    # header row per employee block and print Code/Name only on the FIRST
+    # row of each block. Skip repeated headers and forward-fill the
+    # employee identity onto the block's remaining date rows.
+    carry_bio, carry_name = "", ""
     for rn, r in enumerate(rows[header_idx + 1:], start=header_idx + 2):
         if r is None or all(c in (None, "") for c in r):
             continue
         get = lambda k: (r[cols[k]] if k in cols and cols[k] < len(r) else None)  # noqa: E731
+        date_raw = str(get("date") or "").strip().lower()
+        if date_raw == "date":  # repeated header row inside the data
+            continue
+        bio = _norm_bio(get("bio"))
+        name = str(get("name") or "").strip()
+        if bio or name:
+            carry_bio, carry_name = bio, name
+        else:
+            bio, name = carry_bio, carry_name
+        date_v = _parse_date_cell(get("date"))
+        in_v = _parse_time_cell(get("in"))
+        out_v = _parse_time_cell(get("out"))
+        if not date_v and not in_v and not out_v:
+            continue  # section separators ("Department : …", totals)
         out.append({
             "row_no": rn,
-            "bio_code": _norm_bio(get("bio")),
-            "name": str(get("name") or "").strip(),
-            "date": _parse_date_cell(get("date")),
-            "in_time": _parse_time_cell(get("in")),
-            "out_time": _parse_time_cell(get("out")),
+            "bio_code": bio,
+            "name": name,
+            "date": date_v,
+            "in_time": in_v,
+            "out_time": out_v,
             # Iter 208 — optional OT punch pair. When OT-Out is earlier
             # than OT-In it means the OT ran past midnight (night OT);
             # the OT-Out punch is stored on the NEXT calendar day and the
@@ -246,7 +275,10 @@ async def _match_rows(company_id: str, raw: List[Dict[str, Any]]) -> List[Dict[s
         if not row["date"]:
             row.update({"status": "error", "error": "Invalid/missing date"})
         elif not row["in_time"] and not row["out_time"]:
-            row.update({"status": "error", "error": "No In or Out time"})
+            # Iter 560 — attendance-report sheets legitimately contain
+            # blank days (absent/WO); don't count them as ERRORS.
+            row.update({"status": "skipped",
+                        "error": "Blank day — no In/Out punch (skipped)"})
         elif not emp:
             row.update({"status": "unmatched",
                         "error": "No employee with this Bio Code / Name"})
@@ -325,6 +357,7 @@ async def preview_import(payload: Dict[str, Any] = Body(...),
             "total": len(rows),
             "matched": len(matched),
             "unmatched": len([r for r in rows if r["status"] == "unmatched"]),
+            "skipped": len([r for r in rows if r["status"] == "skipped"]),
             "errors": len([r for r in rows if r["status"] == "error"]),
             "punches_to_create": sum(
                 (1 if r["in_time"] else 0) + (1 if r["out_time"] else 0)

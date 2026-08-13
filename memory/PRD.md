@@ -5652,3 +5652,22 @@ Frontend: green "Excel" button (testID pa-export-xlsx) next to Show/Save
 on the 4 source tabs only, via apiBinary blob download. Verified: xlsx
 for auto (1 row), manual (126), updated (0) tabs + UI button visibility.
 APP_ITERATION=559, deploy_vps_iter559.sh (cumulative), pointer → 559.
+
+## Iter 560 — Punch Import: Monthly Performance sheet support (user issue)
+User's client sheet (Performance xlsx: repeated per-employee header
+blocks, "01 Aug 2026" dates, Code/Name only on first block row, blank
+absent days, "Department :" separators, OT = duration col not punches).
+Fixes in routes/punch_import.py:
+1. _parse_date_cell: "%d %b %Y" etc. formats (old [:10] truncation broke
+   "01 Aug 2026").
+2. _parse_sheet: skip repeated header rows (date cell == "date"),
+   forward-fill bio/name per employee block, silently drop rows with no
+   date+no times (separators/totals).
+3. _match_rows: blank days (date but no in/out) → status "skipped" not
+   "error". Preview summary adds "skipped".
+Frontend PunchImportModal: "Blank days" grey chip, grey skipped status,
+softer OT banner (engine auto-computes OT from In/Out per policy).
+Tested with the real sheet: 891 punch rows / 96 employees / 0 errors /
+2190 blank days; preview endpoint e2e OK (unmatched locally — client's
+codes live on VPS firm). APP_ITERATION=560, deploy_vps_iter560.sh,
+pointer → 560.

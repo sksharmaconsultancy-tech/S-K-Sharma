@@ -27,7 +27,7 @@ type Row = {
   date?: string | null;
   in_time?: string | null;
   out_time?: string | null;
-  status: "matched" | "unmatched" | "error";
+  status: "matched" | "unmatched" | "skipped" | "error";
   matched_by?: string;
   user_id?: string;
   emp_name?: string;
@@ -45,6 +45,7 @@ type Preview = {
     total: number;
     matched: number;
     unmatched: number;
+    skipped?: number;
     errors: number;
     punches_to_create: number;
   };
@@ -257,6 +258,10 @@ export default function PunchImportModal({ visible, companyId, onClose, onImport
                       <Text style={[st.sumNum, { color: "#B45309" }]}>{s.unmatched}</Text>
                       <Text style={st.sumLbl}>Unmatched</Text>
                     </View>
+                    <View style={[st.sumChip, { backgroundColor: "#F1F5F9" }]}>
+                      <Text style={[st.sumNum, { color: "#64748B" }]}>{s.skipped || 0}</Text>
+                      <Text style={st.sumLbl}>Blank days</Text>
+                    </View>
                     <View style={[st.sumChip, { backgroundColor: "#FEF2F2" }]}>
                       <Text style={[st.sumNum, { color: "#B91C1C" }]}>{s.errors}</Text>
                       <Text style={st.sumLbl}>Errors</Text>
@@ -273,9 +278,10 @@ export default function PunchImportModal({ visible, companyId, onClose, onImport
                       <View style={st.otWarnBanner}>
                         <Ionicons name="warning" size={14} color="#B91C1C" />
                         <Text style={st.otWarnTxt}>
-                          OT In / OT Out columns NOT found — OT punches will NOT be imported.
-                          Headers found in your file: {preview.columns.headers.join(", ") || "none"}.
-                          Rename your OT columns to &quot;OT In&quot; and &quot;OT Out&quot; (or download the sample template).
+                          No &quot;OT In&quot; / &quot;OT Out&quot; columns in this sheet — only In/Out punches
+                          will be imported, and the attendance engine will auto-calculate OT from
+                          them as per your firm&apos;s OT policy. If your sheet has separate OT punch
+                          times, name those columns &quot;OT In&quot; and &quot;OT Out&quot; (see the sample template).
                         </Text>
                       </View>
                     )
@@ -310,7 +316,7 @@ export default function PunchImportModal({ visible, companyId, onClose, onImport
                             ✓ {r.matched_by === "name" ? "by Name" : "by Bio Code"}
                           </Text>
                         ) : (
-                          <Text style={[st.tCell, { flex: 1, color: "#B91C1C" }]} numberOfLines={2}>
+                          <Text style={[st.tCell, { flex: 1, color: r.status === "skipped" ? "#64748B" : "#B91C1C" }]} numberOfLines={2}>
                             {r.error || "—"}
                           </Text>
                         )}
