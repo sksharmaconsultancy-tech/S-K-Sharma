@@ -5551,3 +5551,13 @@ features PDF 200 via API. Phase 2 pending: reconciliation, TRACES Part A
 lock, ESS Form 16, email, charts. APP_ITERATION=551,
 deploy_vps_iter551.sh, pointer updated. GitHub pushed through Iter 550
 earlier (user token — advised revoke).
+
+## Iter 552 — Form 16 TAN/PAN quick entry (enabler for user's workflow)
+POST /admin/form16/employer (TAN/PAN with regex validation, audit) +
+POST /admin/form16/set-pan (employee PAN inline, audit). Form16 screen:
+inline Save-TAN box in warning row; per-row PAN input + green ✓ when PAN
+missing. API-tested (valid 200 / invalid 400). Employee PAN previously
+existed only as KYC document type — users.pan text field now the Form 16
+source. APP_ITERATION=552, deploy_vps_iter552.sh, pointer updated.
+Phase 2 REMAINING: TDS-return reconciliation, TRACES Part A lock, ESS
+Form 16 (employee payslip tab), email delivery (needs SMTP), charts.

@@ -41,6 +41,8 @@ export default function Form16Screen() {
   const [extraInc, setExtraInc] = useState<Extra[]>([]);
   const [extraDed, setExtraDed] = useState<Extra[]>([]);
   const [extrasMap, setExtrasMap] = useState<Record<string, any>>({});
+  const [tanIn, setTanIn] = useState("");
+  const [panIn, setPanIn] = useState<Record<string, string>>({});
 
   useEffect(() => { if (!firmId && selectedCompanyId) setFirmId(selectedCompanyId); }, [selectedCompanyId, firmId]);
 
@@ -132,7 +134,19 @@ export default function Form16Screen() {
       </View>
 
       {tan === null || tan === "" ? (
-        <Text style={st.warnTxt}>⚠ Employer TAN not set in Firm Master — it will print blank on Form 16.</Text>
+        <View style={st.tanRow}>
+          <Text style={[st.warnTxt, { paddingTop: 0, flexShrink: 1 }]}>⚠ Employer TAN missing:</Text>
+          <TextInput style={[st.search, { flex: 0, minWidth: 130 }]} value={tanIn}
+            onChangeText={(v) => setTanIn(v.toUpperCase())} placeholder="ABCD12345E"
+            placeholderTextColor={colors.onSurfaceTertiary} maxLength={10} testID="f16-tan-input" />
+          <Pressable style={[st.btn, st.btnPrimary]} testID="f16-tan-save" onPress={async () => {
+            try {
+              await api(`/admin/form16/employer`, { method: "POST",
+                body: JSON.stringify({ company_id: firmId, tan: tanIn }) });
+              await load();
+            } catch (x: any) { setErr(x?.message || "TAN save failed"); }
+          }}><Text style={[st.btnTxt, { color: "#fff" }]}>Save TAN</Text></Pressable>
+        </View>
       ) : null}
       {err ? <Text style={st.errTxt}>{err}</Text> : null}
 
@@ -173,6 +187,23 @@ export default function Form16Screen() {
                   {r.generated ? ` · v${r.version} generated` : ""}
                 </Text>
                 {!r.ready && <Text style={st.rowIssue}>⛔ {r.issues.join(", ")}</Text>}
+                {(!r.pan || r.issues.some((i) => i.startsWith("PAN"))) && (
+                  <View style={st.tanRow}>
+                    <TextInput style={[st.exInput, { minWidth: 120 }]} placeholder="Enter PAN"
+                      placeholderTextColor={colors.onSurfaceTertiary} maxLength={10}
+                      value={panIn[r.user_id] || ""} testID={`f16-pan-${r.user_id}`}
+                      onChangeText={(v) => setPanIn((m) => ({ ...m, [r.user_id]: v.toUpperCase() }))} />
+                    <Pressable onPress={async () => {
+                      try {
+                        await api(`/admin/form16/set-pan`, { method: "POST",
+                          body: JSON.stringify({ user_id: r.user_id, pan: panIn[r.user_id] || "" }) });
+                        await load();
+                      } catch (x: any) { setErr(x?.message || "PAN save failed"); }
+                    }} hitSlop={6} testID={`f16-pan-save-${r.user_id}`}>
+                      <Ionicons name="checkmark-circle" size={22} color="#16A34A" />
+                    </Pressable>
+                  </View>
+                )}
                 {extrasMap[r.user_id] ? <Text style={st.rowExtra}>＋ extra heads added</Text> : null}
               </View>
               <Pressable onPress={() => {
@@ -246,6 +277,7 @@ const st = StyleSheet.create({
   fyRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, marginTop: 8, gap: 4 },
   search: { flex: 1, borderWidth: 1, borderColor: colors.divider, borderRadius: radius.md, paddingHorizontal: 10, paddingVertical: 7, fontSize: 12.5, color: colors.onSurface, backgroundColor: colors.surface },
   warnTxt: { color: "#B45309", fontSize: 11.5, paddingHorizontal: 12, paddingTop: 6, fontWeight: "700" },
+  tanRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingTop: 6, flexWrap: "wrap" },
   errTxt: { color: "#DC2626", fontSize: 11.5, paddingHorizontal: 12, paddingTop: 6 },
   cards: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   card: { borderWidth: 1, borderColor: colors.divider, borderRadius: radius.lg, backgroundColor: colors.surface, paddingVertical: 10, paddingHorizontal: 14, minWidth: 110, alignItems: "center" },

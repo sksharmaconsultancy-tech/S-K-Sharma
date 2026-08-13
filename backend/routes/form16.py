@@ -146,6 +146,52 @@ def _readiness(emp: dict, pay: Optional[dict], company: dict) -> dict:
     return {"ready": not critical, "issues": issues}
 
 
+TAN_RE = re.compile(r"^[A-Z]{4}[0-9]{5}[A-Z]$")
+
+
+@router.post("/employer")
+async def set_employer_tax_ids(payload: dict = Body(...), authorization: Optional[str] = Header(None)):
+    """Iter 552 — set employer TAN / PAN right from the Form 16 screen."""
+    company_id = str(payload.get("company_id") or "")
+    admin = await _auth(authorization, company_id)
+    updates = {}
+    tan = str(payload.get("tan") or "").strip().upper()
+    pan = str(payload.get("pan") or "").strip().upper()
+    if tan:
+        if not TAN_RE.match(tan):
+            raise HTTPException(status_code=400, detail="Invalid TAN (format: ABCD12345E)")
+        updates["tan"] = tan
+    if pan:
+        if not PAN_RE.match(pan):
+            raise HTTPException(status_code=400, detail="Invalid PAN (format: ABCDE1234F)")
+        updates["pan"] = pan
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nothing to save")
+    await db.companies.update_one({"company_id": company_id}, {"$set": updates})
+    await db.form16_audit.insert_one({
+        "at": datetime.now(timezone.utc).isoformat(), "by": admin.get("user_id"),
+        "action": "employer_tax_ids", "company_id": company_id, "set": updates})
+    return {"ok": True, **updates}
+
+
+@router.post("/set-pan")
+async def set_employee_pan(payload: dict = Body(...), authorization: Optional[str] = Header(None)):
+    """Iter 552 — quick employee PAN entry from the Form 16 readiness list."""
+    uid = str(payload.get("user_id") or "")
+    pan = str(payload.get("pan") or "").strip().upper()
+    emp = await db.users.find_one({"user_id": uid}, {"_id": 0, "company_id": 1})
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    admin = await _auth(authorization, emp["company_id"])
+    if not PAN_RE.match(pan):
+        raise HTTPException(status_code=400, detail="Invalid PAN (format: ABCDE1234F)")
+    await db.users.update_one({"user_id": uid}, {"$set": {"pan": pan}})
+    await db.form16_audit.insert_one({
+        "at": datetime.now(timezone.utc).isoformat(), "by": admin.get("user_id"),
+        "action": "set_pan", "user_id": uid, "pan": pan})
+    return {"ok": True, "pan": pan}
+
+
 # ---------------- endpoints ----------------
 
 @router.get("/tax-config")
