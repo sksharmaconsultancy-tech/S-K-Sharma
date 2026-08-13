@@ -55,8 +55,16 @@ async def list_super_admins(authorization: Optional[str] = Header(None)):
     admin = await get_user_from_token(authorization)
     require_super_admin_strict(admin)
     docs = await db.users.find(
-        {"role": "super_admin"}, {"_id": 0, "password_hash": 0},
+        # Iter 555 — whitelist projection: the old exclude-only projection
+        # leaked pin_hash and OTP/lockout internals to the client.
+        {"role": "super_admin"},
+        {"_id": 0, "user_id": 1, "name": 1, "email": 1, "phone": 1,
+         "phone_e164": 1, "position": 1, "disabled": 1, "created_at": 1,
+         "created_by": 1, "password_must_change": 1,
+         "password_last_login_at": 1, "password_hash": 1},
     ).sort("created_at", 1).to_list(100)
+    for d in docs:
+        d["has_password"] = bool(d.pop("password_hash", None))
     return {
         "super_admins": docs,
         "me": admin["user_id"],
@@ -94,6 +102,9 @@ async def create_super_admin(
         "phone_e164": phone,
         "position": "Super Admin",
         "disabled": False,
+        # Iter 555 — exempts this account from the startup allowlist sweep
+        # that demotes unknown super_admins (see _run_startup_backfill).
+        "super_admin_allowlisted": True,
         "created_at": now_iso(),
         "created_by": admin["user_id"],
         "onboarded": True,

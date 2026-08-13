@@ -1949,8 +1949,15 @@ def dedupe_close_punches(
             # (a second registered device produced same-time duplicates).
             # Non-machine punches keep the original same-source-only rule
             # so an admin's manual repair punch is never dropped.
+            # Iter 555 (user bug — "Edit Manual OT In/Out → OT punch not
+            # showing") — manual_admin punches are NEVER deduped: the
+            # repair modal saves the OT IN 1 min after the duty OUT, so
+            # when the duty OUT was also manually repaired the same-source
+            # 5-min rule silently dropped the OT IN and the whole manual
+            # OT session vanished (unpaired OT OUT is discarded).
             is_machine = src.startswith("zkteco")
-            if (last_at is not None
+            is_manual = src == "manual_admin"
+            if (last_at is not None and not is_manual
                     and (is_machine or (src and src == last_src))
                     and abs((t - last_at).total_seconds()) < window_min * 60):
                 continue  # duplicate burst — drop
@@ -2161,7 +2168,9 @@ def dedupe_same_kind_punches(day_punches: List[dict],
                              window_min: float = 5.0) -> List[dict]:
     """Iter 538 (user rule, Punch-Sequence mode) — ignore duplicate punches
     of the SAME kind (in/out) within ``window_min`` minutes, regardless of
-    which machine recorded them. Keeps the FIRST punch of each burst."""
+    which machine recorded them. Keeps the FIRST punch of each burst.
+    Iter 555 — manual_admin punches (deliberate admin repairs) are never
+    dropped."""
     out: List[dict] = []
     last: Dict[str, datetime] = {}
     for p in sorted(day_punches, key=lambda x: x.get("at") or ""):
@@ -2173,7 +2182,9 @@ def dedupe_same_kind_punches(day_punches: List[dict],
             out.append(p)
             continue
         prev = last.get(kind)
-        if prev is not None and (at - prev).total_seconds() < window_min * 60.0:
+        if (prev is not None
+                and str(p.get("source") or "") != "manual_admin"
+                and (at - prev).total_seconds() < window_min * 60.0):
             continue
         last[kind] = at
         out.append(p)
@@ -3253,8 +3264,13 @@ async def _run_startup_backfill():
     )
     #    b. Demote any other super_admin back to employee (they can be re-elevated
     #       to company_admin manually by the true super_admin).
+    #    Iter 555 (user request — "Create 2 More Super Admins") — accounts
+    #    created through the Super Admin Rights screen carry
+    #    ``super_admin_allowlisted: True`` and are EXEMPT from this sweep,
+    #    otherwise every backend restart silently demoted them.
     await db.users.update_many(
-        {"role": "super_admin", "email": {"$nin": list(SUPER_ADMIN_EMAILS)}},
+        {"role": "super_admin", "email": {"$nin": list(SUPER_ADMIN_EMAILS)},
+         "super_admin_allowlisted": {"$ne": True}},
         {"$set": {"role": "employee"}},
     )
 
@@ -9487,7 +9503,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "554"
+APP_ITERATION = "555"
 
 
 @api.get("/version")

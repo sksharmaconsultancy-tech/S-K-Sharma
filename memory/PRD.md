@@ -5587,3 +5587,22 @@ PENDING (user-acknowledged plan): P0 Manual OT punch edit bug (Anil
 Purbiya Aug 5 — data only on VPS, not local); Manage Super Admins screen
 (user chose option b); Form 16 Phase 2. Bio-ID 923 conflict = SKIP (user
 rectified manually).
+
+## Iter 555 — P0 Manual OT punch fix + Super Admins restart-demotion fix
+1. P0 BUG (Anil Purbiya Aug 5) ROOT CAUSE: `dedupe_close_punches` same-
+   source 5-min rule dropped manual_admin OT IN (repair modal saves OT IN
+   duty-OUT+1min; when duty OUT was also manual_admin → dropped → OT OUT
+   unpaired → whole manual OT vanished). FIX: manual_admin punches NEVER
+   deduped (server.py, also `dedupe_same_kind_punches` punch-seq mode).
+   Verified: 4 unit cases + e2e via manual-punch API + daily-verification.
+2. SUPER ADMINS: user wanted 2 more. Screen/API already existed
+   (/super-admin-access, routes/super_admins.py) BUT startup backfill 4b
+   demoted any super_admin not in SUPER_ADMIN_EMAILS env allowlist to
+   employee on EVERY restart. FIX: accounts created via the screen get
+   `super_admin_allowlisted: True` and are exempt from the sweep. Also
+   fixed list endpoint leaking pin_hash (whitelist projection +
+   has_password bool). Verified: create → restart → role survives →
+   password login (must_change=True) → delete.
+APP_ITERATION=555, deploy_vps_iter555.sh, temp_bundle pointer → 555.
+User must run deploy555 on VPS then: re-check Anil Purbiya Aug 5; add
+2 super admins via Administration → Super Admin Rights.
