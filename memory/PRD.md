@@ -5606,3 +5606,12 @@ rectified manually).
 APP_ITERATION=555, deploy_vps_iter555.sh, temp_bundle pointer → 555.
 User must run deploy555 on VPS then: re-check Anil Purbiya Aug 5; add
 2 super admins via Administration → Super Admin Rights.
+
+## Iter 556 — "Admin Corrected" badge on attendance grid (user-accepted improvement)
+Day cells containing manual_admin punches now carry `manual: true`
+(server.py: main cell + anomaly cell in _compute_monthly_grid_data).
+attendance-grid.tsx: violet ✎ badge (badgeManual #7C3AED) in the cell
+badge row + legend "Admin Corrected — manually edited punches
+(protected)". Verified via API (manual flag true on corrected day only)
++ UI screenshot. APP_ITERATION=556, deploy_vps_iter556.sh (includes 555
+changelog since user may deploy once), temp_bundle pointer → 556.

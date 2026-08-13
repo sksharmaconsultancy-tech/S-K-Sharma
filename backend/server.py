@@ -9503,7 +9503,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "555"
+APP_ITERATION = "556"
 
 
 @api.get("/version")
@@ -10250,6 +10250,9 @@ async def _compute_monthly_grid_data(
                     "ot_in": None, "ot_out": None,
                     "hours": 0.0, "duty_hours": 0.0, "raw_hours": 0.0, "ot_hours": 0.0,
                     "sources": list({_classify_punch_source(p.get("source")) for p in day_punches}),
+                    # Iter 556 — admin-corrected day indicator.
+                    "manual": any(str(p.get("source") or "") == "manual_admin"
+                                  for p in day_punches),
                     "punches": len(day_punches),
                     "break_hours": 0.0, "net_hours": 0.0,
                     "late_min": 0, "early_min": 0,
@@ -10560,6 +10563,11 @@ async def _compute_monthly_grid_data(
                 "late_min": _dm["late_minutes"],
                 "early_min": _dm["early_minutes"],
                 "sources": seen,
+                # Iter 556 (user request) — "Manual punches protected"
+                # badge: day contains admin-corrected (manual_admin)
+                # punches, which the engine never deduplicates (Iter 555).
+                "manual": any(str(p.get("source") or "") == "manual_admin"
+                              for p in day_punches),
                 "present": _day_present,
                 "weekly_off": bool(summary.get("is_weekly_off")),
                 "holiday": _is_holiday_day,

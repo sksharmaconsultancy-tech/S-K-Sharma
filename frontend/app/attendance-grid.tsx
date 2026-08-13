@@ -53,6 +53,7 @@ type Cell = {
   late_min?: number;           // Iter 236 — late arrival vs shift start
   early_min?: number;          // Iter 236 — early going vs shift end
   sources?: string[]; // ["bio","app","sys"] — provenance badges for the day
+  manual?: boolean;   // Iter 556 — day contains admin-corrected punches
   present?: number;            // Iter 77e — 0 / 0.5 / 1 present-day credit
   weekly_off?: boolean;        // Iter 77e — cell falls on a weekly-off day
   salary?: number;             // Iter 94 — day-wise earned salary (₹)
@@ -992,6 +993,11 @@ export default function AttendanceGridScreen() {
             <View style={[styles.badge, styles.badgeSys]}><Text style={styles.badgeTxt}>S</Text></View>
             <Text style={styles.legendTxt}>System — Manual Punching</Text>
           </View>
+          {/* Iter 556 (user request) — admin-corrected day indicator */}
+          <View style={styles.legendItem}>
+            <View style={[styles.badge, styles.badgeManual]}><Text style={styles.badgeTxt}>✎</Text></View>
+            <Text style={styles.legendTxt}>Admin Corrected — manually edited punches (protected)</Text>
+          </View>
         </View>
       </View>
 
@@ -1591,9 +1597,15 @@ function DayCell({
           </Text>
         </>
       )}
-      {cell.sources && cell.sources.length > 0 && (
+      {(cell.manual || (cell.sources && cell.sources.length > 0)) && (
         <View style={styles.badgeRow}>
-          {cell.sources.map((s) => (
+          {/* Iter 556 — admin-corrected day indicator (protected punches) */}
+          {cell.manual && (
+            <View style={[styles.badge, styles.badgeManual]}>
+              <Text style={styles.badgeTxt}>✎</Text>
+            </View>
+          )}
+          {(cell.sources || []).map((s) => (
             <View key={s} style={[styles.badge, s === "bio" ? styles.badgeBio : s === "app" ? styles.badgeApp : styles.badgeSys]}>
               <Text style={styles.badgeTxt}>{s === "bio" ? "B" : s === "app" ? "M" : "S"}</Text>
             </View>
@@ -1956,5 +1968,6 @@ const styles = StyleSheet.create({
   badgeBio: { backgroundColor: "#1F5254" },
   badgeApp: { backgroundColor: "#2563EB" },
   badgeSys: { backgroundColor: "#6B7280" },
+  badgeManual: { backgroundColor: "#7C3AED" }, // Iter 556 — admin corrected
   badgeTxt: { color: "#fff", fontSize: 7, fontWeight: "700" },
 });
