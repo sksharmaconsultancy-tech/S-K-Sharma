@@ -5615,3 +5615,15 @@ badge row + legend "Admin Corrected — manually edited punches
 (protected)". Verified via API (manual flag true on corrected day only)
 + UI screenshot. APP_ITERATION=556, deploy_vps_iter556.sh (includes 555
 changelog since user may deploy once), temp_bundle pointer → 556.
+
+## Iter 557 — Time Format dropdown (user dev-prompt spec)
+Upgraded Iter 554 switch → "Time Format" DROPDOWN in daily-verification
+filters: "12 Hour Format (AM/PM)" (DEFAULT) / "24 Hour Format".
+Session-remembered (web sessionStorage key dv_time_format), instant
+apply, always sends time_format param. Backend: drill-down now also
+converts employee shift_start/shift_end. Display-only (durations stay
+HH:MM, calculations untouched). Tested: 11 conversion unit cases (incl.
+00:30→12:30 AM, 12:30→12:30 PM, null/blank), multi-punch drill timeline,
+12h/24h rows, XLSX + PDF exports contain AM/PM, UI switch e2e via
+Playwright. APP_ITERATION=557, deploy_vps_iter557.sh (cumulative
+555+556+557 changelog), temp_bundle pointer → 557.

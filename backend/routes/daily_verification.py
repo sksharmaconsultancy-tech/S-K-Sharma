@@ -581,6 +581,10 @@ async def daily_verification_employee(
             t["time"] = _to12(t["time"])
         for h in history:
             h["in"], h["out"] = _to12(h["in"]), _to12(h["out"])
+        # Iter 557 — shift start/end shown in the drill-down header too.
+        for k in ("shift_start", "shift_end"):
+            if u.get(k):
+                u[k] = _to12(u[k])
     return {"employee": u, "date": date, "timeline": timeline,
             "history": history}
 

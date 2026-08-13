@@ -129,8 +129,22 @@ export default function DailyVerificationScreen() {
   // Iter 479 (user request) — show only PRESENT employees (a single punch
   // counts as present).
   const [presentOnly, setPresentOnly] = useState(false);
-  // Iter 554 (user request) — show times in 12-hour AM/PM format.
-  const [hr12, setHr12] = useState(false);
+  // Iter 557 (user spec) — configurable Time Format, DEFAULT 12-hour
+  // (AM/PM). Display-only: stored punches and all calculations stay
+  // 24-hour. Remembered for the current session (web sessionStorage).
+  const [hr12, setHr12] = useState<boolean>(() => {
+    if (Platform.OS === "web") {
+      try { return globalThis.sessionStorage?.getItem("dv_time_format") !== "24h"; } catch { return true; }
+    }
+    return true;
+  });
+  const setTimeFormat = (v: string) => {
+    const is12 = v !== "24h";
+    setHr12(is12);
+    if (Platform.OS === "web") {
+      try { globalThis.sessionStorage?.setItem("dv_time_format", is12 ? "12h" : "24h"); } catch { /* ignore */ }
+    }
+  };
 
   const [rows, setRows] = useState<Row[]>([]);
   const [summary, setSummary] = useState<Summary>({});
@@ -159,7 +173,7 @@ export default function DailyVerificationScreen() {
     if (q.trim()) p.set("q", q.trim());
     if (exOnly) p.set("exceptions_only", "true");
     if (presentOnly) p.set("present_only", "true");
-    if (hr12) p.set("time_format", "12h");
+    if (hr12) p.set("time_format", "12h"); else p.set("time_format", "24h");
     p.set("group_by", pdfGroupBy);
     Object.entries(extra || {}).forEach(([k, v]) => p.set(k, v));
     return p.toString();
@@ -366,9 +380,17 @@ export default function DailyVerificationScreen() {
             <Text style={st.lbl}>Only Present</Text>
             <Switch value={presentOnly} onValueChange={setPresentOnly} />
           </View>
-          <View style={{ alignItems: "center" }}>
-            <Text style={st.lbl}>AM/PM Time</Text>
-            <Switch value={hr12} onValueChange={setHr12} testID="dv-ampm-toggle" />
+          {/* Iter 557 (user spec) — Time Format dropdown, default 12-hr */}
+          <View style={{ minWidth: 170 }}>
+            <Text style={st.lbl}>Time Format</Text>
+            {Platform.OS === "web" ? (
+              <select value={hr12 ? "12h" : "24h"}
+                onChange={(e) => setTimeFormat((e.target as HTMLSelectElement).value)}
+                style={WEB_SELECT} data-testid="dv-time-format">
+                <option value="12h">12 Hour Format (AM/PM)</option>
+                <option value="24h">24 Hour Format</option>
+              </select>
+            ) : null}
           </View>
           <Pressable style={st.applyBtn} onPress={() => load(0)} disabled={loading}>
             {loading ? <ActivityIndicator color="#fff" size="small" /> : (
