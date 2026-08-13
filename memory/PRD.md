@@ -5561,3 +5561,10 @@ existed only as KYC document type — users.pan text field now the Form 16
 source. APP_ITERATION=552, deploy_vps_iter552.sh, pointer updated.
 Phase 2 REMAINING: TDS-return reconciliation, TRACES Part A lock, ESS
 Form 16 (employee payslip tab), email delivery (needs SMTP), charts.
+
+## Iter 553 — Features List PDF 404 fix (user-reported)
+Root cause: VPS bundle tars only backend/frontend/memory/test_reports —
+root-level USER_MANUAL_FEATURES.md never shipped. Fix: doc copied to
+/app/backend/USER_MANUAL_FEATURES.md; features_pdf.py checks backend dir
+first, root fallback. Verified 200 locally. APP_ITERATION=553,
+deploy_vps_iter553.sh, pointer updated.

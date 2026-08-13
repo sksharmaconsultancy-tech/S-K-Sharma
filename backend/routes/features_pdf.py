@@ -15,7 +15,11 @@ from fastapi.responses import Response
 from server import get_user_from_token, require_role  # noqa: E402
 
 router = APIRouter(prefix="/api/admin", tags=["features-pdf"])
-MD_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "USER_MANUAL_FEATURES.md")
+# Iter 553 fix — the doc must live INSIDE backend/ (the VPS code bundle
+# ships only backend/frontend/memory dirs; the old root path 404'd live).
+_BK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MD_CANDIDATES = [os.path.join(_BK, "USER_MANUAL_FEATURES.md"),
+                 os.path.join(_BK, "..", "USER_MANUAL_FEATURES.md")]
 
 
 def _clean(s: str) -> str:
@@ -28,8 +32,9 @@ def _clean(s: str) -> str:
 async def features_list_pdf(authorization: Optional[str] = Header(None)):
     u = await get_user_from_token(authorization)
     require_role(u, ["super_admin", "sub_admin", "company_admin"])
-    path = os.path.abspath(MD_PATH)
-    if not os.path.exists(path):
+    path = next((os.path.abspath(c) for c in MD_CANDIDATES
+                 if os.path.exists(c)), None)
+    if not path:
         raise HTTPException(status_code=404, detail="Feature list document missing")
     md = open(path, encoding="utf-8").read().splitlines()
 
