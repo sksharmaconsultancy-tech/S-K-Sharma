@@ -5568,3 +5568,22 @@ root-level USER_MANUAL_FEATURES.md never shipped. Fix: doc copied to
 /app/backend/USER_MANUAL_FEATURES.md; features_pdf.py checks backend dir
 first, root fallback. Verified 200 locally. APP_ITERATION=553,
 deploy_vps_iter553.sh, pointer updated.
+
+## Iter 554 — Daily Verification report: AM/PM option + PDF layout (user requests)
+1. 12-HR AM/PM: `_to12`/`_apply_12h` in routes/daily_verification.py;
+   `time_format=12h` param on JSON, xlsx/csv/pdf, drill-down, email,
+   WhatsApp. Frontend "AM/PM Time" toggle (instant reload, testID
+   dv-ampm-toggle).
+2. PDF header CENTERED: Row1 = Company Name (+Group filter in parens)
+   + address; Row2 = "Daily Report — DD-MM-YYYY (Ddd)". Old 2-col head
+   table removed.
+3. PDF grouping: DESIGNATION-wise bands by DEFAULT (`group_by` param,
+   default "designation"); Department-wise optional via new "PDF Print
+   Grouping" dropdown in UI.
+4. Employee Status filter REMOVED from UI — always active employees.
+Tested locally: 12h JSON, designation + department PDFs, screenshot OK.
+APP_ITERATION=554, deploy_vps_iter554.sh, temp_bundle pointer → 554.
+PENDING (user-acknowledged plan): P0 Manual OT punch edit bug (Anil
+Purbiya Aug 5 — data only on VPS, not local); Manage Super Admins screen
+(user chose option b); Form 16 Phase 2. Bio-ID 923 conflict = SKIP (user
+rectified manually).

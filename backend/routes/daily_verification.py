@@ -66,6 +66,31 @@ def _hm(hours: Any) -> str:
     return f"{m // 60:02d}:{m % 60:02d}"
 
 
+def _to12(s: Any) -> str:
+    """Iter 554 (user request) — convert an 'HH:MM' / 'HH:MM:SS' string to
+    12-hour 'hh:MM AM/PM'. Non-time values ('-', '') pass through as-is."""
+    txt = str(s or "").strip()
+    if not txt or ":" not in txt:
+        return txt
+    try:
+        parts = txt.split(":")
+        h, m = int(parts[0]), int(parts[1])
+        ampm = "AM" if h < 12 else "PM"
+        h12 = h % 12 or 12
+        return f"{h12:02d}:{m:02d} {ampm}"
+    except (ValueError, IndexError):
+        return txt
+
+
+def _apply_12h(data: dict) -> dict:
+    """Iter 554 — rewrite all clock-time fields in the report rows to
+    12-hour AM/PM format (durations like Work Hrs / OT Hrs stay HH:MM)."""
+    for r in data.get("rows") or []:
+        for k in ("punch_in", "punch_out", "ot_in", "ot_out"):
+            r[k] = _to12(r.get(k))
+    return data
+
+
 async def _auth(authorization: Optional[str], company_id: Optional[str]):
     from server import get_user_from_token, require_role, sub_admin_can_touch_company
     admin = await get_user_from_token(authorization)
@@ -388,6 +413,7 @@ async def _build(company_id: str, date: str,
             (((company or {}).get("attendance_policy") or {})
              .get("policy_master") or {}).get("attendance_by_duty_hours")),
         "date": date, "weekday": weekday,
+        "group": group or "",
         "rows": rows, "summary": summary,
         "filter_options": {
             "departments": sorted({e.get("department") or "" for e in extra.values()} - {""}),
@@ -430,6 +456,7 @@ async def daily_verification_json(
     q: Optional[str] = Query(None),
     exceptions_only: bool = Query(False),
     present_only: bool = Query(False),
+    time_format: str = Query("24h"),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     authorization: Optional[str] = Header(None),
@@ -438,6 +465,8 @@ async def daily_verification_json(
     data = await _build(cid, date, department, designation, contractor,
                         category, shift, group, status, source, machine,
                         employee_code, q, exceptions_only, present_only)
+    if time_format == "12h":
+        _apply_12h(data)
     rows = data["rows"]
     data["total_rows"] = len(rows)
     data["rows"] = rows[offset:offset + limit]
@@ -486,6 +515,7 @@ async def daily_verification_employee(
     company_id: Optional[str] = Query(None),
     date: str = Query(...),
     user_id: str = Query(...),
+    time_format: str = Query("24h"),
     authorization: Optional[str] = Header(None),
 ):
     from server import db, _compute_monthly_grid_data
@@ -546,6 +576,11 @@ async def daily_verification_employee(
             })
     except Exception:
         pass
+    if time_format == "12h":  # Iter 554 — AM/PM option
+        for t in timeline:
+            t["time"] = _to12(t["time"])
+        for h in history:
+            h["in"], h["out"] = _to12(h["in"]), _to12(h["out"])
     return {"employee": u, "date": date, "timeline": timeline,
             "history": history}
 
@@ -618,7 +653,8 @@ def _build_csv(data: dict) -> str:
     return buf.getvalue()
 
 
-def _build_pdf(data: dict, orientation: str = "landscape") -> bytes:
+def _build_pdf(data: dict, orientation: str = "landscape",
+               group_by: str = "designation") -> bytes:
     from reportlab.lib import colors as rl
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.units import mm
@@ -641,31 +677,33 @@ def _build_pdf(data: dict, orientation: str = "landscape") -> bytes:
     # Iter 479 (user request) — header: "Daily Report" + date on the RIGHT,
     # company name on the SECOND row.
     # Iter 523 (user request) — company ADDRESS printed with the firm name.
+    # Iter 554 (user request) — header CENTERED: Row 1 = Company Name
+    # (+ Group when a Group filter is applied), Row 2 = "Daily Report —
+    # DD-MM-YYYY (Ddd)".
     _comp_addr = ", ".join(
         s for s in (str(data["company"].get("address") or "").strip(),
                     str(data["company"].get("city") or "").strip()) if s)
-    head_tbl = Table(
-        [[Paragraph("<b>Daily Report</b>", ParagraphStyle(
-            "t", parent=styles["Title"], alignment=0, fontSize=15,
-            leading=18, spaceAfter=0)),
-          Paragraph(f"{data['date']} ({data['weekday']})", ParagraphStyle(
-              "d", parent=styles["Normal"], alignment=2, fontSize=10,
-              leading=18, fontName="Helvetica-Bold"))],
-         [Paragraph(
-             str(data["company"]["name"])
-             + (f"<br/><font size=8>{_comp_addr}</font>" if _comp_addr else ""),
-             ParagraphStyle(
-                 "c", parent=styles["Normal"], fontSize=11, leading=13,
-                 fontName="Helvetica-Bold")), ""]],
-        colWidths=[avail * 0.62, avail * 0.38])
-    head_tbl.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
-        ("TOPPADDING", (0, 0), (-1, -1), 1),
-    ]))
-    story = [head_tbl, Spacer(1, 3 * mm)]
+    _grp = str(data.get("group") or "").strip()
+    try:
+        _dmy = datetime.strptime(str(data["date"]), "%Y-%m-%d").strftime("%d-%m-%Y")
+    except ValueError:
+        _dmy = str(data["date"])
+    story: list = [
+        Paragraph(
+            str(data["company"]["name"]) + (f" ({_grp})" if _grp else ""),
+            ParagraphStyle("t", parent=styles["Title"], alignment=1,
+                           fontSize=14, leading=17, spaceAfter=0)),
+    ]
+    if _comp_addr:
+        story.append(Paragraph(_comp_addr, ParagraphStyle(
+            "a", parent=styles["Normal"], alignment=1, fontSize=8,
+            leading=10)))
+    story.append(Paragraph(
+        f"Daily Report — {_dmy} ({data['weekday']})",
+        ParagraphStyle("d", parent=styles["Normal"], alignment=1,
+                       fontSize=10.5, leading=14,
+                       fontName="Helvetica-Bold")))
+    story.append(Spacer(1, 3 * mm))
     fs = 7.0 if orientation != "portrait" else 5.8
     # Iter 479 (user request) — PDF drops Verified / Verified By / Remarks
     # and shows the BIO CODE instead of the Emp Code.
@@ -696,16 +734,21 @@ def _build_pdf(data: dict, orientation: str = "landscape") -> bytes:
     _row_h = 9 * mm if orientation != "portrait" else 8 * mm
     row_heights: list = [None]
     from itertools import groupby
+    # Iter 524 (user request) — grouped print with a grey band per group.
+    # Iter 554 (user request) — DEFAULT grouping is now DESIGNATION-wise;
+    # department-wise stays available as an option (group_by=department).
+    _gb_field = "department" if group_by == "department" else "designation"
+    _gb_label = _gb_field.upper()
     rows_sorted = sorted(
         data["rows"],
-        key=lambda r: ((r.get("department") or "~").lower(),
+        key=lambda r: ((r.get(_gb_field) or "~").lower(),
                        str(r.get("employee_code") or "")))
     ridx = 0
     sno = 0
-    for dept, grp in groupby(rows_sorted,
-                             key=lambda r: r.get("department") or ""):
+    for gval, grp in groupby(rows_sorted,
+                             key=lambda r: r.get(_gb_field) or ""):
         ridx += 1
-        tdata.append([f"DEPARTMENT — {dept or 'No Department'}"]
+        tdata.append([f"{_gb_label} — {gval or 'No ' + _gb_field.title()}"]
                      + [""] * (n_cols - 1))
         tstyle += [
             ("SPAN", (0, ridx), (-1, ridx)),
@@ -756,8 +799,11 @@ def _build_pdf(data: dict, orientation: str = "landscape") -> bytes:
 
 
 async def _export_data(authorization, company_id, date, **kw):
+    time_format = kw.pop("time_format", "24h")  # Iter 554 — AM/PM option
     admin, cid = await _auth(authorization, company_id)
     data = await _build(cid, date, **kw)
+    if time_format == "12h":
+        _apply_12h(data)
     return admin, cid, data
 
 
@@ -779,6 +825,7 @@ async def daily_verification_xlsx(
     machine: Optional[str] = Query(None), employee_code: Optional[str] = Query(None),
     q: Optional[str] = Query(None), exceptions_only: bool = Query(False),
     present_only: bool = Query(False),
+    time_format: str = Query("24h"),
     authorization: Optional[str] = Header(None),
 ):
     admin, cid, data = await _export_data(
@@ -786,7 +833,8 @@ async def daily_verification_xlsx(
         designation=designation, contractor=contractor, category=category,
         shift=shift, group=group, status=status, source=source,
         machine=machine, employee_code=employee_code, q=q,
-        exceptions_only=exceptions_only, present_only=present_only)
+        exceptions_only=exceptions_only, present_only=present_only,
+        time_format=time_format)
     await _audit("report_export", admin, cid, date, "XLSX export")
     return Response(
         content=_build_xlsx(data),
@@ -805,6 +853,7 @@ async def daily_verification_csv(
     machine: Optional[str] = Query(None), employee_code: Optional[str] = Query(None),
     q: Optional[str] = Query(None), exceptions_only: bool = Query(False),
     present_only: bool = Query(False),
+    time_format: str = Query("24h"),
     authorization: Optional[str] = Header(None),
 ):
     admin, cid, data = await _export_data(
@@ -812,7 +861,8 @@ async def daily_verification_csv(
         designation=designation, contractor=contractor, category=category,
         shift=shift, group=group, status=status, source=source,
         machine=machine, employee_code=employee_code, q=q,
-        exceptions_only=exceptions_only, present_only=present_only)
+        exceptions_only=exceptions_only, present_only=present_only,
+        time_format=time_format)
     await _audit("report_export", admin, cid, date, "CSV export")
     return Response(content=_build_csv(data), media_type="text/csv",
                     headers={"Content-Disposition":
@@ -823,6 +873,7 @@ async def daily_verification_csv(
 async def daily_verification_pdf(
     company_id: Optional[str] = Query(None), date: str = Query(...),
     orientation: str = Query("landscape"),
+    group_by: str = Query("designation"),
     department: Optional[str] = Query(None), designation: Optional[str] = Query(None),
     contractor: Optional[str] = Query(None), category: Optional[str] = Query(None),
     shift: Optional[str] = Query(None), group: Optional[str] = Query(None),
@@ -830,6 +881,7 @@ async def daily_verification_pdf(
     machine: Optional[str] = Query(None), employee_code: Optional[str] = Query(None),
     q: Optional[str] = Query(None), exceptions_only: bool = Query(False),
     present_only: bool = Query(False),
+    time_format: str = Query("24h"),
     authorization: Optional[str] = Header(None),
 ):
     admin, cid, data = await _export_data(
@@ -837,9 +889,10 @@ async def daily_verification_pdf(
         designation=designation, contractor=contractor, category=category,
         shift=shift, group=group, status=status, source=source,
         machine=machine, employee_code=employee_code, q=q,
-        exceptions_only=exceptions_only, present_only=present_only)
+        exceptions_only=exceptions_only, present_only=present_only,
+        time_format=time_format)
     await _audit("report_export", admin, cid, date, f"PDF export ({orientation})")
-    return Response(content=_build_pdf(data, orientation),
+    return Response(content=_build_pdf(data, orientation, group_by),
                     media_type="application/pdf",
                     headers={"Content-Disposition":
                              f"inline; filename=Daily_Verification_{date}.pdf"})
@@ -864,6 +917,8 @@ async def daily_verification_email(
         raise HTTPException(status_code=400,
                             detail="SMTP is not configured (Email Settings).")
     data = await _build(cid, date, exceptions_only=bool(payload.get("exceptions_only")))
+    if str(payload.get("time_format") or "") == "12h":
+        _apply_12h(data)
     s = data["summary"]
     body = (f"Daily In/Out & OT Verification Report — {data['company']['name']}\n"
             f"Date: {date}\n\n" + "\n".join(_summary_lines(data)) +
@@ -902,6 +957,8 @@ async def daily_verification_whatsapp(
                             detail="WhatsApp is not configured for this firm "
                                    "(WhatsApp Center → Settings).")
     data = await _build(cid, date)
+    if str(payload.get("time_format") or "") == "12h":
+        _apply_12h(data)
     pdf = _build_pdf(data)
     client = WhatsAppClient(settings)
     media_id = await client.upload_media(

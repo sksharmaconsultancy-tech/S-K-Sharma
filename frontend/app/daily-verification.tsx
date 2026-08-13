@@ -77,11 +77,11 @@ const COLS: { key: keyof Row | "sr" | "sign"; label: string; w: number }[] = [
   { key: "department", label: "Department", w: 110 },
   { key: "designation", label: "Designation", w: 110 },
   { key: "contractor", label: "Contractor", w: 110 },
-  { key: "punch_in", label: "Punch In", w: 70 },
-  { key: "punch_out", label: "Punch Out", w: 70 },
+  { key: "punch_in", label: "Punch In", w: 78 },
+  { key: "punch_out", label: "Punch Out", w: 78 },
   { key: "work_hours", label: "Work Hrs", w: 68 },
-  { key: "ot_in", label: "OT In", w: 64 },
-  { key: "ot_out", label: "OT Out", w: 64 },
+  { key: "ot_in", label: "OT In", w: 74 },
+  { key: "ot_out", label: "OT Out", w: 74 },
   { key: "ot_hours", label: "OT Hrs", w: 60 },
   { key: "total_hours", label: "Total Duty", w: 74 },
   { key: "status", label: "Attendance Status", w: 200 },
@@ -119,12 +119,18 @@ export default function DailyVerificationScreen() {
   const [dept, setDept] = useState(""); const [desig, setDesig] = useState("");
   const [contr, setContr] = useState("");
   const [grp, setGrp] = useState("");
-  const [empStatus, setEmpStatus] = useState("active");
+  // Iter 554 (user request) — Employee Status filter removed from the UI;
+  // the report always shows ACTIVE employees.
   const [machine, setMachine] = useState("");
+  // Iter 554 (user request) — PDF prints DESIGNATION-wise by default;
+  // department-wise grouping stays available as an option.
+  const [pdfGroupBy, setPdfGroupBy] = useState("designation");
   const [q, setQ] = useState(""); const [exOnly, setExOnly] = useState(false);
   // Iter 479 (user request) — show only PRESENT employees (a single punch
   // counts as present).
   const [presentOnly, setPresentOnly] = useState(false);
+  // Iter 554 (user request) — show times in 12-hour AM/PM format.
+  const [hr12, setHr12] = useState(false);
 
   const [rows, setRows] = useState<Row[]>([]);
   const [summary, setSummary] = useState<Summary>({});
@@ -148,14 +154,16 @@ export default function DailyVerificationScreen() {
     if (desig) p.set("designation", desig);
     if (contr) p.set("contractor", contr);
     if (grp) p.set("group", grp);
-    if (empStatus) p.set("status", empStatus);
+    p.set("status", "active");
     if (machine) p.set("machine", machine);
     if (q.trim()) p.set("q", q.trim());
     if (exOnly) p.set("exceptions_only", "true");
     if (presentOnly) p.set("present_only", "true");
+    if (hr12) p.set("time_format", "12h");
+    p.set("group_by", pdfGroupBy);
     Object.entries(extra || {}).forEach(([k, v]) => p.set(k, v));
     return p.toString();
-  }, [companyId, date, dept, desig, contr, grp, empStatus, machine, q, exOnly, presentOnly]);
+  }, [companyId, date, dept, desig, contr, grp, machine, q, exOnly, presentOnly, hr12, pdfGroupBy]);
 
   const load = useCallback(async (off = 0) => {
     if (!companyId || !date) return;
@@ -178,6 +186,8 @@ export default function DailyVerificationScreen() {
   }, [companyId, date, qs]);
 
   useEffect(() => { void load(0); }, [companyId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Iter 554 — instant re-render when the AM/PM toggle changes.
+  useEffect(() => { void load(0); }, [hr12]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const verify = async (r: Row, verified: boolean) => {
     let remarks = r.remarks;
@@ -207,7 +217,7 @@ export default function DailyVerificationScreen() {
     setDrill(null);
     try {
       const d = await api<Drill>(
-        `/admin/reports/daily-verification/employee?company_id=${encodeURIComponent(companyId)}&date=${date}&user_id=${encodeURIComponent(r.user_id)}`);
+        `/admin/reports/daily-verification/employee?company_id=${encodeURIComponent(companyId)}&date=${date}&user_id=${encodeURIComponent(r.user_id)}&time_format=${hr12 ? "12h" : "24h"}`);
       setDrill(d);
     } catch (e: any) {
       showMsg(e?.message || "Drill-down failed");
@@ -244,7 +254,7 @@ export default function DailyVerificationScreen() {
     setBusy(true);
     try {
       const r = await api<any>("/admin/reports/daily-verification/email", {
-        method: "POST", body: { company_id: companyId, date, to },
+        method: "POST", body: { company_id: companyId, date, to, time_format: hr12 ? "12h" : "24h" },
       });
       showMsg(r.message || "Emailed");
     } catch (e: any) { showMsg(e?.message || "Email failed"); } finally { setBusy(false); }
@@ -256,7 +266,7 @@ export default function DailyVerificationScreen() {
     setBusy(true);
     try {
       const r = await api<any>("/admin/reports/daily-verification/whatsapp", {
-        method: "POST", body: { company_id: companyId, date, to },
+        method: "POST", body: { company_id: companyId, date, to, time_format: hr12 ? "12h" : "24h" },
       });
       showMsg(r.message || "Sent");
     } catch (e: any) { showMsg(e?.message || "WhatsApp failed"); } finally { setBusy(false); }
@@ -337,8 +347,10 @@ export default function DailyVerificationScreen() {
               filters removed; "Unit / Group" renamed to "Group". */}
           <Sel label="Group" value={grp} onChange={setGrp} width={130}
             options={(opts?.groups || []).map((v) => ({ v, l: v }))} />
-          <Sel label="Employee Status" value={empStatus} onChange={(v) => setEmpStatus(v || "active")}
-            width={120} options={[{ v: "active", l: "Active" }, { v: "resigned", l: "Inactive" }, { v: "all", l: "All" }]} />
+          <Sel label="PDF Print Grouping" value={pdfGroupBy}
+            onChange={(v) => setPdfGroupBy(v || "designation")} width={150}
+            options={[{ v: "designation", l: "Designation-wise (default)" },
+              { v: "department", l: "Department-wise" }]} />
           <Sel label="Punch Machine" value={machine} onChange={setMachine} width={150}
             options={(opts?.machines || []).map((m) => ({ v: m.serial, l: m.name || m.serial }))} />
           <View style={{ minWidth: 170 }}>
@@ -353,6 +365,10 @@ export default function DailyVerificationScreen() {
           <View style={{ alignItems: "center" }}>
             <Text style={st.lbl}>Only Present</Text>
             <Switch value={presentOnly} onValueChange={setPresentOnly} />
+          </View>
+          <View style={{ alignItems: "center" }}>
+            <Text style={st.lbl}>AM/PM Time</Text>
+            <Switch value={hr12} onValueChange={setHr12} testID="dv-ampm-toggle" />
           </View>
           <Pressable style={st.applyBtn} onPress={() => load(0)} disabled={loading}>
             {loading ? <ActivityIndicator color="#fff" size="small" /> : (
