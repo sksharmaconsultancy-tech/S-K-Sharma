@@ -5641,3 +5641,14 @@ Playwright. APP_ITERATION=557, deploy_vps_iter557.sh (cumulative
 Verified: day-status API returns bio_code (124/127 rows), Playwright
 screenshot Auto-Punches table (Code 123 | Bio 4 | full names visible).
 APP_ITERATION=558, deploy_vps_iter558.sh (cumulative), pointer → 558.
+
+## Iter 559 — Punch Approvals Excel export (user-accepted improvement)
+Backend: GET /admin/attendance/day-status/{cid}/export.xlsx (tab=
+updated|auto|manual|extra, q search, from/to dates) in
+attendance_admin_core.py — reuses attendance_day_status handler, same
+tab filters as frontend dayVisible, openpyxl sheet with Date/Code/Bio
+Code/Name/Father/Designation/In/Out/Duty/OT In/OT Out/OT/Total cols.
+Frontend: green "Excel" button (testID pa-export-xlsx) next to Show/Save
+on the 4 source tabs only, via apiBinary blob download. Verified: xlsx
+for auto (1 row), manual (126), updated (0) tabs + UI button visibility.
+APP_ITERATION=559, deploy_vps_iter559.sh (cumulative), pointer → 559.

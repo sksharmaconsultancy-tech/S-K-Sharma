@@ -17,7 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 
-import { api } from "@/src/api/client";
+import { api, apiBinary } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import { useOnRefresh } from "@/src/context/RefreshBusContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
@@ -466,6 +466,31 @@ export default function PunchApprovalsScreen() {
     return base.filter((r) =>
       rowMatch(r.name, r.father_name, r.designation, r.employee_code, r.bio_code));
   }, [dayRows, tab, rowMatch]);
+
+  // Iter 559 (user request) — Excel export of the current source tab.
+  const [exporting, setExporting] = useState(false);
+  const exportTabXlsx = async () => {
+    if (!selectedCompanyId || exporting) return;
+    setExporting(true);
+    try {
+      const effTo = dateMode === "period" && toDate >= selectedDate ? toDate : selectedDate;
+      const params = new URLSearchParams({ from_date: selectedDate, to_date: effTo, tab });
+      if (rowSearch.trim()) params.set("q", rowSearch.trim());
+      const res = await apiBinary(
+        `/admin/attendance/day-status/${selectedCompanyId}/export.xlsx?${params.toString()}`);
+      if (Platform.OS === "web" && res.webBlobUrl) {
+        const a = document.createElement("a");
+        a.href = res.webBlobUrl;
+        a.download = `Punch_Approvals_${tab}_${selectedDate}.xlsx`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 60000);
+      }
+    } catch (e: any) {
+      showAlert("Export failed", e?.message || "Could not export Excel");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // Save one Additional Duty row (extra time and/or ₹ amount).
   // Iter 340 (user request) — value is entered as TIME (H:MM); it can be
@@ -1105,6 +1130,25 @@ export default function PunchApprovalsScreen() {
               </>
             )}
           </Pressable>
+          {/* Iter 559 (user request) — Excel export of the current
+              source tab (same columns as the table, incl. Bio Code). */}
+          {(tab === "updated" || tab === "auto" || tab === "manual" || tab === "extra") && (
+            <Pressable
+              onPress={exportTabXlsx}
+              disabled={exporting}
+              style={[styles.showBtn, { backgroundColor: "#16A34A" }, exporting && { opacity: 0.6 }]}
+              testID="pa-export-xlsx"
+            >
+              {exporting ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="download-outline" size={14} color="#fff" />
+                  <Text style={styles.showBtnTxt}>Excel</Text>
+                </>
+              )}
+            </Pressable>
+          )}
         </View>
       </SafeAreaView>
 

@@ -5,13 +5,14 @@ approve-punch / auto-close (+loop helper) / open-shifts / roster (+mark),
 me/location-ping, manual punch create-edit-delete + audit, record admin
 and the admin attendance history endpoints."""
 import asyncio
+import io
 import os
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Body, Header, HTTPException, Query
+from fastapi import APIRouter, Body, Header, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from server import (  # noqa: E402
@@ -1355,6 +1356,99 @@ async def attendance_day_status(
                 "shift_end": _shift_end,
             })
     return {"rows": rows, "from_date": f, "to_date": t, "shifts": _shift_docs}
+
+
+@api.get("/admin/attendance/day-status/{company_id}/export.xlsx")
+async def attendance_day_status_export(
+    company_id: str,
+    from_date: str = Query(...),
+    to_date: Optional[str] = Query(None),
+    tab: str = Query("auto"),
+    q: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 559 (user request) — Excel export of the Punch Approvals
+    source tabs. Same columns as the on-screen table (incl. Bio Code) so
+    supervisors can circulate the correction list to site managers."""
+    data = await attendance_day_status(company_id, from_date, to_date,
+                                       authorization)
+    rows = data["rows"]
+    if tab == "updated":
+        rows = [r for r in rows if r.get("updated")]
+    elif tab in ("auto", "extra"):
+        rows = [r for r in rows if r.get("in") and r.get("out")]
+    elif tab == "manual":
+        rows = [r for r in rows if not r.get("in") or not r.get("out")
+                or bool(r.get("ot_in")) != bool(r.get("ot_out"))]
+    if q and q.strip():
+        needle = q.strip().lower()
+        rows = [r for r in rows if needle in " ".join(
+            str(r.get(k) or "").lower()
+            for k in ("name", "father_name", "designation",
+                      "employee_code", "bio_code"))]
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    comp = await db.companies.find_one(
+        {"company_id": company_id}, {"_id": 0, "name": 1})
+    label = {"updated": "Updated Punches", "auto": "Auto-Punches",
+             "manual": "Manual Entries", "extra": "Additional Duty"
+             }.get(tab, tab.title())
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Punch Approvals"
+    rng = data["from_date"] + (
+        f" to {data['to_date']}" if data["to_date"] != data["from_date"] else "")
+    ws.append([f"{(comp or {}).get('name') or ''} — Punch Approvals — "
+               f"{label} — {rng}"])
+    ws["A1"].font = Font(bold=True, size=13)
+    headers = ["Date", "Code", "Bio Code", "Name", "Father Name",
+               "Designation", "In Punch", "Out Punch", "Duty HRS",
+               "OT In", "OT Out", "OT HRS", "Total HRS"]
+    ws.append(headers)
+    for c in ws[2]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="2563EB")
+        c.alignment = Alignment(horizontal="center")
+
+    def _hm(cell) -> str:
+        return (cell or {}).get("hhmm") or "—"
+
+    def _pair_hrs(a, b) -> float:
+        try:
+            t0 = datetime.fromisoformat(str(a["at"]).replace("Z", "+00:00"))
+            t1 = datetime.fromisoformat(str(b["at"]).replace("Z", "+00:00"))
+            return max((t1 - t0).total_seconds(), 0.0) / 3600.0
+        except (KeyError, TypeError, ValueError):
+            return 0.0
+
+    def _fmt(h: float) -> str:
+        m = int(round(h * 60))
+        return f"{m // 60}:{m % 60:02d}" if m else "—"
+
+    for r in rows:
+        duty = _pair_hrs(r.get("in"), r.get("out")) \
+            if r.get("in") and r.get("out") else 0.0
+        ot = _pair_hrs(r.get("ot_in"), r.get("ot_out")) \
+            if r.get("ot_in") and r.get("ot_out") else 0.0
+        ws.append([r.get("date"), r.get("employee_code") or "—",
+                   r.get("bio_code") or "—", r.get("name") or "—",
+                   r.get("father_name") or "—", r.get("designation") or "—",
+                   _hm(r.get("in")), _hm(r.get("out")), _fmt(duty),
+                   _hm(r.get("ot_in")), _hm(r.get("ot_out")), _fmt(ot),
+                   _fmt(duty + ot)])
+    for i, w in enumerate([11, 8, 9, 26, 22, 18, 10, 10, 9, 9, 9, 8, 10], 1):
+        ws.column_dimensions[chr(64 + i)].width = w
+    ws.freeze_panes = "A3"
+    buf = io.BytesIO()
+    wb.save(buf)
+    return Response(
+        content=buf.getvalue(),
+        media_type=("application/vnd.openxmlformats-officedocument"
+                    ".spreadsheetml.sheet"),
+        headers={"Content-Disposition":
+                 f"attachment; filename=Punch_Approvals_{tab}_"
+                 f"{data['from_date']}.xlsx"})
 
 
 # ---------------------------------------------------------------------------
