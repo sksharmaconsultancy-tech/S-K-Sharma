@@ -113,6 +113,7 @@ async def list_pending_punches(
             "name": u.get("name"),
             "father_name": u.get("father_name"),
             "employee_code": u.get("employee_code"),
+            "bio_code": u.get("bio_code"),
             "designation": u.get("designation"),
             "profile_photo_base64": u.get("profile_photo_base64"),
         }

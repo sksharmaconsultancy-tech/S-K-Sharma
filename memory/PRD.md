@@ -5627,3 +5627,17 @@ HH:MM, calculations untouched). Tested: 11 conversion unit cases (incl.
 12h/24h rows, XLSX + PDF exports contain AM/PM, UI switch e2e via
 Playwright. APP_ITERATION=557, deploy_vps_iter557.sh (cumulative
 555+556+557 changelog), temp_bundle pointer → 557.
+
+## Iter 558 — Punch Approvals: column fix + Bio Code column (user requests)
+1. Name/Father Name/Designation were truncated ("ADITYA KUMAR CH…") —
+   widened 150/130/110 → 190/170/150 px + numberOfLines 1→2 in ALL 3
+   tables of punch-approvals.tsx (extra-duty, day-status tabs, status
+   tabs at ~1150/1360/1780).
+2. NEW "Bio Code" (w 64) column after Code in all 3 tables. Backend:
+   bio_code added to day-status rows (attendance_admin_core.py ~1168
+   projection + ~1348 row dict) and pending-punches employee embed
+   (attendance_self_service.py ~106/116). Frontend types EmployeeMini/
+   DayRow/grouped-rows + rowMatch search now includes bio_code.
+Verified: day-status API returns bio_code (124/127 rows), Playwright
+screenshot Auto-Punches table (Code 123 | Bio 4 | full names visible).
+APP_ITERATION=558, deploy_vps_iter558.sh (cumulative), pointer → 558.

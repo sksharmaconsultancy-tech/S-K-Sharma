@@ -30,6 +30,7 @@ type EmployeeMini = {
   name?: string;
   father_name?: string;
   employee_code?: string;
+  bio_code?: string;
   designation?: string;
   profile_photo_base64?: string | null;
 };
@@ -88,6 +89,7 @@ type DayRow = {
   father_name?: string | null;
   designation?: string | null;
   employee_code?: string | null;
+  bio_code?: string | null;
   in: DayCell;
   out: DayCell;
   // Iter 210 — second punch pair = OT window.
@@ -395,6 +397,7 @@ export default function PunchApprovalsScreen() {
     const rows = [] as {
       key: string; date: string;
       employee_code?: string | null;
+      bio_code?: string | null;
       name?: string | null; father_name?: string | null; designation?: string | null;
       in: string | null; out: string | null; ot_in: string | null; ot_out: string | null;
       duty_hours: number; ot_hours: number; total_hours: number;
@@ -425,6 +428,7 @@ export default function PunchApprovalsScreen() {
         key: k,
         date: (ps[0].at || "").slice(0, 10),
         employee_code: emp.employee_code,
+        bio_code: emp.bio_code,
         name: emp.name,
         father_name: emp.father_name,
         designation: emp.designation,
@@ -443,7 +447,7 @@ export default function PunchApprovalsScreen() {
     // punches that were only loaded for stitching), then apply the search.
     return rows
       .filter((r) => r.date >= selectedDate && r.date <= effTo)
-      .filter((r) => rowMatch(r.name, r.father_name, r.designation, r.employee_code));
+      .filter((r) => rowMatch(r.name, r.father_name, r.designation, r.employee_code, r.bio_code));
   }, [visibleRecords, records, tab, selectedDate, dateMode, toDate, rowMatch]);
 
   // Iter 94 — filter the day-status rows per source tab.
@@ -460,7 +464,7 @@ export default function PunchApprovalsScreen() {
     else if (tab === "extra") base = dayRows.filter((r) => !!r.in && !!r.out);
     // Iter 210 — apply the search box on every source-tab row.
     return base.filter((r) =>
-      rowMatch(r.name, r.father_name, r.designation, r.employee_code));
+      rowMatch(r.name, r.father_name, r.designation, r.employee_code, r.bio_code));
   }, [dayRows, tab, rowMatch]);
 
   // Save one Additional Duty row (extra time and/or ₹ amount).
@@ -1141,8 +1145,9 @@ export default function PunchApprovalsScreen() {
               <View style={upStyles.hdrRow}>
                 {[
                   { w: 54, txt: "Code" },
-                  { w: 150, txt: "Name" },
-                  { w: 110, txt: "Designation" },
+                  { w: 64, txt: "Bio Code" },
+                  { w: 190, txt: "Name" },
+                  { w: 150, txt: "Designation" },
                   { w: 86, txt: "In / Date" },
                   { w: 86, txt: "Out / Date" },
                   { w: 86, txt: "OT In / Date" },
@@ -1225,10 +1230,11 @@ export default function PunchApprovalsScreen() {
                   return (
                     <View key={r.key} style={[upStyles.row, i % 2 === 0 && upStyles.rowAlt]}>
                       <Text style={[upStyles.cell, { width: 54 }]}>{r.employee_code || "—"}</Text>
-                      <Text style={[upStyles.cell, { width: 150, fontWeight: "600" }]} numberOfLines={1}>
+                      <Text style={[upStyles.cell, { width: 64 }]}>{r.bio_code || "—"}</Text>
+                      <Text style={[upStyles.cell, { width: 190, fontWeight: "600" }]} numberOfLines={2}>
                         {r.name || "—"}
                       </Text>
-                      <Text style={[upStyles.cell, { width: 110 }]} numberOfLines={1}>
+                      <Text style={[upStyles.cell, { width: 150 }]} numberOfLines={2}>
                         {r.designation || "—"}
                       </Text>
                       {punchCell("in")}
@@ -1350,9 +1356,10 @@ export default function PunchApprovalsScreen() {
               <View style={upStyles.hdrRow}>
                 {[
                   { w: 54, txt: "Code" },
-                  { w: 150, txt: "Name" },
-                  { w: 130, txt: "Father Name" },
-                  { w: 110, txt: "Designation" },
+                  { w: 64, txt: "Bio Code" },
+                  { w: 190, txt: "Name" },
+                  { w: 170, txt: "Father Name" },
+                  { w: 150, txt: "Designation" },
                   { w: 86, txt: "In Punch / Date" },
                   { w: 86, txt: "Out Punch / Date" },
                   { w: 68, txt: "Duty HRS" },
@@ -1426,13 +1433,14 @@ export default function PunchApprovalsScreen() {
                   return (
                     <View key={r.key} style={[upStyles.row, i % 2 === 0 && upStyles.rowAlt]}>
                       <Text style={[upStyles.cell, { width: 54 }]}>{r.employee_code || "—"}</Text>
-                      <Text style={[upStyles.cell, { width: 150, fontWeight: "600" }]} numberOfLines={1}>
+                      <Text style={[upStyles.cell, { width: 64 }]}>{r.bio_code || "—"}</Text>
+                      <Text style={[upStyles.cell, { width: 190, fontWeight: "600" }]} numberOfLines={2}>
                         {r.name || "—"}
                       </Text>
-                      <Text style={[upStyles.cell, { width: 130 }]} numberOfLines={1}>
+                      <Text style={[upStyles.cell, { width: 170 }]} numberOfLines={2}>
                         {r.father_name || "—"}
                       </Text>
-                      <Text style={[upStyles.cell, { width: 110 }]} numberOfLines={1}>
+                      <Text style={[upStyles.cell, { width: 150 }]} numberOfLines={2}>
                         {r.designation || "—"}
                       </Text>
                       {(["in", "out"] as const).map((k) => {
@@ -1764,9 +1772,10 @@ export default function PunchApprovalsScreen() {
               <View style={upStyles.hdrRow}>
                 {[
                   { w: 54, txt: "Code" },
-                  { w: 150, txt: "Name" },
-                  { w: 130, txt: "Father Name" },
-                  { w: 110, txt: "Designation" },
+                  { w: 64, txt: "Bio Code" },
+                  { w: 190, txt: "Name" },
+                  { w: 170, txt: "Father Name" },
+                  { w: 150, txt: "Designation" },
                   { w: 86, txt: "In Punch / Date" },
                   { w: 86, txt: "Out Punch / Date" },
                   { w: 72, txt: "Duty HRS" },
@@ -1809,13 +1818,14 @@ export default function PunchApprovalsScreen() {
                 return (
                   <View key={r.key} style={[upStyles.row, i % 2 === 0 && upStyles.rowAlt]}>
                     <Text style={[upStyles.cell, { width: 54 }]}>{r.employee_code || "—"}</Text>
-                    <Text style={[upStyles.cell, { width: 150, fontWeight: "600" }]} numberOfLines={1}>
+                    <Text style={[upStyles.cell, { width: 64 }]}>{r.bio_code || "—"}</Text>
+                    <Text style={[upStyles.cell, { width: 190, fontWeight: "600" }]} numberOfLines={2}>
                       {r.name || "—"}
                     </Text>
-                    <Text style={[upStyles.cell, { width: 130 }]} numberOfLines={1}>
+                    <Text style={[upStyles.cell, { width: 170 }]} numberOfLines={2}>
                       {r.father_name || "—"}
                     </Text>
-                    <Text style={[upStyles.cell, { width: 110 }]} numberOfLines={1}>
+                    <Text style={[upStyles.cell, { width: 150 }]} numberOfLines={2}>
                       {r.designation || "—"}
                     </Text>
                     {punchCell(r.in, "in")}

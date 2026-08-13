@@ -1166,7 +1166,7 @@ async def attendance_day_status(
         {"company_id": company_id, "role": "employee",
          "disabled": {"$ne": True}, "exit_date": None},
         {"_id": 0, "user_id": 1, "name": 1, "father_name": 1,
-         "designation": 1, "employee_code": 1,
+         "designation": 1, "employee_code": 1, "bio_code": 1,
          "shift_start": 1, "shift_end": 1, "attendance_policy_override": 1},
     ).to_list(2000)
     # Iter 95g — resolve each employee's shift times (Shift Master override
@@ -1345,6 +1345,7 @@ async def attendance_day_status(
                 "father_name": e.get("father_name"),
                 "designation": e.get("designation"),
                 "employee_code": e.get("employee_code"),
+                "bio_code": e.get("bio_code"),
                 "in": _cell(first_in),
                 "out": _cell(out_rec),
                 "ot_in": _cell(pr.get("ot_in")),
