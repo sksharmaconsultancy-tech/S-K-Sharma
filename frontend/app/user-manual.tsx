@@ -43,7 +43,7 @@ export default function UserManualScreen() {
   if (loading) return null;
   if (!user || user.role !== "super_admin") return <Redirect href="/" />;
 
-  const download = async (kind: "user-manual" | "employee-guide" = "user-manual") => {
+  const download = async (kind: "user-manual" | "employee-guide" | "features-list" = "user-manual") => {
     setBusy(true);
     setErr("");
     try {
@@ -86,6 +86,13 @@ export default function UserManualScreen() {
             testID="employee-guide-download">
             <Ionicons name="phone-portrait-outline" size={16} color="#fff" />
             <Text style={s.btnTxt}>Employee Quick Guide (PDF)</Text>
+          </Pressable>
+          {/* Iter 551 — separate Features List PDF */}
+          <Pressable style={[s.btn, { backgroundColor: "#B45309", marginTop: 10 }]}
+            onPress={() => download("features-list")} disabled={busy}
+            testID="features-list-download">
+            <Ionicons name="list-outline" size={16} color="#fff" />
+            <Text style={s.btnTxt}>Software Features List (PDF)</Text>
           </Pressable>
           {/* Iter 531 — auto-update status */}
           {status ? (

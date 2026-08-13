@@ -5531,3 +5531,23 @@ Verified via pypdf unit test both branches. Also this session: verified
 548 6-line cell LIVE on smartpayrolling.com via prod screenshot (token
 login). VPS was on 549 at last check. APP_ITERATION=550,
 deploy_vps_iter550.sh, pointer updated.
+
+## Iter 551 — Form 16 Module Phase 1 + Features List PDF (user spec)
+User choices: new regime default, TDS from monthly salary-run rows (tds
+field), Phase 1 approved. Backend routes/form16.py: tax-config master
+(form16_tax_config, default new-regime slabs FY25-26, std ded 75000,
+rebate 87A ≤12L max 60k, cess 4%), _fy_payroll consolidates Apr→Mar from
+compliance_salary_runs (fallback salary_runs) rows (total_gross, tds,
+epf), readiness (PAN critical/TAN warn/no-payroll critical), generate
+with per-employee extras {other_income[], deductions[]}, versioned
+form16_records + form16_audit, statutory A4 PDF (Part A monthly summary
++ Part B computation), bulk.zip. Frontend app/form16.tsx (dashboard
+cards, FY chips, readiness list, extras modal, apiBinary downloads).
+Menu: Payroll → Salary Process → "TDS · Form 16" (both menus).
+routes/features_pdf.py renders USER_MANUAL_FEATURES.md → landscape A4
+PDF; button on user-manual screen ("features-list" kind).
+Verified: tax math (13L→66,300 liability; 11L→rebate zero tax), PDF/ZIP/
+features PDF 200 via API. Phase 2 pending: reconciliation, TRACES Part A
+lock, ESS Form 16, email, charts. APP_ITERATION=551,
+deploy_vps_iter551.sh, pointer updated. GitHub pushed through Iter 550
+earlier (user token — advised revoke).

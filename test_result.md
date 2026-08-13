@@ -464,3 +464,10 @@ ITER 487 (doc-expiry alerts):
 - IN/OUT grid cell + OT line merge (frontend only, mirrors working
   inout_salary pattern). Lint clean. Not screenshot-verified locally
   (no OT seed data in dev); user verifies on VPS after deploy.
+
+## Iter 551
+- Form 16 Phase 1: API-tested tax-config/employees/generate/pdf/zip +
+  features-list.pdf (all 200). Part B math unit-verified. Local salary
+  data is all-zero (test DB) so gross totals show 0 locally — real
+  totals verified conceptually; user validates on VPS. Frontend lint
+  clean; smoke screenshot pending.
