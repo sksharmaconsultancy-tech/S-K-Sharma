@@ -5671,3 +5671,31 @@ Tested with the real sheet: 891 punch rows / 96 employees / 0 errors /
 2190 blank days; preview endpoint e2e OK (unmatched locally — client's
 codes live on VPS firm). APP_ITERATION=560, deploy_vps_iter560.sh,
 pointer → 560.
+
+## Iter 561 — Secure Punching Data Push API (user's full B2B spec)
+Backend routes/punch_push_api.py:
+- POST /api/v1/punching (vendor): HTTPS check (x-forwarded-proto), IP
+  whitelist, Bearer api_key (sha256 hash stored), HMAC-SHA256 signature
+  (client_id\nts\nreq_id\nsha256(body)), ±300s ts window, unique
+  X-Request-ID (api_request_ids TTL 24h), per-client rate limit
+  (in-memory, req/min), body size limit, batch limit, strict validation
+  (YYYY-MM-DD/HH:mm:ss/IN|OUT), company_code must match client, machine
+  whitelist, employee match by employee_code/bio_code, DUP protection
+  via api_punch_txns unique idx (company+machine+txn_id), punches →
+  attendance (source=vendor_api, status=approved, api metadata), audit
+  → api_request_logs. Error codes per spec (401/403/400/422/429/413).
+- Admin (super only): /api/admin/punch-api/clients CRUD + /rotate
+  (key|secret|both, shown once) + /logs (filters) + /docs (vendor md).
+Frontend app/punching-api.tsx (NOTE: route MUST NOT start with /api —
+/api-integration collided with ingress /api/* rule → renamed):
+Clients tab (cards + actions incl. block/rotate/IPs), Logs tab with
+filters, credentials-shown-once modal, Copy Vendor Docs. Menu:
+Administration → API Integration (super only, hidden for sub-admins).
+TESTED: /app/test_punch_api_561.py — 21/21 pass (valid push, dup, replay
+, bad HMAC, stale ts, wrong key, 4 field validations, machine/company
+mismatch, batch limit, IP block, client block, key rotation, storage,
+logs, docs, delete). UI screenshot OK.
+APP_ITERATION=561, deploy_vps_iter561.sh, pointer → 561.
+NOTE for VPS: WAF/DDoS/port-firewall is infra-level (nginx/ufw) — the
+app enforces everything application-level; UAT = create a client with
+environment=uat (separate creds/IPs; separate domain optional).

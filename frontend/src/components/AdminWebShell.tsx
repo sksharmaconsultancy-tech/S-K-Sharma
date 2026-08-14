@@ -301,6 +301,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/users-log-report", label: "User Log Report", icon: "document-text-outline" },
       { route: "/rectified-punches", label: "Rectified Punch Audit", icon: "shield-checkmark-outline" },
       { route: "/super-admin-access", label: "Super Admin Rights", icon: "star-outline" },
+      { route: "/punching-api", label: "API Integration", icon: "cloud-upload-outline" },
       { route: "/proposals", label: "Sales \u00b7 Proposals", icon: "document-text-outline" },
       { route: "/appearance", label: "Appearance / Theme", icon: "color-palette-outline" },
       { route: "/user-manual", label: "User Manual (PDF)", icon: "book-outline" },
@@ -848,6 +849,7 @@ export default function AdminWebShell({ children }: Props) {
         if (r === "/sub-admins") return false;
         if (r === "/employer-access-rights") return false;
         if (r === "/super-admin-access") return false;
+        if (r === "/punching-api") return false;
         // Iter 212 — user directive: Sub Super Admins get ALL features.
         // (Previously-hidden entries below are now allowed; per-button
         // menu_rights set by the super admin still apply above.)
