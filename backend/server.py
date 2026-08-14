@@ -3214,6 +3214,10 @@ async def _create_core_indexes():
     await db.trusted_devices.create_index([("user_id", 1), ("token_hash", 1)])
     # Iter 570 — security alerts (new-IP detection)
     await db.login_ips.create_index([("user_id", 1), ("ip", 1)], unique=True)
+    # Iter 576 — MSG91 SMS logs (rate-limit lookups)
+    await db.sms_log.create_index([("at_dt", -1)])
+    await db.sms_log.create_index("mobile")
+    await db.sms_log.create_index("company_id")
     await db.attendance.create_index([("user_id", 1), ("date", -1)])
     await db.leaves.create_index("user_id")
     await db.payslips.create_index([("employee_user_id", 1), ("month", -1)])
@@ -5306,6 +5310,15 @@ async def _twofa_send_code(user: dict, method: str, code: str, st: dict) -> dict
         except Exception as exc:  # noqa: BLE001
             return {"delivered": False, "error": f"whatsapp_error: {exc}"}
     if method == "sms":
+        # Iter 576 — MSG91 first (company-wise SMS Settings), then legacy
+        # providers from Security 2FA settings.
+        try:
+            from shared.sms_service import send_otp_sms, get_sms_settings
+            m91 = await get_sms_settings(db, user.get("company_id"))
+            if m91["enabled"] and m91["otp_enabled"]:
+                return await send_otp_sms(db, user, code, minutes)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[2FA msg91 FAIL] {exc}")
         if not _twofa_channel_ready("sms", st):
             return {"delivered": False, "error": "sms_not_configured"}
         sc = st["sms_config"]
@@ -5461,6 +5474,22 @@ async def _security_check_new_ip(user: dict, request: Request):
         logger.warning("[security-alert] new-ip check failed", exc_info=True)
 
 
+async def _twofa_methods_async(user: dict, st: dict) -> list:
+    """Methods list + MSG91 override: SMS shows 'configured' when the firm's
+    MSG91 OTP channel (SMS Settings) is enabled, even without legacy config."""
+    methods = _twofa_methods_for_user(user, st)
+    try:
+        from shared.sms_service import get_sms_settings as _g91
+        m91 = await _g91(db, user.get("company_id"))
+        if m91["enabled"] and m91["otp_enabled"] and m91["authkey"]:
+            for m in methods:
+                if m["method"] == "sms":
+                    m["configured"] = True
+    except Exception:
+        pass
+    return methods
+
+
 async def _start_2fa_challenge(user: dict, request: Request, login_kind: str):
     """Called AFTER credentials verified. Returns the challenge response
     dict when 2FA is required, or None when login can proceed normally."""
@@ -5493,7 +5522,7 @@ async def _start_2fa_challenge(user: dict, request: Request, login_kind: str):
                                    f"device={td.get('device_name') or ''}")
                 await _security_check_new_ip(user, request)
                 return None
-    methods = _twofa_methods_for_user(user, st)
+    methods = await _twofa_methods_async(user, st)
     configured = [m for m in methods if m["configured"]]
     preferred = user.get("twofa_method") or "email"
     method = next((m["method"] for m in configured if m["method"] == preferred),
@@ -9957,7 +9986,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "575"
+APP_ITERATION = "576"
 
 
 @api.get("/version")
@@ -12674,6 +12703,9 @@ app.include_router(gps_diagnostics_router)
 # Iter 569 — 2FA/MFA for Super/Sub admin logins.
 from routes.twofa import router as twofa_router  # noqa: E402
 app.include_router(twofa_router)
+# Iter 576 — MSG91 SMS notifications (Phase 1).
+from routes.sms_notifications import router as sms_notifications_router  # noqa: E402
+app.include_router(sms_notifications_router)
 # Iter 409 — Actual (legacy) Salary Runs extracted to routes/salary_runs.py.
 # _payslip_rows_for_month is imported back because the WhatsApp engine
 # accesses it as a server attribute (srv._payslip_rows_for_month).

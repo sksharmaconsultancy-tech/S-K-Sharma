@@ -574,3 +574,19 @@ ITER 487 (doc-expiry alerts):
   smtp.gmail.com (+username auto-filled); other emails → 400 friendly
   error. Host label clarified in email-settings.tsx. User's "Name or
   service not known" error was host=their email address.
+
+## Iter 576 (backend verified by main agent — 11/12 first run; failing case re-verified OK on focused retest)
+- MSG91 Phase 1: shared/msg91.py provider (flow v5, normalize/mask),
+  shared/sms_service.py (company-wise sms_settings resolve global→firm,
+  rate limits 3/10min-user 5/hr-mobile 10/min-user, sms_log + activity_log
+  Messaging events, never raises), routes/sms_notifications.py
+  (GET/PUT sms-settings w/ masked authkey + masked resubmit keep,
+  test SMS, sms-logs masked mobiles firm-scoped, otp-logs).
+  2FA sms channel: MSG91 first (send_otp_sms) then legacy providers;
+  _twofa_methods_async marks sms configured when MSG91 OTP on.
+  Frontend sms-settings.tsx + AdminWebShell menu "SMS (MSG91)".
+- Verified: settings roundtrip, secret masking, graceful MSG91 error
+  ("invalid flow ID" with fake creds → FAILED log), users-log SMS_ event,
+  sms method configured flag in 2FA challenge.
+- Pending Phase 2: template master + event SMS; Phase 3: dashboard/usage.
+- User will add real MSG91 creds + DLT ids later via the settings UI.

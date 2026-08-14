@@ -5842,3 +5842,15 @@ stored; failed actions logged; firm isolation enforced server-side.
 - PENDING (user side): WhatsApp Meta credentials, SMS provider creds,
   SMTP config for expiring documents. Future: AI WhatsApp chatbot,
   multi-language EN/HI.
+
+## MSG91 SMS & OTP (June 2026) — PHASED
+- Phase 1 SHIPPED (Iter 576): MSG91Provider (shared/msg91.py), sms_service
+  (company-wise settings, rate limits, sms_log, Users Log events),
+  routes/sms_notifications.py, SMS (MSG91) settings UI, 2FA OTP-by-SMS via
+  MSG91, Send Test SMS. Credentials/DLT ids to be added by user in UI.
+- Phase 2 TODO: SMS Template Master (DLT mapping, variables), event
+  notifications (SALARY_PROCESSED, MISSING_PUNCH, LEAVE_APPROVED/REJECTED,
+  ONBOARDING, PAYROLL_APPROVED, COMPLIANCE_REMINDER) fire-and-forget from
+  existing modules (never block payroll).
+- Phase 3 TODO: SMS dashboard (counts/charts/filters), usage & cost report,
+  MSG91 delivery webhook (/api/webhooks/msg91) to update sms_log status.

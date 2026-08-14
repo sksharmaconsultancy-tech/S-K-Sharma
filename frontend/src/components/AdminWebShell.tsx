@@ -279,6 +279,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/portal-automation", label: "WhatsApp Linking", icon: "logo-whatsapp" },
       { route: "/attendance-email", label: "Email Automation", icon: "mail-outline" },
       { route: "/email-settings", label: "Email SMTP & Notifications", icon: "mail-unread-outline" },
+      { route: "/sms-settings", label: "SMS (MSG91)", icon: "chatbox-ellipses-outline" },
     ],
   },
   {

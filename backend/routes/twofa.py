@@ -24,9 +24,9 @@ from pydantic import BaseModel
 from server import (  # noqa: E402
     db, get_user_from_token, require_role, now_iso, logger,
     _hash_otp, _issue_session, _enrich_user_with_company,
-    _twofa_settings, _twofa_methods_for_user, _twofa_send_code,
-    _twofa_audit, _twofa_new_code, _mask_email, _mask_mobile,
-    _req_ip, OTP_DEV_MODE,
+    _twofa_settings, _twofa_methods_for_user, _twofa_methods_async,
+    _twofa_send_code, _twofa_audit, _twofa_new_code, _mask_email,
+    _mask_mobile, _req_ip, OTP_DEV_MODE,
     _send_security_alert, _security_check_new_ip,
 )
 import secrets as _secrets
@@ -183,7 +183,7 @@ async def twofa_resend(payload: ResendReq, request: Request):
         raise HTTPException(status_code=429, detail=f"Please wait {wait}s before requesting another OTP.")
 
     method = (payload.method or row.get("method") or "email").lower()
-    methods = _twofa_methods_for_user(user, st)
+    methods = await _twofa_methods_async(user, st)
     m = next((x for x in methods if x["method"] == method), None)
     if not m:
         raise HTTPException(status_code=400, detail="This verification method is not available for your account.")
@@ -243,7 +243,7 @@ async def my_security(authorization: Optional[str] = Header(None)):
         "preferred_method": user.get("twofa_method") or "email",
         "masked_email": _mask_email(user.get("email") or ""),
         "masked_mobile": _mask_mobile(user.get("phone") or ""),
-        "methods": _twofa_methods_for_user(user, st),
+        "methods": await _twofa_methods_async(user, st),
         "last_verified_at": user.get("twofa_last_verified_at"),
         "active_sessions": sessions,
         "trusted_devices": devices,
