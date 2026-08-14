@@ -590,3 +590,6 @@ ITER 487 (doc-expiry alerts):
   sms method configured flag in 2FA challenge.
 - Pending Phase 2: template master + event SMS; Phase 3: dashboard/usage.
 - User will add real MSG91 creds + DLT ids later via the settings UI.
+
+
+## Iter 577 — OTP email rebrand: subject/heading 'Your Smart Payroll Login Code', signature 'From S.K. Sharma & Co / Your Trusted Compliance Partner' (Resend + SMTP paths). Live send verified.

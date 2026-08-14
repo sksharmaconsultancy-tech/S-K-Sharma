@@ -4557,14 +4557,15 @@ async def _send_otp_email(to_email: str, code: str, minutes: int = OTP_TTL_MINUT
     # Iter 571 — IST send-time in the mail so the user can spot the LATEST
     # email when several login attempts each produced a code.
     ist = (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).strftime("%d-%m-%Y %I:%M:%S %p")
-    subject = f"Your S.K. Sharma & Co. login code: {code}"
+    subject = f"Your Smart Payroll Login Code: {code}"
     text = (
-        f"Your S.K. Sharma & Co. login code is: {code}\n"
+        f"Your Smart Payroll Login Code is: {code}\n"
         f"Sent at: {ist} (IST)\n\n"
         f"This code is valid for {minutes} minutes and can only be used once.\n"
         "Always use the code from the NEWEST email — older codes are cancelled.\n"
         "If you didn't request this, you can safely ignore this email.\n\n"
-        "— S.K. Sharma & Co."
+        "From S.K. Sharma & Co\n"
+        "Your Trusted Compliance Partner"
     )
     # Big, easy-to-copy code with brand colours
     boxes = "".join(
@@ -4580,11 +4581,11 @@ async def _send_otp_email(to_email: str, code: str, minutes: int = OTP_TTL_MINUT
     <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #E5E5E0;">
       <div style="background:#1B3A6E;color:#fff;padding:18px 24px;">
         <div style="font-size:12px;letter-spacing:1.5px;color:#E39A2A;font-weight:700;">S.K. SHARMA &amp; CO.</div>
-        <div style="font-size:20px;font-weight:700;margin-top:2px;">Your login code</div>
+        <div style="font-size:20px;font-weight:700;margin-top:2px;">Your Smart Payroll Login Code</div>
       </div>
       <div style="padding:24px;">
         <p style="margin:0 0 16px 0;color:#333;font-size:14px;line-height:20px;">
-          Use the code below to sign in to the S.K. Sharma & Co. app. It expires in
+          Use the code below to sign in to the Smart Payroll portal. It expires in
           <strong>{minutes} minutes</strong>. Sent at <strong>{ist} IST</strong> —
           always use the code from the <strong>newest</strong> email.
         </p>
@@ -4593,8 +4594,9 @@ async def _send_otp_email(to_email: str, code: str, minutes: int = OTP_TTL_MINUT
           Didn&apos;t request this? You can safely ignore this email — no one can access your account without this code.
         </p>
       </div>
-      <div style="background:#F7F7F5;padding:12px 24px;color:#999;font-size:12px;">
-        This is an automated email from the S.K. Sharma & Co. app.
+      <div style="background:#F7F7F5;padding:12px 24px;color:#666;font-size:12px;line-height:18px;">
+        <strong>From S.K. Sharma &amp; Co</strong><br/>
+        Your Trusted Compliance Partner
       </div>
     </div>
   </body>
@@ -5242,11 +5244,13 @@ async def _twofa_send_code(user: dict, method: str, code: str, st: dict) -> dict
                     ist = (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).strftime("%d-%m-%Y %I:%M:%S %p")
                     await _smtp_send(
                         smtp, user["email"],
-                        f"Your S.K. Sharma & Co. login code: {code}",
-                        (f"Your S.K. Sharma & Co. login code is: {code}\n"
+                        f"Your Smart Payroll Login Code: {code}",
+                        (f"Your Smart Payroll Login Code is: {code}\n"
                          f"Sent at: {ist} (IST)\n\n"
                          f"This code is valid for {minutes} minutes and can only be used once.\n"
-                         "Always use the code from the NEWEST email — older codes are cancelled."))
+                         "Always use the code from the NEWEST email — older codes are cancelled.\n\n"
+                         "From S.K. Sharma & Co\n"
+                         "Your Trusted Compliance Partner"))
                     return True
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"[2FA smtp FAIL] {exc}")
@@ -9986,7 +9990,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "576"
+APP_ITERATION = "577"
 
 
 @api.get("/version")
