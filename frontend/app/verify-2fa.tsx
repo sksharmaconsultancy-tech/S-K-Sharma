@@ -111,9 +111,11 @@ export default function Verify2FAScreen() {
       setCooldown(Number(r.resend_cooldown || 30));
       setExpiresIn(Number(r.otp_expires_in || 300));
       setOtp("");
-      setInfo(r.delivered
-        ? `A new OTP was sent via ${METHOD_LABEL[r.method] || r.method}.`
-        : "We could not send the OTP using this method. Please try another verification method.");
+      if (r.delivered) {
+        setInfo(`A new OTP was sent via ${METHOD_LABEL[r.method] || r.method}.`);
+      } else {
+        setError("We could not send the OTP using this method. Please try another verification method.");
+      }
     } catch (e: any) {
       setError(e?.message || "Could not resend OTP");
     } finally {

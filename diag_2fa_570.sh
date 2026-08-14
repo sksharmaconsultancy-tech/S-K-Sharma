@@ -44,6 +44,33 @@ EOF
   exit 0
 fi
 
+if [ "$1" = "fix" ]; then
+  echo "══════════ OTP EMAIL ENV AUTO-REPAIR ══════════"
+  if grep -q "^OTP_EMAIL_ENABLED=false" $ENV_FILE; then
+    sed -i 's/^OTP_EMAIL_ENABLED=.*/OTP_EMAIL_ENABLED=true/' $ENV_FILE
+    echo "OTP_EMAIL_ENABLED false → true ✓"
+  fi
+  grep -q "^OTP_EMAIL_ENABLED=" $ENV_FILE || echo "OTP_EMAIL_ENABLED=true" >> $ENV_FILE
+  if ! grep -q "^RESEND_API_KEY=re_" $ENV_FILE; then
+    echo "RESEND_API_KEY=re_TVV9ccdZ_NiFrGwZzGjVTiKLEYSskpGqB" >> $ENV_FILE
+    echo "RESEND_API_KEY added ✓"
+  fi
+  $PY - <<'PYEOF'
+import os, sys
+sys.path.insert(0, "/home/sksharma/app/backend")
+from dotenv import load_dotenv
+load_dotenv("/home/sksharma/app/backend/.env")
+from pymongo import MongoClient
+db = MongoClient(os.environ["MONGO_URL"])[os.environ.get("DB_NAME", "labourlaw")]
+db.security_settings.update_one({"key": "2fa"}, {"$set": {"email_enabled": True}}, upsert=True)
+print("Security settings: Email OTP channel forced ON ✓")
+PYEOF
+  echo "Restarting backend..."
+  sudo supervisorctl restart sksharma-backend 2>/dev/null || sudo systemctl restart sksharma-backend 2>/dev/null
+  echo "Done — try logging in again. Then run: bash diag2fa.sh   (to confirm delivery)"
+  exit 0
+fi
+
 echo "══════════ 2FA OTP EMAIL DIAGNOSTIC ══════════"
 
 echo "==> 1/5 Backend .env email configuration:"
@@ -94,6 +121,20 @@ if r.status_code < 300:
 else:
     print("   ❌ Resend rejected it — the error above is the root cause.")
 EOF
+
+echo "==> 3b/5 2FA security settings in DB (email channel must be ON):"
+$PY - <<'PYEOF'
+import os, sys
+sys.path.insert(0, "/home/sksharma/app/backend")
+from dotenv import load_dotenv
+load_dotenv("/home/sksharma/app/backend/.env")
+from pymongo import MongoClient
+db = MongoClient(os.environ["MONGO_URL"])[os.environ.get("DB_NAME", "labourlaw")]
+st = db.security_settings.find_one({"key": "2fa"}) or {}
+em = st.get("email_enabled", True)
+print(f"   email_enabled: {em} {'✓' if em else '❌ ← THIS BLOCKS OTP EMAILS! run: bash diag2fa.sh fix'}")
+print(f"   otp_validity_min: {st.get('otp_validity_min', 2)}  resend_cooldown_sec: {st.get('resend_cooldown_sec', 120)}")
+PYEOF
 
 echo "==> 4/5 Pending 2FA challenges in DB (should clear after each login):"
 $PY - <<'EOF'

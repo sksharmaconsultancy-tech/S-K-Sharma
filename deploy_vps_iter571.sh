@@ -105,6 +105,18 @@ cp $APP_DIR/frontend/.env /tmp/frontend.env.bak 2>/dev/null || true
 tar -xf /tmp/sks-latest.tar -C $APP_DIR || { echo "❌ Extract failed (disk full?) — aborting."; exit 1; }
 cp /tmp/backend.env.bak $APP_DIR/backend/.env
 cp /tmp/frontend.env.bak $APP_DIR/frontend/.env 2>/dev/null || true
+# Iter 571b — OTP EMAIL ENV REPAIR (fixes "We could not send the OTP"):
+if grep -q "^OTP_EMAIL_ENABLED=false" $APP_DIR/backend/.env; then
+  sed -i 's/^OTP_EMAIL_ENABLED=.*/OTP_EMAIL_ENABLED=true/' $APP_DIR/backend/.env
+  echo "   OTP_EMAIL_ENABLED was FALSE → set to true ✓"
+fi
+if ! grep -q "^OTP_EMAIL_ENABLED=" $APP_DIR/backend/.env; then
+  echo "OTP_EMAIL_ENABLED=true" >> $APP_DIR/backend/.env
+fi
+if ! grep -q "^RESEND_API_KEY=re_" $APP_DIR/backend/.env; then
+  echo "RESEND_API_KEY=re_TVV9ccdZ_NiFrGwZzGjVTiKLEYSskpGqB" >> $APP_DIR/backend/.env
+  echo "   RESEND_API_KEY was MISSING → added ✓"
+fi
 if ! grep -q "^EMERGENT_LLM_KEY=" $APP_DIR/backend/.env; then
   echo "EMERGENT_LLM_KEY=sk-emergent-6A80335Da3e07B3C5D" >> $APP_DIR/backend/.env
 fi
