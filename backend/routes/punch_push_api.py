@@ -533,6 +533,98 @@ async def api_logs(company_code: Optional[str] = Query(None),
     return {"logs": docs}
 
 
+@router.post("/api/admin/punch-api/clients/{client_id}/test-console")
+async def test_console(client_id: str, payload: Dict[str, Any] = Body(...),
+                       authorization: Optional[str] = Header(None)):
+    """Iter 562 (user-accepted improvement) — generate a READY-SIGNED
+    sample request (curl + Python) with the client's real credentials,
+    and optionally fire it live against /api/v1/punching (send_now)."""
+    await _admin(authorization)
+    c = await db.api_clients.find_one({"client_id": client_id})
+    if not c:
+        raise HTTPException(status_code=404, detail="API client not found")
+    api_key = str(payload.get("api_key") or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=400,
+                            detail="Paste the client's API Key (you saved it at generation)")
+    if _sha256(api_key) != c.get("api_key_hash"):
+        raise HTTPException(status_code=400,
+                            detail="This API Key does not match the client (was it rotated?)")
+    import json as json_mod
+    body = {
+        "company_code": c["company_code"],
+        "machine_code": str(payload.get("machine_code") or
+                            (c.get("machine_codes") or ["BIO001"])[0]),
+        "punches": [{
+            "employee_code": str(payload.get("employee_code") or "EMP001"),
+            "employee_name": str(payload.get("employee_name") or "Test Employee"),
+            "punch_date": str(payload.get("punch_date") or
+                              datetime.now(timezone.utc).date().isoformat()),
+            "punch_time": str(payload.get("punch_time") or "09:05:22"),
+            "punch_type": str(payload.get("punch_type") or "IN").upper(),
+            "machine_transaction_id": str(payload.get("machine_transaction_id")
+                                          or f"TXN{int(time_mod.time())}"),
+        }],
+    }
+    raw = json_mod.dumps(body, separators=(",", ":")).encode()
+    ts = str(int(time_mod.time()))
+    rid = f"REQ-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{pysecrets.token_hex(3).upper()}"
+    msg = f"{client_id}\n{ts}\n{rid}\n{hashlib.sha256(raw).hexdigest()}"
+    sig = hmac_mod.new(str(c.get("secret_key") or "").encode(), msg.encode(),
+                       hashlib.sha256).hexdigest()
+    url = str(payload.get("base_url") or "https://<your-domain>") + "/api/v1/punching"
+    body_str = raw.decode()
+    curl = (f"curl -X POST '{url}' \\\n"
+            f"  -H 'Content-Type: application/json' \\\n"
+            f"  -H 'Authorization: Bearer {api_key}' \\\n"
+            f"  -H 'X-Client-ID: {client_id}' \\\n"
+            f"  -H 'X-Timestamp: {ts}' \\\n"
+            f"  -H 'X-Request-ID: {rid}' \\\n"
+            f"  -H 'X-Signature: {sig}' \\\n"
+            f"  -d '{body_str}'")
+    python_code = f'''import hashlib, hmac, json, time, uuid, requests
+
+CLIENT_ID = "{client_id}"
+API_KEY = "{api_key}"
+SECRET_KEY = "<your secret key>"
+URL = "{url}"
+
+body = {json_mod.dumps(body, indent=2)}
+raw = json.dumps(body, separators=(",", ":")).encode()
+ts = str(int(time.time()))
+rid = f"REQ-{{uuid.uuid4().hex[:12].upper()}}"
+msg = f"{{CLIENT_ID}}\\n{{ts}}\\n{{rid}}\\n{{hashlib.sha256(raw).hexdigest()}}"
+sig = hmac.new(SECRET_KEY.encode(), msg.encode(), hashlib.sha256).hexdigest()
+r = requests.post(URL, data=raw, headers={{
+    "Content-Type": "application/json",
+    "Authorization": f"Bearer {{API_KEY}}",
+    "X-Client-ID": CLIENT_ID, "X-Timestamp": ts,
+    "X-Request-ID": rid, "X-Signature": sig}})
+print(r.status_code, r.json())'''
+    out: Dict[str, Any] = {
+        "ok": True, "curl": curl, "python": python_code,
+        "note": ("The signed curl is valid for ±5 minutes only "
+                 "(timestamp window). The Python snippet signs fresh "
+                 "requests — insert the Secret Key you saved."),
+    }
+    if payload.get("send_now"):
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=30) as cli:
+                r = await cli.post(
+                    "http://localhost:8001/api/v1/punching", content=raw,
+                    headers={"Content-Type": "application/json",
+                             "Authorization": f"Bearer {api_key}",
+                             "X-Client-ID": client_id, "X-Timestamp": ts,
+                             "X-Request-ID": rid, "X-Signature": sig})
+                out["live_status"] = r.status_code
+                out["live_response"] = r.json()
+        except Exception as e:
+            out["live_status"] = 0
+            out["live_response"] = {"error": str(e)}
+    return out
+
+
 @router.get("/api/admin/punch-api/docs")
 async def vendor_docs(authorization: Optional[str] = Header(None)):
     """Vendor integration document (markdown) — share with the client."""

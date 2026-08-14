@@ -81,6 +81,13 @@ export default function ApiIntegrationScreen() {
   // credentials shown ONCE
   const [creds, setCreds] = useState<{ client_id: string; api_key?: string; secret_key?: string } | null>(null);
 
+  // Iter 562 — Test Console
+  const [tcClient, setTcClient] = useState<Client | null>(null);
+  const [tcKey, setTcKey] = useState("");
+  const [tcEmp, setTcEmp] = useState("");
+  const [tcOut, setTcOut] = useState<{ curl?: string; python?: string; note?: string; live_status?: number; live_response?: any } | null>(null);
+  const [tcBusy, setTcBusy] = useState(false);
+
   // log filters
   const [lgStatus, setLgStatus] = useState("");
   const [lgClient, setLgClient] = useState("");
@@ -217,6 +224,27 @@ export default function ApiIntegrationScreen() {
     }
   };
 
+  // Iter 562 — generate a signed sample request / fire a live test.
+  const runTestConsole = async (sendNow: boolean) => {
+    if (!tcClient || tcBusy) return;
+    if (!tcKey.trim()) { showMsg("Paste the client's API Key first"); return; }
+    setTcBusy(true);
+    try {
+      const r = await api<any>(`/admin/punch-api/clients/${tcClient.client_id}/test-console`, {
+        method: "POST",
+        body: {
+          api_key: tcKey.trim(),
+          employee_code: tcEmp.trim() || undefined,
+          base_url: Platform.OS === "web" ? globalThis.location?.origin : undefined,
+          send_now: sendNow,
+        },
+      });
+      setTcOut(r);
+    } catch (e: any) {
+      showMsg(e?.message || "Test console failed");
+    } finally { setTcBusy(false); }
+  };
+
   if (authLoading) {
     return <View style={st.root}><View style={st.center}><ActivityIndicator color={colors.brandPrimary} /></View></View>;
   }
@@ -322,6 +350,10 @@ export default function ApiIntegrationScreen() {
                     <Pressable onPress={() => patchFlag(c, { blocked: !c.blocked })} style={st.actBtn}>
                       <Ionicons name={c.blocked ? "shield-checkmark-outline" : "ban-outline"} size={13} color="#DC2626" />
                       <Text style={[st.actTxt, { color: "#DC2626" }]}>{c.blocked ? "Unblock" : "Block"}</Text>
+                    </Pressable>
+                    <Pressable onPress={() => { setTcClient(c); setTcKey(""); setTcEmp(""); setTcOut(null); }} style={st.actBtn} testID={`api-test-${c.client_id}`}>
+                      <Ionicons name="flask-outline" size={13} color="#7C3AED" />
+                      <Text style={[st.actTxt, { color: "#7C3AED" }]}>Test Console</Text>
                     </Pressable>
                     <Pressable onPress={() => { setTab("logs"); setLgClient(c.client_id); }} style={st.actBtn}>
                       <Ionicons name="list-outline" size={13} color={colors.onSurfaceSecondary} />
@@ -444,6 +476,75 @@ export default function ApiIntegrationScreen() {
                 <Pressable onPress={save} style={[st.mBtn, st.mBtnPrimary]} testID="api-f-save">
                   {busy ? <ActivityIndicator size="small" color="#fff" /> :
                     <Text style={st.mBtnPrimaryTxt}>{editing ? "Save changes" : "Create + Generate Credentials"}</Text>}
+                </Pressable>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Iter 562 — Test Console */}
+      <Modal visible={!!tcClient} transparent animationType="fade" onRequestClose={() => setTcClient(null)}>
+        <View style={st.modalWrap}>
+          <View style={st.modalCard}>
+            <ScrollView>
+              <Text style={st.modalTitle}>🧪 Test Console — {tcClient?.client_id}</Text>
+              <Text style={st.credWarn}>
+                Generates a fully SIGNED sample request with this client&apos;s real credentials
+                (the server signs it with the stored Secret). Paste the API Key you saved at
+                generation. &quot;Send Test Now&quot; fires a real request — it inserts a real punch
+                if the employee code exists.
+              </Text>
+              <Text style={st.lbl}>API Key *</Text>
+              <TextInput style={st.input} value={tcKey} onChangeText={setTcKey}
+                autoCapitalize="none" placeholder="pk_…" placeholderTextColor={colors.onSurfaceTertiary}
+                testID="api-tc-key" />
+              <Text style={st.lbl}>Employee Code for the sample punch (optional)</Text>
+              <TextInput style={st.input} value={tcEmp} onChangeText={setTcEmp}
+                placeholder="e.g. 123" placeholderTextColor={colors.onSurfaceTertiary} />
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+                <Pressable onPress={() => runTestConsole(false)} style={[st.mBtn, st.mBtnGhost, { flex: 1 }]} testID="api-tc-generate">
+                  {tcBusy ? <ActivityIndicator size="small" color={colors.brandPrimary} /> :
+                    <Text style={st.mBtnGhostTxt}>Generate curl + Python</Text>}
+                </Pressable>
+                <Pressable onPress={() => runTestConsole(true)} style={[st.mBtn, st.mBtnPrimary, { flex: 1 }]} testID="api-tc-send">
+                  {tcBusy ? <ActivityIndicator size="small" color="#fff" /> :
+                    <Text style={st.mBtnPrimaryTxt}>Send Test Now</Text>}
+                </Pressable>
+              </View>
+              {tcOut?.live_status !== undefined ? (
+                <View style={[st.credRow, { marginTop: 10 }]}>
+                  <Text style={st.lbl}>Live response — HTTP {tcOut.live_status}</Text>
+                  <Text style={[st.credVal, { color: tcOut.live_status === 200 ? "#15803D" : "#DC2626" }]} selectable>
+                    {JSON.stringify(tcOut.live_response, null, 2)}
+                  </Text>
+                </View>
+              ) : null}
+              {tcOut?.curl ? (
+                <View style={st.credRow}>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                    <Text style={st.lbl}>curl (valid ±5 min)</Text>
+                    <Pressable onPress={() => copyTxt(tcOut.curl!)} hitSlop={6}>
+                      <Ionicons name="copy-outline" size={15} color={colors.brandPrimary} />
+                    </Pressable>
+                  </View>
+                  <Text style={st.credVal} selectable>{tcOut.curl}</Text>
+                </View>
+              ) : null}
+              {tcOut?.python ? (
+                <View style={st.credRow}>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                    <Text style={st.lbl}>Python (signs fresh requests)</Text>
+                    <Pressable onPress={() => copyTxt(tcOut.python!)} hitSlop={6}>
+                      <Ionicons name="copy-outline" size={15} color={colors.brandPrimary} />
+                    </Pressable>
+                  </View>
+                  <Text style={st.credVal} selectable>{tcOut.python}</Text>
+                </View>
+              ) : null}
+              <View style={st.modalActions}>
+                <Pressable onPress={() => setTcClient(null)} style={[st.mBtn, st.mBtnGhost]}>
+                  <Text style={st.mBtnGhostTxt}>Close</Text>
                 </Pressable>
               </View>
             </ScrollView>

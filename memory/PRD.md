@@ -5699,3 +5699,15 @@ APP_ITERATION=561, deploy_vps_iter561.sh, pointer → 561.
 NOTE for VPS: WAF/DDoS/port-firewall is infra-level (nginx/ufw) — the
 app enforces everything application-level; UAT = create a client with
 environment=uat (separate creds/IPs; separate domain optional).
+
+## Iter 562 — Punching API Test Console (user-accepted improvement)
+Backend: POST /api/admin/punch-api/clients/{id}/test-console (super
+only) — admin pastes saved api_key (verified vs hash), server signs a
+sample request with the stored secret; returns ready curl (±5 min) +
+Python signing snippet; send_now=true fires live via httpx →
+localhost:8001/api/v1/punching and returns live_status/live_response.
+Frontend punching-api.tsx: violet "Test Console" button per client →
+modal (API Key + optional employee code, Generate / Send Test Now,
+copyable curl/python, live response). E2E tested: generate OK, live 200
+success, wrong key 400. UI screenshot OK (Iter 562 badge).
+APP_ITERATION=562, deploy_vps_iter562.sh, pointer → 562.
