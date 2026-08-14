@@ -573,12 +573,33 @@ async def admin_employees_bulk_import(
     skipped_duplicates: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
 
+    # Iter 565 (user directive) — NEVER import a duplicate NAME without
+    # explicit permission. Same-name rows (vs the firm's existing
+    # employees AND within the sheet itself) are skipped unless the
+    # admin passes ``allow_duplicate_names=true``.
+    _allow_dup_names = bool(payload.get("allow_duplicate_names"))
+    _seen_names: set = set()
+    if not _allow_dup_names:
+        async for _u in db.users.find(
+                {"company_id": cid, "role": "employee"}, {"_id": 0, "name": 1}):
+            _n = re.sub(r"\s+", " ", str(_u.get("name") or "").strip().lower())
+            if _n:
+                _seen_names.add(_n)
+
     for idx, r in enumerate(rows, start=1):
         try:
             r = _normalise_row(r)
             name = str(r.get("name") or "").strip()
             if not name:
                 errors.append({"row": idx, "reason": "name is required"})
+                continue
+            _nkey = re.sub(r"\s+", " ", name.lower())
+            if not _allow_dup_names and _nkey in _seen_names:
+                skipped_duplicates.append({
+                    "row": idx, "name": name, "duplicate_name": True,
+                    "reason": ("Same NAME already exists in this firm — "
+                               "enable 'Allow duplicate names' to import anyway"),
+                })
                 continue
             phone = _normalise_phone(str(r.get("phone") or ""))
             email = (str(r.get("email") or "").strip().lower()) or None
@@ -756,6 +777,7 @@ async def admin_employees_bulk_import(
                 "employee_code": doc.get("employee_code"),
                 "temp_pin": temp_pin,
             })
+            _seen_names.add(_nkey)  # Iter 565 — catch same-name rows within the sheet
         except Exception as ex:
             errors.append({"row": idx, "reason": str(ex)})
 

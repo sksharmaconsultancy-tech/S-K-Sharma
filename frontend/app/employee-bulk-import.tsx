@@ -155,6 +155,9 @@ export default function EmployeeBulkImportScreen() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  // Iter 565 (user directive) — duplicate NAMES are blocked unless the
+  // admin explicitly permits them.
+  const [allowDupNames, setAllowDupNames] = useState(false);
   const [confirmStep, setConfirmStep] = useState<0 | 1 | 2>(0); // Iter 295 — double-confirm
   const [result, setResult] = useState<ImportResult | null>(null);
 
@@ -267,6 +270,7 @@ export default function EmployeeBulkImportScreen() {
         body: {
           company_id: selectedCompanyId,
           rows: cleanRows,
+          allow_duplicate_names: allowDupNames,
         },
       });
       setResult(r);
@@ -457,6 +461,22 @@ export default function EmployeeBulkImportScreen() {
         {/* Step 4 — import */}
         <View style={styles.card}>
           <Text style={styles.section}>4 · Import</Text>
+          {/* Iter 565 (user directive) — duplicate names need permission */}
+          <Pressable
+            onPress={() => setAllowDupNames((v) => !v)}
+            style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}
+            testID="ebi-allow-dup-names"
+          >
+            <Ionicons
+              name={allowDupNames ? "checkbox" : "square-outline"}
+              size={20}
+              color={allowDupNames ? "#DC2626" : "#64748B"}
+            />
+            <Text style={{ fontSize: 12.5, color: allowDupNames ? "#DC2626" : "#334155", flex: 1 }}>
+              Allow duplicate names (rows whose NAME already exists in this firm are
+              SKIPPED unless this is ticked)
+            </Text>
+          </Pressable>
           <Text style={styles.importHint}>
             You&apos;ll be asked to confirm twice before any records are created.
           </Text>

@@ -5732,3 +5732,18 @@ vendor: POST <origin>/api/v1/punching" (testID api-endpoint-url) with
 copy button; copyDocs passes base_url=origin. Tested: derived-host +
 base_url param + UI screenshot (Iter 564 badge).
 APP_ITERATION=564, deploy_vps_iter564.sh, pointer → 564.
+
+## Iter 565 — Bulk Employee Import duplicate-NAME protection (user directive)
+employees_admin.py bulk-import: rows with a name matching an existing
+employee of the firm (case/whitespace-insensitive) OR a name already in
+the same sheet are SKIPPED (skipped_duplicates with duplicate_name=True)
+unless payload allow_duplicate_names=true. Frontend
+employee-bulk-import.tsx: red checkbox "Allow duplicate names" (testID
+ebi-allow-dup-names) in Step 4, sent with the import body. Tested via
+API: existing-name skip, in-sheet dup skip, permission override create.
+APP_ITERATION=565, deploy_vps_iter565.sh, pointer → 565.
+NOTE: Form 16 Phase 2 remains next major task (was starting when this
+came in). Phase 2 plan: 24Q reconciliation, TRACES Part A lock, ESS
+Form 16, email delivery, dashboard — form16.py structures reviewed
+(_fy_payroll returns user_id→monthly gross/tds; records in
+form16_records; PDF via _build_pdf(rec)).
