@@ -146,7 +146,7 @@ function SmtpSection() {
           NOT your normal Gmail password.
         </Text>
 
-        <Text style={styles.lbl}>SMTP Host</Text>
+        <Text style={styles.lbl}>SMTP Host (server name — NOT your email; Gmail: smtp.gmail.com)</Text>
         <TextInput style={styles.input} value={String(s.host ?? "")} autoCapitalize="none"
           onChangeText={(t) => setS({ ...s, host: t })} placeholder="smtp.gmail.com" testID="es-host" />
 

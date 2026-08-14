@@ -568,3 +568,9 @@ ITER 487 (doc-expiry alerts):
   temp-code-bundle kind=script → 574.
 - USER TODO: verify smartpayrolling.com at resend.com/domains; configure
   Gmail App Password SMTP in Email SMTP & Notifications.
+
+## Iter 575 (verified by main agent — API tests PASS)
+- SMTP host guard: email typed in Host field → gmail auto-corrected to
+  smtp.gmail.com (+username auto-filled); other emails → 400 friendly
+  error. Host label clarified in email-settings.tsx. User's "Name or
+  service not known" error was host=their email address.

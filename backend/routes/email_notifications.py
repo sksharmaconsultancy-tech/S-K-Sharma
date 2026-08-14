@@ -248,6 +248,19 @@ async def update_smtp_settings(payload: dict = Body(...),
         doc["port"] = int(doc["port"])
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Port must be a number")
+    # Iter 575 — common mistake guard: an email address typed in the HOST
+    # field ("Name or service not known"). Auto-correct Gmail, else reject.
+    host = str(doc.get("host") or "").strip()
+    if "@" in host:
+        if host.lower().endswith("@gmail.com"):
+            if not doc.get("username"):
+                doc["username"] = host
+            doc["host"] = "smtp.gmail.com"
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="SMTP Host must be a server name like smtp.gmail.com — "
+                       "not an email address. Put your email in Username.")
     # sane TLS combo: exactly one of use_tls / start_tls
     if doc.get("use_tls"):
         doc["start_tls"] = False
