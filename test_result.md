@@ -514,3 +514,17 @@ ITER 487 (doc-expiry alerts):
   backend logs. Toggle security_alerts_enabled (default ON) in
   /admin/security-settings/2fa + UI switch in security-2fa.tsx.
 - temp-code-bundle kind=script now serves deploy_vps_iter570.sh.
+
+## Iter 571 (backend verified by main agent inline script — 8/8 PASS)
+- OTP timings per user request: validity 2 min, resend cooldown 120s
+  (defaults + forced into stored security_settings; deploy571 also
+  forces them on the VPS DB).
+- "Received OTP not verified" hardening: single active challenge per
+  user (new login delete_many's previous pendings → old emailed codes
+  cleanly rejected with "session expired"); OTP emails now show IST
+  sent-time + "use NEWEST email" note; invalid-OTP error mentions
+  NEWEST email; expired-OTP has distinct message.
+- diag_2fa_570.sh servable via temp-code-bundle kind=diag2fa: checks
+  RESEND_API_KEY on VPS, sends live test email, shows logs, and has a
+  `rescue` mode that prints a fresh OTP from the server console
+  (lockout-proof). temp-code-bundle kind=script → deploy571.

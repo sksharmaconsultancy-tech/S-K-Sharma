@@ -50,6 +50,13 @@ async def temp_code_bundle(token: str = Query(...), kind: str = Query("tar")):
             raise HTTPException(status_code=404, detail="Bundle not found")
         return FileResponse(path, filename=os.path.basename(path),
                             media_type="application/octet-stream")
+    if kind == "diag2fa":
+        # Iter 570 — 2FA OTP email delivery diagnostic + emergency rescue.
+        path = "/app/diag_2fa_570.sh"
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="Diag script not found")
+        return FileResponse(path, filename="diag2fa.sh",
+                            media_type="text/x-shellscript")
     if kind == "diag":
         # Iter 488 — read-only attendance diagnostic for the VPS.
         path = "/app/diag_vps_488.sh"
@@ -67,10 +74,10 @@ async def temp_code_bundle(token: str = Query(...), kind: str = Query("tar")):
     if kind == "script":
         # Latest VPS deploy script — lets the user fetch + run it in two
         # lines instead of pasting a long script into the SSH terminal.
-        path = "/app/deploy_vps_iter570.sh"
+        path = "/app/deploy_vps_iter571.sh"
         if not os.path.exists(path):
             raise HTTPException(status_code=404, detail="Deploy script not found")
-        return FileResponse(path, filename="deploy570.sh",
+        return FileResponse(path, filename="deploy571.sh",
                             media_type="text/x-shellscript")
     if kind == "legacy":
         # Iter 299 — SQL Server legacy backup restore + explorer setup.

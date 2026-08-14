@@ -121,7 +121,7 @@ async def twofa_verify(payload: VerifyReq, request: Request):
         await db.twofa_pending.update_one({"_id": row["_id"]}, upd)
         await _twofa_audit(user, "OTP_VERIFICATION_FAILED", request, False,
                            f"Invalid OTP — attempt {attempts}/{max_att}", row.get("method") or "")
-        raise HTTPException(status_code=401, detail="Invalid OTP. Please check the OTP and try again.")
+        raise HTTPException(status_code=401, detail="Invalid OTP. Please use the code from the NEWEST email and try again.")
 
     # SUCCESS — one-time use: destroy the pending challenge (also prevents
     # replay), then create the full session (fresh token = regenerated id).

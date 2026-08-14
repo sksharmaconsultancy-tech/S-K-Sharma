@@ -4550,10 +4550,15 @@ def _norm_identifier(identifier: str, channel: str) -> str:
 
 async def _send_otp_email(to_email: str, code: str, minutes: int = OTP_TTL_MINUTES) -> dict:
     """Send an OTP code to a user via Resend. Returns {delivered, email_id, error}."""
+    # Iter 571 — IST send-time in the mail so the user can spot the LATEST
+    # email when several login attempts each produced a code.
+    ist = (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).strftime("%d-%m-%Y %I:%M:%S %p")
     subject = f"Your S.K. Sharma & Co. login code: {code}"
     text = (
-        f"Your S.K. Sharma & Co. login code is: {code}\n\n"
+        f"Your S.K. Sharma & Co. login code is: {code}\n"
+        f"Sent at: {ist} (IST)\n\n"
         f"This code is valid for {minutes} minutes and can only be used once.\n"
+        "Always use the code from the NEWEST email — older codes are cancelled.\n"
         "If you didn't request this, you can safely ignore this email.\n\n"
         "— S.K. Sharma & Co."
     )
@@ -4576,7 +4581,8 @@ async def _send_otp_email(to_email: str, code: str, minutes: int = OTP_TTL_MINUT
       <div style="padding:24px;">
         <p style="margin:0 0 16px 0;color:#333;font-size:14px;line-height:20px;">
           Use the code below to sign in to the S.K. Sharma & Co. app. It expires in
-          <strong>{minutes} minutes</strong>.
+          <strong>{minutes} minutes</strong>. Sent at <strong>{ist} IST</strong> —
+          always use the code from the <strong>newest</strong> email.
         </p>
         <div style="text-align:center;padding:8px 0 16px 0;">{boxes}</div>
         <p style="margin:0;color:#888;font-size:12px;line-height:18px;">
@@ -5121,8 +5127,9 @@ _TWOFA_DEFAULTS = {
     "key": "2fa",
     "mandatory_roles": ["super_admin", "sub_admin"],
     "otp_length": 6,
-    "otp_validity_min": 5,
-    "resend_cooldown_sec": 30,
+    # Iter 571 — per user request: OTP valid 2 minutes, resend after 2 minutes.
+    "otp_validity_min": 2,
+    "resend_cooldown_sec": 120,
     "max_attempts": 5,
     "email_enabled": True,
     "whatsapp_enabled": True,
@@ -5424,6 +5431,9 @@ async def _start_2fa_challenge(user: dict, request: Request, login_kind: str):
     code = _twofa_new_code(int(st["otp_length"]))
     now = datetime.now(timezone.utc)
     pending_id = f"2fa_{_twofa_secrets.token_hex(24)}"
+    # Iter 571 — ONE active challenge per user: a new login invalidates all
+    # previous pending OTPs (prevents "old email code" confusion).
+    await db.twofa_pending.delete_many({"user_id": user["user_id"]})
     await db.twofa_pending.insert_one({
         "pending_id": pending_id,
         "user_id": user["user_id"],
@@ -9875,7 +9885,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "570"
+APP_ITERATION = "571"
 
 
 @api.get("/version")
