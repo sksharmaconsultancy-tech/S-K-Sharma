@@ -110,6 +110,62 @@ async def _log(client: Optional[dict], request: Request, request_id: str,
         if client:
             await db.api_clients.update_one(
                 {"client_id": client["client_id"]}, {"$set": upd})
+        if sec_fail:
+            await _maybe_security_alert(client, request, sec_fail)
+    except Exception:
+        pass
+
+
+_ALERT_THRESHOLD = 5          # failures within window → alert
+_ALERT_WINDOW_MIN = 15
+_ALERT_COOLDOWN_MIN = 60      # max 1 email per client per hour
+
+
+async def _maybe_security_alert(client: Optional[dict], request: Request,
+                                sec_fail: str) -> None:
+    """Iter 563 (user-accepted improvement) — email the super admin when
+    a client (or unknown caller) accumulates repeated security failures
+    (bad signature, blocked IP, wrong key…) so intrusion attempts are
+    flagged immediately. Max one alert per client per hour."""
+    try:
+        cid = (client or {}).get("client_id") or \
+            request.headers.get("x-client-id") or "UNKNOWN"
+        window_start = datetime.now(timezone.utc)
+        from datetime import timedelta as _td
+        since = (window_start - _td(minutes=_ALERT_WINDOW_MIN)).isoformat()
+        n = await db.api_request_logs.count_documents({
+            "client_id": cid, "security_failure": {"$nin": ["", None]},
+            "at": {"$gte": since}})
+        n += 1  # current failure not yet inserted
+        threshold = int((client or {}).get("alert_threshold") or _ALERT_THRESHOLD)
+        if n < threshold:
+            return
+        last = await db.api_security_alerts.find_one(
+            {"client_id": cid}, sort=[("at", -1)])
+        if last and last.get("at", "") > \
+                (window_start - _td(minutes=_ALERT_COOLDOWN_MIN)).isoformat():
+            return
+        to_email = str((client or {}).get("alert_email") or "").strip() or \
+            next(iter(__import__("server").SUPER_ADMIN_EMAILS), "")
+        ip = _client_ip(request)
+        subject = f"⚠ Punching API security alert — {cid} ({n} failures in {_ALERT_WINDOW_MIN} min)"
+        text = (f"Punching Data Push API — repeated security failures detected.\n\n"
+                f"Client: {cid} ({(client or {}).get('name') or 'unknown'})\n"
+                f"Latest failure: {sec_fail}\n"
+                f"Failures in last {_ALERT_WINDOW_MIN} min: {n}\n"
+                f"Latest source IP: {ip}\n"
+                f"Time: {now_iso()}\n\n"
+                f"Review: Administration → API Integration → API Logs.\n"
+                f"You can Block the client or rotate its credentials from the same screen.")
+        from server import _send_email_with_attachments
+        res = await _send_email_with_attachments(
+            to_email=to_email, subject=subject, text=text,
+            html=f"<pre>{text}</pre>", attachments=[])
+        await db.api_security_alerts.insert_one({
+            "client_id": cid, "at": now_iso(), "failures": n,
+            "latest_failure": sec_fail, "source_ip": ip,
+            "emailed_to": to_email, "delivered": bool(res.get("delivered")),
+            "email_error": res.get("error")})
     except Exception:
         pass
 
@@ -447,13 +503,17 @@ async def update_client(client_id: str, payload: Dict[str, Any] = Body(...),
     if not c:
         raise HTTPException(status_code=404, detail="API client not found")
     upd: Dict[str, Any] = {}
-    for k in ("name", "status", "blocked", "expiry_date", "environment"):
+    for k in ("name", "status", "blocked", "expiry_date", "environment",
+              "alert_email"):
         if k in payload:
             upd[k] = payload[k]
     for k in ("max_batch", "rate_limit"):
         if k in payload:
             upd[k] = int(payload[k] or 0) or (
                 _DEFAULT_BATCH if k == "max_batch" else _DEFAULT_RATE)
+    if "alert_threshold" in payload:
+        upd["alert_threshold"] = max(int(payload["alert_threshold"] or 0), 0) \
+            or _ALERT_THRESHOLD
     for k in ("allowed_ips", "machine_codes"):
         if k in payload and isinstance(payload[k], list):
             upd[k] = [str(x).strip() for x in payload[k] if str(x).strip()]

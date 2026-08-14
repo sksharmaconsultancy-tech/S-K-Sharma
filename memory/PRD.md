@@ -5711,3 +5711,15 @@ modal (API Key + optional employee code, Generate / Send Test Now,
 copyable curl/python, live response). E2E tested: generate OK, live 200
 success, wrong key 400. UI screenshot OK (Iter 562 badge).
 APP_ITERATION=562, deploy_vps_iter562.sh, pointer → 562.
+
+## Iter 563 — Punching API security-failure email alerts (user-accepted)
+punch_push_api.py: `_maybe_security_alert` called from `_log` whenever
+sec_fail set — counts security failures per client_id in last 15 min
+(api_request_logs); at ≥5 (per-client `alert_threshold` override) sends
+email via server._send_email_with_attachments (Resend) to per-client
+`alert_email` or first SUPER_ADMIN_EMAILS; cooldown 1h per client via
+api_security_alerts collection (also an audit trail: failures, latest
+reason, source_ip, delivered). PATCH clients now accepts alert_email +
+alert_threshold. TESTED live: 6 bad-signature attempts → alert doc
+created, email DELIVERED=True to sksharmaconsultancy@gmail.com.
+APP_ITERATION=563, deploy_vps_iter563.sh, pointer → 563.
