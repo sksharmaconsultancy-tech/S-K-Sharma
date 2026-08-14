@@ -5771,3 +5771,13 @@ form16_records; PDF via _build_pdf(rec)).
 APP_ITERATION=566, deploy_vps_iter566.sh, pointer → 566.
 Remaining Form16 polish (backlog): reconciliation Excel export, email
 templates customization.
+
+## Iter 567 — Recon Excel export + My Form 16 employee menu link
+1. GET /admin/form16/reconciliation.xlsx (form16.py) — 22-col sheet
+   (per-Q Payroll/Filed/Diff/Status + totals + Result), mismatch rows
+   red-filled, freeze D4. Tested: 125 rows, mismatch highlighted.
+2. form16.tsx: "Excel" button (testID f16-recon-xlsx) in recon header.
+3. (tabs)/profile.tsx: Row "My Form 16" (testID row-my-form16) →
+   /my-form16 ESS screen.
+APP_ITERATION=567, deploy_vps_iter567.sh, pointer → 567.
+BLOCKED backlog: WhatsApp API (user Meta credentials needed).

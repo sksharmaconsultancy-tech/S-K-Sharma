@@ -253,9 +253,14 @@ export default function Form16Screen() {
               <Text style={st.reconTitle}>
                 TDS Reconciliation — Payroll vs Form 24Q ({recon.filter((r) => r.mismatch).length} mismatched)
               </Text>
-              <Pressable style={[st.btn, st.btnPrimary]} onPress={save24q} disabled={busy} testID="f16-24q-save">
-                <Text style={[st.btnTxt, { color: "#fff" }]}>Save 24Q</Text>
-              </Pressable>
+              <View style={{ flexDirection: "row", gap: 6 }}>
+                <Pressable style={st.btn} onPress={() => openDownload(`/admin/form16/reconciliation.xlsx?company_id=${firmId}&fy=${fy}`)} testID="f16-recon-xlsx">
+                  <Text style={st.btnTxt}>Excel</Text>
+                </Pressable>
+                <Pressable style={[st.btn, st.btnPrimary]} onPress={save24q} disabled={busy} testID="f16-24q-save">
+                  <Text style={[st.btnTxt, { color: "#fff" }]}>Save 24Q</Text>
+                </Pressable>
+              </View>
             </View>
             <Text style={st.modalHint}>Enter the TDS amounts as FILED in each quarter&apos;s 24Q return. Differences over ₹1 are flagged.</Text>
             {recon.map((rr) => (

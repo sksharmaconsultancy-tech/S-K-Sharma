@@ -390,6 +390,12 @@ export default function ProfileScreen() {
           onPress={() => router.push("/id-card")}
         />
         <Row
+          testID="row-my-form16"
+          icon="document-text-outline"
+          label="My Form 16"
+          onPress={() => router.push("/my-form16")}
+        />
+        <Row
           testID="row-leaves"
           icon="calendar-outline"
           label="My Leaves"

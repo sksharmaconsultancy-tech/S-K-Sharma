@@ -656,3 +656,60 @@ async def ess_pdf(record_id: str, authorization: Optional[str] = Header(None)):
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition":
                              f'attachment; filename="Form16_{rec["fy"]}.pdf"'})
+
+
+@router.get("/reconciliation.xlsx")
+async def reconciliation_xlsx(company_id: str, fy: str,
+                              authorization: Optional[str] = Header(None)):
+    """Iter 567 (user backlog) — Excel export of the 24Q reconciliation."""
+    data = await tds_reconciliation(company_id, fy, authorization)
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    comp = await db.companies.find_one({"company_id": company_id},
+                                       {"_id": 0, "name": 1})
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "24Q Reconciliation"
+    ws.append([f"{(comp or {}).get('name') or ''} — TDS Reconciliation "
+               f"(Payroll vs Form 24Q) — FY {fy}"])
+    ws["A1"].font = Font(bold=True, size=13)
+    s = data["summary"]
+    ws.append([f"Employees: {s['employees']}   Mismatched: {s['mismatched']}"])
+    head = ["Code", "Name", "PAN"]
+    for q in ("Q1", "Q2", "Q3", "Q4"):
+        head += [f"{q} Payroll", f"{q} Filed", f"{q} Diff", f"{q} Status"]
+    head += ["Payroll Total", "Filed Total", "Result"]
+    ws.append(head)
+    for c in ws[3]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="2563EB")
+        c.alignment = Alignment(horizontal="center")
+    red = PatternFill("solid", fgColor="FEE2E2")
+    for r in data["rows"]:
+        row = [r.get("employee_code") or "—", r.get("name") or "—",
+               r.get("pan") or "—"]
+        for qq in r["quarters"]:
+            row += [qq["payroll"],
+                    qq["filed"] if qq["filed"] is not None else "—",
+                    qq["diff"] if qq["diff"] is not None else "—",
+                    qq["status"]]
+        row += [r["payroll_total"], r["filed_total"],
+                "MISMATCH ⚠" if r["mismatch"] else "OK"]
+        ws.append(row)
+        if r["mismatch"]:
+            for c in ws[ws.max_row]:
+                c.fill = red
+    widths = [8, 26, 13] + [10, 10, 8, 11] * 4 + [12, 11, 12]
+    for i, w in enumerate(widths, 1):
+        col = ws.cell(row=3, column=i).column_letter
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "D4"
+    import io as io_mod
+    buf = io_mod.BytesIO()
+    wb.save(buf)
+    return Response(
+        content=buf.getvalue(),
+        media_type=("application/vnd.openxmlformats-officedocument"
+                    ".spreadsheetml.sheet"),
+        headers={"Content-Disposition":
+                 f"attachment; filename=TDS_Reconciliation_{fy}.xlsx"})
