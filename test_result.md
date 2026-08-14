@@ -597,3 +597,15 @@ ITER 487 (doc-expiry alerts):
 ## Iter 578 — Removed 'Sent at' date/time from OTP emails (Resend + SMTP). Live send verified.
 
 ## Iter 579 — OTP email signature styled (navy band, gold bold 'From S.K. Sharma & Co', white bold-italic tagline). Demo approved by user; live send verified.
+
+## Iter 580 (backend verified by main agent — engine live-tested)
+- Audit Email Notification Engine (routes/audit_notify.py): is_critical
+  classifier (emp delete, bank/salary/pf/esic/uan field changes, unlock/
+  rights/roles/permission/challan/firm-access paths), instant alerts via
+  middleware create_task hook, daily 08:00 IST summary loop + send-now
+  endpoint, settings GET/PUT (super only) with recipients/cc/toggles.
+  LIVE VERIFIED: salary_monthly patch → "🚨 Critical activity" email
+  delivered (Resend 200); daily summary delivered.
+- Users Log Report: "Activity by User" rollup table (total/emp/att/pay/
+  reports/failed per user) + Today/Yesterday quick ranges.
+- Frontend: audit-notifications.tsx + AdminWebShell menu entry.

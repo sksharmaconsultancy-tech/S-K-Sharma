@@ -9984,7 +9984,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "579"
+APP_ITERATION = "580"
 
 
 @api.get("/version")
@@ -12646,7 +12646,7 @@ async def _activity_logger(request: Request, call_next):
             new_values = _audit_snapshot(body_data)
             rec_label = _audit_label(body_data)
         cid = cid or (old_doc or {}).get("company_id")
-        await db.activity_log.insert_one({
+        audit_doc = {
             "at": now_iso(),
             "actor_id": (actor or {}).get("user_id"),
             "actor_name": (actor or {}).get("name"),
@@ -12668,7 +12668,14 @@ async def _activity_logger(request: Request, call_next):
             "ip": ((request.headers.get("x-forwarded-for")
                     or (request.client.host if request.client else "") or "")
                    .split(",")[0].strip()),
-        })
+        }
+        await db.activity_log.insert_one(dict(audit_doc))
+        # Iter 580 — instant email alerts for critical activities.
+        try:
+            from routes.audit_notify import on_audit_event
+            asyncio.create_task(on_audit_event(audit_doc))
+        except Exception:
+            pass
     except Exception:
         logger.warning("[activity-log] failed to record", exc_info=True)
     return response
@@ -12704,6 +12711,14 @@ app.include_router(twofa_router)
 # Iter 576 — MSG91 SMS notifications (Phase 1).
 from routes.sms_notifications import router as sms_notifications_router  # noqa: E402
 app.include_router(sms_notifications_router)
+# Iter 580 — Audit & Activity email notifications.
+from routes.audit_notify import router as audit_notify_router, daily_loop as _audit_daily_loop  # noqa: E402
+app.include_router(audit_notify_router)
+
+
+@app.on_event("startup")
+async def _start_audit_daily_loop():
+    asyncio.create_task(_audit_daily_loop())
 # Iter 409 — Actual (legacy) Salary Runs extracted to routes/salary_runs.py.
 # _payslip_rows_for_month is imported back because the WhatsApp engine
 # accesses it as a server attribute (srv._payslip_rows_for_month).

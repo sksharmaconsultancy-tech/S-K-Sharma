@@ -5854,3 +5854,5 @@ stored; failed actions logged; firm isolation enforced server-side.
   existing modules (never block payroll).
 - Phase 3 TODO: SMS dashboard (counts/charts/filters), usage & cost report,
   MSG91 delivery webhook (/api/webhooks/msg91) to update sms_log status.
+
+- Iter 580 SHIPPED: Sub-User Activity Monitoring + Audit Email Notifications (instant critical alerts, daily 08:00 IST summary, Audit Notifications settings screen, Activity-by-User rollup, Today/Yesterday filters).

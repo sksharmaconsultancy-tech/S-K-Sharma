@@ -203,6 +203,24 @@ export default function UsersLogReportScreen() {
     return Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
   }, [events]);
 
+  // Iter 580 — Sub-User activity rollup (per user, from the filtered view).
+  const byUser = useMemo(() => {
+    type R = { name: string; firm: string; total: number; emp: number; att: number; pay: number; rep: number; failed: number };
+    const m = new Map<string, R>();
+    for (const e of filtered) {
+      const k = e.actor_id || e.actor_name || "system";
+      const r = m.get(k) || { name: e.actor_name || "System", firm: e.company_name || "—", total: 0, emp: 0, att: 0, pay: 0, rep: 0, failed: 0 };
+      r.total += 1;
+      if (e.module === "Employee") r.emp += 1;
+      else if (e.module === "Attendance") r.att += 1;
+      else if (e.module === "Payroll" || e.module === "Compliance") r.pay += 1;
+      if (e.action_type === "DOWNLOAD" || e.module === "Reports") r.rep += 1;
+      if (e.success === false) r.failed += 1;
+      m.set(k, r);
+    }
+    return Array.from(m.values()).sort((a, b) => b.total - a.total).slice(0, 20);
+  }, [filtered]);
+
   // Performance chart — per-admin action counts grouped by category.
   const perf = useMemo(() => {
     type Row = {
@@ -284,6 +302,9 @@ export default function UsersLogReportScreen() {
             <View style={styles.filterCol}>
               <Text style={styles.label}>Quick period</Text>
               <View style={styles.chipStrip}>
+                <Chip label="Today" active={isRange(0)} onPress={() => setQuickRange(0)} />
+                <Chip label="Yesterday" active={fromDate === daysAgoIso(1) && toDate === daysAgoIso(1)}
+                  onPress={() => { setFromDate(daysAgoIso(1)); setToDate(daysAgoIso(1)); }} />
                 <Chip label="Last 7 days" active={isRange(7)} onPress={() => setQuickRange(7)} />
                 <Chip label="Last 30 days" active={isRange(30)} onPress={() => setQuickRange(30)} />
                 <Chip label="Last 90 days" active={isRange(90)} onPress={() => setQuickRange(90)} />
@@ -468,6 +489,30 @@ export default function UsersLogReportScreen() {
             </View>
           ))}
         </View>
+
+        {/* Iter 580 — Sub-User activity rollup */}
+        {byUser.length > 0 ? (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Activity by User</Text>
+            <View style={styles.buHead}>
+              {["User", "Total", "Emp", "Att", "Pay", "Rep", "Fail"].map((h, i) => (
+                <Text key={h} style={[styles.buCell, styles.buHeadTxt, i === 0 ? { flex: 2.2 } : { flex: 0.8, textAlign: "center" }]}>{h}</Text>
+              ))}
+            </View>
+            {byUser.map((r, i) => (
+              <View key={i} style={[styles.buRow, i % 2 === 1 && { backgroundColor: colors.surface }]}>
+                <View style={{ flex: 2.2, padding: 6 }}>
+                  <Text style={styles.buName}>{r.name}</Text>
+                  <Text style={styles.buFirm}>{r.firm}</Text>
+                </View>
+                {[r.total, r.emp, r.att, r.pay, r.rep].map((v, j) => (
+                  <Text key={j} style={[styles.buCell, { flex: 0.8, textAlign: "center" }]}>{v}</Text>
+                ))}
+                <Text style={[styles.buCell, { flex: 0.8, textAlign: "center", color: r.failed ? "#dc2626" : colors.onSurfaceTertiary, fontWeight: "700" }]}>{r.failed}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>
@@ -786,6 +831,14 @@ const styles = StyleSheet.create({
   diffField: { fontWeight: "700", color: colors.onSurface },
   diffOld: { color: "#b91c1c", textDecorationLine: "line-through" },
   diffNew: { color: "#15803d", fontWeight: "600" },
+
+  // Iter 580 — by-user rollup
+  buHead: { flexDirection: "row", backgroundColor: colors.surfaceSecondary, borderTopLeftRadius: 8, borderTopRightRadius: 8 },
+  buHeadTxt: { fontWeight: "800", fontSize: 10, textTransform: "uppercase", color: colors.onSurfaceSecondary },
+  buRow: { flexDirection: "row", alignItems: "center", borderBottomWidth: 1, borderBottomColor: colors.divider },
+  buCell: { padding: 6, fontSize: 12, color: colors.onSurface },
+  buName: { fontSize: 12, fontWeight: "700", color: colors.onSurface },
+  buFirm: { fontSize: 10, color: colors.onSurfaceTertiary },
   logAction: { fontSize: 13, fontWeight: "700", color: colors.onSurface },
   logMeta: { fontSize: 11, color: colors.onSurfaceSecondary, marginTop: 2 },
   logDetails: { fontSize: 11, color: colors.onSurfaceTertiary, marginTop: 2, fontStyle: "italic" },
