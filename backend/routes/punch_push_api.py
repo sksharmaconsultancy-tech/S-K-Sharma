@@ -686,13 +686,24 @@ print(r.status_code, r.json())'''
 
 
 @router.get("/api/admin/punch-api/docs")
-async def vendor_docs(authorization: Optional[str] = Header(None)):
-    """Vendor integration document (markdown) — share with the client."""
+async def vendor_docs(request: Request,
+                      base_url: Optional[str] = Query(None),
+                      authorization: Optional[str] = Header(None)):
+    """Vendor integration document (markdown) — share with the client.
+    Iter 564 (user request) — includes the REAL portal URL so the vendor
+    gets the exact endpoint, derived from the request host."""
     await _admin(authorization)
+    base = (base_url or "").strip().rstrip("/")
+    if not base:
+        host = request.headers.get("x-forwarded-host") or \
+            request.headers.get("host") or "<your-domain>"
+        proto = request.headers.get("x-forwarded-proto") or "https"
+        base = f"{proto}://{host}"
+    endpoint = f"{base}/api/v1/punching"
     md = f"""# Punching Data Push API — Integration Guide (v1)
 
 ## Endpoint
-`POST https://<your-portal-domain>/api/v1/punching`   (HTTPS only)
+`POST {endpoint}`   (HTTPS only)
 UAT: use the UAT credentials/domain issued to you — UAT and Production
 credentials, IP whitelists and data are completely separate.
 
@@ -767,4 +778,4 @@ Rate limit: as configured (default {_DEFAULT_RATE} requests/minute).
 - The API accepts punch data POST only — no read access of any kind.
 - All requests are logged (IP, request-id, counts, failures).
 """
-    return {"markdown": md}
+    return {"markdown": md, "endpoint": endpoint}

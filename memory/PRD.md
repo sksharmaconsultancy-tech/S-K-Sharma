@@ -5723,3 +5723,12 @@ reason, source_ip, delivered). PATCH clients now accepts alert_email +
 alert_threshold. TESTED live: 6 bad-signature attempts → alert doc
 created, email DELIVERED=True to sksharmaconsultancy@gmail.com.
 APP_ITERATION=563, deploy_vps_iter563.sh, pointer → 563.
+
+## Iter 564 — API URL surfaced for the client (user request)
+punch_push_api.py docs endpoint: accepts ?base_url= or derives from
+x-forwarded-host/proto → returns {markdown, endpoint} with the REAL
+portal URL embedded. punching-api.tsx: green banner "API URL for the
+vendor: POST <origin>/api/v1/punching" (testID api-endpoint-url) with
+copy button; copyDocs passes base_url=origin. Tested: derived-host +
+base_url param + UI screenshot (Iter 564 badge).
+APP_ITERATION=564, deploy_vps_iter564.sh, pointer → 564.

@@ -209,7 +209,8 @@ export default function ApiIntegrationScreen() {
 
   const copyDocs = async () => {
     try {
-      const r = await api<{ markdown: string }>("/admin/punch-api/docs");
+      const base = Platform.OS === "web" ? `?base_url=${encodeURIComponent(globalThis.location?.origin || "")}` : "";
+      const r = await api<{ markdown: string; endpoint: string }>(`/admin/punch-api/docs${base}`);
       if (Platform.OS === "web" && (navigator as any)?.clipboard) {
         await (navigator as any).clipboard.writeText(r.markdown);
         showMsg("Vendor integration document copied to clipboard — paste it into an email/Word file for the client.");
@@ -293,6 +294,19 @@ export default function ApiIntegrationScreen() {
       <ScrollView contentContainerStyle={st.scroll}>
         {tab === "clients" ? (
           <>
+            {/* Iter 564 (user request) — the exact API URL for the vendor */}
+            {Platform.OS === "web" ? (
+              <View style={st.urlCard}>
+                <Ionicons name="link-outline" size={15} color="#15803D" />
+                <Text style={st.urlLbl}>API URL for the vendor:</Text>
+                <Text style={st.urlVal} selectable numberOfLines={1} testID="api-endpoint-url">
+                  {`POST ${globalThis.location?.origin || ""}/api/v1/punching`}
+                </Text>
+                <Pressable onPress={() => copyTxt(`${globalThis.location?.origin || ""}/api/v1/punching`)} hitSlop={6}>
+                  <Ionicons name="copy-outline" size={15} color="#15803D" />
+                </Pressable>
+              </View>
+            ) : null}
             <View style={st.noteCard}>
               <Ionicons name="shield-checkmark-outline" size={16} color={colors.brandPrimary} />
               <Text style={st.noteTxt}>
@@ -624,6 +638,16 @@ const st = StyleSheet.create({
     borderWidth: 1, borderColor: "#BFDBFE", padding: 12, marginBottom: 12,
   },
   noteTxt: { flex: 1, fontSize: 12, color: "#1E40AF", lineHeight: 17 },
+  urlCard: {
+    flexDirection: "row", gap: 8, alignItems: "center",
+    backgroundColor: "#F0FDF4", borderRadius: radius.lg,
+    borderWidth: 1, borderColor: "#BBF7D0", padding: 12, marginBottom: 10,
+  },
+  urlLbl: { fontSize: 12, fontWeight: "800", color: "#15803D" },
+  urlVal: {
+    flex: 1, fontSize: 12, fontWeight: "700", color: "#166534",
+    fontFamily: Platform.OS === "web" ? "monospace" : undefined,
+  },
   card: {
     backgroundColor: colors.surface, borderRadius: radius.lg,
     borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 10,
