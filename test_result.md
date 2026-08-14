@@ -593,3 +593,7 @@ ITER 487 (doc-expiry alerts):
 
 
 ## Iter 577 — OTP email rebrand: subject/heading 'Your Smart Payroll Login Code', signature 'From S.K. Sharma & Co / Your Trusted Compliance Partner' (Resend + SMTP paths). Live send verified.
+
+## Iter 578 — Removed 'Sent at' date/time from OTP emails (Resend + SMTP). Live send verified.
+
+## Iter 579 — OTP email signature styled (navy band, gold bold 'From S.K. Sharma & Co', white bold-italic tagline). Demo approved by user; live send verified.
