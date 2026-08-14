@@ -9503,7 +9503,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "565"
+APP_ITERATION = "566"
 
 
 @api.get("/version")
@@ -12334,7 +12334,9 @@ from routes.punch_policy_report import router as punch_policy_report_router  # n
 app.include_router(punch_policy_report_router)
 # Iter 551 — Form 16 module (Phase 1) + Features List PDF.
 from routes.form16 import router as form16_router  # noqa: E402
+from routes.form16 import ess_router as form16_ess_router  # noqa: E402
 app.include_router(form16_router)
+app.include_router(form16_ess_router)
 from routes.features_pdf import router as features_pdf_router  # noqa: E402
 app.include_router(features_pdf_router)
 from routes.portal_rpa import router as portal_rpa_router  # noqa: E402

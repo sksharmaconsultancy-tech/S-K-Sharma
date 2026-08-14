@@ -43,6 +43,11 @@ export default function Form16Screen() {
   const [extrasMap, setExtrasMap] = useState<Record<string, any>>({});
   const [tanIn, setTanIn] = useState("");
   const [panIn, setPanIn] = useState<Record<string, string>>({});
+  // Iter 566 — Phase 2 state
+  const [p2, setP2] = useState<any>(null);
+  const [recon, setRecon] = useState<any[]>([]);
+  const [showRecon, setShowRecon] = useState(false);
+  const [q24, setQ24] = useState<Record<string, Record<string, string>>>({});
 
   useEffect(() => { if (!firmId && selectedCompanyId) setFirmId(selectedCompanyId); }, [selectedCompanyId, firmId]);
 
@@ -52,6 +57,7 @@ export default function Form16Screen() {
     try {
       const r = await api<any>(`/admin/form16/employees?company_id=${firmId}&fy=${fy}`);
       setRows(r.rows || []); setDash(r.dashboard || {}); setTan(r.company?.tan || null);
+      try { setP2(await api<any>(`/admin/form16/dashboard?company_id=${firmId}&fy=${fy}`)); } catch { /* phase2 */ }
     } catch (x: any) { setErr(x?.message || "Failed to load"); }
     finally { setLoading(false); }
   }, [firmId, fy]);
@@ -91,6 +97,54 @@ export default function Form16Screen() {
       .map((x) => ({ label: x.label.trim(), amount: parseFloat(x.amount) }));
     setExtrasMap((m) => ({ ...m, [extrasFor]: { other_income: clean(extraInc), deductions: clean(extraDed) } }));
     setExtrasFor(null);
+  };
+
+  // ── Iter 566 — Phase 2 actions ──────────────────────────────────
+  const loadRecon = async () => {
+    try {
+      const r = await api<any>(`/admin/form16/reconciliation?company_id=${firmId}&fy=${fy}`);
+      setRecon(r.rows || []);
+      const m: Record<string, Record<string, string>> = {};
+      (r.rows || []).forEach((row: any) => {
+        m[row.user_id] = {};
+        row.quarters.forEach((qq: any) => { m[row.user_id][qq.q] = qq.filed === null || qq.filed === undefined ? "" : String(qq.filed); });
+      });
+      setQ24(m);
+      setShowRecon(true);
+    } catch (x: any) { setErr(x?.message || "Reconciliation failed"); }
+  };
+  const save24q = async () => {
+    setBusy(true);
+    try {
+      const rowsOut = Object.entries(q24).map(([uid, qs]) => ({
+        user_id: uid,
+        ...Object.fromEntries(Object.entries(qs).filter(([, v]) => v !== "").map(([k, v]) => [k, parseFloat(v) || 0])),
+      }));
+      await api(`/admin/form16/24q`, { method: "PUT", body: JSON.stringify({ company_id: firmId, fy, rows: rowsOut }) });
+      await loadRecon();
+    } catch (x: any) { setErr(x?.message || "24Q save failed"); }
+    finally { setBusy(false); }
+  };
+  const emailAll = async (uid?: string) => {
+    setBusy(true); setErr("");
+    try {
+      const r = await api<any>(`/admin/form16/email`, {
+        method: "POST",
+        body: JSON.stringify({ company_id: firmId, fy, user_ids: uid ? [uid] : [] }),
+      });
+      setErr(`✉ Sent ${r.sent?.length || 0}${r.skipped?.length ? ` · skipped ${r.skipped.length}: ${r.skipped.map((s: any) => `${s.name} (${s.reason})`).join("; ").slice(0, 220)}` : ""}`);
+      await load();
+    } catch (x: any) { setErr(x?.message || "Email failed"); }
+    finally { setBusy(false); }
+  };
+  const toggleLock = async (r: Row & { part_a_locked?: boolean }) => {
+    try {
+      await api(`/admin/form16/traces-lock`, {
+        method: "POST",
+        body: JSON.stringify({ record_id: r.record_id, locked: !(r as any).part_a_locked }),
+      });
+      await load();
+    } catch (x: any) { setErr(x?.message || "Lock failed"); }
   };
 
   const ql = q.trim().toLowerCase();
@@ -157,7 +211,21 @@ export default function Form16Screen() {
           <Card label="Form 16 Ready" value={dash.ready} tone="ok" />
           <Card label="Pending Issues" value={dash.pending} tone="warn" />
           <Card label="Generated" value={dash.generated} />
+          <Card label="TRACES Locked" value={p2?.locked} />
+          <Card label="Emailed" value={p2?.emailed} tone="ok" />
+          <Card label={`Total TDS ₹`} value={(p2?.total_tds || 0).toLocaleString()} />
         </View>
+        {p2?.quarterly_tds ? (
+          <View style={st.qRow}>
+            {p2.quarterly_tds.map((qq: any) => (
+              <View key={qq.q} style={st.qCell}>
+                <Text style={st.qVal}>₹{(qq.tds || 0).toLocaleString()}</Text>
+                <View style={[st.qBar, { width: `${Math.max(6, Math.min(100, (qq.tds / Math.max(1, Math.max(...p2.quarterly_tds.map((z: any) => z.tds)))) * 100))}%` }]} />
+                <Text style={st.qLbl}>{qq.q} TDS</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
         <View style={st.actions}>
           <Pressable style={st.btn} onPress={() => {
             const all: Record<string, boolean> = {};
@@ -171,7 +239,52 @@ export default function Form16Screen() {
           <Pressable style={st.btn} onPress={() => openDownload(`/admin/form16/bulk.zip?company_id=${firmId}&fy=${fy}`)} testID="f16-zip">
             <Text style={st.btnTxt}>Bulk ZIP</Text>
           </Pressable>
+          <Pressable style={st.btn} onPress={() => emailAll()} disabled={busy} testID="f16-email-all">
+            <Text style={st.btnTxt}>✉ Email All</Text>
+          </Pressable>
+          <Pressable style={[st.btn, showRecon && st.btnPrimary]} onPress={() => (showRecon ? setShowRecon(false) : loadRecon())} testID="f16-recon">
+            <Text style={[st.btnTxt, showRecon && { color: "#fff" }]}>24Q Reconciliation</Text>
+          </Pressable>
         </View>
+
+        {showRecon && (
+          <View style={st.reconBox}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Text style={st.reconTitle}>
+                TDS Reconciliation — Payroll vs Form 24Q ({recon.filter((r) => r.mismatch).length} mismatched)
+              </Text>
+              <Pressable style={[st.btn, st.btnPrimary]} onPress={save24q} disabled={busy} testID="f16-24q-save">
+                <Text style={[st.btnTxt, { color: "#fff" }]}>Save 24Q</Text>
+              </Pressable>
+            </View>
+            <Text style={st.modalHint}>Enter the TDS amounts as FILED in each quarter&apos;s 24Q return. Differences over ₹1 are flagged.</Text>
+            {recon.map((rr) => (
+              <View key={rr.user_id} style={[st.reconRow, rr.mismatch && { borderColor: "#F59E0B", backgroundColor: "#FFFBEB" }]}>
+                <Text style={st.rowName} numberOfLines={1}>
+                  {rr.name} · {rr.employee_code} {rr.mismatch ? "⚠" : "✓"}  (Payroll ₹{(rr.payroll_total || 0).toLocaleString()})
+                </Text>
+                <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+                  {rr.quarters.map((qq: any) => (
+                    <View key={qq.q} style={{ minWidth: 110 }}>
+                      <Text style={st.qLbl}>{qq.q} · payroll ₹{qq.payroll}</Text>
+                      <TextInput
+                        style={[st.exInput, qq.status === "MISMATCH" && { borderColor: "#DC2626" },
+                          qq.status === "MATCHED" && { borderColor: "#16A34A" }]}
+                        keyboardType="numeric" placeholder="24Q filed ₹"
+                        placeholderTextColor={colors.onSurfaceTertiary}
+                        value={q24[rr.user_id]?.[qq.q] ?? ""}
+                        onChangeText={(v) => setQ24((m) => ({ ...m, [rr.user_id]: { ...(m[rr.user_id] || {}), [qq.q]: v.replace(/[^\d.]/g, "") } }))}
+                      />
+                      <Text style={[st.qLbl, qq.status === "MISMATCH" ? { color: "#DC2626" } : qq.status === "MATCHED" ? { color: "#16A34A" } : null]}>
+                        {qq.status}{qq.diff !== null && qq.status === "MISMATCH" ? ` (${qq.diff > 0 ? "+" : ""}${qq.diff})` : ""}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
 
         {loading ? <ActivityIndicator style={{ marginTop: 30 }} color={colors.brandPrimary} /> :
           vRows.map((r) => (
@@ -215,9 +328,19 @@ export default function Form16Screen() {
                 <Ionicons name="add-circle-outline" size={20} color="#B45309" />
               </Pressable>
               {r.generated && (
-                <Pressable onPress={() => openDownload(`/admin/form16/${r.record_id}.pdf`)} hitSlop={6} testID={`f16-pdf-${r.user_id}`}>
-                  <Ionicons name="download-outline" size={20} color={colors.brandPrimary} />
-                </Pressable>
+                <>
+                  <Pressable onPress={() => openDownload(`/admin/form16/${r.record_id}.pdf`)} hitSlop={6} testID={`f16-pdf-${r.user_id}`}>
+                    <Ionicons name="download-outline" size={20} color={colors.brandPrimary} />
+                  </Pressable>
+                  <Pressable onPress={() => emailAll(r.user_id)} hitSlop={6} testID={`f16-email-${r.user_id}`}>
+                    <Ionicons name={(r as any).emailed_at ? "mail-open-outline" : "mail-outline"} size={19}
+                      color={(r as any).emailed_at ? "#16A34A" : colors.onSurfaceSecondary} />
+                  </Pressable>
+                  <Pressable onPress={() => toggleLock(r as any)} hitSlop={6} testID={`f16-lock-${r.user_id}`}>
+                    <Ionicons name={(r as any).part_a_locked ? "lock-closed" : "lock-open-outline"} size={19}
+                      color={(r as any).part_a_locked ? "#DC2626" : colors.onSurfaceSecondary} />
+                  </Pressable>
+                </>
               )}
             </View>
           ))}
@@ -302,5 +425,14 @@ const st = StyleSheet.create({
   modalSec: { fontSize: 12, fontWeight: "800", color: colors.brandPrimary, marginBottom: 4 },
   exRow: { flexDirection: "row", gap: 6, alignItems: "center", marginBottom: 6 },
   exInput: { borderWidth: 1, borderColor: colors.divider, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6, fontSize: 12, color: colors.onSurface },
+  // Iter 566 — Phase 2
+  qRow: { flexDirection: "row", gap: 8, marginBottom: 10 },
+  qCell: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.divider, padding: 8 },
+  qVal: { fontSize: 13, fontWeight: "800", color: colors.onSurface },
+  qBar: { height: 5, backgroundColor: colors.brandPrimary, borderRadius: 3, marginVertical: 4 },
+  qLbl: { fontSize: 10, color: colors.onSurfaceTertiary },
+  reconBox: { backgroundColor: colors.surface, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.divider, padding: 10, marginBottom: 12 },
+  reconTitle: { fontSize: 13, fontWeight: "800", color: colors.onSurface, flexShrink: 1 },
+  reconRow: { borderWidth: 1, borderColor: colors.divider, borderRadius: radius.md, padding: 8, marginTop: 8 },
   addLine: { flexDirection: "row", alignItems: "center", gap: 4, paddingVertical: 4 },
 });

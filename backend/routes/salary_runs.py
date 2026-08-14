@@ -1026,6 +1026,37 @@ def _actual_row_to_payslip(r: dict, month_days: Any) -> dict:
     }
 
 
+def _legacy_row_to_payslip(d: dict) -> dict:
+    """Iter 566 (user issue) — map a ``legacy_salary_history`` row (old
+    PayrollCnslt DB import) to the payslip row shape so payslips and
+    month reports work for LOCKED/migrated months that have no live run."""
+    epf = float(d.get("ee_pf") or d.get("less_epf") or 0)
+    esi = float(d.get("less_esi") or 0)
+    adv = float(d.get("less_adv") or 0)
+    loan = float(d.get("less_loan") or 0)
+    oth = float(d.get("less_other") or 0)
+    tds = float(d.get("tds") or 0)
+    ded_total = float(d.get("less_total") or 0) or round(
+        epf + esi + adv + loan + oth + tds, 2)
+    earn = d.get("earn_heads") or {}
+    return {
+        "user_id": d.get("user_id"), "name": d.get("name"),
+        "employee_code": d.get("emp_code"),
+        "days_paid": d.get("present_days"),
+        "ot_hours": d.get("ot_hours") or d.get("work_hours"),
+        "basic": d.get("basic"),
+        "other_earning": (round(sum(earn.values()), 2) if earn
+                          else (d.get("others") or 0)),
+        "gross": d.get("gross"),
+        "pf_employee": epf, "esic_employee": esi, "tds": tds,
+        "advance": round(adv + loan + oth, 2),
+        "total_deduction": ded_total,
+        "net": d.get("net"),
+        "earn_heads": earn, "deduct_heads": d.get("deduct_heads") or {},
+        "legacy": True,
+    }
+
+
 async def _payslip_rows_for_month(company_id: str, month: str):
     """(rows, month_days, source) for the latest processed run of a month."""
     crun = await db.compliance_salary_runs.find_one(
@@ -1046,6 +1077,22 @@ async def _payslip_rows_for_month(company_id: str, month: str):
         rows = [_actual_row_to_payslip(r, arun.get("month_days"))
                 for r in (arun.get("rows") or [])]
         return (rows, arun.get("month_days"), "actual")
+    # Iter 566 (user issue) — LOCKED salary migrated from the OLD DB
+    # lives in ``legacy_salary_history``; fall back to it so old months
+    # still produce payslips/reports instead of "run the Salary Process".
+    ldocs = await db.legacy_salary_history.find(
+        {"company_id": company_id, "month": month}, {"_id": 0}).to_list(6000)
+    if ldocs:
+        best: Dict[str, dict] = {}
+        for d in sorted(ldocs,
+                        key=lambda x: 0 if x.get("kind") == "online" else 1):
+            key = str(d.get("user_id") or
+                      f"legacy_{d.get('emp_code') or d.get('emp_id')}")
+            best.setdefault(key, d)
+        rows = [_legacy_row_to_payslip(d) for d in best.values()]
+        md = next((d.get("month_days") for d in best.values()
+                   if d.get("month_days")), None)
+        return (rows, md, "legacy")
     return ([], None, None)
 
 

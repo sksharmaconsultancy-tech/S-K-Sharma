@@ -5747,3 +5747,27 @@ came in). Phase 2 plan: 24Q reconciliation, TRACES Part A lock, ESS
 Form 16, email delivery, dashboard — form16.py structures reviewed
 (_fy_payroll returns user_id→monthly gross/tds; records in
 form16_records; PDF via _build_pdf(rec)).
+
+## Iter 566 — Legacy salary fallback + FORM 16 PHASE 2 (both user asks)
+1. OLD-DB LOCKED SALARY: salary_runs.py `_payslip_rows_for_month` now
+   falls back to `legacy_salary_history` (kind=online preferred, per-
+   user dedupe) via new `_legacy_row_to_payslip` mapper → payslip PDF +
+   payslips-month.zip work for migrated months. Tested: seeded legacy
+   row 2023-04 → payslip PDF 200 with correct name/net. Raw viewer
+   already exists at /legacy-salary.
+2. FORM 16 PHASE 2 (form16.py appended + ess_router included in
+   server.py): PUT /24q (form16_24q coll), GET /reconciliation (payroll
+   vs filed per Q, MATCHED/MISMATCH/NOT FILED, ₹1 tolerance), POST
+   /traces-lock (part_a_locked blocks regeneration — guard added in
+   generate; form16_audit), POST /email (Resend, per-employee PDF
+   attach, skips no-email), GET /dashboard (locked/emailed/total_tds +
+   quarterly_tds). ESS: /api/employee/form16/list + /{id}.pdf (own
+   records only). Frontend form16.tsx: new cards + Q1-Q4 bars, Email
+   All, 24Q Reconciliation editable section (Save 24Q), per-row ✉ +
+   🔒 icons; new app/my-form16.tsx ESS screen. /employees endpoint now
+   returns part_a_locked/emailed_at.
+   Tested: dashboard/reconciliation/24q-save/mismatch-flag/ESS-list via
+   curl; UI screenshot of recon section OK.
+APP_ITERATION=566, deploy_vps_iter566.sh, pointer → 566.
+Remaining Form16 polish (backlog): reconciliation Excel export, email
+templates customization.

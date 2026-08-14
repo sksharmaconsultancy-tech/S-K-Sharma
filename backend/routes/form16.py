@@ -229,7 +229,8 @@ async def form16_employees(
     gen: Dict[str, dict] = {}
     async for g in db.form16_records.find(
         {"company_id": company_id, "fy": fy}, {"_id": 0, "user_id": 1, "record_id": 1,
-                                               "version": 1, "generated_at": 1}):
+                                               "version": 1, "generated_at": 1,
+                                               "part_a_locked": 1, "emailed_at": 1}):
         gen[g["user_id"]] = g
     rows = []
     async for e in db.users.find(
@@ -252,6 +253,8 @@ async def form16_employees(
             "ready": r["ready"], "issues": r["issues"],
             "generated": bool(g), "record_id": (g or {}).get("record_id"),
             "version": (g or {}).get("version"),
+            "part_a_locked": bool((g or {}).get("part_a_locked")),
+            "emailed_at": (g or {}).get("emailed_at"),
         })
     ready = sum(1 for r in rows if r["ready"])
     return {
@@ -290,7 +293,12 @@ async def form16_generate(payload: dict = Body(...), authorization: Optional[str
         p = pay[uid]
         pb = _part_b(p["gross"], p["tds"], cfg, extras_map.get(uid))
         prev = await db.form16_records.find_one(
-            {"company_id": company_id, "fy": fy, "user_id": uid}, {"_id": 0, "version": 1})
+            {"company_id": company_id, "fy": fy, "user_id": uid},
+            {"_id": 0, "version": 1, "part_a_locked": 1})
+        if (prev or {}).get("part_a_locked"):
+            skipped.append({"user_id": uid, "name": emp.get("name"),
+                            "reason": "TRACES Part A LOCKED — unlock before regenerating"})
+            continue
         version = int((prev or {}).get("version") or 0) + 1
         rec = {
             "record_id": f"f16_{uuid.uuid4().hex[:12]}",
@@ -426,3 +434,225 @@ async def form16_zip(company_id: str, fy: str, authorization: Optional[str] = He
     return Response(content=buf.getvalue(), media_type="application/zip",
                     headers={"Content-Disposition":
                              f'attachment; filename="Form16_{fy}.zip"'})
+
+
+# ════════════════════════════════════════════════════════════════════
+#  PHASE 2 (Iter 566) — 24Q reconciliation, TRACES lock, ESS, email,
+#  dashboard.
+# ════════════════════════════════════════════════════════════════════
+_QTR = {"Q1": ("04", "05", "06"), "Q2": ("07", "08", "09"),
+        "Q3": ("10", "11", "12"), "Q4": ("01", "02", "03")}
+
+
+def _quarter_of(month: str) -> str:
+    mm = month[5:7]
+    for q, ms in _QTR.items():
+        if mm in ms:
+            return q
+    return "?"
+
+
+@router.put("/24q")
+async def save_24q(payload: dict = Body(...),
+                   authorization: Optional[str] = Header(None)):
+    """Save Form 24Q filed TDS figures: {company_id, fy, rows:
+    [{user_id, Q1, Q2, Q3, Q4}]} — amounts as filed in the TDS return."""
+    company_id = str(payload.get("company_id") or "")
+    fy = str(payload.get("fy") or "")
+    admin = await _auth(authorization, company_id)
+    rows = payload.get("rows") or []
+    n = 0
+    for r in rows:
+        uid = str(r.get("user_id") or "")
+        if not uid:
+            continue
+        doc = {"company_id": company_id, "fy": fy, "user_id": uid,
+               "updated_at": datetime.now(timezone.utc).isoformat(),
+               "updated_by": admin.get("user_id")}
+        for q in ("Q1", "Q2", "Q3", "Q4"):
+            if q in r and r[q] is not None and str(r[q]) != "":
+                doc[q] = round(float(r[q] or 0), 2)
+        await db.form16_24q.update_one(
+            {"company_id": company_id, "fy": fy, "user_id": uid},
+            {"$set": doc}, upsert=True)
+        n += 1
+    return {"ok": True, "saved": n}
+
+
+@router.get("/reconciliation")
+async def tds_reconciliation(company_id: str, fy: str,
+                             authorization: Optional[str] = Header(None)):
+    """Payroll TDS vs Form 24Q filed TDS, per employee per quarter."""
+    await _auth(authorization, company_id)
+    pay = await _fy_payroll(company_id, fy)
+    filed = {d["user_id"]: d async for d in db.form16_24q.find(
+        {"company_id": company_id, "fy": fy}, {"_id": 0})}
+    uids = [u for u, p in pay.items() if p.get("tds")] or list(pay.keys())
+    emps = {e["user_id"]: e async for e in db.users.find(
+        {"user_id": {"$in": uids}},
+        {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1, "pan": 1})}
+    out = []
+    for uid in uids:
+        p = pay.get(uid) or {}
+        pq = {q: 0.0 for q in _QTR}
+        for m in p.get("monthly") or []:
+            pq[_quarter_of(m["month"])] = round(
+                pq.get(_quarter_of(m["month"]), 0) + m["tds"], 2)
+        f = filed.get(uid) or {}
+        quarters, mismatch = [], False
+        for q in ("Q1", "Q2", "Q3", "Q4"):
+            fq = f.get(q)
+            diff = round((fq or 0.0) - pq[q], 2)
+            st = "MATCHED" if (fq is not None and abs(diff) < 1.0) else \
+                ("NOT FILED" if fq is None and pq[q] > 0 else
+                 ("—" if fq is None else "MISMATCH"))
+            if st in ("MISMATCH", "NOT FILED"):
+                mismatch = True
+            quarters.append({"q": q, "payroll": pq[q], "filed": fq,
+                             "diff": diff if fq is not None else None,
+                             "status": st})
+        e = emps.get(uid) or {}
+        out.append({"user_id": uid, "name": e.get("name"),
+                    "employee_code": e.get("employee_code"),
+                    "pan": e.get("pan"),
+                    "payroll_total": p.get("tds") or 0.0,
+                    "filed_total": round(sum(f.get(q) or 0 for q in _QTR), 2),
+                    "quarters": quarters, "mismatch": mismatch})
+    out.sort(key=lambda r: (not r["mismatch"], str(r.get("name") or "")))
+    return {"rows": out,
+            "summary": {"employees": len(out),
+                        "mismatched": sum(1 for r in out if r["mismatch"])}}
+
+
+@router.post("/traces-lock")
+async def traces_lock(payload: dict = Body(...),
+                      authorization: Optional[str] = Header(None)):
+    """Lock/unlock a record as OFFICIAL TRACES Part A (blocks regeneration)."""
+    rec = await db.form16_records.find_one(
+        {"record_id": str(payload.get("record_id") or "")}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=404, detail="Form 16 not found")
+    admin = await _auth(authorization, rec["company_id"])
+    locked = bool(payload.get("locked", True))
+    upd = {"part_a_locked": locked,
+           "traces_cert_no": str(payload.get("traces_cert_no") or
+                                 rec.get("traces_cert_no") or "").upper(),
+           "locked_at": datetime.now(timezone.utc).isoformat() if locked else None,
+           "locked_by": admin.get("user_id") if locked else None}
+    await db.form16_records.update_one(
+        {"record_id": rec["record_id"]}, {"$set": upd})
+    await db.form16_audit.insert_one({
+        "at": datetime.now(timezone.utc).isoformat(), "by": admin.get("user_id"),
+        "action": "traces_lock" if locked else "traces_unlock",
+        "record_id": rec["record_id"], "user_id": rec["user_id"],
+        "fy": rec["fy"], "company_id": rec["company_id"]})
+    return {"ok": True, "locked": locked}
+
+
+@router.post("/email")
+async def email_form16(payload: dict = Body(...),
+                       authorization: Optional[str] = Header(None)):
+    """Email each employee their Form 16 PDF (Resend)."""
+    import base64
+    company_id = str(payload.get("company_id") or "")
+    fy = str(payload.get("fy") or "")
+    await _auth(authorization, company_id)
+    user_ids = list(payload.get("user_ids") or [])
+    q = {"company_id": company_id, "fy": fy}
+    if user_ids:
+        q["user_id"] = {"$in": user_ids}
+    recs = await db.form16_records.find(q, {"_id": 0}).to_list(3000)
+    from server import _send_email_with_attachments
+    sent, skipped = [], []
+    for rec in recs:
+        emp = await db.users.find_one({"user_id": rec["user_id"]},
+                                      {"_id": 0, "email": 1, "name": 1})
+        to = str((emp or {}).get("email") or "").strip()
+        if not to:
+            skipped.append({"name": rec.get("name"), "reason": "No email on employee master"})
+            continue
+        pdf = _build_pdf(rec)
+        res = await _send_email_with_attachments(
+            to_email=to,
+            subject=f"Form 16 — FY {fy} — {rec.get('employer', {}).get('name') or ''}",
+            text=(f"Dear {rec.get('name')},\n\nPlease find attached your "
+                  f"Form 16 for FY {fy}.\n\nRegards,\n"
+                  f"{rec.get('employer', {}).get('name') or 'HR'}"),
+            html=f"<p>Dear {rec.get('name')},</p><p>Please find attached your "
+                 f"Form 16 for FY {fy}.</p>",
+            attachments=[{"filename": f"Form16_{rec.get('employee_code')}_{fy}.pdf",
+                          "content": base64.b64encode(pdf).decode(),
+                          "content_type": "application/pdf"}])
+        if res.get("delivered"):
+            await db.form16_records.update_one(
+                {"record_id": rec["record_id"]},
+                {"$set": {"emailed_at": datetime.now(timezone.utc).isoformat(),
+                          "emailed_to": to}})
+            sent.append({"name": rec.get("name"), "to": to})
+        else:
+            skipped.append({"name": rec.get("name"),
+                            "reason": res.get("error") or "send failed"})
+    return {"ok": True, "sent": sent, "skipped": skipped}
+
+
+@router.get("/dashboard")
+async def form16_dashboard(company_id: str, fy: str,
+                           authorization: Optional[str] = Header(None)):
+    await _auth(authorization, company_id)
+    pay = await _fy_payroll(company_id, fy)
+    recs = await db.form16_records.find(
+        {"company_id": company_id, "fy": fy},
+        {"_id": 0, "part_a_locked": 1, "emailed_at": 1}).to_list(3000)
+    qt = {q: 0.0 for q in _QTR}
+    for p in pay.values():
+        for m in p.get("monthly") or []:
+            qt[_quarter_of(m["month"])] = round(
+                qt[_quarter_of(m["month"])] + m["tds"], 2)
+    return {
+        "employees_with_payroll": len(pay),
+        "with_tds": sum(1 for p in pay.values() if (p.get("tds") or 0) > 0),
+        "generated": len(recs),
+        "locked": sum(1 for r in recs if r.get("part_a_locked")),
+        "emailed": sum(1 for r in recs if r.get("emailed_at")),
+        "total_tds": round(sum(p.get("tds") or 0 for p in pay.values()), 2),
+        "quarterly_tds": [{"q": q, "tds": qt[q]} for q in ("Q1", "Q2", "Q3", "Q4")],
+    }
+
+
+# ── ESS (Employee Self-Service) — employees see ONLY their own Form 16
+ess_router = APIRouter(prefix="/api/employee/form16", tags=["form16-ess"])
+
+
+async def _emp_auth(authorization):
+    u = await get_user_from_token(authorization)
+    if not u:
+        raise HTTPException(status_code=401, detail="Login required")
+    return u
+
+
+@ess_router.get("/list")
+async def ess_list(authorization: Optional[str] = Header(None)):
+    u = await _emp_auth(authorization)
+    recs = await db.form16_records.find(
+        {"user_id": u["user_id"]},
+        {"_id": 0, "record_id": 1, "fy": 1, "version": 1, "generated_at": 1,
+         "part_a_locked": 1, "part_b": 1}).sort("fy", -1).to_list(50)
+    return {"forms": [{
+        "record_id": r["record_id"], "fy": r["fy"], "version": r.get("version"),
+        "generated_at": r.get("generated_at"),
+        "traces_locked": bool(r.get("part_a_locked")),
+        "gross": (r.get("part_b") or {}).get("gross_salary"),
+        "tds": (r.get("part_b") or {}).get("tds_deducted"),
+    } for r in recs]}
+
+
+@ess_router.get("/{record_id}.pdf")
+async def ess_pdf(record_id: str, authorization: Optional[str] = Header(None)):
+    u = await _emp_auth(authorization)
+    rec = await db.form16_records.find_one({"record_id": record_id}, {"_id": 0})
+    if not rec or rec.get("user_id") != u["user_id"]:
+        raise HTTPException(status_code=404, detail="Form 16 not found")
+    pdf = _build_pdf(rec)
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="Form16_{rec["fy"]}.pdf"'})
