@@ -25,6 +25,7 @@ Endpoints:
     Filters: from_date, to_date, company_id, user_id.
 """
 from typing import Optional, List
+import re
 from fastapi import APIRouter, Header, Query
 
 # Shared helpers live on the `server` module.  Importing them here at
@@ -35,6 +36,89 @@ from server import db, get_user_from_token, require_role  # noqa: E402
 from shared.audit import derive_module  # noqa: E402
 
 router = APIRouter(prefix="/api")
+
+
+# Iter 572 — strip internal-ID tokens ("company_id=cmp_x, user_id=...") that
+# older log rows stored in details; firm/user names are shown separately.
+_ID_TOKEN = re.compile(r"\b\w*_?id=[^,\s]+[,]?\s*", re.IGNORECASE)
+
+
+def _clean_details(details: str) -> str:
+    return _ID_TOKEN.sub("", details or "").strip(" ,")
+
+
+# Iter 572 — step-by-step human-readable narration of every audit event.
+def _pretty_field(f: str) -> str:
+    return (f or "").replace("_", " ").strip().title()
+
+
+_SECURITY_PHRASES = [
+    ("OTP_GENERATED", "generated a login OTP"),
+    ("OTP_SENT_EMAIL", "was sent a login OTP by Email"),
+    ("OTP_SENT_WHATSAPP", "was sent a login OTP on WhatsApp"),
+    ("OTP_SENT_SMS", "was sent a login OTP by SMS"),
+    ("OTP_VERIFICATION_SUCCESS", "verified the login OTP and signed in"),
+    ("OTP_VERIFICATION_FAILED", "entered a wrong login OTP"),
+    ("OTP_BLOCKED", "was blocked after too many wrong OTP attempts"),
+    ("OTP_EXPIRED", "tried an expired login OTP"),
+    ("OTP_RESEND", "requested the OTP again"),
+    ("2FA_METHOD_CHANGED", "changed the 2FA verification method"),
+    ("2FA_SETTINGS_UPDATED", "updated the security (2FA) settings"),
+    ("TRUSTED_DEVICE_ADDED", "trusted this device for future logins"),
+    ("TRUSTED_DEVICE_REVOKED", "revoked a trusted device"),
+    ("TRUSTED_DEVICE_LOGIN", "signed in from a trusted device (OTP skipped)"),
+    ("ALL_SESSIONS_REVOKED", "logged out from all devices"),
+    ("NEW_IP_LOGIN", "signed in from a NEW IP address"),
+]
+
+
+def _describe(ev: dict) -> str:
+    """Builds 'S.K. Sharma Admin (Super Admin) updated Employee RAJESH —
+    changed Designation from Helper to Supervisor' style narration."""
+    actor = ev.get("actor_name") or "System"
+    if actor == "-":
+        actor = "System"
+    role = ev.get("actor_role") or ""
+    who = f"{actor} ({role.replace('_', ' ').title()})" if role else actor
+    action = ev.get("action") or ""
+    t = ev.get("action_type") or "OTHER"
+    module = ev.get("module") or "record"
+    label = ev.get("record_label") or ""
+    target = f"{module}" + (f" “{label}”" if label else "")
+    failed = ev.get("success") is False
+
+    for key, phrase in _SECURITY_PHRASES:
+        if key in action:
+            out = f"{who} {phrase}"
+            return out + (" — FAILED" if failed and "FAILED" not in phrase.upper()
+                          and "wrong" not in phrase and "blocked" not in phrase else "")
+
+    if t == "LOGIN":
+        path = ev.get("path") or ""
+        how = "PIN" if "pin" in path else ("password" if "password" in path else "credentials")
+        return f"{who} {'failed to sign in' if failed else 'signed in'} with {how}"
+
+    if t == "DOWNLOAD":
+        name = (ev.get("path") or action).rstrip("/").split("/")[-1].split("?")[0]
+        return f"{who} downloaded “{name}”"
+
+    changes = ev.get("changes") or []
+    if t == "UPDATE" and changes:
+        steps = "; ".join(
+            f"{_pretty_field(c.get('field'))}: “{(c.get('old') or '—')[:60]}” → “{(c.get('new') or '—')[:60]}”"
+            for c in changes[:3])
+        more = f" (+{len(changes) - 3} more fields)" if len(changes) > 3 else ""
+        return f"{who} updated {target} — changed {steps}{more}"
+    if t == "UPDATE":
+        det = _clean_details(ev.get("details") or "")
+        return f"{who} updated {target}" + (f" ({det[:120]})" if det else "") + (" — FAILED" if failed else "")
+    if t == "DELETE":
+        return f"{who} deleted {target}" + (" — FAILED" if failed else "")
+    if t == "CREATE":
+        det = _clean_details(ev.get("details") or "")
+        return f"{who} created {target}" + (f" ({det[:120]})" if det and not label else "") + (" — FAILED" if failed else "")
+    det = _clean_details(ev.get("details") or "")
+    return f"{who} — {action}" + (f" ({det[:100]})" if det else "")
 
 
 def _action_type(action: str, source: str) -> str:
@@ -107,7 +191,7 @@ async def users_log_report(
             "actor_id": e.get("actor_id"),
             "action": e.get("action") or f"{e.get('method')} {e.get('path')}",
             "company_id": e.get("company_id"),
-            "details": ((e.get("details") or "") + extra).strip(),
+            "details": (_clean_details(e.get("details") or "") + extra).strip(),
             "source": "activity_log",
             "module": e.get("module") or derive_module(e.get("path") or ""),
             "success": not failed,
@@ -233,6 +317,8 @@ async def users_log_report(
         ev["actor_name"] = actor.get("name") or "-"
         ev["actor_role"] = actor.get("role") or ""
         ev["company_name"] = company_names.get(ev.get("company_id") or "") or "-"
+        # Iter 572 — step-by-step human narration of the action.
+        ev["description"] = _describe(ev)
 
     # Iter 568 — free-text search across the enriched events.
     if search and search.strip():
@@ -244,6 +330,7 @@ async def users_log_report(
                 ev.get("actor_name") or "", ev.get("record_label") or "",
                 ev.get("path") or "", ev.get("module") or "",
                 ev.get("company_name") or "", ev.get("ip") or "",
+                ev.get("description") or "",
             )).lower()
         ]
 
@@ -296,8 +383,8 @@ async def users_log_report_xlsx(
     ws = wb.active
     ws.title = "Users Log"
     ws.append(["Date", "Time", "User", "Role", "Firm", "Module", "Type",
-               "Action", "Record", "Changes (Old → New)", "Details",
-               "IP", "Status", "Source"])
+               "Description (Step-by-step)", "Record",
+               "Changes (Old → New)", "Details", "IP", "Status", "Source"])
     for c in ws[1]:
         c.font = Font(bold=True)
     fail_fill = PatternFill("solid", fgColor="FEE2E2")
@@ -316,7 +403,7 @@ async def users_log_report_xlsx(
             ev.get("company_name") or "-",
             ev.get("module") or "",
             ev.get("action_type") or "",
-            ev.get("action") or "",
+            ev.get("description") or ev.get("action") or "",
             ev.get("record_label") or ev.get("record_id") or "",
             chg,
             (ev.get("details") or "")[:500],

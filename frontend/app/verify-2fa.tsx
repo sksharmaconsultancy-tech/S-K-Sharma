@@ -45,12 +45,16 @@ export default function Verify2FAScreen() {
   const [busy, setBusy] = useState(false);
   const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(
-    params.delivered === "1" ? null
-      : (params.delivery_error
-        ? "We could not send the OTP using this method. Please try another verification method."
-        : null),
-  );
+  const [info, setInfo] = useState<string | null>(() => {
+    const note = String(params.delivery_note || "");
+    if (note.startsWith("sent_to_admin:")) {
+      return `Email provider is in TEST mode — the OTP was sent to the administrator's email (${note.split(":")[1] || ""}). Ask your admin for the code, or verify a domain at resend.com to deliver directly.`;
+    }
+    if (params.delivered === "1") return null;
+    return params.delivery_error
+      ? "We could not send the OTP using this method. Please try another verification method."
+      : null;
+  });
   const [cooldown, setCooldown] = useState(Number(params.resend_cooldown || 30));
   const [expiresIn, setExpiresIn] = useState(Number(params.otp_expires_in || 300));
   const [trustDevice, setTrustDevice] = useState(false);
@@ -111,7 +115,10 @@ export default function Verify2FAScreen() {
       setCooldown(Number(r.resend_cooldown || 30));
       setExpiresIn(Number(r.otp_expires_in || 300));
       setOtp("");
-      if (r.delivered) {
+      const note = String(r.delivery_note || "");
+      if (note.startsWith("sent_to_admin:")) {
+        setInfo(`OTP sent to the administrator's email (${note.split(":")[1] || ""}) — email provider is in TEST mode.`);
+      } else if (r.delivered) {
         setInfo(`A new OTP was sent via ${METHOD_LABEL[r.method] || r.method}.`);
       } else {
         setError("We could not send the OTP using this method. Please try another verification method.");

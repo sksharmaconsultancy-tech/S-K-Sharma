@@ -5209,8 +5209,28 @@ async def _twofa_send_code(user: dict, method: str, code: str, st: dict) -> dict
     if method == "email":
         if not _twofa_channel_ready("email", st):
             return {"delivered": False, "error": "email_not_configured"}
-        r = await _send_otp_email(user.get("email") or "", code, minutes)
-        return {"delivered": r["delivered"], "error": r.get("error")}
+        if not (user.get("email") or "").strip():
+            return {"delivered": False, "error": "no_email_on_profile"}
+        r = await _send_otp_email(user["email"], code, minutes)
+        if r["delivered"]:
+            return {"delivered": True, "error": None}
+        err = str(r.get("error") or "")
+        # Iter 572 — Resend TEST MODE only delivers to the account owner.
+        # Interim fallback so sub admins are never locked out: deliver the
+        # OTP to the Super Admin's email instead (flagged in the response).
+        if "only send testing emails" in err:
+            sa = await db.users.find_one(
+                {"role": "super_admin", "email": {"$nin": [None, ""]}}, {"email": 1})
+            if sa and sa["email"].strip().lower() != user["email"].strip().lower():
+                r2 = await _send_otp_email(sa["email"], code, minutes)
+                if r2["delivered"]:
+                    logger.warning(
+                        f"[2FA] Resend test-mode: OTP for {user['email']} "
+                        f"delivered to owner {sa['email']} instead")
+                    return {"delivered": True, "error": None,
+                            "note": f"sent_to_admin:{_mask_email(sa['email'])}"}
+            return {"delivered": False, "error": "email_test_mode_restriction"}
+        return {"delivered": False, "error": r.get("error")}
     msg = (f"Your Payroll Security OTP is {code}. This OTP is valid for "
            f"{minutes} minutes. Do not share this OTP with anyone.")
     phone = user.get("phone") or ""
@@ -5469,6 +5489,8 @@ async def _start_2fa_challenge(user: dict, request: Request, login_kind: str):
     }
     if delivery.get("error"):
         resp["delivery_error"] = delivery["error"]
+    if delivery.get("note"):
+        resp["delivery_note"] = delivery["note"]
     if OTP_DEV_MODE:
         resp["dev_hint"] = f"code ends in ...{code[-2:]}"
     return resp
@@ -9885,7 +9907,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "571"
+APP_ITERATION = "572"
 
 
 @api.get("/version")
@@ -12508,6 +12530,10 @@ async def _activity_logger(request: Request, call_next):
                     parts = []
                     for k, v in data.items():
                         if any(s in k.lower() for s in _ACT_SENSITIVE):
+                            continue
+                        # Iter 572 — internal IDs are noise in the report
+                        # (firm/user names are shown separately).
+                        if k.lower() == "id" or k.lower().endswith("_id"):
                             continue
                         if isinstance(v, (str, int, float, bool)) and str(v).strip():
                             parts.append(f"{k}={str(v)[:40]}")

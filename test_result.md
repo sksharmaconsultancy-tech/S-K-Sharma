@@ -528,3 +528,19 @@ ITER 487 (doc-expiry alerts):
   RESEND_API_KEY on VPS, sends live test email, shows logs, and has a
   `rescue` mode that prints a fresh OTP from the server console
   (lockout-proof). temp-code-bundle kind=script → deploy571.
+
+## Iter 572 (backend verified by main agent inline tests — all PASS)
+- Users Log readability: _describe() builds step-by-step sentences
+  ("X (Super Admin) updated Employee Y — changed Designation: a → b
+  (+N more)"); security actions narrated (OTP sent/verified/blocked,
+  new-IP, trusted device). details stripped of *_id= tokens (middleware
+  skip + read-time _clean_details for old rows). Excel col "Description
+  (Step-by-step)". Frontend row shows description; modal "What
+  Happened" row.
+- Sub-admin OTP: always sent to the sub user's OWN email. Resend acct
+  is TEST MODE (owner sksharmaconsultancy@gmail.com; other recipients
+  403). Interim fallback auto-forwards OTP to super admin email with
+  delivery_note "sent_to_admin:<masked>" shown on OTP screen (verified
+  live with Test SubAdmin testsub@sksharma.co / subtest123). Permanent
+  fix = domain verify at resend.com + RESEND_FROM_EMAIL.
+- deploy_vps_iter572.sh; temp-code-bundle kind=script → 572.

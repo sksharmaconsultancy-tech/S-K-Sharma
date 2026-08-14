@@ -217,6 +217,8 @@ async def twofa_resend(payload: ResendReq, request: Request):
     }
     if delivery.get("error"):
         resp["delivery_error"] = delivery["error"]
+    if delivery.get("note"):
+        resp["delivery_note"] = delivery["note"]
     if OTP_DEV_MODE:
         resp["dev_hint"] = f"code ends in ...{code[-2:]}"
     return resp

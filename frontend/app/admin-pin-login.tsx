@@ -71,6 +71,7 @@ export default function AdminPinLoginScreen() {
           trusted_enabled: r.trusted_device_enabled ? "1" : "0",
           delivered: r.delivered ? "1" : "0",
           delivery_error: r.delivery_error || "",
+          delivery_note: r.delivery_note || "",
         },
       });
     };

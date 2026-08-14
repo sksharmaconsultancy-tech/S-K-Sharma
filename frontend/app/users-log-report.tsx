@@ -57,6 +57,7 @@ type LogEvent = {
   path?: string;
   record_id?: string;
   record_label?: string;
+  description?: string;
   changes?: FieldChange[];
   old_values?: Record<string, string> | null;
   new_values?: Record<string, string> | null;
@@ -493,8 +494,8 @@ export default function UsersLogReportScreen() {
                   <Text style={styles.typeBadgeTxt}>{t.slice(0, 3)}</Text>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.logAction} numberOfLines={2}>
-                    {e.action || "—"}
+                  <Text style={styles.logAction} numberOfLines={3}>
+                    {e.description || e.action || "—"}
                     {failed ? <Text style={{ color: "#dc2626" }}>  ✗ FAILED</Text> : null}
                   </Text>
                   <Text style={styles.logMeta}>
@@ -545,6 +546,9 @@ export default function UsersLogReportScreen() {
               {detailEvent ? (
                 <>
                   <MetaRow label="Date & Time" value={formatDateTime(detailEvent.at)} />
+                  {detailEvent.description ? (
+                    <MetaRow label="What Happened" value={detailEvent.description} />
+                  ) : null}
                   <MetaRow label="User" value={`${detailEvent.actor_name || "—"}${detailEvent.actor_role ? ` (${detailEvent.actor_role})` : ""}`} />
                   <MetaRow label="Firm" value={detailEvent.company_name || "—"} />
                   <MetaRow label="Module" value={detailEvent.module || "—"} />
