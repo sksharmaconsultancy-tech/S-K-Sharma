@@ -3212,6 +3212,8 @@ async def _create_core_indexes():
     await db.twofa_pending.create_index("pending_id", unique=True)
     await db.twofa_pending.create_index("expires_at", expireAfterSeconds=0)
     await db.trusted_devices.create_index([("user_id", 1), ("token_hash", 1)])
+    # Iter 570 — security alerts (new-IP detection)
+    await db.login_ips.create_index([("user_id", 1), ("ip", 1)], unique=True)
     await db.attendance.create_index([("user_id", 1), ("date", -1)])
     await db.leaves.create_index("user_id")
     await db.payslips.create_index([("employee_user_id", 1), ("month", -1)])
@@ -5127,6 +5129,7 @@ _TWOFA_DEFAULTS = {
     "sms_enabled": True,
     "trusted_device_enabled": False,
     "trusted_days": 30,
+    "security_alerts_enabled": True,
     "whatsapp_config": {"access_token": "", "phone_number_id": "", "template_name": ""},
     "sms_config": {"provider": "", "twilio_sid": "", "twilio_token": "", "twilio_from": "",
                    "msg91_authkey": "", "msg91_sender": "", "msg91_template_id": "",
@@ -5303,6 +5306,84 @@ def _twofa_new_code(length: int) -> str:
     return str(_twofa_secrets.randbelow(10 ** length)).zfill(length)
 
 
+# Iter 570 — proactive Security Alerts: email every Super Admin when a
+# failed-OTP lockout happens or an admin signs in from a brand-new IP.
+async def _send_security_alert(subject: str, lines: list, st: Optional[dict] = None):
+    try:
+        st = st or await _twofa_settings()
+        if not st.get("security_alerts_enabled", True):
+            return
+        api_key = os.getenv("RESEND_API_KEY", "").strip()
+        if not api_key:
+            return
+        from_email = os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev").strip()
+        recipients = []
+        async for u in db.users.find(
+                {"role": "super_admin", "email": {"$nin": [None, ""]}},
+                {"email": 1}).limit(10):
+            recipients.append(u["email"])
+        if not recipients:
+            return
+        rows = "".join(
+            f"<tr><td style='padding:4px 14px 4px 0;color:#64748b;font-size:13px;"
+            f"white-space:nowrap'>{k}</td><td style='padding:4px 0;font-size:13px;"
+            f"color:#0f172a'><strong>{v}</strong></td></tr>"
+            for k, v in lines)
+        html = (
+            "<div style='font-family:Arial,sans-serif;max-width:520px;margin:0 auto;"
+            "border:1px solid #e2e8f0;border-radius:10px;overflow:hidden'>"
+            "<div style='background:#b91c1c;color:#fff;padding:14px 20px;font-size:15px;"
+            f"font-weight:bold'>🔐 Security Alert — S.K. Sharma &amp; Co. Payroll</div>"
+            f"<div style='padding:18px 20px'><table>{rows}</table>"
+            "<p style='font-size:12px;color:#64748b;margin-top:14px'>Review the full "
+            "trail in <strong>Reports → Users Log Report</strong>. If this was not "
+            "expected, open <strong>Administration → Security · 2FA/MFA</strong> and "
+            "use “Logout from all devices”.</p></div></div>")
+        text = subject + "\n\n" + "\n".join(f"{k}: {v}" for k, v in lines)
+        async with httpx.AsyncClient(timeout=10.0) as hc:
+            r = await hc.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {api_key}",
+                         "Content-Type": "application/json"},
+                json={"from": f"S.K. Sharma & Co. Security <{from_email}>",
+                      "to": recipients, "subject": subject,
+                      "text": text, "html": html})
+        logger.info(f"[security-alert] '{subject}' → {len(recipients)} super admin(s) ({r.status_code})")
+    except Exception:
+        logger.warning("[security-alert] send failed", exc_info=True)
+
+
+async def _security_check_new_ip(user: dict, request: Request):
+    """Called after a successful Super/Sub admin login. Records the IP and
+    alerts Super Admins the first time a brand-new IP is used."""
+    try:
+        ip = _req_ip(request)
+        if not ip:
+            return
+        existing = await db.login_ips.find_one({"user_id": user["user_id"], "ip": ip})
+        had_any = await db.login_ips.count_documents({"user_id": user["user_id"]}) > 0
+        device = (request.headers.get("user-agent") or "")[:200]
+        await db.login_ips.update_one(
+            {"user_id": user["user_id"], "ip": ip},
+            {"$set": {"last_seen": now_iso(), "device": device},
+             "$setOnInsert": {"first_seen": now_iso()},
+             "$inc": {"count": 1}},
+            upsert=True)
+        if existing is None and had_any:
+            await _twofa_audit(user, "NEW_IP_LOGIN", request, True,
+                               f"First login from IP {ip}")
+            await _send_security_alert(
+                f"⚠️ New IP login — {user.get('name') or user.get('email')}",
+                [("Event", "Login from a NEW IP address"),
+                 ("User", f"{user.get('name') or '—'} ({user.get('role') or '—'})"),
+                 ("Email", user.get("email") or "—"),
+                 ("IP Address", ip),
+                 ("Device", device[:120] or "—"),
+                 ("Time (UTC)", now_iso()[:19].replace("T", " "))])
+    except Exception:
+        logger.warning("[security-alert] new-ip check failed", exc_info=True)
+
+
 async def _start_2fa_challenge(user: dict, request: Request, login_kind: str):
     """Called AFTER credentials verified. Returns the challenge response
     dict when 2FA is required, or None when login can proceed normally."""
@@ -5333,6 +5414,7 @@ async def _start_2fa_challenge(user: dict, request: Request, login_kind: str):
                     {"$set": {"last_used_at": now_iso(), "ip_address": _req_ip(request)}})
                 await _twofa_audit(user, "TRUSTED_DEVICE_LOGIN", request, True,
                                    f"device={td.get('device_name') or ''}")
+                await _security_check_new_ip(user, request)
                 return None
     methods = _twofa_methods_for_user(user, st)
     configured = [m for m in methods if m["configured"]]
@@ -9793,7 +9875,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "569"
+APP_ITERATION = "570"
 
 
 @api.get("/version")

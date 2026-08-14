@@ -503,3 +503,14 @@ ITER 487 (doc-expiry alerts):
   twofa_pending to sha256('123456') — see /app/memory/test_credentials.md.
 - WhatsApp/SMS OTP channels intentionally NOT CONFIGURED (user adds
   provider credentials later in Security · 2FA/MFA screen).
+
+## Iter 570 (backend verified by main agent inline script — 12/12 PASS)
+- Security Alert Emails: _send_security_alert (Resend → all super_admin
+  emails) + _security_check_new_ip (login_ips collection, unique
+  user_id+ip). Triggers: OTP_BLOCKED lockout in twofa.verify, and
+  NEW_IP_LOGIN after successful 2FA verify + trusted-device bypass.
+  First-ever IP of a user records silently (no alert noise); repeat IPs
+  increment count only. Both alert sends confirmed 200 by Resend in
+  backend logs. Toggle security_alerts_enabled (default ON) in
+  /admin/security-settings/2fa + UI switch in security-2fa.tsx.
+- temp-code-bundle kind=script now serves deploy_vps_iter570.sh.

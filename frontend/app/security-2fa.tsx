@@ -79,6 +79,7 @@ export default function Security2FAScreen() {
           whatsapp_enabled: !!st.whatsapp_enabled,
           sms_enabled: !!st.sms_enabled,
           trusted_device_enabled: !!st.trusted_device_enabled,
+          security_alerts_enabled: !!st.security_alerts_enabled,
           whatsapp_config: st.whatsapp_config || {},
           sms_config: st.sms_config || {},
         },
@@ -232,6 +233,8 @@ export default function Security2FAScreen() {
                 <ToggleRow label="SMS OTP" value={!!st.sms_enabled} onChange={(v) => upSt({ sms_enabled: v })} />
                 <ToggleRow label="Trusted Device (30-day skip)" value={!!st.trusted_device_enabled}
                   onChange={(v) => upSt({ trusted_device_enabled: v })} />
+                <ToggleRow label="Security Alert Emails (OTP lockout / new-IP login)" value={!!st.security_alerts_enabled}
+                  onChange={(v) => upSt({ security_alerts_enabled: v })} />
                 {st.trusted_device_enabled ? (
                   <View style={styles.numGrid}>
                     <NumField label="Trusted for (days)" value={st.trusted_days} onChange={(v) => upSt({ trusted_days: v })} />

@@ -27,6 +27,7 @@ from server import (  # noqa: E402
     _twofa_settings, _twofa_methods_for_user, _twofa_send_code,
     _twofa_audit, _twofa_new_code, _mask_email, _mask_mobile,
     _req_ip, OTP_DEV_MODE,
+    _send_security_alert, _security_check_new_ip,
 )
 import secrets as _secrets
 
@@ -105,6 +106,17 @@ async def twofa_verify(payload: VerifyReq, request: Request):
             await db.twofa_pending.update_one({"_id": row["_id"]}, upd)
             await _twofa_audit(user, "OTP_BLOCKED", request, False,
                                f"Blocked after {attempts} failed attempts", row.get("method") or "")
+            # Iter 570 — proactive alert to Super Admins on OTP lockout.
+            await _send_security_alert(
+                f"🚨 OTP lockout — {user.get('name') or user.get('email')}",
+                [("Event", "2FA OTP BLOCKED after too many wrong attempts"),
+                 ("User", f"{user.get('name') or '—'} ({user.get('role') or '—'})"),
+                 ("Email", user.get("email") or "—"),
+                 ("Failed Attempts", f"{attempts}/{max_att}"),
+                 ("IP Address", _req_ip(request) or "—"),
+                 ("Device", (request.headers.get("user-agent") or "")[:120] or "—"),
+                 ("Time (UTC)", now_iso()[:19].replace("T", " "))],
+                st)
             raise HTTPException(status_code=429, detail="Too many incorrect OTP attempts. Please request a new OTP.")
         await db.twofa_pending.update_one({"_id": row["_id"]}, upd)
         await _twofa_audit(user, "OTP_VERIFICATION_FAILED", request, False,
@@ -120,6 +132,8 @@ async def twofa_verify(payload: VerifyReq, request: Request):
         {"$set": {"twofa_last_verified_at": now_iso()}})
     await _twofa_audit(user, "OTP_VERIFICATION_SUCCESS", request, True,
                        "2FA verified — session created", row.get("method") or "")
+    # Iter 570 — record login IP; alert Super Admins on a brand-new IP.
+    await _security_check_new_ip(user, request)
 
     resp: dict = {}
     # Optional trusted device (only when the feature is enabled in settings).
@@ -336,7 +350,8 @@ async def update_security_settings(payload: dict, request: Request,
             if not (lo <= v <= hi):
                 raise HTTPException(status_code=400, detail=f"{k} must be between {lo} and {hi}")
             upd[k] = v
-    for k in ("email_enabled", "whatsapp_enabled", "sms_enabled", "trusted_device_enabled"):
+    for k in ("email_enabled", "whatsapp_enabled", "sms_enabled",
+              "trusted_device_enabled", "security_alerts_enabled"):
         if k in payload:
             upd[k] = bool(payload[k])
     # Provider configs — masked values ("••••••••") mean "keep existing".
