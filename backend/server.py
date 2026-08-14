@@ -5137,6 +5137,12 @@ _TWOFA_DEFAULTS = {
     "trusted_device_enabled": False,
     "trusted_days": 30,
     "security_alerts_enabled": True,
+    # Iter 573 — OTP email routing. otp_email_via_smtp: deliver login OTPs
+    # through the firm's own SMTP (Email Settings) so ANY recipient works.
+    # fallback_to_admin_email: forward undeliverable OTPs to the Super
+    # Admin inbox — OFF by default per user request (was flooding Gmail).
+    "otp_email_via_smtp": False,
+    "fallback_to_admin_email": False,
     "whatsapp_config": {"access_token": "", "phone_number_id": "", "template_name": ""},
     "sms_config": {"provider": "", "twilio_sid": "", "twilio_token": "", "twilio_from": "",
                    "msg91_authkey": "", "msg91_sender": "", "msg91_template_id": "",
@@ -5171,7 +5177,8 @@ def _mask_mobile(phone: str) -> str:
 
 def _twofa_channel_ready(method: str, st: dict) -> bool:
     if method == "email":
-        return bool(st["email_enabled"] and os.getenv("RESEND_API_KEY", "").strip())
+        return bool(st["email_enabled"] and (
+            os.getenv("RESEND_API_KEY", "").strip() or st.get("otp_email_via_smtp")))
     if method == "whatsapp":
         wc = st["whatsapp_config"]
         return bool(st["whatsapp_enabled"] and wc.get("access_token") and wc.get("phone_number_id"))
@@ -5207,28 +5214,49 @@ async def _twofa_send_code(user: dict, method: str, code: str, st: dict) -> dict
     """Dispatch OTP over the requested channel. Returns {delivered, error}."""
     minutes = int(st["otp_validity_min"])
     if method == "email":
-        if not _twofa_channel_ready("email", st):
+        if not st.get("email_enabled", True):
             return {"delivered": False, "error": "email_not_configured"}
         if not (user.get("email") or "").strip():
             return {"delivered": False, "error": "no_email_on_profile"}
+        # Iter 573 — optional delivery via the firm's own SMTP (Email
+        # Settings): works for EVERY recipient (no Resend test-mode limit).
+        if st.get("otp_email_via_smtp"):
+            try:
+                from routes.email_notifications import _get_settings as _smtp_get, _smtp_send
+                smtp = await _smtp_get()
+                if smtp and smtp.get("enabled") and smtp.get("username"):
+                    ist = (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).strftime("%d-%m-%Y %I:%M:%S %p")
+                    await _smtp_send(
+                        smtp, user["email"],
+                        f"Your S.K. Sharma & Co. login code: {code}",
+                        (f"Your S.K. Sharma & Co. login code is: {code}\n"
+                         f"Sent at: {ist} (IST)\n\n"
+                         f"This code is valid for {minutes} minutes and can only be used once.\n"
+                         "Always use the code from the NEWEST email — older codes are cancelled."))
+                    return {"delivered": True, "error": None, "note": "sent_via_smtp"}
+                logger.warning("[2FA smtp] selected but SMTP not configured — using Resend")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[2FA smtp FAIL] {exc} — falling back to Resend")
+        if not os.getenv("RESEND_API_KEY", "").strip():
+            return {"delivered": False, "error": "email_not_configured"}
         r = await _send_otp_email(user["email"], code, minutes)
         if r["delivered"]:
             return {"delivered": True, "error": None}
         err = str(r.get("error") or "")
-        # Iter 572 — Resend TEST MODE only delivers to the account owner.
-        # Interim fallback so sub admins are never locked out: deliver the
-        # OTP to the Super Admin's email instead (flagged in the response).
+        # Resend TEST MODE only delivers to the account owner. Forward to
+        # the Super Admin inbox ONLY when explicitly enabled in settings.
         if "only send testing emails" in err:
-            sa = await db.users.find_one(
-                {"role": "super_admin", "email": {"$nin": [None, ""]}}, {"email": 1})
-            if sa and sa["email"].strip().lower() != user["email"].strip().lower():
-                r2 = await _send_otp_email(sa["email"], code, minutes)
-                if r2["delivered"]:
-                    logger.warning(
-                        f"[2FA] Resend test-mode: OTP for {user['email']} "
-                        f"delivered to owner {sa['email']} instead")
-                    return {"delivered": True, "error": None,
-                            "note": f"sent_to_admin:{_mask_email(sa['email'])}"}
+            if st.get("fallback_to_admin_email"):
+                sa = await db.users.find_one(
+                    {"role": "super_admin", "email": {"$nin": [None, ""]}}, {"email": 1})
+                if sa and sa["email"].strip().lower() != user["email"].strip().lower():
+                    r2 = await _send_otp_email(sa["email"], code, minutes)
+                    if r2["delivered"]:
+                        logger.warning(
+                            f"[2FA] Resend test-mode: OTP for {user['email']} "
+                            f"delivered to owner {sa['email']} instead")
+                        return {"delivered": True, "error": None,
+                                "note": f"sent_to_admin:{_mask_email(sa['email'])}"}
             return {"delivered": False, "error": "email_test_mode_restriction"}
         return {"delivered": False, "error": r.get("error")}
     msg = (f"Your Payroll Security OTP is {code}. This OTP is valid for "
@@ -9907,7 +9935,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "572"
+APP_ITERATION = "573"
 
 
 @api.get("/version")

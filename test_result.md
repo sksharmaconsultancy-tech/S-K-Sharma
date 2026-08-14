@@ -544,3 +544,15 @@ ITER 487 (doc-expiry alerts):
   live with Test SubAdmin testsub@sksharma.co / subtest123). Permanent
   fix = domain verify at resend.com + RESEND_FROM_EMAIL.
 - deploy_vps_iter572.sh; temp-code-bundle kind=script → 572.
+
+## Iter 573 (backend verified by main agent inline tests — 7/7 PASS)
+- ROOT CAUSE of "all OTPs on sksharmaconsultancy@gmail.com": user's
+  RESEND account is TEST MODE (unverified domain) → only delivers to
+  owner; Iter 572 fallback forwarded sub OTPs there.
+- Iter 573: fallback_to_admin_email now OFF by default (opt-in toggle);
+  new otp_email_via_smtp toggle routes OTP through smtp_settings
+  (routes/email_notifications _smtp_send) → delivers to any sub user's
+  own email. _twofa_channel_ready treats smtp mode as configured.
+  verify-2fa shows actionable test-mode message. Deploy573 resets both
+  flags in VPS DB. Permanent options for user: verify domain at
+  resend.com (Option A) or configure SMTP + toggle (Option B).

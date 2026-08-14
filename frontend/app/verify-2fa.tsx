@@ -48,9 +48,12 @@ export default function Verify2FAScreen() {
   const [info, setInfo] = useState<string | null>(() => {
     const note = String(params.delivery_note || "");
     if (note.startsWith("sent_to_admin:")) {
-      return `Email provider is in TEST mode — the OTP was sent to the administrator's email (${note.split(":")[1] || ""}). Ask your admin for the code, or verify a domain at resend.com to deliver directly.`;
+      return `Your email provider (Resend) is in TEST mode — the OTP was forwarded to the administrator's email (${note.split(":")[1] || ""}). Permanent fix: verify your domain at resend.com or enable "Send OTP via own SMTP" in Security settings.`;
     }
     if (params.delivered === "1") return null;
+    if (params.delivery_error === "email_test_mode_restriction") {
+      return "Could not deliver the OTP to your email: the Resend email account is in TEST mode (no verified domain). Ask the Super Admin to enable 'Send OTP via own SMTP' in Security · 2FA/MFA, or verify a domain at resend.com.";
+    }
     return params.delivery_error
       ? "We could not send the OTP using this method. Please try another verification method."
       : null;

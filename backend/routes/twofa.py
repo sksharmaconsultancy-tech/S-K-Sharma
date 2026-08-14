@@ -353,7 +353,8 @@ async def update_security_settings(payload: dict, request: Request,
                 raise HTTPException(status_code=400, detail=f"{k} must be between {lo} and {hi}")
             upd[k] = v
     for k in ("email_enabled", "whatsapp_enabled", "sms_enabled",
-              "trusted_device_enabled", "security_alerts_enabled"):
+              "trusted_device_enabled", "security_alerts_enabled",
+              "otp_email_via_smtp", "fallback_to_admin_email"):
         if k in payload:
             upd[k] = bool(payload[k])
     # Provider configs — masked values ("••••••••") mean "keep existing".

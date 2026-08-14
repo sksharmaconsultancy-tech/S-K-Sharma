@@ -80,6 +80,8 @@ export default function Security2FAScreen() {
           sms_enabled: !!st.sms_enabled,
           trusted_device_enabled: !!st.trusted_device_enabled,
           security_alerts_enabled: !!st.security_alerts_enabled,
+          otp_email_via_smtp: !!st.otp_email_via_smtp,
+          fallback_to_admin_email: !!st.fallback_to_admin_email,
           whatsapp_config: st.whatsapp_config || {},
           sms_config: st.sms_config || {},
         },
@@ -235,6 +237,11 @@ export default function Security2FAScreen() {
                   onChange={(v) => upSt({ trusted_device_enabled: v })} />
                 <ToggleRow label="Security Alert Emails (OTP lockout / new-IP login)" value={!!st.security_alerts_enabled}
                   onChange={(v) => upSt({ security_alerts_enabled: v })} />
+                <Text style={styles.label}>OTP email delivery</Text>
+                <ToggleRow label="Send OTP via own SMTP (Email Settings) — delivers to EVERY sub user's email" value={!!st.otp_email_via_smtp}
+                  onChange={(v) => upSt({ otp_email_via_smtp: v })} />
+                <ToggleRow label="If undeliverable, forward OTP to Super Admin email" value={!!st.fallback_to_admin_email}
+                  onChange={(v) => upSt({ fallback_to_admin_email: v })} />
                 {st.trusted_device_enabled ? (
                   <View style={styles.numGrid}>
                     <NumField label="Trusted for (days)" value={st.trusted_days} onChange={(v) => upSt({ trusted_days: v })} />
