@@ -4607,21 +4607,31 @@ async def _send_otp_email(to_email: str, code: str, minutes: int = OTP_TTL_MINUT
     if os.getenv("OTP_EMAIL_ENABLED", "true").strip().lower() in ("false", "0", "no", "off"):
         return {"delivered": False, "email_id": None, "error": "otp_email_disabled_by_env"}
     try:
-        async with httpx.AsyncClient(timeout=10.0) as hc:
-            r = await hc.post(
-                "https://api.resend.com/emails",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "from": f"S.K. Sharma & Co. <{from_email}>",
-                    "to": [to_email],
-                    "subject": subject,
-                    "text": text,
-                    "html": html,
-                },
-            )
+        async def _post(frm: str):
+            async with httpx.AsyncClient(timeout=10.0) as hc:
+                return await hc.post(
+                    "https://api.resend.com/emails",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "from": f"S.K. Sharma & Co. <{frm}>",
+                        "to": [to_email],
+                        "subject": subject,
+                        "text": text,
+                        "html": html,
+                    },
+                )
+
+        r = await _post(from_email)
+        # Iter 574 — custom-domain sender not verified yet? Auto-retry with
+        # Resend's test sender so login never breaks mid domain-setup.
+        if (r.status_code >= 400 and from_email != "onboarding@resend.dev"
+                and ("domain is not verified" in (r.text or "").lower()
+                     or "not verified" in (r.text or "").lower())):
+            logger.warning(f"[Resend] from-domain not verified yet ({from_email}) — retrying with onboarding@resend.dev")
+            r = await _post("onboarding@resend.dev")
         if r.status_code < 300:
             data = {}
             try:
@@ -5220,7 +5230,7 @@ async def _twofa_send_code(user: dict, method: str, code: str, st: dict) -> dict
             return {"delivered": False, "error": "no_email_on_profile"}
         # Iter 573 — optional delivery via the firm's own SMTP (Email
         # Settings): works for EVERY recipient (no Resend test-mode limit).
-        if st.get("otp_email_via_smtp"):
+        async def _try_smtp() -> bool:
             try:
                 from routes.email_notifications import _get_settings as _smtp_get, _smtp_send
                 smtp = await _smtp_get()
@@ -5233,19 +5243,31 @@ async def _twofa_send_code(user: dict, method: str, code: str, st: dict) -> dict
                          f"Sent at: {ist} (IST)\n\n"
                          f"This code is valid for {minutes} minutes and can only be used once.\n"
                          "Always use the code from the NEWEST email — older codes are cancelled."))
-                    return {"delivered": True, "error": None, "note": "sent_via_smtp"}
-                logger.warning("[2FA smtp] selected but SMTP not configured — using Resend")
+                    return True
             except Exception as exc:  # noqa: BLE001
-                logger.warning(f"[2FA smtp FAIL] {exc} — falling back to Resend")
+                logger.warning(f"[2FA smtp FAIL] {exc}")
+            return False
+
+        if st.get("otp_email_via_smtp"):
+            if await _try_smtp():
+                return {"delivered": True, "error": None, "note": "sent_via_smtp"}
+            logger.warning("[2FA smtp] primary SMTP delivery failed/not configured — using Resend")
         if not os.getenv("RESEND_API_KEY", "").strip():
+            # No Resend key — last chance: SMTP even if the toggle is off.
+            if await _try_smtp():
+                return {"delivered": True, "error": None, "note": "sent_via_smtp"}
             return {"delivered": False, "error": "email_not_configured"}
         r = await _send_otp_email(user["email"], code, minutes)
         if r["delivered"]:
             return {"delivered": True, "error": None}
         err = str(r.get("error") or "")
-        # Resend TEST MODE only delivers to the account owner. Forward to
-        # the Super Admin inbox ONLY when explicitly enabled in settings.
+        # Resend TEST MODE only delivers to the account owner.
         if "only send testing emails" in err:
+            # Iter 574 — auto-rescue: if the firm's SMTP is configured, use
+            # it so the sub user still gets the OTP on their OWN email.
+            if await _try_smtp():
+                return {"delivered": True, "error": None, "note": "sent_via_smtp"}
+            # Forward to the Super Admin inbox ONLY when explicitly enabled.
             if st.get("fallback_to_admin_email"):
                 sa = await db.users.find_one(
                     {"role": "super_admin", "email": {"$nin": [None, ""]}}, {"email": 1})
@@ -9935,7 +9957,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "573"
+APP_ITERATION = "574"
 
 
 @api.get("/version")

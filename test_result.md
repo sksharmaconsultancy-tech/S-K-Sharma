@@ -556,3 +556,15 @@ ITER 487 (doc-expiry alerts):
   verify-2fa shows actionable test-mode message. Deploy573 resets both
   flags in VPS DB. Permanent options for user: verify domain at
   resend.com (Option A) or configure SMTP + toggle (Option B).
+
+## Iter 574 (backend verified by main agent inline tests — 3/3 PASS)
+- User chose BOTH email options. _send_otp_email: if RESEND_FROM_EMAIL
+  custom domain not yet verified, auto-retries with onboarding@resend.dev
+  (verified live via env swap + log line). _twofa_send_code: _try_smtp
+  auto-rescue — on Resend test-mode block, OTP auto-sends via configured
+  SMTP even without the toggle; toggle makes SMTP primary; bogus-SMTP
+  graceful fallback tested. deploy574 sets
+  RESEND_FROM_EMAIL=no-reply@smartpayrolling.com on VPS (safe).
+  temp-code-bundle kind=script → 574.
+- USER TODO: verify smartpayrolling.com at resend.com/domains; configure
+  Gmail App Password SMTP in Email SMTP & Notifications.
