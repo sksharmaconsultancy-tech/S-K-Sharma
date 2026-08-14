@@ -5781,3 +5781,64 @@ templates customization.
    /my-form16 ESS screen.
 APP_ITERATION=567, deploy_vps_iter567.sh, pointer → 567.
 BLOCKED backlog: WhatsApp API (user Meta credentials needed).
+
+## NEXT MAJOR TASK (user spec received, NOT yet implemented) — Users Log
+## Report → full Audit Trail upgrade (Iter 568+)
+EXISTING INFRA (verified — EXTEND, do NOT duplicate):
+- server.py ~12038-12120: `_activity_logger` middleware logs EVERY authed
+  request to `activity_log` coll (actor_id, company_id, at, ip, path,
+  method; _ACT_SKIP list at 12018). Indexes at 3207-3210 (at/actor/company).
+- routes/reports_extra.py: GET /api/admin/users-log (existing feed).
+- frontend app/users-log-report.tsx (existing report screen).
+PLAN (phase-wise, keep existing report working):
+P1 Central service: `async def create_audit_log(request, admin, *, module,
+   sub_module, action, record_type, record_id, employee_code, description,
+   old_values, new_values, status, error, critical)` in new
+   /app/backend/utils/audit.py → writes to SAME activity_log coll with new
+   optional fields (backward compatible). Parse device/OS/browser from
+   User-Agent; session id from token hash prefix. Diff helper
+   `diff_fields(old_doc, new_doc, fields)` returns only changed fields.
+P2 Instrument critical endpoints (call service): auth login/fail/logout
+   (server.py admin-password-login ~5270, PIN login, lockout), employee
+   PATCH (routes/employees_admin.py — field-level diff incl salary/bank/
+   PF/ESIC/UAN → critical=True), manual-punch add/edit/delete
+   (attendance_admin_core.py ~1420+), punch approvals approve/reject,
+   salary process/lock/unlock (salary_runs.py), challans/ECR (compliance
+   routes), report exports (mark EXPORT), firm CRUD, super-admin CRUD
+   (routes/super_admins.py), permission/role changes.
+P3 Upgrade GET /admin/users-log: add filters (from/to, user, role, firm,
+   branch, module, sub_module, action, employee_code, record_id, status,
+   ip, q global search), server-side pagination (limit/offset), firm
+   scoping (super=all; sub/company admin → allowed company_ids only —
+   reuse sub_admin_can_touch_company), summary endpoint (totals, today,
+   logins, failed, changes, exports, critical, top users, top modules),
+   exports xlsx/csv/pdf (log the export itself). NO edit/delete endpoints
+   (immutable).
+P4 users-log-report.tsx: summary cards + quick date chips (Today/Yest/
+   7d/30d/month/custom), filter bar + global search, audit table columns
+   per spec, Critical badge (red), View Details modal (user/firm/action/
+   record info, old→new field comparison rendered friendly, IP/device/
+   session, status/error). Human-readable descriptions built server-side
+   ("X changed Y's Basic Salary from ₹14,000 to ₹15,000").
+P5 Test via testing_agent (backend focus), bump iteration, deploy script.
+ACCEPTANCE: existing report/permissions keep working; only changed fields
+stored; failed actions logged; firm isolation enforced server-side.
+
+## STATUS UPDATE (June 2026 fork — Iter 568/569 DONE)
+- Iter 568 DETAILED AUDIT TRAIL: SHIPPED. Implemented via shared/audit.py
+  + middleware old-doc pre-fetch (P1-P4 above delivered in simplified
+  form: field diffs, module/IP/device/success, filters module/action_type/
+  status/search, summary block, details modal, upgraded xlsx). Log remains
+  immutable; firm scoping enforced (company_admin → own firm only).
+- Iter 569 2FA/MFA LOGIN SECURITY: SHIPPED. Mandatory for super_admin +
+  sub_admin. Backend-enforced pending-token flow, hashed 6-digit OTP,
+  5-min/one-time/5-attempts/30s-cooldown, Email channel LIVE (Resend),
+  WhatsApp + SMS channels built but awaiting user provider credentials
+  (Administration → Security · 2FA/MFA), trusted devices OFF by default,
+  full audit event integration. Files: backend/routes/twofa.py,
+  frontend/app/verify-2fa.tsx, frontend/app/security-2fa.tsx.
+- Deploy scripts: deploy_vps_iter568.sh, deploy_vps_iter569.sh (569
+  includes 568). Current APP_ITERATION = 569.
+- PENDING (user side): WhatsApp Meta credentials, SMS provider creds,
+  SMTP config for expiring documents. Future: AI WhatsApp chatbot,
+  multi-language EN/HI.

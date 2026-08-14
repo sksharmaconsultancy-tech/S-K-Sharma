@@ -471,3 +471,35 @@ ITER 487 (doc-expiry alerts):
   data is all-zero (test DB) so gross totals show 0 locally — real
   totals verified conceptually; user validates on VPS. Frontend lint
   clean; smoke screenshot pending.
+
+## Iter 568 (backend verified by main agent inline script — all PASS)
+- Detailed Audit Trail: shared/audit.py resource map + middleware pre-fetch
+  captures field-level old→new diffs on PUT/PATCH/DELETE for employees,
+  attendance, firms, sub-admins, advances, leaves, shifts, masters,
+  api-clients. activity_log now stores module/record_label/changes/
+  old_values/new_values/device/success. users-log API: filters
+  (module/action_type/status/search) + summary block; xlsx adds
+  Module/Type/Record/Changes/IP/Status (failed rows red).
+- Frontend users-log-report: summary cards, quick filter chips, search,
+  View Details modal with Field/Old/New diff table (screenshot verified).
+
+## Iter 569 (backend 33/33 PASS via /app/test_2fa_569.py; frontend E2E by testing agent iteration_569.json)
+- 2FA mandatory for super_admin + sub_admin on password AND pin login:
+  twofa_required + pending_token (no session), OTP hashed (sha256),
+  5-min validity, one-time (pending deleted on success, replay 401),
+  5 attempts → blocked (even correct OTP rejected), resend cooldown 30s,
+  method switch w/ friendly error when channel not configured.
+- routes/twofa.py: verify/resend/my-security/preferred-method/
+  trusted-devices(+revoke)/logout-all/admin security-settings GET+PUT
+  (secrets masked with •••, masked resubmit keeps stored value).
+- Audit events verified in users-log: OTP_GENERATED, OTP_SENT_EMAIL,
+  OTP_VERIFICATION_SUCCESS/FAILED, OTP_BLOCKED, 2FA_SETTINGS_UPDATED.
+- Frontend: verify-2fa.tsx (masked contacts, countdown, resend, alt
+  channels), security-2fa.tsx (My Security, policy, WhatsApp/SMS provider
+  config, trusted devices). Testing agent found 1 HIGH bug (settings
+  panel skipped load before AuthContext hydration) — FIXED (useEffect
+  deps on user) and re-verified via cold-navigation screenshot.
+- TESTING NOTE: to complete 2FA in automation, swap otp_hash in
+  twofa_pending to sha256('123456') — see /app/memory/test_credentials.md.
+- WhatsApp/SMS OTP channels intentionally NOT CONFIGURED (user adds
+  provider credentials later in Security · 2FA/MFA screen).

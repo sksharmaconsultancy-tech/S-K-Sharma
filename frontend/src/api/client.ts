@@ -38,6 +38,29 @@ export async function clearToken() {
   }
 }
 
+// Iter 569 — trusted-device token (2FA "trust this device"). Stored per
+// browser; sent on login so the server can skip OTP when enabled+valid.
+const DEVICE_TOKEN_KEY = "llc_2fa_device_token";
+
+export async function readDeviceToken(): Promise<string | null> {
+  if (Platform.OS === "web") {
+    try {
+      return globalThis.localStorage?.getItem(DEVICE_TOKEN_KEY) ?? null;
+    } catch {
+      return null;
+    }
+  }
+  return await SecureStore.getItemAsync(DEVICE_TOKEN_KEY);
+}
+
+export async function saveDeviceToken(token: string) {
+  if (Platform.OS === "web") {
+    globalThis.localStorage?.setItem(DEVICE_TOKEN_KEY, token);
+  } else {
+    await SecureStore.setItemAsync(DEVICE_TOKEN_KEY, token);
+  }
+}
+
 // Staff-portal switch (employee ⇄ staff): the employee token is backed up
 // so "Back to Employee App" can restore it without a re-login.
 const EMP_BACKUP_KEY = "llc_employee_token_backup";
@@ -124,11 +147,11 @@ export async function apiBinary(
 
 export async function api<T = any>(
   path: string,
-  opts: { method?: string; body?: any; auth?: boolean } = {},
+  opts: { method?: string; body?: any; auth?: boolean; headers?: Record<string, string> } = {},
   _retried = false,
 ): Promise<T> {
   const { method = "GET", body, auth = true } = opts;
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...(opts.headers || {}) };
   if (auth) {
     const t = await readToken();
     if (t) headers.Authorization = `Bearer ${t}`;

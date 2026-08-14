@@ -8,7 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { Redirect, useRouter } from "expo-router";
 
-import { api, saveToken } from "@/src/api/client";
+import { api, saveToken, readDeviceToken } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -52,15 +52,38 @@ export default function AdminPinLoginScreen() {
       setError(mode === "password" ? "Enter your email" : "Enter your email or phone number");
       return;
     }
+    // Iter 569 — send the trusted-device token (if any) so the server can
+    // skip 2FA for devices the admin explicitly trusted.
+    const dt = await readDeviceToken();
+    const loginHeaders: Record<string, string> = dt ? { "X-Device-Token": dt } : {};
+    // Iter 569 — Super/Sub admins get a 2FA challenge instead of a session.
+    const goto2fa = (r: any) => {
+      router.push({
+        pathname: "/verify-2fa",
+        params: {
+          pending_token: r.pending_token,
+          method: r.method || "email",
+          methods: JSON.stringify(r.methods || []),
+          masked_email: r.masked_email || "",
+          masked_mobile: r.masked_mobile || "",
+          otp_expires_in: String(r.otp_expires_in || 300),
+          resend_cooldown: String(r.resend_cooldown || 30),
+          trusted_enabled: r.trusted_device_enabled ? "1" : "0",
+          delivered: r.delivered ? "1" : "0",
+          delivery_error: r.delivery_error || "",
+        },
+      });
+    };
     if (mode === "pin") {
       const p = pin.trim();
       if (!/^\d{6}$/.test(p)) { setError("PIN must be exactly 6 digits"); return; }
       setBusy(true);
       try {
-        const r = await api<{ session_token: string; user: any; pin_must_change: boolean }>(
+        const r = await api<any>(
           "/auth/admin-pin-login",
-          { method: "POST", auth: false, body: { identifier: id, pin: p } },
+          { method: "POST", auth: false, body: { identifier: id, pin: p }, headers: loginHeaders },
         );
+        if (r.twofa_required) { goto2fa(r); return; }
         await saveToken(r.session_token);
         await refresh();
         // Iter 184 — land on "/" so the root guard routes admins to the
@@ -76,10 +99,11 @@ export default function AdminPinLoginScreen() {
       if (!password || password.length < 6) { setError("Enter your password"); return; }
       setBusy(true);
       try {
-        const r = await api<{ session_token: string; user: any; password_must_change?: boolean }>(
+        const r = await api<any>(
           "/auth/admin-password-login",
-          { method: "POST", auth: false, body: { email: id, password } },
+          { method: "POST", auth: false, body: { email: id, password }, headers: loginHeaders },
         );
+        if (r.twofa_required) { goto2fa(r); return; }
         await saveToken(r.session_token);
         await refresh();
         // Iter 184 — root guard sends admins to the Portal Dashboard.

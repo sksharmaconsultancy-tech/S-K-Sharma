@@ -207,6 +207,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               "/employer", "/employee", "/admin-pin-login", "/pin-login",
               "/company-login", "/company-register", "/emp-code-login",
               "/employee-signup", "/admin-set-password", "/firm-select",
+              "/verify-2fa",
             ];
             const isPublic = path === "/" || path === "" ||
               PUBLIC_PREFIXES.some((p) => path === p || path.startsWith(p + "/"));

@@ -19,6 +19,8 @@ import {
   ActivityIndicator,
   ScrollView,
   Platform,
+  TextInput,
+  Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -32,6 +34,8 @@ import { formatDateTime } from "@/src/utils/date";
 import DateField from "@/src/components/DateField";
 import CompanyPicker from "@/src/components/CompanyPicker";
 
+type FieldChange = { field: string; old: string; new: string };
+
 type LogEvent = {
   at?: string;
   actor_id?: string;
@@ -42,6 +46,29 @@ type LogEvent = {
   action?: string;
   details?: string;
   source?: string;
+  // Iter 568 — Detailed Audit Trail
+  module?: string;
+  action_type?: string;
+  success?: boolean;
+  status_code?: number;
+  ip?: string;
+  device?: string;
+  method?: string;
+  path?: string;
+  record_id?: string;
+  record_label?: string;
+  changes?: FieldChange[];
+  old_values?: Record<string, string> | null;
+  new_values?: Record<string, string> | null;
+};
+
+const TYPE_COLORS: Record<string, string> = {
+  CREATE: "#16a34a",
+  UPDATE: "#2563eb",
+  DELETE: "#dc2626",
+  LOGIN: "#7c3aed",
+  DOWNLOAD: "#d97706",
+  OTHER: "#64748b",
 };
 
 function todayIso(): string {
@@ -66,6 +93,12 @@ export default function UsersLogReportScreen() {
   const [actorId, setActorId] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [events, setEvents] = useState<LogEvent[]>([]);
+  // Iter 568 — Detailed Audit Trail: quick filters + search + details modal.
+  const [searchTxt, setSearchTxt] = useState("");
+  const [typeFilter, setTypeFilter] = useState<string>("");
+  const [moduleFilter, setModuleFilter] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string>(""); // "" | "success" | "failed"
+  const [detailEvent, setDetailEvent] = useState<LogEvent | null>(null);
 
   const showMsg = (msg: string) => {
     if (Platform.OS === "web") globalThis.alert(msg);
@@ -100,6 +133,10 @@ export default function UsersLogReportScreen() {
       if (toDate)   params.set("to_date", toDate);
       if (firmId)   params.set("company_id", firmId);
       if (actorId)  params.set("user_id", actorId);
+      if (moduleFilter)  params.set("module", moduleFilter);
+      if (typeFilter)    params.set("action_type", typeFilter);
+      if (statusFilter)  params.set("status", statusFilter);
+      if (searchTxt.trim()) params.set("search", searchTxt.trim());
       const res = await apiBinary(`/admin/users-log.xlsx?${params.toString()}`);
       if (Platform.OS === "web" && res.webBlobUrl) {
         const a = document.createElement("a");
@@ -125,6 +162,46 @@ export default function UsersLogReportScreen() {
     return Array.from(map.entries()).map(([id, v]) => ({ id, ...v }));
   }, [events]);
 
+  // Iter 568 — client-side quick filters (instant, applied on loaded events).
+  const filtered = useMemo(() => {
+    let out = events;
+    if (moduleFilter) out = out.filter((e) => (e.module || "Other") === moduleFilter);
+    if (typeFilter) out = out.filter((e) => (e.action_type || "OTHER") === typeFilter);
+    if (statusFilter === "failed") out = out.filter((e) => e.success === false);
+    else if (statusFilter === "success") out = out.filter((e) => e.success !== false);
+    const s = searchTxt.trim().toLowerCase();
+    if (s) {
+      out = out.filter((e) =>
+        [e.action, e.details, e.actor_name, e.record_label, e.path, e.module, e.company_name, e.ip]
+          .join(" ").toLowerCase().includes(s));
+    }
+    return out;
+  }, [events, moduleFilter, typeFilter, statusFilter, searchTxt]);
+
+  // Iter 568 — summary cards for the visible (filtered) events.
+  const summary = useMemo(() => {
+    const s = { total: filtered.length, creates: 0, updates: 0, deletes: 0, logins: 0, downloads: 0, failed: 0 };
+    for (const e of filtered) {
+      const t = e.action_type || "OTHER";
+      if (t === "CREATE") s.creates += 1;
+      else if (t === "UPDATE") s.updates += 1;
+      else if (t === "DELETE") s.deletes += 1;
+      else if (t === "LOGIN") s.logins += 1;
+      else if (t === "DOWNLOAD") s.downloads += 1;
+      if (e.success === false) s.failed += 1;
+    }
+    return s;
+  }, [filtered]);
+
+  const modules = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of events) {
+      const k = e.module || "Other";
+      m.set(k, (m.get(k) || 0) + 1);
+    }
+    return Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
+  }, [events]);
+
   // Performance chart — per-admin action counts grouped by category.
   const perf = useMemo(() => {
     type Row = {
@@ -132,7 +209,7 @@ export default function UsersLogReportScreen() {
       punch: number; salary: number; compliance: number; other: number; total: number;
     };
     const map = new Map<string, Row>();
-    for (const e of events) {
+    for (const e of filtered) {
       const id = e.actor_id || "unknown";
       let row = map.get(id);
       if (!row) {
@@ -155,7 +232,7 @@ export default function UsersLogReportScreen() {
     const rows = Array.from(map.values()).sort((a, b) => b.total - a.total);
     const max = rows.length ? rows[0].total : 0;
     return { rows, max };
-  }, [events]);
+  }, [filtered]);
 
   const setQuickRange = (days: number) => {
     setFromDate(daysAgoIso(days));
@@ -190,6 +267,16 @@ export default function UsersLogReportScreen() {
       </SafeAreaView>
 
       <ScrollView contentContainerStyle={styles.scroll}>
+        {/* ── Iter 568 — Summary cards ─────────────────────────────── */}
+        <View style={styles.sumRow}>
+          <SummaryCard label="Total" value={summary.total} color={colors.brandPrimary} icon="list-outline" />
+          <SummaryCard label="Created" value={summary.creates} color="#16a34a" icon="add-circle-outline" />
+          <SummaryCard label="Updated" value={summary.updates} color="#2563eb" icon="create-outline" />
+          <SummaryCard label="Deleted" value={summary.deletes} color="#dc2626" icon="trash-outline" />
+          <SummaryCard label="Logins" value={summary.logins} color="#7c3aed" icon="log-in-outline" />
+          <SummaryCard label="Failed" value={summary.failed} color="#b91c1c" icon="warning-outline" />
+        </View>
+
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Filters</Text>
           <View style={styles.filterRow}>
@@ -296,6 +383,44 @@ export default function UsersLogReportScreen() {
           </View>
         </View>
 
+        {/* ── Iter 568 — Audit quick filters + search ──────────────── */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Audit Filters</Text>
+          <Text style={styles.label}>Search (user, action, record, IP...)</Text>
+          <TextInput
+            style={styles.input}
+            value={searchTxt}
+            onChangeText={setSearchTxt}
+            placeholder="Type to search the log..."
+            placeholderTextColor={colors.onSurfaceTertiary}
+            testID="ulr-search"
+          />
+          <Text style={styles.label}>Action type</Text>
+          <View style={styles.chipStrip}>
+            <Chip label="All" active={!typeFilter} onPress={() => setTypeFilter("")} />
+            {["CREATE", "UPDATE", "DELETE", "LOGIN", "DOWNLOAD"].map((t) => (
+              <Chip key={t} label={t} active={typeFilter === t} onPress={() => setTypeFilter(typeFilter === t ? "" : t)} />
+            ))}
+          </View>
+          <Text style={styles.label}>Status</Text>
+          <View style={styles.chipStrip}>
+            <Chip label="All" active={!statusFilter} onPress={() => setStatusFilter("")} />
+            <Chip label="Success" active={statusFilter === "success"} onPress={() => setStatusFilter(statusFilter === "success" ? "" : "success")} />
+            <Chip label="Failed" active={statusFilter === "failed"} onPress={() => setStatusFilter(statusFilter === "failed" ? "" : "failed")} />
+          </View>
+          {modules.length > 0 ? (
+            <>
+              <Text style={styles.label}>Module</Text>
+              <View style={styles.chipStrip}>
+                <Chip label="All" active={!moduleFilter} onPress={() => setModuleFilter("")} />
+                {modules.slice(0, 10).map(([m, n]) => (
+                  <Chip key={m} label={`${m} (${n})`} active={moduleFilter === m} onPress={() => setModuleFilter(moduleFilter === m ? "" : m)} />
+                ))}
+              </View>
+            </>
+          ) : null}
+        </View>
+
         {/* ── Sub Admin Performance Chart ─────────────────────────── */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Sub Admin Performance</Text>
@@ -345,46 +470,174 @@ export default function UsersLogReportScreen() {
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>
-            Log entries · {events.length}
+            Log entries · {filtered.length}
           </Text>
-          {events.length === 0 && !loading ? (
+          {filtered.length === 0 && !loading ? (
             <Text style={styles.smallHint}>
               No log entries for the selected filters. Try widening the date
               range or clearing the firm / user filter.
             </Text>
           ) : null}
-          {events.map((e, idx) => (
-            <View key={idx} style={styles.logRow}>
-              <View style={styles.logIcon}>
-                <Ionicons
-                  name={
-                    (e.action || "").startsWith("punch") ? "finger-print-outline"
-                    : (e.action || "").startsWith("salary") ? "cash-outline"
-                    : (e.action || "").startsWith("compliance") ? "shield-checkmark-outline"
-                    : "document-text-outline"
-                  }
-                  size={16}
-                  color={colors.brandPrimary}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.logAction}>{e.action || "—"}</Text>
-                <Text style={styles.logMeta}>
-                  {e.actor_name || "—"}
-                  {e.actor_role ? ` (${e.actor_role})` : ""}
-                  {"  ·  "}
-                  {e.company_name || "—"}
-                </Text>
-                {e.details ? (
-                  <Text style={styles.logDetails}>{e.details}</Text>
-                ) : null}
-              </View>
-              <Text style={styles.logAt}>{formatDateTime(e.at)}</Text>
-            </View>
-          ))}
+          {filtered.map((e, idx) => {
+            const t = e.action_type || "OTHER";
+            const failed = e.success === false;
+            const nChanges = (e.changes || []).length;
+            return (
+              <Pressable
+                key={idx}
+                style={[styles.logRow, failed && styles.logRowFailed]}
+                onPress={() => setDetailEvent(e)}
+                testID={`ulr-row-${idx}`}
+              >
+                <View style={[styles.typeBadge, { backgroundColor: TYPE_COLORS[t] || TYPE_COLORS.OTHER }]}>
+                  <Text style={styles.typeBadgeTxt}>{t.slice(0, 3)}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.logAction} numberOfLines={2}>
+                    {e.action || "—"}
+                    {failed ? <Text style={{ color: "#dc2626" }}>  ✗ FAILED</Text> : null}
+                  </Text>
+                  <Text style={styles.logMeta}>
+                    {e.actor_name || "—"}
+                    {e.actor_role ? ` (${e.actor_role})` : ""}
+                    {"  ·  "}
+                    {e.company_name || "—"}
+                    {e.module ? `  ·  ${e.module}` : ""}
+                  </Text>
+                  {e.record_label ? (
+                    <Text style={styles.logMeta}>Record: {e.record_label}</Text>
+                  ) : null}
+                  {nChanges > 0 ? (
+                    <Text style={styles.logChanges}>
+                      ✎ {nChanges} field{nChanges > 1 ? "s" : ""} changed — tap to view old → new
+                    </Text>
+                  ) : e.details ? (
+                    <Text style={styles.logDetails} numberOfLines={2}>{e.details}</Text>
+                  ) : null}
+                </View>
+                <View style={{ alignItems: "flex-end", gap: 4 }}>
+                  <Text style={styles.logAt}>{formatDateTime(e.at)}</Text>
+                  <Ionicons name="chevron-forward" size={14} color={colors.onSurfaceTertiary} />
+                </View>
+              </Pressable>
+            );
+          })}
         </View>
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* ── Iter 568 — View Details modal (field-level old → new) ──── */}
+      <Modal
+        visible={!!detailEvent}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDetailEvent(null)}
+      >
+        <View style={styles.modalBg}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHead}>
+              <Text style={styles.modalTitle}>Audit Entry Details</Text>
+              <Pressable onPress={() => setDetailEvent(null)} hitSlop={10} testID="ulr-detail-close">
+                <Ionicons name="close" size={22} color={colors.onSurface} />
+              </Pressable>
+            </View>
+            <ScrollView style={{ maxHeight: 480 }}>
+              {detailEvent ? (
+                <>
+                  <MetaRow label="Date & Time" value={formatDateTime(detailEvent.at)} />
+                  <MetaRow label="User" value={`${detailEvent.actor_name || "—"}${detailEvent.actor_role ? ` (${detailEvent.actor_role})` : ""}`} />
+                  <MetaRow label="Firm" value={detailEvent.company_name || "—"} />
+                  <MetaRow label="Module" value={detailEvent.module || "—"} />
+                  <MetaRow label="Action" value={detailEvent.action || "—"} />
+                  {detailEvent.record_label || detailEvent.record_id ? (
+                    <MetaRow label="Record" value={`${detailEvent.record_label || ""}${detailEvent.record_id ? ` [${detailEvent.record_id}]` : ""}`} />
+                  ) : null}
+                  <MetaRow
+                    label="Status"
+                    value={detailEvent.success === false
+                      ? `FAILED${detailEvent.status_code ? ` (HTTP ${detailEvent.status_code})` : ""}`
+                      : "Success"}
+                    valueColor={detailEvent.success === false ? "#dc2626" : "#16a34a"}
+                  />
+                  {detailEvent.ip ? <MetaRow label="IP Address" value={detailEvent.ip} /> : null}
+                  {detailEvent.device ? <MetaRow label="Device" value={detailEvent.device} small /> : null}
+                  {detailEvent.method && detailEvent.path ? (
+                    <MetaRow label="Endpoint" value={`${detailEvent.method} ${detailEvent.path}`} small />
+                  ) : null}
+                  {detailEvent.details ? <MetaRow label="Details" value={detailEvent.details} small /> : null}
+
+                  {(detailEvent.changes || []).length > 0 ? (
+                    <>
+                      <Text style={styles.diffTitle}>Field Changes (Old → New)</Text>
+                      <View style={styles.diffHead}>
+                        <Text style={[styles.diffCell, styles.diffHeadTxt, { flex: 1 }]}>Field</Text>
+                        <Text style={[styles.diffCell, styles.diffHeadTxt, { flex: 1.3 }]}>Old Value</Text>
+                        <Text style={[styles.diffCell, styles.diffHeadTxt, { flex: 1.3 }]}>New Value</Text>
+                      </View>
+                      {(detailEvent.changes || []).map((c, i) => (
+                        <View key={i} style={[styles.diffRow, i % 2 === 1 && { backgroundColor: colors.surface }]}>
+                          <Text style={[styles.diffCell, styles.diffField, { flex: 1 }]}>{c.field}</Text>
+                          <Text style={[styles.diffCell, styles.diffOld, { flex: 1.3 }]}>{c.old || "—"}</Text>
+                          <Text style={[styles.diffCell, styles.diffNew, { flex: 1.3 }]}>{c.new || "—"}</Text>
+                        </View>
+                      ))}
+                    </>
+                  ) : null}
+
+                  {detailEvent.old_values && Object.keys(detailEvent.old_values).length > 0 ? (
+                    <>
+                      <Text style={styles.diffTitle}>Deleted Record Snapshot</Text>
+                      {Object.entries(detailEvent.old_values).map(([k, v], i) => (
+                        <View key={i} style={styles.diffRow}>
+                          <Text style={[styles.diffCell, styles.diffField, { flex: 1 }]}>{k}</Text>
+                          <Text style={[styles.diffCell, styles.diffOld, { flex: 2.6 }]}>{String(v)}</Text>
+                        </View>
+                      ))}
+                    </>
+                  ) : null}
+
+                  {detailEvent.new_values && Object.keys(detailEvent.new_values).length > 0 ? (
+                    <>
+                      <Text style={styles.diffTitle}>Created Record Values</Text>
+                      {Object.entries(detailEvent.new_values).map(([k, v], i) => (
+                        <View key={i} style={styles.diffRow}>
+                          <Text style={[styles.diffCell, styles.diffField, { flex: 1 }]}>{k}</Text>
+                          <Text style={[styles.diffCell, styles.diffNew, { flex: 2.6 }]}>{String(v)}</Text>
+                        </View>
+                      ))}
+                    </>
+                  ) : null}
+                </>
+              ) : null}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+function SummaryCard({ label, value, color, icon }: {
+  label: string; value: number; color: string; icon: any;
+}) {
+  return (
+    <View style={[styles.sumCard, { borderColor: color + "44" }]}>
+      <Ionicons name={icon} size={16} color={color} />
+      <Text style={[styles.sumValue, { color }]}>{value}</Text>
+      <Text style={styles.sumLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function MetaRow({ label, value, valueColor, small }: {
+  label: string; value: string; valueColor?: string; small?: boolean;
+}) {
+  return (
+    <View style={styles.metaRow}>
+      <Text style={styles.metaLabel}>{label}</Text>
+      <Text style={[styles.metaValue, small && { fontSize: 11 }, valueColor ? { color: valueColor, fontWeight: "700" } : null]}>
+        {value}
+      </Text>
     </View>
   );
 }
@@ -471,11 +724,64 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: 1, borderBottomColor: colors.divider,
   },
-  logIcon: {
-    width: 30, height: 30, borderRadius: 15,
-    backgroundColor: colors.brandTertiary,
-    alignItems: "center", justifyContent: "center",
+  logRowFailed: { backgroundColor: "#FEF2F2", borderRadius: 8, paddingHorizontal: 6 },
+  logChanges: { fontSize: 11, color: "#7c3aed", marginTop: 2, fontWeight: "600" },
+
+  // Iter 568 — summary cards
+  sumRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: spacing.md },
+  sumCard: {
+    flexGrow: 1, minWidth: 100, alignItems: "center",
+    backgroundColor: colors.surfaceSecondary, borderRadius: radius.md,
+    borderWidth: 1, paddingVertical: 10, paddingHorizontal: 8, gap: 2,
   },
+  sumValue: { fontSize: 18, fontWeight: "800" },
+  sumLabel: { fontSize: 10, fontWeight: "700", color: colors.onSurfaceSecondary, textTransform: "uppercase" },
+
+  // Iter 568 — action-type badge
+  typeBadge: {
+    width: 38, paddingVertical: 4, borderRadius: 6,
+    alignItems: "center", justifyContent: "center", marginTop: 2,
+  },
+  typeBadgeTxt: { color: "#fff", fontSize: 9, fontWeight: "800" },
+
+  // Iter 568 — details modal
+  modalBg: {
+    flex: 1, backgroundColor: "rgba(0,0,0,0.5)",
+    alignItems: "center", justifyContent: "center", padding: 16,
+  },
+  modalCard: {
+    backgroundColor: colors.surface, borderRadius: radius.lg,
+    padding: spacing.md, width: "100%", maxWidth: 640,
+  },
+  modalHead: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    marginBottom: 10, paddingBottom: 8,
+    borderBottomWidth: 1, borderBottomColor: colors.divider,
+  },
+  modalTitle: { ...type.h6, color: colors.onSurface, fontWeight: "800" },
+  metaRow: { flexDirection: "row", paddingVertical: 5, gap: 10 },
+  metaLabel: {
+    width: 100, fontSize: 11, fontWeight: "700",
+    color: colors.onSurfaceSecondary, textTransform: "uppercase",
+  },
+  metaValue: { flex: 1, fontSize: 13, color: colors.onSurface },
+  diffTitle: {
+    fontSize: 13, fontWeight: "800", color: colors.onSurface,
+    marginTop: 14, marginBottom: 6,
+  },
+  diffHead: {
+    flexDirection: "row", backgroundColor: colors.surfaceSecondary,
+    borderTopLeftRadius: 8, borderTopRightRadius: 8,
+  },
+  diffHeadTxt: { fontWeight: "800", fontSize: 10, textTransform: "uppercase", color: colors.onSurfaceSecondary },
+  diffRow: {
+    flexDirection: "row",
+    borderBottomWidth: 1, borderBottomColor: colors.divider,
+  },
+  diffCell: { padding: 7, fontSize: 12 },
+  diffField: { fontWeight: "700", color: colors.onSurface },
+  diffOld: { color: "#b91c1c", textDecorationLine: "line-through" },
+  diffNew: { color: "#15803d", fontWeight: "600" },
   logAction: { fontSize: 13, fontWeight: "700", color: colors.onSurface },
   logMeta: { fontSize: 11, color: colors.onSurfaceSecondary, marginTop: 2 },
   logDetails: { fontSize: 11, color: colors.onSurfaceTertiary, marginTop: 2, fontStyle: "italic" },

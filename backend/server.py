@@ -3208,6 +3208,10 @@ async def _create_core_indexes():
     await db.activity_log.create_index([("at", -1)])
     await db.activity_log.create_index("actor_id")
     await db.activity_log.create_index("company_id")
+    # Iter 569 — 2FA/MFA
+    await db.twofa_pending.create_index("pending_id", unique=True)
+    await db.twofa_pending.create_index("expires_at", expireAfterSeconds=0)
+    await db.trusted_devices.create_index([("user_id", 1), ("token_hash", 1)])
     await db.attendance.create_index([("user_id", 1), ("date", -1)])
     await db.leaves.create_index("user_id")
     await db.payslips.create_index([("employee_user_id", 1), ("month", -1)])
@@ -4542,12 +4546,12 @@ def _norm_identifier(identifier: str, channel: str) -> str:
     return "".join(c for c in ident if c.isdigit() or c == "+")
 
 
-async def _send_otp_email(to_email: str, code: str) -> dict:
+async def _send_otp_email(to_email: str, code: str, minutes: int = OTP_TTL_MINUTES) -> dict:
     """Send an OTP code to a user via Resend. Returns {delivered, email_id, error}."""
     subject = f"Your S.K. Sharma & Co. login code: {code}"
     text = (
         f"Your S.K. Sharma & Co. login code is: {code}\n\n"
-        f"This code is valid for {OTP_TTL_MINUTES} minutes and can only be used once.\n"
+        f"This code is valid for {minutes} minutes and can only be used once.\n"
         "If you didn't request this, you can safely ignore this email.\n\n"
         "— S.K. Sharma & Co."
     )
@@ -4570,7 +4574,7 @@ async def _send_otp_email(to_email: str, code: str) -> dict:
       <div style="padding:24px;">
         <p style="margin:0 0 16px 0;color:#333;font-size:14px;line-height:20px;">
           Use the code below to sign in to the S.K. Sharma & Co. app. It expires in
-          <strong>{OTP_TTL_MINUTES} minutes</strong>.
+          <strong>{minutes} minutes</strong>.
         </p>
         <div style="text-align:center;padding:8px 0 16px 0;">{boxes}</div>
         <p style="margin:0;color:#888;font-size:12px;line-height:18px;">
@@ -5102,8 +5106,284 @@ async def _issue_session(user_id: str, method: str) -> str:
     return token
 
 
+# ---------------------------------------------------------------------------
+# Iter 569 — 2FA/MFA for Super Admin & Sub (Super) Admin.
+# Backend-enforced: valid credentials → temporary pre-auth challenge →
+# OTP (hashed, 5-min, one-time, max attempts) → full session.
+# OTP channels: Email (Resend, live), WhatsApp Cloud API and SMS
+# (both pluggable — configured in Administration → Security 2FA).
+# ---------------------------------------------------------------------------
+import secrets as _twofa_secrets  # noqa: E402
+
+_TWOFA_DEFAULTS = {
+    "key": "2fa",
+    "mandatory_roles": ["super_admin", "sub_admin"],
+    "otp_length": 6,
+    "otp_validity_min": 5,
+    "resend_cooldown_sec": 30,
+    "max_attempts": 5,
+    "email_enabled": True,
+    "whatsapp_enabled": True,
+    "sms_enabled": True,
+    "trusted_device_enabled": False,
+    "trusted_days": 30,
+    "whatsapp_config": {"access_token": "", "phone_number_id": "", "template_name": ""},
+    "sms_config": {"provider": "", "twilio_sid": "", "twilio_token": "", "twilio_from": "",
+                   "msg91_authkey": "", "msg91_sender": "", "msg91_template_id": "",
+                   "fast2sms_key": ""},
+}
+TWOFA_PENDING_TTL_MIN = 10  # window to complete OTP entry after password
+
+
+async def _twofa_settings() -> dict:
+    doc = await db.security_settings.find_one({"key": "2fa"}, {"_id": 0}) or {}
+    st = {**_TWOFA_DEFAULTS, **doc}
+    st["whatsapp_config"] = {**_TWOFA_DEFAULTS["whatsapp_config"], **(doc.get("whatsapp_config") or {})}
+    st["sms_config"] = {**_TWOFA_DEFAULTS["sms_config"], **(doc.get("sms_config") or {})}
+    # Super/sub admin 2FA is MANDATORY and cannot be switched off.
+    for r in ("super_admin", "sub_admin"):
+        if r not in st["mandatory_roles"]:
+            st["mandatory_roles"].append(r)
+    return st
+
+
+def _mask_email(email: str) -> str:
+    if not email or "@" not in email:
+        return ""
+    name, dom = email.split("@", 1)
+    return f"{name[0]}*****@{dom}"
+
+
+def _mask_mobile(phone: str) -> str:
+    digits = "".join(c for c in (phone or "") if c.isdigit())
+    return f"******{digits[-4:]}" if len(digits) >= 4 else ""
+
+
+def _twofa_channel_ready(method: str, st: dict) -> bool:
+    if method == "email":
+        return bool(st["email_enabled"] and os.getenv("RESEND_API_KEY", "").strip())
+    if method == "whatsapp":
+        wc = st["whatsapp_config"]
+        return bool(st["whatsapp_enabled"] and wc.get("access_token") and wc.get("phone_number_id"))
+    if method == "sms":
+        sc = st["sms_config"]
+        prov = (sc.get("provider") or "").lower()
+        if not st["sms_enabled"]:
+            return False
+        if prov == "twilio":
+            return bool(sc.get("twilio_sid") and sc.get("twilio_token") and sc.get("twilio_from"))
+        if prov == "msg91":
+            return bool(sc.get("msg91_authkey"))
+        if prov == "fast2sms":
+            return bool(sc.get("fast2sms_key"))
+        return False
+    return False
+
+
+def _twofa_methods_for_user(user: dict, st: dict) -> list:
+    out = []
+    if user.get("email"):
+        out.append({"method": "email", "target": _mask_email(user["email"]),
+                    "configured": _twofa_channel_ready("email", st)})
+    if user.get("phone"):
+        out.append({"method": "whatsapp", "target": _mask_mobile(user["phone"]),
+                    "configured": _twofa_channel_ready("whatsapp", st)})
+        out.append({"method": "sms", "target": _mask_mobile(user["phone"]),
+                    "configured": _twofa_channel_ready("sms", st)})
+    return out
+
+
+async def _twofa_send_code(user: dict, method: str, code: str, st: dict) -> dict:
+    """Dispatch OTP over the requested channel. Returns {delivered, error}."""
+    minutes = int(st["otp_validity_min"])
+    if method == "email":
+        if not _twofa_channel_ready("email", st):
+            return {"delivered": False, "error": "email_not_configured"}
+        r = await _send_otp_email(user.get("email") or "", code, minutes)
+        return {"delivered": r["delivered"], "error": r.get("error")}
+    msg = (f"Your Payroll Security OTP is {code}. This OTP is valid for "
+           f"{minutes} minutes. Do not share this OTP with anyone.")
+    phone = user.get("phone") or ""
+    if method == "whatsapp":
+        if not _twofa_channel_ready("whatsapp", st):
+            return {"delivered": False, "error": "whatsapp_not_configured"}
+        wc = st["whatsapp_config"]
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as hc:
+                r = await hc.post(
+                    f"https://graph.facebook.com/v20.0/{wc['phone_number_id']}/messages",
+                    headers={"Authorization": f"Bearer {wc['access_token']}",
+                             "Content-Type": "application/json"},
+                    json={"messaging_product": "whatsapp",
+                          "to": phone.lstrip("+"),
+                          "type": "text",
+                          "text": {"body": msg}},
+                )
+            if r.status_code < 300:
+                return {"delivered": True, "error": None}
+            logger.warning(f"[2FA whatsapp FAIL {r.status_code}] {r.text[:200]}")
+            return {"delivered": False, "error": f"whatsapp_http_{r.status_code}"}
+        except Exception as exc:  # noqa: BLE001
+            return {"delivered": False, "error": f"whatsapp_error: {exc}"}
+    if method == "sms":
+        if not _twofa_channel_ready("sms", st):
+            return {"delivered": False, "error": "sms_not_configured"}
+        sc = st["sms_config"]
+        prov = (sc.get("provider") or "").lower()
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as hc:
+                if prov == "twilio":
+                    r = await hc.post(
+                        f"https://api.twilio.com/2010-04-01/Accounts/{sc['twilio_sid']}/Messages.json",
+                        auth=(sc["twilio_sid"], sc["twilio_token"]),
+                        data={"To": phone, "From": sc["twilio_from"], "Body": msg},
+                    )
+                elif prov == "msg91":
+                    r = await hc.post(
+                        "https://control.msg91.com/api/v5/flow/",
+                        headers={"authkey": sc["msg91_authkey"],
+                                 "Content-Type": "application/json"},
+                        json={"template_id": sc.get("msg91_template_id") or "",
+                              "sender": sc.get("msg91_sender") or "",
+                              "recipients": [{"mobiles": phone.lstrip("+"),
+                                              "otp": code}]},
+                    )
+                else:  # fast2sms
+                    r = await hc.post(
+                        "https://www.fast2sms.com/dev/bulkV2",
+                        headers={"authorization": sc["fast2sms_key"]},
+                        data={"route": "otp", "variables_values": code,
+                              "numbers": "".join(c for c in phone if c.isdigit())[-10:]},
+                    )
+            if r.status_code < 300:
+                return {"delivered": True, "error": None}
+            logger.warning(f"[2FA sms FAIL {r.status_code}] {r.text[:200]}")
+            return {"delivered": False, "error": f"sms_http_{r.status_code}"}
+        except Exception as exc:  # noqa: BLE001
+            return {"delivered": False, "error": f"sms_error: {exc}"}
+    return {"delivered": False, "error": "unknown_method"}
+
+
+def _req_ip(request: Request) -> str:
+    return ((request.headers.get("x-forwarded-for")
+             or (request.client.host if request.client else "") or "")
+            .split(",")[0].strip())
+
+
+async def _twofa_audit(user: dict, action: str, request: Optional[Request],
+                       success: bool, details: str = "", method: str = ""):
+    """Named security events feed the SAME Users Log Report (activity_log)."""
+    try:
+        await db.activity_log.insert_one({
+            "at": now_iso(),
+            "actor_id": (user or {}).get("user_id"),
+            "actor_name": (user or {}).get("name"),
+            "actor_role": (user or {}).get("role"),
+            "company_id": (user or {}).get("company_id"),
+            "method": "POST",
+            "path": (request.url.path if request else "")[:300],
+            "action": f"LOGIN {action}" + (f" via {method}" if method else ""),
+            "status": 200 if success else 401,
+            "success": success,
+            "module": "Auth",
+            "record_id": None,
+            "record_label": (user or {}).get("name") or "",
+            "changes": [],
+            "old_values": None,
+            "new_values": None,
+            "details": details[:400],
+            "device": ((request.headers.get("user-agent") if request else "") or "")[:200],
+            "ip": _req_ip(request) if request else "",
+        })
+    except Exception:
+        logger.warning("[2FA audit] failed to record", exc_info=True)
+
+
+def _twofa_new_code(length: int) -> str:
+    return str(_twofa_secrets.randbelow(10 ** length)).zfill(length)
+
+
+async def _start_2fa_challenge(user: dict, request: Request, login_kind: str):
+    """Called AFTER credentials verified. Returns the challenge response
+    dict when 2FA is required, or None when login can proceed normally."""
+    st = await _twofa_settings()
+    required = user.get("role") in st["mandatory_roles"] or bool(user.get("twofa_enabled"))
+    if not required:
+        return None
+    # Trusted-device bypass (only when the feature is switched ON).
+    if st["trusted_device_enabled"]:
+        dt = (request.headers.get("x-device-token") or "").strip()
+        if dt:
+            td = await db.trusted_devices.find_one({
+                "user_id": user["user_id"],
+                "token_hash": _hash_otp(dt),
+                "revoked_at": None,
+            })
+            exp = (td or {}).get("expires_at")
+            if isinstance(exp, str):
+                try:
+                    exp = datetime.fromisoformat(exp)
+                except ValueError:
+                    exp = None
+            if exp is not None and exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if td and exp and exp > datetime.now(timezone.utc):
+                await db.trusted_devices.update_one(
+                    {"_id": td["_id"]},
+                    {"$set": {"last_used_at": now_iso(), "ip_address": _req_ip(request)}})
+                await _twofa_audit(user, "TRUSTED_DEVICE_LOGIN", request, True,
+                                   f"device={td.get('device_name') or ''}")
+                return None
+    methods = _twofa_methods_for_user(user, st)
+    configured = [m for m in methods if m["configured"]]
+    preferred = user.get("twofa_method") or "email"
+    method = next((m["method"] for m in configured if m["method"] == preferred),
+                  (configured[0]["method"] if configured else "email"))
+    code = _twofa_new_code(int(st["otp_length"]))
+    now = datetime.now(timezone.utc)
+    pending_id = f"2fa_{_twofa_secrets.token_hex(24)}"
+    await db.twofa_pending.insert_one({
+        "pending_id": pending_id,
+        "user_id": user["user_id"],
+        "login_kind": login_kind,
+        "otp_hash": _hash_otp(code),
+        "otp_expires_at": now + timedelta(minutes=int(st["otp_validity_min"])),
+        "expires_at": now + timedelta(minutes=TWOFA_PENDING_TTL_MIN),
+        "attempts": 0,
+        "blocked": False,
+        "method": method,
+        "resend_available_at": now + timedelta(seconds=int(st["resend_cooldown_sec"])),
+        "created_at": now,
+        "ip": _req_ip(request),
+        "device": (request.headers.get("user-agent") or "")[:200],
+    })
+    delivery = await _twofa_send_code(user, method, code, st)
+    await _twofa_audit(user, "OTP_GENERATED", request, True, "6-digit OTP issued", method)
+    await _twofa_audit(user, f"OTP_SENT_{method.upper()}", request,
+                       bool(delivery["delivered"]),
+                       delivery.get("error") or "delivered", method)
+    resp = {
+        "twofa_required": True,
+        "pending_token": pending_id,
+        "method": method,
+        "methods": methods,
+        "masked_email": _mask_email(user.get("email") or ""),
+        "masked_mobile": _mask_mobile(user.get("phone") or ""),
+        "otp_expires_in": int(st["otp_validity_min"]) * 60,
+        "resend_cooldown": int(st["resend_cooldown_sec"]),
+        "max_attempts": int(st["max_attempts"]),
+        "trusted_device_enabled": bool(st["trusted_device_enabled"]),
+        "delivered": delivery["delivered"],
+    }
+    if delivery.get("error"):
+        resp["delivery_error"] = delivery["error"]
+    if OTP_DEV_MODE:
+        resp["dev_hint"] = f"code ends in ...{code[-2:]}"
+    return resp
+
+
 @api.post("/auth/admin-pin-login")
-async def admin_pin_login(payload: AdminPinLoginRequest):
+async def admin_pin_login(payload: AdminPinLoginRequest, request: Request):
     """Company/Super admins log in with one of:
       • email + 6-digit PIN
       • phone + 6-digit PIN
@@ -5247,6 +5527,11 @@ async def admin_pin_login(payload: AdminPinLoginRequest):
         {"user_id": user["user_id"]},
         {"$set": {"pin_fail_count": 0, "pin_last_login_at": now_iso(), "pin_locked_until": None}},
     )
+    # Iter 569 — 2FA gate for Super/Sub admins: no session until OTP verified.
+    if not _is_linked_staff:
+        _challenge = await _start_2fa_challenge(user, request, "pin")
+        if _challenge is not None:
+            return _challenge
     token = await _issue_session(
         user["user_id"],
         "staff_portal_pin" if _is_linked_staff else "pin",
@@ -5284,7 +5569,7 @@ class AdminSetPasswordRequest(BaseModel):
 
 
 @api.post("/auth/admin-password-login")
-async def admin_password_login(payload: AdminPasswordLoginRequest):
+async def admin_password_login(payload: AdminPasswordLoginRequest, request: Request):
     """Email OR User ID + password login for App & Web. Only company_admin,
     super_admin and sub_admin can use this — employees stay on the mobile
     PIN flow. Shares the same lockout logic as PIN login (5 attempts →
@@ -5377,6 +5662,11 @@ async def admin_password_login(payload: AdminPasswordLoginRequest):
             "password_locked_until": None,
         }},
     )
+    # Iter 569 — 2FA gate for Super/Sub admins: no session until OTP verified.
+    if not _is_linked_staff:
+        _challenge = await _start_2fa_challenge(user, request, "password")
+        if _challenge is not None:
+            return _challenge
     token = await _issue_session(
         user["user_id"],
         "staff_portal" if _is_linked_staff else "password",
@@ -9503,7 +9793,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "567"
+APP_ITERATION = "569"
 
 
 @api.get("/version")
@@ -12043,6 +12333,15 @@ _ACT_SKIP = ("/temp-code-bundle", "/portal-rpa/frame", "/health", "/db-viewer")
 _ACT_SENSITIVE = ("pin", "password", "token", "otp", "captcha", "secret")
 _ACT_VERB = {"POST": "CREATE", "PUT": "UPDATE", "PATCH": "UPDATE", "DELETE": "DELETE"}
 
+# Iter 568 — Detailed Audit Trail: field-level old→new diff support.
+from shared.audit import (  # noqa: E402
+    match_resource as _audit_match,
+    compute_changes as _audit_changes,
+    snapshot as _audit_snapshot,
+    record_label as _audit_label,
+    derive_module as _audit_module,
+)
+
 
 @app.middleware("http")
 async def _activity_logger(request: Request, call_next):
@@ -12060,6 +12359,18 @@ async def _activity_logger(request: Request, call_next):
             raw = await request.body()
         except Exception:
             raw = b""
+    # Iter 568 — pre-fetch the OLD document for UPDATE/DELETE on known
+    # resources so we can record field-level old→new value diffs.
+    old_doc = None
+    res_match = None
+    if should and method in ("PUT", "PATCH", "DELETE"):
+        try:
+            res_match = _audit_match(path)
+            if res_match:
+                coll, id_field, rec_id, _mod = res_match
+                old_doc = await db[coll].find_one({id_field: rec_id}, {"_id": 0})
+        except Exception:
+            old_doc = None
     response = await call_next(request)
     if not should:
         return response
@@ -12095,10 +12406,12 @@ async def _activity_logger(request: Request, call_next):
                 pass
         cid = request.query_params.get("company_id")
         summary = ""
+        body_data = None
         if raw and len(raw) < 200_000:
             try:
                 data = json.loads(raw)
                 if isinstance(data, dict):
+                    body_data = data
                     cid = cid or data.get("company_id")
                     parts = []
                     for k, v in data.items():
@@ -12117,6 +12430,27 @@ async def _activity_logger(request: Request, call_next):
             verb = "LOGIN" if "login" in path.lower() else "AUTH"
         else:
             verb = _ACT_VERB.get(method, method)
+        # Iter 568 — Detailed Audit Trail extras: field-level diffs,
+        # module, record label, device and success flag.
+        ok = response.status_code < 400
+        changes = []
+        old_values = None
+        new_values = None
+        rec_id = None
+        rec_label = ""
+        module = _audit_module(path)
+        if res_match:
+            _coll, _idf, rec_id, module = res_match
+        if ok and method in ("PUT", "PATCH") and old_doc is not None and body_data:
+            changes = _audit_changes(old_doc, body_data)
+            rec_label = _audit_label(old_doc)
+        elif ok and method == "DELETE" and old_doc is not None:
+            old_values = _audit_snapshot(old_doc)
+            rec_label = _audit_label(old_doc)
+        elif ok and method == "POST" and body_data and verb == "CREATE":
+            new_values = _audit_snapshot(body_data)
+            rec_label = _audit_label(body_data)
+        cid = cid or (old_doc or {}).get("company_id")
         await db.activity_log.insert_one({
             "at": now_iso(),
             "actor_id": (actor or {}).get("user_id"),
@@ -12127,7 +12461,15 @@ async def _activity_logger(request: Request, call_next):
             "path": path[:300],
             "action": f"{verb} {path[4:][:200]}",
             "status": response.status_code,
+            "success": ok,
+            "module": module,
+            "record_id": rec_id,
+            "record_label": rec_label,
+            "changes": changes,
+            "old_values": old_values,
+            "new_values": new_values,
             "details": summary[:400],
+            "device": (request.headers.get("user-agent") or "")[:200],
             "ip": ((request.headers.get("x-forwarded-for")
                     or (request.client.host if request.client else "") or "")
                    .split(",")[0].strip()),
@@ -12161,6 +12503,9 @@ app.include_router(bonus_router)
 # Iter 417 — Smart Punch GPS diagnostics (device logs + admin dashboard).
 from routes.gps_diagnostics import router as gps_diagnostics_router  # noqa: E402
 app.include_router(gps_diagnostics_router)
+# Iter 569 — 2FA/MFA for Super/Sub admin logins.
+from routes.twofa import router as twofa_router  # noqa: E402
+app.include_router(twofa_router)
 # Iter 409 — Actual (legacy) Salary Runs extracted to routes/salary_runs.py.
 # _payslip_rows_for_month is imported back because the WhatsApp engine
 # accesses it as a server attribute (srv._payslip_rows_for_month).
