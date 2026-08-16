@@ -90,7 +90,7 @@ SYSTEM_PROMPT = """You are the AI command parser for an Indian payroll & attenda
 The operator may write in English, Hindi or Hinglish (e.g. "Kankani ka June salary process karo").
 Parse the command into STRICT JSON (no markdown, no prose) with this schema:
 {
-  "intent": "process_salary" | "finalize_salary" | "report" | "email_report" | "employee_search" | "employee_update" | "bulk_salary_change" | "data_query" | "compliance_info" | "attendance_summary" | "pending_approvals" | "navigate" | "answer",
+  "intent": "process_salary" | "finalize_salary" | "report" | "email_report" | "employee_search" | "employee_update" | "bulk_salary_change" | "undo_bulk" | "data_query" | "compliance_info" | "attendance_summary" | "pending_approvals" | "navigate" | "answer",
   "salary_type": "actual" | "compliance" | "ot" | "arrear" | null,
   "report": "salary_register" | "bank_sheet" | "attendance_sheet" | "pf_ecr" | null,
   "metric": "salary_total" | "esic_eligible" | "absent_list" | "present_count" | "employee_count" | "top_paid" | "run_status" | "missing_data" | "pf_mismatch" | "why_salary" | null,
@@ -125,6 +125,7 @@ Rules (today is %TODAY%):
 - "find employee Ramesh", "show Suresh's details" → employee_search with employee_query.
 - "change Ramesh's phone to 98xxx", "set salary of code 50 to 15000", "mark Ramesh resigned/active" → employee_update with employee_query, field (phone|salary|status) and value (for status: "resigned" or "active").
 - BULK salary commands — "increase salary of ALL employees (in <X> department) by 5%", "sabki salary 500 rupaye badhao", "reduce Production dept salaries by 10%" → bulk_salary_change with department (null = whole firm) and percent (NEGATIVE for decrease/reduce) OR amount (flat ₹, negative for decrease). NEVER use employee_update for more than one employee.
+- "undo the last bulk change", "bulk salary change wapas/cancel karo", "revert the bulk increase" → undo_bulk (put a bulk id like BLK-XXXX in value if the user names one).
 - "open X" / "go to X" → navigate with the best screen key.
 - Questions about PF/EPF/ESIC/PT/TDS/labour-law RULES, rates, wage limits, due dates, latest NEWS, circulars, notifications or amendments (e.g. "PF ki latest notification kya hai", "what is the ESIC wage limit rule", "any new labour code update?") → compliance_info, and put the TOPIC in employee_query (e.g. "pf", "esic", "labour_code", "pt", "tds", "minimum_wages").
 - Anything else (greetings, general payroll/PF/ESIC law questions) → answer, with your best short answer in reply.
@@ -818,6 +819,31 @@ async def ai_command(body: CommandBody, authorization: Optional[str] = Header(No
                               "danger": True,
                               "success_note": (f"✅ Bulk change applied to "
                                                f"{pv['employees_affected']} employees.")}
+
+        elif intent == "undo_bulk":
+            # Iter 589b — safety net: restore salaries from the per-employee
+            # history of the last executed bulk change (preview + confirm).
+            from routes.ai_bulk_actions import build_bulk_undo_preview
+            bid = (parsed.get("value") or "").strip().upper() or None
+            pv = await build_bulk_undo_preview(
+                admin, bid if bid and bid.startswith("BLK-") else None)
+            reply = (
+                "↩️ Undo Bulk Change Preview\n"
+                f"Source: {pv['change_label']}\n"
+                f"Firm: {pv.get('firm_name') or firm_label}\n"
+                f"Employees to restore: {pv['employees_affected']}"
+                + (f" (skipped {pv['skipped']} changed since)" if pv.get("skipped") else "") + "\n"
+                f"Current payroll: {_money(pv['current_payroll'])}\n"
+                f"Payroll after undo: {_money(pv['new_payroll'])}\n"
+                "e.g. " + "; ".join(pv["sample"][:3]))
+            action = {"type": "confirm_api", "method": "POST",
+                      "endpoint": "/admin/ai-bulk/salary/execute",
+                      "body": {"preview_id": pv["preview_id"]},
+                      "label": ("Confirm & Undo" if admin["role"] == "super_admin"
+                                else "Send Undo for Approval"),
+                      "danger": True,
+                      "success_note": (f"↩️ Restored {pv['employees_affected']} "
+                                       "employees to their previous salary.")}
 
         elif intent == "data_query":
             r2, a2 = await _h_data_query(parsed, admin, cid, firm_label, company)

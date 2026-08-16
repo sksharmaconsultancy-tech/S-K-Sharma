@@ -6124,3 +6124,9 @@ Current iteration: 589. Next: 590.
 REMAINING from AI spec: AI add-employee action, custom date-range insights,
 configurable per-action risk matrix UI, WhatsApp channel adapter (needs
 Meta creds). Plus MSG91 SMS Phase 2/3, client-role templates.
+
+## Iter 589b (DONE) — AI Bulk-Change Undo
+- /admin/ai-bulk/salary/undo-preview + undo_bulk AI intent; single-undo
+  (source marked UNDONE), skips salaries changed after the bulk, same
+  execute/approval path (sub-admin undo → maker-checker CRITICAL).
+- Tests: test_undo_589b.py 11/11; bulk regression 17/17.

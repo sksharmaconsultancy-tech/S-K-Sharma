@@ -715,3 +715,16 @@ ITER 487 (doc-expiry alerts):
   with per-employee old→new → red "Confirm & Execute" → "applied to 2
   employees". Demo data cleaned.
 - Deploy script: /app/deploy_vps_iter589.sh (kind=script serves 589).
+
+## Iter 589b — AI Bulk-Change UNDO (2026-06)
+- ai_bulk_actions.py: build_bulk_undo_preview (finds last EXECUTED bulk in
+  firm scope or by BLK- id; restores each employee to pre-bulk salary;
+  SKIPS anyone changed again since; authz re-checked) + POST
+  /admin/ai-bulk/salary/undo-preview. execute_bulk_salary marks the source
+  bulk UNDONE after an undo executes (single-undo guarantee).
+- ai_assistant.py: undo_bulk intent ("undo the last bulk change", value may
+  carry BLK- id) → preview reply + danger confirm action (Confirm & Undo /
+  Send Undo for Approval for sub-admins → maker-checker CRITICAL).
+- Tests: test_undo_589b.py 11/11 (skip-changed-since, restore math, source
+  UNDONE, double-undo blocked, salary_history rows, AI intent e2e, no
+  change without confirm) + test_bulk_589.py regression 17/17.

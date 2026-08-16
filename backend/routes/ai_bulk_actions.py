@@ -90,6 +90,72 @@ async def build_bulk_salary_preview(admin: dict, company_id: str,
     return doc
 
 
+async def build_bulk_undo_preview(admin: dict,
+                                  bulk_id: Optional[str] = None) -> Dict[str, Any]:
+    """Build an UNDO preview for an executed bulk change — restores each
+    affected employee to their pre-bulk salary. Employees whose salary was
+    changed AGAIN after the bulk (current != bulk 'new') are skipped so we
+    never overwrite a newer deliberate change. Nothing is modified here."""
+    from shared.authz import firm_ok
+    q: Dict[str, Any] = {"kind": "bulk_salary_change", "status": "EXECUTED"}
+    if bulk_id:
+        q["preview_id"] = bulk_id
+    source = None
+    async for cand in db.ai_bulk_previews.find(q, {"_id": 0}).sort("executed_at", -1).limit(20):
+        if firm_ok(admin, cand.get("company_id")):
+            source = cand
+            break
+    if not source:
+        raise HTTPException(status_code=404,
+                            detail=("That bulk change was not found or is outside your scope"
+                                    if bulk_id else "No executed bulk change found to undo"))
+    authorize(admin, "salary_process", "edit", company_id=source["company_id"])
+
+    rows, skipped, cur_total, new_total = [], 0, 0.0, 0.0
+    for r in source.get("rows") or []:
+        emp = await db.users.find_one({"user_id": r["user_id"]},
+                                      {"_id": 0, "salary_monthly": 1, "name": 1,
+                                       "employee_code": 1})
+        if not emp:
+            skipped += 1
+            continue
+        cur = float(emp.get("salary_monthly") or 0)
+        if cur != float(r["new"]):
+            skipped += 1  # changed again since the bulk — leave it alone
+            continue
+        rows.append({"user_id": r["user_id"], "name": emp.get("name") or r.get("name"),
+                     "employee_code": emp.get("employee_code") or r.get("employee_code"),
+                     "old": cur, "new": float(r["old"])})
+        cur_total += cur
+        new_total += float(r["old"])
+    if not rows:
+        raise HTTPException(status_code=409,
+                            detail=("Nothing to undo — every affected salary was "
+                                    "changed again after that bulk change"))
+    preview_id = f"BLK-{uuid.uuid4().hex[:10].upper()}"
+    doc = {
+        "preview_id": preview_id, "kind": "bulk_salary_undo",
+        "source_bulk_id": source["preview_id"],
+        "company_id": source["company_id"], "firm_name": source.get("firm_name"),
+        "department": source.get("department"),
+        "change_label": f"UNDO of {source['preview_id']} ({source.get('change_label')})",
+        "rows": rows, "employees_affected": len(rows), "skipped": skipped,
+        "current_payroll": round(cur_total, 2),
+        "new_payroll": round(new_total, 2),
+        "difference": round(new_total - cur_total, 2),
+        "status": "PREVIEW",
+        "created_by": admin["user_id"], "created_by_name": admin.get("name"),
+        "created_at": now_iso(),
+        "expires_at": (datetime.now(timezone.utc)
+                       + timedelta(minutes=_PREVIEW_TTL_MIN)).isoformat(),
+    }
+    await db.ai_bulk_previews.insert_one(dict(doc))
+    doc.pop("rows")
+    doc["sample"] = [f"{r['name']} ({r['employee_code'] or '—'}): ₹{r['old']:,.0f} → ₹{r['new']:,.0f}"
+                     for r in rows[:5]]
+    return doc
+
+
 async def execute_bulk_salary(preview: dict, actor_id: str,
                               approval_id: Optional[str] = None) -> Dict[str, Any]:
     """Apply a previewed bulk change — one salary_history row per employee,
@@ -118,6 +184,12 @@ async def execute_bulk_salary(preview: dict, actor_id: str,
         {"preview_id": preview["preview_id"]},
         {"$set": {"status": "EXECUTED", "executed_at": now_iso(),
                   "executed_by": actor_id, "employees_changed": changed}})
+    # An executed UNDO retires its source bulk so it can't be undone twice.
+    if preview.get("kind") == "bulk_salary_undo" and preview.get("source_bulk_id"):
+        await db.ai_bulk_previews.update_one(
+            {"preview_id": preview["source_bulk_id"]},
+            {"$set": {"status": "UNDONE", "undone_by": preview["preview_id"],
+                      "undone_at": now_iso()}})
     try:
         await db.activity_log.insert_one({
             "log_id": f"al_{uuid.uuid4().hex[:12]}",
@@ -154,6 +226,15 @@ async def bulk_salary_preview(payload: Dict[str, Any] = Body(...),
         admin, payload.get("company_id"), payload.get("department"),
         pct=float(pct) if pct is not None else None,
         amount=float(amount) if amount is not None else None)}
+
+
+@router.post("/salary/undo-preview")
+async def bulk_salary_undo_preview(payload: Dict[str, Any] = Body(default={}),
+                                   authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    return {"ok": True, "preview": await build_bulk_undo_preview(
+        admin, payload.get("bulk_id"))}
 
 
 @router.post("/salary/execute")

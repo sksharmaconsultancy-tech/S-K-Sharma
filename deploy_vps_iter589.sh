@@ -23,6 +23,15 @@
 #      are rejected (403).
 #  * Tests: 17/17 bulk-engine tests + full maker-checker regression pass.
 #
+# ↩️ BULK-CHANGE UNDO (safety net):
+#  * Say "undo the last bulk change" (or name a bulk id) — the AI builds an
+#      UNDO preview from the per-employee history: who gets restored, who
+#      is SKIPPED because their salary was changed again afterwards, and
+#      the payroll before/after. Confirm & Undo applies it (sub-admins:
+#      Send Undo for Approval → Super-Admin-only, CRITICAL).
+#  * A bulk change can be undone only once; undo writes its own
+#      salary_history rows + CRITICAL audit entry. 11/11 undo tests pass.
+#
 # PREVIOUS (Iter 588) — 🤖 AI Command Center: Ask AI / Approvals with risk
 #    levels / Alerts engine / Insights KPIs / immutable AI Activity log.
 #
