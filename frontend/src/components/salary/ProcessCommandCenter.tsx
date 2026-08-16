@@ -12,6 +12,7 @@ import {
   View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 
 import { api } from "@/src/api/client";
 import { colors, radius } from "@/src/theme";
@@ -32,6 +33,7 @@ export type Readiness = {
       actual: boolean; actual_count: number; actual_finalized: boolean;
     };
     challans: { pf_uploaded: boolean; esic_uploaded: boolean; pending: number };
+    held_blocked?: { held: number; blocked: number; total: number; employees: number };
   };
   checks: Check[];
 };
@@ -67,6 +69,7 @@ function Kpi({ icon, label, value, tone, sub }: {
 export default function ProcessCommandCenter({
   companyId, month, processType, runExists, runFinalized, refreshKey = 0,
 }: Props) {
+  const router = useRouter();
   const [data, setData] = useState<Readiness | null>(null);
   const [loading, setLoading] = useState(false);
   const [showChecks, setShowChecks] = useState(false);
@@ -155,6 +158,30 @@ export default function ProcessCommandCenter({
             sub={k ? `PF ${k.challans.pf_uploaded ? "✓" : "•"} · ESIC ${k.challans.esic_uploaded ? "✓" : "•"}` : undefined} />
         )}
       </ScrollView>
+
+      {/* ---------- Iter 582 — Onboarding-gate payroll warning ---------- */}
+      {(k?.held_blocked?.total ?? 0) > 0 ? (
+        <Pressable
+          style={[st.hbWarn, (k?.held_blocked?.blocked ?? 0) > 0
+            ? { backgroundColor: "#FEF2F2", borderColor: "#FECACA" }
+            : { backgroundColor: "#FFFBEB", borderColor: "#FDE68A" }]}
+          onPress={() => router.push("/attendance-eligibility")}
+          testID="pcc-held-blocked-warning"
+        >
+          <Ionicons name="warning-outline" size={16}
+            color={(k?.held_blocked?.blocked ?? 0) > 0 ? "#B91C1C" : "#B45309"} />
+          <Text style={[st.hbWarnTxt,
+            { color: (k?.held_blocked?.blocked ?? 0) > 0 ? "#B91C1C" : "#92400E" }]}>
+            {k?.held_blocked?.held ? `${k.held_blocked.held} HELD` : ""}
+            {k?.held_blocked?.held && k?.held_blocked?.blocked ? " + " : ""}
+            {k?.held_blocked?.blocked ? `${k.held_blocked.blocked} BLOCKED` : ""}
+            {" "}punch{(k?.held_blocked?.total ?? 0) === 1 ? "" : "es"} ({k?.held_blocked?.employees} employee{(k?.held_blocked?.employees ?? 0) === 1 ? "" : "s"}) will
+            NOT count in this salary — release/reject before processing. Tap to open.
+          </Text>
+          <Ionicons name="chevron-forward" size={14}
+            color={(k?.held_blocked?.blocked ?? 0) > 0 ? "#B91C1C" : "#B45309"} />
+        </Pressable>
+      ) : null}
 
       {/* ---------- Workflow stepper ---------- */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}
@@ -253,6 +280,12 @@ const st = StyleSheet.create({
     overflow: "hidden", marginHorizontal: 4,
   },
   valBarFill: { height: 7, borderRadius: 4 },
+
+  hbWarn: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8,
+  },
+  hbWarnTxt: { flex: 1, fontSize: 11, fontWeight: "700", lineHeight: 15 },
 
   checksWrap: {
     borderTopWidth: 1, borderTopColor: colors.border ?? "#E2E8F0",

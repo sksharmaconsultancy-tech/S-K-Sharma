@@ -39,7 +39,7 @@ REQUIREMENT_LABELS = {
 USER_PROJECTION = {
     "_id": 0, "user_id": 1, "company_id": 1, "role": 1, "name": 1,
     "employee_code": 1, "doj": 1, "created_at": 1,
-    "aadhar_number": 1, "pan_number": 1,
+    "aadhar_number": 1, "aadhaar_no": 1, "pan_number": 1, "pan_no": 1,
     "bank_account_number": 1, "bank_account": 1,
     "ifsc_code": 1, "bank_ifsc": 1,
 }
@@ -76,14 +76,16 @@ def missing_requirements(user_doc: dict, gate: dict,
                          has_photo: Optional[bool] = None) -> List[str]:
     """List of missing mandatory onboarding items for one employee."""
     missing: List[str] = []
-    if gate.get("require_aadhaar") and not _filled(user_doc.get("aadhar_number")):
+    if gate.get("require_aadhaar") and not (
+            _filled(user_doc.get("aadhar_number")) or _filled(user_doc.get("aadhaar_no"))):
         missing.append("aadhaar")
     if gate.get("require_bank"):
         acct = _filled(user_doc.get("bank_account_number")) or _filled(user_doc.get("bank_account"))
         ifsc = _filled(user_doc.get("ifsc_code")) or _filled(user_doc.get("bank_ifsc"))
         if not (acct and ifsc):
             missing.append("bank")
-    if gate.get("require_pan") and not _filled(user_doc.get("pan_number")):
+    if gate.get("require_pan") and not (
+            _filled(user_doc.get("pan_number")) or _filled(user_doc.get("pan_no"))):
         missing.append("pan")
     if gate.get("require_photo"):
         hp = has_photo if has_photo is not None else _filled(user_doc.get("profile_photo_base64"))

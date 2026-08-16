@@ -129,6 +129,25 @@ async def salary_process_readiness(
     att_master = await db.attendance_master_entries.count_documents(
         {"company_id": company_id, "month": month})
 
+    # ---- Iter 582 — Onboarding-gate payroll guard: HELD/BLOCKED punches
+    # do NOT count toward hours/attendance, so payroll must not run until
+    # HR releases or rejects them (Attendance Eligibility screen).
+    hb_rows = await db.attendance.aggregate([
+        {"$match": {"company_id": company_id, "date": {"$regex": f"^{month}"},
+                    "status": {"$in": ["held", "blocked"]}}},
+        {"$group": {"_id": "$status", "count": {"$sum": 1},
+                    "users": {"$addToSet": "$user_id"}}},
+    ]).to_list(10)
+    held_ct = blocked_ct = 0
+    hb_users: set = set()
+    for r in hb_rows:
+        if r["_id"] == "held":
+            held_ct = r["count"]
+        else:
+            blocked_ct = r["count"]
+        hb_users.update(r.get("users") or [])
+    hb_total = held_ct + blocked_ct
+
     # ---- Runs for the month (KPI: salary processed / locked)
     comp_run = await db.compliance_salary_runs.find_one(
         {"company_id": company_id, "month": month},
@@ -158,6 +177,14 @@ async def salary_process_readiness(
             1 if (att_count or att_master) else 0, 1,
             (f"{att_count} punch records" + (f" · {att_master} master rows" if att_master else ""))
             if (att_count or att_master) else "No attendance data found for this month"),
+        chk("eligibility_hold", "Held / Blocked Punches (Onboarding Gate)",
+            hb_total, 0,
+            ("No held or blocked punches — all attendance counts"
+             if hb_total == 0 else
+             f"{held_ct} held + {blocked_ct} blocked punches across "
+             f"{len(hb_users)} employee(s) will NOT count — release or reject "
+             f"them on the Attendance Eligibility screen before payroll"),
+            invert=True),
         chk("salary_structure", "Salary Structure Available", wage_ok, total,
             f"{wage_ok}/{total} employees have a wage / structure"),
         chk("uan", "UAN Verified", uan_have, pf_eligible,
@@ -230,6 +257,12 @@ async def salary_process_readiness(
                 "pending": (0 if pf_challan else 1) + (0 if esic_challan else 1),
             },
             "attendance_records": att_count,
+            "held_blocked": {
+                "held": held_ct,
+                "blocked": blocked_ct,
+                "total": hb_total,
+                "employees": len(hb_users),
+            },
         },
         "checks": checks,
     }

@@ -833,6 +833,27 @@ export default function AttendanceScreen() {
                     : " — then contact HR to release your held punches."}
                 </Text>
               ) : null}
+              {/* Iter 582 — onboarding completion % progress */}
+              {onboarding.onboarding_pct != null && (onboarding.missing || []).length > 0 ? (
+                <View style={styles.obRow} testID="onboarding-pct-bar">
+                  <View style={styles.obTrack}>
+                    <View
+                      style={[
+                        styles.obFill,
+                        {
+                          width: `${Math.min(onboarding.onboarding_pct, 100)}%`,
+                          backgroundColor:
+                            onboarding.onboarding_pct >= 80 ? "#16A34A"
+                              : onboarding.onboarding_pct >= 50 ? "#F59E0B" : "#DC2626",
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.obPctTxt}>
+                    {onboarding.onboarding_pct}% · {onboarding.completed_count}/{onboarding.required_count} done
+                  </Text>
+                </View>
+              ) : null}
               {(onboarding.held_count || 0) > 0 || (onboarding.blocked_count || 0) > 0 ? (
                 <Text style={styles.syncBannerSub}>
                   {onboarding.held_count > 0 ? `${onboarding.held_count} punch${onboarding.held_count === 1 ? "" : "es"} held. ` : ""}
@@ -1217,6 +1238,10 @@ export default function AttendanceScreen() {
 }
 
 const styles = StyleSheet.create({
+  obRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 },
+  obTrack: { flex: 1, height: 6, borderRadius: 3, backgroundColor: "#FDE68A", overflow: "hidden" },
+  obFill: { height: 6, borderRadius: 3 },
+  obPctTxt: { fontSize: 10.5, fontWeight: "800", color: "#92400E" },
   root: { flex: 1, backgroundColor: colors.surface },
   syncBanner: {
     flexDirection: "row", alignItems: "center", gap: 10,

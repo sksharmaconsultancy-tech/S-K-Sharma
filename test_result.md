@@ -618,3 +618,11 @@ ITER 487 (doc-expiry alerts):
   (test_reports/iteration_581.json). Both testing done, no open issues.
 - Local Kankani DB state after testing: gate ON (require_pan true, 10 days),
   1 held punch remains for user_44cd6f561da0, his aadhaar/bank cleared.
+
+## Iter 582 — Payroll guard + Onboarding % widgets (2026-06)
+- salary_readiness.py: eligibility_hold check + kpis.held_blocked;
+  ProcessCommandCenter warning strip (pcc-held-blocked-warning) verified
+  via screenshot on /salary-run.
+- onboarding-status returns onboarding_pct; summary returns firm-wide
+  "onboarding" stats; widget verified via screenshot (ae-onboarding-widget).
+- Engine now checks aadhaar_no/pan_no aliases too.

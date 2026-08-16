@@ -5914,4 +5914,17 @@ BLOCKED punches releasable ONLY manually by HR with MANDATORY reason (2).
 REMAINING BACKLOG from full spec (P3): salary-run warning when held/blocked
 punches exist, onboarding % widget, SMS/WhatsApp notifications for holds,
 policy versioning/reprocess, configurable duplicate-punch window.
-Current iteration: 581. Next: 582.
+## Iter 582 (DONE) — P3: Payroll guard + Onboarding % widgets
+- Salary-run warning: routes/salary_readiness.py now aggregates held/blocked
+  punches for the month → new check "eligibility_hold" + kpis.held_blocked.
+  ProcessCommandCenter.tsx (all 3 salary screens) shows tappable amber/red
+  warning strip (testID pcc-held-blocked-warning) → /attendance-eligibility.
+- Onboarding % : /api/attendance/onboarding-status returns onboarding_pct /
+  completed_count / required_count (PWA banner progress bar, testID
+  onboarding-pct-bar); admin summary returns firm-wide "onboarding" stats
+  (complete/incomplete/pct) → widget card on attendance-eligibility screen
+  (testID ae-onboarding-widget).
+- Engine now recognises legacy KYC field aliases: aadhaar_no + pan_no
+  (DB stores both variants).
+Current iteration: 581 (deploy script /app/deploy_vps_iter581.sh includes
+Iter 582 changes — APP_ITERATION stays 581 unless user asks to bump).

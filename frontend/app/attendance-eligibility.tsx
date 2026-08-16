@@ -67,6 +67,7 @@ export default function AttendanceEligibilityScreen() {
   const [gate, setGate] = useState<any>(null);
   const [rows, setRows] = useState<EmpRow[]>([]);
   const [totals, setTotals] = useState<{ held: number; blocked: number } | null>(null);
+  const [onboardingStats, setOnboardingStats] = useState<any>(null);
 
   // Expanded employee → their held/blocked punch list.
   const [openUid, setOpenUid] = useState<string | null>(null);
@@ -94,6 +95,7 @@ export default function AttendanceEligibilityScreen() {
       setGate(r.gate);
       setRows(r.employees || []);
       setTotals(r.totals || null);
+      setOnboardingStats(r.onboarding || null);
     } catch (e: any) {
       setError(e.message || "Failed to load");
     } finally {
@@ -245,6 +247,41 @@ export default function AttendanceEligibilityScreen() {
               <Text style={styles.totNum}>{rows.length}</Text>
               <Text style={styles.totLbl}>Employees</Text>
             </View>
+          </View>
+        ) : null}
+
+        {/* Iter 582 — firm-wide onboarding completion widget */}
+        {onboardingStats ? (
+          <View style={styles.obCard} testID="ae-onboarding-widget">
+            <View style={styles.obHead}>
+              <Ionicons name="clipboard-outline" size={16} color={colors.brandPrimary} />
+              <Text style={styles.obTitle}>Onboarding Completion</Text>
+              <Text
+                style={[
+                  styles.obPct,
+                  { color: onboardingStats.pct >= 80 ? "#16A34A" : onboardingStats.pct >= 50 ? "#B45309" : "#B91C1C" },
+                ]}
+              >
+                {onboardingStats.pct}%
+              </Text>
+            </View>
+            <View style={styles.obTrack}>
+              <View
+                style={[
+                  styles.obFill,
+                  {
+                    width: `${Math.min(onboardingStats.pct, 100)}%`,
+                    backgroundColor:
+                      onboardingStats.pct >= 80 ? "#16A34A" : onboardingStats.pct >= 50 ? "#F59E0B" : "#DC2626",
+                  },
+                ]}
+              />
+            </View>
+            <Text style={styles.obSub}>
+              {onboardingStats.complete} of {onboardingStats.total_employees} employees have
+              all mandatory data ({(onboardingStats.required_items || []).join(", ")}).
+              {onboardingStats.incomplete > 0 ? ` ${onboardingStats.incomplete} incomplete.` : ""}
+            </Text>
           </View>
         ) : null}
 
@@ -460,6 +497,18 @@ const styles = StyleSheet.create({
   },
   totNum: { fontSize: 20, fontWeight: "800", color: colors.onSurface },
   totLbl: { fontSize: 11, color: colors.onSurfaceTertiary, marginTop: 2 },
+  obCard: {
+    borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg,
+    backgroundColor: colors.surfaceSecondary, padding: 12, gap: 8,
+  },
+  obHead: { flexDirection: "row", alignItems: "center", gap: 8 },
+  obTitle: { flex: 1, fontSize: 13, fontWeight: "800", color: colors.onSurface },
+  obPct: { fontSize: 16, fontWeight: "800" },
+  obTrack: {
+    height: 8, borderRadius: 4, backgroundColor: colors.border, overflow: "hidden",
+  },
+  obFill: { height: 8, borderRadius: 4 },
+  obSub: { fontSize: 11.5, color: colors.onSurfaceSecondary, lineHeight: 16 },
   err: { color: "#DC2626", marginTop: 20, textAlign: "center" },
   empty: { color: colors.onSurfaceTertiary, textAlign: "center", fontSize: 12.5 },
   emptyCard: { alignItems: "center", gap: 6, paddingVertical: 40 },

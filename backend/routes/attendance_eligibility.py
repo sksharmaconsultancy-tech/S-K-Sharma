@@ -71,6 +71,11 @@ async def onboarding_status(authorization: Optional[str] = Header(None)):
         {"user_id": user["user_id"], "status": "held"})
     blocked = await db.attendance.count_documents(
         {"user_id": user["user_id"], "status": "blocked"})
+    # Iter 582 — onboarding completion % for the PWA widget.
+    required = [k for k, flag in (
+        ("aadhaar", gate["require_aadhaar"]), ("bank", gate["require_bank"]),
+        ("pan", gate["require_pan"]), ("photo", gate["require_photo"])) if flag]
+    completed = [k for k in required if k not in missing]
     return {
         "gate_enabled": True,
         "eligibility": ev["eligibility"],
@@ -81,6 +86,9 @@ async def onboarding_status(authorization: Optional[str] = Header(None)):
         "auto_release": gate["auto_release"],
         "held_count": held,
         "blocked_count": blocked,
+        "required_count": len(required),
+        "completed_count": len(completed),
+        "onboarding_pct": round(len(completed) * 100 / len(required)) if required else 100,
     }
 
 
@@ -147,9 +155,45 @@ async def eligibility_summary(
             "deadline": ev["deadline"],
         })
     employees.sort(key=lambda x: (x["blocked_count"] == 0, x.get("name") or ""))
+
+    # Iter 582 — firm-wide onboarding completion widget (all active
+    # employees, not just those with held/blocked punches).
+    onboarding = None
+    if gate["enabled"]:
+        req_keys = [k for k in ("require_aadhaar", "require_bank",
+                                "require_pan", "require_photo") if gate[k]]
+        emp_docs = await db.users.find(
+            {"company_id": cid, "role": "employee", "active": {"$ne": False}},
+            USER_PROJECTION).to_list(20000)
+        firm_photo: set = set()
+        if gate["require_photo"] and emp_docs:
+            firm_photo = set(await db.users.distinct(
+                "user_id",
+                {"company_id": cid, "role": "employee",
+                 "profile_photo_base64": {"$nin": [None, ""]}}))
+        complete_ct = 0
+        items_done = items_total = 0
+        for u in emp_docs:
+            miss = missing_requirements(
+                u, gate,
+                has_photo=(u["user_id"] in firm_photo) if gate["require_photo"] else None)
+            items_total += len(req_keys)
+            items_done += len(req_keys) - len(miss)
+            if not miss:
+                complete_ct += 1
+        onboarding = {
+            "total_employees": len(emp_docs),
+            "complete": complete_ct,
+            "incomplete": len(emp_docs) - complete_ct,
+            "pct": round(complete_ct * 100 / len(emp_docs)) if emp_docs else 100,
+            "items_pct": round(items_done * 100 / items_total) if items_total else 100,
+            "required_items": [REQUIREMENT_LABELS[k.replace("require_", "")]
+                               for k in req_keys],
+        }
     return {
         "gate": gate,
         "employees": employees,
+        "onboarding": onboarding,
         "totals": {
             "held": sum(e["held_count"] for e in employees),
             "blocked": sum(e["blocked_count"] for e in employees),
