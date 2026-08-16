@@ -69,16 +69,31 @@ export default function PendingApprovalsScreen() {
   useEffect(() => { void loadSettings(); }, [loadSettings]);
 
   const toggle = async (key: string, value: boolean) => {
-    const next = { ...settings, actions: { ...settings.actions, [key]: value } };
+    const isDigest = key === "digest_enabled";
+    const next = isDigest
+      ? { ...settings, digest_enabled: value }
+      : { ...settings, actions: { ...settings.actions, [key]: value } };
     setSettings(next);
     try {
       await api(`/admin/maker-checker/settings`, {
-        method: "PUT", body: { actions: { [key]: value } },
+        method: "PUT",
+        body: isDigest ? { digest_enabled: value } : { actions: { [key]: value } },
       });
     } catch (e: any) {
       notify("Failed", e.message || "Could not update settings");
       void loadSettings();
     }
+  };
+
+  const sendDigestNow = async () => {
+    setBusy(true);
+    try {
+      const r = await api<any>(`/admin/maker-checker/send-digest-now`, { method: "POST" });
+      notify("Digest", r.sent
+        ? `Digest emailed — ${r.stale_count} request(s) waiting > 24h.`
+        : r.note || "No pending requests older than 24h — nothing to send.");
+    } catch (e: any) { notify("Failed", e.message || "Digest failed"); }
+    finally { setBusy(false); }
   };
 
   const decide = async (id: string, decision: "approve" | "reject") => {
@@ -157,6 +172,23 @@ export default function PendingApprovalsScreen() {
                   testID={`pa-toggle-${k}`} />
               </View>
             ))}
+            <View style={[st.setRow, { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 6 }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={st.line}>Daily overdue digest email</Text>
+                <Text style={st.hint}>09:00 IST — requests pending {">"} 24h</Text>
+              </View>
+              <Switch value={!!settings.digest_enabled}
+                onValueChange={(v) => void toggle("digest_enabled", v)}
+                testID="pa-toggle-digest" />
+            </View>
+            <Pressable
+              style={[st.btn, { backgroundColor: colors.brandPrimary, alignSelf: "flex-start", paddingHorizontal: 12, minHeight: 36 }]}
+              disabled={busy}
+              onPress={() => void sendDigestNow()}
+              testID="pa-send-digest-btn">
+              <Ionicons name="mail-outline" size={14} color="#fff" />
+              <Text style={[st.btnTxt, { fontSize: 12 }]}>Send digest now</Text>
+            </Pressable>
           </View>
         ) : null}
 

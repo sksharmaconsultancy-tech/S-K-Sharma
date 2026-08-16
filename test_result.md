@@ -677,3 +677,15 @@ ITER 487 (doc-expiry alerts):
   now SCOPED (company_admin firm / sub_admin restricted firm list).
 - Verified via screenshot: badge visible on /admin, click navigates to the
   queue. Demo approval cleaned up. Included in deploy587 bundle.
+
+## Iter 587c — Daily pending-approvals digest email (2026-06)
+- routes/maker_checker.py: send_pending_digest (>24h PENDING, metadata only,
+  skips email when none), digest_loop daily 09:00 IST (started in server.py
+  startup next to audit loop), POST /admin/maker-checker/send-digest-now
+  (super admin), settings gained digest_enabled (default ON, GET/PUT).
+- UI: pending-approvals settings card — "Daily overdue digest email" toggle
+  (pa-toggle-digest) + "Send digest now" button (pa-send-digest-btn).
+- LIVE VERIFIED: seeded 30h-old pending → send-now → Resend 200 delivered to
+  sksharmaconsultancy@gmail.com ("⏰ Pending Approvals Digest — 1 request(s)
+  waiting > 24h"). Regression test_mc_587.py 22/22 still passes. Demo data
+  cleaned. Included in deploy587 bundle.

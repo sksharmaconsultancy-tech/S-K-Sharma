@@ -49,12 +49,17 @@ MC_LABELS = {"salary_change": "Salary Change", "bank_change": "Bank Details Chan
              "employee_delete": "Employee Deletion"}
 _DEFAULTS = {"enabled": True,
              "actions": {a: True for a in MC_ACTIONS}}
+# Daily digest of stale PENDING requests (>24h) — emailed at 09:00 IST.
+_DIGEST_DEFAULT = True
+_DIGEST_HOUR_IST = 9
+_DIGEST_MIN_AGE_HOURS = 24
 
 
 async def get_mc_settings() -> Dict[str, Any]:
     doc = await db.maker_checker_settings.find_one({"_id_key": "singleton"}, {"_id": 0}) or {}
     actions = {**_DEFAULTS["actions"], **(doc.get("actions") or {})}
     return {"enabled": bool(doc.get("enabled", _DEFAULTS["enabled"])), "actions": actions,
+            "digest_enabled": bool(doc.get("digest_enabled", _DIGEST_DEFAULT)),
             "updated_at": doc.get("updated_at"), "updated_by": doc.get("updated_by")}
 
 
@@ -206,6 +211,75 @@ _APPLY = {"salary_change": _apply_salary, "bank_change": _apply_bank,
           "employee_delete": _apply_delete}
 
 
+# ── Daily overdue-approvals digest (user request) ───────────────────────────
+async def send_pending_digest(min_age_hours: int = _DIGEST_MIN_AGE_HOURS) -> Dict[str, Any]:
+    """Email approvers a digest of PENDING requests older than 24h so
+    nothing sits in the queue unnoticed. Skips the email when there are
+    none. Sensitive values are never included — metadata only."""
+    from datetime import timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=min_age_hours)).isoformat()
+    stale = await db.pending_approvals.find(
+        {"status": "PENDING", "created_at": {"$lte": cutoff}},
+        {"_id": 0, "approval_id": 1, "action_label": 1, "target_name": 1,
+         "target_code": 1, "maker_name": 1, "maker_role": 1,
+         "company_id": 1, "created_at": 1},
+    ).sort("created_at", 1).to_list(100)
+    if not stale:
+        return {"sent": False, "stale_count": 0,
+                "note": f"No PENDING requests older than {min_age_hours}h"}
+    now = datetime.now(timezone.utc)
+    lines = []
+    for a in stale:
+        try:
+            age_h = int((now - datetime.fromisoformat(
+                str(a["created_at"]).replace("Z", "+00:00"))).total_seconds() // 3600)
+        except Exception:
+            age_h = min_age_hours
+        age = f"{age_h // 24}d {age_h % 24}h" if age_h >= 24 else f"{age_h}h"
+        lines.append(
+            f"• {a.get('action_label')} — {a.get('target_name') or '—'}"
+            f"{' (' + a['target_code'] + ')' if a.get('target_code') else ''}"
+            f" | by {a.get('maker_name')} ({a.get('maker_role')})"
+            f" | waiting {age} | {a.get('approval_id')}")
+    body = (f"{len(stale)} approval request(s) have been PENDING for more than "
+            f"{min_age_hours} hours:\n\n" + "\n".join(lines) +
+            "\n\nReview them in Administration → Pending Approvals. "
+            "Nothing is applied until approved; rejected requests leave the "
+            "original data unchanged.")
+    await _email_alert(
+        f"⏰ Pending Approvals Digest — {len(stale)} request(s) waiting > {min_age_hours}h",
+        body)
+    logger.info("[maker-checker] digest sent — %d stale requests", len(stale))
+    return {"sent": True, "stale_count": len(stale)}
+
+
+async def digest_loop():
+    """Daily at 09:00 IST — one hour after the audit summary."""
+    import asyncio
+    from datetime import timedelta
+    while True:
+        try:
+            now_ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
+            nxt = now_ist.replace(hour=_DIGEST_HOUR_IST, minute=0, second=0, microsecond=0)
+            if nxt <= now_ist:
+                nxt += timedelta(days=1)
+            await asyncio.sleep((nxt - now_ist).total_seconds())
+            st = await get_mc_settings()
+            if st["enabled"] and st["digest_enabled"]:
+                await send_pending_digest()
+        except Exception:
+            logger.warning("[maker-checker] digest loop error", exc_info=True)
+            import asyncio as _a
+            await _a.sleep(3600)
+
+
+@router.post("/maker-checker/send-digest-now")
+async def send_digest_now(authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin"])
+    return await send_pending_digest()
+
+
 # ── Endpoints ───────────────────────────────────────────────────────────────
 @router.get("/maker-checker/settings")
 async def read_settings(authorization: Optional[str] = Header(None)):
@@ -222,6 +296,7 @@ async def write_settings(payload: Dict[str, Any] = Body(...),
     require_role(admin, ["super_admin"])
     cur = await get_mc_settings()
     enabled = bool(payload.get("enabled", cur["enabled"]))
+    digest_enabled = bool(payload.get("digest_enabled", cur["digest_enabled"]))
     actions = dict(cur["actions"])
     for a, v in (payload.get("actions") or {}).items():
         if a in MC_ACTIONS:
@@ -229,10 +304,12 @@ async def write_settings(payload: Dict[str, Any] = Body(...),
     await db.maker_checker_settings.update_one(
         {"_id_key": "singleton"},
         {"$set": {"enabled": enabled, "actions": actions,
+                  "digest_enabled": digest_enabled,
                   "updated_at": now_iso(), "updated_by": admin["user_id"]}},
         upsert=True)
     await _audit(admin, "MAKER_CHECKER_SETTINGS_CHANGED",
-                 {"enabled": enabled, "actions": actions})
+                 {"enabled": enabled, "actions": actions,
+                  "digest_enabled": digest_enabled})
     return {"ok": True, "settings": await get_mc_settings()}
 
 

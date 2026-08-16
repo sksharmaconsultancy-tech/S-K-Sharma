@@ -12779,13 +12779,15 @@ app.include_router(attendance_eligibility_router)
 # Iter 585 — RBAC Phase 1: Department Master, data scope, Access Preview.
 from routes.rbac_phase1 import router as rbac_phase1_router  # noqa: E402
 app.include_router(rbac_phase1_router)
-from routes.maker_checker import router as maker_checker_router  # noqa: E402
+from routes.maker_checker import router as maker_checker_router, digest_loop as _mc_digest_loop  # noqa: E402
 app.include_router(maker_checker_router)
 
 
 @app.on_event("startup")
 async def _start_audit_daily_loop():
     asyncio.create_task(_audit_daily_loop())
+    # Iter 587b — daily 09:00 IST digest of >24h pending approvals.
+    asyncio.create_task(_mc_digest_loop())
 # Iter 409 — Actual (legacy) Salary Runs extracted to routes/salary_runs.py.
 # _payslip_rows_for_month is imported back because the WhatsApp engine
 # accesses it as a server attribute (srv._payslip_rows_for_month).
