@@ -280,7 +280,13 @@ async def get_employee_kyc(
         "mobile", "alternate_mobile", "emergency_contact",
         "bank_account_number", "bank_name", "ifsc_code", "name_as_per_bank",
     ]
-    return {"kyc": {k: emp.get(k) for k in keys}}
+    out = {k: emp.get(k) for k in keys}
+    # Iter 587 — central authz: scope + backend sensitive masking.
+    from shared.authz import apply_sensitive_masking, assert_employee_in_scope
+    assert_employee_in_scope(admin, emp)
+    out = await apply_sensitive_masking(db, admin, out, employee_id=user_id,
+                                        module="employee_kyc")
+    return {"kyc": out}
 
 
 @router.patch("/employees/{user_id}/kyc")
@@ -358,6 +364,35 @@ async def update_employee_kyc(
     if updates.get("ifsc_code"):
         updates["bank_ifsc"] = updates["ifsc_code"]
 
+    # Iter 587 — RBAC Phase 3 Maker-Checker: BANK detail changes by
+    # non-super admins are STAGED for approval. Non-bank fields in the same
+    # patch still apply immediately; bank fields stay unchanged until an
+    # authorized checker approves.
+    _BANK_KEYS = ("bank_account_number", "bank_name", "ifsc_code",
+                  "name_as_per_bank", "bank_account", "bank_ifsc")
+    bank_changed = {k: updates[k] for k in _BANK_KEYS
+                    if k in updates and updates.get(k) != emp.get(k)}
+    staged = None
+    if bank_changed:
+        from routes.maker_checker import stage_if_required
+        staged = await stage_if_required(
+            admin, action_type="bank_change", module="employees", emp=emp,
+            old_values={k: emp.get(k) for k in bank_changed},
+            new_values=dict(bank_changed),
+            apply_spec={"kind": "kyc_set",
+                        "to_set": {**bank_changed, "kyc_updated_by": admin["user_id"]},
+                        "source": (payload.get("_source") or "manual").strip() or "manual"})
+        if staged:
+            for k in _BANK_KEYS:
+                updates.pop(k, None)
+            changed_keys = [k for k in changed_keys if k not in bank_changed]
+            prev_snapshot = {k: v for k, v in prev_snapshot.items()
+                             if k not in bank_changed}
+            if not changed_keys:
+                # Bank-only patch — nothing applies now.
+                return {"ok": True, "approval_required": True, **staged,
+                        "updated_keys": [], "kyc": {}}
+
     await db.kyc_history.insert_one({
         "user_id": user_id,
         "company_id": emp.get("company_id"),
@@ -401,8 +436,13 @@ async def update_employee_kyc(
         "bank_account_number", "bank_name", "ifsc_code", "name_as_per_bank",
         "kyc_updated_at", "kyc_updated_by",
     ]
-    return {
+    out = {
         "ok": True,
         "updated_keys": changed_keys,
         "kyc": {k: fresh.get(k) for k in keys},
     }
+    if staged:
+        # Iter 587 — bank fields were staged for approval; the rest applied.
+        out["approval_required"] = True
+        out.update(staged)
+    return out

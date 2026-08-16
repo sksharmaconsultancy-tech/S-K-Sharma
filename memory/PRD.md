@@ -6040,3 +6040,33 @@ exports; Export Security engine (authorize_export, DATA_EXPORT/
 EXPORT_DENIED, export IDs + history UI); Phase 3 Maker-Checker approval
 engine; predefined client-role templates customization.
 Current iteration: 586. Next: 587.
+
+## Iter 587 (DONE) — RBAC Phase 2 completion + Phase 3 Maker-Checker
+- Phase 2: KYC GET masking (employee_kyc.py via apply_sensitive_masking);
+  central export engine in shared/authz.py (authorize_export = firm scope +
+  module:export gate; log_export = DATA_EXPORT/EXPORT_DENIED activity_log
+  rows with unique Export IDs, denied = CRITICAL). Wired on Salary Register
+  csv/xlsx/pdf. GET /admin/export-history endpoint (rbac_phase1.py) + new
+  /export-history UI screen (All/Successful/Denied tabs).
+- Phase 3: routes/maker_checker.py — pending_approvals collection, staging
+  via stage_if_required (super_admin bypasses; dedup per target+action);
+  actions: salary_change (employee_salary.py PATCH), bank_change
+  (employee_kyc.py PATCH — bank keys staged, other fields apply instantly),
+  employee_delete (employees_admin.py DELETE — sub/company admins with
+  employees:delete may now REQUEST; super admin still deletes directly).
+  Decide endpoint enforces: maker never approves own (may reject/withdraw);
+  checker needs module:approve + firm scope; employee_delete approvals are
+  SUPER ADMIN ONLY. Old/new values stored + masked in queue for viewers
+  without sensitive_data:view. Apply-on-approve writes salary_history/
+  kyc_history with approval_id; full audit (APPROVAL_REQUESTED/APPROVED/
+  REJECTED) + Resend email alerts. Settings (maker_checker_settings
+  singleton, GET/PUT, super-only write) default ALL ON.
+- UI: /pending-approvals (tabs, settings toggles for super admin, diff
+  table, approve/reject with reason) + AdminWebShell menu entries.
+- Tests: test_rbac_587.py 9/9, test_mc_587.py 22/22, testing_agent UI 7/7
+  (test_reports/iteration_587.json). Deploy: /app/deploy_vps_iter587.sh
+  (temp-code-bundle kind=script now serves 587).
+Current iteration: 587. Next: 588.
+REMAINING (approved backlog): predefined client-role templates
+customization; MSG91 SMS Phase 2/3 event wiring; WhatsApp API (needs Meta
+credentials); AI WhatsApp chatbot; multi-language EN/Hindi.

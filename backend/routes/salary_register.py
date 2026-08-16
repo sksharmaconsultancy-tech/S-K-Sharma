@@ -604,6 +604,11 @@ async def export_csv(
 ):
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    # Iter 587 — central export gate + audit (shared/authz.py).
+    from shared.authz import authorize_export, log_export
+    await authorize_export(db, admin, module="salary_process",
+                           report="Salary Register", fmt="csv",
+                           company_id=company_id, period=month)
     prep = await _prepare(
         admin, source, company_id, month, run_id, employee_type,
         branch, department, contractor, search, sort_by, sort_dir,
@@ -611,6 +616,9 @@ async def export_csv(
     rows, columns = prep["rows"], prep["columns"]
     if not prep["run"]:
         raise HTTPException(status_code=404, detail="No salary run found for this month")
+    await log_export(db, admin, report="Salary Register", module="salary_process",
+                     fmt="file", company_id=prep["company_id"], period=month,
+                     records=len(rows))
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["Sr"] + [c["label"] for c in columns])
@@ -814,12 +822,20 @@ async def export_xlsx(
 ):
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    # Iter 587 — central export gate + audit (shared/authz.py).
+    from shared.authz import authorize_export, log_export
+    await authorize_export(db, admin, module="salary_process",
+                           report="Salary Register", fmt="xlsx",
+                           company_id=company_id, period=month)
     prep = await _prepare(
         admin, source, company_id, month, run_id, employee_type,
         branch, department, contractor, search, sort_by, sort_dir,
     )
     if not prep["run"]:
         raise HTTPException(status_code=404, detail="No salary run found for this month")
+    await log_export(db, admin, report="Salary Register", module="salary_process",
+                     fmt="xlsx", company_id=prep["company_id"], period=month,
+                     records=len(prep["rows"]))
     comp = await _company_name(prep["company_id"])
     data = _xlsx_bytes(comp, source, month, prep["rows"], prep["columns"])
     return StreamingResponse(

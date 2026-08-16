@@ -243,8 +243,10 @@ SENSITIVE_KEYS = {
     "aadhar_number": 4, "aadhaar_no": 4, "pan_number": 4, "pan_no": 4,
     "bank_account_number": 4, "bank_account": 4, "ifsc_code": 4,
     "bank_ifsc": 4, "uan_number": 4, "uan": 4, "esic_number": 4,
-    "esic_ip_number": 4, "phone": 4, "personal_email": 3,
+    "esic_ip_number": 4, "phone": 4, "mobile": 4, "alternate_mobile": 4,
+    "emergency_contact": 4, "personal_email": 3,
     "address": 0, "permanent_address": 0, "current_address": 0,
+    "present_address": 0,
 }
 
 
@@ -304,3 +306,52 @@ async def apply_sensitive_masking(db, user: dict, doc: dict,
         doc[k] = _mask(doc[k], SENSITIVE_KEYS[k])
     doc["sensitive_masked"] = True
     return doc
+
+
+# ── Iter 587 — EXPORT SECURITY & LOGGING (central engine) ──────────────────
+async def log_export(db, user: dict, *, report: str, module: str,
+                     fmt: str, company_id: Optional[str] = None,
+                     period: Optional[str] = None, records: int = 0,
+                     sensitive: bool = False, status: str = "SUCCESS",
+                     reason: Optional[str] = None) -> str:
+    """Create a DATA_EXPORT / EXPORT_DENIED audit row with a unique Export
+    ID. Super Admin exports are logged too. Never stores actual values."""
+    import uuid as _uuid
+    from datetime import datetime, timezone
+    export_id = f"EXP-{datetime.now(timezone.utc).year}-{_uuid.uuid4().hex[:8].upper()}"
+    try:
+        await db.activity_log.insert_one({
+            "log_id": f"al_{_uuid.uuid4().hex[:12]}",
+            "user_id": user.get("user_id"), "user_name": user.get("name"),
+            "role": user.get("role"),
+            "action": "DATA_EXPORT" if status == "SUCCESS" else "EXPORT_DENIED",
+            "module": module,
+            "severity": "INFO" if status == "SUCCESS" else "CRITICAL",
+            "detail": {"export_id": export_id, "report": report,
+                       "format": fmt, "company_id": company_id,
+                       "period": period, "records": records,
+                       "sensitive_included": sensitive, "reason": reason},
+            "at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception:
+        pass
+    return export_id
+
+
+async def authorize_export(db, user: dict, *, module: str, report: str,
+                           fmt: str, company_id: Optional[str] = None,
+                           period: Optional[str] = None) -> None:
+    """Central export gate: firm scope + module EXPORT permission. Denied
+    attempts are logged (EXPORT_DENIED) then rejected with 403."""
+    try:
+        if company_id is not None and not firm_ok(user, company_id):
+            raise HTTPException(status_code=403,
+                                detail="Forbidden — firm outside your scope")
+        if not has_permission(user, module, "export"):
+            raise HTTPException(status_code=403,
+                                detail=f"Forbidden — you lack {module}:export permission")
+    except HTTPException as e:
+        await log_export(db, user, report=report, module=module, fmt=fmt,
+                         company_id=company_id, period=period,
+                         status="DENIED", reason=e.detail)
+        raise

@@ -307,3 +307,28 @@ async def migrate_sensitive_permission(authorization: Optional[str] = Header(Non
                  {"migration": "sensitive_data:view backward-compat",
                   "granted": granted})
     return {"ok": True, "granted": granted}
+
+
+@router.get("/admin/export-history")
+async def export_history(
+    company_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None, description="SUCCESS | DENIED"),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 587 — Export audit history (DATA_EXPORT / EXPORT_DENIED)."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    q: Dict[str, Any] = {"action": {"$in": ["DATA_EXPORT", "EXPORT_DENIED"]}}
+    if status == "SUCCESS":
+        q["action"] = "DATA_EXPORT"
+    elif status == "DENIED":
+        q["action"] = "EXPORT_DENIED"
+    if admin["role"] == "company_admin":
+        q["detail.company_id"] = admin.get("company_id")
+    elif company_id:
+        from shared.authz import firm_ok
+        if not firm_ok(admin, company_id):
+            raise HTTPException(status_code=403, detail="Firm outside your scope")
+        q["detail.company_id"] = company_id
+    logs = await db.activity_log.find(q, {"_id": 0}).sort("at", -1).to_list(200)
+    return {"exports": logs}

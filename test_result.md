@@ -653,3 +653,27 @@ ITER 487 (doc-expiry alerts):
 - Masking currently wired on employee profile GET; list/KYC/export masking
   pending next session. VPS: run POST /api/admin/access/
   migrate-sensitive-permission once after deploy (backward compat).
+
+## Iter 587 — RBAC Phase 2 (Export Security + Export History) + Phase 3 (Maker-Checker) (2026-06)
+- Backend: test_rbac_587.py 9/9 (KYC masking, export 403 + EXPORT_DENIED log,
+  export-with-perm OK, cross-firm 403, export history) and test_mc_587.py
+  22/22 (staging, dedup, maker-cannot-approve, apply-on-approve, super admin
+  bypass, mixed KYC patch splits bank vs other fields, queue masking, reject
+  keeps data, delete request→super-only approval, toggle off→strict 403,
+  audit rows).
+- Frontend: testing_agent 7/7 (test_reports/iteration_587.json) — pending-
+  approvals full approve+reject UI flow with diff table, settings toggles
+  persisted, export-history Denied tab shows blocked attempt, sidebar entries.
+- Maker-Checker DEFAULT: all 3 actions ON (maker_checker_settings singleton).
+  Sub-admins with employees:delete can now REQUEST deletion (super admin
+  approves). Test data fully cleaned by both agents.
+- Deploy script: /app/deploy_vps_iter587.sh (kind=script serves 587).
+
+## Iter 587b — Pending-approvals header badge (2026-06)
+- AdminWebShell header: checkmark-done icon + red count (testID
+  web-approvals-badge) for super/sub/company admins when PENDING requests
+  exist; polls /admin/approvals?status=PENDING every 60s + on global
+  Refresh; click opens /pending-approvals. pending_count in the endpoint is
+  now SCOPED (company_admin firm / sub_admin restricted firm list).
+- Verified via screenshot: badge visible on /admin, click navigates to the
+  queue. Demo approval cleaned up. Included in deploy587 bundle.

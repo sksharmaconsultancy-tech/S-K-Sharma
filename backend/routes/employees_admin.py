@@ -973,9 +973,13 @@ async def delete_employee(user_id: str,
     - Super admins cannot be deleted via this endpoint (safety guard).
     """
     admin = await get_user_from_token(authorization)
-    # Iter 490 — STRICT: sub_admin normally inherits super_admin reach via
-    # require_role, so use the strict guard to keep them out of deletes.
-    require_super_admin_strict(admin)
+    # Iter 490 — STRICT: only super admin deletes DIRECTLY.
+    # Iter 587 (RBAC Phase 3) — when the Maker-Checker toggle for
+    # employee_delete is ON, sub/company admins with employees:delete may
+    # REQUEST a deletion; nothing is removed until the Super Admin approves.
+    from routes.maker_checker import mc_action_enabled
+    if admin.get("role") != "super_admin" and not await mc_action_enabled("employee_delete"):
+        require_super_admin_strict(admin)
     target = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     if not target:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -991,6 +995,22 @@ async def delete_employee(user_id: str,
                     "first to unlock, then delete."))
     if admin.get("user_id") == user_id:
         raise HTTPException(status_code=400, detail="You cannot delete your own account")
+
+    if admin.get("role") != "super_admin":
+        # Iter 587 — Maker-Checker: stage the deletion for approval.
+        from shared.authz import authorize
+        from routes.maker_checker import stage_if_required
+        require_role(admin, ["company_admin", "sub_admin"])
+        authorize(admin, "employees", "delete", company_id=target.get("company_id"))
+        staged = await stage_if_required(
+            admin, action_type="employee_delete", module="employees", emp=target,
+            old_values={"name": target.get("name"),
+                        "employee_code": target.get("employee_code"),
+                        "company_id": target.get("company_id"),
+                        "active": target.get("active")},
+            new_values={"deleted": True},
+            apply_spec={"kind": "employee_delete"})
+        return {"ok": True, "approval_required": True, **(staged or {})}
 
     result = await delete_employee_record(user_id, actor=admin.get("email") or admin.get("user_id"))
     return {"ok": True, **result}

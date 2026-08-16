@@ -302,6 +302,8 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/access-management", label: "Access Management", icon: "key-outline" },
       { route: "/access-preview", label: "Access Preview", icon: "eye-outline" },
       { route: "/roles-permissions", label: "Roles & Permissions", icon: "options-outline" },
+      { route: "/pending-approvals", label: "Pending Approvals", icon: "checkmark-done-outline" },
+      { route: "/export-history", label: "Export History", icon: "download-outline" },
       { route: "/security-2fa", label: "Security · 2FA/MFA", icon: "shield-half-outline" },
       { route: "/audit-notifications", label: "Audit Notifications", icon: "notifications-circle-outline" },
       { route: "/whatsapp-config", label: "WhatsApp Configuration", icon: "logo-whatsapp" },
@@ -796,6 +798,22 @@ export default function AdminWebShell({ children }: Props) {
   const { count: primaryUnread } = usePrimaryInbox(
     role === "super_admin" || role === "sub_admin",
   );
+  // Iter 587 — Maker-Checker pending-approvals badge (header). Checkers
+  // instantly see how many requests await them; click opens the queue.
+  const [pendingApprovals, setPendingApprovals] = React.useState(0);
+  React.useEffect(() => {
+    if (!isWebDesktop || !(role === "super_admin" || role === "sub_admin" || role === "company_admin")) return;
+    let alive = true;
+    const fetchCount = () => {
+      api<{ pending_count: number }>("/admin/approvals?status=PENDING")
+        .then((r) => { if (alive) setPendingApprovals(r?.pending_count || 0); })
+        .catch(() => { if (alive) setPendingApprovals(0); });
+    };
+    fetchCount();
+    const t = setInterval(fetchCount, 60000);
+    return () => { alive = false; clearInterval(t); };
+    // refreshedAt/pathname: re-check on global Refresh + screen changes.
+  }, [isWebDesktop, role, refreshedAt, pathname]);
 
   // Iter 67 — Sub-Admin gate: /firm-select renders full-bleed without the
   // sidebar / top-bar chrome so the picker is the only thing on screen.
@@ -1516,6 +1534,26 @@ export default function AdminWebShell({ children }: Props) {
               <Text style={styles.refreshedAtTxt} testID="web-refreshed-at">
                 {formatSinceRefresh(refreshedAt)}
               </Text>
+            ) : null}
+            {/* Iter 587 — Pending Approvals badge (Maker-Checker queue). */}
+            {(role === "super_admin" || role === "sub_admin" || role === "company_admin")
+              && pendingApprovals > 0 ? (
+              <Pressable
+                onPress={() => router.push("/pending-approvals" as any)}
+                style={({ pressed }) => [
+                  styles.notifBellBtn,
+                  pressed && { opacity: 0.85 },
+                ]}
+                testID="web-approvals-badge"
+                hitSlop={6}
+              >
+                <Ionicons name="checkmark-done" size={18} color={colors.accent} />
+                <View style={styles.notifBadge}>
+                  <Text style={styles.notifBadgeTxt} numberOfLines={1}>
+                    {pendingApprovals > 99 ? "99+" : String(pendingApprovals)}
+                  </Text>
+                </View>
+              </Pressable>
             ) : null}
             {/* Iter 127 — Primary Inbox mail badge (Super/Sub Admin). */}
             {role === "super_admin" || role === "sub_admin" ? (

@@ -1,0 +1,30 @@
+{
+  "summary": "Iter 587 FRONTEND ONLY — /pending-approvals and /export-history verified end-to-end as super admin with a maker-checker flow driven by a real sub_admin. All acceptance criteria met (7/7 UI checkpoints passed). Header + tabs + super-admin toggle card render; PENDING cards for staged salary + bank changes appear with correct OLD vs NEW diff (10000 -> 12000); Approve moves salary card to APPROVED tab and updates users.salary_monthly to 12000; Reject moves bank card to REJECTED tab and leaves users.bank_account_number unchanged (11223344556677); toggle off/on persists via PUT /admin/maker-checker/settings; /export-history renders All/Successful/Denied tabs and the DENIED entry from sub_admin export attempt shows red DENIED badge with reason 'Forbidden — you lack salary_process:export permission'; AdminWebShell Administration sidebar section contains both 'Pending Approvals' and 'Export History' entries (visible in screenshots at /app/test_reports/screens/iter587_*.png).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/iter587/seed_iter587.py",
+    "/app/backend/tests/iter587/cleanup_iter587.py",
+    "/app/test_reports/screens/iter587_pa_load.png",
+    "/app/test_reports/screens/iter587_pa_rejected.png",
+    "/app/test_reports/screens/iter587_eh_all.png",
+    "/app/test_reports/screens/iter587_eh_denied.png",
+    "/app/test_reports/screens/iter587_shell.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "shared/authz.py _LEGACY grants 'export' via legacy 'read' permission — this is intentional per the code comments (backward compat), but be aware: any sub_admin with legacy 'salary_process:read' still gets export. New-style 'salary_process:view' correctly does NOT grant export, which is what the UI toggles issue."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (already verified 31/31 by main agent)", "frontend": "100% (7/7 UI checkpoints)"},
+  "seed_data_creation": "Seeded (and then fully cleaned) test sub_admin user_test587sub + session sub587tok_e6ef3015bf and test employee user_test587emp (Kankani cmp_527fecdd7c). Staged one salary_change (10000->12000) and one bank_change ('99887766554433') PENDING approval, plus one EXPORT_DENIED activity log via /admin/salary-register/export.csv (403). Cleanup script deleted 2 users, 1 session, 2 pending_approvals, 1 salary_history, 4 activity_log rows. Maker-checker settings restored to all-ON (verified via GET settings).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Super admin web UI is 2FA-gated. Use `localStorage.setItem('llc_session_token','smoketok_581_cdba55cd')` before navigating (session lives in DB user_sessions and points to super admin user_67791559822a). Maker-checker staging MUST be done as a sub_admin — super_admin PATCHes apply directly. When seeding a sub_admin, DO NOT give 'module:read' if you want export to be blocked — legacy 'read' grants both view and export in shared/authz._LEGACY. Use new-style 'module:view'/'module:edit' instead.",
+  "rca_of_issue": "N/A — no bugs found. Only observation during test setup: initial sub_admin seed included legacy 'salary_process:read' which unexpectedly allowed the export (returned 200). After restricting perms to view/edit only, the export was correctly denied (403) — this is by design in shared/authz.py."
+}

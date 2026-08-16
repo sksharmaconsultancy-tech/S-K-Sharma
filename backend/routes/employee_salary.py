@@ -211,6 +211,19 @@ async def update_employee_salary(
                     f"salary_monthly {float(monthly):.2f}"
                 )
 
+    # Iter 587 — RBAC Phase 3 Maker-Checker: salary changes by non-super
+    # admins are STAGED for approval; original data stays unchanged.
+    from routes.maker_checker import stage_if_required
+    _diff_keys = [k for k in to_set if k not in ("salary_updated_at", "salary_updated_by")]
+    staged = await stage_if_required(
+        admin, action_type="salary_change", module="salary_process", emp=emp,
+        old_values={k: emp.get(k) for k in _diff_keys},
+        new_values={k: to_set[k] for k in _diff_keys},
+        apply_spec={"kind": "salary_set", "to_set": to_set},
+        notes=(payload.get("notes") or "").strip() or None)
+    if staged:
+        return {"ok": True, "approval_required": True, "warnings": warnings, **staged}
+
     # Write audit trail BEFORE the update so we can capture prev/new.
     await db.salary_history.insert_one({
         "user_id": user_id,
