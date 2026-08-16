@@ -242,3 +242,68 @@ async def access_preview(user_id: str,
                  {"viewed_user_id": user_id, "viewed_name": target.get("name"),
                   "viewed_role": target.get("role")})
     return out
+
+
+# ── Iter 586 — Granular permission editor + sensitive-data migration ───────
+GRANULAR_ACTIONS = ["view", "add", "edit", "delete", "export", "approve"]
+
+
+@router.patch("/admin/access/user-permissions")
+async def set_user_permissions(payload: dict = Body(...),
+                               authorization: Optional[str] = Header(None)):
+    """Super Admin sets the FULL granular permission list for a sub-admin or
+    client (staff) user. Format: ["employees:view", "salary_process:export",
+    "sensitive_data:view", …]. Legacy read/write keys are also accepted.
+    Change is audited as CRITICAL (old vs new)."""
+    admin = await get_user_from_token(authorization)
+    require_super_admin_strict(admin)
+    uid = str(payload.get("user_id") or "").strip()
+    perms = payload.get("permissions")
+    if not isinstance(perms, list):
+        raise HTTPException(status_code=400, detail="permissions must be a list")
+    clean = sorted({str(p).strip() for p in perms
+                    if ":" in str(p) and len(str(p)) < 80})
+    target = await db.users.find_one({"user_id": uid})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.get("role") == "sub_admin":
+        field, old = "sub_admin_permissions", target.get("sub_admin_permissions")
+    elif target.get("role") == "company_admin" and target.get("is_company_staff"):
+        field, old = "staff_permissions", target.get("staff_permissions")
+    else:
+        raise HTTPException(status_code=400,
+                            detail="Granular permissions apply to sub-admins "
+                                   "and client staff users only")
+    await db.users.update_one({"user_id": uid}, {"$set": {field: clean}})
+    await _audit(admin, "PERMISSION_CHANGED",
+                 {"target_user_id": uid, "target_name": target.get("name"),
+                  "field": field, "old": old, "new": clean})
+    return {"ok": True, "user_id": uid, "permissions": clean}
+
+
+@router.post("/admin/access/migrate-sensitive-permission")
+async def migrate_sensitive_permission(authorization: Optional[str] = Header(None)):
+    """One-time idempotent backward-compat migration: sub-admins / client
+    staff who could already see employee data (employees:read|write|view)
+    keep seeing UNMASKED sensitive values by receiving sensitive_data:view.
+    Super Admin can revoke it per user afterwards via user-permissions."""
+    admin = await get_user_from_token(authorization)
+    require_super_admin_strict(admin)
+    granted = 0
+    for field, rq in (("sub_admin_permissions", {"role": "sub_admin"}),
+                      ("staff_permissions", {"role": "company_admin",
+                                             "is_company_staff": True})):
+        async for u in db.users.find({**rq, field: {"$exists": True}},
+                                     {"user_id": 1, field: 1}):
+            perms = u.get(field) or []
+            if "sensitive_data:view" in perms:
+                continue
+            if any(p.startswith("employees:") for p in perms):
+                await db.users.update_one(
+                    {"user_id": u["user_id"]},
+                    {"$addToSet": {field: "sensitive_data:view"}})
+                granted += 1
+    await _audit(admin, "PERMISSION_CHANGED",
+                 {"migration": "sensitive_data:view backward-compat",
+                  "granted": granted})
+    return {"ok": True, "granted": granted}

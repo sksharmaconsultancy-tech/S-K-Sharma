@@ -106,6 +106,17 @@ def scope_filter(user: dict, field_branch: str = "branch_id",
     return q
 
 
+async def scoped_user_id_set(db, user: dict):
+    """None → unrestricted. Otherwise the set of employee user_ids inside
+    the user's branch/department scope — for filtering salary/report rows
+    that don't carry branch/department fields directly."""
+    q = scope_filter(user)
+    if not q:
+        return None
+    ids = await db.users.distinct("user_id", {"role": "employee", **q})
+    return set(ids)
+
+
 def employee_in_scope(user: dict, emp: dict) -> bool:
     """ID-manipulation protection for a single employee document."""
     if user.get("role") == "super_admin":
@@ -221,5 +232,75 @@ async def get_effective_access(db, target: dict,
         "department_scope": {"mode": "ALL_DEPARTMENTS" if d is None else "SELECTED_DEPARTMENTS",
                              "department_ids": d},
         "matrix": matrix,
+        "sensitive_data_view": can_view_sensitive(target),
         "counts": {"firms": len(firms), "employees": emp_count},
     }
+
+
+# ── Iter 586 — SENSITIVE FIELD MASKING (RBAC Phase 2 core) ─────────────────
+# Central classification: field → number of trailing chars kept visible.
+SENSITIVE_KEYS = {
+    "aadhar_number": 4, "aadhaar_no": 4, "pan_number": 4, "pan_no": 4,
+    "bank_account_number": 4, "bank_account": 4, "ifsc_code": 4,
+    "bank_ifsc": 4, "uan_number": 4, "uan": 4, "esic_number": 4,
+    "esic_ip_number": 4, "phone": 4, "personal_email": 3,
+    "address": 0, "permanent_address": 0, "current_address": 0,
+}
+
+
+def can_view_sensitive(user: dict) -> bool:
+    role = user.get("role")
+    if role == "super_admin":
+        return True
+    if role == "company_admin" and not user.get("is_company_staff"):
+        return True  # real firm admin — unrestricted inside own firm
+    perms = _user_perms(user) or set()
+    return "sensitive_data:view" in perms
+
+
+def _mask(v: Any, keep: int) -> str:
+    s = str(v)
+    if keep <= 0 or len(s) <= keep:
+        return "XXXX"
+    return "X" * (len(s) - keep) + s[-keep:]
+
+
+async def apply_sensitive_masking(db, user: dict, doc: dict,
+                                  employee_id: Optional[str] = None,
+                                  module: str = "employees") -> dict:
+    """Central masking service. If the user lacks sensitive_data:view the
+    BACKEND RESPONSE ITSELF carries only masked values (never frontend
+    JS masking). Authorized unmasked access emits a SENSITIVE_DATA_VIEWED
+    audit event (deduped per user+employee+day; never stores the values)."""
+    present = [k for k in SENSITIVE_KEYS if doc.get(k)]
+    if not present:
+        return doc
+    if can_view_sensitive(user):
+        try:
+            from datetime import datetime, timezone
+            day = datetime.now(timezone.utc).date().isoformat()
+            dedup = {"action": "SENSITIVE_DATA_VIEWED",
+                     "user_id": user.get("user_id"),
+                     "detail.employee_id": employee_id,
+                     "detail.day": day}
+            if not await db.activity_log.find_one(dedup, {"_id": 1}):
+                import uuid as _uuid
+                await db.activity_log.insert_one({
+                    "log_id": f"al_{_uuid.uuid4().hex[:12]}",
+                    "user_id": user.get("user_id"),
+                    "user_name": user.get("name"),
+                    "role": user.get("role"),
+                    "action": "SENSITIVE_DATA_VIEWED",
+                    "module": module,
+                    "severity": "INFO",
+                    "detail": {"employee_id": employee_id, "day": day,
+                               "fields": present},  # field NAMES only
+                    "at": datetime.now(timezone.utc).isoformat(),
+                })
+        except Exception:
+            pass
+        return doc
+    for k in present:
+        doc[k] = _mask(doc[k], SENSITIVE_KEYS[k])
+    doc["sensitive_masked"] = True
+    return doc

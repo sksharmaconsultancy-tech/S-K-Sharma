@@ -403,6 +403,12 @@ async def _prepare(
     rows = _filter_rows(
         run.get("rows") or [], employee_type, branch, department, contractor, search,
     )
+    # Iter 586 — RBAC data scope: keep only employees inside the admin's
+    # branch/department scope (applies to the register AND every export).
+    from shared.authz import scoped_user_id_set
+    _allowed = await scoped_user_id_set(db, admin)
+    if _allowed is not None:
+        rows = [r for r in rows if r.get("user_id") in _allowed]
     columns = _build_columns(source, rows)
     # Iter 313 — ESIC Leave Module: firm toggle "Show ESIC Leave
     # Separately on Salary Register" removes the column when OFF.

@@ -6015,4 +6015,28 @@ central mask service, SENSITIVE_DATA_VIEWED audit) + export security
 (authorize_export, DATA_EXPORT/EXPORT_DENIED logs, export IDs, history UI).
 PHASE 3 (approved, pending): Maker-Checker approval engine (pending queue,
 old/new snapshot, self-approval ban, concurrency check, email alerts).
-Current iteration: 585. Next: 586.
+## Iter 586 (DONE) — RBAC continued: wiring + UI + sensitive masking
+- Scope wiring: attendance day-status (attendance_admin_core.py users query
+  + scope_filter) and salary register _prepare (rows filtered via new
+  authz.scoped_user_id_set — covers register + its CSV/XLSX exports).
+- shared/authz.py additions: scoped_user_id_set, SENSITIVE_KEYS,
+  can_view_sensitive (super_admin + real company_admin always; sub_admin/
+  staff need "sensitive_data:view"), apply_sensitive_masking (backend-level
+  masking, keeps last 4 chars, SENSITIVE_DATA_VIEWED audit with field NAMES
+  only, deduped per user+employee+day); get_effective_access now returns
+  sensitive_data_view.
+- Masking wired: employee profile GET (employee_profile.py, aliases
+  aadhaar_no/pan_no are what the profile exposes).
+- rbac_phase1.py additions: PATCH /admin/access/user-permissions (granular
+  list, PERMISSION_CHANGED audit) + POST /admin/access/
+  migrate-sensitive-permission (idempotent backward-compat: users with any
+  employees:* perm get sensitive_data:view; run once on VPS after deploy).
+- UI: /roles-permissions screen (matrix + sensitive toggle + branch/dept
+  scope chips, saves via the two PATCH endpoints) + AdminWebShell menu.
+- Tests: test_rbac_586.py 14/14 + test_rbac_585.py 32/32 regression pass.
+- Deploy: /app/deploy_vps_iter586.sh (bundle kind=script → 586).
+REMAINING (approved, next sessions): masking on employees LIST + KYC GET +
+exports; Export Security engine (authorize_export, DATA_EXPORT/
+EXPORT_DENIED, export IDs + history UI); Phase 3 Maker-Checker approval
+engine; predefined client-role templates customization.
+Current iteration: 586. Next: 587.

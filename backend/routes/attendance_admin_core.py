@@ -1165,7 +1165,9 @@ async def attendance_day_status(
 
     emps = await db.users.find(
         {"company_id": company_id, "role": "employee",
-         "disabled": {"$ne": True}, "exit_date": None},
+         "disabled": {"$ne": True}, "exit_date": None,
+         # Iter 586 — RBAC branch/department data scope (shared/authz.py).
+         **__import__("shared.authz", fromlist=["scope_filter"]).scope_filter(admin)},
         {"_id": 0, "user_id": 1, "name": 1, "father_name": 1,
          "designation": 1, "employee_code": 1, "bio_code": 1,
          "shift_start": 1, "shift_end": 1, "attendance_policy_override": 1},

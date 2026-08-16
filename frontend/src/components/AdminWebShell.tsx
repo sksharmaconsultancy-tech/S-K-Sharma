@@ -301,6 +301,7 @@ export const NAV_SUPER: NavItem[] = [
     children: [
       { route: "/access-management", label: "Access Management", icon: "key-outline" },
       { route: "/access-preview", label: "Access Preview", icon: "eye-outline" },
+      { route: "/roles-permissions", label: "Roles & Permissions", icon: "options-outline" },
       { route: "/security-2fa", label: "Security · 2FA/MFA", icon: "shield-half-outline" },
       { route: "/audit-notifications", label: "Audit Notifications", icon: "notifications-circle-outline" },
       { route: "/whatsapp-config", label: "WhatsApp Configuration", icon: "logo-whatsapp" },

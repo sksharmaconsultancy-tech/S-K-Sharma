@@ -647,3 +647,9 @@ ITER 487 (doc-expiry alerts):
 - Enforcement wired: employees list + profile detail. Attendance/salary/report
   query wiring + Roles & Permissions UI + scope-editing UI = next session.
 - Access Preview UI verified via screenshot (matrix + scopes + counts).
+
+## Iter 586 — RBAC wiring + Roles & Permissions UI + sensitive masking (2026-06)
+- 14/14 new tests + 32/32 Phase-1 regression pass. UI screenshot verified.
+- Masking currently wired on employee profile GET; list/KYC/export masking
+  pending next session. VPS: run POST /api/admin/access/
+  migrate-sensitive-permission once after deploy (backward compat).

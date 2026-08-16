@@ -117,6 +117,10 @@ async def get_employee_profile(
     # Legacy aliases
     out["aadhaar_no"] = emp.get("aadhaar_no") or emp.get("aadhar_number")
     out["pan_no"] = emp.get("pan_no") or emp.get("pan_number")
+    # Iter 586 — central sensitive-field masking (shared/authz.py):
+    # backend returns masked values unless the admin has sensitive_data:view.
+    from shared.authz import apply_sensitive_masking
+    out = await apply_sensitive_masking(db, admin, out, employee_id=user_id)
     return out
 
 
