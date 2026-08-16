@@ -633,3 +633,11 @@ ITER 487 (doc-expiry alerts):
 - Local Kankani policy now v3, dedup_window_minutes=10 (test artifacts);
   1 seeded held punch remains for user_44cd6f561da0.
 - zk_push records use attendance_id — all eligibility ops handle both IDs.
+
+## Iter 584 — Device Sync Engine manual register/delete (2026-06)
+- Auto master-sync locked off at service layer; 22/22 acceptance tests pass
+  (test_sync_584.py). UI verified via screenshot (Employee Device Management
+  + Settings toggles + DISABLED·LOCKED badge).
+- Legacy /sync/all & /sync/employee now 403 MASTER_DATA_DEVICE_SYNC_DISABLED.
+- Test data cleaned (TESTSN01/02 devices removed). Kankani sync settings now
+  have manual_employee_registration/delete = true (left ON for user testing).

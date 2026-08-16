@@ -91,6 +91,12 @@ type Machine = {
 
 type Settings = {
   enable_auto_sync: boolean;
+  // Iter 584 — final sync rules
+  machine_to_payroll_punch_sync?: boolean;
+  machine_to_machine_sync?: boolean;
+  manual_employee_registration?: boolean;
+  manual_employee_delete?: boolean;
+  auto_master_sync?: string;
   sync_fingerprints: boolean;
   sync_face: boolean;
   sync_card: boolean;
@@ -289,6 +295,131 @@ export default function SyncEngineScreen() {
     }
   };
 
+  // Iter 584 — Employee Device Management (manual register / delete)
+  const [edmCode, setEdmCode] = useState("");
+  const [edmPreview, setEdmPreview] = useState<any>(null);
+  const [edmSel, setEdmSel] = useState<Set<string>>(new Set());
+  const [edmFields, setEdmFields] = useState<Set<string>>(new Set());
+  const [edmActivity, setEdmActivity] = useState<any[]>([]);
+  const loadEdmActivity = useCallback(async () => {
+    try {
+      const r = await api<{ jobs: any[] }>(`/device-sync/activity${qs}`);
+      setEdmActivity(r.jobs || []);
+    } catch {}
+  }, [qs]);
+  useEffect(() => { if (canManage && (!isSuper || companyId)) void loadEdmActivity(); }, [canManage, isSuper, companyId, loadEdmActivity]);
+  const loadEdmPreview = async () => {
+    const code = edmCode.trim();
+    if (!code) { flash("Enter the Employee Code first"); return; }
+    setBusy(true);
+    setEdmPreview(null);
+    try {
+      const r = await api<any>(
+        `/device-sync/registration-preview${qs}${qs ? "&" : "?"}employee_code=${encodeURIComponent(code)}`);
+      setEdmPreview(r);
+      setEdmSel(new Set());
+      const f = new Set<string>();
+      (["card", "password", "fingerprint", "face"] as const).forEach((k) => {
+        if (r.fields?.[k]?.available) f.add(k);
+      });
+      setEdmFields(f);
+    } catch (e: any) {
+      flash(e?.message || "Employee not found");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const edmToggleSel = (sn: string) => {
+    const s = new Set(edmSel);
+    if (s.has(sn)) s.delete(sn); else s.add(sn);
+    setEdmSel(s);
+  };
+  const edmToggleField = (k: string) => {
+    const s = new Set(edmFields);
+    if (s.has(k)) s.delete(k); else s.add(k);
+    setEdmFields(s);
+  };
+  const edmRegister = async () => {
+    if (!edmPreview || edmSel.size === 0) { flash("Select at least one machine"); return; }
+    const dup = edmPreview.machines.filter((m: any) => edmSel.has(m.serial_number) && m.already_registered);
+    let updateExisting = false;
+    if (dup.length) {
+      const ok = Platform.OS === "web"
+        ? window.confirm(
+            `Employee already exists on: ${dup.map((m: any) => m.name || m.serial_number).join(", ")}.\n\n` +
+            "OK = Update Device User · Cancel = abort")
+        : true;
+      if (!ok) return;
+      updateExisting = true;
+    }
+    const ok2 = Platform.OS === "web"
+      ? window.confirm(
+          `CONFIRM & REGISTER\n\nEmployee: ${edmPreview.employee.employee_code} - ${edmPreview.employee.name}\n` +
+          `Device User ID: ${edmPreview.employee.device_user_id}\n` +
+          `Machines: ${Array.from(edmSel).join(", ")}\n` +
+          `Data to send: Name, Employee Code, Device User ID${edmFields.size ? ", " + Array.from(edmFields).join(", ") : ""}`)
+      : true;
+    if (!ok2) return;
+    setBusy(true);
+    try {
+      const r = await api<any>("/device-sync/manual-register-employee", {
+        method: "POST",
+        body: { ...cidBody(), user_id: edmPreview.employee.user_id,
+                device_serials: Array.from(edmSel),
+                fields: Array.from(edmFields),
+                update_existing: updateExisting },
+      });
+      flash(`${r.status}: registration queued on ${r.machines.length} machine(s)`);
+      setEdmPreview(null);
+      setEdmCode("");
+      loadAll();
+      loadEdmActivity();
+    } catch (e: any) {
+      flash(e?.message || "Registration failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const edmDelete = async (allRegistered: boolean) => {
+    if (!edmPreview) return;
+    if (!allRegistered && edmSel.size === 0) { flash("Select at least one machine"); return; }
+    let confirmCode: string | undefined;
+    if (allRegistered && Platform.OS === "web") {
+      confirmCode = window.prompt(
+        `Delete ${edmPreview.employee.name} from ALL machines where registered ` +
+        `(${(edmPreview.registered_on || []).join(", ") || "none"})?\n\n` +
+        "Type the Employee Code to confirm:") || undefined;
+      if (!confirmCode) return;
+    }
+    const ok = Platform.OS === "web" && !allRegistered
+      ? window.confirm(
+          `CONFIRM DELETE FROM MACHINE\n\nEmployee: ${edmPreview.employee.employee_code} - ${edmPreview.employee.name}\n` +
+          `Device User ID: ${edmPreview.employee.device_user_id}\n` +
+          `Machines: ${Array.from(edmSel).join(", ")}\n\n` +
+          "Payroll employee, attendance & salary history are NOT touched.")
+      : true;
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const r = await api<any>("/device-sync/manual-delete-employee", {
+        method: "POST",
+        body: { ...cidBody(), user_id: edmPreview.employee.user_id,
+                ...(allRegistered
+                  ? { all_registered: true, confirm_code: confirmCode }
+                  : { device_serials: Array.from(edmSel) }) },
+      });
+      flash(`${r.status}: machine delete queued (${r.machines.length} machine(s)) — payroll unchanged`);
+      setEdmPreview(null);
+      setEdmCode("");
+      loadAll();
+      loadEdmActivity();
+    } catch (e: any) {
+      flash(e?.message || "Delete failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const runManual = async (path: string, body: any, label: string) => {
     setBusy(true);
     try {
@@ -436,13 +567,96 @@ export default function SyncEngineScreen() {
                       : true;
                     if (ok) runManual("/sync/machines", {}, "Machine sync");
                   }} />
-                <ActionBtn icon="people-outline" label="Sync All Employees" busy={busy}
-                  onPress={() => runManual("/sync/all", {}, "Sync all")} />
                 <ActionBtn icon="download-outline" label="Download Report" busy={busy}
                   onPress={downloadReport} ghost />
               </View>
 
-              <FilterSync busy={busy} onSync={(f) => runManual("/sync/all", f, "Filtered sync")} />
+              {/* Iter 584 — EMPLOYEE DEVICE MANAGEMENT (only Portal→Device ops) */}
+              <Text style={styles.section}>Employee Device Management</Text>
+              <Text style={styles.delNote}>
+                Manual Registration: {settings?.manual_employee_registration ? "ON" : "OFF"} ·
+                Manual Delete: {settings?.manual_employee_delete ? "ON" : "OFF"} ·
+                Automatic Master Sync: DISABLED (locked)
+              </Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, alignItems: "center", marginTop: 6 }}>
+                <TextInput
+                  value={edmCode} onChangeText={setEdmCode}
+                  placeholder="Employee Code"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  style={styles.delInput} testID="edm-code" />
+                <ActionBtn icon="search-outline" label="Load Employee & Machines"
+                  busy={busy} onPress={loadEdmPreview} />
+              </View>
+              {edmPreview ? (
+                <View style={styles.machineCard} testID="edm-preview">
+                  <Text style={styles.rowTitle}>
+                    {edmPreview.employee.employee_code} - {edmPreview.employee.name}
+                    {"  ·  Device User ID: "}{edmPreview.employee.device_user_id || "—"}
+                  </Text>
+                  <Text style={[styles.rowSub, { marginTop: 4 }]}>Data to send (Name, Code & Device User ID always included):</Text>
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginVertical: 6 }}>
+                    {(["card", "password", "fingerprint", "face"] as const).map((k) => {
+                      const av = edmPreview.fields?.[k]?.available;
+                      const on = edmFields.has(k);
+                      return (
+                        <Pressable key={k} disabled={!av} onPress={() => edmToggleField(k)}
+                          style={[styles.miniBtn, {
+                            backgroundColor: !av ? "#E2E8F0" : on ? "#16A34A" : "#94A3B8" }]}
+                          testID={`edm-field-${k}`}>
+                          <Text style={styles.miniBtnTxt}>
+                            {av ? (on ? "✓ " : "") : "✕ "}{k}{av ? "" : " (not supported)"}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                  <Text style={styles.rowSub}>Select machine(s):</Text>
+                  {(edmPreview.machines || []).map((m: any) => (
+                    <Pressable key={m.serial_number} onPress={() => edmToggleSel(m.serial_number)}
+                      style={[styles.row, edmSel.has(m.serial_number) && { borderColor: colors.brandPrimary, borderWidth: 1.5 }]}
+                      testID={`edm-machine-${m.serial_number}`}>
+                      <Ionicons
+                        name={edmSel.has(m.serial_number) ? "checkbox" : "square-outline"}
+                        size={18} color={edmSel.has(m.serial_number) ? colors.brandPrimary : colors.onSurfaceTertiary} />
+                      <View style={{ flex: 1, marginLeft: 8 }}>
+                        <Text style={styles.rowTitle}>{m.name || m.serial_number}</Text>
+                        <Text style={styles.rowSub}>
+                          {m.serial_number}{m.model ? ` · ${m.model}` : ""}{m.location ? ` · ${m.location}` : ""}
+                          {" · "}{m.online ? "ONLINE" : "OFFLINE"}
+                          {m.already_registered ? "  ·  ⚠ already registered" : ""}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  ))}
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 8 }}>
+                    <ActionBtn icon="person-add-outline" label="Confirm & Register" busy={busy}
+                      onPress={edmRegister} />
+                    <ActionBtn icon="person-remove-outline" label="Delete From Selected" busy={busy}
+                      ghost onPress={() => edmDelete(false)} />
+                    <ActionBtn icon="trash-outline" label="Delete From All Registered" busy={busy}
+                      ghost onPress={() => edmDelete(true)} />
+                  </View>
+                </View>
+              ) : null}
+              {edmActivity.length > 0 ? (
+                <>
+                  <Text style={styles.section}>Recent manual device actions</Text>
+                  {edmActivity.slice(0, 8).map((j: any) => (
+                    <View key={j.job_id} style={styles.row}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.rowTitle}>
+                          {j.name || j.pin} · {j.sync_type === "MANUAL_EMPLOYEE_DELETE" ? "DELETE" : "REGISTER"}
+                        </Text>
+                        <Text style={styles.rowSub}>
+                          PIN {j.pin} · {(j.targets || []).length} machine(s) · by {j.created_by}
+                        </Text>
+                        <Text style={styles.rowTime}>{fmtTime(j.updated_at)}</Text>
+                      </View>
+                      <StatusPill status={j.status} />
+                    </View>
+                  ))}
+                </>
+              ) : null}
 
               {/* Iter 541 (user request) — delete employees FROM machines */}
               <Text style={styles.section}>Remove from machines</Text>
@@ -558,9 +772,37 @@ export default function SyncEngineScreen() {
 
           {tab === "Settings" && settings && (
             <>
-              <Text style={styles.section}>Automatic synchronization</Text>
-              <ToggleRow label="Enable Auto Sync" hint="Sync employees to machines automatically on any change"
-                value={settings.enable_auto_sync} onValueChange={(v) => saveSettings({ enable_auto_sync: v })} />
+              <Text style={styles.section}>Biometric Device Integration</Text>
+              <ToggleRow label="Machine → Payroll Punch Sync"
+                hint="Punch/ATTLOG data flows from every machine into attendance"
+                value={settings.machine_to_payroll_punch_sync !== false}
+                onValueChange={(v) => saveSettings({ machine_to_payroll_punch_sync: v } as any)} />
+              <ToggleRow label="Machine → Machine Sync"
+                hint="Device-to-device user + template synchronization"
+                value={settings.machine_to_machine_sync !== false}
+                onValueChange={(v) => saveSettings({ machine_to_machine_sync: v } as any)} />
+              <ToggleRow label="Manual Employee Registration"
+                hint="Allow HR to manually register an employee on selected machine(s)"
+                value={!!settings.manual_employee_registration}
+                onValueChange={(v) => saveSettings({ manual_employee_registration: v } as any)} />
+              <ToggleRow label="Manual Employee Delete"
+                hint="Allow HR to manually delete an employee from selected machine(s)"
+                value={!!settings.manual_employee_delete}
+                onValueChange={(v) => saveSettings({ manual_employee_delete: v } as any)} />
+              <View style={styles.row} testID="setting-auto-master-locked">
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowTitle}>Automatic Employee Master Sync</Text>
+                  <Text style={styles.rowSub}>
+                    Employee create/update/delete/transfer NEVER touches the machines.
+                    Portal → Device is manual-only.
+                  </Text>
+                </View>
+                <View style={[styles.onlinePill, { backgroundColor: "#FEE2E2" }]}>
+                  <Text style={{ fontSize: 11, fontWeight: "800", color: "#DC2626" }}>DISABLED · LOCKED</Text>
+                </View>
+              </View>
+
+              <Text style={styles.section}>Data included in manual registration</Text>
               <ToggleRow label="Sync Fingerprints" value={settings.sync_fingerprints}
                 onValueChange={(v) => saveSettings({ sync_fingerprints: v })} />
               <ToggleRow label="Sync Face" value={settings.sync_face}
@@ -636,29 +878,6 @@ function ActionBtn({ icon, label, onPress, busy, ghost }: {
       <Ionicons name={icon} size={16} color={ghost ? colors.brandPrimary : colors.onCta} />
       <Text style={[styles.actionTxt, ghost && { color: colors.brandPrimary }]}>{label}</Text>
     </Pressable>
-  );
-}
-
-function FilterSync({ onSync, busy }: { onSync: (f: any) => void; busy?: boolean }) {
-  const [department, setDepartment] = useState("");
-  const [group, setGroup] = useState("");
-  const [branch, setBranch] = useState("");
-  return (
-    <View style={styles.filterCard}>
-      <Text style={styles.section}>Sync by group / department / branch</Text>
-      <TextInput style={styles.input} placeholder="Department (optional)" placeholderTextColor={colors.onSurfaceTertiary}
-        value={department} onChangeText={setDepartment} />
-      <TextInput style={styles.input} placeholder="Employee Group (optional)" placeholderTextColor={colors.onSurfaceTertiary}
-        value={group} onChangeText={setGroup} />
-      <TextInput style={styles.input} placeholder="Branch (optional)" placeholderTextColor={colors.onSurfaceTertiary}
-        value={branch} onChangeText={setBranch} />
-      <ActionBtn icon="filter-outline" label="Sync matching employees" busy={busy}
-        onPress={() => onSync({
-          ...(department ? { department } : {}),
-          ...(group ? { group } : {}),
-          ...(branch ? { branch } : {}),
-        })} />
-    </View>
   );
 }
 

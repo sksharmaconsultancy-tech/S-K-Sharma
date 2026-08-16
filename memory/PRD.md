@@ -5948,4 +5948,38 @@ policy versioning/reprocess, configurable duplicate-punch window.
   screenshots. Deploy: /app/deploy_vps_iter583.sh.
 REMAINING BACKLOG (P3): SMS/WhatsApp notifications for held punches,
 then MSG91 Phase 2/3 (payroll/attendance/leave SMS wiring, DLT templates).
-Current iteration: 583. Next: 584.
+## Iter 584 (DONE) — Device Sync Engine: Manual Register/Delete, Auto LOCKED
+Per user spec (final sync rules — only 3 legal flows):
+- AUTO Employee Master→Machine sync PERMANENTLY DISABLED/LOCKED:
+  get_sync_settings forces enable_auto_sync=False + auto_master_sync
+  "DISABLED"; PUT strips the key; enqueue_employee_sync gates on sync_type
+  (_ALLOWED_PORTAL_SYNC = MANUAL_EMPLOYEE_REGISTRATION/_DELETE, everything
+  else → blocked log MASTER_DATA_DEVICE_SYNC_DISABLED);
+  enqueue_employee_removal fully blocked. /sync/all + /sync/employee → 403.
+- New settings (sync_settings): machine_to_payroll_punch_sync ON,
+  machine_to_machine_sync ON, manual_employee_registration OFF,
+  manual_employee_delete OFF.
+- New endpoints (routes/sync_engine.py tail):
+  GET /api/device-sync/registration-preview (fields availability honest —
+  fp/face only if portal has templates; dup check via
+  biometric_machine_users; machines w/ online status),
+  POST /api/device-sync/manual-register-employee (feature+perm gates,
+  duplicate→409 unless update_existing, target machines + send_fields on
+  job), POST /api/device-sync/manual-delete-employee (machine-only delete,
+  all_registered needs confirm_code=employee_code; payroll untouched),
+  GET /api/device-sync/activity. Legacy /sync/delete-employee +
+  /sync/delete-left kept but gated on manual_employee_delete + perm.
+- Perms: _has_manual_perm — super/company admin allowed; sub_admin needs
+  biometric_manual_employee_registration|delete or biometric_devices:write.
+- Jobs now carry source_type PORTAL / destination_type DEVICE / sync_type /
+  send_fields; _dispatch_job honours send_fields. Machine→Machine +
+  punch sync untouched.
+- UI (sync-engine.tsx): "Employee Device Management" dashboard section
+  (load employee → field chips → machine checkboxes → Confirm & Register /
+  Delete From Selected / Delete From All Registered + recent activity);
+  Settings tab shows 4 toggles + "DISABLED · LOCKED" badge; removed
+  Sync All Employees + FilterSync.
+- Tests: /app/test_sync_584.py 22/22 pass (spec acceptance tests 1-6, 8;
+  test 7 punch flow covered by Iter 581/583 tests). UI screenshot verified.
+- Deploy: /app/deploy_vps_iter584.sh (temp_bundle kind=script → 584).
+Current iteration: 584. Next: 585.

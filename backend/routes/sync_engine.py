@@ -47,8 +47,17 @@ _CMD_TERMINAL = {"done", "failed"}
 # ---------------------------------------------------------------------------
 # Settings (Sync_Settings)
 # ---------------------------------------------------------------------------
+# Iter 584 (user spec) — FINAL SYNC RULES. Only three flows are legal:
+#   1. MACHINE  → PAYROLL   (punch / ATTLOG sync)
+#   2. MACHINE  → MACHINE   (device-to-device sync)
+#   3. PORTAL   → DEVICE    (MANUAL employee registration / deletion ONLY)
+# Automatic Employee Master → Machine sync is PERMANENTLY DISABLED/LOCKED.
 SYNC_DEFAULTS: Dict[str, Any] = {
-    "enable_auto_sync": True,
+    "enable_auto_sync": False,  # LOCKED — not configurable (Iter 584)
+    "machine_to_payroll_punch_sync": True,
+    "machine_to_machine_sync": True,
+    "manual_employee_registration": False,
+    "manual_employee_delete": False,
     "sync_fingerprints": True,
     "sync_face": True,
     "sync_card": True,
@@ -71,6 +80,10 @@ async def get_sync_settings(company_id: str) -> Dict[str, Any]:
     doc = await db.sync_settings.find_one({"company_id": company_id}, {"_id": 0}) or {}
     merged = dict(SYNC_DEFAULTS)
     merged.update({k: v for k, v in doc.items() if k in SYNC_DEFAULTS})
+    # Iter 584 — automatic Employee Master → Machine sync is LOCKED OFF for
+    # every firm regardless of what an old settings document says.
+    merged["enable_auto_sync"] = False
+    merged["auto_master_sync"] = "DISABLED"
     merged["company_id"] = company_id
     return merged
 
@@ -145,23 +158,47 @@ async def _build_commands(
 # ---------------------------------------------------------------------------
 # Enqueue (called by server.py employee endpoints + manual sync APIs)
 # ---------------------------------------------------------------------------
+# Iter 584 — the ONLY sync types allowed to travel PORTAL → DEVICE.
+_ALLOWED_PORTAL_SYNC = {"MANUAL_EMPLOYEE_REGISTRATION", "MANUAL_EMPLOYEE_DELETE"}
+# Every other master-data type is rejected at the SERVICE layer.
+BLOCKED_SYNC_TYPES = {
+    "EMPLOYEE_MASTER_AUTO_SYNC", "EMPLOYEE_MASTER_BULK_SYNC",
+    "AUTOMATIC_EMPLOYEE_CREATE", "AUTOMATIC_EMPLOYEE_UPDATE",
+    "AUTOMATIC_EMPLOYEE_DELETE", "AUTOMATIC_EMPLOYEE_TRANSFER",
+}
+
+
 async def enqueue_employee_sync(
     company_id: str,
     user_id: str,
     action: str,
     actor: str = "system",
     force: bool = False,
+    sync_type: str = "EMPLOYEE_MASTER_AUTO_SYNC",
+    target_serials: Optional[List[str]] = None,
+    send_fields: Optional[List[str]] = None,
 ) -> Optional[str]:
-    """Queue a sync job for one employee change. Returns the job_id, or
-    ``None`` when nothing needs syncing (auto-sync off, no devices, no PIN).
+    """Queue a PORTAL → DEVICE job for one employee.
 
-    ``force=True`` (manual sync) bypasses the auto-sync toggle.
+    Iter 584 — SERVICE-LAYER GUARD: only the two MANUAL sync types are
+    permitted. Every automatic Employee-Master trigger (create / update /
+    delete / transfer / …, still wired in employees_admin.py etc.) lands
+    here with the default sync_type and is silently REJECTED
+    (MASTER_DATA_DEVICE_SYNC_DISABLED) — the employee operation itself is
+    never affected.
     """
     try:
-        settings = await get_sync_settings(company_id)
-        if not force and not settings.get("enable_auto_sync"):
+        if sync_type not in _ALLOWED_PORTAL_SYNC:
+            logger.info(
+                "[sync] BLOCKED %s (%s) for %s/%s — "
+                "MASTER_DATA_DEVICE_SYNC_DISABLED",
+                sync_type, action, company_id, user_id)
             return None
+        settings = await get_sync_settings(company_id)
         devices = await _sync_enabled_devices(company_id)
+        if target_serials:
+            want = {str(s) for s in target_serials}
+            devices = [d for d in devices if d["serial_number"] in want]
         if not devices:
             return None
         emp = await db.users.find_one({"user_id": user_id}, {"_id": 0})
@@ -184,13 +221,17 @@ async def enqueue_employee_sync(
             "max_attempts": int(settings.get("max_retry_count") or 3),
             "targets": [d["serial_number"] for d in devices],
             "cmd_ids": [],
+            "source_type": "PORTAL",
+            "destination_type": "DEVICE",
+            "sync_type": sync_type,
+            "send_fields": send_fields,
             "created_by": actor,
             "created_at": _now(),
             "updated_at": _now(),
             "error": None,
         })
-        logger.info("[sync] enqueued %s job=%s pin=%s -> %d device(s)",
-                    action, job_id, pin, len(devices))
+        logger.info("[sync] enqueued %s (%s) job=%s pin=%s -> %d device(s)",
+                    action, sync_type, job_id, pin, len(devices))
         return job_id
     except Exception:
         logger.warning("[sync] enqueue failed for %s/%s", company_id, user_id,
@@ -205,8 +246,15 @@ async def enqueue_employee_removal(
     name: Optional[str] = None,
     actor: str = "system",
 ) -> Optional[str]:
-    """Queue a 'delete' job from an ALREADY-removed employee (the user row is
-    gone, so we take the PIN directly). Respects the auto-sync toggle."""
+    """Iter 584 — BLOCKED. This was the automatic machine-delete fired when
+    an employee was removed from the payroll. Per the final sync rules an
+    employee deletion / deactivation / transfer must NEVER touch the
+    machines automatically — HR must use the manual
+    'Delete Employee from Machine' action instead."""
+    logger.info("[sync] BLOCKED auto machine-delete pin=%s (%s) — "
+                "MASTER_DATA_DEVICE_SYNC_DISABLED", pin, company_id)
+    return None
+    # --- unreachable legacy body kept for reference ---
     try:
         settings = await get_sync_settings(company_id)
         if not settings.get("enable_auto_sync"):
@@ -252,6 +300,14 @@ async def _dispatch_job(job: dict) -> None:
         "bio_code": job.get("pin"), "name": job.get("name"),
         "company_id": job["company_id"],
     }
+    # Iter 584 — manual registration sends ONLY the fields the admin picked.
+    if job.get("send_fields") is not None:
+        f = set(job["send_fields"] or [])
+        settings = {**settings,
+                    "sync_password": "password" in f,
+                    "sync_card": "card" in f,
+                    "sync_fingerprints": "fingerprint" in f,
+                    "sync_face": "face" in f}
     cmds = await _build_commands(emp, job["action"], settings)
     if not cmds and job["action"] not in ("delete", "disable"):
         await db.sync_jobs.update_one(
@@ -564,6 +620,8 @@ async def put_settings_api(payload: dict = Body(...),
     require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     cid = _scope_company(admin, payload.get("company_id"))
     update = {k: payload[k] for k in SYNC_DEFAULTS if k in payload}
+    # Iter 584 — automatic master sync is LOCKED; the toggle is not saved.
+    update.pop("enable_auto_sync", None)
     if "max_retry_count" in update:
         update["max_retry_count"] = max(0, min(10, int(update["max_retry_count"])))
     if "sync_interval" in update:
@@ -582,18 +640,11 @@ async def sync_employee_api(payload: dict = Body(...),
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "company_admin", "sub_admin"])
     cid = _scope_company(admin, payload.get("company_id"))
-    user_id = payload.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=400, detail="user_id is required")
-    job_id = await enqueue_employee_sync(
-        cid, user_id, payload.get("action") or "update",
-        actor=admin["user_id"], force=True)
-    if not job_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Nothing to sync — check the employee has a Bio Code and "
-                   "at least one sync-enabled machine is registered.")
-    return {"ok": True, "job_id": job_id}
+    raise HTTPException(
+        status_code=403,
+        detail="MASTER_DATA_DEVICE_SYNC_DISABLED — Employee Master → Machine "
+               "sync is permanently disabled. Use Device Sync Engine → "
+               "Register Employee on Machine (manual).")
 
 
 def _left_query(cid: str) -> dict:
@@ -641,8 +692,17 @@ async def sync_delete_employee_api(payload: dict = Body(...),
                                    "delete on the machines.")
     if payload.get("dry_run"):
         return {"ok": True, "dry_run": True, "employee": emp}
+    settings = await get_sync_settings(cid)
+    if not settings.get("manual_employee_delete"):
+        raise HTTPException(status_code=403,
+                            detail="MANUAL_EMPLOYEE_DELETE_DISABLED — enable "
+                                   "'Manual Employee Delete' in Sync Settings first.")
+    if not _has_manual_perm(admin, "delete"):
+        raise HTTPException(status_code=403,
+                            detail="You lack the BIOMETRIC_MANUAL_EMPLOYEE_DELETE permission.")
     job_id = await enqueue_employee_sync(
-        cid, emp["user_id"], "delete", actor=admin["user_id"], force=True)
+        cid, emp["user_id"], "delete", actor=admin["user_id"], force=True,
+        sync_type="MANUAL_EMPLOYEE_DELETE")
     if not job_id:
         raise HTTPException(status_code=400,
                             detail="No sync-enabled machine registered for "
@@ -668,10 +728,19 @@ async def sync_delete_left_api(payload: dict = Body(None),
     if payload.get("dry_run"):
         return {"ok": True, "dry_run": True, "count": len(emps),
                 "employees": emps[:200]}
+    settings = await get_sync_settings(cid)
+    if not settings.get("manual_employee_delete"):
+        raise HTTPException(status_code=403,
+                            detail="MANUAL_EMPLOYEE_DELETE_DISABLED — enable "
+                                   "'Manual Employee Delete' in Sync Settings first.")
+    if not _has_manual_perm(admin, "delete"):
+        raise HTTPException(status_code=403,
+                            detail="You lack the BIOMETRIC_MANUAL_EMPLOYEE_DELETE permission.")
     queued, skipped = [], 0
     for e in emps:
         job_id = await enqueue_employee_sync(
-            cid, e["user_id"], "delete", actor=admin["user_id"], force=True)
+            cid, e["user_id"], "delete", actor=admin["user_id"], force=True,
+            sync_type="MANUAL_EMPLOYEE_DELETE")
         if job_id:
             queued.append({"job_id": job_id, "name": e.get("name"),
                            "employee_code": e.get("employee_code")})
@@ -688,6 +757,11 @@ async def sync_all_api(payload: dict = Body(None),
     group / branch). Body: {company_id?, department?, group?, branch?}."""
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    raise HTTPException(
+        status_code=403,
+        detail="MASTER_DATA_DEVICE_SYNC_DISABLED — bulk Employee Master → "
+               "Machine sync (EMPLOYEE_MASTER_BULK_SYNC) is permanently "
+               "disabled. Use manual Register Employee on Machine instead.")
     payload = payload or {}
     cid = _scope_company(admin, payload.get("company_id"))
     if not await _sync_enabled_devices(cid):
@@ -1034,3 +1108,286 @@ async def sync_report_xlsx(company_id: Optional[str] = Query(None),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=sync-report.xlsx"},
     )
+
+
+# ---------------------------------------------------------------------------
+# Iter 584 — MANUAL EMPLOYEE DEVICE MANAGEMENT (the only Portal → Device ops)
+# ---------------------------------------------------------------------------
+def _has_manual_perm(admin: dict, kind: str) -> bool:
+    """BIOMETRIC_MANUAL_EMPLOYEE_REGISTRATION / _DELETE permission check.
+    Super admin always allowed; firm admin allowed; sub-admins need the
+    dedicated permission (or full biometric_devices:write)."""
+    role = admin.get("role")
+    if role in ("super_admin", "company_admin"):
+        return True
+    if role == "sub_admin":
+        perms = admin.get("permissions") or []
+        return (f"biometric_manual_employee_{kind}" in perms
+                or "biometric_devices:write" in perms)
+    return False
+
+
+def _dev_online(d: dict) -> bool:
+    ts = str(d.get("last_seen") or d.get("last_contact") or "")
+    if not ts:
+        return False
+    try:
+        seen = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - seen) < timedelta(minutes=10)
+    except Exception:
+        return False
+
+
+def _dev_row(d: dict) -> dict:
+    return {
+        "serial_number": d.get("serial_number"),
+        "name": d.get("name") or d.get("device_name"),
+        "model": d.get("model") or d.get("device_model"),
+        "location": d.get("location"),
+        "kind": d.get("kind"),
+        "online": _dev_online(d),
+        "last_seen": d.get("last_seen") or d.get("last_contact"),
+    }
+
+
+async def _resolve_emp(cid: str, payload_or_qs: dict) -> dict:
+    q: dict = {"company_id": cid, "role": "employee"}
+    if payload_or_qs.get("user_id"):
+        q["user_id"] = str(payload_or_qs["user_id"]).strip()
+    elif payload_or_qs.get("employee_code"):
+        q["employee_code"] = str(payload_or_qs["employee_code"]).strip()
+    elif payload_or_qs.get("bio_code"):
+        q["bio_code"] = str(payload_or_qs["bio_code"]).strip()
+    else:
+        raise HTTPException(status_code=400,
+                            detail="user_id, employee_code or bio_code required")
+    emp = await db.users.find_one(q, {"_id": 0, "user_id": 1, "name": 1,
+                                      "employee_code": 1, "bio_code": 1,
+                                      "card_no": 1, "card_number": 1,
+                                      "punch_password": 1, "device_password": 1,
+                                      "active": 1})
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found in this firm")
+    return emp
+
+
+@router.get("/device-sync/registration-preview")
+async def manual_registration_preview(
+    company_id: Optional[str] = Query(None),
+    user_id: Optional[str] = Query(None),
+    employee_code: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Everything the confirmation screen needs: employee + Device User ID,
+    per-field availability (honest — templates are sent only when the portal
+    actually HAS them), the firm's machines with online status, and on which
+    machines the PIN is already registered (duplicate protection)."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    cid = _scope_company(admin, company_id)
+    emp = await _resolve_emp(cid, {"user_id": user_id, "employee_code": employee_code})
+    pin = str(emp.get("bio_code") or "").strip()
+    devices = await db.biometric_devices.find(
+        {"company_id": cid, "enabled": {"$ne": False}}, {"_id": 0}).to_list(200)
+    registered_on = set()
+    if pin:
+        registered_on = {
+            m.get("device_serial")
+            async for m in db.biometric_machine_users.find(
+                {"company_id": cid, "pin": pin},
+                {"_id": 0, "device_serial": 1})}
+    fp_count = face_count = 0
+    if pin:
+        fp_count = await db.biometric_templates.count_documents(
+            {"company_id": cid, "pin": pin, "kind": "fp"})
+        face_count = await db.biometric_templates.count_documents(
+            {"company_id": cid, "pin": pin, "kind": "face"})
+    fields = {
+        "name": {"available": bool(emp.get("name")), "value": emp.get("name")},
+        "employee_code": {"available": bool(emp.get("employee_code")),
+                          "value": emp.get("employee_code")},
+        "device_user_id": {"available": bool(pin), "value": pin},
+        "card": {"available": bool(emp.get("card_no") or emp.get("card_number"))},
+        "password": {"available": bool(emp.get("punch_password") or emp.get("device_password"))},
+        "fingerprint": {"available": fp_count > 0, "count": fp_count,
+                        "note": None if fp_count else
+                        "No fingerprint template in the portal — enroll on a "
+                        "machine and run Machine Sync to capture it first."},
+        "face": {"available": face_count > 0, "count": face_count,
+                 "note": None if face_count else
+                 "No face template in the portal — not supported until one "
+                 "is captured from a machine."},
+    }
+    return {
+        "employee": {"user_id": emp["user_id"], "name": emp.get("name"),
+                     "employee_code": emp.get("employee_code"),
+                     "device_user_id": pin or None,
+                     "active": emp.get("active", True)},
+        "fields": fields,
+        "machines": [{**_dev_row(d),
+                      "already_registered": d.get("serial_number") in registered_on}
+                     for d in devices],
+        "registered_on": sorted(registered_on),
+    }
+
+
+@router.post("/device-sync/manual-register-employee")
+async def manual_register_employee(
+    payload: dict = Body(...),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 584 — MANUAL Employee Registration on selected machine(s).
+    Body: {company_id?, user_id | employee_code, device_serials: [..],
+    fields: ["card","password","fingerprint","face"], update_existing?}.
+    sync_type = MANUAL_EMPLOYEE_REGISTRATION (the only permitted
+    Portal → Device registration path)."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    cid = _scope_company(admin, payload.get("company_id"))
+    settings = await get_sync_settings(cid)
+    if not settings.get("manual_employee_registration"):
+        raise HTTPException(status_code=403,
+                            detail="MANUAL_EMPLOYEE_REGISTRATION_DISABLED — "
+                                   "enable 'Manual Employee Registration' in "
+                                   "Sync Settings first.")
+    if not _has_manual_perm(admin, "registration"):
+        raise HTTPException(status_code=403,
+                            detail="You lack the BIOMETRIC_MANUAL_EMPLOYEE_"
+                                   "REGISTRATION permission.")
+    emp = await _resolve_emp(cid, payload)
+    pin = str(emp.get("bio_code") or "").strip()
+    if not pin:
+        raise HTTPException(status_code=400,
+                            detail="Employee has no Device User ID (Bio Code) "
+                                   "— set it in the Employee Master first.")
+    serials = [str(s) for s in (payload.get("device_serials") or []) if s]
+    if not serials:
+        raise HTTPException(status_code=400,
+                            detail="Select at least one machine "
+                                   "(device_serials).")
+    firm_serials = {d["serial_number"] for d in await db.biometric_devices.find(
+        {"company_id": cid}, {"_id": 0, "serial_number": 1}).to_list(200)}
+    bad = [s for s in serials if s not in firm_serials]
+    if bad:
+        raise HTTPException(status_code=400,
+                            detail=f"Machine(s) not in this firm: {bad}")
+    # Duplicate registration protection.
+    already = [m.get("device_serial") async for m in db.biometric_machine_users.find(
+        {"company_id": cid, "pin": pin, "device_serial": {"$in": serials}},
+        {"_id": 0, "device_serial": 1})]
+    if already and not payload.get("update_existing"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Employee already exists on: {', '.join(sorted(already))}. "
+                   "Pass update_existing=true to update the device user "
+                   "instead of creating a duplicate.")
+    fields = [f for f in (payload.get("fields") or ["card", "password"])
+              if f in ("card", "password", "fingerprint", "face")]
+    job_id = await enqueue_employee_sync(
+        cid, emp["user_id"], "add", actor=admin["user_id"], force=True,
+        sync_type="MANUAL_EMPLOYEE_REGISTRATION",
+        target_serials=serials, send_fields=fields)
+    if not job_id:
+        raise HTTPException(status_code=400,
+                            detail="Could not queue — no sync-enabled machine "
+                                   "matched your selection.")
+    return {"ok": True, "job_id": job_id, "status": "QUEUED",
+            "employee": {"name": emp.get("name"),
+                         "employee_code": emp.get("employee_code"),
+                         "device_user_id": pin},
+            "machines": serials, "fields_sent": ["name", "employee_code",
+                                                 "device_user_id"] + fields,
+            "message": "Registration queued — offline machines execute the "
+                       "command on their next contact."}
+
+
+@router.post("/device-sync/manual-delete-employee")
+async def manual_delete_employee(
+    payload: dict = Body(...),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 584 — MANUAL Delete Employee FROM MACHINE(s) only. The payroll
+    employee, attendance, punches, salary and PF/ESIC data are NEVER
+    touched. Body: {company_id?, user_id | employee_code,
+    device_serials: [..] OR all_registered: true (+ confirm_code =
+    employee code), }. sync_type = MANUAL_EMPLOYEE_DELETE."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    cid = _scope_company(admin, payload.get("company_id"))
+    settings = await get_sync_settings(cid)
+    if not settings.get("manual_employee_delete"):
+        raise HTTPException(status_code=403,
+                            detail="MANUAL_EMPLOYEE_DELETE_DISABLED — enable "
+                                   "'Manual Employee Delete' in Sync Settings "
+                                   "first.")
+    if not _has_manual_perm(admin, "delete"):
+        raise HTTPException(status_code=403,
+                            detail="You lack the BIOMETRIC_MANUAL_EMPLOYEE_"
+                                   "DELETE permission.")
+    emp = await _resolve_emp(cid, payload)
+    pin = str(emp.get("bio_code") or "").strip()
+    if not pin:
+        raise HTTPException(status_code=400,
+                            detail="Employee has no Device User ID (Bio Code) "
+                                   "— nothing to delete on the machines.")
+    if payload.get("all_registered"):
+        # Extra confirmation for the destructive all-machines variant.
+        if str(payload.get("confirm_code") or "").strip() != \
+                str(emp.get("employee_code") or "").strip():
+            raise HTTPException(status_code=400,
+                                detail="Type the Employee Code in confirm_code "
+                                       "to delete from ALL registered machines.")
+        serials = sorted({m.get("device_serial") async for m in
+                          db.biometric_machine_users.find(
+                              {"company_id": cid, "pin": pin},
+                              {"_id": 0, "device_serial": 1})})
+        if not serials:
+            raise HTTPException(status_code=404,
+                                detail="This Device User ID is not registered "
+                                       "on any machine (per the machines' own "
+                                       "user lists).")
+    else:
+        serials = [str(s) for s in (payload.get("device_serials") or []) if s]
+        if not serials:
+            raise HTTPException(status_code=400,
+                                detail="Select at least one machine "
+                                       "(device_serials) or pass "
+                                       "all_registered=true.")
+        firm_serials = {d["serial_number"] for d in await db.biometric_devices.find(
+            {"company_id": cid}, {"_id": 0, "serial_number": 1}).to_list(200)}
+        bad = [s for s in serials if s not in firm_serials]
+        if bad:
+            raise HTTPException(status_code=400,
+                                detail=f"Machine(s) not in this firm: {bad}")
+    job_id = await enqueue_employee_sync(
+        cid, emp["user_id"], "delete", actor=admin["user_id"], force=True,
+        sync_type="MANUAL_EMPLOYEE_DELETE", target_serials=serials)
+    if not job_id:
+        raise HTTPException(status_code=400,
+                            detail="Could not queue — no sync-enabled machine "
+                                   "matched your selection.")
+    return {"ok": True, "job_id": job_id, "status": "QUEUED",
+            "employee": {"name": emp.get("name"),
+                         "employee_code": emp.get("employee_code"),
+                         "device_user_id": pin},
+            "machines": serials,
+            "payroll_unchanged": True,
+            "message": "Delete queued for the selected machine(s) ONLY — the "
+                       "payroll employee, attendance and salary history are "
+                       "not touched."}
+
+
+@router.get("/device-sync/activity")
+async def manual_device_activity(
+    company_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Recent MANUAL register/delete jobs for the dashboard section."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    cid = _scope_company(admin, company_id)
+    jobs = await db.sync_jobs.find(
+        {"company_id": cid,
+         "sync_type": {"$in": list(_ALLOWED_PORTAL_SYNC)}},
+        {"_id": 0}).sort("created_at", -1).to_list(50)
+    return {"jobs": jobs}
