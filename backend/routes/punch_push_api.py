@@ -408,6 +408,12 @@ async def push_punching(request: Request):
         att_rows.append(att)
         accepted += 1
     if att_rows:
+        # Iter 581 — central onboarding eligibility engine (HELD/BLOCKED).
+        try:
+            from shared.attendance_eligibility import bulk_apply as _elig_bulk
+            await _elig_bulk(db, company_id, att_rows)
+        except Exception:
+            pass
         await db.attendance.insert_many(att_rows)
 
     resp = {

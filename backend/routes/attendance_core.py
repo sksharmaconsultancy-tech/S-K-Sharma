@@ -10,6 +10,7 @@ routes/attendance_admin_core.py, payroll endpoints in
 routes/payroll_core.py, pure date helpers in shared/dates.py and hour
 helpers in shared/hours.py."""
 import asyncio
+import math
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -247,6 +248,10 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
                 ),
             )
         dist, closest = await _resolve_geofence(company, payload.latitude, payload.longitude)
+        # Firm without any geofence configured → _resolve_geofence returns
+        # math.inf, which breaks JSON serialization downstream. Treat as 0.
+        if closest is None or not math.isfinite(dist):
+            dist = 0.0
         radius = closest.get("geofence_radius_m", 200) if closest else (
             company.get("geofence_radius_m") or 200
         )
@@ -686,8 +691,25 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
     # Iter 175 — contractual employees: stamp contractor for the report
     # (app punches are already pending, so no status change here).
     await apply_contractual_gate(record)
+    # Iter 581 — CENTRAL ONBOARDING ELIGIBILITY ENGINE: punches from
+    # employees with missing mandatory onboarding data (per the firm's
+    # Attendance Policy → Onboarding Gate) are stored but HELD (inside the
+    # permission window) or BLOCKED (after it). Raw punches are NEVER
+    # deleted — HR releases/rejects them from the eligibility dashboard.
+    from shared.attendance_eligibility import (
+        apply_to_record as _elig_apply,
+        auto_release_if_complete as _elig_auto_release,
+        evaluate_for_punch as _elig_eval,
+    )
+    _elig = await _elig_eval(db, user["user_id"], company=company, punch_date=today)
+    _elig_apply(record, _elig)
     await db.attendance.insert_one(record)
     record.pop("_id", None)
+    # Data complete again? Auto-release earlier HELD punches (policy
+    # configurable — BLOCKED punches always need manual HR release).
+    if _elig.get("gate_enabled") and _elig.get("eligibility") == "ACTIVE" \
+            and _elig.get("auto_release"):
+        asyncio.create_task(_elig_auto_release(db, user["user_id"]))
     # Iter 99 — personal punch notification with the joined firm's name.
     # Works the same for IN and OUT, all sources (manual / auto / first-login).
     try:
@@ -782,6 +804,12 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
         "status": record["status"],
         "approval_required": needs_approval,
         "shift_mismatch": _shift_mismatch,
+        # Iter 581 — onboarding eligibility outcome for the PWA banner.
+        "eligibility": {
+            "status": _elig.get("eligibility") or "ACTIVE",
+            "missing": _elig.get("missing_labels") or [],
+            "days_left": _elig.get("days_left"),
+        } if _elig.get("gate_enabled") else None,
     }
 
 

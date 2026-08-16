@@ -1353,6 +1353,29 @@ def _validate_policy(raw: dict) -> dict:
     if salary_allowed not in ("actual", "compliance", "both"):
         salary_allowed = "both"
 
+    # Iter 581 (user spec) — Employee Onboarding Gate: mandatory onboarding
+    # data (Aadhaar / Bank / PAN / Photo) + Permission Days window. Punches
+    # from employees with missing data are stored but HELD (inside the
+    # window) or BLOCKED (after it) by the central eligibility engine
+    # (shared/attendance_eligibility.py). enabled_at anchors the window for
+    # existing employees; re-enabling the gate restarts it.
+    og_raw = raw.get("onboarding_gate") if isinstance(raw.get("onboarding_gate"), dict) else {}
+    try:
+        _og_days = int(og_raw.get("permission_days", 7) or 0)
+    except (TypeError, ValueError):
+        _og_days = 7
+    _og_enabled = bool(og_raw.get("enabled"))
+    onboarding_gate = {
+        "enabled": _og_enabled,
+        "require_aadhaar": bool(og_raw.get("require_aadhaar", True)),
+        "require_bank": bool(og_raw.get("require_bank", True)),
+        "require_pan": bool(og_raw.get("require_pan", False)),
+        "require_photo": bool(og_raw.get("require_photo", True)),
+        "permission_days": max(0, min(90, _og_days)),
+        "auto_release": bool(og_raw.get("auto_release", True)),
+        "enabled_at": ((og_raw.get("enabled_at") or now_iso()) if _og_enabled else None),
+    }
+
     return {
         "shifts": shifts,
         "weekly_off_days": sorted(days),
@@ -1388,6 +1411,8 @@ def _validate_policy(raw: dict) -> dict:
         "shift_change": shift_change_cfg,
         # Iter 205 — Week-Off Worked Attendance config.
         "week_off_worked": week_off_worked_cfg,
+        # Iter 581 — Employee Onboarding Gate (attendance eligibility).
+        "onboarding_gate": onboarding_gate,
     }
 
 
@@ -9984,7 +10009,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "580"
+APP_ITERATION = "581"
 
 
 @api.get("/version")
@@ -12260,6 +12285,12 @@ async def zk_push_webhook(body: ZKPushBody):
             "created_at": now_iso(),
             "raw": p,
         }
+        # Iter 581 — central onboarding eligibility engine (may HOLD/BLOCK).
+        try:
+            from shared.attendance_eligibility import bulk_apply as _elig_bulk
+            await _elig_bulk(db, body.company_id, [rec])
+        except Exception:
+            logger.exception("[iter581] zk_push eligibility check failed")
         try:
             await db.attendance.insert_one(rec)
             inserted += 1
@@ -12714,6 +12745,9 @@ app.include_router(sms_notifications_router)
 # Iter 580 — Audit & Activity email notifications.
 from routes.audit_notify import router as audit_notify_router, daily_loop as _audit_daily_loop  # noqa: E402
 app.include_router(audit_notify_router)
+# Iter 581 — Onboarding-based attendance eligibility (HR release workflow).
+from routes.attendance_eligibility import router as attendance_eligibility_router  # noqa: E402
+app.include_router(attendance_eligibility_router)
 
 
 @app.on_event("startup")

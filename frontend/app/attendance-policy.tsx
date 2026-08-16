@@ -184,6 +184,8 @@ type Policy = {
   shift_change?: Record<string, any>;
   // Iter 205 — Week-Off Worked Attendance config.
   week_off_worked?: Record<string, any>;
+  // Iter 581 — Employee Onboarding Gate (attendance eligibility).
+  onboarding_gate?: Record<string, any>;
 };
 
 type PolicyResponse = {
@@ -254,6 +256,17 @@ function normalisePolicy(p: Policy): Policy {
       instant_exception: ((p as any).shift_change?.instant_exception ?? true) !== false,
       time_window: (p as any).shift_change?.time_window || "any",
       approval_levels: (p as any).shift_change?.approval_levels || "single",
+    },
+    // Iter 581 — Employee Onboarding Gate config.
+    onboarding_gate: {
+      enabled: !!(p as any).onboarding_gate?.enabled,
+      require_aadhaar: ((p as any).onboarding_gate?.require_aadhaar ?? true) !== false,
+      require_bank: ((p as any).onboarding_gate?.require_bank ?? true) !== false,
+      require_pan: !!(p as any).onboarding_gate?.require_pan,
+      require_photo: ((p as any).onboarding_gate?.require_photo ?? true) !== false,
+      permission_days: Number((p as any).onboarding_gate?.permission_days ?? 7),
+      auto_release: ((p as any).onboarding_gate?.auto_release ?? true) !== false,
+      enabled_at: (p as any).onboarding_gate?.enabled_at ?? null,
     },
     // Iter 205 — Week-Off Worked Attendance config.
     week_off_worked: {
@@ -647,6 +660,65 @@ export default function AttendancePolicyScreen() {
                     <Text style={styles.toggleLabel}>Approval Levels</Text>
                     {chips("approval_levels", [["single", "Single Approval (Manager/HR/Admin)"],
                       ["two_level", "Two Level (Manager → HR/Admin)"]])}
+                  </>
+                ) : null}
+              </View>
+            );
+          })()}
+
+          {/* Iter 581 — Employee Onboarding Gate (attendance eligibility) */}
+          <SectionTitle
+            title="Employee Onboarding Gate"
+            hint="Hold or block attendance when mandatory onboarding data is missing. Raw punches are never deleted — inside the Permission window they are HELD; after it they are BLOCKED, until HR releases them (Attendance Eligibility screen)."
+          />
+          {(() => {
+            const og = (policy.onboarding_gate || {}) as Record<string, any>;
+            const setOg = (patch: Record<string, any>) =>
+              setPolicy({ ...policy, onboarding_gate: { ...og, ...patch } });
+            const yn = (key: string, label: string, helper: string) => (
+              <Pressable
+                key={key}
+                testID={`ap-og-${key}`}
+                style={styles.toggleRow}
+                onPress={() => setOg({ [key]: !og[key] })}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.toggleLabel}>{label}</Text>
+                  <Text style={styles.helper}>{helper}</Text>
+                </View>
+                <View style={[styles.toggle, og[key] && styles.toggleOn]}>
+                  <View style={[styles.toggleKnob, og[key] && styles.toggleKnobOn]} />
+                </View>
+              </Pressable>
+            );
+            return (
+              <View>
+                {yn("enabled", "Enable Onboarding Gate (Yes/No)",
+                    "Yes → punches from employees with missing mandatory data are stored as HELD/BLOCKED across PWA, biometric machines and the Punch API.")}
+                {og.enabled ? (
+                  <>
+                    {yn("require_aadhaar", "Aadhaar Mandatory",
+                        "Employee must have an Aadhaar number on file (KYC).")}
+                    {yn("require_bank", "Bank Details Mandatory",
+                        "Bank account number + IFSC must be on file.")}
+                    {yn("require_pan", "PAN Mandatory",
+                        "PAN number must be on file (off by default).")}
+                    {yn("require_photo", "Profile Photo Mandatory",
+                        "A profile photo must be uploaded/enrolled.")}
+                    <NumRow
+                      label="Permission Days (grace window)"
+                      value={Number(og.permission_days ?? 7)}
+                      onChange={(v) => setOg({ permission_days: Math.max(0, Math.min(90, Math.round(v))) })}
+                      step={1}
+                      testID="ap-og-days"
+                    />
+                    <Text style={styles.helper}>
+                      Punches inside this window (from joining / gate enable date) are HELD;
+                      after it they are BLOCKED. HR can release BLOCKED punches only with a
+                      mandatory reason.
+                    </Text>
+                    {yn("auto_release", "Auto-Release on Data Completion",
+                        "Yes → once the employee completes the missing data, their HELD punches are released automatically. BLOCKED punches always need manual HR release with a reason.")}
                   </>
                 ) : null}
               </View>

@@ -370,6 +370,14 @@ async def update_employee_kyc(
     })
 
     await db.users.update_one({"user_id": user_id}, {"$set": updates})
+    # Iter 581 — onboarding gate: if the employee's mandatory data is now
+    # complete and the firm's policy has auto-release ON, release their
+    # HELD punches immediately.
+    try:
+        from shared.attendance_eligibility import auto_release_if_complete
+        await auto_release_if_complete(db, user_id)
+    except Exception:
+        logger.exception("[iter581] auto-release after KYC update failed")
     logger.info(
         "[kyc-admin] emp=%s updated by %s (%s) — keys=%s",
         user_id, admin["user_id"], admin["role"], changed_keys,

@@ -609,3 +609,12 @@ ITER 487 (doc-expiry alerts):
 - Users Log Report: "Activity by User" rollup table (total/emp/att/pay/
   reports/failed per user) + Today/Yesterday quick ranges.
 - Frontend: audit-notifications.tsx + AdminWebShell menu entry.
+
+## Iter 581 — Onboarding Gate / Attendance Eligibility (2026-06)
+- Central engine shared/attendance_eligibility.py gates PWA/biometric/API/ZK
+  punches: HELD inside permission window, BLOCKED after. Raw punches never
+  deleted. Release restores pre_hold_status; BLOCKED release needs reason.
+- Backend 23/23 (test_eligibility_581.py), frontend 7/7
+  (test_reports/iteration_581.json). Both testing done, no open issues.
+- Local Kankani DB state after testing: gate ON (require_pan true, 10 days),
+  1 held punch remains for user_44cd6f561da0, his aadhaar/bank cleared.

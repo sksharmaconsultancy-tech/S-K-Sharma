@@ -395,6 +395,21 @@ async def _ingest_attlog_line(
             record["photo_source"] = "zkteco_attphoto"
     except Exception:
         pass
+    # Iter 581 — central onboarding eligibility engine: machine punches
+    # from employees with missing mandatory onboarding data are stored
+    # but HELD/BLOCKED (never deleted) until HR releases them.
+    if record.get("status") in ("approved", "pending"):
+        try:
+            from shared.attendance_eligibility import (
+                apply_to_record as _elig_apply,
+                evaluate_for_punch as _elig_eval,
+            )
+            _elig = await _elig_eval(
+                db, user["user_id"], company_id=record.get("company_id"),
+                punch_date=record["date"])
+            _elig_apply(record, _elig)
+        except Exception:
+            logger.exception("[iter581] biometric eligibility check failed")
     await db.attendance.insert_one(record)
     return True, ("duplicate_within_5min_stored" if _is_duplicate else None)
 

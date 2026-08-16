@@ -165,6 +165,8 @@ export default function AttendanceScreen() {
   const gpsPunchAllowed = user?.effective_gps_punch === true;
   const biometricOnlyMode = !gpsPunchAllowed;
   const [toast, setToast] = useState<{ msg: string; kind: "ok" | "err" } | null>(null);
+  // Iter 581 — onboarding gate status (missing data → punches HELD/BLOCKED).
+  const [onboarding, setOnboarding] = useState<any>(null);
   const [locError, setLocError] = useState<string | null>(null);
   const [address, setAddress] = useState<string | null>(null);
   const [officeAddress, setOfficeAddress] = useState<string | null>(null);
@@ -199,6 +201,13 @@ export default function AttendanceScreen() {
       setToday(t);
     } catch (e: any) {
       showToast(e.message || "Failed to load", "err");
+    }
+    // Iter 581 — onboarding gate banner (best-effort, never blocks the screen).
+    try {
+      const ob = await api<any>("/attendance/onboarding-status");
+      setOnboarding(ob?.gate_enabled ? ob : null);
+    } catch {
+      setOnboarding(null);
     }
   }, []);
 
@@ -781,6 +790,56 @@ export default function AttendanceScreen() {
                 <Text style={styles.syncNowTxt}>Sync now</Text>
               </Pressable>
             ) : null}
+          </View>
+        ) : null}
+
+        {/* Iter 581 — Onboarding gate banner: missing mandatory data means
+            punches are HELD (grace window) or BLOCKED (window over). */}
+        {onboarding && ((onboarding.missing || []).length > 0
+          || (onboarding.held_count || 0) > 0 || (onboarding.blocked_count || 0) > 0) ? (
+          <View
+            style={[
+              styles.syncBanner,
+              (onboarding.missing || []).length > 0 && onboarding.eligibility === "BLOCKED"
+                ? { backgroundColor: "#FEF2F2", borderColor: "#FECACA" }
+                : styles.syncBannerOffline,
+            ]}
+            testID="onboarding-gate-banner"
+          >
+            <Ionicons
+              name={onboarding.eligibility === "BLOCKED" ? "alert-circle-outline" : "time-outline"}
+              size={18}
+              color={onboarding.eligibility === "BLOCKED" ? "#B91C1C" : "#B45309"}
+            />
+            <View style={{ flex: 1 }}>
+              <Text
+                style={[
+                  styles.syncBannerTitle,
+                  { color: onboarding.eligibility === "BLOCKED" ? "#B91C1C" : "#92400E" },
+                ]}
+              >
+                {(onboarding.missing || []).length > 0
+                  ? (onboarding.eligibility === "BLOCKED"
+                    ? "Onboarding data incomplete — punches are being BLOCKED"
+                    : `Onboarding data incomplete — punches are HELD${
+                        onboarding.days_left != null ? ` (${onboarding.days_left} day${onboarding.days_left === 1 ? "" : "s"} left)` : ""}`)
+                  : "Some of your punches are held/blocked — pending HR release"}
+              </Text>
+              {(onboarding.missing || []).length > 0 ? (
+                <Text style={styles.syncBannerSub}>
+                  Missing: {(onboarding.missing || []).map((m: any) => m.label).join(", ")}.
+                  {" "}Complete your profile/KYC{onboarding.auto_release
+                    ? " — held punches release automatically once done."
+                    : " — then contact HR to release your held punches."}
+                </Text>
+              ) : null}
+              {(onboarding.held_count || 0) > 0 || (onboarding.blocked_count || 0) > 0 ? (
+                <Text style={styles.syncBannerSub}>
+                  {onboarding.held_count > 0 ? `${onboarding.held_count} punch${onboarding.held_count === 1 ? "" : "es"} held. ` : ""}
+                  {onboarding.blocked_count > 0 ? `${onboarding.blocked_count} blocked (HR release required).` : ""}
+                </Text>
+              ) : null}
+            </View>
           </View>
         ) : null}
 

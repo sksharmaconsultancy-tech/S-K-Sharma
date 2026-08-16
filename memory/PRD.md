@@ -5856,3 +5856,62 @@ stored; failed actions logged; firm isolation enforced server-side.
   MSG91 delivery webhook (/api/webhooks/msg91) to update sms_log status.
 
 - Iter 580 SHIPPED: Sub-User Activity Monitoring + Audit Email Notifications (instant critical alerts, daily 08:00 IST summary, Audit Notifications settings screen, Activity-by-User rollup, Today/Yesterday filters).
+
+## NEXT MAJOR FEATURE (user spec received, NOT started) — Attendance Eligibility & Onboarding Compliance
+Full spec: extend EXISTING Attendance Policy (NOT firm master) with section
+"Employee Attendance Eligibility & Onboarding Compliance". Feature flag OFF
+by default for existing companies. Key requirements:
+- Mandatory data toggles: Aadhaar/Bank/PAN/Photo/Docs required for attendance.
+- Permission period: DOJ + N days (0/3/7/15/custom).
+- During permission: Allow+Active | Allow+Hold (default) | Block.
+- After expiry: Continue+Hold | Continue+Block (default) | Stop | Warn.
+- Release method: Automatic | HR Approval (default); release-from: DOJ (default).
+- ONE Attendance Validation Engine for PWA/Biometric/API/Manual → statuses
+  RAW/ACTIVE/HELD/BLOCKED/RELEASED/REJECTED. NEVER delete raw punches.
+- Payroll uses only ACTIVE+RELEASED; warn before salary run if held/blocked.
+- Employee PWA: onboarding % + permission countdown; HR dashboard widgets;
+  Attendance Release Approval screen (approve/reject/selected dates).
+- Notifications via existing engine (in-app/email/SMS/WhatsApp when configured).
+- Policy versioning: historical attendance keeps policy version; explicit
+  Reprocess only. Full audit (existing engine). Aadhaar/bank masked.
+- Duplicate punch detection across sources (configured window), keep raw.
+- 10 acceptance tests specified (complete emp ACTIVE; incomplete HELD;
+  expired BLOCKED; release flows; per-firm policies; policy-change safety).
+SUGGESTED PHASES: P1 policy section + validation engine + statuses on punch
+ingest (PWA/bio/API) + register filter + payroll guard; P2 release approval
+screen + auto-release + PWA onboarding %; P3 dashboards + notifications +
+duplicate window + policy versioning.
+## Iter 581 (DONE) — Attendance Eligibility & Onboarding Compliance (Phase 1+2)
+Implemented per user choices: auto-release configurable per policy (1c);
+BLOCKED punches releasable ONLY manually by HR with MANDATORY reason (2).
+- Attendance Policy → new "Employee Onboarding Gate" section (OFF by default):
+  toggles require_aadhaar/bank/pan/photo, permission_days (0-90, default 7),
+  auto_release, enabled_at (window anchor for existing staff — window starts
+  at LATER of DOJ and gate-enable date; re-enable restarts it).
+  Backend: _validate_policy in server.py + GET backfill in
+  routes/attendance_policy_api.py. UI: attendance-policy.tsx (testIDs ap-og-*).
+- CENTRAL ENGINE: backend/shared/attendance_eligibility.py — gates ALL punch
+  sources: PWA (routes/attendance_core.py), biometric ADMS
+  (routes/biometric_devices.py), vendor Punch API (routes/punch_push_api.py
+  bulk_apply), ZK push (server.py). Raw punches NEVER deleted. Held/blocked
+  use legacy status "held"/"blocked" (excluded from hours/payroll since only
+  "approved" counts) + eligibility_status ACTIVE/HELD/BLOCKED/RELEASED/
+  REJECTED, pre_hold_status snapshot for correct restore on release.
+- HR workflow: routes/attendance_eligibility.py —
+  GET /api/attendance/onboarding-status (employee banner),
+  GET /api/admin/attendance-eligibility/summary|records,
+  POST .../release (reason MANDATORY if any BLOCKED) and .../reject (reason
+  always mandatory). Audit → db.eligibility_release_log + db.notifications.
+- Auto-release: on KYC completion (hook in routes/employee_kyc.py) and lazily
+  on next ACTIVE punch. Only HELD auto-releases; BLOCKED never.
+- UI: new /attendance-eligibility HR screen (AdminWebShell menu ×3 groups,
+  sub-admin perms = punch_approvals:*; admin.tsx tile); employee PWA banner
+  on (tabs)/attendance.tsx (testID onboarding-gate-banner).
+- Also fixed pre-existing bug: firms w/o geofence coords → distance_m=inf →
+  JSON 500 on /api/attendance/punch (attendance_core.py now sanitizes).
+- Tests: /app/test_eligibility_581.py 23/23 pass; frontend 7/7 pass
+  (test_reports/iteration_581.json). Deploy: /app/deploy_vps_iter581.sh.
+REMAINING BACKLOG from full spec (P3): salary-run warning when held/blocked
+punches exist, onboarding % widget, SMS/WhatsApp notifications for holds,
+policy versioning/reprocess, configurable duplicate-punch window.
+Current iteration: 581. Next: 582.

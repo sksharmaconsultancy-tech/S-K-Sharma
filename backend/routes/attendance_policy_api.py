@@ -161,6 +161,19 @@ async def get_attendance_policy(
         _pm_bf.setdefault("compliance_ot_include", True)
         # Iter 289 — per-firm OT slab (30-min default).
         _pm_bf.setdefault("ot_slab_minutes", 30)
+    # Iter 581 — Employee Onboarding Gate backfill for firms whose policy
+    # was saved before the gate existed (safe defaults, gate OFF).
+    _og = policy.get("onboarding_gate") if isinstance(policy.get("onboarding_gate"), dict) else {}
+    policy["onboarding_gate"] = {
+        "enabled": bool(_og.get("enabled")),
+        "require_aadhaar": bool(_og.get("require_aadhaar", True)),
+        "require_bank": bool(_og.get("require_bank", True)),
+        "require_pan": bool(_og.get("require_pan", False)),
+        "require_photo": bool(_og.get("require_photo", True)),
+        "permission_days": int(_og.get("permission_days", 7) or 0),
+        "auto_release": bool(_og.get("auto_release", True)),
+        "enabled_at": _og.get("enabled_at"),
+    }
     # "Default preset" here means: no admin has explicitly saved / overridden
     # the policy yet. Because we auto-attach a preset on company creation,
     # the presence of `attendance_policy` alone isn't a good signal — we

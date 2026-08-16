@@ -384,6 +384,25 @@ export default function AdminScreen() {
           <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceTertiary} />
         </Pressable>
 
+        {/* Iter 581 — Onboarding-gate held/blocked attendance release */}
+        <Pressable
+          testID="open-attendance-eligibility"
+          style={styles.actionTile}
+          onPress={() => router.push("/attendance-eligibility")}
+        >
+          <View style={styles.actionIcon}>
+            <Ionicons name="shield-checkmark-outline" size={20} color={colors.brandPrimary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.actionTitle}>Attendance eligibility</Text>
+            <Text style={styles.actionSub}>
+              Onboarding gate — release or reject HELD / BLOCKED punches when
+              employee data (Aadhaar, Bank, PAN, Photo) is incomplete.
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceTertiary} />
+        </Pressable>
+
         {/* Iter 284 (user request) — the "Company Policies" tile section
             (Attendance policy, Biometric devices, Salary/OT/Compliance
             process, Back-date punches) moved to the sidebar Utility group. */}

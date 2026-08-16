@@ -1,0 +1,26 @@
+{
+  "summary": "Iter 581 frontend testing PASSED for the Attendance Policy Based Employee Onboarding & Attendance Eligibility feature. All 7 test cases from the review request verified end-to-end via the public preview URL. Screens tested: /attendance-eligibility (admin), /attendance-policy (admin — new 'Employee Onboarding Gate' section), and Employee PWA /(tabs)/attendance Smart Punch tab. Full flows work: totals rendering, employee card expansion, HELD/BLOCKED pills, release (mandatory reason for BLOCKED, empty reason -> toast), reject (reason always mandatory, empty -> toast), totals refresh after action, policy toggle + Permission Days input, save persistence (verified via GET /api/attendance/policy), and employee PWA onboarding-gate-banner with amber styling and correct missing/held counts. No console crashes, no red screens.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": ["Non-blocking console warnings: 'shadow*' style props deprecated, props.pointerEvents deprecated. Pre-existing across app, not introduced by Iter 581. Report only, no action needed for this iter."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_581.json"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "attendance-eligibility.tsx (523 lines): well-structured single-file screen. Reason validation is client-side; backend enforces MANDATORY reason again for BLOCKED release (confirmed working). No _id leakage in responses.",
+    "attendance-policy.tsx renders Employee Onboarding Gate correctly with testIDs ap-og-enabled / require_aadhaar / require_bank / require_pan / require_photo / days / auto_release. Save is wired via existing ap-save button (persists via PATCH /api/attendance/policy).",
+    "(tabs)/attendance.tsx banner logic on lines 796-844 covers three states (missing data with HELD/BLOCKED, or only held/blocked counts). testID 'onboarding-gate-banner' present."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request — 23/23 already verified)", "frontend": "100% (7/7 cases)"},
+  "seed_data_creation": "Consumed 1 BLOCKED + 1 HELD punch (release 'Docs verified' + reject 'test reject'). 1 HELD punch remains for SURENDRA SINGH user_44cd6f561da0. Kankani onboarding_gate mutated to require_pan=true, permission_days=10.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "If reseeding needed for a re-run, insert attendance docs with status='held'/'blocked', eligibility_status='HELD'/'BLOCKED', pre_hold_status='approved', company_id=cmp_527fecdd7c, user_id=user_44cd6f561da0. Kankani policy is currently require_pan=true, permission_days=10 (was require_pan=false, permission_days=7 at the start of this run — this is expected persistence).",
+  "rca_of_issue": "N/A — no bugs found."
+}
