@@ -678,6 +678,10 @@ async def list_employees(
     # (which surfaced on the Bulk Employee Correction screen as "Sharma
     # Associates Admin" etc.).
     q["role"] = "employee"
+    # Iter 585 — RBAC Phase 1: branch/department data scope enforced
+    # SERVER-SIDE via the central authorization service (shared/authz.py).
+    from shared.authz import scope_filter
+    q.update(scope_filter(user))
     # Iter 333 (user request) — up to 20,000 employees per firm.
     users = await db.users.find(q, {"_id": 0}).sort("created_at", -1).to_list(20000)
     users = [_redact_user(u) for u in users]

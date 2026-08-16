@@ -90,6 +90,10 @@ async def _get_emp(user_id: str, admin: Dict[str, Any]) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="Employee not found")
     if admin["role"] == "company_admin" and emp.get("company_id") != admin.get("company_id"):
         raise HTTPException(status_code=403, detail="Not authorised for this employee")
+    # Iter 585 — central authz: firm + branch + department scope enforced
+    # server-side (ID-manipulation protection).
+    from shared.authz import assert_employee_in_scope
+    assert_employee_in_scope(admin, emp)
     return emp
 
 

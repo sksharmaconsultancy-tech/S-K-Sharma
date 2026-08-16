@@ -1,0 +1,244 @@
+"""Iter 585 — RBAC Phase 1 routes: Department Master, User Data Scope
+(branch/department) assignment, and Access Preview.
+
+All authorization decisions delegate to shared/authz.py (single source of
+truth). Scope changes and Access Preview views are audit-logged as CRITICAL
+security events into db.activity_log (Users Log Report)."""
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Body, Header, HTTPException, Query
+
+from server import db, get_user_from_token, require_role, require_super_admin_strict
+from shared.authz import get_effective_access
+
+router = APIRouter(prefix="/api")
+
+# Modules shown in the Access Preview matrix (existing permission keys).
+PREVIEW_MODULES = [
+    "employees", "attendance_policy", "punch_approvals", "salary_process",
+    "compliance", "reports", "masters", "biometric_devices", "tickets",
+    "messages", "company_requests", "user_management",
+]
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+async def _audit(admin: dict, action: str, detail: dict) -> None:
+    try:
+        await db.activity_log.insert_one({
+            "log_id": f"al_{uuid.uuid4().hex[:12]}",
+            "user_id": admin.get("user_id"),
+            "user_name": admin.get("name"),
+            "role": admin.get("role"),
+            "action": action,
+            "module": "access_management",
+            "severity": "CRITICAL" if action != "ACCESS_PREVIEW" else "INFO",
+            "detail": detail,
+            "at": _now(),
+        })
+    except Exception:
+        pass
+
+
+# ── DEPARTMENT MASTER ──────────────────────────────────────────────────────
+@router.get("/admin/departments")
+async def list_departments(
+    company_id: str = Query(...),
+    branch_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    from shared.authz import firm_ok
+    if not firm_ok(admin, company_id):
+        raise HTTPException(status_code=403, detail="Firm outside your scope")
+    q: Dict[str, Any] = {"company_id": company_id}
+    if branch_id:
+        q["branch_id"] = branch_id
+    deps = await db.departments.find(q, {"_id": 0}).sort("name", 1).to_list(500)
+    return {"departments": deps}
+
+
+@router.post("/admin/departments")
+async def create_department(payload: dict = Body(...),
+                            authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    cid = str(payload.get("company_id") or "").strip()
+    name = str(payload.get("name") or "").strip()
+    branch_id = str(payload.get("branch_id") or "").strip() or None
+    from shared.authz import firm_ok
+    if not cid or not firm_ok(admin, cid):
+        raise HTTPException(status_code=403, detail="Firm outside your scope")
+    if not name:
+        raise HTTPException(status_code=400, detail="Department name required")
+    if branch_id:
+        br = await db.branches.find_one({"branch_id": branch_id, "company_id": cid})
+        if not br:
+            raise HTTPException(status_code=400,
+                                detail="Branch does not belong to this firm")
+    dup = await db.departments.find_one(
+        {"company_id": cid, "branch_id": branch_id,
+         "name": {"$regex": f"^{name}$", "$options": "i"}})
+    if dup:
+        raise HTTPException(status_code=409, detail="Department already exists")
+    doc = {"department_id": f"dept_{uuid.uuid4().hex[:10]}", "company_id": cid,
+           "branch_id": branch_id, "name": name, "status": "active",
+           "created_by": admin["user_id"], "created_at": _now()}
+    await db.departments.insert_one(doc)
+    doc.pop("_id", None)
+    return {"ok": True, "department": doc}
+
+
+@router.post("/admin/departments/migrate-from-employees")
+async def migrate_departments(payload: dict = Body(default={}),
+                              authorization: Optional[str] = Header(None)):
+    """Build the Department Master from existing free-text employee
+    departments and stamp department_id on each employee (no data deleted)."""
+    admin = await get_user_from_token(authorization)
+    require_super_admin_strict(admin)
+    cid = payload.get("company_id")
+    q: Dict[str, Any] = {"role": "employee",
+                         "department": {"$nin": [None, ""]}}
+    if cid:
+        q["company_id"] = cid
+    created = stamped = 0
+    async for e in db.users.find(q, {"user_id": 1, "company_id": 1,
+                                     "department": 1, "branch_id": 1,
+                                     "department_id": 1}):
+        name = str(e.get("department") or "").strip()
+        if not name:
+            continue
+        dep = await db.departments.find_one(
+            {"company_id": e["company_id"],
+             "name": {"$regex": f"^{name}$", "$options": "i"}})
+        if not dep:
+            dep = {"department_id": f"dept_{uuid.uuid4().hex[:10]}",
+                   "company_id": e["company_id"], "branch_id": None,
+                   "name": name, "status": "active",
+                   "created_by": "migration", "created_at": _now()}
+            await db.departments.insert_one(dep)
+            created += 1
+        if e.get("department_id") != dep["department_id"]:
+            await db.users.update_one({"user_id": e["user_id"]},
+                                      {"$set": {"department_id": dep["department_id"]}})
+            stamped += 1
+    await _audit(admin, "DEPARTMENT_MIGRATION",
+                 {"company_id": cid, "created": created, "stamped": stamped})
+    return {"ok": True, "departments_created": created,
+            "employees_stamped": stamped}
+
+
+# ── USER DATA SCOPE (branch / department) ──────────────────────────────────
+@router.patch("/admin/access/user-scope")
+async def set_user_scope(payload: dict = Body(...),
+                         authorization: Optional[str] = Header(None)):
+    """Super Admin assigns branch/department scope to a sub-admin or client
+    user. Validates every id against the target user's firm scope; takes
+    effect immediately (evaluated per-request, never cached)."""
+    admin = await get_user_from_token(authorization)
+    require_super_admin_strict(admin)
+    uid = str(payload.get("user_id") or "").strip()
+    target = await db.users.find_one({"user_id": uid})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.get("role") not in ("sub_admin", "company_admin"):
+        raise HTTPException(status_code=400,
+                            detail="Scope applies to sub-admins and client users only")
+    updates: Dict[str, Any] = {}
+    old: Dict[str, Any] = {}
+    # firm ids the target may reach — scope ids must belong to these firms.
+    if target["role"] == "sub_admin" and (target.get("sub_admin_company_scope") or "all") != "all":
+        firm_ids = target.get("sub_admin_company_ids") or []
+    elif target["role"] == "company_admin":
+        firm_ids = [target.get("company_id")]
+    else:
+        firm_ids = None  # all firms
+    for key, coll, id_field in (("branch_scope", db.branches, "branch_id"),
+                                ("department_scope", db.departments, "department_id")):
+        if key not in payload:
+            continue
+        sc = payload[key]
+        if not isinstance(sc, dict):
+            raise HTTPException(status_code=400, detail=f"{key} must be an object")
+        if sc.get("all", True):
+            clean = {"all": True, "ids": []}
+        else:
+            ids = [str(x) for x in (sc.get("ids") or [])]
+            fq: Dict[str, Any] = {id_field: {"$in": ids}}
+            if firm_ids is not None:
+                fq["company_id"] = {"$in": firm_ids}
+            found = await coll.find(fq, {"_id": 0, id_field: 1}).to_list(1000)
+            found_ids = {f[id_field] for f in found}
+            bad = [i for i in ids if i not in found_ids]
+            if bad:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{key}: id(s) outside the user's firm scope "
+                           f"or non-existent: {bad}")
+            clean = {"all": False, "ids": ids}
+        old[key] = target.get(key)
+        updates[key] = clean
+    if not updates:
+        raise HTTPException(status_code=400,
+                            detail="Pass branch_scope and/or department_scope")
+    await db.users.update_one({"user_id": uid}, {"$set": updates})
+    await _audit(admin, "DATA_SCOPE_CHANGED",
+                 {"target_user_id": uid, "target_name": target.get("name"),
+                  "old": old, "new": updates})
+    return {"ok": True, "user_id": uid, **updates}
+
+
+# ── ACCESS PREVIEW ─────────────────────────────────────────────────────────
+@router.get("/admin/access-preview/users")
+async def preview_user_search(
+    q: Optional[str] = Query(None),
+    role: Optional[str] = Query(None),
+    company_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    admin = await get_user_from_token(authorization)
+    require_super_admin_strict(admin)
+    f: Dict[str, Any] = {"role": {"$in": ["sub_admin", "company_admin", "employee"]}}
+    if role:
+        f["role"] = role
+    if company_id:
+        f["company_id"] = company_id
+    if q:
+        f["$or"] = [{"name": {"$regex": q, "$options": "i"}},
+                    {"email": {"$regex": q, "$options": "i"}},
+                    {"phone": {"$regex": q, "$options": "i"}}]
+    users = await db.users.find(
+        f, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "role": 1,
+            "company_id": 1, "active": 1}).sort("name", 1).to_list(50)
+    return {"users": users}
+
+
+@router.get("/admin/access-preview/{user_id}")
+async def access_preview(user_id: str,
+                         authorization: Optional[str] = Header(None)):
+    """Read-only effective access for any user — calculated by the SAME
+    shared/authz.py engine that protects the APIs (Preview == reality)."""
+    admin = await get_user_from_token(authorization)
+    require_super_admin_strict(admin)
+    target = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    out = await get_effective_access(db, target, PREVIEW_MODULES)
+    # resolve branch/department names for display
+    for key, coll, id_field in (("branch_scope", db.branches, "branch_id"),
+                                ("department_scope", db.departments, "department_id")):
+        ids = out[key].get(f"{id_field}s")
+        if ids:
+            docs = await coll.find({id_field: {"$in": ids}},
+                                   {"_id": 0, id_field: 1, "name": 1,
+                                    "company_id": 1}).to_list(500)
+            out[key]["items"] = docs
+    await _audit(admin, "ACCESS_PREVIEW",
+                 {"viewed_user_id": user_id, "viewed_name": target.get("name"),
+                  "viewed_role": target.get("role")})
+    return out

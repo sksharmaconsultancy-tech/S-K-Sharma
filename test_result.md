@@ -641,3 +641,9 @@ ITER 487 (doc-expiry alerts):
 - Legacy /sync/all & /sync/employee now 403 MASTER_DATA_DEVICE_SYNC_DISABLED.
 - Test data cleaned (TESTSN01/02 devices removed). Kankani sync settings now
   have manual_employee_registration/delete = true (left ON for user testing).
+
+## Iter 585 — RBAC Phase 1 (2026-06)
+- shared/authz.py central engine; 32/32 authz tests pass (test_rbac_585.py).
+- Enforcement wired: employees list + profile detail. Attendance/salary/report
+  query wiring + Roles & Permissions UI + scope-editing UI = next session.
+- Access Preview UI verified via screenshot (matrix + scopes + counts).

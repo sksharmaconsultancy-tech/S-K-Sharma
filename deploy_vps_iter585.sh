@@ -1,0 +1,270 @@
+#!/bin/bash
+# S.K. Sharma & Co. — VPS deploy script (Iter 585 — RBAC Phase 1: Central Authorization, Data Scope & Access Preview)
+# Deploys the FULL latest code (includes ALL of Iter 568-584). Running 585 alone is enough.
+#
+# ═══════════ WHAT'S NEW (this deploy = Iter 585) ═══════════
+#
+# ATTENDANCE POLICY BASED EMPLOYEE ONBOARDING & ATTENDANCE ELIGIBILITY
+#
+# A. ATTENDANCE POLICY → new "Employee Onboarding Gate" section:
+#    * Toggle mandatory onboarding data: Aadhaar / Bank (A/c + IFSC) /
+#      PAN / Profile Photo.
+#    * Permission Days (grace window, default 7): punches with missing
+#      data are HELD inside the window, BLOCKED after it.
+#    * Auto-Release on Data Completion (Yes/No) — HELD punches release
+#      automatically once the employee completes the data. BLOCKED
+#      punches ALWAYS need manual HR release with a MANDATORY reason.
+#
+# B. CENTRAL VALIDATION ENGINE (backend/shared/attendance_eligibility.py):
+#    ONE engine gates EVERY punch source — employee PWA, ZKTeco/eSSL
+#    biometric machines (ADMS/iClock), the vendor Punch API and ZK push.
+#    Raw punches are NEVER deleted. Eligibility states:
+#    ACTIVE / HELD / BLOCKED / RELEASED / REJECTED.
+#    Held & blocked punches are EXCLUDED from attendance, hours and
+#    payroll until released.
+#
+# C. NEW HR SCREEN: Admin dashboard → "Attendance eligibility":
+#    * Per-employee held/blocked counts + which data is missing.
+#    * Expand → select punches → Release (reason mandatory for BLOCKED)
+#      or Reject (reason always mandatory). Full audit trail
+#      (eligibility_release_log) + employee notifications.
+#
+# D. EMPLOYEE PWA: Smart Punch screen shows an onboarding banner —
+#    missing items, days left in the grace window, held/blocked counts.
+#
+# WHAT'S NEW vs 581 (this deploy also includes ALL of Iter 568-581):
+#  * PAYROLL GUARD — the salary process screens (Compliance / Actual /
+#    Arrear Command Center) now warn BEFORE processing when the month has
+#    HELD/BLOCKED punches: amber/red strip "X HELD + Y BLOCKED punches
+#    (N employees) will NOT count in this salary — release/reject before
+#    processing" — tap opens the Attendance Eligibility screen. Also added
+#    as a line item in the Compliance Validation checklist.
+#  * ONBOARDING % WIDGETS — HR Attendance Eligibility screen shows a
+#    firm-wide "Onboarding Completion" progress card (X% · Y of Z employees
+#    complete); the employee PWA banner now shows a personal onboarding
+#    progress bar (% + items done).
+#  * Engine now also recognises legacy KYC fields aadhaar_no / pan_no.
+#
+# WHAT'S NEW vs 584 — RBAC PHASE 1 (Advanced Role-Based Access Control):
+#  * CENTRAL AUTHORIZATION SERVICE (backend/shared/authz.py) — single engine:
+#    USER -> ROLE -> FIRM SCOPE -> BRANCH SCOPE -> DEPARTMENT SCOPE ->
+#    MODULE -> ACTION -> ALLOW / 403. All server-side.
+#  * ACTION-LEVEL PERMISSIONS — View/Add/Edit/Delete/Export/Approve per
+#    module. Legacy perms auto-migrated (read -> View+Export,
+#    write -> Add+Edit+Delete+Approve) so NOBODY loses access.
+#  * BRANCH & DEPARTMENT DATA SCOPE — new Department Master (+ one-click
+#    migration from existing employee departments); Super Admin can restrict
+#    any sub-admin/client user to selected branches/departments; enforced
+#    server-side on employee list/detail with ID-manipulation protection.
+#  * ACCESS PREVIEW — Administration -> Access Preview: search any user and
+#    see their exact effective access (firm/branch/department scope +
+#    module/action matrix + accessible-employee count) computed by the SAME
+#    engine that protects the APIs. Every preview is audit-logged.
+#  * 32/32 automated authorization tests pass (cross-firm, cross-branch,
+#    cross-department, ID manipulation, action-permission separation).
+#
+# PREVIOUS (Iter 584)
+#  * AUTOMATIC Employee Master -> Machine sync is PERMANENTLY DISABLED and
+#    LOCKED (employee create/update/delete/deactivate/transfer never touch
+#    the machines; blocked at the service layer:
+#    MASTER_DATA_DEVICE_SYNC_DISABLED). "Sync All Employees" removed.
+#  * MANUAL Employee Registration on Machine (toggle, OFF by default):
+#    Device Sync -> Employee Device Management -> load employee -> pick
+#    fields (card/password/fp/face - honest capability check) -> pick
+#    machine(s) -> Confirm & Register. Duplicate protection built in.
+#  * MANUAL Employee Delete from Machine (toggle, OFF by default): delete
+#    the Device User ID from selected machine(s) or all registered ones
+#    (type employee code to confirm). Payroll/attendance/salary UNCHANGED.
+#  * New sync types MANUAL_EMPLOYEE_REGISTRATION / MANUAL_EMPLOYEE_DELETE
+#    (the ONLY Portal->Device ops) + recent-activity feed + full sync_log
+#    and Users Log Report audit. Machine->Machine and Machine->Payroll
+#    punch sync are unchanged.
+#
+# PREVIOUS (Iter 583) (this deploy also includes ALL of Iter 568-582):
+#  * POLICY VERSIONING — every Attendance Policy save bumps policy_version
+#    (shown in the policy screen + eligibility widget). Punches are stamped
+#    with the version they were evaluated under. Historical attendance is
+#    NEVER silently rewritten when the policy changes.
+#  * EXPLICIT REPROCESS — new button (sync icon) on the Attendance
+#    Eligibility screen: re-evaluates ALL held/blocked punches under the
+#    CURRENT policy + CURRENT employee data (complete → released; missing →
+#    held/blocked per the window). Reason is MANDATORY when the reprocess
+#    would release BLOCKED punches. Fully audit-logged.
+#  * CONFIGURABLE DUPLICATE-PUNCH WINDOW — Attendance Policy → "Duplicate
+#    Punch Detection": was hardcoded 5 minutes, now 0-120 min (0 = off).
+#    Applies to biometric machines (ADMS/iClock), the vendor Punch API and
+#    ZK push. Raw duplicate punches are stored, marked, never counted.
+#
+# Run ON THE VPS as root/sksharma:
+#   wget -O deploy585.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
+#   bash deploy585.sh
+
+APP_DIR=/home/sksharma/app
+WEB_DIR=/var/www/sksharma
+BUNDLE_URL="https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=tar"
+PIP=$APP_DIR/backend/venv/bin/pip
+
+echo "════════════════════════════════════════════════════════════"
+echo "  STEP 0 — DIAGNOSTICS (send me this block if deploy fails)"
+echo "════════════════════════════════════════════════════════════"
+echo "--- Disk space ---"
+df -h / | tail -1
+echo "--- Memory + swap ---"
+free -h
+echo "--- Backend service ---"
+sudo supervisorctl status sksharma-backend 2>/dev/null || systemctl status sksharma-backend --no-pager -l 2>/dev/null | head -5 || echo "(no backend service found by either name)"
+echo "--- Backend health (localhost:8001) ---"
+curl -s -m 5 http://localhost:8001/api/health && echo " <-- backend answers ✅" || echo "❌ BACKEND NOT ANSWERING"
+echo "--- Nginx ---"
+sudo nginx -t 2>&1 | tail -1
+systemctl is-active nginx && echo "nginx active ✅" || echo "❌ nginx NOT active"
+echo "--- Web folder ---"
+ls -la $WEB_DIR/index.html 2>/dev/null || echo "❌ $WEB_DIR/index.html MISSING"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+
+echo "==> 1/9 Freeing disk space (safe cache cleanup)..."
+rm -rf $APP_DIR/frontend/.metro-cache $APP_DIR/frontend/.expo /tmp/metro-* /tmp/haste-* 2>/dev/null
+npm cache clean --force >/dev/null 2>&1 || true
+yarn cache clean >/dev/null 2>&1 || true
+AVAIL_MB=$(df -m / | tail -1 | awk '{print $4}')
+echo "   Free disk now: ${AVAIL_MB} MB"
+if [ "$AVAIL_MB" -lt 1500 ]; then
+  echo "   ⚠ Less than 1.5 GB free — cleaning apt + journal too..."
+  sudo apt-get clean 2>/dev/null || true
+  sudo journalctl --vacuum-size=100M >/dev/null 2>&1 || true
+  df -m / | tail -1 | awk '{print "   Free disk now: "$4" MB"}'
+fi
+
+echo "==> 2/9 Ensuring swap (prevents build OOM-kill)..."
+SWAP_KB=$(grep SwapTotal /proc/meminfo | awk '{print $2}')
+if [ "$SWAP_KB" -lt 1000000 ]; then
+  echo "   No/low swap — creating 2 GB swapfile..."
+  sudo fallocate -l 2G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+  sudo chmod 600 /swapfile && sudo mkswap /swapfile >/dev/null && sudo swapon /swapfile \
+    && echo "   Swap ON ✅" || echo "   (swap setup failed — continuing)"
+  grep -q "/swapfile" /etc/fstab || echo "/swapfile none swap sw 0 0" | sudo tee -a /etc/fstab >/dev/null
+else
+  echo "   Swap already present ✅"
+fi
+
+echo "==> 3/9 Downloading latest code bundle (~10 MB, retries enabled)..."
+rm -f /tmp/sks-latest.tar
+ok=""
+for i in 1 2 3 4 5; do
+  if wget -c -T 60 -t 1 --show-progress -q -O /tmp/sks-latest.tar "$BUNDLE_URL"; then
+    ok=1; break
+  fi
+  echo "   attempt $i failed — retrying in 10s (server may be waking up)..."
+  sleep 10
+done
+if [ -z "$ok" ]; then
+  echo "   wget failed 5x — trying curl..."
+  curl -fSL --retry 5 --retry-delay 10 -o /tmp/sks-latest.tar "$BUNDLE_URL"
+fi
+if ! tar -tf /tmp/sks-latest.tar >/dev/null 2>&1; then
+  echo "❌ Downloaded bundle is corrupt/incomplete ($(du -h /tmp/sks-latest.tar | cut -f1))."
+  echo "   Open the portal preview URL in a browser once, wait 30s, re-run."
+  exit 1
+fi
+echo "   Bundle OK: $(du -h /tmp/sks-latest.tar | cut -f1)"
+
+echo "==> 4/9 Extracting into $APP_DIR (preserving .env files)..."
+cp $APP_DIR/backend/.env /tmp/backend.env.bak
+cp $APP_DIR/frontend/.env /tmp/frontend.env.bak 2>/dev/null || true
+tar -xf /tmp/sks-latest.tar -C $APP_DIR || { echo "❌ Extract failed (disk full?) — aborting."; exit 1; }
+cp /tmp/backend.env.bak $APP_DIR/backend/.env
+cp /tmp/frontend.env.bak $APP_DIR/frontend/.env 2>/dev/null || true
+# Iter 571b — OTP EMAIL ENV REPAIR (fixes "We could not send the OTP"):
+if grep -q "^OTP_EMAIL_ENABLED=false" $APP_DIR/backend/.env; then
+  sed -i 's/^OTP_EMAIL_ENABLED=.*/OTP_EMAIL_ENABLED=true/' $APP_DIR/backend/.env
+  echo "   OTP_EMAIL_ENABLED was FALSE → set to true ✓"
+fi
+if ! grep -q "^OTP_EMAIL_ENABLED=" $APP_DIR/backend/.env; then
+  echo "OTP_EMAIL_ENABLED=true" >> $APP_DIR/backend/.env
+fi
+if ! grep -q "^RESEND_FROM_EMAIL=" $APP_DIR/backend/.env; then
+  echo "RESEND_FROM_EMAIL=no-reply@smartpayrolling.com" >> $APP_DIR/backend/.env
+  echo "   RESEND_FROM_EMAIL set to no-reply@smartpayrolling.com ✓ (auto-fallback until domain verified)"
+fi
+if ! grep -q "^RESEND_API_KEY=re_" $APP_DIR/backend/.env; then
+  echo "RESEND_API_KEY=re_TVV9ccdZ_NiFrGwZzGjVTiKLEYSskpGqB" >> $APP_DIR/backend/.env
+  echo "   RESEND_API_KEY was MISSING → added ✓"
+fi
+if ! grep -q "^EMERGENT_LLM_KEY=" $APP_DIR/backend/.env; then
+  echo "EMERGENT_LLM_KEY=sk-emergent-6A80335Da3e07B3C5D" >> $APP_DIR/backend/.env
+fi
+
+echo "==> 5/9 Installing backend deps..."
+grep -v "^litellm" $APP_DIR/backend/requirements.txt > /tmp/reqs.txt
+$PIP install -r /tmp/reqs.txt --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ -q || \
+  echo "   (pip failed — safe to continue if requirements unchanged)"
+$PIP install openpyxl Pillow -q || true
+
+echo "==> 6/9 Restarting backend FIRST (portal comes back before the build)..."
+sudo supervisorctl stop sksharma-backend 2>/dev/null || true
+sudo fuser -k 8001/tcp 2>/dev/null || true
+sleep 2
+sudo supervisorctl start sksharma-backend 2>/dev/null || sudo systemctl restart sksharma-backend 2>/dev/null || true
+HEALTH=""
+for i in $(seq 1 12); do
+  sleep 5
+  HEALTH=$(curl -s -m 8 http://localhost:8001/api/health)
+  [ -n "$HEALTH" ] && break
+  echo "   waiting for backend... (${i}0s)"
+done
+if [ -n "$HEALTH" ]; then
+  echo "   Backend healthy ✅  ($HEALTH)"
+else
+  echo "   ❌ BACKEND STILL NOT ANSWERING. Last 30 log lines:"
+  sudo tail -30 /var/log/supervisor/sksharma-backend*.log 2>/dev/null || sudo journalctl -u sksharma-backend -n 30 --no-pager 2>/dev/null
+  echo "   ── Send me the lines above. Continuing with the web build anyway."
+fi
+
+echo "==> 7/9 Building web frontend (with OOM protection)..."
+cd $APP_DIR/frontend
+yarn install --frozen-lockfile --silent 2>/dev/null || yarn install --silent
+export NODE_OPTIONS="--max-old-space-size=3072"
+rm -rf dist
+if npx expo export -p web 2>&1 | tail -15; then true; fi
+if [ ! -f dist/index.html ] || [ ! -d dist/_expo/static/js/web ]; then
+  echo "❌ WEB BUILD FAILED — the current live portal folder was NOT touched."
+  echo "   Re-run this script once; if it fails again send me the build error above."
+  exit 1
+fi
+echo "   Build OK ✅ ($(du -sh dist | cut -f1))"
+
+echo "==> 8/9 Publishing new build (with rollback safety)..."
+sudo mkdir -p $WEB_DIR
+sudo rm -rf ${WEB_DIR}.prev
+sudo cp -r $WEB_DIR ${WEB_DIR}.prev 2>/dev/null || true
+sudo find $WEB_DIR -mindepth 1 -maxdepth 1 ! -name '.well-known' ! -name '_expo' -exec rm -rf {} +
+sudo cp -r dist/* $WEB_DIR/
+sudo cp public/sw.js $WEB_DIR/sw.js 2>/dev/null || true
+sudo find $WEB_DIR/_expo -type f -mtime +45 -delete 2>/dev/null || true
+sudo nginx -t && sudo systemctl reload nginx
+
+echo "==> 9/9 Verification..."
+echo -n "   Server badge is 585 (must say OK): "
+grep -q 'APP_ITERATION = "585"' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
+echo -n "   Central eligibility engine — Iter 581 (must say OK): "
+[ -f $APP_DIR/backend/shared/attendance_eligibility.py ] && echo "OK" || echo "MISSING!"
+echo -n "   HR release workflow API — Iter 581 (must say OK): "
+[ -f $APP_DIR/backend/routes/attendance_eligibility.py ] && echo "OK" || echo "MISSING!"
+echo -n "   HR eligibility screen — Iter 581 (must say OK): "
+[ -f $APP_DIR/frontend/app/attendance-eligibility.tsx ] && echo "OK" || echo "MISSING!"
+echo -n "   Policy Onboarding Gate UI — Iter 581 (must say OK): "
+grep -q 'Employee Onboarding Gate' $APP_DIR/frontend/app/attendance-policy.tsx && echo "OK" || echo "MISSING!"
+echo -n "   Web build published (must say OK): "
+[ -f $WEB_DIR/index.html ] && echo "OK" || echo "MISSING!"
+echo -n "   Backend /api/health: "
+curl -s -m 5 http://localhost:8001/api/health || echo "❌ NOT ANSWERING"
+echo ""
+echo "════════════════════════════════════════════════════════════"
+echo "  DONE — Iter 585 deployed."
+echo "  Setup: Attendance Policy → 'Employee Onboarding Gate' →"
+echo "  enable + choose mandatory data + Permission Days → Save."
+echo "  HR release screen: Admin dashboard → 'Attendance eligibility'."
+echo "  Employees see the missing-data banner on the Smart Punch tab."
+echo "  Hard-refresh the browser (Ctrl+Shift+R) after deploy."
+echo "════════════════════════════════════════════════════════════"

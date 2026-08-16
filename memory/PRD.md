@@ -5982,4 +5982,37 @@ Per user spec (final sync rules — only 3 legal flows):
 - Tests: /app/test_sync_584.py 22/22 pass (spec acceptance tests 1-6, 8;
   test 7 punch flow covered by Iter 581/583 tests). UI screenshot verified.
 - Deploy: /app/deploy_vps_iter584.sh (temp_bundle kind=script → 584).
-Current iteration: 584. Next: 585.
+## Iter 585 (DONE) — RBAC PHASE 1: Central Authz + Data Scope + Access Preview
+User approved full 3-phase RBAC plan (detailed specs saved in msg history):
+- shared/authz.py = SINGLE source of truth: authorize(user, module, action,
+  company_id, branch_id, department_id, employee) → 403; ACTIONS =
+  view/add/edit/delete/export/approve; legacy migration read→view+export,
+  write→add+edit+delete+approve (preserves current effective access exactly);
+  scope_filter(user) mongo fragment; assert_employee_in_scope (ID-manip
+  protection); get_effective_access (powers Access Preview — same engine).
+- User doc scope fields: branch_scope/department_scope = {all: bool, ids: []};
+  missing → ALL (backward compat). Roles carry perms: sub_admin →
+  sub_admin_permissions; company staff → staff_permissions; real
+  company_admin/super_admin unrestricted (in own firm / everywhere).
+- routes/rbac_phase1.py: Department Master CRUD (db.departments:
+  department_id, company_id, branch_id, name, status) + POST
+  /admin/departments/migrate-from-employees (builds master from free-text
+  employee departments + stamps department_id); PATCH /admin/access/user-scope
+  (super admin only, validates ids against target's firm scope, CRITICAL
+  audit DATA_SCOPE_CHANGED); GET /admin/access-preview/users +
+  /admin/access-preview/{user_id} (read-only, audit ACCESS_PREVIEW).
+- Enforcement wired: /api/admin/employees list (payroll_core.py
+  scope_filter) + employee profile detail (_get_emp in employee_profile.py).
+- UI: /access-preview screen (search → firm/branch/dept scope + matrix +
+  counts) + AdminWebShell menu entry under Administration.
+- Tests: /app/test_rbac_585.py 32/32 pass (all 15 spec scenarios).
+- Deploy: /app/deploy_vps_iter585.sh (bundle kind=script → 585).
+PHASE 1 REMAINING (next session): wire scope_filter into attendance +
+salary + reports queries; Roles & Permissions matrix UI (bulk assignment);
+scope-editing UI (branch/dept pickers on sub-admin & client-user screens).
+PHASE 2 (approved, pending): sensitive field masking (sensitive_data:view,
+central mask service, SENSITIVE_DATA_VIEWED audit) + export security
+(authorize_export, DATA_EXPORT/EXPORT_DENIED logs, export IDs, history UI).
+PHASE 3 (approved, pending): Maker-Checker approval engine (pending queue,
+old/new snapshot, self-approval ban, concurrency check, email alerts).
+Current iteration: 585. Next: 586.

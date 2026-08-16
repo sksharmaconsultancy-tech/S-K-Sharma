@@ -10021,7 +10021,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "584"
+APP_ITERATION = "585"
 
 
 @api.get("/version")
@@ -12776,6 +12776,9 @@ app.include_router(audit_notify_router)
 # Iter 581 — Onboarding-based attendance eligibility (HR release workflow).
 from routes.attendance_eligibility import router as attendance_eligibility_router  # noqa: E402
 app.include_router(attendance_eligibility_router)
+# Iter 585 — RBAC Phase 1: Department Master, data scope, Access Preview.
+from routes.rbac_phase1 import router as rbac_phase1_router  # noqa: E402
+app.include_router(rbac_phase1_router)
 
 
 @app.on_event("startup")
