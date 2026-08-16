@@ -65,6 +65,8 @@ def gate_from_company(company: Optional[dict]) -> Dict[str, Any]:
         "permission_days": max(0, min(90, days)),
         "auto_release": bool(og.get("auto_release", True)),
         "enabled_at": og.get("enabled_at"),
+        # Iter 583 — policy version the gate belongs to (stamped on punches).
+        "policy_version": int(((company or {}).get("attendance_policy") or {}).get("policy_version") or 1),
     }
 
 
@@ -128,6 +130,7 @@ def classify(gate: dict, missing: List[str], user_doc: dict,
         "missing_labels": [REQUIREMENT_LABELS.get(m, m) for m in missing],
         "permission_days": int(gate.get("permission_days", 7) or 0),
         "auto_release": bool(gate.get("auto_release", True)),
+        "policy_version": int(gate.get("policy_version") or 1),
         "days_left": None,
         "deadline": None,
     }
@@ -161,7 +164,7 @@ async def evaluate_for_punch(db, user_id: str, company: Optional[dict] = None,
     if company is None:
         company = await db.companies.find_one(
             {"company_id": company_id},
-            {"_id": 0, "attendance_policy.onboarding_gate": 1}) or {}
+            {"_id": 0, "attendance_policy.onboarding_gate": 1, "attendance_policy.policy_version": 1}) or {}
     gate = gate_from_company(company)
     if not gate["enabled"]:
         return {"gate_enabled": False, "eligibility": "ACTIVE", "missing": [],
@@ -186,6 +189,7 @@ def apply_to_record(record: dict, ev: Optional[dict]) -> dict:
         return record
     elig = ev.get("eligibility") or "ACTIVE"
     record["eligibility_status"] = elig
+    record["policy_version"] = int(ev.get("policy_version") or 1)
     if elig == "ACTIVE":
         return record
     record["eligibility_missing"] = ev.get("missing") or []
@@ -207,7 +211,7 @@ async def bulk_apply(db, company_id: str, records: List[dict]) -> None:
         return
     company = await db.companies.find_one(
         {"company_id": company_id},
-        {"_id": 0, "attendance_policy.onboarding_gate": 1}) or {}
+        {"_id": 0, "attendance_policy.onboarding_gate": 1, "attendance_policy.policy_version": 1}) or {}
     gate = gate_from_company(company)
     if not gate["enabled"]:
         return
@@ -241,9 +245,11 @@ async def auto_release_held(db, user_id: str,
     n = 0
     async for r in db.attendance.find(
             {"user_id": user_id, "status": "held"},
-            {"_id": 0, "record_id": 1, "pre_hold_status": 1}):
+            {"_id": 0, "record_id": 1, "attendance_id": 1, "pre_hold_status": 1}):
+        _sel = ({"record_id": r["record_id"]} if r.get("record_id")
+                else {"attendance_id": r.get("attendance_id")})
         await db.attendance.update_one(
-            {"record_id": r["record_id"], "status": "held"},
+            {**_sel, "status": "held"},
             {"$set": {
                 "status": r.get("pre_hold_status") or "approved",
                 "eligibility_status": "RELEASED",
@@ -264,7 +270,7 @@ async def auto_release_if_complete(db, user_id: str) -> int:
         return 0
     company = await db.companies.find_one(
         {"company_id": u["company_id"]},
-        {"_id": 0, "attendance_policy.onboarding_gate": 1}) or {}
+        {"_id": 0, "attendance_policy.onboarding_gate": 1, "attendance_policy.policy_version": 1}) or {}
     gate = gate_from_company(company)
     if not (gate["enabled"] and gate["auto_release"]):
         return 0

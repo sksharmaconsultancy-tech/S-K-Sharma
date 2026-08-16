@@ -5926,5 +5926,26 @@ policy versioning/reprocess, configurable duplicate-punch window.
   (testID ae-onboarding-widget).
 - Engine now recognises legacy KYC field aliases: aadhaar_no + pan_no
   (DB stores both variants).
-Current iteration: 581 (deploy script /app/deploy_vps_iter581.sh includes
-Iter 582 changes — APP_ITERATION stays 581 unless user asks to bump).
+## Iter 583 (DONE) — P3: Policy versioning/reprocess + duplicate window
+- policy_version: bumped on every PATCH save (attendance_policy_api.py);
+  stamped on punches via engine (gate_from_company/classify/apply_to_record);
+  GET backfills. Shown in policy screen helper + eligibility widget title.
+- Explicit Reprocess: POST /api/admin/attendance-eligibility/reprocess
+  (optional user_id/from_date/to_date/reason) — re-evaluates held/blocked
+  under CURRENT policy+data; reason MANDATORY if blocked would release;
+  audit → eligibility_release_log action "reprocess". UI: sync button +
+  modal on attendance-eligibility.tsx (ae-reprocess-btn/ae-repro-confirm).
+- dedup_window_minutes (0-120, default 5) in _validate_policy; applied in
+  biometric_devices.py (was hardcoded 5), punch_push_api.py (new time-window
+  check) and zk_push (server.py). Raw duplicates stored with status
+  "duplicate". UI: "Duplicate Punch Detection" section (ap-dedup-window).
+- IMPORTANT FIX: zk_push records use attendance_id (not record_id) —
+  release/reject/reprocess/auto-release now handle both via _rid_sel.
+- LESSON: never batch multiple search_replace edits to server.py in ONE
+  parallel call — edits silently clobbered each other twice (APP_ITERATION,
+  _validate_policy dedup block). Apply server.py edits sequentially.
+- Tests: /app/test_versioning_583.py 14/14 pass; UI verified via
+  screenshots. Deploy: /app/deploy_vps_iter583.sh.
+REMAINING BACKLOG (P3): SMS/WhatsApp notifications for held punches,
+then MSG91 Phase 2/3 (payroll/attendance/leave SMS wiring, DLT templates).
+Current iteration: 583. Next: 584.

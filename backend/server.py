@@ -1353,6 +1353,16 @@ def _validate_policy(raw: dict) -> dict:
     if salary_allowed not in ("actual", "compliance", "both"):
         salary_allowed = "both"
 
+    # Iter 583 — configurable duplicate-punch window: machine/API punches
+    # within this window of an existing punch are STORED but marked
+    # "duplicate" (never counted). 0 = detection off. Default 5 minutes
+    # (the previous hardcoded Iter 481/488 behaviour).
+    try:
+        _dedup_min = int(raw.get("dedup_window_minutes", 5))
+    except (TypeError, ValueError):
+        _dedup_min = 5
+    _dedup_min = max(0, min(120, _dedup_min))
+
     # Iter 581 (user spec) — Employee Onboarding Gate: mandatory onboarding
     # data (Aadhaar / Bank / PAN / Photo) + Permission Days window. Punches
     # from employees with missing data are stored but HELD (inside the
@@ -1413,6 +1423,8 @@ def _validate_policy(raw: dict) -> dict:
         "week_off_worked": week_off_worked_cfg,
         # Iter 581 — Employee Onboarding Gate (attendance eligibility).
         "onboarding_gate": onboarding_gate,
+        # Iter 583 — configurable duplicate-punch window (minutes, 0 = off).
+        "dedup_window_minutes": _dedup_min,
     }
 
 
@@ -10009,7 +10021,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "582"
+APP_ITERATION = "583"
 
 
 @api.get("/version")
@@ -12255,6 +12267,11 @@ async def zk_push_webhook(body: ZKPushBody):
 
     inserted = 0
     broadcast_events: List[Dict[str, Any]] = []
+    # Iter 583 — configurable duplicate-punch window from the firm policy.
+    try:
+        _zk_dedup_min = int((company.get("attendance_policy") or {}).get("dedup_window_minutes", 5))
+    except (TypeError, ValueError):
+        _zk_dedup_min = 5
     for p in body.punches:
         bc = str(p.get("bio_code") or "").strip()
         u = by_bio.get(bc)
@@ -12285,6 +12302,17 @@ async def zk_push_webhook(body: ZKPushBody):
             "created_at": now_iso(),
             "raw": p,
         }
+        # Iter 583 — duplicate-punch window: raw punch kept, marked duplicate.
+        if _zk_dedup_min > 0:
+            _dup = await db.attendance.find_one({
+                "user_id": u["user_id"],
+                "at": {"$gte": (at_dt - timedelta(minutes=_zk_dedup_min)).isoformat(),
+                       "$lte": (at_dt + timedelta(minutes=_zk_dedup_min)).isoformat()},
+                "status": {"$in": ["approved", "pending", "held", "blocked"]},
+            }, {"_id": 1})
+            if _dup:
+                rec["status"] = "duplicate"
+                rec["duplicate_reason"] = f"within_{_zk_dedup_min}min"
         # Iter 581 — central onboarding eligibility engine (may HOLD/BLOCK).
         try:
             from shared.attendance_eligibility import bulk_apply as _elig_bulk

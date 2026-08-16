@@ -199,21 +199,32 @@ async def _ingest_attlog_line(
             "seen_at": _now_iso_z(),
         })
         return False, f"unmapped_user:{device_user_id}"
-    # Iter 481 (user request) — duplicate punches within 5 minutes.
+    # Iter 481 (user request) — duplicate punches within a configurable
+    # window (Iter 583: was hardcoded 5 min, now Attendance Policy →
+    # dedup_window_minutes, 0 = off).
     # Iter 488 (user: "Multi Punch Within the Same time") — the guard was
     # scoped to the SAME machine, so the same punch arriving from a second
     # registered device / webhook / re-sync was stored AGAIN at the same
-    # time. Now ANY existing punch for the employee within ±5 minutes
+    # time. Now ANY existing punch for the employee within the window
     # (any device, app or manual) marks the new machine punch as a
     # DUPLICATE. Per user rule the raw punch is still STORED in the punch
     # log (never deleted) — it is simply excluded from every calculation.
-    _win_lo = (dt - timedelta(minutes=5)).isoformat()
-    _win_hi = (dt + timedelta(minutes=5)).isoformat()
-    _dup5 = await db.attendance.find_one({
-        "user_id": user["user_id"],
-        "at": {"$gte": _win_lo, "$lte": _win_hi},
-        "status": {"$in": ["approved", "pending"]},
-    }, {"_id": 0, "record_id": 1})
+    _co_dedup = await db.companies.find_one(
+        {"company_id": user.get("company_id") or device.get("company_id")},
+        {"_id": 0, "attendance_policy.dedup_window_minutes": 1}) or {}
+    try:
+        _dedup_min = int((_co_dedup.get("attendance_policy") or {}).get("dedup_window_minutes", 5))
+    except (TypeError, ValueError):
+        _dedup_min = 5
+    _dup5 = None
+    if _dedup_min > 0:
+        _win_lo = (dt - timedelta(minutes=_dedup_min)).isoformat()
+        _win_hi = (dt + timedelta(minutes=_dedup_min)).isoformat()
+        _dup5 = await db.attendance.find_one({
+            "user_id": user["user_id"],
+            "at": {"$gte": _win_lo, "$lte": _win_hi},
+            "status": {"$in": ["approved", "pending"]},
+        }, {"_id": 0, "record_id": 1})
     _is_duplicate = bool(_dup5)
     record_id = f"zk_{uuid.uuid4().hex[:12]}"
     # Iter 486 (user bug — "Still Facing Issue", missing OUT everywhere) —
@@ -411,7 +422,7 @@ async def _ingest_attlog_line(
         except Exception:
             logger.exception("[iter581] biometric eligibility check failed")
     await db.attendance.insert_one(record)
-    return True, ("duplicate_within_5min_stored" if _is_duplicate else None)
+    return True, (f"duplicate_within_{_dedup_min}min_stored" if _is_duplicate else None)
 
 
 def _resync_active(device: dict) -> bool:

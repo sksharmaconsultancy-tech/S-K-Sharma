@@ -174,6 +174,15 @@ async def get_attendance_policy(
         "auto_release": bool(_og.get("auto_release", True)),
         "enabled_at": _og.get("enabled_at"),
     }
+    # Iter 583 — duplicate window + policy version backfill.
+    try:
+        policy["dedup_window_minutes"] = max(0, min(120, int(policy.get("dedup_window_minutes", 5))))
+    except (TypeError, ValueError):
+        policy["dedup_window_minutes"] = 5
+    try:
+        policy["policy_version"] = int(policy.get("policy_version") or 1)
+    except (TypeError, ValueError):
+        policy["policy_version"] = 1
     # "Default preset" here means: no admin has explicitly saved / overridden
     # the policy yet. Because we auto-attach a preset on company creation,
     # the presence of `attendance_policy` alone isn't a good signal — we
@@ -231,6 +240,16 @@ async def update_attendance_policy(
         merged = {**preset, **{k: v for k, v in base.items() if v not in (None, "", [])}, **raw_policy}
         raw_policy = merged
     clean = _validate_policy(raw_policy)
+    # Iter 583 — POLICY VERSIONING: every save bumps the version. Punches
+    # are stamped with the version they were evaluated under; historical
+    # attendance is NEVER silently rewritten — only the explicit Reprocess
+    # action (Attendance Eligibility screen) re-evaluates under the new
+    # version.
+    try:
+        _prev_ver = int((base or {}).get("policy_version") or 0)
+    except (TypeError, ValueError):
+        _prev_ver = 0
+    clean["policy_version"] = _prev_ver + 1
     updates: dict = {
         "attendance_policy": clean,
         "attendance_policy_updated_at": now_iso(),

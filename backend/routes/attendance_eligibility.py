@@ -36,6 +36,14 @@ router = APIRouter(prefix="/api")
 _ADMIN_ROLES = ["super_admin", "sub_admin", "company_admin"]
 
 
+def _rid_sel(r: dict) -> Dict[str, Any]:
+    """Attendance records carry either record_id (app/biometric/API) or
+    attendance_id (zk_push) — build the right update selector."""
+    if r.get("record_id"):
+        return {"record_id": r["record_id"]}
+    return {"attendance_id": r.get("attendance_id")}
+
+
 async def _scoped_company_id(admin: dict, company_id: Optional[str]) -> str:
     if admin["role"] == "company_admin":
         cid = admin.get("company_id")
@@ -59,7 +67,7 @@ async def onboarding_status(authorization: Optional[str] = Header(None)):
         return {"gate_enabled": False}
     company = await db.companies.find_one(
         {"company_id": user["company_id"]},
-        {"_id": 0, "attendance_policy.onboarding_gate": 1}) or {}
+        {"_id": 0, "attendance_policy.onboarding_gate": 1, "attendance_policy.policy_version": 1}) or {}
     gate = gate_from_company(company)
     if not gate["enabled"]:
         return {"gate_enabled": False}
@@ -104,7 +112,7 @@ async def eligibility_summary(
     require_role(admin, _ADMIN_ROLES)
     cid = await _scoped_company_id(admin, company_id)
     company = await db.companies.find_one(
-        {"company_id": cid}, {"_id": 0, "attendance_policy.onboarding_gate": 1}) or {}
+        {"company_id": cid}, {"_id": 0, "attendance_policy.onboarding_gate": 1, "attendance_policy.policy_version": 1}) or {}
     gate = gate_from_company(company)
 
     rows = await db.attendance.aggregate([
@@ -232,6 +240,9 @@ async def eligibility_records(
         u = names.get(r.get("user_id")) or {}
         r["employee_name"] = u.get("name")
         r["employee_code"] = u.get("employee_code")
+        # zk_push rows carry attendance_id — normalise for the UI selection.
+        if not r.get("record_id"):
+            r["record_id"] = r.get("attendance_id")
         r["missing_labels"] = [REQUIREMENT_LABELS.get(m, m)
                                for m in (r.get("eligibility_missing") or [])]
     return {"records": recs, "count": len(recs)}
@@ -245,15 +256,17 @@ async def _load_target_records(cid: str, payload: dict) -> List[dict]:
     record_ids = payload.get("record_ids")
     user_id = (payload.get("user_id") or "").strip()
     if isinstance(record_ids, list) and record_ids:
-        q["record_id"] = {"$in": [str(r) for r in record_ids][:1000]}
+        ids = [str(r) for r in record_ids][:1000]
+        q["$or"] = [{"record_id": {"$in": ids}}, {"attendance_id": {"$in": ids}}]
     elif user_id:
         q["user_id"] = user_id
     else:
         raise HTTPException(status_code=400,
                             detail="Pass record_ids[] or user_id")
     recs = await db.attendance.find(
-        q, {"_id": 0, "record_id": 1, "user_id": 1, "status": 1,
-            "pre_hold_status": 1, "date": 1, "kind": 1, "at": 1}).to_list(1000)
+        q, {"_id": 0, "record_id": 1, "attendance_id": 1, "user_id": 1,
+            "status": 1, "pre_hold_status": 1, "date": 1, "kind": 1,
+            "at": 1}).to_list(1000)
     if not recs:
         raise HTTPException(status_code=404,
                             detail="No held/blocked punches matched")
@@ -311,7 +324,7 @@ async def release_punches(
     released = 0
     for r in recs:
         res = await db.attendance.update_one(
-            {"record_id": r["record_id"], "status": {"$in": ["held", "blocked"]}},
+            {**_rid_sel(r), "status": {"$in": ["held", "blocked"]}},
             {"$set": {
                 "status": r.get("pre_hold_status") or "approved",
                 "eligibility_status": "RELEASED",
@@ -325,7 +338,7 @@ async def release_punches(
         "log_id": f"erl_{uuid.uuid4().hex[:12]}",
         "company_id": cid,
         "action": "release",
-        "record_ids": [r["record_id"] for r in recs],
+        "record_ids": [r.get("record_id") or r.get("attendance_id") for r in recs],
         "count": released,
         "included_blocked": any_blocked,
         "reason": reason,
@@ -356,7 +369,7 @@ async def reject_punches(
     rejected = 0
     for r in recs:
         res = await db.attendance.update_one(
-            {"record_id": r["record_id"], "status": {"$in": ["held", "blocked"]}},
+            {**_rid_sel(r), "status": {"$in": ["held", "blocked"]}},
             {"$set": {
                 "status": "rejected",
                 "eligibility_status": "REJECTED",
@@ -369,7 +382,7 @@ async def reject_punches(
         "log_id": f"erl_{uuid.uuid4().hex[:12]}",
         "company_id": cid,
         "action": "reject",
-        "record_ids": [r["record_id"] for r in recs],
+        "record_ids": [r.get("record_id") or r.get("attendance_id") for r in recs],
         "count": rejected,
         "reason": reason,
         "by_user_id": admin["user_id"],
@@ -378,3 +391,139 @@ async def reject_punches(
     })
     await _notify_employees(recs, cid, "reject", reason)
     return {"ok": True, "rejected": rejected}
+
+
+@router.post("/admin/attendance-eligibility/reprocess")
+async def reprocess_eligibility(
+    payload: Dict[str, Any] = Body(default={}),
+    company_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 583 — POLICY VERSIONING / EXPLICIT REPROCESS.
+
+    Historical punches always keep the eligibility decision (and
+    policy_version) they were stamped with; changing the Attendance Policy
+    never rewrites them silently. This endpoint is the ONLY way to
+    re-evaluate: every HELD/BLOCKED punch (optionally filtered by user /
+    date range) is re-run through the CURRENT policy + CURRENT employee
+    data:
+
+      * data complete (or gate now off) → RELEASED (reason MANDATORY when
+        any BLOCKED punch would be released — user rule)
+      * data missing, inside the window  → HELD
+      * data missing, window over        → BLOCKED
+    """
+    admin = await get_user_from_token(authorization)
+    require_role(admin, _ADMIN_ROLES)
+    cid = await _scoped_company_id(admin, company_id or payload.get("company_id"))
+    company = await db.companies.find_one(
+        {"company_id": cid},
+        {"_id": 0, "attendance_policy.onboarding_gate": 1,
+         "attendance_policy.policy_version": 1}) or {}
+    gate = gate_from_company(company)
+    ver = int(gate.get("policy_version") or 1)
+
+    q: Dict[str, Any] = {"company_id": cid, "status": {"$in": ["held", "blocked"]}}
+    if payload.get("user_id"):
+        q["user_id"] = str(payload["user_id"]).strip()
+    date_q: Dict[str, Any] = {}
+    if payload.get("from_date"):
+        date_q["$gte"] = str(payload["from_date"])[:10]
+    if payload.get("to_date"):
+        date_q["$lte"] = str(payload["to_date"])[:10]
+    if date_q:
+        q["date"] = date_q
+    recs = await db.attendance.find(
+        q, {"_id": 0, "record_id": 1, "attendance_id": 1, "user_id": 1,
+            "status": 1, "pre_hold_status": 1, "date": 1}).to_list(5000)
+    if not recs:
+        return {"ok": True, "total": 0, "released": 0, "held": 0,
+                "blocked": 0, "unchanged": 0, "policy_version": ver}
+
+    reason = str(payload.get("reason") or "").strip()
+    uids = list({r["user_id"] for r in recs})
+    docs = {u["user_id"]: u async for u in db.users.find(
+        {"user_id": {"$in": uids}}, USER_PROJECTION)}
+    with_photo: set = set()
+    if gate["enabled"] and gate["require_photo"]:
+        with_photo = set(await db.users.distinct(
+            "user_id", {"user_id": {"$in": uids},
+                        "profile_photo_base64": {"$nin": [None, ""]}}))
+
+    plan = []
+    for r in recs:
+        u = docs.get(r["user_id"]) or {}
+        if not gate["enabled"]:
+            plan.append((r, "ACTIVE", None))
+            continue
+        missing = missing_requirements(
+            u, gate,
+            has_photo=(r["user_id"] in with_photo) if gate["require_photo"] else None)
+        ev = classify(gate, missing, u, r["date"])
+        plan.append((r, ev["eligibility"], ev))
+
+    if any(r["status"] == "blocked" and new == "ACTIVE" for r, new, _ in plan) \
+            and not reason:
+        raise HTTPException(
+            status_code=400,
+            detail="Reason is MANDATORY — this reprocess would release "
+                   "BLOCKED punches.")
+
+    now = _now()
+    released = held = blocked = unchanged = 0
+    for r, new, ev in plan:
+        if new == "ACTIVE":
+            await db.attendance.update_one(
+                {**_rid_sel(r), "status": {"$in": ["held", "blocked"]}},
+                {"$set": {
+                    "status": r.get("pre_hold_status") or "approved",
+                    "eligibility_status": "RELEASED",
+                    "released_at": now,
+                    "released_by": admin["user_id"],
+                    "released_from": r.get("status"),
+                    "release_reason": reason or f"Reprocessed under policy v{ver}",
+                    "policy_version": ver,
+                    "reprocessed_at": now,
+                }})
+            released += 1
+        else:
+            new_status = "held" if new == "HELD" else "blocked"
+            if new_status == r.get("status"):
+                unchanged += 1
+            elif new_status == "held":
+                held += 1
+            else:
+                blocked += 1
+            await db.attendance.update_one(
+                {**_rid_sel(r), "status": {"$in": ["held", "blocked"]}},
+                {"$set": {
+                    "status": new_status,
+                    "eligibility_status": new.upper(),
+                    "eligibility_missing": (ev or {}).get("missing") or [],
+                    "eligibility_deadline": (ev or {}).get("deadline"),
+                    "policy_version": ver,
+                    "reprocessed_at": now,
+                    "reprocessed_by": admin["user_id"],
+                }})
+    await db.eligibility_release_log.insert_one({
+        "log_id": f"erl_{uuid.uuid4().hex[:12]}",
+        "company_id": cid,
+        "action": "reprocess",
+        "policy_version": ver,
+        "count": len(plan),
+        "released": released,
+        "moved_to_held": held,
+        "moved_to_blocked": blocked,
+        "unchanged": unchanged,
+        "reason": reason,
+        "by_user_id": admin["user_id"],
+        "by_role": admin["role"],
+        "at": now_iso(),
+    })
+    if released:
+        rel_recs = [r for r, new, _ in plan if new == "ACTIVE"]
+        await _notify_employees(rel_recs, cid, "release",
+                                reason or f"Reprocessed under policy v{ver}")
+    return {"ok": True, "total": len(plan), "released": released,
+            "held": held, "blocked": blocked, "unchanged": unchanged,
+            "policy_version": ver}

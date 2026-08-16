@@ -186,6 +186,9 @@ type Policy = {
   week_off_worked?: Record<string, any>;
   // Iter 581 — Employee Onboarding Gate (attendance eligibility).
   onboarding_gate?: Record<string, any>;
+  // Iter 583 — duplicate punch window + policy version.
+  dedup_window_minutes?: number;
+  policy_version?: number;
 };
 
 type PolicyResponse = {
@@ -268,6 +271,9 @@ function normalisePolicy(p: Policy): Policy {
       auto_release: ((p as any).onboarding_gate?.auto_release ?? true) !== false,
       enabled_at: (p as any).onboarding_gate?.enabled_at ?? null,
     },
+    // Iter 583 — duplicate punch window + policy version.
+    dedup_window_minutes: Number((p as any).dedup_window_minutes ?? 5),
+    policy_version: Number((p as any).policy_version ?? 1),
     // Iter 205 — Week-Off Worked Attendance config.
     week_off_worked: {
       mode: (p as any).week_off_worked?.mode || "",
@@ -724,6 +730,27 @@ export default function AttendancePolicyScreen() {
               </View>
             );
           })()}
+
+          {/* Iter 583 — Duplicate Punch Detection window */}
+          <SectionTitle
+            title="Duplicate Punch Detection"
+            hint="Machine / API punches arriving within this window of an existing punch are stored in the raw log but marked DUPLICATE and excluded from every calculation. Set 0 to switch detection off."
+          />
+          <NumRow
+            label="Duplicate Window (minutes)"
+            value={Number(policy.dedup_window_minutes ?? 5)}
+            onChange={(v) =>
+              setPolicy({ ...policy, dedup_window_minutes: Math.max(0, Math.min(120, Math.round(v))) })
+            }
+            step={1}
+            testID="ap-dedup-window"
+          />
+          <Text style={styles.helper}>
+            Applies to biometric machines (ADMS/iClock), the vendor Punch API and ZK
+            push. Current policy version: v{Number(policy.policy_version ?? 1)} — every
+            save creates a new version; held/blocked punches are re-evaluated only via
+            the explicit Reprocess action on the Attendance Eligibility screen.
+          </Text>
 
           {/* Weekly off — Iter 201 (user request): N/A + Rotation Basis */}
           <SectionTitle title="Weekly off" hint="Days that don’t count as working days." />

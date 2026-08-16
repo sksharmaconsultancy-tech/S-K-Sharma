@@ -626,3 +626,10 @@ ITER 487 (doc-expiry alerts):
 - onboarding-status returns onboarding_pct; summary returns firm-wide
   "onboarding" stats; widget verified via screenshot (ae-onboarding-widget).
 - Engine now checks aadhaar_no/pan_no aliases too.
+
+## Iter 583 — Policy versioning/reprocess + duplicate window (2026-06)
+- 14/14 backend tests pass (test_versioning_583.py); UI screenshots verified
+  (Reprocess modal, Policy vN badge, Duplicate Punch Detection section).
+- Local Kankani policy now v3, dedup_window_minutes=10 (test artifacts);
+  1 seeded held punch remains for user_44cd6f561da0.
+- zk_push records use attendance_id — all eligibility ops handle both IDs.

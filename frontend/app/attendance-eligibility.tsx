@@ -80,6 +80,10 @@ export default function AttendanceEligibilityScreen() {
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  // Iter 583 — explicit policy reprocess.
+  const [reproOpen, setReproOpen] = useState(false);
+  const [reproReason, setReproReason] = useState("");
+  const [reproSaving, setReproSaving] = useState(false);
 
   const showToast = (m: string) => {
     setToast(m);
@@ -186,6 +190,27 @@ export default function AttendanceEligibilityScreen() {
     }
   };
 
+  const submitReprocess = async () => {
+    setReproSaving(true);
+    try {
+      const r = await api<any>(
+        `/admin/attendance-eligibility/reprocess?company_id=${cid}`,
+        { method: "POST", body: { reason: reproReason.trim() } },
+      );
+      showToast(
+        r.total === 0
+          ? "Nothing to reprocess — no held/blocked punches."
+          : `Reprocessed ${r.total} under policy v${r.policy_version}: ${r.released} released, ${r.held} → held, ${r.blocked} → blocked, ${r.unchanged} unchanged.`,
+      );
+      setReproOpen(false);
+      await load();
+    } catch (e: any) {
+      showToast(e.message || "Reprocess failed");
+    } finally {
+      setReproSaving(false);
+    }
+  };
+
   const missingChips = (missing: { key: string; label: string }[]) => (
     <View style={styles.chipsWrap}>
       {missing.map((m) => (
@@ -206,6 +231,13 @@ export default function AttendanceEligibilityScreen() {
           <Text style={styles.h1}>Attendance Eligibility</Text>
           <Text style={styles.sub}>Held / blocked punches — onboarding gate</Text>
         </View>
+        <Pressable
+          onPress={() => { setReproReason(""); setReproOpen(true); }}
+          style={styles.backBtn}
+          testID="ae-reprocess-btn"
+        >
+          <Ionicons name="sync-circle-outline" size={22} color={colors.brandPrimary} />
+        </Pressable>
         <Pressable onPress={() => void load()} style={styles.backBtn} testID="ae-refresh">
           <Ionicons name="refresh" size={20} color={colors.brandPrimary} />
         </Pressable>
@@ -255,7 +287,10 @@ export default function AttendanceEligibilityScreen() {
           <View style={styles.obCard} testID="ae-onboarding-widget">
             <View style={styles.obHead}>
               <Ionicons name="clipboard-outline" size={16} color={colors.brandPrimary} />
-              <Text style={styles.obTitle}>Onboarding Completion</Text>
+              <Text style={styles.obTitle}>
+                Onboarding Completion
+                {gate?.policy_version ? `  ·  Policy v${gate.policy_version}` : ""}
+              </Text>
               <Text
                 style={[
                   styles.obPct,
@@ -457,6 +492,46 @@ export default function AttendanceEligibilityScreen() {
                 testID="ae-confirm-btn"
               >
                 <Text style={styles.actTxt}>{saving ? "Saving…" : "Confirm"}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Iter 583 — Reprocess under current policy modal */}
+      <Modal visible={reproOpen} transparent animationType="fade" onRequestClose={() => setReproOpen(false)}>
+        <View style={styles.modalBg}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>
+              Reprocess under policy v{gate?.policy_version || 1}
+            </Text>
+            <Text style={styles.modalSub}>
+              Re-evaluates ALL held/blocked punches of this firm against the CURRENT
+              Attendance Policy and each employee&apos;s CURRENT data: complete data →
+              released; missing data → held (inside window) or blocked (window over).
+              Historical punches are never changed without this explicit action.
+              A reason is MANDATORY if any BLOCKED punch would be released.
+            </Text>
+            <TextInput
+              style={styles.reasonInput}
+              placeholder="Reason (mandatory when blocked punches get released)…"
+              placeholderTextColor={colors.onSurfaceTertiary}
+              value={reproReason}
+              onChangeText={setReproReason}
+              multiline
+              testID="ae-repro-reason"
+            />
+            <View style={styles.actionsRow}>
+              <Pressable style={[styles.actBtn, { backgroundColor: colors.surfaceSecondary }]} onPress={() => setReproOpen(false)}>
+                <Text style={[styles.actTxt, { color: colors.onSurface }]}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.actBtn, { backgroundColor: colors.brandPrimary }, reproSaving && { opacity: 0.6 }]}
+                onPress={() => void submitReprocess()}
+                disabled={reproSaving}
+                testID="ae-repro-confirm"
+              >
+                <Text style={styles.actTxt}>{reproSaving ? "Reprocessing…" : "Reprocess"}</Text>
               </Pressable>
             </View>
           </View>

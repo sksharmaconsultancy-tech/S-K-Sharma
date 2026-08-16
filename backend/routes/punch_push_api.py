@@ -26,7 +26,7 @@ import re
 import secrets as pysecrets
 import time as time_mod
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Header, HTTPException, Query, Request
@@ -396,6 +396,16 @@ async def push_punching(request: Request):
         })
 
     # ── Duplicate machine_transaction_id protection (unique index)
+    # Iter 583 — plus configurable time-window duplicate detection: a punch
+    # within the firm's dedup window of an existing punch is stored but
+    # marked "duplicate" (never counted, raw kept).
+    try:
+        _co_pol = await db.companies.find_one(
+            {"company_id": company_id},
+            {"_id": 0, "attendance_policy.dedup_window_minutes": 1}) or {}
+        _dedup_min = int((_co_pol.get("attendance_policy") or {}).get("dedup_window_minutes", 5))
+    except (TypeError, ValueError):
+        _dedup_min = 5
     for t in txn_rows:
         att = t.pop("_att")
         try:
@@ -405,6 +415,21 @@ async def push_punching(request: Request):
         except Exception:
             duplicate += 1
             continue
+        if _dedup_min > 0:
+            try:
+                _at_dt = datetime.strptime(att["at"], "%Y-%m-%dT%H:%M:%SZ")
+                _dup = await db.attendance.find_one({
+                    "user_id": att["user_id"],
+                    "at": {"$gte": (_at_dt - timedelta(minutes=_dedup_min)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                           "$lte": (_at_dt + timedelta(minutes=_dedup_min)).strftime("%Y-%m-%dT%H:%M:%SZ")},
+                    "status": {"$in": ["approved", "pending", "held", "blocked"]},
+                }, {"_id": 1})
+                if _dup:
+                    att["status"] = "duplicate"
+                    att["duplicate_reason"] = f"within_{_dedup_min}min"
+                    duplicate += 1
+            except Exception:
+                pass
         att_rows.append(att)
         accepted += 1
     if att_rows:
