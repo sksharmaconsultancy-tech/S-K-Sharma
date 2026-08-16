@@ -90,7 +90,7 @@ SYSTEM_PROMPT = """You are the AI command parser for an Indian payroll & attenda
 The operator may write in English, Hindi or Hinglish (e.g. "Kankani ka June salary process karo").
 Parse the command into STRICT JSON (no markdown, no prose) with this schema:
 {
-  "intent": "process_salary" | "finalize_salary" | "report" | "email_report" | "employee_search" | "employee_update" | "data_query" | "compliance_info" | "attendance_summary" | "pending_approvals" | "navigate" | "answer",
+  "intent": "process_salary" | "finalize_salary" | "report" | "email_report" | "employee_search" | "employee_update" | "bulk_salary_change" | "data_query" | "compliance_info" | "attendance_summary" | "pending_approvals" | "navigate" | "answer",
   "salary_type": "actual" | "compliance" | "ot" | "arrear" | null,
   "report": "salary_register" | "bank_sheet" | "attendance_sheet" | "pf_ecr" | null,
   "metric": "salary_total" | "esic_eligible" | "absent_list" | "present_count" | "employee_count" | "top_paid" | "run_status" | "missing_data" | "pf_mismatch" | "why_salary" | null,
@@ -100,6 +100,9 @@ Parse the command into STRICT JSON (no markdown, no prose) with this schema:
   "employee_query": string | null,
   "field": "phone" | "salary" | "status" | null,
   "value": string | null,
+  "department": string | null,
+  "percent": number | null,
+  "amount": number | null,
   "screen": one of [%SCREENS%] | null,
   "reply": short helpful sentence in the SAME language the user wrote in (English or Hindi)
 }
@@ -121,6 +124,7 @@ Rules (today is %TODAY%):
   * "why is Rajesh's salary lower (this month)?" → why_salary with employee_query (and month if named)
 - "find employee Ramesh", "show Suresh's details" → employee_search with employee_query.
 - "change Ramesh's phone to 98xxx", "set salary of code 50 to 15000", "mark Ramesh resigned/active" → employee_update with employee_query, field (phone|salary|status) and value (for status: "resigned" or "active").
+- BULK salary commands — "increase salary of ALL employees (in <X> department) by 5%", "sabki salary 500 rupaye badhao", "reduce Production dept salaries by 10%" → bulk_salary_change with department (null = whole firm) and percent (NEGATIVE for decrease/reduce) OR amount (flat ₹, negative for decrease). NEVER use employee_update for more than one employee.
 - "open X" / "go to X" → navigate with the best screen key.
 - Questions about PF/EPF/ESIC/PT/TDS/labour-law RULES, rates, wage limits, due dates, latest NEWS, circulars, notifications or amendments (e.g. "PF ki latest notification kya hai", "what is the ESIC wage limit rule", "any new labour code update?") → compliance_info, and put the TOPIC in employee_query (e.g. "pf", "esic", "labour_code", "pt", "tds", "minimum_wages").
 - Anything else (greetings, general payroll/PF/ESIC law questions) → answer, with your best short answer in reply.
@@ -778,6 +782,42 @@ async def ai_command(body: CommandBody, authorization: Optional[str] = Header(No
 
         elif intent == "employee_update":
             reply, action = await _h_employee_update(parsed, admin, cid, firm_label)
+
+        elif intent == "bulk_salary_change":
+            # Iter 589 — spec §16: bulk changes get a PREVIEW and can never
+            # execute automatically. authorize() inside raises 403 when the
+            # user lacks salary edit rights or firm scope.
+            if not cid:
+                reply = "Which firm should I apply this bulk change to? Please name the firm."
+            else:
+                from routes.ai_bulk_actions import build_bulk_salary_preview
+                pct = parsed.get("percent")
+                amt = parsed.get("amount")
+                if pct is None and amt is None:
+                    reply = "By how much? e.g. \"increase by 5%\" or \"increase by ₹500\"."
+                else:
+                    pv = await build_bulk_salary_preview(
+                        admin, cid, parsed.get("department"),
+                        pct=float(pct) if pct is not None else None,
+                        amount=float(amt) if amt is not None else None)
+                    reply = (
+                        "⚠️ Bulk Salary Change Preview\n"
+                        f"Firm: {pv.get('firm_name') or firm_label}\n"
+                        + (f"Department: {pv['department']}\n" if pv.get("department") else "")
+                        + f"Change: {pv['change_label']}\n"
+                        f"Employees affected: {pv['employees_affected']}\n"
+                        f"Current payroll: {_money(pv['current_payroll'])}\n"
+                        f"Estimated new payroll: {_money(pv['new_payroll'])}\n"
+                        f"Difference: {'+' if pv['difference'] >= 0 else ''}{_money(pv['difference'])}\n"
+                        "e.g. " + "; ".join(pv["sample"][:3]))
+                    action = {"type": "confirm_api", "method": "POST",
+                              "endpoint": "/admin/ai-bulk/salary/execute",
+                              "body": {"preview_id": pv["preview_id"]},
+                              "label": ("Confirm & Execute" if admin["role"] == "super_admin"
+                                        else "Send for Approval"),
+                              "danger": True,
+                              "success_note": (f"✅ Bulk change applied to "
+                                               f"{pv['employees_affected']} employees.")}
 
         elif intent == "data_query":
             r2, a2 = await _h_data_query(parsed, admin, cid, firm_label, company)

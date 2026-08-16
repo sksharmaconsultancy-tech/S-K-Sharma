@@ -44,13 +44,16 @@ from shared.authz import (  # noqa: E402
 
 router = APIRouter(prefix="/api/admin", tags=["maker-checker"])
 
-MC_ACTIONS = ("salary_change", "bank_change", "employee_delete")
+MC_ACTIONS = ("salary_change", "bank_change", "employee_delete", "bulk_salary_change")
 MC_LABELS = {"salary_change": "Salary Change", "bank_change": "Bank Details Change",
-             "employee_delete": "Employee Deletion"}
+             "employee_delete": "Employee Deletion",
+             "bulk_salary_change": "Bulk Salary Change"}
 # Iter 588 — AI risk engine: risk level per action (drives UI chips and
 # documents why approval is required).
 MC_RISK = {"salary_change": "HIGH", "bank_change": "HIGH",
-           "employee_delete": "CRITICAL"}
+           "employee_delete": "CRITICAL", "bulk_salary_change": "CRITICAL"}
+# Actions only the Super Admin may approve (4-eyes + top-authority rule).
+MC_SUPER_ONLY = ("employee_delete", "bulk_salary_change")
 _DEFAULTS = {"enabled": True,
              "actions": {a: True for a in MC_ACTIONS}}
 # Daily digest of stale PENDING requests (>24h) — emailed at 09:00 IST.
@@ -211,8 +214,19 @@ async def _apply_delete(appr: dict, checker: dict) -> Dict[str, Any]:
         actor=f"approval:{checker.get('email') or checker['user_id']}")
 
 
+async def _apply_bulk_salary(appr: dict, checker: dict) -> Dict[str, Any]:
+    from routes.ai_bulk_actions import execute_bulk_salary
+    preview = await db.ai_bulk_previews.find_one(
+        {"preview_id": appr["apply_spec"].get("preview_id")}, {"_id": 0})
+    if not preview:
+        return {"note": "Preview no longer exists — nothing applied"}
+    return await execute_bulk_salary(preview, checker["user_id"],
+                                     approval_id=appr["approval_id"])
+
+
 _APPLY = {"salary_change": _apply_salary, "bank_change": _apply_bank,
-          "employee_delete": _apply_delete}
+          "employee_delete": _apply_delete,
+          "bulk_salary_change": _apply_bulk_salary}
 
 
 # ── Daily overdue-approvals digest (user request) ───────────────────────────
@@ -400,9 +414,9 @@ async def decide_approval(approval_id: str,
             raise HTTPException(status_code=403,
                                 detail="Maker cannot approve their own request (4-eyes rule)")
         if admin["role"] != "super_admin":
-            if appr["action_type"] == "employee_delete":
+            if appr["action_type"] in MC_SUPER_ONLY:
                 raise HTTPException(status_code=403,
-                                    detail="Employee deletions can only be approved by the Super Admin")
+                                    detail=f"{MC_LABELS[appr['action_type']]} can only be approved by the Super Admin")
             if not firm_ok(admin, appr.get("company_id")):
                 raise HTTPException(status_code=403, detail="Firm outside your scope")
             if not has_permission(admin, appr.get("module") or "employees", "approve"):

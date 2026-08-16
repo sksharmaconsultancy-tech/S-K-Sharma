@@ -6100,3 +6100,27 @@ credentials); AI WhatsApp chatbot; multi-language EN/Hindi.
 - Tests: test_aicc_588.py 12/12 backend; testing_agent 7/7 UI
   (test_reports/iteration_588.json). Deploy: /app/deploy_vps_iter588.sh.
 Current iteration: 588. Next: 589.
+
+## Iter 589 (DONE) — AI Bulk-Action Engine (spec §16)
+- routes/ai_bulk_actions.py: POST /admin/ai-bulk/salary/preview (authz
+  salary_process:edit + firm scope; computes rows/current/new payroll,
+  stores ai_bulk_previews doc, 30-min TTL, max 500 emps) and
+  /salary/execute (super=direct execute; others staged into maker-checker
+  as bulk_salary_change CRITICAL — approve is SUPER-ONLY via MC_SUPER_ONLY
+  tuple). execute_bulk_salary: per-employee salary_history rows (bulk_id,
+  approval_id) + CRITICAL BULK_SALARY_CHANGE audit; idempotent (409 on
+  re-execute); authz re-checked at execute time.
+- ai_assistant.py: new bulk_salary_change intent (SYSTEM_PROMPT schema +
+  department/percent/amount fields); handler renders preview text + danger
+  confirm_api action (Confirm & Execute for super / Send for Approval).
+- maker_checker.py: MC_ACTIONS/MC_LABELS/MC_RISK gained bulk_salary_change;
+  _apply_bulk_salary handler; MC_SUPER_ONLY = (employee_delete,
+  bulk_salary_change). Settings toggle auto-appears in pending-approvals UI.
+- Tests: test_bulk_589.py 17/17 (incl. LLM intent e2e + cross-firm 403 +
+  staged-approval apply) + test_mc_587.py regression 22/22. UI verified via
+  screenshots (preview card → Confirm & Execute → applied).
+- Deploy: /app/deploy_vps_iter589.sh (kind=script serves 589).
+Current iteration: 589. Next: 590.
+REMAINING from AI spec: AI add-employee action, custom date-range insights,
+configurable per-action risk matrix UI, WhatsApp channel adapter (needs
+Meta creds). Plus MSG91 SMS Phase 2/3, client-role templates.

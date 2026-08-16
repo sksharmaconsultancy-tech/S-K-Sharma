@@ -703,3 +703,15 @@ ITER 487 (doc-expiry alerts):
   FAB hidden only on /ai-command-center (visible on /admin), sidebar order.
 - Known cosmetic: assistant markdown ** stripped in chat bubbles.
 - Deploy script: /app/deploy_vps_iter588.sh (kind=script serves 588).
+
+## Iter 589 — AI Bulk-Action Engine (2026-06)
+- test_bulk_589.py 17/17: preview math (+10% / +₹500), nothing modified on
+  preview, super direct execute + salary_history bulk rows + CRITICAL
+  audit, re-execute 409, sub-admin execute → staged (data unchanged),
+  approval risk=CRITICAL, sub-admin approve 403 (super-only), approve
+  applies, AI LLM intent → preview+confirm action without changing data,
+  cross-firm preview 403. Maker-checker regression 22/22.
+- UI screenshot-verified in AI Command Center: bulk command → preview card
+  with per-employee old→new → red "Confirm & Execute" → "applied to 2
+  employees". Demo data cleaned.
+- Deploy script: /app/deploy_vps_iter589.sh (kind=script serves 589).
