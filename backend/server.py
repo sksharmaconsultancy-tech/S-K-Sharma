@@ -10021,7 +10021,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "587"
+APP_ITERATION = "588"
 
 
 @api.get("/version")
@@ -12781,6 +12781,9 @@ from routes.rbac_phase1 import router as rbac_phase1_router  # noqa: E402
 app.include_router(rbac_phase1_router)
 from routes.maker_checker import router as maker_checker_router, digest_loop as _mc_digest_loop  # noqa: E402
 app.include_router(maker_checker_router)
+# Iter 588 — AI Command Center (alerts / insights / activity).
+from routes.ai_command_center import router as ai_cc_router  # noqa: E402
+app.include_router(ai_cc_router)
 
 
 @app.on_event("startup")

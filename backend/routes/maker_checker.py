@@ -47,6 +47,10 @@ router = APIRouter(prefix="/api/admin", tags=["maker-checker"])
 MC_ACTIONS = ("salary_change", "bank_change", "employee_delete")
 MC_LABELS = {"salary_change": "Salary Change", "bank_change": "Bank Details Change",
              "employee_delete": "Employee Deletion"}
+# Iter 588 — AI risk engine: risk level per action (drives UI chips and
+# documents why approval is required).
+MC_RISK = {"salary_change": "HIGH", "bank_change": "HIGH",
+           "employee_delete": "CRITICAL"}
 _DEFAULTS = {"enabled": True,
              "actions": {a: True for a in MC_ACTIONS}}
 # Daily digest of stale PENDING requests (>24h) — emailed at 09:00 IST.
@@ -322,6 +326,7 @@ def _mask_values(user: dict, values: Dict[str, Any]) -> Dict[str, Any]:
 
 def _serialise(user: dict, appr: dict, full: bool = False) -> Dict[str, Any]:
     out = {k: v for k, v in appr.items() if k not in ("_id", "apply_spec")}
+    out["risk"] = MC_RISK.get(appr.get("action_type"), "MEDIUM")
     out["old_values"] = _mask_values(user, appr.get("old_values") or {})
     out["new_values"] = _mask_values(user, appr.get("new_values") or {})
     if not full:

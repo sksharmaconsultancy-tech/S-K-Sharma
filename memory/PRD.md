@@ -6070,3 +6070,33 @@ Current iteration: 587. Next: 588.
 REMAINING (approved backlog): predefined client-role templates
 customization; MSG91 SMS Phase 2/3 event wiring; WhatsApp API (needs Meta
 credentials); AI WhatsApp chatbot; multi-language EN/Hindi.
+
+## Iter 588 (DONE) — 🤖 AI COMMAND CENTER (user's big production-upgrade spec, Phase 1)
+- routes/ai_command_center.py: GET /admin/ai-cc/alerts (rule-based detectors:
+  missing aadhaar/bank/ifsc/uan/esic, duplicate bank/UAN, no salary
+  structure, >30%/>100% salary jumps in 31d, HELD/BLOCKED punches, pending
+  approvals backlog; severity CRITICAL/WARNING/INFO), /admin/ai-cc/insights
+  (employee/payroll/attendance/compliance KPIs + MoM gross growth, periods
+  this_month/prev_month), /admin/ai-cc/activity (AI_COMMAND + APPROVAL audit
+  rows + own chat). ALL server-side scoped via shared.authz.firm_ok
+  (cross-firm = 403; restricted sub-admin never sees other firms).
+- ai_assistant.py command endpoint now writes immutable AI_COMMAND rows to
+  activity_log (command, intent, action type) — integrated with Users Log.
+- maker_checker.py: MC_RISK levels (salary/bank=HIGH, delete=CRITICAL)
+  exposed in approval serialisation.
+- frontend/app/ai-command-center.tsx: 5 tabs (Ask AI chat w/ quick chips +
+  confirm/download/navigate actions incl. staged-approval handling;
+  Approvals inline w/ risk chips + approve/reject; Alerts w/ severity
+  filter + deep links; Insights KPI cards; Activity trail). Sidebar entry
+  above AI Payroll Assistant. Floating AiAssistant FAB hidden ONLY on this
+  screen (AdminWebShell).
+- Spec items ALREADY satisfied by existing engines (not duplicated):
+  two-step confirm (assistant confirm_api), maker-checker approval routing,
+  central authz, export security, AI Universal Import / Insights / Salary
+  Compliance screens, bulk protection (assistant has no bulk executor).
+- NOT YET BUILT from the spec (future): AI-driven bulk salary change
+  preview/execute, AI add-employee action, WhatsApp channel adapter,
+  custom date-range insights, configurable per-action risk matrix UI.
+- Tests: test_aicc_588.py 12/12 backend; testing_agent 7/7 UI
+  (test_reports/iteration_588.json). Deploy: /app/deploy_vps_iter588.sh.
+Current iteration: 588. Next: 589.

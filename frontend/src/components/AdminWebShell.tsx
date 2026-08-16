@@ -317,6 +317,7 @@ export const NAV_SUPER: NavItem[] = [
     ],
   },
   // User directive — AI Insights lives at the very END of the sidebar.
+  { route: "/ai-command-center", label: "AI Command Center", icon: "sparkles" },
   { route: "/ai-payroll-assistant", label: "AI Payroll Assistant", icon: "hardware-chip-outline" },
   { route: "/ai-insights", label: "AI Insights", icon: "sparkles-outline" },
 ];
@@ -1839,7 +1840,11 @@ export default function AdminWebShell({ children }: Props) {
       ) : null}
 
       {/* Iter 294 — AI Payroll Assistant (chat + voice). */}
-      <AiAssistant open={aiOpen} onToggle={setAiOpen} />
+      {/* Iter 588 — the AI Command Center has its own full chat; hide the
+          floating assistant there to avoid duplicate overlapping panels. */}
+      {pathname !== "/ai-command-center" ? (
+        <AiAssistant open={aiOpen} onToggle={setAiOpen} />
+      ) : null}
 
       {/* Iter 85 — Logout confirmation modal (Super/Sub admin only) */}
       {logoutModal ? (

@@ -689,3 +689,17 @@ ITER 487 (doc-expiry alerts):
   sksharmaconsultancy@gmail.com ("⏰ Pending Approvals Digest — 1 request(s)
   waiting > 24h"). Regression test_mc_587.py 22/22 still passes. Demo data
   cleaned. Included in deploy587 bundle.
+
+## Iter 588 — AI Command Center (2026-06)
+- Backend test_aicc_588.py 12/12: alerts fire (missing bank CRITICAL count
+  >100 on Kankani), severity ordering, cross-firm 403 for restricted
+  sub-admin on alerts+insights, no data leak in scoped alerts, insights
+  KPIs, AI command still works + AI_COMMAND audit row created, activity
+  endpoint lists it, maker-checker regression (staged salary carries
+  risk=HIGH).
+- Frontend testing_agent 7/7 (test_reports/iteration_588.json): quick chip
+  → LLM reply, action button navigates to /attendance-grid, Approvals tab
+  approve applies to DB, CRITICAL filter + alert deep-link, Activity rows,
+  FAB hidden only on /ai-command-center (visible on /admin), sidebar order.
+- Known cosmetic: assistant markdown ** stripped in chat bubbles.
+- Deploy script: /app/deploy_vps_iter588.sh (kind=script serves 588).

@@ -853,6 +853,23 @@ async def ai_command(body: CommandBody, authorization: Optional[str] = Header(No
         ])
     except Exception:
         pass
+    # Iter 588 — AI Command Center: immutable audit row for every AI command
+    # (alongside employee/salary/export events in the Users Log Report).
+    try:
+        import uuid as _uuid
+        await db.activity_log.insert_one({
+            "log_id": f"al_{_uuid.uuid4().hex[:12]}",
+            "user_id": admin["user_id"], "user_name": admin.get("name"),
+            "role": admin["role"], "action": "AI_COMMAND", "module": "ai_assistant",
+            "severity": "INFO",
+            "detail": {"command": text[:500], "intent": intent,
+                       "company_id": cid,
+                       "action_type": (action or {}).get("type"),
+                       "action_label": (action or {}).get("label")},
+            "at": _now_iso(),
+        })
+    except Exception:
+        pass
 
     return {"reply": reply, "intent": intent, "action": action}
 
