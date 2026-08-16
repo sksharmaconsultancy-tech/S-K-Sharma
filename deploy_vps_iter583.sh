@@ -1,8 +1,8 @@
 #!/bin/bash
 # S.K. Sharma & Co. — VPS deploy script (Iter 583 — Policy Versioning/Reprocess + Configurable Duplicate-Punch Window)
-# Deploys the FULL latest code (includes Iter 568-580). Running 581 alone is enough.
+# Deploys the FULL latest code (includes ALL of Iter 568-582). Running 583 alone is enough.
 #
-# ═══════════ WHAT'S NEW (this deploy = Iter 581) ═══════════
+# ═══════════ WHAT'S NEW (this deploy = Iter 583) ═══════════
 #
 # ATTENDANCE POLICY BASED EMPLOYEE ONBOARDING & ATTENDANCE ELIGIBILITY
 #
