@@ -806,3 +806,7 @@ ITER 487 (doc-expiry alerts):
   deterministic, filter narrows to Kankani, save persists restricted ids in
   mongo, matrix bulk toggles + Save Permissions OK, sidebar deny list
   verified. session_token (not token) required for seeded sessions.
+
+## Iter 594b — Branch/Dept filters (2026-06)
+- Screenshot-verified: both filter inputs render when All toggled off,
+  chips from masters (departments SECURITY/WEAVING/QA...), counters shown.

@@ -38,6 +38,8 @@ export default function RolesPermissionsScreen() {
   const [fmSel, setFmSel] = useState<Set<string>>(new Set());
   const [fmAll, setFmAll] = useState(true);
   const [fmFilter, setFmFilter] = useState("");
+  const [brFilter, setBrFilter] = useState("");
+  const [dpFilter, setDpFilter] = useState("");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3500); };
@@ -268,22 +270,42 @@ export default function RolesPermissionsScreen() {
                   ) : null}
                 </>
               ) : null}
-              <Text style={st.blockTitle}>Data Scope — Branches</Text>
+              <Text style={st.blockTitle}>Data Scope — Branches ({branches.length} in master)</Text>
+              {!brAll ? (
+                <TextInput style={st.input} value={brFilter} onChangeText={setBrFilter}
+                  placeholder="🔍 Filter branches…"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  testID="rp-branch-filter" />
+              ) : null}
               <View style={st.wrap}>
                 {chip(brAll, "All Branches", () => setBrAll(!brAll), "br-all")}
-                {!brAll && branches.map((b: any) => chip(
+                {!brAll && branches
+                  .filter((b: any) => !brFilter.trim()
+                    || (b.name || "").toLowerCase().includes(brFilter.toLowerCase()))
+                  .map((b: any) => chip(
                   brSel.has(b.branch_id), b.name || b.branch_id,
                   () => { const s = new Set(brSel); if (s.has(b.branch_id)) s.delete(b.branch_id); else s.add(b.branch_id); setBrSel(s); },
                   b.branch_id))}
               </View>
-              <Text style={st.blockTitle}>Data Scope — Departments</Text>
+              {!brAll ? <Text style={st.legend}>{brSel.size} of {branches.length} branches selected</Text> : null}
+              <Text style={st.blockTitle}>Data Scope — Departments ({departments.length} in master)</Text>
+              {!dpAll ? (
+                <TextInput style={st.input} value={dpFilter} onChangeText={setDpFilter}
+                  placeholder="🔍 Filter departments…"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  testID="rp-dept-filter" />
+              ) : null}
               <View style={st.wrap}>
                 {chip(dpAll, "All Departments", () => setDpAll(!dpAll), "dp-all")}
-                {!dpAll && departments.map((d: any) => chip(
+                {!dpAll && departments
+                  .filter((d: any) => !dpFilter.trim()
+                    || (d.name || "").toLowerCase().includes(dpFilter.toLowerCase()))
+                  .map((d: any) => chip(
                   dpSel.has(d.department_id), d.name,
                   () => { const s = new Set(dpSel); if (s.has(d.department_id)) s.delete(d.department_id); else s.add(d.department_id); setDpSel(s); },
                   d.department_id))}
               </View>
+              {!dpAll ? <Text style={st.legend}>{dpSel.size} of {departments.length} departments selected</Text> : null}
               <Pressable style={[st.btn, { marginTop: 8 }]} onPress={() => void saveScope()} testID="rp-save-scope">
                 <Text style={st.btnTxt}>Save Data Scope</Text>
               </Pressable>

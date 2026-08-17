@@ -6228,3 +6228,8 @@ Current iteration: 593. Next: 594.
   earlier automation misread the ✓ state). Matrix "not showing all options"
   = user's VPS on old build; fixed by deploy594.
 Current iteration: 594. Next: 595.
+
+## Iter 594b (DONE) — Branch/Department pickers with filters
+- roles-permissions.tsx: branch + department chips now filterable
+  (rp-branch-filter / rp-dept-filter), master counts + selected counters,
+  matching the firm selector. Screenshot-verified.

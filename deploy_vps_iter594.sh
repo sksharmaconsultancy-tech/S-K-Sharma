@@ -10,6 +10,9 @@
 #      firms PRE-SELECTED; toggle "All Firms" or pick specific firms.
 #  * FILTER box narrows the firm list as you type (e.g. "kank" → Kankani).
 #  * Saving updates the user's firm scope server-side (validated ids).
+#  * Branch & Department pickers now also list from the masters with
+#      their own 🔍 filter boxes and "x of y selected" counters — the full
+#      data-scope setup (firms + branches + departments) on one screen.
 #  * Permission Matrix reminder: ALL 16 modules × 6 actions show after
 #      THIS deploy (your live server was on an older build).
 #
