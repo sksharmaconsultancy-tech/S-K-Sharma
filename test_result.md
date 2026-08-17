@@ -800,3 +800,9 @@ ITER 487 (doc-expiry alerts):
 - email-check endpoint now inspects DKIM/SPF/DMARC DNS records for the
   brand domain (falls back to the account's first domain when FROM is
   resend.dev) and explains the spam cause with fix advice. Verified live.
+
+## Iter 594 — Firm Access editor + gating (2026-06)
+- testing_agent (iteration_594.json): firm chips+filter render, 4x toggle
+  deterministic, filter narrows to Kankani, save persists restricted ids in
+  mongo, matrix bulk toggles + Save Permissions OK, sidebar deny list
+  verified. session_token (not token) required for seeded sessions.

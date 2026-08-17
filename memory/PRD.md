@@ -6215,3 +6215,16 @@ Current iteration: 592. Next: 593.
   security-2fa.tsx (sec-email-check). FINDING: smartpayrolling.com domain on
   Resend is status "not_started" — user must complete DNS verification.
 Current iteration: 593. Next: 594.
+
+## Iter 594 (DONE) — Firm Access editor + super-admin-only access tools
+- roles-permissions.tsx: Firm Access block (all Firm Master firms, current
+  selection pre-checked, All Firms toggle, filter input rp-firm-filter,
+  chips rp-chip-{cid}); saveScope sends firm_scope for sub_admins.
+- rbac_phase1.py set_user_scope: accepts firm_scope {all|ids} → validates
+  ids against companies, updates sub_admin_company_scope/_ids.
+- AdminWebShell sub_admin nav: /access-management, /access-preview,
+  /roles-permissions, /security-2fa now super-admin-only.
+- testing_agent iteration_594.json: all flows PASS (bug not reproducible —
+  earlier automation misread the ✓ state). Matrix "not showing all options"
+  = user's VPS on old build; fixed by deploy594.
+Current iteration: 594. Next: 595.

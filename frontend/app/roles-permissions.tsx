@@ -33,6 +33,11 @@ export default function RolesPermissionsScreen() {
   const [dpSel, setDpSel] = useState<Set<string>>(new Set());
   const [brAll, setBrAll] = useState(true);
   const [dpAll, setDpAll] = useState(true);
+  // Iter 594 — firm access editor (all Firm Master firms, filterable).
+  const [firms, setFirms] = useState<any[]>([]);
+  const [fmSel, setFmSel] = useState<Set<string>>(new Set());
+  const [fmAll, setFmAll] = useState(true);
+  const [fmFilter, setFmFilter] = useState("");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3500); };
@@ -59,6 +64,15 @@ export default function RolesPermissionsScreen() {
       setDpAll(p.department_scope?.mode !== "SELECTED_DEPARTMENTS");
       setBrSel(new Set(p.branch_scope?.branch_ids || []));
       setDpSel(new Set(p.department_scope?.department_ids || []));
+      // Firm access — load the full Firm Master list, pre-select current.
+      try {
+        const c = await api<any>(`/companies`);
+        setFirms(c.companies || c || []);
+      } catch { setFirms([]); }
+      const restricted = p.firm_scope?.mode === "RESTRICTED_FIRMS";
+      setFmAll(!restricted);
+      setFmSel(new Set((p.firm_scope?.firms || []).map((f: any) => f.company_id)));
+      setFmFilter("");
       const cid = (p.firm_scope?.firms || [])[0]?.company_id || u.company_id;
       if (cid) {
         try {
@@ -114,6 +128,9 @@ export default function RolesPermissionsScreen() {
         method: "PATCH",
         body: {
           user_id: sel.user_id,
+          ...(sel.role === "sub_admin"
+            ? { firm_scope: fmAll ? { all: true } : { all: false, ids: Array.from(fmSel) } }
+            : {}),
           branch_scope: brAll ? { all: true } : { all: false, ids: Array.from(brSel) },
           department_scope: dpAll ? { all: true } : { all: false, ids: Array.from(dpSel) },
         } });
@@ -123,7 +140,7 @@ export default function RolesPermissionsScreen() {
   };
 
   const chip = (on: boolean, label: string, onPress: () => void, key: string) => (
-    <Pressable key={key} onPress={onPress}
+    <Pressable key={key} onPress={onPress} testID={`rp-chip-${key}`}
       style={[st.chip, on && { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary }]}>
       <Text style={[st.chipTxt, on && { color: "#fff" }]}>{on ? "✓ " : ""}{label}</Text>
     </Pressable>
@@ -227,6 +244,30 @@ export default function RolesPermissionsScreen() {
             </View>
 
             <View style={st.block} testID="rp-scope">
+              {sel.role === "sub_admin" ? (
+                <>
+                  <Text style={st.blockTitle}>Firm Access — from Firm Master ({firms.length})</Text>
+                  {!fmAll ? (
+                    <TextInput style={st.input} value={fmFilter} onChangeText={setFmFilter}
+                      placeholder="🔍 Filter firms…"
+                      placeholderTextColor={colors.onSurfaceTertiary}
+                      testID="rp-firm-filter" />
+                  ) : null}
+                  <View style={st.wrap}>
+                    {chip(fmAll, "All Firms", () => setFmAll(!fmAll), "fm-all")}
+                    {!fmAll && firms
+                      .filter((f: any) => !fmFilter.trim()
+                        || (f.name || "").toLowerCase().includes(fmFilter.toLowerCase()))
+                      .map((f: any) => chip(
+                        fmSel.has(f.company_id), f.name || f.company_id,
+                        () => { const s = new Set(fmSel); if (s.has(f.company_id)) s.delete(f.company_id); else s.add(f.company_id); setFmSel(s); },
+                        f.company_id))}
+                  </View>
+                  {!fmAll ? (
+                    <Text style={st.legend}>{fmSel.size} of {firms.length} firms selected</Text>
+                  ) : null}
+                </>
+              ) : null}
               <Text style={st.blockTitle}>Data Scope — Branches</Text>
               <View style={st.wrap}>
                 {chip(brAll, "All Branches", () => setBrAll(!brAll), "br-all")}

@@ -167,6 +167,28 @@ async def set_user_scope(payload: dict = Body(...),
                             detail="Scope applies to sub-admins and client users only")
     updates: Dict[str, Any] = {}
     old: Dict[str, Any] = {}
+    # Iter 594 (user request) — FIRM scope editable here too (sub-admins).
+    # {"all": true} → every firm in the Firm Master; else restricted ids.
+    if "firm_scope" in payload and target["role"] == "sub_admin":
+        fs = payload["firm_scope"]
+        if not isinstance(fs, dict):
+            raise HTTPException(status_code=400, detail="firm_scope must be an object")
+        old["firm_scope"] = {"scope": target.get("sub_admin_company_scope"),
+                             "ids": target.get("sub_admin_company_ids") or []}
+        if fs.get("all", True):
+            updates["sub_admin_company_scope"] = "all"
+            updates["sub_admin_company_ids"] = []
+        else:
+            ids = [str(x) for x in (fs.get("ids") or [])]
+            if not ids:
+                raise HTTPException(status_code=400,
+                                    detail="Select at least one firm or choose All Firms")
+            valid = await db.companies.count_documents({"company_id": {"$in": ids}})
+            if valid != len(set(ids)):
+                raise HTTPException(status_code=400, detail="Unknown firm id in firm_scope")
+            updates["sub_admin_company_scope"] = "restricted"
+            updates["sub_admin_company_ids"] = sorted(set(ids))
+        target = {**target, **updates}  # branch/dept validation uses new firms
     # firm ids the target may reach — scope ids must belong to these firms.
     if target["role"] == "sub_admin" and (target.get("sub_admin_company_scope") or "all") != "all":
         firm_ids = target.get("sub_admin_company_ids") or []

@@ -911,6 +911,13 @@ export default function AdminWebShell({ children }: Props) {
         if (r === "/employer-access-rights") return false;
         if (r === "/super-admin-access") return false;
         if (r === "/punching-api") return false;
+        // Iter 594 (user directive) — Access & Workflow security screens
+        // are SUPER-ADMIN-ONLY: users who were granted access must not see
+        // the tools that grant access.
+        if (r === "/access-management") return false;
+        if (r === "/access-preview") return false;
+        if (r === "/roles-permissions") return false;
+        if (r === "/security-2fa") return false;
         // Iter 212 — user directive: Sub Super Admins get ALL features.
         // (Previously-hidden entries below are now allowed; per-button
         // menu_rights set by the super admin still apply above.)

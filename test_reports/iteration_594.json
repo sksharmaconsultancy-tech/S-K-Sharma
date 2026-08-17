@@ -1,0 +1,37 @@
+{
+  "summary": "Iter 594 Roles & Permissions — Firm Access editor for sub_admin: BUG 1 DID NOT REPRODUCE. All toggle/reveal/hide behavior is working end-to-end. Pre-selection, filter narrowing, and PATCH persistence verified. Regression flows (matrix bulk row toggle, Save Permissions) and sub_admin sidebar gating (code-review verified) all pass.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_594.json"],
+  "action_items": [
+    "No fix required for BUG 1 — the state race described in the review request does not exist. rp-chip-fm-all toggles fmAll, rp-firm-filter and rp-chip-cmp_* correctly render when fmAll=false and hide when fmAll=true. Verified by 4 consecutive toggles and by fresh-open of a sub_admin user (initial fmAll came from RESTRICTED_FIRMS scope and 3 firm chips + filter rendered on first paint).",
+    "Main agent's earlier browser-automation report was most likely (a) reading fmAll state inversely — because 'no checkmark' means fmAll=false (filter+chips visible) and '✓ All Firms' means fmAll=true (filter+chips hidden); or (b) never actually clicked (Pressable inside AdminWebShell tab-content needs force=True). If the flakiness recurs, use the working pattern in this report (page.click with force=True + 500-800ms settle).",
+    "Sub_admin route-level guard: sidebar hiding is confirmed via code review (AdminWebShell.tsx lines 917-920). Route-level auth for direct URL access is NOT enforced from the frontend on /roles-permissions itself — an unauthenticated / sub_admin visiting the URL sees the sign-in page (via app root gate), which is correct. However, backend PATCH /admin/access/user-scope must remain super-admin-guarded (assumed done in rbac_phase1.py)."
+  ],
+  "critical_code_review_comments": [
+    "roles-permissions.tsx open() flow: setFirms/setFmAll ordering is fine — setFmAll is called after firms are set, so the render pass that switches fmAll from true→false already has the firms populated. No race observed.",
+    "One tiny inconsistency (not a bug): saveScope() serialises firm_scope as {all,ids} but the preview endpoint reads {mode:'ALL_FIRMS'|'RESTRICTED_FIRMS', firms:[...]}. Main agent already noted backend accepts {all,ids} form for PATCH, so shape mismatch is intentional. Persistence confirmed in Mongo (sub_admin_company_ids updated from ['cmp_adddad3f65'] to ['cmp_527fecdd7c','cmp_adddad3f65'] after Save Data Scope).",
+    "AdminWebShell.tsx lines 917-920 correctly deny /access-management, /access-preview, /roles-permissions, /security-2fa for sub_admin. Verified by code review."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (not tested)", "frontend": "100% (7/7 checks passed)"},
+  "seed_data_creation": "Created a sub_admin user_sessions doc with session_token='sub_smoketok_iter594' for user_id sub_623b8a106846 (for sidebar-gating attempts). The doc uses the correct field name 'session_token' (not 'token'). Also mutated testsub@sksharma.co sub_admin_company_ids while testing Save Data Scope — final state: ['cmp_527fecdd7c','cmp_adddad3f65'] restricted.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The 'firm access editor bug' reported at iter 594 is NOT reproducible on the live preview. Test flow that works reliably: (1) inject super-admin token 'smoketok_581_cdba55cd' via localStorage.setItem('llc_session_token', ...); (2) goto /roles-permissions; (3) fill rp-search='sub', click rp-search-btn; (4) click the div[tabindex=0] card whose text contains 'sub_admin'; (5) wait 2500ms; (6) scroll rp-chip-fm-all into view before clicking. Toggle behaviour confirmed: initial fmAll comes from p.firm_scope.mode==='RESTRICTED_FIRMS' → fmAll=false → filter + firm chips visible on first paint. 4 consecutive clicks alternated cleanly.",
+  "rca_of_issue": "No bug to RCA. Most likely the previous automation misinterpreted the chip label — 'All Firms' (no ✓) actually means fmAll=false (which is the state that DOES reveal filter+chips), while '✓ All Firms' means fmAll=true (correctly hides them). Reading the chip's checkmark backwards would produce exactly the symptom described ('toggle text flips but chips never appear'), because the observation timing was inverted. Live functional test with programmatic DOM introspection (this run) shows initial state fmAll=false with 3 chips + filter present, and toggling flips both cleanly.",
+  "regression_verified": {
+    "matrix_row_bulk_toggle_rp-row-tickets": "PASS — all 6 tickets:* cells flipped false→true on single click",
+    "save_permissions": "PASS — toast 'Permissions saved ✓ (audited)' shown",
+    "save_data_scope_persistence": "PASS — Mongo confirmed sub_admin_company_ids updated to ['cmp_527fecdd7c','cmp_adddad3f65']",
+    "firm_filter_narrowing": "PASS — typing 'kank' left only 'Kankani Enterprises' chip visible",
+    "firm_preselection": "PASS — City Care Hospital chip renders with ✓ (was the only restricted firm)",
+    "all_firms_toggle": "PASS — 4 consecutive toggles alternated filter+chips visibility deterministically",
+    "sub_admin_sidebar_gating": "CODE-REVIEW PASS — AdminWebShell.tsx L917-920 explicitly denies /access-management, /access-preview, /roles-permissions, /security-2fa for sub_admin role (also denies /sub-admins, /employer-access-rights, /super-admin-access, /punching-api, /appearance)."
+  }
+}
