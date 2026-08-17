@@ -750,3 +750,11 @@ ITER 487 (doc-expiry alerts):
   already auto-submitted (unchanged).
 - Screenshot-verified: mic renders/toggles, listening state visible, text
   command regression OK.
+
+## Iter 591 — Full Permission Matrix + client-user OTP login (2026-06)
+- Matrix UI screenshot-verified: 16 module rows with labels, bulk row ALL
+  toggle (tickets row all ✓ after one tap), column headers tappable.
+- OTP: curl-verified admin@kankani.local password login → twofa_required
+  challenge (email/whatsapp/sms methods); wrong OTP → "Invalid OTP" with
+  attempt tracking; twofa_pending doc hashed. Employee logins unaffected.
+- Deploy script: /app/deploy_vps_iter591.sh (kind=script serves 591).

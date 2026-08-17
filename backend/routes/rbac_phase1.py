@@ -15,12 +15,28 @@ from shared.authz import get_effective_access
 
 router = APIRouter(prefix="/api")
 
-# Modules shown in the Access Preview matrix (existing permission keys).
-PREVIEW_MODULES = [
-    "employees", "attendance_policy", "punch_approvals", "salary_process",
-    "compliance", "reports", "masters", "biometric_devices", "tickets",
-    "messages", "company_requests", "user_management",
-]
+# Modules shown in the Access Preview / Roles & Permissions matrix.
+# Iter 591 (user request) — the FULL catalog: every module × every action
+# (View/Add/Edit/Delete/Export/Approve) is visible and editable.
+MODULE_LABELS = {
+    "employees": "Employee Master",
+    "attendance_policy": "Attendance Policy",
+    "attendance_review": "Attendance Review & Reports",
+    "punch_approvals": "Punch / Shift Approvals",
+    "salary_process": "Salary Processing (Actual)",
+    "compliance_salary": "Compliance Salary",
+    "compliance": "PF / ESIC / Challans",
+    "reports": "Reports & Downloads",
+    "masters": "General Masters",
+    "companies": "Firm Master",
+    "biometric_devices": "Biometric Devices",
+    "portal_credentials": "Portal Credentials",
+    "company_requests": "Client Requests",
+    "tickets": "Tickets / Support",
+    "messages": "Messages",
+    "user_management": "User Management",
+}
+PREVIEW_MODULES = list(MODULE_LABELS.keys())
 
 
 def _now() -> str:
@@ -229,6 +245,7 @@ async def access_preview(user_id: str,
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
     out = await get_effective_access(db, target, PREVIEW_MODULES)
+    out["module_labels"] = MODULE_LABELS
     # resolve branch/department names for display
     for key, coll, id_field in (("branch_scope", db.branches, "branch_id"),
                                 ("department_scope", db.departments, "department_id")):

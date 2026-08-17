@@ -6159,3 +6159,23 @@ Current iteration: 590. Next: 591.
 - Mic + SpeechRecognition auto-submit added to ai-command-center.tsx
   (floating assistant already had it). Hands-free voice navigation works
   with the Iter 590 direct-navigation engine.
+
+## Iter 591 (DONE) — Full Permission Matrix + OTP login for client users
+- rbac_phase1.py: MODULE_LABELS catalog (16 modules incl. attendance_review,
+  compliance_salary, companies, portal_credentials) — PREVIEW_MODULES now
+  derives from it; access-preview response carries module_labels.
+- roles-permissions.tsx: friendly labels + technical key, VIEW(R)/EDIT(W)
+  headers, per-column bulk toggle (rp-col-*), per-module ALL toggle
+  (rp-row-*), legend. All 6 actions editable on every module.
+- 2FA/OTP for client users: _TWOFA_DEFAULTS.mandatory_roles now includes
+  company_admin + company_staff (super/sub stay hard-mandatory; client
+  roles editable via Security 2FA settings). Existing challenge engine
+  (_start_2fa_challenge) is role-generic — verified live: Kankani company
+  admin password login returns twofa_required + pending_token + methods;
+  wrong OTP rejected with attempts tracking. Linked staff & employee PWA
+  logins unchanged. DB migration for customised settings docs included in
+  deploy591 notes (preview DB had no override doc).
+- NOTE: preview Resend key only delivers to sksharmaconsultancy@gmail.com;
+  live VPS uses verified smartpayrolling.com sender → client OTPs deliver.
+- Deploy: /app/deploy_vps_iter591.sh (kind=script serves 591).
+Current iteration: 591. Next: 592.

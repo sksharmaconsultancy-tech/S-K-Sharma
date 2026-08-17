@@ -5174,7 +5174,10 @@ import secrets as _twofa_secrets  # noqa: E402
 
 _TWOFA_DEFAULTS = {
     "key": "2fa",
-    "mandatory_roles": ["super_admin", "sub_admin"],
+    # Iter 591 (user request) — OTP login applies to ALL portal users
+    # managed under Access & Workflow Management: client admins and client
+    # staff too, not just Super/Sub admins.
+    "mandatory_roles": ["super_admin", "sub_admin", "company_admin", "company_staff"],
     "otp_length": 6,
     # Iter 571 — per user request: OTP valid 2 minutes, resend after 2 minutes.
     "otp_validity_min": 2,
@@ -10021,7 +10024,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "590"
+APP_ITERATION = "591"
 
 
 @api.get("/version")

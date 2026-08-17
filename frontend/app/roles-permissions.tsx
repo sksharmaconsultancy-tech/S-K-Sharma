@@ -25,6 +25,7 @@ export default function RolesPermissionsScreen() {
   const [users, setUsers] = useState<any[]>([]);
   const [sel, setSel] = useState<any>(null);
   const [matrix, setMatrix] = useState<Record<string, Record<string, boolean>>>({});
+  const [labels, setLabels] = useState<Record<string, string>>({});
   const [sensitive, setSensitive] = useState(false);
   const [branches, setBranches] = useState<any[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
@@ -52,6 +53,7 @@ export default function RolesPermissionsScreen() {
       const p = await api<any>(`/admin/access-preview/${u.user_id}`);
       setSel({ ...u, preview: p });
       setMatrix(JSON.parse(JSON.stringify(p.matrix || {})));
+      setLabels(p.module_labels || {});
       setSensitive(!!p.sensitive_data_view);
       setBrAll(p.branch_scope?.mode !== "SELECTED_BRANCHES");
       setDpAll(p.department_scope?.mode !== "SELECTED_DEPARTMENTS");
@@ -74,6 +76,20 @@ export default function RolesPermissionsScreen() {
 
   const toggleCell = (m: string, a: string) =>
     setMatrix((prev) => ({ ...prev, [m]: { ...prev[m], [a]: !prev[m]?.[a] } }));
+
+  // Iter 591 — bulk toggles: whole module row / whole action column.
+  const toggleRow = (m: string) =>
+    setMatrix((prev) => {
+      const on = !ACTIONS.every((a) => prev[m]?.[a]);
+      return { ...prev, [m]: Object.fromEntries(ACTIONS.map((a) => [a, on])) };
+    });
+  const toggleCol = (a: string) =>
+    setMatrix((prev) => {
+      const on = !Object.keys(prev).every((m) => prev[m]?.[a]);
+      const next: any = {};
+      Object.keys(prev).forEach((m) => { next[m] = { ...prev[m], [a]: on }; });
+      return next;
+    });
 
   const savePerms = async () => {
     if (!sel) return;
@@ -151,14 +167,33 @@ export default function RolesPermissionsScreen() {
             <Text style={st.name}>{sel.name} · {sel.role}</Text>
 
             <View style={st.block} testID="rp-matrix">
-              <Text style={st.blockTitle}>Module / Action Permissions</Text>
+              <Text style={st.blockTitle}>Module / Action Permissions — full catalog</Text>
+              <Text style={st.legend}>
+                R = View · W = Add/Edit · plus Delete / Export / Approve.
+                Tap any cell to toggle. Tap a column header to grant/revoke
+                that action on ALL modules, or a module&apos;s ALL to grant/revoke
+                everything for it.
+              </Text>
               <View style={st.mRow}>
                 <Text style={[st.mHead, { flex: 2, textAlign: "left" }]}>Module</Text>
-                {ACTIONS.map((a) => <Text key={a} style={st.mHead}>{a.slice(0, 4).toUpperCase()}</Text>)}
+                {ACTIONS.map((a) => (
+                  <Pressable key={a} style={[st.mCell, { alignItems: "center" }]}
+                    onPress={() => toggleCol(a)} testID={`rp-col-${a}`}>
+                    <Text style={[st.mHead, { textDecorationLine: "underline" }]}>
+                      {a === "view" ? "VIEW (R)" : a === "edit" ? "EDIT (W)" : a.slice(0, 4).toUpperCase()}
+                    </Text>
+                  </Pressable>
+                ))}
+                <Text style={st.mHead}>ALL</Text>
               </View>
               {Object.entries(matrix).map(([m, acts]: any) => (
                 <View key={m} style={st.mRow}>
-                  <Text style={[st.mCell, { flex: 2, textAlign: "left" }]}>{m}</Text>
+                  <View style={{ flex: 2 }}>
+                    <Text style={[st.mCell, { textAlign: "left", fontWeight: "700" }]}>
+                      {labels[m] || m}
+                    </Text>
+                    <Text style={st.mKey}>{m}</Text>
+                  </View>
                   {ACTIONS.map((a) => (
                     <Pressable key={a} style={[st.mCell, { alignItems: "center" }]}
                       onPress={() => toggleCell(m, a)} testID={`rp-${m}-${a}`}>
@@ -167,6 +202,15 @@ export default function RolesPermissionsScreen() {
                       </Text>
                     </Pressable>
                   ))}
+                  <Pressable style={[st.mCell, { alignItems: "center" }]}
+                    onPress={() => toggleRow(m)} testID={`rp-row-${m}`}>
+                    <Text style={{
+                      color: ACTIONS.every((a) => acts[a]) ? "#16A34A" : colors.onSurfaceTertiary,
+                      fontWeight: "800", fontSize: 10.5,
+                    }}>
+                      {ACTIONS.every((a) => acts[a]) ? "✓ ALL" : "ALL"}
+                    </Text>
+                  </Pressable>
                 </View>
               ))}
               <Pressable style={st.senRow} onPress={() => setSensitive(!sensitive)} testID="rp-sensitive">
@@ -247,6 +291,8 @@ const st = StyleSheet.create({
   mRow: { flexDirection: "row", alignItems: "center", paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: colors.border },
   mHead: { flex: 1, fontSize: 10, fontWeight: "800", color: colors.onSurfaceTertiary, textAlign: "center" },
   mCell: { flex: 1, fontSize: 11.5, color: colors.onSurface },
+  mKey: { fontSize: 9, color: colors.onSurfaceTertiary },
+  legend: { fontSize: 10.5, color: colors.onSurfaceTertiary, lineHeight: 15 },
   senRow: {
     flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8,
     padding: 10, borderWidth: 1, borderColor: "#FDE68A", borderRadius: radius.md,
