@@ -378,3 +378,73 @@ async def update_security_settings(payload: dict, request: Request,
     await _twofa_audit(admin, "2FA_SETTINGS_UPDATED", request, True,
                        ", ".join(sorted(k for k in upd if k not in ("updated_at", "updated_by"))))
     return {"ok": True}
+
+
+@router.post("/admin/security-settings/email-check")
+async def email_deliverability_check(authorization: Optional[str] = Header(None)):
+    """Iter 593 — one-button OTP email deliverability self-check.
+    Reports exactly why registered users may not receive OTP mails:
+    Resend key present? Which FROM address? Domains verified on the
+    account? SMTP fallback configured? Then test-sends to the admin."""
+    import httpx
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin"])
+    key = os.getenv("RESEND_API_KEY", "").strip()
+    from_email = os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev").strip()
+    from_domain = from_email.split("@")[-1].lower()
+    checks: list = []
+    advice: list = []
+    domains: list = []
+    checks.append({"name": "Resend API key configured", "ok": bool(key)})
+    if key:
+        try:
+            async with httpx.AsyncClient(timeout=15) as cl:
+                r = await cl.get("https://api.resend.com/domains",
+                                 headers={"Authorization": f"Bearer {key}"})
+            if r.status_code == 200:
+                domains = [{"name": d.get("name"), "status": d.get("status")}
+                           for d in (r.json().get("data") or [])]
+        except Exception as exc:  # noqa: BLE001
+            checks.append({"name": "Resend API reachable", "ok": False, "detail": str(exc)[:120]})
+    verified = [d["name"] for d in domains if d.get("status") == "verified"]
+    checks.append({"name": "Verified domain on Resend account", "ok": bool(verified),
+                   "detail": ", ".join(verified) if verified
+                   else "NO verified domains — Resend is in TEST mode (delivers only to the account owner's email)"})
+    from_ok = from_domain in [v.lower() for v in verified]
+    checks.append({"name": f"FROM address uses a verified domain ({from_email})",
+                   "ok": from_ok})
+    if not verified:
+        advice.append("Verify your domain at resend.com/domains (add the DKIM/SPF DNS records), "
+                      "then set RESEND_FROM_EMAIL=no-reply@<your-domain> in backend/.env and restart.")
+    elif not from_ok:
+        advice.append(f"Change RESEND_FROM_EMAIL to an address on: {', '.join(verified)}.")
+    # SMTP fallback status
+    smtp_ok = False
+    try:
+        from routes.email_notifications import _get_settings as _smtp_get
+        smtp = await _smtp_get()
+        smtp_ok = bool(smtp and smtp.get("enabled") and smtp.get("username"))
+    except Exception:
+        pass
+    st = await _twofa_settings()
+    checks.append({"name": "Own SMTP configured (Email Settings)", "ok": smtp_ok})
+    checks.append({"name": "'Send OTP via own SMTP' toggle", "ok": bool(st.get("otp_email_via_smtp")),
+                   "detail": "ON — OTPs bypass Resend limits" if st.get("otp_email_via_smtp")
+                   else "OFF"})
+    if not smtp_ok and not verified:
+        advice.append("Quick fix without DNS: configure SMTP in Email Settings and switch ON "
+                      "'Send OTP via own SMTP' here — OTPs then reach every user immediately.")
+    # live test send to the requesting super admin (works even in test mode)
+    test = {"delivered": False, "error": "no key"}
+    if key:
+        from server import _send_otp_email
+        test = await _send_otp_email(admin.get("email") or "", "000000", 2)
+    checks.append({"name": f"Test email to {admin.get('email')}", "ok": bool(test.get("delivered")),
+                   "detail": str(test.get("error") or "delivered")[:160]})
+    can_deliver_to_all = (bool(verified) and from_ok) or (smtp_ok and bool(st.get("otp_email_via_smtp")))
+    verdict = ("✅ OTP emails will reach EVERY registered user."
+               if can_deliver_to_all else
+               "❌ OTP emails currently reach ONLY the Resend account owner — registered users will NOT receive them.")
+    return {"verdict": verdict, "can_deliver_to_all": can_deliver_to_all,
+            "from_email": from_email, "domains": domains,
+            "checks": checks, "advice": advice}

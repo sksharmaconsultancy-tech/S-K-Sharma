@@ -33,6 +33,16 @@ export default function Security2FAScreen() {
   const [msg, setMsg] = useState<string | null>(null);
   const [my, setMy] = useState<any>(null);
   const [st, setSt] = useState<any>(null);
+  const [emailCheck, setEmailCheck] = useState<any>(null);
+  const [emailChecking, setEmailChecking] = useState(false);
+  const runEmailCheck = async () => {
+    setEmailChecking(true);
+    try {
+      setEmailCheck(await api("/admin/security-settings/email-check", { method: "POST" }));
+    } catch (e: any) {
+      setEmailCheck({ verdict: e?.message || "Check failed", can_deliver_to_all: false, checks: [], advice: [] });
+    } finally { setEmailChecking(false); }
+  };
   const [devices, setDevices] = useState<any[]>([]);
 
   const notify = (m: string) => {
@@ -242,6 +252,33 @@ export default function Security2FAScreen() {
                   onChange={(v) => upSt({ otp_email_via_smtp: v })} />
                 <ToggleRow label="If undeliverable, forward OTP to Super Admin email" value={!!st.fallback_to_admin_email}
                   onChange={(v) => upSt({ fallback_to_admin_email: v })} />
+                {/* Iter 593 — one-button deliverability self-check */}
+                <Pressable
+                  style={{ backgroundColor: "#2563EB", borderRadius: 8, paddingVertical: 10, alignItems: "center", marginTop: 6 }}
+                  disabled={emailChecking}
+                  onPress={() => void runEmailCheck()}
+                  testID="sec-email-check">
+                  <Text style={{ color: "#fff", fontWeight: "800", fontSize: 12.5 }}>
+                    {emailChecking ? "Checking…" : "Run Email Deliverability Check"}
+                  </Text>
+                </Pressable>
+                {emailCheck ? (
+                  <View style={{ borderWidth: 1, borderColor: emailCheck.can_deliver_to_all ? "#86EFAC" : "#FCA5A5", borderRadius: 8, padding: 10, gap: 4, marginTop: 4 }}>
+                    <Text style={{ fontSize: 12.5, fontWeight: "800", color: emailCheck.can_deliver_to_all ? "#166534" : "#B91C1C" }}>
+                      {emailCheck.verdict}
+                    </Text>
+                    {emailCheck.checks.map((c: any, i: number) => (
+                      <Text key={i} style={{ fontSize: 11.5, color: "#334155" }}>
+                        {c.ok ? "✅" : "❌"} {c.name}{c.detail ? ` — ${c.detail}` : ""}
+                      </Text>
+                    ))}
+                    {emailCheck.advice.map((a: string, i: number) => (
+                      <Text key={`a${i}`} style={{ fontSize: 11.5, color: "#B45309", fontWeight: "600" }}>
+                        👉 {a}
+                      </Text>
+                    ))}
+                  </View>
+                ) : null}
                 {st.trusted_device_enabled ? (
                   <View style={styles.numGrid}>
                     <NumField label="Trusted for (days)" value={st.trusted_days} onChange={(v) => upSt({ trusted_days: v })} />

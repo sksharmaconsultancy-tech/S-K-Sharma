@@ -6207,3 +6207,11 @@ Current iteration: 592. Next: 593.
   stuck after PIN). Delivery failure root cause: Resend domain NOT verified
   (test mode, owner-only delivery) — user action needed: verify domain at
   resend.com/domains or enable "Send OTP via own SMTP" (Security · 2FA).
+
+## Iter 593 (DONE) — Email Deliverability Self-Check
+- POST /admin/security-settings/email-check (twofa.py, super admin): Resend
+  key/domains API status, FROM-domain verification, SMTP + otp_email_via_smtp
+  state, live test send; verdict + fix advice. UI button + report panel in
+  security-2fa.tsx (sec-email-check). FINDING: smartpayrolling.com domain on
+  Resend is status "not_started" — user must complete DNS verification.
+Current iteration: 593. Next: 594.

@@ -776,3 +776,8 @@ ITER 487 (doc-expiry alerts):
   after PIN entry. Now routes to /verify-2fa with delivery fields, same as
   admin-pin-login. Verified live: admin@kankani.local PIN 123456 → Verify
   Your Identity screen with the test-mode delivery warning shown.
+
+## Iter 593 — Email deliverability self-check (2026-06)
+- Endpoint verified via curl (correct ❌ verdict, 6 checks, 2 advice lines,
+  domain "not_started" surfaced); UI verified via screenshot (button →
+  full report panel). No regressions.
