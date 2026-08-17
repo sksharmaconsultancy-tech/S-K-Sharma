@@ -1421,13 +1421,18 @@ async def fetch_templates_from_device(
         ("DATA QUERY USERINFO", "Query user database"),
         ("DATA QUERY FINGERTMP", "Query fingerprint templates"),
         ("DATA QUERY BIODATA", "Query face / bio-data templates"),
+        # Iter 600 (user bug) — also pull the registered face PHOTOS so
+        # they can be synced to other machines.
+        ("DATA QUERY USERPIC", "Query registered user photos"),
+        ("DATA QUERY BIOPHOTO", "Query registered bio photos"),
     ):
         await _queue_cmd(sn, cmd, admin["user_id"], label)
     return {
         "ok": True,
         "message": (
             "Template fetch queued — the machine uploads its users, "
-            "fingerprints and face data within a minute while online. "
+            "fingerprints, face data AND registered photos within a "
+            "minute while online. "
             "Then use 'Sync FP/Face' on another machine to copy them over."
         ),
     }
@@ -1465,15 +1470,30 @@ async def sync_templates_to_device(
     templates = await db.biometric_templates.find(tq, {"_id": 0}).to_list(20000)
     templates = [t for t in templates
                  if t.get("device_serial") != device["serial_number"]]
-    if not templates:
+    # Iter 600 (user bug) — the registered FACE PHOTOS captured from other
+    # machines (USERPIC / BIOPHOTO) were NEVER included in the sync, so
+    # "photos didn't sync from machine 1 to machine 2". Push them too,
+    # skipping photos originally captured FROM this device.
+    pq: dict = {"company_id": company_id,
+                "photo_b64": {"$exists": True, "$nin": [None, ""]}}
+    if tq.get("pin"):
+        pq["pin"] = tq["pin"]
+    photos = await db.biometric_machine_users.find(
+        pq, {"_id": 0, "pin": 1, "photo_b64": 1, "photo_wire": 1,
+             "device_serial": 1},
+    ).to_list(20000)
+    photos = [p for p in photos
+              if p.get("device_serial") != device["serial_number"]]
+    if not templates and not photos:
         raise HTTPException(
             status_code=404,
-            detail="No stored templates to sync — first press 'Fetch "
-                   "FP/Face' on the machine where employees are enrolled.",
+            detail="No stored templates or photos to sync — first press "
+                   "'Fetch FP/Face' on the machine where employees are "
+                   "enrolled.",
         )
     sn = device["serial_number"]
     # Push USERINFO (name) once per PIN so the template lands on a user.
-    pins = sorted({t["pin"] for t in templates})
+    pins = sorted({t["pin"] for t in templates} | {p["pin"] for p in photos})
     emp_by_pin = {}
     async for u in db.users.find(
             {"company_id": company_id, "bio_code": {"$in": pins}},
@@ -1491,13 +1511,29 @@ async def sync_templates_to_device(
             sn, _template_to_cmd(t), admin["user_id"],
             f"Sync {t.get('kind')} template PIN {t.get('pin')}")
         queued += 1
+    # Iter 600 — queue the face photos (same wire the source machine used:
+    # USERPIC for legacy models, BIOPHOTO Type=9 for newer face devices).
+    for p in photos:
+        pb = p["photo_b64"]
+        if str(p.get("photo_wire") or "userpic").lower() == "biophoto":
+            cmd = ("DATA UPDATE BIOPHOTO "
+                   f"PIN={p['pin']}\tFileName={p['pin']}.jpg\tType=9"
+                   f"\tSize={len(pb)}\tContent={pb}")
+        else:
+            cmd = (f"DATA UPDATE USERPIC PIN={p['pin']}"
+                   f"\tSize={len(pb)}\tContent={pb}")
+        await _queue_cmd(sn, cmd, admin["user_id"],
+                         f"Sync face photo PIN {p['pin']}")
+        queued += 1
     return {
         "ok": True, "queued": queued,
         "employees": len(pins), "templates": len(templates),
+        "photos": len(photos),
         "message": (
-            f"{len(templates)} template(s) for {len(pins)} employee(s) "
-            f"queued to '{device.get('name')}' — they install within a "
-            "minute while the machine is online."
+            f"{len(templates)} template(s) + {len(photos)} face photo(s) "
+            f"for {len(pins)} employee(s) queued to "
+            f"'{device.get('name')}' — they install within a minute while "
+            "the machine is online."
         ),
     }
 

@@ -6312,3 +6312,18 @@ Current iteration: 594. Next: 595.
 - Tests PASS: unlock ok/fail logged in order, super admin 200,
   sub-admin 403. Screenshot-verified panel. deploy_vps_iter599.sh;
   APP_ITERATION="599".
+
+## Iter 600 (DONE) — Machine face-photo sync bug fix (user report)
+- Bug: photos registered on machine 1 didn't sync to machine 2. Root
+  cause: sync-templates pushed USERINFO + FP/FACE/BIODATA templates only;
+  captured USERPIC/BIOPHOTO photos (biometric_machine_users.photo_b64)
+  were never queued.
+- biometric_devices.py: sync-templates now also pushes stored face photos
+  (DATA UPDATE USERPIC / BIOPHOTO Type=9 wire per photo_wire), skips
+  photos captured from the target device, works even when an employee has
+  only a photo (no template); pins union covers photo-only users;
+  response includes "photos" count. fetch-templates also queues
+  DATA QUERY USERPIC + BIOPHOTO.
+- Tests PASS: photo queued with correct BIOPHOTO wire, source-machine
+  skip, fetch queues photo queries. deploy_vps_iter600.sh;
+  APP_ITERATION="600".
