@@ -10028,7 +10028,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "603"
+APP_ITERATION = "604"
 
 
 @api.get("/version")
@@ -13207,6 +13207,9 @@ app.include_router(webauthn_devices_router)
 # Iter 602 — secure face-punch verification flow.
 from routes.face_punch import router as face_punch_router  # noqa: E402
 app.include_router(face_punch_router)
+# Iter 604 — Expense Claims module (Phase 1).
+from routes.expense_claims import router as expense_claims_router  # noqa: E402
+app.include_router(expense_claims_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.

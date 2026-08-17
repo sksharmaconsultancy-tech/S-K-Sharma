@@ -6394,3 +6394,22 @@ Current iteration: 594. Next: 595.
   (Iter 297/374) preserves present days + manual amounts. E2E PASS
   (others 777 + pd 9.5 survived; save-rows needs FULL row set FYI).
 - deploy_vps_iter603.sh; APP_ITERATION="603".
+
+## Iter 604 (DONE) — Expense Claims Module Phase 1 (backend)
+- USER SPEC: full 29-section Expense Claims & Reimbursement module.
+  Choices: AI OCR via Emergent LLM key (gpt-5.4 vision), receipts in
+  MongoDB, default chain Manager→Accounts→Finance (configurable later).
+- routes/expense_claims.py (/api/expense/*): categories (33 defaults
+  seeded per firm, admin upsert), claims CRUD draft→submit
+  (pending_manager), claim_no EC<yymm>-nnnn, employee snapshot from users,
+  dashboard totals, attachments (PDF/JPG/PNG 5MB base64 Mongo, auth-gated
+  download), duplicate detection 409+confirm, client_txn_id idempotency
+  (offline sync), expense_audit trail, /expense/ocr (LlmChat ImageContent
+  send_message → strict JSON extract).
+- Tests: 11/11 PASS + OCR extracted synthetic hotel receipt 100%.
+- STATUSES list ready for Phases 2-3: pending_accounts/pending_finance/
+  returned/approved/payment_pending/processing/paid/cancelled.
+- deploy_vps_iter604.sh; APP_ITERATION="604".
+- NEXT (Phase 1b-2): employee PWA screen (dashboard cards, new claim form
+  with camera/upload + OCR confirm), manager approval screen, workflow
+  config, no-self-approval, notifications via existing engine.
