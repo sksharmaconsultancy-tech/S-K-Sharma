@@ -1579,6 +1579,9 @@ export default function ComplianceSalaryRunScreen() {
           const floorPct = Number(stat.stat_wage_floor_pct ?? 50) / 100;
           const wageRuleOn = stat.wage_definition_rule_enabled !== false;
           const pfCap = Number(stat.pf_wage_cap ?? 15000);
+          // Iter 597 — Contractor Wage-Based PF mirror (utils/compliance_salary.py).
+          const contractorOn = String(stat.contractor_pf_mode || "standard") === "contractor_wage_based";
+          const contractorFixed = String(stat.contractor_partial_month_rule || "adopted_wage") === "adopted_wage";
           const grossEarn = Number(next.gross_paid || 0);
           const monthDays2 = Math.max(1, Number((prev as any).month_days) || 30);
           const ratio2 = Math.min(1, (Number(next.present_days) || 0) / monthDays2);
@@ -1608,13 +1611,19 @@ export default function ComplianceSalaryRunScreen() {
             const hiWage1 = Number((next as any).higher_pf_wage || 0);
             const pfWages = hiActive1
               ? (hiWage1 > 0
-                ? (next.salary_mode === "monthly" ? hiWage1 * ratio2 : hiWage1)
+                ? (contractorOn && contractorFixed
+                  ? hiWage1 // Iter 597 Rule 4 — fixed adopted wage (company policy)
+                  : (next.salary_mode === "monthly" ? hiWage1 * ratio2 : hiWage1))
                 : (pfBasicFull > 0
-                  ? pfBasicPro
+                  ? (contractorOn && contractorFixed ? pfBasicMonth : pfBasicPro)
                   : Math.max(pfBase, Number(next.basic || 0), grossEarn * floorPct)))
               : (next.intl_worker
                 ? pfBase
-                : (pfBasicMonth > pfCap ? pfBasicPro : Math.min(pfBase, pfCap)));
+                // Iter 597 Rules 1-3 — contractor mode: PF on the earned PF
+                // Basic only (no 50% floor), capped at the ceiling.
+                : contractorOn
+                  ? Math.min(pfBasicPro, pfCap)
+                  : (pfBasicMonth > pfCap ? pfBasicPro : Math.min(pfBase, pfCap)));
             const pfEmpRate = Number(stat.pf_percent_employee ?? 12) / 100;
             const pfErEpfRate = Number(stat.pf_percent_employer_epf ?? 3.67) / 100;
             const pfErEpsRate = Number(stat.pf_percent_employer_eps ?? 8.33) / 100;
@@ -1773,6 +1782,9 @@ export default function ComplianceSalaryRunScreen() {
         const grossEarn = grossPaid + Number((r as any).ot_pay || 0);
         // Iter 387 — Wage Definition Rule switch mirrors the engine.
         const wageRuleOn = stat.wage_definition_rule_enabled !== false;
+        // Iter 597 — Contractor Wage-Based PF mirror (utils/compliance_salary.py).
+        const contractorOn2 = String(stat.contractor_pf_mode || "standard") === "contractor_wage_based";
+        const contractorFixed2 = String(stat.contractor_partial_month_rule || "adopted_wage") === "adopted_wage";
         const pfBase = pfBasicMonth < pfCap && wageRuleOn
           ? Math.max(pfBasicPro, grossEarn * floorPct)
           : pfBasicPro;
@@ -1790,12 +1802,18 @@ export default function ComplianceSalaryRunScreen() {
         const pfWagesNew = pfOn
           ? (hiActive
             ? (hiWageFull > 0
-              ? ((r as any).salary_mode === "monthly" ? hiWageFull * ratio : hiWageFull)
+              ? (contractorOn2 && contractorFixed2
+                ? hiWageFull // Iter 597 Rule 4 — fixed adopted wage (company policy)
+                : ((r as any).salary_mode === "monthly" ? hiWageFull * ratio : hiWageFull))
               : (pfBasicFull > 0
-                ? pfBasicPro
+                ? (contractorOn2 && contractorFixed2 ? pfBasicMonth : pfBasicPro)
                 : Math.max(pfBase, paidBasic, grossEarn * floorPct)))
             : ((r as any).intl_worker
               ? pfBase
+              // Iter 597 Rules 1-3 — contractor mode: PF on the earned PF
+              // Basic only (no 50% floor), capped at the ceiling.
+              : contractorOn2
+                ? Math.min(pfBasicPro, pfCap)
               // Iter 456 (user final PF Engine spec) — PF Basic ABOVE the
               // ceiling = ADOPTED Higher PF: PF on the FULL earned PF Basic
               // (no cap). Below/at the ceiling: PF wage = max(earned PF

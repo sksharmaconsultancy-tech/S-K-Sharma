@@ -6269,3 +6269,23 @@ Current iteration: 594. Next: 595.
   portal-upload-jobs) inherit merging automatically. Tested: single 200,
   merged 200 (55 deduped rows), merged ecr.txt download 200.
 - deploy_vps_iter596.sh; APP_ITERATION="596"; screenshot-verified UI.
+
+## Iter 597 (DONE) — Contractor PF Calculation Rule (user spec)
+- New PF Settings (global + per-firm via _CHOICE_FIELDS in
+  compliance_settings.py): contractor_pf_mode (standard |
+  contractor_wage_based, default standard) + contractor_partial_month_rule
+  (adopted_wage default | earned_wage).
+- Engine (utils/compliance_salary.py): contractor mode = PF strictly on
+  EARNED PF Basic (no 50% floor). Rule 2 earned≥cap→cap; Rule 3 partial→
+  actual earned; Rule 4 Adopt-PF partial→fixed adopted wage (company
+  policy default) or earned (option); Rule 5 reverse/freeze-gross flows
+  inherit automatically. pf_reason + calc_snapshot annotated.
+- Frontend: compliance-settings.tsx "Contractor PF Calculation" section
+  (chips, partial sub-setting disabled unless wage-based); grid client
+  recompute mirrors (updateRow + updatePresentDays) in
+  compliance-salary-run.tsx.
+- Tests: test_contractor_pf_597.py — ALL PASS incl. spec examples
+  (18000/30d→1800, 18000/12d→864, employer split 600/264) and standard-mode
+  regressions. Settings API round-trip PASS (default/firm override/400 on
+  bad value/clear). Screenshot-verified UI.
+- deploy_vps_iter597.sh; APP_ITERATION="597".

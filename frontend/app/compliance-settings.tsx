@@ -157,6 +157,9 @@ export default function ComplianceSettingsScreen() {
       }
       f.pf_proration_method = settings?.pf_proration_method || "calendar_days";
       f.esic_proration_method = settings?.esic_proration_method || "calendar_days";
+      // Iter 597 (user spec) — Contractor PF Calculation Rule.
+      f.contractor_pf_mode = (settings as any)?.contractor_pf_mode || "standard";
+      f.contractor_partial_month_rule = (settings as any)?.contractor_partial_month_rule || "adopted_wage";
       f.rule_version = settings?.rule_version || "";
       f.head_mapping = settings?.head_mapping && typeof settings.head_mapping === "object"
         ? { ...DEFAULT_HM, ...settings.head_mapping }
@@ -181,6 +184,9 @@ export default function ComplianceSettingsScreen() {
         // Iter 387 — module switches / proration / rule version / mapping.
         pf_proration_method: form.pf_proration_method,
         esic_proration_method: form.esic_proration_method,
+        // Iter 597 — Contractor PF Calculation Rule.
+        contractor_pf_mode: form.contractor_pf_mode || "standard",
+        contractor_partial_month_rule: form.contractor_partial_month_rule || "adopted_wage",
         rule_version: String(form.rule_version || ""),
         head_mapping: form.head_mapping || DEFAULT_HM,
       };
@@ -490,6 +496,67 @@ export default function ComplianceSettingsScreen() {
               <Text style={styles.hint}>
                 Proration: Calendar = present ÷ days-in-month (default) · Working = ÷26 ·
                 Attendance = ÷30 · Paid Days = full wages when any day is paid · No Proration = always full.
+              </Text>
+            </Section>
+
+            {/* Iter 597 (user spec) — Contractor PF Calculation Rule. */}
+            <Section title="Contractor PF Calculation" icon="construct-outline">
+              <View style={styles.fieldRow}>
+                <Text style={styles.fieldLbl}>Contractor PF Calculation Rule</Text>
+                <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
+                  {[
+                    { v: "standard", l: "Standard EPF Calculation" },
+                    { v: "contractor_wage_based", l: "Contractor Wage-Based PF" },
+                  ].map((o) => (
+                    <Pressable
+                      key={o.v}
+                      disabled={!isSuper}
+                      onPress={() => setForm((p) => ({ ...p, contractor_pf_mode: o.v }))}
+                      style={[styles.chip, form.contractor_pf_mode === o.v && styles.chipActive]}
+                      testID={`cs-contractor-mode-${o.v}`}
+                    >
+                      <Text style={[styles.chipTxt, form.contractor_pf_mode === o.v && styles.chipTxtActive]}>{o.l}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+              <Text style={styles.hint}>
+                Wage-Based mode (contractor firms): PF strictly on the EARNED Basic+DA —
+                full period at/above the ₹15,000 ceiling → PF wage = ceiling (max ₹1,800);
+                partial period (LOP / mid-month joining or exit / fewer days) → PF on the
+                ACTUAL earned PF wage (e.g. ₹18,000 basic, 12 of 30 days → earned ₹7,200 →
+                PF ₹864). The 50% wage-definition floor does NOT apply in this mode.
+                Employer EPF/EPS split and EPS ceiling follow the existing rules.
+              </Text>
+              <View style={styles.fieldRow}>
+                <Text style={styles.fieldLbl}>During Partial Month (Adopt-PF employees)</Text>
+                <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
+                  {[
+                    { v: "earned_wage", l: "Actual Earned PF Wage (Recommended)" },
+                    { v: "adopted_wage", l: "Adopted/Fixed PF Wage (Company Policy)" },
+                  ].map((o) => (
+                    <Pressable
+                      key={o.v}
+                      disabled={!isSuper || form.contractor_pf_mode !== "contractor_wage_based"}
+                      onPress={() => setForm((p) => ({ ...p, contractor_partial_month_rule: o.v }))}
+                      style={[
+                        styles.chip,
+                        form.contractor_partial_month_rule === o.v && styles.chipActive,
+                        form.contractor_pf_mode !== "contractor_wage_based" && { opacity: 0.45 },
+                      ]}
+                      testID={`cs-contractor-partial-${o.v}`}
+                    >
+                      <Text style={[styles.chipTxt, form.contractor_partial_month_rule === o.v && styles.chipTxtActive]}>{o.l}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+              <Text style={styles.hint}>
+                Applies to employees marked Higher / Adopt PF while Wage-Based mode is ON:
+                ‘Actual Earned’ prorates the adopted PF wage by attendance; ‘Adopted/Fixed’
+                (default) continues contributions on the full adopted wage regardless of
+                attendance. Reverse / Freeze-gross firms: Freeze Gross stays unchanged —
+                only the PF wage follows these rules.
               </Text>
             </Section>
 

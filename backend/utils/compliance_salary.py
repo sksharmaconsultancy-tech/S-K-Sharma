@@ -104,6 +104,17 @@ DEFAULT_STATUTORY_CFG: Dict[str, Any] = {
                                 # longer gates Higher PF on this switch.
     "allow_vpf": True,          # permit Voluntary PF (employee side only)
     "vpf_max_percent": 0.0,     # 0 = no company limit on VPF %
+    # Iter 597 (user spec) — Contractor PF Calculation Rule (PF Settings):
+    #   standard              → existing EPF calculation (default)
+    #   contractor_wage_based → PF strictly on the EARNED Basic+DA:
+    #     earned ≥ ceiling → PF wage = ceiling; earned < ceiling (LOP /
+    #     partial month / mid-month join-exit) → PF on the ACTUAL earned wage.
+    "contractor_pf_mode": "standard",
+    # Sub-rule for Adopt-PF employees during PARTIAL months (contractor mode):
+    #   adopted_wage → continue on the FIXED adopted wage regardless of
+    #                  attendance (company policy, default per user spec)
+    #   earned_wage  → PF on the actual earned adopted wage (recommended)
+    "contractor_partial_month_rule": "adopted_wage",
     # head_mapping default is None → DEFAULT_HEAD_MAPPING applies.
 }
 
@@ -135,6 +146,8 @@ _CFG_PASSTHRU_KEYS = (
     "esic_proration_method", "rule_version", "head_mapping", "_salary_month",
     # Iter 408 — Higher PF / VPF company policy flags.
     "allow_higher_pf", "allow_vpf",
+    # Iter 597 — Contractor PF Calculation Rule.
+    "contractor_pf_mode", "contractor_partial_month_rule",
 )
 
 
@@ -706,6 +719,12 @@ def compute_compliance_row(
     _pf_type = str(user.get("pf_contribution_type") or "statutory").lower()
     _hi_active = False
     _hi_reason = ""
+    # Iter 597 (user spec) — Contractor Wage-Based PF mode + partial-month
+    # policy (from PF Settings, global or per-firm). Note kept for the
+    # pf_reason / "View Calculation" layers.
+    _contractor_on = str(cfg.get("contractor_pf_mode") or "standard").lower() == "contractor_wage_based"
+    _contractor_partial = str(cfg.get("contractor_partial_month_rule") or "adopted_wage").lower()
+    _contractor_note = ""
     if pf_applicable:
         # Iter 471 — DAILY / HOURLY rate basis: the PF Basic on the master
         # is a PER-DAY / PER-HOUR figure. Earned PF Basic = rate × days
@@ -771,17 +790,54 @@ def compute_compliance_row(
             #   2. PF Basic filled → PF on the EARNED PF Basic (no ceiling).
             #   3. Neither → actual wage base (max(Basic, floor% Gross)).
             if _hi_wage > 0:
-                _fct = (_proration_factor(
-                    pf_proration_method, effective_present,
-                    max(1, month_days)) if salary_mode == "monthly" else 1.0)
-                capped_pf_wages = _hi_wage * _fct
+                if _contractor_on and _contractor_partial == "adopted_wage":
+                    # Iter 597 Rule 4 (company policy) — FIXED adopted wage
+                    # regardless of attendance / LOP.
+                    capped_pf_wages = _hi_wage
+                    _contractor_note = ("Rule 4 — adopted PF Wage kept FIXED "
+                                        "regardless of attendance (company policy)")
+                else:
+                    _fct = (_proration_factor(
+                        pf_proration_method, effective_present,
+                        max(1, month_days)) if salary_mode == "monthly" else 1.0)
+                    capped_pf_wages = _hi_wage * _fct
+                    if _contractor_on:
+                        _contractor_note = ("Rule 4 — PF on the EARNED adopted "
+                                            "PF Wage (partial attendance)")
             elif pf_basic_override > 0:
-                capped_pf_wages = pf_basic_prorated
+                if _contractor_on and _contractor_partial == "adopted_wage":
+                    capped_pf_wages = _pf_basic_month
+                    _contractor_note = ("Rule 4 — adopted PF Basic kept FIXED "
+                                        "regardless of attendance (company policy)")
+                else:
+                    capped_pf_wages = pf_basic_prorated
+                    if _contractor_on:
+                        _contractor_note = ("Rule 4 — PF on the EARNED PF Basic "
+                                            "(partial attendance)")
             else:
                 capped_pf_wages = max(pf_base, stat_wage_base)
         else:
             if _intl_worker:
                 capped_pf_wages = pf_base
+            elif _contractor_on:
+                # Iter 597 (user spec) — CONTRACTOR WAGE-BASED PF (Rules 1-3):
+                # PF strictly on the EARNED Basic+DA (PF Basic) of the wage
+                # period — the 50% wage-definition floor does NOT apply.
+                #   Rule 2 — earned ≥ ceiling → PF wage = ceiling (max PF)
+                #   Rule 3 — earned < ceiling (LOP / partial month / mid-month
+                #            join or exit) → PF on the ACTUAL earned PF wage.
+                if pf_basic_prorated >= cfg["pf_wage_cap"]:
+                    capped_pf_wages = cfg["pf_wage_cap"]
+                    _contractor_note = (
+                        f"Rule 2 — earned PF wage ₹{pf_basic_prorated:,.0f} at/above "
+                        f"the ceiling → maximum statutory contribution")
+                else:
+                    capped_pf_wages = pf_basic_prorated
+                    _contractor_note = (
+                        "Rule 3 — PARTIAL period (LOP / fewer days): PF on the "
+                        "ACTUAL earned PF wage"
+                        if _pf_basic_month >= cfg["pf_wage_cap"]
+                        else "Rule 1 — PF on the earned Basic+DA (below ceiling)")
             elif _pf_basic_month > cfg["pf_wage_cap"]:
                 # Iter 456 (user final PF Engine spec) — PF Basic FILLED
                 # ABOVE the ₹15,000 ceiling on the Employee Master = ADOPTED
@@ -1167,8 +1223,12 @@ def compute_compliance_row(
                 + (" (no ceiling — International Worker)" if user.get("intl_worker")
                    else (f" (capped from ₹{pf_base:,.0f} at ₹{cfg['pf_wage_cap']:,.0f})"
                          if pf_base > capped_pf_wages + 0.5 else ""))
+                + (f"; CONTRACTOR WAGE-BASED PF — {_contractor_note}"
+                   if _contractor_note else "")
                 + (f"; floor rule max(PF Basic ₹{pf_basic_prorated:,.0f}, "
-                   f"{floor_pct:g}% of Gross)" if (wage_rule_on and _pf_basic_month < cfg["pf_wage_cap"]) else "")
+                   f"{floor_pct:g}% of Gross)"
+                   if (wage_rule_on and _pf_basic_month < cfg["pf_wage_cap"]
+                       and not _contractor_on) else "")
                 + ("; EPS on uncapped wages (Higher Pension)" if user.get("higher_pension") else "")
                 + ("; EPS = 0 (EPS Disabled)" if user.get("eps_disabled") else "")
                 + (f"; HIGHER PF — contribution on actual wages ₹{capped_pf_wages:,.0f}, "
@@ -1197,6 +1257,9 @@ def compute_compliance_row(
             "rule_version": str(cfg.get("rule_version") or ""),
             "wage_definition_rule": bool(wage_rule_on),
             "pf_proration_method": pf_proration_method,
+            # Iter 597 — Contractor PF mode snapshot for audit layers.
+            "contractor_pf_mode": ("contractor_wage_based" if _contractor_on else "standard"),
+            "contractor_partial_month_rule": _contractor_partial,
             "esic_proration_method": esic_proration_method,
             "stat_wage_floor_pct": floor_pct,
             "pf": {

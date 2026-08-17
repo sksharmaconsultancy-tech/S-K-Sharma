@@ -51,7 +51,11 @@ _BOOL_CFG_FIELDS = (
     "allow_higher_pf", "allow_vpf",
 )
 _PRORATION_FIELDS = ("pf_proration_method", "esic_proration_method")
-_CHOICE_FIELDS: Dict[str, tuple] = {}
+_CHOICE_FIELDS: Dict[str, tuple] = {
+    # Iter 597 (user spec) — Contractor PF Calculation Rule (PF Settings).
+    "contractor_pf_mode": ("standard", "contractor_wage_based"),
+    "contractor_partial_month_rule": ("adopted_wage", "earned_wage"),
+}
 
 
 def _extract_cfg_updates(payload: Dict[str, Any], *, strict: bool) -> Dict[str, Any]:
