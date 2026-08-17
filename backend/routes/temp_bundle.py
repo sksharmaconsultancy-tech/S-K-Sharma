@@ -74,7 +74,7 @@ async def temp_code_bundle(token: str = Query(...), kind: str = Query("tar")):
     if kind == "script":
         # Latest VPS deploy script — lets the user fetch + run it in two
         # lines instead of pasting a long script into the SSH terminal.
-        path = "/app/deploy_vps_iter601.sh"
+        path = "/app/deploy_vps_iter602.sh"
         if not os.path.exists(path):
             raise HTTPException(status_code=404, detail="Deploy script not found")
         return FileResponse(path, filename="deploy594.sh",

@@ -6355,3 +6355,31 @@ Current iteration: 594. Next: 595.
   heuristic fallback), 1:1 match vs face_templates, /api/attendance/punch
   gating via verification_session; policy toggles + lockout + audit
   screen (Phases 3-4).
+
+## Iter 602 (DONE) — Secure Punch Phase 2: liveness + anti-spoof + 1:1 match
+- utils/anti_spoof.py: PAD heuristics (FFT moire ring ratio >0.62 penalty,
+  saturation flatness <18, cross-frame motion_check >=1.4) + optional ONNX
+  model hook at backend/models/antispoof.onnx.
+- routes/face_punch.py: /attendance/face-verify/start (random CENTER + 2
+  of TURN_LEFT/TURN_RIGHT/MOVE_CLOSER; requires device-auth session when
+  employee has active webauthn cred + policy), /complete (per-frame 1-face
+  quality, same-person cos>=0.45 across frames, server-verified challenges
+  via kps yaw offset delta>=0.16 / bbox 1.18x, anti-spoof mean>=0.55,
+  1:1 match pct=((cos+1)/2)*100 >= threshold 72), /policy; admin audit GET
+  /admin/attendance/punch-verification-audit. Lockout: 3 fails → 30min
+  (punch_verification_lock), audit → punch_verification_audit.
+- attendance_core.py punch gate: firm flag secure_face_punch_enabled →
+  requires unexpired unused session with all passes; marks used; stores
+  secure_verification summary on record. AttendancePunch +=
+  verification_session_id.
+- app/secure-punch.tsx: employee flow device→camera→challenges→verify→
+  punch (web geolocation), success/rejection screens per spec.
+- test_face_punch_602.py 8/8 PASS (genuine 100%, wrong person 53.3%
+  rejected, gate 403, lockout 429, audit rows). Firm flags for Phase 3 UI:
+  secure_face_punch_enabled, face_match_threshold_pct,
+  punch_max_failed_attempts, punch_retry_lock_minutes,
+  secure_punch_webauthn_required, secure_punch_liveness,
+  secure_punch_anti_spoof. deploy_vps_iter602.sh; APP_ITERATION="602".
+- NEXT (Phase 3-4): Attendance Policy toggles UI, entry buttons wiring
+  secure-punch into the employee home/PunchFlowModal when policy on,
+  audit log admin screen, real-device spoof testing by user.

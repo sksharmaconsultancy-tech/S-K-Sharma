@@ -170,6 +170,46 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
     # Iter 285 — onboarding approval gate (may 403 for unapproved staff).
     _onboarding_punch_gate(user, company)
 
+    # ------------------------------------------------------------------
+    # Iter 602 — SECURE FACE PUNCH GATE (user spec). When the firm enables
+    # secure_face_punch_enabled, the punch MUST carry a server-side
+    # verification session proving device auth + liveness + anti-spoof +
+    # 1:1 face match. The backend NEVER trusts frontend booleans.
+    # ------------------------------------------------------------------
+    verified_punch: Optional[dict] = None
+    if company.get("secure_face_punch_enabled") and payload.source != "admin_approved":
+        vs = None
+        if payload.verification_session_id:
+            vs = await db.punch_verification_sessions.find_one(
+                {"session_id": payload.verification_session_id,
+                 "user_id": user["user_id"], "used": False}, {"_id": 0})
+        _now = datetime.now(timezone.utc)
+        if (not vs or vs.get("face_match") != "pass"
+                or vs.get("liveness") != "pass"
+                or vs.get("anti_spoof") != "pass"
+                or datetime.fromisoformat(vs["expires_at"]) < _now):
+            raise HTTPException(
+                status_code=403,
+                detail="Secure verification required — complete device + "
+                       "live face verification before punching.")
+        _has_dev = await db.webauthn_credentials.count_documents(
+            {"user_id": user["user_id"], "status": "active"}) > 0
+        if _has_dev and company.get("secure_punch_webauthn_required", True) \
+                and vs.get("device_auth") != "pass":
+            raise HTTPException(
+                status_code=403,
+                detail="Device verification failed — authenticate with your "
+                       "registered device.")
+        await db.punch_verification_sessions.update_one(
+            {"session_id": vs["session_id"]},
+            {"$set": {"used": True, "used_at": now_iso()}})
+        verified_punch = {
+            "verification_session_id": vs["session_id"],
+            "device_auth": vs.get("device_auth"),
+            "liveness": "pass", "anti_spoof": "pass",
+            "face_match_score": vs.get("face_match_score"),
+        }
+
 
     # Offline-sync idempotency (Phase 2): if this exact queued punch was
     # already accepted (same client_dedupe_id), return it instead of making
@@ -551,6 +591,8 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
         "record_id": record_id,
         "user_id": user["user_id"],
         "company_id": user["company_id"],
+        # Iter 602 — secure verification summary (None when policy off).
+        "secure_verification": verified_punch,
         "branch_id": (closest or {}).get("branch_id"),
         "branch_name": (closest or {}).get("name"),
         "date": today,

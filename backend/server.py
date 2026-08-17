@@ -345,6 +345,10 @@ class AttendancePunch(BaseModel):
     biometric_method: Literal["fingerprint", "face"]
     selfie_base64: Optional[str] = None
     device_info: Optional[str] = None
+    # Iter 602 — SECURE FACE PUNCH: id of a server-side verification
+    # session (WebAuthn device auth + liveness + anti-spoof + 1:1 face
+    # match). Required when the firm enables secure_face_punch_enabled.
+    verification_session_id: Optional[str] = None
     # How the punch was triggered: "manual" (default), "manual-nogps"
     # (manual biometric punch with GPS turned off — audit-flagged),
     # "geofence-auto" (foreground/background geofence transition), or
@@ -10024,7 +10028,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "601"
+APP_ITERATION = "602"
 
 
 @api.get("/version")
@@ -13200,6 +13204,9 @@ from routes.face_verification import router as face_verification_router  # noqa:
 app.include_router(face_verification_router)
 from routes.webauthn_devices import router as webauthn_devices_router  # noqa: E402
 app.include_router(webauthn_devices_router)
+# Iter 602 — secure face-punch verification flow.
+from routes.face_punch import router as face_punch_router  # noqa: E402
+app.include_router(face_punch_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.
