@@ -697,6 +697,17 @@ export default function EmployeeMasterScreen() {
                 <Text style={styles.editAllTxt}>Edit All Details (One Page)</Text>
               </Pressable>
 
+              {/* Iter 601 — HR-only biometric face enrollment for secure punch */}
+              <Pressable
+                onPress={() => router.push(
+                  `/face-enrollment?user_id=${emp.user_id}&name=${encodeURIComponent(emp.name || "")}`)}
+                style={[styles.editAllBtn, { backgroundColor: "#7C3AED", marginTop: 8 }]}
+                testID="em-face-enroll"
+              >
+                <Ionicons name="scan-outline" size={16} color="#fff" />
+                <Text style={styles.editAllTxt}>Face Verification (Register / Status)</Text>
+              </Pressable>
+
               {/* Iter 475 — Rejoin (rehire) for separated employees */}
               {Boolean(
                 (emp as any).exit_date || (emp as any).resign_date ||

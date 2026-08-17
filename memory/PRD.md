@@ -6327,3 +6327,31 @@ Current iteration: 594. Next: 595.
 - Tests PASS: photo queued with correct BIOPHOTO wire, source-machine
   skip, fetch queues photo queries. deploy_vps_iter600.sh;
   APP_ITERATION="600".
+
+## Iter 601 (DONE) — Secure Punch Phase 1: WebAuthn Device Lock + Face Enrollment
+- USER SPEC (two large specs merged): PWA face verification + liveness +
+  anti-spoofing + WebAuthn device lock. Approved plan: self-hosted
+  InsightFace/ArcFace on VPS + dedicated anti-spoof model (NOT only
+  blink/head-turn), HR-only enrollment, employee first-device
+  self-registration, replacement via HR approval.
+- backend/routes/face_verification.py: engine (buffalo_l, lazy-load,
+  CPU), check-frame (1 face/quality gates: MIN_BLUR_VAR=28, brightness,
+  size), enroll (2-5 live samples, cross-sample cosine>=0.55 same-person,
+  md5 duplicate-frame reject, encrypted template via secrets_vault to
+  face_templates + history), status/list/disable/enable,
+  face_admin_audit log. Models at /root/.insightface (601MB local).
+- backend/routes/webauthn_devices.py (py_webauthn 3.0): register-options/
+  verify, auth-options/verify (issues punch_verification_sessions TTL 3min
+  — for Phase 3 punch), status, request-change; admin list/revoke/
+  approve-change. RP ID derived from Origin. One active device/employee.
+- Frontend: src/utils/webauthnClient.ts; app/device-security.tsx
+  (employee); app/face-enrollment.tsx (admin, expo-camera, 3 samples);
+  employee-master.tsx button "Face Verification (Register / Status)".
+- test_face_601.py: 12/12 PASS (mixed-person 422, employee 403, template
+  enc::, garbage attestation 400 etc). deploy_vps_iter601.sh includes AI
+  model warmup (~300MB download). APP_ITERATION="601".
+- NEXT (Phase 2): PunchFlowModal camera flow — random liveness challenges,
+  frame streaming, server anti-spoof (MiniFASNet ONNX to be added w/
+  heuristic fallback), 1:1 match vs face_templates, /api/attendance/punch
+  gating via verification_session; policy toggles + lockout + audit
+  screen (Phases 3-4).
