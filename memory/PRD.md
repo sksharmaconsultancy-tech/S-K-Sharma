@@ -6179,3 +6179,25 @@ Current iteration: 590. Next: 591.
   live VPS uses verified smartpayrolling.com sender → client OTPs deliver.
 - Deploy: /app/deploy_vps_iter591.sh (kind=script serves 591).
 Current iteration: 591. Next: 592.
+
+## Iter 592 (DONE) — Keyboard Shortcuts & Key Navigation (Phase 1)
+- src/utils/shortcuts.ts: central engine — single window keydown listener,
+  registerShortcuts(scope, bindings) with unregister fn, conflict warnings,
+  typing guard (bare keys blocked in inputs; ctrl/alt chords allowed),
+  listShortcuts() for the help overlay. Web-only (no-op elsewhere).
+- src/components/ShortcutHelp.tsx: searchable grouped overlay (opens via
+  "?" or the keypad header icon web-shortcuts-btn).
+- AdminWebShell: global bindings Alt+1..8 (Dashboard/Employees/Attendance/
+  Salary/Compliance Salary/Reports/Firm Master/Masters), Ctrl+K → floating
+  AI assistant (suppressed on /ai-command-center), "?" → help.
+- Security: navigation targets remain authz-gated server-side; no shortcut
+  bypasses approvals/audit/permissions. AI direct navigation (Iter 590)
+  covers spec §7.
+- Verified via automation: Alt+2 →/admin, Alt+3 →/attendance-grid, "?"
+  overlay, Ctrl+K opens assistant, typing "?" inside input does NOT fire.
+- PHASE 2 BACKLOG (user spec §3-6, §11): page-level Ctrl+S/N/E/P +
+  Ctrl+Shift+E on Employee Master, Attendance grid cell navigation +
+  configurable quick status keys (P/A/L/H/W/O), salary F5 recalc,
+  user-customisable bindings + reset-to-default.
+- Deploy: /app/deploy_vps_iter592.sh (kind=script serves 592).
+Current iteration: 592. Next: 593.

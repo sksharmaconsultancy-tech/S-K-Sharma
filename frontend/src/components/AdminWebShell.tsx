@@ -17,6 +17,8 @@ import { api, readEmployeeTokenBackup, clearEmployeeTokenBackup, saveToken } fro
 import { useAuth } from "@/src/context/AuthContext";
 import GlobalCompanyPicker from "@/src/components/GlobalCompanyPicker";
 import { useRefreshBus } from "@/src/context/RefreshBusContext";
+import { registerShortcuts } from "@/src/utils/shortcuts";
+import ShortcutHelp from "@/src/components/ShortcutHelp";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import WorkspaceTabs from "@/src/components/WorkspaceTabs";
 import { onSyncMessage } from "@/src/utils/workspaceSync";
@@ -726,6 +728,37 @@ export default function AdminWebShell({ children }: Props) {
   const [favs, setFavs] = React.useState<string[]>(() => readNavList(FAV_KEY));
   const [, setRecent] = React.useState<string[]>(() => readNavList(RECENT_KEY));
   const [aiOpen, setAiOpen] = React.useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = React.useState(false);
+  // Iter 592 — central keyboard shortcuts (web/PWA with a physical
+  // keyboard). ONE listener via src/utils/shortcuts.ts; pages can register
+  // their own scoped bindings. Navigation lands on authz-gated screens, so
+  // RBAC/approvals/audit are enforced server-side exactly like mouse use.
+  React.useEffect(() => {
+    const nav = (route: string, label: string) => ({
+      label: `Go to ${label}`, category: "Navigation",
+      handler: () => router.push(route as any),
+    });
+    const off = registerShortcuts("global", [
+      { combo: "alt+1", ...nav("/portal-dashboard", "Dashboard") },
+      { combo: "alt+2", ...nav("/admin", "Employee Master") },
+      { combo: "alt+3", ...nav("/attendance-grid", "Attendance") },
+      { combo: "alt+4", ...nav("/salary-run", "Salary Processing") },
+      { combo: "alt+5", ...nav("/compliance-salary-run", "Compliance Salary") },
+      { combo: "alt+6", ...nav("/reports?tab=salary", "Reports") },
+      { combo: "alt+7", ...nav("/companies", "Firm Master") },
+      { combo: "alt+8", ...nav("/masters", "Masters / Settings") },
+      { combo: "ctrl+k", label: "AI Assistant / Global Search", category: "Actions",
+        allowInInput: true,
+        handler: () => {
+          if (pathname === "/ai-command-center") return;
+          setAiOpen(true);
+        } },
+      { combo: "?", label: "Keyboard Shortcuts Help", category: "Help",
+        handler: () => setShortcutsOpen(true) },
+    ]);
+    return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
   const [notifOpen, setNotifOpen] = React.useState(false);
   const [helpOpen, setHelpOpen] = React.useState(false);
   // Iter 461 (Phase 2/3) — cross-tab real-time sync toast + status bar.
@@ -1536,6 +1569,15 @@ export default function AdminWebShell({ children }: Props) {
                 {formatSinceRefresh(refreshedAt)}
               </Text>
             ) : null}
+            {/* Iter 592 — Keyboard Shortcuts help (also via "?"). */}
+            <Pressable
+              onPress={() => setShortcutsOpen(true)}
+              style={({ pressed }) => [styles.notifBellBtn, pressed && { opacity: 0.85 }]}
+              testID="web-shortcuts-btn"
+              hitSlop={6}
+            >
+              <Ionicons name="keypad-outline" size={18} color={colors.accent} />
+            </Pressable>
             {/* Iter 587 — Pending Approvals badge (Maker-Checker queue). */}
             {(role === "super_admin" || role === "sub_admin" || role === "company_admin")
               && pendingApprovals > 0 ? (
@@ -1845,6 +1887,7 @@ export default function AdminWebShell({ children }: Props) {
       {pathname !== "/ai-command-center" ? (
         <AiAssistant open={aiOpen} onToggle={setAiOpen} />
       ) : null}
+      <ShortcutHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 
       {/* Iter 85 — Logout confirmation modal (Super/Sub admin only) */}
       {logoutModal ? (

@@ -758,3 +758,8 @@ ITER 487 (doc-expiry alerts):
   challenge (email/whatsapp/sms methods); wrong OTP → "Invalid OTP" with
   attempt tracking; twofa_pending doc hashed. Employee logins unaffected.
 - Deploy script: /app/deploy_vps_iter591.sh (kind=script serves 591).
+
+## Iter 592 — Keyboard Shortcuts Phase 1 (2026-06)
+- Central engine + help overlay + global Alt+1..8 / Ctrl+K / "?" verified
+  live via Playwright (nav URLs changed, overlay rendered, assistant
+  opened, typing guard held). No page-level regressions observed.
