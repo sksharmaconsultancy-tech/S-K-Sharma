@@ -6413,3 +6413,33 @@ Current iteration: 594. Next: 595.
 - NEXT (Phase 1b-2): employee PWA screen (dashboard cards, new claim form
   with camera/upload + OCR confirm), manager approval screen, workflow
   config, no-self-approval, notifications via existing engine.
+
+## Iter 605 (DONE) — Expense Claims Module COMPLETE (Phases 2-4)
+- Backend additions (routes/expense_claims.py): GET/PUT /claims/{id}
+  (edit draft/returned), POST /claims/{id}/cancel, scope=approvals queue
+  (APPROVER_ROLES incl. manager/accounts/finance), GET /expense/reports
+  (month summary by status/category/employee), categories
+  include_inactive=1 + company_id override for super/sub admins
+  (_scope_cid helper).
+- Employee PWA: app/my-expenses.tsx (summary tiles, filter chips, claim
+  cards w/ approval trail + receipts, submit w/ duplicate confirm, edit/
+  cancel), app/expense-claim-form.tsx (web file picker + native camera/
+  gallery, AI OCR auto-fill preview w/ Apply button, grouped category
+  modal, DateField, Save Draft / Save & Submit). Dashboard "Expense
+  Claim"/"Reimbursement" cards now route to /my-expenses (were
+  comingSoon).
+- Admin: app/expense-approvals.tsx (tabs Manager→Accounts→Finance→
+  Payments w/ counts, approve/return/reject remarks modal, finance
+  approved-amount, payment modal incl. "Add to Payroll" mode),
+  app/expense-admin.tsx (Reports/Categories/Payroll-feed tabs). Sidebar
+  (AdminWebShell both NAV trees, Payroll group): "Expense Approvals &
+  Payments" + "Expense Reports & Categories"; NAV_PERMISSION_MAP gated by
+  salary_process.
+- Tests: /app/test_expense_605.py 26/26 PASS (login: TEST50 pin +
+  super-admin 2FA otp_hash sha256 brute-force helper). Playwright UI run
+  full PASS (test_reports/iteration_605.json): employee create→submit,
+  admin 3-stage approve→payroll payment→PAID, reports/categories/feed.
+- deploy_vps_iter605.sh (temp_bundle kind=script now serves 605);
+  APP_ITERATION="605".
+- NOTE: employee web view is mobile-viewport gated ("Please use the
+  mobile app" on desktop) — test employees at 390x844.

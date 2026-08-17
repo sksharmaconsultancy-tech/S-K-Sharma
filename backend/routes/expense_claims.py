@@ -36,6 +36,16 @@ DEFAULT_CATEGORIES = [
 STATUSES = ["draft", "submitted", "pending_manager", "pending_accounts",
             "pending_finance", "returned", "rejected", "approved",
             "payment_pending", "processing", "paid", "cancelled"]
+APPROVER_ROLES = ADMIN_ROLES + ["hr_manager", "manager", "accounts", "finance"]
+PENDING_STAGES = ["pending_manager", "pending_accounts", "pending_finance"]
+
+
+def _scope_cid(user: dict, company_id: Optional[str]) -> Optional[str]:
+    """Admin roles (super/sub admins) may pass an explicit company_id;
+    everyone else is locked to their own firm."""
+    if user.get("role") in ("super_admin", "sub_admin") and company_id:
+        return company_id
+    return user.get("company_id") or company_id
 
 
 async def _audit(user: dict, claim_id: str, action: str,
@@ -63,14 +73,18 @@ async def _seed_categories(company_id: str):
 
 
 @router.get("/categories")
-async def list_categories(authorization: Optional[str] = Header(None)):
+async def list_categories(company_id: Optional[str] = Query(None),
+                          include_inactive: int = Query(0),
+                          authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
-    cid = user.get("company_id")
+    cid = _scope_cid(user, company_id)
     if not cid:
         raise HTTPException(status_code=400, detail="No firm scope")
     await _seed_categories(cid)
-    rows = await db.expense_categories.find(
-        {"company_id": cid, "active": True}, {"_id": 0}).sort(
+    q: dict = {"company_id": cid}
+    if not include_inactive:
+        q["active"] = True
+    rows = await db.expense_categories.find(q, {"_id": 0}).sort(
         [("group", 1), ("name", 1)]).to_list(500)
     return {"categories": rows}
 
@@ -155,20 +169,139 @@ async def create_claim(payload: Dict[str, Any] = Body(...),
 @router.get("/claims")
 async def list_claims(
     scope: str = Query("mine"), status: Optional[str] = Query(None),
+    company_id: Optional[str] = Query(None),
     authorization: Optional[str] = Header(None),
 ):
     user = await get_user_from_token(authorization)
-    q: dict = {"company_id": user.get("company_id")}
-    if scope == "mine" or user.get("role") == "employee":
+    q: dict = {"company_id": _scope_cid(user, company_id)}
+    if scope == "approvals" and user.get("role") in APPROVER_ROLES:
+        # Approver queue — pending claims for the firm (self-approval is
+        # still blocked at action time).
+        q["status"] = status if status else {"$in": PENDING_STAGES}
+        if user.get("role") == "super_admin" and not q["company_id"]:
+            q.pop("company_id")
+    elif scope == "all" and user.get("role") in ADMIN_ROLES:
+        if status:
+            q["status"] = status
+        if user.get("role") == "super_admin" and not q["company_id"]:
+            q.pop("company_id")
+    else:
         q["user_id"] = user["user_id"]
-    elif user.get("role") not in ADMIN_ROLES:
-        q["user_id"] = user["user_id"]
-    if status:
-        q["status"] = status
+        if status:
+            q["status"] = status
     rows = await db.expense_claims.find(
         q, {"_id": 0, "attachments.data_b64": 0}).sort(
         "created_at", -1).to_list(300)
     return {"claims": rows}
+
+
+@router.get("/claims/{claim_id}")
+async def get_claim(claim_id: str, authorization: Optional[str] = Header(None)):
+    user = await get_user_from_token(authorization)
+    c = await db.expense_claims.find_one(
+        {"claim_id": claim_id}, {"_id": 0, "attachments.data_b64": 0})
+    if not c:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    if c["user_id"] != user["user_id"] and user.get("role") not in APPROVER_ROLES:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    return {"claim": c}
+
+
+EDITABLE_FIELDS = ("expense_date", "category_id", "category_name", "vendor",
+                   "invoice_no", "project", "client", "payment_mode",
+                   "amount", "gst_amount", "description")
+
+
+@router.put("/claims/{claim_id}")
+async def update_claim(claim_id: str, payload: Dict[str, Any] = Body(...),
+                       authorization: Optional[str] = Header(None)):
+    user = await get_user_from_token(authorization)
+    c = await db.expense_claims.find_one(
+        {"claim_id": claim_id, "user_id": user["user_id"]},
+        {"_id": 0, "status": 1})
+    if not c:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    if c["status"] not in ("draft", "returned"):
+        raise HTTPException(status_code=400,
+                            detail="Only draft/returned claims can be edited")
+    upd = {k: payload[k] for k in EDITABLE_FIELDS if k in payload}
+    if "amount" in upd:
+        upd["amount"] = float(upd["amount"] or 0)
+        if upd["amount"] <= 0:
+            raise HTTPException(status_code=400, detail="Amount must be positive")
+    if "gst_amount" in upd:
+        upd["gst_amount"] = float(upd["gst_amount"] or 0)
+    if "description" in upd:
+        upd["description"] = str(upd["description"] or "")[:600]
+    upd["updated_at"] = now_iso()
+    await db.expense_claims.update_one({"claim_id": claim_id}, {"$set": upd})
+    await _audit(user, claim_id, "edited", None, upd)
+    return {"ok": True}
+
+
+@router.post("/claims/{claim_id}/cancel")
+async def cancel_claim(claim_id: str,
+                       authorization: Optional[str] = Header(None)):
+    user = await get_user_from_token(authorization)
+    c = await db.expense_claims.find_one(
+        {"claim_id": claim_id, "user_id": user["user_id"]},
+        {"_id": 0, "status": 1})
+    if not c:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    if c["status"] not in ("draft", "returned", "pending_manager"):
+        raise HTTPException(status_code=400,
+                            detail=f"Cannot cancel a {c['status']} claim")
+    await db.expense_claims.update_one(
+        {"claim_id": claim_id},
+        {"$set": {"status": "cancelled", "updated_at": now_iso()}})
+    await _audit(user, claim_id, "cancelled", c["status"], "cancelled")
+    return {"ok": True}
+
+
+@router.get("/reports")
+async def expense_reports(month: str = Query(...),
+                          company_id: Optional[str] = Query(None),
+                          authorization: Optional[str] = Header(None)):
+    """Phase 4 — month summary: by status / category / employee."""
+    user = await get_user_from_token(authorization)
+    require_role(user, APPROVER_ROLES)
+    q: dict = {"expense_date": {"$regex": f"^{month}"},
+               "status": {"$ne": "cancelled"}}
+    cid = _scope_cid(user, company_id)
+    if cid:
+        q["company_id"] = cid
+    rows = await db.expense_claims.find(
+        q, {"_id": 0, "attachments": 0}).to_list(3000)
+    by_status: Dict[str, dict] = {}
+    by_cat: Dict[str, dict] = {}
+    by_emp: Dict[str, dict] = {}
+    for r in rows:
+        amt = float(r.get("amount") or 0)
+        paid = float(r.get("paid_amount") or 0)
+        s = by_status.setdefault(r["status"], {"count": 0, "amount": 0.0})
+        s["count"] += 1; s["amount"] += amt
+        cat = r.get("category_name") or "Uncategorised"
+        crow = by_cat.setdefault(cat, {"count": 0, "amount": 0.0, "paid": 0.0})
+        crow["count"] += 1; crow["amount"] += amt; crow["paid"] += paid
+        emp = (r.get("employee") or {})
+        key = r["user_id"]
+        erow = by_emp.setdefault(key, {
+            "name": emp.get("name") or "—",
+            "employee_code": emp.get("employee_code") or "",
+            "count": 0, "amount": 0.0, "paid": 0.0})
+        erow["count"] += 1; erow["amount"] += amt; erow["paid"] += paid
+    rnd = lambda d: {k: (round(v, 2) if isinstance(v, float) else v)  # noqa: E731
+                     for k, v in d.items()}
+    return {"month": month, "total_claims": len(rows),
+            "total_amount": round(sum(float(r.get("amount") or 0) for r in rows), 2),
+            "total_paid": round(sum(float(r.get("paid_amount") or 0)
+                                    for r in rows if r["status"] == "paid"), 2),
+            "by_status": {k: rnd(v) for k, v in by_status.items()},
+            "by_category": [dict(name=k, **rnd(v))
+                            for k, v in sorted(by_cat.items(),
+                                               key=lambda x: -x[1]["amount"])],
+            "by_employee": sorted([rnd(v) for v in by_emp.values()],
+                                  key=lambda x: -x["amount"])}
 
 
 @router.get("/dashboard")
@@ -307,6 +440,114 @@ async def ocr_receipt(payload: Dict[str, Any] = Body(...),
     except Exception as e:
         logger.warning("[expense-ocr] failed: %s", e)
         raise HTTPException(status_code=502, detail="OCR extraction failed — fill fields manually")
+
+
+@router.post("/claims/{claim_id}/action")
+async def claim_action(claim_id: str,
+                       payload: Dict[str, Any] = Body(...),
+                       authorization: Optional[str] = Header(None)):
+    """Phase 2 — approval workflow: Manager → Accounts → Finance.
+    Actions: approve | reject | return. NO SELF-APPROVAL. Admin roles can
+    act at any stage (small firms); remarks stored + audit-logged."""
+    user = await get_user_from_token(authorization)
+    require_role(user, ADMIN_ROLES + ["hr_manager", "manager", "accounts", "finance"])
+    c = await db.expense_claims.find_one({"claim_id": claim_id}, {"_id": 0})
+    if not c:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    if c.get("company_id") != user.get("company_id") and user["role"] != "super_admin":
+        raise HTTPException(status_code=403, detail="Not your company's claim")
+    if c["user_id"] == user["user_id"]:
+        raise HTTPException(status_code=403, detail="Self-approval is not allowed")
+    action = str(payload.get("action") or "")
+    remarks = str(payload.get("remarks") or "")[:400]
+    stage = c["status"]
+    CHAIN = {"pending_manager": "pending_accounts",
+             "pending_accounts": "pending_finance",
+             "pending_finance": "approved"}
+    if stage not in CHAIN:
+        raise HTTPException(status_code=400, detail=f"No pending action on a {stage} claim")
+    if action == "approve":
+        new_status = CHAIN[stage]
+        upd: dict = {"status": new_status}
+        if new_status == "approved":
+            upd["approved_amount"] = float(payload.get("approved_amount")
+                                           or c.get("amount") or 0)
+            upd["approved_at"] = now_iso()
+        if stage == "pending_accounts" and "gst_eligible" in payload:
+            upd["gst_eligible"] = bool(payload.get("gst_eligible"))
+    elif action == "reject":
+        new_status = "rejected"; upd = {"status": "rejected", "rejected_at": now_iso()}
+    elif action == "return":
+        new_status = "returned"; upd = {"status": "returned"}
+    else:
+        raise HTTPException(status_code=400, detail="action must be approve/reject/return")
+    upd["updated_at"] = now_iso()
+    await db.expense_claims.update_one(
+        {"claim_id": claim_id},
+        {"$set": upd,
+         "$push": {"approvals": {"stage": stage, "action": action,
+                                 "by": user["user_id"], "by_name": user.get("name"),
+                                 "role": user.get("role"), "remarks": remarks,
+                                 "at": now_iso()}}})
+    await _audit(user, claim_id, f"{stage}:{action}", stage, new_status, remarks)
+    return {"ok": True, "status": new_status}
+
+
+@router.post("/claims/{claim_id}/payment")
+async def claim_payment(claim_id: str,
+                        payload: Dict[str, Any] = Body(...),
+                        authorization: Optional[str] = Header(None)):
+    """Phase 3 — Finance payment. Only APPROVED claims can be paid;
+    PAID claims become immutable."""
+    user = await get_user_from_token(authorization)
+    require_role(user, ADMIN_ROLES + ["finance"])
+    c = await db.expense_claims.find_one({"claim_id": claim_id}, {"_id": 0})
+    if not c:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    if c["user_id"] == user["user_id"]:
+        raise HTTPException(status_code=403, detail="Self-payment is not allowed")
+    if c["status"] not in ("approved", "payment_pending", "processing"):
+        raise HTTPException(status_code=400,
+                            detail="Payment allowed only after final approval")
+    mode = str(payload.get("payment_mode") or "bank_transfer")
+    paid_amount = float(payload.get("paid_amount")
+                        or c.get("approved_amount") or c.get("amount") or 0)
+    upd = {"status": "paid", "paid_amount": paid_amount,
+           "payment_mode": mode,
+           "payment_date": str(payload.get("payment_date") or now_iso()[:10]),
+           "payment_reference": str(payload.get("payment_reference") or "")[:120],
+           "reimburse_via_payroll": mode == "payroll",
+           "paid_by": user["user_id"], "paid_at": now_iso(),
+           "updated_at": now_iso()}
+    await db.expense_claims.update_one({"claim_id": claim_id}, {"$set": upd})
+    await _audit(user, claim_id, "paid", c["status"], "paid",
+                 f"{mode} ₹{paid_amount}")
+    return {"ok": True, "status": "paid", "paid_amount": paid_amount}
+
+
+@router.get("/payroll-reimbursements")
+async def payroll_reimbursements(
+    month: str = Query(...), company_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Phase 3 — payroll integration feed: PAID claims flagged
+    reimburse_via_payroll for the month, kept SEPARATE from wages
+    (per-employee 'Expense Reimbursement' head)."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ADMIN_ROLES)
+    cid = admin["company_id"] if admin["role"] == "company_admin" else company_id
+    q: dict = {"status": "paid", "reimburse_via_payroll": True,
+               "payment_date": {"$regex": f"^{month}"}}
+    if cid:
+        q["company_id"] = cid
+    rows = await db.expense_claims.find(
+        q, {"_id": 0, "attachments": 0}).to_list(2000)
+    per: Dict[str, float] = {}
+    for r in rows:
+        per[r["user_id"]] = per.get(r["user_id"], 0) + float(r.get("paid_amount") or 0)
+    return {"month": month, "head": "Expense Reimbursement",
+            "per_employee": [{"user_id": k, "amount": round(v, 2)} for k, v in per.items()],
+            "claims": rows}
 
 
 @router.get("/claims/{claim_id}/audit")

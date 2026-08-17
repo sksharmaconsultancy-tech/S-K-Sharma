@@ -486,8 +486,8 @@ export default function Dashboard() {
                     { icon: "card-outline", label: "ID Card", color: "#4338CA", route: "/id-card" },
                     { icon: "chatbubbles-outline", label: "Helpdesk", color: "#DB2777", route: "/tickets" },
                     { icon: "mail-outline", label: "Messages", color: "#0369A1", route: "/messages" },
-                    { icon: "receipt-outline", label: "Expense Claim", color: "#64748B", comingSoon: true },
-                    { icon: "wallet-outline", label: "Reimbursement", color: "#64748B", comingSoon: true },
+                    { icon: "receipt-outline", label: "Expense Claim", color: "#0D9488", route: "/my-expenses" },
+                    { icon: "wallet-outline", label: "Reimbursement", color: "#0D9488", route: "/my-expenses" },
                   ]}
                 />
                 <View style={{ height: spacing.md }} />

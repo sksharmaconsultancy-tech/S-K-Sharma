@@ -810,3 +810,15 @@ ITER 487 (doc-expiry alerts):
 ## Iter 594b — Branch/Dept filters (2026-06)
 - Screenshot-verified: both filter inputs render when All toggled off,
   chips from masters (departments SECURITY/WEAVING/QA...), counters shown.
+
+## Iter 605 — Expense Claims Phases 2-4 COMPLETE (2026-06)
+- Backend: 26/26 PASS via /app/test_expense_605.py (create/edit/cancel/
+  dedupe/409-duplicate/attachments/approval chain/self-approval block/
+  payroll payment/feed/reports/categories admin/audit). Super-admin login
+  in tests recovers the 2FA OTP by sha256 brute-force of twofa_pending.
+- Frontend: testing_agent full PASS (iteration_605.json). Employee
+  (mobile 390x844, TEST50/123456 Username tab): my-expenses dashboard,
+  new claim form, draft→submit. Admin (desktop, 2FA session injection):
+  sidebar entries, 4-stage approvals, payroll payment, reports/
+  categories/payroll feed. Employee re-verified claim PAID with trail.
+- Payments tab testID is expappr-tab-approved (status key "approved").
