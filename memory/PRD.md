@@ -6256,3 +6256,16 @@ Current iteration: 594. Next: 595.
   no code change. PAWAN ₹1,140 = 12% × ₹9,500 earned PF Basic.
 - GitHub push: routed to platform "Save to GitHub" flow; user revoked the
   leaked PAT.
+
+## Iter 596 (DONE) — PF/ESIC Challan Uploads: Month + Group auto-select
+- challans.tsx: "Compliance Run" dropdown REMOVED (user request). Month +
+  Employee Group alone decide the run — newest FINALIZED run(s) auto-picked,
+  green "Selected Run (auto)" chip (testID portal-selected-run) confirms.
+  Employee Group defaults to "All groups" → ALL finalized runs of the month
+  are merged (selRunId = comma-joined run_ids).
+- Backend challans.py _load_run_for_portal accepts comma-separated run_ids:
+  merges rows (same month + same firm enforced, dup employees deduped). All
+  7 portal endpoints (ECR txt/xlsx, ESIC xls/xlsx, ecr-check, preview,
+  portal-upload-jobs) inherit merging automatically. Tested: single 200,
+  merged 200 (55 deduped rows), merged ecr.txt download 200.
+- deploy_vps_iter596.sh; APP_ITERATION="596"; screenshot-verified UI.

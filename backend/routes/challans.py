@@ -369,12 +369,41 @@ async def export_challans_xlsx(
 # ---------------------------------------------------------------------------
 
 async def _load_run_for_portal(run_id: str, user: Dict[str, Any]) -> Dict[str, Any]:
-    run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
-    if not run:
+    """Iter 596 (user request) — the Challans screen no longer has a
+    "Compliance Run" dropdown: Month + Employee Group drive the selection and
+    "All groups" merges EVERY finalized run of the month. run_id therefore
+    accepts a comma-separated list; multiple runs are merged (same month +
+    same firm enforced, duplicate employees deduped, first occurrence wins)."""
+    ids = [s.strip() for s in str(run_id or "").split(",") if s.strip()]
+    if not ids:
         raise HTTPException(status_code=404, detail="Compliance run not found")
-    if user["role"] in ("company_admin", "sub_admin") and run.get("company_id"):
-        _scope_company(user, run.get("company_id"))
-    return run
+    runs: List[Dict[str, Any]] = []
+    for rid in ids:
+        run = await db.compliance_salary_runs.find_one({"run_id": rid}, {"_id": 0})
+        if not run:
+            raise HTTPException(status_code=404, detail="Compliance run not found")
+        if user["role"] in ("company_admin", "sub_admin") and run.get("company_id"):
+            _scope_company(user, run.get("company_id"))
+        runs.append(run)
+    if len(runs) == 1:
+        return runs[0]
+    if len({r.get("month") for r in runs}) > 1:
+        raise HTTPException(status_code=400, detail="Merged runs must belong to the SAME month")
+    if len({r.get("company_id") for r in runs}) > 1:
+        raise HTTPException(status_code=400, detail="Merged runs must belong to the SAME firm")
+    merged = dict(runs[0])
+    rows: List[Dict[str, Any]] = []
+    seen: set = set()
+    for r in runs:
+        for row in r.get("rows", []) or []:
+            key = row.get("user_id") or row.get("employee_code") or f"row{len(rows)}"
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(row)
+    merged["rows"] = rows
+    merged["employee_type"] = "All Groups"
+    return merged
 
 
 async def _uan_esic_map(rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:

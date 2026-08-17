@@ -204,12 +204,16 @@ export default function ChallansScreen() {
   }, [runs, allRunsFinalized]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    // keep selection valid within the current month/group filter
-    if (filteredRuns.length && !filteredRuns.some((r) => r.run_id === selRunId)) {
-      setSelRunId(filteredRuns[0].run_id);
-    } else if (!filteredRuns.length && selRunId) {
-      setSelRunId("");
-    }
+    // Iter 596 (user request) — the separate "Compliance Run" dropdown is
+    // gone: Month + Employee Group ALONE decide the selection. "All groups"
+    // merges EVERY finalized run of the (newest filtered) month — selRunId
+    // becomes a comma-separated list the backend merges into one file.
+    const m = filteredRuns[0]?.month;
+    const next = filteredRuns
+      .filter((r) => r.month === m)
+      .map((r) => r.run_id)
+      .join(",");
+    if (selRunId !== next) setSelRunId(next);
   }, [runMonth, runGroup, runs]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -222,7 +226,6 @@ export default function ChallansScreen() {
         const r = await api<{ runs: RunLite[] }>(`/admin/compliance-salary-runs${q}`);
         const list = (r.runs || []).slice(0, 60);
         setRuns(list);
-        setSelRunId(list[0]?.run_id || "");
       } catch {
         setRuns([]);
         setSelRunId("");
@@ -267,13 +270,13 @@ export default function ChallansScreen() {
   };
 
   const downloadPortalFile = async (kind: "ecr.txt" | "ecr.xlsx" | "esic.xls" | "esic.xlsx") => {
-    if (!selRunId) { window.alert("Run a Compliance Salary first, then pick the run here."); return; }
+    if (!selRunId) { window.alert("No FINALIZED run for the selected Month / Employee Group — finalize it in Salary Process first."); return; }
     setDlPortal(kind);
     try {
       const skipQ = skipMissing ? "&skip_missing=1" : "";
       const r = await apiBinary(`/admin/challans/${kind}?run_id=${encodeURIComponent(selRunId)}${skipQ}`);
       if (!r.webBlobUrl) throw new Error("Download failed");
-      const run = runs.find((x) => x.run_id === selRunId);
+      const run = runs.find((x) => x.run_id === selRunId.split(",")[0]);
       const month = run?.month || "month";
       // Iter 446 (user bug) — EPFO rejects filenames containing spaces or
       // non-word characters (the hyphen in "2026-07"): use MMYYYY instead.
@@ -326,7 +329,7 @@ export default function ChallansScreen() {
   const [ecrCheck, setEcrCheck] = useState<any>(null);
   const [ecrCheckBusy, setEcrCheckBusy] = useState(false);
   const runEcrCheck = async () => {
-    if (!selRunId) { window.alert("Pick a Compliance Run first."); return; }
+    if (!selRunId) { window.alert("No FINALIZED run for the selected Month / Employee Group."); return; }
     if (ecrCheck) { setEcrCheck(null); return; } // toggle off
     setEcrCheckBusy(true);
     try {
@@ -475,36 +478,45 @@ export default function ChallansScreen() {
                 </select>
               ) : null}
             </View>
-            <View style={{ minWidth: 260 }}>
-              <Text style={styles.lbl}>Compliance Run</Text>
-              {Platform.OS === "web" ? (
-                <select
-                  value={selRunId}
-                  onChange={(e: any) => setSelRunId(e.target.value)}
-                  style={{
-                    padding: 8, borderRadius: 8, border: "1px solid #D6DEE4",
-                    fontSize: 12.5, width: "100%", background: "#fff",
-                  }}
-                  data-testid="portal-run-select"
-                >
-                  {filteredRuns.length === 0 ? <option value="">No FINALIZED compliance run — finalize the month in Salary Process first</option> : null}
-                  {/* Iter 452 (user request) — show only the MONTH NAME of
-                      finalized runs (no employee count); the group is added
-                      only when the same month has multiple runs. */}
-                  {filteredRuns.map((r) => {
-                    const [yy, mm] = String(r.month || "").split("-");
-                    const mName = yy && mm
-                      ? `${["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][Number(mm) - 1]} ${yy}`
-                      : r.month;
-                    const dup = filteredRuns.filter((x) => x.month === r.month).length > 1;
-                    return (
-                      <option key={r.run_id} value={r.run_id}>
-                        {mName}{dup ? ` · ${r.employee_type || "All"}` : ""}{r.finalized_at ? " ✓" : ""}
-                      </option>
-                    );
-                  })}
-                </select>
-              ) : null}
+            {/* Iter 596 (user request) — "Compliance Run" dropdown removed:
+                Month + Employee Group auto-select the newest FINALIZED run.
+                A read-only chip confirms which run the files will use. */}
+            <View style={{ minWidth: 200 }}>
+              <Text style={styles.lbl}>Selected Run (auto)</Text>
+              {(() => {
+                const ids = selRunId ? selRunId.split(",") : [];
+                const sel = filteredRuns.filter((r) => ids.includes(r.run_id));
+                const run = sel[0];
+                if (!run) {
+                  return (
+                    <Text style={{ fontSize: 11.5, color: "#B91C1C", paddingVertical: 9 }}>
+                      No FINALIZED run for this Month / Group — finalize it in Salary Process first
+                    </Text>
+                  );
+                }
+                const [yy, mm] = String(run.month || "").split("-");
+                const mName = yy && mm
+                  ? `${["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][Number(mm) - 1]} ${yy}`
+                  : run.month;
+                const groupLbl = sel.length > 1
+                  ? `All Groups (${sel.length} runs merged)`
+                  : (run.employee_type || "All");
+                return (
+                  <View
+                    style={{
+                      flexDirection: "row", alignItems: "center", gap: 6,
+                      backgroundColor: "#ECFDF5", borderWidth: 1, borderColor: "#A7F3D0",
+                      borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8,
+                    }}
+                    testID="portal-selected-run"
+                  >
+                    <Ionicons name="checkmark-circle" size={14} color="#047857" />
+                    <Text style={{ fontSize: 12.5, color: "#065F46", fontWeight: "600" }}>
+                      {mName} · {groupLbl} ✓
+                    </Text>
+                  </View>
+                );
+              })()}
             </View>
             <Pressable
               onPress={() => setSkipMissing((v) => !v)}
