@@ -1595,6 +1595,108 @@ async def create_manual_punch(
     return {"ok": True, "record": {k: v for k, v in record.items() if k != "_id"}}
 
 
+class QuickMarkRequest(BaseModel):
+    user_id: str
+    date: str  # YYYY-MM-DD
+    status: Literal["present", "absent"]
+    reason: Optional[str] = None
+
+
+@api.post("/admin/attendance/quick-mark")
+async def attendance_quick_mark(
+    payload: QuickMarkRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 595 — keyboard quick keys on the Monthly Attendance Grid.
+
+    * status=present → inserts a FULL-DAY punch pair (IN at the employee's
+      shift start, OUT at shift end — Shift-Master override respected,
+      night shifts roll the OUT to the next day). Refused when the day
+      already has punches (use the repair modal instead).
+    * status=absent  → deletes ALL punches of that employee-date (each
+      delete is audit-logged, same as the repair modal's delete).
+    """
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", payload.date or ""):
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+    emp = await db.users.find_one(
+        {"user_id": payload.user_id},
+        {"_id": 0, "user_id": 1, "company_id": 1, "name": 1,
+         "shift_start": 1, "shift_end": 1, "attendance_policy_override": 1},
+    )
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if admin["role"] == "company_admin" and emp.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Employee not in your company")
+    reason = (payload.reason or "").strip() or (
+        "Keyboard quick key P — marked full-day present"
+        if payload.status == "present" else
+        "Keyboard quick key A — day cleared (absent)"
+    )
+
+    existing = await db.attendance.find(
+        {"user_id": payload.user_id, "date": payload.date},
+        {"_id": 0, "selfie_base64": 0, "photo_base64": 0},
+    ).to_list(50)
+
+    if payload.status == "absent":
+        deleted = 0
+        for r in existing:
+            await db.attendance.delete_one({"record_id": r["record_id"]})
+            await _log_punch_audit("delete", admin, r["record_id"], r, None, reason)
+            deleted += 1
+        return {"ok": True, "deleted": deleted}
+
+    # status == "present"
+    active = [r for r in existing if r.get("status") != "rejected"]
+    if active:
+        raise HTTPException(
+            status_code=409,
+            detail="This day already has punches — press Enter to open the repair modal instead.",
+        )
+    # Resolve shift times: Shift Master override → user's shift_start/end → 09:00-18:00.
+    _ov = emp.get("attendance_policy_override") or {}
+    _sh = {}
+    if _ov.get("shift_id"):
+        _sh = await db.shift_masters.find_one(
+            {"shift_id": _ov["shift_id"]}, {"_id": 0, "start": 1, "end": 1},
+        ) or {}
+    shift_start = _sh.get("start") or emp.get("shift_start") or "09:00"
+    shift_end = _sh.get("end") or emp.get("shift_end") or "18:00"
+    if not re.fullmatch(r"\d{2}:\d{2}", shift_start):
+        shift_start = "09:00"
+    if not re.fullmatch(r"\d{2}:\d{2}", shift_end):
+        shift_end = "18:00"
+    in_when = _parse_manual_at(f"{payload.date}T{shift_start}:00")
+    out_date = payload.date
+    if shift_end <= shift_start:  # night shift — OUT lands next day
+        out_date = (datetime.strptime(payload.date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+    out_when = _parse_manual_at(f"{out_date}T{shift_end}:00")
+    _enforce_lookback(admin, in_when)
+
+    records = []
+    for kind, when in (("in", in_when), ("out", out_when)):
+        record = {
+            "record_id": f"att_{uuid.uuid4().hex[:12]}",
+            "user_id": payload.user_id,
+            "company_id": emp.get("company_id"),
+            "date": when.strftime("%Y-%m-%d"),
+            "kind": kind,
+            "at": when.isoformat().replace("+00:00", "Z"),
+            "source": "manual_admin",
+            "status": "approved",
+            "approved_by": admin["user_id"],
+            "manual_reason": reason,
+            "created_by": admin["user_id"],
+            "created_at": now_iso(),
+        }
+        await db.attendance.insert_one(record)
+        await _log_punch_audit("create", admin, record["record_id"], None, record, reason)
+        records.append({k: v for k, v in record.items() if k != "_id"})
+    return {"ok": True, "records": records, "shift": {"start": shift_start, "end": shift_end}}
+
+
 @api.patch("/admin/attendance/{record_id}")
 async def edit_attendance_record(
     record_id: str,

@@ -24,9 +24,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 
 import { api, apiBinary } from "@/src/api/client";
+import { registerShortcuts } from "@/src/utils/shortcuts";
 import { useLiveSync } from "@/src/api/live-sync";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
@@ -520,6 +521,97 @@ export default function AttendanceGridScreen() {
     return out;
   }, [filteredEmployees, sortBy]);
 
+  // ─── Iter 595 — Keyboard shortcuts Phase 2: grid cell navigation ───
+  // ↑↓←→ select a day cell · Enter = open repair · P = mark full-day
+  // present · A = clear the day (absent) · Esc = deselect. Web only,
+  // registered while the screen is FOCUSED (never leaks to other pages).
+  const [sel, setSel] = useState<{ r: number; c: number } | null>(null);
+  const selRef = useRef(sel); selRef.current = sel;
+  const empsRef = useRef(filteredEmployees); empsRef.current = filteredEmployees;
+  const dataRef = useRef(data); dataRef.current = data;
+  const repairRef = useRef(repair); repairRef.current = repair;
+  const loadRef = useRef(load); loadRef.current = load;
+
+  const selCellInfo = useCallback(() => {
+    const s = selRef.current, d = dataRef.current, emps = empsRef.current;
+    if (!s || !d) return null;
+    const emp = emps[s.r];
+    const dayLabel = d.day_labels[s.c];
+    if (!emp || !dayLabel) return null;
+    const dateIso = d.day_full_dates?.[s.c] ?? `${d.month}-${dayLabel.slice(-2)}`;
+    return { emp, dateIso, dayLabel };
+  }, []);
+
+  const quickMark = useCallback(async (status: "present" | "absent") => {
+    if (repairRef.current) return;
+    const info = selCellInfo();
+    if (!info) return;
+    const who = info.emp.name || info.emp.employee_code || "employee";
+    const dmy = info.dateIso.split("-").reverse().join("-");
+    const q = status === "present"
+      ? `Mark ${who} FULL-DAY PRESENT on ${dmy}?\n(IN/OUT punches at the shift times will be added.)`
+      : `Clear the day for ${who} on ${dmy}?\nALL punches of this day will be DELETED (audit-logged).`;
+    if (!window.confirm(q)) return;
+    try {
+      await api(`/admin/attendance/quick-mark`, {
+        method: "POST",
+        body: {
+          user_id: info.emp.user_id,
+          date: info.dateIso,
+          status,
+          reason: `Keyboard quick key ${status === "present" ? "P" : "A"} (attendance grid)`,
+        },
+      });
+      await loadRef.current();
+    } catch (e: any) {
+      window.alert(e?.message || "Quick mark failed");
+    }
+  }, [selCellInfo]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== "web") return undefined;
+      const move = (dr: number, dc: number) => {
+        const emps = empsRef.current, d = dataRef.current;
+        if (!d || emps.length === 0 || repairRef.current) return;
+        const maxR = emps.length - 1;
+        const maxC = d.day_labels.length - 1;
+        setSel((cur) => {
+          if (!cur) return { r: 0, c: 0 };
+          return {
+            r: Math.max(0, Math.min(maxR, cur.r + dr)),
+            c: Math.max(0, Math.min(maxC, cur.c + dc)),
+          };
+        });
+      };
+      return registerShortcuts("attendance-grid", [
+        { combo: "arrowup", label: "Grid: move selection up", category: "Attendance Grid", handler: () => move(-1, 0) },
+        { combo: "arrowdown", label: "Grid: move selection down", category: "Attendance Grid", handler: () => move(1, 0) },
+        { combo: "arrowleft", label: "Grid: move selection left", category: "Attendance Grid", handler: () => move(0, -1) },
+        { combo: "arrowright", label: "Grid: move selection right", category: "Attendance Grid", handler: () => move(0, 1) },
+        {
+          combo: "enter", label: "Grid: open day repair", category: "Attendance Grid",
+          handler: () => {
+            if (repairRef.current) return;
+            const info = selCellInfo();
+            if (!info) return;
+            setRepair({
+              userId: info.emp.user_id,
+              name: info.emp.name || info.emp.employee_code || "Employee",
+              date: info.dateIso,
+            });
+          },
+        },
+        { combo: "p", label: "Grid: mark full-day Present", category: "Attendance Grid", handler: () => quickMark("present") },
+        { combo: "a", label: "Grid: clear day → Absent", category: "Attendance Grid", handler: () => quickMark("absent") },
+        {
+          combo: "escape", label: "Grid: clear selection", category: "Attendance Grid",
+          handler: () => { if (!repairRef.current) setSel(null); },
+        },
+      ]);
+    }, [quickMark, selCellInfo]),
+  );
+
   // Iter 519 (user enhancement) — day-wise footer stats computed ONCE from
   // the FILTERED dataset (single pass, no per-cell work while rendering).
   const [showSummary, setShowSummary] = useState(false);
@@ -998,6 +1090,15 @@ export default function AttendanceGridScreen() {
             <View style={[styles.badge, styles.badgeManual]}><Text style={styles.badgeTxt}>✎</Text></View>
             <Text style={styles.legendTxt}>Admin Corrected — manually edited punches (protected)</Text>
           </View>
+          {/* Iter 595 — keyboard quick keys hint (web only). */}
+          {Platform.OS === "web" ? (
+            <View style={styles.legendItem}>
+              <Ionicons name="keypad-outline" size={12} color={colors.onSurfaceSecondary} />
+              <Text style={styles.legendTxt}>
+                ↑↓←→ select cell · Enter repair · P mark present · A clear day · Esc deselect
+              </Text>
+            </View>
+          ) : null}
         </View>
       </View>
 
@@ -1049,6 +1150,7 @@ export default function AttendanceGridScreen() {
                   view={view}
                   hideDays={hideDays}
                   zebra={item.zebra}
+                  selCol={sel && sel.r === item.sno - 1 ? sel.c : null}
                   onCellPress={(uid, name, date) => setRepair({ userId: uid, name, date })}
                 />
               ))}
@@ -1306,6 +1408,7 @@ function GridRow({
   hideDays,
   zebra,
   onCellPress,
+  selCol,
 }: {
   emp: EmpRow;
   sno: number;
@@ -1314,6 +1417,7 @@ function GridRow({
   hideDays?: boolean;
   zebra: boolean;
   onCellPress?: (userId: string, name: string, dateIso: string) => void;
+  selCol?: number | null;
 }) {
   const dayW =
     view === "inout" || view === "inout_salary"
@@ -1353,9 +1457,19 @@ function GridRow({
         // Iter 233 — tap any day cell to open the punch-repair modal.
         const fullDate =
           data.day_full_dates?.[di] ?? `${data.month}-${d.slice(-2)}`;
+        const isSel = selCol === di;
         return (
           <Pressable
             key={d}
+            // Iter 595 — keyboard-selected cell: blue inset ring + keep in view.
+            style={isSel ? styles.dayCellSelected : undefined}
+            ref={
+              isSel && Platform.OS === "web"
+                ? ((node: any) => {
+                    try { node?.scrollIntoView?.({ block: "nearest", inline: "nearest" }); } catch { /* noop */ }
+                  })
+                : undefined
+            }
             onPress={
               onCellPress
                 ? () => onCellPress(emp.user_id, emp.name || emp.employee_code || "Employee", fullDate)
@@ -1916,6 +2030,12 @@ const styles = StyleSheet.create({
   deptTxt: { color: colors.onSurfaceSecondary, fontSize: 11 },
   bioTxt: { color: colors.onSurface, fontWeight: "700", fontSize: 11, textAlign: "center" },
   dayCellEmpty: { alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
+  // Iter 595 — keyboard-selected day cell (inset ring, no layout shift).
+  dayCellSelected: {
+    ...(Platform.OS === "web"
+      ? ({ boxShadow: "inset 0 0 0 2px #2563EB", backgroundColor: "rgba(37,99,235,0.08)" } as any)
+      : { borderWidth: 2, borderColor: "#2563EB" }),
+  },
   dayEmpty: { color: colors.onSurfaceTertiary, fontSize: 14 },
   dayIn: { color: colors.success || "#0F5132", fontWeight: "700", fontSize: 10 },
   dayOut: { color: colors.error || "#8A1F1F", fontWeight: "700", fontSize: 10 },

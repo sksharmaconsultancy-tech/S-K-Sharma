@@ -38,6 +38,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { api, apiBinary } from "@/src/api/client";
+import { registerShortcuts } from "@/src/utils/shortcuts";
 import { confirmYesNo } from "@/src/utils/confirm";
 import { useLiveSync } from "@/src/api/live-sync";
 import { useAuth } from "@/src/context/AuthContext";
@@ -362,6 +363,21 @@ export default function ActualSalaryProcessScreen() {
   });
 
   /* ----- Generate a new run ----- */
+  // Iter 595 — F5 = recalculate / process salary (keyboard shortcuts Phase 2).
+  const generateRef = useRef<() => void>(() => {});
+  useEffect(
+    () =>
+      registerShortcuts("salary-run", [
+        {
+          combo: "f5",
+          label: "Recalculate / process salary",
+          category: "Salary Processing",
+          allowInInput: true,
+          handler: () => generateRef.current(),
+        },
+      ]),
+    [],
+  );
   const generate = async () => {
     if (busy) return;
     // Iter 85 (fix) — Super Admin must pick a firm from the top bar
@@ -445,8 +461,8 @@ export default function ActualSalaryProcessScreen() {
       setBusy(false);
     }
   };
+  generateRef.current = generate;
 
-  /* ----- Open a past run ----- */
   /* ----- Open a past run ----- */
   const openPastRun = async (r: PastRunSummary) => {
     try {

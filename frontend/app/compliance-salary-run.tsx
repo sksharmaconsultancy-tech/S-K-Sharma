@@ -36,6 +36,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
 
 import { api, apiBinary } from "@/src/api/client";
+import { registerShortcuts } from "@/src/utils/shortcuts";
 import { confirmYesNo, confirmChoice, showToast } from "@/src/utils/confirm";
 import { EmployeeListSkeleton } from "@/src/components/EmployeeStatsBar";
 import { useAuth } from "@/src/context/AuthContext";
@@ -780,6 +781,21 @@ export default function ComplianceSalaryRunScreen() {
     } finally { setImportBusy(false); }
   };
 
+  // Iter 595 — F5 = recalculate / process salary (keyboard shortcuts Phase 2).
+  const generateRef = useRef<() => void>(() => {});
+  useEffect(
+    () =>
+      registerShortcuts("compliance-salary-run", [
+        {
+          combo: "f5",
+          label: "Recalculate / process compliance salary",
+          category: "Salary Processing",
+          allowInInput: true,
+          handler: () => generateRef.current(),
+        },
+      ]),
+    [],
+  );
   const generate = async () => {
     if (busy) return;
     // Iter 426 (user request) — Employee Group selection is MANDATORY:
@@ -896,6 +912,7 @@ export default function ComplianceSalaryRunScreen() {
       showMsg(e?.message || "Failed to generate compliance run");
     } finally { setBusy(false); }
   };
+  generateRef.current = generate;
 
   // Iter 330 (user request) — Copy Last Month Salary into this month.
   const copyLastMonth = async () => {

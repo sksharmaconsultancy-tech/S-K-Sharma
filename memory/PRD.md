@@ -6233,3 +6233,26 @@ Current iteration: 594. Next: 595.
 - roles-permissions.tsx: branch + department chips now filterable
   (rp-branch-filter / rp-dept-filter), master counts + selected counters,
   matching the firm selector. Screenshot-verified.
+
+## Iter 595 (DONE) — Firm picker "CURRENT FIRM" + Keyboard Shortcuts Phase 2
+- GlobalCompanyPicker: pinned "CURRENT FIRM (OPEN)" section at the top of the
+  header firm dropdown (open firm highlighted + check-marked, keyboard cursor
+  starts on it); search filter narrows by name/code. Screenshot-verified.
+- Keyboard Phase 2 (web, registered on FOCUS only, never leaks):
+  * attendance-grid: ArrowUp/Down/Left/Right select a day cell (blue inset
+    ring + scrollIntoView), Enter opens the punch-repair modal, P = mark
+    full-day present, A = clear day (absent), Esc = deselect. Legend hint row.
+  * Backend POST /admin/attendance/quick-mark (attendance_admin_core.py):
+    present → IN/OUT punch pair at the employee's shift times (Shift-Master
+    override respected, night shift OUT rolls to next day), 409 if the day
+    already has punches; absent → deletes all punches of the day. All actions
+    audit-logged. test_quickmark_595.py = PASS (6/6).
+  * salary-run.tsx + compliance-salary-run.tsx: F5 = recalculate/process
+    (allowInInput, browser refresh suppressed).
+- Deploy script /app/deploy_vps_iter595.sh; temp_bundle.py serves it;
+  APP_ITERATION = "595"; /api/version → 595.
+- PF question (user): explained engine rule chain (PF on earned PF Basic /
+  PF Wage, NOT the ESI wage-base column). User CONFIRMED rules are correct —
+  no code change. PAWAN ₹1,140 = 12% × ₹9,500 earned PF Basic.
+- GitHub push: routed to platform "Save to GitHub" flow; user revoked the
+  leaked PAT.

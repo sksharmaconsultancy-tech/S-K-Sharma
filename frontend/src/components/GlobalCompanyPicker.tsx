@@ -85,6 +85,14 @@ export default function GlobalCompanyPicker({ compact = false }: { compact?: boo
     );
   }, [companies, query]);
 
+  // Iter 595 (user request) — the currently OPEN firm is always pinned at the
+  // very top of the dropdown so admins instantly see which firm is active.
+  const currentPinned = useMemo<CompanyLite[]>(() => {
+    if (query.trim() || !selectedCompanyId) return []; // hide while searching
+    const cur = companies.find((c) => c.company_id === selectedCompanyId);
+    return cur ? [cur] : [];
+  }, [companies, query, selectedCompanyId]);
+
   // Recent firms — only those still in the visible companies list.
   const recentPinned = useMemo<CompanyLite[]>(() => {
     if (query.trim()) return []; // hide pinned section while searching
@@ -95,11 +103,17 @@ export default function GlobalCompanyPicker({ compact = false }: { compact?: boo
       .filter((c) => c.company_id !== selectedCompanyId); // don't repeat current
   }, [recent, companies, query, selectedCompanyId]);
 
-  // Ordered pickable list for keyboard cursor (pinned then filtered — skipping duplicates).
+  // Ordered pickable list for keyboard cursor (current + pinned then filtered — skipping duplicates).
   const orderedPickable = useMemo<CompanyLite[]>(() => {
-    const pinnedIds = new Set(recentPinned.map((c) => c.company_id));
-    return [...recentPinned, ...filtered.filter((c) => !pinnedIds.has(c.company_id))];
-  }, [recentPinned, filtered]);
+    const pinnedIds = new Set(
+      [...currentPinned, ...recentPinned].map((c) => c.company_id),
+    );
+    return [
+      ...currentPinned,
+      ...recentPinned,
+      ...filtered.filter((c) => !pinnedIds.has(c.company_id)),
+    ];
+  }, [currentPinned, recentPinned, filtered]);
 
   // Close on outside click (web only)
   useEffect(() => {
@@ -220,6 +234,39 @@ export default function GlobalCompanyPicker({ compact = false }: { compact?: boo
               </Pressable>
             )}
 
+            {currentPinned.length > 0 ? (
+              <>
+                <View style={styles.sectionHdr}>
+                  <Ionicons name="checkmark-circle-outline" size={12} color={colors.brandPrimary} />
+                  <Text style={[styles.sectionHdrTxt, { color: colors.brandPrimary }]}>
+                    CURRENT FIRM (OPEN)
+                  </Text>
+                </View>
+                {currentPinned.map((c, i) => {
+                  const isCursor = i === cursor;
+                  return (
+                    <Pressable
+                      key={`cur-${c.company_id}`}
+                      onPress={() => commitSelection(c.company_id)}
+                      style={[styles.row, styles.rowActive, isCursor && styles.rowCursor]}
+                      testID={`global-company-picker-current-${c.company_id}`}
+                    >
+                      <Ionicons name="radio-button-on" size={16} color={colors.brandPrimary} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.rowLabel} numberOfLines={1}>
+                          {c.name}
+                        </Text>
+                        {c.company_code ? (
+                          <Text style={styles.rowSub}>{c.company_code}</Text>
+                        ) : null}
+                      </View>
+                      <Ionicons name="checkmark" size={16} color={colors.brandPrimary} />
+                    </Pressable>
+                  );
+                })}
+              </>
+            ) : null}
+
             {recentPinned.length > 0 ? (
               <>
                 <View style={styles.sectionHdr}>
@@ -228,7 +275,7 @@ export default function GlobalCompanyPicker({ compact = false }: { compact?: boo
                 </View>
                 {recentPinned.map((c, i) => {
                   const on = c.company_id === selectedCompanyId;
-                  const isCursor = i === cursor;
+                  const isCursor = currentPinned.length + i === cursor;
                   return (
                     <Pressable
                       key={`rc-${c.company_id}`}
@@ -252,14 +299,17 @@ export default function GlobalCompanyPicker({ compact = false }: { compact?: boo
                     </Pressable>
                   );
                 })}
-                <View style={styles.sectionHdr}>
-                  <Ionicons name="list-outline" size={12} color={colors.onSurfaceSecondary} />
-                  <Text style={styles.sectionHdrTxt}>ALL FIRMS</Text>
-                </View>
               </>
             ) : null}
 
-            {filtered.length === 0 && recentPinned.length === 0 ? (
+            {currentPinned.length > 0 || recentPinned.length > 0 ? (
+              <View style={styles.sectionHdr}>
+                <Ionicons name="list-outline" size={12} color={colors.onSurfaceSecondary} />
+                <Text style={styles.sectionHdrTxt}>ALL FIRMS</Text>
+              </View>
+            ) : null}
+
+            {filtered.length === 0 && recentPinned.length === 0 && currentPinned.length === 0 ? (
               <View style={styles.empty}>
                 <Text style={styles.emptyTxt}>
                   {companiesLoading ? "Loading…" : query.trim() ? "No firms match." : "No firms yet."}
@@ -267,10 +317,14 @@ export default function GlobalCompanyPicker({ compact = false }: { compact?: boo
               </View>
             ) : (
               filtered
-                .filter((c) => !recentPinned.some((rc) => rc.company_id === c.company_id))
+                .filter(
+                  (c) =>
+                    !recentPinned.some((rc) => rc.company_id === c.company_id) &&
+                    !currentPinned.some((cc) => cc.company_id === c.company_id),
+                )
                 .map((c, i) => {
                   const on = c.company_id === selectedCompanyId;
-                  const cursorIdx = recentPinned.length + i;
+                  const cursorIdx = currentPinned.length + recentPinned.length + i;
                   const isCursor = cursorIdx === cursor;
                   return (
                     <Pressable
