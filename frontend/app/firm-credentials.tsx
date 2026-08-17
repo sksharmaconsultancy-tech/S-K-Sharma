@@ -31,6 +31,17 @@ type FirmCred = {
   other_logins?: { login_type?: string; user_name?: string; password?: string | null }[];
 };
 
+type VaultLog = {
+  log_id: string;
+  name?: string | null;
+  email?: string | null;
+  role?: string | null;
+  ok: boolean;
+  reason?: string | null;
+  ip?: string | null;
+  at: string;
+};
+
 function copyText(t: string) {
   if (Platform.OS === "web") {
     try { (navigator as any)?.clipboard?.writeText(t); } catch { /* noop */ }
@@ -68,6 +79,9 @@ export default function FirmCredentialsScreen() {
   // Iter 598 (user report) — self-service PIN recovery for Sub Super Admins.
   const [forgotMsg, setForgotMsg] = useState("");
   const [forgotBusy, setForgotBusy] = useState(false);
+  // Iter 599 (user request) — vault access log (Super Admin only).
+  const [logs, setLogs] = useState<VaultLog[] | null>(null);
+  const [logBusy, setLogBusy] = useState(false);
   // Iter 328 (user report) — opening this page from the search menu could
   // "click through" onto a cell and copy an email/value unintentionally.
   // Ignore any copy in the first moments after the sheet mounts.
@@ -119,6 +133,19 @@ export default function FirmCredentialsScreen() {
     } finally { setForgotBusy(false); }
   };
 
+  // Iter 599 — toggle the vault access log panel (Super Admin only).
+  const toggleLog = async () => {
+    if (logs) { setLogs(null); return; }
+    if (logBusy) return;
+    setLogBusy(true);
+    try {
+      const r = await api<{ logs: VaultLog[] }>("/admin/firm-credentials/access-log");
+      setLogs(r.logs || []);
+    } catch (e: any) {
+      setErr(e?.message || "Could not load the access log");
+    } finally { setLogBusy(false); }
+  };
+
   const visible = (firms || []).filter((f) =>
     !search.trim() || f.firm_name.toLowerCase().includes(search.trim().toLowerCase()),
   );
@@ -134,6 +161,20 @@ export default function FirmCredentialsScreen() {
             <Text style={styles.title}>Firms ID & Password</Text>
             <Text style={styles.subtitle}>EPF · ESIC portal logins for every firm</Text>
           </View>
+          {user?.role === "super_admin" ? (
+            <Pressable
+              style={[styles.lockBtn, { borderColor: colors.brandPrimary }]}
+              onPress={toggleLog}
+              testID="cred-access-log"
+            >
+              {logBusy
+                ? <ActivityIndicator size="small" color={colors.brandPrimary} />
+                : <Ionicons name="list-outline" size={14} color={colors.brandPrimary} />}
+              <Text style={[styles.lockBtnTxt, { color: colors.brandPrimary }]}>
+                {logs ? "Hide Log" : "Access Log"}
+              </Text>
+            </Pressable>
+          ) : null}
           {firms ? (
             <Pressable style={styles.lockBtn} onPress={() => { setFirms(null); setPin(""); }}>
               <Ionicons name="lock-closed-outline" size={14} color={colors.error} />
@@ -141,6 +182,37 @@ export default function FirmCredentialsScreen() {
             </Pressable>
           ) : null}
         </View>
+
+        {/* Iter 599 (user request) — who unlocked the vault & when. */}
+        {logs ? (
+          <View style={styles.logCard}>
+            <Text style={styles.logTitle}>Vault Access Log — last {logs.length} attempts</Text>
+            {logs.length === 0 ? (
+              <Text style={styles.mutedTxt}>No access recorded yet.</Text>
+            ) : logs.map((l) => (
+              <View key={l.log_id} style={styles.logRow}>
+                <Ionicons
+                  name={l.ok ? "checkmark-circle" : "close-circle"}
+                  size={15}
+                  color={l.ok ? "#047857" : colors.error}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.logWho} numberOfLines={1}>
+                    {l.name || l.email || "Unknown"}
+                    <Text style={styles.logRole}>
+                      {"  ·  "}{l.role === "super_admin" ? "Super Admin" : l.role === "sub_admin" ? "Sub Super Admin" : (l.role || "")}
+                    </Text>
+                  </Text>
+                  <Text style={styles.logMeta}>
+                    {new Date(l.at).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    {l.ok ? "  ·  unlocked" : `  ·  FAILED (${l.reason === "no_pin_set" ? "no PIN set" : "wrong PIN"})`}
+                    {l.ip ? `  ·  ${l.ip}` : ""}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         {!firms ? (
           <View style={styles.pinCard}>
@@ -295,6 +367,22 @@ const styles = StyleSheet.create({
     paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: colors.error,
   },
   lockBtnTxt: { fontSize: 12, fontWeight: "700", color: colors.error },
+  // Iter 599 — vault access log panel.
+  logCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    gap: 8,
+    ...shadow.sm,
+  },
+  logTitle: { fontSize: 13, fontWeight: "800", color: colors.onSurface },
+  logRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  logWho: { fontSize: 12.5, fontWeight: "700", color: colors.onSurface },
+  logRole: { fontSize: 11.5, fontWeight: "600", color: colors.onSurfaceSecondary },
+  logMeta: { fontSize: 11, color: colors.onSurfaceSecondary },
   lockBox: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8 },
   lockTitle: { fontSize: 16, fontWeight: "800", color: colors.onSurface },
   mutedTxt: { fontSize: 12, color: colors.onSurfaceSecondary },

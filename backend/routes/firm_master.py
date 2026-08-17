@@ -25,14 +25,16 @@ accepts partial payloads and merges into the persisted subdocument so
 Save works section-by-section without forcing all-or-nothing input.
 """
 from datetime import datetime, timezone
+import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Header, HTTPException
+from fastapi import APIRouter, Body, Header, HTTPException, Request
 
 from server import (  # noqa: E402
     db,
     get_user_from_token,
     require_role,
+    require_super_admin_strict,
     now_iso,
     logger,
 )
@@ -711,6 +713,7 @@ def _fm_city(fm: Dict[str, Any]) -> str:
 
 @router.post("/firm-credentials")
 async def firm_credentials(
+    request: Request,
     payload: Dict[str, Any] = Body(default={}),
     authorization: Optional[str] = Header(None),
 ):
@@ -718,6 +721,25 @@ async def firm_credentials(
     # Iter 331 (user request) — Sub Super Admins can view firm credentials
     # too (verified against their OWN login PIN).
     require_role(user, ["super_admin", "sub_admin"])
+
+    # Iter 599 (user request) — VAULT ACCESS LOG: every unlock attempt
+    # (success AND failure) is recorded for the Super Admin's audit trail.
+    async def _log_vault(ok: bool, reason: str) -> None:
+        try:
+            await db.vault_access_log.insert_one({
+                "log_id": f"val_{uuid.uuid4().hex[:12]}",
+                "user_id": user["user_id"],
+                "name": user.get("name"),
+                "email": user.get("email"),
+                "role": user.get("role"),
+                "ok": ok,
+                "reason": reason,
+                "ip": (request.client.host if request and request.client else None),
+                "at": now_iso(),
+            })
+        except Exception:
+            logger.exception("[vault-log] failed to persist access log row")
+
     pin = str(payload.get("pin") or "").strip()
     from server import _verify_pin
     me = await db.users.find_one({"user_id": user["user_id"]},
@@ -726,17 +748,20 @@ async def firm_credentials(
     # seeing a generic "wrong PIN" error and assumed only the Super Admin's
     # PIN works. Tell them exactly what to do instead.
     if not (me or {}).get("pin_hash"):
+        await _log_vault(False, "no_pin_set")
         raise HTTPException(
             status_code=403,
             detail=("No PIN is set on your account yet. Use 'Forgot PIN?' below "
                     "to email yourself a temporary PIN, or ask the Super Admin "
                     "to set your 6-digit PIN in Sub Admins → Edit."))
     if not pin or not _verify_pin(pin, me["pin_hash"]):
+        await _log_vault(False, "wrong_pin")
         raise HTTPException(
             status_code=403,
             detail=("Incorrect PIN — enter YOUR OWN admin PIN. Sub Super "
                     "Admins use their own PIN, not the Super Admin's. "
                     "Forgotten it? Tap 'Forgot PIN?' below."))
+    await _log_vault(True, "success")
 
     from utils.secrets_vault import decrypt_secret
     names: Dict[str, str] = {}
@@ -777,6 +802,20 @@ async def firm_credentials(
     logger.info("[firm-credentials] revealed to %s (%d firms)",
                 user["user_id"], len(out))
     return {"firms": out}
+
+
+@router.get("/firm-credentials/access-log")
+async def firm_credentials_access_log(
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 599 (user request) — VAULT ACCESS LOG viewer (Super Admin only):
+    who unlocked (or failed to unlock) Firms ID & Password, and when."""
+    user = await get_user_from_token(authorization)
+    require_super_admin_strict(user)
+    rows = await db.vault_access_log.find(
+        {}, {"_id": 0},
+    ).sort("at", -1).to_list(200)
+    return {"logs": rows}
 
 
 # ---------------------------------------------------------------------------

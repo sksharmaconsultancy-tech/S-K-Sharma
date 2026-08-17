@@ -6301,3 +6301,14 @@ Current iteration: 594. Next: 595.
   supported sub_admin; emails temp PIN, works even with no PIN set).
 - Tests PASS: own PIN 200, wrong PIN 403 w/ guidance, no-PIN 403 w/
   guidance, forgot-pin 200. deploy_vps_iter598.sh; APP_ITERATION="598".
+
+## Iter 599 (DONE) — Vault Access Log (Firms ID & Password)
+- firm_master.py: every firm-credentials unlock attempt (success/failed
+  with reason wrong_pin|no_pin_set, IP, timestamp) logged to new
+  vault_access_log collection. New GET /admin/firm-credentials/access-log
+  (require_super_admin_strict — sub_admins 403).
+- firm-credentials.tsx: "Access Log" toggle button (super_admin only)
+  renders the last 200 attempts with ✓/✗, name, role, time, IP.
+- Tests PASS: unlock ok/fail logged in order, super admin 200,
+  sub-admin 403. Screenshot-verified panel. deploy_vps_iter599.sh;
+  APP_ITERATION="599".
