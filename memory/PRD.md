@@ -6289,3 +6289,15 @@ Current iteration: 594. Next: 595.
   regressions. Settings API round-trip PASS (default/firm override/400 on
   bad value/clear). Screenshot-verified UI.
 - deploy_vps_iter597.sh; APP_ITERATION="597".
+
+## Iter 598 (DONE) — Firms ID & Password: Sub Super Admin PIN access
+- User report: sub-admins thought only the Super Admin PIN unlocks the
+  vault. Root cause: endpoint ALREADY accepted sub_admin own PIN (Iter 331)
+  but sub-admins WITHOUT a pin_hash got a generic "wrong PIN" error.
+- firm_master.py firm-credentials: distinct 403 messages — "No PIN is set
+  on your account yet…" vs "Incorrect PIN — enter YOUR OWN admin PIN…".
+- firm-credentials.tsx: sub_admin hint ("use YOUR OWN PIN"), "Forgot PIN?
+  Email me a temporary PIN" button → POST /auth/forgot-pin (already
+  supported sub_admin; emails temp PIN, works even with no PIN set).
+- Tests PASS: own PIN 200, wrong PIN 403 w/ guidance, no-PIN 403 w/
+  guidance, forgot-pin 200. deploy_vps_iter598.sh; APP_ITERATION="598".

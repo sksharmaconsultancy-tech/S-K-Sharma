@@ -722,10 +722,21 @@ async def firm_credentials(
     from server import _verify_pin
     me = await db.users.find_one({"user_id": user["user_id"]},
                                  {"_id": 0, "pin_hash": 1})
-    if not pin or not (me or {}).get("pin_hash") or not _verify_pin(pin, me["pin_hash"]):
+    # Iter 598 (user report) — Sub Super Admins created WITHOUT a PIN kept
+    # seeing a generic "wrong PIN" error and assumed only the Super Admin's
+    # PIN works. Tell them exactly what to do instead.
+    if not (me or {}).get("pin_hash"):
         raise HTTPException(
             status_code=403,
-            detail="Enter your correct Admin PIN to view firm credentials")
+            detail=("No PIN is set on your account yet. Use 'Forgot PIN?' below "
+                    "to email yourself a temporary PIN, or ask the Super Admin "
+                    "to set your 6-digit PIN in Sub Admins → Edit."))
+    if not pin or not _verify_pin(pin, me["pin_hash"]):
+        raise HTTPException(
+            status_code=403,
+            detail=("Incorrect PIN — enter YOUR OWN admin PIN. Sub Super "
+                    "Admins use their own PIN, not the Super Admin's. "
+                    "Forgotten it? Tap 'Forgot PIN?' below."))
 
     from utils.secrets_vault import decrypt_secret
     names: Dict[str, str] = {}

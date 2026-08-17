@@ -65,6 +65,9 @@ export default function FirmCredentialsScreen() {
   // Iter 325 (user request) — Excel-sheet view with tap-to-copy cells.
   const [copied, setCopied] = useState("");
   const [showPw, setShowPw] = useState(false);
+  // Iter 598 (user report) — self-service PIN recovery for Sub Super Admins.
+  const [forgotMsg, setForgotMsg] = useState("");
+  const [forgotBusy, setForgotBusy] = useState(false);
   // Iter 328 (user report) — opening this page from the search menu could
   // "click through" onto a cell and copy an email/value unintentionally.
   // Ignore any copy in the first moments after the sheet mounts.
@@ -91,7 +94,7 @@ export default function FirmCredentialsScreen() {
 
   const unlock = async () => {
     if (!pin.trim()) { setErr("Enter your Admin PIN"); return; }
-    setLoading(true); setErr("");
+    setLoading(true); setErr(""); setForgotMsg("");
     try {
       const r = await api<{ firms: FirmCred[] }>("/admin/firm-credentials", {
         method: "POST",
@@ -101,6 +104,19 @@ export default function FirmCredentialsScreen() {
     } catch (e: any) {
       setErr(e?.message || "PIN verification failed");
     } finally { setLoading(false); }
+  };
+
+  // Iter 598 — email a temporary PIN to the signed-in admin (works for
+  // Super Admin AND Sub Super Admins, even when no PIN was ever set).
+  const forgotPin = async () => {
+    if (forgotBusy || !user?.email) return;
+    setForgotBusy(true); setErr("");
+    try {
+      await api("/auth/forgot-pin", { method: "POST", body: { identifier: user.email } });
+      setForgotMsg(`A temporary 6-digit PIN has been emailed to ${user.email}. Enter it above to unlock (you'll pick a new PIN on next sign-in).`);
+    } catch (e: any) {
+      setErr(e?.message || "Could not send the temporary PIN");
+    } finally { setForgotBusy(false); }
   };
 
   const visible = (firms || []).filter((f) =>
@@ -133,6 +149,11 @@ export default function FirmCredentialsScreen() {
             <Text style={styles.mutedTxt}>
               Enter your login PIN to reveal firm portal credentials.
             </Text>
+            {user?.role === "sub_admin" ? (
+              <Text style={[styles.mutedTxt, { fontSize: 11.5, color: colors.brandPrimary }]}>
+                Sub Super Admins: use YOUR OWN 6-digit PIN (not the Super Admin’s).
+              </Text>
+            ) : null}
             <TextInput
               style={styles.pinInput}
               placeholder="PIN"
@@ -146,11 +167,20 @@ export default function FirmCredentialsScreen() {
               testID="cred-pin-input"
             />
             {!!err && <Text style={styles.errTxt}>{err}</Text>}
+            {!!forgotMsg && (
+              <Text style={[styles.mutedTxt, { color: "#047857", textAlign: "center" }]}>{forgotMsg}</Text>
+            )}
             <Pressable style={styles.unlockBtn} onPress={unlock} disabled={loading} testID="cred-unlock">
               {loading
                 ? <ActivityIndicator color={colors.onBrandPrimary} size="small" />
                 : <Ionicons name="lock-open-outline" size={15} color={colors.onBrandPrimary} />}
               <Text style={styles.unlockTxt}>Unlock credentials</Text>
+            </Pressable>
+            {/* Iter 598 — self-service PIN recovery (temp PIN via email). */}
+            <Pressable onPress={forgotPin} disabled={forgotBusy} testID="cred-forgot-pin">
+              <Text style={{ color: colors.brandPrimary, fontSize: 12.5, fontWeight: "600", padding: 6 }}>
+                {forgotBusy ? "Sending…" : "Forgot PIN? Email me a temporary PIN"}
+              </Text>
             </Pressable>
           </View>
         ) : (
