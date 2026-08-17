@@ -740,3 +740,13 @@ ITER 487 (doc-expiry alerts):
   attendance for Kankani Enterprises" → /attendance-grid?company_id=...&
   month=2026-08 with month preselected and firm switched.
 - Deploy script: /app/deploy_vps_iter590.sh (kind=script serves 590).
+
+## Iter 590b — Voice-first commands in AI Command Center (2026-06)
+- ai-command-center.tsx: mic button (aicc-voice) with web SpeechRecognition
+  (en-IN / hi-IN via useLang), interim transcript in the input, AUTO-SUBMIT
+  on final result → combined with direct navigation, spoken "attendance
+  kholo" opens the page hands-free. Red mic + "Listening…" placeholder
+  while active; button hidden on unsupported browsers. Floating assistant
+  already auto-submitted (unchanged).
+- Screenshot-verified: mic renders/toggles, listening state visible, text
+  command regression OK.

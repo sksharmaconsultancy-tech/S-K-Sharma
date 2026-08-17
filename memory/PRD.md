@@ -6154,3 +6154,8 @@ Meta creds). Plus MSG91 SMS Phase 2/3, client-role templates.
   attendance for Kankani" landed on ?company_id&month=2026-08 preselected.
 - Deploy: /app/deploy_vps_iter590.sh (kind=script serves 590).
 Current iteration: 590. Next: 591.
+
+## Iter 590b (DONE) — Voice-first commands in AI Command Center
+- Mic + SpeechRecognition auto-submit added to ai-command-center.tsx
+  (floating assistant already had it). Hands-free voice navigation works
+  with the Iter 590 direct-navigation engine.

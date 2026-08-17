@@ -21,6 +21,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { api, apiBinary } from "@/src/api/client";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
+import { useLang } from "@/src/i18n";
 import { colors, radius, spacing } from "@/src/theme";
 
 type Action =
@@ -63,6 +64,53 @@ export default function AiCommandCenterScreen() {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [busy, setBusy] = useState(false);
   const scrollRef = useRef<ScrollView | null>(null);
+
+  // Iter 590b — voice-first commands (web SpeechRecognition, en-IN/hi-IN):
+  // speak "attendance kholo" → auto-submits on the final result → the
+  // direct-navigation engine opens the page hands-free.
+  const lang = useLang();
+  const [listening, setListening] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const recRef = useRef<any>(null);
+  useEffect(() => {
+    if (Platform.OS === "web") {
+      const SR = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+      setVoiceSupported(!!SR);
+    }
+  }, []);
+
+  const toggleVoice = () => {
+    if (Platform.OS !== "web") return;
+    if (listening) {
+      recRef.current?.stop();
+      setListening(false);
+      return;
+    }
+    const SR = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+    if (!SR) return;
+    const rec = new SR();
+    rec.lang = lang === "hi" ? "hi-IN" : "en-IN";
+    rec.interimResults = true;
+    rec.continuous = false;
+    rec.onresult = (ev: any) => {
+      let final = "";
+      let interim = "";
+      for (let i = 0; i < ev.results.length; i++) {
+        if (ev.results[i].isFinal) final += ev.results[i][0].transcript;
+        else interim += ev.results[i][0].transcript;
+      }
+      setInput(final || interim);
+      if (final) {
+        setListening(false);
+        void send(final); // hands-free: auto-submit the spoken command
+      }
+    };
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    recRef.current = rec;
+    setListening(true);
+    rec.start();
+  };
 
   const send = async (text: string) => {
     const cmd = text.trim();
@@ -259,8 +307,17 @@ export default function AiCommandCenterScreen() {
             ))}
           </ScrollView>
           <View style={st.inputRow}>
+            {voiceSupported ? (
+              <Pressable onPress={toggleVoice}
+                style={[st.micBtn, listening && st.micBtnOn]}
+                testID="aicc-voice">
+                <Ionicons name={listening ? "mic" : "mic-outline"} size={18}
+                  color={listening ? "#fff" : colors.brandPrimary} />
+              </Pressable>
+            ) : null}
             <TextInput style={st.input} value={input} onChangeText={setInput}
-              placeholder='e.g. "Kankani me kitne employees hain?"'
+              placeholder={listening ? "Listening… bol kar command dijiye"
+                : 'e.g. "Kankani me kitne employees hain?"'}
               placeholderTextColor={colors.onSurfaceTertiary}
               onSubmitEditing={() => void send(input)} testID="aicc-input" />
             <Pressable style={st.sendBtn} onPress={() => void send(input)} testID="aicc-send">
@@ -514,6 +571,12 @@ const st = StyleSheet.create({
     backgroundColor: colors.brandPrimary, borderRadius: radius.md,
     paddingHorizontal: 16, justifyContent: "center", minHeight: 44,
   },
+  micBtn: {
+    width: 44, minHeight: 44, borderRadius: radius.md, alignItems: "center",
+    justifyContent: "center", borderWidth: 1, borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  micBtnOn: { backgroundColor: "#DC2626", borderColor: "#DC2626" },
   linkRow: { flexDirection: "row", alignItems: "center", gap: 4 },
   linkTxt: { color: colors.brandPrimary, fontWeight: "700", fontSize: 12.5 },
   smallBtn: { borderRadius: radius.md, paddingHorizontal: 14, paddingVertical: 9 },
