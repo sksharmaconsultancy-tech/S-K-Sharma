@@ -6383,3 +6383,14 @@ Current iteration: 594. Next: 595.
 - NEXT (Phase 3-4): Attendance Policy toggles UI, entry buttons wiring
   secure-punch into the employee home/PunchFlowModal when policy on,
   audit log admin screen, real-device spoof testing by user.
+
+## Iter 603 (DONE) — Two user bug fixes
+- PF Basic auto-copy (employee-add.tsx Compliance Basic onChange): typing
+  25000 left stale "2500" in pf_basic. Now n>=15000 clears pf_basic
+  (blank default), n<15000 keeps auto-copy.
+- Refresh Master (compliance_salary_runs.py refresh-master-snapshot):
+  called _compute_compliance_run WITHOUT prev_rows → wiped saved grid
+  edits. Fix: pass existing rows as prev_rows → non-destructive reprocess
+  (Iter 297/374) preserves present days + manual amounts. E2E PASS
+  (others 777 + pd 9.5 survived; save-rows needs FULL row set FYI).
+- deploy_vps_iter603.sh; APP_ITERATION="603".

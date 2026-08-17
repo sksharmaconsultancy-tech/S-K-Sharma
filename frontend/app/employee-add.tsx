@@ -1888,7 +1888,16 @@ export default function EmployeeAddScreen() {
                 const clean = v.replace(/[^0-9.]/g, "");
                 setField("compliance_basic", clean);
                 const n = Number(clean || 0);
-                if (n > 0 && n < 15000) setField("pf_basic", clean);
+                if (n > 0 && n < 15000) {
+                  setField("pf_basic", clean);
+                } else if (n >= 15000) {
+                  // Iter 603 (user bug) — while TYPING e.g. "25000" the
+                  // partial value "2500" (< ceiling) auto-copied into PF
+                  // Basic and stayed there once the Basic crossed ₹15,000.
+                  // Basic at/above the EPF limit → PF Basic defaults to
+                  // BLANK (optional); the admin can still type one manually.
+                  if (form.pf_basic) setField("pf_basic", "");
+                }
               }}
               placeholder="e.g. 12000"
               keyboardType="numeric"

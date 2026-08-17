@@ -2346,7 +2346,15 @@ async def refresh_master_snapshot_endpoint(
         structure_pct=existing.get("structure_pct"),
         statutory_cfg=existing.get("statutory_cfg"),
     )
+    # Iter 603 (user bug) — "Refresh Master" was wiping ALL saved grid data
+    # (entered present days, manual OT/Others/TDS/Advance…). Pass the
+    # existing rows into the compute so the NON-DESTRUCTIVE reprocess
+    # machinery (Iter 297/374) keeps every manual figure — only the master
+    # values (rates, basic, policies) refresh.
+    _prev_rows = {r.get("user_id"): r for r in (existing.get("rows") or [])
+                  if r.get("user_id")}
     run = await _compute_compliance_run(admin, payload,
+                                        prev_rows=_prev_rows,
                                         allow_snapshot_create=False)
     run["run_id"] = run_id
     run["reprocessed_from_at"] = existing.get("generated_at")
