@@ -434,12 +434,32 @@ async def email_deliverability_check(authorization: Optional[str] = Header(None)
     if not smtp_ok and not verified:
         advice.append("Quick fix without DNS: configure SMTP in Email Settings and switch ON "
                       "'Send OTP via own SMTP' here — OTPs then reach every user immediately.")
-    # live test send to the requesting super admin (works even in test mode)
+    # live test send to the requesting super admin (works even in test mode).
+    # Iter 593b — clearly labelled as a TEST so it can't be mistaken for a
+    # real login OTP (previously reused the OTP template with 000000).
     test = {"delivered": False, "error": "no key"}
     if key:
-        from server import _send_otp_email
-        test = await _send_otp_email(admin.get("email") or "", "000000", 2)
-    checks.append({"name": f"Test email to {admin.get('email')}", "ok": bool(test.get("delivered")),
+        try:
+            async with httpx.AsyncClient(timeout=15) as cl:
+                tr = await cl.post(
+                    "https://api.resend.com/emails",
+                    headers={"Authorization": f"Bearer {key}"},
+                    json={"from": f"S.K. Sharma & Co <{from_email}>",
+                          "to": [admin.get("email") or ""],
+                          "subject": "TEST — Email Deliverability Check (please ignore)",
+                          "html": ("<p><b>This is only a delivery test</b> triggered from "
+                                   "Security · 2FA/MFA → Run Email Deliverability Check.</p>"
+                                   "<p>It is <b>not</b> a login code — no action is needed. "
+                                   "If you received this, the email pipeline can reach this "
+                                   "address.</p><p>— Smart Payroll, S.K. Sharma &amp; Co</p>")})
+            if tr.status_code in (200, 201):
+                test = {"delivered": True, "error": None}
+            else:
+                test = {"delivered": False, "error": tr.text[:160]}
+        except Exception as exc:  # noqa: BLE001
+            test = {"delivered": False, "error": str(exc)[:160]}
+    checks.append({"name": f"Test email to {admin.get('email')} (clearly marked TEST)",
+                   "ok": bool(test.get("delivered")),
                    "detail": str(test.get("error") or "delivered")[:160]})
     can_deliver_to_all = (bool(verified) and from_ok) or (smtp_ok and bool(st.get("otp_email_via_smtp")))
     verdict = ("✅ OTP emails will reach EVERY registered user."

@@ -781,3 +781,11 @@ ITER 487 (doc-expiry alerts):
 - Endpoint verified via curl (correct ❌ verdict, 6 checks, 2 advice lines,
   domain "not_started" surfaced); UI verified via screenshot (button →
   full report panel). No regressions.
+
+## Iter 593b — Deliverability test email relabelled (2026-06)
+- User confusion: the check's test send reused the real OTP template with
+  code 000000, addressed to the super admin → looked like a leaked user
+  OTP. FIXED: check now sends a distinct "TEST — Email Deliverability
+  Check (please ignore)" email; verified delivered. Confirmed real login
+  OTPs go ONLY to the logging-in user's own email (_twofa_send_code →
+  _send_otp_email(user.email)); fallback_to_admin_email is OFF.
