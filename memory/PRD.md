@@ -6130,3 +6130,27 @@ Meta creds). Plus MSG91 SMS Phase 2/3, client-role templates.
   (source marked UNDONE), skips salaries changed after the bulk, same
   execute/approval path (sub-admin undo → maker-checker CRITICAL).
 - Tests: test_undo_589b.py 11/11; bulk regression 17/17.
+
+## Iter 590 (DONE) — AI Direct Navigation & Direct Actions (user spec)
+- ai_assistant.py navigate handler rewritten: action gains auto:true →
+  frontend router.push fires immediately (both AiAssistant.tsx and
+  ai-command-center.tsx auto-run + hide the button). Short "Opening X."
+  reply. Firm+month context: named firm → action.company_id (frontend calls
+  setSelectedCompanyId first) + route query params company_id/month
+  (attendance-grid reads both via useLocalSearchParams). Ambiguous "open
+  salary" → clarification, screen=null (SYSTEM_PROMPT rule).
+- Permission gate (server-side, §13): _SCREEN_MODULE map (screens →
+  employees/punch_approvals/salary_process/reports/compliance/masters/
+  biometric_devices) checked via has_permission(module,"view") for
+  sub-admins; _SUPER_ADMIN_SCREENS={companies} refused for non-super.
+  Denied → "You don't have permission to access <page>", no action.
+- Safe actions (report downloads) already auto; sensitive actions
+  (employee_update/bulk/process) unchanged — still confirm_api +
+  maker-checker.
+- Tests: test_nav_590.py 10/10 (EN+Hinglish nav, PF report, firm+month
+  context, ambiguity, permission deny/allow, Firm Master deny, sensitive
+  still confirm, download still auto). UI screenshot-verified: "attendance
+  kholo" auto-opened /attendance-grid; floating assistant "Open August
+  attendance for Kankani" landed on ?company_id&month=2026-08 preselected.
+- Deploy: /app/deploy_vps_iter590.sh (kind=script serves 590).
+Current iteration: 590. Next: 591.

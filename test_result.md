@@ -728,3 +728,15 @@ ITER 487 (doc-expiry alerts):
 - Tests: test_undo_589b.py 11/11 (skip-changed-since, restore math, source
   UNDONE, double-undo blocked, salary_history rows, AI intent e2e, no
   change without confirm) + test_bulk_589.py regression 17/17.
+
+## Iter 590 — AI Direct Navigation (2026-06)
+- test_nav_590.py 10/10 — direct auto-navigation EN/Hinglish, firm+month
+  context in route + action.company_id, ambiguous salary clarification,
+  sub-admin module gate (deny w/o punch_approvals:view, allow employees),
+  Firm Master super-only, sensitive salary change still confirm_api (not
+  auto), report download still auto.
+- UI verified via screenshots: command center "attendance kholo" →
+  auto-opened /attendance-grid (no button); floating assistant "Open August
+  attendance for Kankani Enterprises" → /attendance-grid?company_id=...&
+  month=2026-08 with month preselected and firm switched.
+- Deploy script: /app/deploy_vps_iter590.sh (kind=script serves 590).

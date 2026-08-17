@@ -55,7 +55,7 @@ const inr = (v: any) => `₹${Number(v || 0).toLocaleString("en-IN")}`;
 
 export default function AiCommandCenterScreen() {
   const router = useRouter();
-  const { selectedCompanyId } = useSelectedCompany();
+  const { selectedCompanyId, setSelectedCompanyId } = useSelectedCompany();
   const [tab, setTab] = useState<(typeof TABS)[number]>("Ask AI");
 
   // ── Ask AI ──
@@ -85,7 +85,13 @@ export default function AiCommandCenterScreen() {
   };
 
   const runAction = async (a: Action, idx: number) => {
-    if (a.type === "navigate") { router.push(a.route as any); return; }
+    if (a.type === "navigate") {
+      // Iter 590 — firm-scoped navigation: switch the active firm first.
+      const navCid = (a as any).company_id;
+      if (navCid) setSelectedCompanyId(navCid);
+      router.push(a.route as any);
+      return;
+    }
     if (a.type === "link") { if (Platform.OS === "web") window.open(a.url, "_blank"); return; }
     if (a.type === "download") {
       setBusy(true);
@@ -219,7 +225,7 @@ export default function AiCommandCenterScreen() {
                 <Text style={m.who === "user" ? st.bubbleUserTxt : st.bubbleAiTxt}>
                   {m.text.replace(/\*\*/g, "")}
                 </Text>
-                {m.action && !m.done ? (
+                {m.action && !m.done && !(m.action as any).auto ? (
                   <Pressable
                     onPress={() => void runAction(m.action!, i)}
                     style={[st.actBtn,

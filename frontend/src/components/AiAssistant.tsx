@@ -43,7 +43,7 @@ export default function AiAssistant({
   open, onToggle,
 }: { open: boolean; onToggle: (v: boolean) => void }) {
   const router = useRouter();
-  const { selectedCompanyId } = useSelectedCompany();
+  const { selectedCompanyId, setSelectedCompanyId } = useSelectedCompany();
   const tr = useT();
   const lang = useLang();
   const [input, setInput] = useState("");
@@ -88,6 +88,9 @@ export default function AiAssistant({
   const runAction = async (a: Action, idx: number) => {
     if (a.type === "navigate") {
       onToggle(false);
+      // Iter 590 — firm-scoped navigation: switch the active firm first.
+      const navCid = (a as any).company_id;
+      if (navCid) setSelectedCompanyId(navCid);
       router.push(a.route as any);
       return;
     }

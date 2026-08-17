@@ -86,6 +86,27 @@ SCREENS = {
     "ai_dashboard": ("/ai-payroll-assistant", "AI Payroll Assistant"),
 }
 
+# Iter 590 — direct-navigation permission gate (§13 of the user spec).
+# Screens mapped to the RBAC module a sub-admin must hold `<module>:view`
+# for; screens in _SUPER_ADMIN_SCREENS are refused for everyone else.
+_SCREEN_MODULE = {
+    "employee_master": "employees", "add_employee": "employees",
+    "kyc": "employees",
+    "attendance_report": "punch_approvals", "inout_matrix": "punch_approvals",
+    "punch_approvals": "punch_approvals", "shift_change": "punch_approvals",
+    "salary_run": "salary_process", "compliance_salary": "salary_process",
+    "ot_salary": "salary_process", "arrear_salary": "salary_process",
+    "advances": "salary_process", "bonus": "salary_process",
+    "day_salary_sheet": "salary_process",
+    "bank_sheet": "reports", "labour_reports": "reports", "reports": "reports",
+    "employee_reports": "reports", "payslips": "reports",
+    "daily_present": "reports",
+    "pf_reports": "compliance", "esic_reports": "compliance",
+    "challans": "compliance",
+    "masters": "masters", "devices": "biometric_devices",
+}
+_SUPER_ADMIN_SCREENS = {"companies"}  # Firm Master — super/sub admin territory
+
 SYSTEM_PROMPT = """You are the AI command parser for an Indian payroll & attendance web portal (S.K. Sharma & Co.).
 The operator may write in English, Hindi or Hinglish (e.g. "Kankani ka June salary process karo").
 Parse the command into STRICT JSON (no markdown, no prose) with this schema:
@@ -126,7 +147,7 @@ Rules (today is %TODAY%):
 - "change Ramesh's phone to 98xxx", "set salary of code 50 to 15000", "mark Ramesh resigned/active" → employee_update with employee_query, field (phone|salary|status) and value (for status: "resigned" or "active").
 - BULK salary commands — "increase salary of ALL employees (in <X> department) by 5%", "sabki salary 500 rupaye badhao", "reduce Production dept salaries by 10%" → bulk_salary_change with department (null = whole firm) and percent (NEGATIVE for decrease/reduce) OR amount (flat ₹, negative for decrease). NEVER use employee_update for more than one employee.
 - "undo the last bulk change", "bulk salary change wapas/cancel karo", "revert the bulk increase" → undo_bulk (put a bulk id like BLK-XXXX in value if the user names one).
-- "open X" / "go to X" → navigate with the best screen key.
+- "open X" / "go to X" / "X kholo" / "X open karo" / "mujhe X par le jao" / "show X page" / "take me to X" → navigate with the best screen key. Carry firm_name and month when named ("Open August attendance for Kankani" → navigate + firm_name + month). If the page is AMBIGUOUS (e.g. just "open salary" could be Actual Salary, Compliance Salary or Salary Reports) set screen=null and ASK which one in reply — do not guess.
 - Questions about PF/EPF/ESIC/PT/TDS/labour-law RULES, rates, wage limits, due dates, latest NEWS, circulars, notifications or amendments (e.g. "PF ki latest notification kya hai", "what is the ESIC wage limit rule", "any new labour code update?") → compliance_info, and put the TOPIC in employee_query (e.g. "pf", "esic", "labour_code", "pt", "tds", "minimum_wages").
 - Anything else (greetings, general payroll/PF/ESIC law questions) → answer, with your best short answer in reply.
 - Relative dates: "today"=%TODAY%, "yesterday"=the day before. If a month is named without a year, use the current year (or previous year if in the future).
@@ -897,14 +918,44 @@ async def ai_command(body: CommandBody, authorization: Optional[str] = Header(No
             action = {"type": "navigate", "route": "/admin", "label": "Open Employee Master"}
 
         elif intent == "navigate":
+            # Iter 590 — DIRECT NAVIGATION (user spec): clear navigation
+            # commands EXECUTE immediately (action.auto) — no buttons, no
+            # confirmation. Permission-gated server-side before navigating.
             key = parsed.get("screen")
             if key in SCREENS:
                 route, label = SCREENS[key]
-                action = {"type": "navigate", "route": route, "label": f"Open {label}"}
-                reply = reply or f"Opening {label}."
+                denied = False
+                if admin["role"] != "super_admin":
+                    if key in _SUPER_ADMIN_SCREENS:
+                        denied = True
+                    else:
+                        mod = _SCREEN_MODULE.get(key)
+                        from shared.authz import has_permission as _hp
+                        if mod and not _hp(admin, mod, "view"):
+                            denied = True
+                if denied:
+                    reply = f"You don't have permission to access {label}."
+                else:
+                    firm_named = bool(parsed.get("firm_name")) and bool(cid)
+                    sep = "&" if "?" in route else "?"
+                    if firm_named:
+                        route = f"{route}{sep}company_id={cid}"
+                        sep = "&"
+                    if parsed.get("month"):
+                        route = f"{route}{sep}month={parsed['month']}"
+                    action = {"type": "navigate", "route": route,
+                              "label": f"Open {label}", "auto": True}
+                    if firm_named:
+                        action["company_id"] = cid
+                    reply = (f"Opening {label}"
+                             + (f" — {firm_label}" if firm_named else "")
+                             + (f" ({_mon_label(parsed['month'])})" if parsed.get("month") else "")
+                             + ".")
             else:
-                reply = reply or ("I couldn't find that screen. Try 'open attendance "
-                                  "report' or 'open salary process'.")
+                reply = reply or ("Which page do you want to open? For example: "
+                                  "Employee Master, Attendance Report, Actual Salary, "
+                                  "Compliance Salary, PF Reports, ESIC Reports, "
+                                  "Firm Master or Bank Sheet.")
     except Exception as e:  # noqa: BLE001 — the assistant must never 500
         logger.exception("[ai-assistant] handler failed")
         reply = f"Something went wrong while preparing that: {str(e)[:150]}"
