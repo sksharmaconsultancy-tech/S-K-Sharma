@@ -763,3 +763,16 @@ ITER 487 (doc-expiry alerts):
 - Central engine + help overlay + global Alt+1..8 / Ctrl+K / "?" verified
   live via Playwright (nav URLs changed, overlay rendered, assistant
   opened, typing guard held). No page-level regressions observed.
+
+## Iter 592b — BUG FIX: OTP for Registered Users (2026-06)
+- Root cause 1 (delivery): Resend account has NO verified domain → test
+  mode → delivers ONLY to sksharmaconsultancy@gmail.com; sending from
+  no-reply@smartpayrolling.com returns 403 "domain is not verified"
+  (verified via direct API call). NOT fixable in code — user must verify
+  the domain at resend.com/domains OR enable otp_email_via_smtp with their
+  SMTP (both paths already exist; verify-2fa screen explains it in-line).
+- Root cause 2 (frontend bug, FIXED): app/company-login.tsx (Employer Sign
+  In used by client admins/staff) ignored twofa_required — users were stuck
+  after PIN entry. Now routes to /verify-2fa with delivery fields, same as
+  admin-pin-login. Verified live: admin@kankani.local PIN 123456 → Verify
+  Your Identity screen with the test-mode delivery warning shown.

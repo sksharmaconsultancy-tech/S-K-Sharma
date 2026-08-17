@@ -89,10 +89,31 @@ export default function CompanyLoginScreen() {
     }
     setBusy(true);
     try {
-      const r = await api<{ session_token: string; pin_must_change: boolean }>(
+      const r = await api<any>(
         "/auth/admin-pin-login",
         { method: "POST", auth: false, body },
       );
+      // Iter 592b — client firm admins/staff now get an OTP challenge too
+      // (Iter 591): route them to the same verify screen as Super Admin.
+      if (r.twofa_required) {
+        router.push({
+          pathname: "/verify-2fa",
+          params: {
+            pending_token: r.pending_token,
+            method: r.method || "email",
+            methods: JSON.stringify(r.methods || []),
+            masked_email: r.masked_email || "",
+            masked_mobile: r.masked_mobile || "",
+            otp_expires_in: String(r.otp_expires_in || 300),
+            resend_cooldown: String(r.resend_cooldown || 30),
+            trusted_enabled: r.trusted_device_enabled ? "1" : "0",
+            delivered: r.delivered ? "1" : "0",
+            delivery_error: r.delivery_error || "",
+            delivery_note: r.delivery_note || "",
+          },
+        });
+        return;
+      }
       await saveToken(r.session_token);
       await refresh();
       // Iter 184 — land on "/" so the root guard routes admins to the

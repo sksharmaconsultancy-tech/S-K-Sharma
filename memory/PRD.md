@@ -6201,3 +6201,9 @@ Current iteration: 591. Next: 592.
   user-customisable bindings + reset-to-default.
 - Deploy: /app/deploy_vps_iter592.sh (kind=script serves 592).
 Current iteration: 592. Next: 593.
+
+## Iter 592b (DONE) — OTP-not-received bug for Registered Users
+- Fixed company-login.tsx missing twofa_required handling (client users
+  stuck after PIN). Delivery failure root cause: Resend domain NOT verified
+  (test mode, owner-only delivery) — user action needed: verify domain at
+  resend.com/domains or enable "Send OTP via own SMTP" (Security · 2FA).

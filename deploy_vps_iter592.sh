@@ -20,6 +20,22 @@
 #      Employee Master & Salary screens, attendance grid quick keys
 #      (P/A/L/H/W), and user-customisable bindings.
 #
+# 🔧 BUG FIX — OTP FOR REGISTERED USERS (client firm logins):
+#  * The Employer Sign In screen (/company-login) did not handle the new
+#      OTP challenge — client admins/staff are now correctly taken to the
+#      "Verify Your Identity" screen after entering their PIN.
+#  * WHY MAILS DON'T ARRIVE: your Resend account has NO VERIFIED DOMAIN, so
+#      it is in TEST mode — it can only deliver to the account owner's own
+#      email (sksharmaconsultancy@gmail.com). Registered users therefore
+#      never receive the OTP. TWO FIXES (either works):
+#        1) Verify your domain: resend.com/domains → add smartpayrolling.com
+#           → add the DKIM/SPF DNS records it shows → set RESEND_FROM_EMAIL=
+#           no-reply@smartpayrolling.com in backend/.env → restart backend.
+#        2) OR configure your own SMTP (Administration → Email Settings)
+#           and switch ON "Send OTP via own SMTP" in Security · 2FA/MFA —
+#           OTPs then deliver to EVERY user with no Resend limits.
+#      The verify screen now clearly explains this whenever delivery fails.
+#
 # PREVIOUS (Iter 591) — full 16-module permission matrix + OTP login for
 #    client admins/staff.
 #
