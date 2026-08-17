@@ -409,7 +409,44 @@ async def email_deliverability_check(authorization: Optional[str] = Header(None)
     verified = [d["name"] for d in domains if d.get("status") == "verified"]
     checks.append({"name": "Verified domain on Resend account", "ok": bool(verified),
                    "detail": ", ".join(verified) if verified
-                   else "NO verified domains — Resend is in TEST mode (delivers only to the account owner's email)"})
+                   else ("; ".join(f"{d['name']}: {d['status']}" for d in domains)
+                         or "NO domains — Resend is in TEST mode")})
+    # Iter 593c — DNS-record inspection (explains SPAM-folder delivery):
+    # without DKIM/SPF alignment the mails fall back to onboarding@resend.dev
+    # (brand mismatch + shared sender) and land in Spam.
+    _check_domain = from_domain if from_domain != "resend.dev" else (
+        (domains[0]["name"] if domains else None))
+    if _check_domain:
+        try:
+            import dns.resolver as _dr
+
+            def _has(name: str, rtype: str = "TXT") -> bool:
+                try:
+                    _dr.resolve(name, rtype)
+                    return True
+                except Exception:
+                    return False
+            dkim = _has(f"resend._domainkey.{_check_domain}")
+            spf = _has(f"send.{_check_domain}") or _has(_check_domain)
+            dmarc = _has(f"_dmarc.{_check_domain}")
+            checks.append({"name": f"DKIM DNS record (resend._domainkey.{_check_domain})",
+                           "ok": dkim,
+                           "detail": "" if dkim else "MISSING — add the TXT record shown on resend.com/domains"})
+            checks.append({"name": f"SPF DNS record (send.{_check_domain})", "ok": spf,
+                           "detail": "" if spf else "MISSING — add the TXT + MX records shown on resend.com/domains"})
+            checks.append({"name": f"DMARC record (_dmarc.{_check_domain})", "ok": dmarc,
+                           "detail": "" if dmarc else
+                           "MISSING — add TXT: v=DMARC1; p=none; (improves inbox placement)"})
+            if not (dkim and spf):
+                advice.append("SPAM-FOLDER CAUSE: DKIM/SPF records are missing, so mails go out "
+                              "from onboarding@resend.dev (shared test sender + brand mismatch) — "
+                              "Gmail flags that as spam. Add the DNS records from resend.com/domains "
+                              "at your DNS provider; verification usually completes within minutes.")
+            elif not dmarc:
+                advice.append("Add a DMARC TXT record (_dmarc." + from_domain +
+                              " → v=DMARC1; p=none;) to further improve inbox placement.")
+        except ImportError:
+            pass
     from_ok = from_domain in [v.lower() for v in verified]
     checks.append({"name": f"FROM address uses a verified domain ({from_email})",
                    "ok": from_ok})

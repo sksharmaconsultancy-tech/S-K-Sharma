@@ -789,3 +789,14 @@ ITER 487 (doc-expiry alerts):
   Check (please ignore)" email; verified delivered. Confirmed real login
   OTPs go ONLY to the logging-in user's own email (_twofa_send_code →
   _send_otp_email(user.email)); fallback_to_admin_email is OFF.
+
+## Iter 593c — Spam-folder diagnosis + DNS checks in email-check (2026-06)
+- Root cause of OTP-in-spam: mails go out from onboarding@resend.dev
+  (shared test sender + "S.K. Sharma & Co." display-name mismatch, no
+  DKIM/SPF/DMARC alignment) — Gmail spam-flags it. User added
+  smartpayrolling.com on Resend (status "pending") but NONE of the DNS
+  records exist yet (resend._domainkey / send TXT+MX / _dmarc all NXDOMAIN,
+  verified via dnspython).
+- email-check endpoint now inspects DKIM/SPF/DMARC DNS records for the
+  brand domain (falls back to the account's first domain when FROM is
+  resend.dev) and explains the spam cause with fix advice. Verified live.
