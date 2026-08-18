@@ -99,7 +99,14 @@ async def device_register_options(
 ):
     user = await get_user_from_token(authorization)
     active = await _active_creds(user["user_id"])
-    if active:
+    # Iter 607 — firm-configurable device limit (1-3, default 1). Under the
+    # limit the employee may self-register an ADDITIONAL device; at the
+    # limit a replacement needs an APPROVED change request.
+    company = await db.companies.find_one(
+        {"company_id": user.get("company_id")},
+        {"_id": 0, "max_registered_devices": 1}) or {}
+    max_dev = max(1, min(3, int(company.get("max_registered_devices") or 1)))
+    if len(active) >= max_dev:
         # replacement needs an APPROVED change request
         req = await db.device_change_requests.find_one(
             {"user_id": user["user_id"], "status": "approved"})
@@ -155,14 +162,26 @@ async def device_register_verify(
         logger.warning("[webauthn] register verify failed: %s", e)
         raise HTTPException(status_code=400,
                             detail="Device registration could not be verified")
-    # Revoke any previous credential (approved replacement flow).
-    await db.webauthn_credentials.update_many(
-        {"user_id": user["user_id"], "status": "active"},
-        {"$set": {"status": "revoked", "revoked_at": now_iso(),
-                  "revoked_reason": "replaced_by_new_registration"}})
-    await db.device_change_requests.update_many(
-        {"user_id": user["user_id"], "status": "approved"},
-        {"$set": {"status": "completed", "completed_at": now_iso()}})
+    # Iter 607 — replacement vs additional device: only revoke previous
+    # credentials when this registration is an APPROVED replacement OR the
+    # firm's device limit would be exceeded (default limit 1 keeps the
+    # original replace-on-register behaviour).
+    company = await db.companies.find_one(
+        {"company_id": user.get("company_id")},
+        {"_id": 0, "max_registered_devices": 1}) or {}
+    max_dev = max(1, min(3, int(company.get("max_registered_devices") or 1)))
+    approved_req = await db.device_change_requests.find_one(
+        {"user_id": user["user_id"], "status": "approved"})
+    n_active = await db.webauthn_credentials.count_documents(
+        {"user_id": user["user_id"], "status": "active"})
+    if approved_req or n_active >= max_dev:
+        await db.webauthn_credentials.update_many(
+            {"user_id": user["user_id"], "status": "active"},
+            {"$set": {"status": "revoked", "revoked_at": now_iso(),
+                      "revoked_reason": "replaced_by_new_registration"}})
+        await db.device_change_requests.update_many(
+            {"user_id": user["user_id"], "status": "approved"},
+            {"$set": {"status": "completed", "completed_at": now_iso()}})
     cred_ref = f"dev_{uuid.uuid4().hex[:12]}"
     await db.webauthn_credentials.insert_one({
         "credential_ref": cred_ref,
@@ -336,6 +355,15 @@ async def admin_list_devices(
     reqs = await db.device_change_requests.find(
         {**q, "status": "pending"} if q else {"status": "pending"},
         {"_id": 0}).to_list(200)
+    # Iter 607 — enrich with employee name/code for the admin UI.
+    uids = list({c["user_id"] for c in creds} | {r["user_id"] for r in reqs})
+    names = {u["user_id"]: u async for u in db.users.find(
+        {"user_id": {"$in": uids}},
+        {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1})}
+    for row in creds + reqs:
+        u = names.get(row["user_id"]) or {}
+        row["employee_name"] = u.get("name")
+        row["employee_code"] = u.get("employee_code")
     return {"devices": creds, "pending_requests": reqs}
 
 

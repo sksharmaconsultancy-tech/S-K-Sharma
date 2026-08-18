@@ -242,6 +242,17 @@ function normalisePolicy(p: Policy): Policy {
     ot_pct_basic: Number(p.ot_pct_basic ?? 0),
     ot_pct_gross: Number(p.ot_pct_gross ?? 0),
     punch_approval_required: p.punch_approval_required ?? true,
+    // Iter 607 — Secure Device & Face Punch config (company-level flags).
+    secure_punch: {
+      enabled: !!(p as any).secure_punch?.enabled,
+      webauthn_required: ((p as any).secure_punch?.webauthn_required ?? true) !== false,
+      liveness: ((p as any).secure_punch?.liveness ?? true) !== false,
+      anti_spoof: ((p as any).secure_punch?.anti_spoof ?? true) !== false,
+      face_match_threshold_pct: Number((p as any).secure_punch?.face_match_threshold_pct ?? 72),
+      max_failed_attempts: Number((p as any).secure_punch?.max_failed_attempts ?? 3),
+      retry_lock_minutes: Number((p as any).secure_punch?.retry_lock_minutes ?? 30),
+      max_registered_devices: Number((p as any).secure_punch?.max_registered_devices ?? 1),
+    },
     report_settings: {
       enabled: Object.fromEntries(
         REPORT_TYPES.map(([k]) => [k, (p.report_settings?.enabled?.[k] ?? true) !== false]),
@@ -1118,6 +1129,100 @@ export default function AttendancePolicyScreen() {
               />
             </View>
           </Pressable>
+
+          {/* Iter 607 — Secure Device & Face Punch (spec section 16). */}
+          <SectionTitle
+            title="Secure Device & Face Punch"
+            hint="Registered device (WebAuthn / passkey) + live face verification with liveness & anti-spoofing before every punch. The phone's biometric never leaves the device."
+          />
+          {(() => {
+            const sp = ((policy as any).secure_punch || {}) as Record<string, any>;
+            const setSp = (patch: Record<string, any>) =>
+              setPolicy({ ...(policy as any), secure_punch: { ...sp, ...patch } } as any);
+            const enabled = !!sp.enabled;
+            const spToggle = (key: string, label: string, hint: string) => {
+              const on = (sp[key] ?? true) !== false;
+              return (
+                <Pressable key={key} style={styles.toggleRow} testID={`ap-sp-${key}`}
+                  onPress={() => setSp({ [key]: !on })}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.toggleLabel}>{label}</Text>
+                    <Text style={styles.toggleHint}>{hint}</Text>
+                  </View>
+                  <View style={[styles.toggle, on && styles.toggleOn]}>
+                    <View style={[styles.toggleKnob, on && styles.toggleKnobOn]} />
+                  </View>
+                </Pressable>
+              );
+            };
+            return (
+              <>
+                <Pressable style={styles.toggleRow} testID="ap-sp-enabled"
+                  onPress={() => setSp({ enabled: !enabled })}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.toggleLabel}>Secure Face Punch (master switch)</Text>
+                    <Text style={styles.toggleHint}>
+                      When ON, every punch requires: registered device → live camera →
+                      liveness challenges → anti-spoof → 1:1 face match → geofence →
+                      backend approval. Employees need HR face enrollment first.
+                    </Text>
+                  </View>
+                  <View style={[styles.toggle, enabled && styles.toggleOn]}>
+                    <View style={[styles.toggleKnob, enabled && styles.toggleKnobOn]} />
+                  </View>
+                </Pressable>
+                {enabled ? (
+                  <>
+                    {spToggle("webauthn_required",
+                      "Registered device required (WebAuthn / Passkey)",
+                      "Phone's own Face ID / fingerprint unlocks the registered passkey before the camera opens. Device replacement needs HR approval.")}
+                    {spToggle("liveness", "Liveness detection",
+                      "Random challenges (look center / turn left / turn right / move closer) — server-verified, can't be pre-recorded.")}
+                    {spToggle("anti_spoof", "Anti-spoofing",
+                      "Blocks printed photos, phone/laptop screens and video replays.")}
+                    <View style={styles.toggleRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.toggleLabel}>Always enforced (locked)</Text>
+                        <Text style={styles.toggleHint}>
+                          Multiple-face rejection: ON · Gallery upload: OFF ·
+                          Live camera required: ON — these cannot be disabled.
+                        </Text>
+                      </View>
+                      <Ionicons name="lock-closed" size={18} color="#94A3B8" />
+                    </View>
+                    <NumRow
+                      label="Face match threshold (%)"
+                      value={Number(sp.face_match_threshold_pct ?? 72)}
+                      onChange={(v) => setSp({ face_match_threshold_pct: Math.max(50, Math.min(95, v)) })}
+                      step={1}
+                      testID="ap-sp-threshold"
+                    />
+                    <NumRow
+                      label="Maximum registered devices (1-3)"
+                      value={Number(sp.max_registered_devices ?? 1)}
+                      onChange={(v) => setSp({ max_registered_devices: Math.max(1, Math.min(3, v)) })}
+                      step={1}
+                      testID="ap-sp-maxdev"
+                    />
+                    <NumRow
+                      label="Maximum failed attempts before lock"
+                      value={Number(sp.max_failed_attempts ?? 3)}
+                      onChange={(v) => setSp({ max_failed_attempts: Math.max(1, Math.min(10, v)) })}
+                      step={1}
+                      testID="ap-sp-maxfails"
+                    />
+                    <NumRow
+                      label="Retry lock duration (minutes)"
+                      value={Number(sp.retry_lock_minutes ?? 30)}
+                      onChange={(v) => setSp({ retry_lock_minutes: Math.max(5, Math.min(240, v)) })}
+                      step={5}
+                      testID="ap-sp-lockmin"
+                    />
+                  </>
+                ) : null}
+              </>
+            );
+          })()}
 
           {/* Iter 200 (user directive) — Textile Policy 1/2 & Hospital
               presets retired; attendance policy is fully managed from

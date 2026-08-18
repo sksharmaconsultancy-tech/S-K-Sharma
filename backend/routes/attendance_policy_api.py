@@ -124,6 +124,19 @@ async def get_attendance_policy(
     # so the Attendance Policy screen can render a single unified form.
     policy = dict(policy)  # avoid mutating cached preset
     policy["punch_approval_required"] = bool(company.get("punch_approval_required", True))
+    # Iter 607 — SECURE DEVICE & FACE PUNCH settings (spec section 16).
+    # These live on the company doc (they gate punch/webauthn endpoints);
+    # surfaced here so the Attendance Policy screen renders one unified form.
+    policy["secure_punch"] = {
+        "enabled": bool(company.get("secure_face_punch_enabled")),
+        "webauthn_required": company.get("secure_punch_webauthn_required", True) is not False,
+        "liveness": company.get("secure_punch_liveness", True) is not False,
+        "anti_spoof": company.get("secure_punch_anti_spoof", True) is not False,
+        "face_match_threshold_pct": float(company.get("face_match_threshold_pct") or 72),
+        "max_failed_attempts": int(company.get("punch_max_failed_attempts") or 3),
+        "retry_lock_minutes": int(company.get("punch_retry_lock_minutes") or 30),
+        "max_registered_devices": int(company.get("max_registered_devices") or 1),
+    }
     # Iter 96 — normalise legacy policy shape to the modern keys the UI (and
     # other consumers) read, so nobody crashes on undefined numeric fields.
     _wd = policy.get("workday_hours")
@@ -223,6 +236,8 @@ async def update_attendance_policy(
     # validating the policy blob (validator would otherwise reject it as an
     # unknown key on the shift/hours schema).
     approval_flag = raw_policy.pop("punch_approval_required", None) if isinstance(raw_policy, dict) else None
+    # Iter 607 — SECURE PUNCH config also lives on the company doc.
+    secure_cfg = raw_policy.pop("secure_punch", None) if isinstance(raw_policy, dict) else None
     # Iter 104 — support PARTIAL updates (e.g. Firm Master's Policy 1/2
     # picker sends only {policy_variant}). Merge the incoming fields onto
     # the firm's existing policy (or its category preset) before validating.
@@ -257,6 +272,17 @@ async def update_attendance_policy(
     }
     if approval_flag is not None:
         updates["punch_approval_required"] = bool(approval_flag)
+    if isinstance(secure_cfg, dict):
+        updates.update({
+            "secure_face_punch_enabled": bool(secure_cfg.get("enabled")),
+            "secure_punch_webauthn_required": secure_cfg.get("webauthn_required", True) is not False,
+            "secure_punch_liveness": secure_cfg.get("liveness", True) is not False,
+            "secure_punch_anti_spoof": secure_cfg.get("anti_spoof", True) is not False,
+            "face_match_threshold_pct": max(50.0, min(95.0, float(secure_cfg.get("face_match_threshold_pct") or 72))),
+            "punch_max_failed_attempts": max(1, min(10, int(secure_cfg.get("max_failed_attempts") or 3))),
+            "punch_retry_lock_minutes": max(5, min(240, int(secure_cfg.get("retry_lock_minutes") or 30))),
+            "max_registered_devices": max(1, min(3, int(secure_cfg.get("max_registered_devices") or 1))),
+        })
     r = await db.companies.update_one(
         {"company_id": company_id},
         {"$set": updates},

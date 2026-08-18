@@ -708,6 +708,17 @@ export default function EmployeeMasterScreen() {
                 <Text style={styles.editAllTxt}>Face Verification (Register / Status)</Text>
               </Pressable>
 
+              {/* Iter 607 — Registered Device (WebAuthn passkey) management */}
+              <Pressable
+                onPress={() => router.push(
+                  `/punch-verification-audit?tab=devices&user_id=${emp.user_id}` as any)}
+                style={[styles.editAllBtn, { backgroundColor: "#0F766E", marginTop: 8 }]}
+                testID="em-device-security"
+              >
+                <Ionicons name="phone-portrait-outline" size={16} color="#fff" />
+                <Text style={styles.editAllTxt}>Device Security (Registered Device)</Text>
+              </Pressable>
+
               {/* Iter 475 — Rejoin (rehire) for separated employees */}
               {Boolean(
                 (emp as any).exit_date || (emp as any).resign_date ||

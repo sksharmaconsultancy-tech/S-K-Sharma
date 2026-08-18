@@ -453,6 +453,13 @@ export default function AttendanceScreen() {
   // Iter 176 — guided punch workflow modal (GPS → Worksite → Face →
   // Device Biometric → Save). All manual punch CTAs open this.
   const [flowOpen, setFlowOpen] = useState(false);
+  // Iter 607 — Secure Punch policy: when the firm enables secure face
+  // punch, the punch button routes into the /secure-punch flow instead of
+  // the classic photo-punch modal.
+  const [securePunch, setSecurePunch] = useState<any>(null);
+  useEffect(() => {
+    api("/attendance/face-verify/policy").then(setSecurePunch).catch(() => {});
+  }, []);
 
   /** Iter 165 — WEB (PWA) fingerprint gate before a punch. Runs only when
    *  the admin requires fingerprint for this employee AND the browser has
@@ -728,6 +735,12 @@ export default function AttendanceScreen() {
   };
 
   const handlePunch = async () => {
+    // Iter 607 — firm has Secure Face Punch ON → the punch MUST go through
+    // the secure flow (device passkey → liveness → anti-spoof → 1:1 match).
+    if (securePunch?.secure_punch_enabled) {
+      navRouter.push("/secure-punch" as any);
+      return;
+    }
     // Iter 176 — every manual punch goes through the guided workflow:
     // GPS Verification → Select Worksite (if applicable) → Face
     // Verification → Optional Device Biometric → Attendance Saved

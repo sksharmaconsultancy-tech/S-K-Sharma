@@ -822,3 +822,17 @@ ITER 487 (doc-expiry alerts):
   sidebar entries, 4-stage approvals, payroll payment, reports/
   categories/payroll feed. Employee re-verified claim PAID with trail.
 - Payments tab testID is expappr-tab-approved (status key "approved").
+
+## Iter 607 — Secure Punch Phases 3-4 (2026-06)
+- Backend E2E via python: PATCH/GET attendance/policy secure_punch
+  round-trip OK, company doc flags set, employee /attendance/face-verify/
+  policy flips with master switch, /admin/attendance/devices +
+  punch-verification-audit return enriched rows. Kankani secure punch
+  toggled ON then back OFF (clean state).
+- Screenshots: Attendance Policy "SECURE DEVICE & FACE PUNCH" section
+  (master toggle + expanded sub-toggles/NumRows w/ persisted values);
+  /punch-verification-audit audit tab shows real Iter 602 rows (3x
+  REJECTED face mismatch 53.3%, 1x SUCCESS 100% w/ pass pills), devices
+  tab empty-state OK.
+- NOT machine-testable: actual WebAuthn passkey + camera flow → user must
+  test on real Android/iPhone after VPS deploy.

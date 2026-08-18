@@ -140,6 +140,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/geofence-monitor", label: "Geofence Monitor", icon: "navigate-circle-outline" },
       { route: "/punch-log-report", label: "Punch Log Report", icon: "finger-print-outline" },
       { route: "/photo-sync", label: "Photo Sync / Reconciliation", icon: "images-outline" },
+      { route: "/punch-verification-audit", label: "Secure Punch Audit & Devices", icon: "shield-checkmark-outline" },
     ],
   },
   {
@@ -541,6 +542,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
       { route: "/geofence-policy", label: "Geofence Policy", icon: "location-outline" },
       { route: "/geofence-monitor", label: "Geofence Monitor", icon: "navigate-circle-outline" },
       { route: "/location-audit", label: "Location Audit", icon: "navigate-outline" },
+      { route: "/punch-verification-audit", label: "Secure Punch Audit & Devices", icon: "shield-checkmark-outline" },
     ],
   },
   {

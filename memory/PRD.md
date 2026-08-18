@@ -6453,3 +6453,32 @@ Current iteration: 594. Next: 595.
   deny list (joins Iter 594 access-management/access-preview/
   roles-permissions/security-2fa which stay super-admin-only for staff;
   company staff already have /roles + /approval-workflows hidden).
+
+## Iter 607 (DONE) — Secure Punch Phases 3-4 COMPLETE
+- Attendance Policy (attendance_policy_api.py GET/PATCH + UI section
+  "Secure Device & Face Punch"): company-level secure_punch config —
+  enabled, webauthn_required, liveness, anti_spoof, face_match_threshold
+  _pct (50-95), max_failed_attempts (1-10), retry_lock_minutes (5-240),
+  max_registered_devices (1-3). Locked info row (multi-face reject ON /
+  gallery OFF / live camera ON). testIDs ap-sp-*.
+- webauthn_devices.py: register-options + register-verify honour
+  max_registered_devices (additional device allowed under limit;
+  at limit replacement still needs approved change request); admin
+  devices list enriched with employee_name/employee_code.
+- Punch wiring ((tabs)/attendance.tsx): loads /attendance/face-verify/
+  policy on mount; handlePunch routes to /secure-punch when
+  secure_punch_enabled (else classic PunchFlowModal).
+- NEW app/punch-verification-audit.tsx (sidebar "Secure Punch Audit &
+  Devices" in both NAV trees; accepts ?tab=devices&user_id=): audit tab
+  (result pill, liveness/anti-spoof/face-match passes, face_match_score,
+  reason) + devices tab (pending change requests approve/reject, active
+  devices w/ revoke, revoked history). employee-master.tsx new "Device
+  Security" button per employee.
+- Verified: backend E2E script (policy round-trip, company doc flags,
+  employee face-verify/policy reflects ON/OFF, devices+audit APIs);
+  screenshots of policy section (persisted 75%/2 devices) + audit screen
+  (real Iter 602 attempts: 53.3% mismatch rejections, 100% success).
+  Secure punch left OFF for Kankani after testing.
+- deploy_vps_iter607.sh (kind=script serves 607); APP_ITERATION="607".
+- PENDING (user): real-device testing on Android Chrome / iPhone Safari
+  (passkey register, printed photo, phone-screen replay, wrong person).
