@@ -1029,12 +1029,17 @@ export default function AdminWebShell({ children }: Props) {
   // firm's Offline Salary toggle is ON. Unconfigured firms (both toggles
   // off) keep every entry visible (legacy behaviour).
   const gatedNav = useMemo(() => {
+    // Iter 608 (user directive) — SUPER ADMIN CAN ACCESS EVERYTHING:
+    // firm-level feature locks (offline-salary gating etc.) never apply
+    // to the super admin.
+    if (role === "super_admin") return nav;
     if (!salaryFlags || (!salaryFlags.online && !salaryFlags.offline)) return nav;
     const HIDE = new Set<string>();
     if (!salaryFlags.offline) HIDE.add("/salary-run");
     // Iter 129h (user directive) — Attendance Policy is only relevant for
     // firms running Off-roll (Offline/Actual) salary from biometrics.
     if (!salaryFlags.offline) HIDE.add("/attendance-policy");
+    // Iter 608 (user directive) — super admin bypasses firm-level locks.
     if (HIDE.size === 0) return nav;
     // Iter 333 (user request) — LOCK instead of hide: the entry stays in
     // the sidebar; clicking shows "not available for the current firm".
@@ -1054,7 +1059,7 @@ export default function AdminWebShell({ children }: Props) {
       return out;
     };
     return mark(nav);
-  }, [nav, salaryFlags]);
+  }, [nav, salaryFlags, role]);
 
   // Iter 83 — flatten the nav tree (parents + children) so activeRoute /
   // page title lookups can still match child routes. Kept BEFORE any

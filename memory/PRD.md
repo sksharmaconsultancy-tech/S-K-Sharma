@@ -6482,3 +6482,21 @@ Current iteration: 594. Next: 595.
 - deploy_vps_iter607.sh (kind=script serves 607); APP_ITERATION="607".
 - PENDING (user): real-device testing on Android Chrome / iPhone Safari
   (passkey register, printed photo, phone-screen replay, wrong person).
+
+## Iter 608 (DONE) — Two user reports
+1. "Why testing machines show on live server": biometric_unknown kept
+   every serial that ever hit /iclock, incl. our own probes.
+   biometric_devices.py: _is_probe_serial() auto-hides PROBE-*/TEST-*/
+   TEST123 from _unknown_devices_payload; dismissed flag honoured; new
+   POST /biometric/unknown/dismiss (super/sub/company admin); a fresh
+   device ping sets dismissed=False (reappears). UI: Dismiss button next
+   to Register in the "New machines detected" card (biometric-devices.tsx,
+   testID dismiss-unknown-<sn>, confirmYesNo import added). Backend E2E
+   tested (auto-hide, dismiss, reappear-on-ping). NOTE: told user
+   CN4C231160062 (8087 hits) looks like a REAL machine to register.
+2. "Super admin can access everything": AdminWebShell gatedNav (Iter
+   114/129h offline-salary lock of /salary-run + /attendance-policy)
+   applied to all roles → now returns nav unmodified for super_admin
+   (deps + role). routeDenied already exempted super_admin. Verified via
+   screenshot (attendance-policy opens for super admin).
+- deploy_vps_iter608.sh (kind=script serves 608); APP_ITERATION="608".

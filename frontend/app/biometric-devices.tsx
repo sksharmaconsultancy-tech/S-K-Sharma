@@ -24,6 +24,7 @@ import { useLiveSync } from "@/src/api/live-sync";
 import EmployeePhoto from "@/src/components/EmployeePhoto";
 import { useAuth } from "@/src/context/AuthContext";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
+import { confirmYesNo } from "@/src/utils/confirm";
 
 type Device = {
   device_id: string;
@@ -246,6 +247,22 @@ export default function BiometricDevicesScreen() {
       company_id: isSuper ? "" : (user?.company_id || ""),
     });
     setEditorOpen(true);
+  };
+
+  // Iter 608 (user report — test probes showing on live server): hide a
+  // stray serial from the "New machines detected" list. It reappears
+  // automatically if the machine pings the server again.
+  const dismissUnknown = async (sn: string) => {
+    const yes = await confirmYesNo(
+      `Dismiss '${sn}' from this list?\n\nIf a real machine with this serial pings the server again, it will reappear automatically.`,
+      "Dismiss entry");
+    if (!yes) return;
+    try {
+      await api("/biometric/unknown/dismiss", { method: "POST", body: { serial_number: sn } });
+      setUnknownDevices((p) => p.filter((u: any) => u.serial_number !== sn));
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    }
   };
 
   const openEdit = (d: Device) => {
@@ -859,13 +876,22 @@ export default function BiometricDevicesScreen() {
                         Last attempt: {String(u.last_seen_at || "").replace("T", " ").slice(0, 19)} · {u.hits} attempts
                       </Text>
                     </View>
-                    <Pressable
-                      onPress={() => openRegisterUnknown(u.serial_number)}
-                      testID={`register-unknown-${u.serial_number}`}
-                      style={{ backgroundColor: "#DC2626", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10 }}
-                    >
-                      <Text style={{ color: "#fff", fontWeight: "800", fontSize: 12 }}>Register</Text>
-                    </Pressable>
+                    <View style={{ flexDirection: "column", gap: 6, alignItems: "stretch" }}>
+                      <Pressable
+                        onPress={() => openRegisterUnknown(u.serial_number)}
+                        testID={`register-unknown-${u.serial_number}`}
+                        style={{ backgroundColor: "#DC2626", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, alignItems: "center" }}
+                      >
+                        <Text style={{ color: "#fff", fontWeight: "800", fontSize: 12 }}>Register</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => dismissUnknown(u.serial_number)}
+                        testID={`dismiss-unknown-${u.serial_number}`}
+                        style={{ backgroundColor: "#fff", borderWidth: 1, borderColor: "#FECACA", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 9, alignItems: "center" }}
+                      >
+                        <Text style={{ color: "#991B1B", fontWeight: "800", fontSize: 12 }}>Dismiss</Text>
+                      </Pressable>
+                    </View>
                   </View>
                 </View>
               ))}
