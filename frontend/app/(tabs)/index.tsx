@@ -477,7 +477,12 @@ export default function Dashboard() {
                 <SectionHeader title="My services" />
                 <QuickCardsGrid
                   cards={[
-                    { icon: "time-outline", label: "Attendance", color: "#2563EB", route: "/history" },
+                    { icon: "time-outline", label: "Attendance", color: "#2563EB", route: "/my-attendance" },
+                    { icon: "person-circle-outline", label: "My Profile", color: "#4338CA", route: "/my-profile" },
+                    { icon: "briefcase-outline", label: "Salary · PF · ESIC", color: "#059669", route: "/my-salary" },
+                    { icon: "list-outline", label: "My Requests", color: "#DB2777", route: "/my-requests" },
+                    { icon: "notifications-outline", label: "Notifications", color: "#D97706", route: "/my-requests?tab=notifications" },
+                    { icon: "calendar-number-outline", label: "Shift / Roster", color: "#0891B2", route: "/my-attendance" },
                     { icon: "calendar-outline", label: "Leaves", color: "#7C3AED", route: "/leaves" },
                     { icon: "cash-outline", label: "Payslip", color: "#059669", route: "/payslip" },
                     { icon: "wallet-outline", label: "My Advances", color: "#0891B2", route: "/my-advances" },

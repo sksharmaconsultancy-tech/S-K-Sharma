@@ -836,3 +836,12 @@ ITER 487 (doc-expiry alerts):
   tab empty-state OK.
 - NOT machine-testable: actual WebAuthn passkey + camera flow → user must
   test on real Android/iPhone after VPS deploy.
+
+## Iter 610 — ESS Phase 1 (2026-06)
+- Backend 19/19 PASS (test_ess_610.py): profile, attendance month, shift
+  roster, salary/pf/esic, request create/validate, admin approve applies
+  correction as NEW manual_correction record (original kept), profile
+  field applied, role guards, notifications feed/unread/mark-read.
+- Frontend testing_agent 100% PASS (iteration_610.json): all employee
+  screens (mobile 390x844), admin ESS queue approve, employee sees
+  APPROVED + notification. Regression OK (home, /my-expenses).

@@ -141,6 +141,7 @@ export const NAV_SUPER: NavItem[] = [
       { route: "/punch-log-report", label: "Punch Log Report", icon: "finger-print-outline" },
       { route: "/photo-sync", label: "Photo Sync / Reconciliation", icon: "images-outline" },
       { route: "/punch-verification-audit", label: "Secure Punch Audit & Devices", icon: "shield-checkmark-outline" },
+      { route: "/ess-requests-admin", label: "Employee Requests (ESS)", icon: "list-circle-outline" },
     ],
   },
   {
@@ -543,6 +544,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
       { route: "/geofence-monitor", label: "Geofence Monitor", icon: "navigate-circle-outline" },
       { route: "/location-audit", label: "Location Audit", icon: "navigate-outline" },
       { route: "/punch-verification-audit", label: "Secure Punch Audit & Devices", icon: "shield-checkmark-outline" },
+      { route: "/ess-requests-admin", label: "Employee Requests (ESS)", icon: "list-circle-outline" },
     ],
   },
   {

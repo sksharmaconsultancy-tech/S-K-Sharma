@@ -6506,3 +6506,37 @@ Current iteration: 594. Next: 595.
   S.K. Sharma navy/blue). Stored in backend/static_assets/ (ships in VPS
   bundle). temp_bundle kind=brochure serves it (path relative to module).
 - deploy_vps_iter609.sh; APP_ITERATION="609".
+
+## Iter 610 (DONE) — ESS Phase 1 + parts of Phase 2/3 (user: "do all three phases")
+- NEW backend routes/ess.py (registered in server.py): GET /ess/profile
+  (+editable_fields, pending count), GET /ess/attendance?month= (per-day
+  IN/OUT/hours/source labels Mobile PWA/ZKTeco/ESSL/Manual Correction,
+  holidays), GET /ess/shift (daily_shift_assignments→shift_assignments→
+  user.shift fallback + shift_masters times), GET /ess/salary (months+
+  pf+esic arrays from compliance_salary_runs rows matched by user_id/
+  employee_code; CTC=gross+employer PF+ESIC; never invents data),
+  POST/GET /ess/requests (unified ess_requests collection, 9 types,
+  REQ<yymm>-#### numbering, history[]), POST /ess/requests/{id}/decide
+  (admin roles; approve APPLIES: attendance_correction → NEW attendance
+  records source=manual_correction (originals kept), profile/bank →
+  whitelist fields applied + company_audit_log, device_change → approved
+  device_change_requests row), GET /ess/notifications (+unread) /read.
+  Phase 3: _notify() = in-app notification + MSG91 SMS via
+  shared.sms_service (toggles + default_flow_id from SMS Settings).
+- NEW screens: my-profile.tsx (view + Request Change modal),
+  my-attendance.tsx (Attendance+Shift tabs, source pills, correction
+  modal), my-salary.tsx (Salary/PF/ESIC tabs), my-requests.tsx
+  (Requests+Notifications tabs, create modal 9 types),
+  ess-requests-admin.tsx (queue + decide modal). Sidebar entry
+  "Employee Requests (ESS)" both NAV trees; home services grid rewired
+  (Attendance→/my-attendance, +My Profile/Salary·PF·ESIC/My Requests/
+  Notifications/Shift cards).
+- Tests: /app/test_ess_610.py 19/19 PASS; testing_agent frontend run
+  100% PASS (iteration_610.json) incl. E2E correction approve → employee
+  notified → mark-all-read. NOTE: TEST50's employee_code is "50".
+- deploy_vps_iter610.sh (kind=script serves 610); APP_ITERATION="610".
+- REMAINING from ESS spec (Phase 2 leftovers): KYC status screen,
+  document acknowledgement, ID-card QR, secure-punch stage-status UI
+  polish, offline punch status card, leave-balance card on home,
+  advance deduction history detail. SMS wiring beyond request decisions
+  (salary processed / payslip generated events) also pending.
