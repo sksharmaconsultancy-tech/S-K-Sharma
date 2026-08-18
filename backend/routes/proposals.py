@@ -72,7 +72,8 @@ SERVICE_LABELS: Dict[str, str] = {
 
 async def _guard(authorization: Optional[str], company_id: Optional[str]) -> Dict[str, Any]:
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
+    # Iter 606 (user directive) — Sales Proposals are SUPER-ADMIN-ONLY.
+    require_role(admin, ["super_admin"])
     if admin["role"] == "company_admin":
         company_id = admin.get("company_id")
     if not company_id:
@@ -291,7 +292,7 @@ async def convert_to_customer(proposal_id: str,
     Idempotent — converting twice returns the already-linked firm.
     """
     admin = await _guard(authorization, payload.get("company_id"))
-    require_role(admin, ["super_admin", "sub_admin"])
+    require_role(admin, ["super_admin"])
     p = await db.proposals.find_one(
         {"proposal_id": proposal_id, "company_id": admin["_cid"]}, {"_id": 0})
     if not p:

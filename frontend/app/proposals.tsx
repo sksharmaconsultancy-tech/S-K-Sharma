@@ -156,7 +156,8 @@ export default function ProposalsScreen() {
 
   if (loading) return null;
   const role = user?.role as string;
-  if (!user || !["super_admin", "sub_admin", "company_admin"].includes(role)) {
+  if (!user || role !== "super_admin") {
+    // Iter 606 (user directive) — Sales Proposals are SUPER-ADMIN-ONLY.
     return <Redirect href="/" />;
   }
 

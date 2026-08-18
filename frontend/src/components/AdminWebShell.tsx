@@ -674,7 +674,8 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
       { route: "/tickets", label: "Tickets", icon: "ticket-outline" },
     ],
   },
-  { route: "/proposals", label: "Sales \u00b7 Proposals", icon: "document-text-outline" },
+  // Iter 606 (user directive) — Sales · Proposals is SUPER-ADMIN-ONLY;
+  // removed from the Company Admin nav.
   // Iter 85 — Appearance / Theme is intentionally omitted from the
   // Company Admin nav — theme switching is Super-Admin-only.
 ];
@@ -929,6 +930,8 @@ export default function AdminWebShell({ children }: Props) {
         // menu_rights set by the super admin still apply above.)
         // Iter 85 — Appearance / Theme switching is Super-Admin-only.
         if (r === "/appearance") return false;
+        // Iter 606 (user directive) — Sales · Proposals is SUPER-ADMIN-ONLY.
+        if (r === "/proposals") return false;
         if (r === "/attendance-email") return true;
         if (r === "/bulk-employee-correction") return true;
         if (r === "/bonus-run") return true;

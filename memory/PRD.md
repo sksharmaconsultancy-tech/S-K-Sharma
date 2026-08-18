@@ -6443,3 +6443,13 @@ Current iteration: 594. Next: 595.
   APP_ITERATION="605".
 - NOTE: employee web view is mobile-viewport gated ("Please use the
   mobile app" on desktop) — test employees at 390x844.
+
+## Iter 606 (DONE) — Sales Proposals SUPER-ADMIN-ONLY (user directive)
+- Backend routes/proposals.py: _guard + convert now require_role
+  ["super_admin"] only (was company_admin/sub_admin too). Verified:
+  employee token → 403, super admin → passes role gate.
+- Frontend: proposals.tsx Redirect guard super_admin only; AdminWebShell
+  removed /proposals from NAV_COMPANY_ADMIN and added it to the sub_admin
+  deny list (joins Iter 594 access-management/access-preview/
+  roles-permissions/security-2fa which stay super-admin-only for staff;
+  company staff already have /roles + /approval-workflows hidden).
