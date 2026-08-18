@@ -79,6 +79,13 @@ async def temp_code_bundle(token: str = Query(...), kind: str = Query("tar")):
             raise HTTPException(status_code=404, detail="Deploy script not found")
         return FileResponse(path, filename="deploy608.sh",
                             media_type="text/x-shellscript")
+    if kind == "brochure":
+        # Iter 609 — client-facing Employee PWA feature brochure (PDF).
+        path = "/app/brochure_employee_pwa.pdf"
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="Brochure not found")
+        return FileResponse(path, filename="Employee_PWA_Features_SKSharma.pdf",
+                            media_type="application/pdf")
     if kind == "legacy":
         # Iter 299 — SQL Server legacy backup restore + explorer setup.
         path = "/app/legacy_setup_vps.sh"
