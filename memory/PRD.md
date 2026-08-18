@@ -6500,3 +6500,9 @@ Current iteration: 594. Next: 595.
    (deps + role). routeDenied already exempted super_admin. Verified via
    screenshot (attendance-policy opens for super admin).
 - deploy_vps_iter608.sh (kind=script serves 608); APP_ITERATION="608".
+
+## Iter 609 (DONE) — Client brochure + deploy
+- /app/generate_brochure.py → branded A4 PDF (Employee PWA features,
+  S.K. Sharma navy/blue). Stored in backend/static_assets/ (ships in VPS
+  bundle). temp_bundle kind=brochure serves it (path relative to module).
+- deploy_vps_iter609.sh; APP_ITERATION="609".
