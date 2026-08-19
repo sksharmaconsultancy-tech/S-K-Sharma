@@ -6660,3 +6660,24 @@ Current iteration: 594. Next: 595.
 - APP_ITERATION 619; deploy_vps_iter619.sh served at /api/temp-code-bundle?kind=script.
 - Backlog carried: attendance-grid quick status keys L/H/W/O need a data-model
   decision (leave/holiday/week-off are not punch records) — not implemented.
+
+## Iteration 620 (2026-06) — Compliance Salary: PF proration mirror + Wage Base + Delete (P0 user bugs)
+- User (prod firm SEO GROWTH) reported: PF changed for all employees after
+  Save + "Reprocess with existing data (30)"; Wage Base column 0 on first
+  process; deleted run still triggered the "already exists → Reprocess?" dialog.
+- ROOT CAUSE 1: firm Compliance Settings pf_proration_method='working_days'
+  (fixed ÷26). Server prorated PF ÷26 while the grid's client recompute used
+  ÷month_days → values flipped on save/reprocess. Math proof: monthly 14000,
+  pf_basic 14000, pd 21 → PF 1357 at BOTH md 26 & 30 (working_days); 1176 with
+  calendar_days at 30. FIX: frontend pfProrationFactor() mirrors
+  _proration_factor and is used in updatePresentDays + updateRowField.
+- ROOT CAUSE 2: updatePresentDays never rebuilt stat_wage_base, so 0-day fresh
+  sheets kept Wage Base 0 after typing days. FIX: stat_wage_base =
+  max(earned Basic, floor%×Gross), 0 on zero pay.
+- ROOT CAUSE 3: deleteRun didn't refresh the runs list → stale "existing"
+  check. FIX: await loadRuns() after delete.
+- Tests: backend/tests/test_iter620_compliance_pf_proration.py (14/14 PASS);
+  frontend code review + smoke by testing agent. APP_ITERATION 620;
+  deploy_vps_iter620.sh served via /api/temp-code-bundle?kind=script.
+- USER GUIDANCE: if they want PF = 12% of earned wage base on 30-day sheets,
+  set PF Proration Method = Calendar Days in Compliance Settings and reprocess.

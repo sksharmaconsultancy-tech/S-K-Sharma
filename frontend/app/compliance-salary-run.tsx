@@ -1064,6 +1064,10 @@ export default function ComplianceSalaryRunScreen() {
       );
       if (r.deleted) {
         setRun(null);
+        // Iter 620 (user bug) — refresh the runs list so "Salary Process"
+        // doesn't offer the "already exists → Reprocess?" dialog for the
+        // just-deleted sheet.
+        await loadRuns();
         showMsg("Salary run DELETED ✓");
       } else {
         showMsg(r.message || "Deletion sent to the Super Admin for approval.");
@@ -1510,6 +1514,22 @@ export default function ComplianceSalaryRunScreen() {
     }
   };
 
+  // Iter 620 (user bug — SEO GROWTH "PF changed after Save + Reprocess") —
+  // the grid's client-side PF recompute used present ÷ month_days ALWAYS,
+  // but the server honours the firm's PF Proration Method (working_days
+  // ÷26, attendance_days ÷30, paid_days, none). The mismatch made PF flip
+  // between the on-screen value and the server value on save/reprocess.
+  // Mirrors utils/compliance_salary.py::_proration_factor.
+  const pfProrationFactor = (method: any, pd: number, monthDays: number) => {
+    const m = String(method || "calendar_days").trim().toLowerCase();
+    if (m === "none") return 1;
+    if (m === "paid_days") return pd > 0 ? 1 : 0;
+    const div = m === "working_days" ? 26
+      : m === "attendance_days" ? 30
+      : Math.max(1, monthDays);
+    return Math.min(1, pd / div);
+  };
+
   // Client-side setter for individual row fields (Others allowance,
   // Other deduction, OT Amount, TDS — Iter 230). Recomputes Gross + Net
   // locally so the grid stays in sync while editing.
@@ -1558,7 +1578,9 @@ export default function ComplianceSalaryRunScreen() {
           const contractorFixed = String(stat.contractor_partial_month_rule || "adopted_wage") === "adopted_wage";
           const grossEarn = Number(next.gross_paid || 0);
           const monthDays2 = Math.max(1, Number((prev as any).month_days) || 30);
-          const ratio2 = Math.min(1, (Number(next.present_days) || 0) / monthDays2);
+          // Iter 620 — PF honours the configured proration method.
+          const pfRatio2 = pfProrationFactor(
+            stat.pf_proration_method, Number(next.present_days) || 0, monthDays2);
           const pfBasicFull = Number(next.pf_basic || 0);
           const pfOn = (next.pf_eligible !== undefined
             ? next.pf_eligible !== false : next.pf_applicable !== false)
@@ -1568,7 +1590,7 @@ export default function ComplianceSalaryRunScreen() {
             // is a PER-DAY figure; earned = rate × days, ceiling checks use
             // the full-month equivalent (mirrors utils/compliance_salary.py).
             const pd471b = Number(next.present_days) || 0;
-            const pfBasicPro = next.salary_mode === "monthly" ? pfBasicFull * ratio2
+            const pfBasicPro = next.salary_mode === "monthly" ? pfBasicFull * pfRatio2
               : next.salary_mode === "daily" ? pfBasicFull * pd471b : pfBasicFull;
             const pfBasicMonth = next.salary_mode === "daily"
               ? pfBasicFull * monthDays2 : pfBasicFull;
@@ -1587,7 +1609,7 @@ export default function ComplianceSalaryRunScreen() {
               ? (hiWage1 > 0
                 ? (contractorOn && contractorFixed
                   ? hiWage1 // Iter 597 Rule 4 — fixed adopted wage (company policy)
-                  : (next.salary_mode === "monthly" ? hiWage1 * ratio2 : hiWage1))
+                  : (next.salary_mode === "monthly" ? hiWage1 * pfRatio2 : hiWage1))
                 : (pfBasicFull > 0
                   ? (contractorOn && contractorFixed ? pfBasicMonth : pfBasicPro)
                   : Math.max(pfBase, Number(next.basic || 0), grossEarn * floorPct)))
@@ -1706,6 +1728,9 @@ export default function ComplianceSalaryRunScreen() {
         // clamped to half-day steps (.0 / .5) and the month-days cap.
         const pd = Math.max(0, Math.min(monthDays, Math.round((Number(newPd) || 0) * 2) / 2));
         const ratio = pd / monthDays;
+        // Iter 620 — PF honours the configured proration method (the
+        // earnings heads stay on present ÷ month_days).
+        const pfRatio = pfProrationFactor(stat.pf_proration_method, pd, monthDays);
 
         // FULL monthly heads. The MASTER columns (basic_master, …) are the
         // authoritative full-month values — using them fixes rows that start
@@ -1762,7 +1787,7 @@ export default function ComplianceSalaryRunScreen() {
         // Iter 471 (user bug — daily-rate) — daily rows: PF Basic is a
         // PER-DAY figure; earned = rate × days, ceiling checks on the
         // full-month equivalent (mirrors utils/compliance_salary.py).
-        const pfBasicPro = (r as any).salary_mode === "monthly" ? pfBasicFull * ratio
+        const pfBasicPro = (r as any).salary_mode === "monthly" ? pfBasicFull * pfRatio
           : (r as any).salary_mode === "daily" ? pfBasicFull * pd : pfBasicFull;
         const pfBasicMonth = (r as any).salary_mode === "daily"
           ? pfBasicFull * monthDays : pfBasicFull;
@@ -1792,7 +1817,7 @@ export default function ComplianceSalaryRunScreen() {
             ? (hiWageFull > 0
               ? (contractorOn2 && contractorFixed2
                 ? hiWageFull // Iter 597 Rule 4 — fixed adopted wage (company policy)
-                : ((r as any).salary_mode === "monthly" ? hiWageFull * ratio : hiWageFull))
+                : ((r as any).salary_mode === "monthly" ? hiWageFull * pfRatio : hiWageFull))
               : (pfBasicFull > 0
                 ? (contractorOn2 && contractorFixed2 ? pfBasicMonth : pfBasicPro)
                 : Math.max(pfBase, paidBasic, grossEarn * floorPct)))
@@ -1900,6 +1925,13 @@ export default function ComplianceSalaryRunScreen() {
           others: rHeads.others,
           monthly_gross: grossPaid,
           gross_paid: grossPaid,
+          // Iter 620 (user bug — "Wage Base not showing on first process") —
+          // rows that start at 0 days carry stat_wage_base 0 from the
+          // server; typing days must rebuild it (max(Basic, floor% Gross)),
+          // like the server does on reprocess.
+          stat_wage_base: grossEarn > 0
+            ? Math.round(Math.max(rHeads.basic, grossEarn * floorPct))
+            : 0,
           pf_applicable: pfOn,
           pf_wages: Math.round(pfWagesNew),
           pf_employee: Math.round(pfEmp),
