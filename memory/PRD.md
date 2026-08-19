@@ -6621,3 +6621,19 @@ Current iteration: 594. Next: 595.
   calendar days with pay_days_audit, Rate Basis dropdown in Bulk Correction,
   firm-master dropdown zIndex fix, masked-mobile fix, designation optional.
 - Tests: test_copy_reprocess_616.py 10/10; inline scenario tests all PASS.
+
+## Iteration 618 (2026-06) — Compliance Salary Grid Keyboard Navigation & Data Integrity (P0)
+- FIXED: Arrow Up/Down on numeric grid cells could alter payroll values; blur/traversal
+  stamped manual_override on untouched rows.
+- Excel-style two-mode cells in /app/frontend/app/compliance-salary-run.tsx:
+  * NAVIGATION mode (focus): value selected; ArrowUp/Down move rows, ArrowLeft/Right hop
+    editable columns (navCols); value can NEVER change from arrows (preventDefault).
+  * EDIT mode (typing or Enter): local text state; Enter commits + hops down (Excel);
+    Escape reverts; blur commits.
+  * dirty-guard: commit fires ONLY if admin actually typed — traversing cells never
+    stamps manual_override / never re-commits values (incl. OTHoursCell on frozen runs).
+- New shared component: EditableGridCell (used for Others, OT Amt, TDS, Advance, Other Ded);
+  PresentDaysCell + OTHoursCell rewritten with same dirty-guarded logic.
+- APP_ITERATION bumped to 618; deploy_vps_iter618.sh created and served at
+  /api/temp-code-bundle?kind=script.
+- Testing: frontend testing agent — all 7 tests PASS (test_reports/iteration_618.json).

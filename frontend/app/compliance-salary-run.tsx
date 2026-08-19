@@ -1498,18 +1498,12 @@ export default function ComplianceSalaryRunScreen() {
     const el: any = col === "pd" ? pdRefs.current[idx] : cellRefs.current[`${col}:${idx}`];
     if (el && typeof el.focus === "function") el.focus();
   };
-  const handleNavKey = (e: any, col: string, idx: number) => {
-    const key = e?.nativeEvent?.key;
-    if (key === "Enter") {
-      e.preventDefault?.();
-      (e?.target as any)?.blur?.();
-      return;
-    }
+  // Iter 618 (user P0 — data integrity) — Excel-style navigation: arrow
+  // keys ONLY move focus between cells and can NEVER mutate a value.
+  const navigateFrom = (col: string, idx: number, key: string) => {
     if (key === "ArrowUp" || key === "ArrowDown") {
-      e.preventDefault?.();
       focusCell(col, idx + (key === "ArrowDown" ? 1 : -1));
     } else if (key === "ArrowLeft" || key === "ArrowRight") {
-      e.preventDefault?.();
       const ci = navCols.indexOf(col);
       const next = navCols[ci + (key === "ArrowRight" ? 1 : -1)];
       if (next) focusCell(next, idx);
@@ -2932,17 +2926,12 @@ export default function ComplianceSalaryRunScreen() {
                           {has("medical") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.medical)}</Text> : null}
                           {has("special") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.special)}</Text> : null}
                           {has("others") ? (
-                            <TextInput
-                              ref={(el) => { cellRefs.current[`others:${idx}`] = el; }}
-                              value={String(Math.round(r.others || 0))}
-                              onChangeText={(v) => {
-                                const n = Number(v.replace(/[^0-9.]/g, ""));
-                                if (!Number.isNaN(n)) updateRowField(r.user_id, "others", n);
-                              }}
-                              onKeyPress={(e: any) => handleNavKey(e, "others", idx)}
-                              keyboardType="decimal-pad"
-                              selectTextOnFocus
-                              style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
+                            <EditableGridCell
+                              col="others" idx={idx} width={colW.num}
+                              value={r.others || 0}
+                              cellRefs={cellRefs}
+                              onCommit={(n) => updateRowField(r.user_id, "others", n)}
+                              onNav={navigateFrom}
                             />
                           ) : null}
                         </>
@@ -2950,17 +2939,12 @@ export default function ComplianceSalaryRunScreen() {
                     })()}
                     {/* Iter 230 (user request) — editable OT Amount.
                         Iter 339c (user request) — shown BEFORE Gross. */}
-                    <TextInput
-                      ref={(el) => { cellRefs.current[`ot_pay:${idx}`] = el; }}
-                      value={String(Math.round(r.ot_pay || 0))}
-                      onChangeText={(v) => {
-                        const n = Number(v.replace(/[^0-9.]/g, ""));
-                        if (!Number.isNaN(n)) updateRowField(r.user_id, "ot_pay", n);
-                      }}
-                      onKeyPress={(e: any) => handleNavKey(e, "ot_pay", idx)}
-                      keyboardType="decimal-pad"
-                      selectTextOnFocus
-                      style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
+                    <EditableGridCell
+                      col="ot_pay" idx={idx} width={colW.num}
+                      value={r.ot_pay || 0}
+                      cellRefs={cellRefs}
+                      onCommit={(n) => updateRowField(r.user_id, "ot_pay", n)}
+                      onNav={navigateFrom}
                     />
                     {/* Iter 379 (user request) — Gross column HIGHLIGHTED;
                         red when it differs from the Freeze Salary. */}
@@ -2995,17 +2979,12 @@ export default function ComplianceSalaryRunScreen() {
                           {hasDed("pt") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.pt)}</Text> : null}
                           {/* Iter 230 (user request) — editable TDS. */}
                           {hasDed("tds") ? (
-                            <TextInput
-                              ref={(el) => { cellRefs.current[`tds:${idx}`] = el; }}
-                              value={String(Math.round(r.tds || 0))}
-                              onChangeText={(v) => {
-                                const n = Number(v.replace(/[^0-9.]/g, ""));
-                                if (!Number.isNaN(n)) updateRowField(r.user_id, "tds", n);
-                              }}
-                              onKeyPress={(e: any) => handleNavKey(e, "tds", idx)}
-                              keyboardType="decimal-pad"
-                              selectTextOnFocus
-                              style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
+                            <EditableGridCell
+                              col="tds" idx={idx} width={colW.num}
+                              value={r.tds || 0}
+                              cellRefs={cellRefs}
+                              onCommit={(n) => updateRowField(r.user_id, "tds", n)}
+                              onNav={navigateFrom}
                             />
                           ) : null}
                         </>
@@ -3030,32 +3009,22 @@ export default function ComplianceSalaryRunScreen() {
                       return (
                         <>
                           {hasDed("advance") ? (
-                            <TextInput
-                              ref={(el) => { cellRefs.current[`advance_recovery:${idx}`] = el; }}
-                              value={String(Math.round((r as any).advance_recovery || 0))}
-                              onChangeText={(v) => {
-                                const n = Number(v.replace(/[^0-9.]/g, ""));
-                                if (!Number.isNaN(n)) updateRowField(r.user_id, "advance_recovery", n);
-                              }}
-                              onKeyPress={(e: any) => handleNavKey(e, "advance_recovery", idx)}
-                              keyboardType="decimal-pad"
-                              selectTextOnFocus
-                              style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
+                            <EditableGridCell
+                              col="advance_recovery" idx={idx} width={colW.num}
+                              value={(r as any).advance_recovery || 0}
+                              cellRefs={cellRefs}
+                              onCommit={(n) => updateRowField(r.user_id, "advance_recovery", n)}
+                              onNav={navigateFrom}
                             />
                           ) : null}
                           {/* Iter 85 — Editable "Other" deduction. */}
                           {hasDed("other") ? (
-                            <TextInput
-                              ref={(el) => { cellRefs.current[`other_deduction:${idx}`] = el; }}
-                              value={String(Math.round((r as any).other_deduction || 0))}
-                              onChangeText={(v) => {
-                                const n = Number(v.replace(/[^0-9.]/g, ""));
-                                if (!Number.isNaN(n)) updateRowField(r.user_id, "other_deduction", n);
-                              }}
-                              onKeyPress={(e: any) => handleNavKey(e, "other_deduction", idx)}
-                              keyboardType="decimal-pad"
-                              selectTextOnFocus
-                              style={[styles.tblCell, styles.rightCell, styles.editableCell, { width: colW.num }]}
+                            <EditableGridCell
+                              col="other_deduction" idx={idx} width={colW.num}
+                              value={(r as any).other_deduction || 0}
+                              cellRefs={cellRefs}
+                              onCommit={(n) => updateRowField(r.user_id, "other_deduction", n)}
+                              onNav={navigateFrom}
                             />
                           ) : null}
                         </>
@@ -3277,29 +3246,126 @@ export default function ComplianceSalaryRunScreen() {
 // 3+ keystroke value) isn't clamped/re-rendered mid-edit. Clamping to
 // month days still happens in updatePresentDays() on COMMIT (blur/Enter).
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Iter 618 (user P0 — data integrity) — Excel-style editable grid cell with
+// two EXPLICIT states:
+//   • NAVIGATION mode (on focus): value shown selected; Arrow keys ONLY move
+//     focus between cells — they can NEVER mutate the value.
+//   • EDIT mode (typing or Enter): local text state; committed on blur or
+//     Enter (Enter also hops down, Excel-style); Escape reverts.
+// A commit fires ONLY when the admin actually typed (dirty flag), so merely
+// traversing cells never stamps manual_override on untouched rows.
+// ---------------------------------------------------------------------------
+function EditableGridCell({
+  col, idx, width, value, cellRefs, onCommit, onNav,
+}: {
+  col: string;
+  idx: number;
+  width: number;
+  value: number;
+  cellRefs: React.MutableRefObject<Record<string, any>>;
+  onCommit: (n: number) => void;
+  onNav: (col: string, idx: number, key: string) => void;
+}) {
+  const [txt, setTxt] = useState<string>(String(Math.round(value || 0)));
+  const focusedRef = useRef(false);
+  const editRef = useRef(false);   // EDIT mode (Enter / typing)
+  const dirtyRef = useRef(false);  // admin actually typed something
+  useEffect(() => {
+    if (!focusedRef.current) setTxt(String(Math.round(value || 0)));
+  }, [value]);
+  const commit = () => {
+    if (!dirtyRef.current) return;
+    dirtyRef.current = false;
+    const n = Number(txt.replace(/[^0-9.]/g, ""));
+    if (!Number.isNaN(n) && txt.trim() !== "") onCommit(n);
+    else setTxt(String(Math.round(value || 0)));
+  };
+  return (
+    <TextInput
+      ref={(el) => { cellRefs.current[`${col}:${idx}`] = el; }}
+      value={txt}
+      onChangeText={(v) => {
+        setTxt(v.replace(/[^0-9.]/g, ""));
+        dirtyRef.current = true;
+        editRef.current = true;
+      }}
+      onFocus={() => {
+        focusedRef.current = true;
+        editRef.current = false;
+        dirtyRef.current = false;
+        setTxt(String(Math.round(value || 0)));
+      }}
+      onBlur={() => { focusedRef.current = false; editRef.current = false; commit(); }}
+      onKeyPress={(e: any) => {
+        const key = e?.nativeEvent?.key;
+        if (key === "ArrowUp" || key === "ArrowDown") {
+          e.preventDefault?.();
+          commit();
+          onNav(col, idx, key);
+        } else if (key === "ArrowLeft" || key === "ArrowRight") {
+          if (!editRef.current) {
+            e.preventDefault?.();
+            onNav(col, idx, key);
+          } // EDIT mode → let the caret move inside the text
+        } else if (key === "Enter") {
+          e.preventDefault?.();
+          if (dirtyRef.current || editRef.current) {
+            commit();
+            editRef.current = false;
+            onNav(col, idx, "ArrowDown"); // Excel: commit + hop down
+          } else {
+            editRef.current = true; // NAVIGATION → EDIT mode
+          }
+        } else if (key === "Escape") {
+          e.preventDefault?.();
+          dirtyRef.current = false;
+          editRef.current = false;
+          setTxt(String(Math.round(value || 0)));
+        }
+      }}
+      keyboardType="decimal-pad"
+      selectTextOnFocus
+      style={[styles.tblCell, styles.rightCell, styles.editableCell, { width }]}
+    />
+  );
+}
+
 /* Iter 340 (user request) — manual OT HOURS cell (commit on blur/Enter):
-   hours × per-hour OT rate lands in the OT Amt column. */
+   hours × per-hour OT rate lands in the OT Amt column.
+   Iter 618 — dirty-guarded: blurring/tabbing through WITHOUT typing never
+   re-commits (which used to stamp manual_override on frozen runs). */
 function OTHoursCell({ width, value, onCommit }: {
   width: number; value: number; onCommit: (n: number) => void;
 }) {
   const [txt, setTxt] = useState<string>(String(value ?? 0));
   const focusedRef = useRef(false);
+  const dirtyRef = useRef(false);
   useEffect(() => {
     if (!focusedRef.current) setTxt(String(value ?? 0));
   }, [value]);
   const commit = () => {
+    if (!dirtyRef.current) return;
+    dirtyRef.current = false;
     const n = Number(txt.replace(/[^0-9.]/g, ""));
-    if (!Number.isNaN(n) && n >= 0) onCommit(n);
+    if (!Number.isNaN(n) && n >= 0 && txt.trim() !== "") onCommit(n);
     else setTxt(String(value ?? 0));
   };
   return (
     <TextInput
       value={txt}
-      onChangeText={(v) => setTxt(v.replace(/[^0-9.]/g, ""))}
-      onFocus={() => { focusedRef.current = true; }}
+      onChangeText={(v) => { setTxt(v.replace(/[^0-9.]/g, "")); dirtyRef.current = true; }}
+      onFocus={() => { focusedRef.current = true; dirtyRef.current = false; }}
       onBlur={() => { focusedRef.current = false; commit(); }}
       onKeyPress={(e: any) => {
-        if (e?.nativeEvent?.key === "Enter") { e.preventDefault?.(); (e?.target as any)?.blur?.(); }
+        const key = e?.nativeEvent?.key;
+        if (key === "Enter") { e.preventDefault?.(); (e?.target as any)?.blur?.(); }
+        else if (key === "ArrowUp" || key === "ArrowDown") { e.preventDefault?.(); }
+        else if (key === "Escape") {
+          e.preventDefault?.();
+          dirtyRef.current = false;
+          setTxt(String(value ?? 0));
+        }
       }}
       keyboardType="decimal-pad"
       selectTextOnFocus
@@ -3319,6 +3385,8 @@ function PresentDaysCell({
 }) {
   const [txt, setTxt] = useState<string>(String(value ?? 0));
   const focusedRef = useRef(false);
+  const editRef = useRef(false);   // Iter 618 — EDIT mode (Enter / typing)
+  const dirtyRef = useRef(false);  // Iter 618 — admin actually typed
 
   useEffect(() => {
     if (focusedRef.current) return;
@@ -3326,39 +3394,59 @@ function PresentDaysCell({
   }, [value]);
 
   const commit = () => {
+    if (!dirtyRef.current) return; // Iter 618 — never commit untouched cells
+    dirtyRef.current = false;
     const n = Number(txt.replace(/[^0-9.]/g, ""));
     // Iter 93 — present days only in half-day steps: .0 or .5
-    if (!Number.isNaN(n)) onCommit(Math.round(n * 2) / 2);
+    if (!Number.isNaN(n) && txt.trim() !== "") onCommit(Math.round(n * 2) / 2);
     else setTxt(String(value ?? 0));
+  };
+
+  const focusRow = (next: number) => {
+    const target = pdRefs.current[next];
+    if (target && typeof (target as any).focus === "function") {
+      (target as any).focus();
+    }
   };
 
   return (
     <TextInput
       ref={(el) => { pdRefs.current[idx] = el; }}
       value={txt}
-      onChangeText={(v) => setTxt(v.replace(/[^0-9.]/g, ""))}
-      onFocus={() => { focusedRef.current = true; }}
-      onBlur={() => { focusedRef.current = false; commit(); }}
+      onChangeText={(v) => {
+        setTxt(v.replace(/[^0-9.]/g, ""));
+        dirtyRef.current = true;
+        editRef.current = true;
+      }}
+      onFocus={() => { focusedRef.current = true; editRef.current = false; dirtyRef.current = false; }}
+      onBlur={() => { focusedRef.current = false; editRef.current = false; commit(); }}
       onKeyPress={(e: any) => {
         const key = e?.nativeEvent?.key;
         if (key === "ArrowUp" || key === "ArrowDown") {
+          // Iter 618 — arrows ONLY move focus; value never mutates
           e.preventDefault?.();
           commit();
-          const next = idx + (key === "ArrowDown" ? 1 : -1);
-          const target = pdRefs.current[next];
-          if (target && typeof (target as any).focus === "function") {
-            (target as any).focus();
-          }
+          focusRow(idx + (key === "ArrowDown" ? 1 : -1));
         } else if ((key === "ArrowLeft" || key === "ArrowRight") && onNav) {
-          // Iter 256 — spreadsheet-style column hop
-          e.preventDefault?.();
-          commit();
-          onNav(key);
+          // Iter 256 — spreadsheet-style column hop (NAVIGATION mode only)
+          if (!editRef.current) {
+            e.preventDefault?.();
+            onNav(key);
+          }
         } else if (key === "Enter") {
           e.preventDefault?.();
-          if (typeof (e?.target as any)?.blur === "function") {
-            (e.target as any).blur();
+          if (dirtyRef.current || editRef.current) {
+            commit();
+            editRef.current = false;
+            focusRow(idx + 1); // Excel: commit + hop down
+          } else {
+            editRef.current = true; // NAVIGATION → EDIT mode
           }
+        } else if (key === "Escape") {
+          e.preventDefault?.();
+          dirtyRef.current = false;
+          editRef.current = false;
+          setTxt(String(value ?? 0));
         }
       }}
       keyboardType="decimal-pad"
