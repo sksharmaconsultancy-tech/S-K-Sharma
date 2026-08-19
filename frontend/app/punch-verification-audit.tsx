@@ -6,10 +6,7 @@
  *    pending device-change requests — spec sections 2 & 7.
  */
 import React, { useCallback, useEffect, useState } from "react";
-import {
-  View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator,
-  RefreshControl,
-} from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl, Image, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -32,8 +29,11 @@ export default function PunchVerificationAudit() {
   const router = useRouter();
   const params = useLocalSearchParams<{ tab?: string; user_id?: string }>();
   const { selectedCompanyId } = useSelectedCompany();
-  const [tab, setTab] = useState<"audit" | "devices">(
-    params.tab === "devices" ? "devices" : "audit");
+  const [tab, setTab] = useState<"audit" | "devices" | "faces">(
+    params.tab === "devices" ? "devices" : params.tab === "faces" ? "faces" : "audit");
+  const [faces, setFaces] = useState<any[]>([]);
+  const [faceAct, setFaceAct] = useState<any>(null); // {row, action}
+  const [faceReason, setFaceReason] = useState("");
   const [logs, setLogs] = useState<any[]>([]);
   const [devices, setDevices] = useState<any[]>([]);
   const [pending, setPending] = useState<any[]>([]);
@@ -46,14 +46,16 @@ export default function PunchVerificationAudit() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [a, d] = await Promise.all([
+      const [a, d, f] = await Promise.all([
         api(`/admin/attendance/punch-verification-audit?${cidQ}`),
         api(`/admin/attendance/devices?${cidQ}${userFilter ? `&user_id=${userFilter}` : ""}`),
+        api(`/admin/face-verification/pending?${cidQ}`).catch(() => ({ pending: [] })),
       ]);
       setLogs((a.logs || []).filter(
         (l: any) => !userFilter || l.user_id === userFilter));
       setDevices(d.devices || []);
       setPending(d.pending_requests || []);
+      setFaces(f.pending || []);
     } catch (e: any) { setMsg(String(e?.message || e)); }
     finally { setLoading(false); }
   }, [cidQ, userFilter]);
@@ -80,6 +82,18 @@ export default function PunchVerificationAudit() {
       setMsg(approve
         ? "Approved — the employee can now register the new phone ✓"
         : "Request rejected");
+      await load();
+    } catch (e: any) { setMsg(String(e?.message || e)); }
+  };
+
+  const decideFace = async () => {
+    if (!faceAct) return;
+    try {
+      await api(`/admin/face-verification/pending/${faceAct.row.enrollment_id}/decide`, {
+        method: "POST", body: { action: faceAct.action, reason: faceReason },
+      });
+      setMsg(`Face enrollment ${faceAct.action}d — employee notified ✓`);
+      setFaceAct(null); setFaceReason("");
       await load();
     } catch (e: any) { setMsg(String(e?.message || e)); }
   };
@@ -117,6 +131,14 @@ export default function PunchVerificationAudit() {
             color={tab === "devices" ? "#fff" : colors.onSurfaceSecondary} />
           <Text style={[s.tabTxt, tab === "devices" && { color: "#fff" }]}>
             Devices ({activeDevices.length}{pending.length ? ` · ${pending.length} pending` : ""})
+          </Text>
+        </Pressable>
+        <Pressable style={[s.tab, tab === "faces" && s.tabOn]} onPress={() => setTab("faces")}
+          testID="pva-tab-faces">
+          <Ionicons name="scan-outline" size={15}
+            color={tab === "faces" ? "#fff" : colors.onSurfaceSecondary} />
+          <Text style={[s.tabTxt, tab === "faces" && { color: "#fff" }]}>
+            Face Approvals ({faces.length})
           </Text>
         </Pressable>
       </View>
@@ -166,6 +188,54 @@ export default function PunchVerificationAudit() {
               </View>
             );
           })
+        ) : null}
+
+        {/* ─── FACE APPROVALS (Iter 611 — self-enrollment review) ─── */}
+        {tab === "faces" && !loading ? (
+          faces.length === 0 ? (
+            <View style={s.empty}>
+              <Ionicons name="scan-outline" size={38} color={colors.onSurfaceTertiary} />
+              <Text style={s.muted}>No pending self-enrollments. Employees submit via PWA → Face Registration.</Text>
+            </View>
+          ) : faces.map((f) => (
+            <View key={f.enrollment_id} style={s.card} testID={`pva-face-${f.enrollment_id}`}>
+              <View style={s.cardTop}>
+                <Text style={s.emp}>{f.name || f.user_id}{f.employee_code ? ` (${f.employee_code})` : ""}</Text>
+                <Text style={s.at}>{fmtAt(f.submitted_at)}</Text>
+                {f.is_reenrollment ? (
+                  <View style={[s.pill, { backgroundColor: "#D9770618" }]}>
+                    <Text style={[s.pillTxt, { color: "#D97706" }]}>RE-ENROLLMENT</Text>
+                  </View>
+                ) : null}
+              </View>
+              <Text style={s.meta}>
+                {f.designation || ""}{f.department ? ` · ${f.department}` : ""} · {f.samples} live samples · quality & same-person checks PASSED
+              </Text>
+              <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
+                {(f.sample_previews || []).map((p: string, i: number) => (
+                  <Image key={i} source={{ uri: p }} style={s.facePrev} resizeMode="cover" />
+                ))}
+              </View>
+              <Text style={[s.meta, { marginTop: 6 }]}>
+                Compare with the employee&apos;s known identity before approving.
+              </Text>
+              <View style={s.btnRow}>
+                <Pressable style={[s.aBtn, { backgroundColor: "#059669" }]}
+                  onPress={() => { setFaceAct({ row: f, action: "approve" }); setFaceReason(""); }}
+                  testID={`pva-face-approve-${f.enrollment_id}`}>
+                  <Text style={s.aBtnTxt}>Approve & Activate</Text>
+                </Pressable>
+                <Pressable style={[s.aBtn, s.aBtnDanger]}
+                  onPress={() => { setFaceAct({ row: f, action: "reject" }); setFaceReason(""); }}>
+                  <Text style={[s.aBtnTxt, { color: "#DC2626" }]}>Reject</Text>
+                </Pressable>
+                <Pressable style={[s.aBtn, { backgroundColor: "#FFF7ED", borderWidth: 1, borderColor: "#FED7AA" }]}
+                  onPress={() => { setFaceAct({ row: f, action: "recapture" }); setFaceReason(""); }}>
+                  <Text style={[s.aBtnTxt, { color: "#EA580C" }]}>Request Re-capture</Text>
+                </Pressable>
+              </View>
+            </View>
+          ))
         ) : null}
 
         {/* ─── DEVICES ─── */}
@@ -257,6 +327,29 @@ export default function PunchVerificationAudit() {
         ) : null}
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* Face decision confirm bar (Iter 611) */}
+      {faceAct ? (
+        <View style={s.faceBar}>
+          <Text style={s.faceBarT}>
+            {faceAct.action === "approve" ? "Approve & activate" : faceAct.action === "reject" ? "Reject" : "Request re-capture"} · {faceAct.row.name}
+          </Text>
+          {faceAct.action !== "approve" ? (
+            <TextInput style={s.faceInput} value={faceReason} onChangeText={setFaceReason}
+              placeholder="Reason (shown to employee)" placeholderTextColor={colors.onSurfaceTertiary}
+              testID="pva-face-reason" />
+          ) : null}
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+            <Pressable style={[s.aBtn, s.aBtnDanger, { flex: 1 }]} onPress={() => setFaceAct(null)}>
+              <Text style={[s.aBtnTxt, { color: colors.onSurface }]}>Cancel</Text>
+            </Pressable>
+            <Pressable style={[s.aBtn, { flex: 1, backgroundColor: faceAct.action === "approve" ? "#059669" : "#DC2626" }]}
+              onPress={decideFace} testID="pva-face-confirm">
+              <Text style={s.aBtnTxt}>Confirm</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -310,4 +403,15 @@ const s = StyleSheet.create({
   },
   aBtnDanger: { backgroundColor: "#FEF2F2", borderWidth: 1, borderColor: "#FECACA" },
   aBtnTxt: { color: "#fff", fontWeight: "800", fontSize: 12.5 },
+  facePrev: { width: 84, height: 84, borderRadius: 10, backgroundColor: "#000" },
+  faceBar: {
+    backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border,
+    padding: 14,
+  },
+  faceBarT: { fontSize: 13.5, fontWeight: "800", color: colors.onSurface },
+  faceInput: {
+    backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border,
+    borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9,
+    fontSize: 13.5, color: colors.onSurface, minHeight: 42, marginTop: 8,
+  },
 });

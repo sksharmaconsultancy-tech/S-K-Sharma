@@ -483,6 +483,7 @@ export default function Dashboard() {
                     { icon: "list-outline", label: "My Requests", color: "#DB2777", route: "/my-requests" },
                     { icon: "notifications-outline", label: "Notifications", color: "#D97706", route: "/my-requests?tab=notifications" },
                     { icon: "calendar-number-outline", label: "Shift / Roster", color: "#0891B2", route: "/my-attendance" },
+                    { icon: "scan-outline", label: "Face Registration", color: "#7C3AED", route: "/register-my-face" },
                     { icon: "calendar-outline", label: "Leaves", color: "#7C3AED", route: "/leaves" },
                     { icon: "cash-outline", label: "Payslip", color: "#059669", route: "/payslip" },
                     { icon: "wallet-outline", label: "My Advances", color: "#0891B2", route: "/my-advances" },

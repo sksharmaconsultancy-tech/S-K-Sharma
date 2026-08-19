@@ -6540,3 +6540,30 @@ Current iteration: 594. Next: 595.
   polish, offline punch status card, leave-balance card on home,
   advance deduction history detail. SMS wiring beyond request decisions
   (salary processed / payslip generated events) also pending.
+
+## Iter 611 (DONE) — Self Face Enrollment w/ HR Approval + 2nd Super Admin
+- face_verification.py additions: POST /face-verification/self-check-frame
+  (employee per-frame quality gate), POST /self-enroll (consent required,
+  3-5 frames, quality+same-person+duplicate checks, stores PENDING in
+  face_enrollment_requests w/ encrypted mean embedding + 2 preview frames;
+  supersedes earlier pending; is_reenrollment flag), GET /self-status
+  (not_registered/pending/approved/rejected/recapture_required),
+  GET /admin/face-verification/pending (+7-day lazy expiry),
+  POST /admin/face-verification/pending/{id}/decide (approve archives old
+  template → activates new via registered_via=self_enrollment_approved;
+  reject/recapture w/ reason; previews purged on decision; audit +
+  employee notification via ess._notify incl. SMS).
+- Frontend: app/register-my-face.tsx (status→consent→camera 3 samples w/
+  live server checks→submit→pending; expo-camera, permission contract);
+  home grid card "Face Registration"; punch-verification-audit.tsx got a
+  3rd tab "Face Approvals" (previews + Approve/Reject/Re-capture with
+  reason bar, testIDs pva-face-*).
+- Tested: /app/test_self_face_611.py FULL E2E PASS with real face image
+  (insightface t1): enroll→pending→employee-403-on-decide→approve→
+  template active→previews purged→status approved→notified. UI smoke OK.
+- 2nd Super Admin (user request): backend/seed_second_super_admin.py
+  (idempotent; promotes if email exists else creates) —
+  nikkirock02@gmail.com / Nikki@2026 (also in memory/test_credentials.md).
+  Verified full login+2FA+super admin API access locally. deploy611 runs
+  the seed on VPS.
+- deploy_vps_iter611.sh (kind=script serves 611); APP_ITERATION="611".

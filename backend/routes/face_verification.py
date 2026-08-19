@@ -374,3 +374,188 @@ async def face_enable(
         raise HTTPException(status_code=404, detail="No registered face")
     await _face_admin_audit(admin, "enable", user_id)
     return {"ok": True}
+
+
+# ═════════ Iter 611 — EMPLOYEE SELF-ENROLLMENT with HR APPROVAL ═════════
+# Employees capture their own live samples; nothing becomes an ACTIVE
+# punch credential until HR/Admin approves. Statuses: pending / approved /
+# rejected / recapture_required. Pending previews auto-expire (7 days).
+
+SELF_RETENTION_DAYS = 7
+
+
+async def _cleanup_pending():
+    from datetime import datetime, timedelta, timezone
+    cutoff = (datetime.now(timezone.utc)
+              - timedelta(days=SELF_RETENTION_DAYS)).isoformat()
+    await db.face_enrollment_requests.update_many(
+        {"status": "pending", "submitted_at": {"$lt": cutoff}},
+        {"$set": {"status": "expired", "sample_previews": []}})
+
+
+@router.post("/face-verification/self-check-frame")
+async def self_check_frame(payload: Dict[str, Any] = Body(...),
+                           authorization: Optional[str] = Header(None)):
+    """Employee-side per-frame quality gate (same engine as HR flow)."""
+    await get_user_from_token(authorization)
+    res = await asyncio.to_thread(_analyse_frame, str(payload.get("frame") or ""))
+    return {"ok": res["ok"], "reason": res.get("reason")}
+
+
+@router.post("/face-verification/self-enroll")
+async def self_enroll(payload: Dict[str, Any] = Body(...),
+                      authorization: Optional[str] = Header(None)):
+    user = await get_user_from_token(authorization)
+    if not payload.get("consent"):
+        raise HTTPException(status_code=400,
+                            detail="Consent is required before enrollment")
+    frames: List[str] = [f for f in (payload.get("frames") or []) if f]
+    if len(frames) < 3 or len(frames) > 5:
+        raise HTTPException(status_code=400, detail="Provide 3-5 live samples")
+    embs: List[np.ndarray] = []
+    for i, f in enumerate(frames):
+        res = await asyncio.to_thread(_analyse_frame, f)
+        if not res["ok"]:
+            raise HTTPException(status_code=422,
+                                detail=f"Sample {i + 1}: {res['reason']}")
+        embs.append(res["embedding"])
+    for i in range(len(embs)):
+        for j in range(i + 1, len(embs)):
+            if _cos(embs[i], embs[j]) < SAMPLE_CONSISTENCY:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Face samples could not be verified as belonging "
+                           "to the same person. Please recapture.")
+    import hashlib as _h
+    if len({_h.md5(f.encode()).hexdigest() for f in frames}) < len(frames):
+        raise HTTPException(status_code=422,
+                            detail="Duplicate frames detected — capture "
+                                   "distinct live samples.")
+    mean_emb = np.mean(np.stack(embs), axis=0)
+    mean_emb = mean_emb / (np.linalg.norm(mean_emb) + 1e-9)
+    u = await db.users.find_one(
+        {"user_id": user["user_id"]},
+        {"_id": 0, "name": 1, "employee_code": 1, "company_id": 1,
+         "designation": 1, "department": 1}) or {}
+    # Supersede any earlier open request from this employee.
+    await db.face_enrollment_requests.update_many(
+        {"user_id": user["user_id"], "status": "pending"},
+        {"$set": {"status": "superseded", "sample_previews": []}})
+    doc = {
+        "enrollment_id": f"fen_{uuid.uuid4().hex[:10]}",
+        "user_id": user["user_id"], "company_id": u.get("company_id"),
+        "employee_code": u.get("employee_code"), "name": u.get("name"),
+        "designation": u.get("designation"), "department": u.get("department"),
+        "status": "pending", "samples": len(frames),
+        "template_enc": _emb_to_enc(mean_emb),
+        # First + last frame kept as HR review previews (auto-deleted on
+        # decision / after retention days). NOT usable for punching.
+        "sample_previews": [frames[0], frames[-1]],
+        "consent": True, "submitted_at": now_iso(),
+        "is_reenrollment": bool(await db.face_templates.find_one(
+            {"user_id": user["user_id"], "status": "active"}, {"_id": 1})),
+    }
+    await db.face_enrollment_requests.insert_one({**doc})
+    await db.face_admin_audit.insert_one({
+        "audit_id": f"faud_{uuid.uuid4().hex[:8]}", "action": "self_enroll_submitted",
+        "target_user_id": user["user_id"], "by": user["user_id"],
+        "detail": f"{len(frames)} live samples (self-service)", "at": now_iso()})
+    return {"ok": True, "status": "pending",
+            "message": "Face samples submitted — pending HR approval."}
+
+
+@router.get("/face-verification/self-status")
+async def self_status(authorization: Optional[str] = Header(None)):
+    user = await get_user_from_token(authorization)
+    active = await db.face_templates.find_one(
+        {"user_id": user["user_id"]}, {"_id": 0, "template_enc": 0})
+    req = await db.face_enrollment_requests.find_one(
+        {"user_id": user["user_id"],
+         "status": {"$in": ["pending", "rejected", "recapture_required"]}},
+        {"_id": 0, "template_enc": 0, "sample_previews": 0},
+        sort=[("submitted_at", -1)])
+    if req and req["status"] == "pending":
+        status = "pending"
+    elif active and active.get("status") == "active":
+        status = "approved"
+    elif req:
+        status = req["status"]
+    else:
+        status = "not_registered"
+    return {"status": status,
+            "active_template": bool(active and active.get("status") == "active"),
+            "registered_at": (active or {}).get("registered_at"),
+            "request": req}
+
+
+@router.get("/admin/face-verification/pending")
+async def pending_enrollments(company_id: Optional[str] = Query(None),
+                              authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    _require_face_admin(admin)
+    await _cleanup_pending()
+    q: dict = {"status": "pending"}
+    cid = admin.get("company_id") or company_id
+    if admin.get("role") in ("super_admin", "sub_admin") and company_id:
+        cid = company_id
+    if cid:
+        q["company_id"] = cid
+    rows = await db.face_enrollment_requests.find(
+        q, {"_id": 0, "template_enc": 0}).sort("submitted_at", -1).to_list(200)
+    return {"pending": rows}
+
+
+@router.post("/admin/face-verification/pending/{enrollment_id}/decide")
+async def decide_enrollment(enrollment_id: str,
+                            payload: Dict[str, Any] = Body(...),
+                            authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    _require_face_admin(admin)
+    action = str(payload.get("action") or "")
+    if action not in ("approve", "reject", "recapture"):
+        raise HTTPException(status_code=400, detail="Invalid action")
+    reason = str(payload.get("reason") or "")[:300]
+    req = await db.face_enrollment_requests.find_one(
+        {"enrollment_id": enrollment_id, "status": "pending"})
+    if not req:
+        raise HTTPException(status_code=404, detail="Pending enrollment not found")
+    if action == "approve":
+        old = await db.face_templates.find_one({"user_id": req["user_id"]}, {"_id": 0})
+        if old:
+            await db.face_templates_history.insert_one(
+                {**old, "archived_at": now_iso(), "archived_by": admin["user_id"],
+                 "archived_reason": "replaced_by_self_enrollment"})
+        await db.face_templates.update_one(
+            {"user_id": req["user_id"]},
+            {"$set": {
+                "user_id": req["user_id"], "company_id": req.get("company_id"),
+                "employee_code": req.get("employee_code"),
+                "template_enc": req["template_enc"], "samples": req["samples"],
+                "model": FACE_MODEL_PACK, "status": "active",
+                "registered_at": now_iso(), "registered_by": admin["user_id"],
+                "registered_by_name": admin.get("name"),
+                "registered_via": "self_enrollment_approved",
+                "last_verified_at": None, "disabled_at": None}},
+            upsert=True)
+    new_status = {"approve": "approved", "reject": "rejected",
+                  "recapture": "recapture_required"}[action]
+    await db.face_enrollment_requests.update_one(
+        {"enrollment_id": enrollment_id},
+        {"$set": {"status": new_status, "reviewed_at": now_iso(),
+                  "reviewed_by": admin.get("email") or admin["user_id"],
+                  "reason": reason, "sample_previews": []}})
+    await _face_admin_audit(
+        admin, f"self_enroll_{new_status}", req["user_id"],
+        reason or f"{req['samples']} samples")
+    from routes.ess import _notify  # noqa: E402 — reuse ESS notifier (+SMS)
+    emp = await db.users.find_one({"user_id": req["user_id"]},
+                                  {"_id": 0, "mobile": 1}) or {}
+    msgs = {
+        "approved": "Face Registration Approved ✓ — secure punch is now enabled for you.",
+        "rejected": f"Face Registration Rejected.{(' Reason: ' + reason) if reason else ''} You may register again.",
+        "recapture_required": f"Please register your face again.{(' Reason: ' + reason) if reason else ''}",
+    }
+    await _notify(req["user_id"], req.get("company_id"),
+                  f"Face Registration {new_status.replace('_', ' ').title()}",
+                  msgs[new_status], sms_type="onboarding", mobile=emp.get("mobile"))
+    return {"ok": True, "status": new_status}
