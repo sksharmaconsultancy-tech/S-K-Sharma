@@ -6280,12 +6280,25 @@ async def employee_signup(payload: EmployeeSignupRequest):
         raise HTTPException(status_code=404, detail="Company code not recognised. Please double-check with your admin.")
 
     # Duplicate phone → conflict, guide them to login instead
-    existing = await db.users.find_one({"phone": phone}, {"_id": 0, "role": 1, "approval_status": 1})
+    existing = await db.users.find_one(
+        {"phone": phone},
+        {"_id": 0, "user_id": 1, "role": 1, "approval_status": 1})
     if existing:
-        raise HTTPException(
-            status_code=409,
-            detail="An account with this phone number already exists. Please sign in instead.",
-        )
+        # Iter 617 (user bug) — a REJECTED signup must not block the mobile
+        # number forever: purge the stale rejected account (and sessions)
+        # so the employee can register afresh.
+        if (existing.get("approval_status") == "rejected"
+                and existing.get("role") in ("employee", None, "")):
+            await db.users.delete_one({"user_id": existing["user_id"]})
+            await db.user_sessions.delete_many({"user_id": existing["user_id"]})
+            logger.info(
+                "[employee-signup] purged rejected account %s so phone %s "
+                "can re-register", existing.get("user_id"), phone)
+        else:
+            raise HTTPException(
+                status_code=409,
+                detail="An account with this phone number already exists. Please sign in instead.",
+            )
 
     # Email optional; if provided, ensure not already taken by a different account
     email = (payload.email or "").strip().lower() or None

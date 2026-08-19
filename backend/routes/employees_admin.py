@@ -90,7 +90,10 @@ async def _dup_employee_with_orphan_heal(
         if not live:
             stale_ids.append(u["user_id"])
             continue
-        if _employee_is_resigned(u):
+        # Iter 617 (user bug) — REJECTED signups release their phone/email
+        # exactly like resigned employees, so the person can be registered
+        # again (previously "Mobile No. is already Registered").
+        if _employee_is_resigned(u) or u.get("approval_status") == "rejected":
             if phone and u.get("phone") == phone:
                 release_phone_ids.append(u["user_id"])
             if email and (u.get("email") or "").lower() == (email or "").lower():
