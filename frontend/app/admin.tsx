@@ -9,6 +9,7 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
 
 import { useOnRefresh } from "@/src/context/RefreshBusContext";
+import { registerShortcuts } from "@/src/utils/shortcuts";
 
 import { api, apiBinary } from "@/src/api/client";
 import { useLiveSync } from "@/src/api/live-sync";
@@ -278,6 +279,37 @@ export default function AdminScreen() {
     return companies.find((c) => c.company_id === id)?.name || id;
   };
 
+  // Iter 619 — Keyboard Shortcuts Phase 3 (Employee Master module, web).
+  const empSearchRef = React.useRef<any>(null);
+  const shortcutFns = React.useRef({ export: () => {}, save: () => {} });
+  shortcutFns.current = { export: bulkExportMasterPdf, save };
+  useFocusEffect(useCallback(() => registerShortcuts("employee-master", [
+    {
+      combo: "alt+n", label: "New Employee", category: "Employee Master",
+      handler: () => router.push("/employee-add"),
+    },
+    {
+      combo: "ctrl+f", label: "Find employee (focus search)", category: "Employee Master",
+      allowInInput: true, handler: () => empSearchRef.current?.focus?.(),
+    },
+    {
+      combo: "ctrl+shift+e", label: "Bulk Master PDF export", category: "Employee Master",
+      handler: () => shortcutFns.current.export(),
+    },
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ]), []));
+  // Ctrl+S saves the quick-edit modal — registered ONLY while it is open.
+  useEffect(() => {
+    if (!selected) return;
+    return registerShortcuts("employee-master-edit", [
+      {
+        combo: "ctrl+s", label: "Save employee changes", category: "Employee Master",
+        allowInInput: true, handler: () => shortcutFns.current.save(),
+      },
+    ]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!selected]);
+
   return (
     <View style={styles.root}>
       <SafeAreaView edges={["top"]} style={{ backgroundColor: colors.surface }}>
@@ -515,6 +547,7 @@ export default function AdminScreen() {
           <View style={styles.empSearchBox}>
             <Ionicons name="search" size={14} color={colors.onSurfaceTertiary} />
             <TextInput
+              ref={empSearchRef}
               style={styles.empSearchInput}
               value={empQuery}
               onChangeText={setEmpQuery}

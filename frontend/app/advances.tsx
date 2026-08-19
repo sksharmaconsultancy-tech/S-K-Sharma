@@ -13,9 +13,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { Redirect, useRouter } from "expo-router";
+import { Redirect, useFocusEffect, useRouter } from "expo-router";
 
 import { api, readAuthToken, getApiBaseUrl } from "@/src/api/client";
+import { registerShortcuts } from "@/src/utils/shortcuts";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import CompanyPicker from "@/src/components/CompanyPicker";
@@ -118,6 +119,10 @@ export default function AdvancesScreen() {
 
   // create form
   const [showForm, setShowForm] = useState(false);
+  // Iter 619 — Keyboard Shortcuts Phase 3: Alt+N opens the New Advance form.
+  useFocusEffect(useCallback(() => registerShortcuts("advances", [
+    { combo: "alt+n", label: "New Advance", category: "Advances", handler: () => setShowForm(true) },
+  ]), []));
   const [emps, setEmps] = useState<any[]>([]);
   const [empQuery, setEmpQuery] = useState("");
   const [f, setF] = useState<any>({

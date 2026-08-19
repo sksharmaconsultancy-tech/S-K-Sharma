@@ -765,6 +765,12 @@ export default function AdminWebShell({ children }: Props) {
           if (pathname === "/ai-command-center") return;
           setAiOpen(true);
         } },
+      { combo: "ctrl+shift+a", label: "Toggle AI Assistant", category: "Actions",
+        allowInInput: true,
+        handler: () => {
+          if (pathname === "/ai-command-center") return;
+          setAiOpen((v) => !v);
+        } },
       { combo: "?", label: "Keyboard Shortcuts Help", category: "Help",
         handler: () => setShortcutsOpen(true) },
     ]);
@@ -772,7 +778,6 @@ export default function AdminWebShell({ children }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
   const [notifOpen, setNotifOpen] = React.useState(false);
-  const [helpOpen, setHelpOpen] = React.useState(false);
   // Iter 461 (Phase 2/3) — cross-tab real-time sync toast + status bar.
   const [syncToast, setSyncToast] = React.useState<{ entity?: string; name?: string } | null>(null);
   const [wsOnline, setWsOnline] = React.useState(true);
@@ -1169,27 +1174,17 @@ export default function AdminWebShell({ children }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, isWebDesktop]);
 
-  // Iter 294 — ERP keyboard shortcuts (web only). Ctrl+K search,
-  // Ctrl+Shift+A AI assistant, ? help, g-then-key navigation.
+  // Iter 294 — g-then-key quick navigation (web only). Iter 619 — the old
+  // Ctrl+K / Ctrl+Shift+A / "?" branches moved into the central shortcuts
+  // engine (src/utils/shortcuts.ts) so only ONE help overlay exists.
   useEffect(() => {
     if (Platform.OS !== "web" || !isWebDesktop) return;
     let lastG = 0;
     const onKey = (e: KeyboardEvent) => {
       const tag = (document.activeElement?.tagName || "").toLowerCase();
       const typing = tag === "input" || tag === "textarea" || tag === "select";
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        (searchInputRef.current as any)?.focus?.();
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "a") {
-        e.preventDefault();
-        setAiOpen((v) => !v);
-        return;
-      }
       if (typing) return;
-      if (e.key === "?") { setHelpOpen((v) => !v); return; }
-      if (e.key === "Escape") { setHelpOpen(false); setNotifOpen(false); return; }
+      if (e.key === "Escape") { setNotifOpen(false); return; }
       if (e.key.toLowerCase() === "g") { lastG = Date.now(); return; }
       if (Date.now() - lastG < 1500) {
         const map: Record<string, string> = {
@@ -1875,34 +1870,6 @@ export default function AdminWebShell({ children }: Props) {
               <Text style={styles.gsEmpty}>No notifications yet.</Text>
             ) : null}
           </ScrollView>
-        </View>
-      ) : null}
-
-      {/* Iter 294 — Keyboard-shortcut help overlay ("?" to toggle). */}
-      {helpOpen ? (
-        <View style={styles.logoutOverlay} testID="shortcuts-modal">
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setHelpOpen(false)} />
-          <View style={styles.logoutModal}>
-            <Text style={styles.logoutModalTitle}>⌨️ {tr("Keyboard Shortcuts")}</Text>
-            {[
-              ["Ctrl + K", "Focus global search"],
-              ["Ctrl + Shift + A", "Toggle AI Assistant"],
-              ["g then d", "Go to Dashboard"],
-              ["g then e", "Go to Employee Master"],
-              ["g then a", "Go to Attendance Report"],
-              ["g then p", "Go to Salary Process"],
-              ["g then r", "Go to Salary Reports"],
-              ["g then b", "Go to Bank Transfer Files"],
-              ["g then m", "Go to Masters"],
-              ["?", "Show / hide this help"],
-              ["Esc", "Close panels"],
-            ].map(([k, d]) => (
-              <View key={k} style={styles.scRow}>
-                <View style={styles.scKey}><Text style={styles.scKeyTxt}>{k}</Text></View>
-                <Text style={styles.scDesc}>{d}</Text>
-              </View>
-            ))}
-          </View>
         </View>
       ) : null}
 

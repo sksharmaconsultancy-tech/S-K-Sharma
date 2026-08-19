@@ -35,11 +35,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { announceRecordUpdate, useRecordLock } from "../src/utils/workspaceSync";
 import DateField from "@/src/components/DateField";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystemNS from "expo-file-system";
 
 import { api } from "@/src/api/client";
+import { registerShortcuts } from "@/src/utils/shortcuts";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import ScanOCRButton from "@/src/components/ScanOCRButton";
@@ -714,6 +715,17 @@ export default function EmployeeAddScreen() {
       setError(e?.message || "Could not save draft");
     } finally { setDraftBusy(false); }
   };
+
+  // Iter 619 — Keyboard Shortcuts Phase 3: Ctrl+S saves the draft while
+  // filling the Employee form (web only; fires even inside inputs).
+  const saveDraftRef = React.useRef<() => void>(() => {});
+  saveDraftRef.current = saveDraft;
+  useFocusEffect(useCallback(() => registerShortcuts("employee-add", [
+    {
+      combo: "ctrl+s", label: "Save employee draft", category: "Employee Master",
+      allowInInput: true, handler: () => saveDraftRef.current(),
+    },
+  ]), []));
 
   // Iter 294 — AUTO-SAVE: in create mode, silently save the draft to the
   // server 3s after the operator stops typing (name required so we don't

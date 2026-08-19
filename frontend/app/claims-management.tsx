@@ -18,9 +18,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { Redirect, useRouter } from "expo-router";
+import { Redirect, useFocusEffect, useRouter } from "expo-router";
 
 import { api, apiBinary } from "@/src/api/client";
+import { registerShortcuts } from "@/src/utils/shortcuts";
 import RegisterTable, {
   ExportButtons,
   shared,
@@ -199,6 +200,10 @@ export default function ClaimsManagementScreen() {
   const [tab, setTab] = useState<
     "dashboard" | "register" | "form" | "reminders" | "reports"
   >("dashboard");
+  // Iter 619 — Keyboard Shortcuts Phase 3: Alt+N jumps to the New Claim tab.
+  useFocusEffect(useCallback(() => registerShortcuts("claims-management", [
+    { combo: "alt+n", label: "New Claim", category: "Claims", handler: () => setTab("form") },
+  ]), []));
   const [meta, setMeta] = useState<any>(null);
   const [dash, setDash] = useState<any>(null);
   const [claims, setClaims] = useState<any[]>([]);

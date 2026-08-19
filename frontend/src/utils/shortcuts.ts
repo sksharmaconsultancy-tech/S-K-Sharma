@@ -21,10 +21,27 @@ export type ShortcutBinding = {
   handler: () => void;
 };
 
-type Entry = ShortcutBinding & { scope: string };
+type Entry = ShortcutBinding & { scope: string; defaultCombo: string };
 
 const registry = new Map<string, Entry>(); // combo -> entry
 let started = false;
+
+// Iter 619 (Phase 3, user spec §11) — user-customisable bindings, stored on
+// this device. Map key: `${scope}|${defaultCombo}` → custom combo.
+const OV_KEY = "sk_shortcut_overrides_v1";
+let captureMode = false; // ShortcutHelp is recording a new key — engine pauses
+
+export function setCaptureMode(on: boolean) { captureMode = on; }
+
+function loadOverrides(): Record<string, string> {
+  try {
+    return JSON.parse(window.localStorage.getItem(OV_KEY) || "{}") || {};
+  } catch { return {}; }
+}
+
+function saveOverrides(ov: Record<string, string>) {
+  try { window.localStorage.setItem(OV_KEY, JSON.stringify(ov)); } catch { /* private mode */ }
+}
 
 export function comboOf(e: KeyboardEvent): string {
   const parts: string[] = [];
@@ -49,6 +66,7 @@ function isTyping(e: KeyboardEvent): boolean {
 }
 
 function onKeyDown(e: KeyboardEvent) {
+  if (captureMode) return; // ShortcutHelp is recording a new binding
   const combo = comboOf(e);
   if (!combo) return;
   const entry = registry.get(combo);
@@ -69,9 +87,12 @@ export function registerShortcuts(scope: string, bindings: ShortcutBinding[]): (
     window.addEventListener("keydown", onKeyDown, true);
     started = true;
   }
-  const added: string[] = [];
+  const overrides = loadOverrides();
+  const addedDefaults: string[] = [];
   for (const b of bindings) {
-    const combo = b.combo.toLowerCase();
+    const defaultCombo = b.combo.toLowerCase();
+    // Iter 619 — a user-customised key wins over the built-in default.
+    const combo = (overrides[`${scope}|${defaultCombo}`] || defaultCombo).toLowerCase();
     const existing = registry.get(combo);
     if (existing && existing.scope !== scope) {
       // conflict — page-scoped bindings override globals while mounted,
@@ -81,10 +102,50 @@ export function registerShortcuts(scope: string, bindings: ShortcutBinding[]): (
         continue;
       }
     }
-    registry.set(combo, { ...b, combo, scope });
-    added.push(combo);
+    registry.set(combo, { ...b, combo, defaultCombo, scope });
+    addedDefaults.push(defaultCombo);
   }
-  return () => { added.forEach((c) => { if (registry.get(c)?.scope === scope) registry.delete(c); }); };
+  return () => {
+    // remove by scope+default (the live combo may have been re-mapped)
+    registry.forEach((e, k) => {
+      if (e.scope === scope && addedDefaults.includes(e.defaultCombo)) registry.delete(k);
+    });
+  };
+}
+
+/** Iter 619 — remap one shortcut. Returns an error message or null on success. */
+export function applyOverride(scope: string, defaultCombo: string, newComboRaw: string): string | null {
+  const newCombo = (newComboRaw || "").toLowerCase();
+  if (!newCombo) return "Invalid key";
+  let currentKey = "";
+  let entry: Entry | undefined;
+  registry.forEach((e, k) => {
+    if (e.scope === scope && e.defaultCombo === defaultCombo) { currentKey = k; entry = e; }
+  });
+  const clash = registry.get(newCombo);
+  if (clash && clash !== entry) return `Already used by "${clash.label}"`;
+  const ov = loadOverrides();
+  if (newCombo === defaultCombo) delete ov[`${scope}|${defaultCombo}`];
+  else ov[`${scope}|${defaultCombo}`] = newCombo;
+  saveOverrides(ov);
+  if (entry && currentKey && currentKey !== newCombo) {
+    registry.delete(currentKey);
+    registry.set(newCombo, { ...entry, combo: newCombo });
+  }
+  return null;
+}
+
+/** Iter 619 — wipe ALL custom keys and restore built-in defaults. */
+export function resetOverrides(): void {
+  saveOverrides({});
+  const moves: [string, Entry][] = [];
+  registry.forEach((e, k) => { if (k !== e.defaultCombo) moves.push([k, e]); });
+  moves.forEach(([k, e]) => {
+    registry.delete(k);
+    if (!registry.get(e.defaultCombo)) {
+      registry.set(e.defaultCombo, { ...e, combo: e.defaultCombo });
+    }
+  });
 }
 
 export function listShortcuts(): Entry[] {
