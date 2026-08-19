@@ -400,12 +400,15 @@ export default function ProfileEditScreen() {
               testID="pedit-present-address"
               value={presentAddress}
               onChangeText={(t) => {
-                setPresentAddress(t);
-                if (sameAddress) setPermanentAddress(t);
+                // Iter 617 (user rule) — addresses always in CAPITALS.
+                const u = t.toUpperCase();
+                setPresentAddress(u);
+                if (sameAddress) setPermanentAddress(u);
               }}
               placeholder="Where you currently stay"
               placeholderTextColor={colors.onSurfaceTertiary}
               style={[styles.input, { minHeight: 72 }]}
+              autoCapitalize="characters"
               multiline
             />
 
@@ -441,10 +444,11 @@ export default function ProfileEditScreen() {
                 <TextInput
                   testID="pedit-permanent-address"
                   value={permanentAddress}
-                  onChangeText={setPermanentAddress}
+                  onChangeText={(t) => setPermanentAddress(t.toUpperCase())}
                   placeholder="Your permanent home address"
                   placeholderTextColor={colors.onSurfaceTertiary}
                   style={[styles.input, { minHeight: 72 }]}
+                  autoCapitalize="characters"
                   multiline
                 />
               </>

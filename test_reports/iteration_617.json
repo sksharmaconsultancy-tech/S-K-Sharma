@@ -1,0 +1,52 @@
+{
+  "summary": "Frontend-only verification of two Iter 617 employee-PWA features: (1) auto-uppercase address inputs on /profile-edit and (2) custom web CROP modal on /profile-photo with zoom controls and base64 upload. Both features work end-to-end. Also ran light regression: name field NOT force-uppercased, cancel-crop path (no upload), and 'Remove photo' still works.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "profile-photo.tsx: `compressImage()` (lines 31-47) is unused since Iter 617 (only onCropDone uploads now). Consider removing to reduce bundle size, or keep as a helper if future non-crop paths need it.",
+    "profile-edit.tsx is 1142 lines — well over the 700-line guideline. Consider extracting the Family-members block, Address block and pending-request card into separate components."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request)", "frontend": "100%"},
+  "seed_data_creation": "None — used existing TEST50 / 123456 employee.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login flow: /pin-login is Mobile-tab default; click 'Username' text (right edge of the label to avoid overlapping Mobile tab hit-area works, or the visible label locator once page settles). TEST50 / 123456 lands on '/' (home). Deep-linking to /profile-edit and /profile-photo works from that state. Address auto-uppercase is implemented via t.toUpperCase() onChangeText in profile-edit.tsx (lines 402-407 & 447). Web-only crop modal at profile-photo.tsx CropModal (lines 54-167) opens after expo-image-picker returns an asset when Platform.OS==='web'. File-chooser is a hidden <input type=file> and can be driven via page.expect_file_chooser().",
+  "rca_of_issue": "N/A — no bugs found.",
+  "test_evidence": {
+    "test_1_address_uppercase": {
+      "present_address_typed": "jaipur house 12",
+      "present_address_value": "JAIPUR HOUSE 12",
+      "permanent_address_typed": "mumbai street 99",
+      "permanent_address_value": "MUMBAI STREET 99",
+      "result": "PASS"
+    },
+    "test_2_crop_modal": {
+      "modal_appeared": true,
+      "title": "Position & crop your photo (present)",
+      "zoom_after_two_plus_clicks": "150%",
+      "crop_upload_alert": "Photo updated \u2713",
+      "api_call": "POST /api/me/profile-photo with body starting {\"photo_base64\":\"data:image/jpeg;base64,...\"}",
+      "preview_image_rendered": true,
+      "result": "PASS"
+    },
+    "test_3_cancel_path": {
+      "modal_closed_on_cancel": true,
+      "profile_photo_api_calls_after_cancel": 0,
+      "result": "PASS"
+    },
+    "test_4_regression": {
+      "remove_photo_alert": "Photo removed",
+      "preview_cleared": true,
+      "name_field_not_forced_uppercase": true,
+      "result": "PASS"
+    }
+  }
+}

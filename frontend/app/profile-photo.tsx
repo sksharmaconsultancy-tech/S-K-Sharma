@@ -8,6 +8,9 @@ import {
   Platform,
   Alert,
   ScrollView,
+  Modal,
+  PanResponder,
+  Image as RNImage,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -43,10 +46,171 @@ async function compressImage(uri: string): Promise<string> {
   return `data:image/jpeg;base64,${b64}`;
 }
 
+/**
+ * Iter 617 (user request) — square crop step before upload: drag the photo
+ * to position it inside the frame and zoom with the − / + controls. Used on
+ * web (native platforms get the OS crop UI via allowsEditing).
+ */
+function CropModal({ uri, busy, onCancel, onDone }: {
+  uri: string;
+  busy: boolean;
+  onCancel: () => void;
+  onDone: (rect: { originX: number; originY: number; width: number; height: number }) => void;
+}) {
+  const V = 280; // crop viewport (square)
+  const [nat, setNat] = useState<{ w: number; h: number } | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [, force] = useState(0);
+  const off = React.useRef({ x: 0, y: 0 });
+  const start = React.useRef({ x: 0, y: 0 });
+  const clampRef = React.useRef<(x: number, y: number) => { x: number; y: number }>(
+    (x, y) => ({ x, y }),
+  );
+
+  useEffect(() => {
+    RNImage.getSize(uri, (w, h) => setNat({ w, h }), () => setNat({ w: 720, h: 720 }));
+  }, [uri]);
+
+  const k = nat ? (V / Math.min(nat.w, nat.h)) * zoom : 1;
+  const dw = nat ? nat.w * k : V;
+  const dh = nat ? nat.h * k : V;
+  clampRef.current = (x: number, y: number) => ({
+    x: Math.min(0, Math.max(V - dw, x)),
+    y: Math.min(0, Math.max(V - dh, y)),
+  });
+  off.current = clampRef.current(off.current.x, off.current.y);
+
+  const pan = React.useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => { start.current = { ...off.current }; },
+      onPanResponderMove: (_e, g) => {
+        off.current = clampRef.current(start.current.x + g.dx, start.current.y + g.dy);
+        force((n) => n + 1);
+      },
+    }),
+  ).current;
+
+  const stepZoom = (d: number) => {
+    setZoom((z) => Math.min(3, Math.max(1, Math.round((z + d) * 100) / 100)));
+  };
+
+  const doCrop = () => {
+    if (!nat) return;
+    const originX = Math.max(0, Math.round(-off.current.x / k));
+    const originY = Math.max(0, Math.round(-off.current.y / k));
+    const size = Math.round(V / k);
+    onDone({
+      originX,
+      originY,
+      width: Math.max(1, Math.min(size, nat.w - originX)),
+      height: Math.max(1, Math.min(size, nat.h - originY)),
+    });
+  };
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onCancel}>
+      <View style={cropStyles.backdrop}>
+        <View style={cropStyles.sheet}>
+          <Text style={cropStyles.title}>Position &amp; crop your photo</Text>
+          <Text style={cropStyles.sub}>Drag to position · use − / + to zoom</Text>
+          <View style={[cropStyles.viewport, { width: V, height: V }]} {...pan.panHandlers}>
+            {nat ? (
+              <RNImage
+                source={{ uri }}
+                style={{
+                  position: "absolute",
+                  left: off.current.x,
+                  top: off.current.y,
+                  width: dw,
+                  height: dh,
+                }}
+                resizeMode="stretch"
+              />
+            ) : (
+              <ActivityIndicator color={colors.brandPrimary} />
+            )}
+            <View pointerEvents="none" style={cropStyles.frame} />
+          </View>
+          <View style={cropStyles.zoomRow}>
+            <Pressable onPress={() => stepZoom(-0.25)} style={cropStyles.zoomBtn} testID="crop-zoom-out">
+              <Ionicons name="remove" size={20} color={colors.onSurface} />
+            </Pressable>
+            <Text style={cropStyles.zoomTxt}>{Math.round(zoom * 100)}%</Text>
+            <Pressable onPress={() => stepZoom(0.25)} style={cropStyles.zoomBtn} testID="crop-zoom-in">
+              <Ionicons name="add" size={20} color={colors.onSurface} />
+            </Pressable>
+          </View>
+          <View style={cropStyles.btnRow}>
+            <Pressable onPress={onCancel} disabled={busy} style={cropStyles.cancelBtn} testID="crop-cancel">
+              <Text style={cropStyles.cancelTxt}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              onPress={doCrop}
+              disabled={busy || !nat}
+              style={[cropStyles.okBtn, (busy || !nat) && { opacity: 0.6 }]}
+              testID="crop-upload"
+            >
+              {busy ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Ionicons name="crop-outline" size={16} color="#fff" />
+              )}
+              <Text style={cropStyles.okTxt}>Crop &amp; Upload</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const cropStyles = StyleSheet.create({
+  backdrop: {
+    flex: 1, backgroundColor: "rgba(15,23,42,0.75)",
+    alignItems: "center", justifyContent: "center", padding: 20,
+  },
+  sheet: {
+    backgroundColor: colors.surface, borderRadius: radius.lg,
+    padding: spacing.md, alignItems: "center", gap: 10, width: 328, maxWidth: "100%",
+  },
+  title: { fontSize: 15, fontWeight: "800", color: colors.onSurface },
+  sub: { fontSize: 11.5, color: colors.onSurfaceTertiary },
+  viewport: {
+    overflow: "hidden", borderRadius: 12, backgroundColor: "#0F172A",
+    alignItems: "center", justifyContent: "center",
+  },
+  frame: {
+    position: "absolute", left: 0, top: 0, right: 0, bottom: 0,
+    borderWidth: 2, borderColor: "rgba(255,255,255,0.85)", borderRadius: 12,
+  },
+  zoomRow: { flexDirection: "row", alignItems: "center", gap: 14 },
+  zoomBtn: {
+    width: 40, height: 40, borderRadius: 20, borderWidth: 1,
+    borderColor: colors.borderLight, alignItems: "center", justifyContent: "center",
+    backgroundColor: colors.background,
+  },
+  zoomTxt: { fontSize: 13, fontWeight: "700", color: colors.onSurface, minWidth: 46, textAlign: "center" },
+  btnRow: { flexDirection: "row", gap: 10, alignSelf: "stretch" },
+  cancelBtn: {
+    flex: 1, minHeight: 44, borderRadius: 10, borderWidth: 1,
+    borderColor: colors.borderLight, alignItems: "center", justifyContent: "center",
+  },
+  cancelTxt: { fontSize: 13.5, fontWeight: "700", color: colors.onSurfaceSecondary },
+  okBtn: {
+    flex: 1.4, minHeight: 44, borderRadius: 10, backgroundColor: colors.brandPrimary,
+    alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6,
+  },
+  okTxt: { fontSize: 13.5, fontWeight: "700", color: "#fff" },
+});
+
 export default function ProfilePhotoScreen() {
   const router = useRouter();
   const { user, refresh } = useAuth();
   const [busy, setBusy] = useState(false);
+  // Iter 617 — pending image awaiting the crop step (web).
+  const [cropUri, setCropUri] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(
     user?.profile_photo_base64 || null,
   );
@@ -79,7 +243,10 @@ export default function ProfilePhotoScreen() {
           quality: 0.7,
         });
         if (r.canceled || !r.assets?.[0]?.uri) return;
-        await upload(r.assets[0].uri);
+        // Iter 617 (user request) — on web the OS crop UI doesn't exist:
+        // open our own crop step (drag to position + zoom) before upload.
+        if (Platform.OS === "web") setCropUri(r.assets[0].uri);
+        else await upload(r.assets[0].uri);
       } else {
         const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (perm.status !== "granted") {
@@ -92,7 +259,8 @@ export default function ProfilePhotoScreen() {
           quality: 0.7,
         });
         if (r.canceled || !r.assets?.[0]?.uri) return;
-        await upload(r.assets[0].uri);
+        if (Platform.OS === "web") setCropUri(r.assets[0].uri);
+        else await upload(r.assets[0].uri);
       }
     } catch (e: any) {
       showMsg(e?.message || "Could not open picker");
@@ -117,6 +285,34 @@ export default function ProfilePhotoScreen() {
     }
   };
 
+  // Iter 617 — apply the chosen crop, then compress + upload.
+  const onCropDone = async (rect: {
+    originX: number; originY: number; width: number; height: number;
+  }) => {
+    if (!cropUri) return;
+    setBusy(true);
+    try {
+      const manip = await ImageManipulator.manipulateAsync(
+        cropUri,
+        [{ crop: rect }, { resize: { width: 720 } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+      );
+      const b64 = `data:image/jpeg;base64,${manip.base64}`;
+      await api("/me/profile-photo", {
+        method: "POST",
+        body: { photo_base64: b64 },
+      });
+      setPreview(b64);
+      setCropUri(null);
+      await refresh();
+      showMsg("Photo updated ✓");
+    } catch (e: any) {
+      showMsg(e?.message || "Crop failed — try another photo");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const remove = async () => {
     setBusy(true);
     try {
@@ -133,6 +329,14 @@ export default function ProfilePhotoScreen() {
 
   return (
     <View style={styles.root}>
+      {cropUri ? (
+        <CropModal
+          uri={cropUri}
+          busy={busy}
+          onCancel={() => setCropUri(null)}
+          onDone={onCropDone}
+        />
+      ) : null}
       <SafeAreaView edges={["top"]} style={{ backgroundColor: colors.surface }}>
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} hitSlop={8}>

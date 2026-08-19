@@ -206,6 +206,7 @@ export const NAV_SUPER: NavItem[] = [
     children: [
       { route: "/approval-inbox", label: "Approval Inbox", icon: "file-tray-full-outline" },
       { route: "/employee-approvals", label: "Pending Employee Approval", icon: "person-add-outline" },
+      { route: "/profile-edit-reviews", label: "Profile Edit Approvals", icon: "clipboard-outline" },
       { route: "/company-requests", label: "Company Requests", icon: "mail-open-outline" },
       { route: "/shift-change-admin", label: "Shift Change Approval", icon: "swap-horizontal" },
       { route: "/attendance-approvals", label: "Attendance Approval", icon: "hand-right-outline" },
