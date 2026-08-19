@@ -1100,15 +1100,14 @@ export default function ComplianceSalaryRunScreen() {
     if (!okGo) return;
     setFinalizing(true);
     try {
-      // Iter 374 (user bug) — FLUSH pending grid edits BEFORE locking:
-      // the debounced auto-save used to arrive AFTER the lock and get
-      // rejected, silently dropping manually filled amounts.
-      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+      // Iter 374 (user bug) — FLUSH pending grid edits BEFORE locking
+      // (Finalize is an explicit action, so saving here is expected).
       try {
         await api(`/admin/compliance-salary-runs/${run.run_id}/save-rows`, {
           method: "POST",
           body: { rows: run.rows, totals: run.totals },
         });
+        setUnsavedEdits(false);
       } catch { /* proceed — run may already match the server state */ }
       // Iter 388 (Phase 3) — automatic PF/ESIC validation before the lock.
       // Errors ALWAYS block; warnings block unless a Super Admin overrides.
@@ -1129,28 +1128,17 @@ export default function ComplianceSalaryRunScreen() {
   // grid (Present Days / Others / Other Deduction) to the backend. It used
   // to be a no-op, so every edit vanished when the run was reopened.
   const [savingDraft, setSavingDraft] = useState(false);
-  // Iter 182 — silent auto-save: 3s after any grid edit the draft is
-  // stored automatically (skips finalized runs and the initial compute).
-  const autoSaveSkipRef = useRef<string | null>(null);
-  const [autoSavedAt, setAutoSavedAt] = useState<string | null>(null);
+  // Iter 616 (user rule) — AUTO-SAVE REMOVED. The sheet is stored ONLY
+  // when the admin explicitly clicks "Save as Draft" (Finalize still
+  // flushes the grid first, since that is an explicit action too). We
+  // now just track a dirty flag to warn about unsaved edits.
+  const [unsavedEdits, setUnsavedEdits] = useState(false);
+  const dirtyRunRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!run || (run as any).finalized) return;
-    if (autoSaveSkipRef.current !== run.run_id) {
-      // first sighting of this run (compute/open) — don't auto-save yet
-      autoSaveSkipRef.current = run.run_id;
-      return;
+    if (run && dirtyRunRef.current !== run.run_id) {
+      dirtyRunRef.current = run.run_id;
+      setUnsavedEdits(false); // fresh run opened/computed — nothing edited yet
     }
-    const t = setTimeout(async () => {
-      try {
-        await api(`/admin/compliance-salary-runs/${run.run_id}/save-rows`, {
-          method: "POST",
-          body: { rows: run.rows, totals: run.totals },
-        });
-        setAutoSavedAt(new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }));
-      } catch { /* silent */ }
-    }, 3000);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run]);
   const saveAsDraft = async () => {
     if (!run || savingDraft) return;
@@ -1165,6 +1153,7 @@ export default function ComplianceSalaryRunScreen() {
         body: { rows: run.rows, totals: run.totals },
       });
       await loadRuns();
+      setUnsavedEdits(false);
       showMsg("Saved as draft ✓ — your edits are stored and will be there when you reopen this run.");
       setReportsFor({
         run_id: run.run_id, month: run.month, note: "Saved as draft ✓",
@@ -1175,29 +1164,9 @@ export default function ComplianceSalaryRunScreen() {
     } finally { setSavingDraft(false); }
   };
 
-  // Iter 145 — safety net: auto-save the edited grid (debounced 2.5s) so
-  // edits survive even if the admin forgets to press "Save as Draft".
-  const runRef = useRef<CompRun | null>(null);
-  useEffect(() => { runRef.current = run; }, [run]);
-  const autoSaveTimer = useRef<any>(null);
-  const scheduleDraftAutoSave = useCallback(() => {
-    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(async () => {
-      const r = runRef.current;
-      if (!r || (r as any).finalized) return;
-      try {
-        await api(`/admin/compliance-salary-runs/${r.run_id}/save-rows`, {
-          method: "POST",
-          body: { rows: r.rows, totals: r.totals },
-        });
-      } catch {
-        // silent — the explicit "Save as Draft" button surfaces errors
-      }
-    }, 2500);
-  }, []);
-  useEffect(() => () => {
-    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-  }, []);
+  // Iter 616 (user rule) — the old 2.5s debounced auto-save is GONE:
+  // grid edits now only mark the sheet as having unsaved changes.
+  const markGridDirty = useCallback(() => setUnsavedEdits(true), []);
 
   const [unlockBusy, setUnlockBusy] = useState(false);
   const [pendingUnlockReq, setPendingUnlockReq] = useState<any | null>(null);
@@ -1691,7 +1660,7 @@ export default function ComplianceSalaryRunScreen() {
       }
       return { ...prev, rows, totals: totals as any };
     });
-    scheduleDraftAutoSave(); // Iter 145 — persist edits automatically
+    markGridDirty(); // Iter 616 — mark unsaved (no auto-save)
   };
 
   const updatePresentDays = (userId: string, newPd: number) => {
@@ -1942,7 +1911,7 @@ export default function ComplianceSalaryRunScreen() {
       }
       return { ...prev, rows, totals };
     });
-    scheduleDraftAutoSave(); // Iter 145 — persist edits automatically
+    markGridDirty(); // Iter 616 — mark unsaved (no auto-save)
   };
 
   if (!isAdmin) {
@@ -2538,9 +2507,9 @@ export default function ComplianceSalaryRunScreen() {
                 <ActionBtn icon="document-text-outline" label="PDF" busy={downloading} onPress={() => downloadFile("pdf")} />
                 <ActionBtn icon="document-outline" label="PDF (Option 2)" busy={downloading} onPress={() => downloadFile("pdf2")} />
                 <ActionBtn icon="download-outline" label="CSV" busy={downloading} onPress={() => downloadFile("csv")} />
-                {autoSavedAt ? (
-                  <Text style={{ fontSize: 9.5, color: colors.success, fontWeight: "700", alignSelf: "center" }}>
-                    ✓ Auto-saved {autoSavedAt}
+                {unsavedEdits && !(run as any)?.finalized ? (
+                  <Text style={{ fontSize: 9.5, color: "#B45309", fontWeight: "800", alignSelf: "center" }}>
+                    ● Unsaved changes — click &quot;Save as Draft&quot;
                   </Text>
                 ) : null}
                 <ActionBtn icon="paper-plane-outline" label="Push payslips" busy={pushing} onPress={pushToPayslips} primary />

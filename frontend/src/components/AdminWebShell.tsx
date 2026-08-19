@@ -1791,7 +1791,6 @@ export default function AdminWebShell({ children }: Props) {
               </Text>
             </View>
           ) : null}
-          <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary }}>Auto Save On</Text>
           <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary }}>All tabs share one login session</Text>
         </View>
       </View>
