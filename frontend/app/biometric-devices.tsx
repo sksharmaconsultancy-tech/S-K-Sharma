@@ -112,7 +112,7 @@ const emptyDraft = {
 const BRANDS: { key: string; label: string; adms: boolean }[] = [
   { key: "zkteco", label: "ZKTeco", adms: true },
   { key: "essl", label: "eSSL", adms: true },
-  { key: "bioface", label: "BIOFACE (MSD1K)", adms: true },
+  { key: "bioface", label: "BIOFACE (MSD1K / MSD2K)", adms: true },
   { key: "matrix", label: "Matrix COSEC", adms: false },
   { key: "mantra", label: "Mantra", adms: false },
   { key: "other", label: "Other", adms: false },

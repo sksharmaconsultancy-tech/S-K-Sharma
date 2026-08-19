@@ -1722,7 +1722,7 @@ async def register_biometric_device(
         "model": {
             "zkteco": "ZKTeco AC Mini Plus",
             "essl": "eSSL (iClock/ADMS)",
-            "bioface": "BIOFACE-MSD1K (iClock/ADMS)",
+            "bioface": "BIOFACE-MSD1K/MSD2K (iClock/ADMS)",
             "matrix": "Matrix COSEC",
             "mantra": "Mantra",
         }.get(payload.brand or "zkteco", "Generic"),
