@@ -2043,6 +2043,12 @@ def build_compliance_register_pdf_v2(
     doc.addPageTemplates([PageTemplate(id="pg", frames=[frame], onPage=_header)])
 
     cell = ParagraphStyle("cell", fontName="Helvetica", fontSize=7.8, leading=9)
+    # Iter 623 (user bug — Format 2) — long UAN / EPF / ESIC numbers used to
+    # OVERWRITE the neighbouring columns (plain strings never wrap in
+    # reportlab). Same fix as Format 1 (Iter 372): CJK word-wrap breaks
+    # anywhere within the cell so the value stays inside its own column.
+    idcell = ParagraphStyle("idcell2", fontName="Helvetica", fontSize=6.4,
+                            leading=7.2, alignment=1, wordWrap="CJK")
 
     # Iter 162 — layout-driven columns (choose / order / rename / widths),
     # saved ONE TIME in Settings and applied on every download.
@@ -2236,9 +2242,10 @@ def build_compliance_register_pdf_v2(
                 cell),
             "desig": Paragraph((r.get("designation") or "").upper(), cell),
             # Iter 322 (user request) — statutory ID columns.
-            "uan": str(r.get("uan_no") or "-"),
-            "pf_no": str(r.get("pf_no") or "-"),
-            "esi_no": str(r.get("esi_ip_no") or "-"),
+            # Iter 623 — wrapped Paragraphs so long IDs can't overflow.
+            "uan": Paragraph(str(r.get("uan_no") or "-"), idcell),
+            "pf_no": Paragraph(str(r.get("pf_no") or "-"), idcell),
+            "esi_no": Paragraph(str(r.get("esi_ip_no") or "-"), idcell),
             "days": f"{days:g}",
             "basic": A(r.get("basic")), "hra": A(r.get("hra")),
             "conv": A(r.get("conveyance")), "other_earn": A(oth_e),

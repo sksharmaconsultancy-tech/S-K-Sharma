@@ -6711,3 +6711,16 @@ Current iteration: 594. Next: 595.
   "PF & ESIC proration is fixed for all firms: value × Present ÷ Month Days".
   Verified via screenshot on preview (no 'Proration Method'/'Working Days'
   text on /compliance-settings).
+
+## Iteration 623 (2026-06) — Format 2 register: UAN/EPF/ESIC column overwrite fix (user bug)
+- Root cause: build_compliance_register_pdf_v2 rendered uan/pf_no/esi_no as
+  plain strings — reportlab never wraps plain strings, so long IDs overflowed
+  and overprinted the next column. Format 1 was fixed for this in Iter 372
+  (idcell CJK wrap) but Format 2 was missed.
+- Fix: idcell2 ParagraphStyle (6.4pt, CJK word-wrap, centered) + wrapped
+  Paragraphs for the three ID cells in the v2 builder.
+- Verified: generated variant=2 PDF with seeded 12-22 char IDs and rendered
+  page 1 via pypdfium2 — EPF wraps to 3 lines inside its own column, no
+  overlap. Seeded test IDs cleared from dev DB afterwards.
+- User also confirmed: keep Iter 622 Month-Days rule, no rollback needed.
+- APP_ITERATION 623; deploy_vps_iter623.sh served via kind=script.
