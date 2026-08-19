@@ -6637,3 +6637,26 @@ Current iteration: 594. Next: 595.
 - APP_ITERATION bumped to 618; deploy_vps_iter618.sh created and served at
   /api/temp-code-bundle?kind=script.
 - Testing: frontend testing agent — all 7 tests PASS (test_reports/iteration_618.json).
+
+## Iteration 619 (2026-06) — Keyboard Shortcuts Phase 3 (admin desktop)
+- Page-scoped shortcuts (registered on focus, web only):
+  * Employee Master (/admin): Alt+N new employee, Ctrl+F focus search,
+    Ctrl+Shift+E bulk Master PDF, Ctrl+S save (only while quick-edit modal open).
+  * /employee-add: Ctrl+S saves draft (allowInInput).
+  * /advances: Alt+N opens New Advance form.  * /claims-management: Alt+N → New Claim tab.
+- USER-CUSTOMISABLE BINDINGS (spec §11): src/utils/shortcuts.ts gained
+  applyOverride/resetOverrides/setCaptureMode; overrides persisted in
+  localStorage sk_shortcut_overrides_v1 keyed `scope|defaultCombo`. ShortcutHelp
+  overlay: ✎ per row records a new combo (Esc cancels), conflict rejection with
+  inline error, "Reset to defaults" button, custom keys highlighted + default hint.
+- Consolidation: removed the old duplicate Iter 294 help modal in AdminWebShell;
+  Ctrl+K/Ctrl+Shift+A moved into the central engine; g-then-key nav kept.
+- NOTE for agents: /admin-password-login is an API endpoint, NOT a page route —
+  visiting it in a browser shows Unmatched Route behind the splash (self-heal
+  reload loop). For automated UI testing, seed a session token in user_sessions
+  (datetime expires_at!) and set localStorage llc_session_token.
+- Testing: agent verified nav/custom/conflict/reset/persistence PASS; main agent
+  verified employee-add Ctrl+S, advances Alt+N, claims Alt+N PASS via Playwright.
+- APP_ITERATION 619; deploy_vps_iter619.sh served at /api/temp-code-bundle?kind=script.
+- Backlog carried: attendance-grid quick status keys L/H/W/O need a data-model
+  decision (leave/holiday/week-off are not punch records) — not implemented.
