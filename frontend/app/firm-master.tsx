@@ -845,10 +845,13 @@ export default function FirmMasterScreen() {
         {sec("attendance") ? (<>
         <Section icon="ribbon-outline" title="Attendance Policy Preset">
 
-          {/* Iter 91 — Attendance Policy selection (MANDATORY, pick one).
-              The chosen policy is shown on every employee's Master page. */}
+          {/* Iter 613 (user directive) — policy is MANDATORY only when the
+              firm runs Offline Salary AND Biometric Attendance; otherwise
+              it's optional. */}
           <Text style={[styles.subLbl, { marginTop: 10 }]}>
-            Attendance Policy (mandatory — select one)
+            Attendance Policy {sp.offline_salary && sp.bio_matrix_attendance
+              ? "(mandatory — Offline Salary + Biometric Attendance is ON)"
+              : "(optional)"}
           </Text>
           <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
             {([
@@ -894,9 +897,16 @@ export default function FirmMasterScreen() {
             })}
           </View>
           {!st.attendance_policy_preset ? (
-            <Text style={{ fontSize: 11, color: colors.error, marginTop: 4 }}>
-              ⚠ No policy selected yet — pick Standard or Textile and save.
-            </Text>
+            sp.offline_salary && sp.bio_matrix_attendance ? (
+              <Text style={{ fontSize: 11, color: colors.error, marginTop: 4 }}>
+                ⚠ MANDATORY: this firm runs Offline Salary + Biometric Attendance —
+                select Standard or Textile so attendance can be processed correctly.
+              </Text>
+            ) : (
+              <Text style={{ fontSize: 11, color: colors.onSurfaceTertiary, marginTop: 4 }}>
+                No policy selected — optional for this firm; you can pick Standard or Textile anytime.
+              </Text>
+            )
           ) : null}
         </Section>
         {/* Iter 503 — SINGLE MACHINE ATTENDANCE MODE (user spec). */}

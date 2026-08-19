@@ -6567,3 +6567,23 @@ Current iteration: 594. Next: 595.
   Verified full login+2FA+super admin API access locally. deploy611 runs
   the seed on VPS.
 - deploy_vps_iter611.sh (kind=script serves 611); APP_ITERATION="611".
+
+## Iter 612 (DONE) — Firm Master gates relaxed (user directive)
+- firm-master.tsx: "Attendance Policy (mandatory — select one)" →
+  "(optional)"; error-red warning replaced with neutral hint. (Selection
+  was never a hard save-blocker; label/warn removed per user.)
+- firmMaster/HealthSection.tsx: removed checklist items company logo,
+  bank details, attendance policy selected, compliance docs count —
+  health score now only: identity, EPF, ESI, doc expiry checks.
+- Also this session: VPS seed run confirmed — nikkirock02@gmail.com was
+  PROMOTED (existing password kept); gave user a /tmp/setpw.py one-liner
+  to force password Nikki@2026 if unknown. deploy611 seed line now
+  prints errors instead of silencing (fixed in 611 script, carried to 612).
+- deploy_vps_iter612.sh (kind=script serves 612); APP_ITERATION="612".
+
+## Iter 613 (DONE) — Conditional Attendance Policy rule (user directive)
+- Rule: policy MANDATORY only when firm has salary_process.offline_salary
+  AND salary_process.bio_matrix_attendance both ON; else optional.
+- firm-master.tsx: dynamic label + red mandatory warning vs neutral hint.
+- HealthSection.tsx: "Attendance policy selected" check re-added ONLY
+  under that condition. deploy_vps_iter613.sh; APP_ITERATION="613".

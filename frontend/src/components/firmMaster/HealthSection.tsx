@@ -15,13 +15,10 @@ export default function HealthSection({ master }: { master: any }) {
   const g = master.general || {};
   const epf = master.epf || {};
   const esi = master.esi || {};
-  const bank = master.bank || {};
-  const st_ = master.settings || {};
 
   const soon = new Date(); soon.setDate(soon.getDate() + 60);
   const soonIso = soon.toISOString().slice(0, 10);
   const today = new Date().toISOString().slice(0, 10);
-  const docs = (master.compliance_docs || []).filter((d: any) => (d.number || "").trim());
   const expiring = (master.compliance_docs || []).filter(
     (d: any) => d.expiry_date && d.expiry_date >= today && d.expiry_date <= soonIso);
   const expired = (master.compliance_docs || []).filter(
@@ -29,14 +26,18 @@ export default function HealthSection({ master }: { master: any }) {
 
   const checks: { label: string; ok: boolean; warn?: boolean; detail?: string }[] = [
     { label: "Company identity complete", ok: !!(g.company_name || "").trim() && !!(g.company_code || "").trim() },
-    { label: "Company logo uploaded", ok: !!master.logo?.image_base64 },
+    // Iter 612/613 (user directive) — logo / bank / compliance-doc checks
+    // removed. Attendance policy is checked ONLY when the firm runs
+    // Offline Salary + Biometric Attendance (then it's mandatory).
+    ...(((master.salary_process || {}).offline_salary &&
+         (master.salary_process || {}).bio_matrix_attendance)
+      ? [{ label: "Attendance policy selected (mandatory — Offline Salary + Biometric ON)",
+           ok: !!(master.settings || {}).attendance_policy_preset }]
+      : []),
     { label: "EPF registration configured", ok: !!epf.applicable && !!(epf.epf_no || "").trim(),
       detail: epf.applicable ? undefined : "EPF marked not applicable" },
     { label: "ESI registration configured", ok: !!esi.applicable && !!(esi.esi_no || "").trim(),
       detail: esi.applicable ? undefined : "ESI marked not applicable" },
-    { label: "Bank details filled", ok: !!(bank.account_no || "").trim() && !!(bank.ifsc || "").trim() },
-    { label: "Attendance policy selected", ok: !!st_.attendance_policy_preset },
-    { label: `Compliance documents on file (${docs.length})`, ok: docs.length > 0 },
     { label: "No documents expired", ok: expired.length === 0,
       detail: expired.length ? `${expired.length} document(s) EXPIRED` : undefined },
     { label: "No documents expiring in 60 days", ok: expiring.length === 0, warn: true,
