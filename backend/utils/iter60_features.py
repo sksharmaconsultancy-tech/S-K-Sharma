@@ -175,6 +175,8 @@ class BulkEmployeeCorrection(BaseModel):
     # master fields (hra / conveyance / over_time / other) in sync.
     compliance_basic: Optional[float] = None
     pf_basic: Optional[float] = None
+    # Iter 616 (user request) — Compliance Rate Basis (monthly/daily/hourly).
+    compliance_salary_mode: Optional[str] = None
     allowances: Optional[Dict[str, float]] = None
     bio_code: Optional[str] = None   # Iter 139 — offline-salary firms only
     # Iter 141 — Actual Salary correction mode (offline-salary firms).
@@ -830,6 +832,9 @@ def register_iter60_features(
               if bio_code_in_compliance else []),
             {"key": "compliance_basic", "label": "Basic Salary (Compliance)", "type": "number"},
             {"key": "pf_basic", "label": "PF Basic", "type": "number"},
+            # Iter 616 (user request) — Rate Basis drives the Compliance
+            # Salary computation (rate × days / hours vs monthly pro-rate).
+            {"key": "compliance_salary_mode", "label": "Rate Basis", "type": "select:ratebasis"},
             *allow_fields,
             {"key": "uan_no", "label": "UAN No.", "type": "text"},
             {"key": "esi_ip_no", "label": "ESI IP No.", "type": "text"},
@@ -937,6 +942,11 @@ def register_iter60_features(
                     # and keeps the flat master basic in sync.
                     updates["compliance_basic"] = float(v)
                     updates["basic_salary"] = float(v)
+                elif k == "compliance_salary_mode":
+                    # Iter 616 (user request) — Rate Basis dropdown.
+                    _rb = str(v or "").strip().lower()
+                    if _rb in ("monthly", "daily", "hourly"):
+                        updates["compliance_salary_mode"] = _rb
                 elif k == "bank_account_no":
                     # Legacy key — the employee master stores bank_account.
                     updates["bank_account"] = (v or "").strip()
@@ -1036,14 +1046,18 @@ def register_iter60_features(
 
             # Iter 137 — keep the interlinked compliance structure + linked
             # Compliance Gross in sync whenever Basic / allowances change.
-            if "compliance_basic" in updates or "compliance_salary_allowances" in updates:
+            if ("compliance_basic" in updates
+                    or "compliance_salary_allowances" in updates
+                    or "compliance_salary_mode" in updates):
                 from server import build_compliance_structure, compliance_gross_total
                 _basic = updates.get("compliance_basic",
                                      existing.get("compliance_basic")) or 0
                 _allow = updates.get("compliance_salary_allowances",
                                      existing.get("compliance_salary_allowances") or [])
                 updates["salary_structure_compliance"] = build_compliance_structure(
-                    _basic, _allow, existing.get("compliance_salary_mode"))
+                    _basic, _allow,
+                    updates.get("compliance_salary_mode",
+                                existing.get("compliance_salary_mode")))
                 _total = compliance_gross_total(_basic, _allow)
                 if _total > 0:
                     updates["compliance_gross"] = _total

@@ -579,16 +579,21 @@ async def _compute_compliance_run(
             _fag_row = actual_by_user.get(emp["user_id"])
         if _fag_row is not None:
             _fag_used = True
+            # Iter 616 (user bug) — this merge used to CLOBBER the uploaded
+            # sheet's deduction (e.g. ADVANCE 500) with the Actual run's
+            # "Other Ded." value; the sheet's own head/amount now survives
+            # and the Actual "Other Ded.*" is carried separately below.
             _am = {
                 **(_am or {}),
                 "gross_earning": round(float(_fag_row.get("total_gross") or 0), 2),
                 "present_days": float((_am or {}).get("present_days")
                                       or _fag_row.get("p_days") or 0),
                 "tds": round(float(_fag_row.get("tds") or 0), 2),
+                "deduction_amount": float((_am or {}).get("deduction_amount") or 0),
+                "deduction_head": (_am or {}).get("deduction_head") or "",
+                "other_less": float((_am or {}).get("other_less") or 0.0),
                 # Actual run "Other Ded.*" → Other Deductions column.
-                "deduction_amount": round(float(_fag_row.get("other_ded") or 0), 2),
-                "deduction_head": "Other Ded.",
-                "other_less": 0.0,
+                "actual_other_ded": round(float(_fag_row.get("other_ded") or 0), 2),
             }
         # A row is FREEZE-driven when the sheet was imported OR the firm
         # uses Freeze-as-Actual-Gross and an Actual run row exists.
@@ -790,14 +795,41 @@ async def _compute_compliance_run(
         # Iter 100 — Attendance Master "Other Deduction" (Advance/TDS etc.)
         # Iter 328 — client sheet's Adv + "Other Less" combine into Other
         # Deduction; sheet TDS overrides the master TDS.
+        # Iter 616 (user bug) — an imported ADVANCE deduction now lands in
+        # the ADVANCE column (advance_recovery), not in Other Deduction.
         _am_ded = round(float((_am or {}).get("deduction_amount") or 0)
                         + float((_am or {}).get("other_less") or 0), 2)
-        if _am and _am_ded > 0 and _oth_on:
-            row["other_deduction_head"] = _am.get("deduction_head") or (
-                "Advance/Other" if float(_am.get("other_less") or 0) > 0 else "Advance")
-            row["other_deduction"] = _am_ded
-            row["total_deduction"] = round(float(row.get("total_deduction") or 0) + _am_ded, 2)
-            row["net"] = round(float(row.get("net") or 0) - _am_ded, 2)
+        if _am and _am_ded > 0:
+            _head_txt = str(_am.get("deduction_head") or "").strip().upper()
+            _has_other_less = float(_am.get("other_less") or 0) > 0
+            _is_adv = ("ADV" in _head_txt
+                       or (not _head_txt and not _has_other_less))
+            if _is_adv and _adv_on:
+                row["advance_recovery"] = round(
+                    float(row.get("advance_recovery") or 0) + _am_ded, 2)
+                row["total_deduction"] = round(
+                    float(row.get("total_deduction") or 0) + _am_ded, 2)
+                row["net"] = round(float(row.get("net") or 0) - _am_ded, 2)
+                # Ledger recovery must not double-deduct the sheet figure.
+                row["manual_fields"] = sorted(
+                    set(row.get("manual_fields") or []) | {"advance_recovery"})
+            elif _oth_on:
+                row["other_deduction_head"] = _am.get("deduction_head") or (
+                    "Advance/Other" if _has_other_less else "Advance")
+                row["other_deduction"] = _am_ded
+                row["total_deduction"] = round(float(row.get("total_deduction") or 0) + _am_ded, 2)
+                row["net"] = round(float(row.get("net") or 0) - _am_ded, 2)
+        # Iter 616 — the Actual run's "Other Ded.*" (freeze-as-actual-gross
+        # firms) lands in the Other Deduction column, ON TOP of any sheet
+        # deduction routed above.
+        _act_od = round(float((_am or {}).get("actual_other_ded") or 0), 2)
+        if _am and _act_od > 0 and _oth_on:
+            row["other_deduction_head"] = row.get("other_deduction_head") or "Other Ded."
+            row["other_deduction"] = round(
+                float(row.get("other_deduction") or 0) + _act_od, 2)
+            row["total_deduction"] = round(
+                float(row.get("total_deduction") or 0) + _act_od, 2)
+            row["net"] = round(float(row.get("net") or 0) - _act_od, 2)
         # Iter 297 — reprocess also keeps the manually ENTERED "Other
         # Deduction" from the previous run (default is 0 → any value was
         # typed by the admin).
@@ -1211,6 +1243,9 @@ async def _compute_compliance_run(
                         + float(row.get("pt") or 0)
                         + float(row.get("tds") or 0)
                         + float(row.get("other_deduction") or 0)
+                        # Iter 616 (user bug) — the sheet-imported ADVANCE
+                        # was dropped from Total Ded. by this freeze reset.
+                        + float(row.get("advance_recovery") or 0)
                         + float(row.get("master_deduction") or 0), 2)
                     row["net"] = round(_imp_g - row["total_deduction"], 2)
         # Iter 443 (user request) — Freeze as Actual Gross: the Actual run's
@@ -1219,13 +1254,18 @@ async def _compute_compliance_run(
         # manual_fields so the imported figure is never double-deducted).
         if _fag_row is not None and _adv_on:
             _adv_imp = round(float(_fag_row.get("adv") or 0), 2)
-            _adv_d = round(_adv_imp - float(row.get("advance_recovery") or 0), 2)
+            _sheet_adv = round(float(row.get("advance_recovery") or 0), 2)
+            # Iter 616 (user bug) — a 0 Actual-run Adv used to WIPE the
+            # advance routed from the uploaded sheet; the Actual figure now
+            # only overrides when it actually has a value.
+            _target_adv = _adv_imp if _adv_imp > 0 else _sheet_adv
+            _adv_d = round(_target_adv - _sheet_adv, 2)
             if _adv_d:
-                row["advance_recovery"] = _adv_imp
+                row["advance_recovery"] = _target_adv
                 row["total_deduction"] = round(
                     float(row.get("total_deduction") or 0) + _adv_d, 2)
                 row["net"] = round(float(row.get("net") or 0) - _adv_d, 2)
-            if _adv_imp > 0:
+            if _target_adv > 0:
                 row["manual_fields"] = sorted(
                     set(row.get("manual_fields") or []) | {"advance_recovery"})
         # Iter 340 (user request) — OT HOURS derived from the OT AMOUNT:
@@ -1720,8 +1760,13 @@ async def _create_compliance_salary_run_core(
     # for this firm + month + group, every reprocess (existing OR blank)
     # proceeds with the SAME month days — an accidentally changed value in
     # the form is ignored.
+    # Iter 616 (user bug) — IMPORTED-SHEET runs: the typed Month Days
+    # (Override) from the form ALWAYS wins — the sheet import used to be
+    # silently locked to the previous run's days (e.g. 31) even when the
+    # admin entered 26/30 in the Month Days field.
     if (_prev_run and _prev_run.get("month_days")
-            and not payload.override_month_days):
+            and not payload.override_month_days
+            and not (payload.use_imported_sheet and payload.month_days)):
         payload.month_days = int(_prev_run["month_days"])
     elif (_gate_cid and not payload.use_imported_sheet
             and not payload.override_month_days):

@@ -798,7 +798,9 @@ export default function BulkEmployeeCorrectionScreen() {
     }
 
     // Iter 141 — Pay Basis (daily / monthly) + Shift dropdowns.
-    if (f.type === "select:paybasis" || f.type === "select:shift") {
+    // Iter 616 — Rate Basis (Compliance): Monthly / Daily / Hourly.
+    if (f.type === "select:paybasis" || f.type === "select:shift"
+        || f.type === "select:ratebasis") {
       const base = baseValue(row, f.key);
       const cur =
         dirty[row.user_id] && f.key in dirty[row.user_id]
@@ -821,6 +823,13 @@ export default function BulkEmployeeCorrectionScreen() {
                   <option value="">—</option>
                   <option value="daily">Daily</option>
                   <option value="monthly">Monthly</option>
+                </>
+              ) : f.type === "select:ratebasis" ? (
+                <>
+                  <option value="">—</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="daily">Daily</option>
+                  <option value="hourly">Hourly</option>
                 </>
               ) : (
                 <>

@@ -682,6 +682,12 @@ export default function ComplianceSalaryRunScreen() {
 
   const pickAndUpload = async () => {
     if (!activeCompanyId) { showMsg("Select a firm first"); return; }
+    // Iter 616 (user rule) — Month Days MUST be filled before importing:
+    // the imported sheet's days derivation divides by this value.
+    if (!monthDaysOverride.trim() || !(Number(monthDaysOverride) > 0)) {
+      showMsg("⚠ Enter Month Days (Override) first — the sheet import calculates salary using these days.");
+      return;
+    }
     const res = await DocumentPicker.getDocumentAsync({
       type: [
         "text/csv",
@@ -747,6 +753,11 @@ export default function ComplianceSalaryRunScreen() {
   };
 
   const importFromMail = async (msg: any, att: any) => {
+    // Iter 616 (user rule) — Month Days MUST be filled before importing.
+    if (!monthDaysOverride.trim() || !(Number(monthDaysOverride) > 0)) {
+      showMsg("⚠ Enter Month Days (Override) first — the sheet import calculates salary using these days.");
+      return;
+    }
     setMailModal(false);
     setImportBusy(true);
     try {
@@ -1605,12 +1616,23 @@ export default function ComplianceSalaryRunScreen() {
               : pfWages * pfErEpfRate;
             if (next.eps_disabled) { epf += eps; eps = 0; }
             next.pf_wages = Math.round(pfWages);
-            next.pf_employee = Math.round(pfWages * pfEmpRate);
+            // Iter 616 (user report — "PF wrong then auto-rectifies") — the
+            // OT/Others quick-recalc DROPPED the employee's VPF from PF(E);
+            // the server added it back on save/reprocess. Mirror the server.
+            next.pf_employee = Math.round(
+              pfWages * pfEmpRate + (Number((next as any).vpf_amount) || 0));
             next.pf_employer_epf = Math.round(epf);
             next.pf_employer_eps = Math.round(eps);
             next.pf_employer_total = next.pf_employer_epf + next.pf_employer_eps;
             next.stat_wage_base = Math.round(Math.max(
               Number(next.basic || 0), grossEarn * floorPct));
+          } else if (grossEarn <= 0) {
+            // Iter 616 — zero-pay row: statutory must drop to 0 immediately
+            // (stale figures previously lingered until the server recompute).
+            next.pf_wages = next.pf_employee = 0;
+            next.pf_employer_epf = next.pf_employer_eps = 0;
+            next.pf_employer_total = 0;
+            next.stat_wage_base = 0;
           }
           const esiOn = (next.esic_eligible !== undefined
             ? next.esic_eligible !== false : next.esic_applicable !== false)
@@ -1632,6 +1654,9 @@ export default function ComplianceSalaryRunScreen() {
             next.esic_wage_base = Math.round(esiBase);
             next.esic_employee = Math.ceil(esiBase * esiEmpRate);
             next.esic_employer = Math.ceil(esiBase * esiErRate);
+          } else if (grossEarn <= 0) {
+            // Iter 616 — zero-pay row: ESIC drops to 0 immediately too.
+            next.esic_wage_base = next.esic_employee = next.esic_employer = 0;
           }
         }
         const dedTotal = (next.pf_employee || 0) + (next.esic_employee || 0)

@@ -169,8 +169,13 @@ export default function GeneralInfoSection({
   const codeHint = codeStatus === "unique" ? "✓ Code is available"
     : codeStatus === "checking" ? "Checking availability..." : null;
 
+  // Iter 616 (user bug) — dropdown option lists painted UNDER the next
+  // rows on web (later siblings stack above earlier ones): every row now
+  // gets a DESCENDING zIndex so an open dropdown always overlaps the
+  // rows below it.
+  let rowZ = 900;
   const row = (children: React.ReactNode) => (
-    <View style={[styles.row, !twoCol && { flexDirection: "column" }]}>{children}</View>
+    <View style={[styles.row, { zIndex: rowZ-- }, !twoCol && { flexDirection: "column" }]}>{children}</View>
   );
 
   return (
