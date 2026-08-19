@@ -8,6 +8,7 @@ import { StatusBar } from "expo-status-bar";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
+import usePwaAutoUpdate from "@/src/hooks/usePwaAutoUpdate";
 import { AuthProvider } from "@/src/context/AuthContext";
 import { SelectedCompanyProvider } from "@/src/context/SelectedCompanyContext";
 import { AutoPunchProvider } from "@/src/context/AutoPunchContext";
@@ -34,6 +35,8 @@ SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const [loaded, error] = useIconFonts();
+  // Iter 614 — PWA auto-update: reloads once when a new deploy is live.
+  usePwaAutoUpdate();
 
   useEffect(() => {
     if (loaded || error) SplashScreen.hideAsync();

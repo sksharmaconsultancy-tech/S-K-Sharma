@@ -6587,3 +6587,15 @@ Current iteration: 594. Next: 595.
 - firm-master.tsx: dynamic label + red mandatory warning vs neutral hint.
 - HealthSection.tsx: "Attendance policy selected" check re-added ONLY
   under that condition. deploy_vps_iter613.sh; APP_ITERATION="613".
+
+## Iter 614 (DONE) — Two user requests
+1. Face capture "Unreadable image frame" fix: on web, expo-camera
+   takePictureAsync returns base64 already as full data-URL → code was
+   double-prefixing. Fixed in register-my-face.tsx AND face-enrollment.tsx
+   (normalize: use as-is if startsWith "data:").
+2. PWA AUTO-UPDATE: new src/hooks/usePwaAutoUpdate.ts wired in
+   app/_layout.tsx (web only) — on launch + visibilitychange fetches
+   /api/version; if APP_ITERATION changed → sw reg.update() + caches
+   cleared + one reload (2-min loop guard, keys sk_app_iteration /
+   sk_update_reload_at). Employees always get latest build after deploys.
+- deploy_vps_iter614.sh; APP_ITERATION="614".

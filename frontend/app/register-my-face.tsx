@@ -60,7 +60,10 @@ export default function RegisterMyFace() {
     setBusy(true); setErr("");
     try {
       const photo = await camRef.current.takePictureAsync({ base64: true, quality: 0.75, skipProcessing: true });
-      const b64 = `data:image/jpeg;base64,${photo.base64}`;
+      // Iter 614 fix — on web, expo-camera may return base64 already as a
+      // full data-URL; double-prefixing made the frame unreadable.
+      const raw = photo.base64 || photo.uri || "";
+      const b64 = String(raw).startsWith("data:") ? String(raw) : `data:image/jpeg;base64,${raw}`;
       setNote("Checking frame…");
       const chk = await api<{ ok: boolean; reason?: string }>(
         "/face-verification/self-check-frame", { method: "POST", body: { frame: b64 } });

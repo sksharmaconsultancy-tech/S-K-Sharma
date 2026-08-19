@@ -74,7 +74,10 @@ export default function FaceEnrollmentScreen() {
       const photo = await camRef.current.takePictureAsync({
         base64: true, quality: 0.75, skipProcessing: true,
       });
-      const b64 = `data:image/jpeg;base64,${photo.base64}`;
+      // Iter 614 fix — on web, expo-camera may return base64 already as a
+      // full data-URL; double-prefixing made the frame unreadable.
+      const rawB64 = photo.base64 || photo.uri || "";
+      const b64 = String(rawB64).startsWith("data:") ? String(rawB64) : `data:image/jpeg;base64,${rawB64}`;
       setStepMsg("Checking frame…");
       const chk = await api<{ ok: boolean; reason?: string }>(
         "/admin/face-verification/check-frame",
