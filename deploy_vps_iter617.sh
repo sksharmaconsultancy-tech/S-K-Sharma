@@ -22,6 +22,8 @@
 #      drop statutory to 0 instantly (no "auto-rectify" flicker).
 #
 # 👥 EMPLOYEE MASTER / ADMIN:
+#  * REJECTED employees no longer block their mobile number — the same
+#      person can register again (self-signup + admin Add Employee).
 #  * Designation now OPTIONAL in Add/Edit Employee.
 #  * Sub-Admin masked mobile fix (shows XXXXXX1234 properly; masked
 #      values can NEVER overwrite real data — server-side guard).
