@@ -32,6 +32,8 @@ import EssWelcomeHeader from "@/src/components/ess/EssWelcomeHeader";
 import PunchHeroCard from "@/src/components/ess/PunchHeroCard";
 import QuickCardsGrid from "@/src/components/ess/QuickCardsGrid";
 import MonthCalendarCard from "@/src/components/ess/MonthCalendarCard";
+import LeaveBalanceCard from "@/src/components/ess/LeaveBalanceCard";
+import OfflinePunchStatusCard from "@/src/components/ess/OfflinePunchStatusCard";
 
 const LOGO = require("../../assets/images/logo-mark.png");
 
@@ -497,6 +499,10 @@ export default function Dashboard() {
                   ]}
                 />
                 <View style={{ height: spacing.md }} />
+                {/* Iter 615 (ESS Phase 2) — offline punch queue visibility
+                    + CL/PL leave balance at a glance. */}
+                <OfflinePunchStatusCard />
+                <LeaveBalanceCard />
                 <MonthCalendarCard />
                 <View style={{ height: spacing.sm }} />
               </>
