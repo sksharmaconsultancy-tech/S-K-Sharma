@@ -845,3 +845,28 @@ ITER 487 (doc-expiry alerts):
 - Frontend testing_agent 100% PASS (iteration_610.json): all employee
   screens (mobile 390x844), admin ESS queue approve, employee sees
   APPROVED + notification. Regression OK (home, /my-expenses).
+
+## Iter 615 — Punch face enforcement + 2-day auto-approve + ESS Phase 2 (2026-06)
+- Backend 21/21 PASS (/app/test_face_enforce_615.py):
+  * enforce_template_match (routes/face_punch.py) wired into
+    POST /attendance/punch (attendance_core.py ~line 233): active face
+    template => every selfie punch 1:1 matched; mismatch / no-face /
+    multi-face / missing selfie => 403; repeated mismatch => 429 lockout;
+    audit stage "punch_face_match"; matching punch stamped with
+    template_face_match + face_match_score. Un-enrolled employees
+    unaffected. Legacy face_match_enabled "flag-only" path superseded.
+  * Pending self-enrollments AUTO-APPROVE after 2 days (was expire@7d):
+    _auto_approve_pending() runs lazily on admin pending list + employee
+    self-status; activates template (registered_via=
+    self_enrollment_auto_approved), audits, notifies (in-app + SMS).
+  * compliance-docs: per-user acknowledged_by_me/ack_count in list +
+    POST /compliance-docs/{id}/acknowledge (idempotent, 404 unknown).
+- Frontend testing_agent 8/8 PASS (iteration_615.json): home cards
+  (ess-offline-punch-card shown, leave card correctly hidden for firm
+  without CL/PL), doc Acknowledge flip without reload, kyc-status-card,
+  sp-stage-strip (Device omitted w/o WebAuthn), register-my-face
+  "Enrolled & Active", admin audit shows punch_face_match rows,
+  regressions OK (/my-expenses, /my-advances, profile nav).
+- secure-punch.tsx: fixed double base64 data-URL prefix (same bug class
+  as Iter 614 register-my-face fix).
+- APP_ITERATION=615; deploy_vps_iter615.sh served via kind=script.

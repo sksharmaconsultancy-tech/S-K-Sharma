@@ -225,6 +225,19 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
                     "distance_m": dup.get("distance_m", 0),
                     "approval_required": dup.get("status") == "pending"}
 
+    # ------------------------------------------------------------------
+    # Iter 615 (user bug) — APPROVED FACE = ENFORCED FACE. Even when the
+    # firm hasn't enabled the full secure-punch session flow, an employee
+    # whose face template was approved MUST match it on every selfie
+    # punch — a mismatching face now BLOCKS the punch instead of being
+    # allowed (the old face_match_enabled check only flagged, never blocked).
+    # ------------------------------------------------------------------
+    template_face_match: Optional[dict] = None
+    if verified_punch is None and payload.source != "admin_approved":
+        from routes.face_punch import enforce_template_match
+        template_face_match = await enforce_template_match(
+            user, company, payload.selfie_base64, payload.biometric_method)
+
     # Live-in staff (e.g. resort housekeeping who sleep on premises) are
     # ALWAYS inside the resort, but they can still be off-duty. For them
     # we bypass the geofence hard-reject entirely — the shift schedule +
@@ -593,6 +606,10 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
         "company_id": user["company_id"],
         # Iter 602 — secure verification summary (None when policy off).
         "secure_verification": verified_punch,
+        # Iter 615 — punch-time 1:1 template match (approved-face gate).
+        "template_face_match": template_face_match,
+        "face_match_score": ((verified_punch or {}).get("face_match_score")
+                             or (template_face_match or {}).get("face_match_score")),
         "branch_id": (closest or {}).get("branch_id"),
         "branch_name": (closest or {}).get("name"),
         "date": today,

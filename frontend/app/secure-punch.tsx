@@ -35,6 +35,7 @@ export default function SecurePunchScreen() {
   const [vsId, setVsId] = useState("");
   const framesRef = useRef<{ step: string; frame: string }[]>([]);
   const [err, setErr] = useState("");
+  const [errStage, setErrStage] = useState("");
   const [result, setResult] = useState<any>(null);
   const [busy, setBusy] = useState(false);
 
@@ -56,7 +57,7 @@ export default function SecurePunchScreen() {
       framesRef.current = [];
       setPhase("camera");
     } catch (e: any) {
-      setErr(e?.message || "Could not start verification"); setPhase("error");
+      setErr(e?.message || "Could not start verification"); setErrStage("liveness"); setPhase("error");
     } finally { setBusy(false); }
   };
 
@@ -66,7 +67,7 @@ export default function SecurePunchScreen() {
       const sessionId = await authenticateDevice();
       await startChallenges(sessionId);
     } catch (e: any) {
-      setErr(e?.message || "Device verification failed"); setPhase("error");
+      setErr(e?.message || "Device verification failed"); setErrStage("device"); setPhase("error");
     } finally { setBusy(false); }
   };
 
@@ -77,9 +78,12 @@ export default function SecurePunchScreen() {
       if (!vsId) { await startChallenges(); setBusy(false); return; }
       const photo = await camRef.current.takePictureAsync({
         base64: true, quality: 0.7, skipProcessing: true });
+      // Iter 615 — on web, expo-camera may return base64 already as a full
+      // data-URL; double-prefixing made the frame unreadable server-side.
+      const b64 = String(photo.base64 || "");
       framesRef.current.push({
         step: steps[stepIdx].step,
-        frame: `data:image/jpeg;base64,${photo.base64}`,
+        frame: b64.startsWith("data:") ? b64 : `data:image/jpeg;base64,${b64}`,
       });
       if (stepIdx + 1 < steps.length) {
         setStepIdx(stepIdx + 1);
@@ -100,7 +104,7 @@ export default function SecurePunchScreen() {
       });
       await doPunch(r);
     } catch (e: any) {
-      setErr(e?.message || "Verification failed"); setPhase("error");
+      setErr(e?.message || "Verification failed"); setErrStage("verify"); setPhase("error");
     }
   };
 
@@ -132,7 +136,7 @@ export default function SecurePunchScreen() {
       setResult({ ...r, verify });
       setPhase("success");
     } catch (e: any) {
-      setErr(e?.message || "Punch failed"); setPhase("error");
+      setErr(e?.message || "Punch failed"); setErrStage("punch"); setPhase("error");
     }
   };
 
@@ -144,6 +148,12 @@ export default function SecurePunchScreen() {
         <Text style={styles.title}>
           Secure {punchKind === "in" ? "IN" : "OUT"} Punch
         </Text>
+
+        {/* Iter 615 (ESS Phase 2) — live stage progress strip */}
+        {phase !== "policy" ? (
+          <StageStrip phase={phase} errStage={errStage}
+            hasDevice={!!policy?.device_registered} />
+        ) : null}
 
         {phase === "policy" ? <ActivityIndicator style={{ marginTop: 40 }} /> : null}
 
@@ -226,10 +236,12 @@ export default function SecurePunchScreen() {
 
         {phase === "error" ? (
           <View style={[styles.card, { borderColor: "#FECACA", backgroundColor: "#FEF2F2" }]}>
-            <Text style={[styles.cardTitle, { color: "#B91C1C" }]}>⚠ Punch Rejected</Text>
+            <Text style={[styles.cardTitle, { color: "#B91C1C" }]}>
+              ⚠ Punch Rejected{errStage ? ` — ${STAGE_LABEL[errStage] || ""} step failed` : ""}
+            </Text>
             <Text style={styles.mutedTxt}>{err}</Text>
             <Pressable style={styles.btn} onPress={() => {
-              setErr(""); setVsId(""); framesRef.current = [];
+              setErr(""); setErrStage(""); setVsId(""); framesRef.current = [];
               setPhase(policy?.device_registered ? "device" : "camera");
             }} testID="sp-retry">
               <Text style={styles.btnTxt}>Try Again</Text>
@@ -251,6 +263,57 @@ function CheckRow({ label, ok }: { label: string; ok: boolean }) {
   );
 }
 
+const STAGE_ORDER = ["device", "liveness", "verify", "punch"];
+const STAGE_LABEL: Record<string, string> = {
+  device: "Device", liveness: "Liveness", verify: "Face Match", punch: "Punch",
+};
+
+function StageStrip({ phase, errStage, hasDevice }:
+  { phase: Phase; errStage: string; hasDevice: boolean }) {
+  const stages = STAGE_ORDER.filter((k) => k !== "device" || hasDevice);
+  const currentKey =
+    phase === "device" ? "device"
+      : phase === "camera" ? "liveness"
+        : phase === "verifying" ? "verify"
+          : phase === "punching" ? "punch"
+            : phase === "error" ? errStage : "";
+  const curIdx = STAGE_ORDER.indexOf(currentKey);
+  return (
+    <View style={styles.stageStrip} testID="sp-stage-strip">
+      {stages.map((k, i) => {
+        const idx = STAGE_ORDER.indexOf(k);
+        let state: "done" | "active" | "failed" | "pending" = "pending";
+        if (phase === "success") state = "done";
+        else if (curIdx >= 0) {
+          if (idx < curIdx) state = "done";
+          else if (idx === curIdx) state = phase === "error" ? "failed" : "active";
+        }
+        const clr = state === "done" ? "#059669"
+          : state === "active" ? colors.brandPrimary
+            : state === "failed" ? "#DC2626" : "#94A3B8";
+        return (
+          <React.Fragment key={k}>
+            {i > 0 ? (
+              <View style={[styles.stageLine,
+                { backgroundColor: state === "pending" ? "#E2E8F0" : clr }]} />
+            ) : null}
+            <View style={{ alignItems: "center", gap: 2 }}>
+              <Ionicons
+                name={state === "done" ? "checkmark-circle"
+                  : state === "failed" ? "close-circle"
+                    : state === "active" ? "ellipse" : "ellipse-outline"}
+                size={16} color={clr} />
+              <Text style={{ fontSize: 9.5, fontWeight: "700", color: clr }}>
+                {STAGE_LABEL[k]}
+              </Text>
+            </View>
+          </React.Fragment>
+        );
+      })}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   container: { padding: spacing.lg, gap: spacing.md, maxWidth: 520, width: "100%", alignSelf: "center" },
@@ -266,6 +329,11 @@ const styles = StyleSheet.create({
     textAlign: "center", paddingVertical: 4,
   },
   errTxt: { fontSize: 12.5, color: "#DC2626", fontWeight: "600" },
+  stageStrip: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 6, paddingVertical: 4,
+  },
+  stageLine: { width: 22, height: 2, borderRadius: 1, marginBottom: 12 },
   camBox: {
     height: 340, borderRadius: 12, overflow: "hidden", backgroundColor: "#111",
     borderWidth: 1, borderColor: colors.borderLight,

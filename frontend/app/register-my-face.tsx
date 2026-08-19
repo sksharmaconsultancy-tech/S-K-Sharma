@@ -18,7 +18,7 @@ import { colors } from "@/src/theme";
 const NEED = 3;
 const POSES = ["Look straight at the camera", "Turn your head slightly LEFT", "Turn your head slightly RIGHT"];
 const ST_META: Record<string, { t: string; c: string; icon: string }> = {
-  pending: { t: "🟡 Pending HR Approval", c: "#D97706", icon: "hourglass-outline" },
+  pending: { t: "🟡 Pending HR Approval (auto-approves in 2 days)", c: "#D97706", icon: "hourglass-outline" },
   approved: { t: "🟢 Enrolled & Active", c: "#059669", icon: "shield-checkmark" },
   rejected: { t: "🔴 Rejected", c: "#DC2626", icon: "close-circle" },
   recapture_required: { t: "🟠 Recapture Required", c: "#EA580C", icon: "refresh-circle" },

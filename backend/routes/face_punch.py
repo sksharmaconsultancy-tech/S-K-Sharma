@@ -124,6 +124,86 @@ def _analyse(b64: str) -> Dict[str, Any]:
             "gray": gray, "live_score": spoof["live_score"]}
 
 
+async def enforce_template_match(user: dict, company: dict,
+                                 selfie_b64: Optional[str],
+                                 biometric_method: Optional[str]) -> Optional[dict]:
+    """Iter 615 (user bug — approved face still allowed mismatched punches).
+
+    Punch-time 1:1 enforcement OUTSIDE the secure-session flow: once an
+    employee has an ACTIVE approved face template, every selfie punch must
+    match it. A mismatching / undetectable face now BLOCKS the punch (403) —
+    the legacy "flag but allow" behaviour no longer applies to enrolled
+    faces. Returns {"face_match": "pass", "face_match_score": pct} or None
+    when the employee has no active template (nothing to enforce).
+    """
+    tpl = await db.face_templates.find_one(
+        {"user_id": user["user_id"], "status": "active"},
+        {"_id": 0, "template_enc": 1})
+    if not tpl:
+        return None
+    pol = _policy(company)
+    await _lockout_check(user["user_id"], pol)
+    if not selfie_b64:
+        if biometric_method == "face":
+            raise HTTPException(
+                status_code=403,
+                detail="⚠ Punch Rejected — a live selfie is required because "
+                       "your face is registered for verified punching.")
+        return None  # fingerprint-style punches without a camera stay as-is
+
+    def _match() -> Dict[str, Any]:
+        eng = _get_engine()
+        img = _decode_frame(selfie_b64)
+        faces = [f for f in eng.get(img) if float(f.det_score) >= MIN_DET_SCORE]
+        if not faces:
+            return {"ok": False, "reason": "no_face",
+                    "friendly": "no face was detected in the selfie. Keep "
+                                "your face clearly inside the frame."}
+        if len(faces) > 1:
+            return {"ok": False, "reason": "multiple_faces",
+                    "friendly": "multiple faces were detected — only the "
+                                "employee should be visible."}
+        emb = faces[0].normed_embedding.astype(np.float32)
+        reg = emb_from_enc(tpl["template_enc"])
+        cos = _cos(reg, emb)
+        return {"ok": True, "score_pct": round(((cos + 1.0) / 2.0) * 100.0, 1)}
+
+    try:
+        res = await asyncio.to_thread(_match)
+    except HTTPException as e:
+        if e.status_code == 400:  # unreadable frame
+            await _record_fail(user, pol, "punch_unreadable_selfie")
+            await _audit(user, "punch_face_match", "REJECTED",
+                         {"reason": "unreadable_selfie"})
+            raise HTTPException(
+                status_code=403,
+                detail="⚠ Punch Rejected — the selfie could not be read. "
+                       "Try again.")
+        raise  # 503 engine-not-ready etc.
+    if not res["ok"]:
+        await _record_fail(user, pol, f"punch_{res['reason']}")
+        await _audit(user, "punch_face_match", "REJECTED",
+                     {"reason": res["reason"]})
+        raise HTTPException(status_code=403,
+                            detail=f"⚠ Punch Rejected — {res['friendly']}")
+    if res["score_pct"] < pol["threshold"]:
+        await _record_fail(user, pol, "punch_face_mismatch")
+        await _audit(user, "punch_face_match", "REJECTED",
+                     {"reason": "face_mismatch",
+                      "face_match_score": res["score_pct"]})
+        raise HTTPException(
+            status_code=403,
+            detail="⚠ Punch Rejected — face verification failed. The detected "
+                   "face does not match the registered employee.")
+    await db.punch_verification_lock.delete_one({"user_id": user["user_id"]})
+    await db.face_templates.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"last_verified_at": now_iso()}})
+    await _audit(user, "punch_face_match", "SUCCESS",
+                 {"face_match_score": res["score_pct"]})
+    return {"face_match": "pass", "face_match_score": res["score_pct"]}
+
+
 @router.post("/attendance/face-verify/start")
 async def face_verify_start(
     payload: Dict[str, Any] = Body(default={}),

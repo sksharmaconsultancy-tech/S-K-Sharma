@@ -6599,3 +6599,17 @@ Current iteration: 594. Next: 595.
    cleared + one reload (2-min loop guard, keys sk_app_iteration /
    sk_update_reload_at). Employees always get latest build after deploys.
 - deploy_vps_iter614.sh; APP_ITERATION="614".
+
+## Iter 615 (2026-06) — Punch face ENFORCEMENT + 2-day auto-approve + ESS Phase 2
+- USER RULE: pending self face-registrations AUTO-APPROVE after 2 days (was 7-day expiry).
+- USER BUG FIXED: approved face but PWA allowed mismatched punch — now every selfie
+  punch of an enrolled employee is 1:1 matched (InsightFace) at /attendance/punch;
+  mismatch/no-face/missing selfie => 403 blocked + lockout + punch_face_match audit.
+- ESS Phase 2 delivered: LeaveBalanceCard + OfflinePunchStatusCard (employee home),
+  compliance doc Acknowledge (per-user, idempotent API), KYC status card (/kyc),
+  secure-punch stage progress strip + base64 double-prefix camera fix.
+- Backend 21/21 (test_face_enforce_615.py), frontend testing_agent 8/8 (iteration_615.json).
+- deploy_vps_iter615.sh (kind=script serves 615); APP_ITERATION="615".
+- ESS Phase 2 leftovers remaining: none of the original spec items — Digital ID QR,
+  advance history, expenses UI existed already. Next: MSG91 SMS Phase 2/3 wiring,
+  Keyboard Shortcuts Phase 3 (admin desktop only).

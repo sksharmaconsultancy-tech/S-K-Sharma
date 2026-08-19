@@ -170,6 +170,30 @@ export default function DocumentsScreen() {
     if (tab === "personal") loadPersonalDocs();
   }, [tab, loadPersonalDocs]);
 
+  // Iter 615 (ESS Phase 2) — employee acknowledges a published company doc.
+  const [ackBusy, setAckBusy] = useState<string | null>(null);
+  const ackDoc = async (docId: string) => {
+    if (ackBusy) return;
+    setAckBusy(docId);
+    try {
+      const r = await api<{ ok: boolean; acknowledged_at: string }>(
+        `/compliance-docs/${docId}/acknowledge`,
+        { method: "POST" },
+      );
+      setDocs((prev: any[]) =>
+        prev.map((d: any) =>
+          d.doc_id === docId
+            ? { ...d, acknowledged_by_me: true, acknowledged_at: r.acknowledged_at }
+            : d,
+        ),
+      );
+    } catch {
+      // non-fatal
+    } finally {
+      setAckBusy(null);
+    }
+  };
+
   // Iter 72 — Refresh Documents tab on focus so newly-published docs
   // and freshly-uploaded personal papers show up without a hard reload.
   useFocusEffect(
@@ -551,6 +575,35 @@ export default function DocumentsScreen() {
                   <Text style={styles.docSub} numberOfLines={open ? undefined : 2}>
                     {open ? d.content || d.description : d.description}
                   </Text>
+                  {d.acknowledged_by_me ? (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 6 }}>
+                      <Ionicons name="checkmark-circle" size={14} color="#059669" />
+                      <Text style={{ fontSize: 11, color: "#059669", fontWeight: "700" }}>
+                        Acknowledged{d.acknowledged_at ? ` · ${String(d.acknowledged_at).slice(0, 10)}` : ""}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Pressable
+                      onPress={() => ackDoc(d.doc_id)}
+                      disabled={ackBusy === d.doc_id}
+                      testID={`ack-${d.doc_id}`}
+                      style={{
+                        alignSelf: "flex-start", marginTop: 8, flexDirection: "row",
+                        alignItems: "center", gap: 5, backgroundColor: colors.brandPrimary,
+                        borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,
+                        minHeight: 30, opacity: ackBusy === d.doc_id ? 0.6 : 1,
+                      }}
+                    >
+                      {ackBusy === d.doc_id ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Ionicons name="checkmark-done-outline" size={13} color="#fff" />
+                      )}
+                      <Text style={{ fontSize: 11, color: "#fff", fontWeight: "700" }}>
+                        I have read this — Acknowledge
+                      </Text>
+                    </Pressable>
+                  )}
                 </View>
                 <Ionicons
                   name={open ? "chevron-up" : "chevron-forward"}

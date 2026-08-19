@@ -296,6 +296,59 @@ export default function KycScreen() {
                 All fields are optional — fill only what you have.
               </Text>
 
+              {/* Iter 615 (ESS Phase 2) — KYC completion status at a glance */}
+              {(() => {
+                const secs = [
+                  { label: "Aadhaar", done: aadhar.replace(/\D/g, "").length === 12 },
+                  { label: "PAN", done: pan.trim().length === 10 },
+                  { label: "Bank", done: !!(bankAcc && ifsc) },
+                ];
+                const done = secs.filter((x) => x.done).length;
+                const clr = done === 3 ? "#059669" : done > 0 ? "#B45309" : "#DC2626";
+                return (
+                  <View style={[styles.card, { borderColor: `${clr}55` }]} testID="kyc-status-card">
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <Ionicons
+                        name={done === 3 ? "shield-checkmark-outline" : "alert-circle-outline"}
+                        size={16}
+                        color={clr}
+                      />
+                      <Text style={[styles.cardTitle, { color: clr }]}>
+                        KYC Status: {done === 3 ? "Complete" : done > 0 ? `${done} of 3 sections done` : "Pending"}
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: "row", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                      {secs.map((x) => (
+                        <View
+                          key={x.label}
+                          style={{
+                            flexDirection: "row", alignItems: "center", gap: 4,
+                            borderWidth: 1,
+                            borderColor: x.done ? "#A7F3D0" : "#FDE68A",
+                            backgroundColor: x.done ? "#ECFDF5" : "#FFFBEB",
+                            borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4,
+                          }}
+                        >
+                          <Ionicons
+                            name={x.done ? "checkmark-circle" : "time-outline"}
+                            size={12}
+                            color={x.done ? "#059669" : "#B45309"}
+                          />
+                          <Text style={{ fontSize: 11, fontWeight: "700", color: x.done ? "#047857" : "#92400E" }}>
+                            {x.label}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                    {updatedAt ? (
+                      <Text style={{ fontSize: 10.5, color: colors.onSurfaceTertiary, marginTop: 6 }}>
+                        Last updated {String(updatedAt).slice(0, 10)}
+                      </Text>
+                    ) : null}
+                  </View>
+                );
+              })()}
+
               {/* Aadhaar */}
               <View style={styles.card}>
                 <View style={styles.cardHeader}>

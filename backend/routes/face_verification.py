@@ -379,18 +379,71 @@ async def face_enable(
 # ═════════ Iter 611 — EMPLOYEE SELF-ENROLLMENT with HR APPROVAL ═════════
 # Employees capture their own live samples; nothing becomes an ACTIVE
 # punch credential until HR/Admin approves. Statuses: pending / approved /
-# rejected / recapture_required. Pending previews auto-expire (7 days).
+# rejected / recapture_required. Iter 615 (user rule): pending requests
+# AUTO-APPROVE after 2 days when HR hasn't decided.
 
-SELF_RETENTION_DAYS = 7
+SELF_AUTO_APPROVE_DAYS = 2
 
 
-async def _cleanup_pending():
+async def _activate_template(req: dict, by_id: str, by_name: Optional[str],
+                             via: str) -> None:
+    """Archive any existing template for the employee and activate the
+    request's one (shared by HR approve + 2-day auto-approve)."""
+    old = await db.face_templates.find_one({"user_id": req["user_id"]}, {"_id": 0})
+    if old:
+        await db.face_templates_history.insert_one(
+            {**old, "archived_at": now_iso(), "archived_by": by_id,
+             "archived_reason": "replaced_by_self_enrollment"})
+    await db.face_templates.update_one(
+        {"user_id": req["user_id"]},
+        {"$set": {
+            "user_id": req["user_id"], "company_id": req.get("company_id"),
+            "employee_code": req.get("employee_code"),
+            "template_enc": req["template_enc"], "samples": req["samples"],
+            "model": FACE_MODEL_PACK, "status": "active",
+            "registered_at": now_iso(), "registered_by": by_id,
+            "registered_by_name": by_name, "registered_via": via,
+            "last_verified_at": None, "disabled_at": None}},
+        upsert=True)
+
+
+async def _auto_approve_pending():
+    """Iter 615 (user rule) — pending self-enrollments auto-APPROVE after
+    2 days if HR hasn't decided. Lazy sweep: runs on the admin pending list
+    and on employee self-status checks."""
     from datetime import datetime, timedelta, timezone
     cutoff = (datetime.now(timezone.utc)
-              - timedelta(days=SELF_RETENTION_DAYS)).isoformat()
-    await db.face_enrollment_requests.update_many(
+              - timedelta(days=SELF_AUTO_APPROVE_DAYS)).isoformat()
+    stale = await db.face_enrollment_requests.find(
         {"status": "pending", "submitted_at": {"$lt": cutoff}},
-        {"$set": {"status": "expired", "sample_previews": []}})
+        {"_id": 0}).to_list(100)
+    for req in stale:
+        await _activate_template(req, "system", "Auto-approval (2 days)",
+                                 "self_enrollment_auto_approved")
+        await db.face_enrollment_requests.update_one(
+            {"enrollment_id": req["enrollment_id"]},
+            {"$set": {"status": "approved", "reviewed_at": now_iso(),
+                      "reviewed_by": "system_auto_approval",
+                      "reason": f"Auto-approved after {SELF_AUTO_APPROVE_DAYS} "
+                                "days (no HR decision)",
+                      "sample_previews": []}})
+        await db.face_admin_audit.insert_one({
+            "audit_id": f"faud_{uuid.uuid4().hex[:8]}",
+            "action": "self_enroll_auto_approved",
+            "target_user_id": req["user_id"], "by": "system",
+            "detail": f"Auto-approved after {SELF_AUTO_APPROVE_DAYS} days "
+                      f"({req.get('samples')} samples)", "at": now_iso()})
+        try:
+            from routes.ess import _notify  # noqa: E402
+            emp = await db.users.find_one({"user_id": req["user_id"]},
+                                          {"_id": 0, "mobile": 1}) or {}
+            await _notify(req["user_id"], req.get("company_id"),
+                          "Face Registration Approved",
+                          "Face Registration Auto-Approved ✓ — secure punch "
+                          "is now enabled for you.",
+                          sms_type="onboarding", mobile=emp.get("mobile"))
+        except Exception:
+            logger.exception("[face] auto-approve notify failed")
 
 
 @router.post("/face-verification/self-check-frame")
@@ -461,12 +514,14 @@ async def self_enroll(payload: Dict[str, Any] = Body(...),
         "target_user_id": user["user_id"], "by": user["user_id"],
         "detail": f"{len(frames)} live samples (self-service)", "at": now_iso()})
     return {"ok": True, "status": "pending",
-            "message": "Face samples submitted — pending HR approval."}
+            "message": "Face samples submitted — pending HR approval "
+                       "(auto-approves in 2 days if HR doesn't decide)."}
 
 
 @router.get("/face-verification/self-status")
 async def self_status(authorization: Optional[str] = Header(None)):
     user = await get_user_from_token(authorization)
+    await _auto_approve_pending()
     active = await db.face_templates.find_one(
         {"user_id": user["user_id"]}, {"_id": 0, "template_enc": 0})
     req = await db.face_enrollment_requests.find_one(
@@ -493,7 +548,7 @@ async def pending_enrollments(company_id: Optional[str] = Query(None),
                               authorization: Optional[str] = Header(None)):
     admin = await get_user_from_token(authorization)
     _require_face_admin(admin)
-    await _cleanup_pending()
+    await _auto_approve_pending()
     q: dict = {"status": "pending"}
     cid = admin.get("company_id") or company_id
     if admin.get("role") in ("super_admin", "sub_admin") and company_id:
@@ -520,23 +575,8 @@ async def decide_enrollment(enrollment_id: str,
     if not req:
         raise HTTPException(status_code=404, detail="Pending enrollment not found")
     if action == "approve":
-        old = await db.face_templates.find_one({"user_id": req["user_id"]}, {"_id": 0})
-        if old:
-            await db.face_templates_history.insert_one(
-                {**old, "archived_at": now_iso(), "archived_by": admin["user_id"],
-                 "archived_reason": "replaced_by_self_enrollment"})
-        await db.face_templates.update_one(
-            {"user_id": req["user_id"]},
-            {"$set": {
-                "user_id": req["user_id"], "company_id": req.get("company_id"),
-                "employee_code": req.get("employee_code"),
-                "template_enc": req["template_enc"], "samples": req["samples"],
-                "model": FACE_MODEL_PACK, "status": "active",
-                "registered_at": now_iso(), "registered_by": admin["user_id"],
-                "registered_by_name": admin.get("name"),
-                "registered_via": "self_enrollment_approved",
-                "last_verified_at": None, "disabled_at": None}},
-            upsert=True)
+        await _activate_template(req, admin["user_id"], admin.get("name"),
+                                 "self_enrollment_approved")
     new_status = {"approve": "approved", "reject": "rejected",
                   "recapture": "recapture_required"}[action]
     await db.face_enrollment_requests.update_one(
