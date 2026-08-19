@@ -163,7 +163,9 @@ PYW
 
 echo "==> 6/9 Restarting backend FIRST (portal comes back before the build)..."
 # Iter 611 — seed the second Super Admin login (idempotent, user request)
-cd $APP_DIR/backend && $APP_DIR/backend/venv/bin/python seed_second_super_admin.py 2>/dev/null || python3 seed_second_super_admin.py || true
+echo "==> Seeding second super admin login..."
+cd $APP_DIR/backend
+$APP_DIR/backend/venv/bin/python seed_second_super_admin.py || python3 seed_second_super_admin.py || echo "⚠ SEED FAILED — run manually: cd $APP_DIR/backend && ./venv/bin/python seed_second_super_admin.py"
 sudo supervisorctl stop sksharma-backend 2>/dev/null || true
 sudo fuser -k 8001/tcp 2>/dev/null || true
 sleep 2
