@@ -173,7 +173,11 @@ export default function EmployeeAddScreen() {
           name: p.name || "",
           // Iter 386 — normalize legacy phones: strip "+91"/"91" country
           // code so the field always holds exactly the 10-digit number.
-          phone: normalizePhone10(p.phone || ""),
+          // Iter 616 (user bug) — RBAC-masked phones ("XXXXXX3210") must be
+          // kept AS-IS: digit-stripping them showed only the last 4 digits.
+          phone: /^X{2,}/.test(String(p.phone || "").trim())
+            ? String(p.phone)
+            : normalizePhone10(p.phone || ""),
           email: p.email || "",
           father_name: p.father_name || "",
           gender: normGender(p.gender || ""),
@@ -427,10 +431,15 @@ export default function EmployeeAddScreen() {
     // Iter 375 (user rule) — red-star fields must be clear on EDIT too
     // (edits used to skip validation and could save incomplete data).
     // Iter 376 (user rule) — Mobile number is EXACTLY 10 digits.
+    // Iter 616 — a privacy-MASKED phone ("XXXXXX3210") counts as filled;
+    // the untouched masked value is never sent back to the server.
+    const _phoneMasked = /^X{2,}/.test(form.phone.trim());
     const _ph = form.phone.replace(/\D/g, "");
-    if (!_ph) return "Mobile number is required.";
-    if (_ph.length !== 10)
-      return "Mobile number must be exactly 10 digits.";
+    if (!_phoneMasked) {
+      if (!_ph) return "Mobile number is required.";
+      if (_ph.length !== 10)
+        return "Mobile number must be exactly 10 digits.";
+    }
     if (!form.doj.trim())
       return "Date of Joining is required.";
     // Iter 244b (user rule) — Spouse Name is mandatory ONLY for a
@@ -869,6 +878,14 @@ export default function EmployeeAddScreen() {
         emergency_contact_phone: form.emergency_contact_phone.trim() || undefined,
         family_members: form.family_members.filter((f) => f.name.trim()),
       };
+      // Iter 616 (user bug) — RBAC-masked values (XXXX…1234) returned by
+      // the profile API for admins without sensitive_data:view must NEVER
+      // be written back: drop every untouched masked field so the stored
+      // real values (mobile, Aadhaar, PAN, bank, address) stay intact.
+      Object.keys(payload).forEach((k) => {
+        const v = (payload as any)[k];
+        if (typeof v === "string" && /^X{2,}/.test(v.trim())) delete (payload as any)[k];
+      });
       if (editUserId) {
         // Iter 91 — EDIT MODE: one-page update of the existing employee.
         await api(`/admin/employees/${editUserId}/profile`, {
@@ -1483,7 +1500,13 @@ export default function EmployeeAddScreen() {
               label="Mobile No."
               required
               value={form.phone}
-              onChange={(v) => setField("phone", v.replace(/\D/g, "").slice(0, 10))}
+              onChange={(v) =>
+                // Iter 616 — while the value still carries the privacy mask
+                // (X…), keep it untouched; clear the field to type a new
+                // 10-digit number.
+                setField("phone", /X/i.test(v) && /^X{2,}/.test(form.phone.trim())
+                  ? v
+                  : v.replace(/\D/g, "").slice(0, 10))}
             />
             <Field
               label="Email"

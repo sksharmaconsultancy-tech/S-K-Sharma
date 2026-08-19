@@ -160,6 +160,16 @@ async def patch_employee_profile(
         if k in payload:
             v = payload[k]
             updates[k] = (str(v).strip() or None) if v is not None else None
+    # Iter 616 (user bug) — central write-back guard: RBAC-masked values
+    # ("XXXXXX3210" from apply_sensitive_masking, Iter 586) must never
+    # overwrite the real stored values. Drop any sensitive-field update
+    # that still carries the mask signature (X-run + short kept tail).
+    from shared.authz import SENSITIVE_KEYS
+    for k in list(updates.keys()):
+        v = updates[k]
+        if (k in SENSITIVE_KEYS and isinstance(v, str)
+                and re.fullmatch(r"X{2,}\S{0,4}", v.strip())):
+            updates.pop(k)
     for k in _NUM_FIELDS:
         if k in payload:
             try:
