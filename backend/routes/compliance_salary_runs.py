@@ -655,6 +655,49 @@ async def _compute_compliance_run(
             if _prev.get("duty_hours") is not None:
                 stats["duty_hours"] = float(_prev.get("duty_hours") or 0.0)
         _ff = firm_stat_flags.get(emp.get("company_id")) or {"pf": False, "esic": False}
+        # ------------------------------------------------------------------
+        # Iter 617 (user spec) — DOJ/DOL ELIGIBILITY WINDOW on CALENDAR days.
+        # The salary Month Days (override, e.g. 26) stays PURELY the salary
+        # denominator; the DOJ/DOL position is judged on the real calendar:
+        #   joined mid-month  → allowed = calendar_days − DOJ_day + 1
+        #   exited mid-month  → allowed = DOL_day
+        #   both in the month → allowed = DOL_day − DOJ_day + 1
+        # Final Present Days = MIN(attendance days, allowed, month_days) —
+        # attendance stays the source (the window never auto-pays days) and
+        # the clamp runs BEFORE the money math so PF/ESIC calculate on the
+        # final earned wage.
+        # ------------------------------------------------------------------
+        _dojdol_allowed = int(default_days)
+        _dojdol_reason = ""
+        try:
+            _doj_s = str(emp.get("doj") or "")
+            _dol_s = str(emp.get("exit_date") or "")
+            _ms617 = f"{year:04d}-{mon:02d}-01"
+            _me617 = f"{year:04d}-{mon:02d}-{default_days:02d}"
+            _doj_in = bool(_doj_s and _ms617 <= _doj_s <= _me617)
+            _dol_in = bool(_dol_s and _ms617 <= _dol_s <= _me617)
+            if _doj_in and _dol_in:
+                _dojdol_allowed = (int(_dol_s.split("-")[2])
+                                   - int(_doj_s.split("-")[2]) + 1)
+                _dojdol_reason = "DOJ and DOL both in this month"
+            elif _doj_in:
+                _dojdol_allowed = default_days - int(_doj_s.split("-")[2]) + 1
+                _dojdol_reason = "joined mid-month (DOJ)"
+            elif _dol_in:
+                _dojdol_allowed = int(_dol_s.split("-")[2])
+                _dojdol_reason = "exited mid-month (DOL)"
+            _dojdol_allowed = max(0, _dojdol_allowed)
+        except (ValueError, IndexError):
+            _dojdol_allowed = int(default_days)
+        _att_days_in = float(stats.get("present_days") or 0)
+        _final_cap617 = min(float(month_days), float(_dojdol_allowed))
+        if _att_days_in > _final_cap617:
+            stats = dict(stats)
+            stats["present_days"] = _final_cap617
+            stats["effective_present"] = min(
+                float(stats.get("effective_present") or _att_days_in),
+                _final_cap617)
+            stats["half_days"] = 0
         # Iter 178 — state-wise PT from the firm's compliance policy.
         _fcp = (company_doc.get("compliance_policy") or {}) if company_doc else {}
         row = compute_compliance_row(
@@ -959,23 +1002,31 @@ async def _compute_compliance_run(
             row["total_deduction"] = round(float(row.get("total_deduction") or 0) + _tds_delta, 2)
             row["net"] = round(float(row.get("net") or 0) - _tds_delta, 2)
 
-        # Iter 85 — DOJ / Exit-date cap for Compliance Salary. Same idea
-        # as Actual Salary: cap present_days at the number of days the
-        # employee was actually on the rolls this month.
+        # Iter 85/617 — stamp the eligibility ceiling + a per-row AUDIT
+        # TRAIL. Days were already clamped BEFORE the money math; this is a
+        # safety re-cap for paths that overwrite days later (imported-sheet
+        # derivations) — those keep their frozen gross by design, but the
+        # days column never exceeds the DOJ/DOL window.
         try:
-            doj = str(emp.get("doj") or "")
-            exit_date = str(emp.get("exit_date") or "")
-            month_start = f"{year:04d}-{mon:02d}-01"
-            month_end = f"{year:04d}-{mon:02d}-{default_days:02d}"
-            cap = int(month_days)
-            if doj and month_start <= doj <= month_end:
-                cap = min(cap, month_days - int(doj.split("-")[2]) + 1)
-            if exit_date and month_start <= exit_date <= month_end:
-                cap = min(cap, int(exit_date.split("-")[2]))
-            cap = max(0, cap)
-            if row.get("present_days", 0) > cap:
+            cap = round(min(float(month_days), float(_dojdol_allowed)), 2)
+            if float(row.get("present_days") or 0) > cap:
                 row["present_days"] = cap
+                if not _dojdol_reason:
+                    _dojdol_reason = "salary month-days limit"
             row["max_p_days"] = cap
+            row["pay_days_audit"] = {
+                "doj": str(emp.get("doj") or "") or None,
+                "dol": str(emp.get("exit_date") or "") or None,
+                "salary_month_days": float(month_days),
+                "calendar_days": int(default_days),
+                "attendance_days": round(_att_days_in, 2),
+                "dojdol_allowed_days": _dojdol_allowed,
+                "final_days": float(row.get("present_days") or 0),
+                "cap_reason": (_dojdol_reason
+                               if (_att_days_in > cap
+                                   or _dojdol_allowed < int(default_days))
+                               else ""),
+            }
         except (ValueError, IndexError):
             row.setdefault("max_p_days", int(month_days))
         # Iter 374 (user bug) — a REPROCESS must NEVER remove the admin's

@@ -883,3 +883,20 @@ ITER 487 (doc-expiry alerts):
   2026-08, edit+save, reprocess existing = identical incl. edit, fresh
   rebuild switches source). Also: compliance auto-save removed (UI verified),
   masked-phone fix, designation optional, MSD2K SDK vendor — all earlier.
+
+## Iter 617 — DOJ/DOL eligibility rework per user spec (2026-06)
+- CALENDAR days now decide the DOJ/DOL window (salary Month Days override
+  stays purely the denominator): DOJ→cal−doj+1, DOL→dol_day, both→dol−doj+1.
+- Clamp runs BEFORE compute_compliance_row (PF/ESIC on final earned wage);
+  Final PD = MIN(attendance, window, month_days). Attendance stays source.
+- Imported sheets clamped by the same rules; per-row pay_days_audit stamped
+  (doj, dol, salary_month_days, calendar_days, attendance_days,
+  dojdol_allowed_days, final_days, cap_reason).
+- Verified: DOJ 16th + override 26 + July(31) → 16 days (old logic: 11);
+  DOJ 5 + DOL 20 → 16; sheet PD 26 → clamped 16. ALL PASS.
+- NOTE: runs read employees from the frozen master snapshot — a DOJ/DOL
+  edited after processing needs the "Refresh Master" button on the run.
+- Also this session: import ADVANCE→Advance col (3 clobber points fixed),
+  month-days override wins for imports + mandatory before import, firm
+  master dropdown zIndex fix, bulk-correction Rate Basis dropdown,
+  client PF/ESIC quick-recalc VPF + zero-pay fixes.

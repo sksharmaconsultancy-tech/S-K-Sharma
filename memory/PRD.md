@@ -6613,3 +6613,11 @@ Current iteration: 594. Next: 595.
 - ESS Phase 2 leftovers remaining: none of the original spec items — Digital ID QR,
   advance history, expenses UI existed already. Next: MSG91 SMS Phase 2/3 wiring,
   Keyboard Shortcuts Phase 3 (admin desktop only).
+
+## Iter 616/617 (2026-06) — Compliance Salary hardening (user specs)
+- No auto-save (explicit Save only, unsaved-changes hint), copy-last-month
+  reprocess keeps sheet verbatim, import ADVANCE→Advance column,
+  month-days override honored + mandatory before import, DOJ/DOL window on
+  calendar days with pay_days_audit, Rate Basis dropdown in Bulk Correction,
+  firm-master dropdown zIndex fix, masked-mobile fix, designation optional.
+- Tests: test_copy_reprocess_616.py 10/10; inline scenario tests all PASS.
