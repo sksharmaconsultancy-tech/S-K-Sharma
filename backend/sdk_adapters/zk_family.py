@@ -155,3 +155,10 @@ class RealtimeTA(_ZKFamilyBase):
     vendor = "realtime"
     label = "Realtime T&A SDK"
     notes = "TCP 4370 — most Realtime T-series speak the ZK protocol."
+
+
+@register
+class BioFaceMSD(_ZKFamilyBase):
+    vendor = "bioface_msd"
+    label = "BIOFACE / Mantra MSD (MSD1K, MSD2K)"
+    notes = "TCP 4370 — BioFace MSD1K/MSD2K run ZK-compatible firmware."
