@@ -88,23 +88,26 @@ class TestProrationFactor:
 
 
 class TestPFWorkingDays:
-    """Bug 1 — PF must be same 1357 for working_days at month_days 26 or 30."""
+    """Iter 622 (user decision) — proration is LOCKED to the sheet's
+    Month Days: stored methods like working_days are IGNORED, PF always
+    divides by the entered month_days."""
 
-    def test_pf_working_days_month30_pd21(self):
+    def test_pf_working_days_ignored_month30_pd21(self):
         row = compute_compliance_row(
             _user(), _policy(), 30, _stats(21),
             statutory_cfg={"pf_proration_method": "working_days"},
         )
-        # PF = round(12% × 14000 × 21/26) = round(1356.92) = 1357
-        assert row["pf_employee"] == 1357, row.get("pf_reason")
+        # Locked rule: PF = round(12% × 14000 × 21/30) = 1176 (NOT ÷26).
+        assert row["pf_employee"] == 1176, row.get("pf_reason")
         # Basic = 14000 × 21/30 = 9800
         assert row["basic"] == 9800
 
-    def test_pf_working_days_month26_pd21(self):
+    def test_pf_working_days_ignored_month26_pd21(self):
         row = compute_compliance_row(
             _user(), _policy(), 26, _stats(21),
             statutory_cfg={"pf_proration_method": "working_days"},
         )
+        # ÷ entered 26 days: round(12% × 14000 × 21/26) = 1357.
         assert row["pf_employee"] == 1357, row.get("pf_reason")
 
     def test_pf_calendar_days_month30_pd21(self):

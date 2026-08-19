@@ -6688,3 +6688,21 @@ Current iteration: 594. Next: 595.
   when PF head disabled via enabled_deductions/fmMask) + label appended to the
   TotalsFooter caption. Verified live via screenshot (PF ÷30 Calendar Days on
   Kankani run). APP_ITERATION 621; deploy_vps_iter621.sh served via kind=script.
+
+## Iteration 622 (2026-06) — PF & ESIC proration LOCKED to sheet Month Days (user rule, ALL firms)
+- User decision: "we don't need this feature — by default PF and ESIC must
+  always divide by the entered Month Days. Hold the option."
+- Engine: utils/compliance_salary.py forces pf_proration_method &
+  esic_proration_method = "calendar_days" (stored settings IGNORED);
+  routes/compliance_salary_runs.py forces both keys in effective_statutory so
+  the grid mirror / View Calculation / badge all reflect the lock.
+- UI: compliance-settings.tsx proration selectors replaced with a locked
+  "Month Days (sheet override)" chip + ON HOLD note (PRORATION_OPTS/LABEL
+  removed). Badge label now "PF ÷<md> (Month Days)".
+- Tests: test_iter620_compliance_pf_proration.py updated to locked rule —
+  14/14 PASS. Live check: with working_days stored in app_settings, reprocess
+  returned statutory_effective calendar_days ✓ (dev settings reverted after).
+- REVERSAL NOTE (if user later wants methods back): remove the two forced
+  lines in compute_compliance_row + effective_statutory and restore the
+  selector UI (see git history Iter 622 commit).
+- APP_ITERATION 622; deploy_vps_iter622.sh served via kind=script.

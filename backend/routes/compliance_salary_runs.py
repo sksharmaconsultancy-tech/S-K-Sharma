@@ -245,6 +245,12 @@ async def _compute_compliance_run(
     _std_cfg = await get_standard_compliance_cfg(on_date=f"{payload.month}-31")
     _firm_over = await get_firm_statutory_overrides(payload.company_id)
     effective_statutory = {**_std_cfg, **_firm_over, **(payload.statutory_cfg or {})}
+    # Iter 622 (user decision) — PF & ESIC proration LOCKED to the sheet's
+    # entered Month Days. Forced here too so the grid's client-side mirror,
+    # the View-Calculation layer and the PF badge all reflect the lock even
+    # when old settings still store working_days / attendance_days.
+    effective_statutory["pf_proration_method"] = "calendar_days"
+    effective_statutory["esic_proration_method"] = "calendar_days"
     # Iter 387 — salary month for the engine's ESIC Exit-Date rule.
     effective_statutory["_salary_month"] = payload.month
 

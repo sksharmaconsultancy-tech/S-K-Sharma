@@ -50,14 +50,8 @@ const ROUND_LABEL: Record<string, string> = {
 
 
 // Iter 387 — configurable statutory module (global AND per-firm).
-const PRORATION_OPTS = ["calendar_days", "paid_days", "attendance_days", "working_days", "none"] as const;
-const PRORATION_LABEL: Record<string, string> = {
-  calendar_days: "Calendar Days",
-  paid_days: "Paid Days",
-  attendance_days: "Attendance (÷30)",
-  working_days: "Working Days (÷26)",
-  none: "No Proration",
-};
+// Iter 622 (user decision) — PF/ESIC proration method selector is ON HOLD:
+// the engine always divides by the Month Days entered on the salary sheet.
 const BOOL_FIELDS: { key: string; label: string; hint: string; def?: boolean }[] = [
   { key: "pf_enabled", label: "PF Applicable (module switch)", hint: "OFF = no PF for any employee in this scope." },
   { key: "esic_enabled", label: "ESIC Applicable (module switch)", hint: "OFF = no ESIC for any employee in this scope." },
@@ -461,23 +455,20 @@ export default function ComplianceSettingsScreen() {
                   <Text style={styles.hint}>{b.hint}</Text>
                 </View>
               ))}
+              {/* Iter 622 (user decision) — PF/ESIC Proration Method selector
+                  ON HOLD: the engine always divides by the Month Days entered
+                  on the salary sheet. Stored method values are ignored. */}
               {(["pf_proration_method", "esic_proration_method"] as const).map((k) => (
                 <View key={k} style={styles.fieldRow}>
                   <Text style={styles.fieldLbl}>{k === "pf_proration_method" ? "PF Proration Method" : "ESIC Proration Method"}</Text>
-                  <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
-                    {PRORATION_OPTS.map((o) => (
-                      <Pressable
-                        key={o}
-                        disabled={!isSuper}
-                        onPress={() => setForm((p) => ({ ...p, [k]: o }))}
-                        style={[styles.chip, form[k] === o && styles.chipActive]}
-                        testID={`cs-${k}-${o}`}
-                      >
-                        <Text style={[styles.chipTxt, form[k] === o && styles.chipTxtActive]}>
-                          {PRORATION_LABEL[o]}
-                        </Text>
-                      </Pressable>
-                    ))}
+                  <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                    <View style={[styles.chip, styles.chipActive]}>
+                      <Text style={styles.chipTxtActive}>Month Days (sheet override)</Text>
+                    </View>
+                    <Text style={styles.hint}>
+                      Locked — always divides by the Month Days entered on the salary sheet.
+                      Method selection is ON HOLD until calculations are re-verified.
+                    </Text>
                   </View>
                 </View>
               ))}
@@ -494,8 +485,7 @@ export default function ComplianceSettingsScreen() {
                 />
               </View>
               <Text style={styles.hint}>
-                Proration: Calendar = present ÷ days-in-month (default) · Working = ÷26 ·
-                Attendance = ÷30 · Paid Days = full wages when any day is paid · No Proration = always full.
+                Proration is locked: PF & ESIC wages = value × Present ÷ Month Days (as entered on the sheet).
               </Text>
             </Section>
 

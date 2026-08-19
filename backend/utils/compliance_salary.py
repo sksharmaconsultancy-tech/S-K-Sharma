@@ -713,7 +713,12 @@ def compute_compliance_row(
     )
     if pf_eligible and _zero_pay:
         _pf_skip_reason = "Zero-pay month (no payable days / hours / gross)"
-    pf_proration_method = str(cfg.get("pf_proration_method") or "calendar_days")
+    # Iter 622 (user decision — "we don't need this feature; by default
+    # divide by the entered Month Days") — PF proration is LOCKED to the
+    # sheet's month_days. The Compliance Settings method selector is ON
+    # HOLD; any stored value (working_days ÷26 etc.) is IGNORED here until
+    # the user re-verifies the alternative rules.
+    pf_proration_method = "calendar_days"
     # Iter 408 — PF Contribution Type + Higher PF activation state (also
     # exposed on the row when PF is skipped, for the reports/AI layers).
     _pf_type = str(user.get("pf_contribution_type") or "statutory").lower()
@@ -996,7 +1001,9 @@ def compute_compliance_row(
     )
     if esic_eligible and _zero_pay:
         _esic_skip_reason = "Zero-pay month (no payable days / hours / gross)"
-    esic_proration_method = str(cfg.get("esic_proration_method") or "calendar_days")
+    # Iter 622 (user decision) — ESIC proration LOCKED to the sheet's
+    # month_days (see PF note above). Stored method is IGNORED.
+    esic_proration_method = "calendar_days"
 
     if esic_applicable:
         # Iter 385 (user confirmed rule) — legacy ESIC wage base follows

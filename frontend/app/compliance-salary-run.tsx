@@ -1463,7 +1463,7 @@ export default function ComplianceSalaryRunScreen() {
       : m === "attendance_days" ? "PF ÷30 (Attendance Days)"
       : m === "paid_days" ? "PF full wages (Paid Days)"
       : m === "none" ? "PF no proration"
-      : `PF ÷${run.month_days} (Calendar Days)`;
+      : `PF ÷${run.month_days} (Month Days)`;
   })();
   useEffect(() => {
     if (!fmMaskCid) {
