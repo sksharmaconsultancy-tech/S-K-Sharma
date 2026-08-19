@@ -409,8 +409,8 @@ export default function EmployeeAddScreen() {
     setForm((prev) => ({ ...prev, [k]: v }));
 
   // Iter 246 (user rollback) — Mobile is MANDATORY; Employee No. is NOT
-  // required (blank = auto-assign). Designation, DOJ and Salary details
-  // stay required.
+  // required (blank = auto-assign). DOJ and Salary details stay required.
+  // Iter 616 (user rule) — Designation is OPTIONAL now.
   const getMandatoryError = (): string | null => {
     if (!form.name.trim()) return "Employee name is required.";
     if (!form.father_name.trim()) return "Father Name is required.";
@@ -431,8 +431,6 @@ export default function EmployeeAddScreen() {
     if (!_ph) return "Mobile number is required.";
     if (_ph.length !== 10)
       return "Mobile number must be exactly 10 digits.";
-    if (!form.designation.trim())
-      return "Designation is required — select it from the list.";
     if (!form.doj.trim())
       return "Date of Joining is required.";
     // Iter 244b (user rule) — Spouse Name is mandatory ONLY for a
@@ -1624,7 +1622,6 @@ export default function EmployeeAddScreen() {
                   allowed). No more full chip list on the form. */}
               <MasterSelect
                 label="Designation"
-                required
                 masterType="designation"
                 companyId={selectedCompanyId}
                 value={form.designation}
