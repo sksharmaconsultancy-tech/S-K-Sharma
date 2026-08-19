@@ -6681,3 +6681,10 @@ Current iteration: 594. Next: 595.
   deploy_vps_iter620.sh served via /api/temp-code-bundle?kind=script.
 - USER GUIDANCE: if they want PF = 12% of earned wage base on 30-day sheets,
   set PF Proration Method = Calendar Days in Compliance Settings and reprocess.
+
+## Iteration 621 (2026-06) — PF Proration Method badge (user-approved improvement)
+- compliance-salary-run.tsx: pfMethodLabel helper (from run.statutory_effective
+  .pf_proration_method); amber toolbar badge (testID pf-proration-badge, hidden
+  when PF head disabled via enabled_deductions/fmMask) + label appended to the
+  TotalsFooter caption. Verified live via screenshot (PF ÷30 Calendar Days on
+  Kankani run). APP_ITERATION 621; deploy_vps_iter621.sh served via kind=script.

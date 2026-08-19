@@ -1450,6 +1450,21 @@ export default function ComplianceSalaryRunScreen() {
   const [fmMask, setFmMask] = useState<{ en?: string[]; ed?: string[] }>({});
   const fmMaskCid = (run?.rows?.[0] as any)?.company_id
     || (run as any)?.company_id || activeCompanyId;
+
+  // Iter 621 (user-approved improvement) — active PF Proration Method label
+  // so admins instantly see which rule the PF column follows.
+  const pfMethodLabel = (() => {
+    if (!run) return "";
+    const m = String(
+      (((run as any).statutory_effective || run.statutory_cfg || {}) as any)
+        .pf_proration_method || "calendar_days",
+    ).toLowerCase();
+    return m === "working_days" ? "PF ÷26 (Working Days)"
+      : m === "attendance_days" ? "PF ÷30 (Attendance Days)"
+      : m === "paid_days" ? "PF full wages (Paid Days)"
+      : m === "none" ? "PF no proration"
+      : `PF ÷${run.month_days} (Calendar Days)`;
+  })();
   useEffect(() => {
     if (!fmMaskCid) {
       setFmMask({});
@@ -2497,6 +2512,21 @@ export default function ComplianceSalaryRunScreen() {
                     </Text>
                   </View>
                 ) : null}
+                {/* Iter 621 (user-approved) — which PF proration rule the
+                    PF column follows (hidden when the firm disables PF). */}
+                {(() => {
+                  const ed0 = ((run.rows?.[0] as any)?.enabled_deductions
+                    ?? (fmMask as any).ed) as string[] | undefined;
+                  if (ed0 && !ed0.includes("pf")) return null;
+                  return (
+                    <View testID="pf-proration-badge" style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "#FFEDD5", borderRadius: 999 }}>
+                      <Ionicons name="calculator-outline" size={12} color="#9A3412" />
+                      <Text style={{ fontSize: 11, fontWeight: "800", color: "#9A3412" }}>
+                        {pfMethodLabel.toUpperCase()}
+                      </Text>
+                    </View>
+                  );
+                })()}
                 {(run as any).frozen ? (
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "#EDE9FE", borderRadius: 999 }}>
                     <Ionicons name="snow-outline" size={12} color="#5B21B6" />
@@ -3243,6 +3273,7 @@ export default function ComplianceSalaryRunScreen() {
           <TotalsFooter
             caption={
               `${run.month}  ·  ${run.employees_count} employees  ·  month_days = ${run.month_days}` +
+              (hasDed("pf") && pfMethodLabel ? `  ·  ${pfMethodLabel}` : "") +
               (run.payslips_generated_at ? `  ·  ${run.payslips_count} payslips pushed` : "")
             }
             items={[
