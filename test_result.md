@@ -900,3 +900,17 @@ ITER 487 (doc-expiry alerts):
   month-days override wins for imports + mandatory before import, firm
   master dropdown zIndex fix, bulk-correction Rate Basis dropdown,
   client PF/ESIC quick-recalc VPF + zero-pay fixes.
+
+## Iter 617 (cont) — camera for KYC uploads + rejected-mobile release
+- ScanOCRButton (profile-edit Aadhaar/Bank/family docs): new "Camera"
+  button + "Capture with camera" for back side — capture="environment"
+  single-image input (the old image+pdf multiple input hid Take Photo on
+  mobile browsers).
+- kyc.tsx promptScan: web now asks Camera vs File (confirm dialog);
+  documents tab already had camera; profile-photo has crop modal (tested
+  by testing_agent ALL PASS earlier).
+- Rejected employees release phone: /auth/employee-signup purges rejected
+  account on re-signup (tested PASS); employees_admin dup-check treats
+  approval_status=rejected like resigned.
+- AdminWebShell: "Profile Edit Approvals" sidebar entry. APP_ITERATION=617,
+  deploy_vps_iter617.sh served via kind=script.

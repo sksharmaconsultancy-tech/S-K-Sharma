@@ -149,9 +149,12 @@ export default function KycScreen() {
 
   const promptScan = (docType: "aadhaar" | "pan" | "dl" | "passbook") => {
     if (Platform.OS === "web") {
-      // Web: image_picker falls back to <input type=file> so just launch
-      // the library flow directly.
-      scanDoc(docType, "library");
+      // Iter 617 (user bug) — web/PWA can also open the CAMERA now
+      // (expo-image-picker web uses a capture-enabled input).
+      const useCam = (globalThis as any).confirm?.(
+        "Use the CAMERA to capture this document?\n\nOK = Open Camera · Cancel = Choose a file",
+      );
+      scanDoc(docType, useCam ? "camera" : "library");
       return;
     }
     Alert.alert(

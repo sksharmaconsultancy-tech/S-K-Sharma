@@ -188,13 +188,23 @@ export default function ScanOCRButton({
       }
     });
 
-  const pickFile = (append: boolean) => {
+  const pickFile = (append: boolean, useCamera = false) => {
     if (Platform.OS !== "web") return;
     const input = (globalThis as any).document?.createElement?.("input");
     if (!input) return;
     input.type = "file";
-    input.accept = "image/png,image/jpeg,image/webp,application/pdf";
-    input.multiple = true;
+    // Iter 617 (user bug) — the combined image+PDF accept with `multiple`
+    // hid the "Take photo" option on mobile browsers. Camera mode uses a
+    // dedicated single-image input with capture="environment" which opens
+    // the phone camera directly.
+    if (useCamera) {
+      input.accept = "image/*";
+      input.capture = "environment";
+      input.multiple = false;
+    } else {
+      input.accept = "image/png,image/jpeg,image/webp,application/pdf";
+      input.multiple = true;
+    }
     input.onchange = (e: any) => {
       const files: File[] = Array.from(e?.target?.files || []);
       if (!files.length) return;
@@ -306,19 +316,35 @@ export default function ScanOCRButton({
 
   return (
     <>
-      <Pressable
-        onPress={openPicker}
-        style={({ pressed }) => [
-          compact ? styles.btnCompact : styles.btn,
-          pressed && { opacity: 0.85 },
-        ]}
-        testID={`ocr-scan-${documentType}`}
-      >
-        <Ionicons name="scan-outline" size={compact ? 12 : 14} color={colors.brandPrimary} />
-        <Text style={compact ? styles.btnCompactTxt : styles.btnTxt}>
-          {label || `Scan ${DOC_LABELS[documentType] || "Document"} (OCR)`}
-        </Text>
-      </Pressable>
+      <View style={compact ? styles.entryRowCompact : styles.entryRow}>
+        <Pressable
+          onPress={openPicker}
+          style={({ pressed }) => [
+            compact ? styles.btnCompact : styles.btn,
+            pressed && { opacity: 0.85 },
+          ]}
+          testID={`ocr-scan-${documentType}`}
+        >
+          <Ionicons name="scan-outline" size={compact ? 12 : 14} color={colors.brandPrimary} />
+          <Text style={compact ? styles.btnCompactTxt : styles.btnTxt}>
+            {label || `Scan ${DOC_LABELS[documentType] || "Document"} (OCR)`}
+          </Text>
+        </Pressable>
+        {/* Iter 617 (user bug) — dedicated camera button so mobile browsers
+            open the camera directly instead of the file picker. */}
+        <Pressable
+          onPress={() => pickFile(false, true)}
+          style={({ pressed }) => [
+            compact ? styles.btnCompact : styles.btn,
+            { flexShrink: 0 },
+            pressed && { opacity: 0.85 },
+          ]}
+          testID={`ocr-camera-${documentType}`}
+        >
+          <Ionicons name="camera-outline" size={compact ? 12 : 14} color={colors.brandPrimary} />
+          <Text style={compact ? styles.btnCompactTxt : styles.btnTxt}>Camera</Text>
+        </Pressable>
+      </View>
 
       <Modal visible={modalOpen} transparent animationType="fade" onRequestClose={() => setModalOpen(false)}>
         <View style={styles.backdrop}>
@@ -359,16 +385,26 @@ export default function ScanOCRButton({
               ) : null}
 
               {!result && !manualMode && pages.length < MAX_UPLOADS ? (
-                <Pressable
-                  onPress={() => pickFile(true)}
-                  style={styles.addPageBtn}
-                  testID="ocr-add-page"
-                >
-                  <Ionicons name="add-circle-outline" size={15} color={colors.brandPrimary} />
-                  <Text style={styles.addPageTxt}>
-                    Add 2nd page / back side (photo or PDF)
-                  </Text>
-                </Pressable>
+                <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                  <Pressable
+                    onPress={() => pickFile(true)}
+                    style={styles.addPageBtn}
+                    testID="ocr-add-page"
+                  >
+                    <Ionicons name="add-circle-outline" size={15} color={colors.brandPrimary} />
+                    <Text style={styles.addPageTxt}>
+                      Add 2nd page / back side (photo or PDF)
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => pickFile(true, true)}
+                    style={styles.addPageBtn}
+                    testID="ocr-add-page-camera"
+                  >
+                    <Ionicons name="camera-outline" size={15} color={colors.brandPrimary} />
+                    <Text style={styles.addPageTxt}>Capture with camera</Text>
+                  </Pressable>
+                </View>
               ) : null}
 
               {!result && !manualMode ? (
@@ -560,6 +596,8 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
   },
   btnTxt: { color: colors.brandPrimary, fontWeight: "700", fontSize: 12 },
+  entryRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  entryRowCompact: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" },
   btnCompact: {
     flexDirection: "row", alignItems: "center", gap: 4,
     paddingHorizontal: 8, paddingVertical: 4,
