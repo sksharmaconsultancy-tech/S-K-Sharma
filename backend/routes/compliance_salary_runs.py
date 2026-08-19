@@ -1712,7 +1712,8 @@ async def _create_compliance_salary_run_core(
             ),
             "finalized": {"$ne": True},
         },
-        {"_id": 0, "rows": 1, "month_days": 1},
+        {"_id": 0, "rows": 1, "month_days": 1, "attendance_source": 1,
+         "run_id": 1},
         sort=[("generated_at", -1)],
     )
     # Iter 426 (user request) — MONTH DAYS LOCK: once a salary is processed
@@ -1749,6 +1750,20 @@ async def _create_compliance_salary_run_core(
     if payload.copy_last_month:
         run = await _copy_last_month_compliance_run(
             admin, payload, _gate_cid, _grp0)
+    elif (_prev_run and not payload.fresh
+            and str(_prev_run.get("attendance_source") or "")
+            .startswith("copied_last_month")):
+        # Iter 616 (user bug) — reprocess "With EXISTING Data" over a
+        # COPIED sheet used to silently RECOMPUTE every amount from the
+        # CURRENT Employee Master (only the days were kept), so the saved
+        # copied values and the reprocessed sheet mismatched. A copied
+        # sheet is now kept VERBATIM (rows + totals + saved edits);
+        # "From BLANK" still rebuilds fresh from attendance + master.
+        _full_prev = await db.compliance_salary_runs.find_one(
+            {"run_id": _prev_run["run_id"]}, {"_id": 0})
+        run = dict(_full_prev or {})
+        run["generated_by"] = admin["user_id"]
+        run["generated_at"] = now_iso()
     else:
         run = await _compute_compliance_run(admin, payload, prev_rows=_prev_rows)
     run["run_id"] = f"csrun_{uuid.uuid4().hex[:12]}"

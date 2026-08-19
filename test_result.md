@@ -870,3 +870,16 @@ ITER 487 (doc-expiry alerts):
 - secure-punch.tsx: fixed double base64 data-URL prefix (same bug class
   as Iter 614 register-my-face fix).
 - APP_ITERATION=615; deploy_vps_iter615.sh served via kind=script.
+
+## Iter 616 — Copy Last Month reprocess mismatch FIXED (2026-06)
+- Bug: Salary Process -> "With EXISTING Data" over a COPIED sheet recomputed
+  all amounts from CURRENT Employee Master (only days kept) => mismatch vs
+  the saved copied values ("Employee Master salary shows" symptom).
+- Fix (routes/compliance_salary_runs.py ~line 1750): when the existing draft
+  has attendance_source startswith "copied_last_month" and fresh!=true, the
+  reprocess keeps the previous run VERBATIM (rows+totals+saved edits, new
+  run_id/generated_at). "From BLANK" still rebuilds from attendance+master.
+- Test 10/10 PASS: /app/test_copy_reprocess_616.py (copy 2026-07 STAFF ->
+  2026-08, edit+save, reprocess existing = identical incl. edit, fresh
+  rebuild switches source). Also: compliance auto-save removed (UI verified),
+  masked-phone fix, designation optional, MSD2K SDK vendor — all earlier.
