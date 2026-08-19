@@ -7,8 +7,8 @@
 # 🔒 PF & ESIC PRORATION — LOCKED TO MONTH DAYS (user decision, ALL firms):
 #  * PF wages  = PF Basic × Present ÷ Month Days (as ENTERED on the sheet).
 #  * ESIC wage = earned basis ÷ the same entered Month Days.
-#  * The "PF/ESIC Proration Method" selector in Compliance Settings is ON
-#    HOLD — any previously saved method (Working Days ÷26, Attendance ÷30,
+#  * The "PF/ESIC Proration Method" options are REMOVED from Compliance
+#    Settings — any previously saved method (Working Days ÷26, Attendance ÷30,
 #    Paid Days, No Proration) is now IGNORED by the engine for EVERY firm.
 #  * The sheet badge/footer now read "PF ÷<days> (MONTH DAYS)".
 #  * After deploying, REPROCESS any sheet that showed ÷26 PF figures —
@@ -242,7 +242,7 @@ echo "════════════════════════�
 echo "  DONE — Iter 622 deployed."
 echo "  • PF & ESIC now ALWAYS divide by the Month Days entered on the"
 echo "    salary sheet — for ALL firms. Old method settings (÷26 etc.)"
-echo "    are ignored; the selector in Compliance Settings is on hold."
+echo "    are ignored; the options are removed from Compliance Settings."
 echo "  • REPROCESS any sheet that showed ÷26 PF figures: PF becomes"
 echo "    12% of the earned Wage Base (e.g. LAL CHAND 4333 → 520)."
 echo "  • SHORTCUTS: press ? in the portal for the full list; click ✎"

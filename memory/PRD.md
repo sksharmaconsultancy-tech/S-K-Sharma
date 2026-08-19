@@ -6706,3 +6706,8 @@ Current iteration: 594. Next: 595.
   lines in compute_compliance_row + effective_statutory and restore the
   selector UI (see git history Iter 622 commit).
 - APP_ITERATION 622; deploy_vps_iter622.sh served via kind=script.
+- Iter 622 follow-up (user): proration OPTIONS fully REMOVED from the PF/ESIC
+  Settings screen (no locked chip either) — replaced by a single info note
+  "PF & ESIC proration is fixed for all firms: value × Present ÷ Month Days".
+  Verified via screenshot on preview (no 'Proration Method'/'Working Days'
+  text on /compliance-settings).

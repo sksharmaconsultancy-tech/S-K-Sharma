@@ -455,23 +455,9 @@ export default function ComplianceSettingsScreen() {
                   <Text style={styles.hint}>{b.hint}</Text>
                 </View>
               ))}
-              {/* Iter 622 (user decision) — PF/ESIC Proration Method selector
-                  ON HOLD: the engine always divides by the Month Days entered
-                  on the salary sheet. Stored method values are ignored. */}
-              {(["pf_proration_method", "esic_proration_method"] as const).map((k) => (
-                <View key={k} style={styles.fieldRow}>
-                  <Text style={styles.fieldLbl}>{k === "pf_proration_method" ? "PF Proration Method" : "ESIC Proration Method"}</Text>
-                  <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                    <View style={[styles.chip, styles.chipActive]}>
-                      <Text style={styles.chipTxtActive}>Month Days (sheet override)</Text>
-                    </View>
-                    <Text style={styles.hint}>
-                      Locked — always divides by the Month Days entered on the salary sheet.
-                      Method selection is ON HOLD until calculations are re-verified.
-                    </Text>
-                  </View>
-                </View>
-              ))}
+              {/* Iter 622 (user decision) — PF/ESIC Proration Method options
+                  REMOVED: the engine always divides by the Month Days entered
+                  on the salary sheet, for every firm. */}
               <View style={styles.fieldRow}>
                 <Text style={styles.fieldLbl}>Rule Version (label saved on every calculation)</Text>
                 <TextInput
@@ -485,7 +471,7 @@ export default function ComplianceSettingsScreen() {
                 />
               </View>
               <Text style={styles.hint}>
-                Proration is locked: PF & ESIC wages = value × Present ÷ Month Days (as entered on the sheet).
+                PF & ESIC proration is fixed for all firms: value × Present ÷ Month Days (as entered on the salary sheet).
               </Text>
             </Section>
 
