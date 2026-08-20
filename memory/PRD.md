@@ -7224,3 +7224,29 @@ Current iteration: 594. Next: 595.
 - Verified: legacy dup-basic scenario → bulk sets daily → single basic
   row rate_type daily + pay_basis daily persisted ✅.
 - APP_ITERATION "648"; deploy_vps_iter648.sh served via kind=script.
+
+## Iteration 649 (2026-06) — Row highlight + arrow-key navigation
+- User request: click-to-select row + ↑/↓ keyboard navigation on BOTH
+  Compliance Salary (compliance-salary-run.tsx) and Actual Salary
+  (salary-run.tsx) grids. Implemented via existing hlRow highlight:
+  document keydown listener (web only), skips input/textarea/select
+  targets (cell-editing arrows unaffected), moves through the DISPLAYED
+  order (sortRows + filters), clamps at first/last row, scrollIntoView
+  via row nativeID (`csr-row-<uid>` / `asr-row-<uid>`), preventDefault
+  stops page scroll. Verified via automation: click→0, Down→1→2, Up→1,
+  25×Up clamps at 0, run stays on screen.
+- APP_ITERATION "649"; deploy_vps_iter649.sh served via kind=script.
+
+## OPEN ITEMS carried from this session (not yet resolved)
+- Gridfree Solar firm cannot lock salary on LIVE data (VPS on 648 incl.
+  hardened validator). Lock-check modal has an always-available
+  "Finalize & Lock Now" (doFinalize(true,true)); backend finalize is
+  non-blocking. NEED user's exact symptom (no popup? error text? spinner?)
+  and/or VPS backend logs. Asked in finish message of iter 647.
+- "Total is Not Showing Proper Head Wise" — investigated with INCENTIVE
+  enabled on Kankani: totals row appeared ALIGNED in screenshots.
+  Needs user clarification/screenshot of the misaligned head.
+- Potential edge found (not fixed): firm with custom head (INCENTIVE) ON
+  but OTHER MISC.ALLOWANCE OFF → others bucket masked to 0 → custom head
+  paid amounts also zeroed. May need bucket-masking to spare enabled
+  custom labels.

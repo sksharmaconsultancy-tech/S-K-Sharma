@@ -1188,6 +1188,36 @@ function ResultGrid({
   const sumCol = (k: keyof ActualRow) =>
     (run.rows || []).reduce((s, r) => s + (Number(r[k]) || 0), 0);
 
+  // Iter 649 (user request) — ↑/↓ ARROW-KEY row navigation (web only).
+  // Same behaviour as the Compliance grid: moves the highlight through the
+  // DISPLAYED order, clamped at the ends, scrolls into view, and never
+  // fires while typing in an editable cell. Pure UI — no data changes.
+  useEffect(() => {
+    if (Platform.OS !== "web" || !run) return;
+    const onKey = (e: any) => {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      const tag = String(e.target?.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      const rows = sortRows(run.rows || []);
+      if (!rows.length) return;
+      e.preventDefault();
+      const cur = rows.findIndex((r) => r.user_id === hlRow);
+      const next = cur < 0
+        ? (e.key === "ArrowDown" ? 0 : rows.length - 1)
+        : Math.max(0, Math.min(rows.length - 1,
+            cur + (e.key === "ArrowDown" ? 1 : -1)));
+      const uid = rows[next].user_id;
+      setHlRow(uid);
+      setTimeout(() => {
+        (globalThis as any).document?.getElementById?.(`asr-row-${uid}`)
+          ?.scrollIntoView?.({ block: "nearest" });
+      }, 0);
+    };
+    (globalThis as any).document?.addEventListener?.("keydown", onKey);
+    return () => (globalThis as any).document?.removeEventListener?.("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run, hlRow, colSort, colFilters, gridFilters, empSearch, sortBy]);
+
   return (
     <View style={styles.card}>
       <View style={styles.rowBetween}>
@@ -1352,6 +1382,7 @@ function ResultGrid({
             <Pressable
               onPress={() => setHlRow(isHl ? null : r.user_id)}
               key={r.user_id}
+              nativeID={`asr-row-${r.user_id}`}
               style={[
                 styles.tblRow,
                 styles.empRow,

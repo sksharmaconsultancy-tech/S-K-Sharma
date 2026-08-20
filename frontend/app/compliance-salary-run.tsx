@@ -404,6 +404,37 @@ export default function ComplianceSalaryRunScreen() {
     return arr;
   };
 
+  // Iter 649 (user request) — ↑/↓ ARROW-KEY row navigation (web only).
+  // Moves the existing row highlight up/down through the DISPLAYED order,
+  // clamped at the first/last row, and scrolls the row into view. Ignored
+  // while typing inside an editable cell. Pure UI — no data changes.
+  useEffect(() => {
+    if (Platform.OS !== "web" || !run) return;
+    const onKey = (e: any) => {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      const tag = String(e.target?.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      const rows = sortRows(run.rows.filter((r) =>
+        rowPassesColFilters(r, colFilters, COL_FILTER_GETTERS)));
+      if (!rows.length) return;
+      e.preventDefault();
+      const cur = rows.findIndex((r) => r.user_id === hlRow);
+      const next = cur < 0
+        ? (e.key === "ArrowDown" ? 0 : rows.length - 1)
+        : Math.max(0, Math.min(rows.length - 1,
+            cur + (e.key === "ArrowDown" ? 1 : -1)));
+      const uid = rows[next].user_id;
+      setHlRow(uid);
+      setTimeout(() => {
+        (globalThis as any).document?.getElementById?.(`csr-row-${uid}`)
+          ?.scrollIntoView?.({ block: "nearest" });
+      }, 0);
+    };
+    (globalThis as any).document?.addEventListener?.("keydown", onKey);
+    return () => (globalThis as any).document?.removeEventListener?.("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run, hlRow, colFilters, colSort]);
+
   // Iter 370 (user request) — head-wise column totals for the footer row.
   const sumCol = (k: string) =>
     (run?.rows || []).reduce((s: number, r: any) => s + (Number(r[k]) || 0), 0);
@@ -3122,6 +3153,7 @@ export default function ComplianceSalaryRunScreen() {
                   <Pressable
                     onPress={() => setHlRow(isHl ? null : r.user_id)}
                     key={r.user_id}
+                    nativeID={`csr-row-${r.user_id}`}
                     style={[
                       styles.tblRow,
                       { backgroundColor: rowBg },
