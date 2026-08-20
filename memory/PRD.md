@@ -7284,3 +7284,28 @@ Current iteration: 594. Next: 595.
   but OTHER MISC.ALLOWANCE OFF → others bucket masked to 0 → custom head
   paid amounts also zeroed. May need bucket-masking to spare enabled
   custom labels.
+
+## Iter 652–653 (this session)
+### 652 — Shift Deployment "Summary By" (user request)
+- Summary Only no longer forces BOTH sections. New "Summary By" chips
+  (Department Wise / Designation Wise) in labour-reports.tsx; payload key
+  `filters.summary_group`; backend (labour_reports.py) renders ONLY the
+  chosen section, column header + report label name it
+  ("— Department Wise Summary"). Default = department. Verified via curl.
+### 652 — Bulk Employee Correction ↔ Employee Master verified (user check)
+- test_iter652_bulk_correction_sync.py: 12/12 PASS — father_name, dept,
+  desig, UAN, bank a/c, compliance_basic (+basic_salary mirror), HRA
+  (flat + compliance_salary_allowances), actual_basic + pay_basis (into
+  salary_structure_actual) ALL land on db.users instantly. Test emp 50
+  (Kankani) fully restored after the test.
+### 653 — Camera button PWA-only (user request)
+- ScanOCRButton.tsx: `showCamera = isStandalonePWA() || isMobileDevice()`
+  (mobile UA regex). Desktop Web Portal hides the "Camera" and "Capture
+  with camera" buttons; scan (file-picker) buttons remain everywhere.
+  Verified: desktop 0 camera buttons, mobile UA 8.
+### 653 — OCR auto-fill in Statutory & Bank block (user request)
+- employee-add.tsx: 3 compact ScanOCRButtons above PAN row — Scan PAN
+  (pan_no + pan_name), Scan Aadhaar (aadhaar_no + aadhaar_name), Scan
+  Passbook/Cheque (bank_account, bank_ifsc + lookupIfsc, bank_name,
+  bank_branch via branch_name).
+- APP_ITERATION "653"; deploy_vps_iter653.sh ready (kind=script).

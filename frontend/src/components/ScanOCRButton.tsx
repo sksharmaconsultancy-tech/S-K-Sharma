@@ -21,6 +21,14 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { api } from "@/src/api/client";
 import { colors, radius, spacing, type } from "@/src/theme";
+import { isStandalonePWA } from "@/src/utils/pwa";
+
+/** Iter 653 (user request) — the dedicated Camera button is for phones
+ * (installed PWA or mobile browser) only; the desktop Web Portal shows
+ * just the file-picker Scan button. */
+const isMobileDevice = (): boolean =>
+  Platform.OS === "web" && typeof navigator !== "undefined" &&
+  /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
 
 
 type Fields = Record<string, string | null | undefined>;
@@ -314,6 +322,8 @@ export default function ScanOCRButton({
 
   if (Platform.OS !== "web") return null;
 
+  const showCamera = isStandalonePWA() || isMobileDevice();
+
   return (
     <>
       <View style={compact ? styles.entryRowCompact : styles.entryRow}>
@@ -331,19 +341,23 @@ export default function ScanOCRButton({
           </Text>
         </Pressable>
         {/* Iter 617 (user bug) — dedicated camera button so mobile browsers
-            open the camera directly instead of the file picker. */}
-        <Pressable
-          onPress={() => pickFile(false, true)}
-          style={({ pressed }) => [
-            compact ? styles.btnCompact : styles.btn,
-            { flexShrink: 0 },
-            pressed && { opacity: 0.85 },
-          ]}
-          testID={`ocr-camera-${documentType}`}
-        >
-          <Ionicons name="camera-outline" size={compact ? 12 : 14} color={colors.brandPrimary} />
-          <Text style={compact ? styles.btnCompactTxt : styles.btnTxt}>Camera</Text>
-        </Pressable>
+            open the camera directly instead of the file picker.
+            Iter 653 (user request) — PWA / mobile only; hidden on the
+            desktop Web Portal. */}
+        {showCamera ? (
+          <Pressable
+            onPress={() => pickFile(false, true)}
+            style={({ pressed }) => [
+              compact ? styles.btnCompact : styles.btn,
+              { flexShrink: 0 },
+              pressed && { opacity: 0.85 },
+            ]}
+            testID={`ocr-camera-${documentType}`}
+          >
+            <Ionicons name="camera-outline" size={compact ? 12 : 14} color={colors.brandPrimary} />
+            <Text style={compact ? styles.btnCompactTxt : styles.btnTxt}>Camera</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <Modal visible={modalOpen} transparent animationType="fade" onRequestClose={() => setModalOpen(false)}>
@@ -396,14 +410,16 @@ export default function ScanOCRButton({
                       Add 2nd page / back side (photo or PDF)
                     </Text>
                   </Pressable>
-                  <Pressable
-                    onPress={() => pickFile(true, true)}
-                    style={styles.addPageBtn}
-                    testID="ocr-add-page-camera"
-                  >
-                    <Ionicons name="camera-outline" size={15} color={colors.brandPrimary} />
-                    <Text style={styles.addPageTxt}>Capture with camera</Text>
-                  </Pressable>
+                  {showCamera ? (
+                    <Pressable
+                      onPress={() => pickFile(true, true)}
+                      style={styles.addPageBtn}
+                      testID="ocr-add-page-camera"
+                    >
+                      <Ionicons name="camera-outline" size={15} color={colors.brandPrimary} />
+                      <Text style={styles.addPageTxt}>Capture with camera</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
               ) : null}
 

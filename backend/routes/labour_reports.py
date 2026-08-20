@@ -667,7 +667,13 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
         # then Designation-wise — each group row shows headcount + full
         # attendance totals (Present / Half-Day day counts, Hours, OT,
         # Cost). Display and ALL downloads (PDF/Excel/CSV) follow.
+        # Iter 652 (user request) — summary shows EITHER Department-wise OR
+        # Designation-wise (user picks one), not both forced together.
         if policy.get("_summary_only"):
+            sg = str(policy.get("_summary_group") or "").strip().lower()
+            if sg not in ("department", "designation"):
+                sg = "department"
+
             def _agg(idx: int) -> Dict[str, dict]:
                 m: Dict[str, dict] = {}
                 for _g, code_, _d, r in data:
@@ -682,7 +688,7 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
                     a["h"] += r[9]; a["o"] += r[10]; a["c"] += r[11]
                 return m
 
-            s_cols = ["S.No.", "Department / Designation", "Deployed",
+            s_cols = ["S.No.", sg.capitalize(), "Deployed",
                       "Present", "Half Day", "Hours", "OT Hrs", "Cost"]
             s_rows: list = []
 
@@ -707,8 +713,10 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
                 s_rows.append(tr)
 
             if data:
-                _section("DEPARTMENT WISE SUMMARY", _agg(4))
-                _section("DESIGNATION WISE SUMMARY", _agg(5))
+                if sg == "designation":
+                    _section("DESIGNATION WISE SUMMARY", _agg(5))
+                else:
+                    _section("DEPARTMENT WISE SUMMARY", _agg(4))
             return s_cols, s_rows
 
         def _sum_row(label: str, n_emps: int, h: float, o: float, c: float) -> list:
@@ -1213,6 +1221,8 @@ async def generate(payload: Dict[str, Any] = Body(...),
         policy["_group_by"] = str(filters.get("group_by") or "")
         # Iter 627 (user request) — Summary Only vs Full Data option.
         policy["_summary_only"] = bool(filters.get("summary_only"))
+        # Iter 652 (user request) — Summary shows ONE grouping (dept OR desig).
+        policy["_summary_group"] = str(filters.get("summary_group") or "")
         # Iter 526 (user bug — "Out Punch not showing") — In/Out punches
         # must match the ATTENDANCE REPORT (grid engine): re-fetch with a
         # ±1-day window, drop duplicate machine punches and STITCH
@@ -1285,8 +1295,11 @@ async def generate(payload: Dict[str, Any] = Body(...),
     # the heading of the PDF / Excel / preview too.
     _gb_label = str(filters.get("group_by") or "").strip().lower()
     if key == "shift_deployment" and filters.get("summary_only"):
-        # Iter 627 — Summary Only heading (Department + Designation wise).
-        label = f"{label} — Summary Only"
+        # Iter 652 — Summary heading shows the chosen grouping only.
+        _sg = str(filters.get("summary_group") or "").strip().lower()
+        if _sg not in ("department", "designation"):
+            _sg = "department"
+        label = f"{label} — {_sg.capitalize()} Wise Summary"
     elif _gb_label in ("department", "designation", "contractor"):
         label = f"{label} — {_gb_label.capitalize()} Wise"
 

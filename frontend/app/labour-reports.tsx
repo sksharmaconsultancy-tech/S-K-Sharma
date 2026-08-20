@@ -88,6 +88,8 @@ export default function LabourReportsScreen() {
   const [groupBy, setGroupBy] = useState<string>("");
   // Iter 627 — Shift Deployment: Full Data vs Summary Only (Dept + Desig).
   const [summaryOnly, setSummaryOnly] = useState<boolean>(false);
+  // Iter 652 — Summary shows ONE grouping: Department OR Designation wise.
+  const [summaryGroup, setSummaryGroup] = useState<"department" | "designation">("department");
 
   const isSingleDay = SINGLE_DAY_KEYS.has(reportKey);
   const isDayOrPeriod = DAY_OR_PERIOD_KEYS.has(reportKey);
@@ -127,7 +129,7 @@ export default function LabourReportsScreen() {
       ...(isDayOrPeriod
         ? (groupBy && groupBy !== "contractor" && !summaryOnly ? { group_by: groupBy } : {})
         : (groupBy ? { group_by: groupBy } : {})),
-      ...(isDayOrPeriod && summaryOnly ? { summary_only: true } : {}),
+      ...(isDayOrPeriod && summaryOnly ? { summary_only: true, summary_group: summaryGroup } : {}),
       ...(shiftSel ? { shift: shiftSel } : {}),
     },
   });
@@ -146,7 +148,7 @@ export default function LabourReportsScreen() {
       setPreview(null);
     } finally { setBusy(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCompanyId, reportKey, month, fromDate, toDate, reportDate, shiftSel, periodMode, groupBy, summaryOnly]);
+  }, [selectedCompanyId, reportKey, month, fromDate, toDate, reportDate, shiftSel, periodMode, groupBy, summaryOnly, summaryGroup]);
 
   const download = async (format: "pdf" | "excel" | "csv") => {
     if (!selectedCompanyId) return;
@@ -295,9 +297,22 @@ export default function LabourReportsScreen() {
                 </Pressable>
               </View>
               {summaryOnly ? (
-                <Text style={[st.dim, { fontSize: 11, marginTop: 4 }]}>
-                  Department-wise & Designation-wise totals only — no individual employee rows.
-                </Text>
+                <>
+                  {/* Iter 652 — pick ONE grouping for the summary. */}
+                  <Text style={[st.fieldLbl, { marginTop: 8 }]}>Summary By</Text>
+                  <View style={[st.chipsWrap, { marginTop: 4 }]}>
+                    {([["department", "Department Wise"],
+                      ["designation", "Designation Wise"]] as const).map(([v, lbl]) => (
+                      <Pressable key={v} onPress={() => setSummaryGroup(v)}
+                        style={[st.chip, summaryGroup === v && st.chipOn]} testID={`lr-summary-${v}`}>
+                        <Text style={[st.chipTxt, summaryGroup === v && { color: "#fff" }]}>{lbl}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  <Text style={[st.dim, { fontSize: 11, marginTop: 4 }]}>
+                    {summaryGroup === "department" ? "Department" : "Designation"}-wise totals only — no individual employee rows.
+                  </Text>
+                </>
               ) : (
                 <>
                   <Text style={[st.fieldLbl, { marginTop: 8 }]}>Group / Format</Text>

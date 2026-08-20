@@ -2485,6 +2485,48 @@ export default function EmployeeAddScreen() {
               ESIC Temporary Exemption (skip ESIC this period)
             </Text>
           </Pressable>
+          {/* Iter 653 (user request) — OCR scanners for the Statutory / Bank
+              block: scan PAN / Aadhaar / Bank Passbook to auto-fill the
+              fields below (PAN + name, Aadhaar + name, account/IFSC/bank). */}
+          {Platform.OS === "web" ? (
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 10, marginBottom: 4, flexWrap: "wrap" }}>
+              <ScanOCRButton
+                documentType="pan"
+                label="Scan PAN → fill PAN details (OCR)"
+                compact
+                onApply={(fields) => {
+                  if (fields.pan_no) setField("pan_no", String(fields.pan_no).toUpperCase());
+                  if (fields.name) setField("pan_name", String(fields.name).toUpperCase());
+                }}
+              />
+              <ScanOCRButton
+                documentType="aadhaar"
+                label="Scan Aadhaar → fill Aadhaar details (OCR)"
+                compact
+                onApply={(fields) => {
+                  if (fields.aadhaar_no) setField("aadhaar_no", String(fields.aadhaar_no).replace(/\D/g, "").slice(0, 12));
+                  if (fields.name) setField("aadhaar_name", String(fields.name).toUpperCase());
+                }}
+              />
+              <ScanOCRButton
+                documentType="bank_passbook"
+                label="Scan Passbook / Cheque → fill Bank details (OCR)"
+                compact
+                onApply={(fields) => {
+                  const acc = fields.bank_account_number || (fields as any).bank_account || (fields as any).account_no;
+                  if (acc) setField("bank_account", String(acc).replace(/\s/g, ""));
+                  const ifc = fields.ifsc_code || (fields as any).ifsc;
+                  if (ifc) {
+                    const c = String(ifc).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11);
+                    setField("bank_ifsc", c);
+                    if (c.length === 11) void lookupIfsc(c);
+                  }
+                  if (fields.bank_name) setField("bank_name", String(fields.bank_name));
+                  if ((fields as any).branch_name) setField("bank_branch", String((fields as any).branch_name));
+                }}
+              />
+            </View>
+          ) : null}
           <TwoCol>
             <Field
               label="PAN"
