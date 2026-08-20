@@ -62,7 +62,10 @@ async def my_worksites(authorization: Optional[str] = Header(None)):
             "geofence_radius_m": company.get("geofence_radius_m") or 200,
         })
     async for b in db.branches.find(
-        {"company_id": user["company_id"], "active": {"$ne": False}},
+        # Iter 624 — include branches LINKED to this firm too.
+        {"$or": [{"company_id": user["company_id"]},
+                 {"linked_company_ids": user["company_id"]}],
+         "active": {"$ne": False}},
         {"_id": 0, "branch_id": 1, "name": 1, "office_lat": 1,
          "office_lng": 1, "geofence_radius_m": 1},
     ):
@@ -150,6 +153,35 @@ async def _onboarding_payroll_exclusion(q: dict, company_id: Optional[str],
         return
     q.setdefault("$and", []).append(
         {"onboarding_status": {"$nin": ONBOARDING_BLOCKED_STATUSES}})
+
+
+async def _branch_punch_gate(user: dict, detected_bid, detected_name, today: str):
+    """Iter 624 — MULTI-BRANCH punch authorization. When the employee HAS a
+    branch configuration (home/authorized), punches at a detected branch
+    outside that set are allowed only under an approved Temporary Branch
+    Assignment covering today (returns its assign_id). Employees WITHOUT
+    branch config keep the legacy behaviour (any firm geofence). Home
+    Branch NEVER auto-changes. Raises 403 when not authorised."""
+    home_bid = user.get("home_branch_id")
+    auth_bids = [b for b in (user.get("authorized_branch_ids") or []) if b]
+    if not (home_bid or auth_bids) or not detected_bid or detected_bid == "main":
+        return None
+    allowed = set(auth_bids)
+    if home_bid:
+        allowed.add(home_bid)
+    if detected_bid in allowed:
+        return None
+    ta = await db.branch_temp_assignments.find_one({
+        "user_id": user["user_id"], "branch_id": detected_bid,
+        "status": "approved",
+        "from_date": {"$lte": today}, "to_date": {"$gte": today},
+    }, {"_id": 0, "assign_id": 1})
+    if ta:
+        return ta["assign_id"]
+    raise HTTPException(
+        status_code=403,
+        detail=(f"You are not authorised to punch at {detected_name or 'this branch'}. "
+                "Ask HR for branch authorization or a temporary branch assignment."))
 
 
 @api.post("/attendance/punch")
@@ -591,6 +623,10 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
                 _ppol["invalid_sequence_action"])
 
     record_id = f"att_{uuid.uuid4().hex[:12]}"
+    # Iter 624 — MULTI-BRANCH punch authorization (see _branch_punch_gate).
+    _temp_assign_id = await _branch_punch_gate(
+        user, (closest or {}).get("branch_id"), (closest or {}).get("name"), today)
+
     # Iter 64 — location_status: "inside" / "outside" / "no-gps". This is the
     # single field UIs display as a coloured pill without needing to compute
     # anything from distance/radius/gps_verified.
@@ -612,6 +648,9 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
                              or (template_face_match or {}).get("face_match_score")),
         "branch_id": (closest or {}).get("branch_id"),
         "branch_name": (closest or {}).get("name"),
+        # Iter 624 — multi-branch snapshot: home vs worked branch per day.
+        "home_branch_id": user.get("home_branch_id"),
+        "temp_assignment_id": _temp_assign_id,
         "date": today,
         "kind": payload.kind,
         "at": (punch_at_iso or ist_wallclock_iso()),

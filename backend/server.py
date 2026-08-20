@@ -10041,7 +10041,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "623"
+APP_ITERATION = "624"
 
 
 @api.get("/version")
@@ -12797,8 +12797,7 @@ app.include_router(audit_notify_router)
 from routes.attendance_eligibility import router as attendance_eligibility_router  # noqa: E402
 app.include_router(attendance_eligibility_router)
 # Iter 585 — RBAC Phase 1: Department Master, data scope, Access Preview.
-from routes.rbac_phase1 import router as rbac_phase1_router  # noqa: E402
-app.include_router(rbac_phase1_router)
+from routes.rbac_phase1 import router as rbac_phase1_router  # noqa: E402app.include_router(rbac_phase1_router)
 from routes.maker_checker import router as maker_checker_router, digest_loop as _mc_digest_loop  # noqa: E402
 app.include_router(maker_checker_router)
 # Iter 588 — AI Command Center (alerts / insights / activity).
@@ -13228,6 +13227,10 @@ app.include_router(expense_claims_router)
 # salary/PF/ESIC, unified requests, notification center.
 from routes.ess import router as ess_router  # noqa: E402
 app.include_router(ess_router)
+# Iter 624 — Multi-branch architecture: branch management, home/authorized
+# branches, temp assignments, transfers, cost allocation & dashboard.
+from routes.branch_management import router as branch_mgmt_router  # noqa: E402
+app.include_router(branch_mgmt_router)
 
 # Iter 89 — Optional background RPA worker for EPFO/ESIC UAN/ESIC
 # generation jobs. No-op unless RPA_WORKER_ENABLED=1 in backend/.env.

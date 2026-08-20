@@ -6724,3 +6724,33 @@ Current iteration: 594. Next: 595.
   overlap. Seeded test IDs cleared from dev DB afterwards.
 - User also confirmed: keep Iter 622 Month-Days rule, no rollback needed.
 - APP_ITERATION 623; deploy_vps_iter623.sh served via kind=script.
+
+## Iteration 624 (2026-06) — MULTI-BRANCH ARCHITECTURE (user 20-point spec, all phases)
+- NEW backend module routes/branch_management.py (/api/admin/branch-management/*):
+  branches (extended fields incl. unique code per firm, link/unlink existing),
+  employees + /assign (home_branch_id + authorized_branch_ids on users, audited
+  in branch_audit), temp-assignments (approved/cancelled, never deleted),
+  transfers (effective-dated, lazy-applied via _apply_due_transfers, history
+  preserved), /allocation and /dashboard.
+- Allocation engine _allocation(): merges month's compliance_salary_runs rows
+  (dedupe by user → ONE payroll record), worked days from attendance punches
+  (day branch = first punch's branch), normalises to present_days, remainder →
+  home branch; splits gross/net/pf_employer/esic_employer proportionally;
+  guest days = worked branch ≠ home. Rahul acceptance test 3/3 PASS
+  (tests/test_iter624_branch_allocation.py).
+- Punch authorization: attendance_core._branch_punch_gate() — 403 outside
+  home/authorized branches unless approved temp assignment covers today;
+  employees without branch config unaffected; punches store home_branch_id +
+  temp_assignment_id. Unit test tests/test_iter624_punch_gate.py PASS.
+  NOTE: iter624 test files must be run SEPARATELY (Motor event-loop binding).
+- Worksites & geofence resolution now include branches LINKED to the firm.
+- Branch RBAC hook: users.branch_admin_branch_ids restricts new endpoints.
+- Frontend: app/branch-management.tsx (tabs: Branches/Employees/Temp
+  Assignments/Transfers; entry: Branches screen ⚙ icon) and
+  app/branch-dashboard.tsx (per-branch cards + employee-wise allocation,
+  month filter, gross+net columns per user choice 2c).
+- Testing agent: backend 12/12 PASS (dup code 409, assign+audit, temp cancel,
+  transfer apply/pending, dashboard/allocation shapes, regression) + frontend
+  smoke PASS. APP_ITERATION 624; deploy_vps_iter624.sh via kind=script.
+- Deferred/light: branch filters inside legacy reports (dashboard drilldown
+  covers branch view); full branch-level RBAC across old endpoints.

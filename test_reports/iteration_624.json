@@ -1,0 +1,36 @@
+{
+  "summary": "Iter 624 — Multi-Branch Architecture: 12/12 backend endpoint tests PASS (branch PATCH extended fields incl. code uniqueness → 409, employee assign+audit, temp assignments create/list/cancel keeping history, permanent transfer immediate-apply + future-pending w/ users.home_branch_id update, dashboard+allocation shapes, /api/company/branches regression, /branches/link + /unlink). Existing allocation acceptance test test_iter624_branch_allocation.py also 3/3 PASS (Rahul 29k/1k split, no-punch fallback, cleanup). Frontend smoke: /branch-management shows 4 tabs (Branches/Employees/Temp Assignments/Transfers), firm chips load, Dashboard button visible. /branch-dashboard renders month input (2026-08), Cross-Branch and Guest/Temp cards, and empty-state hint. No blocking console errors after token seed (only expo-notifications + shadow* deprecation warnings unrelated to iter 624). Punch-time branch-authorization block was NOT exercised end-to-end via HTTP (per agent-to-agent context — punch payload is heavy: needs face/GPS/policy eligibility), but the code path in attendance_core.py:602-624 was reviewed and matches spec: employees WITHOUT home/authorized branches are exempt; WITH branches → 403 unless approved temp assignment covers today. Recommend E1 add a dedicated unit test that constructs a user dict + minimal payload and asserts the 403.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter624_branch_management_api.py",
+    "/app/test_reports/pytest/iter624_bm_api.xml",
+    "/app/backend/tests/test_iter624_branch_allocation.py"
+  ],
+  "action_items": [
+    "Optional: add a targeted unit test for the punch-time branch authorization block (attendance_core.py:602-624) that simulates an employee with home=A punching inside B geofence without temp assignment → expect 403; and the same employee WITH approved temp assignment → expect success."
+  ],
+  "critical_code_review_comments": [
+    "branch_management.py: _apply_due_transfers uses IST (UTC+5:30) for `today` while /attendance/punch also uses IST — good, consistent.",
+    "PATCH /branches/{id} correctly uppercases `code` before uniqueness check and 409 detail includes the code — good UX.",
+    "temp-assignments cancel is idempotent (update_one with no existence check) — will silently succeed for unknown assign_id; low-severity but could 404 instead.",
+    "/api/company/branches route was NOT modified by this iter; regression test confirms it still returns branches list including newly PATCHed extended fields."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter624_branch_management_api.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Ephemeral: super-admin session token in user_sessions with datetime expires_at; test firm cmp_it624_*, test employee user_it624_*, 2 branches, and a 2nd firm for link test. ALL created docs deleted by pytest fixture teardown + a follow-up sweep. UI-smoke session token 'testtok_iter624_ui_smoke' also removed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend URL is EXPO_PUBLIC_BACKEND_URL (not EXPO_BACKEND_URL). Super-admin user_id user_67791559822a. Seed a Mongo user_sessions doc with a REAL datetime `expires_at` (not iso string works too — server handles both). Existing test file test_iter624_branch_allocation.py already covers the Rahul allocation math — do NOT duplicate.",
+  "rca_of_issue": "N/A — feature verification, no bugs found."
+}

@@ -178,6 +178,15 @@ export default function BranchesScreen() {
             <Ionicons name="chevron-back" size={26} color={colors.onSurface} />
           </Pressable>
           <Text style={styles.h1}>Branches</Text>
+          {/* Iter 624 — multi-branch management hub */}
+          <Pressable
+            onPress={() => router.push("/branch-management")}
+            hitSlop={8}
+            testID="open-branch-management"
+            style={{ marginRight: 10 }}
+          >
+            <Ionicons name="settings-outline" size={22} color={colors.brandPrimary} />
+          </Pressable>
           <Pressable
             onPress={() => { setEditing(null); setShowForm(true); }}
             hitSlop={8}
