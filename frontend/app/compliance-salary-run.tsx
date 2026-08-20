@@ -404,36 +404,6 @@ export default function ComplianceSalaryRunScreen() {
     return arr;
   };
 
-  // Iter 649 (user request) — ↑/↓ ARROW-KEY row navigation (web only).
-  // Moves the existing row highlight up/down through the DISPLAYED order,
-  // clamped at the first/last row, and scrolls the row into view. Ignored
-  // while typing inside an editable cell. Pure UI — no data changes.
-  useEffect(() => {
-    if (Platform.OS !== "web" || !run) return;
-    const onKey = (e: any) => {
-      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-      const tag = String(e.target?.tagName || "").toLowerCase();
-      if (tag === "input" || tag === "textarea" || tag === "select") return;
-      const rows = sortRows(run.rows.filter((r) =>
-        rowPassesColFilters(r, colFilters, COL_FILTER_GETTERS)));
-      if (!rows.length) return;
-      e.preventDefault();
-      const cur = rows.findIndex((r) => r.user_id === hlRow);
-      const next = cur < 0
-        ? (e.key === "ArrowDown" ? 0 : rows.length - 1)
-        : Math.max(0, Math.min(rows.length - 1,
-            cur + (e.key === "ArrowDown" ? 1 : -1)));
-      const uid = rows[next].user_id;
-      setHlRow(uid);
-      setTimeout(() => {
-        (globalThis as any).document?.getElementById?.(`csr-row-${uid}`)
-          ?.scrollIntoView?.({ block: "nearest" });
-      }, 0);
-    };
-    (globalThis as any).document?.addEventListener?.("keydown", onKey);
-    return () => (globalThis as any).document?.removeEventListener?.("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run, hlRow, colFilters, colSort]);
 
   // Iter 370 (user request) — head-wise column totals for the footer row.
   const sumCol = (k: string) =>
@@ -1564,6 +1534,55 @@ export default function ComplianceSalaryRunScreen() {
   // Refs to each editable "Present Days" input so Arrow-Up/Down can
   // move focus between rows on the web portal.
   const pdRefs = useRef<Record<number, any>>({});
+
+  // Iter 649 (user request) — ↑/↓ ARROW-KEY row navigation (web only).
+  // Iter 651 (user request) — ENTER opens the highlighted row's Present
+  // Days cell; Ctrl+S saves; Ctrl+L opens Finalize & Lock. Pure UI.
+  useEffect(() => {
+    if (Platform.OS !== "web" || !run) return;
+    const onKey = (e: any) => {
+      // Ctrl+S / Ctrl+L work even while typing in a cell.
+      if ((e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === "s") {
+        e.preventDefault();
+        if (!savingDraft) void saveAsDraft();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === "l") {
+        e.preventDefault();
+        if (!(run as any).finalized) void finalizeRun();
+        return;
+      }
+      const isNav = e.key === "ArrowDown" || e.key === "ArrowUp";
+      if (!isNav && e.key !== "Enter") return;
+      const tag = String(e.target?.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      const rows = sortRows(run.rows.filter((r) =>
+        rowPassesColFilters(r, colFilters, COL_FILTER_GETTERS)));
+      if (!rows.length) return;
+      if (e.key === "Enter") {
+        const cur = rows.findIndex((r) => r.user_id === hlRow);
+        if (cur < 0) return;
+        e.preventDefault();
+        pdRefs.current[cur]?.focus?.();
+        return;
+      }
+      e.preventDefault();
+      const cur = rows.findIndex((r) => r.user_id === hlRow);
+      const next = cur < 0
+        ? (e.key === "ArrowDown" ? 0 : rows.length - 1)
+        : Math.max(0, Math.min(rows.length - 1,
+            cur + (e.key === "ArrowDown" ? 1 : -1)));
+      const uid = rows[next].user_id;
+      setHlRow(uid);
+      setTimeout(() => {
+        (globalThis as any).document?.getElementById?.(`csr-row-${uid}`)
+          ?.scrollIntoView?.({ block: "nearest" });
+      }, 0);
+    };
+    (globalThis as any).document?.addEventListener?.("keydown", onKey);
+    return () => (globalThis as any).document?.removeEventListener?.("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run, hlRow, colFilters, colSort, savingDraft, finalizing]);
   // Iter 256 (user request) — spreadsheet-style Arrow key navigation
   // across ALL editable cells (Present Days → Others → OT Amt → TDS →
   // Other), following the Firm Master's enabled heads.

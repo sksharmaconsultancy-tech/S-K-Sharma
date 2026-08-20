@@ -1145,9 +1145,13 @@ async def _compute_compliance_run(
             # Iter 472 (user request) — manual OT / Others changed the kept
             # Gross Earning: PF / ESIC / PT REFRESH on that kept gross with
             # the CURRENT master data (days and the kept figures stay).
+            # Iter 651 (user bug — "reprocess with existing data sometimes
+            # gives wrong ESIC until attendance is touched") — the refresh
+            # now runs for EVERY kept-gross difference, not only when
+            # others/ot carry the manual stamp: whatever moved the kept
+            # gross, the statutory figures must follow it.
             _kept_g472 = round(float(row.get("gross_paid") or 0), 2)
-            if ({"others", "ot_pay"} & _mf) and \
-                    abs(_kept_g472 - _fresh_g472) > 0.004:
+            if abs(_kept_g472 - _fresh_g472) > 0.004:
                 _st5 = dict(_stats_final)
                 _st5["other_allowance_extra"] = round(
                     _kept_g472 - _fresh_g472, 2)

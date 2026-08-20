@@ -1189,17 +1189,34 @@ function ResultGrid({
     (run.rows || []).reduce((s, r) => s + (Number(r[k]) || 0), 0);
 
   // Iter 649 (user request) — ↑/↓ ARROW-KEY row navigation (web only).
-  // Same behaviour as the Compliance grid: moves the highlight through the
-  // DISPLAYED order, clamped at the ends, scrolls into view, and never
-  // fires while typing in an editable cell. Pure UI — no data changes.
+  // Iter 651 (user request) — ENTER opens the highlighted row's Days cell;
+  // Ctrl+S saves; Ctrl+L opens Finalize & Lock. Pure UI — no data changes.
   useEffect(() => {
     if (Platform.OS !== "web" || !run) return;
     const onKey = (e: any) => {
-      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      if ((e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === "s") {
+        e.preventDefault();
+        onSave();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === "l") {
+        e.preventDefault();
+        if (!(run as any).finalized && !finalizing) onFinalize();
+        return;
+      }
+      const isNav = e.key === "ArrowDown" || e.key === "ArrowUp";
+      if (!isNav && e.key !== "Enter") return;
       const tag = String(e.target?.tagName || "").toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select") return;
       const rows = sortRows(run.rows || []);
       if (!rows.length) return;
+      if (e.key === "Enter") {
+        const cur = rows.findIndex((r) => r.user_id === hlRow);
+        if (cur < 0) return;
+        e.preventDefault();
+        cellRefs.current.get(`${cur}:1`)?.focus?.();
+        return;
+      }
       e.preventDefault();
       const cur = rows.findIndex((r) => r.user_id === hlRow);
       const next = cur < 0
@@ -1216,7 +1233,7 @@ function ResultGrid({
     (globalThis as any).document?.addEventListener?.("keydown", onKey);
     return () => (globalThis as any).document?.removeEventListener?.("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run, hlRow, colSort, colFilters, gridFilters, empSearch, sortBy]);
+  }, [run, hlRow, colSort, colFilters, gridFilters, empSearch, sortBy, finalizing]);
 
   return (
     <View style={styles.card}>

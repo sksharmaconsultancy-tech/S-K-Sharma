@@ -7253,6 +7253,24 @@ Current iteration: 594. Next: 595.
   EE+ER, PT, TDS, Total Ded., Net) is sumCol over displayed rows.
 - APP_ITERATION "650"; deploy_vps_iter650.sh served via kind=script.
 
+## Iteration 651 (2026-06) — Keyboard shortcuts + ESIC reprocess fix
+### 1. Keyboard (user requests; both grids)
+- ENTER on a highlighted row focuses its Present Days cell
+  (compliance: pdRefs.current[idx]; actual: cellRefs `${idx}:1` p_days).
+- Ctrl+S → saveAsDraft()/onSave(); Ctrl+L → finalizeRun()/onFinalize()
+  (work even while typing in a cell). Effect placed AFTER pdRefs/
+  saveAsDraft declarations (TDZ!). Verified: Enter focuses cell, Ctrl+S
+  shows "Saved as draft ✓".
+### 2. ESIC wrong on "With EXISTING data" reprocess (user bug)
+- Root cause: Iter-472 kept-branch statutory refresh only ran when
+  others/ot_pay had manual stamps — any other kept-gross difference left
+  PF/ESIC/PT computed on the FRESH gross while gross showed the KEPT
+  figure; editing attendance forced a client recompute which "fixed" it.
+- Fix: refresh now runs for EVERY kept-vs-fresh gross difference
+  (condition `{"others","ot_pay"} & _mf` removed).
+- Regression tests 643/644/646 all PASS after the change.
+- APP_ITERATION "651"; deploy_vps_iter651.sh served via kind=script.
+
 ## OPEN ITEMS carried from this session (not yet resolved)
 - Gridfree Solar firm cannot lock salary on LIVE data (VPS on 648 incl.
   hardened validator). Lock-check modal has an always-available
