@@ -1913,8 +1913,14 @@ async def _create_compliance_salary_run_core(
             and not payload.override_month_days
             and not (payload.use_imported_sheet and payload.month_days)):
         payload.month_days = int(_prev_run["month_days"])
-    elif (_gate_cid and not payload.use_imported_sheet
-            and not payload.override_month_days):
+    elif (_gate_cid and not payload.override_month_days
+            and not (payload.use_imported_sheet and payload.month_days)):
+        # Iter 643 (user bug) — EXCEL IMPORT runs used to skip this branch
+        # entirely, so a fresh month imported via sheet defaulted to the
+        # CALENDAR days (31) and PF was computed ÷31 instead of the firm's
+        # configured default (e.g. Fixed 26). The Firm Master fixed-days
+        # rule now applies to imported-sheet runs too; a typed Month Days
+        # (Override) still always wins (Iter 616 rule preserved).
         # Iter 427b (user clarification) — FIXED DAYS (26/30/31): the run's
         # MONTH DAYS are FETCHED from the Firm Master's Fixed Days option,
         # so the whole salary basis (divisor + default present days) is the

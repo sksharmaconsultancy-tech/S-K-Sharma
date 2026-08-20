@@ -7058,3 +7058,39 @@ Current iteration: 594. Next: 595.
   Salary Process + Copy Last Month Salary compact two-line buttons sit together
   on the line below. No code changes needed — previous agent's flex fix in
   MonthPicker.tsx + batchLine styles works. Awaiting user confirmation.
+
+## Iteration 642 (2026-06) — VPS deploy script for single-line toolbar
+- User asked for "VPS CODE TO DEPLOY".
+- Created /app/deploy_vps_iter642.sh (based on 641; header + DONE notes
+  updated: NEW 642 = Configure Batch single-line filter alignment).
+- APP_ITERATION bumped to "642" in server.py (/api/version verified).
+- temp_bundle.py kind=script now serves deploy_vps_iter642.sh (filename
+  deploy642.sh) — download verified 200 OK; tar bundle verified valid (~14MB).
+- VPS run commands:
+  wget -O deploy642.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
+  bash deploy642.sh
+
+## Iteration 643 (2026-06) — Excel-import PF month-days fix + page polish
+### 1. BUG FIX (backend) — Excel import defaulted PF to ÷31
+- User: "If we Import the Salary via Import file Excel Why you have Calculate
+  the PF By Default 31 Days… Calculate as per by default setting."
+- Root cause: in `_create_compliance_salary_run_core` the Firm Master
+  fixed-days branch had `not payload.use_imported_sheet`, so a FRESH month
+  imported via sheet skipped it → month_days=None → calendar days (31).
+- Fix: branch now applies to imported-sheet runs too, unless a Month Days
+  override was typed (Iter 616 rule preserved). Prev-run lock (426) intact.
+- Test /app/test_iter643_import_month_days.py — 3 cases PASSED:
+  (1) import + no override → 26 (firm fixed) (2) import + typed 30 → 30
+  (3) reprocess keeps prev days.
+### 2. UI (VIEW-ONLY, compliance-salary-run.tsx)
+- Select firm + Configure Batch cards FROZEN on top (web position:sticky
+  wrapper `stickyHeaderWrap`, zIndex 40); collapsed compact bar sticks too.
+- MASTER SNAPSHOT / PF ÷days / FREEZE / COPIED note-chips moved to their
+  OWN row above the action buttons (buttons untouched).
+- Grid font reduced by 2: tblCell 14→12, groupHdrTxt 13→11, auto-fit
+  col width 8.2→7.2 px/char. Verified via authenticated screenshots.
+### 3. Deploy
+- APP_ITERATION "643"; deploy_vps_iter643.sh served via kind=script
+  (download verified 200 OK):
+  wget -O deploy643.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
+  bash deploy643.sh

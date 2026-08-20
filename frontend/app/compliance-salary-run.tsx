@@ -332,9 +332,9 @@ export default function ComplianceSalaryRunScreen() {
   // is cut off (user request; replaces the wrap-text experiment).
   const colW = useMemo(() => {
     const rows = run?.rows || [];
-    // Iter 635 (user request — UI readability): 14px grid font needs wider
-    // auto-fit columns (~8.2 px/char + padding). Layout-only change.
-    const px = (v: any) => String(v ?? "").length * 8.2 + 22;
+    // Iter 643 (user request) — grid font reduced to 12px, so auto-fit
+    // columns tighten too (~7.2 px/char + padding). Layout-only change.
+    const px = (v: any) => String(v ?? "").length * 7.2 + 20;
     const fit = (label: string, vals: any[], base = 88, maxW = 280) => {
       let m = Math.max(base, px(label));
       for (const v of vals) {
@@ -2106,7 +2106,11 @@ export default function ComplianceSalaryRunScreen() {
 
         {/* Iter 636 (user request) — COMPACT HEADER: once a run is on
             screen, the Select-firm + Configure-batch cards collapse into
-            one slim bar so the salary grid starts right at the top. */}
+            one slim bar so the salary grid starts right at the top.
+            Iter 643 (user request) — the Select-firm + Configure-Batch
+            cards are FROZEN at the top of the page (sticky, web only) so
+            they never scroll away. */}
+        <View style={styles.stickyHeaderWrap}>
         {run && setupCollapsed ? (
           <Pressable
             testID="csr-setup-expand"
@@ -2642,6 +2646,7 @@ export default function ComplianceSalaryRunScreen() {
         </View>
         </>
         )}
+        </View>
 
         {/* Iter 182 — loading skeleton while a run computes */}
         {busy && !run ? <EmployeeListSkeleton rows={6} /> : null}
@@ -2649,11 +2654,12 @@ export default function ComplianceSalaryRunScreen() {
         {/* Result table */}
         {run ? (
           <View style={styles.card}>
-            <View style={styles.rowBetween}>
-              {/* Iter 427 (user request) — the run summary (month · employees
-                  · net · month_days · PF/ESIC/TDS totals) moved to the sticky
-                  FOOTER strip at the bottom of the screen. */}
-              <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
+            {/* Iter 643 (user request) — INFO NOTES (Master Snapshot, PF
+                rule, Freeze/Copied tags) moved to their OWN line so the
+                action buttons below stay undisturbed. */}
+            {(snapInfo?.exists || (run as any).frozen || (run as any).copied_from_month
+              || pfMethodLabel) ? (
+              <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
                 {/* Iter 486 — Master Snapshot badge: which frozen master
                     version this sheet was calculated on. */}
                 {snapInfo?.exists ? (
@@ -2692,6 +2698,13 @@ export default function ComplianceSalaryRunScreen() {
                     <Text style={{ fontSize: 11, fontWeight: "800", color: "#7C3AED" }}>COPIED FROM {(run as any).copied_from_month}</Text>
                   </View>
                 ) : null}
+              </View>
+            ) : null}
+            <View style={styles.rowBetween}>
+              {/* Iter 427 (user request) — the run summary (month · employees
+                  · net · month_days · PF/ESIC/TDS totals) moved to the sticky
+                  FOOTER strip at the bottom of the screen. */}
+              <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
                 {(run as any).finalized ? (
                   <>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "#DCFCE7", borderRadius: 999 }}>
@@ -4263,17 +4276,17 @@ const styles = StyleSheet.create({
   groupHdrMaster: { backgroundColor: "rgba(16,185,129,0.22)" },  // green tint
   groupHdrCalc:   { backgroundColor: "rgba(59,130,246,0.22)" },  // blue tint
   groupHdrDed:    { backgroundColor: "rgba(239,68,68,0.20)" },   // red tint
-  groupHdrTxt: { fontSize: 13, fontWeight: "800", color: "#0f172a", letterSpacing: 0.3 },
+  groupHdrTxt: { fontSize: 11, fontWeight: "800", color: "#0f172a", letterSpacing: 0.3 },
   // Faint horizontal-strip tints applied to the column-header cells
   // themselves. Kept lighter than the group-band above so the primary
   // header colour still reads.
   groupHdrCellHeaderMaster: { backgroundColor: "rgba(16,185,129,0.25)" },
   groupHdrCellHeaderCalc:   { backgroundColor: "rgba(59,130,246,0.25)" },
   groupHdrCellHeaderDed:    { backgroundColor: "rgba(239,68,68,0.20)" },
-  // Iter 635 (user request — UI readability, VIEW ONLY): 14px grid text,
-  // ~44px rows, bolder 14px headers, wider padding. No logic changes.
+  // Iter 635 (user request — UI readability, VIEW ONLY) · Iter 643 (user
+  // request) — grid font reduced by 2 (14 → 12) so more data fits.
   tblCell: {
-    fontSize: 14,
+    fontSize: 12,
     paddingVertical: 12,
     paddingHorizontal: 8,
     width: 84,
@@ -4281,6 +4294,12 @@ const styles = StyleSheet.create({
   },
   rightCell: { textAlign: "right", width: 84 },
   // Iter 636 — compact setup bar (shown when the setup cards collapse).
+  // Iter 643 (user request) — Select firm + Configure Batch cards FROZEN
+  // at the top of the page (web sticky; native keeps normal flow).
+  stickyHeaderWrap: Platform.OS === "web"
+    ? ({ position: "sticky", top: 0, zIndex: 40,
+         backgroundColor: colors.background } as any)
+    : {},
   compactBar: {
     flexDirection: "row",
     alignItems: "center",
