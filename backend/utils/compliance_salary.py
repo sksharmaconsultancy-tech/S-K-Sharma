@@ -1121,6 +1121,16 @@ def compute_compliance_row(
     )
     master_structure = {**master_structure, **_mast}
 
+    # Iter 626 — snapshot of locals for calc_detail: some PF/ESIC variables
+    # are only bound on eligible branches (skip paths leave them unset).
+    _loc = dict(locals())
+
+    def _cd(name: str) -> float:
+        try:
+            return round(float(_loc.get(name) or 0), 2)
+        except (TypeError, ValueError):
+            return 0.0
+
     return {
         "user_id": user.get("user_id"),
         "name": user.get("name"),
@@ -1223,6 +1233,30 @@ def compute_compliance_row(
         "pf_declaration_available": bool(user.get("pf_declaration_available")),
         # Iter 387 — human-readable calculation reasons + full snapshot
         # ("View Calculation" / audit dashboard / AI assistant layers).
+        # Iter 626 (user spec §5-§10) — transparent, auditable calculation
+        # detail (View Calculation). Separates PF monthly-equivalent /
+        # earned / contribution wages and ESIC coverage vs contribution.
+        "calc_detail": {
+            "salary_mode": salary_mode,
+            "rate": _cd("rate"),
+            "eligible_paid_days": effective_present,
+            "full_day_hours": _cd("full_day_hours"),
+            "ot_hours": _cd("ot_hours"),
+            "ot_rate_per_hour": round(_cd("per_hour_rate") * (_cd("ot_multiplier") or 1), 2),
+            "ot_multiplier": _cd("ot_multiplier"),
+            "ot_amount": _cd("ot_pay"),
+            "pf_basic_per_unit": _cd("pf_basic_override"),
+            "pf_monthly_equivalent": _cd("_pf_basic_month"),
+            "pf_earned_wage": _cd("pf_basic_prorated"),
+            "pf_contribution_wage": _cd("capped_pf_wages"),
+            "pf_wage_ceiling": cfg["pf_wage_cap"],
+            "pf_rate_employee_pct": cfg["pf_percent_employee"],
+            "wage_definition_rule_on": bool(wage_rule_on),
+            "esic_coverage_wage": _cd("_esic_elig_basic"),
+            "esic_contribution_wage": _cd("esic_wage_base"),
+            "esic_rate_employee_pct": cfg["esic_percent_employee"],
+            "esic_rate_employer_pct": cfg["esic_percent_employer"],
+        },
         "pf_reason": (
             _pf_skip_reason if not pf_applicable else (
                 f"PF ₹{pf_employee:,.0f} = {cfg['pf_percent_employee']:g}% of "

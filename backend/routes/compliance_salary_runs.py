@@ -706,6 +706,9 @@ async def _compute_compliance_run(
             stats["half_days"] = 0
         # Iter 178 — state-wise PT from the firm's compliance policy.
         _fcp = (company_doc.get("compliance_policy") or {}) if company_doc else {}
+        # Iter 626 (user spec §12) — mid-month DAILY RATE REVISION.
+        emp, _rate_rev_audit = _apply_daily_rate_revisions(
+            emp, payload.month, int(month_days), grid_by_user_c.get(emp["user_id"]))
         row = compute_compliance_row(
             emp, merged_pol, int(month_days), stats,
             company_structure_pct=payload.structure_pct,
@@ -717,6 +720,9 @@ async def _compute_compliance_run(
         # Iter 406 — remember the stats the FINAL row was computed with so
         # the Freeze block can re-compute statutory on the allocated gross.
         _stats_final = stats
+        # Iter 626 — rate revision audit trail on the row (View Calculation).
+        if _rate_rev_audit:
+            row["rate_revision_audit"] = _rate_rev_audit
         # Iter 337 (user request) — DAYS CALCULATION METHOD (Firm Master →
         # Payroll Settings). For imported (Freeze) runs the Compliance Days
         # can be DERIVED from the imported gross:
@@ -1764,6 +1770,74 @@ async def create_compliance_salary_run(
     # explicitly enable compliance_salary:write on the firm's access rights.
     await require_employer_permission(admin, "compliance_salary:write", db)
     return await _create_compliance_salary_run_core(payload, admin)
+
+
+def _apply_daily_rate_revisions(emp: dict, month: str, month_days: int,
+                                grid_cells: Optional[dict]):
+    """Iter 626 (user spec §12) — mid-month DAILY RATE REVISION.
+
+    Employee Master may carry ``daily_rate_revisions``:
+        [{"effective_from": "YYYY-MM-DD", "rate": 500}, ...]
+    For DAILY-rated employees, the applicable rate for each day of the
+    month is the latest revision effective on that day (master structure
+    = the base rate before the first revision). The month is consolidated
+    into ONE row by scaling the per-day head amounts by the weighted
+    factor  Σ rate_on(day) ÷ (days × base_rate):
+      • with punch data, weights use the ACTUAL worked dates;
+      • without punch data (manually typed days), weights use each rate
+        period's share of the calendar month.
+    Historical runs are untouched — this only affects fresh computes.
+    Returns (possibly-scaled shallow copy of emp, audit dict | None).
+    """
+    revs = [r for r in (emp.get("daily_rate_revisions") or [])
+            if r.get("effective_from") and r.get("rate")]
+    if not revs:
+        return emp, None
+    heads = emp.get("salary_structure_compliance") or []
+    is_daily = any(str(h.get("rate_type") or "").lower() == "daily" for h in heads) \
+        or str(emp.get("compliance_rate_type") or "").lower() == "daily"
+    if not is_daily:
+        return emp, None
+    base_rate = sum(float(h.get("amount") or 0) for h in heads
+                    if str(h.get("rate_type") or "daily").lower() == "daily")
+    if base_rate <= 0:
+        return emp, None
+    revs.sort(key=lambda r: str(r["effective_from"]))
+
+    def rate_on(date_str: str) -> float:
+        r = base_rate
+        for rev in revs:
+            if str(rev["effective_from"]) <= date_str:
+                r = float(rev["rate"])
+        return r
+
+    # 1. actual worked dates from the punch grid when available
+    dates: List[str] = []
+    for d, cell in ((grid_cells or {}).get("days") or {}).items():
+        c = cell or {}
+        if float(c.get("hours") or c.get("raw_hours") or 0) > 0:
+            dates.append(str(d) if str(d).startswith(month) else f"{month}-{str(d)[-2:]}")
+    if dates:
+        weighted = sum(rate_on(d) for d in dates) / (len(dates) * base_rate)
+    else:
+        # 2. fallback — calendar-proportional weighting over the month
+        all_days = [f"{month}-{i:02d}" for i in range(1, month_days + 1)]
+        weighted = sum(rate_on(d) for d in all_days) / (month_days * base_rate)
+    if abs(weighted - 1.0) < 0.0001:
+        return emp, None
+    scaled = dict(emp)
+    scaled["salary_structure_compliance"] = [
+        {**h, "amount": round(float(h.get("amount") or 0) * weighted, 4)}
+        if str(h.get("rate_type") or "daily").lower() == "daily" else dict(h)
+        for h in heads]
+    for k in ("pf_basic", "compliance_gross", "compliance_basic"):
+        if float(emp.get(k) or 0) > 0:
+            scaled[k] = round(float(emp[k]) * weighted, 4)
+    audit = {"base_rate": base_rate, "weighted_factor": round(weighted, 6),
+             "effective_rate": round(base_rate * weighted, 2),
+             "revisions": revs,
+             "weight_source": "punch_dates" if dates else "calendar_proportional"}
+    return scaled, audit
 
 
 async def _create_compliance_salary_run_core(

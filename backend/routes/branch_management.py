@@ -534,6 +534,40 @@ async def bm_allocation_export(company_id: Optional[str] = Query(None),
                  f'attachment; filename="BranchAllocation_{month}.xlsx"'})
 
 
+@router.post("/rate-revisions")
+async def bm_rate_revisions(body: Dict[str, Any] = Body(...),
+                            authorization: Optional[str] = Header(None)):
+    """Iter 626 (user spec §2/§12) — mid-month DAILY RATE REVISIONS on the
+    Employee Master: [{effective_from: YYYY-MM-DD, rate}]. Historical runs
+    are untouched; fresh processes use the period-weighted rate."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, _ADMIN_ROLES)
+    uid = str(body.get("user_id") or "")
+    emp = await db.users.find_one({"user_id": uid}, {"_id": 0, "company_id": 1,
+                                                     "daily_rate_revisions": 1})
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if admin["role"] == "company_admin" and emp.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not your employee")
+    revs = []
+    for r in (body.get("revisions") or []):
+        eff = str(r.get("effective_from") or "").strip()
+        try:
+            rate = float(r.get("rate") or 0)
+        except (TypeError, ValueError):
+            rate = 0
+        if len(eff) == 10 and rate > 0:
+            revs.append({"effective_from": eff, "rate": rate})
+    revs.sort(key=lambda r: r["effective_from"])
+    await db.users.update_one({"user_id": uid},
+                              {"$set": {"daily_rate_revisions": revs}})
+    await db.branch_audit.insert_one({
+        "audit_id": f"bra_{uuid.uuid4().hex[:10]}", "action": "rate_revisions",
+        "user_id": uid, "by": admin["user_id"], "at": now_iso(),
+        "prev": emp.get("daily_rate_revisions"), "new": revs})
+    return {"ok": True, "revisions": revs}
+
+
 @router.get("/dashboard")
 async def bm_dashboard(company_id: Optional[str] = Query(None),
                        month: str = Query(...),

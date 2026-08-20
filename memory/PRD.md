@@ -6763,3 +6763,28 @@ Current iteration: 594. Next: 595.
 - Also answered user Q on daily-rated compliance calc (rate×days gross, PF
   Basic per-day × present days with full-month ceiling check, ESIC on gross
   incl OT with full-month eligibility) — documented from engine code.
+
+## Iteration 626 (2026-06) — Daily-Rated Engine Enhancements (user 16-point spec)
+- GAP ANALYSIS: most of the spec already existed (rate×days gross, per-day PF
+  Basic, full-month-equivalent PF ceiling check + Iter 456 adopted-higher-PF,
+  ESIC eligibility (full-month equiv) vs contribution wage, configurable rates
+  in Compliance Settings, head-mapping-driven ESIC-on-OT, OT from shift policy
+  full_day_hours + ot_multiplier, wage-definition rule, DOJ/DOL windows,
+  reprocess confirmations, frozen runs). Preserved untouched.
+- NEW 1: MID-MONTH DAILY RATE REVISION — users.daily_rate_revisions
+  [{effective_from, rate}]; POST /api/admin/branch-management/rate-revisions
+  (audited in branch_audit); engine-side _apply_daily_rate_revisions() in
+  compliance_salary_runs.py scales daily head amounts + pf_basic by the
+  weighted factor (punch-date weights, else calendar-proportional); audit on
+  row.rate_revision_audit. UI: admin.tsx edit modal "Daily Rate Revisions"
+  textarea (YYYY-MM-DD:rate per line), hydrated + saved with the modal.
+- NEW 2: row.calc_detail — auditable breakdown (rate, eligible_paid_days, OT
+  rate/multiplier/amount, pf_basic_per_unit, pf_monthly_equivalent,
+  pf_earned_wage, pf_contribution_wage, ceiling+rates, wage rule flag,
+  esic_coverage_wage vs esic_contribution_wage, ESIC rates). Built from a
+  locals() snapshot (_cd helper) so skip-branches don't crash.
+- Tests: tests/test_iter626_daily_engine.py 6/6 PASS (450×20, OT policy
+  hours/multiplier, adopted-higher-PF preserved, rate revision punch-date &
+  calendar weighting, monthly regression) + iter620 14/14 + iter624 3/3.
+  NOTE: iter62x test files must run SEPARATELY (Motor event-loop binding).
+- APP_ITERATION 626; deploy_vps_iter626.sh via kind=script.

@@ -112,6 +112,8 @@ export default function AdminScreen() {
   const [dept, setDept] = useState("");
   const [pos, setPos] = useState("");
   const [exitDate, setExitDate] = useState("");
+  // Iter 626 — daily rate revisions editor text ("YYYY-MM-DD:rate" lines)
+  const [rateRevText, setRateRevText] = useState("");
   const [isLiveIn, setIsLiveIn] = useState<boolean>(false);
   const [saving, setSaving] = useState(false);
 
@@ -248,6 +250,9 @@ export default function AdminScreen() {
     setPos(emp.position || "");
     setExitDate(emp.exit_date || "");
     setIsLiveIn(!!emp.is_live_in);
+    // Iter 626 — hydrate daily rate revisions into the text editor
+    setRateRevText(((emp.daily_rate_revisions || []) as any[])
+      .map((r) => `${r.effective_from}:${r.rate}`).join("\n"));
   };
 
   const save = async () => {
@@ -256,6 +261,17 @@ export default function AdminScreen() {
     try {
       // Convert the DD/MM/YYYY exit date field back to ISO before saving
       const exitISO = exitDate.trim() ? (ddmmyyyyToISO(exitDate.trim()) || exitDate.trim()) : "";
+      // Iter 626 — persist daily rate revisions (date:rate per line)
+      const revs = rateRevText.split("\n").map((l) => l.trim()).filter(Boolean)
+        .map((l) => {
+          const i = l.indexOf(":");
+          return { effective_from: l.slice(0, i).trim(), rate: Number(l.slice(i + 1)) };
+        })
+        .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.effective_from) && r.rate > 0);
+      await api("/admin/branch-management/rate-revisions", {
+        method: "POST",
+        body: { user_id: selected.user_id, revisions: revs },
+      }).catch(() => {});
       await api("/admin/user-role", {
         method: "PATCH",
         body: {
@@ -1058,6 +1074,24 @@ export default function AdminScreen() {
               <Text style={styles.hint}>
                 Setting a past or today&apos;s date will immediately block this
                 employee from accessing the app.
+              </Text>
+
+              {/* Iter 626 (user spec §12) — mid-month DAILY RATE REVISIONS.
+                  One per line: YYYY-MM-DD:rate. Historical months untouched;
+                  fresh salary processes use the period-weighted rate. */}
+              <Text style={styles.modalLabel}>Daily Rate Revisions (daily-rated only)</Text>
+              <TextInput
+                style={[styles.modalInput, { minHeight: 60 }]}
+                multiline
+                placeholder={"2026-08-16:500\n2026-09-01:550"}
+                value={rateRevText}
+                onChangeText={setRateRevText}
+                testID="rate-revisions-input"
+              />
+              <Text style={styles.hint}>
+                One revision per line as date:rate (e.g. 2026-08-16:500). Salary
+                before that date uses the old rate; each period is consolidated
+                into one payroll row.
               </Text>
 
               {/* Iter 479 (user request) — Rejoin (Rehire) button right
