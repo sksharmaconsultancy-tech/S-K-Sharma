@@ -103,6 +103,8 @@ async def _build(
     shift: Optional[str] = None,
     q: Optional[str] = None,
     status: str = "active",
+    dummy: bool = False,
+    dummy_shift: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Compute the grid once, join extra master fields, apply filters and
     shape the per-employee 6-row matrix."""
@@ -111,13 +113,43 @@ async def _build(
     day_labels: List[str] = data.get("day_labels") or []
     weekday_labels: List[str] = data.get("weekday_labels") or []
 
+    # Iter 628 (user request) — DUMMY SHIFT IN/OUT MATRIX: a strictly
+    # READ-ONLY reporting layer. The matrix pipeline is identical; only the
+    # D-In / D-Out DISPLAY is substituted with the employee's Dummy-Shift
+    # master timings on present days. NOTHING is ever written to
+    # attendance / payroll / punches.
+    dummy_map: Dict[str, tuple] = {}
+    if dummy:
+        _dpol = await db.companies.find_one(
+            {"company_id": company_id},
+            {"_id": 0, "attendance_policy.policy_master.dummy_shift_allowed": 1})
+        if not bool((((_dpol or {}).get("attendance_policy") or {})
+                     .get("policy_master") or {}).get("dummy_shift_allowed")):
+            raise HTTPException(
+                status_code=400,
+                detail=("Dummy Shift is not enabled for this firm. Switch on "
+                        "'Dummy Shift Allowed' in the Attendance Policy first."))
+        from routes.labour_reports import DUMMY_SHIFTS
+
+        def _hm2min(s: str) -> int:
+            h, mn = str(s).split(":")
+            return int(h) * 60 + int(mn)
+        # overnight = end at/before start → OUT lands on the NEXT calendar
+        # date (marked with * in the report; no extra attendance day).
+        dummy_map = {d["name"]: (d["start"], d["end"],
+                                 _hm2min(d["end"]) <= _hm2min(d["start"]))
+                     for d in DUMMY_SHIFTS}
+    # Summary counters (dummy mode only — sec 16 of the user spec).
+    _dsum = {"present": 0, "week_off": 0, "holiday": 0, "absent": 0}
+    _dshift_counts: Dict[str, int] = {}
+
     # Extra master fields not present in the grid rows.
     extra: Dict[str, Dict[str, Any]] = {}
     async for u in db.users.find(
         {"role": "employee", "company_id": company_id},
         {"_id": 0, "user_id": 1, "employee_type": 1, "contractor_name": 1,
          "shift_name": 1, "department": 1, "designation": 1, "position": 1,
-         "exit_date": 1, "employment_status": 1},
+         "exit_date": 1, "employment_status": 1, "dummy_shift": 1},
     ):
         extra[u["user_id"]] = u
 
@@ -169,6 +201,11 @@ async def _build(
             continue
         if term and term not in f"{emp.get('name', '')} {emp.get('employee_code', '')}".lower():
             continue
+        ds = (ex.get("dummy_shift") or "").strip()
+        if dummy and dummy_shift and ds != dummy_shift:
+            continue
+        if dummy:
+            _dshift_counts[ds or "— None —"] = _dshift_counts.get(ds or "— None —", 0) + 1
 
         days: Dict[str, Dict[str, Any]] = {}
         for i, dl in enumerate(day_labels):
@@ -209,6 +246,38 @@ async def _build(
                     "sources": cell.get("sources") or [],
                 },
             }
+            if dummy:
+                # Iter 628 — day-status priority (user spec sec 10):
+                # Holiday → Week Off → Present → Absent. Substitution is
+                # DISPLAY ONLY; the underlying attendance is never touched.
+                has_in, has_out = bool(cell.get("in")), bool(cell.get("out"))
+                pc = int(cell.get("punches") or 0)
+                e_d = days[dl]
+                if cell.get("holiday"):
+                    e_d["d_in"] = e_d["d_out"] = "H"
+                    e_d["flag"] = "holiday"
+                    _dsum["holiday"] += 1
+                elif cell.get("weekly_off"):
+                    e_d["d_in"] = e_d["d_out"] = "WO"
+                    e_d["flag"] = "weekly_off"
+                    _dsum["week_off"] += 1
+                elif has_in and has_out:
+                    # 2 punches → dummy timings; >2 punches → preserve the
+                    # existing matrix representation (user spec sec 6).
+                    if pc <= 2 and ds in dummy_map:
+                        st, en, overnight = dummy_map[ds]
+                        e_d["d_in"] = st
+                        e_d["d_out"] = f"{en}*" if overnight else en
+                        if e_d["flag"] in ("late", "missing"):
+                            e_d["flag"] = ("ot" if e_d["ot"] != "-"
+                                           else "normal")
+                    _dsum["present"] += 1
+                elif has_in or has_out:
+                    # 1 punch → show the available side, missing side stays
+                    # per the existing IN/OUT matrix logic ("-").
+                    _dsum["present"] += 1
+                else:
+                    _dsum["absent"] += 1
         totals = emp.get("totals") or {}
         out_rows.append({
             "user_id": emp.get("user_id"),
@@ -216,6 +285,7 @@ async def _build(
             "name": emp.get("name"),
             "department": dept, "designation": desig,
             "category": etype, "contractor_name": contr, "shift_name": shf,
+            "dummy_shift": ds,
             "status": "RESIGNED" if resigned else "ACTIVE",
             "days": days,
             "month_total": _fmt_hm(totals.get("duty_hours")),
@@ -282,7 +352,7 @@ async def _build(
         for dl, v in (e.get("days") or {}).items():
             if v.get("ot") and v["ot"] != "-":
                 day_ot_min[dl] = day_ot_min.get(dl, 0) + _hm_min(v["ot"])
-    return {
+    result = {
         "company": {"company_id": company_id,
                     "name": (comp_doc or {}).get("name") or company.get("name"),
                     "logo_base64": (comp_doc or {}).get("logo_base64")},
@@ -301,6 +371,22 @@ async def _build(
             "shifts": sorted({e.get("shift_name") or "" for e in extra.values()} - {""}),
         },
     }
+    if dummy:
+        result["dummy_mode"] = True
+        result["report_title"] = "DUMMY SHIFT IN / OUT MATRIX REPORT"
+        result["dummy_note"] = ("DUMMY SHIFT REPORT — FOR REPORTING PURPOSE "
+                                "ONLY · * = OUT on the next calendar date")
+        result["dummy_summary"] = {
+            "total_employees": len(out_rows),
+            "present_days": _dsum["present"],
+            "week_off_days": _dsum["week_off"],
+            "holiday_days": _dsum["holiday"],
+            "absent_days": _dsum["absent"],
+            "shift_counts": dict(sorted(_dshift_counts.items())),
+        }
+        result["filter_options"]["dummy_shifts"] = sorted(
+            {(e.get("dummy_shift") or "").strip() for e in extra.values()} - {""})
+    return result
 
 
 _FILTER_PARAMS = dict()  # documentation only
@@ -317,13 +403,16 @@ async def inout_ot_matrix_json(
     shift: Optional[str] = None,
     q: Optional[str] = None,
     status: str = "active",
+    dummy: int = 0,
+    dummy_shift: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     authorization: Optional[str] = Header(None),
 ):
     _, cid = await _auth(authorization, company_id)
     data = await _build(cid, month, department, designation, employee_type,
-                        contractor, shift, q, status)
+                        contractor, shift, q, status,
+                        dummy=bool(dummy), dummy_shift=dummy_shift)
     emps = data.pop("employees")
     total = len(emps)
     start = (page - 1) * page_size
@@ -346,8 +435,26 @@ def _header_lines(data: Dict[str, Any], emp: Dict[str, Any]) -> List[str]:
         f"Department: {emp.get('department') or '-'}   Designation: {emp.get('designation') or '-'}   "
         f"Category: {emp.get('category') or '-'}"
         + (f"   Contractor: {emp['contractor_name']}" if emp.get("contractor_name") else ""),
-        f"Shift: {emp.get('shift_name') or '-'}   Month: {data['month_number']}/{data['year']}   "
+        f"Shift: {emp.get('shift_name') or '-'}"
+        + (f"   Dummy Shift: {emp.get('dummy_shift') or 'None'}"
+           if data.get("dummy_mode") else "")
+        + f"   Month: {data['month_number']}/{data['year']}   "
         f"Payroll Period: {data['payroll_period']}",
+    ]
+
+
+def _dummy_summary_lines(data: Dict[str, Any]) -> List[str]:
+    """Iter 628 — report summary block (dummy mode, user spec sec 16)."""
+    ds = data.get("dummy_summary") or {}
+    sc = ds.get("shift_counts") or {}
+    return [
+        f"SUMMARY — Active Employees: {ds.get('total_employees', 0)} · "
+        f"Present Days: {ds.get('present_days', 0)} · "
+        f"Week Off: {ds.get('week_off_days', 0)} · "
+        f"Holidays: {ds.get('holiday_days', 0)} · "
+        f"Absent Days: {ds.get('absent_days', 0)}",
+        "Shift-wise Employees: " + (" · ".join(
+            f"{k}: {v}" for k, v in sc.items()) or "—"),
     ]
 
 
@@ -362,6 +469,8 @@ async def inout_ot_matrix_xlsx(
     shift: Optional[str] = None,
     q: Optional[str] = None,
     status: str = "active",
+    dummy: int = 0,
+    dummy_shift: Optional[str] = None,
     authorization: Optional[str] = Header(None),
 ):
     from openpyxl import Workbook
@@ -370,7 +479,8 @@ async def inout_ot_matrix_xlsx(
 
     _, cid = await _auth(authorization, company_id)
     data = await _build(cid, month, department, designation, employee_type,
-                        contractor, shift, q, status)
+                        contractor, shift, q, status,
+                        dummy=bool(dummy), dummy_shift=dummy_shift)
     emps = data["employees"][:500]
     if not emps:
         raise HTTPException(status_code=404, detail="No employees match the filters")
@@ -384,6 +494,14 @@ async def inout_ot_matrix_xlsx(
     thin = Border(*[Side(style="thin", color="CBD5E1")] * 4)
     center = Alignment(horizontal="center", vertical="center")
     r = 1
+    # Iter 628 — dummy-mode heading + read-only disclaimer.
+    if data.get("dummy_mode"):
+        ws.cell(row=r, column=1, value=data["report_title"]).font = Font(
+            bold=True, size=13, color="7C2D12")
+        r += 1
+        ws.cell(row=r, column=1, value=data["dummy_note"]).font = Font(
+            bold=True, size=10, color="DC2626")
+        r += 2
     # Iter 520 — firm attendance policy line on top of the sheet.
     _pol_line = (data.get("policy") or {}).get("line")
     if _pol_line:
@@ -453,6 +571,11 @@ async def inout_ot_matrix_xlsx(
     ws.cell(row=r, column=1,
             value=f"Month OT Total: {data.get('month_ot_total') or '-'}"
             ).font = Font(bold=True, size=9)
+    # Iter 628 — dummy-mode summary block (sec 16).
+    if data.get("dummy_mode"):
+        for line in _dummy_summary_lines(data):
+            r += 1
+            ws.cell(row=r, column=1, value=line).font = Font(bold=True, size=9)
     ws.column_dimensions["A"].width = 13
     for j in range(2, len(data["day_labels"]) + 2):
         ws.column_dimensions[get_column_letter(j)].width = 6.5
@@ -460,11 +583,13 @@ async def inout_ot_matrix_xlsx(
 
     buf = io.BytesIO()
     wb.save(buf)
+    _fn = ("dummy-shift-matrix" if data.get("dummy_mode")
+           else "inout-ot-matrix")
     return Response(
         content=buf.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition":
-                 f'attachment; filename="inout-ot-matrix-{month}.xlsx"'})
+                 f'attachment; filename="{_fn}-{month}.xlsx"'})
 
 
 @router.get("/inout-ot-matrix.csv")
@@ -478,27 +603,44 @@ async def inout_ot_matrix_csv(
     shift: Optional[str] = None,
     q: Optional[str] = None,
     status: str = "active",
+    dummy: int = 0,
+    dummy_shift: Optional[str] = None,
     authorization: Optional[str] = Header(None),
 ):
     _, cid = await _auth(authorization, company_id)
     data = await _build(cid, month, department, designation, employee_type,
-                        contractor, shift, q, status)
+                        contractor, shift, q, status,
+                        dummy=bool(dummy), dummy_shift=dummy_shift)
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["Emp Code", "Name", "Department", "Designation", "Shift", "Type"]
+    _dm = bool(data.get("dummy_mode"))
+    if _dm:
+        w.writerow([data["report_title"]])
+        w.writerow([data["dummy_note"]])
+        w.writerow([])
+    w.writerow(["Emp Code", "Name", "Department", "Designation", "Shift"]
+               + (["Dummy Shift"] if _dm else []) + ["Type"]
                + [str(d)[:2] for d in data["day_labels"]])
     for emp in data["employees"]:
         for key, label in ROW_KEYS:
             w.writerow([emp.get("employee_code"), emp.get("name"),
                         emp.get("department"), emp.get("designation"),
-                        emp.get("shift_name"), label]
+                        emp.get("shift_name")]
+                       + ([emp.get("dummy_shift") or "None"] if _dm else [])
+                       + [label]
                        + [(emp["days"].get(dl) or {}).get(key) or "-"
                           for dl in data["day_labels"]])
+    if _dm:
+        w.writerow([])
+        for line in _dummy_summary_lines(data):
+            w.writerow([line])
     return Response(
         content=buf.getvalue().encode("utf-8-sig"),
         media_type="text/csv",
         headers={"Content-Disposition":
-                 f'attachment; filename="inout-ot-matrix-{month}.csv"'})
+                 f'attachment; filename="'
+                 f'{"dummy-shift-matrix" if _dm else "inout-ot-matrix"}'
+                 f'-{month}.csv"'})
 
 
 @router.get("/inout-ot-matrix.pdf")
@@ -512,6 +654,8 @@ async def inout_ot_matrix_pdf(
     shift: Optional[str] = None,
     q: Optional[str] = None,
     status: str = "active",
+    dummy: int = 0,
+    dummy_shift: Optional[str] = None,
     authorization: Optional[str] = Header(None),
 ):
     """LEGAL LANDSCAPE (Iter 293, user request) — all employees flow
@@ -526,7 +670,8 @@ async def inout_ot_matrix_pdf(
 
     _, cid = await _auth(authorization, company_id)
     data = await _build(cid, month, department, designation, employee_type,
-                        contractor, shift, q, status)
+                        contractor, shift, q, status,
+                        dummy=bool(dummy), dummy_shift=dummy_shift)
     emps = data["employees"][:500]
     if not emps:
         raise HTTPException(status_code=404, detail="No employees match the filters")
@@ -546,6 +691,14 @@ async def inout_ot_matrix_pdf(
     day_w = (page_w - label_w) / max(1, ndays)
 
     flag_fill = {k: rl.HexColor(f"#{v}") for k, v in FLAG_COLORS.items()}
+    # Iter 628 — dummy-mode heading + read-only disclaimer on the PDF.
+    if data.get("dummy_mode"):
+        flow.append(Paragraph(data["report_title"], ParagraphStyle(
+            "dt", fontSize=13, leading=16, spaceAfter=2,
+            fontName="Helvetica-Bold", textColor=rl.HexColor("#7C2D12"))))
+        flow.append(Paragraph(data["dummy_note"], ParagraphStyle(
+            "dn", fontSize=8.5, leading=11, spaceAfter=3,
+            fontName="Helvetica-Bold", textColor=rl.HexColor("#DC2626"))))
     flow.append(Paragraph(
         "Legend: <font backcolor='#DBEAFE'> OT </font> "
         "<font backcolor='#FEF08A'> Late </font> "
@@ -626,8 +779,15 @@ async def inout_ot_matrix_pdf(
         Paragraph(f"Day-wise OT Totals (all filtered employees) — "
                   f"Month OT Total: {data.get('month_ot_total') or '-'}", h1),
         Spacer(1, 1.5 * mm), ot_tbl]))
+    # Iter 628 — dummy-mode summary block (sec 16).
+    if data.get("dummy_mode"):
+        flow.append(Spacer(1, 3 * mm))
+        for line in _dummy_summary_lines(data):
+            flow.append(Paragraph(line, h2))
     doc.build(flow)
+    _fn = ("dummy-shift-matrix" if data.get("dummy_mode")
+           else "inout-ot-matrix")
     return Response(
         content=buf.getvalue(), media_type="application/pdf",
         headers={"Content-Disposition":
-                 f'inline; filename="inout-ot-matrix-{month}.pdf"'})
+                 f'inline; filename="{_fn}-{month}.pdf"'})

@@ -19,6 +19,7 @@ import {
   ScrollView,
   Platform,
   Modal,
+  useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -30,6 +31,7 @@ import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import CompanyPicker from "@/src/components/CompanyPicker";
 import MonthPicker from "@/src/components/MonthPicker";
 import { colors } from "@/src/theme";
+import { isStandalonePWA } from "@/src/utils/pwa";
 
 const ROW_LABELS: [string, string][] = [
   ["d_in", "D-In"], ["d_out", "D-Out"], ["total", "Total Hrs"],
@@ -65,6 +67,14 @@ export default function InOutOtMatrixScreen() {
   const [contr, setContr] = useState("");
   const [shift, setShift] = useState("");
   const [status, setStatus] = useState<"all" | "active" | "resigned">("active");
+  // Iter 628 — Dummy Shift Mode (report-only layer; needs firm policy flag).
+  const [dummyMode, setDummyMode] = useState(false);
+  const [dummyAllowed, setDummyAllowed] = useState(false);
+  const [dummyShiftF, setDummyShiftF] = useState("");
+  // Iter 628b (user request) — Dummy Shift Mode is a WEB-PORTAL-ONLY
+  // feature: hidden on the mobile PWA / installed app / small screens.
+  const { width: winW } = useWindowDimensions();
+  const webPortal = Platform.OS === "web" && !isStandalonePWA() && winW >= 768;
   const [page, setPage] = useState(1);
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
@@ -78,6 +88,19 @@ export default function InOutOtMatrixScreen() {
     else if (selectedCompanyId && selectedCompanyId !== "all") setCid(selectedCompanyId);
   }, [user, selectedCompanyId]);
 
+  // Iter 628 — show the Dummy Shift Mode toggle only when the firm has
+  // "Dummy Shift Allowed" switched ON in the Attendance Policy.
+  useEffect(() => {
+    if (!cid) { setDummyAllowed(false); return; }
+    api<{ dummy_allowed: boolean }>(
+      `/admin/labour-reports/shift-options?company_id=${cid}`)
+      .then((r) => setDummyAllowed(!!r.dummy_allowed))
+      .catch(() => setDummyAllowed(false));
+  }, [cid]);
+  useEffect(() => {
+    if ((!dummyAllowed || !webPortal) && dummyMode) { setDummyMode(false); setDummyShiftF(""); }
+  }, [dummyAllowed, dummyMode, webPortal]);
+
   const qs = useMemo(() => {
     const p = new URLSearchParams({ month, page: String(page), page_size: "10" });
     if (cid) p.set("company_id", cid);
@@ -87,9 +110,13 @@ export default function InOutOtMatrixScreen() {
     if (cat) p.set("employee_type", cat);
     if (contr) p.set("contractor", contr);
     if (shift) p.set("shift", shift);
+    if (dummyMode) {
+      p.set("dummy", "1");
+      if (dummyShiftF) p.set("dummy_shift", dummyShiftF);
+    }
     p.set("status", status);
     return p.toString();
-  }, [cid, month, q, dept, desig, cat, contr, shift, status, page]);
+  }, [cid, month, q, dept, desig, cat, contr, shift, status, page, dummyMode, dummyShiftF]);
 
   const load = useCallback(async () => {
     if (!cid) return;
@@ -106,7 +133,7 @@ export default function InOutOtMatrixScreen() {
   }, [cid, qs]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setPage(1); }, [cid, month, q, dept, desig, cat, contr, shift, status]);
+  useEffect(() => { setPage(1); }, [cid, month, q, dept, desig, cat, contr, shift, status, dummyMode, dummyShiftF]);
 
   const doExport = async (kind: "xlsx" | "pdf" | "csv" | "print") => {
     if (!cid) return;
@@ -120,7 +147,7 @@ export default function InOutOtMatrixScreen() {
         } else {
           const a = document.createElement("a");
           a.href = r.webBlobUrl;
-          a.download = `inout-ot-matrix-${month}.${kind}`;
+          a.download = `${dummyMode ? "dummy-shift-matrix" : "inout-ot-matrix"}-${month}.${kind}`;
           a.click();
         }
       }
@@ -154,7 +181,7 @@ export default function InOutOtMatrixScreen() {
         <Pressable onPress={() => router.back()} hitSlop={10}>
           <Ionicons name="arrow-back" size={22} color={colors.onSurface} />
         </Pressable>
-        <Text style={s.title}>In/Out & OT Matrix</Text>
+        <Text style={s.title}>{dummyMode ? "Dummy Shift In/Out Matrix" : "In/Out & OT Matrix"}</Text>
         <View style={{ flex: 1 }} />
         {(["xlsx", "pdf", "csv", "print"] as const).map((k) => (
           <Pressable key={k} style={s.expBtn} onPress={() => doExport(k)}
@@ -192,6 +219,10 @@ export default function InOutOtMatrixScreen() {
             <FilterSelect label="Category" value={cat} onChange={setCat} options={fo.categories || []} />
             <FilterSelect label="Contractor" value={contr} onChange={setContr} options={fo.contractors || []} />
             <FilterSelect label="Shift" value={shift} onChange={setShift} options={fo.shifts || []} />
+            {dummyMode ? (
+              <FilterSelect label="Dummy Shift" value={dummyShiftF}
+                onChange={setDummyShiftF} options={fo.dummy_shifts || []} />
+            ) : null}
             <View style={s.statusChips}>
               {(["all", "active", "resigned"] as const).map((k) => (
                 <Pressable key={k} style={[s.chip, status === k && s.chipOn]} onPress={() => setStatus(k)}>
@@ -201,6 +232,16 @@ export default function InOutOtMatrixScreen() {
                 </Pressable>
               ))}
             </View>
+            {dummyAllowed && webPortal ? (
+              <Pressable
+                style={[s.chip, dummyMode && s.dummyChipOn]}
+                onPress={() => { setDummyMode((v) => !v); setDummyShiftF(""); }}
+                testID="iom-dummy-toggle">
+                <Text style={[s.chipTxt, dummyMode && s.chipTxtOn]}>
+                  {dummyMode ? "✓ Dummy Shift Mode" : "Dummy Shift Mode"}
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
           {/* Legend */}
           <View style={s.legendRow}>
@@ -219,6 +260,23 @@ export default function InOutOtMatrixScreen() {
 
         {!loading && data ? (
           <>
+            {data.dummy_mode ? (
+              <View style={s.dummyBanner} testID="iom-dummy-banner">
+                <Text style={s.dummyTitle}>{data.report_title}</Text>
+                <Text style={s.dummyNote}>{data.dummy_note}</Text>
+                {data.dummy_summary ? (
+                  <Text style={s.dummySummary}>
+                    Active Employees: {data.dummy_summary.total_employees} ·
+                    {" "}Present Days: {data.dummy_summary.present_days} ·
+                    {" "}Week Off: {data.dummy_summary.week_off_days} ·
+                    {" "}Holidays: {data.dummy_summary.holiday_days} ·
+                    {" "}Absent: {data.dummy_summary.absent_days}
+                    {"\n"}Shift-wise: {Object.entries(data.dummy_summary.shift_counts || {})
+                      .map(([k, v]) => `${k}: ${v}`).join(" · ") || "—"}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
             <Text style={s.metaTxt}>
               {data.total_employees} employee(s) · page {data.page}/{data.total_pages} · {data.payroll_period}
             </Text>
@@ -401,7 +459,8 @@ function EmployeeMatrix({ data, emp, onCell }: {
               emp.designation && `Desig: ${emp.designation}`,
               emp.category && `Category: ${emp.category}`,
               emp.contractor_name && `Contractor: ${emp.contractor_name}`,
-              emp.shift_name && `Shift: ${emp.shift_name}`]
+              emp.shift_name && `Shift: ${emp.shift_name}`,
+              data.dummy_mode && `Dummy Shift: ${emp.dummy_shift || "None"}`]
               .filter(Boolean).join("   ·   ")}
           </Text>
           <Text style={s.empMeta}>
@@ -504,6 +563,7 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface,
   },
   chipOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  dummyChipOn: { backgroundColor: "#B45309", borderColor: "#B45309" },
   chipTxt: { fontSize: 11.5, fontWeight: "600", color: colors.onSurfaceSecondary },
   chipTxtOn: { color: "#fff" },
   legendRow: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
@@ -511,6 +571,13 @@ const s = StyleSheet.create({
   legendSwatch: { width: 14, height: 14, borderRadius: 3, borderWidth: 1, borderColor: "#CBD5E1" },
   legendTxt: { fontSize: 11, color: colors.onSurfaceSecondary },
   err: { color: "#DC2626", marginTop: 10, fontSize: 13 },
+  dummyBanner: {
+    backgroundColor: "#FFF7ED", borderWidth: 1, borderColor: "#FDBA74",
+    borderRadius: 10, padding: 10, marginTop: 10,
+  },
+  dummyTitle: { fontSize: 13.5, fontWeight: "800", color: "#7C2D12" },
+  dummyNote: { fontSize: 11, fontWeight: "700", color: "#DC2626", marginTop: 2 },
+  dummySummary: { fontSize: 11, color: "#7C2D12", marginTop: 6, fontWeight: "600" },
   muted: { color: colors.onSurfaceTertiary, marginTop: 10, fontSize: 13 },
   metaTxt: { color: colors.onSurfaceSecondary, fontSize: 12, marginVertical: 8 },
   policyTxt: {

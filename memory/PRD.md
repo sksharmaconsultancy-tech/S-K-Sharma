@@ -6808,3 +6808,37 @@ Current iteration: 594. Next: 595.
   2 grand totals, dept vs desig totals match, deployed count matches full-data
   grand total, pdf/excel/csv downloads, multi-day period). UI screenshot OK.
 - APP_ITERATION 627; deploy_vps_iter627.sh served via kind=script.
+
+## Iteration 628 (2026-06) — Dummy Shift In/Out Matrix Report (user 18-section spec)
+- USER DECISIONS: keep EXISTING central Dummy Shift Master timings (SHIFT A1
+  07:00-15:00, B1 15:00-23:00, C1 23:00-07:00, A 08:00-16:00, B 16:00-00:00,
+  C 00:00-08:00, GENERAL 10:00-06:00 — did NOT adopt spec table timings);
+  keep ALL 7 matrix rows (Hrs/OT rows show ACTUAL data, only D-In/D-Out get
+  dummy timings); old single-day dummy muster report KEPT alongside; report
+  opens via a "Dummy Shift Mode" toggle on the existing In/Out Matrix screen.
+- Backend (inout_ot_matrix.py): _build(dummy, dummy_shift) — 400 if firm flag
+  attendance_policy.policy_master.dummy_shift_allowed is OFF; imports
+  DUMMY_SHIFTS from labour_reports; per-day priority Holiday→H, WeekOff→WO
+  (cell.holiday/weekly_off from grid engine), 2 punches→dummy IN/OUT
+  (overnight end<=start → "HH:MM*" OUT next day), 1 punch→existing repr,
+  >2 punches→existing repr preserved; late/missing flag normalised on
+  substituted cells; dummy_summary (present/WO/holiday/absent day counts +
+  shift_counts); filter_options.dummy_shifts; all 4 endpoints take
+  dummy=1&dummy_shift=; exports get title + red disclaimer + summary block +
+  dummy-shift-matrix-{month} filenames; STRICTLY READ-ONLY (GET only, test
+  proves 0 DB writes).
+- Frontend (inout-ot-matrix.tsx): dummyAllowed fetched from
+  /admin/labour-reports/shift-options; amber toggle chip (iom-dummy-toggle),
+  banner (iom-dummy-banner) with title/note/summary, Dummy Shift filter,
+  emp card shows Dummy Shift name, export filenames adapt.
+- Tests: /app/test_iter628_dummy_matrix.py 22/22 PASS (flag gate 400, normal
+  mode untouched, substitution, >2-punch preservation, WO/H markers,
+  overnight *, filter, 3 exports, csv content, read-only proof; restores all
+  data). UI screenshot OK.
+- NOTE: preview firm Kankani left with dummy_shift_allowed=TRUE and employee
+  code 316 assigned SHIFT A1 for user verification (was originally OFF).
+- APP_ITERATION 628; deploy_vps_iter628.sh served via kind=script.
+- Iter 628b (user request): Dummy Shift Mode is WEB-PORTAL ONLY — toggle
+  hidden on mobile PWA / installed standalone PWA / native / width < 768
+  (gate: Platform.OS==="web" && !isStandalonePWA() && width>=768 in
+  inout-ot-matrix.tsx). Verified: hidden @390px, visible+working @1280px.
