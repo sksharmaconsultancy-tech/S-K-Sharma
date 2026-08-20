@@ -87,8 +87,11 @@ async def validate_compliance_run(run: Dict[str, Any]) -> Dict[str, Any]:
     uan_owners: Dict[str, List[str]] = {}
     ip_owners: Dict[str, List[str]] = {}
     for r in rows:
-        uan = str(r.get("uan_no") or "").strip()
-        ip = str(r.get("esi_ip_no") or "").strip()
+        _m0 = masters.get(r.get("user_id")) or {}
+        # Iter 648 — duplicate detection falls back to the LIVE master IDs
+        # (rows don't always carry uan/ip).
+        uan = str(r.get("uan_no") or _m0.get("uan_no") or "").strip()
+        ip = str(r.get("esi_ip_no") or _m0.get("esi_ip_no") or "").strip()
         nm = str(r.get("name") or r.get("employee_code") or "?")
         if uan:
             uan_owners.setdefault(uan, []).append(nm)

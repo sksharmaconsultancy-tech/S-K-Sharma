@@ -1645,6 +1645,32 @@ export default function ComplianceSalaryRunScreen() {
   // Client-side setter for individual row fields (Others allowance,
   // Other deduction, OT Amount, TDS — Iter 230). Recomputes Gross + Net
   // locally so the grid stays in sync while editing.
+  // Iter 647 (user request — "Allow us to edit Incentive column") —
+  // editing a custom allowance head cell adjusts that head AND the row's
+  // Others bucket total (gross/net/PF/ESIC refresh via the same pipeline
+  // as an Others* edit). The edit is stamped manual so reprocess keeps it.
+  const updateAllowanceHead = (userId: string, label: string, value: number) => {
+    const r = (run?.rows || []).find((x) => x.user_id === userId) as any;
+    if (!r) return;
+    const old = Number((r.allowance_heads || {})[label]) || 0;
+    const delta = value - old;
+    setRun((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        rows: prev.rows.map((x) => x.user_id === userId
+          ? ({
+              ...x,
+              allowance_heads: { ...(((x as any).allowance_heads) || {}), [label]: value },
+              manual_fields: Array.from(new Set([...((((x as any).manual_fields) as string[]) || []), "allowance_heads"])),
+              manual_override: true,
+            } as any)
+          : x),
+      } as any;
+    });
+    if (delta) updateRowField(userId, "others", (Number(r.others) || 0) + delta);
+  };
+
   const updateRowField = (
     userId: string,
     key: "others" | "other_deduction" | "advance_recovery" | "ot_pay" | "tds" | "esic_leave_days",
@@ -3205,11 +3231,17 @@ export default function ComplianceSalaryRunScreen() {
                             />
                           ) : null}
                           {/* Iter 644 — dynamic custom allowance head cells
-                              (paid, decomposed out of Others*). */}
+                              (paid, decomposed out of Others*).
+                              Iter 647 (user request) — EDITABLE. */}
                           {allowLabels.map((l) => (
-                            <Text key={`ap-${l}`} style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>
-                              {fmtInr((((r as any).allowance_heads || {})[l]) || 0)}
-                            </Text>
+                            <EditableGridCell
+                              key={`ap-${l}`}
+                              col={`allow::${l}`} idx={idx} width={colW.num}
+                              value={(((r as any).allowance_heads || {})[l]) || 0}
+                              cellRefs={cellRefs}
+                              onCommit={(n) => updateAllowanceHead(r.user_id, l, n)}
+                              onNav={navigateFrom}
+                            />
                           ))}
                         </>
                       );

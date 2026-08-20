@@ -7178,3 +7178,31 @@ Current iteration: 594. Next: 595.
 - PENDING USER PICKS (asked in finish): Salary Slip WhatsApp blast after
   lock (note: whatsapp/send-salary-slips endpoint already exists — check
   before rebuilding) and Hindi language support (P4 backlog).
+
+## Iteration 647 (2026-06) — Editable INCENTIVE column + Salary Lock hardened
+### 1. Editable custom allowance heads (user: "Allow us to edit Incentive")
+- Frontend: updateAllowanceHead(userId,label,value) — patches
+  row.allowance_heads[label], stamps manual_fields "allowance_heads",
+  then delegates money math to updateRowField("others", others+delta)
+  (gross/PF/ESIC/net refresh like an Others* edit). Dynamic head cells are
+  EditableGridCell col=`allow::<label>` now.
+- Backend keep-on-reprocess: both kept branches (non-imported _mf and
+  imported _mf_imp) restore _prev allowance_heads when "allowance_heads"
+  in manual_fields. Verified by script: INCENTIVE 2000→3000 survives
+  reprocess, gross 15040→16040 kept.
+### 2. Salary Lock STILL failing on VPS (user report) — hardening
+- Preview reproduction shows lock WORKS (finalize → reports modal); VPS
+  runs 646 code (verified live chunk has allowance_heads marker). Likely
+  cause on VPS: validate_compliance_run crashing on their data → finalize
+  endpoint 500 (validator was UNGUARDED inside finalize despite Iter 423b
+  non-blocking policy).
+- Fixes: finalize wraps validator + audit writer in try/except (lock can
+  NEVER be blocked by them; validator_error stamped when it crashes).
+  compliance_validation.py: duplicate UAN/IP detection falls back to live
+  Employee Master IDs (rows often carry uan_no=None).
+- NOTE: preview validation modal path verified earlier (Iter 644) with
+  clean lock; with findings the modal shows and "Finalize anyway" works.
+  If user STILL reports lock failure after deploying 647, ASK for the
+  exact symptom (no popup at all? error toast text? spinner stuck?) and
+  check their VPS backend logs for [compliance-run] lines.
+- APP_ITERATION "647"; deploy_vps_iter647.sh served via kind=script.

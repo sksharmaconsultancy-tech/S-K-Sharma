@@ -1109,6 +1109,11 @@ async def _compute_compliance_run(
                     row["gross_paid"] = round(
                         float(row.get("gross_paid") or 0) + _delta, 2)
                     row["net"] = round(float(row.get("net") or 0) + _delta, 2)
+            # Iter 647 (user request) — manually edited custom allowance
+            # head amounts (e.g. INCENTIVE) survive a reprocess.
+            if "allowance_heads" in _mf and isinstance(
+                    _prev.get("allowance_heads"), dict):
+                row["allowance_heads"] = _prev["allowance_heads"]
             if "ot_pay" in _mf:
                 _new_ot = round(float(_prev.get("ot_pay") or 0), 2)
                 _delta = round(_new_ot - float(row.get("ot_pay") or 0), 2)
@@ -1206,6 +1211,11 @@ async def _compute_compliance_run(
                 _mf_imp = set(_prev_imp.get("manual_fields") or [])
                 if _mf_imp:
                     row["manual_fields"] = sorted(_mf_imp)
+                # Iter 647 (user request) — manually edited custom allowance
+                # head amounts survive a reprocess on Freeze runs too.
+                if "allowance_heads" in _mf_imp and isinstance(
+                        _prev_imp.get("allowance_heads"), dict):
+                    row["allowance_heads"] = _prev_imp["allowance_heads"]
                 if "advance_recovery" in _mf_imp:
                     _adv_prev = round(
                         float(_prev_imp.get("advance_recovery") or 0), 2)
@@ -2323,7 +2333,17 @@ async def finalize_compliance_salary_run(
     # still RUNS and its findings are stamped on the run for review, but it
     # NEVER blocks the Salary Lock anymore.
     from routes.compliance_validation import validate_compliance_run
-    validation = await validate_compliance_run(run)
+    # Iter 648 (user bug — "Still not able to Lock") — the validator itself
+    # can crash on unusual data; per the Iter 423b NON-BLOCKING policy a
+    # validator failure must NEVER block the Salary Lock.
+    try:
+        validation = await validate_compliance_run(run)
+    except Exception as _val_err:
+        logger.warning("[compliance-run] lock validation crashed run=%s: %s",
+                       run_id, _val_err)
+        validation = {"errors_count": 0, "warnings_count": 0,
+                      "employees_flagged": 0, "checked_at": now_iso(),
+                      "validator_error": str(_val_err)[:300]}
 
     stamp = {
         "finalized": True,
@@ -2349,14 +2369,18 @@ async def finalize_compliance_salary_run(
         await write_monthly_snapshot(run, admin, stamp["lock_validation"])
     except Exception as _snap_err:  # snapshot must never block the lock
         logger.warning("[compliance-run] snapshot failed run=%s: %s", run_id, _snap_err)
-    # Iter 182 — audit trail
-    from routes.salary_audit import write_salary_audit
-    await write_salary_audit(
-        admin, "finalize", run,
-        "Run finalized (locked)"
-        + (f" — {validation['errors_count']} error(s), "
-           f"{validation['warnings_count']} warning(s) noted (non-blocking policy)"
-           if (validation["errors_count"] or validation["warnings_count"]) else ""))
+    # Iter 182 — audit trail (must never block the lock — Iter 648).
+    try:
+        from routes.salary_audit import write_salary_audit
+        await write_salary_audit(
+            admin, "finalize", run,
+            "Run finalized (locked)"
+            + (f" — {validation['errors_count']} error(s), "
+               f"{validation['warnings_count']} warning(s) noted (non-blocking policy)"
+               if (validation["errors_count"] or validation["warnings_count"]) else ""))
+    except Exception as _aud_err:
+        logger.warning("[compliance-run] finalize audit failed run=%s: %s",
+                       run_id, _aud_err)
     # Iter 103 — automated email trigger
     try:
         from routes.email_notifications import fire_email_event
