@@ -6842,3 +6842,23 @@ Current iteration: 594. Next: 595.
   hidden on mobile PWA / installed standalone PWA / native / width < 768
   (gate: Platform.OS==="web" && !isStandalonePWA() && width>=768 in
   inout-ot-matrix.tsx). Verified: hidden @390px, visible+working @1280px.
+
+## Iteration 629 (2026-06) — PWA punch time double-TZ bug + auto-approve all PWA punches
+- BUG (user): My Attendance in employee PWA showed morning punch as 3:27 PM.
+  ROOT CAUSE: punches stored as IST WALL-CLOCK labelled UTC (Iter 144
+  convention); my-attendance.tsx fmtT() formatted with timeZone
+  "Asia/Kolkata" → +5:30 added TWICE. FIX: render with timeZone "UTC".
+  Also fixed mk() in correction requests: was labelling requested times
+  +05:30 (stored verbatim as `at` by _apply_request in ess.py) → now +00:00
+  per convention.
+- FEATURE (user): ALL employee-PWA punches auto-approve. attendance_core.py
+  firm_auto = company.get("auto_approve_mobile_punches") is not False
+  (default ON; firm can still explicitly turn OFF in Firm Settings).
+  Mock-GPS punches still force manual approval; eligibility HELD gate and
+  contractual gate unchanged. Preview DB: all 3 firms set True; deploy629.sh
+  contains a PYMIG migration setting True on all VPS firms.
+- Tests: /app/test_iter629_punch_autoapprove.py 8/8 PASS (auto-approve,
+  decision_by system:firm-auto-approve, missing-flag default ON, explicit
+  OFF → pending, IST-wall-clock 'at' convention, /ess/attendance payload).
+  UI screenshot: stored 07:51 IST punch now displays "07:51 am".
+- APP_ITERATION 629; deploy_vps_iter629.sh served via kind=script.

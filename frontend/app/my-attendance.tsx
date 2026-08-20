@@ -16,10 +16,14 @@ import { api } from "@/src/api/client";
 import { colors } from "@/src/theme";
 
 const nowMonth = () => new Date().toISOString().slice(0, 7);
+// Iter 629 (user bug) — punches are stored as IST WALL-CLOCK labelled UTC
+// (storage convention since Iter 144). Formatting them with
+// timeZone "Asia/Kolkata" added +5:30 AGAIN (09:57 am showed as 03:27 pm).
+// Render in UTC so the stored wall-clock time is shown as-is.
 const fmtT = (iso?: string | null) => {
   if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
+    return new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
   } catch { return iso.slice(11, 16); }
 };
 const SRC_COLOR: Record<string, string> = {
@@ -49,7 +53,9 @@ export default function MyAttendance() {
     if (!reason.trim()) { setMsg("Reason is required"); return; }
     setBusy(true);
     try {
-      const mk = (t: string) => (t ? `${corr.date}T${t.length === 5 ? t : t.padStart(5, "0")}:00+05:30` : null);
+      // Iter 629 — storage convention is IST wall-clock labelled UTC, so
+      // requested correction times must carry +00:00 (NOT +05:30).
+      const mk = (t: string) => (t ? `${corr.date}T${t.length === 5 ? t : t.padStart(5, "0")}:00+00:00` : null);
       const r = await api("/ess/requests", {
         method: "POST",
         body: {

@@ -704,7 +704,10 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
     # as APPROVED instantly so it shows on the Attendance Grid without an
     # admin decision. Contractual employees are still gated (see
     # apply_contractual_gate — the system: decision_by keeps that contract).
-    firm_auto = bool(company.get("auto_approve_mobile_punches"))
+    # Iter 629 (user request) — ALL employee-PWA punches auto-approve by
+    # DEFAULT: the toggle now defaults ON unless a firm explicitly turns
+    # it OFF in Firm Settings.
+    firm_auto = company.get("auto_approve_mobile_punches") is not False
     # Phase 3 — fake/mock GPS flagged punches ALWAYS need manual approval,
     # even in auto-approving Field mode or firm auto-approve mode.
     if record.get("mock_location"):
