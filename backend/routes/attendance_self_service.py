@@ -376,3 +376,27 @@ async def attendance_summary(
         "window_total_hours": window_total,
         "total_hours_till_today": total_all,
     }
+
+
+@api.post("/attendance/punches/approve-all-pending")
+async def approve_all_pending_punches(
+    company_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 639 (user request) — APPROVE BACKLOG: one click approves EVERY
+    pending punch in the admin's scope so the Attendance Grid is instantly
+    up to date. Same decision fields as a single approval (full audit)."""
+    user = await get_user_from_token(authorization)
+    require_role(user, ["super_admin", "company_admin", "sub_admin"])
+    q: dict = {"status": "pending"}
+    if user["role"] == "company_admin":
+        q["company_id"] = user["company_id"]
+    elif company_id:
+        q["company_id"] = company_id
+    r = await db.attendance.update_many(q, {"$set": {
+        "status": "approved",
+        "decision_by": user["user_id"],
+        "decision_at": now_iso(),
+        "decision_reason": "Bulk approve — pending backlog cleared by admin",
+    }})
+    return {"ok": True, "approved": r.modified_count}

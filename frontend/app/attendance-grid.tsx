@@ -1211,15 +1211,16 @@ export default function AttendanceGridScreen() {
 // Grid header / row
 // ---------------------------------------------------------------------------
 const COL = {
-  sno: 44,
-  name: 190,
-  father: 130,
-  dept: 110,
-  bio: 60,
-  day: 66,
-  dayHours: 46,
-  daySal: 58,
-  sum: 62,
+  // Iter 639 (user request — UI readability): scaled ~20% for larger fonts.
+  sno: 50,
+  name: 220,
+  father: 150,
+  dept: 126,
+  bio: 70,
+  day: 80,
+  dayHours: 56,
+  daySal: 68,
+  sum: 72,
 };
 
 // Iter 205 — frozen identity columns (web): Name, Father Name, Designation
@@ -1993,12 +1994,12 @@ const styles = StyleSheet.create({
     // never go blank past the viewport width (bug: blank after the 25th).
     backgroundColor: colors.brandPrimary,
   },
-  hcellTxt: { color: "#fff", fontWeight: "700", fontSize: 11, letterSpacing: 0.4 },
+  hcellTxt: { color: "#fff", fontWeight: "700", fontSize: 13, letterSpacing: 0.4 },
   // Iter 205b — frozen header identity cells need their own SOLID bg so day
   // headers disappear behind them while scrolling right.
   hcellFrozen: { backgroundColor: colors.brandPrimary },
-  hcellDay: { color: "#fff", fontWeight: "700", fontSize: 12 },
-  hcellDayLabel: { color: "rgba(255,255,255,0.75)", fontSize: 9, marginTop: 1 },
+  hcellDay: { color: "#fff", fontWeight: "700", fontSize: 13.5 },
+  hcellDayLabel: { color: "rgba(255,255,255,0.75)", fontSize: 10.5, marginTop: 1 },
   // Iter 222 (user request) — the 1–31 day headers get their OWN distinct
   // color (deep teal) so they stand apart from the identity/total columns.
   hcellDayBg: { backgroundColor: "#0F766E", borderRightColor: "rgba(255,255,255,0.22)" },
@@ -2016,19 +2017,19 @@ const styles = StyleSheet.create({
   // Iter 291 — Day-wise Present Count footer row.
   footRow: { borderTopWidth: 2, borderTopColor: colors.brandPrimary },
   footBg: { backgroundColor: "rgba(37,99,235,0.07)" },
-  footLbl: { color: colors.brandPrimary, fontWeight: "800", fontSize: 11 },
-  footCnt: { color: colors.brandPrimary, fontWeight: "800", fontSize: 11.5, textAlign: "center" },
+  footLbl: { color: colors.brandPrimary, fontWeight: "800", fontSize: 12.5 },
+  footCnt: { color: colors.brandPrimary, fontWeight: "800", fontSize: 13, textAlign: "center" },
   cell: {
-    paddingVertical: 4,
+    paddingVertical: 8,
     paddingHorizontal: 6,
     borderRightWidth: 1,
     borderRightColor: colors.divider,
     justifyContent: "center",
   },
-  nameTxt: { color: colors.onSurface, fontWeight: "600", fontSize: 12 },
-  subTxt: { color: colors.onSurfaceTertiary, fontSize: 10, marginTop: 1 },
-  deptTxt: { color: colors.onSurfaceSecondary, fontSize: 11 },
-  bioTxt: { color: colors.onSurface, fontWeight: "700", fontSize: 11, textAlign: "center" },
+  nameTxt: { color: colors.onSurface, fontWeight: "600", fontSize: 14 },
+  subTxt: { color: colors.onSurfaceTertiary, fontSize: 11.5, marginTop: 1 },
+  deptTxt: { color: colors.onSurfaceSecondary, fontSize: 12.5 },
+  bioTxt: { color: colors.onSurface, fontWeight: "700", fontSize: 13, textAlign: "center" },
   dayCellEmpty: { alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
   // Iter 595 — keyboard-selected day cell (inset ring, no layout shift).
   dayCellSelected: {
@@ -2036,13 +2037,13 @@ const styles = StyleSheet.create({
       ? ({ boxShadow: "inset 0 0 0 2px #2563EB", backgroundColor: "rgba(37,99,235,0.08)" } as any)
       : { borderWidth: 2, borderColor: "#2563EB" }),
   },
-  dayEmpty: { color: colors.onSurfaceTertiary, fontSize: 14 },
-  dayIn: { color: colors.success || "#0F5132", fontWeight: "700", fontSize: 10 },
-  dayOut: { color: colors.error || "#8A1F1F", fontWeight: "700", fontSize: 10 },
-  dayHoursSm: { color: colors.onSurface, fontSize: 10, marginTop: 1 },
+  dayEmpty: { color: colors.onSurfaceTertiary, fontSize: 16 },
+  dayIn: { color: colors.success || "#0F5132", fontWeight: "700", fontSize: 12 },
+  dayOut: { color: colors.error || "#8A1F1F", fontWeight: "700", fontSize: 12 },
+  dayHoursSm: { color: colors.onSurface, fontSize: 11.5, marginTop: 1 },
   // Iter 236 — per-day Late/Early/Break metrics line.
-  dayMetricTxt: { color: "#b45309", fontSize: 7.5, fontWeight: "700", marginTop: 1 },
-  dayHours: { color: colors.onSurface, fontWeight: "700", fontSize: 12 },
+  dayMetricTxt: { color: "#b45309", fontSize: 9, fontWeight: "700", marginTop: 1 },
+  dayHours: { color: colors.onSurface, fontWeight: "700", fontSize: 13.5 },
   dayHoursOt: { color: colors.accent, fontWeight: "800" },
   // Iter 77g — OT tag (small pill under total hrs) + 4-row IN/OUT layout
   dayOtTag: {
@@ -2057,12 +2058,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
   inoutLbl: {
-    color: colors.onSurfaceSecondary, fontSize: 8, fontWeight: "700",
-    minWidth: 22,
+    color: colors.onSurfaceSecondary, fontSize: 10, fontWeight: "700",
+    minWidth: 26,
   },
   inoutLblOt: { color: colors.accent },
   inoutVal: {
-    color: colors.onSurface, fontSize: 9, fontWeight: "700",
+    color: colors.onSurface, fontSize: 11, fontWeight: "700",
     flex: 1, textAlign: "right",
   },
   inoutValOt: { color: colors.accent, fontWeight: "800" },
@@ -2070,7 +2071,7 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", justifyContent: "center",
     gap: 4, marginTop: 2,
   },
-  sumTxt: { color: colors.onSurface, fontWeight: "700", fontSize: 11, textAlign: "center" },
+  sumTxt: { color: colors.onSurface, fontWeight: "700", fontSize: 13, textAlign: "center" },
   // Iter 77 - Source provenance badges (Mobile "M" / Biometric "B" / System "S")
   badgeRow: {
     flexDirection: "row",

@@ -24,6 +24,7 @@ import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
 import DateField from "@/src/components/DateField";
 import PunchImportModal from "@/src/components/PunchImportModal";
+import { confirmYesNo } from "@/src/utils/confirm";
 
 type EmployeeMini = {
   user_id?: string;
@@ -938,6 +939,33 @@ export default function PunchApprovalsScreen() {
               <Ionicons name="finger-print-outline" size={15} color="#fff" />
               <Text style={upStyles.indBtnTxt}>+ Individual Punch</Text>
             </Pressable>
+            {/* Iter 639 (user request) — APPROVE BACKLOG: one click clears
+                every pending punch so the grid is instantly up to date. */}
+            {pendingCount > 0 ? (
+              <Pressable
+                onPress={async () => {
+                  const ok = await confirmYesNo(
+                    `Approve ALL ${pendingCount} pending punch(es) in one go?\n\n` +
+                    "Each punch is marked approved with a full audit trail " +
+                    "(decided by you, reason: bulk backlog clear). This cannot be batch-undone.",
+                    "Approve entire pending backlog?");
+                  if (!ok) return;
+                  try {
+                    const qs = selectedCompanyId && selectedCompanyId !== "all"
+                      ? `?company_id=${selectedCompanyId}` : "";
+                    const r = await api<{ approved: number }>(
+                      `/attendance/punches/approve-all-pending${qs}`, { method: "POST" });
+                    showAlert("Bulk approve", `Approved ${r.approved} pending punch(es).`);
+                    await load(false);
+                  } catch (e: any) { showAlert("Bulk approve", e?.message || "Bulk approve failed"); }
+                }}
+                style={[upStyles.indBtn, { backgroundColor: "#15803D" }]}
+                testID="pa-approve-all"
+              >
+                <Ionicons name="checkmark-done-outline" size={15} color="#fff" />
+                <Text style={upStyles.indBtnTxt}>Approve All Pending ({pendingCount})</Text>
+              </Pressable>
+            ) : null}
           </View>
         ) : null}
         {/* Iter 113 — Manual Punches quick log (review / undo). */}

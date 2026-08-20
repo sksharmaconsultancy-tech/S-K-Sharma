@@ -7013,3 +7013,21 @@ Current iteration: 594. Next: 595.
 - Verified via screenshots at 1440px: single line, no overlap, compact
   buttons. VIEW-ONLY; no behaviour changes.
 - APP_ITERATION 638; deploy_vps_iter638.sh served via kind=script.
+
+## Iteration 639 (2026-06) — Approve Backlog (one click) + Attendance Grid fonts (user requests)
+- APPROVE BACKLOG: POST /api/attendance/punches/approve-all-pending in
+  attendance_self_service.py — update_many({status:"pending"} scoped:
+  company_admin locked to own firm; super/sub may pass ?company_id=) →
+  status approved + decision_by/decision_at/decision_reason audit fields.
+  Tested: 2 seeded pending → approved:2 with correct audit; cleanup done.
+  UI: punch-approvals.tsx green "Approve All Pending (N)" button
+  (testID pa-approve-all, shown when pendingCount>0, confirmYesNo guard,
+  reloads list after). confirmYesNo imported; feedback via showAlert.
+- ATTENDANCE GRID FONTS (VIEW-ONLY): attendance-grid.tsx COL scaled ~20%
+  (day 66→80, dayHours 46→56, daySal 58→68, sum 62→72, name 190→220,
+  father 130→150, dept 110→126, bio 60→70, sno 44→50); fonts: nameTxt 14,
+  subTxt 11.5, deptTxt 12.5, bioTxt 13, hcellTxt 13, hcellDay 13.5,
+  dayIn/dayOut 12, dayHours 13.5, dayHoursSm 11.5, sumTxt 13, footer 12.5+,
+  inout micro-rows 10/11, dayMetricTxt 9; cell paddingVertical 4→8.
+  Verified via screenshot (2026-07 Kankani): clean, larger, no overlap.
+- APP_ITERATION 639; deploy_vps_iter639.sh served via kind=script.
