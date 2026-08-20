@@ -165,13 +165,21 @@ function actualBase(row: EmployeeRow, key: string): string {
     (row.salary_structure_actual || []).find(
       (r) => String(r?.head || "").trim().toLowerCase() === head.toLowerCase(),
     );
+  // Iter 648 (user bug) — the basic row may be named "Basic" (master form)
+  // or "Basic Salary" (employee modal); match by prefix, prefer the row
+  // carrying a rate_type.
+  const brow = () => {
+    const rows = (row.salary_structure_actual || []).filter(
+      (r) => /^basic/i.test(String(r?.head || "").trim()));
+    return rows.find((r) => r?.rate_type) || rows.find((r) => Number(r?.amount) > 0) || rows[0];
+  };
   switch (key) {
     case "actual_basic": {
-      const b = srow("Basic Salary");
+      const b = brow();
       return b?.amount != null ? String(b.amount) : "";
     }
     case "pay_basis": {
-      const b = srow("Basic Salary");
+      const b = brow();
       return String(b?.rate_type || row.pay_basis || "");
     }
     case "shift_id":

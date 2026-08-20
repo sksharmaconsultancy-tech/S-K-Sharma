@@ -162,7 +162,13 @@ export default function EmployeeAddScreen() {
       try {
         const p = await api<any>(`/admin/employees/${editUserId}/profile`);
         const struct: any[] = p.salary_structure_actual || [];
-        const basicRow = struct.find((r) => /^basic/i.test((r?.head || "").trim()));
+        // Iter 648 (user bug — "Pay Basis shows Monthly again") — legacy
+        // data can carry TWO basic rows ("Basic" + "Basic Salary"); prefer
+        // the one that actually carries a rate_type / amount.
+        const basicRows = struct.filter((r) => /^basic/i.test((r?.head || "").trim()));
+        const basicRow = basicRows.find((r) => r?.rate_type)
+          || basicRows.find((r) => Number(r?.amount) > 0)
+          || basicRows[0];
         const salRow = (n: number) =>
           struct.find((r) => new RegExp(`^salary\\s*${n}$`, "i").test((r?.head || "").trim()));
         if (p.company_id) setSelectedCompanyId(p.company_id);

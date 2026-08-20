@@ -7206,3 +7206,21 @@ Current iteration: 594. Next: 595.
   exact symptom (no popup at all? error toast text? spinner stuck?) and
   check their VPS backend logs for [compliance-run] lines.
 - APP_ITERATION "647"; deploy_vps_iter647.sh served via kind=script.
+
+## Iteration 648 (2026-06) — Bulk Correction Rate/Pay Basis fix
+- User bug: after Bulk Employee Correction (Compliance→Rate Basis,
+  Actual→Pay Basis) the Employee Master again showed "Monthly".
+- ROOT CAUSE (Pay Basis): the master form saves the actual-basic row as
+  head "Basic" while bulk-correction's _srow matched exactly "Basic
+  Salary" → bulk APPENDED a duplicate row; employee-add's load took the
+  FIRST /^basic/i row (still monthly) → master showed Monthly and payroll
+  ignored the edit.
+- FIXES: utils/iter60_features.py _srow now prefix-matches any /^basic/
+  row + merges legacy duplicate basic rows on save;
+  employee-add.tsx load prefers the basic row carrying rate_type;
+  bulk-employee-correction.tsx actualBase() same prefix-match preference.
+- compliance_salary_mode (Rate Basis) verified persisting correctly via
+  API round-trip (bulk → users doc → profile GET all 'daily').
+- Verified: legacy dup-basic scenario → bulk sets daily → single basic
+  row rate_type daily + pay_basis daily persisted ✅.
+- APP_ITERATION "648"; deploy_vps_iter648.sh served via kind=script.

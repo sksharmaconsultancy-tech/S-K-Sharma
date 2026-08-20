@@ -998,8 +998,19 @@ def register_iter60_features(
 
                 def _srow(head: str) -> dict:
                     hl = head.strip().lower()
-                    hit = next((r for r in struct
-                                if str(r.get("head") or "").strip().lower() == hl), None)
+                    # Iter 648 (user bug — "Pay Basis shows Monthly again") —
+                    # different screens name the basic row differently
+                    # ("Basic" from the master form, "Basic Salary" from the
+                    # employee modal). Match ANY row starting with "basic" so
+                    # the edit lands on the EXISTING row instead of appending
+                    # a duplicate that the master screen then ignores.
+                    if hl.startswith("basic"):
+                        hit = next((r for r in struct
+                                    if str(r.get("head") or "").strip().lower()
+                                    .startswith("basic")), None)
+                    else:
+                        hit = next((r for r in struct
+                                    if str(r.get("head") or "").strip().lower() == hl), None)
                     if hit is None:
                         hit = {"head": head}
                         struct.append(hit)
@@ -1014,6 +1025,17 @@ def register_iter60_features(
                         if pb in ("daily", "monthly"):
                             basic["rate_type"] = pb
                             updates["pay_basis"] = pb
+                    # Iter 648 — merge legacy DUPLICATE basic rows (created by
+                    # the old exact-name matching) into the one we just edited.
+                    _dups = [r for r in struct
+                             if r is not basic and str(r.get("head") or "")
+                             .strip().lower().startswith("basic")]
+                    for _d in _dups:
+                        if not basic.get("amount") and _d.get("amount"):
+                            basic["amount"] = _d["amount"]
+                        if not basic.get("rate_type") and _d.get("rate_type"):
+                            basic["rate_type"] = _d["rate_type"]
+                        struct.remove(_d)
                 for n in (1, 2, 3):
                     sk, dk = f"salary_{n}", f"day_{n}"
                     if sk in actual_changes or dk in actual_changes:
