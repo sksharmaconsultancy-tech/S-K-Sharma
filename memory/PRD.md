@@ -7237,6 +7237,22 @@ Current iteration: 594. Next: 595.
   25×Up clamps at 0, run stays on screen.
 - APP_ITERATION "649"; deploy_vps_iter649.sh served via kind=script.
 
+## Iteration 650 (2026-06) — Lock "nothing happens" fix + live TOTAL row
+- User answers to iter-649 questions: (1) Gridfree lock symptom = (a)
+  NOTHING happens on click; (2) totals wrong under Net Payable / Total
+  Deduction heads.
+- LOCK FIX: `finalizeRun` guard `if (finalizing) return` could stay stuck
+  forever if a save/validate/finalize request hung (large firms) — every
+  later click silently ignored. Now: withTimeout (Promise.race) wraps
+  save-rows (90s), validate (45s), finalize (90s); stuck-guard shows toast
+  "Finalize already in progress"; failed grid-save shows toast and
+  continues. Verified lock end-to-end in preview.
+- TOTALS FIX: TOTAL row previously mixed run.totals (server snapshot,
+  stale after client grid edits) with row sums → wrong figures under
+  heads. Now EVERY total (calc heads, OT, Gross, Freeze, WageBase, PF/ESI
+  EE+ER, PT, TDS, Total Ded., Net) is sumCol over displayed rows.
+- APP_ITERATION "650"; deploy_vps_iter650.sh served via kind=script.
+
 ## OPEN ITEMS carried from this session (not yet resolved)
 - Gridfree Solar firm cannot lock salary on LIVE data (VPS on 648 incl.
   hardened validator). Lock-check modal has an always-available

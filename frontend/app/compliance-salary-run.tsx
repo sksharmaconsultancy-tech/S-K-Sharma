@@ -1117,10 +1117,11 @@ export default function ComplianceSalaryRunScreen() {
     if (!run) return;
     setFinalizing(true);
     try {
-      const r = await api<{ ok: boolean; finalized_at?: string }>(
+      // Iter 650 — hard timeout so a hung request can't freeze the button.
+      const r = await withTimeout(api<{ ok: boolean; finalized_at?: string }>(
         `/admin/compliance-salary-runs/${run.run_id}/finalize`,
         { method: "POST", body: { allow_warnings: allowWarnings, allow_errors: allowErrors } },
-      );
+      ), 90000, "Finalize & Lock");
       void r;
       setLockCheck(null);
       // Iter 256 (user request) — after Finalize & Lock the front page is
@@ -1140,8 +1141,22 @@ export default function ComplianceSalaryRunScreen() {
     } finally { setFinalizing(false); }
   };
 
+  // Iter 650 (user bug — "press Lock, nothing happens") — a hung request
+  // could leave `finalizing` stuck true, silently swallowing every later
+  // click. Every finalize step now has a hard timeout and the guard talks.
+  const withTimeout = <T,>(p: Promise<T>, ms: number, what: string) =>
+    Promise.race([
+      p,
+      new Promise<never>((_, rej) =>
+        setTimeout(() => rej(new Error(`${what} timed out — please retry`)), ms)),
+    ]);
+
   const finalizeRun = async () => {
-    if (!run || finalizing) return;
+    if (!run) return;
+    if (finalizing) {
+      showToast("Finalize already in progress — please wait…");
+      return;
+    }
     const okGo = await confirmYesNo(
       "Finalize this compliance run? It becomes LOCKED — nobody can change it without Super Admin approval.",
     );
@@ -1151,16 +1166,21 @@ export default function ComplianceSalaryRunScreen() {
       // Iter 374 (user bug) — FLUSH pending grid edits BEFORE locking
       // (Finalize is an explicit action, so saving here is expected).
       try {
-        await api(`/admin/compliance-salary-runs/${run.run_id}/save-rows`, {
+        await withTimeout(api(`/admin/compliance-salary-runs/${run.run_id}/save-rows`, {
           method: "POST",
           body: { rows: run.rows, totals: run.totals },
-        });
+        }), 90000, "Saving the grid");
         setUnsavedEdits(false);
-      } catch { /* proceed — run may already match the server state */ }
+      } catch (e: any) {
+        // Iter 650 — never silent: tell the admin and continue to lock.
+        showToast(`Grid save skipped (${e?.message || "error"}) — continuing to lock`);
+      }
       // Iter 388 (Phase 3) — automatic PF/ESIC validation before the lock.
       // Errors ALWAYS block; warnings block unless a Super Admin overrides.
       try {
-        const v = await api<any>(`/admin/compliance-salary-runs/${run.run_id}/validate`);
+        const v = await withTimeout(
+          api<any>(`/admin/compliance-salary-runs/${run.run_id}/validate`),
+          45000, "PF/ESIC validation");
         if ((v?.errors_count || 0) > 0 || (v?.warnings_count || 0) > 0) {
           setLockCheck(v);
           setFinalizing(false);
@@ -3429,25 +3449,29 @@ export default function ComplianceSalaryRunScreen() {
                         {/* Calculated group totals (+Gross) */}
                         {opt.map((k) => <React.Fragment key={`tc-${k}`}>{num(
                           k === "others"
-                            ? (Number((run.totals as any)?.others) || 0) - (run.rows || []).reduce((s, r) => s + allowHeadsPaid(r), 0)
-                            : (run.totals as any)?.[k])}</React.Fragment>)}
+                            ? sumCol("others") - (run.rows || []).reduce((s, r) => s + allowHeadsPaid(r), 0)
+                            : sumCol(k as any))}</React.Fragment>)}
                         {allowLabels.map((l) => (
                           <React.Fragment key={`tap-${l}`}>{num(
                             (run.rows || []).reduce((s, r) => s + (Number(((r as any).allowance_heads || {})[l]) || 0), 0))}</React.Fragment>
                         ))}
-                        {/* Iter 339c — OT Amt total BEFORE Gross. */}
-                        {hasOtCol ? num(run.totals?.ot_pay) : null}
-                        {num(run.totals?.gross_paid)}
+                        {/* Iter 339c — OT Amt total BEFORE Gross.
+                            Iter 650 (user bug — "totals not proper head
+                            wise") — EVERY total below is now the live SUM
+                            of the displayed rows (was run.totals, which
+                            could go stale after grid edits). */}
+                        {hasOtCol ? num(sumCol("ot_pay")) : null}
+                        {num(sumCol("gross_paid"))}
                         {/* Iter 335 — Freeze Salary total next to Gross. */}
-                        {hasFrz ? num((run.totals as any)?.imported_gross) : null}
+                        {hasFrz ? num(sumCol("imported_gross" as any)) : null}
                         {/* Deductions group — Iter 370: Wage Base total too. */}
                         {num(sumCol("stat_wage_base"))}
-                        {hasDed("pf") ? num(run.totals?.pf_employee) : null}
-                        {hasDed("pf") ? num(run.totals?.pf_employer_total) : null}
-                        {hasDed("esi") ? num(run.totals?.esic_employee) : null}
-                        {hasDed("esi") ? num(run.totals?.esic_employer) : null}
-                        {hasDed("pt") ? num(run.totals?.pt) : null}
-                        {hasDed("tds") ? num(run.totals?.tds) : null}
+                        {hasDed("pf") ? num(sumCol("pf_employee")) : null}
+                        {hasDed("pf") ? num(sumCol("pf_employer_total" as any)) : null}
+                        {hasDed("esi") ? num(sumCol("esic_employee")) : null}
+                        {hasDed("esi") ? num(sumCol("esic_employer" as any)) : null}
+                        {hasDed("pt") ? num(sumCol("pt" as any)) : null}
+                        {hasDed("tds") ? num(sumCol("tds")) : null}
                         {/* Iter 644 (alignment fix) — totals under the
                             dynamic custom DEDUCTION head columns too. */}
                         {((((run.rows[0] as any)?.deduction_head_labels as string[]) || []).map((dl) => (
@@ -3456,8 +3480,8 @@ export default function ComplianceSalaryRunScreen() {
                         )))}
                         {hasDed("advance") ? num((run.rows || []).reduce((s, r) => s + (Number((r as any).advance_recovery) || 0), 0)) : null}
                         {hasDed("other") ? num((run.rows || []).reduce((s, r) => s + (Number((r as any).other_deduction) || 0), 0)) : null}
-                        {num(run.totals?.total_deduction)}
-                        {num(run.totals?.net)}
+                        {num(sumCol("total_deduction"))}
+                        {num(sumCol("net"))}
                       </>
                     );
                   })()}
