@@ -7031,3 +7031,20 @@ Current iteration: 594. Next: 595.
   inout micro-rows 10/11, dayMetricTxt 9; cell paddingVertical 4→8.
   Verified via screenshot (2026-07 Kankani): clean, larger, no overlap.
 - APP_ITERATION 639; deploy_vps_iter639.sh served via kind=script.
+
+## Iteration 640 (2026-06) — Configure Batch final polish (user feedback, VIEW-ONLY)
+- Days column: label renamed to just "Month Days" (was "Month days
+  (override) · Max N"), column narrowed to 110-130px for the 2-digit input.
+  Validation/confirmation logic untouched.
+- "Copy Last Month Salary" button: compact two-line label (12.5px,
+  lineHeight 16, paddingHorizontal 14). Same action.
+- Verified via desktop screenshot: single-line toolbar with Month · FY ·
+  Month Days · Employee Group · Total/Processed/Pending cards; compact
+  green Salary Process + purple two-line Copy button.
+- APP_ITERATION 640; deploy_vps_iter640.sh served via kind=script.
+
+## Iteration 641 (2026-06) — Salary Process button two-line compact (user feedback)
+- compliance-salary-run.tsx: Salary Process button → "Salary\nProcess"
+  (12.5px, lineHeight 16, paddingHorizontal 14, minHeight 46) matching the
+  Copy Last Month Salary button. Verified via screenshot. VIEW-ONLY.
+- APP_ITERATION 641; deploy_vps_iter641.sh served via kind=script.

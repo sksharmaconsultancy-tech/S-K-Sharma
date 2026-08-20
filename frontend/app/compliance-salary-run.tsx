@@ -2224,10 +2224,10 @@ export default function ComplianceSalaryRunScreen() {
                 testID="csr-month"
               />
             </View>
-            <View style={styles.batchCol}>
-              <Text style={styles.batchLabel}>
-                Month days (override) · Max {calendarDaysInMonth(month)}
-              </Text>
+            <View style={[styles.batchCol, { minWidth: 110, maxWidth: 130 }]}>
+              {/* Iter 640 (user request) — label renamed to just
+                  "Month Days"; 2-digit input, narrow column. */}
+              <Text style={styles.batchLabel}>Month Days</Text>
               <TextInput
                 testID="csr-days"
                 value={monthDaysOverride}
@@ -2573,18 +2573,21 @@ export default function ComplianceSalaryRunScreen() {
               disabled={busy}
               style={[styles.primaryBtn, busy && { opacity: 0.6 },
                 { backgroundColor: "#16A34A", minHeight: 46, borderRadius: 10,
-                  paddingHorizontal: 26, alignSelf: "flex-start" }]}
+                  paddingHorizontal: 14, paddingVertical: 6, alignSelf: "flex-start" }]}
             >
               {busy ? (
                 <ActivityIndicator color="#fff" />
               ) : (
                 <>
-                  <Ionicons name="shield-checkmark-outline" size={16} color="#fff" />
-                  <Text style={styles.primaryBtnTxt}>Salary Process</Text>
+                  <Ionicons name="shield-checkmark-outline" size={15} color="#fff" />
+                  <Text style={[styles.primaryBtnTxt, { fontSize: 12.5, lineHeight: 16, textAlign: "center" }]}>
+                    Salary{"\n"}Process
+                  </Text>
                 </>
               )}
             </Pressable>
-            {/* Iter 330 (user request) — Copy Last Month Salary */}
+            {/* Iter 330 (user request) — Copy Last Month Salary.
+                Iter 640 (user request) — smaller button, label on 2 lines. */}
             <Pressable
               testID="csr-copy-last-month"
               onPress={copyLastMonth}
@@ -2592,11 +2595,13 @@ export default function ComplianceSalaryRunScreen() {
               style={[
                 styles.primaryBtn, busy && { opacity: 0.6 },
                 { backgroundColor: "#7C3AED", minHeight: 46, borderRadius: 10,
-                  paddingHorizontal: 26, alignSelf: "flex-start" },
+                  paddingHorizontal: 14, paddingVertical: 6, alignSelf: "flex-start" },
               ]}
             >
-              <Ionicons name="copy-outline" size={16} color="#fff" />
-              <Text style={styles.primaryBtnTxt}>Copy Last Month Salary</Text>
+              <Ionicons name="copy-outline" size={15} color="#fff" />
+              <Text style={[styles.primaryBtnTxt, { fontSize: 12.5, lineHeight: 16, textAlign: "center" }]}>
+                Copy Last Month{"\n"}Salary
+              </Text>
             </Pressable>
           </View>
           {/* Iter 371 (user request) — the month is already processed &
