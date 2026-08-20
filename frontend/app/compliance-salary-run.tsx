@@ -2244,7 +2244,7 @@ export default function ComplianceSalaryRunScreen() {
                 }}
                 placeholder={`Auto (${calendarDaysInMonth(month)})`}
                 placeholderTextColor={colors.onSurfaceTertiary}
-                style={styles.input}
+                style={[styles.input, { height: 42, paddingVertical: 0, marginBottom: 0 }]}
                 keyboardType="numeric"
                 maxLength={2}
               />
@@ -2260,7 +2260,7 @@ export default function ComplianceSalaryRunScreen() {
                   value={empType}
                   onChange={(e: any) => setEmpType(e.target.value)}
                   style={{
-                    height: 48, borderRadius: 10, border: `1px solid ${colors.divider}`,
+                    height: 42, borderRadius: 10, border: `1px solid ${colors.divider}`,
                     background: colors.surface, color: colors.onSurface,
                     fontSize: 14, fontWeight: 600, padding: "0 10px", width: "100%",
                   } as any}
@@ -4319,6 +4319,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     minWidth: 92,
+    minHeight: 60,
     alignItems: "center",
     justifyContent: "center",
   },

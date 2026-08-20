@@ -7048,3 +7048,13 @@ Current iteration: 594. Next: 595.
   (12.5px, lineHeight 16, paddingHorizontal 14, minHeight 46) matching the
   Copy Last Month Salary button. Verified via screenshot. VIEW-ONLY.
 - APP_ITERATION 641; deploy_vps_iter641.sh served via kind=script.
+
+## Iteration 641 verification (2026-06, fork) — Single-line Configure Batch toolbar CONFIRMED
+- User request: "All, Month (FY-wise), Month days, Employee group, Remaining all
+  Align in same line Please Check".
+- Verified via authenticated screenshot at 1440px: Month (FY-wise) pickers,
+  Month Days input, Employee Group dropdown and the three summary cards
+  (Total Employees / Processed / Pending) all render on ONE horizontal line;
+  Salary Process + Copy Last Month Salary compact two-line buttons sit together
+  on the line below. No code changes needed — previous agent's flex fix in
+  MonthPicker.tsx + batchLine styles works. Awaiting user confirmation.
