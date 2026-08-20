@@ -74,10 +74,10 @@ async def temp_code_bundle(token: str = Query(...), kind: str = Query("tar")):
     if kind == "script":
         # Latest VPS deploy script — lets the user fetch + run it in two
         # lines instead of pasting a long script into the SSH terminal.
-        path = "/app/deploy_vps_iter626.sh"
+        path = "/app/deploy_vps_iter627.sh"
         if not os.path.exists(path):
             raise HTTPException(status_code=404, detail="Deploy script not found")
-        return FileResponse(path, filename="deploy626.sh",
+        return FileResponse(path, filename="deploy627.sh",
                             media_type="text/x-shellscript")
     if kind == "brochure":
         # Iter 609 — client-facing Employee PWA feature brochure (PDF).

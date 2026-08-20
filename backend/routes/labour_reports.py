@@ -662,6 +662,55 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
                 ]))
         data.sort(key=lambda x: (x[0], x[1], x[2]))
 
+        # Iter 627 (user request) — "Summary Only" mode: NO individual
+        # employee rows. Two sections one after another — Department-wise
+        # then Designation-wise — each group row shows headcount + full
+        # attendance totals (Present / Half-Day day counts, Hours, OT,
+        # Cost). Display and ALL downloads (PDF/Excel/CSV) follow.
+        if policy.get("_summary_only"):
+            def _agg(idx: int) -> Dict[str, dict]:
+                m: Dict[str, dict] = {}
+                for _g, code_, _d, r in data:
+                    g = str(r[idx] or "").strip() or "— Not Set —"
+                    a = m.setdefault(g, {"emps": set(), "p": 0, "hd": 0,
+                                         "h": 0.0, "o": 0.0, "c": 0.0})
+                    a["emps"].add(code_)
+                    if r[12] == "HD":
+                        a["hd"] += 1
+                    else:
+                        a["p"] += 1
+                    a["h"] += r[9]; a["o"] += r[10]; a["c"] += r[11]
+                return m
+
+            s_cols = ["S.No.", "Department / Designation", "Deployed",
+                      "Present", "Half Day", "Hours", "OT Hrs", "Cost"]
+            s_rows: list = []
+
+            def _section(title: str, m: Dict[str, dict]) -> None:
+                band = [""] * len(s_cols)
+                band[0] = f"▶ {title}"
+                s_rows.append(band)
+                t_emps: set = set()
+                t_p = t_hd = 0
+                t_h = t_o = t_c = 0.0
+                for n, g in enumerate(sorted(m), start=1):
+                    a = m[g]
+                    s_rows.append([n, g, len(a["emps"]), a["p"], a["hd"],
+                                   round(a["h"], 2), round(a["o"], 2),
+                                   round(a["c"])])
+                    t_emps |= a["emps"]; t_p += a["p"]; t_hd += a["hd"]
+                    t_h += a["h"]; t_o += a["o"]; t_c += a["c"]
+                tr = [""] * len(s_cols)
+                tr[0] = "GRAND TOTAL"
+                tr[2] = len(t_emps); tr[3] = t_p; tr[4] = t_hd
+                tr[5] = round(t_h, 2); tr[6] = round(t_o, 2); tr[7] = round(t_c)
+                s_rows.append(tr)
+
+            if data:
+                _section("DEPARTMENT WISE SUMMARY", _agg(4))
+                _section("DESIGNATION WISE SUMMARY", _agg(5))
+            return s_cols, s_rows
+
         def _sum_row(label: str, n_emps: int, h: float, o: float, c: float) -> list:
             # Iter 526 (user request) — label sits in col 0 and the empty
             # cells up to "Hours" are MERGED in the PDF/Excel exports.
@@ -1162,6 +1211,8 @@ async def generate(payload: Dict[str, Any] = Body(...),
     # Designation wise) through to the builder.
     if key == "shift_deployment":
         policy["_group_by"] = str(filters.get("group_by") or "")
+        # Iter 627 (user request) — Summary Only vs Full Data option.
+        policy["_summary_only"] = bool(filters.get("summary_only"))
         # Iter 526 (user bug — "Out Punch not showing") — In/Out punches
         # must match the ATTENDANCE REPORT (grid engine): re-fetch with a
         # ±1-day window, drop duplicate machine punches and STITCH
@@ -1233,7 +1284,10 @@ async def generate(payload: Dict[str, Any] = Body(...),
     # Iter 531 (user request) — grouped reports show the grouping name in
     # the heading of the PDF / Excel / preview too.
     _gb_label = str(filters.get("group_by") or "").strip().lower()
-    if _gb_label in ("department", "designation", "contractor"):
+    if key == "shift_deployment" and filters.get("summary_only"):
+        # Iter 627 — Summary Only heading (Department + Designation wise).
+        label = f"{label} — Summary Only"
+    elif _gb_label in ("department", "designation", "contractor"):
         label = f"{label} — {_gb_label.capitalize()} Wise"
 
     company = await db.companies.find_one(

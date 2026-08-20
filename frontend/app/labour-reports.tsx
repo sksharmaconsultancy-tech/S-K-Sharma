@@ -86,6 +86,8 @@ export default function LabourReportsScreen() {
   // Iter 525 — Shift Deployment: Single Day / Periodic mode + grouping.
   const [periodMode, setPeriodMode] = useState<"day" | "range">("day");
   const [groupBy, setGroupBy] = useState<string>("");
+  // Iter 627 — Shift Deployment: Full Data vs Summary Only (Dept + Desig).
+  const [summaryOnly, setSummaryOnly] = useState<boolean>(false);
 
   const isSingleDay = SINGLE_DAY_KEYS.has(reportKey);
   const isDayOrPeriod = DAY_OR_PERIOD_KEYS.has(reportKey);
@@ -123,8 +125,9 @@ export default function LabourReportsScreen() {
             : { from_date: fromDate, to_date: toDate })
           : fromDate && toDate ? { from_date: fromDate, to_date: toDate } : { month }),
       ...(isDayOrPeriod
-        ? (groupBy && groupBy !== "contractor" ? { group_by: groupBy } : {})
+        ? (groupBy && groupBy !== "contractor" && !summaryOnly ? { group_by: groupBy } : {})
         : (groupBy ? { group_by: groupBy } : {})),
+      ...(isDayOrPeriod && summaryOnly ? { summary_only: true } : {}),
       ...(shiftSel ? { shift: shiftSel } : {}),
     },
   });
@@ -143,7 +146,7 @@ export default function LabourReportsScreen() {
       setPreview(null);
     } finally { setBusy(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCompanyId, reportKey, month, fromDate, toDate, reportDate, shiftSel, periodMode, groupBy]);
+  }, [selectedCompanyId, reportKey, month, fromDate, toDate, reportDate, shiftSel, periodMode, groupBy, summaryOnly]);
 
   const download = async (format: "pdf" | "excel" | "csv") => {
     if (!selectedCompanyId) return;
@@ -278,16 +281,37 @@ export default function LabourReportsScreen() {
               downloads follow the grouped format). */}
           {isDayOrPeriod ? (
             <View style={{ marginTop: 8 }}>
-              <Text style={st.fieldLbl}>Group / Format</Text>
+              {/* Iter 627 — Full Data vs Summary Only (Department-wise +
+                  Designation-wise totals, no individual employee rows). */}
+              <Text style={st.fieldLbl}>Data</Text>
               <View style={[st.chipsWrap, { marginTop: 4 }]}>
-                {([["", "No Grouping"], ["department", "Department Wise"],
-                  ["designation", "Designation Wise"]] as const).map(([v, lbl]) => (
-                  <Pressable key={v} onPress={() => setGroupBy(v)}
-                    style={[st.chip, groupBy === v && st.chipOn]} testID={`lr-group-${v || "none"}`}>
-                    <Text style={[st.chipTxt, groupBy === v && { color: "#fff" }]}>{lbl}</Text>
-                  </Pressable>
-                ))}
+                <Pressable onPress={() => setSummaryOnly(false)}
+                  style={[st.chip, !summaryOnly && st.chipOn]} testID="lr-data-full">
+                  <Text style={[st.chipTxt, !summaryOnly && { color: "#fff" }]}>Full Data</Text>
+                </Pressable>
+                <Pressable onPress={() => setSummaryOnly(true)}
+                  style={[st.chip, summaryOnly && st.chipOn]} testID="lr-data-summary">
+                  <Text style={[st.chipTxt, summaryOnly && { color: "#fff" }]}>Summary Only</Text>
+                </Pressable>
               </View>
+              {summaryOnly ? (
+                <Text style={[st.dim, { fontSize: 11, marginTop: 4 }]}>
+                  Department-wise & Designation-wise totals only — no individual employee rows.
+                </Text>
+              ) : (
+                <>
+                  <Text style={[st.fieldLbl, { marginTop: 8 }]}>Group / Format</Text>
+                  <View style={[st.chipsWrap, { marginTop: 4 }]}>
+                    {([["", "No Grouping"], ["department", "Department Wise"],
+                      ["designation", "Designation Wise"]] as const).map(([v, lbl]) => (
+                      <Pressable key={v} onPress={() => setGroupBy(v)}
+                        style={[st.chip, groupBy === v && st.chipOn]} testID={`lr-group-${v || "none"}`}>
+                        <Text style={[st.chipTxt, groupBy === v && { color: "#fff" }]}>{lbl}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </>
+              )}
             </View>
           ) : null}
 

@@ -6788,3 +6788,23 @@ Current iteration: 594. Next: 595.
   calendar weighting, monthly regression) + iter620 14/14 + iter624 3/3.
   NOTE: iter62x test files must run SEPARATELY (Motor event-loop binding).
 - APP_ITERATION 626; deploy_vps_iter626.sh via kind=script.
+
+## Iteration 627 (2026-06) — Shift Deployment Report: Summary Only option (user request)
+- New "Data" option on the Shift Deployment Report: Full Data (unchanged) vs
+  Summary Only. Summary Only = NO individual employee rows; TWO sections one
+  after another: ▶ DEPARTMENT WISE SUMMARY then ▶ DESIGNATION WISE SUMMARY.
+  Each group row: S.No., Group, Deployed (unique emps), Present / Half Day
+  (day counts), Hours, OT Hrs, Cost (rounded) + GRAND TOTAL per section.
+- Backend: labour_reports.py — generate() passes filters.summary_only →
+  policy["_summary_only"]; build_report shift_deployment block aggregates
+  from the same per-day engine data (dept idx4 / desig idx5); label becomes
+  "… — Summary Only" (group_by ignored in summary mode). Band/total rows
+  reuse _row_kind styling → PDF/Excel/CSV automatically formatted.
+- Frontend: labour-reports.tsx — summaryOnly state, "Data" chips (Full Data /
+  Summary Only, testIDs lr-data-full / lr-data-summary); Group/Format chips
+  hidden while Summary Only; buildBody sends summary_only:true and omits
+  group_by.
+- Tests: /app/test_iter627_shift_summary.py 18/18 PASS (cols, 2 sections,
+  2 grand totals, dept vs desig totals match, deployed count matches full-data
+  grand total, pdf/excel/csv downloads, multi-day period). UI screenshot OK.
+- APP_ITERATION 627; deploy_vps_iter627.sh served via kind=script.
