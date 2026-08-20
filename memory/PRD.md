@@ -6952,3 +6952,19 @@ Current iteration: 594. Next: 595.
 - Note: pre-existing tsc TS2367 role-comparison warnings in this file are
   unrelated/old. Screen mount smoke-tested via screenshot.
 - APP_ITERATION 634; deploy_vps_iter634.sh served via kind=script.
+
+## Iteration 635 (2026-06) — Compliance grid readability redesign (user request, VIEW-ONLY)
+- STRICT constraint honoured: zero logic/API/calculation changes — only
+  styles + column widths + container height in compliance-salary-run.tsx
+  and GridFreeze.tsx.
+- tblCell 11px→14px, paddingVertical 6→12 (~44px rows), rightCell/editable
+  widths 72→84, editableCell paddingVertical 2→7, groupHdrTxt 10→13.
+- colW auto-fit recalibrated (px/char 6.6→8.2, +22 pad; bases name 140,
+  father 120, desg 110, uan/esi 96, num 88 max 150, sr 52, pd/el 84).
+- GridScroller maxHeight now accepts string; compliance grid passes
+  "calc(100vh - 170px)" on web → full viewport height, ALL employees on
+  one page (there was never pagination), sticky header + sticky identity
+  columns unchanged (GridFreeze).
+- Verified via screenshots (run csrun_edb7d34122f4 2026-06): 14px cells,
+  ~44px rows, sticky header pinned while row 2 scrolls beneath.
+- APP_ITERATION 635; deploy_vps_iter635.sh served via kind=script.

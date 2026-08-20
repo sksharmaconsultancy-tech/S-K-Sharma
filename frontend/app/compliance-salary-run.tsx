@@ -332,8 +332,10 @@ export default function ComplianceSalaryRunScreen() {
   // is cut off (user request; replaces the wrap-text experiment).
   const colW = useMemo(() => {
     const rows = run?.rows || [];
-    const px = (v: any) => String(v ?? "").length * 6.6 + 18;
-    const fit = (label: string, vals: any[], base = 72, maxW = 240) => {
+    // Iter 635 (user request — UI readability): 14px grid font needs wider
+    // auto-fit columns (~8.2 px/char + padding). Layout-only change.
+    const px = (v: any) => String(v ?? "").length * 8.2 + 22;
+    const fit = (label: string, vals: any[], base = 88, maxW = 280) => {
       let m = Math.max(base, px(label));
       for (const v of vals) {
         const p = px(v);
@@ -347,15 +349,15 @@ export default function ComplianceSalaryRunScreen() {
                 fmtInr(r.stat_wage_base), fmtInr(r.total_deduction));
     }
     return {
-      sr: 40, // Iter 379 (user request) — Sr. No first column
-      name: fit("Name", rows.map((r: any) => r.name), 110),
-      father: fit("Father Name", rows.map((r: any) => r.father_name), 100),
-      desg: fit("Designation", rows.map((r: any) => r.designation), 90),
-      uan: fit("UAN No.", rows.map((r: any) => r.uan_no), 80),
-      esi: fit("ESIC No.", rows.map((r: any) => r.esi_ip_no), 80),
-      pd: 72, // PresentDaysCell input is fixed-width
-      el: 72, // Iter 306 (user #20) — ESIC Leave days input
-      num: fit("Wage Base", nums, 72, 130),
+      sr: 52, // Iter 379 (user request) — Sr. No first column
+      name: fit("Name", rows.map((r: any) => r.name), 140),
+      father: fit("Father Name", rows.map((r: any) => r.father_name), 120),
+      desg: fit("Designation", rows.map((r: any) => r.designation), 110),
+      uan: fit("UAN No.", rows.map((r: any) => r.uan_no), 96),
+      esi: fit("ESIC No.", rows.map((r: any) => r.esi_ip_no), 96),
+      pd: 84, // PresentDaysCell input is fixed-width
+      el: 84, // Iter 306 (user #20) — ESIC Leave days input
+      num: fit("Wage Base", nums, 88, 150),
     };
   }, [run?.rows]);
   // Iter 310 — Freeze Salary columns are shown only for imported-sheet
@@ -2773,7 +2775,7 @@ export default function ComplianceSalaryRunScreen() {
                 Compliance Salary Process (Branch/Contractor remain). */}
             <GridFilterChips rows={run.rows} filters={gridFilters} onChange={setGridFilters} testPrefix="comp" hide={["dept"]} />
 
-            <GridScroller>
+            <GridScroller maxHeight={Platform.OS === "web" ? "calc(100vh - 170px)" : 640}>
                 {/* Iter 85 pt 1 — Column-hide by firm's enabled_allowances.
                     Both header and data cells honor the same mask so
                     columns stay aligned. `basic` is always kept.
@@ -4178,32 +4180,34 @@ const styles = StyleSheet.create({
   groupHdrMaster: { backgroundColor: "rgba(16,185,129,0.22)" },  // green tint
   groupHdrCalc:   { backgroundColor: "rgba(59,130,246,0.22)" },  // blue tint
   groupHdrDed:    { backgroundColor: "rgba(239,68,68,0.20)" },   // red tint
-  groupHdrTxt: { fontSize: 10, fontWeight: "800", color: "#0f172a", letterSpacing: 0.3 },
+  groupHdrTxt: { fontSize: 13, fontWeight: "800", color: "#0f172a", letterSpacing: 0.3 },
   // Faint horizontal-strip tints applied to the column-header cells
   // themselves. Kept lighter than the group-band above so the primary
   // header colour still reads.
   groupHdrCellHeaderMaster: { backgroundColor: "rgba(16,185,129,0.25)" },
   groupHdrCellHeaderCalc:   { backgroundColor: "rgba(59,130,246,0.25)" },
   groupHdrCellHeaderDed:    { backgroundColor: "rgba(239,68,68,0.20)" },
+  // Iter 635 (user request — UI readability, VIEW ONLY): 14px grid text,
+  // ~44px rows, bolder 14px headers, wider padding. No logic changes.
   tblCell: {
-    fontSize: 11,
-    paddingVertical: 6,
-    paddingHorizontal: 6,
-    width: 72,
+    fontSize: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    width: 84,
     color: colors.onSurface,
   },
-  rightCell: { textAlign: "right", width: 72 },
+  rightCell: { textAlign: "right", width: 84 },
   // Iter 85 — Inline-editable Present Days cell in Compliance Salary grid.
   editableCell: {
     borderWidth: 1,
     borderColor: colors.brandPrimary,
     borderRadius: 6,
-    paddingHorizontal: 4,
-    paddingVertical: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 7,
     backgroundColor: colors.brandTertiary,
     color: colors.onSurface,
     fontWeight: "700",
-    width: 72,
+    width: 84,
   },
 
   pastRow: {

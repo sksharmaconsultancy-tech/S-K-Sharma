@@ -11,7 +11,9 @@ export function GridScroller({
   maxHeight = 640,
 }: {
   children: React.ReactNode;
-  maxHeight?: number;
+  // Iter 635 — string values (e.g. "calc(100vh - 170px)") let big grids use
+  // the full available viewport height on web.
+  maxHeight?: number | string;
 }) {
   if (Platform.OS === "web") {
     return (
