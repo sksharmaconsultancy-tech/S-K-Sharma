@@ -2213,7 +2213,7 @@ export default function ComplianceSalaryRunScreen() {
           </View>
 
           <View style={styles.batchLine}>
-            <View style={styles.batchCol}>
+            <View style={[styles.batchCol, { minWidth: 300, maxWidth: 420 }]}>
               <Text style={styles.batchLabel}>Month (FY-wise)</Text>
               <MonthPicker
                 value={month}
@@ -2564,13 +2564,16 @@ export default function ComplianceSalaryRunScreen() {
 
           {/* Iter 230 (user request) — "Configure employees" button removed
               from the Compliance Salary Process screen. */}
-          <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+          {/* Iter 638 (user request) — compact buttons, one line, no full-
+              width stretch. Same actions. */}
+          <View style={{ flexDirection: "row", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
             <Pressable
               testID="csr-generate"
               onPress={generate}
               disabled={busy}
               style={[styles.primaryBtn, busy && { opacity: 0.6 },
-                { flex: 1, backgroundColor: "#16A34A", minHeight: 48, borderRadius: 10 }]}
+                { backgroundColor: "#16A34A", minHeight: 46, borderRadius: 10,
+                  paddingHorizontal: 26, alignSelf: "flex-start" }]}
             >
               {busy ? (
                 <ActivityIndicator color="#fff" />
@@ -2588,7 +2591,8 @@ export default function ComplianceSalaryRunScreen() {
               disabled={busy}
               style={[
                 styles.primaryBtn, busy && { opacity: 0.6 },
-                { flex: 1, backgroundColor: "#7C3AED" },
+                { backgroundColor: "#7C3AED", minHeight: 46, borderRadius: 10,
+                  paddingHorizontal: 26, alignSelf: "flex-start" },
               ]}
             >
               <Ionicons name="copy-outline" size={16} color="#fff" />
@@ -4295,7 +4299,7 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     marginBottom: 6,
   },
-  batchCol: { flexGrow: 1, minWidth: 170, maxWidth: 260 },
+  batchCol: { flexGrow: 0, minWidth: 210, maxWidth: 250, overflow: "hidden" },
   batchLabel: {
     fontSize: 12.5,
     fontWeight: "800",
@@ -4307,14 +4311,14 @@ const styles = StyleSheet.create({
   sumCard: {
     borderWidth: 1,
     borderRadius: 10,
-    paddingHorizontal: 14,
+    paddingHorizontal: 10,
     paddingVertical: 6,
-    minWidth: 108,
+    minWidth: 92,
     alignItems: "center",
     justifyContent: "center",
   },
-  sumLabel: { fontSize: 12, fontWeight: "800", color: colors.onSurfaceSecondary },
-  sumVal: { fontSize: 22, fontWeight: "800", marginTop: 1 },
+  sumLabel: { fontSize: 11.5, fontWeight: "800", color: colors.onSurfaceSecondary },
+  sumVal: { fontSize: 20, fontWeight: "800", marginTop: 1 },
   infoPanel: {
     flexDirection: "row",
     alignItems: "center",

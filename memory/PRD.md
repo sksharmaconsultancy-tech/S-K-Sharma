@@ -6999,3 +6999,17 @@ Current iteration: 594. Next: 595.
 - NO logic/API/workflow changes. Verified via desktop screenshot: one-line
   toolbar exactly matching the mock.
 - APP_ITERATION 637; deploy_vps_iter637.sh served via kind=script.
+
+## Iteration 638 (2026-06) — Configure Batch overlap fix + compact buttons (user feedback)
+- User screenshot from VPS showed Iter 637 toolbar columns overlapping
+  (MonthPicker fyMode renders TWO selects; batchCol maxWidth 260 made the
+  FY select collide with the days label) and full-width stretched buttons.
+- Fixes (compliance-salary-run.tsx): Month col inline {minWidth 300,
+  maxWidth 420}; batchCol → flexGrow 0, minWidth 210, maxWidth 250,
+  overflow hidden; sumCard minWidth 92 pad 10, sumLabel 11.5, sumVal 20 (so
+  Total/Processed/Pending fit the same line at 1440px); buttons row → no
+  flex:1, paddingHorizontal 26, minHeight 46, alignSelf flex-start,
+  flexWrap (Salary Process green + Copy purple compact side-by-side).
+- Verified via screenshots at 1440px: single line, no overlap, compact
+  buttons. VIEW-ONLY; no behaviour changes.
+- APP_ITERATION 638; deploy_vps_iter638.sh served via kind=script.
