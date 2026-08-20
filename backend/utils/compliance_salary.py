@@ -415,6 +415,7 @@ def compute_compliance_row(
     firm_pf_enabled: bool = True,
     firm_esic_enabled: bool = True,
     firm_pt: Optional[Dict[str, Any]] = None,
+    enabled_allowances: Optional[set] = None,
 ) -> Dict[str, Any]:
     """Compute the full compliance salary row for a single employee.
 
@@ -423,6 +424,10 @@ def compute_compliance_row(
         policy: Merged attendance/pay policy (from user.employee_policy).
         month_days: Divisor for pro-ration when salary_mode='monthly'.
         stats: { present_days, half_days, effective_present, duty_hours, ot_hours }.
+        enabled_allowances: Iter 630 (user spec) — Firm-Master allowance
+            mask. When given, editable heads NOT in the set calculate as 0
+            INSIDE the engine (Basic is never masked); stored master values
+            are untouched. None = no catalog configured → no masking.
     """
     cfg = dict(DEFAULT_STATUTORY_CFG)
     if statutory_cfg:
@@ -628,6 +633,35 @@ def compute_compliance_row(
     if effective_present <= 0 and duty_hours <= 0 and ot_pay <= 0:
         basic = hra = conveyance = medical = special = others = 0.0
         monthly_gross = 0.0
+
+    # Iter 630 (user spec — Allowance Enable/Disable contract) — apply the
+    # Firm-Master EDITABLE-allowance mask INSIDE the compute: disabled heads
+    # calculate as 0 and the masked amount leaves the gross, so Gross Paid /
+    # ESIC / PT wage bases genuinely exclude them. Basic (fixed component)
+    # is never masked. Stored master values are NEVER modified — re-enabling
+    # the head and reprocessing restores them. On freeze-import runs the
+    # masked amount becomes part of the Difference, which the caller
+    # reallocates ONLY into OT / Other Allowances (the permitted adjustment
+    # heads) so Final Gross Paid == Imported Freeze Gross.
+    if enabled_allowances is not None:
+        _masked630 = 0.0
+        if "hra" not in enabled_allowances:
+            _masked630 += hra
+            hra = 0.0
+        if "conveyance" not in enabled_allowances:
+            _masked630 += conveyance
+            conveyance = 0.0
+        if "medical" not in enabled_allowances:
+            _masked630 += medical
+            medical = 0.0
+        if "special" not in enabled_allowances:
+            _masked630 += special
+            special = 0.0
+        if "others" not in enabled_allowances:
+            _masked630 += others
+            others = 0.0
+        if _masked630:
+            monthly_gross = round(monthly_gross - _masked630, 2)
 
     # Iter 406 (user rule) — freeze-import difference allocated to OTHER
     # ALLOWANCES also lands inside the compute (see ot_pay_extra above).

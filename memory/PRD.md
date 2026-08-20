@@ -6862,3 +6862,27 @@ Current iteration: 594. Next: 595.
   OFF → pending, IST-wall-clock 'at' convention, /ess/attendance payload).
   UI screenshot: stored 07:51 IST punch now displays "07:51 am".
 - APP_ITERATION 629; deploy_vps_iter629.sh served via kind=script.
+
+## Iteration 630 (2026-06) — Allowance Enable/Disable & Freeze Reconciliation contract (user 7-rule spec)
+- Verified existing behaviour with a conformance test → found ONE violation:
+  on Freeze-import runs, disabling an editable head zeroed its column but
+  gross_paid stayed = imported gross with the masked amount VANISHING from
+  the visible columns (Basic 16000 + 0 + adj 1000 ≠ 20000) and ESIC/PT bases
+  still included the masked head.
+- FIX: compute_compliance_row() gained `enabled_allowances: Optional[set]`
+  — mask applied INSIDE the engine right after the structure split (before
+  ot/other extras): disabled heads (hra/conveyance/medical/special/others)
+  → 0 and monthly_gross reduced; Basic never masked. Freeze diff then
+  naturally includes masked amounts → reallocated ONLY to OT/Other
+  Allowance (permitted heads). enabled_set derivation MOVED BEFORE the
+  first compute in compliance_salary_runs.py (single source, reused by the
+  old post-compute block which stays as an idempotent safety net); passed
+  to all 6 compute call sites (initial, _rowF, _st2, _row4, _row3, _row2).
+- Conformance verified 18/18 (/app/test_iter630_allowance_mask_contract.py):
+  R1 disabled=0 on reprocess, R2 gross==imported always, R3 Δadj==masked
+  amount into OT/Others only, R4 stored master+import survive, R5 toggling
+  alone never changes a processed run / reprocess restores + statutory
+  recalc, R6 Basic untouched. Scratch month 2025-12 used; everything
+  cleaned + restored. Checked: NO real Kankani employee carries amounts in
+  currently-disabled heads → zero impact on existing processed payrolls.
+- APP_ITERATION 630; deploy_vps_iter630.sh served via kind=script.

@@ -706,6 +706,27 @@ async def _compute_compliance_run(
             stats["half_days"] = 0
         # Iter 178 — state-wise PT from the firm's compliance policy.
         _fcp = (company_doc.get("compliance_policy") or {}) if company_doc else {}
+        # Iter 630 (user spec — Allowance Enable/Disable contract) — derive
+        # the firm's EDITABLE-allowance mask BEFORE the compute so disabled
+        # heads calculate as 0 INSIDE the engine (Gross Paid / ESIC / PT
+        # bases see the masked structure; on freeze runs the masked amount
+        # flows into the Difference → OT / Other Allowances only).
+        firm_comp_policy = (company_doc.get("compliance_policy") or {}) if company_doc else {}
+        enabled = firm_comp_policy.get("enabled_allowances")
+        _pol_set = ({str(x).lower() for x in enabled}
+                    if enabled and isinstance(enabled, list) else None)
+        _fm_masks = firm_stat_flags.get(emp.get("company_id")) or {}
+        _fm_set = _fm_masks.get("allow_mask")
+        if _pol_set is not None and _fm_set is not None:
+            enabled_set = _pol_set & set(_fm_set)
+        elif _pol_set is not None:
+            enabled_set = _pol_set
+        elif _fm_set is not None:
+            enabled_set = set(_fm_set)
+        else:
+            enabled_set = None
+        if enabled_set is not None:
+            enabled_set.add("basic")  # Basic (fixed head) is never masked
         # Iter 626 (user spec §12) — mid-month DAILY RATE REVISION.
         emp, _rate_rev_audit = _apply_daily_rate_revisions(
             emp, payload.month, int(month_days), grid_by_user_c.get(emp["user_id"]))
@@ -716,6 +737,7 @@ async def _compute_compliance_run(
             firm_pf_enabled=_ff["pf"],
             firm_esic_enabled=_ff["esic"],
             firm_pt={"state": _fcp.get("pt_state"), "slabs": _fcp.get("pt_slabs")},
+            enabled_allowances=enabled_set,
         )
         # Iter 406 — remember the stats the FINAL row was computed with so
         # the Freeze block can re-compute statutory on the allocated gross.
@@ -787,6 +809,7 @@ async def _compute_compliance_run(
                         firm_esic_enabled=_ff["esic"],
                         firm_pt={"state": _fcp.get("pt_state"),
                                  "slabs": _fcp.get("pt_slabs")},
+                        enabled_allowances=enabled_set,
                     )
                     _gF = float(_rowF.get("gross_paid") or 0)
                     if _gF > 0:
@@ -833,6 +856,7 @@ async def _compute_compliance_run(
                         firm_esic_enabled=_ff["esic"],
                         firm_pt={"state": _fcp.get("pt_state"),
                                  "slabs": _fcp.get("pt_slabs")},
+                        enabled_allowances=enabled_set,
                     )
                     _stats_final = _st2
                     row["attendance_days"] = round(
@@ -902,25 +926,12 @@ async def _compute_compliance_run(
         # Iter 85 — Apply the firm's Compliance-Allowances toggles.
         # Iter 171 — ALSO honour the Firm Master Allowances catalog: when
         # the firm configured allowances there, the two masks intersect.
-        # Basic is always kept (statutory floor). Any allowance head that
-        # is switched OFF is zeroed out so it doesn't inflate
-        # Total Gross / statutory bases.
-        firm_comp_policy = company_doc.get("compliance_policy") or {}
-        enabled = firm_comp_policy.get("enabled_allowances")
-        _pol_set = ({str(x).lower() for x in enabled}
-                    if enabled and isinstance(enabled, list) else None)
-        _fm_masks = firm_stat_flags.get(emp.get("company_id")) or {}
-        _fm_set = _fm_masks.get("allow_mask")
-        if _pol_set is not None and _fm_set is not None:
-            enabled_set = _pol_set & set(_fm_set)
-        elif _pol_set is not None:
-            enabled_set = _pol_set
-        elif _fm_set is not None:
-            enabled_set = set(_fm_set)
-        else:
-            enabled_set = None
+        # Iter 630 — the mask (enabled_set, derived BEFORE the compute) is
+        # now applied INSIDE compute_compliance_row, so heads/gross/ESIC
+        # already exclude disabled heads. This block stays as an idempotent
+        # safety net for rows merged from auxiliary computes and records
+        # the mask on the row.
         if enabled_set is not None:
-            enabled_set.add("basic")  # always
             for head in ("hra", "conveyance", "medical", "special", "others"):
                 if head not in enabled_set:
                     row[head] = 0.0
@@ -1118,6 +1129,7 @@ async def _compute_compliance_run(
                     firm_esic_enabled=_ff["esic"],
                     firm_pt={"state": _fcp.get("pt_state"),
                              "slabs": _fcp.get("pt_slabs")},
+                    enabled_allowances=enabled_set,
                 )
                 for _k in ("stat_wage_base", "pf_wages", "pf_employee",
                            "pf_employer_epf", "pf_employer_eps",
@@ -1192,6 +1204,7 @@ async def _compute_compliance_run(
                     firm_esic_enabled=_ff["esic"],
                     firm_pt={"state": _fcp.get("pt_state"),
                              "slabs": _fcp.get("pt_slabs")},
+                    enabled_allowances=enabled_set,
                 )
                 for _k in ("stat_wage_base", "pf_wages", "pf_employee",
                            "pf_employer_epf", "pf_employer_eps",
@@ -1266,6 +1279,7 @@ async def _compute_compliance_run(
                         firm_esic_enabled=_ff["esic"],
                         firm_pt={"state": _fcp.get("pt_state"),
                                  "slabs": _fcp.get("pt_slabs")},
+                        enabled_allowances=enabled_set,
                     )
                     # Merge the recomputed earnings + statutory figures into
                     # the row (sheet TDS / Other Deduction / deduction masks
