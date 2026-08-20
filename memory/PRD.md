@@ -6968,3 +6968,19 @@ Current iteration: 594. Next: 595.
 - Verified via screenshots (run csrun_edb7d34122f4 2026-06): 14px cells,
   ~44px rows, sticky header pinned while row 2 scrolls beneath.
 - APP_ITERATION 635; deploy_vps_iter635.sh served via kind=script.
+
+## Iteration 636 (2026-06) — Actual grid redesign + Compact header (user requests, VIEW-ONLY)
+- salary-run.tsx (Actual Salary Process): tblHeaderTxt/readTxt/empIdent
+  11→14px, empRow minHeight 32→44, editInput 11→14px pad 3→7 minHeight
+  26→38, COL_WIDTHS auto-fit recalibrated (7.2→8.2 px/char, wider bases),
+  GridScroller maxHeight "calc(100vh - 170px)" on web. No logic changes.
+- compliance-salary-run.tsx COMPACT HEADER: setupCollapsed state auto-true
+  when run_id on screen (effect keyed on run?.run_id so grid edits don't
+  re-collapse); collapsed → slim compactBar (testID csr-setup-expand:
+  "Firm · Month · Group | Change firm / month ▾"); expanded cards get a
+  "Collapse setup — jump to grid" link (csr-setup-collapse). Select-firm +
+  Configure-batch cards wrapped in the conditional (fragment closes after
+  the Configure-batch </View> at the unlock button).
+- Verified via screenshots: compact bar + grid starting at top with 9+ rows
+  visible; expand & collapse both work.
+- APP_ITERATION 636; deploy_vps_iter636.sh served via kind=script.

@@ -1150,6 +1150,11 @@ export default function ComplianceSalaryRunScreen() {
   // flushes the grid first, since that is an explicit action too). We
   // now just track a dirty flag to warn about unsaved edits.
   const [unsavedEdits, setUnsavedEdits] = useState(false);
+  // Iter 636 (user request) — compact header state: auto-collapse the
+  // setup cards whenever a run is loaded on screen.
+  const [setupCollapsed, setSetupCollapsed] = useState(false);
+  const runIdOnScreen = (run as any)?.run_id || null;
+  useEffect(() => { setSetupCollapsed(!!runIdOnScreen); }, [runIdOnScreen]);
   const dirtyRunRef = useRef<string | null>(null);
   useEffect(() => {
     if (run && dirtyRunRef.current !== run.run_id) {
@@ -2099,6 +2104,24 @@ export default function ComplianceSalaryRunScreen() {
             and live compliance validation. Iter 370 (user request) —
             moved from the top of the page to the BOTTOM. */}
 
+        {/* Iter 636 (user request) — COMPACT HEADER: once a run is on
+            screen, the Select-firm + Configure-batch cards collapse into
+            one slim bar so the salary grid starts right at the top. */}
+        {run && setupCollapsed ? (
+          <Pressable
+            testID="csr-setup-expand"
+            style={styles.compactBar}
+            onPress={() => setSetupCollapsed(false)}
+          >
+            <Ionicons name="options-outline" size={16} color={colors.brandPrimary} />
+            <Text style={styles.compactBarTxt} numberOfLines={1}>
+              {(ctxCompanies || []).find((c: any) => c.company_id === activeCompanyId)?.name || "Firm"}
+              {"  ·  "}{run.month}{"  ·  "}{(run as any).employee_type || "All Groups"}
+            </Text>
+            <Text style={styles.compactBarHint}>Change firm / month ▾</Text>
+          </Pressable>
+        ) : (
+        <>
         {/* Iter 91 — In-screen firm selection: ALL active firms listed,
             pick ONE and the salary process runs for that firm. */}
         {isSuper ? (
@@ -2558,7 +2581,19 @@ export default function ComplianceSalaryRunScreen() {
               )}
             </Pressable>
           ) : null}
+          {run ? (
+            <Pressable
+              testID="csr-setup-collapse"
+              onPress={() => setSetupCollapsed(true)}
+              style={{ marginTop: 8, alignSelf: "center", flexDirection: "row", alignItems: "center", gap: 4 }}
+            >
+              <Ionicons name="chevron-up" size={14} color={colors.brandPrimary} />
+              <Text style={{ fontSize: 12, fontWeight: "800", color: colors.brandPrimary }}>Collapse setup — jump to grid</Text>
+            </Pressable>
+          ) : null}
         </View>
+        </>
+        )}
 
         {/* Iter 182 — loading skeleton while a run computes */}
         {busy && !run ? <EmployeeListSkeleton rows={6} /> : null}
@@ -4197,6 +4232,21 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
   },
   rightCell: { textAlign: "right", width: 84 },
+  // Iter 636 — compact setup bar (shown when the setup cards collapse).
+  compactBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
+  },
+  compactBarTxt: { flex: 1, fontSize: 13.5, fontWeight: "800", color: colors.onSurface },
+  compactBarHint: { fontSize: 12, fontWeight: "800", color: colors.brandPrimary },
   // Iter 85 — Inline-editable Present Days cell in Compliance Salary grid.
   editableCell: {
     borderWidth: 1,

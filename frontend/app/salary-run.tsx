@@ -1074,8 +1074,10 @@ function ResultGrid({
   // the BASE_COL_WIDTHS minimums.
   const COL_WIDTHS = useMemo(() => {
     const rows = run.rows || [];
-    const px = (v: any) => String(v ?? "").length * 7.2 + 20;
-    const fit = (base: number, label: string, vals: any[], maxW = 280) => {
+    // Iter 636 (user request — UI readability): 14px grid font needs wider
+    // auto-fit columns (~8.2 px/char + padding). Layout-only change.
+    const px = (v: any) => String(v ?? "").length * 8.2 + 22;
+    const fit = (base: number, label: string, vals: any[], maxW = 300) => {
       let m = Math.max(base, px(label));
       for (const v of vals) {
         const p = px(v);
@@ -1085,14 +1087,14 @@ function ResultGrid({
     };
     return {
       ...BASE_COL_WIDTHS,
-      name: fit(110, "Name", rows.map((r) => r.name)),
-      duty: fit(56, "Duty HRS", rows.map((r) => fmtNum(r.duty_hrs, 2))),
-      pdays: fit(60, "P Days", rows.map((r) => fmtNum(r.p_days, 2))),
-      phours: fit(60, "P Hours", rows.map((r) => fmtNum(r.p_hours, 2))),
-      basic: fit(72, "Basic", rows.map((r) => fmtInr(r.basic))),
-      bsalary: fit(80, "B.Salary", rows.map((r) => fmtInr(r.basic_salary))),
-      wbasic: fit(80, "W.Basic", rows.map((r) => fmtInr(r.w_basic_salary))),
-      othallo: fit(72, "Oth Allo", rows.map((r) => fmtInr(r.oth_allo))),
+      name: fit(140, "Name", rows.map((r) => r.name)),
+      duty: fit(70, "Duty HRS", rows.map((r) => fmtNum(r.duty_hrs, 2))),
+      pdays: fit(72, "P Days", rows.map((r) => fmtNum(r.p_days, 2))),
+      phours: fit(72, "P Hours", rows.map((r) => fmtNum(r.p_hours, 2))),
+      basic: fit(86, "Basic", rows.map((r) => fmtInr(r.basic))),
+      bsalary: fit(94, "B.Salary", rows.map((r) => fmtInr(r.basic_salary))),
+      wbasic: fit(94, "W.Basic", rows.map((r) => fmtInr(r.w_basic_salary))),
+      othallo: fit(86, "Oth Allo", rows.map((r) => fmtInr(r.oth_allo))),
       gross: fit(80, "Gross", rows.map((r) => fmtInr(r.total_gross))),
       epf: fit(64, "EPF", rows.map((r) => fmtInr(r.epf))),
       esi: fit(64, "ESI", rows.map((r) => fmtInr(r.esi))),
@@ -1267,7 +1269,7 @@ function ResultGrid({
       {/* Iter 183 — Branch / Dept / Contractor filter chips */}
       <GridFilterChips rows={run.rows} filters={gridFilters} onChange={setGridFilters} testPrefix="asal" />
 
-      <GridScroller>
+      <GridScroller maxHeight={Platform.OS === "web" ? "calc(100vh - 170px)" : 640}>
         <View style={Platform.OS === "web" ? undefined : { minWidth: totalMinWidth }}>
           {/* header — Iter 140: frozen on top + SN/Code/Name frozen left.
               Iter 346 — filter row lives inside the same sticky block. */}
@@ -1800,32 +1802,34 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 6, borderTopRightRadius: 6,
     borderBottomWidth: 0,
   },
-  tblHeaderTxt: { color: "#fff", fontWeight: "800", fontSize: 11 },
-  readTxt: { fontSize: 11, color: colors.onSurface },
+  // Iter 636 (user request — UI readability, VIEW ONLY): 14px grid text,
+  // ~44px rows, 14px bold headers. No logic changes.
+  tblHeaderTxt: { color: "#fff", fontWeight: "800", fontSize: 14 },
+  readTxt: { fontSize: 14, color: colors.onSurface },
   alignLeft: { textAlign: "left" },
   alignRight: { textAlign: "right" },
 
   // Iter 86 — Row-wise employee highlight in Actual Salary grid.
   // Strong zebra stripes + 4px coloured left accent + bolded Code/Name.
   empRow: {
-    minHeight: 32,
+    minHeight: 44,
     alignItems: "center",
   },
   empRowEven: { backgroundColor: colors.surface },
   empRowOdd:  { backgroundColor: colors.surfaceSecondary },
-  empIdent:   { fontWeight: "800", color: colors.onSurface, fontSize: 11 },
+  empIdent:   { fontWeight: "800", color: colors.onSurface, fontSize: 14 },
 
   editInput: {
     borderWidth: 1,
     borderColor: colors.borderStrong,
     borderRadius: 4,
-    paddingHorizontal: 4,
-    paddingVertical: 3,
-    fontSize: 11,
+    paddingHorizontal: 6,
+    paddingVertical: 7,
+    fontSize: 14,
     color: colors.onSurface,
     backgroundColor: colors.surface,
     textAlign: "right",
-    minHeight: 26,
+    minHeight: 38,
   },
   editInputDisabled: {
     backgroundColor: colors.surfaceSecondary,
