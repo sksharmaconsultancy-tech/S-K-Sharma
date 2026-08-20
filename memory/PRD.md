@@ -6754,3 +6754,12 @@ Current iteration: 594. Next: 595.
   smoke PASS. APP_ITERATION 624; deploy_vps_iter624.sh via kind=script.
 - Deferred/light: branch filters inside legacy reports (dashboard drilldown
   covers branch view); full branch-level RBAC across old endpoints.
+
+## Iteration 625 (2026-06) — Branch Allocation Export (user-approved)
+- GET /api/admin/branch-management/allocation-export?company_id&month&fmt=xlsx|pdf
+  (openpyxl 2-sheet workbook: Branch Summary + Employee Allocation; reportlab
+  landscape PDF with totals row). Export XLSX/PDF buttons on branch-dashboard
+  (apiBinary + web download). Verified: both formats return 200.
+- Also answered user Q on daily-rated compliance calc (rate×days gross, PF
+  Basic per-day × present days with full-month ceiling check, ESIC on gross
+  incl OT with full-month eligibility) — documented from engine code.

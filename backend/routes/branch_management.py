@@ -424,6 +424,116 @@ async def bm_allocation(company_id: Optional[str] = Query(None),
     return data
 
 
+@router.get("/allocation-export")
+async def bm_allocation_export(company_id: Optional[str] = Query(None),
+                               month: str = Query(...),
+                               fmt: str = Query("xlsx"),
+                               authorization: Optional[str] = Header(None)):
+    """Iter 625 (user-approved) — Branch Cost Allocation as Excel / PDF."""
+    from fastapi.responses import Response
+    admin, cid = await _gate(authorization, company_id)
+    data = await _allocation(cid, month)
+    company = await db.companies.find_one({"company_id": cid}, {"_id": 0, "name": 1})
+    firm = (company or {}).get("name") or cid
+    title = f"Branch Cost Allocation — {firm} — {month}"
+
+    if fmt == "pdf":
+        import io
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib import colors as rl
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.platypus import (Paragraph, SimpleDocTemplate, Spacer,
+                                        Table, TableStyle)
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
+                                leftMargin=20, rightMargin=20,
+                                topMargin=24, bottomMargin=20)
+        h = ParagraphStyle("h", fontName="Helvetica-Bold", fontSize=13)
+        sub = ParagraphStyle("s", fontName="Helvetica", fontSize=8.5,
+                             textColor=rl.HexColor("#475569"))
+        story: list = [Paragraph(title, h),
+                       Paragraph("One consolidated payroll per employee — "
+                                 "branch cost = salary ÷ payable days × days "
+                                 "worked at each branch.", sub), Spacer(1, 8)]
+        head = ["Branch", "Employees", "Days", "Guest Days", "Gross ₹",
+                "Net ₹", "PF (Er) ₹", "ESIC (Er) ₹"]
+        rows = [head] + [[b["branch"], b["employees"], b["days"],
+                          b["guest_days"], f'{b["gross"]:,.0f}',
+                          f'{b["net"]:,.0f}', f'{b["pf_employer"]:,.0f}',
+                          f'{b["esic_employer"]:,.0f}']
+                         for b in data["branches"]]
+        rows.append(["TOTAL", "", round(sum(b["days"] for b in data["branches"]), 1), "",
+                     f'{sum(b["gross"] for b in data["branches"]):,.0f}',
+                     f'{sum(b["net"] for b in data["branches"]):,.0f}',
+                     f'{sum(b["pf_employer"] for b in data["branches"]):,.0f}',
+                     f'{sum(b["esic_employer"] for b in data["branches"]):,.0f}'])
+        t = Table(rows, repeatRows=1)
+        t.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+            ("GRID", (0, 0), (-1, -1), 0.4, rl.HexColor("#94A3B8")),
+            ("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#E2E8F0")),
+            ("ALIGN", (1, 1), (-1, -1), "RIGHT")]))
+        story.append(t)
+        story.append(Spacer(1, 12))
+        story.append(Paragraph("Employee-wise allocation", h))
+        eh = ["Employee", "Home Branch", "Branch", "Days", "Gross ₹", "Net ₹", "Guest"]
+        erows = [eh]
+        for e in data["employees"]:
+            for p in e["allocation"]:
+                erows.append([e["name"], e["home_branch"], p["branch"],
+                              p["days"], f'{p["gross"]:,.0f}',
+                              f'{p["net"]:,.0f}', "YES" if p["guest"] else ""])
+        et = Table(erows, repeatRows=1)
+        et.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("GRID", (0, 0), (-1, -1), 0.4, rl.HexColor("#CBD5E1")),
+            ("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#F1F5F9")),
+            ("ALIGN", (3, 1), (-2, -1), "RIGHT")]))
+        story.append(et)
+        doc.build(story)
+        return Response(content=buf.getvalue(), media_type="application/pdf",
+                        headers={"Content-Disposition":
+                                 f'attachment; filename="BranchAllocation_{month}.pdf"'})
+
+    # default: Excel
+    import io
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Branch Summary"
+    ws.append([title])
+    ws["A1"].font = Font(bold=True, size=13)
+    ws.append([])
+    ws.append(["Branch", "Employees", "Days", "Guest Days", "Gross",
+               "Net", "PF Employer", "ESIC Employer"])
+    for c in ws[3]:
+        c.font = Font(bold=True)
+    for b in data["branches"]:
+        ws.append([b["branch"], b["employees"], b["days"], b["guest_days"],
+                   b["gross"], b["net"], b["pf_employer"], b["esic_employer"]])
+    ws2 = wb.create_sheet("Employee Allocation")
+    ws2.append(["Employee", "Home Branch", "Present Days", "Gross", "Net",
+                "Branch", "Branch Days", "Branch Gross", "Branch Net", "Guest"])
+    for c in ws2[1]:
+        c.font = Font(bold=True)
+    for e in data["employees"]:
+        for p in e["allocation"]:
+            ws2.append([e["name"], e["home_branch"], e["present_days"],
+                        e["gross"], e["net"], p["branch"], p["days"],
+                        p["gross"], p["net"], "YES" if p["guest"] else ""])
+    out = io.BytesIO()
+    wb.save(out)
+    return Response(
+        content=out.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition":
+                 f'attachment; filename="BranchAllocation_{month}.xlsx"'})
+
+
 @router.get("/dashboard")
 async def bm_dashboard(company_id: Optional[str] = Query(None),
                        month: str = Query(...),

@@ -11,7 +11,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 
-import { api } from "@/src/api/client";
+import { api, apiBinary } from "@/src/api/client";
 
 const inr = (n: number) => `₹${Math.round(n || 0).toLocaleString("en-IN")}`;
 
@@ -101,6 +101,28 @@ export default function BranchDashboard() {
           <Pressable style={st.toggle} onPress={() => setShowEmp((v) => !v)} testID="bd-toggle-emp">
             <Text style={st.toggleTxt}>{showEmp ? "▼" : "▶"} Employee-wise Allocation ({alloc?.employees?.length || 0})</Text>
           </Pressable>
+          {/* Iter 625 (user-approved) — export allocation for accounts */}
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            {(["xlsx", "pdf"] as const).map((f) => (
+              <Pressable key={f} style={st.expBtn} testID={`bd-export-${f}`}
+                onPress={async () => {
+                  try {
+                    const r = await apiBinary(
+                      `/admin/branch-management/allocation-export?company_id=${cid}&month=${month}&fmt=${f}`);
+                    if (r.webBlobUrl) {
+                      const a = document.createElement("a");
+                      a.href = r.webBlobUrl;
+                      a.download = `BranchAllocation_${month}.${f}`;
+                      a.click();
+                      setTimeout(() => URL.revokeObjectURL(r.webBlobUrl!), 60000);
+                    }
+                  } catch {}
+                }}>
+                <Ionicons name={f === "pdf" ? "document-text" : "grid"} size={14} color="#2563EB" />
+                <Text style={st.expTxt}>Export {f.toUpperCase()}</Text>
+              </Pressable>
+            ))}
+          </View>
           {showEmp ? (alloc?.employees || []).map((e: any) => (
             <View key={e.user_id} style={st.card}>
               <View style={st.rowBetween}>
@@ -158,4 +180,6 @@ const st = StyleSheet.create({
   statL: { fontSize: 10, color: "#64748B", marginTop: 1 },
   toggle: { paddingVertical: 8 },
   toggleTxt: { fontSize: 13, fontWeight: "800", color: "#2563EB" },
+  expBtn: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: "#2563EB", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: "#EFF6FF" },
+  expTxt: { fontSize: 12, fontWeight: "800", color: "#2563EB" },
 });
