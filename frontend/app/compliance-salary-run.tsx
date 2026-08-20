@@ -1557,6 +1557,8 @@ export default function ComplianceSalaryRunScreen() {
           "HRA": "hra", "CONV.": "conveyance",
           "MEDICAL ALLOWANCES": "medical", "OTH. ALLOW.": "special",
           "OTHER MISC.ALLOWANCE": "others",
+          // Iter 644 — OVER TIME toggle drives the OT columns.
+          "OVER TIME": "ot",
         };
         const en = stored
           ? ["basic",
@@ -1576,18 +1578,38 @@ export default function ComplianceSalaryRunScreen() {
       })
       .catch(() => setFmMask({}));
   }, [fmMaskCid]);
+  // Iter 644 (user bug — "OT not allowed but showing") — the OT Hrs /
+  // OT Amt* columns follow the Firm-Master "OVER TIME" toggle. Legacy runs
+  // whose rows carry OT amounts keep the columns so old data stays visible.
+  const hasOtCol = useMemo(() => {
+    const rows: any[] = (run?.rows as any[]) || [];
+    const en = (rows[0]?.enabled_allowances ?? fmMask.en) as string[] | undefined;
+    return !en || en.includes("ot")
+      || rows.some((r) => (Number(r.ot_pay) || 0) !== 0 || (Number(r.ot_hours) || 0) !== 0);
+  }, [run, fmMask]);
+  // Iter 644 (user request — "INCENTIVE ticked but not showing") — dynamic
+  // custom allowance head columns (decomposed out of the Others bucket by
+  // the backend; the Others columns display the remainder).
+  const allowLabels = useMemo(
+    () => (((run?.rows?.[0] as any)?.allowance_head_labels as string[]) || []),
+    [run],
+  );
+  const allowHeadsPaid = (r: any) => allowLabels.reduce(
+    (s, l) => s + (Number(((r as any).allowance_heads || {})[l]) || 0), 0);
+  const allowHeadsMaster = (r: any) => allowLabels.reduce(
+    (s, l) => s + (Number(((r as any).allowance_heads_master || {})[l]) || 0), 0);
   const navCols = useMemo(() => {
     const r0: any = run?.rows?.[0] || {};
     const en = (r0.enabled_allowances ?? fmMask.en) as string[] | undefined;
     const ed = (r0.enabled_deductions ?? fmMask.ed) as string[] | undefined;
     const cols: string[] = ["pd"];
     if (!en || en.includes("others")) cols.push("others");
-    cols.push("ot_pay");
+    if (hasOtCol) cols.push("ot_pay");
     if (!ed || ed.includes("tds")) cols.push("tds");
     if (!ed || ed.includes("advance")) cols.push("advance_recovery");
     if (!ed || ed.includes("other")) cols.push("other_deduction");
     return cols;
-  }, [run, fmMask]);
+  }, [run, fmMask, hasOtCol]);
   const focusCell = (col: string, idx: number) => {
     const el: any = col === "pd" ? pdRefs.current[idx] : cellRefs.current[`${col}:${idx}`];
     if (el && typeof el.focus === "function") el.focus();
@@ -2343,154 +2365,6 @@ export default function ComplianceSalaryRunScreen() {
               BOTTOM of the page (see below, before the footer). */}
 
 
-          {/* Iter 388 (Phase 3) — Pre-Lock PF/ESIC Validation results */}
-          <Modal
-            visible={!!lockCheck}
-            transparent
-            animationType="fade"
-            onRequestClose={() => setLockCheck(null)}
-          >
-            <View style={{
-              flex: 1, backgroundColor: "rgba(15,23,42,0.45)",
-              alignItems: "center", justifyContent: "center", padding: 20,
-            }}>
-              <View style={{
-                backgroundColor: colors.surfaceSecondary, borderRadius: 16, padding: 16,
-                width: "100%", maxWidth: 640, maxHeight: "85%",
-                borderWidth: 1, borderColor: colors.border,
-              }}>
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                  <Text style={{ fontSize: 15, fontWeight: "800", color: colors.onSurface }}>
-                    🔒 Salary Lock — PF/ESIC Validation
-                  </Text>
-                  <Pressable onPress={() => setLockCheck(null)} hitSlop={10} testID="lock-check-close">
-                    <Ionicons name="close" size={18} color={colors.onSurfaceSecondary} />
-                  </Pressable>
-                </View>
-                <View style={{ flexDirection: "row", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-                  <View style={{ backgroundColor: "#FEE2E2", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
-                    <Text style={{ fontSize: 11, fontWeight: "800", color: "#B91C1C" }}>
-                      {lockCheck?.errors_count || 0} error(s) — review below
-                    </Text>
-                  </View>
-                  <View style={{ backgroundColor: "#FEF3C7", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
-                    <Text style={{ fontSize: 11, fontWeight: "800", color: "#92400E" }}>
-                      {lockCheck?.warnings_count || 0} warning(s)
-                    </Text>
-                  </View>
-                  <View style={{ backgroundColor: "#E0F2FE", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
-                    <Text style={{ fontSize: 11, fontWeight: "800", color: "#075985" }}>
-                      {lockCheck?.employees_flagged || 0} / {lockCheck?.employees_total || 0} employees flagged
-                    </Text>
-                  </View>
-                </View>
-                <ScrollView style={{ maxHeight: 420 }}>
-                  {(lockCheck?.global_issues || []).map((g: any, i: number) => (
-                    <View key={`g${i}`} style={{
-                      flexDirection: "row", gap: 8, padding: 8, borderRadius: 8, marginBottom: 6,
-                      backgroundColor: g.level === "error" ? "#FEF2F2" : "#FFFBEB",
-                      borderWidth: 1, borderColor: g.level === "error" ? "#FCA5A5" : "#FCD34D",
-                    }}>
-                      <Ionicons name={g.level === "error" ? "close-circle" : "warning"} size={16}
-                        color={g.level === "error" ? "#DC2626" : "#D97706"} style={{ marginTop: 1 }} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 12, fontWeight: "700", color: colors.onSurface }}>{g.message}</Text>
-                        <Text style={{ fontSize: 11, color: colors.onSurfaceSecondary, marginTop: 1 }}>→ {g.suggestion}</Text>
-                      </View>
-                    </View>
-                  ))}
-                  {(lockCheck?.rows || []).map((er: any) => (
-                    <View key={er.user_id} style={{
-                      borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider,
-                      paddingVertical: 8,
-                    }}>
-                      <Text style={{ fontSize: 12.5, fontWeight: "800", color: colors.onSurface }}>
-                        {er.employee_code ? `${er.employee_code} · ` : ""}{er.name}
-                        <Text style={{ fontWeight: "400", color: colors.onSurfaceTertiary }}>
-                          {"   "}Gross ₹{Number(er.gross_paid || 0).toLocaleString("en-IN")} · {er.present_days} days
-                        </Text>
-                      </Text>
-                      {(er.issues || []).map((is: any, j: number) => (
-                        <View key={j} style={{ flexDirection: "row", gap: 6, marginTop: 4, marginLeft: 2 }}>
-                          <Ionicons name={is.level === "error" ? "close-circle" : "warning"} size={14}
-                            color={is.level === "error" ? "#DC2626" : "#D97706"} style={{ marginTop: 1 }} />
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ fontSize: 11.5, color: is.level === "error" ? "#B91C1C" : "#92400E", fontWeight: "600" }}>
-                              [{is.code}] {is.message}
-                            </Text>
-                            <Text style={{ fontSize: 10.5, color: colors.onSurfaceSecondary }}>→ {is.suggestion}</Text>
-                          </View>
-                        </View>
-                      ))}
-                    </View>
-                  ))}
-                </ScrollView>
-                <View style={{ flexDirection: "row", gap: 8, marginTop: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                  <Pressable
-                    onPress={() => setLockCheck(null)}
-                    style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border }}
-                    testID="lock-check-cancel"
-                  >
-                    <Text style={{ fontSize: 13, fontWeight: "700", color: colors.onSurfaceSecondary }}>Fix issues first</Text>
-                  </Pressable>
-                  {/* Iter 423b (user directive) — the validation NEVER
-                      blocks the lock: findings are informational and the
-                      Finalize button is always available to every admin. */}
-                  <Pressable
-                    onPress={() => doFinalize(true, true)}
-                    disabled={finalizing}
-                    style={{
-                      flexDirection: "row", alignItems: "center", gap: 6,
-                      paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10,
-                      backgroundColor: "#059669", opacity: finalizing ? 0.6 : 1,
-                    }}
-                    testID="lock-anyway"
-                  >
-                    {finalizing ? <ActivityIndicator size="small" color="#fff" /> : (
-                      <Ionicons name="lock-closed" size={14} color="#fff" />
-                    )}
-                    <Text style={{ fontSize: 13, fontWeight: "800", color: "#fff" }}>
-                      Finalize &amp; Lock Now
-                    </Text>
-                  </Pressable>
-                </View>
-                {(lockCheck?.errors_count || 0) > 0 ? (
-                  <Text style={{ fontSize: 10.5, color: "#B91C1C", marginTop: 8 }}>
-                    {user?.role === "super_admin"
-                      ? "Review the employee-wise errors above — as Super Admin you can still lock with the red override button (recorded on the run + audit trail)."
-                      : "Errors must be fixed before the Salary Lock — only a Super Admin can override errors."}
-                  </Text>
-                ) : null}
-              </View>
-            </View>
-          </Modal>
-
-          {/* Iter 438 (user request) — post Save / Finalize: Download or
-              Mail the reports (PDF / Excel / CSV / All). */}
-          <ReportsShareModal
-            visible={!!reportsFor}
-            onClose={() => setReportsFor(null)}
-            title={`Compliance Salary — ${reportsFor?.month || ""}`}
-            subtitle={reportsFor?.note}
-            employeeGroup={reportsFor?.group}
-            formatOptions={[
-              { key: "pdf", label: "PDF Format 1" },
-              { key: "pdf2", label: "PDF Format 2" },
-              { key: "xlsx", label: "Excel" },
-              { key: "csv", label: "CSV" },
-            ]}
-            defaultEmail={(user as any)?.email || ""}
-            companyId={(run as any)?.company_id || activeCompanyId || ""}
-            emailEndpoint={reportsFor
-              ? `/admin/compliance-salary-runs/${reportsFor.run_id}/email-report`
-              : ""}
-            onDownload={async (fmts) => {
-              if (reportsFor) {
-                await downloadRunReports(reportsFor.run_id, reportsFor.month, fmts);
-              }
-            }}
-          />
-
           {/* Iter 101 — Gmail attachment picker */}
           <Modal
             visible={mailModal}
@@ -2647,6 +2521,159 @@ export default function ComplianceSalaryRunScreen() {
         </>
         )}
         </View>
+
+        {/* Iter 644 (user bug — "Not able to Lock") — these modals used to
+            live inside the collapsible Configure-Batch branch, so once a run
+            was on screen (setup auto-collapsed) they NEVER mounted: clicking
+            Finalize & Lock with validation findings silently did nothing.
+            Moved here so they are ALWAYS mounted. */}
+          {/* Iter 388 (Phase 3) — Pre-Lock PF/ESIC Validation results */}
+          <Modal
+            visible={!!lockCheck}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setLockCheck(null)}
+          >
+            <View style={{
+              flex: 1, backgroundColor: "rgba(15,23,42,0.45)",
+              alignItems: "center", justifyContent: "center", padding: 20,
+            }}>
+              <View style={{
+                backgroundColor: colors.surfaceSecondary, borderRadius: 16, padding: 16,
+                width: "100%", maxWidth: 640, maxHeight: "85%",
+                borderWidth: 1, borderColor: colors.border,
+              }}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                  <Text style={{ fontSize: 15, fontWeight: "800", color: colors.onSurface }}>
+                    🔒 Salary Lock — PF/ESIC Validation
+                  </Text>
+                  <Pressable onPress={() => setLockCheck(null)} hitSlop={10} testID="lock-check-close">
+                    <Ionicons name="close" size={18} color={colors.onSurfaceSecondary} />
+                  </Pressable>
+                </View>
+                <View style={{ flexDirection: "row", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+                  <View style={{ backgroundColor: "#FEE2E2", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
+                    <Text style={{ fontSize: 11, fontWeight: "800", color: "#B91C1C" }}>
+                      {lockCheck?.errors_count || 0} error(s) — review below
+                    </Text>
+                  </View>
+                  <View style={{ backgroundColor: "#FEF3C7", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
+                    <Text style={{ fontSize: 11, fontWeight: "800", color: "#92400E" }}>
+                      {lockCheck?.warnings_count || 0} warning(s)
+                    </Text>
+                  </View>
+                  <View style={{ backgroundColor: "#E0F2FE", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
+                    <Text style={{ fontSize: 11, fontWeight: "800", color: "#075985" }}>
+                      {lockCheck?.employees_flagged || 0} / {lockCheck?.employees_total || 0} employees flagged
+                    </Text>
+                  </View>
+                </View>
+                <ScrollView style={{ maxHeight: 420 }}>
+                  {(lockCheck?.global_issues || []).map((g: any, i: number) => (
+                    <View key={`g${i}`} style={{
+                      flexDirection: "row", gap: 8, padding: 8, borderRadius: 8, marginBottom: 6,
+                      backgroundColor: g.level === "error" ? "#FEF2F2" : "#FFFBEB",
+                      borderWidth: 1, borderColor: g.level === "error" ? "#FCA5A5" : "#FCD34D",
+                    }}>
+                      <Ionicons name={g.level === "error" ? "close-circle" : "warning"} size={16}
+                        color={g.level === "error" ? "#DC2626" : "#D97706"} style={{ marginTop: 1 }} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 12, fontWeight: "700", color: colors.onSurface }}>{g.message}</Text>
+                        <Text style={{ fontSize: 11, color: colors.onSurfaceSecondary, marginTop: 1 }}>→ {g.suggestion}</Text>
+                      </View>
+                    </View>
+                  ))}
+                  {(lockCheck?.rows || []).map((er: any) => (
+                    <View key={er.user_id} style={{
+                      borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider,
+                      paddingVertical: 8,
+                    }}>
+                      <Text style={{ fontSize: 12.5, fontWeight: "800", color: colors.onSurface }}>
+                        {er.employee_code ? `${er.employee_code} · ` : ""}{er.name}
+                        <Text style={{ fontWeight: "400", color: colors.onSurfaceTertiary }}>
+                          {"   "}Gross ₹{Number(er.gross_paid || 0).toLocaleString("en-IN")} · {er.present_days} days
+                        </Text>
+                      </Text>
+                      {(er.issues || []).map((is: any, j: number) => (
+                        <View key={j} style={{ flexDirection: "row", gap: 6, marginTop: 4, marginLeft: 2 }}>
+                          <Ionicons name={is.level === "error" ? "close-circle" : "warning"} size={14}
+                            color={is.level === "error" ? "#DC2626" : "#D97706"} style={{ marginTop: 1 }} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 11.5, color: is.level === "error" ? "#B91C1C" : "#92400E", fontWeight: "600" }}>
+                              [{is.code}] {is.message}
+                            </Text>
+                            <Text style={{ fontSize: 10.5, color: colors.onSurfaceSecondary }}>→ {is.suggestion}</Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  ))}
+                </ScrollView>
+                <View style={{ flexDirection: "row", gap: 8, marginTop: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                  <Pressable
+                    onPress={() => setLockCheck(null)}
+                    style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border }}
+                    testID="lock-check-cancel"
+                  >
+                    <Text style={{ fontSize: 13, fontWeight: "700", color: colors.onSurfaceSecondary }}>Fix issues first</Text>
+                  </Pressable>
+                  {/* Iter 423b (user directive) — the validation NEVER
+                      blocks the lock: findings are informational and the
+                      Finalize button is always available to every admin. */}
+                  <Pressable
+                    onPress={() => doFinalize(true, true)}
+                    disabled={finalizing}
+                    style={{
+                      flexDirection: "row", alignItems: "center", gap: 6,
+                      paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10,
+                      backgroundColor: "#059669", opacity: finalizing ? 0.6 : 1,
+                    }}
+                    testID="lock-anyway"
+                  >
+                    {finalizing ? <ActivityIndicator size="small" color="#fff" /> : (
+                      <Ionicons name="lock-closed" size={14} color="#fff" />
+                    )}
+                    <Text style={{ fontSize: 13, fontWeight: "800", color: "#fff" }}>
+                      Finalize &amp; Lock Now
+                    </Text>
+                  </Pressable>
+                </View>
+                {(lockCheck?.errors_count || 0) > 0 ? (
+                  <Text style={{ fontSize: 10.5, color: "#B91C1C", marginTop: 8 }}>
+                    {user?.role === "super_admin"
+                      ? "Review the employee-wise errors above — as Super Admin you can still lock with the red override button (recorded on the run + audit trail)."
+                      : "Errors must be fixed before the Salary Lock — only a Super Admin can override errors."}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+          </Modal>
+
+          {/* Iter 438 (user request) — post Save / Finalize: Download or
+              Mail the reports (PDF / Excel / CSV / All). */}
+          <ReportsShareModal
+            visible={!!reportsFor}
+            onClose={() => setReportsFor(null)}
+            title={`Compliance Salary — ${reportsFor?.month || ""}`}
+            subtitle={reportsFor?.note}
+            employeeGroup={reportsFor?.group}
+            formatOptions={[
+              { key: "pdf", label: "PDF Format 1" },
+              { key: "pdf2", label: "PDF Format 2" },
+              { key: "xlsx", label: "Excel" },
+              { key: "csv", label: "CSV" },
+            ]}
+            defaultEmail={(user as any)?.email || ""}
+            companyId={(run as any)?.company_id || activeCompanyId || ""}
+            emailEndpoint={reportsFor
+              ? `/admin/compliance-salary-runs/${reportsFor.run_id}/email-report`
+              : ""}
+            onDownload={async (fmts) => {
+              if (reportsFor) {
+                await downloadRunReports(reportsFor.run_id, reportsFor.month, fmts);
+              }
+            }}
+          />
 
         {/* Iter 182 — loading skeleton while a run computes */}
         {busy && !run ? <EmployeeListSkeleton rows={6} /> : null}
@@ -2931,23 +2958,23 @@ export default function ComplianceSalaryRunScreen() {
                   const has = (k: string) => !en || en.includes(k) || k === "basic";
                   const ed = ((run.rows[0] as any)?.enabled_deductions ?? fmMask.ed) as string[] | undefined;
                   const hasDed = (k: string) => !ed || ed.includes(k);
-                  const headers: { label: string; group: "info" | "master" | "calc" | "ded" }[] = [
+                  const headers: { label: string; group: "info" | "master" | "calc" | "ded"; w?: number }[] = [
                     // User directive — Employee Code HIDDEN; show Father
                     // Name, Designation, UAN No. & ESIC No. instead.
                     // Iter 379 (user request) — Sr. No first, then UAN No.
                     // and ESIC No., THEN the Employee Name.
-                    { label: "Sr", group: "info" },
-                    { label: "UAN No.", group: "info" },
-                    { label: "ESIC No.", group: "info" },
-                    { label: "Name", group: "info" },
-                    { label: "Father Name", group: "info" },
-                    { label: "Designation", group: "info" },
-                    { label: "Present Days", group: "info" },
+                    { label: "Sr", group: "info", w: colW.sr },
+                    { label: "UAN No.", group: "info", w: colW.uan },
+                    { label: "ESIC No.", group: "info", w: colW.esi },
+                    { label: "Name", group: "info", w: colW.name },
+                    { label: "Father Name", group: "info", w: colW.father },
+                    { label: "Designation", group: "info", w: colW.desg },
+                    { label: "Present Days", group: "info", w: colW.pd },
                     // Iter 477 (user request) — OT Hrs shifted right after
-                    // Present Days (was between OT Amt* and Gross).
-                    { label: "OT Hrs", group: "calc" },
+                    // Present Days. Iter 644 — hidden when OVER TIME is off.
+                    ...(hasOtCol ? [{ label: "OT Hrs", group: "calc" as const, w: colW.num }] : []),
                     // Iter 306 (user #20) — editable ESIC Leave days.
-                    { label: "ESIC Leave", group: "info" },
+                    { label: "ESIC Leave", group: "info", w: colW.el },
                   ];
                   if (has("basic")) headers.push({ label: "M.Basic", group: "master" });
                   if (has("hra")) headers.push({ label: "M.HRA", group: "master" });
@@ -2955,6 +2982,8 @@ export default function ComplianceSalaryRunScreen() {
                   if (has("medical")) headers.push({ label: "M.Med", group: "master" });
                   if (has("special")) headers.push({ label: "M.Spl", group: "master" });
                   if (has("others")) headers.push({ label: "M.Others", group: "master" });
+                  // Iter 644 — dynamic custom allowance heads (INCENTIVE …).
+                  for (const l of allowLabels) headers.push({ label: `M.${l}`, group: "master" });
                   headers.push({ label: "M.Gross", group: "master" });
                   if (has("basic")) headers.push({ label: "Basic", group: "calc" });
                   if (has("hra")) headers.push({ label: "HRA", group: "calc" });
@@ -2962,9 +2991,11 @@ export default function ComplianceSalaryRunScreen() {
                   if (has("medical")) headers.push({ label: "Med", group: "calc" });
                   if (has("special")) headers.push({ label: "Spl", group: "calc" });
                   if (has("others")) headers.push({ label: "Others*", group: "calc" });
+                  for (const l of allowLabels) headers.push({ label: l, group: "calc" });
                   // Iter 230 (user request) — editable OT Amount column.
                   // Iter 339c (user request) — OT Amt* moved BEFORE Gross.
-                  headers.push({ label: "OT Amt*", group: "calc" });
+                  // Iter 644 — hidden when the OVER TIME head is disabled.
+                  if (hasOtCol) headers.push({ label: "OT Amt*", group: "calc" });
                   headers.push({ label: "Gross", group: "calc" });
                   // Iter 335 (user request) — Freeze Salary column right
                   // next to Gross (imported/frozen gross per employee).
@@ -2986,7 +3017,6 @@ export default function ComplianceSalaryRunScreen() {
                     "Total Ded.", "Net",
                   ];
                   for (const d of dedLabels) headers.push({ label: d, group: "ded" });
-                  const infoW = [colW.sr, colW.uan, colW.esi, colW.name, colW.father, colW.desg, colW.pd, colW.num, colW.el];
                   const stickyOff = [0, colW.sr, colW.sr + colW.uan, colW.sr + colW.uan + colW.esi];
                   return (
                     <>
@@ -3000,7 +3030,7 @@ export default function ComplianceSalaryRunScreen() {
                           onPress={() => toggleColSort(h.label)}
                           style={[
                             styles.tblCell,
-                            { width: i < 9 ? infoW[i] : colW.num },
+                            { width: h.w ?? colW.num },
                             styles.tblHeaderTxt,
                             i >= 6 && { textAlign: "right" },
                             h.group === "master" && styles.groupHdrCellHeaderMaster,
@@ -3026,7 +3056,7 @@ export default function ComplianceSalaryRunScreen() {
                         <View
                           key={i}
                           style={[
-                            { width: i < 9 ? infoW[i] : colW.num, paddingHorizontal: 2, paddingVertical: 2 },
+                            { width: h.w ?? colW.num, paddingHorizontal: 2, paddingVertical: 2 },
                             i < 4 && stickyCol(stickyOff[i], "#EFF6FF"),
                           ]}
                         >
@@ -3107,9 +3137,8 @@ export default function ComplianceSalaryRunScreen() {
                         imported (Freeze) runs (auto: OT Amt ÷ per-hour OT
                         rate); MANUALLY editable on normal runs when Firm
                         Master Overtime is allowed (hours × rate → OT Amt).
-                        Iter 477 (user request) — shifted right after the
-                        Present Days column. */}
-                    {(() => {
+                        Iter 644 — hidden when OVER TIME is disabled. */}
+                    {hasOtCol ? (() => {
                       const hrRate = Number((r as any).ot_hourly_rate) || 0;
                       const otHrs = hrRate > 0
                         ? (Number(r.ot_pay) || 0) / hrRate
@@ -3131,7 +3160,7 @@ export default function ComplianceSalaryRunScreen() {
                           {otHrs > 0 ? otHrs.toFixed(1) : "0"}
                         </Text>
                       );
-                    })()}
+                    })() : null}
                     {/* Iter 306 (user #20) — ESIC Leave days.
                         Iter 477 (user request) — READ-ONLY: days are
                         fetched from the ESIC Leave Master (approved
@@ -3151,7 +3180,14 @@ export default function ComplianceSalaryRunScreen() {
                           {has("conveyance") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr((r as any).conveyance_master)}</Text> : null}
                           {has("medical") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr((r as any).medical_master)}</Text> : null}
                           {has("special") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr((r as any).special_master)}</Text> : null}
-                          {has("others") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr((r as any).others_master)}</Text> : null}
+                          {has("others") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(((r as any).others_master || 0) - allowHeadsMaster(r))}</Text> : null}
+                          {/* Iter 644 — dynamic custom allowance heads
+                              (master, decomposed out of M.Others). */}
+                          {allowLabels.map((l) => (
+                            <Text key={`am-${l}`} style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>
+                              {fmtInr((((r as any).allowance_heads_master || {})[l]) || 0)}
+                            </Text>
+                          ))}
                           <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr((r as any).gross_master)}</Text>
                           {/* Calculated (pro-rated by Present Days). */}
                           {has("basic") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.basic)}</Text> : null}
@@ -3162,24 +3198,34 @@ export default function ComplianceSalaryRunScreen() {
                           {has("others") ? (
                             <EditableGridCell
                               col="others" idx={idx} width={colW.num}
-                              value={r.others || 0}
+                              value={Math.max(0, (r.others || 0) - allowHeadsPaid(r))}
                               cellRefs={cellRefs}
-                              onCommit={(n) => updateRowField(r.user_id, "others", n)}
+                              onCommit={(n) => updateRowField(r.user_id, "others", n + allowHeadsPaid(r))}
                               onNav={navigateFrom}
                             />
                           ) : null}
+                          {/* Iter 644 — dynamic custom allowance head cells
+                              (paid, decomposed out of Others*). */}
+                          {allowLabels.map((l) => (
+                            <Text key={`ap-${l}`} style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>
+                              {fmtInr((((r as any).allowance_heads || {})[l]) || 0)}
+                            </Text>
+                          ))}
                         </>
                       );
                     })()}
                     {/* Iter 230 (user request) — editable OT Amount.
-                        Iter 339c (user request) — shown BEFORE Gross. */}
-                    <EditableGridCell
-                      col="ot_pay" idx={idx} width={colW.num}
-                      value={r.ot_pay || 0}
-                      cellRefs={cellRefs}
-                      onCommit={(n) => updateRowField(r.user_id, "ot_pay", n)}
-                      onNav={navigateFrom}
-                    />
+                        Iter 339c (user request) — shown BEFORE Gross.
+                        Iter 644 — hidden when OVER TIME is disabled. */}
+                    {hasOtCol ? (
+                      <EditableGridCell
+                        col="ot_pay" idx={idx} width={colW.num}
+                        value={r.ot_pay || 0}
+                        cellRefs={cellRefs}
+                        onCommit={(n) => updateRowField(r.user_id, "ot_pay", n)}
+                        onNav={navigateFrom}
+                      />
+                    ) : null}
                     {/* Iter 379 (user request) — Gross column HIGHLIGHTED;
                         red when it differs from the Freeze Salary. */}
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "800" },
@@ -3281,13 +3327,15 @@ export default function ComplianceSalaryRunScreen() {
                   {/* Iter 370 (user request) — totals under EVERY column. */}
                   <Text style={[styles.tblCell, styles.rightCell, { width: colW.pd, fontWeight: "700" }]}>{fmtDaysTotal(sumCol("present_days"))}</Text>
                   {/* Iter 340 — OT Hours total.
-                      Iter 477 (user request) — shifted after Present Days. */}
-                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>
-                    {(run.rows || []).reduce((s, r) => {
-                      const hr = Number((r as any).ot_hourly_rate) || 0;
-                      return s + (hr > 0 ? (Number(r.ot_pay) || 0) / hr : Number((r as any).ot_hours) || 0);
-                    }, 0).toFixed(1)}
-                  </Text>
+                      Iter 644 — hidden when OVER TIME is disabled. */}
+                  {hasOtCol ? (
+                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>
+                      {(run.rows || []).reduce((s, r) => {
+                        const hr = Number((r as any).ot_hourly_rate) || 0;
+                        return s + (hr > 0 ? (Number(r.ot_pay) || 0) / hr : Number((r as any).ot_hours) || 0);
+                      }, 0).toFixed(1)}
+                    </Text>
+                  ) : null}
                   <Text style={[styles.tblCell, styles.rightCell, { width: colW.el, fontWeight: "700" }]}>{fmtDaysTotal(sumCol("esic_leave_days"))}</Text>
                   {/* Iter 171 — totals row follows the same column masks so
                       every figure lands under its own header. */}
@@ -3304,12 +3352,27 @@ export default function ComplianceSalaryRunScreen() {
                       <>
                         {/* Master group — Iter 370 (user request): head-wise
                             totals under EVERY column (were dashes). */}
-                        {opt.map((k) => <React.Fragment key={`tm-${k}`}>{num(sumCol(`${k}_master`))}</React.Fragment>)}
+                        {opt.map((k) => <React.Fragment key={`tm-${k}`}>{num(
+                          k === "others"
+                            ? sumCol("others_master") - (run.rows || []).reduce((s, r) => s + allowHeadsMaster(r), 0)
+                            : sumCol(`${k}_master`))}</React.Fragment>)}
+                        {/* Iter 644 — custom allowance head totals. */}
+                        {allowLabels.map((l) => (
+                          <React.Fragment key={`tam-${l}`}>{num(
+                            (run.rows || []).reduce((s, r) => s + (Number(((r as any).allowance_heads_master || {})[l]) || 0), 0))}</React.Fragment>
+                        ))}
                         {num(sumCol("gross_master"))}
                         {/* Calculated group totals (+Gross) */}
-                        {opt.map((k) => <React.Fragment key={`tc-${k}`}>{num((run.totals as any)?.[k])}</React.Fragment>)}
+                        {opt.map((k) => <React.Fragment key={`tc-${k}`}>{num(
+                          k === "others"
+                            ? (Number((run.totals as any)?.others) || 0) - (run.rows || []).reduce((s, r) => s + allowHeadsPaid(r), 0)
+                            : (run.totals as any)?.[k])}</React.Fragment>)}
+                        {allowLabels.map((l) => (
+                          <React.Fragment key={`tap-${l}`}>{num(
+                            (run.rows || []).reduce((s, r) => s + (Number(((r as any).allowance_heads || {})[l]) || 0), 0))}</React.Fragment>
+                        ))}
                         {/* Iter 339c — OT Amt total BEFORE Gross. */}
-                        {num(run.totals?.ot_pay)}
+                        {hasOtCol ? num(run.totals?.ot_pay) : null}
                         {num(run.totals?.gross_paid)}
                         {/* Iter 335 — Freeze Salary total next to Gross. */}
                         {hasFrz ? num((run.totals as any)?.imported_gross) : null}
@@ -3321,6 +3384,12 @@ export default function ComplianceSalaryRunScreen() {
                         {hasDed("esi") ? num(run.totals?.esic_employer) : null}
                         {hasDed("pt") ? num(run.totals?.pt) : null}
                         {hasDed("tds") ? num(run.totals?.tds) : null}
+                        {/* Iter 644 (alignment fix) — totals under the
+                            dynamic custom DEDUCTION head columns too. */}
+                        {((((run.rows[0] as any)?.deduction_head_labels as string[]) || []).map((dl) => (
+                          <React.Fragment key={`tdh-${dl}`}>{num(
+                            (run.rows || []).reduce((s, r) => s + (Number(((r as any).deduction_heads || {})[dl]) || 0), 0))}</React.Fragment>
+                        )))}
                         {hasDed("advance") ? num((run.rows || []).reduce((s, r) => s + (Number((r as any).advance_recovery) || 0), 0)) : null}
                         {hasDed("other") ? num((run.rows || []).reduce((s, r) => s + (Number((r as any).other_deduction) || 0), 0)) : null}
                         {num(run.totals?.total_deduction)}

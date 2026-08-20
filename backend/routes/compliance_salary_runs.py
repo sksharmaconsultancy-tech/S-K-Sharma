@@ -333,7 +333,11 @@ async def _compute_compliance_run(
             # means the firm never configured that catalog (show defaults).
             _amap = {"HRA": "hra", "CONV.": "conveyance",
                      "MEDICAL ALLOWANCES": "medical", "OTH. ALLOW.": "special",
-                     "OTHER MISC.ALLOWANCE": "others"}
+                     "OTHER MISC.ALLOWANCE": "others",
+                     # Iter 644 (user bug — "OT not allowed but showing") —
+                     # the "OVER TIME" catalog toggle now drives the OT Hrs
+                     # / OT Amt* columns dynamically like every other head.
+                     "OVER TIME": "ot"}
             allow_mask = {h for lbl, h in _amap.items() if _fm_allow.get(lbl)}
             # Iter 369 (user request) — EPF / ESI "Applicable" flags are
             # AUTHORITATIVE when explicitly set (True or False): disabled
@@ -366,6 +370,14 @@ async def _compute_compliance_run(
             custom_ded_labels = sorted(
                 lbl for lbl, on in _fm_ded.items()
                 if on and str(lbl).strip().upper() not in _STAT_DED)
+            # Iter 644 (user request — "INCENTIVE ticked but not showing")
+            # — CUSTOM allowance heads enabled in the Firm Master
+            # (INCENTIVE / BONUS / DA / …) become their own DYNAMIC columns
+            # on the sheet (mirrors the Iter 420 deduction columns).
+            _STAT_ALLOW = set(_amap)
+            custom_allow_labels = sorted(
+                lbl for lbl, on in _fm_allow.items()
+                if on and str(lbl).strip().upper() not in _STAT_ALLOW)
             firm_stat_flags[fm["company_id"]] = {
                 # Iter 369 — "Applicable" flag authoritative (see above).
                 "pf": _pf_col,
@@ -380,6 +392,9 @@ async def _compute_compliance_run(
                 # Iter 420 — dynamic custom deduction heads (None when the
                 # firm never configured the Deductions catalog).
                 "custom_ded_labels": custom_ded_labels if _fm_ded else None,
+                # Iter 644 — dynamic custom allowance heads (None when the
+                # firm never configured the Allowances catalog).
+                "custom_allow_labels": custom_allow_labels if _fm_allow else None,
                 # Iter 310 — Freeze Salary difference allocation gate.
                 "ot_allowed": bool((fm.get("salary_process") or {}).get("ot_allowed")),
                 # Iter 337 (user request) — Days Calculation Method.
@@ -738,6 +753,7 @@ async def _compute_compliance_run(
             firm_esic_enabled=_ff["esic"],
             firm_pt={"state": _fcp.get("pt_state"), "slabs": _fcp.get("pt_slabs")},
             enabled_allowances=enabled_set,
+            custom_allowance_labels=_fm_masks.get("custom_allow_labels"),
         )
         # Iter 406 — remember the stats the FINAL row was computed with so
         # the Freeze block can re-compute statutory on the allocated gross.
@@ -810,6 +826,7 @@ async def _compute_compliance_run(
                         firm_pt={"state": _fcp.get("pt_state"),
                                  "slabs": _fcp.get("pt_slabs")},
                         enabled_allowances=enabled_set,
+                        custom_allowance_labels=_fm_masks.get("custom_allow_labels"),
                     )
                     _gF = float(_rowF.get("gross_paid") or 0)
                     if _gF > 0:
@@ -857,6 +874,7 @@ async def _compute_compliance_run(
                         firm_pt={"state": _fcp.get("pt_state"),
                                  "slabs": _fcp.get("pt_slabs")},
                         enabled_allowances=enabled_set,
+                        custom_allowance_labels=_fm_masks.get("custom_allow_labels"),
                     )
                     _stats_final = _st2
                     row["attendance_days"] = round(
@@ -963,6 +981,13 @@ async def _compute_compliance_run(
                     float(row.get("total_deduction") or 0) - _removed, 2)
                 row["net"] = round(float(row.get("net") or 0) + _removed, 2)
             row["enabled_deductions"] = sorted(_ded_set)
+
+        # Iter 644 (user request) — dynamic ALLOWANCE head labels carried
+        # on the row so the grid / exports render one column per enabled
+        # custom allowance head (INCENTIVE / BONUS / …).
+        _customA = _fm_masks.get("custom_allow_labels")
+        if _customA is not None:
+            row["allowance_head_labels"] = _customA
 
         # Iter 420 (user request) — DEDUCTIONS follow the Firm Master
         # catalog DYNAMICALLY: each enabled custom head is its own column;
@@ -1130,6 +1155,7 @@ async def _compute_compliance_run(
                     firm_pt={"state": _fcp.get("pt_state"),
                              "slabs": _fcp.get("pt_slabs")},
                     enabled_allowances=enabled_set,
+                    custom_allowance_labels=_fm_masks.get("custom_allow_labels"),
                 )
                 for _k in ("stat_wage_base", "pf_wages", "pf_employee",
                            "pf_employer_epf", "pf_employer_eps",
@@ -1205,6 +1231,7 @@ async def _compute_compliance_run(
                     firm_pt={"state": _fcp.get("pt_state"),
                              "slabs": _fcp.get("pt_slabs")},
                     enabled_allowances=enabled_set,
+                    custom_allowance_labels=_fm_masks.get("custom_allow_labels"),
                 )
                 for _k in ("stat_wage_base", "pf_wages", "pf_employee",
                            "pf_employer_epf", "pf_employer_eps",
@@ -1280,6 +1307,7 @@ async def _compute_compliance_run(
                         firm_pt={"state": _fcp.get("pt_state"),
                                  "slabs": _fcp.get("pt_slabs")},
                         enabled_allowances=enabled_set,
+                        custom_allowance_labels=_fm_masks.get("custom_allow_labels"),
                     )
                     # Merge the recomputed earnings + statutory figures into
                     # the row (sheet TDS / Other Deduction / deduction masks
@@ -2638,7 +2666,9 @@ async def _ensure_firm_head_masks(run: dict) -> dict:
     _fm_ded = fm.get("deductions") or {}
     _amap = {"HRA": "hra", "CONV.": "conveyance",
              "MEDICAL ALLOWANCES": "medical", "OTH. ALLOW.": "special",
-             "OTHER MISC.ALLOWANCE": "others"}
+             "OTHER MISC.ALLOWANCE": "others",
+             # Iter 644 — OVER TIME toggle drives the OT columns.
+             "OVER TIME": "ot"}
     allow_mask = (sorted({h for lbl, h in _amap.items()
                           if _fm_allow.get(lbl)} | {"basic"})
                   if _fm_allow else None)

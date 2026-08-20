@@ -7094,3 +7094,60 @@ Current iteration: 594. Next: 595.
   (download verified 200 OK):
   wget -O deploy643.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
   bash deploy643.sh
+
+## Iteration 644 (2026-06) — Salary Lock fix + Dynamic Allowance/OT columns
+### 1. BUG FIX — "Not able to Lock the Salary"
+- Root cause: the PF/ESIC pre-lock validation Modal + the post-save
+  ReportsShareModal lived INSIDE the collapsible Configure-Batch branch
+  (`run && setupCollapsed ? compactBar : <>cards+modals</>`). Once a run is
+  on screen the setup auto-collapses (Iter 636) → modals NEVER mounted →
+  clicking Finalize & Lock on a run with validation findings silently did
+  nothing. Moved both modals OUTSIDE the branch (after stickyHeaderWrap) so
+  they are always mounted. Verified: finalize chain works end-to-end.
+### 2. Dynamic allowance columns (user: "INCENTIVE ticked but not showing")
+- Engine (compliance_salary.py): compute_compliance_row gained
+  custom_allowance_labels; custom heads (INCENTIVE/BONUS/DA/…) are
+  decomposed OUT of the Others bucket for DISPLAY ONLY — amounts stay inside
+  others for every calculation (gross/PF/ESIC/PT UNCHANGED). Row carries
+  allowance_heads / allowance_heads_master / allowance_head_labels.
+- Route: firm_stat_flags gained custom_allow_labels; passed at all 4
+  compute call sites; labels stamped on rows.
+- Frontend: M.<HEAD> + <HEAD> columns render after M.Others/Others*;
+  Others columns display the REMAINDER (edit commits typed + heads).
+- Exports: flatten_deduction_heads also flattens allowance heads &
+  subtracts from others/others_master; dynamic_csv_columns inserts labels
+  after others. (PDF register formats NOT yet dynamic for allowance heads.)
+### 3. OT columns follow "OVER TIME" toggle (user: "OT not allowed but showing")
+- "OVER TIME"→"ot" added to backend+frontend AMAP masks; frontend hasOtCol
+  = mask has "ot" OR any row carries OT data (legacy runs keep columns).
+  Gates OT Hrs / OT Amt* headers, cells, totals, navCols; CSV drops
+  ot_pay/ot_hours when off & no data.
+### 4. Bonus fix — TOTAL row now prints totals under custom deduction
+  head columns (was misaligned when custom deduction heads existed).
+- Headers now carry explicit widths (h.w) — infoW positional array removed.
+- Test /app/test_iter644_dynamic_allowances.py — ALL CHECKS PASSED
+  (labels, breakdown 2000/440 split, totals unchanged, ot mask on/off,
+  export cols).
+- APP_ITERATION "644"; deploy_vps_iter644.sh served via kind=script:
+  wget -O deploy644.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
+  bash deploy644.sh
+
+## Iteration 645 (2026-06) — INCENTIVE / custom allowance columns in PDF registers
+- User: "Show INCENTIVE and custom allowance columns inside the PDF salary
+  register formats too."
+- build_compliance_register_pdf (Format 1): dynamic (label, ma{j}/ea{j})
+  columns appended after OTHER in both the MASTER SALARY & ALLOWANCES and
+  EARNINGS bands; OTHER shows the remainder (heads subtracted); band
+  TOTALs unchanged. Group-header filler row fixed to NCOLS-1 (was fixed 22).
+- build_compliance_register_pdf_v2 (Format 2): dynamic "allow::<LABEL>"
+  columns injected before Other Earn in cols_spec (survives saved layouts);
+  Other Earn shows the remainder; per-row vals / group subtotals / grand
+  total / numeric right-align all handle the dynamic keys; _defaults
+  lookups made .get()-safe for injected keys.
+- Test /app/test_iter645_pdf_allowance_cols.py — ALL PASSED: Format 1
+  (INCENTIVE + 2000 + remainder 440), Format 2 (comma-formatted 2,000),
+  regression without labels builds fine. NOTE: Format 2 amounts are
+  comma-formatted ("2,000") — remember when text-matching PDFs.
+- APP_ITERATION "645"; deploy_vps_iter645.sh served via kind=script:
+  wget -O deploy645.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
+  bash deploy645.sh

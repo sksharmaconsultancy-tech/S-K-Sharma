@@ -416,6 +416,7 @@ def compute_compliance_row(
     firm_esic_enabled: bool = True,
     firm_pt: Optional[Dict[str, Any]] = None,
     enabled_allowances: Optional[set] = None,
+    custom_allowance_labels: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Compute the full compliance salary row for a single employee.
 
@@ -1155,6 +1156,66 @@ def compute_compliance_row(
     )
     master_structure = {**master_structure, **_mast}
 
+    # Iter 644 (user request — "Allowances not showing dynamically") —
+    # decompose the CUSTOM Firm-Master allowance heads (INCENTIVE / BONUS /
+    # DA / …) OUT of the "Others" bucket for DISPLAY ONLY. The amounts stay
+    # inside the others totals for every calculation (Gross / PF / ESIC /
+    # PT bases are UNCHANGED); the row just carries a per-head breakdown so
+    # each enabled head renders as its OWN dynamic column (mirrors the
+    # Iter 420 deduction heads). Views/exports subtract it from Others.
+    allowance_heads: Dict[str, float] = {}
+    allowance_heads_master: Dict[str, float] = {}
+    if custom_allowance_labels:
+        _lab_low = {str(l).strip().lower(): str(l)
+                    for l in custom_allowance_labels if str(l).strip()}
+
+        def _is_others_head(h: Any) -> bool:
+            s = str(h or "").strip().lower()
+            if not s or "employer" in s or s.startswith("basic"):
+                return False
+            if "hra" in s or "house" in s:
+                return False
+            if s.startswith("conv") or "travel" in s:
+                return False
+            if "medic" in s or "special" in s:
+                return False
+            return True
+
+        _st_rows = [r for r in (user.get("salary_structure_compliance") or [])
+                    if isinstance(r, dict)]
+        _has_basic_row = any(
+            str(r.get("head") or "").strip().lower().startswith("basic")
+            and "employer" not in str(r.get("head") or "").lower()
+            and _num(r.get("amount"), 0.0) > 0 for r in _st_rows)
+        _src_rows = _st_rows if _has_basic_row else [
+            r for r in (user.get("compliance_salary_allowances") or [])
+            if isinstance(r, dict)]
+        _cust_monthly: Dict[str, float] = {}
+        _oth_monthly = 0.0
+        for _r in _src_rows:
+            _h = str(_r.get("head") or "").strip()
+            _a = _num(_r.get("amount"), 0.0)
+            if _a <= 0 or not _is_others_head(_h):
+                continue
+            _oth_monthly += _a
+            _lb = _lab_low.get(_h.lower())
+            if _lb:
+                _cust_monthly[_lb] = _cust_monthly.get(_lb, 0.0) + _a
+        if _cust_monthly and _oth_monthly > 0:
+            _m_scale = master_structure["others"] / _oth_monthly
+            _p_scale = others / _oth_monthly
+            _mb = float(master_structure["others"])
+            _pb = float(others)
+            for _lb, _a in _cust_monthly.items():
+                _hm = min(float(round(_a * _m_scale)), _mb)
+                _hp = min(float(round(_a * _p_scale)), _pb)
+                if _hm > 0:
+                    allowance_heads_master[_lb] = _hm
+                    _mb -= _hm
+                if _hp > 0:
+                    allowance_heads[_lb] = _hp
+                    _pb -= _hp
+
     # Iter 633 (user request) — ALWAYS CALCULATE IN ROUND FIGURES: every
     # money figure the sheet stores / displays / reprocesses is a WHOLE
     # RUPEE (the earning heads were already whole-rupee reconciled above).
@@ -1236,6 +1297,10 @@ def compute_compliance_row(
         "medical": round(medical, 2),
         "special": round(special, 2),
         "others": round(others, 2),
+        # Iter 644 — custom allowance head breakdown (display decomposition
+        # of the Others bucket; views subtract this from Others columns).
+        "allowance_heads": allowance_heads,
+        "allowance_heads_master": allowance_heads_master,
         "monthly_gross": round(monthly_gross, 2),
         "gross_paid": round(gross_paid, 2),
         # PF
@@ -1445,6 +1510,11 @@ def round_export_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             c["deduction_heads"] = {
                 h: int(round(_num(a, 0.0)))
                 for h, a in c["deduction_heads"].items()}
+        # Iter 644 — allowance head breakdowns exported as whole rupees too.
+        for _hk in ("allowance_heads", "allowance_heads_master"):
+            if isinstance(c.get(_hk), dict):
+                c[_hk] = {h: int(round(_num(a, 0.0)))
+                          for h, a in c[_hk].items()}
         out.append(c)
     return out
 
@@ -1458,16 +1528,40 @@ def _ded_head_labels(rows: List[Dict[str, Any]]) -> List[str]:
     return [str(l) for l in labels if l]
 
 
+def _allow_head_labels(rows: List[Dict[str, Any]]) -> List[str]:
+    """Iter 644 — dynamic Firm-Master allowance head labels for a run."""
+    r0 = rows[0] if rows else {}
+    labels = r0.get("allowance_head_labels")
+    if labels is None:
+        labels = sorted({h for r in rows for h in (r.get("allowance_heads") or {})})
+    return [str(l) for l in labels if l]
+
+
 def flatten_deduction_heads(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Iter 420 — copy rows with each firm-master deduction head flattened
-    to a top-level key so CSV/XLSX exports render one column per head."""
+    to a top-level key so CSV/XLSX exports render one column per head.
+    Iter 644 — custom ALLOWANCE heads are flattened the same way and their
+    amounts are subtracted from Others (display decomposition)."""
     labels = _ded_head_labels(rows)
-    if not labels:
+    alabels = _allow_head_labels(rows)
+    if not labels and not alabels:
         return rows
     out = []
     for r in rows:
         heads = r.get("deduction_heads") or {}
-        out.append({**r, **{l: heads.get(l, 0) for l in labels}})
+        aheads = r.get("allowance_heads") or {}
+        amast = r.get("allowance_heads_master") or {}
+        c = {**r, **{l: heads.get(l, 0) for l in labels},
+             **{l: aheads.get(l, 0) for l in alabels}}
+        if alabels:
+            _ap = sum(_num(aheads.get(l), 0.0) for l in alabels)
+            _am2 = sum(_num(amast.get(l), 0.0) for l in alabels)
+            if _ap and isinstance(c.get("others"), (int, float)):
+                c["others"] = max(0, int(round(_num(c.get("others"), 0.0) - _ap)))
+            if _am2 and isinstance(c.get("others_master"), (int, float)):
+                c["others_master"] = max(0, int(round(
+                    _num(c.get("others_master"), 0.0) - _am2)))
+        out.append(c)
     return out
 
 
@@ -1504,6 +1598,25 @@ def dynamic_csv_columns(rows: List[Dict[str, Any]]) -> List[str]:
     if not has_d("other"):
         drop |= {"other_deduction", "other_deduction_head"}
     cols = [c for c in CSV_COLUMNS if c not in drop]
+    # Iter 644 — OT columns follow the Firm-Master "OVER TIME" toggle:
+    # hidden when the head is off AND the run carries no OT data (legacy
+    # runs with OT amounts keep their columns).
+    if not has_a("ot") and not any(
+            _num(r.get("ot_pay"), 0.0) or _num(r.get("ot_hours"), 0.0)
+            for r in rows):
+        cols = [c for c in cols if c not in ("ot_pay", "ot_hours")]
+    # Iter 644 — one dynamic column per enabled custom ALLOWANCE head,
+    # placed right after Others (or before monthly_gross when Others is
+    # disabled).
+    alabels = _allow_head_labels(rows)
+    if alabels:
+        if "others" in cols:
+            i2 = cols.index("others") + 1
+        elif "monthly_gross" in cols:
+            i2 = cols.index("monthly_gross")
+        else:
+            i2 = len(cols)
+        cols[i2:i2] = alabels
     # Iter 420 (user request) — one dynamic column per Firm-Master enabled
     # deduction head, placed just before Total Ded.
     labels = _ded_head_labels(rows)
@@ -1585,6 +1698,9 @@ def build_compliance_register_pdf(
     show_pf = _has_d("pf")
     show_esi = _has_d("esi")
     show_tds = _has_d("tds")
+    # Iter 645 (user request) — custom allowance heads (INCENTIVE / …) get
+    # their OWN columns in the register (decomposed out of OTHER).
+    _alab = _allow_head_labels(rows)
 
     def A(v: Any) -> str:
         # Iter 323 (user request) — whole rupees only, no ".00".
@@ -1706,6 +1822,9 @@ def build_compliance_register_pdf(
         m_cols.append(("CONV.", "m_conv"))
     if show_oth_m:
         m_cols.append(("OTHER", "m_oth"))
+    # Iter 645 — dynamic custom allowance head columns (master band).
+    for _j, _l in enumerate(_alab):
+        m_cols.append((str(_l), f"ma{_j}"))
     m_cols.append(("TOTAL", "m_tot"))
     e_cols: List[Any] = [("SALARY", "sal")]
     if show_hra:
@@ -1714,6 +1833,9 @@ def build_compliance_register_pdf(
         e_cols.append(("CONV.", "conv"))
     if show_oth_e:
         e_cols.append(("OTHER", "oth"))
+    # Iter 645 — dynamic custom allowance head columns (earnings band).
+    for _j, _l in enumerate(_alab):
+        e_cols.append((str(_l), f"ea{_j}"))
     e_cols.append(("TOTAL", "gross"))
     d_cols: List[Any] = []
     if show_pf:
@@ -1763,6 +1885,10 @@ def build_compliance_register_pdf(
         "pf", "esi", "adv", "othd", "tds", "ded", "net",
         "pf_wages", "gross_pf", "gross_nonpf", "esi_base", "nonesi_base",
     )}
+    # Iter 645 — dynamic allowance head totals.
+    for _j in range(len(_alab)):
+        tot[f"ma{_j}"] = 0.0
+        tot[f"ea{_j}"] = 0.0
     # Iter 324 (user request) — optional GROUPING with per-group sub-totals.
     body_items: List[Dict[str, Any]] = []
     g_tot = {k: 0.0 for k in tot}
@@ -1799,7 +1925,8 @@ def build_compliance_register_pdf(
                 for _k in g_tot:
                     g_tot[_k] = 0.0
                 body_items.append({"kind": "hdr",
-                                   "cells": [f"{_grp_head}: {gv}"] + [""] * 22})
+                                   "cells": [f"{_grp_head}: {gv}"]
+                                   + [""] * (NCOLS - 1)})
         days = float(r.get("present_days") or 0)
         hrs = float(r.get("ot_hours") or 0)
         oth_e = other_earn(r)
@@ -1812,6 +1939,14 @@ def build_compliance_register_pdf(
         m_conv = float(r.get("conveyance_master") or 0)
         m_oth = other_master(r)
         m_tot = m_sal + m_hra + m_conv + m_oth
+        # Iter 645 — decompose custom allowance heads out of the OTHER
+        # columns (band totals unchanged: OTHER shows the remainder).
+        _ah = r.get("allowance_heads") or {}
+        _ahm = r.get("allowance_heads_master") or {}
+        _ah_vals = [float(_ah.get(_l) or 0) for _l in _alab]
+        _ahm_vals = [float(_ahm.get(_l) or 0) for _l in _alab]
+        oth_e -= sum(_ah_vals)
+        m_oth -= sum(_ahm_vals)
         _pairs = (
             ("days", days), ("hrs", hrs),
             ("m_sal", m_sal), ("m_hra", m_hra), ("m_conv", m_conv),
@@ -1824,6 +1959,8 @@ def build_compliance_register_pdf(
             ("othd", oth_d), ("tds", float(r.get("tds") or 0)),
             ("ded", float(r.get("total_deduction") or 0)),
             ("net", float(r.get("net") or 0)),
+            *[(f"ma{_j}", _ahm_vals[_j]) for _j in range(len(_alab))],
+            *[(f"ea{_j}", _ah_vals[_j]) for _j in range(len(_alab))],
         )
         for _k, _v in _pairs:
             tot[_k] += _v
@@ -1852,6 +1989,9 @@ def build_compliance_register_pdf(
             "conv": r.get("conveyance"), "oth": oth_e, "gross": gross,
             "pf": pf_v, "esi": r.get("esic_employee"), "adv": adv_v,
             "othd": oth_d, "tds": r.get("tds"), "ded": r.get("total_deduction"),
+            # Iter 645 — dynamic custom allowance head cells.
+            **{f"ma{_j}": _ahm_vals[_j] for _j in range(len(_alab))},
+            **{f"ea{_j}": _ah_vals[_j] for _j in range(len(_alab))},
         }
         data.append(
             [str(i), name_p, ids_p,
@@ -2245,9 +2385,22 @@ def build_compliance_register_pdf_v2(
                              for r in rows)),
     }
     cols_spec = [c for c in cols_spec if _col_ok.get(c["key"], True)]
+    # Iter 645 (user request) — dynamic custom allowance head columns
+    # (INCENTIVE / …) injected right before Other Earn (or Gross); the
+    # Other Earn column shows the remainder.
+    _alab2 = _allow_head_labels(rows)
+    if _alab2:
+        _apos2 = next((i for i, c in enumerate(cols_spec)
+                       if c["key"] in ("other_earn", "gross")),
+                      len(cols_spec))
+        cols_spec[_apos2:_apos2] = [
+            {"key": f"allow::{_l}", "heading": str(_l), "width": 7}
+            for _l in _alab2]
     col_keys = [c["key"] for c in cols_spec]
-    header = [str(c.get("heading") or _defaults[c["key"]][0]) for c in cols_spec]
-    widths = [max(4.0, float(c.get("width") or _defaults[c["key"]][1]))
+    header = [str(c.get("heading") or _defaults.get(c["key"], (c["key"], 7))[0])
+              for c in cols_spec]
+    widths = [max(4.0, float(c.get("width")
+                             or _defaults.get(c["key"], ("", 7.0))[1]))
               for c in cols_spec]
     data: List[List[Any]] = [header]
 
@@ -2278,6 +2431,9 @@ def build_compliance_register_pdf_v2(
                             "hrs", "sal", "hra_e", "conv_e", "oth_e",
                             "pf_wages", "gross_pf", "gross_nonpf",
                             "esi_base", "nonesi_base")}
+    # Iter 645 — dynamic allowance head totals.
+    for _l in _alab2:
+        tot[f"allow::{_l}"] = 0.0
     # Iter 324 (user request) — optional GROUPING with per-group sub-totals.
     body_items: List[Dict[str, Any]] = []
     g_tot = {k: 0.0 for k in tot}
@@ -2303,6 +2459,7 @@ def build_compliance_register_pdf_v2(
             "pf": A(g["pf"]), "esi": A(g["esi"]), "other_ded": A(g["othd"]),
             "tds": A(g["tds"]), "total_ded": A(g["ded"]), "net": A(g["net"]),
             "sign": "",
+            **{f"allow::{_l}": A(g.get(f"allow::{_l}")) for _l in _alab2},
         }
         if "name" not in col_keys and col_keys:
             sv[col_keys[0]] = f"TOTAL — {gname}"
@@ -2322,6 +2479,10 @@ def build_compliance_register_pdf_v2(
                                    + [""] * (len(col_keys) - 1)})
         days = float(r.get("present_days") or 0)
         oth_e = other_earn(r)
+        # Iter 645 — decompose custom allowance heads out of Other Earn.
+        _ah2 = r.get("allowance_heads") or {}
+        _ah2_vals = {f"allow::{_l}": float(_ah2.get(_l) or 0) for _l in _alab2}
+        oth_e -= sum(_ah2_vals.values())
         pf_v = float(r.get("pf_employee") or 0) + float(r.get("vpf_amount") or 0)
         oth_d = other_ded(r)
         adv_v2 = adv_ded2(r)
@@ -2333,6 +2494,7 @@ def build_compliance_register_pdf_v2(
             ("hra", float(r.get("hra") or 0)),
             ("conv", float(r.get("conveyance") or 0)),
             ("oth", oth_e),
+            *_ah2_vals.items(),
             ("gross", float(r.get("gross_paid") or 0)),
             ("pf", pf_v),
             ("esi", float(r.get("esic_employee") or 0)),
@@ -2383,6 +2545,7 @@ def build_compliance_register_pdf_v2(
             "tds": A(r.get("tds")), "total_ded": A(r.get("total_deduction")),
             "net": A(r.get("net")),
             "sign": "",
+            **{k2: A(v2) for k2, v2 in _ah2_vals.items()},
         }
         data.append([vals[k] for k in col_keys])
         body_items.append({"kind": "emp", "cells": data[-1]})
@@ -2397,6 +2560,7 @@ def build_compliance_register_pdf_v2(
         "other_ded": A(tot["othd"]),
         "tds": A(tot["tds"]), "total_ded": A(tot["ded"]), "net": A(tot["net"]),
         "sign": "",
+        **{f"allow::{_l}": A(tot.get(f"allow::{_l}")) for _l in _alab2},
     }
     if "name" not in col_keys and col_keys:
         tot_vals[col_keys[0]] = "GRAND TOTAL"
@@ -2404,7 +2568,8 @@ def build_compliance_register_pdf_v2(
 
     _scale = (W - 8 * mm) / (sum(widths) * mm)
     col_widths = [wmm * mm * _scale for wmm in widths]
-    _num_idx = [i for i, k in enumerate(col_keys) if k in _numeric]
+    _num_idx = [i for i, k in enumerate(col_keys)
+                if k in _numeric or k.startswith("allow::")]
 
     def _v2_style(n_body: int, zebra_offset: int, is_final: bool) -> TableStyle:
         last = n_body + (1 if is_final else 0)  # grand-total row index
