@@ -1277,16 +1277,43 @@ async def _compute_compliance_run(
                     # Gross Earning INCLUDING OT. Previously the diff was
                     # bolted on AFTER the statutory calc, so PF/ESIC never
                     # saw the freeze OT.
-                    _frz_ot = (firm_stat_flags.get(emp.get("company_id"))
-                               or {}).get("ot_allowed")
+                    # Iter 646 (user bug — OT showing for people who never
+                    # have OT) — the freeze diff goes to OT only when the
+                    # Firm allows OT AND the "OVER TIME" allowance head is
+                    # enabled in the catalog; otherwise Other Allowances.
+                    _frz_ot = ((firm_stat_flags.get(emp.get("company_id"))
+                                or {}).get("ot_allowed")
+                               and (enabled_set is None or "ot" in enabled_set))
                     _st3 = dict(_stats_final)
+                    # Iter 646 (user bug — "FOOD ALLOWANCE amount landed in
+                    # OT") — per-head allowance amounts typed on the imported
+                    # sheet allocate to OTHER ALLOWANCES (shown under their
+                    # own dynamic head column), NEVER to OT; only the
+                    # remaining difference follows the OT rule.
+                    _ca646 = {k: float(v or 0)
+                              for k, v in ((_am.get("custom_allowances")
+                                            if _am else None) or {}).items()
+                              if float(v or 0) > 0}
+                    _ca_tot = round(sum(_ca646.values()), 2)
+                    _alloc_allow = 0.0
                     if _diff_g > 0:
-                        if _frz_ot:
-                            _st3["ot_pay_extra"] = _diff_g
-                            row["difference_allocation_head"] = "Overtime"
-                        else:
-                            _st3["other_allowance_extra"] = _diff_g
-                            row["difference_allocation_head"] = "Other Allowances"
+                        _alloc_allow = round(min(_ca_tot, _diff_g), 2)
+                        _rem_diff = round(_diff_g - _alloc_allow, 2)
+                        if _alloc_allow > 0:
+                            _st3["other_allowance_extra"] = _alloc_allow
+                            row["difference_allocation_head"] = "Allowance Heads"
+                        if _rem_diff > 0:
+                            if _frz_ot:
+                                _st3["ot_pay_extra"] = _rem_diff
+                                row["difference_allocation_head"] = (
+                                    "Allowance Heads + Overtime"
+                                    if _alloc_allow else "Overtime")
+                            else:
+                                _st3["other_allowance_extra"] = round(
+                                    float(_st3.get("other_allowance_extra")
+                                          or 0) + _rem_diff, 2)
+                                row["difference_allocation_head"] = (
+                                    "Other Allowances")
                     else:
                         # Iter 344 (user request) — EXACT match with the
                         # Freeze: trim from OT first, then Other Allowances.
@@ -1322,6 +1349,19 @@ async def _compute_compliance_run(
                                "esic_employer", "calc_note"):
                         if _k in _row2:
                             row[_k] = _row2[_k]
+                    if "allowance_heads" in _row2:
+                        row["allowance_heads"] = _row2["allowance_heads"]
+                    # Iter 646 — show the sheet's per-head amounts under
+                    # their own dynamic allowance columns (Others shows the
+                    # remainder; totals unchanged — the amount already sits
+                    # inside Others via other_allowance_extra).
+                    if _alloc_allow > 0 and _ca_tot > 0:
+                        _ah646 = dict(row.get("allowance_heads") or {})
+                        _sc646 = _alloc_allow / _ca_tot
+                        for _l6, _v6 in _ca646.items():
+                            _ah646[_l6] = round(
+                                float(_ah646.get(_l6) or 0) + _v6 * _sc646)
+                        row["allowance_heads"] = _ah646
                     # PT follows the new gross unless the firm's deduction
                     # mask switched it OFF earlier.
                     if not (_ded_set is not None and "pt" not in _ded_set):

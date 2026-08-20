@@ -7151,3 +7151,30 @@ Current iteration: 594. Next: 595.
 - APP_ITERATION "645"; deploy_vps_iter645.sh served via kind=script:
   wget -O deploy645.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
   bash deploy645.sh
+
+## Iteration 646 (2026-06) — Import sheet FOOD ALLOWANCE / OT allocation fix
+- User bug (BMD STAFF import, Import Sheet.xlsx): sheet has per-head cols
+  (Basic/HRA/Conv./FOOD ALLOWANCES/Gross Salary/Present Days/OVER_TIME/Adv/
+  TDS/Other Less/Employee Salary). FOOD ALLOWANCES amounts were part of the
+  imported gross but missing from the employee master → freeze difference →
+  dumped into OT (ot_allowed) → wrong OT + wrong ESIC; user had to zero OT
+  and re-fix days manually.
+- FIX 1 (compliance_import.py): dynamic ALLOWANCE head columns — sheet
+  amounts on enabled custom Firm-Master allowance heads import per-head
+  into entry.custom_allowances (mirrors Iter 469 custom_deductions).
+- FIX 2 (compliance_salary_runs.py freeze block): positive freeze diff is
+  allocated to the sheet's allowance heads FIRST (other_allowance_extra +
+  row.allowance_heads stamped so it displays under its own column, e.g.
+  FOOD ALLOWANCES); only the REMAINDER follows the OT rule.
+  difference_allocation_head = "Allowance Heads" / "Allowance Heads +
+  Overtime". Negative-diff trim branch unchanged.
+- FIX 3: freeze diff goes to OT only when salary_process.ot_allowed AND
+  the catalog "OVER TIME" head is enabled (enabled_set has "ot").
+- Tests: /app/test_iter646_import_food_allowance.py PASSED (gross 29947,
+  OT 0, FOOD ALLOWANCES 8000 own column, alloc label). Importer verified
+  against the user's real xlsx (_parse_sheet + _store_import →
+  custom_allowances {"FOOD ALLOWANCES": 8000} stored).
+- APP_ITERATION "646"; deploy_vps_iter646.sh served via kind=script.
+- PENDING USER PICKS (asked in finish): Salary Slip WhatsApp blast after
+  lock (note: whatsapp/send-salary-slips endpoint already exists — check
+  before rebuilding) and Hindi language support (P4 backlog).

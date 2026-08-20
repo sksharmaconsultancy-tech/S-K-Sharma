@@ -222,13 +222,24 @@ async def _store_import(admin: dict, company_id: str, month: str,
     # (PF / ESI / PT / TDS / I.Tax) are computed by the engine, never
     # imported.
     _fm = await db.firm_masters.find_one(
-        {"company_id": company_id}, {"_id": 0, "deductions": 1}) or {}
+        {"company_id": company_id},
+        {"_id": 0, "deductions": 1, "allowances": 1}) or {}
     _stat_heads = {"pf", "esi", "esic", "pt", "itax", "tax", "incometax",
                    "tds", "professionaltax", "providentfund", "epf"}
     ded_heads: dict = {}  # normalised label -> Firm-Master label
     for _head, _on in (_fm.get("deductions") or {}).items():
         if _on and _norm_header(_head) not in _stat_heads:
             ded_heads[_norm_header(_head)] = str(_head).strip()
+    # Iter 646 (user bug — "FOOD ALLOWANCE amount landed in OT") — dynamic
+    # ALLOWANCE head columns: sheet amounts on custom Firm-Master allowance
+    # heads (FOOD ALLOWANCES / INCENTIVE / …) import PER-HEAD; the salary
+    # run allocates them to that head, never to OT.
+    _stat_allow = {"basic", "hra", "conv", "conveyance", "othallow",
+                   "overtime", "othermiscallowance", "medicalallowances"}
+    allow_heads: dict = {}
+    for _head, _on in (_fm.get("allowances") or {}).items():
+        if _on and _norm_header(_head) not in _stat_allow:
+            allow_heads[_norm_header(_head)] = str(_head).strip()
 
     by_code: dict = {}
     by_uan: dict = {}
@@ -308,10 +319,14 @@ async def _store_import(admin: dict, company_id: str, month: str,
         # sheet (UNIFORM / CLUB / CANTEEN / …) import per-head; the run
         # merges them into the row's dynamic deduction columns.
         _custom_ded: dict = {}
+        _custom_allow: dict = {}
         for _lbl, _val in (row.get("_extra") or {}).items():
             _n = _norm_header(_lbl)
             if _n in ded_heads and float(_val or 0) > 0:
                 _custom_ded[ded_heads[_n]] = round(float(_val), 2)
+            # Iter 646 — per-head allowance amounts from the sheet.
+            elif _n in allow_heads and float(_val or 0) > 0:
+                _custom_allow[allow_heads[_n]] = round(float(_val), 2)
         matched.append({
             "company_id": company_id,
             "month": month,
@@ -325,6 +340,7 @@ async def _store_import(admin: dict, company_id: str, month: str,
             "other_less": float(row.get("other_less") or 0),
             "ot_hours": float(row.get("ot_hours") or 0),
             "custom_deductions": _custom_ded,
+            "custom_allowances": _custom_allow,
         })
 
     # Replace the whole (firm, month) set on every import.
