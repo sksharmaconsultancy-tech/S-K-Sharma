@@ -1390,6 +1390,40 @@ CSV_COLUMNS = [
 ]
 
 
+# Iter 632 (user request) — CSV / Excel exports show WHOLE RUPEES only, the
+# same as the on-screen grid and the PDF register (Iter 323), so the exported
+# sheet never differs from the processed salary by paise. Days / hours / rate
+# keep their real precision (e.g. 22.5 present days, daily rate 483.87).
+_EXPORT_MONEY_KEYS = (
+    "basic", "hra", "conveyance", "medical", "special", "others",
+    "monthly_gross", "ot_pay", "gross_paid", "stat_wage_base",
+    "pf_wages", "pf_employee", "pf_employer_epf", "pf_employer_eps",
+    "pf_employer_total", "vpf_amount",
+    "esic_wage_base", "esic_employee", "esic_employer",
+    "pt", "tds", "advance_recovery", "other_deduction", "master_deduction",
+    "total_deduction", "net",
+    "imported_gross", "calculated_gross", "difference",
+)
+
+
+def round_export_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Return copies of the rows with every money figure rounded to whole
+    rupees (stored run data is NOT modified)."""
+    out = []
+    for r in rows:
+        c = dict(r)
+        for k in _EXPORT_MONEY_KEYS:
+            v = c.get(k)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                c[k] = int(round(float(v)))
+        if isinstance(c.get("deduction_heads"), dict):
+            c["deduction_heads"] = {
+                h: int(round(_num(a, 0.0)))
+                for h, a in c["deduction_heads"].items()}
+        out.append(c)
+    return out
+
+
 def _ded_head_labels(rows: List[Dict[str, Any]]) -> List[str]:
     """Iter 420 — dynamic Firm-Master deduction head labels for a run."""
     r0 = rows[0] if rows else {}
@@ -1457,7 +1491,8 @@ def dynamic_csv_columns(rows: List[Dict[str, Any]]) -> List[str]:
 def to_csv(rows: List[Dict[str, Any]]) -> str:
     # Iter 373 (user request) — dynamic firm-wise heads in CSV too.
     cols = dynamic_csv_columns(rows)
-    rows = flatten_deduction_heads(rows)
+    # Iter 632 (user request) — whole rupees in exports.
+    rows = flatten_deduction_heads(round_export_rows(rows))
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
     w.writeheader()

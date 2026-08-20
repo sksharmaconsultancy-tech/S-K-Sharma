@@ -2699,7 +2699,9 @@ async def export_compliance_salary_run_xlsx(
     authorization: Optional[str] = Header(None),
 ):
     """Iter 64 — native Excel export for Compliance Salary runs."""
-    from utils.compliance_salary import dynamic_csv_columns, flatten_deduction_heads
+    from utils.compliance_salary import (
+        dynamic_csv_columns, flatten_deduction_heads, round_export_rows,
+    )
     from utils.report_xlsx import build_rows_xlsx
     from fastapi.responses import Response
     admin = await get_user_from_token(authorization)
@@ -2721,8 +2723,8 @@ async def export_compliance_salary_run_xlsx(
     xlsx_bytes = build_rows_xlsx(
         # Iter 373 (user request) — dynamic firm-wise heads (matches PDF).
         columns=dynamic_csv_columns(run.get("rows") or []),
-        rows=flatten_deduction_heads(
-            _sort_export_rows(run.get("rows") or [], sort_by)),
+        rows=flatten_deduction_heads(round_export_rows(
+            _sort_export_rows(run.get("rows") or [], sort_by))),
         sheet_name="Compliance",
         title=f"Compliance Salary — {company_name}",
         subtitle=f"Month: {run.get('month')} · Employees: {len(run.get('rows') or [])}",
@@ -3258,3 +3260,47 @@ async def download_ecr_file(run_id: str, authorization: Optional[str] = Header(N
         headers={"Content-Disposition": f'attachment; filename="ECR_{_m2w}.txt"'},
     )
 
+
+
+# ---------------------------------------------------------------------------
+# Iter 631 (user request) — DISABLE WARNING: before an admin switches OFF an
+# allowance head in the Firm Master, the frontend asks this endpoint whether
+# any PROCESSED month carries amounts in that head. Read-only.
+# ---------------------------------------------------------------------------
+_ALLOW_LABEL_TO_BUCKET = {
+    "HRA": "hra", "CONV.": "conveyance", "MEDICAL ALLOWANCES": "medical",
+    "OTH. ALLOW.": "special", "OTHER MISC.ALLOWANCE": "others",
+}
+
+
+@api.get("/admin/compliance-allowance-impact")
+async def firm_allowance_impact(
+    company_id: str = Query(...),
+    head: str = Query(...),
+    authorization: Optional[str] = Header(None),
+):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    if admin["role"] == "company_admin" and admin.get("company_id") != company_id:
+        raise HTTPException(status_code=403, detail="Not authorised for this firm")
+    bucket = _ALLOW_LABEL_TO_BUCKET.get(str(head or "").strip().upper())
+    if not bucket:
+        # Custom catalog heads are not part of the salary-column mask.
+        return {"applicable": False, "months": []}
+    months = await db.compliance_salary_runs.aggregate([
+        {"$match": {"company_id": company_id}},
+        {"$unwind": "$rows"},
+        {"$match": {f"rows.{bucket}": {"$gt": 0}}},
+        {"$group": {"_id": "$month",
+                    "employees": {"$sum": 1},
+                    "total": {"$sum": f"$rows.{bucket}"},
+                    "finalized": {"$max": {"$cond": ["$finalized", 1, 0]}}}},
+        {"$sort": {"_id": -1}},
+        {"$limit": 24},
+    ]).to_list(24)
+    out = [{"month": m["_id"], "employees": m["employees"],
+            "total": round(float(m["total"] or 0), 2),
+            "finalized": bool(m.get("finalized"))} for m in months]
+    return {"applicable": True, "bucket": bucket, "months": out,
+            "total_amount": round(sum(m["total"] for m in out), 2),
+            "total_employees": sum(m["employees"] for m in out)}

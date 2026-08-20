@@ -6886,3 +6886,28 @@ Current iteration: 594. Next: 595.
   cleaned + restored. Checked: NO real Kankani employee carries amounts in
   currently-disabled heads → zero impact on existing processed payrolls.
 - APP_ITERATION 630; deploy_vps_iter630.sh served via kind=script.
+
+## Iteration 631 (2026-06) — Allowance Disable Warning (user request)
+- New GET /api/admin/compliance-allowance-impact?company_id&head — maps the
+  Firm Master label (HRA/CONV./MEDICAL ALLOWANCES/OTH. ALLOW./OTHER
+  MISC.ALLOWANCE) to its bucket and aggregates compliance_salary_runs rows
+  with amounts in that bucket → month-wise {employees, total, finalized}.
+  (First tried /admin/firm-master/allowance-impact — 404: shadowed by
+  /admin/firm-master/{company_id}; renamed.) Custom heads → applicable:false.
+- firm-master.tsx: toggleAllowance() — on switching OFF, fetches impact; if
+  processed months found shows confirmYesNo listing up to 6 months with
+  totals + FINALIZED flag; Cancel keeps toggle ON; impact check failure
+  never blocks. Verified via screenshot (custom modal shown, correct text).
+
+## Iteration 632 (2026-06) — Compliance exports in WHOLE RUPEES (user bug, STAFF.xlsx)
+- User's exported sheet showed paise (Gross Paid 2903.85, Net 2881.85) vs
+  whole-rupee processed sheet/PDF (PDF already rounded since Iter 323).
+- utils/compliance_salary.py: _EXPORT_MONEY_KEYS + round_export_rows(rows)
+  (copies only; stored run data untouched; deduction_heads dict rounded;
+  days/hours/rate/month_days keep precision). Applied in to_csv() and the
+  export.xlsx endpoint (flatten_deduction_heads(round_export_rows(...))).
+  NOTE: Actual Salary Process exports use utils/salary_run.to_csv —
+  intentionally NOT touched (user asked for compliance only).
+- Verified: seeded run with 2903.85/21.78/50.25 → CSV+XLSX export all money
+  cols integers (2904/22/50), Present Days 5 intact, stored 2903.85 intact.
+- APP_ITERATION 632; deploy_vps_iter632.sh served via kind=script.

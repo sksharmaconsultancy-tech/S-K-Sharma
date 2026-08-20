@@ -25,6 +25,7 @@ import AuditLogSection from "@/src/components/firmMaster/AuditLogSection";
 import HealthSection from "@/src/components/firmMaster/HealthSection";
 import useEnterNav from "@/src/hooks/useEnterNav";
 import useSaveShortcut from "@/src/hooks/useSaveShortcut";
+import { confirmYesNo } from "@/src/utils/confirm";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import CompanyPicker from "@/src/components/CompanyPicker";
@@ -316,6 +317,35 @@ export default function FirmMasterScreen() {
       [section]: { ...(prev?.[section] || {}), ...patch },
     }));
     setDirty(true);
+  };
+
+  // Iter 631 (user request) — DISABLE WARNING: switching OFF an allowance
+  // head that has amounts in a processed month first shows the impact and
+  // asks for confirmation. Saved values are never deleted — the head just
+  // calculates as 0 on the next Reprocess.
+  const toggleAllowance = async (lab: string, v: boolean) => {
+    if (!v && companyId) {
+      try {
+        const imp = await api<any>(
+          `/admin/compliance-allowance-impact?company_id=${companyId}&head=${encodeURIComponent(lab)}`);
+        if (imp?.applicable && (imp.months || []).length > 0) {
+          const list = imp.months.slice(0, 6)
+            .map((m: any) => `• ${m.month}: ₹${Number(m.total).toLocaleString("en-IN")} across ${m.employees} employee row(s)${m.finalized ? " (FINALIZED)" : ""}`)
+            .join("\n");
+          const more = imp.months.length > 6 ? `\n…and ${imp.months.length - 6} more month(s)` : "";
+          const ok = await confirmYesNo(
+            `"${lab}" has amounts in processed salary month(s):\n\n${list}${more}\n\n` +
+            `Disabling will calculate this head as ₹0 on the NEXT Reprocess ` +
+            `(already processed months stay unchanged until reprocessed; on ` +
+            `Freeze imports the amount moves to OT / Other Allowance so the ` +
+            `imported Gross is kept). Saved values are NOT deleted — ` +
+            `re-enabling + Reprocess restores them.\n\nDisable "${lab}"?`,
+            "Allowance has processed amounts");
+          if (!ok) return;
+        }
+      } catch { /* impact check is advisory — never blocks the toggle */ }
+    }
+    updateSection("allowances", { [lab]: v });
   };
 
   // Iter 108 — Enter jumps to the next field; Enter on the LAST field saves.
@@ -692,7 +722,7 @@ export default function FirmMasterScreen() {
                   key={lab}
                   label={lab}
                   value={!!master.allowances?.[lab]}
-                  onChange={(v) => updateSection("allowances", { [lab]: v })}
+                  onChange={(v) => { void toggleAllowance(lab, v); }}
                   testID={`allowance-${lab}`}
                 />
               ))}
