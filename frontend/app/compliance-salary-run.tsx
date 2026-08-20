@@ -2203,13 +2203,18 @@ export default function ComplianceSalaryRunScreen() {
         {/* Iter 114 — duplicate "Firm" selector card REMOVED (user rule):
             only ONE firm selector ("Select firm" card above) remains. */}
 
-        {/* Config card */}
+        {/* Config card — Iter 637 (user request): compact single-line
+            "Configure Batch" toolbar. VIEW-ONLY redesign — every control,
+            value and button keeps its exact existing behaviour. */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Configure batch</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <Ionicons name="settings-outline" size={20} color={colors.brandPrimary} />
+            <Text style={styles.batchTitle}>Configure Batch</Text>
+          </View>
 
-          <View style={styles.gridRow}>
-            <View style={styles.gridCol}>
-              <Text style={styles.label}>Month (FY-wise)</Text>
+          <View style={styles.batchLine}>
+            <View style={styles.batchCol}>
+              <Text style={styles.batchLabel}>Month (FY-wise)</Text>
               <MonthPicker
                 value={month}
                 onChange={setMonth}
@@ -2219,8 +2224,8 @@ export default function ComplianceSalaryRunScreen() {
                 testID="csr-month"
               />
             </View>
-            <View style={styles.gridCol}>
-              <Text style={styles.label}>
+            <View style={styles.batchCol}>
+              <Text style={styles.batchLabel}>
                 Month days (override) · Max {calendarDaysInMonth(month)}
               </Text>
               <TextInput
@@ -2243,16 +2248,11 @@ export default function ComplianceSalaryRunScreen() {
                 keyboardType="numeric"
                 maxLength={2}
               />
-              {existingAny && (existingAny as any).month_days ? (
-                <Text style={{ fontSize: 9.5, color: colors.onSurfaceTertiary, marginTop: 2 }}>
-                  Already processed with {(existingAny as any).month_days} days — a different value will ask for confirmation.
-                </Text>
-              ) : null}
             </View>
-            <View style={styles.gridCol}>
+            <View style={styles.batchCol}>
               {/* Iter 255 (user request) — Employee Group DROPDOWN placed
                   right after Month days (override). */}
-              <Text style={styles.label}>Employee group</Text>
+              <Text style={styles.batchLabel}>Employee group</Text>
               {Platform.OS === "web" ? (
                 // @ts-ignore web-only element
                 <select
@@ -2260,9 +2260,9 @@ export default function ComplianceSalaryRunScreen() {
                   value={empType}
                   onChange={(e: any) => setEmpType(e.target.value)}
                   style={{
-                    height: 40, borderRadius: 10, border: `1px solid ${colors.divider}`,
+                    height: 48, borderRadius: 10, border: `1px solid ${colors.divider}`,
                     background: colors.surface, color: colors.onSurface,
-                    fontSize: 13, fontWeight: 600, padding: "0 10px", width: "100%",
+                    fontSize: 14, fontWeight: 600, padding: "0 10px", width: "100%",
                   } as any}
                 >
                   <option value="all">— Select group (mandatory) —</option>
@@ -2285,7 +2285,45 @@ export default function ComplianceSalaryRunScreen() {
                 </View>
               )}
             </View>
+
+            {/* Iter 637 — display-only summary cards (same existing data:
+                group counts + the run already on screen). */}
+            {(() => {
+              const total = empType !== "all"
+                ? (types.find((t) => t.name === empType)?.count ?? 0)
+                : types.reduce((s, t) => s + (t.count || 0), 0);
+              const processed = run && (run as any).month === month
+                ? ((run as any).rows || []).length : 0;
+              const pending = Math.max(0, total - processed);
+              return (
+                <>
+                  <View style={[styles.sumCard, { borderColor: "#93C5FD", backgroundColor: "#EFF6FF" }]}>
+                    <Text style={styles.sumLabel}>Total Employees</Text>
+                    <Text style={[styles.sumVal, { color: "#1D4ED8" }]}>{total}</Text>
+                  </View>
+                  <View style={[styles.sumCard, { borderColor: "#86EFAC", backgroundColor: "#F0FDF4" }]}>
+                    <Text style={styles.sumLabel}>Processed</Text>
+                    <Text style={[styles.sumVal, { color: "#15803D" }]}>{processed} ✓</Text>
+                  </View>
+                  <View style={[styles.sumCard, { borderColor: "#FDBA74", backgroundColor: "#FFF7ED" }]}>
+                    <Text style={styles.sumLabel}>Pending</Text>
+                    <Text style={[styles.sumVal, { color: "#C2410C" }]}>{pending} ◷</Text>
+                  </View>
+                </>
+              );
+            })()}
           </View>
+
+          {/* Iter 637 — month-days info moved BELOW the toolbar into a
+              subtle light-blue panel (same text, same confirmation flow). */}
+          {existingAny && (existingAny as any).month_days ? (
+            <View style={styles.infoPanel}>
+              <Ionicons name="information-circle-outline" size={14} color="#0369A1" />
+              <Text style={styles.infoPanelTxt}>
+                Already processed with {(existingAny as any).month_days} days — a different value will ask for confirmation.
+              </Text>
+            </View>
+          ) : null}
 
           {/* Iter 85 — Roll filter removed. Compliance Salary Process
               is intentionally locked to ON-ROLL employees only, so the
@@ -2531,7 +2569,8 @@ export default function ComplianceSalaryRunScreen() {
               testID="csr-generate"
               onPress={generate}
               disabled={busy}
-              style={[styles.primaryBtn, busy && { opacity: 0.6 }, { flex: 1 }]}
+              style={[styles.primaryBtn, busy && { opacity: 0.6 },
+                { flex: 1, backgroundColor: "#16A34A", minHeight: 48, borderRadius: 10 }]}
             >
               {busy ? (
                 <ActivityIndicator color="#fff" />
@@ -4247,6 +4286,48 @@ const styles = StyleSheet.create({
   },
   compactBarTxt: { flex: 1, fontSize: 13.5, fontWeight: "800", color: colors.onSurface },
   compactBarHint: { fontSize: 12, fontWeight: "800", color: colors.brandPrimary },
+  // Iter 637 (user request) — compact single-line Configure Batch toolbar.
+  batchTitle: { fontSize: 22, fontWeight: "800", color: colors.onSurface },
+  batchLine: {
+    flexDirection: "row",
+    gap: 10,
+    alignItems: "flex-end",
+    flexWrap: "wrap",
+    marginBottom: 6,
+  },
+  batchCol: { flexGrow: 1, minWidth: 170, maxWidth: 260 },
+  batchLabel: {
+    fontSize: 12.5,
+    fontWeight: "800",
+    color: colors.onSurfaceSecondary,
+    marginBottom: 4,
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  sumCard: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    minWidth: 108,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sumLabel: { fontSize: 12, fontWeight: "800", color: colors.onSurfaceSecondary },
+  sumVal: { fontSize: 22, fontWeight: "800", marginTop: 1 },
+  infoPanel: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#F0F9FF",
+    borderWidth: 1,
+    borderColor: "#BAE6FD",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    marginBottom: 6,
+  },
+  infoPanelTxt: { flex: 1, fontSize: 12.5, fontWeight: "600", color: "#0C4A6E" },
   // Iter 85 — Inline-editable Present Days cell in Compliance Salary grid.
   editableCell: {
     borderWidth: 1,

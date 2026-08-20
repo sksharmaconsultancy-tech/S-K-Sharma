@@ -6984,3 +6984,18 @@ Current iteration: 594. Next: 595.
 - Verified via screenshots: compact bar + grid starting at top with 9+ rows
   visible; expand & collapse both work.
 - APP_ITERATION 636; deploy_vps_iter636.sh served via kind=script.
+
+## Iteration 637 (2026-06) — Configure Batch single-line toolbar (user request, VIEW-ONLY)
+- compliance-salary-run.tsx Config card restyled per user's reference mock:
+  batchTitle 22px + gear icon; batchLine flex row (wrap) with batchCol
+  (minWidth 170/max 260); batchLabel 12.5px UPPERCASE bold; web group
+  <select> 40→48px/14px; summary cards inline (IIFE, display-only: total =
+  selected group count or sum of types, processed = run-on-screen rows for
+  the SAME month else 0, pending = total-processed) — blue/green/orange
+  sumCard styles; "Already processed with N days" moved out of the days
+  column into styles.infoPanel (light-blue) BELOW the line (same confirm
+  flow); Salary Process button green (#16A34A, 48px, r10) via inline
+  override on shared primaryBtn (Copy Last Month stays purple).
+- NO logic/API/workflow changes. Verified via desktop screenshot: one-line
+  toolbar exactly matching the mock.
+- APP_ITERATION 637; deploy_vps_iter637.sh served via kind=script.
