@@ -40,11 +40,12 @@ async function checkAndUpdate() {
 export default function usePwaAutoUpdate() {
   useEffect(() => {
     if (Platform.OS !== "web") return;
+    // Iter 634 (user request — Multi-Tab fix): the update check now runs
+    // ONLY at app launch. It previously also ran on every visibilitychange,
+    // which RELOADED an older tab the moment the user switched back to it
+    // after a deploy — losing unsaved work and landing on the Dashboard.
+    // Returning to a tab must never refresh the app; the new version is
+    // picked up on the next fresh open instead.
     checkAndUpdate();
-    const onVis = () => {
-      if ((globalThis as any).document?.visibilityState === "visible") checkAndUpdate();
-    };
-    (globalThis as any).document?.addEventListener?.("visibilitychange", onVis);
-    return () => (globalThis as any).document?.removeEventListener?.("visibilitychange", onVis);
   }, []);
 }

@@ -6911,3 +6911,44 @@ Current iteration: 594. Next: 595.
 - Verified: seeded run with 2903.85/21.78/50.25 → CSV+XLSX export all money
   cols integers (2904/22/50), Present Days 5 intact, stored 2903.85 intact.
 - APP_ITERATION 632; deploy_vps_iter632.sh served via kind=script.
+
+## Iteration 633 (2026-06) — Whole-rupee CALCULATION + Export Displayed (user requests)
+- ENGINE ROUNDING: compute_compliance_row (utils/compliance_salary.py) now
+  rounds ALL money figures to whole rupees AFTER the Iter 230 head
+  reconciliation and BEFORE the return dict: monthly_gross, ot_pay,
+  gross_paid(=rounded parts), stat_wage_base, capped_pf_wages, pf_employee,
+  vpf, pf_employer_epf/eps (total re-derived), esic_wage_base/employee/
+  employer, pt, tds, master_deduction; total_deduction & net RE-DERIVED
+  from rounded parts. Statutory % math still runs on precise values first.
+  Verified: 15100×5/26 → 2904 whole; Iter630 conformance test re-run 18/18
+  (no regression to freeze/mask flows).
+- EXPORT DISPLAYED: new POST /api/admin/compliance-salary-runs/
+  export-display.xlsx {month, company_id, rows} → xlsx of the ON-SCREEN
+  rows (round_export_rows + dynamic columns), persists nothing. apiBinary()
+  in src/api/client.ts extended with optional {method, body}. New
+  "Excel (Displayed)" ActionBtn (testID btn-export-displayed, shows * when
+  unsavedEdits) beside Excel in compliance-salary-run.tsx; posts current
+  run.rows state. Verified via POST test (paise rows → 2904/23/3005, days
+  5.5 kept).
+- APP_ITERATION 633; deploy_vps_iter633.sh served via kind=script.
+
+## Iteration 634 (2026-06) — 1-minute Autosave restored + Multi-Tab refresh fix (user requests)
+- AUTOSAVE (user: "rollback the autosave system… always save every minute"):
+  compliance-salary-run.tsx — 60s setInterval (refs: runRef/unsavedRef/
+  autoSaveBusy to avoid stale closures) posts save-rows when unsavedEdits
+  && !finalized; sets lastAutoSave shown as green "✓ Auto-saved HH:MM:SS";
+  amber banner now says "auto-saves within 1 min". Manual Save as Draft
+  unchanged. salary-run.tsx (Actual): per-edit 450ms PATCH kept; on PATCH
+  failure the changes are re-merged into pendingRef and retried after 60s
+  via scheduleSaveRef.
+- MULTI-TAB FIX (user's earlier report: switching to an older tab refreshed
+  the app and redirected to Dashboard): ROOT CAUSE = usePwaAutoUpdate
+  (Iter 614) ran checkAndUpdate on every visibilitychange → after ANY
+  deploy the first tab to become visible force-reloaded. Now the check
+  runs ONLY at launch (visibility listener removed). Updates apply on next
+  fresh open.
+- UNSAVED GUARD: beforeunload handler on compliance sheet (web) warns when
+  unsavedRef true.
+- Note: pre-existing tsc TS2367 role-comparison warnings in this file are
+  unrelated/old. Screen mount smoke-tested via screenshot.
+- APP_ITERATION 634; deploy_vps_iter634.sh served via kind=script.

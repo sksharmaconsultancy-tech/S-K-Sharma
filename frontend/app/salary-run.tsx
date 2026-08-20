@@ -530,12 +530,19 @@ export default function ActualSalaryProcessScreen() {
           return { ...prev, rows, totals: r.totals };
         });
       } catch (e: any) {
-        showMsg(e?.message || "Auto-save failed");
+        // Iter 634 (user request) — NEVER lose an edit: on failure the
+        // change is put back in the queue and retried after 1 minute.
+        pendingRef.current[user_id] = {
+          ...changesToSend, ...(pendingRef.current[user_id] || {}) };
+        setTimeout(() => scheduleSaveRef.current?.(user_id, {}), 60000);
+        showMsg(e?.message || "Auto-save failed — will retry in 1 minute");
       } finally {
         setSavingRow(null);
       }
     }, 450);
   }, [run]);
+  const scheduleSaveRef = useRef<typeof scheduleSave | null>(null);
+  useEffect(() => { scheduleSaveRef.current = scheduleSave; }, [scheduleSave]);
 
   /* ----- Local edit handler (updates UI immediately, then debounced save) ----- */
   const editField = useCallback((

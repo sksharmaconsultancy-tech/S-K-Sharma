@@ -3304,3 +3304,53 @@ async def firm_allowance_impact(
     return {"applicable": True, "bucket": bucket, "months": out,
             "total_amount": round(sum(m["total"] for m in out), 2),
             "total_employees": sum(m["employees"] for m in out)}
+
+
+# ---------------------------------------------------------------------------
+# Iter 633 (user request) — EXPORT THE DISPLAYED (unsaved) SHEET: the grid
+# posts its CURRENT rows (including edits not yet saved as draft) and gets
+# the same whole-rupee Excel back. Nothing is persisted.
+# ---------------------------------------------------------------------------
+class DisplayExportPayload(BaseModel):
+    month: str
+    company_id: Optional[str] = None
+    rows: List[Dict[str, Any]] = []
+
+
+@api.post("/admin/compliance-salary-runs/export-display.xlsx")
+async def export_displayed_compliance_xlsx(
+    payload: DisplayExportPayload,
+    authorization: Optional[str] = Header(None),
+):
+    from utils.compliance_salary import (
+        dynamic_csv_columns, flatten_deduction_heads, round_export_rows,
+    )
+    from utils.report_xlsx import build_rows_xlsx
+    from fastapi.responses import Response
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    await require_employer_permission(admin, "compliance_salary:read", db)
+    if admin["role"] == "company_admin" and payload.company_id \
+            and payload.company_id != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised for this firm")
+    rows = payload.rows or []
+    company_name = "S.K. Sharma & Co."
+    if payload.company_id:
+        c = await db.companies.find_one(
+            {"company_id": payload.company_id}, {"_id": 0, "name": 1})
+        if c and c.get("name"):
+            company_name = c["name"]
+    xlsx_bytes = build_rows_xlsx(
+        columns=dynamic_csv_columns(rows),
+        rows=flatten_deduction_heads(round_export_rows(rows)),
+        sheet_name="Compliance",
+        title=f"Compliance Salary (Displayed) — {company_name}",
+        subtitle=(f"Month: {payload.month} · Employees: {len(rows)} · "
+                  "Exported from the on-screen sheet (before save)"),
+    )
+    return Response(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition":
+                 f'attachment; filename="ComplianceSalary_Displayed_{payload.month}.xlsx"',
+                 "Cache-Control": "no-store"})

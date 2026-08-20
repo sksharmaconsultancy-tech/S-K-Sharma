@@ -1155,6 +1155,31 @@ def compute_compliance_row(
     )
     master_structure = {**master_structure, **_mast}
 
+    # Iter 633 (user request) — ALWAYS CALCULATE IN ROUND FIGURES: every
+    # money figure the sheet stores / displays / reprocesses is a WHOLE
+    # RUPEE (the earning heads were already whole-rupee reconciled above).
+    # The statutory percentages were applied on the precise values first;
+    # the results are rounded here and the totals RE-DERIVED from the
+    # rounded parts so every column always tallies exactly.
+    monthly_gross = float(round(monthly_gross))
+    ot_pay = float(round(ot_pay))
+    gross_paid = monthly_gross + ot_pay
+    stat_wage_base = float(round(stat_wage_base))
+    capped_pf_wages = float(round(capped_pf_wages))
+    pf_employee = float(round(pf_employee))
+    vpf = float(round(vpf))
+    pf_employer_epf = float(round(pf_employer_epf))
+    pf_employer_eps = float(round(pf_employer_eps))
+    pf_employer_total = pf_employer_epf + pf_employer_eps
+    esic_wage_base = float(round(esic_wage_base))
+    esic_employee = float(round(esic_employee))
+    esic_employer = float(round(esic_employer))
+    pt = float(round(pt))
+    tds = float(round(tds))
+    master_deduction = float(round(master_deduction))
+    total_deduction = pf_employee + esic_employee + pt + tds + master_deduction
+    net = gross_paid - total_deduction
+
     # Iter 626 — snapshot of locals for calc_detail: some PF/ESIC variables
     # are only bound on eligible branches (skip paths leave them unset).
     _loc = dict(locals())

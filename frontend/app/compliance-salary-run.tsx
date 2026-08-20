@@ -1183,6 +1183,48 @@ export default function ComplianceSalaryRunScreen() {
   // grid edits now only mark the sheet as having unsaved changes.
   const markGridDirty = useCallback(() => setUnsavedEdits(true), []);
 
+  // Iter 634 (user request) — AUTO-SAVE RESTORED as a 1-MINUTE timer:
+  // while a run with unsaved edits is open, the sheet is silently
+  // persisted every 60 seconds (same save-rows call as "Save as Draft"),
+  // so work is never lost to a refresh or closed tab. Finalized runs are
+  // never touched; a failed autosave retries next minute.
+  const runRef = useRef<any>(null);
+  useEffect(() => { runRef.current = run; }, [run]);
+  const unsavedRef = useRef(false);
+  useEffect(() => { unsavedRef.current = unsavedEdits; }, [unsavedEdits]);
+  const [lastAutoSave, setLastAutoSave] = useState<string>("");
+  const autoSaveBusy = useRef(false);
+  useEffect(() => {
+    const id = setInterval(async () => {
+      const r = runRef.current;
+      if (!r || (r as any).finalized || !unsavedRef.current || autoSaveBusy.current) return;
+      autoSaveBusy.current = true;
+      try {
+        await api(`/admin/compliance-salary-runs/${r.run_id}/save-rows`, {
+          method: "POST", body: { rows: r.rows, totals: r.totals },
+        });
+        setUnsavedEdits(false);
+        setLastAutoSave(new Date().toLocaleTimeString("en-IN",
+          { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+      } catch { /* silent — retried next minute; manual Save still works */ }
+      finally { autoSaveBusy.current = false; }
+    }, 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Iter 634 (user request) — UNSAVED CHANGES PROTECTION: refreshing or
+  // closing the browser tab with unsaved grid edits asks for confirmation.
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    const w = (globalThis as any).window;
+    if (!w?.addEventListener) return;
+    const h = (e: any) => {
+      if (unsavedRef.current) { e.preventDefault(); e.returnValue = ""; }
+    };
+    w.addEventListener("beforeunload", h);
+    return () => w.removeEventListener("beforeunload", h);
+  }, []);
+
   const [unlockBusy, setUnlockBusy] = useState(false);
   const [pendingUnlockReq, setPendingUnlockReq] = useState<any | null>(null);
   const checkUnlockRequests = useCallback(async (runId: string) => {
@@ -1319,6 +1361,32 @@ export default function ComplianceSalaryRunScreen() {
       }
     } catch (e: any) {
       showMsg(e?.message || "Download failed");
+    } finally { setDownloading(false); }
+  };
+
+  // Iter 633 (user request) — export EXACTLY what is displayed on screen
+  // (including edits not yet saved as draft). Nothing is persisted.
+  const exportDisplayed = async () => {
+    if (!run || downloading) return;
+    setDownloading(true);
+    try {
+      const res = await apiBinary("/admin/compliance-salary-runs/export-display.xlsx", {
+        method: "POST",
+        body: {
+          month: run.month,
+          company_id: (run as any).company_id || undefined,
+          rows: (run as any).rows || [],
+        },
+      });
+      if (Platform.OS === "web" && res.webBlobUrl) {
+        const a = document.createElement("a");
+        a.href = res.webBlobUrl;
+        a.download = `ComplianceSalary_Displayed_${run.month}.xlsx`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 30000);
+      }
+    } catch (e: any) {
+      showMsg(e?.message || "Export failed");
     } finally { setDownloading(false); }
   };
 
@@ -2585,12 +2653,18 @@ export default function ComplianceSalaryRunScreen() {
                   </>
                 )}
                 <ActionBtn icon="grid-outline" label="Excel" busy={downloading} onPress={() => downloadFile("xlsx")} />
+                <ActionBtn icon="eye-outline" label={unsavedEdits ? "Excel (Displayed*)" : "Excel (Displayed)"}
+                  testID="btn-export-displayed" busy={downloading} onPress={() => void exportDisplayed()} />
                 <ActionBtn icon="document-text-outline" label="PDF" busy={downloading} onPress={() => downloadFile("pdf")} />
                 <ActionBtn icon="document-outline" label="PDF (Option 2)" busy={downloading} onPress={() => downloadFile("pdf2")} />
                 <ActionBtn icon="download-outline" label="CSV" busy={downloading} onPress={() => downloadFile("csv")} />
                 {unsavedEdits && !(run as any)?.finalized ? (
                   <Text style={{ fontSize: 9.5, color: "#B45309", fontWeight: "800", alignSelf: "center" }}>
-                    ● Unsaved changes — click &quot;Save as Draft&quot;
+                    ● Unsaved changes — auto-saves within 1 min
+                  </Text>
+                ) : lastAutoSave && !(run as any)?.finalized ? (
+                  <Text style={{ fontSize: 9.5, color: "#15803D", fontWeight: "800", alignSelf: "center" }}>
+                    ✓ Auto-saved {lastAutoSave}
                   </Text>
                 ) : null}
                 <ActionBtn icon="paper-plane-outline" label="Push payslips" busy={pushing} onPress={pushToPayslips} primary />

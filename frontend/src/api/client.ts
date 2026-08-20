@@ -111,11 +111,18 @@ export function getApiBaseUrl(): string {
  */
 export async function apiBinary(
   path: string,
+  opts: { method?: string; body?: any } = {},
 ): Promise<{ mimeType: string; base64: string; webBlobUrl?: string }> {
   const t = await readToken();
   const headers: Record<string, string> = {};
   if (t) headers.Authorization = `Bearer ${t}`;
-  const res = await fetch(`${BASE}/api${path}`, { headers, credentials: "include" });
+  if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+  const res = await fetch(`${BASE}/api${path}`, {
+    method: opts.method || "GET",
+    headers,
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    credentials: "include",
+  });
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
     throw new Error(txt || `HTTP ${res.status}`);
