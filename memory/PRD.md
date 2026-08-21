@@ -7448,3 +7448,12 @@ Current iteration: 594. Next: 595.
   sites-enabled server blocks (100m + 300s timeouts). conf.d never
   touched with body-size again.
 - APP_ITERATION=663; temp_bundle serves deploy663.
+
+## Iter 664 — nginx duplicate persists (2nd user report)
+- Root cause: /etc/nginx/nginx.conf http block ALSO has
+  client_max_body_size (older deploy) + conf.d/sks-upload.conf ->
+  duplicate. deploy664 8b: if nginx.conf has it -> bump to 100m and
+  DELETE sks-upload.conf; else keep deduped sks-upload.conf. Also strips
+  the directive from all other conf.d files. Verification line checks
+  published bundle contains "Hide Zero Attendance".
+- APP_ITERATION=664; temp_bundle serves deploy664.

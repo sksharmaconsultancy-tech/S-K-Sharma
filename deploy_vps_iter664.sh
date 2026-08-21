@@ -1,8 +1,8 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 663)
+# S.K. Sharma & Co. — VPS deploy script (Iter 664)
 # Deploys the FULL latest code (includes ALL previous iterations).
 #
-# ═══════════ WHAT'S NEW (Iter 663) ═══════════
+# ═══════════ WHAT'S NEW (Iter 664) ═══════════
 #
 # 🧮 GRID TOTAL vs FILTERS (user bug "filter total showing wrong"):
 #  * With a column filter (e.g. Name = BHERU) the TOTAL row still summed
@@ -116,8 +116,8 @@
 #    INCENTIVE · FOOD ALLOWANCE import fix · dynamic allowance columns.
 #
 # Run ON THE VPS as root/sksharma:
-#   wget -O deploy663.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
-#   bash deploy663.sh
+#   wget -O deploy664.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
+#   bash deploy664.sh
 
 APP_DIR=/home/sksharma/app
 WEB_DIR=/var/www/sksharma
@@ -269,11 +269,15 @@ sudo cp public/sw.js $WEB_DIR/sw.js 2>/dev/null || true
 sudo find $WEB_DIR/_expo -type f -mtime +45 -delete 2>/dev/null || true
 sudo nginx -t && sudo systemctl reload nginx
 
-echo "==> 8b/9 Nginx hardening for BIG salary sheets (Iter 663)..."
-# Iter 663 REPAIR — older deploys left http-level client_max_body_size in
+echo "==> 8b/9 Nginx hardening for BIG salary sheets (Iter 664)..."
+# Iter 664 REPAIR — older deploys left http-level client_max_body_size in
 # more than one conf.d file ("directive is duplicate" -> nginx -t fails).
 # /etc/nginx/conf.d/sks-upload.conf OWNS the global limit; strip the
 # directive from every OTHER conf.d file, and dedupe sks-upload.conf too.
+# Iter 664 REPAIR — the global body-size may ALSO live in nginx.conf's
+# http block (older deploys). nginx forbids two http-level copies. Keep
+# EXACTLY ONE: if nginx.conf has it, bump it to 100m and DELETE
+# sks-upload.conf; otherwise sks-upload.conf owns it.
 for CONF in /etc/nginx/conf.d/*.conf; do
   [ -f "$CONF" ] || continue
   [ "$CONF" = "/etc/nginx/conf.d/sks-upload.conf" ] && continue
@@ -282,7 +286,11 @@ for CONF in /etc/nginx/conf.d/*.conf; do
     echo "   Removed duplicate body-size from $CONF ✅"
   fi
 done
-if [ -f /etc/nginx/conf.d/sks-upload.conf ]; then
+if grep -q "client_max_body_size" /etc/nginx/nginx.conf; then
+  sudo sed -i 's/client_max_body_size[[:space:]]*[0-9]*[km]\?;/client_max_body_size 100m;/' /etc/nginx/nginx.conf
+  sudo rm -f /etc/nginx/conf.d/sks-upload.conf
+  echo "   nginx.conf owns the global 100m limit — removed sks-upload.conf ✅"
+elif [ -f /etc/nginx/conf.d/sks-upload.conf ]; then
   sudo awk '!(/client_max_body_size/ && seen++)' /etc/nginx/conf.d/sks-upload.conf | sudo tee /tmp/sks-upload.dedup >/dev/null
   sudo mv /tmp/sks-upload.dedup /etc/nginx/conf.d/sks-upload.conf
 else
@@ -304,7 +312,7 @@ for CONF in /etc/nginx/sites-enabled/*; do
 done
 sudo nginx -t && sudo systemctl reload nginx && echo "   nginx reloaded ✅" || echo "   ❌ nginx config test failed — check: sudo nginx -t"
 
-echo "==> 8c/9 SPEED-UP: nginx compression, caching & HTTP/2 (Iter 663)..."
+echo "==> 8c/9 SPEED-UP: nginx compression, caching & HTTP/2 (Iter 664)..."
 # 1) Pre-compress the built JS/CSS once so nginx can serve .gz instantly
 #    (gzip_static) instead of re-compressing multi-MB bundles per visitor.
 sudo find $WEB_DIR -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.json' -o -name '*.svg' \) -size +1k -exec gzip -kf9 {} \; 2>/dev/null
@@ -313,7 +321,7 @@ echo "   Pre-compressed $(sudo find $WEB_DIR -name '*.gz' | wc -l) static files 
 #    text-ish, serve pre-compressed files, long immutable cache for the
 #    content-hashed /_expo bundles (safe — new deploys emit new hashes).
 sudo tee /etc/nginx/conf.d/sksharma_perf.conf >/dev/null <<'NGINXPERF'
-# S.K. Sharma & Co. — performance tuning (deploy Iter 663)
+# S.K. Sharma & Co. — performance tuning (deploy Iter 664)
 gzip on;
 gzip_comp_level 5;
 gzip_min_length 1024;
@@ -351,8 +359,8 @@ else
 fi
 
 echo "==> 9/9 Verification..."
-echo -n "   Server badge is 663 (must say OK): "
-grep -q 'APP_ITERATION = "663"' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
+echo -n "   Server badge is 664 (must say OK): "
+grep -q 'APP_ITERATION = "664"' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
 echo -n "   PUBLISHED web bundle has Hide-Zero-Attendance (must say OK): "
 grep -rlq "Hide Zero Attendance" $WEB_DIR/_expo 2>/dev/null && echo "OK" || echo "MISSING! — the frontend build/copy FAILED; scroll up to the 'expo export' output for the error"
 echo -n "   Toolbar polish — Iter 640 (must say OK): "
@@ -437,7 +445,7 @@ echo -n "   Backend /api/health: "
 curl -s -m 5 http://localhost:8001/api/health || echo "❌ NOT ANSWERING"
 echo ""
 echo "════════════════════════════════════════════════════════════"
-echo "  DONE — Iter 663 deployed."
+echo "  DONE — Iter 664 deployed."
 echo "  • NEW (657): Grid freeze pack — header, Present Days & Net frozen;"
 echo "    h-scrollbar always on screen; highlight follows edited cell;"
 echo "    Freeze diff can now land in editable INCENTIVE (OT first)."
