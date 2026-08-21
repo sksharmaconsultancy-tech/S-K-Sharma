@@ -7324,3 +7324,14 @@ Current iteration: 594. Next: 595.
   csrun_8e4b76624d1b (LABOUR 3 errs). temp_bundle serves deploy654.
 - If user STILL cannot lock after deploying 654: ask for the exact toast
   text (now shows real cause + HTTP status) and browser console.
+
+## Iter 655 — Live system speed-up (user request)
+- Backend already had GZipMiddleware (verified: /admin/employees gzip'd).
+- deploy_vps_iter655.sh new step 8c: pre-gzip -kf9 all built js/css/html,
+  /etc/nginx/conf.d/sksharma_perf.conf (gzip+gzip_static, map-based
+  expires: /_expo/static/ 365d, images/fonts 30d, default off so API
+  untouched), HTTP/2 on 'listen 443 ssl' site configs. Self-healing:
+  removes perf conf if nginx -t rejects it.
+- temp_bundle serves deploy655. APP_ITERATION=655.
+- NOTE: run ids csrun_7be2973f21cd was removed by testing agent; use
+  csrun_c5978515ff7f (STAFF clean) / csrun_8e4b76624d1b (LABOUR errs).
