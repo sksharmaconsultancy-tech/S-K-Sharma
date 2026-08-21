@@ -7640,3 +7640,44 @@ Frontend:
   ABSENT from portal-dashboard.tsx, sks-pwa-v11); temp_bundle ->
   deploy673; APP_ITERATION=673.
 - Smoke verified: dashboard renders with NO digest card/slot (count 0).
+
+## Iter 674 — 🤖 EMAIL AUDIT AGENT Phase 1 (READ-ONLY, Super Admin only)
+User confirmed: GPT-5.4 (Emergent key), poll 5 min, threshold 80%, UI as
+a tab inside AI Command Center.
+- NEW /app/backend/routes/email_audit_agent.py (prefix /api/email-agent):
+  * Reuses gmail_mailbox helpers (_smtp_settings, _imap_connect) — the
+    existing Email SMTP & Notifications mailbox; IMAP select readonly.
+  * CUTOFF 15-Aug-2026 00:00 IST: IMAP SEARCH SINCE + per-mail re-check;
+    older -> IGNORED_HISTORICAL (excluded from all stats via OPERATIONAL
+    filter). Message-ID dedupe vs email_audit_records.
+  * Company match: company_email_registry exact (99) -> domain (90,
+    COMMON_DOMAINS excluded) -> AI content (CONTENT_MATCH if company
+    confidence >= threshold). Multi-company -> COMPANY_REVIEW_REQUIRED
+    with candidates; manual assign endpoint sets MANUAL 100.
+  * _ai_analyze: LlmChat gpt-5.4 strict JSON (categories from 19-cat
+    list, priority, action_required, summary, recommendation,
+    possible_company + 4 confidences, extracted fields, missing info).
+  * Attachments peek read-only: openpyxl (xlsx 12 rows), csv, pypdf
+    (2 pages), docx via zipfile XML, zip namelist; excerpt <=1200 chars.
+  * Statuses: ACTION_REQUIRED/URGENT/REVIEW_REQUIRED/
+    COMPANY_REVIEW_REQUIRED/INFORMATION_ONLY/PROCESSING_FAILED/
+    IGNORED_HISTORICAL. Notify super_admins (utils.notify) for action/
+    urgent/company-review, action_url /ai-command-center?tab=email-audit.
+  * email_agent_loop() started in server.py startup; polls when
+    state.enabled. Caps: 20 AI emails/scan, 300 headers.
+  * Endpoints: settings GET/POST, scan, registry CRUD, dashboard,
+    emails list/detail, assign-company, company-summary, daily-report,
+    exceptions, sandbox-ingest (sandbox mode only).
+  * Collections: email_agent_state (singleton), company_email_registry,
+    email_audit_records (timeline[] per record).
+- Frontend: NEW /app/frontend/src/components/EmailAuditTab.tsx (sub-tabs
+  Overview/Emails/Companies/Registry/Report/Settings + full detail view
+  with timeline & manual firm assign). ai-command-center.tsx: 6th tab
+  "🤖 Email Audit" (super_admin only via useAuth), deep-link
+  ?tab=email-audit via useLocalSearchParams.
+- E2E PASS (test_iter674_email_agent.py): exact match URGENT, content
+  match ACTION_REQUIRED (real GPT-5.4), historical ignored, dashboard/
+  report/summary/timeline/manual-assign all verified. UI smoke OK.
+- deploy_vps_iter674.sh; temp_bundle -> deploy674; APP_ITERATION=674.
+- NOTE: preview DB has NO smtp_settings; live scan works on VPS where
+  Email SMTP & Notifications is configured. Agent default OFF.

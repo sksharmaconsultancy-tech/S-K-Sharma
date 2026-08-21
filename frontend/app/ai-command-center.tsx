@@ -18,11 +18,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { api, apiBinary } from "@/src/api/client";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
+import { useAuth } from "@/src/context/AuthContext";
 import { useLang } from "@/src/i18n";
 import { colors, radius, spacing } from "@/src/theme";
+import EmailAuditTab from "@/src/components/EmailAuditTab";
 
 type Action =
   | { type: "navigate"; route: string; label?: string }
@@ -57,7 +59,13 @@ const inr = (v: any) => `₹${Number(v || 0).toLocaleString("en-IN")}`;
 export default function AiCommandCenterScreen() {
   const router = useRouter();
   const { selectedCompanyId, setSelectedCompanyId } = useSelectedCompany();
-  const [tab, setTab] = useState<(typeof TABS)[number]>("Ask AI");
+  // Iter 674 — 🤖 Email Audit tab (Phase 1, Super Admin only).
+  const { user } = useAuth();
+  const isSuper = user?.role === "super_admin";
+  const visibleTabs: string[] = isSuper ? [...TABS, "Email Audit"] : [...TABS];
+  const params = useLocalSearchParams<{ tab?: string }>();
+  const [tab, setTab] = useState<string>(
+    isSuper && String(params.tab || "") === "email-audit" ? "Email Audit" : "Ask AI");
 
   // ── Ask AI ──
   const [input, setInput] = useState("");
@@ -248,13 +256,18 @@ export default function AiCommandCenterScreen() {
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false}
         style={{ flexGrow: 0 }} contentContainerStyle={st.tabs}>
-        {TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <Pressable key={t} onPress={() => setTab(t)}
             style={[st.tab, tab === t && st.tabOn]} testID={`aicc-tab-${t.replace(" ", "")}`}>
-            <Text style={[st.tabTxt, tab === t && st.tabTxtOn]}>{t}</Text>
+            <Text style={[st.tabTxt, tab === t && st.tabTxtOn]}>
+              {t === "Email Audit" ? "🤖 Email Audit" : t}
+            </Text>
           </Pressable>
         ))}
       </ScrollView>
+
+      {/* ── EMAIL AUDIT (Iter 674 · Super Admin only) ── */}
+      {tab === "Email Audit" && isSuper ? <EmailAuditTab /> : null}
 
       {/* ── ASK AI ── */}
       {tab === "Ask AI" ? (

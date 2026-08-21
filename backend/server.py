@@ -3155,6 +3155,13 @@ async def startup():
     except Exception:
         logger.exception("[startup] device offline alert loop failed to start")
 
+    # Iter 674 — 🤖 Email Audit Agent poller (READ-ONLY, super admin).
+    try:
+        from routes.email_audit_agent import email_agent_loop
+        asyncio.create_task(email_agent_loop())
+    except Exception:
+        logger.exception("[startup] email audit agent loop failed to start")
+
     # Iter 267 — ZKTeco multi-device sync engine worker (30s cadence).
     try:
         from routes.sync_engine import sync_engine_loop
@@ -10041,7 +10048,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "673"
+APP_ITERATION = "674"
 
 
 @api.get("/version")
@@ -12908,6 +12915,8 @@ app.include_router(policy_simulator_router)
 app.include_router(tickets_router)
 app.include_router(notifications_router)
 app.include_router(gmail_mailbox_router)
+from routes.email_audit_agent import router as email_audit_agent_router  # noqa: E402
+app.include_router(email_audit_agent_router)
 app.include_router(attendance_master_router)
 app.include_router(leaves_router)
 app.include_router(payslips_router)
