@@ -7603,3 +7603,26 @@ Frontend:
   migration PYMIG3 purges them on the VPS.
 - Verified E2E: stack bounding box x=16 (left), Hide clears all toasts.
 - deploy_vps_iter671.sh; temp_bundle -> deploy671; APP_ITERATION=671.
+
+## Iter 672 — Task Allotment notifications + digest placement ROOT-CAUSE fix
+- portal_phase2.py: NEW _notify_task_allotted(actor, task) — emits
+  audience="user" target_user_id=assignee, company_id=None (so sub_admin
+  global-scoped feed includes it), category system, priority important
+  when task priority high, action_url /portal-dashboard?tab=tasks,
+  reference_id task_id, skips self-assignment. Called from create_task,
+  delegate_task, and update_task (only when assignee_id CHANGES to a new
+  user). Verified E2E (test_iter672_task_notify.py): sub_admin feed
+  receives "New Task Allotted — ..." + digest endpoint OK. PASS.
+- DIGEST MISPLACEMENT ROOT CAUSE (user's 2nd live screenshot, Iter 671
+  bundle): card rendered squeezed INSIDE the Compliance Overview panel.
+  app.json web.output="static" => SSG + hydration; React #418 hydration
+  mismatches (confirmed in prod-build console) can insert late-mounted
+  nodes at wrong DOM positions. FIX: NotifDigestCard now ALWAYS renders
+  a stable outer slot View (testID notif-digest-slot-{variant}) even
+  when empty; LiveNotifToasts absolute container likewise always
+  mounted. Cards can no longer be inserted into other panels.
+- sw.js cache v9 -> v10. deploy_vps_iter672.sh (verify greps:
+  _notify_task_allotted, notif-digest-slot, sks-pwa-v10);
+  temp_bundle -> deploy672; APP_ITERATION=672.
+- Smoke verified: digest wide at top (x260 w1164), toast stack x=16
+  bottom-left with Hide. Seeds/test rows cleaned.

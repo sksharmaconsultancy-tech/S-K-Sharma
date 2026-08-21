@@ -200,6 +200,30 @@ class RecurringUpdate(BaseModel):
     active: Optional[bool] = None
 
 
+async def _notify_task_allotted(actor: dict, task: dict) -> None:
+    """Iter 672 (user request) — Task Allotment notification to the
+    assignee. Uses a USER-targeted notification (audience="user") so it
+    reaches EVERY role — including Sub Super Admins, who don't receive
+    "admins"-audience broadcasts. company_id stays None so sub admins'
+    global-scoped feed always includes it. Never notifies self-assignment."""
+    aid = task.get("assignee_id")
+    if not aid or aid == actor.get("user_id"):
+        return
+    from utils.notify import emit as _notify
+    firms = ", ".join(task.get("company_names") or []) \
+        or task.get("company_name") or "General"
+    await _notify(
+        db, audience="user", target_user_id=aid, company_id=None,
+        category="system",
+        priority="important" if task.get("priority") == "high" else "normal",
+        title=f"New Task Allotted — {task.get('title') or 'Task'}",
+        message=(f"Assigned by {task.get('assigned_by_name') or 'Admin'} · "
+                 f"{firms} · Due {task.get('due_date') or '—'} · "
+                 f"Priority {(task.get('priority') or 'medium').upper()}"),
+        action_url="/portal-dashboard?tab=tasks",
+        reference_id=task.get("task_id"))
+
+
 @router.get("/portal-recurring-tasks")
 async def list_recurring_tasks(authorization: Optional[str] = Header(None)):
     admin = await _admin(authorization)
@@ -562,6 +586,8 @@ async def create_task(payload: TaskCreate, authorization: Optional[str] = Header
     await _task_audit(admin, "assigned" if assignee else "created", task,
                       f"→ {(assignee or {}).get('name') or 'unassigned'} · "
                       f"{', '.join(company_names) or 'general'}")
+    # Iter 672 — notify the assignee (works for Sub Super Admins too).
+    await _notify_task_allotted(admin, task)
     return {"ok": True, "task": task}
 
 
@@ -675,6 +701,10 @@ async def update_task(task_id: str, payload: TaskUpdate,
     if payload.assignee_id is not None:
         await _task_audit(admin, "reassigned", t2,
                           f"→ {upd.get('assignee_name') or 'unassigned'}")
+        # Iter 672 — notify the NEW assignee on reassignment (skip if
+        # unchanged or cleared).
+        if payload.assignee_id and payload.assignee_id != t.get("assignee_id"):
+            await _notify_task_allotted(admin, t2)
     return {"ok": True, "task": t2}
 
 
@@ -955,6 +985,8 @@ async def delegate_task(task_id: str, payload: DelegateBody,
          "$set": {"updated_at": _now().isoformat()}})
     await _task_audit(admin, "delegated", child,
                       f"from {task_id} → {assignee.get('name')}")
+    # Iter 672 — notify the delegated assignee (incl. Sub Super Admins).
+    await _notify_task_allotted(admin, child)
     return {"ok": True, "task": child}
 
 

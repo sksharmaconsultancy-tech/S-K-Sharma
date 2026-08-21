@@ -162,8 +162,9 @@ export default function LiveNotifToasts({ incoming, onConsumed, onView }: {
     setToasts((prev) => prev.filter((t) => t.notification_id !== id));
   }, []);
 
-  if (!toasts.length) return null;
-
+  // Iter 672 — the absolute container is ALWAYS mounted (empty when no
+  // toasts) so popups can never be inserted at a wrong DOM position by a
+  // hydration mismatch on pre-rendered pages.
   return (
     <View
       pointerEvents="box-none"
@@ -183,6 +184,7 @@ export default function LiveNotifToasts({ incoming, onConsumed, onView }: {
           It auto-unhides the moment a NEW notification arrives, and each
           window auto-hides again ~10 s later. Hiding does NOT mark
           anything read — items stay unread in the bell. */}
+      {toasts.length ? (
       <Pressable
         onPress={() => setToasts([])}
         style={{
@@ -196,6 +198,7 @@ export default function LiveNotifToasts({ incoming, onConsumed, onView }: {
         <Ionicons name="eye-off-outline" size={12} color="#FFFFFF" />
         <Text style={{ fontSize: 11, fontWeight: "700", color: "#FFFFFF" }}>Hide</Text>
       </Pressable>
+      ) : null}
     </View>
   );
 }

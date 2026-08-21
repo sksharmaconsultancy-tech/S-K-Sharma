@@ -72,13 +72,21 @@ export default function NotifDigestCard({ variant, onNavigate }: {
     router.push((n.action_url || "/notifications") as any);
   }, [onNavigate, router]);
 
-  if (hidden || !digest || !digest.total) return null;
+  // Iter 672 — STABLE SLOT: the outer View is ALWAYS rendered (even when
+  // empty) so the card can never be inserted at a wrong DOM position by a
+  // hydration mismatch on the pre-rendered dashboard HTML (user's live
+  // portal showed the card squeezed INSIDE the Compliance panel).
+  const empty = hidden || !digest || !digest.total;
+  if (empty) {
+    return <View style={{ width: "100%" }} testID={`notif-digest-slot-${variant}`} />;
+  }
 
   const cats = Object.entries(digest.by_category).sort((a, b) => b[1] - a[1]);
   const compact = variant === "compact";
   const highlights = digest.highlights.slice(0, compact ? 2 : 4);
 
   return (
+    <View style={{ width: "100%" }} testID={`notif-digest-slot-${variant}`}>
     <View style={[st.card, compact && st.cardCompact]} testID={`notif-digest-${variant}`}>
       <View style={st.head}>
         <View style={st.headIcon}>
@@ -145,6 +153,7 @@ export default function NotifDigestCard({ variant, onNavigate }: {
           ))}
         </View>
       ) : null}
+    </View>
     </View>
   );
 }
