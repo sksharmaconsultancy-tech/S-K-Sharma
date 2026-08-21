@@ -421,8 +421,15 @@ export default function ComplianceSalaryRunScreen() {
 
 
   // Iter 370 (user request) — head-wise column totals for the footer row.
+  // Iter 662 (user bug — "while using filter total showing wrong") — the
+  // TOTAL row must sum ONLY the rows visible after the column filters.
+  const visibleRows = React.useMemo(
+    () => (run?.rows || []).filter((r: any) =>
+      rowPassesColFilters(r, colFilters, COL_FILTER_GETTERS)),
+    [run, colFilters],
+  );
   const sumCol = (k: string) =>
-    (run?.rows || []).reduce((s: number, r: any) => s + (Number(r[k]) || 0), 0);
+    visibleRows.reduce((s: number, r: any) => s + (Number(r[k]) || 0), 0);
   const fmtDaysTotal = (v: number) => (v % 1 ? v.toFixed(1) : String(v));
 
   // Iter 182 — keyboard shortcuts (web): "/" focuses employee search,
@@ -3541,7 +3548,7 @@ export default function ComplianceSalaryRunScreen() {
                       Iter 644 — hidden when OVER TIME is disabled. */}
                   {hasOtCol ? (
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>
-                      {(run.rows || []).reduce((s, r) => {
+                      {visibleRows.reduce((s, r) => {
                         const hr = Number((r as any).ot_hourly_rate) || 0;
                         return s + (hr > 0 ? (Number(r.ot_pay) || 0) / hr : Number((r as any).ot_hours) || 0);
                       }, 0).toFixed(1)}
@@ -3565,22 +3572,22 @@ export default function ComplianceSalaryRunScreen() {
                             totals under EVERY column (were dashes). */}
                         {opt.map((k) => <React.Fragment key={`tm-${k}`}>{num(
                           k === "others"
-                            ? sumCol("others_master") - (run.rows || []).reduce((s, r) => s + allowHeadsMaster(r), 0)
+                            ? sumCol("others_master") - visibleRows.reduce((s, r) => s + allowHeadsMaster(r), 0)
                             : sumCol(`${k}_master`))}</React.Fragment>)}
                         {/* Iter 644 — custom allowance head totals. */}
                         {allowLabels.map((l) => (
                           <React.Fragment key={`tam-${l}`}>{num(
-                            (run.rows || []).reduce((s, r) => s + (Number(((r as any).allowance_heads_master || {})[l]) || 0), 0))}</React.Fragment>
+                            visibleRows.reduce((s, r) => s + (Number(((r as any).allowance_heads_master || {})[l]) || 0), 0))}</React.Fragment>
                         ))}
                         {num(sumCol("gross_master"))}
                         {/* Calculated group totals (+Gross) */}
                         {opt.map((k) => <React.Fragment key={`tc-${k}`}>{num(
                           k === "others"
-                            ? sumCol("others") - (run.rows || []).reduce((s, r) => s + allowHeadsPaid(r), 0)
+                            ? sumCol("others") - visibleRows.reduce((s, r) => s + allowHeadsPaid(r), 0)
                             : sumCol(k as any))}</React.Fragment>)}
                         {allowLabels.map((l) => (
                           <React.Fragment key={`tap-${l}`}>{num(
-                            (run.rows || []).reduce((s, r) => s + (Number(((r as any).allowance_heads || {})[l]) || 0), 0))}</React.Fragment>
+                            visibleRows.reduce((s, r) => s + (Number(((r as any).allowance_heads || {})[l]) || 0), 0))}</React.Fragment>
                         ))}
                         {/* Iter 339c — OT Amt total BEFORE Gross.
                             Iter 650 (user bug — "totals not proper head
@@ -3603,10 +3610,10 @@ export default function ComplianceSalaryRunScreen() {
                             dynamic custom DEDUCTION head columns too. */}
                         {((((run.rows[0] as any)?.deduction_head_labels as string[]) || []).map((dl) => (
                           <React.Fragment key={`tdh-${dl}`}>{num(
-                            (run.rows || []).reduce((s, r) => s + (Number(((r as any).deduction_heads || {})[dl]) || 0), 0))}</React.Fragment>
+                            visibleRows.reduce((s, r) => s + (Number(((r as any).deduction_heads || {})[dl]) || 0), 0))}</React.Fragment>
                         )))}
-                        {hasDed("advance") ? num((run.rows || []).reduce((s, r) => s + (Number((r as any).advance_recovery) || 0), 0)) : null}
-                        {hasDed("other") ? num((run.rows || []).reduce((s, r) => s + (Number((r as any).other_deduction) || 0), 0)) : null}
+                        {hasDed("advance") ? num(visibleRows.reduce((s, r) => s + (Number((r as any).advance_recovery) || 0), 0)) : null}
+                        {hasDed("other") ? num(visibleRows.reduce((s, r) => s + (Number((r as any).other_deduction) || 0), 0)) : null}
                         {num(sumCol("total_deduction"))}
                         <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }, stickyColRight(colors.brandTertiary)]}>{fmtInr(sumCol("net"))}</Text>
                       </>

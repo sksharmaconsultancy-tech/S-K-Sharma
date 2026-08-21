@@ -7428,3 +7428,13 @@ Current iteration: 594. Next: 595.
 - Verified: upload with employee_type=STAFF -> run employee_type STAFF,
   16 rows (not 124), month_days 26. Test data cleaned.
 - deploy661 ready; temp_bundle serves it; APP_ITERATION=661.
+
+## Iter 662 — TOTAL row ignores column filters (user bug)
+- compliance-salary-run.tsx: new visibleRows memo (rowPassesColFilters);
+  sumCol + all 7 direct (run.rows||[]).reduce in the totals region
+  (lines ~3540-3620: OT hrs, master allowance heads, paid heads,
+  deduction heads, advance, other) now use visibleRows.
+- salary-run.tsx: sumCol now sums sortRows(run.rows) (gridFilters +
+  colFilters + empSearch applied).
+- Verified via playwright: filter SURENDRA -> TOTAL = 2 rows' sums only.
+- deploy662 ready; temp_bundle serves it; APP_ITERATION=662.

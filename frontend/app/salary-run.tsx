@@ -1233,8 +1233,9 @@ function ResultGrid({
   };
 
   // Iter 370 (user request) — head-wise column totals for the footer row.
+  // Iter 662 (user bug) — totals must reflect the FILTERED rows only.
   const sumCol = (k: keyof ActualRow) =>
-    (run.rows || []).reduce((s, r) => s + (Number(r[k]) || 0), 0);
+    sortRows(run.rows || []).reduce((s, r) => s + (Number(r[k]) || 0), 0);
 
   // Iter 649 (user request) — ↑/↓ ARROW-KEY row navigation (web only).
   // Iter 651 (user request) — ENTER opens the highlighted row's Days cell;

@@ -1,8 +1,14 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 661)
+# S.K. Sharma & Co. — VPS deploy script (Iter 662)
 # Deploys the FULL latest code (includes ALL previous iterations).
 #
-# ═══════════ WHAT'S NEW (Iter 661) ═══════════
+# ═══════════ WHAT'S NEW (Iter 662) ═══════════
+#
+# 🧮 GRID TOTAL vs FILTERS (user bug "filter total showing wrong"):
+#  * With a column filter (e.g. Name = BHERU) the TOTAL row still summed
+#    ALL employees. The TOTAL row (all heads: Days, OT, Master, Basic,
+#    HRA, PF, ESIC, deduction heads, Advance, Net…) now sums ONLY the
+#    rows visible after filters/search — in BOTH salary grids.
 #
 # 📥 IMPORT SALARY SHEET — GROUP FIX (user bug "import 56, showing 69"):
 #  * The auto-reprocess after uploading a salary sheet IGNORED the
@@ -110,8 +116,8 @@
 #    INCENTIVE · FOOD ALLOWANCE import fix · dynamic allowance columns.
 #
 # Run ON THE VPS as root/sksharma:
-#   wget -O deploy661.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
-#   bash deploy661.sh
+#   wget -O deploy662.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
+#   bash deploy662.sh
 
 APP_DIR=/home/sksharma/app
 WEB_DIR=/var/www/sksharma
@@ -263,7 +269,7 @@ sudo cp public/sw.js $WEB_DIR/sw.js 2>/dev/null || true
 sudo find $WEB_DIR/_expo -type f -mtime +45 -delete 2>/dev/null || true
 sudo nginx -t && sudo systemctl reload nginx
 
-echo "==> 8b/9 Nginx hardening for BIG salary sheets (Iter 661)..."
+echo "==> 8b/9 Nginx hardening for BIG salary sheets (Iter 662)..."
 # Root cause candidates for "Still not able to Lock the Salary" on live
 # data: nginx default client_max_body_size (1m) rejects a large firm's
 # save-rows payload with HTTP 413, and 60s proxy timeouts cut long
@@ -283,7 +289,7 @@ for CONF in /etc/nginx/sites-enabled/* /etc/nginx/conf.d/*.conf; do
 done
 sudo nginx -t && sudo systemctl reload nginx && echo "   nginx reloaded ✅" || echo "   ❌ nginx config test failed — restoring is automatic (no reload done)"
 
-echo "==> 8c/9 SPEED-UP: nginx compression, caching & HTTP/2 (Iter 661)..."
+echo "==> 8c/9 SPEED-UP: nginx compression, caching & HTTP/2 (Iter 662)..."
 # 1) Pre-compress the built JS/CSS once so nginx can serve .gz instantly
 #    (gzip_static) instead of re-compressing multi-MB bundles per visitor.
 sudo find $WEB_DIR -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.json' -o -name '*.svg' \) -size +1k -exec gzip -kf9 {} \; 2>/dev/null
@@ -292,7 +298,7 @@ echo "   Pre-compressed $(sudo find $WEB_DIR -name '*.gz' | wc -l) static files 
 #    text-ish, serve pre-compressed files, long immutable cache for the
 #    content-hashed /_expo bundles (safe — new deploys emit new hashes).
 sudo tee /etc/nginx/conf.d/sksharma_perf.conf >/dev/null <<'NGINXPERF'
-# S.K. Sharma & Co. — performance tuning (deploy Iter 661)
+# S.K. Sharma & Co. — performance tuning (deploy Iter 662)
 gzip on;
 gzip_comp_level 5;
 gzip_min_length 1024;
@@ -330,8 +336,8 @@ else
 fi
 
 echo "==> 9/9 Verification..."
-echo -n "   Server badge is 661 (must say OK): "
-grep -q 'APP_ITERATION = "661"' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
+echo -n "   Server badge is 662 (must say OK): "
+grep -q 'APP_ITERATION = "662"' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
 echo -n "   Toolbar polish — Iter 640 (must say OK): "
 grep -q 'label renamed to just' $APP_DIR/frontend/app/compliance-salary-run.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Approve backlog endpoint — Iter 639 (must say OK): "
@@ -414,7 +420,7 @@ echo -n "   Backend /api/health: "
 curl -s -m 5 http://localhost:8001/api/health || echo "❌ NOT ANSWERING"
 echo ""
 echo "════════════════════════════════════════════════════════════"
-echo "  DONE — Iter 661 deployed."
+echo "  DONE — Iter 662 deployed."
 echo "  • NEW (657): Grid freeze pack — header, Present Days & Net frozen;"
 echo "    h-scrollbar always on screen; highlight follows edited cell;"
 echo "    Freeze diff can now land in editable INCENTIVE (OT first)."
