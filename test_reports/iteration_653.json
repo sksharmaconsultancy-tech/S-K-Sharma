@@ -1,0 +1,32 @@
+{
+  "summary": "Verified 'Finalize & Lock' end-to-end on /compliance-salary-run for Kankani (cmp_527fecdd7c), FY2026-27 · June, on BOTH validation paths. Path A (STAFF, 0 errors): click Finalize & Lock → in-app confirm 'Yes' → run finalized directly (POST /finalize 200, DB run doc finalized:true). Path B (LABOUR, 3 errors + 3 warnings): click Finalize & Lock → 'Yes' → 'Salary Lock — PF/ESIC Validation' modal opened (lockCheck) → clicked red 'Finalize & Lock Now' override (data-testid=lock-anyway) → POST /finalize 200, Reports modal opened showing '2026-06 · Finalized 🔒', page cleared to setup. No JS errors, no failed API calls (save-rows/validate/finalize all 200). The lock flow works in this preview environment; the user-reported failure on their VPS ('Gridfree Solar') could NOT be reproduced here — this points to environment-specific factors (session/auth, large-grid save-rows timeout, or older frontend build on their VPS) rather than a code defect in current preview.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "ActionBtn 'Finalize & Lock'", "issue": "No testID on the primary action button; had to locate by visible text which collides with the workflow stepper label '7 Finalize & Lock'. Add testID='btn-finalize-lock' for reliable tests and future regression.", "testID": "MISSING", "priority": "LOW"},
+      {"component": "confirmYesNo (Yes/No web modal)", "issue": "Yes/No buttons have no data-testid — Playwright must fall back to text 'Yes' which is fragile. Add ids like 'confirm-yes' / 'confirm-no' in /app/frontend/src/utils/confirm.ts.", "testID": "MISSING", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Since local repro FAILED (lock works on both paths), request the user to share: (a) browser console logs from their VPS during the failing click, (b) network tab HAR showing status of /save-rows /validate /finalize, (c) exact toast/message they see. Without that we cannot pinpoint the VPS failure.",
+    "Consider adding a client-side console.log at each stage of finalizeRun() (before save-rows, before validate, before doFinalize, on lockCheck open, on doFinalize response) guarded by a feature flag or __DEV__ so remote debugging becomes easier next time.",
+    "Add testID='btn-finalize-lock' to the primary Finalize & Lock ActionBtn (compliance-salary-run.tsx:2873) and testID='confirm-yes'/'confirm-no' to confirmYesNo buttons (src/utils/confirm.ts) — improves E2E stability.",
+    "Optional: extend the 90 s save-rows timeout only for very large grids (>500 rows) — VPS with slower disk/mongo may be hitting the 90 s cap on the full-firm salary sheet."
+  ],
+  "critical_code_review_comments": [
+    "compliance-salary-run.tsx is 4616 lines — split into hooks/modals modules per file-size guideline (<700 lines).",
+    "finalizeRun swallows validate errors silently (line 1159 empty catch) — a network failure to /validate would proceed to lock without any user notice. Consider logging or showing a toast on validate fetch failure.",
+    "doFinalize catch block returns a generic 'Salary Lock blocked' message for any non-string error — a network/CORS/500 error would appear identical to a validation block, confusing the user (likely what happens on VPS)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100% (local); VPS failure NOT reproducible"},
+  "seed_data_creation": "Two draft compliance_salary_runs exist post-test for Kankani 2026-06: csrun_c5978515ff7f (STAFF) and csrun_8e4b76624d1b (LABOUR). Both restored from finalized→draft after test. Original csrun_7be2973f21cd was superseded by csrun_c5978515ff7f when re-generated with EXISTING data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Preview URL lock flow works fully. Session-token approach: token in /tmp/tok.txt (test_f3fc2...). Draft runs kept: csrun_c5978515ff7f (STAFF 0 errors) & csrun_8e4b76624d1b (LABOUR 3 errors) to re-verify both paths without re-processing. To restore after another finalize: db.compliance_salary_runs.update_one({'run_id':<id>},{'$unset':{'finalized':'','finalized_at':'','finalized_by':'','lock_validation':''}}).",
+  "rca_of_issue": "The current-code 'Finalize & Lock' flow on the preview env works on both validation-clean and validation-error paths (verified with real MongoDB writes). The user's persistent 'Not able to Lock' complaint on their VPS is therefore NOT a defect in this codebase's UI wiring. Most probable root causes on the VPS: (1) VPS running an older frontend build predating iter 644 (lockCheck modal used to live inside the collapsed setup card and never mounted); (2) /save-rows exceeding the 90 s hard-timeout on their large 'Gridfree Solar' sheet — the resulting error message 'Salary Lock blocked by the PF/ESIC validation' is misleading (see review comment #3); (3) auth/session token expired mid-flow producing 401 on /finalize that is caught as a generic error. Suggested mitigation: ship the diagnostic logging + more precise error message so the next user report can be pinpointed."
+}

@@ -1105,9 +1105,18 @@ export default function ComplianceSalaryRunScreen() {
         group: (run as any).employee_type || (empType !== "all" ? empType : "All Groups"),
       });
     } catch (e: any) {
-      showMsg(typeof e?.message === "string"
-        ? e.message
-        : "Salary Lock blocked by the PF/ESIC validation — fix the listed issues first.");
+      // Iter 654 (user bug — "Still not able to Lock") — NEVER blame the
+      // PF/ESIC validation (it is non-blocking since Iter 423b). Show the
+      // REAL failure so the admin knows what actually went wrong.
+      const status = e?.status;
+      let why = typeof e?.message === "string" && e.message
+        ? e.message : "Unknown error";
+      if (status === 401 || status === 403) {
+        why = "Your login session expired — please log in again and retry the lock.";
+      } else if (status === 413) {
+        why = "The salary sheet is too large for the server to accept (HTTP 413) — please retry; if it repeats, contact support.";
+      }
+      showMsg(`Salary Lock FAILED — ${why}${status ? ` (HTTP ${status})` : ""}`);
     } finally { setFinalizing(false); }
   };
 
@@ -2870,7 +2879,7 @@ export default function ComplianceSalaryRunScreen() {
                                  busy={refreshingSnap} onPress={refreshMasterSnapshot} />
                     ) : null}
                     <ActionBtn icon="trash-outline" label="Delete" onPress={deleteRun} />
-                    <ActionBtn icon="checkmark-done-outline" label="Finalize & Lock" busy={finalizing} onPress={finalizeRun} primary />
+                    <ActionBtn icon="checkmark-done-outline" label="Finalize & Lock" busy={finalizing} onPress={finalizeRun} primary testID="btn-finalize-lock" />
                   </>
                 )}
                 <ActionBtn icon="grid-outline" label="Excel" busy={downloading} onPress={() => downloadFile("xlsx")} />

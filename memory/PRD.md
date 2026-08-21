@@ -7309,3 +7309,18 @@ Current iteration: 594. Next: 595.
   Passbook/Cheque (bank_account, bank_ifsc + lookupIfsc, bank_name,
   bank_branch via branch_name).
 - APP_ITERATION "653"; deploy_vps_iter653.sh ready (kind=script).
+
+## Iter 654 — Salary Lock "still not able to lock" (recurring user bug)
+- testing_agent E2E: BOTH lock paths PASS locally (clean + validation-findings
+  override modal). NOT reproducible in preview -> VPS-side cause.
+- Root-cause candidates on VPS: nginx 1m client_max_body_size (413 on big
+  save-rows) / 60s proxy timeouts (504); or stale build < Iter 650.
+- FIXES: (1) doFinalize catch no longer blames PF/ESIC validation — shows
+  real error + HTTP status (401->relogin, 413->sheet too large);
+  (2) deploy_vps_iter654.sh step 8b auto-patches nginx: 50m body, 300s
+  proxy timeouts on all proxy_pass site configs; (3) testIDs added:
+  btn-finalize-lock, confirm-yes/confirm-no.
+- Regression draft runs kept: csrun_c5978515ff7f (STAFF clean),
+  csrun_8e4b76624d1b (LABOUR 3 errs). temp_bundle serves deploy654.
+- If user STILL cannot lock after deploying 654: ask for the exact toast
+  text (now shows real cause + HTTP status) and browser console.

@@ -37,10 +37,12 @@ export function confirmYesNo(message: string, title = "Please confirm"): Promise
       const done = (v: boolean) => { ov.remove(); resolve(v); };
       const no = document.createElement("button");
       no.textContent = "No";
+      no.setAttribute("data-testid", "confirm-no");
       no.style.cssText = BTN_BASE + "background:#F1F5F9;color:#334155;border:1px solid #CBD5E1;";
       no.onclick = () => done(false);
       const yes = document.createElement("button");
       yes.textContent = "Yes";
+      yes.setAttribute("data-testid", "confirm-yes");
       yes.style.cssText = BTN_BASE + "background:#2563EB;color:#fff;border:1px solid #2563EB;";
       yes.onclick = () => done(true);
       ov.onclick = (e) => { if (e.target === ov) done(false); };
