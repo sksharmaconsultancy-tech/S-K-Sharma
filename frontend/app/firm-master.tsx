@@ -1285,7 +1285,7 @@ export default function FirmMasterScreen() {
                   { k: "attendance_gross_validation", l: "Attendance + Gross Validation (Recommended)" },
                   { k: "freeze_actual_gross", l: "Freeze as Actual Gross (imported gross taken AS-IS)" },
                 ].map((o) => {
-                  const on = (sp.days_calc_method || "attendance") === o.k;
+                  const on = (sp.days_calc_method || "attendance_gross_validation") === o.k;
                   return (
                     <Pressable
                       key={o.k}
@@ -1300,7 +1300,7 @@ export default function FirmMasterScreen() {
                 })}
               </View>
               <View style={{ flexDirection: "row", gap: 18, marginTop: 10, flexWrap: "wrap" }}>
-                {(sp.days_calc_method || "attendance") === "fixed" ? (
+                {(sp.days_calc_method || "attendance_gross_validation") === "fixed" ? (
                   <View>
                     <Text style={{ fontSize: 12, color: "#64748B", marginBottom: 4 }}>Fixed Days</Text>
                     <View style={{ flexDirection: "row", gap: 6 }}>
@@ -1317,7 +1317,7 @@ export default function FirmMasterScreen() {
                     </View>
                   </View>
                 ) : null}
-                {(sp.days_calc_method || "attendance") !== "attendance" ? (
+                {(sp.days_calc_method || "attendance_gross_validation") !== "attendance" ? (
                   <View>
                     <Text style={{ fontSize: 12, color: "#64748B", marginBottom: 4 }}>Round Compliance Days to</Text>
                     <View style={{ flexDirection: "row", gap: 6 }}>
@@ -1335,7 +1335,7 @@ export default function FirmMasterScreen() {
                   </View>
                 ) : null}
               </View>
-              {(sp.days_calc_method || "attendance") !== "attendance" ? (
+              {(sp.days_calc_method || "attendance_gross_validation") !== "attendance" ? (
                 <Text style={styles.linkHint}>
                   Compliance Days = Imported Gross ÷ (Master Monthly Gross ÷ Month Days).
                   Statutory (PF/ESIC/PT) is recalculated on the derived days; any remaining
@@ -1352,7 +1352,7 @@ export default function FirmMasterScreen() {
                     fixed: "Fixed Days",
                     attendance_gross_validation: "Attendance + Gross Validation",
                     freeze_actual_gross: "Freeze as Actual Gross",
-                  } as any)[sp.days_calc_method || "attendance"]}
+                  } as any)[sp.days_calc_method || "attendance_gross_validation"]}
                 </Text>
                 {(({
                   attendance: [
@@ -1382,12 +1382,10 @@ export default function FirmMasterScreen() {
                     "4. Imported vs Calculated difference → Overtime / Other Allowance",
                   ],
                   attendance_gross_validation: [
-                    "1. Salary Import → Attendance Days AND Imported Gross both read",
-                    "2. System derives Compliance Days from gross and compares with attendance",
-                    "3. Salary recalculated on Compliance Days · Basic per wage definition",
-                    "4. PF / ESIC / LWF / PT recalculated automatically",
-                    "5. Grid shows Att. Days · Comp. Days · ✓ Matched / ≠ Diff per employee",
-                    "6. Remaining difference → Overtime / Other Allowance",
+                    "1. Salary Import → Attendance Days AND Imported Gross both read (DEFAULT method)",
+                    "2. Days AUTO-REDUCE if too high for the gross — but NEVER increase",
+                    "3. Extra gross (Days × Rate < Imported) → OT / Incentive / Other Allowance",
+                    "4. Grid shows Att. Days · Comp. Days · ✓ Matched / ≠ Diff per employee",
                   ],
                   freeze_actual_gross: [
                     "1. Salary Import → Imported Gross taken AS-IS as the final gross",
@@ -1395,7 +1393,7 @@ export default function FirmMasterScreen() {
                     "3. PF / ESIC / LWF / PT calculated on the imported gross",
                     "4. Difference ≈ 0 → every row shows ✓ Matched",
                   ],
-                } as any)[sp.days_calc_method || "attendance"] as string[]).map((step: string) => (
+                } as any)[sp.days_calc_method || "attendance_gross_validation"] as string[]).map((step: string) => (
                   <Text key={step} style={{ fontSize: 12, color: "#334155", lineHeight: 19 }}>{step}</Text>
                 ))}
                 <Text style={{ fontSize: 11, color: "#64748B", marginTop: 6 }}>

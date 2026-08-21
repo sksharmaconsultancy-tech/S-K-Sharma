@@ -1,8 +1,16 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 664)
+# S.K. Sharma & Co. — VPS deploy script (Iter 665)
 # Deploys the FULL latest code (includes ALL previous iterations).
 #
-# ═══════════ WHAT'S NEW (Iter 664) ═══════════
+# ═══════════ WHAT'S NEW (Iter 665) ═══════════
+#
+# 📐 ATTENDANCE + GROSS VALIDATION — NEW DEFAULT (user directive):
+#  * DEFAULT days-calc method for EVERY firm (migration included; firms
+#    with an explicitly chosen method keep it — change in Firm Master).
+#  * Sheet DAYS + GROSS are both respected: days AUTO-REDUCE when too
+#    high for the gross, but NEVER increase beyond the sheet days.
+#  * Extra imported gross flows to OT / Incentive / Other Allowance per
+#    firm rules; gross stays frozen as imported.
 #
 # 🧮 GRID TOTAL vs FILTERS (user bug "filter total showing wrong"):
 #  * With a column filter (e.g. Name = BHERU) the TOTAL row still summed
@@ -116,8 +124,8 @@
 #    INCENTIVE · FOOD ALLOWANCE import fix · dynamic allowance columns.
 #
 # Run ON THE VPS as root/sksharma:
-#   wget -O deploy664.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
-#   bash deploy664.sh
+#   wget -O deploy665.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
+#   bash deploy665.sh
 
 APP_DIR=/home/sksharma/app
 WEB_DIR=/var/www/sksharma
@@ -227,6 +235,23 @@ async def m():
 asyncio.run(m())
 PYMIG
 
+echo "==> Iter 665 migration: Attendance + Gross Validation as DEFAULT days-calc method..."
+$APP_DIR/backend/venv/bin/python - << 'PYMIG2' || echo "⚠ migration failed — run manually"
+import asyncio, os
+from motor.motor_asyncio import AsyncIOMotorClient
+from dotenv import load_dotenv
+load_dotenv("/app/backend/.env" if os.path.exists("/app/backend/.env") else ".env")
+load_dotenv(".env")
+async def m():
+    db = AsyncIOMotorClient(os.environ["MONGO_URL"])[os.environ.get("DB_NAME", "test_database")]
+    r = await db.firm_masters.update_many(
+        {"$or": [{"salary_process.days_calc_method": {"$exists": False}},
+                 {"salary_process.days_calc_method": {"$in": ["", None]}}]},
+        {"$set": {"salary_process.days_calc_method": "attendance_gross_validation"}})
+    print(f"   days_calc_method=attendance_gross_validation set on {r.modified_count} firm(s) (explicit choices untouched)")
+asyncio.run(m())
+PYMIG2
+
 sudo supervisorctl stop sksharma-backend 2>/dev/null || true
 sudo fuser -k 8001/tcp 2>/dev/null || true
 sleep 2
@@ -269,12 +294,12 @@ sudo cp public/sw.js $WEB_DIR/sw.js 2>/dev/null || true
 sudo find $WEB_DIR/_expo -type f -mtime +45 -delete 2>/dev/null || true
 sudo nginx -t && sudo systemctl reload nginx
 
-echo "==> 8b/9 Nginx hardening for BIG salary sheets (Iter 664)..."
-# Iter 664 REPAIR — older deploys left http-level client_max_body_size in
+echo "==> 8b/9 Nginx hardening for BIG salary sheets (Iter 665)..."
+# Iter 665 REPAIR — older deploys left http-level client_max_body_size in
 # more than one conf.d file ("directive is duplicate" -> nginx -t fails).
 # /etc/nginx/conf.d/sks-upload.conf OWNS the global limit; strip the
 # directive from every OTHER conf.d file, and dedupe sks-upload.conf too.
-# Iter 664 REPAIR — the global body-size may ALSO live in nginx.conf's
+# Iter 665 REPAIR — the global body-size may ALSO live in nginx.conf's
 # http block (older deploys). nginx forbids two http-level copies. Keep
 # EXACTLY ONE: if nginx.conf has it, bump it to 100m and DELETE
 # sks-upload.conf; otherwise sks-upload.conf owns it.
@@ -312,7 +337,7 @@ for CONF in /etc/nginx/sites-enabled/*; do
 done
 sudo nginx -t && sudo systemctl reload nginx && echo "   nginx reloaded ✅" || echo "   ❌ nginx config test failed — check: sudo nginx -t"
 
-echo "==> 8c/9 SPEED-UP: nginx compression, caching & HTTP/2 (Iter 664)..."
+echo "==> 8c/9 SPEED-UP: nginx compression, caching & HTTP/2 (Iter 665)..."
 # 1) Pre-compress the built JS/CSS once so nginx can serve .gz instantly
 #    (gzip_static) instead of re-compressing multi-MB bundles per visitor.
 sudo find $WEB_DIR -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.json' -o -name '*.svg' \) -size +1k -exec gzip -kf9 {} \; 2>/dev/null
@@ -321,7 +346,7 @@ echo "   Pre-compressed $(sudo find $WEB_DIR -name '*.gz' | wc -l) static files 
 #    text-ish, serve pre-compressed files, long immutable cache for the
 #    content-hashed /_expo bundles (safe — new deploys emit new hashes).
 sudo tee /etc/nginx/conf.d/sksharma_perf.conf >/dev/null <<'NGINXPERF'
-# S.K. Sharma & Co. — performance tuning (deploy Iter 664)
+# S.K. Sharma & Co. — performance tuning (deploy Iter 665)
 gzip on;
 gzip_comp_level 5;
 gzip_min_length 1024;
@@ -359,8 +384,8 @@ else
 fi
 
 echo "==> 9/9 Verification..."
-echo -n "   Server badge is 664 (must say OK): "
-grep -q 'APP_ITERATION = "664"' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
+echo -n "   Server badge is 665 (must say OK): "
+grep -q 'APP_ITERATION = "665"' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
 echo -n "   PUBLISHED web bundle has Hide-Zero-Attendance (must say OK): "
 grep -rlq "Hide Zero Attendance" $WEB_DIR/_expo 2>/dev/null && echo "OK" || echo "MISSING! — the frontend build/copy FAILED; scroll up to the 'expo export' output for the error"
 echo -n "   Toolbar polish — Iter 640 (must say OK): "
@@ -445,7 +470,7 @@ echo -n "   Backend /api/health: "
 curl -s -m 5 http://localhost:8001/api/health || echo "❌ NOT ANSWERING"
 echo ""
 echo "════════════════════════════════════════════════════════════"
-echo "  DONE — Iter 664 deployed."
+echo "  DONE — Iter 665 deployed."
 echo "  • NEW (657): Grid freeze pack — header, Present Days & Net frozen;"
 echo "    h-scrollbar always on screen; highlight follows edited cell;"
 echo "    Freeze diff can now land in editable INCENTIVE (OT first)."

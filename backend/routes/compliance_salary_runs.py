@@ -398,7 +398,7 @@ async def _compute_compliance_run(
                 # Iter 310 — Freeze Salary difference allocation gate.
                 "ot_allowed": bool((fm.get("salary_process") or {}).get("ot_allowed")),
                 # Iter 337 (user request) — Days Calculation Method.
-                "days_calc_method": str((fm.get("salary_process") or {}).get("days_calc_method") or "attendance"),
+                "days_calc_method": str((fm.get("salary_process") or {}).get("days_calc_method") or "attendance_gross_validation"),
                 "days_calc_fixed": (fm.get("salary_process") or {}).get("days_calc_fixed") or 26,
                 "days_calc_rounding": (fm.get("salary_process") or {}).get("days_calc_rounding", 0.5),
             }
@@ -773,7 +773,10 @@ async def _compute_compliance_run(
             row["attendance_days"] = round(
                 min(float(_am.get("present_days") or 0), float(month_days)), 2)
             _dcm = firm_stat_flags.get(emp.get("company_id")) or {}
-            _method = str(_dcm.get("days_calc_method") or "attendance")
+            # Iter 665 (user directive) — Attendance + Gross Validation is
+            # the DEFAULT method for every firm (changeable in Firm Master).
+            _method = str(_dcm.get("days_calc_method")
+                          or "attendance_gross_validation")
             _imp_g0 = round(float(_am.get("gross_earning") or 0), 2)
             # Iter 339 (user request) — ONE-TIME freeze import: when the
             # imported sheet carries a GROSS but NO attendance days, the
@@ -856,6 +859,16 @@ async def _compute_compliance_run(
                         # Other Allowance; a round-UP produced overshoots
                         # like −117 in the Difference column.
                         _new_days = math.floor((_rawd + 1e-9) / _step) * _step
+                        if _method == "attendance_gross_validation":
+                            # Iter 665 (user directive) — sheet DAYS +
+                            # GROSS are both authoritative: days may only
+                            # AUTO-REDUCE when too high for the gross,
+                            # NEVER increase. Any extra imported gross
+                            # flows to OT / Incentive / Other Allowance
+                            # via the freeze-difference rules.
+                            _sheet_d665 = float(row.get("attendance_days") or 0)
+                            if _sheet_d665 > 0 and _new_days > _sheet_d665:
+                                _new_days = _sheet_d665
             if _new_days is not None:
                 _new_days = max(0.0, min(round(_new_days, 2), float(month_days)))
                 if abs(_new_days - float(row.get("present_days") or 0)) > 1e-9:

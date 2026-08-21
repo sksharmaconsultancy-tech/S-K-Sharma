@@ -7457,3 +7457,18 @@ Current iteration: 594. Next: 595.
   the directive from all other conf.d files. Verification line checks
   published bundle contains "Hide Zero Attendance".
 - APP_ITERATION=664; temp_bundle serves deploy664.
+
+## Iter 665 — Attendance+Gross Validation default + days cap (user directive)
+- AGV method: days AUTO-REDUCE when > gross-derived days, NEVER increase
+  (cap only when sheet days > 0; the Iter-339 gross-only fallback keeps
+  full derivation). Extra gross -> OT/Incentive/Others (Iter 310/657).
+- DEFAULT for all firms: backend fallback 'attendance' -> AGV (process +
+  firm listing); frontend firm-master.tsx radio default + 6 fallbacks;
+  method description bullets rewritten (old pt-4 "recalc on comp days"
+  removed per user). Migration (local done, in deploy665 PYMIG2): set
+  AGV only where days_calc_method missing/empty — explicit choices kept.
+- Verified: CASE A sheet 26d gross 7450 -> comp days 15 (calc=imported,
+  matched); CASE B sheet 10d gross 19370 -> days stay 10, 14528 -> OT.
+- deploy665 serves via temp_bundle; APP_ITERATION=665.
+NOTE: /tmp/tok.txt gets wiped by pod restarts — regenerate via
+user_sessions insert when needed.
