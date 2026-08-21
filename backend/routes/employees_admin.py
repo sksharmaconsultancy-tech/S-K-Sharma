@@ -384,6 +384,22 @@ async def admin_create_employee(
         doc["onboarding_pending_since"] = now_iso()
 
     await db.users.insert_one(doc)
+    # Iter 667 (user request) — bell notification to company/super admins
+    # when a new employee lands, esp. when onboarding approval is pending.
+    try:
+        from utils.notify import emit as _notify
+        _pending = doc.get("onboarding_status") == "pending_approval"
+        await _notify(
+            db,
+            title=("New Employee — Approval Required" if _pending else "New Employee Added"),
+            message=(f"{name} ({doc.get('employee_code') or phone or email or ''}) "
+                     + ("is awaiting onboarding approval." if _pending else "has been added.")),
+            audience="admins", company_id=cid, category="employee",
+            priority=("important" if _pending else "normal"),
+            action_url=("/employee-approvals" if _pending else "/admin"),
+            reference_id=doc.get("user_id"))
+    except Exception:
+        pass
     logger.info(
         f"[ADMIN CREATE EMPLOYEE] {name} ({phone or email}) → company={cid} by {admin.get('email')}"
     )

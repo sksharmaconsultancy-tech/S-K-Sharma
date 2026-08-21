@@ -7509,3 +7509,17 @@ Frontend:
 - Verified: emit->API shows category/priority/action/read; mark-read all
   ->unread 0; page UI screenshot OK. Dropdown shares same markup.
 - deploy666 serves via temp_bundle; APP_ITERATION=666.
+
+## Iter 667 — onboarding + edit-request admin notifications (user request)
+- employees_admin.py after users.insert_one (create employee): emit
+  "New Employee — Approval Required" (important, /employee-approvals)
+  when onboarding_status=pending_approval else "New Employee Added"
+  (normal, /admin). audience admins = company_admin + super_admin (sub
+  super admins included via their role).
+- ess.py create_request after ess_requests.insert_one: emit per type —
+  profile_correction "Employee Details Edit Request", bank_change,
+  attendance_correction (important, /ess-requests-admin, ref request_id).
+- Verified E2E: employee profile_correction (address) -> 200 REQ2608-0001
+  -> admin notification with correct body/priority/action. NOTE:
+  EDITABLE_PROFILE_FIELDS excludes father_name (400 if tried).
+- deploy667 serves via temp_bundle; APP_ITERATION=667.

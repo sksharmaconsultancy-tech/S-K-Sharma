@@ -282,6 +282,24 @@ async def create_request(payload: Dict[str, Any] = Body(...),
         "created_at": now_iso(), "updated_at": now_iso(),
     }
     await db.ess_requests.insert_one({**doc})
+    # Iter 667 (user request) — bell notification to company/super admins
+    # when an employee applies to edit their details (approval needed).
+    try:
+        from utils.notify import emit as _notify
+        _tl = {"profile_correction": "Employee Details Edit Request",
+               "bank_change": "Bank Details Change Request",
+               "attendance_correction": "Attendance Correction Request"}
+        await _notify(
+            db,
+            title=_tl.get(rtype, "Employee Request"),
+            message=(f"{u.get('name') or 'An employee'} "
+                     f"({u.get('employee_code') or ''}) submitted request "
+                     f"#{doc['request_no']} — approval required."),
+            audience="admins", company_id=user.get("company_id"),
+            category="employee", priority="important",
+            action_url="/ess-requests-admin", reference_id=doc["request_id"])
+    except Exception:
+        pass
     return {"ok": True, "request": doc}
 
 

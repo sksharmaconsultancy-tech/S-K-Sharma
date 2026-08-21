@@ -1,8 +1,8 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 666)
+# S.K. Sharma & Co. — VPS deploy script (Iter 667)
 # Deploys the FULL latest code (includes ALL previous iterations).
 #
-# ═══════════ WHAT'S NEW (Iter 666) ═══════════
+# ═══════════ WHAT'S NEW (Iter 667) ═══════════
 #
 # 🔔 NOTIFICATION SYSTEM ENHANCEMENT (user spec, additive layer):
 #  * Categories (Attendance/Leave/Salary/Compliance/Expense/Employee/
@@ -141,8 +141,8 @@
 #    INCENTIVE · FOOD ALLOWANCE import fix · dynamic allowance columns.
 #
 # Run ON THE VPS as root/sksharma:
-#   wget -O deploy666.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
-#   bash deploy666.sh
+#   wget -O deploy667.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
+#   bash deploy667.sh
 
 APP_DIR=/home/sksharma/app
 WEB_DIR=/var/www/sksharma
@@ -252,7 +252,7 @@ async def m():
 asyncio.run(m())
 PYMIG
 
-echo "==> Iter 666 migration: Attendance + Gross Validation as DEFAULT days-calc method..."
+echo "==> Iter 667 migration: Attendance + Gross Validation as DEFAULT days-calc method..."
 $APP_DIR/backend/venv/bin/python - << 'PYMIG2' || echo "⚠ migration failed — run manually"
 import asyncio, os
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -311,12 +311,12 @@ sudo cp public/sw.js $WEB_DIR/sw.js 2>/dev/null || true
 sudo find $WEB_DIR/_expo -type f -mtime +45 -delete 2>/dev/null || true
 sudo nginx -t && sudo systemctl reload nginx
 
-echo "==> 8b/9 Nginx hardening for BIG salary sheets (Iter 666)..."
-# Iter 666 REPAIR — older deploys left http-level client_max_body_size in
+echo "==> 8b/9 Nginx hardening for BIG salary sheets (Iter 667)..."
+# Iter 667 REPAIR — older deploys left http-level client_max_body_size in
 # more than one conf.d file ("directive is duplicate" -> nginx -t fails).
 # /etc/nginx/conf.d/sks-upload.conf OWNS the global limit; strip the
 # directive from every OTHER conf.d file, and dedupe sks-upload.conf too.
-# Iter 666 REPAIR — the global body-size may ALSO live in nginx.conf's
+# Iter 667 REPAIR — the global body-size may ALSO live in nginx.conf's
 # http block (older deploys). nginx forbids two http-level copies. Keep
 # EXACTLY ONE: if nginx.conf has it, bump it to 100m and DELETE
 # sks-upload.conf; otherwise sks-upload.conf owns it.
@@ -354,7 +354,7 @@ for CONF in /etc/nginx/sites-enabled/*; do
 done
 sudo nginx -t && sudo systemctl reload nginx && echo "   nginx reloaded ✅" || echo "   ❌ nginx config test failed — check: sudo nginx -t"
 
-echo "==> 8c/9 SPEED-UP: nginx compression, caching & HTTP/2 (Iter 666)..."
+echo "==> 8c/9 SPEED-UP: nginx compression, caching & HTTP/2 (Iter 667)..."
 # 1) Pre-compress the built JS/CSS once so nginx can serve .gz instantly
 #    (gzip_static) instead of re-compressing multi-MB bundles per visitor.
 sudo find $WEB_DIR -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.json' -o -name '*.svg' \) -size +1k -exec gzip -kf9 {} \; 2>/dev/null
@@ -363,7 +363,7 @@ echo "   Pre-compressed $(sudo find $WEB_DIR -name '*.gz' | wc -l) static files 
 #    text-ish, serve pre-compressed files, long immutable cache for the
 #    content-hashed /_expo bundles (safe — new deploys emit new hashes).
 sudo tee /etc/nginx/conf.d/sksharma_perf.conf >/dev/null <<'NGINXPERF'
-# S.K. Sharma & Co. — performance tuning (deploy Iter 666)
+# S.K. Sharma & Co. — performance tuning (deploy Iter 667)
 gzip on;
 gzip_comp_level 5;
 gzip_min_length 1024;
@@ -401,8 +401,8 @@ else
 fi
 
 echo "==> 9/9 Verification..."
-echo -n "   Server badge is 666 (must say OK): "
-grep -q 'APP_ITERATION = "666"' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
+echo -n "   Server badge is 667 (must say OK): "
+grep -q 'APP_ITERATION = "667"' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
 echo -n "   PUBLISHED web bundle has Hide-Zero-Attendance (must say OK): "
 grep -rlq "Hide Zero Attendance" $WEB_DIR/_expo 2>/dev/null && echo "OK" || echo "MISSING! — the frontend build/copy FAILED; scroll up to the 'expo export' output for the error"
 echo -n "   Toolbar polish — Iter 640 (must say OK): "
@@ -487,7 +487,7 @@ echo -n "   Backend /api/health: "
 curl -s -m 5 http://localhost:8001/api/health || echo "❌ NOT ANSWERING"
 echo ""
 echo "════════════════════════════════════════════════════════════"
-echo "  DONE — Iter 666 deployed."
+echo "  DONE — Iter 667 deployed."
 echo "  • NEW (657): Grid freeze pack — header, Present Days & Net frozen;"
 echo "    h-scrollbar always on screen; highlight follows edited cell;"
 echo "    Freeze diff can now land in editable INCENTIVE (OT first)."
