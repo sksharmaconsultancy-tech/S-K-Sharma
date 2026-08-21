@@ -7384,3 +7384,11 @@ Current iteration: 594. Next: 595.
    keeps it in sync (test set advance directly in DB so ded looked stale;
    not a real-flow issue).
 - deploy658 ready; temp_bundle serves it; APP_ITERATION=658.
+
+## Iter 658b — user video "highlight still not moving" (VPS stale bundle)
+- Verified via playwright on preview (Iter 658): click PD row3 -> row3
+  yellow; ArrowDown -> highlight moves to row4 WITH focus. Fix WORKS.
+- User's recording is from their VPS running an older frontend bundle
+  (grid 2026-07 STAFF live data). SW cache bumped v7->v8 (public/sw.js)
+  to purge stale shells on next deploy. Told user: deploy 658, close all
+  portal tabs, reopen / Ctrl+Shift+R.
