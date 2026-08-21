@@ -353,6 +353,8 @@ fi
 echo "==> 9/9 Verification..."
 echo -n "   Server badge is 663 (must say OK): "
 grep -q 'APP_ITERATION = "663"' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
+echo -n "   PUBLISHED web bundle has Hide-Zero-Attendance (must say OK): "
+grep -rlq "Hide Zero Attendance" $WEB_DIR/_expo 2>/dev/null && echo "OK" || echo "MISSING! — the frontend build/copy FAILED; scroll up to the 'expo export' output for the error"
 echo -n "   Toolbar polish — Iter 640 (must say OK): "
 grep -q 'label renamed to just' $APP_DIR/frontend/app/compliance-salary-run.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Approve backlog endpoint — Iter 639 (must say OK): "
