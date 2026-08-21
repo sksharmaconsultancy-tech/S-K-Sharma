@@ -226,6 +226,15 @@ function sumTotals(rows: ActualRow[]): Record<string, number> {
 /*  Screen                                                             */
 /* ------------------------------------------------------------------- */
 
+// Iter 656 (user bug — "switching workspace tabs wipes the grid") — the
+// workspace tab bar REMOUNTS this screen on every tab switch, losing the
+// open run + unsaved grid edits. Module-level snapshot survives the
+// remount and is restored when the admin switches back. Max age 6 h.
+let actualRunKeepAlive: {
+  companyId: string | null; run: any; month: string; monthDays: string;
+  empType: string; ts: number;
+} | null = null;
+
 export default function ActualSalaryProcessScreen() {
   const router = useRouter();
   const { user } = useAuth();
@@ -481,10 +490,49 @@ export default function ActualSalaryProcessScreen() {
   const params = useLocalSearchParams<{ run_id?: string }>();
   useEffect(() => {
     if (params.run_id && isAdmin) {
+      // Iter 656 — keep-alive snapshot for this exact run wins (it holds
+      // the unsaved edits); the restore effect below brings it back.
+      if (actualRunKeepAlive?.run?.run_id === String(params.run_id)) return;
       openPastRun({ run_id: String(params.run_id) } as PastRunSummary);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.run_id, isAdmin]);
+
+  // Iter 656 — restore the run (incl. unsaved grid edits) that was on
+  // screen before a workspace tab switch remounted us. Runs BEFORE the
+  // Iter 162 auto-open below (which would load the last SAVED run and
+  // silently drop the unsaved edits).
+  const keepAliveRestoredRef = React.useRef(false);
+  useEffect(() => {
+    if (!isAdmin || keepAliveRestoredRef.current) return;
+    const snap = actualRunKeepAlive;
+    if (!snap?.run) return;
+    if (params.run_id && String(params.run_id) !== snap.run.run_id) return;
+    if (Date.now() - snap.ts > 6 * 3600 * 1000) { actualRunKeepAlive = null; return; }
+    if (!selectedCompanyId || (snap.companyId && snap.companyId !== selectedCompanyId)) return;
+    keepAliveRestoredRef.current = true;
+    autoOpenedRef.current = true; // skip the auto-open of the last saved run
+    setRun(snap.run);
+    setMonth(snap.month);
+    setMonthDaysOverride(snap.monthDays);
+    setEmpType(snap.empType);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, selectedCompanyId]);
+
+  // Iter 656 — keep the snapshot in sync with what's on screen.
+  const hadRunRef = React.useRef(false);
+  useEffect(() => {
+    if (run && !(run as any).finalized) {
+      hadRunRef.current = true;
+      actualRunKeepAlive = {
+        companyId: selectedCompanyId, run, month,
+        monthDays: monthDaysOverride, empType, ts: Date.now(),
+      };
+    } else if (!run && hadRunRef.current) {
+      actualRunKeepAlive = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run, month, monthDaysOverride, empType]);
 
   // Iter 162 — auto-open the LAST processed run on screen load so the
   // report is visible without clicking "Process Salary" (user request).

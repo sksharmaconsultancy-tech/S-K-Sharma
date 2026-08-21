@@ -7335,3 +7335,15 @@ Current iteration: 594. Next: 595.
 - temp_bundle serves deploy655. APP_ITERATION=655.
 - NOTE: run ids csrun_7be2973f21cd was removed by testing agent; use
   csrun_c5978515ff7f (STAFF clean) / csrun_8e4b76624d1b (LABOUR errs).
+
+## Iter 656 — Workspace tab switching wipes grid (user bug, confirmed 1a/2a)
+- Cause: WorkspaceTabs.switchTab does router.replace with _r nonce ->
+  full screen remount; run + unsaved edits (in-memory state) lost.
+- Fix: module-level keep-alive snapshots in compliance-salary-run.tsx
+  (compRunKeepAlive: run/month/monthDays/empType/unsaved, 6h TTL,
+  company-guarded, cleared when run explicitly cleared after having one)
+  and salary-run.tsx (actualRunKeepAlive, also sets autoOpenedRef to skip
+  Iter 162 auto-open). Deep-link ?run_id= skips refetch when snapshot
+  holds that same run (preserves unsaved edits); restore effect handles it.
+- Verified E2E via playwright: edit PD 0->21, + tab -> dashboard, switch
+  back -> grid + edit intact, totals recomputed. deploy656 ready.

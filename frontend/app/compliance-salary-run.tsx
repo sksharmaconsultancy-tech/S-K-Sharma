@@ -215,6 +215,17 @@ const COL_FILTER_GETTERS: Record<string, (r: any) => any> = {
   "Net": (r) => r.net,
 };
 
+// Iter 656 (user bug — "switching workspace tabs wipes the grid") — the
+// workspace tab bar REMOUNTS this screen on every tab switch (refresh
+// nonce in the route), losing the open run + any unsaved grid edits.
+// A module-level snapshot survives the remount (same SPA document) and
+// is restored when the admin switches back. Cleared on Finalize/Delete/
+// explicit clear. Max age 6 h.
+let compRunKeepAlive: {
+  companyId: string | null; run: any; month: string; monthDays: string;
+  empType: string; unsaved: boolean; ts: number;
+} | null = null;
+
 export default function ComplianceSalaryRunScreen() {
   const router = useRouter();
   const { user } = useAuth();
@@ -1512,10 +1523,54 @@ export default function ComplianceSalaryRunScreen() {
   const urlParams = useLocalSearchParams<{ run_id?: string }>();
   useEffect(() => {
     if (urlParams.run_id && isAdmin) {
+      // Iter 656 — if the keep-alive snapshot holds this exact run
+      // (workspace tab switch), let the restore effect below bring it
+      // back WITH the unsaved edits instead of refetching a stale copy.
+      if (compRunKeepAlive?.run?.run_id === String(urlParams.run_id)) return;
       openPastRun({ run_id: String(urlParams.run_id) } as CompRun);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlParams.run_id, isAdmin]);
+
+  // Iter 656 — restore the run that was on screen before a workspace tab
+  // switch remounted us (deep links via ?run_id= take precedence).
+  const keepAliveRestoredRef = useRef(false);
+  useEffect(() => {
+    if (!isAdmin || keepAliveRestoredRef.current) return;
+    const snap = compRunKeepAlive;
+    if (!snap?.run) return;
+    if (urlParams.run_id && String(urlParams.run_id) !== snap.run.run_id) return;
+    if (Date.now() - snap.ts > 6 * 3600 * 1000) { compRunKeepAlive = null; return; }
+    if (!activeCompanyId || (snap.companyId && snap.companyId !== activeCompanyId)) return;
+    keepAliveRestoredRef.current = true;
+    setRun(snap.run);
+    setMonth(snap.month);
+    setMonthDaysOverride(snap.monthDays);
+    setEmpType(snap.empType);
+    if (snap.unsaved) {
+      setUnsavedEdits(true);
+      showToast("Restored your open run with UNSAVED edits — remember to Save as Draft / Finalize.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, activeCompanyId]);
+
+  // Iter 656 — keep the snapshot in sync with what's on screen.
+  const hadRunRef = useRef(false);
+  useEffect(() => {
+    if (run && !(run as any).finalized) {
+      hadRunRef.current = true;
+      compRunKeepAlive = {
+        companyId: activeCompanyId, run, month,
+        monthDays: monthDaysOverride, empType,
+        unsaved: unsavedEdits, ts: Date.now(),
+      };
+    } else if (!run && hadRunRef.current) {
+      // Run explicitly cleared this session (Finalize / Delete / firm
+      // change) — drop the snapshot so it doesn't come back.
+      compRunKeepAlive = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run, month, monthDaysOverride, empType, unsavedEdits]);
 
   // Iter 162 auto-opened the LAST processed run on screen load. Iter 306
   // (user request #6) — REMOVED: the Compliance Salary screen must show
