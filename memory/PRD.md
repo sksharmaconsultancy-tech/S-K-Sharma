@@ -7370,3 +7370,17 @@ Current iteration: 594. Next: 595.
 5. "Other allow. editable" (user pt 5) — Others* column ALREADY editable
    since Iter 230; confirmed to user.
 - deploy657 ready; temp_bundle serves it; APP_ITERATION=657.
+
+## Iter 658 — Hours Excel screen format + register Advance fix
+1. build_hours_only_grid_xlsx (utils/monthly_attendance.py, fn at ~865):
+   ONE row per employee (S.No./Name/Father/Desig/Bio + combined Duty+OT
+   HH:MM per day) — matches on-screen Hours grid; removed the Duty/OT
+   row-pair + merges. "OT HRS" tab kept. Verified via real xlsx download.
+2. Register PDF Advance (user bug): utils/compliance_salary.py lines
+   ~2142 & ~2714 hardcoded "0" -> A(tot["adv"]) in BOTH
+   build_compliance_register_pdf and _v2. Verified via pdfminer: 1500
+   shows at Advance Deduction Amount.
+   NOTE: tot["ded"] sums row.total_deduction — the run's own pipeline
+   keeps it in sync (test set advance directly in DB so ded looked stale;
+   not a real-flow issue).
+- deploy658 ready; temp_bundle serves it; APP_ITERATION=658.

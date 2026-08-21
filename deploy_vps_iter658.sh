@@ -1,8 +1,19 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 657)
+# S.K. Sharma & Co. — VPS deploy script (Iter 658)
 # Deploys the FULL latest code (includes ALL previous iterations).
 #
-# ═══════════ WHAT'S NEW (Iter 657) ═══════════
+# ═══════════ WHAT'S NEW (Iter 658) ═══════════
+#
+# 📗 HOURS EXCEL — SCREEN FORMAT (user request):
+#  * The Attendance "Hours only" Excel is now ONE ROW per employee —
+#    S.No. · Name · Father Name · Designation · Bio · day-wise combined
+#    Duty+OT hours (HH:MM) — exactly like the on-screen HRS sheet.
+#    The separate day-wise OT split stays on the "OT HRS" tab.
+#
+# 🧾 REGISTER PDF — ADVANCE FIX (user bug "ADVANCE 0 AA RHA HE"):
+#  * The Salary Sheet / Register of Wages summary block showed Advance
+#    Deduction Amount = 0 always (hardcoded). It now shows the REAL
+#    Advance total from the run (both register formats).
 #
 # 🧊 COMPLIANCE GRID — FREEZE PACK (user requests):
 #  * Header rows stay FROZEN on top; grid height auto-fits the screen so
@@ -77,8 +88,8 @@
 #    INCENTIVE · FOOD ALLOWANCE import fix · dynamic allowance columns.
 #
 # Run ON THE VPS as root/sksharma:
-#   wget -O deploy657.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
-#   bash deploy657.sh
+#   wget -O deploy658.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
+#   bash deploy658.sh
 
 APP_DIR=/home/sksharma/app
 WEB_DIR=/var/www/sksharma
@@ -230,7 +241,7 @@ sudo cp public/sw.js $WEB_DIR/sw.js 2>/dev/null || true
 sudo find $WEB_DIR/_expo -type f -mtime +45 -delete 2>/dev/null || true
 sudo nginx -t && sudo systemctl reload nginx
 
-echo "==> 8b/9 Nginx hardening for BIG salary sheets (Iter 657)..."
+echo "==> 8b/9 Nginx hardening for BIG salary sheets (Iter 658)..."
 # Root cause candidates for "Still not able to Lock the Salary" on live
 # data: nginx default client_max_body_size (1m) rejects a large firm's
 # save-rows payload with HTTP 413, and 60s proxy timeouts cut long
@@ -250,7 +261,7 @@ for CONF in /etc/nginx/sites-enabled/* /etc/nginx/conf.d/*.conf; do
 done
 sudo nginx -t && sudo systemctl reload nginx && echo "   nginx reloaded ✅" || echo "   ❌ nginx config test failed — restoring is automatic (no reload done)"
 
-echo "==> 8c/9 SPEED-UP: nginx compression, caching & HTTP/2 (Iter 657)..."
+echo "==> 8c/9 SPEED-UP: nginx compression, caching & HTTP/2 (Iter 658)..."
 # 1) Pre-compress the built JS/CSS once so nginx can serve .gz instantly
 #    (gzip_static) instead of re-compressing multi-MB bundles per visitor.
 sudo find $WEB_DIR -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.json' -o -name '*.svg' \) -size +1k -exec gzip -kf9 {} \; 2>/dev/null
@@ -259,7 +270,7 @@ echo "   Pre-compressed $(sudo find $WEB_DIR -name '*.gz' | wc -l) static files 
 #    text-ish, serve pre-compressed files, long immutable cache for the
 #    content-hashed /_expo bundles (safe — new deploys emit new hashes).
 sudo tee /etc/nginx/conf.d/sksharma_perf.conf >/dev/null <<'NGINXPERF'
-# S.K. Sharma & Co. — performance tuning (deploy Iter 657)
+# S.K. Sharma & Co. — performance tuning (deploy Iter 658)
 gzip on;
 gzip_comp_level 5;
 gzip_min_length 1024;
@@ -297,8 +308,8 @@ else
 fi
 
 echo "==> 9/9 Verification..."
-echo -n "   Server badge is 657 (must say OK): "
-grep -q 'APP_ITERATION = "657"' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
+echo -n "   Server badge is 658 (must say OK): "
+grep -q 'APP_ITERATION = "658"' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
 echo -n "   Toolbar polish — Iter 640 (must say OK): "
 grep -q 'label renamed to just' $APP_DIR/frontend/app/compliance-salary-run.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Approve backlog endpoint — Iter 639 (must say OK): "
@@ -381,7 +392,7 @@ echo -n "   Backend /api/health: "
 curl -s -m 5 http://localhost:8001/api/health || echo "❌ NOT ANSWERING"
 echo ""
 echo "════════════════════════════════════════════════════════════"
-echo "  DONE — Iter 657 deployed."
+echo "  DONE — Iter 658 deployed."
 echo "  • NEW (657): Grid freeze pack — header, Present Days & Net frozen;"
 echo "    h-scrollbar always on screen; highlight follows edited cell;"
 echo "    Freeze diff can now land in editable INCENTIVE (OT first)."

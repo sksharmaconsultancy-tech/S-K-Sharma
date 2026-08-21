@@ -893,9 +893,10 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
     )
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    # Layout (Iter 202 — user request): A=Bio Code, B=Name, C=Father,
-    # D=Designation, E=Type (Duty HRS / OT HRS — one row EACH per employee,
-    # day-wise, per the attendance policy), F..=days, then trailing totals.
+    # Layout (Iter 658 — user request: "same format as the HRS screen"):
+    # ONE ROW per employee, exactly like the on-screen Hours-only grid:
+    # A=S.No., B=Emp Name, C=Father Name, D=Designation, E=Bio, F..=days
+    # (each cell = Duty+OT combined HH:MM), then the trailing totals.
     trail_labels = ["Duty HRS", "OT HRS", "Total Working HRS", "Present Days", "Extra HRS"]
     total_cols = 5 + days_n + len(trail_labels)
 
@@ -915,15 +916,15 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
     )
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=total_cols)
     ws.cell(row=2, column=1, value=(
-        f"{period} · Days: {days_n} · Duty HRS and OT HRS shown in SEPARATE rows "
-        f"per employee, day-wise, as per the firm's attendance policy. "
+        f"{period} · Days: {days_n} · Each day cell = Duty + OT combined "
+        f"(HH:MM), same as the on-screen Hours sheet. "
         f"Generated: {datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime('%d-%b-%Y %H:%M IST')}"
     )).font = Font(italic=True, color="475569", size=10)
     ws.cell(row=2, column=1).alignment = center
     ws.row_dimensions[2].height = 18
 
     header_row = 4
-    hdrs = ["Bio Code", "Emp Name", "Emp Father Name", "Designation", "Type"]
+    hdrs = ["S.No.", "Emp Name", "Emp Father Name", "Designation", "Bio"]
     for i, label in enumerate(hdrs, start=1):
         c = ws.cell(row=header_row, column=i, value=label)
         c.font = hdr_font
@@ -945,7 +946,7 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
         c.border = border
     ws.row_dimensions[header_row].height = 32
 
-    ws.column_dimensions["A"].width = 10
+    ws.column_dimensions["A"].width = 6
     ws.column_dimensions["B"].width = 26
     ws.column_dimensions["C"].width = 22
     ws.column_dimensions["D"].width = 18
@@ -973,44 +974,34 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
         days_cell = emp.get("days") or {}
         totals = emp.get("totals") or {}
         fill = zebra_a if idx % 2 == 0 else zebra_b
-        duty_row, ot_row = cur, cur + 1
+        row = cur
 
-        # Identity columns merged vertically across the Duty/OT row pair.
+        # Iter 658 (user request) — SINGLE row per employee, matching the
+        # on-screen Hours sheet (no separate OT row; the OT split stays on
+        # the dedicated "OT HRS" tab for cross-verification).
         _bio = emp.get("bio_code")
         id_vals = [
-            "" if _bio in (None, "") else str(_bio),
+            idx + 1,
             emp.get("name") or "",
             emp.get("father_name") or "",
             emp.get("designation") or emp.get("department") or "",
+            "" if _bio in (None, "") else str(_bio),
         ]
         for col_i, v in enumerate(id_vals, start=1):
-            ws.merge_cells(start_row=duty_row, start_column=col_i,
-                           end_row=ot_row, end_column=col_i)
-            c = ws.cell(row=duty_row, column=col_i, value=v)
+            c = ws.cell(row=row, column=col_i, value=v)
             c.alignment = Alignment(vertical="center", wrap_text=True)
-        ws.cell(row=duty_row, column=5, value="Duty HRS").font = Font(size=9, bold=True)
-        ws.cell(row=ot_row, column=5, value="OT HRS").font = Font(
-            size=9, bold=True, color="B45309")
 
-        # Iter 202 (user request) — day-wise Duty HRS and OT HRS in
-        # SEPARATE rows, both already policy-adjusted upstream (8-HR
-        # sub-point, week-off / holiday rules, rounding, OT gates).
-        # Iter 207 (user request) — the Duty HRS row per day INCLUDES the
-        # day's OT (Duty + OT combined, capped at 24 hrs). The OT row
-        # below still shows the OT split for cross-verification.
+        # Each day cell = Duty + OT combined (capped at 24 hrs) — exactly
+        # what the on-screen Hours-only grid shows.
         for j, day_lbl in enumerate(day_labels):
             d = days_cell.get(day_lbl) or {}
             duty_h = float(d.get("duty_hours") or 0.0)
             ot_h = float(d.get("ot_hours") or 0.0)
             day_total_h = min(duty_h + ot_h, 24.0)
-            c = ws.cell(row=duty_row, column=6 + j, value=_fmt_hhmm(day_total_h))
+            c = ws.cell(row=row, column=6 + j, value=_fmt_hhmm(day_total_h))
             c.alignment = center
             c.border = border
             c.font = Font(size=9)
-            c2 = ws.cell(row=ot_row, column=6 + j, value=_fmt_hhmm(ot_h))
-            c2.alignment = center
-            c2.border = border
-            c2.font = Font(size=9, color="B45309" if ot_h > 0 else "94A3B8")
 
         combined = float(totals.get("hours") or 0.0)
         ot = float(totals.get("ot_hours") or 0.0)
@@ -1029,22 +1020,19 @@ def build_hours_only_grid_xlsx(grid: Dict[str, Any]) -> bytes:
             _fmt_hhmm(duty_only), _fmt_hhmm(ot),
             _fmt_hhmm(combined), days_int, _fmt_hhmm(extra_hrs),
         ]):
-            ws.merge_cells(start_row=duty_row, start_column=6 + days_n + k,
-                           end_row=ot_row, end_column=6 + days_n + k)
-            c = ws.cell(row=duty_row, column=6 + days_n + k, value=val)
+            c = ws.cell(row=row, column=6 + days_n + k, value=val)
             c.alignment = center
             c.border = border
             if k == 3:
                 c.number_format = "0.##"
             c.font = total_font
 
-        for r_ in (duty_row, ot_row):
-            for c_ in range(1, total_cols + 1):
-                cell = ws.cell(row=r_, column=c_)
-                cell.fill = fill
-                cell.border = border
-            ws.row_dimensions[r_].height = 17
-        cur += 2
+        for c_ in range(1, total_cols + 1):
+            cell = ws.cell(row=row, column=c_)
+            cell.fill = fill
+            cell.border = border
+        ws.row_dimensions[row].height = 17
+        cur += 1
 
     # Footer totals
     if employees:

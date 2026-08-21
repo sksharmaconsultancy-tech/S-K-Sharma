@@ -2139,7 +2139,9 @@ def build_compliance_register_pdf(
                   ("ABRY P.F. Benifit", "0")]
     if show_esi:
         _sum2.append(("E.S.I. Deduction Amount", A(tot["esi"])))
-    _sum2 += [("Advance Deduction Amount", "0"),
+    # Iter 658 (user bug — "REPORT ME ADVANCE 0 AA RHA HE") — summary now
+    # shows the REAL Advance total instead of a hardcoded 0.
+    _sum2 += [("Advance Deduction Amount", A(tot["adv"])),
               ("Other Deduction Amount", A(tot["othd"]))]
     if show_tds:
         _sum2.append(("TDS Deduction Amount", A(tot["tds"])))
@@ -2711,7 +2713,8 @@ def build_compliance_register_pdf_v2(
                 ("ABRY P.F. Benifit", "0")]
     if _col_ok["esi"]:
         _s2.append(("E.S.I. Deduction Amount", A(tot["esi"])))
-    _s2 += [("Advance Deduction Amount", "0"),
+    # Iter 658 (user bug) — real Advance total (was hardcoded 0).
+    _s2 += [("Advance Deduction Amount", A(tot["adv"])),
             ("Other Deduction Amount", A(tot["othd"]))]
     if _col_ok["tds"]:
         _s2.append(("TDS Deduction Amount", A(tot["tds"])))
