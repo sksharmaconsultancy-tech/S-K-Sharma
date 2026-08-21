@@ -7523,3 +7523,22 @@ Frontend:
   -> admin notification with correct body/priority/action. NOTE:
   EDITABLE_PROFILE_FIELDS excludes father_name (400 if tried).
 - deploy667 serves via temp_bundle; APP_ITERATION=667.
+
+## Iter 668 — Live Notification Popups (stackable toasts, user spec)
+- NEW /app/frontend/src/components/LiveNotifToasts.tsx: bottom-right
+  stack (right:16 bottom:92 above AI button, zIndex 950, pointerEvents
+  box-none, column-reverse => newest nearest corner), max 4 visible,
+  340px cards, slide-in from right + fade (Animated, 260ms), auto-
+  dismiss 6s, hover pauses timer (resume 2.5s), testIDs:
+  live-notif-toast / -view / -close / -stack. Card = category icon
+  circle + priority/category left bar + title + relative time + 2-line
+  msg + "View →" chip + ✕.
+- AdminWebShell: old single toast666 (top-right) REPLACED. freshItems
+  effect now setLiveToasts(candidates) (still dedupe via alreadyToasted
+  + prefs.toasts + per-category prefs + sound). onView => markRead +
+  router.push(action_url); ✕ close does NOT mark read. Non-blocking
+  overlay, no reloads/focus steal.
+- Verified E2E via minted session (test_iter668_mint_session.py): 3 API
+  broadcasts -> focus event -> 3 stacked toasts render, ✕ removes one.
+- deploy_vps_iter668.sh created; temp_bundle kind=script -> deploy668;
+  APP_ITERATION=668.

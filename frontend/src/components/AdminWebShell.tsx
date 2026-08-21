@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -24,6 +24,7 @@ import WorkspaceTabs from "@/src/components/WorkspaceTabs";
 import { onSyncMessage } from "@/src/utils/workspaceSync";
 import { useUnreadNotifications } from "@/src/hooks/useUnreadNotifications";
 import { catOf, PRIORITY_COLORS, loadPrefs, alreadyToasted, rememberToasted, playNotifSound } from "@/src/utils/notifHelpers";
+import LiveNotifToasts from "@/src/components/LiveNotifToasts";
 import { usePrimaryInbox } from "@/src/hooks/usePrimaryInbox";
 import { useTheme } from "@/src/context/ThemeContext";
 import { colors, radius, spacing, type, isDarkTheme, DARK_THEME_ID } from "@/src/theme";
@@ -732,9 +733,8 @@ export default function AdminWebShell({ children }: Props) {
   // Iter 89 — Notifications bell + unread badge for the admin header.
   const { unreadCount: unreadNotifCount, items: notifItems, markAllSeen, markRead, freshItems, clearFresh } = useUnreadNotifications();
 
-  // Iter 666 — toast popups + optional sound for NEW notifications.
-  const [toast666, setToast666] = useState<any | null>(null);
-  const toastTimer666 = useRef<any>(null);
+  // Iter 668 — Live Notification Popups: stackable bottom-right toasts.
+  const [liveToasts, setLiveToasts] = useState<any[]>([]);
   useEffect(() => {
     if (!freshItems?.length) return;
     const prefs = loadPrefs();
@@ -743,11 +743,7 @@ export default function AdminWebShell({ children }: Props) {
       && prefs.categories[String(n.category || "announcement")] !== false);
     if (!candidates.length) { clearFresh(); return; }
     rememberToasted(candidates.map((n: any) => n.notification_id));
-    if (prefs.toasts) {
-      setToast666(candidates[0]);
-      if (toastTimer666.current) clearTimeout(toastTimer666.current);
-      toastTimer666.current = setTimeout(() => setToast666(null), 6500);
-    }
+    if (prefs.toasts) setLiveToasts(candidates);
     if (prefs.sound) playNotifSound();
     clearFresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1912,42 +1908,17 @@ export default function AdminWebShell({ children }: Props) {
         </View>
       ) : null}
 
-      {/* Iter 666 — new-notification toast (top-right, 6.5 s, deduped). */}
-      {toast666 ? (
-        <Pressable
-          onPress={() => {
-            const n = toast666; setToast666(null);
-            if (n.notification_id) markRead([n.notification_id]);
-            router.push((n.action_url || "/notifications") as any);
-          }}
-          style={{ position: "absolute", top: 62, right: 16, zIndex: 900, maxWidth: 340,
-                   backgroundColor: "#FFFFFF", borderRadius: 12, padding: 12,
-                   flexDirection: "row", gap: 10, alignItems: "flex-start",
-                   borderWidth: 1, borderColor: "#DBEAFE",
-                   shadowColor: "#0F172A", shadowOpacity: 0.18, shadowRadius: 14,
-                   shadowOffset: { width: 0, height: 6 }, elevation: 8,
-                   borderLeftWidth: 4,
-                   borderLeftColor: PRIORITY_COLORS[String(toast666.priority || "normal")] !== "transparent"
-                     ? PRIORITY_COLORS[String(toast666.priority)] : catOf(toast666).color }}
-          testID="notif-toast"
-        >
-          <Ionicons name={catOf(toast666).icon} size={18} color={catOf(toast666).color} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 13, fontWeight: "800", color: "#0F172A" }} numberOfLines={1}>
-              {toast666.title || "Notification"}
-            </Text>
-            <Text style={{ fontSize: 12, color: "#475569", marginTop: 2 }} numberOfLines={2}>
-              {toast666.message || toast666.body || ""}
-            </Text>
-            {toast666.action_url ? (
-              <Text style={{ fontSize: 12, fontWeight: "700", color: "#2563EB", marginTop: 4 }}>View →</Text>
-            ) : null}
-          </View>
-          <Pressable onPress={() => setToast666(null)} hitSlop={8}>
-            <Ionicons name="close" size={14} color="#94A3B8" />
-          </Pressable>
-        </Pressable>
-      ) : null}
+      {/* Iter 668 — Live Notification Popups (stackable, bottom-right,
+          auto-dismiss ~6 s, non-blocking overlay). Closing a toast does
+          NOT mark it read; only "View" does. */}
+      <LiveNotifToasts
+        incoming={liveToasts}
+        onConsumed={() => setLiveToasts([])}
+        onView={(n) => {
+          if (n.notification_id) markRead([n.notification_id]);
+          router.push((n.action_url || "/notifications") as any);
+        }}
+      />
 
       {/* Iter 294 — AI Payroll Assistant (chat + voice). */}
       {/* Iter 588 — the AI Command Center has its own full chat; hide the
