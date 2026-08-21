@@ -7587,3 +7587,19 @@ Frontend:
   Ctrl+Shift+R) after deploying so the new SW takes over.
 - Test seeds cleaned; digest correctly hidden when yesterday had 0
   notifications.
+
+## Iter 671 — Popups bottom-LEFT + Hide button + device-offline alerts OFF
+- LiveNotifToasts.tsx: stack moved to BOTTOM-LEFT (left:16 bottom:44,
+  alignItems flex-start), slide-in from LEFT (-72px), AUTO_DISMISS 6s ->
+  10s. NEW "Hide" pill button (dark, eye-off icon, testID
+  live-notif-toast-hide-all) at top of the window — clears ALL toasts at
+  once (items stay unread). Auto-unhide is inherent: new arrivals
+  repopulate the stack; window auto-hides again ~10s later.
+- biometric_devices.py: device_offline_alert_loop gated by
+  _OFFLINE_ALERTS_ON (env DEVICE_OFFLINE_ALERTS, default FALSE) — NO
+  "Machine OFFLINE" notifications AND NO offline emails anymore.
+  Re-enable via DEVICE_OFFLINE_ALERTS=true in backend/.env.
+- Purged type=device.offline notifications locally (10) + deploy671
+  migration PYMIG3 purges them on the VPS.
+- Verified E2E: stack bounding box x=16 (left), Hide clears all toasts.
+- deploy_vps_iter671.sh; temp_bundle -> deploy671; APP_ITERATION=671.

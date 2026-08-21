@@ -18,7 +18,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { catOf, PRIORITY_COLORS } from "@/src/utils/notifHelpers";
 
 const MAX_VISIBLE = 4;
-const AUTO_DISMISS_MS = 6000;
+// Iter 671 (user request) — window auto-hides after 10 seconds.
+const AUTO_DISMISS_MS = 10000;
 
 function timeAgo(iso?: string): string {
   if (!iso) return "just now";
@@ -78,7 +79,8 @@ function ToastCard({ n, onDismiss, onView }: {
       style={{
         opacity: anim,
         transform: [
-          { translateX: anim.interpolate({ inputRange: [0, 1], outputRange: [72, 0] }) },
+          // Iter 671 — slides in from the LEFT (stack lives bottom-left now).
+          { translateX: anim.interpolate({ inputRange: [0, 1], outputRange: [-72, 0] }) },
         ],
         marginTop: 8,
       }}
@@ -166,9 +168,10 @@ export default function LiveNotifToasts({ incoming, onConsumed, onView }: {
     <View
       pointerEvents="box-none"
       style={{
-        position: "absolute", right: 16, bottom: 92, zIndex: 950,
-        alignItems: "flex-end",
-        // Render newest on top of the stack.
+        // Iter 671 (user request) — moved to the BOTTOM-LEFT corner.
+        position: "absolute", left: 16, bottom: 44, zIndex: 950,
+        alignItems: "flex-start",
+        // Render newest closest to the corner.
         flexDirection: "column-reverse",
       }}
       testID="live-notif-toast-stack"
@@ -176,6 +179,23 @@ export default function LiveNotifToasts({ incoming, onConsumed, onView }: {
       {toasts.map((n) => (
         <ToastCard key={n.notification_id} n={n} onDismiss={dismiss} onView={onView} />
       ))}
+      {/* Iter 671 — HIDE button: closes the whole popup window at once.
+          It auto-unhides the moment a NEW notification arrives, and each
+          window auto-hides again ~10 s later. Hiding does NOT mark
+          anything read — items stay unread in the bell. */}
+      <Pressable
+        onPress={() => setToasts([])}
+        style={{
+          flexDirection: "row", alignItems: "center", gap: 4,
+          alignSelf: "flex-start", backgroundColor: "#0F172A",
+          borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4,
+          marginTop: 8, opacity: 0.85,
+        }}
+        testID="live-notif-toast-hide-all"
+      >
+        <Ionicons name="eye-off-outline" size={12} color="#FFFFFF" />
+        <Text style={{ fontSize: 11, fontWeight: "700", color: "#FFFFFF" }}>Hide</Text>
+      </Pressable>
     </View>
   );
 }

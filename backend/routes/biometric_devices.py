@@ -18,6 +18,7 @@ import asyncio
 import base64
 import difflib
 import logging
+import os
 import random
 import re
 import secrets
@@ -2497,6 +2498,10 @@ async def biometric_system_health(
 # Iter 259 — Device OFFLINE alerts + Device Health Report (Excel).
 # ---------------------------------------------------------------------------
 OFFLINE_ALERT_AFTER_MIN = 15
+# Iter 671 (user request) — device-offline notifications AND emails are
+# STOPPED. Re-enable by setting DEVICE_OFFLINE_ALERTS=true in backend/.env.
+_OFFLINE_ALERTS_ON = os.environ.get(
+    "DEVICE_OFFLINE_ALERTS", "false").strip().lower() in ("1", "true", "yes")
 
 
 async def device_offline_alert_loop():
@@ -2504,6 +2509,10 @@ async def device_offline_alert_loop():
     admin notification (company admins + super admins); coming back online
     resets the flag so a future outage alerts again."""
     while True:
+        if not _OFFLINE_ALERTS_ON:
+            # Iter 671 — alerts disabled: no notifications, no emails.
+            await asyncio.sleep(300)
+            continue
         try:
             now = datetime.now(timezone.utc)
             async for d in db.biometric_devices.find(
