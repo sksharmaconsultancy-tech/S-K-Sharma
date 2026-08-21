@@ -7472,3 +7472,13 @@ Current iteration: 594. Next: 595.
 - deploy665 serves via temp_bundle; APP_ITERATION=665.
 NOTE: /tmp/tok.txt gets wiped by pod restarts — regenerate via
 user_sessions insert when needed.
+
+## Iter 665b — user clarifications
+- ROLLBACK: AGV description restored — "Salary recalculated on Compliance
+  Days · Basic per wage definition" + "PF/ESIC/LWF/PT recalculated
+  automatically" back in bullets (behavior was never changed; days-cap
+  rule from 665 KEPT).
+- Fixed Days (26/30/31) method REMOVED from Firm Master: radio option,
+  fixed-days picker UI, workflow bullets + label gone. Migration (local
+  0 firms + deploy665 PYMIG2) converts "fixed" -> AGV. Backend "fixed"
+  branch left harmless for safety.

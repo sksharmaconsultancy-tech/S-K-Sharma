@@ -1281,8 +1281,7 @@ export default function FirmMasterScreen() {
                   { k: "attendance", l: "Attendance Days (from imported sheet — default)" },
                   { k: "gross_based", l: "Gross Salary Based (days derived from imported gross)" },
                   { k: "freeze_based", l: "Freeze Salary Based (days derived from frozen gross)" },
-                  { k: "fixed", l: "Fixed Days (26 / 30 / 31)" },
-                  { k: "attendance_gross_validation", l: "Attendance + Gross Validation (Recommended)" },
+                  { k: "attendance_gross_validation", l: "Attendance + Gross Validation (Default · Recommended)" },
                   { k: "freeze_actual_gross", l: "Freeze as Actual Gross (imported gross taken AS-IS)" },
                 ].map((o) => {
                   const on = (sp.days_calc_method || "attendance_gross_validation") === o.k;
@@ -1300,23 +1299,6 @@ export default function FirmMasterScreen() {
                 })}
               </View>
               <View style={{ flexDirection: "row", gap: 18, marginTop: 10, flexWrap: "wrap" }}>
-                {(sp.days_calc_method || "attendance_gross_validation") === "fixed" ? (
-                  <View>
-                    <Text style={{ fontSize: 12, color: "#64748B", marginBottom: 4 }}>Fixed Days</Text>
-                    <View style={{ flexDirection: "row", gap: 6 }}>
-                      {[26, 30, 31].map((d) => {
-                        const on = Number(sp.days_calc_fixed || 26) === d;
-                        return (
-                          <Pressable key={d} onPress={() => updateSection("salary_process", { days_calc_fixed: d })}
-                            style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, borderWidth: 1,
-                                     borderColor: on ? "#2563EB" : "#CBD5E1", backgroundColor: on ? "#DBEAFE" : "#fff" }}>
-                            <Text style={{ fontSize: 13, fontWeight: "700", color: on ? "#1D4ED8" : "#334155" }}>{d}</Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  </View>
-                ) : null}
                 {(sp.days_calc_method || "attendance_gross_validation") !== "attendance" ? (
                   <View>
                     <Text style={{ fontSize: 12, color: "#64748B", marginBottom: 4 }}>Round Compliance Days to</Text>
@@ -1349,7 +1331,6 @@ export default function FirmMasterScreen() {
                     attendance: "Attendance Days",
                     gross_based: "Gross Salary Based",
                     freeze_based: "Freeze Salary Based",
-                    fixed: "Fixed Days",
                     attendance_gross_validation: "Attendance + Gross Validation",
                     freeze_actual_gross: "Freeze as Actual Gross",
                   } as any)[sp.days_calc_method || "attendance_gross_validation"]}
@@ -1375,17 +1356,14 @@ export default function FirmMasterScreen() {
                     "4. PF / ESIC / LWF / PT recalculated automatically",
                     "5. Remaining difference → Overtime / Other Allowance",
                   ],
-                  fixed: [
-                    "1. Salary Import → every employee in the sheet gets the Fixed Days",
-                    "2. Salary = Master rates × Fixed Days",
-                    "3. PF / ESIC / LWF / PT calculated on that gross",
-                    "4. Imported vs Calculated difference → Overtime / Other Allowance",
-                  ],
                   attendance_gross_validation: [
                     "1. Salary Import → Attendance Days AND Imported Gross both read (DEFAULT method)",
-                    "2. Days AUTO-REDUCE if too high for the gross — but NEVER increase",
-                    "3. Extra gross (Days × Rate < Imported) → OT / Incentive / Other Allowance",
-                    "4. Grid shows Att. Days · Comp. Days · ✓ Matched / ≠ Diff per employee",
+                    "2. System derives Compliance Days from gross and compares with attendance",
+                    "3. Days AUTO-REDUCE if too high for the gross — but NEVER increase",
+                    "4. Salary recalculated on Compliance Days · Basic per wage definition",
+                    "5. PF / ESIC / LWF / PT recalculated automatically",
+                    "6. Grid shows Att. Days · Comp. Days · ✓ Matched / ≠ Diff per employee",
+                    "7. Remaining difference → Overtime / Incentive / Other Allowance",
                   ],
                   freeze_actual_gross: [
                     "1. Salary Import → Imported Gross taken AS-IS as the final gross",

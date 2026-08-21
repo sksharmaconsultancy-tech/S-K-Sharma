@@ -9,8 +9,8 @@
 #    with an explicitly chosen method keep it — change in Firm Master).
 #  * Sheet DAYS + GROSS are both respected: days AUTO-REDUCE when too
 #    high for the gross, but NEVER increase beyond the sheet days.
-#  * Extra imported gross flows to OT / Incentive / Other Allowance per
-#    firm rules; gross stays frozen as imported.
+#  * Salary recalculated on Compliance Days; PF/ESIC/LWF/PT auto.
+#  * Fixed Days (26/30/31) method REMOVED (existing fixed firms auto-move).
 #
 # 🧮 GRID TOTAL vs FILTERS (user bug "filter total showing wrong"):
 #  * With a column filter (e.g. Name = BHERU) the TOTAL row still summed
@@ -246,7 +246,7 @@ async def m():
     db = AsyncIOMotorClient(os.environ["MONGO_URL"])[os.environ.get("DB_NAME", "test_database")]
     r = await db.firm_masters.update_many(
         {"$or": [{"salary_process.days_calc_method": {"$exists": False}},
-                 {"salary_process.days_calc_method": {"$in": ["", None]}}]},
+                 {"salary_process.days_calc_method": {"$in": ["", None, "fixed"]}}]},
         {"$set": {"salary_process.days_calc_method": "attendance_gross_validation"}})
     print(f"   days_calc_method=attendance_gross_validation set on {r.modified_count} firm(s) (explicit choices untouched)")
 asyncio.run(m())
