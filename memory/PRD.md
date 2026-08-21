@@ -7403,3 +7403,15 @@ Current iteration: 594. Next: 595.
 - Verified via playwright: 3x "+" creates no duplicates; navigate away ->
   "+" creates exactly one Dashboard tab; switching restores screens.
 - deploy659 ready; temp_bundle serves it; APP_ITERATION=659.
+
+## Iter 660 — Hide Zero Attendance (user request)
+- attendance-grid.tsx: hideZero state; filteredEmployees drops rows with
+  0 hours/present/OT/punches; chip testID toggle-hide-zero ("Hide Zero
+  Attendance" / "Showing Non-Zero Only"); downloadReport passes
+  hide_zero=1 (deps updated).
+- attendance_reports_api.py: hide_zero param on all 6 monthly endpoints
+  (xlsx+pdf, inout/hours/ot); _grid wrapper strips zero-total employees.
+  GOTCHA hit: blanket replace also renamed the recursive inner call AND
+  the separate _daily_report_impl call -> RecursionError/F821; both fixed.
+- Verified: hours xlsx 127 rows -> 1 with hide_zero=1; UI toggle 127 -> 1.
+- deploy660 ready; temp_bundle serves it; APP_ITERATION=660.

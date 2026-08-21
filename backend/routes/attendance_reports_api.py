@@ -25,6 +25,7 @@ async def _monthly_report_impl(
     admin: dict,
     variant: str,   # "hours" | "inout"
     group_id: Optional[str] = None,
+    hide_zero: bool = False,
 ):
     """Shared plumbing for both monthly attendance reports.
 
@@ -64,6 +65,20 @@ async def _monthly_report_impl(
     except ValueError:
         raise HTTPException(status_code=400, detail="month must be YYYY-MM")
 
+    # Iter 660 (user request) — "Hide Zero Attendance": drop employees
+    # with no hours / present days / OT / punches from the export.
+    async def _grid(**kw):
+        g = await _compute_monthly_grid_data(**kw)  # noqa: original compute
+        if hide_zero:
+            kept = []
+            for e in (g.get("employees") or []):
+                t = e.get("totals") or {}
+                if (t.get("hours") or 0) or (t.get("present_days") or 0) \
+                        or (t.get("ot_hours") or 0) or (t.get("total_punches") or 0):
+                    kept.append(e)
+            g["employees"] = kept
+        return g
+
     # All four variants (XLSX + PDF twins) are grid-based now, so the
     # employee/punch loading happens inside ``_compute_monthly_grid_data``
     # with the full Firm Master policy pipeline applied.
@@ -74,7 +89,7 @@ async def _monthly_report_impl(
         # admins see on-screen: bounce-merge, dedup, OT cap, cross-day OT
         # pairing, weekly-off rules — all applied upstream.
         from utils.monthly_attendance import build_grid_view_xlsx
-        grid = await _compute_monthly_grid_data(
+        grid = await _grid(
             company_id=company_id,
             month=month,
             group_id=group_id,
@@ -88,7 +103,7 @@ async def _monthly_report_impl(
         # grid pipeline as the XLSX/Grid View so all attendance reports
         # follow the Firm Master attendance policy.
         from utils.monthly_attendance_pdf import build_monthly_inout_pdf
-        grid = await _compute_monthly_grid_data(
+        grid = await _grid(
             company_id=company_id,
             month=month,
             group_id=group_id,
@@ -108,7 +123,7 @@ async def _monthly_report_impl(
     elif variant == "ot":
         # Iter 203 (user request) — OT Duty HRS report: day-wise OT ONLY.
         from utils.monthly_attendance import build_ot_only_grid_xlsx
-        grid = await _compute_monthly_grid_data(
+        grid = await _grid(
             company_id=company_id,
             month=month,
             group_id=group_id,
@@ -119,7 +134,7 @@ async def _monthly_report_impl(
         variant_slug = "OTDutyHRS"
     elif variant == "ot_pdf":
         from utils.monthly_attendance_pdf import build_monthly_ot_pdf
-        grid = await _compute_monthly_grid_data(
+        grid = await _grid(
             company_id=company_id,
             month=month,
             group_id=group_id,
@@ -138,7 +153,7 @@ async def _monthly_report_impl(
         )
     elif variant == "hours_pdf":
         from utils.monthly_attendance_pdf import build_monthly_hours_pdf
-        grid = await _compute_monthly_grid_data(
+        grid = await _grid(
             company_id=company_id,
             month=month,
             group_id=group_id,
@@ -159,7 +174,7 @@ async def _monthly_report_impl(
         # Iter 77z — Hours Only sheet routed through grid compute so each
         # day cell combines Duty + OT (both included in the totals).
         from utils.monthly_attendance import build_hours_only_grid_xlsx
-        grid = await _compute_monthly_grid_data(
+        grid = await _grid(
             company_id=company_id,
             month=month,
             group_id=group_id,
@@ -184,11 +199,12 @@ async def monthly_attendance_hours(
     company_id: str,
     month: str,
     group_id: Optional[str] = None,
+    hide_zero: int = 0,
     authorization: Optional[str] = Header(None),
 ):
     """Monthly working-hours matrix (mirrors the user's reference sheet)."""
     admin = await get_user_from_token(authorization)
-    return await _monthly_report_impl(company_id, month, admin, "hours", group_id)
+    return await _monthly_report_impl(company_id, month, admin, "hours", group_id, hide_zero=bool(hide_zero))
 
 
 @api.get("/admin/attendance/monthly-ot/{company_id}/{month}.xlsx")
@@ -196,11 +212,12 @@ async def monthly_attendance_ot(
     company_id: str,
     month: str,
     group_id: Optional[str] = None,
+    hide_zero: int = 0,
     authorization: Optional[str] = Header(None),
 ):
     """Iter 203 — OT Duty HRS report (day-wise OT only, policy-computed)."""
     admin = await get_user_from_token(authorization)
-    return await _monthly_report_impl(company_id, month, admin, "ot", group_id)
+    return await _monthly_report_impl(company_id, month, admin, "ot", group_id, hide_zero=bool(hide_zero))
 
 
 @api.get("/admin/attendance/monthly-ot/{company_id}/{month}.pdf")
@@ -208,10 +225,11 @@ async def monthly_attendance_ot_pdf(
     company_id: str,
     month: str,
     group_id: Optional[str] = None,
+    hide_zero: int = 0,
     authorization: Optional[str] = Header(None),
 ):
     admin = await get_user_from_token(authorization)
-    return await _monthly_report_impl(company_id, month, admin, "ot_pdf", group_id)
+    return await _monthly_report_impl(company_id, month, admin, "ot_pdf", group_id, hide_zero=bool(hide_zero))
 
 
 @api.get("/admin/attendance/monthly-inout/{company_id}/{month}.xlsx")
@@ -219,11 +237,12 @@ async def monthly_attendance_inout(
     company_id: str,
     month: str,
     group_id: Optional[str] = None,
+    hide_zero: int = 0,
     authorization: Optional[str] = Header(None),
 ):
     """Monthly IN / OUT + Working Hours matrix — same layout, richer cells."""
     admin = await get_user_from_token(authorization)
-    return await _monthly_report_impl(company_id, month, admin, "inout", group_id)
+    return await _monthly_report_impl(company_id, month, admin, "inout", group_id, hide_zero=bool(hide_zero))
 
 
 @api.get("/admin/attendance/monthly-inout/{company_id}/{month}.pdf")
@@ -231,12 +250,13 @@ async def monthly_attendance_inout_pdf(
     company_id: str,
     month: str,
     group_id: Optional[str] = None,
+    hide_zero: int = 0,
     authorization: Optional[str] = Header(None),
 ):
     """Iter 77 - Landscape A4 PDF twin of the IN / OUT XLSX. Same numbers,
     print-ready."""
     admin = await get_user_from_token(authorization)
-    return await _monthly_report_impl(company_id, month, admin, "inout_pdf", group_id)
+    return await _monthly_report_impl(company_id, month, admin, "inout_pdf", group_id, hide_zero=bool(hide_zero))
 
 
 @api.get("/admin/attendance/monthly-hours/{company_id}/{month}.pdf")
@@ -244,11 +264,12 @@ async def monthly_attendance_hours_pdf(
     company_id: str,
     month: str,
     group_id: Optional[str] = None,
+    hide_zero: int = 0,
     authorization: Optional[str] = Header(None),
 ):
     """Iter 77 - Landscape A4 PDF twin of the Working Hours XLSX."""
     admin = await get_user_from_token(authorization)
-    return await _monthly_report_impl(company_id, month, admin, "hours_pdf", group_id)
+    return await _monthly_report_impl(company_id, month, admin, "hours_pdf", group_id, hide_zero=bool(hide_zero))
 
 
 # ---------------------------------------------------------------------------

@@ -199,6 +199,9 @@ export default function AttendanceGridScreen() {
 
   const [month, setMonth] = useState<string>(initialMonth);
   const [view, setView] = useState<GridView>("inout");
+  // Iter 660 (user request) — one-click Hide Zero Attendance toggle
+  // (also passed to the Excel/PDF downloads).
+  const [hideZero, setHideZero] = useState(false);
 
   // Iter 200 (user request) — per-firm Report Settings (Attendance Policy →
   // Report Settings) decide which report views exist for this firm and
@@ -450,12 +453,21 @@ export default function AttendanceGridScreen() {
   const filteredEmployees = useMemo(() => {
     if (!data) return [];
     const needle = q.trim().toLowerCase();
-    const src = !needle
+    let src = !needle
       ? data.employees
       : data.employees.filter((e) => {
           const hay = `${e.name || ""} ${e.employee_code || ""} ${e.bio_code || ""} ${e.department || ""} ${e.designation || ""}`.toLowerCase();
           return hay.includes(needle);
         });
+    // Iter 660 (user request) — one-click "Hide Zero Attendance": drop
+    // employees with no hours, no present days, no OT and no punches.
+    if (hideZero) {
+      src = src.filter((e) => {
+        const t: any = e.totals || {};
+        return (t.hours || 0) > 0 || (t.present_days || 0) > 0
+          || (t.ot_hours || 0) > 0 || (t.total_punches || 0) > 0;
+      });
+    }
     // Sort
     const sorted = src.slice().sort((a, b) => {
       const dir = sortDir === "asc" ? 1 : -1;
@@ -493,7 +505,7 @@ export default function AttendanceGridScreen() {
       }
     });
     return sorted;
-  }, [data, q, sortBy, sortDir]);
+  }, [data, q, sortBy, sortDir, hideZero]);
 
   // Iter 517 (user request) — Department/Designation-wise sort GROUPS the
   // rows with a named band above each group (e.g. "YARN (23)").
@@ -648,7 +660,12 @@ export default function AttendanceGridScreen() {
         const slug = view === "inout" ? "monthly-inout" : view === "ot" ? "monthly-ot" : "monthly-hours";
         // Iter 495 (user bug: "IN/OUT Report — not able to see group wise")
         // — the monthly download ignored the selected Employee Group.
-        const gq = groupId ? `?group_id=${encodeURIComponent(groupId)}` : "";
+        const qs: string[] = [];
+        if (groupId) qs.push(`group_id=${encodeURIComponent(groupId)}`);
+        // Iter 660 (user request) — Hide Zero Attendance also applies to
+        // the downloaded Excel / PDF.
+        if (hideZero) qs.push("hide_zero=1");
+        const gq = qs.length ? `?${qs.join("&")}` : "";
         const path = `/admin/attendance/${slug}/${effectiveCid}/${month}.${fmt}${gq}`;
         const res = await apiBinary(path);
         const gname = groupId
@@ -677,7 +694,7 @@ export default function AttendanceGridScreen() {
         setExporting(false);
       }
     },
-    [effectiveCid, exporting, month, view, groupId, groups],
+    [effectiveCid, exporting, month, view, groupId, groups, hideZero],
   );
 
   // Iter 111 — Daily-basis report (single date, one row per employee).
@@ -1053,6 +1070,22 @@ export default function AttendanceGridScreen() {
         </View>
 
         <View style={{ flex: 1 }} />
+
+        {/* Iter 660 (user request) — one-click Hide Zero Attendance */}
+        <Pressable
+          onPress={() => setHideZero((h) => !h)}
+          style={[styles.groupChip, hideZero && styles.groupChipOn]}
+          testID="toggle-hide-zero"
+        >
+          <Ionicons
+            name={hideZero ? "person-remove-outline" : "person-outline"}
+            size={13}
+            color={hideZero ? "#fff" : colors.onSurfaceSecondary}
+          />
+          <Text style={[styles.groupChipTxt, hideZero && styles.groupChipTxtOn]}>
+            {hideZero ? "Showing Non-Zero Only" : "Hide Zero Attendance"}
+          </Text>
+        </Pressable>
 
         {/* Iter 94 — Hide/Show the 1–31 day columns (summary-only view) */}
         <Pressable
