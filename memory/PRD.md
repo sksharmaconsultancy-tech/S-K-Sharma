@@ -7392,3 +7392,14 @@ Current iteration: 594. Next: 595.
   (grid 2026-07 STAFF live data). SW cache bumped v7->v8 (public/sw.js)
   to purge stale shells on next deploy. Told user: deploy 658, close all
   portal tabs, reopen / Ctrl+Shift+R.
+
+## Iter 659 — workspace multi-tab fix (user video "Dashboard issue")
+- Video analysis: + stacked duplicate "Dashboard" tabs; every tab click
+  forced remount w/ _r nonce -> white flash; clicking + then dashboard
+  menu felt broken.
+- WorkspaceTabs.tsx: addTab de-dupes (existing HOME tab -> switchTab);
+  switchTab: nonce ONLY when clicking the ACTIVE tab (Iter 502 refresh
+  behavior kept); switching to another tab = plain router.replace(route).
+- Verified via playwright: 3x "+" creates no duplicates; navigate away ->
+  "+" creates exactly one Dashboard tab; switching restores screens.
+- deploy659 ready; temp_bundle serves it; APP_ITERATION=659.

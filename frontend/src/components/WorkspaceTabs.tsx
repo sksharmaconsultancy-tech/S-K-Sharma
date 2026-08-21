@@ -97,21 +97,30 @@ export default function WorkspaceTabs({
   }, [pathname, active]);
 
   const switchTab = (t: WorkspaceTab) => {
-    // Iter 464 + Iter 502 (user request) — clicking ANY tab (active or an
-    // old one) REFRESHES that tab's own page (remount + refetch for the
-    // current firm) and STAYS there — never jumps to the dashboard.
     const [p, q] = t.route.split("?");
     const qs = (q || "").replace(/(^|&)_r=\d+/g, "").replace(/^&/, "");
-    const fresh = p + "?" + (qs ? qs + "&" : "") + "_r=" + Date.now();
-    if (t.id !== active) {
-      setActive(t.id);
-      saveState(tabs, t.id);
+    if (t.id === active) {
+      // Iter 502 (user request) — clicking the ACTIVE tab refreshes that
+      // tab's own page (remount + refetch) and stays there.
+      const fresh = p + "?" + (qs ? qs + "&" : "") + "_r=" + Date.now();
+      switching.current = t.route;
+      router.replace(fresh as any);
+      return;
     }
+    // Iter 659 (user bug — "issue using multiple tab") — switching to a
+    // DIFFERENT tab is a plain navigation now: no forced-remount nonce, so
+    // no double reload / white flash on every switch.
+    setActive(t.id);
+    saveState(tabs, t.id);
     switching.current = t.route;
-    router.replace(fresh as any);
+    router.replace((qs ? `${p}?${qs}` : p) as any);
   };
 
   const addTab = () => {
+    // Iter 659 (user bug) — don't stack duplicate Dashboard tabs: if a tab
+    // is already sitting on the Dashboard, jump to it instead.
+    const existing = tabs.find((x) => x.route.split("?")[0] === HOME);
+    if (existing) { switchTab(existing); return; }
     if (tabs.length >= MAX_TABS) return;
     const t = { id: newId(), route: HOME, label: labelFor(HOME) };
     const next = [...tabs, t];
