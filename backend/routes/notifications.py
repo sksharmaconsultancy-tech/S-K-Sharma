@@ -28,24 +28,47 @@ async def list_notifications(authorization: Optional[str] = Header(None)):
     cid = user.get("company_id")
     # Fetch global notifications (company_id=None) + user's own company notifications
     q = {"$or": [{"company_id": None}, {"company_id": {"$exists": False}}]}
-    if cid:
+    if role == "super_admin":
+        # Iter 666 — super admins see notifications across ALL companies.
+        q = {}
+    elif cid:
         q = {"$or": [{"company_id": None}, {"company_id": {"$exists": False}}, {"company_id": cid}]}
     notifs = await db.notifications.find(q, {"_id": 0}).sort("created_at", -1).to_list(200)
     out = []
+    uid = user["user_id"]
     for n in notifs:
         aud = n.get("audience", "all")
-        if aud == "all":
-            out.append(n)
-        elif aud == "employees" and role == "employee":
-            out.append(n)
-        elif aud == "user" and n.get("target_user_id") == user["user_id"]:
-            # Iter 99 — personal notifications (e.g. own punch in/out).
-            out.append(n)
-        elif aud == "admins" and role in ("company_admin", "super_admin"):
-            out.append(n)
-        elif aud == "super_admins" and role == "super_admin":
-            out.append(n)
+        keep = (
+            aud == "all"
+            or (aud == "employees" and role == "employee")
+            or (aud == "user" and n.get("target_user_id") == uid)
+            or (aud == "admins" and role in ("company_admin", "super_admin"))
+            or (aud == "super_admins" and role == "super_admin")
+        )
+        if not keep:
+            continue
+        # Iter 666 — per-user read state (server-side).
+        n["read"] = uid in (n.get("read_by") or [])
+        n.pop("read_by", None)
+        out.append(n)
     return {"notifications": out}
+
+
+@router.post("/notifications/mark-read")
+async def mark_notifications_read(payload: dict = None,
+                                  authorization: Optional[str] = Header(None)):
+    """Iter 666 — mark specific ids (or all) as READ for the current user."""
+    user = await get_user_from_token(authorization)
+    payload = payload or {}
+    uid = user["user_id"]
+    ids = payload.get("ids") or []
+    if payload.get("all"):
+        await db.notifications.update_many({}, {"$addToSet": {"read_by": uid}})
+    elif ids:
+        await db.notifications.update_many(
+            {"notification_id": {"$in": [str(i) for i in ids]}},
+            {"$addToSet": {"read_by": uid}})
+    return {"ok": True}
 
 
 @router.post("/notifications")

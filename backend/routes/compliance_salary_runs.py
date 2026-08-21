@@ -2132,6 +2132,20 @@ async def _create_compliance_salary_run_core(
         "finalized": {"$ne": True},
     })
     await db.compliance_salary_runs.insert_one(run)
+    # Iter 666 — notification layer (never blocks processing).
+    try:
+        from utils.notify import emit as _notify
+        await _notify(db, title="Salary Processing Completed",
+                      message=(f"{payload.month} compliance salary processed for "
+                               f"{len(run.get('rows') or [])} employee(s)"
+                               f"{' from imported sheet' if payload.use_imported_sheet else ''}."),
+                      audience="admins", company_id=payload.company_id,
+                      category="salary",
+                      priority="important",
+                      action_url=f"/compliance-salary-run?run_id={run['run_id']}",
+                      reference_id=run["run_id"])
+    except Exception:
+        pass
     # Iter 310 — immutable Freeze Salary snapshot (never edited by
     # save-rows / reprocess — kept as the audit copy of what was imported
     # and how the difference was allocated).
@@ -2413,6 +2427,19 @@ async def finalize_compliance_salary_run(
     }
     await db.compliance_salary_runs.update_one({"run_id": run_id}, {"$set": stamp})
     logger.info("[compliance-run] finalized run=%s by %s", run_id, admin["user_id"])
+    # Iter 666 — notification layer (never blocks the lock).
+    try:
+        from utils.notify import emit as _notify
+        await _notify(db, title="Salary Locked",
+                      message=(f"{run.get('month')} salary run "
+                               f"({run.get('employee_type') or 'All Groups'}) has been "
+                               f"finalized & locked."),
+                      audience="admins", company_id=run.get("company_id"),
+                      category="salary", priority="important",
+                      action_url=f"/compliance-salary-run?run_id={run_id}",
+                      reference_id=run_id)
+    except Exception:
+        pass
     # Iter 388 (Phase 4) — append-only monthly statutory snapshot.
     try:
         from routes.compliance_validation import write_monthly_snapshot

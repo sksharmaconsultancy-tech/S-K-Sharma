@@ -7482,3 +7482,30 @@ user_sessions insert when needed.
   fixed-days picker UI, workflow bullets + label gone. Migration (local
   0 firms + deploy665 PYMIG2) converts "fixed" -> AGV. Backend "fixed"
   branch left harmless for safety.
+
+## Iter 666 — Notification System Enhancement (user spec)
+Backend:
+- utils/notify.py emit() (never raises): category/priority/action_url/
+  reference_id/read_by fields on db.notifications.
+- notifications.py: per-user read flag (read_by), POST /notifications/
+  mark-read {ids|all}; super_admin sees ALL companies (was blank cid ->
+  global-only); company admins own+global (unchanged).
+- Event hooks (try/except, non-blocking): salary processed (create core
+  after insert_one), Salary Locked (finalize), Salary Import Completed/
+  Partial (_store_import), New Leave Request (leaves insert), Leave
+  Approved/Rejected (decide, audience user).
+Frontend:
+- useUnreadNotifications: 30s poll + focus refetch + freshItems (new
+  arrivals) + markRead(ids|"all"); unread excludes server-read.
+- src/utils/notifHelpers.ts: NOTIF_CATEGORIES icons/colors, PRIORITY_
+  COLORS, prefs localStorage (sks.notif.prefs.v1: toasts ON, sound OFF,
+  per-category), toast dedupe (sks.notif.toasted.v1), WebAudio chime.
+- AdminWebShell: dropdown rows w/ icons+priority bars+unread bg+action
+  chevron+click->markRead+router.push; open=seen only; Mark all read =
+  server markRead; toast top-right 6.5s (testID notif-toast). Bell
+  testid is `web-notif-bell`.
+- notifications.tsx: search + All/Unread/9-cat filters + Mark All Read +
+  settings panel (gear testID notif-settings-btn) + priority/read UI.
+- Verified: emit->API shows category/priority/action/read; mark-read all
+  ->unread 0; page UI screenshot OK. Dropdown shares same markup.
+- deploy666 serves via temp_bundle; APP_ITERATION=666.

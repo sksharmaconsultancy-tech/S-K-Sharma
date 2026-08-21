@@ -17,7 +17,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api } from "@/src/api/client";
 
 const SEEN_KEY = "sksharma.notifications.seen.v1";
-const POLL_INTERVAL_MS = 60_000;
+const POLL_INTERVAL_MS = 30_000;
 
 async function readSeen(): Promise<Set<string>> {
   try {
@@ -42,6 +42,9 @@ export function useUnreadNotifications() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const timerRef = useRef<any>(null);
+  // Iter 666 — items that arrived in the LAST poll (for toast popups).
+  const [freshItems, setFreshItems] = useState<any[]>([]);
+  const knownIdsRef = useRef<Set<string> | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -49,8 +52,16 @@ export function useUnreadNotifications() {
       const list = r?.notifications || [];
       const seen = await readSeen();
       const unread = list.filter(
-        (n) => n?.notification_id && !seen.has(n.notification_id),
+        (n) => n?.notification_id && !seen.has(n.notification_id) && !n.read,
       );
+      // Detect NEW arrivals since the previous poll (skip first load).
+      if (knownIdsRef.current) {
+        const fresh = list.filter(
+          (n) => n?.notification_id && !knownIdsRef.current!.has(n.notification_id) && !n.read,
+        );
+        if (fresh.length) setFreshItems(fresh.slice(0, 3));
+      }
+      knownIdsRef.current = new Set(list.map((n) => n?.notification_id).filter(Boolean));
       setItems(list);
       setUnreadCount(unread.length);
     } catch {
@@ -63,8 +74,16 @@ export function useUnreadNotifications() {
   useEffect(() => {
     load();
     timerRef.current = setInterval(load, POLL_INTERVAL_MS);
+    // Iter 666 — refetch instantly when the tab regains focus.
+    const onFocus = () => load();
+    if (typeof window !== "undefined" && window.addEventListener) {
+      window.addEventListener("focus", onFocus);
+    }
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      if (typeof window !== "undefined" && window.removeEventListener) {
+        window.removeEventListener("focus", onFocus);
+      }
     };
   }, [load]);
 
@@ -81,5 +100,19 @@ export function useUnreadNotifications() {
     setUnreadCount(0);
   }, [items]);
 
-  return { unreadCount, items, loading, refresh: load, markAllSeen };
+  // Iter 666 — server-side READ state (per user).
+  const markRead = useCallback(async (ids: string[] | "all") => {
+    try {
+      await api("/notifications/mark-read", {
+        method: "POST",
+        body: ids === "all" ? { all: true } : { ids },
+      });
+      setItems((prev) => prev.map((n) =>
+        ids === "all" || (ids as string[]).includes(n.notification_id)
+          ? { ...n, read: true } : n));
+      if (ids === "all") { await markAllSeen(); }
+    } catch { /* non-blocking */ }
+  }, [markAllSeen]);
+
+  return { unreadCount, items, loading, refresh: load, markAllSeen, markRead, freshItems, clearFresh: () => setFreshItems([]) };
 }

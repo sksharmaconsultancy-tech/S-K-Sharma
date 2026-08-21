@@ -12,6 +12,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { colors, radius, spacing, type } from "@/src/theme";
 import { useUnreadNotifications } from "@/src/hooks/useUnreadNotifications";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { NOTIF_CATEGORIES, catOf, PRIORITY_COLORS, loadPrefs, savePrefs, type NotifPrefs } from "@/src/utils/notifHelpers";
 
 const AUDIENCE = ["all", "employees", "admins"] as const;
 
@@ -27,6 +28,15 @@ export default function NotificationsScreen() {
   const [body, setBody] = useState("");
   const [audience, setAudience] = useState<(typeof AUDIENCE)[number]>("all");
   const [submitting, setSubmitting] = useState(false);
+  // Iter 666 — search, filters & settings.
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState<string>("all");
+  const [prefs, setPrefs] = useState<NotifPrefs>(loadPrefs());
+  const [showSettings, setShowSettings] = useState(false);
+  const setPref = (patch: Partial<NotifPrefs>) => {
+    const next = { ...prefs, ...patch };
+    setPrefs(next); savePrefs(next);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -38,12 +48,22 @@ export default function NotificationsScreen() {
   useEffect(() => { load(); }, [load]);
   // Iter 89 — Mark all fetched notifications as "seen" so the bell badge
   // clears the moment the user opens the inbox.
-  const { markAllSeen } = useUnreadNotifications();
+  const { markAllSeen, markRead } = useUnreadNotifications();
   useEffect(() => {
     if (!loading && items.length > 0) {
       markAllSeen();
     }
   }, [loading, items, markAllSeen]);
+
+  const visible = items.filter((n) => {
+    if (filter === "unread" && n.read) return false;
+    if (filter !== "all" && filter !== "unread" && String(n.category || "announcement") !== filter) return false;
+    if (q.trim()) {
+      const hay = `${n.title || ""} ${n.body || ""} ${n.message || ""}`.toLowerCase();
+      if (!hay.includes(q.trim().toLowerCase())) return false;
+    }
+    return true;
+  });
 
   const submit = async () => {
     if (!title || !body) return;
@@ -63,25 +83,89 @@ export default function NotificationsScreen() {
             <Ionicons name="chevron-back" size={26} color={colors.onSurface} />
           </Pressable>
           <Text style={styles.h1}>Notifications</Text>
-          <View style={{ width: 26 }} />
+          <Pressable onPress={() => setShowSettings((s) => !s)} hitSlop={8} testID="notif-settings-btn">
+            <Ionicons name="settings-outline" size={20} color={colors.onSurfaceSecondary} />
+          </Pressable>
         </View>
       </SafeAreaView>
 
+      {/* Iter 666 — search + category filters + mark-all-read */}
+      <View style={{ paddingHorizontal: spacing.lg, gap: 8 }}>
+        <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+          <TextInput value={q} onChangeText={setQ} style={[styles.input, { flex: 1, marginTop: 0 }]}
+            placeholder="Search notifications…" placeholderTextColor={colors.onSurfaceTertiary} />
+          <Pressable onPress={() => { markRead("all"); setItems((p) => p.map((n) => ({ ...n, read: true }))); }}
+            style={styles.markAllBtn} testID="notif-page-mark-all">
+            <Ionicons name="checkmark-done-outline" size={14} color="#fff" />
+            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Mark All Read</Text>
+          </Pressable>
+        </View>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+          {["all", "unread", ...Object.keys(NOTIF_CATEGORIES)].map((f) => (
+            <Pressable key={f} onPress={() => setFilter(f)}
+              style={[styles.typeChip, { paddingVertical: 5 }, filter === f && styles.typeChipActive]}>
+              <Text style={[styles.typeChipTxt, { fontSize: 11 }, filter === f && styles.typeChipTxtActive]}>
+                {f === "all" ? "All" : f === "unread" ? "Unread" : NOTIF_CATEGORIES[f].label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        {showSettings ? (
+          <View style={styles.settingsBox}>
+            <Text style={{ fontSize: 13, fontWeight: "800", color: colors.onSurface, marginBottom: 6 }}>Notification Settings (this device)</Text>
+            {[["Toast Notifications", "toasts"], ["Notification Sound", "sound"]].map(([lbl, k]) => (
+              <Pressable key={k} style={styles.setRow}
+                onPress={() => setPref({ [k]: !(prefs as any)[k] } as any)}>
+                <Text style={styles.setLbl}>{lbl}</Text>
+                <Text style={[styles.setVal, (prefs as any)[k] && { color: "#059669" }]}>{(prefs as any)[k] ? "ON" : "OFF"}</Text>
+              </Pressable>
+            ))}
+            {Object.entries(NOTIF_CATEGORIES).map(([k, c]) => (
+              <Pressable key={k} style={styles.setRow}
+                onPress={() => setPref({ categories: { ...prefs.categories, [k]: !(prefs.categories[k] !== false) } })}>
+                <Text style={styles.setLbl}>{c.label} Notifications</Text>
+                <Text style={[styles.setVal, prefs.categories[k] !== false && { color: "#059669" }]}>
+                  {prefs.categories[k] !== false ? "ON" : "OFF"}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+      </View>
+
       <KeyboardAwareScrollView bottomOffset={62} contentContainerStyle={styles.scroll}>
         {loading ? <ActivityIndicator style={{ marginTop: 60 }} color={colors.brandPrimary} /> :
-          items.length === 0 ? <Text style={styles.empty}>No notifications yet.</Text> :
-            items.map((n) => (
-              <View key={n.notification_id} style={styles.card}>
-                <View style={styles.icon}>
-                  <Ionicons name="megaphone-outline" size={18} color={colors.onBrandTertiary} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.title}>{n.title}</Text>
-                  <Text style={styles.body}>{n.body}</Text>
-                  <Text style={styles.meta}>{new Date(n.created_at).toLocaleString()} · {n.audience}</Text>
-                </View>
-              </View>
-            ))}
+          visible.length === 0 ? <Text style={styles.empty}>No notifications found.</Text> :
+            visible.map((n) => {
+              const cat = catOf(n);
+              const pr = PRIORITY_COLORS[String(n.priority || "normal")] || "transparent";
+              return (
+                <Pressable key={n.notification_id}
+                  style={[styles.card,
+                    !n.read && { backgroundColor: "#F0F7FF", borderColor: "#BFDBFE" },
+                    pr !== "transparent" && { borderLeftWidth: 4, borderLeftColor: pr }]}
+                  onPress={() => {
+                    if (n.notification_id && !n.read) {
+                      markRead([n.notification_id]);
+                      setItems((p) => p.map((x) => x.notification_id === n.notification_id ? { ...x, read: true } : x));
+                    }
+                    if (n.action_url) router.push(n.action_url as any);
+                  }}>
+                  <View style={[styles.icon, { backgroundColor: `${cat.color}22` }]}>
+                    <Ionicons name={cat.icon} size={18} color={cat.color} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.title, !n.read && { fontWeight: "800" }]}>{n.title}</Text>
+                    <Text style={styles.body}>{n.body || n.message}</Text>
+                    <Text style={styles.meta}>
+                      {cat.label} · {new Date(n.created_at).toLocaleString()} · {n.audience}
+                      {n.priority === "critical" ? "  ⚠ CRITICAL" : n.priority === "important" ? "  • Important" : ""}
+                    </Text>
+                  </View>
+                  {n.action_url ? <Ionicons name="chevron-forward" size={16} color={colors.onSurfaceTertiary} /> : null}
+                </Pressable>
+              );
+            })}
         <View style={{ height: 100 }} />
       </KeyboardAwareScrollView>
 
@@ -154,4 +238,9 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md, color: colors.onSurface, fontSize: type.base, marginTop: 6, backgroundColor: colors.surfaceSecondary },
   submit: { marginTop: spacing.lg, backgroundColor: colors.cta, paddingVertical: 14, borderRadius: radius.pill, alignItems: "center" },
   submitTxt: { color: "#fff", fontSize: type.lg, fontWeight: "500" },
+  markAllBtn: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.brandPrimary, paddingHorizontal: 12, paddingVertical: 9, borderRadius: radius.pill },
+  settingsBox: { backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md },
+  setRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  setLbl: { fontSize: 13, color: colors.onSurfaceSecondary },
+  setVal: { fontSize: 13, fontWeight: "800", color: colors.onSurfaceTertiary },
 });

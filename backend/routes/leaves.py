@@ -105,6 +105,18 @@ async def create_leave(payload: LeaveCreate, authorization: Optional[str] = Head
         "created_at": now_iso(),
     }
     await db.leaves.insert_one(leave)
+    # Iter 666 — bell notification to company admins.
+    try:
+        from utils.notify import emit as _notify
+        await _notify(db, title="New Leave Request",
+                      message=(f"{user.get('name') or 'An employee'} applied for "
+                               f"{leave.get('leave_type')} leave "
+                               f"{leave.get('from_date')} → {leave.get('to_date')}."),
+                      audience="admins", company_id=user.get("company_id"),
+                      category="leave", priority="normal",
+                      action_url="/leave-approvals", reference_id=leave.get("leave_id"))
+    except Exception:
+        pass
     # Iter 103 — automated email trigger
     try:
         from routes.email_notifications import fire_email_event
@@ -204,6 +216,20 @@ async def decide_leave(leave_id: str, payload: LeaveDecision,
         }
         await _ws.broadcast_firm(leave.get("company_id") or "", _ev)
         await _ws.broadcast_user(leave.get("user_id") or "", _ev)
+    except Exception:
+        pass
+    # Iter 666 — bell notification to the employee (personal).
+    try:
+        from utils.notify import emit as _notify
+        _ap = payload.status == "approved"
+        await _notify(db, title=f"Leave {'Approved' if _ap else 'Rejected'}",
+                      message=(f"Your {leave.get('leave_type')} leave "
+                               f"{leave.get('from_date')} → {leave.get('to_date')} was "
+                               f"{'approved ✓' if _ap else 'rejected'}."),
+                      audience="user", company_id=leave.get("company_id"),
+                      target_user_id=leave.get("user_id"),
+                      category="leave", priority="normal",
+                      action_url="/leaves", reference_id=leave.get("leave_id"))
     except Exception:
         pass
     # Iter 103 — automated email trigger

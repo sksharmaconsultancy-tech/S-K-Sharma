@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -23,6 +23,7 @@ import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import WorkspaceTabs from "@/src/components/WorkspaceTabs";
 import { onSyncMessage } from "@/src/utils/workspaceSync";
 import { useUnreadNotifications } from "@/src/hooks/useUnreadNotifications";
+import { catOf, PRIORITY_COLORS, loadPrefs, alreadyToasted, rememberToasted, playNotifSound } from "@/src/utils/notifHelpers";
 import { usePrimaryInbox } from "@/src/hooks/usePrimaryInbox";
 import { useTheme } from "@/src/context/ThemeContext";
 import { colors, radius, spacing, type, isDarkTheme, DARK_THEME_ID } from "@/src/theme";
@@ -729,7 +730,28 @@ export default function AdminWebShell({ children }: Props) {
   // without re-entering credentials).
   const [logoutModal, setLogoutModal] = React.useState(false);
   // Iter 89 — Notifications bell + unread badge for the admin header.
-  const { unreadCount: unreadNotifCount, items: notifItems, markAllSeen } = useUnreadNotifications();
+  const { unreadCount: unreadNotifCount, items: notifItems, markAllSeen, markRead, freshItems, clearFresh } = useUnreadNotifications();
+
+  // Iter 666 — toast popups + optional sound for NEW notifications.
+  const [toast666, setToast666] = useState<any | null>(null);
+  const toastTimer666 = useRef<any>(null);
+  useEffect(() => {
+    if (!freshItems?.length) return;
+    const prefs = loadPrefs();
+    const candidates = freshItems.filter((n: any) =>
+      n?.notification_id && !alreadyToasted(n.notification_id)
+      && prefs.categories[String(n.category || "announcement")] !== false);
+    if (!candidates.length) { clearFresh(); return; }
+    rememberToasted(candidates.map((n: any) => n.notification_id));
+    if (prefs.toasts) {
+      setToast666(candidates[0]);
+      if (toastTimer666.current) clearTimeout(toastTimer666.current);
+      toastTimer666.current = setTimeout(() => setToast666(null), 6500);
+    }
+    if (prefs.sound) playNotifSound();
+    clearFresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [freshItems]);
   // Iter 180 — global menu search + dark mode toggle.
   const [navQuery, setNavQuery] = React.useState("");
   const { themeId, setThemeId } = useTheme();
@@ -1647,7 +1669,7 @@ export default function AdminWebShell({ children }: Props) {
             {/* Iter 89 — Notifications bell — Iter 294: opens the
                 Notification Centre dropdown panel. */}
             <Pressable
-              onPress={() => setNotifOpen((v) => !v)}
+              onPress={() => setNotifOpen((v) => { if (!v) markAllSeen(); return !v; })}
               style={({ pressed }) => [
                 styles.notifBellBtn,
                 pressed && { opacity: 0.85 },
@@ -1834,7 +1856,7 @@ export default function AdminWebShell({ children }: Props) {
           <View style={styles.notifPanelHead}>
             <Text style={styles.notifPanelTitle}>Notifications</Text>
             <View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}>
-              <Pressable onPress={markAllSeen} hitSlop={6} testID="notif-mark-all">
+              <Pressable onPress={() => markRead("all")} hitSlop={6} testID="notif-mark-all">
                 <Text style={styles.notifPanelLink}>Mark all read</Text>
               </Pressable>
               <Pressable
@@ -1850,27 +1872,81 @@ export default function AdminWebShell({ children }: Props) {
             </View>
           </View>
           <ScrollView style={{ maxHeight: 360 }}>
-            {(notifItems || []).slice(0, 12).map((n: any, i: number) => (
-              <View key={n.notification_id || i} style={styles.notifRow}>
-                <Ionicons name="notifications-outline" size={15} color={colors.brandPrimary} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.notifRowTitle} numberOfLines={1}>
-                    {n.title || n.message || "Notification"}
-                  </Text>
-                  {n.title && n.message ? (
-                    <Text style={styles.notifRowMsg} numberOfLines={2}>{n.message}</Text>
+            {(notifItems || []).slice(0, 12).map((n: any, i: number) => {
+              const cat = catOf(n);
+              const pr = PRIORITY_COLORS[String(n.priority || "normal")] || "transparent";
+              return (
+                <Pressable
+                  key={n.notification_id || i}
+                  style={[styles.notifRow,
+                    !n.read && { backgroundColor: "#F0F7FF" },
+                    pr !== "transparent" && { borderLeftWidth: 3, borderLeftColor: pr }]}
+                  onPress={() => {
+                    if (n.notification_id) markRead([n.notification_id]);
+                    if (n.action_url) { setNotifOpen(false); router.push(n.action_url as any); }
+                  }}
+                >
+                  <Ionicons name={cat.icon} size={15} color={cat.color} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.notifRowTitle, !n.read && { fontWeight: "800" }]} numberOfLines={1}>
+                      {n.title || n.message || "Notification"}
+                    </Text>
+                    {n.title && (n.message || n.body) ? (
+                      <Text style={styles.notifRowMsg} numberOfLines={2}>{n.message || n.body}</Text>
+                    ) : null}
+                    <Text style={styles.notifRowAt}>
+                      {cat.label} · {(n.created_at || "").slice(0, 16).replace("T", " ")}
+                      {n.priority === "critical" ? "  ⚠ CRITICAL" : n.priority === "important" ? "  • Important" : ""}
+                    </Text>
+                  </View>
+                  {n.action_url ? (
+                    <Ionicons name="chevron-forward" size={14} color={colors.onSurfaceTertiary} />
                   ) : null}
-                  <Text style={styles.notifRowAt}>
-                    {(n.created_at || "").slice(0, 16).replace("T", " ")}
-                  </Text>
-                </View>
-              </View>
-            ))}
+                </Pressable>
+              );
+            })}
             {(notifItems || []).length === 0 ? (
               <Text style={styles.gsEmpty}>No notifications yet.</Text>
             ) : null}
           </ScrollView>
         </View>
+      ) : null}
+
+      {/* Iter 666 — new-notification toast (top-right, 6.5 s, deduped). */}
+      {toast666 ? (
+        <Pressable
+          onPress={() => {
+            const n = toast666; setToast666(null);
+            if (n.notification_id) markRead([n.notification_id]);
+            router.push((n.action_url || "/notifications") as any);
+          }}
+          style={{ position: "absolute", top: 62, right: 16, zIndex: 900, maxWidth: 340,
+                   backgroundColor: "#FFFFFF", borderRadius: 12, padding: 12,
+                   flexDirection: "row", gap: 10, alignItems: "flex-start",
+                   borderWidth: 1, borderColor: "#DBEAFE",
+                   shadowColor: "#0F172A", shadowOpacity: 0.18, shadowRadius: 14,
+                   shadowOffset: { width: 0, height: 6 }, elevation: 8,
+                   borderLeftWidth: 4,
+                   borderLeftColor: PRIORITY_COLORS[String(toast666.priority || "normal")] !== "transparent"
+                     ? PRIORITY_COLORS[String(toast666.priority)] : catOf(toast666).color }}
+          testID="notif-toast"
+        >
+          <Ionicons name={catOf(toast666).icon} size={18} color={catOf(toast666).color} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 13, fontWeight: "800", color: "#0F172A" }} numberOfLines={1}>
+              {toast666.title || "Notification"}
+            </Text>
+            <Text style={{ fontSize: 12, color: "#475569", marginTop: 2 }} numberOfLines={2}>
+              {toast666.message || toast666.body || ""}
+            </Text>
+            {toast666.action_url ? (
+              <Text style={{ fontSize: 12, fontWeight: "700", color: "#2563EB", marginTop: 4 }}>View →</Text>
+            ) : null}
+          </View>
+          <Pressable onPress={() => setToast666(null)} hitSlop={8}>
+            <Ionicons name="close" size={14} color="#94A3B8" />
+          </Pressable>
+        </Pressable>
       ) : null}
 
       {/* Iter 294 — AI Payroll Assistant (chat + voice). */}

@@ -385,6 +385,21 @@ async def _store_import(admin: dict, company_id: str, month: str,
         except Exception as ex:  # noqa: BLE001 — never fail the import
             auto_run = {"ok": False, "error": str(ex)[:200]}
 
+    # Iter 666 — notification layer (never blocks the import).
+    try:
+        from utils.notify import emit as _notify
+        _unm = len(unmatched)
+        await _notify(
+            db,
+            title=("Salary Import Completed" if _unm == 0 else "Salary Import — Partial"),
+            message=(f"{filename or source}: {len(matched)} of {len(rows)} row(s) imported "
+                     f"for {month}" + (f" — {_unm} unmatched, please review." if _unm else ".")),
+            audience="admins", company_id=company_id, category="import",
+            priority=("important" if _unm else "normal"),
+            action_url="/compliance-salary-run", reference_id=month)
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "company_name": company.get("name"),
