@@ -208,7 +208,9 @@ def _parse_sheet(content: bytes, filename: str) -> list:
 
 
 async def _store_import(admin: dict, company_id: str, month: str,
-                        rows: list, source: str, filename: str) -> dict:
+                        rows: list, source: str, filename: str,
+                        employee_type: str | None = None,
+                        month_days: int | None = None) -> dict:
     """Match parsed rows to the firm's employees and persist them."""
     if not company_id or not month:
         raise HTTPException(status_code=400, detail="company_id and month are required")
@@ -365,10 +367,17 @@ async def _store_import(admin: dict, company_id: str, month: str,
             # every sheet import silently failed ("Auto-process failed").
             from routes.compliance_salary_runs import (
                 _create_compliance_salary_run_core, ComplianceSalaryRunCreate)
+            # Iter 661 (user bug — "imported 56 but showing 69 / All
+            # Groups") — the auto-reprocess must respect the EMPLOYEE
+            # GROUP + Month Days selected in Configure Batch, exactly
+            # like pressing Salary Process manually.
             resp = await _create_compliance_salary_run_core(
                 ComplianceSalaryRunCreate(
                     month=month, company_id=company_id,
-                    use_imported_sheet=True),
+                    use_imported_sheet=True,
+                    employee_type=employee_type or None,
+                    month_days=int(month_days) if month_days else None,
+                    override_month_days=bool(month_days)),
                 admin)
             auto_run = {"ok": True, "run": resp.get("run")}
         except HTTPException as ex:
@@ -437,7 +446,13 @@ async def compliance_import_upload(
     if len(content) > 8 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 8 MB)")
     rows = _parse_sheet(content, filename)
-    return await _store_import(admin, company_id, month, rows, "file", filename)
+    # Iter 661 — Configure Batch context so auto-reprocess matches it.
+    _etype = str(payload.get("employee_type") or "").strip() or None
+    if _etype and _etype.lower() == "all":
+        _etype = None
+    _mdays = payload.get("month_days")
+    return await _store_import(admin, company_id, month, rows, "file", filename,
+                               employee_type=_etype, month_days=_mdays)
 
 
 @router.get("/gmail/spreadsheet-attachments")

@@ -7415,3 +7415,16 @@ Current iteration: 594. Next: 595.
   the separate _daily_report_impl call -> RecursionError/F821; both fixed.
 - Verified: hours xlsx 127 rows -> 1 with hide_zero=1; UI toggle 127 -> 1.
 - deploy660 ready; temp_bundle serves it; APP_ITERATION=660.
+
+## Iter 661 — Import Salary Sheet drops Employee Group (user bug)
+- Symptom: firm SILVERLINE, group LABOUR (56) selected; after sheet
+  import the auto-reprocess produced "All Groups" 69-employee run with
+  month_days 31 instead of 26.
+- Cause: compliance_import.py auto-reprocess built
+  ComplianceSalaryRunCreate with only month/company/use_imported_sheet.
+- Fix: upload endpoint accepts employee_type + month_days; _store_import
+  passes them through (override_month_days when days given); frontend
+  pickAndUpload sends empType + monthDaysOverride.
+- Verified: upload with employee_type=STAFF -> run employee_type STAFF,
+  16 rows (not 124), month_days 26. Test data cleaned.
+- deploy661 ready; temp_bundle serves it; APP_ITERATION=661.

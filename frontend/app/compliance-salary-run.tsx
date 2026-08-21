@@ -721,7 +721,13 @@ export default function ComplianceSalaryRunScreen() {
       const b64 = await fileToBase64(asset.uri);
       const r = await api<any>("/admin/compliance-import/upload", {
         method: "POST",
-        body: { company_id: activeCompanyId, month, filename: asset.name, content_base64: b64 },
+        body: {
+          company_id: activeCompanyId, month, filename: asset.name, content_base64: b64,
+          // Iter 661 (user bug) — the auto-reprocess after import must keep
+          // the SAME Employee Group + Month Days chosen in Configure Batch.
+          employee_type: empType,
+          month_days: Number(monthDaysOverride) || undefined,
+        },
       });
       setUseImportedSheet(true);
       await loadImportStatus();
