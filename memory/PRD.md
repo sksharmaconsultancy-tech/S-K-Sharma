@@ -7626,3 +7626,17 @@ Frontend:
   temp_bundle -> deploy672; APP_ITERATION=672.
 - Smoke verified: digest wide at top (x260 w1164), toast stack x=16
   bottom-left with Hide. Seeds/test rows cleaned.
+
+## Iter 673 — "Yesterday at a glance" box REMOVED from Dashboard (user)
+- User's live (on 672 bundle) STILL showed the digest box misrendered
+  inside the Compliance panel. User directive: hide the box entirely —
+  notifications only via (1) live popup window when NEW ones arrive and
+  (2) the bell button.
+- portal-dashboard.tsx: NotifDigestCard full variant + import REMOVED.
+  Compact digest KEPT pinned inside the bell dropdown (mounted only on
+  bell click, post-hydration => safe). NotifDigestCard.tsx retained for
+  the compact variant.
+- sw.js cache v10 -> v11. deploy_vps_iter673.sh (verify: NotifDigestCard
+  ABSENT from portal-dashboard.tsx, sks-pwa-v11); temp_bundle ->
+  deploy673; APP_ITERATION=673.
+- Smoke verified: dashboard renders with NO digest card/slot (count 0).
