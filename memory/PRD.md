@@ -7438,3 +7438,13 @@ Current iteration: 594. Next: 595.
   colFilters + empSearch applied).
 - Verified via playwright: filter SURENDRA -> TOTAL = 2 rows' sums only.
 - deploy662 ready; temp_bundle serves it; APP_ITERATION=662.
+
+## Iter 663 — VPS nginx "client_max_body_size duplicate" (user deploy error)
+- User's VPS: sks-adms.conf + sks-upload.conf both had http-level
+  client_max_body_size -> nginx -t failed, 8b/8c skipped reload.
+- deploy663 step 8b now REPAIRS first: strips the directive from every
+  conf.d file except sks-upload.conf (owns global 100m; recreated if
+  missing), dedupes within it (awk seen++), and only patches
+  sites-enabled server blocks (100m + 300s timeouts). conf.d never
+  touched with body-size again.
+- APP_ITERATION=663; temp_bundle serves deploy663.
