@@ -153,6 +153,12 @@ const st = StyleSheet.create({
   card: {
     backgroundColor: "#FFFBEB", borderRadius: 14, borderWidth: 1,
     borderColor: "#FDE68A", padding: 12, marginBottom: 10,
+    // Iter 670 — defensive layout hardening (user's live portal showed the
+    // card overlapping dashboard panels under a stale cached bundle):
+    // keep the card strictly in normal flow, full-width, clipped, and
+    // painting ABOVE any absolutely-positioned chart labels of siblings.
+    position: "relative", zIndex: 5, alignSelf: "stretch",
+    width: "100%", maxWidth: "100%", overflow: "hidden",
   },
   cardCompact: {
     marginHorizontal: 10, marginTop: 8, marginBottom: 4, padding: 10, borderRadius: 10,

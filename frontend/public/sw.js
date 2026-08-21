@@ -7,7 +7,7 @@
  *     (Iter 291: fixes "PWA sometimes won't open" on weak connections).
  *   • static assets (js/css/img)   → stale-while-revalidate.
  */
-const CACHE = "sks-pwa-v8"; // Iter 658 — bump purges stale cached shells (old-bundle fix)
+const CACHE = "sks-pwa-v9"; // Iter 670 — bump purges stale cached shells (digest-card overlap fix)
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();

@@ -7566,3 +7566,24 @@ Frontend:
   cleanup.py).
 - deploy_vps_iter669.sh; temp_bundle kind=script -> deploy669;
   APP_ITERATION=669.
+
+## Iter 670 — Digest card overlap fix (user screenshot from live VPS)
+- User's live portal (smartpayrolling.com, already on 669) showed the
+  "Yesterday at a glance" card floating/overlapping Compliance & KPI
+  panels. NOT reproducible here: verified dev metro AND a full
+  production `expo export -p web` build (served via test proxy
+  test_iter669_prod_proxy.py) both render the card perfectly at
+  1920x1080 with heavy data. Root cause: stale PWA-cached shell from an
+  older deploy mixing with the new bundle (same class of issue as
+  Iter 658).
+- Fixes: public/sw.js CACHE bumped sks-pwa-v8 -> v9 (purges old cached
+  shells on next open); NotifDigestCard full-card style hardened
+  (position relative, zIndex 5, alignSelf stretch, width/maxWidth 100%,
+  overflow hidden) so it can never paint over sibling panels/chart
+  labels even under a stale shell.
+- deploy_vps_iter670.sh (verify greps: APP_ITERATION 670 + sks-pwa-v9
+  in $WEB_DIR/sw.js); temp_bundle kind=script -> deploy670;
+  APP_ITERATION=670. User must close all portal tabs once (or
+  Ctrl+Shift+R) after deploying so the new SW takes over.
+- Test seeds cleaned; digest correctly hidden when yesterday had 0
+  notifications.
