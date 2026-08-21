@@ -47,7 +47,7 @@ import ProcessCommandCenter from "@/src/components/salary/ProcessCommandCenter";
 import ReportsShareModal, { type ReportFormat } from "@/src/components/salary/ReportsShareModal";
 import TotalsFooter from "@/src/components/salary/TotalsFooter";
 import GridFilterChips, { GRID_FILTER_DEFAULT, rowMatchesFilters, type GridFilters } from "@/src/components/GridFilterChips";
-import { GridScroller, stickyCol, stickyHeader } from "@/src/components/GridFreeze";
+import { GridScroller, stickyCol, stickyColRight, stickyHeader } from "@/src/components/GridFreeze";
 import { rowPassesColFilters } from "@/src/utils/colFilter";
 import { colors, radius, shadow, spacing, type } from "@/src/theme";
 import { sortEmployeeTypes } from "@/src/utils/employeeTypes";
@@ -337,6 +337,10 @@ export default function ComplianceSalaryRunScreen() {
   const [gridFilters, setGridFilters] = useState<GridFilters>(GRID_FILTER_DEFAULT);
   // Iter 306 (user #8) — tap a row to HIGHLIGHT it across the wide grid.
   const [hlRow, setHlRow] = useState<string | null>(null);
+  // Iter 657 (user request) — measure the grid's real top offset so its
+  // height always fits the viewport (frozen header + visible h-scrollbar).
+  const gridWrapRef = useRef<any>(null);
+  const [gridTopPx, setGridTopPx] = useState(170);
   // Iter 346 (user request) — Excel-style per-column header filters.
   const [colFilters, setColFilters] = useState<Record<string, string>>({});
   // Iter 127e — AUTO-ADJUST every column to its widest content so nothing
@@ -1196,6 +1200,20 @@ export default function ComplianceSalaryRunScreen() {
   const [setupCollapsed, setSetupCollapsed] = useState(false);
   const runIdOnScreen = (run as any)?.run_id || null;
   useEffect(() => { setSetupCollapsed(!!runIdOnScreen); }, [runIdOnScreen]);
+  // Iter 657 — re-measure the grid's top offset whenever the layout above
+  // it changes (run loaded / setup cards collapsed).
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    const t = setTimeout(() => {
+      try {
+        const el: any = gridWrapRef.current;
+        const rect = el?.getBoundingClientRect?.();
+        if (rect && rect.top > 40 && rect.top < 600) setGridTopPx(Math.round(rect.top));
+      } catch { /* keep default */ }
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run, setupCollapsed]);
   const dirtyRunRef = useRef<string | null>(null);
   useEffect(() => {
     if (run && dirtyRunRef.current !== run.run_id) {
@@ -3058,7 +3076,12 @@ export default function ComplianceSalaryRunScreen() {
                 Compliance Salary Process (Branch/Contractor remain). */}
             <GridFilterChips rows={run.rows} filters={gridFilters} onChange={setGridFilters} testPrefix="comp" hide={["dept"]} />
 
-            <GridScroller maxHeight={Platform.OS === "web" ? "calc(100vh - 170px)" : 640}>
+            {/* Iter 657 (user request) — the grid height is measured from
+                its real on-screen top so it ALWAYS fits the viewport: the
+                sticky header stays visible and the horizontal scrollbar
+                sits at the bottom of the screen (no page-scroll needed). */}
+            <View ref={gridWrapRef as any}>
+            <GridScroller maxHeight={Platform.OS === "web" ? `calc(100vh - ${gridTopPx + 66}px)` : 640}>
                 {/* Iter 85 pt 1 — Column-hide by firm's enabled_allowances.
                     Both header and data cells honor the same mask so
                     columns stay aligned. `basic` is always kept.
@@ -3201,6 +3224,10 @@ export default function ComplianceSalaryRunScreen() {
                             h.label === "Gross" && { backgroundColor: "#B45309", color: "#FEF3C7" },
                             h.label === "Freeze Salary" && { backgroundColor: "#5B21B6", color: "#EDE9FE" },
                             i < 4 && stickyCol(stickyOff[i], colors.brandPrimary),
+                            // Iter 657 (user request) — Present Days frozen
+                            // beside the Name block; Net frozen at the right.
+                            h.label === "Present Days" && stickyCol(stickyOff[3] + colW.name, colors.brandPrimary),
+                            h.label === "Net" && stickyColRight(colors.brandPrimary),
                           ]}
                         >
                           {h.label}
@@ -3218,6 +3245,8 @@ export default function ComplianceSalaryRunScreen() {
                           style={[
                             { width: h.w ?? colW.num, paddingHorizontal: 2, paddingVertical: 2 },
                             i < 4 && stickyCol(stickyOff[i], "#EFF6FF"),
+                            h.label === "Present Days" && stickyCol(stickyOff[3] + colW.name, "#EFF6FF"),
+                            h.label === "Net" && stickyColRight("#EFF6FF"),
                           ]}
                         >
                           {COL_FILTER_GETTERS[h.label] ? (
@@ -3287,6 +3316,8 @@ export default function ComplianceSalaryRunScreen() {
                       value={r.present_days ?? 0}
                       pdRefs={pdRefs}
                       onCommit={(n) => updatePresentDays(r.user_id, n)}
+                      onFocused={() => setHlRow(r.user_id)}
+                      frozen={stickyCol(colW.sr + colW.uan + colW.esi + colW.name, rowBg)}
                       onNav={(key) => {
                         // Iter 256 — ArrowRight jumps to the next editable
                         // column of the same row (Others / OT / TDS / Other).
@@ -3310,6 +3341,7 @@ export default function ComplianceSalaryRunScreen() {
                           <OTHoursCell
                             width={colW.num}
                             value={Math.round(otHrs * 100) / 100}
+                            onFocused={() => setHlRow(r.user_id)}
                             onCommit={(n) => updateRowField(
                               r.user_id, "ot_pay",
                               Math.round(n * hrRate * 100) / 100)}
@@ -3363,6 +3395,7 @@ export default function ComplianceSalaryRunScreen() {
                               cellRefs={cellRefs}
                               onCommit={(n) => updateRowField(r.user_id, "others", n + allowHeadsPaid(r))}
                               onNav={navigateFrom}
+                              onFocused={() => setHlRow(r.user_id)}
                             />
                           ) : null}
                           {/* Iter 644 — dynamic custom allowance head cells
@@ -3376,6 +3409,7 @@ export default function ComplianceSalaryRunScreen() {
                               cellRefs={cellRefs}
                               onCommit={(n) => updateAllowanceHead(r.user_id, l, n)}
                               onNav={navigateFrom}
+                              onFocused={() => setHlRow(r.user_id)}
                             />
                           ))}
                         </>
@@ -3391,6 +3425,7 @@ export default function ComplianceSalaryRunScreen() {
                         cellRefs={cellRefs}
                         onCommit={(n) => updateRowField(r.user_id, "ot_pay", n)}
                         onNav={navigateFrom}
+                              onFocused={() => setHlRow(r.user_id)}
                       />
                     ) : null}
                     {/* Iter 379 (user request) — Gross column HIGHLIGHTED;
@@ -3432,6 +3467,7 @@ export default function ComplianceSalaryRunScreen() {
                               cellRefs={cellRefs}
                               onCommit={(n) => updateRowField(r.user_id, "tds", n)}
                               onNav={navigateFrom}
+                              onFocused={() => setHlRow(r.user_id)}
                             />
                           ) : null}
                         </>
@@ -3462,6 +3498,7 @@ export default function ComplianceSalaryRunScreen() {
                               cellRefs={cellRefs}
                               onCommit={(n) => updateRowField(r.user_id, "advance_recovery", n)}
                               onNav={navigateFrom}
+                              onFocused={() => setHlRow(r.user_id)}
                             />
                           ) : null}
                           {/* Iter 85 — Editable "Other" deduction. */}
@@ -3472,6 +3509,7 @@ export default function ComplianceSalaryRunScreen() {
                               cellRefs={cellRefs}
                               onCommit={(n) => updateRowField(r.user_id, "other_deduction", n)}
                               onNav={navigateFrom}
+                              onFocused={() => setHlRow(r.user_id)}
                             />
                           ) : null}
                         </>
@@ -3479,7 +3517,7 @@ export default function ComplianceSalaryRunScreen() {
                     })()}
                     {/* Iter 136 (user request) — Total Deduction before Net Pay */}
                     <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(r.total_deduction)}</Text>
-                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }]}>{fmtInr(r.net)}</Text>
+                    <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }, stickyColRight(rowBg)]}>{fmtInr(r.net)}</Text>
                   </Pressable>
                   );
                 })}
@@ -3492,7 +3530,7 @@ export default function ComplianceSalaryRunScreen() {
                   <Text style={[styles.tblCell, { width: colW.father }]}>—</Text>
                   <Text style={[styles.tblCell, { width: colW.desg }]}>—</Text>
                   {/* Iter 370 (user request) — totals under EVERY column. */}
-                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.pd, fontWeight: "700" }]}>{fmtDaysTotal(sumCol("present_days"))}</Text>
+                  <Text style={[styles.tblCell, styles.rightCell, { width: colW.pd, fontWeight: "700" }, stickyCol(colW.sr + colW.uan + colW.esi + colW.name, colors.brandTertiary)]}>{fmtDaysTotal(sumCol("present_days"))}</Text>
                   {/* Iter 340 — OT Hours total.
                       Iter 644 — hidden when OVER TIME is disabled. */}
                   {hasOtCol ? (
@@ -3564,12 +3602,13 @@ export default function ComplianceSalaryRunScreen() {
                         {hasDed("advance") ? num((run.rows || []).reduce((s, r) => s + (Number((r as any).advance_recovery) || 0), 0)) : null}
                         {hasDed("other") ? num((run.rows || []).reduce((s, r) => s + (Number((r as any).other_deduction) || 0), 0)) : null}
                         {num(sumCol("total_deduction"))}
-                        {num(sumCol("net"))}
+                        <Text style={[styles.tblCell, styles.rightCell, { width: colW.num, fontWeight: "700" }, stickyColRight(colors.brandTertiary)]}>{fmtInr(sumCol("net"))}</Text>
                       </>
                     );
                   })()}
                 </View>
             </GridScroller>
+            </View>
           </View>
         ) : null}
 
@@ -3732,7 +3771,7 @@ export default function ComplianceSalaryRunScreen() {
 // traversing cells never stamps manual_override on untouched rows.
 // ---------------------------------------------------------------------------
 function EditableGridCell({
-  col, idx, width, value, cellRefs, onCommit, onNav,
+  col, idx, width, value, cellRefs, onCommit, onNav, onFocused,
 }: {
   col: string;
   idx: number;
@@ -3741,6 +3780,9 @@ function EditableGridCell({
   cellRefs: React.MutableRefObject<Record<string, any>>;
   onCommit: (n: number) => void;
   onNav: (col: string, idx: number, key: string) => void;
+  /** Iter 657 (user bug) — sync the ROW HIGHLIGHT whenever this cell gains
+   * focus (click OR arrow-key hop), so the highlight follows the cursor. */
+  onFocused?: () => void;
 }) {
   const [txt, setTxt] = useState<string>(String(Math.round(value || 0)));
   const focusedRef = useRef(false);
@@ -3770,6 +3812,7 @@ function EditableGridCell({
         editRef.current = false;
         dirtyRef.current = false;
         setTxt(String(Math.round(value || 0)));
+        onFocused?.();
       }}
       onBlur={() => { focusedRef.current = false; editRef.current = false; commit(); }}
       onKeyPress={(e: any) => {
@@ -3810,8 +3853,9 @@ function EditableGridCell({
    hours × per-hour OT rate lands in the OT Amt column.
    Iter 618 — dirty-guarded: blurring/tabbing through WITHOUT typing never
    re-commits (which used to stamp manual_override on frozen runs). */
-function OTHoursCell({ width, value, onCommit }: {
+function OTHoursCell({ width, value, onCommit, onFocused }: {
   width: number; value: number; onCommit: (n: number) => void;
+  onFocused?: () => void;
 }) {
   const [txt, setTxt] = useState<string>(String(value ?? 0));
   const focusedRef = useRef(false);
@@ -3830,7 +3874,7 @@ function OTHoursCell({ width, value, onCommit }: {
     <TextInput
       value={txt}
       onChangeText={(v) => { setTxt(v.replace(/[^0-9.]/g, "")); dirtyRef.current = true; }}
-      onFocus={() => { focusedRef.current = true; dirtyRef.current = false; }}
+      onFocus={() => { focusedRef.current = true; dirtyRef.current = false; onFocused?.(); }}
       onBlur={() => { focusedRef.current = false; commit(); }}
       onKeyPress={(e: any) => {
         const key = e?.nativeEvent?.key;
@@ -3850,13 +3894,17 @@ function OTHoursCell({ width, value, onCommit }: {
 }
 
 function PresentDaysCell({
-  idx, value, pdRefs, onCommit, onNav,
+  idx, value, pdRefs, onCommit, onNav, onFocused, frozen,
 }: {
   idx: number;
   value: number;
   pdRefs: React.MutableRefObject<(TextInput | null)[]>;
   onCommit: (n: number) => void;
   onNav?: (key: "ArrowLeft" | "ArrowRight") => void;
+  /** Iter 657 (user bug) — row highlight follows the focused cell. */
+  onFocused?: () => void;
+  /** Iter 657 (user request) — sticky style so the PD column freezes. */
+  frozen?: any;
 }) {
   const [txt, setTxt] = useState<string>(String(value ?? 0));
   const focusedRef = useRef(false);
@@ -3893,7 +3941,7 @@ function PresentDaysCell({
         dirtyRef.current = true;
         editRef.current = true;
       }}
-      onFocus={() => { focusedRef.current = true; editRef.current = false; dirtyRef.current = false; }}
+      onFocus={() => { focusedRef.current = true; editRef.current = false; dirtyRef.current = false; onFocused?.(); }}
       onBlur={() => { focusedRef.current = false; editRef.current = false; commit(); }}
       onKeyPress={(e: any) => {
         const key = e?.nativeEvent?.key;
@@ -3930,6 +3978,7 @@ function PresentDaysCell({
         styles.tblCell,
         styles.rightCell,
         styles.editableCell,
+        frozen,
       ]}
     />
   );

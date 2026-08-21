@@ -1484,7 +1484,7 @@ function ResultGrid({
                 onChange={(v) => editField(r.user_id, "p_days", Math.round(v * 2) / 2)}
                 disabled={readOnly}
                 digits={2}
-                gridRow={idx} gridCol={1} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.master}
+                gridRow={idx} gridCol={1} cellRefs={cellRefs} onArrow={gridNav} onFocused={() => setHlRow(r.user_id)} bg={GRP.master}
               />
               <EditCell
                 w={COL_WIDTHS.phours}
@@ -1492,7 +1492,7 @@ function ResultGrid({
                 onChange={(v) => editField(r.user_id, "p_hours", v)}
                 disabled={readOnly}
                 digits={2}
-                gridRow={idx} gridCol={2} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.master}
+                gridRow={idx} gridCol={2} cellRefs={cellRefs} onArrow={gridNav} onFocused={() => setHlRow(r.user_id)} bg={GRP.master}
               />
 
               {/* Iter 217 (user request) — Basic is READ-ONLY: always
@@ -1506,7 +1506,7 @@ function ResultGrid({
                   onChange={(v) => editField(r.user_id, "basic" as keyof ActualRow, v)}
                   disabled={readOnly}
                   money
-                  gridRow={idx} gridCol={0} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.master}
+                  gridRow={idx} gridCol={0} cellRefs={cellRefs} onArrow={gridNav} onFocused={() => setHlRow(r.user_id)} bg={GRP.master}
                 />
               ) : (
                 <ReadCell w={COL_WIDTHS.basic} bg={GRP.master}>{fmtInr(r.basic)}</ReadCell>
@@ -1520,7 +1520,7 @@ function ResultGrid({
                 onChange={(v) => editField(r.user_id, "w_basic_salary", v)}
                 disabled={readOnly}
                 money
-                gridRow={idx} gridCol={3} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.calc}
+                gridRow={idx} gridCol={3} cellRefs={cellRefs} onArrow={gridNav} onFocused={() => setHlRow(r.user_id)} bg={GRP.calc}
               />
               <EditCell
                 w={COL_WIDTHS.othallo}
@@ -1528,7 +1528,7 @@ function ResultGrid({
                 onChange={(v) => editField(r.user_id, "oth_allo", v)}
                 disabled={readOnly}
                 money
-                gridRow={idx} gridCol={4} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.calc}
+                gridRow={idx} gridCol={4} cellRefs={cellRefs} onArrow={gridNav} onFocused={() => setHlRow(r.user_id)} bg={GRP.calc}
               />
               {/* Iter 338 — Freeze gross imported into Actual Salary badge */}
               <View style={{ width: COL_WIDTHS.gross, paddingHorizontal: 6, paddingVertical: 4, justifyContent: "center", backgroundColor: GRP.calc }}>
@@ -1549,7 +1549,7 @@ function ResultGrid({
                 onChange={(v) => editField(r.user_id, "adv", v)}
                 disabled={readOnly}
                 money
-                gridRow={idx} gridCol={5} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.ded}
+                gridRow={idx} gridCol={5} cellRefs={cellRefs} onArrow={gridNav} onFocused={() => setHlRow(r.user_id)} bg={GRP.ded}
               />
               <EditCell
                 w={COL_WIDTHS.tds}
@@ -1557,7 +1557,7 @@ function ResultGrid({
                 onChange={(v) => editField(r.user_id, "tds", v)}
                 disabled={readOnly}
                 money
-                gridRow={idx} gridCol={6} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.ded}
+                gridRow={idx} gridCol={6} cellRefs={cellRefs} onArrow={gridNav} onFocused={() => setHlRow(r.user_id)} bg={GRP.ded}
               />
               {/* Iter 421 (user request) — manual Other Deduction from Gross. */}
               <EditCell
@@ -1566,7 +1566,7 @@ function ResultGrid({
                 onChange={(v) => editField(r.user_id, "other_ded" as keyof ActualRow, v)}
                 disabled={readOnly}
                 money
-                gridRow={idx} gridCol={7} cellRefs={cellRefs} onArrow={gridNav} bg={GRP.ded}
+                gridRow={idx} gridCol={7} cellRefs={cellRefs} onArrow={gridNav} onFocused={() => setHlRow(r.user_id)} bg={GRP.ded}
               />
               <View style={{ width: COL_WIDTHS.net, paddingHorizontal: 6, paddingVertical: 4, justifyContent: "center" }}>
                 <Text style={[styles.readTxt, { textAlign: "right", fontWeight: "700" }]}>
@@ -1680,7 +1680,7 @@ function BoldRead({ w, children }: any) {
 
 function EditCell({
   w, value, onChange, disabled, money, digits = 2,
-  gridRow, gridCol, cellRefs, onArrow, bg,
+  gridRow, gridCol, cellRefs, onArrow, bg, onFocused,
 }: {
   w: number; value: number; onChange: (v: number) => void;
   disabled?: boolean; money?: boolean; digits?: number;
@@ -1689,6 +1689,8 @@ function EditCell({
   cellRefs?: React.MutableRefObject<Map<string, any>>;
   onArrow?: (row: number, col: number, key: string) => void;
   bg?: string;
+  /** Iter 657 (user bug) — row highlight follows the focused cell. */
+  onFocused?: () => void;
 }) {
   const [txt, setTxt] = useState<string>(String(value ?? 0));
   // Iter 91 — while the admin is typing (focused), NEVER overwrite the
@@ -1723,7 +1725,7 @@ function EditCell({
         }}
         value={txt}
         onChangeText={setTxt}
-        onFocus={() => { focusedRef.current = true; }}
+        onFocus={() => { focusedRef.current = true; onFocused?.(); }}
         onBlur={() => { focusedRef.current = false; commit(); }}
         onEndEditing={commit}
         onKeyPress={(e: any) => {

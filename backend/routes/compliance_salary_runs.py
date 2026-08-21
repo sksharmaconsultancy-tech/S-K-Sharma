@@ -1298,6 +1298,18 @@ async def _compute_compliance_run(
                     _frz_ot = ((firm_stat_flags.get(emp.get("company_id"))
                                 or {}).get("ot_allowed")
                                and (enabled_set is None or "ot" in enabled_set))
+                    # Iter 657 (user request) — INCENTIVE as an adjust head:
+                    # when the firm's Allowance catalog has an INCENTIVE
+                    # head enabled, the freeze difference remaining AFTER
+                    # the OT rule lands under INCENTIVE (its own editable
+                    # column). Priority: OT first, then Incentive, then
+                    # Other Allowances.
+                    _inc_labels657 = [
+                        _l for _l in ((firm_stat_flags.get(emp.get("company_id"))
+                                       or {}).get("custom_allow_labels") or [])
+                        if str(_l).strip().upper() == "INCENTIVE"]
+                    _frz_inc = bool(_inc_labels657)
+                    _inc_extra657 = 0.0
                     _st3 = dict(_stats_final)
                     # Iter 646 (user bug — "FOOD ALLOWANCE amount landed in
                     # OT") — per-head allowance amounts typed on the imported
@@ -1322,6 +1334,18 @@ async def _compute_compliance_run(
                                 row["difference_allocation_head"] = (
                                     "Allowance Heads + Overtime"
                                     if _alloc_allow else "Overtime")
+                            elif _frz_inc:
+                                # Iter 657 — remainder to the INCENTIVE
+                                # head (inside the compute via Others so
+                                # PF/ESIC see it; shown & editable under
+                                # the INCENTIVE column below).
+                                _inc_extra657 = _rem_diff
+                                _st3["other_allowance_extra"] = round(
+                                    float(_st3.get("other_allowance_extra")
+                                          or 0) + _rem_diff, 2)
+                                row["difference_allocation_head"] = (
+                                    "Allowance Heads + Incentive"
+                                    if _alloc_allow else "Incentive")
                             else:
                                 _st3["other_allowance_extra"] = round(
                                     float(_st3.get("other_allowance_extra")
@@ -1376,6 +1400,15 @@ async def _compute_compliance_run(
                             _ah646[_l6] = round(
                                 float(_ah646.get(_l6) or 0) + _v6 * _sc646)
                         row["allowance_heads"] = _ah646
+                    # Iter 657 — the Incentive-routed remainder shows under
+                    # the firm's INCENTIVE column (editable in the grid;
+                    # the amount already sits inside Others in the totals).
+                    if _inc_extra657 > 0:
+                        _ah657 = dict(row.get("allowance_heads") or {})
+                        _il657 = _inc_labels657[0]
+                        _ah657[_il657] = round(
+                            float(_ah657.get(_il657) or 0) + _inc_extra657)
+                        row["allowance_heads"] = _ah657
                     # PT follows the new gross unless the firm's deduction
                     # mask switched it OFF earlier.
                     if not (_ded_set is not None and "pt" not in _ded_set):

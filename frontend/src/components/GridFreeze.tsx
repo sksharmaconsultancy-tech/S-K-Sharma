@@ -35,6 +35,12 @@ export const stickyCol = (left: number, bg: string): any =>
     ? ({ position: "sticky", left, zIndex: 2, backgroundColor: bg } as any)
     : null;
 
+/** Iter 657 (user request) — freeze a cell at the RIGHT edge (web only). */
+export const stickyColRight = (bg: string): any =>
+  Platform.OS === "web"
+    ? ({ position: "sticky", right: 0, zIndex: 2, backgroundColor: bg } as any)
+    : null;
+
 /** Freeze the header block on top while scrolling down (web only). */
 export const stickyHeader = (bg: string): any =>
   Platform.OS === "web"

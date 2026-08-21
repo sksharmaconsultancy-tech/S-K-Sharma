@@ -7347,3 +7347,26 @@ Current iteration: 594. Next: 595.
   holds that same run (preserves unsaved edits); restore effect handles it.
 - Verified E2E via playwright: edit PD 0->21, + tab -> dashboard, switch
   back -> grid + edit intact, totals recomputed. deploy656 ready.
+
+## Iter 657 — grid freeze pack + incentive allocation (user requests)
+1. Row highlight follows focused cell (user bug "highlight frozen after
+   edit"): onFocused prop added to EditableGridCell/PresentDaysCell/
+   OTHoursCell (compliance) + EditCell (salary-run); all call sites pass
+   setHlRow(r.user_id). Verified via screenshot.
+2. Grid fits viewport: gridWrapRef measured top (gridTopPx state, 400ms
+   after run/setupCollapsed) -> GridScroller maxHeight calc(100vh - top -
+   66px). Header sticky always visible + h-scrollbar on screen.
+3. Frozen columns: Present Days sticky left at FROZEN_W (header, filter
+   row, data via PresentDaysCell `frozen` prop, totals); Net sticky right
+   (new stickyColRight in GridFreeze.tsx) header/data/totals.
+4. Freeze diff -> INCENTIVE: compliance_salary_runs.py — when firm
+   catalog has INCENTIVE (custom_allow_labels) and OT not allowed,
+   remaining positive diff goes into allowance_heads[INCENTIVE] (via
+   other_allowance_extra inside compute; editable col). Priority: sheet
+   heads -> OT -> INCENTIVE -> Other Allowances. Labels: "Incentive",
+   "Allowance Heads + Incentive". test_iter657_incentive_alloc.py 2/2
+   PASS (note: firms with days_calc freeze_actual_gross take gross from
+   Actual run, not sheet).
+5. "Other allow. editable" (user pt 5) — Others* column ALREADY editable
+   since Iter 230; confirmed to user.
+- deploy657 ready; temp_bundle serves it; APP_ITERATION=657.
