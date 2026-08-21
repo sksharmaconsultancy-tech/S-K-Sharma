@@ -25,6 +25,7 @@ import { onSyncMessage } from "@/src/utils/workspaceSync";
 import { useUnreadNotifications } from "@/src/hooks/useUnreadNotifications";
 import { catOf, PRIORITY_COLORS, loadPrefs, alreadyToasted, rememberToasted, playNotifSound } from "@/src/utils/notifHelpers";
 import LiveNotifToasts from "@/src/components/LiveNotifToasts";
+import NotifDigestCard from "@/src/components/NotifDigestCard";
 import { usePrimaryInbox } from "@/src/hooks/usePrimaryInbox";
 import { useTheme } from "@/src/context/ThemeContext";
 import { colors, radius, spacing, type, isDarkTheme, DARK_THEME_ID } from "@/src/theme";
@@ -1867,6 +1868,8 @@ export default function AdminWebShell({ children }: Props) {
               </Pressable>
             </View>
           </View>
+          {/* Iter 669 — pinned "Yesterday at a glance" digest. */}
+          <NotifDigestCard variant="compact" onNavigate={() => setNotifOpen(false)} />
           <ScrollView style={{ maxHeight: 360 }}>
             {(notifItems || []).slice(0, 12).map((n: any, i: number) => {
               const cat = catOf(n);

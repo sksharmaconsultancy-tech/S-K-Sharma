@@ -28,6 +28,7 @@ import CalendarPanel from "@/src/components/portal/CalendarPanel";
 import AlertsModal from "@/src/components/portal/AlertsModal";
 import OverviewPremium from "@/src/components/portal/OverviewPremium";
 import PriorityTasks from "@/src/components/portal/PriorityTasks";
+import NotifDigestCard from "@/src/components/NotifDigestCard";
 
 const TABS: { key: string; label: string; icon: string }[] = [
   { key: "overview", label: "Overview", icon: "grid-outline" },
@@ -145,6 +146,8 @@ export default function PortalDashboardScreen() {
           contentContainerStyle={{ padding: spacing.md, paddingBottom: 60 }}
           refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}
         >
+          {/* Iter 669 — Notification Digest: yesterday at a glance. */}
+          <NotifDigestCard variant="full" />
           {/* Iter 499 — compact Priority Tasks highlight (prepended only;
               existing dashboard below is untouched). */}
           <PriorityTasks

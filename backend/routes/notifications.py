@@ -6,6 +6,7 @@ Two small endpoints extracted from `server.py`:
                              company_admin, global for super_admin).
 """
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Header
@@ -52,6 +53,76 @@ async def list_notifications(authorization: Optional[str] = Header(None)):
         n.pop("read_by", None)
         out.append(n)
     return {"notifications": out}
+
+
+@router.get("/notifications/digest")
+async def notifications_digest(authorization: Optional[str] = Header(None)):
+    """Iter 669 — 'Yesterday at a glance' digest.
+
+    Summarizes YESTERDAY's (IST calendar day) notification events for the
+    current admin: total, counts by category, top highlights (critical >
+    important > newest) and — for super admins — a per-firm breakdown.
+    """
+    user = await get_user_from_token(authorization)
+    role = user["role"]
+    cid = user.get("company_id")
+    # Yesterday in IST (UTC+5:30) expressed as a UTC window.
+    ist = timezone(timedelta(hours=5, minutes=30))
+    today_ist = datetime.now(ist).replace(hour=0, minute=0, second=0, microsecond=0)
+    start_utc = (today_ist - timedelta(days=1)).astimezone(timezone.utc)
+    end_utc = today_ist.astimezone(timezone.utc)
+    q: dict = {"created_at": {"$gte": start_utc.isoformat(), "$lt": end_utc.isoformat()}}
+    if role == "super_admin":
+        pass  # all companies
+    elif cid:
+        q["$or"] = [{"company_id": None}, {"company_id": {"$exists": False}},
+                    {"company_id": cid}]
+    else:
+        q["$or"] = [{"company_id": None}, {"company_id": {"$exists": False}}]
+    notifs = await db.notifications.find(q, {"_id": 0, "read_by": 0}).sort(
+        "created_at", -1).to_list(500)
+    uid = user["user_id"]
+    kept = []
+    for n in notifs:
+        aud = n.get("audience", "all")
+        if (aud == "all"
+                or (aud == "user" and n.get("target_user_id") == uid)
+                or (aud == "admins" and role in ("company_admin", "super_admin"))
+                or (aud == "super_admins" and role == "super_admin")):
+            kept.append(n)
+    by_category: dict = {}
+    for n in kept:
+        c = str(n.get("category") or "announcement")
+        by_category[c] = by_category.get(c, 0) + 1
+    prio_rank = {"critical": 0, "important": 1}
+    newest_first = sorted(kept, key=lambda n: n.get("created_at") or "", reverse=True)
+    highlights = sorted(
+        newest_first,
+        key=lambda n: prio_rank.get(str(n.get("priority") or "normal"), 2),
+    )[:5]
+    per_firm = []
+    if role == "super_admin":
+        firm_counts: dict = {}
+        for n in kept:
+            fc = n.get("company_id")
+            if fc:
+                firm_counts[fc] = firm_counts.get(fc, 0) + 1
+        if firm_counts:
+            comps = await db.companies.find(
+                {"company_id": {"$in": list(firm_counts)}},
+                {"_id": 0, "company_id": 1, "name": 1}).to_list(100)
+            names = {c["company_id"]: c.get("name") or c["company_id"] for c in comps}
+            per_firm = sorted(
+                [{"company_id": k, "name": names.get(k, k), "count": v}
+                 for k, v in firm_counts.items()],
+                key=lambda x: -x["count"])
+    return {
+        "date_label": (today_ist - timedelta(days=1)).strftime("%d %b %Y"),
+        "total": len(kept),
+        "by_category": by_category,
+        "highlights": highlights,
+        "per_firm": per_firm,
+    }
 
 
 @router.post("/notifications/mark-read")

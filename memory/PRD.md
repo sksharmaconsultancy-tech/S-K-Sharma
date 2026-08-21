@@ -7542,3 +7542,27 @@ Frontend:
   broadcasts -> focus event -> 3 stacked toasts render, ✕ removes one.
 - deploy_vps_iter668.sh created; temp_bundle kind=script -> deploy668;
   APP_ITERATION=668.
+
+## Iter 669 — Notification Digest "Yesterday at a glance" (user request)
+- Backend GET /api/notifications/digest (routes/notifications.py):
+  yesterday = IST calendar day converted to UTC window on created_at
+  (string ISO compare). Role scoping same as feed (super=all, company=
+  own+global), audience filter (all/user/admins/super_admins). Returns
+  {date_label "20 Aug 2026", total, by_category{cat:count}, highlights
+  top5 (critical>important>newest-first), per_firm[{company_id,name,
+  count}] super-admin only}.
+- NEW /app/frontend/src/components/NotifDigestCard.tsx: variants
+  full (Dashboard, amber #FFFBEB card, dismiss ✕ -> localStorage
+  sks.notif.digest.dismissed.v1 = YYYY-MM-DD, top 4 highlights,
+  per-firm row) & compact (bell dropdown pinned, top 2 highlights).
+  Highlight click -> mark-read + router.push(action_url). Renders null
+  when total=0 or dismissed today. testIDs notif-digest-full/-compact/
+  -dismiss/-highlight.
+- Wired: portal-dashboard.tsx Overview (above PriorityTasks);
+  AdminWebShell notifPanel (between head and list, onNavigate closes).
+- Verified E2E: seeded 5 yesterday-dated notifs (test_iter669_seed_
+  digest.py), API JSON correct, both cards render, dismiss hides for
+  the day. Seeds + Iter668 toast test rows CLEANED (test_iter669_
+  cleanup.py).
+- deploy_vps_iter669.sh; temp_bundle kind=script -> deploy669;
+  APP_ITERATION=669.
