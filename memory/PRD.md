@@ -7731,3 +7731,12 @@ a tab inside AI Command Center.
   Employee code (optional); you@example.com -> Email (optional).
 - Checked pin-login/otp-login/tabs: no other personal-looking samples.
 - deploy_vps_iter678.sh; temp_bundle -> deploy678; APP_ITERATION=678.
+
+## Iter 679 — SSL / HTTPS "Not secure" fix (user request)
+- deploy_vps_iter679.sh NEW step 9a: installs certbot (apt, snap
+  fallback), detects domains from nginx site config server_name
+  (excluding _, localhost, IPs), runs `certbot --nginx -d ... --redirect
+  --keep-until-expiring -m sksharmaconsultancy@gmail.com`, enables
+  certbot.timer auto-renew, reloads nginx, curls each https domain.
+  Prints guidance if DNS A record doesn't point at the VPS.
+- No app-code change; APP_ITERATION=679; temp_bundle -> deploy679.
