@@ -215,10 +215,12 @@ export default function EmployeeSignupScreen() {
                 <TextInput
                   testID="signup-phone-input"
                   value={phone}
-                  onChangeText={setPhone}
-                  placeholder="+91 98765 43210"
+                  // Iter 677 (user request) — digits only, hard cap 10.
+                  onChangeText={(t) => setPhone(t.replace(/\D/g, "").slice(0, 10))}
+                  placeholder="10-digit mobile number"
                   placeholderTextColor={colors.onSurfaceTertiary}
-                  keyboardType="phone-pad"
+                  keyboardType="number-pad"
+                  maxLength={10}
                   style={styles.input}
                 />
 
@@ -253,7 +255,7 @@ export default function EmployeeSignupScreen() {
                   testID="signup-company-code"
                   value={companyCode}
                   onChangeText={(t) => setCompanyCode(t.toUpperCase().slice(0, 12))}
-                  placeholder="e.g. ACME01"
+                  placeholder="Enter company code"
                   placeholderTextColor={colors.onSurfaceTertiary}
                   autoCapitalize="characters"
                   autoCorrect={false}
@@ -303,7 +305,7 @@ export default function EmployeeSignupScreen() {
                   testID="signup-name"
                   value={name}
                   onChangeText={(v) => setName(v.toUpperCase())}
-                  placeholder="RAJESH KUMAR"
+                  placeholder="ENTER YOUR FULL NAME"
                   placeholderTextColor={colors.onSurfaceTertiary}
                   style={styles.input}
                 />
@@ -314,7 +316,7 @@ export default function EmployeeSignupScreen() {
                   testID="signup-employee-code"
                   value={employeeCode}
                   onChangeText={(v) => setEmployeeCode(v.toUpperCase().slice(0, 16))}
-                  placeholder="e.g. SKSCO1001 (optional)"
+                  placeholder="Employee code (optional)"
                   placeholderTextColor={colors.onSurfaceTertiary}
                   autoCapitalize="characters"
                   autoCorrect={false}
@@ -363,7 +365,7 @@ export default function EmployeeSignupScreen() {
                   testID="signup-email"
                   value={email}
                   onChangeText={setEmail}
-                  placeholder="you@example.com"
+                  placeholder="Email (optional)"
                   placeholderTextColor={colors.onSurfaceTertiary}
                   autoCapitalize="none"
                   keyboardType="email-address"

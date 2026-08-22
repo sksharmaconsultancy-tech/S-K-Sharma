@@ -7718,3 +7718,16 @@ a tab inside AI Command Center.
   -> prefilled + "You're joining City Care Hospital"; reopening WITHOUT
   the param still prefilled. deploy_vps_iter676.sh; temp_bundle ->
   deploy676; APP_ITERATION=676.
+
+## Iter 677 — Joining form mobile number: digits only, max 10 (user)
+- employee-signup.tsx phone input: onChangeText strips non-digits +
+  slice(0,10), maxLength 10, keyboardType number-pad, placeholder
+  "10-digit mobile number". Verified via screenshot (17 typed -> 10 kept).
+- deploy_vps_iter677.sh; temp_bundle -> deploy677; APP_ITERATION=677.
+
+## Iter 678 — Joining form dummy/sample data removed (user)
+- employee-signup.tsx placeholders neutralized: RAJESH KUMAR -> ENTER
+  YOUR FULL NAME; e.g. ACME01 -> Enter company code; e.g. SKSCO1001 ->
+  Employee code (optional); you@example.com -> Email (optional).
+- Checked pin-login/otp-login/tabs: no other personal-looking samples.
+- deploy_vps_iter678.sh; temp_bundle -> deploy678; APP_ITERATION=678.
