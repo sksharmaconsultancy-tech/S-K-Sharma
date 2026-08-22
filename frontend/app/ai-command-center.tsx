@@ -254,8 +254,10 @@ export default function AiCommandCenterScreen() {
           <Text style={st.sub}>Ask anything about your payroll — scoped to your access</Text>
         </View>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}
-        style={{ flexGrow: 0 }} contentContainerStyle={st.tabs}>
+      {/* Iter 684 (user bug — tabs overlapping/hiding on live): plain
+          wrapping row; horizontal ScrollViews can collapse to 0 height on
+          first layout in RN-web PROD builds, sliding content over the bar. */}
+      <View style={st.tabs}>
         {visibleTabs.map((t) => (
           <Pressable key={t} onPress={() => setTab(t)}
             style={[st.tab, tab === t && st.tabOn]} testID={`aicc-tab-${t.replace(" ", "")}`}>
@@ -264,7 +266,7 @@ export default function AiCommandCenterScreen() {
             </Text>
           </Pressable>
         ))}
-      </ScrollView>
+      </View>
 
       {/* ── EMAIL AUDIT (Iter 674 · Super Admin only) ── */}
       {tab === "Email Audit" && isSuper ? <EmailAuditTab /> : null}
@@ -534,7 +536,7 @@ const st = StyleSheet.create({
   },
   h1: { fontSize: 18, fontWeight: "800", color: colors.onSurface },
   sub: { fontSize: 12, color: colors.onSurfaceTertiary },
-  tabs: { flexDirection: "row", gap: 8, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  tabs: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   tab: {
     paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.md,
     borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary,

@@ -7813,3 +7813,18 @@ a tab inside AI Command Center.
 - Sandbox e2e PASS (real GPT-5.4): 3 findings incl. salary-discrepancy
   detection, full timeline. Attachment/IMAP paths verify on VPS.
 - deploy_vps_iter683.sh; temp_bundle -> deploy683; APP_ITERATION=683.
+
+## Iter 684 — AI Command Center tabs overlap FIXED (user bug ×2)
+- Root cause: previous session's partial edit left invalid JSX in
+  ai-command-center.tsx — tab bar opened as <View style={st.tabs}> but
+  closed with </ScrollView>, breaking the bundle/layout so tabs
+  overlapped and hid content on the live portal.
+- Fix: closed the tab row correctly as </View>; st.tabs is a plain
+  wrapping row (flexWrap) — can never collapse/overlap.
+- Verified via screenshot tool (super admin session): mobile 390px and
+  desktop 1280px, Ask AI / Alerts / Email Audit tabs all render clean.
+- deploy_vps_iter684.sh; temp_bundle -> deploy684; APP_ITERATION=684.
+- Testing note: OTP 2FA — for automated login, overwrite
+  db.twofa_pending.otp_hash with sha256("123456") after password login,
+  then POST /api/auth/2fa/verify; inject session_token into
+  localStorage key llc_session_token.
