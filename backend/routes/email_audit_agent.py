@@ -209,23 +209,44 @@ def _parse_msg(raw: bytes) -> dict:
     }
 
 
-def _imap_fetch_new_sync(settings: dict, known_ids: set) -> tuple:
+def _imap_fetch_new_sync(settings: dict, known_ids: set,
+                         registered_emails: set) -> tuple:
     """Fetch new eligible messages since the cutoff. Returns
-    (parsed_list, headers_seen, historical_skipped). READ-ONLY (PEEK)."""
+    (parsed_list, headers_seen, historical_skipped). READ-ONLY (PEEK).
+
+    Iter 680 (user rules):
+      * INBOX — Gmail PRIMARY category ONLY (Updates / Social / Promotions
+        are excluded via X-GM-RAW "category:primary"; plain SINCE search
+        is the fallback for non-Gmail servers).
+      * SPAM — also scanned, but ONLY messages whose sender address is
+        registered in the Company Email Registry are processed (a client
+        mail wrongly landing in Spam is never missed)."""
     from routes.gmail_mailbox import _imap_connect
     box = _imap_connect(settings)
     parsed, seen, historical = [], 0, 0
-    try:
-        box.select("INBOX", readonly=True)  # READ-ONLY guarantee
+
+    def _search_uids(primary_only: bool) -> list:
+        if primary_only:
+            try:
+                typ, data = box.uid("SEARCH", None, "X-GM-RAW",
+                                    '"category:primary"',
+                                    f"(SINCE {CUTOFF_IMAP})")
+                if typ == "OK":
+                    return (data[0] or b"").split()
+            except Exception:
+                pass  # not Gmail — fall back to the whole INBOX
         typ, data = box.uid("SEARCH", None, f"(SINCE {CUTOFF_IMAP})")
-        uids = (data[0] or b"").split()
-        uids = uids[-MAX_HEADER_SCAN:][::-1]  # newest first
+        return (data[0] or b"").split() if typ == "OK" else []
+
+    def _harvest(folder_label: str, uids: list, only_registered: bool):
+        nonlocal seen, historical
         import email as email_lib
-        for uid in uids:
+        for uid in uids[-MAX_HEADER_SCAN:][::-1]:  # newest first
             if len(parsed) >= MAX_FULL_FETCH_PER_SCAN:
-                break
-            typ, md = box.uid("FETCH", uid,
-                              "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID DATE)])")
+                return
+            typ, md = box.uid(
+                "FETCH", uid,
+                "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID DATE FROM)])")
             if typ != "OK" or not md or not isinstance(md[0], tuple):
                 continue
             seen += 1
@@ -233,6 +254,10 @@ def _imap_fetch_new_sync(settings: dict, known_ids: set) -> tuple:
             mid = (hdr.get("Message-ID") or "").strip()
             if mid and mid in known_ids:
                 continue
+            if only_registered:
+                _, frm = parseaddr(hdr.get("From") or "")
+                if (frm or "").lower() not in registered_emails:
+                    continue  # spam from unknown senders stays untouched
             try:
                 rec_dt = parsedate_to_datetime(hdr.get("Date"))
                 if rec_dt.tzinfo is None:
@@ -247,7 +272,24 @@ def _imap_fetch_new_sync(settings: dict, known_ids: set) -> tuple:
                 continue
             p = _parse_msg(fd[0][1] or b"")
             p["imap_uid"] = uid.decode()
+            p["folder"] = folder_label
             parsed.append(p)
+
+    try:
+        # 1) INBOX — Primary category only.
+        box.select("INBOX", readonly=True)  # READ-ONLY guarantee
+        _harvest("INBOX", _search_uids(primary_only=True), only_registered=False)
+        # 2) SPAM — registered company senders only.
+        if registered_emails and len(parsed) < MAX_FULL_FETCH_PER_SCAN:
+            for spam_box in ('"[Gmail]/Spam"', "Spam", "Junk"):
+                try:
+                    typ, _ = box.select(spam_box, readonly=True)
+                except Exception:
+                    typ = "NO"
+                if typ == "OK":
+                    _harvest("SPAM", _search_uids(primary_only=False),
+                             only_registered=True)
+                    break
     finally:
         try:
             box.logout()
@@ -371,6 +413,7 @@ async def _process_email(parsed: dict, *, sandbox: bool, threshold: int) -> dict
         "body_text": (parsed.get("body_text") or "")[:20000],
         "attachments": parsed.get("attachments", []),
         "has_attachments": bool(parsed.get("attachments")),
+        "folder": parsed.get("folder") or "INBOX",
         "sandbox": bool(sandbox),
         "company_id": None, "company_name": None,
         "company_match_type": "UNKNOWN", "company_match_confidence": 0,
@@ -387,7 +430,10 @@ async def _process_email(parsed: dict, *, sandbox: bool, threshold: int) -> dict
         "timeline": [],
         "created_at": now_iso(),
     }
-    _tl(rec, "Email Received", f"From {rec['sender_email']} · {rec['subject'][:80]}")
+    _tl(rec, "Email Received",
+        f"From {rec['sender_email']} · {rec['subject'][:80]}"
+        + (" · ⚠ found in SPAM (registered company sender)"
+           if rec["folder"] == "SPAM" else ""))
     # Backend date-boundary re-check (never trust the IMAP filter alone).
     try:
         rdt = datetime.fromisoformat(str(rec["received_at"]).replace("Z", "+00:00"))
@@ -511,9 +557,15 @@ async def _run_scan(triggered_by: str) -> dict:
     async for d in db.email_audit_records.find({}, {"_id": 0, "message_id": 1}):
         if d.get("message_id"):
             known.add(d["message_id"])
+    # Iter 680 — registered company emails (needed for the Spam sweep).
+    registered = set()
+    async for r in db.company_email_registry.find(
+            {"active": {"$ne": False}}, {"_id": 0, "email": 1}):
+        if r.get("email"):
+            registered.add(r["email"].lower())
     try:
         parsed_list, seen, historical = await asyncio.to_thread(
-            _imap_fetch_new_sync, settings, known)
+            _imap_fetch_new_sync, settings, known, registered)
     except Exception as exc:
         res = {"ok": False, "error": f"IMAP error: {str(exc)[:200]}",
                "at": now_iso(), "by": triggered_by}

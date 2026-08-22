@@ -188,7 +188,8 @@ export default function EmailAuditTab() {
           </View>
           <Text style={st.blockTitle}>{detail.subject || "(no subject)"}</Text>
           <Text style={st.line}>From: {detail.sender_name} &lt;{detail.sender_email}&gt;</Text>
-          <Text style={st.line}>Received: {fmtAt(detail.received_at)}</Text>
+          <Text style={st.line}>Received: {fmtAt(detail.received_at)}
+            {detail.folder === "SPAM" ? "  ·  ⚠️ Found in Spam (registered company sender)" : ""}</Text>
           {detail.cc ? <Text style={st.line}>CC: {detail.cc}</Text> : null}
         </View>
         <View style={st.block}>
@@ -372,6 +373,7 @@ export default function EmailAuditTab() {
                 <Text style={st.blockTitle} numberOfLines={1}>{e.subject || "(no subject)"}</Text>
                 <Text style={st.line} numberOfLines={1}>
                   {e.sender_email} → {e.company_name || "Company not identified"}
+                  {e.folder === "SPAM" ? " · ⚠️ from Spam" : ""}
                   {e.has_attachments ? " · 📎" : ""}{e.sandbox ? " · 🧪" : ""}
                 </Text>
                 {e.ai_summary ? <Text style={st.line} numberOfLines={2}>{e.ai_summary}</Text> : null}

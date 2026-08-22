@@ -7740,3 +7740,18 @@ a tab inside AI Command Center.
   certbot.timer auto-renew, reloads nginx, curls each https domain.
   Prints guidance if DNS A record doesn't point at the VPS.
 - No app-code change; APP_ITERATION=679; temp_bundle -> deploy679.
+
+## Iter 680 — Email agent: Primary-only inbox + Spam rescue (user rules)
+- _imap_fetch_new_sync rewritten: signature now (settings, known_ids,
+  registered_emails). INBOX search uses Gmail X-GM-RAW
+  "category:primary" (+SINCE) with plain-SINCE fallback for non-Gmail —
+  Updates/Social/Promotions excluded. Then Spam sweep: selects
+  '"[Gmail]/Spam"' | Spam | Junk readonly, SINCE search, headers incl
+  FROM — processes ONLY senders present in company_email_registry
+  (active). parsed["folder"] = INBOX|SPAM; record.folder stored;
+  timeline "Email Received" notes '⚠ found in SPAM'.
+- _run_scan loads registered emails set and passes it through.
+- EmailAuditTab: list rows + detail show "⚠️ from Spam" marker.
+- Verified: syntax + sandbox e2e still PASS (IMAP paths not testable in
+  preview — no smtp_settings; verify on VPS after deploy).
+- deploy_vps_iter680.sh; temp_bundle -> deploy680; APP_ITERATION=680.
