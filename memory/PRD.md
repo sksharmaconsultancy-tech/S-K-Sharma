@@ -7793,3 +7793,23 @@ a tab inside AI Command Center.
   reproducible on current build — ask user to recheck after deploy682,
   else trace that record on VPS.
 - deploy_vps_iter682.sh; temp_bundle -> deploy682; APP_ITERATION=682.
+
+## Iter 683 — Email Agent Phase 1 upgrade: DOCUMENT & DATA ANALYSIS
+- email_audit_agent.py:
+  * _attachment_excerpt xlsx: 500-row scan -> stats {rows, cols,
+    blank_rows, duplicate_rows, sheets} + codes[] (first-2-col values,
+    cap 300) stored per attachment.
+  * AI prompt extended: findings[{severity,message}] +
+    email_vs_attachment[{field,email_value,attachment_value,severity}].
+  * _process_email: aggregates stats across attachments; read-only
+    Employee Master matching (db.users employee_code $in codes for the
+    linked company) -> matched/unmatched + HIGH finding when partial;
+    duplicate-row warning; mismatches appended to findings as CRITICAL;
+    rec.data_analysis / rec.findings / rec.email_vs_attachment stored;
+    timeline steps Data Validated / Data Compared / Exceptions
+    Identified; CRITICAL finding escalates status -> URGENT (notifies).
+- EmailAuditTab detail: new "📊 Data Analysis" block (stats, master
+  match, mismatch lines, severity-emoji findings).
+- Sandbox e2e PASS (real GPT-5.4): 3 findings incl. salary-discrepancy
+  detection, full timeline. Attachment/IMAP paths verify on VPS.
+- deploy_vps_iter683.sh; temp_bundle -> deploy683; APP_ITERATION=683.

@@ -250,6 +250,35 @@ export default function EmailAuditTab() {
             Extraction {conf.extraction || 0}% · Recommendation {conf.recommendation || 0}%
           </Text>
         </View>
+        {/* Iter 683 — Data Analysis, Comparison & Findings */}
+        {detail.data_analysis && (detail.data_analysis.rows || detail.data_analysis.matched || (detail.findings || []).length) ? (
+          <View style={st.block}>
+            <Text style={st.section}>📊 Data Analysis</Text>
+            {detail.data_analysis.rows ? (
+              <Text style={st.line}>
+                Rows {detail.data_analysis.rows} · Blank {detail.data_analysis.blank_rows} ·
+                Duplicates {detail.data_analysis.duplicate_rows} · Codes seen {detail.data_analysis.employee_codes_seen}
+              </Text>
+            ) : null}
+            {detail.data_analysis.matched || detail.data_analysis.unmatched ? (
+              <Text style={st.line}>
+                Employee Master (read-only): ✓ {detail.data_analysis.matched} matched ·
+                ✗ {detail.data_analysis.unmatched} unmatched
+              </Text>
+            ) : null}
+            {(detail.email_vs_attachment || []).map((c: any, i: number) => (
+              <Text key={`c${i}`} style={[st.line, { color: "#B91C1C" }]}>
+                ⚠ {c.field}: email {"“"}{c.email_value}{"”"} vs attachment {"“"}{c.attachment_value}{"”"}
+              </Text>
+            ))}
+            {(detail.findings || []).map((f: any, i: number) => (
+              <Text key={`f${i}`} style={st.line}>
+                {f.severity === "critical" ? "🔴" : f.severity === "high" ? "🟠"
+                  : f.severity === "warning" ? "🟡" : "🟢"} {f.message}
+              </Text>
+            ))}
+          </View>
+        ) : null}
         <View style={[st.block, { backgroundColor: "#F0FDF4", borderColor: "#BBF7D0" }]}>
           <Text style={st.section}>💡 AI Recommendation</Text>
           <Text style={st.line}>{detail.ai_recommendation || "—"}</Text>

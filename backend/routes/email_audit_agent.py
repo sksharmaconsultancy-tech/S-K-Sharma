@@ -117,14 +117,33 @@ def _attachment_excerpt(name: str, data: bytes) -> dict:
             import openpyxl
             wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
             ws = wb.worksheets[0]
-            rows = []
+            rows, seen_rows, dup_rows, blank_rows, codes = [], set(), 0, 0, []
+            n_rows = n_cols = 0
             for i, row in enumerate(ws.iter_rows(values_only=True)):
-                if i >= 12:
+                if i >= 500:
                     break
-                rows.append(" | ".join("" if c is None else str(c)[:30] for c in row[:15]))
+                vals = ["" if c is None else str(c).strip() for c in row[:25]]
+                if not any(vals):
+                    blank_rows += 1
+                    continue
+                n_rows += 1
+                n_cols = max(n_cols, len([v for v in vals if v]))
+                key = "|".join(vals)
+                if key in seen_rows:
+                    dup_rows += 1
+                seen_rows.add(key)
+                for v in vals[:2]:  # candidate employee codes (first 2 cols)
+                    if v and len(v) <= 20 and i > 0:
+                        codes.append(v.upper())
+                if i < 12:
+                    rows.append(" | ".join(v[:30] for v in vals[:15]))
             wb.close()
             out.update(readable=True, excerpt="\n".join(rows)[:ATTACH_EXCERPT_CHARS],
-                       note=f"{ws.max_row or '?'} rows")
+                       note=f"{n_rows} data rows",
+                       stats={"rows": n_rows, "cols": n_cols,
+                              "blank_rows": blank_rows, "duplicate_rows": dup_rows,
+                              "sheets": len(wb.sheetnames) if hasattr(wb, "sheetnames") else 1},
+                       codes=codes[:300])
         elif low.endswith(".csv"):
             out.update(readable=True,
                        excerpt=data[:4000].decode("utf-8", "replace")[:ATTACH_EXCERPT_CHARS])
@@ -363,8 +382,13 @@ consultancy. Analyze ONE client email and reply with STRICT JSON ONLY:
  "attendance_month": null|"..", "joining_date": null|"..",
  "exit_date": null|"..",
  "extracted_data": { .. any other clearly stated facts .. },
- "missing_information": [".."]
+ "missing_information": [".."],
+ "findings": [{"severity":"critical"|"high"|"warning"|"normal","message":".."}],
+ "email_vs_attachment": [{"field":"..","email_value":"..","attachment_value":"..","severity":"critical"|"warning"}]
 }
+Compare what the EMAIL BODY states against what the ATTACHMENT excerpts
+show (salary, month, employee count, names) — report every mismatch in
+email_vs_attachment; leave it [] when nothing conflicts.
 Rules: NEVER invent missing information — use null / empty. Known client
 companies: %COMPANIES%. If the email clearly names one of them, set
 possible_company to that exact name."""
@@ -481,6 +505,60 @@ async def _process_email(parsed: dict, *, sandbox: bool, threshold: int) -> dict
                                      for k, v in list(extra.items())[:20]})
         rec["missing_information"] = [str(x)[:200] for x in
                                       (ai.get("missing_information") or [])][:15]
+        # Iter 683 — DATA ANALYSIS layer (Phase 1 spec).
+        findings = [{"severity": str(f.get("severity") or "normal").lower(),
+                     "message": str(f.get("message") or "")[:300]}
+                    for f in (ai.get("findings") or []) if isinstance(f, dict)][:20]
+        rec["email_vs_attachment"] = [
+            {k: str(c.get(k) or "")[:120] for k in
+             ("field", "email_value", "attachment_value", "severity")}
+            for c in (ai.get("email_vs_attachment") or []) if isinstance(c, dict)][:15]
+        for c in rec["email_vs_attachment"]:
+            findings.append({"severity": c.get("severity") or "critical",
+                             "message": f"MISMATCH {c['field']}: email says "
+                                        f"{c['email_value']} but attachment says "
+                                        f"{c['attachment_value']}"})
+        stats = {"rows": 0, "blank_rows": 0, "duplicate_rows": 0}
+        codes: list = []
+        for a in rec["attachments"]:
+            st_ = a.get("stats") or {}
+            for k in stats:
+                stats[k] += int(st_.get(k) or 0)
+            codes.extend(a.get("codes") or [])
+        matched = unmatched = 0
+        if codes and rec["company_id"]:
+            uniq = list({c for c in codes if c})[:300]
+            found = set()
+            async for u in db.users.find(
+                    {"company_id": rec["company_id"],
+                     "employee_code": {"$in": uniq}},
+                    {"_id": 0, "employee_code": 1}):
+                found.add(str(u.get("employee_code") or "").upper())
+            matched = len(found)
+            unmatched = max(0, len(uniq) - matched)
+            # only meaningful when the sheet actually carries codes
+            if matched and unmatched:
+                findings.append({"severity": "high", "message":
+                                 f"{unmatched} of {matched + unmatched} employee "
+                                 f"codes in the attachment were NOT found in the "
+                                 f"Employee Master (read-only check)"})
+            _tl(rec, "Data Compared",
+                f"Employee Master: {matched} matched · {unmatched} unmatched")
+        if stats["duplicate_rows"]:
+            findings.append({"severity": "warning", "message":
+                             f"{stats['duplicate_rows']} duplicate row(s) in the sheet"})
+        rec["data_analysis"] = {**stats, "employee_codes_seen": len(set(codes)),
+                                "matched": matched, "unmatched": unmatched}
+        rec["findings"] = findings
+        if stats["rows"]:
+            _tl(rec, "Data Validated",
+                f"{stats['rows']} rows · {stats['blank_rows']} blank · "
+                f"{stats['duplicate_rows']} duplicate")
+        if findings:
+            worst = ("critical" if any(f["severity"] == "critical" for f in findings)
+                     else "high" if any(f["severity"] == "high" for f in findings)
+                     else "warning")
+            _tl(rec, "Exceptions Identified", f"{len(findings)} finding(s) · worst: {worst}")
         rec["confidences"] = {
             "company": int(ai.get("company_confidence") or 0),
             "classification": int(ai.get("classification_confidence") or 0),
@@ -514,6 +592,10 @@ async def _process_email(parsed: dict, *, sandbox: bool, threshold: int) -> dict
             rec["status"] = "ACTION_REQUIRED"
         else:
             rec["status"] = "INFORMATION_ONLY"
+        # Iter 683 — a CRITICAL data finding escalates the email.
+        if any(f["severity"] == "critical" for f in findings) and \
+                rec["status"] in ("INFORMATION_ONLY", "ACTION_REQUIRED", "REVIEW_REQUIRED"):
+            rec["status"] = "URGENT"
         _tl(rec, "Audit Completed", rec["status"])
         _tl(rec, "Recommendation Generated", rec["ai_recommendation"][:120])
     except Exception as exc:
