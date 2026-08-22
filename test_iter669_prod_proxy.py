@@ -35,10 +35,13 @@ class H(http.server.SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(data)
             return
-        # SPA-ish static: map /route -> /route.html
+        # SPA fallback: any extension-less route -> index.html
         p = self.path.split("?")[0]
-        if p != "/" and "." not in os.path.basename(p) and os.path.exists(DIST + p + ".html"):
-            self.path = p + ".html"
+        if p != "/" and "." not in os.path.basename(p):
+            if os.path.exists(DIST + p + ".html"):
+                self.path = p + ".html"
+            else:
+                self.path = "/index.html"
         if self.command == "GET":
             super().do_GET()
         else:

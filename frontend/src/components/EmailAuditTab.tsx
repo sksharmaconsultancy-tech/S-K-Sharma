@@ -284,16 +284,18 @@ export default function EmailAuditTab() {
   }
 
   return (
-    <View style={{ flex: 1 }}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}
-        style={{ flexGrow: 0 }} contentContainerStyle={st.subTabs}>
+    <View style={{ flex: 1, minHeight: 0 }}>
+      {/* Iter 675 — plain wrapping row (was a horizontal ScrollView, which
+          collapses to 0 height on first layout in RN-web PROD builds and
+          made the content overlap this bar). */}
+      <View style={st.subTabs}>
         {SUB.map((s) => (
           <Pressable key={s} onPress={() => setSub(s)}
             style={[st.subTab, sub === s && st.subTabOn]} testID={`ea-sub-${s}`}>
             <Text style={[st.subTabTxt, sub === s && st.subTabTxtOn]}>{s}</Text>
           </Pressable>
         ))}
-      </ScrollView>
+      </View>
 
       <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: 10, paddingBottom: 60 }}>
         {sub === "Overview" ? (
@@ -338,18 +340,18 @@ export default function EmailAuditTab() {
 
         {sub === "Emails" ? (
           <>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>
-              <View style={{ flexDirection: "row", gap: 6 }}>
-                {FILTERS.map((f) => (
-                  <Pressable key={f || "ALL"} onPress={() => setFilter(f)}
-                    style={[st.subTab, filter === f && st.subTabOn]} testID={`ea-filter-${f || "ALL"}`}>
-                    <Text style={[st.subTabTxt, filter === f && st.subTabTxtOn]}>
-                      {f ? (STATUS_META[f]?.label || f) : "All"}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </ScrollView>
+            {/* Iter 675 — wrapping row instead of nested horizontal
+                ScrollView (prod overlap fix). */}
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+              {FILTERS.map((f) => (
+                <Pressable key={f || "ALL"} onPress={() => setFilter(f)}
+                  style={[st.subTab, filter === f && st.subTabOn]} testID={`ea-filter-${f || "ALL"}`}>
+                  <Text style={[st.subTabTxt, filter === f && st.subTabTxtOn]}>
+                    {f ? (STATUS_META[f]?.label || f) : "All"}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
             <View style={{ flexDirection: "row", gap: 8 }}>
               <TextInput value={search} onChangeText={setSearch}
                 placeholder="Search subject / sender / summary…"
@@ -397,17 +399,16 @@ export default function EmailAuditTab() {
           <>
             <View style={st.block}>
               <Text style={st.section}>Register a company email</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>
-                <View style={{ flexDirection: "row", gap: 6 }}>
-                  {firms.map((f: any) => (
-                    <Pressable key={f.company_id} onPress={() => setRegFirm(f.company_id)}
-                      style={[st.subTab, regFirm === f.company_id && st.subTabOn]}>
-                      <Text style={[st.subTabTxt, regFirm === f.company_id && st.subTabTxtOn]}
-                        numberOfLines={1}>{f.name}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </ScrollView>
+              {/* Iter 675 — wrapping row (prod overlap fix). */}
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                {firms.map((f: any) => (
+                  <Pressable key={f.company_id} onPress={() => setRegFirm(f.company_id)}
+                    style={[st.subTab, regFirm === f.company_id && st.subTabOn]}>
+                    <Text style={[st.subTabTxt, regFirm === f.company_id && st.subTabTxtOn]}
+                      numberOfLines={1}>{f.name}</Text>
+                  </Pressable>
+                ))}
+              </View>
               <TextInput value={regEmail} onChangeText={setRegEmail} placeholder="email@company.com"
                 placeholderTextColor={colors.onSurfaceTertiary} autoCapitalize="none"
                 style={st.input} testID="ea-reg-email" />
@@ -543,7 +544,10 @@ export default function EmailAuditTab() {
 }
 
 const st = StyleSheet.create({
-  subTabs: { flexDirection: "row", gap: 6, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  subTabs: {
+    flexDirection: "row", flexWrap: "wrap", gap: 6,
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
+  },
   subTab: {
     paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.md,
     borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary,

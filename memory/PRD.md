@@ -7681,3 +7681,24 @@ a tab inside AI Command Center.
 - deploy_vps_iter674.sh; temp_bundle -> deploy674; APP_ITERATION=674.
 - NOTE: preview DB has NO smtp_settings; live scan works on VPS where
   Email SMTP & Notifications is configured. Agent default OFF.
+
+## Iter 675 — OVERLAP ROOT-CAUSE FIX (user videos: AI CC + Dashboard)
+- Bug 1 (REPRODUCED on local prod build): EmailAuditTab filter-chip row
+  overlapped/hid the sub-tab bar on first render — nested horizontal
+  ScrollViews (style flexGrow:0, no height) collapse to 0 height on
+  initial layout in RN-web PROD exports. FIX: sub-tabs, status filters,
+  registry firm picker are now plain flexWrap row Views (no nested
+  horizontal ScrollViews in EmailAuditTab).
+- Bug 2 (dashboard Recently Opened chips overlapping on user's live,
+  NOT reproducible on latest Chromium): same hydration-misplacement
+  family (React #418 confirmed on their build). ROOT FIX: app.json
+  web.output "static" -> "single" (pure SPA — no pre-rendered route
+  HTML, no hydration at all). Verified: SPA prod export renders
+  dashboard + email audit cleanly; deep links work via fallback.
+- deploy_vps_iter675.sh: NEW step 8a auto-patches the nginx site config
+  serving $WEB_DIR to `try_files $uri $uri.html /index.html;` (backup
+  .bak675, nginx -t guard, restore on failure) — REQUIRED for SPA
+  deep links. Verify greps: output single, sks-pwa-v12, deep-link curl.
+- sw.js cache v11 -> v12. temp_bundle -> deploy675; APP_ITERATION=675.
+- test_iter669_prod_proxy.py updated: extension-less routes fall back
+  to index.html (mimics nginx SPA fallback).
