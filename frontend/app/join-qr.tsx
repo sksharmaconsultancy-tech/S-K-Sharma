@@ -89,9 +89,11 @@ export default function JoinQrScreen() {
 
   // Iter 106 — the QR codes point to the "Get the App" landing page:
   // scan → install app → register (employee joining / employer signup).
+  // Iter 676 (user request) — the EMPLOYEE QR now opens the JOINING FORM
+  // directly with the employer code auto-fetched & locked (?company=CODE).
   const employeeUrl = useMemo(() => selected?.company_code
-    ? `${BASE_URL}/get-app?type=employee&company=${encodeURIComponent(selected.company_code)}`
-    : `${BASE_URL}/get-app?type=employee`, [selected, BASE_URL]);
+    ? `${BASE_URL}/employee-signup?company=${encodeURIComponent(selected.company_code)}`
+    : `${BASE_URL}/employee-signup`, [selected, BASE_URL]);
   const employerUrl = useMemo(
     () => `${BASE_URL}/get-app?type=employer`, [BASE_URL]);
 
@@ -198,9 +200,9 @@ export default function JoinQrScreen() {
               key: "employee", title: "Employee QR", color: "#16A34A",
               icon: "person-add-outline" as const, url: employeeUrl,
               sub: selected
-                ? `${selected.name} — employee registers himself (joining form)`
-                : "Employee registers himself (joining form)",
-              hindi: "कर्मचारी — QR स्कैन करें, ऐप इंस्टॉल करें और रजिस्टर करें",
+                ? `${selected.name} — opens the joining form directly, employer code auto-filled`
+                : "Opens the joining form directly (employer code auto-filled)",
+              hindi: "कर्मचारी — QR स्कैन करते ही जॉइनिंग फॉर्म खुलेगा, कोड अपने आप भरेगा",
             }, {
               key: "employer", title: "Employer QR", color: "#1E3A8A",
               icon: "briefcase-outline" as const, url: employerUrl,

@@ -36,8 +36,28 @@ export default function EmployeeSignupScreen() {
   const router = useRouter();
   // Iter 96p — a company QR/link can pre-fill & lock the company code
   // (e.g. /employee-signup?company=SKS123 opened after scanning the QR).
+  // Iter 676 (user issue: employer code not auto-fetched after PWA
+  // install) — the scanned code is also persisted on-device, so even if
+  // the installed app later opens WITHOUT the ?company= param, the
+  // joining form still auto-fetches the employer code.
   const params = useLocalSearchParams<{ company?: string }>();
-  const prefillCompany = params.company ? String(params.company).toUpperCase() : "";
+  const paramCompany = params.company ? String(params.company).toUpperCase() : "";
+  const storedCompany = (() => {
+    try {
+      if (Platform.OS === "web" && typeof localStorage !== "undefined") {
+        return (localStorage.getItem("sks.join.company") || "").toUpperCase();
+      }
+    } catch { /* noop */ }
+    return "";
+  })();
+  const prefillCompany = paramCompany || storedCompany;
+  useEffect(() => {
+    try {
+      if (paramCompany && Platform.OS === "web" && typeof localStorage !== "undefined") {
+        localStorage.setItem("sks.join.company", paramCompany);
+      }
+    } catch { /* noop */ }
+  }, [paramCompany]);
 
   const [step, setStep] = useState<Step>("phone");
   const [phone, setPhone] = useState("");

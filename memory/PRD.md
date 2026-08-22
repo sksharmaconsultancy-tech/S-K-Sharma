@@ -7702,3 +7702,19 @@ a tab inside AI Command Center.
 - sw.js cache v11 -> v12. temp_bundle -> deploy675; APP_ITERATION=675.
 - test_iter669_prod_proxy.py updated: extension-less routes fall back
   to index.html (mimics nginx SPA fallback).
+
+## Iter 676 — Employee QR: joining form + auto employer code (user issue)
+- Issue: after scanning the employee QR + installing the PWA, the
+  employer code wasn't auto-fetched (install flow drops ?company=).
+- join-qr.tsx: employee QR URL now points DIRECTLY to
+  /employee-signup?company=CODE (was /get-app?type=employee&company=).
+- employee-signup.tsx: prefill = param OR localStorage
+  "sks.join.company"; param persisted to that key on mount. Existing
+  verify+lock flow unchanged ("You're joining <firm>").
+- get-app.tsx: when landed with a company code (old printed QRs) it now
+  ALSO persists sks.join.company before install, so the installed app's
+  joining form auto-fills.
+- Verified (screenshot, mobile viewport): /employee-signup?company=4A632A
+  -> prefilled + "You're joining City Care Hospital"; reopening WITHOUT
+  the param still prefilled. deploy_vps_iter676.sh; temp_bundle ->
+  deploy676; APP_ITERATION=676.

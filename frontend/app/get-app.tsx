@@ -32,12 +32,18 @@ export default function GetAppScreen() {
     if (Platform.OS !== "web") return;
     try {
       window.localStorage.setItem("qr_entry_type", isEmployer ? "employer" : "employee");
+      // Iter 676 — persist the scanned employer code so the joining form
+      // auto-fetches it even after the PWA is installed (params get lost
+      // when the installed app opens from its start_url).
+      if (!isEmployer && companyCode) {
+        window.localStorage.setItem("sks.join.company", companyCode);
+      }
     } catch {}
     // Iter 185 — point the browser at the correct app manifest so the
     // Install prompt installs the right PWA (Employer vs Employee).
     setManifestHref(isEmployer ? "/manifest-employer.json" : "/manifest-employee.json");
     setAppleWebAppTitle(isEmployer ? "SKS Employer" : "SKS Employee");
-  }, [isEmployer]);
+  }, [isEmployer, companyCode]);
 
   useEffect(() => {
     if (Platform.OS !== "web") return;
