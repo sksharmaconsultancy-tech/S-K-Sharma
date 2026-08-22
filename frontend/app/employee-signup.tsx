@@ -70,7 +70,12 @@ export default function EmployeeSignupScreen() {
   const [name, setName] = useState("");
   const [fatherName, setFatherName] = useState("");
   const [dob, setDob] = useState("");
-  const [doj, setDoj] = useState("");
+  // Iter 686 (user request) — Date of Joining auto-fills with TODAY's date
+  // when the employee opens the form (still editable).
+  const [doj, setDoj] = useState(() => {
+    const t = new Date();
+    return `${String(t.getDate()).padStart(2, "0")}-${String(t.getMonth() + 1).padStart(2, "0")}-${t.getFullYear()}`;
+  });
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
   // Iter 85 — Employee-provided code (from offer letter).
@@ -151,6 +156,15 @@ export default function EmployeeSignupScreen() {
     setError(null);
     if (!name.trim()) {
       setError("Please enter your full name");
+      return;
+    }
+    // Iter 686 (user request) — Father's name & Date of birth are required.
+    if (!fatherName.trim()) {
+      setError("Please enter your father's name");
+      return;
+    }
+    if (!ddmmyyyyDashToISO(dob.trim())) {
+      setError("Please enter your date of birth (DD-MM-YYYY)");
       return;
     }
     setBusy(true);
@@ -326,23 +340,23 @@ export default function EmployeeSignupScreen() {
                   If your employer already gave you a code, enter it here — otherwise leave blank and one will be assigned.
                 </Text>
 
-                <Text style={styles.label}>Father&apos;s name</Text>
+                <Text style={styles.label}>Father&apos;s name *</Text>
                 <TextInput
                   testID="signup-father"
                   value={fatherName}
                   onChangeText={(v) => setFatherName(v.toUpperCase())}
-                  placeholder="(OPTIONAL)"
+                  placeholder="ENTER FATHER'S NAME"
                   placeholderTextColor={colors.onSurfaceTertiary}
                   style={styles.input}
                 />
 
-                <Text style={styles.label}>Date of birth</Text>
+                <Text style={styles.label}>Date of birth *</Text>
                 <TextInput
                   testID="signup-dob"
                   value={dob}
                   onChangeText={(t) => setDob(maskDashDate(t))}
                   keyboardType="number-pad"
-                  placeholder="DD-MM-YYYY (optional)"
+                  placeholder="DD-MM-YYYY"
                   placeholderTextColor={colors.onSurfaceTertiary}
                   style={styles.input}
                   maxLength={10}
@@ -354,11 +368,14 @@ export default function EmployeeSignupScreen() {
                   value={doj}
                   onChangeText={(t) => setDoj(maskDashDate(t))}
                   keyboardType="number-pad"
-                  placeholder="DD-MM-YYYY (optional)"
+                  placeholder="DD-MM-YYYY"
                   placeholderTextColor={colors.onSurfaceTertiary}
                   style={styles.input}
                   maxLength={10}
                 />
+                <Text style={styles.hint}>
+                  Auto-filled with today&apos;s date — change it if you joined earlier.
+                </Text>
 
                 <Text style={styles.label}>Email (optional)</Text>
                 <TextInput

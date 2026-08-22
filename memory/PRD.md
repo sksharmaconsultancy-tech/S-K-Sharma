@@ -7864,3 +7864,12 @@ a tab inside AI Command Center.
 - E2E PASS: image-only PDF → "PAN CARD of SAHIL DIKSAN · No.
   FKTPS8891C · father_name · dob" extracted via Gemini vision.
 - pymupdf==1.28.0 already in requirements.txt (ships to VPS).
+
+## Iter 685c — Employee PWA Joining Form Page 2 (user request)
+- employee-signup.tsx "details" step:
+  * Father's Name → required (validation "Please enter your father's name")
+  * Date of Birth → required (ddmmyyyyDashToISO validated)
+  * Date of Joining → useState initializer = today's DD-MM-YYYY (editable,
+    hint "Auto-filled with today's date — change it if you joined earlier.")
+- Verified via screenshot: labels with *, DOJ=22-08-2026 auto-filled,
+  father-name validation error fires on empty submit.

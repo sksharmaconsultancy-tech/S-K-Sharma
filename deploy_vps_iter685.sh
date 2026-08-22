@@ -32,6 +32,12 @@
 #  (kind=diag685 / kind=fix685) for the legacy-import salary-structure
 #  junk found in AAZAR DARAN (backup + dry-run before apply).
 #
+# 📝 ALSO (685): EMPLOYEE PWA JOINING FORM — PAGE 2 (user request):
+#  * Father's Name → REQUIRED * (with validation message)
+#  * Date of Birth → REQUIRED * (DD-MM-YYYY validated)
+#  * Date of Joining → AUTO-FILLS with TODAY's date when the employee
+#    opens the form (still editable — hint shown below the field).
+#
 # ═══════════ ALSO INCLUDED (Iter 684) ═══════════
 #
 # 🛠️ AI COMMAND CENTER — TABS OVERLAP FIXED (user bug, video ×2):
@@ -793,6 +799,8 @@ echo -n "   OCR Document Scanner — Iter 685 (must say OK): "
 grep -q '_ocr_documents' $APP_DIR/backend/routes/email_audit_agent.py && grep -q 'Document Analysis (OCR)' $APP_DIR/frontend/src/components/EmailAuditTab.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Scanned-PDF OCR — Iter 685 (must say OK): "
 grep -q '_b64_pages' $APP_DIR/backend/routes/email_audit_agent.py && echo "OK" || echo "MISSING!"
+echo -n "   Joining form Page 2 rules — Iter 685 (must say OK): "
+grep -q "Please enter your father's name" $APP_DIR/frontend/app/employee-signup.tsx && grep -q "Auto-filled with today" $APP_DIR/frontend/app/employee-signup.tsx && echo "OK" || echo "MISSING!"
 echo -n "   AI CC tab bar fixed — Iter 684 (must say OK): "
 grep -q 'plain' $APP_DIR/frontend/app/ai-command-center.tsx && ! grep -q '</ScrollView>$' <(sed -n '265,272p' $APP_DIR/frontend/app/ai-command-center.tsx) && echo "OK" || echo "MISSING!"
 echo -n "   Data Analysis layer — Iter 683 (must say OK): "
