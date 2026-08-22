@@ -206,14 +206,23 @@ V2_REGISTER_COLUMNS: List[Any] = [
 
 
 def _round_stat(v: float, mode: str) -> float:
-    """Whole-rupee statutory rounding."""
+    """Whole-rupee statutory rounding.
+
+    Iter 681 (user bug — BANTI SINGH RAWAT: our ESIC ₹51 vs portal ₹50 on
+    wages 6667): government portals compute the contribution in
+    RUPEES-PAISE first (2 decimals) and only then round to the whole
+    rupee. 6667 × 0.75% = 50.0025 → ₹50.00 → round-up leaves 50, while
+    ceiling the raw product gave 51. So ALWAYS settle to paise before the
+    whole-rupee step (also correct for PF — EPFO works on paise values).
+    """
+    v = round(v, 2)
     if mode == "ceil":
         return float(math.ceil(v - 1e-9))
     if mode == "floor":
         return float(math.floor(v + 1e-9))
     if mode == "nearest":
         return float(round(v))
-    return round(v, 2)
+    return v
 
 # --------------------------------------------------------------------------- 
 # Professional Tax — monthly ₹ per state. Simplified flat monthly amounts.

@@ -3413,8 +3413,17 @@ export default function ComplianceSalaryRunScreen() {
                           ) : null}
                           {/* Iter 644 — dynamic custom allowance head cells
                               (paid, decomposed out of Others*).
-                              Iter 647 (user request) — EDITABLE. */}
+                              Iter 647 (user request) — EDITABLE.
+                              Iter 681 (user rule) — FOOD heads are ALWAYS
+                              read-only for every firm (sheet/master values
+                              show, but cannot be typed over). */}
                           {allowLabels.map((l) => (
+                            String(l).toUpperCase().includes("FOOD") ? (
+                              <Text key={`ap-${l}`}
+                                style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>
+                                {fmtInr((((r as any).allowance_heads || {})[l]) || 0)}
+                              </Text>
+                            ) : (
                             <EditableGridCell
                               key={`ap-${l}`}
                               col={`allow::${l}`} idx={idx} width={colW.num}
@@ -3424,6 +3433,7 @@ export default function ComplianceSalaryRunScreen() {
                               onNav={navigateFrom}
                               onFocused={() => setHlRow(r.user_id)}
                             />
+                            )
                           ))}
                         </>
                       );

@@ -7755,3 +7755,25 @@ a tab inside AI Command Center.
 - Verified: syntax + sandbox e2e still PASS (IMAP paths not testable in
   preview — no smtp_settings; verify on VPS after deploy).
 - deploy_vps_iter680.sh; temp_bundle -> deploy680; APP_ITERATION=680.
+
+## Iter 681 — ESIC paise-first rounding + FOOD column read-only (user)
+- BUG (BANTI SINGH RAWAT, SHARMA ALLIED AJMER): wages 6667 -> grid ESI(E)
+  51 vs portal challan 50. Root cause: _round_stat ceiled the RAW product
+  (6667*0.0075=50.0025 -> 51); portals settle to paise first (50.00 ->
+  50). FIX utils/compliance_salary.py _round_stat: v=round(v,2) BEFORE
+  mode rounding (applies to ESIC EE/ER + PF). Unit-verified against the
+  user's challan: 50/87/84/113 + employer 217/376/362 ALL PASS. User must
+  Reprocess open months.
+- FOOD read-only (user choices): allocation UNCHANGED (sheet FOOD stays
+  under FOOD, remainder to OT); compliance-salary-run.tsx allowLabels map
+  renders labels containing "FOOD" as plain Text (all firms, always).
+- OPEN ISSUES (interrupted, investigate next):
+  1) Night-shift punch: SAAM TEXTILES — KAILASH CHAND 21-08 modal shows
+     OUT 07:54 + IN 19:51; grid flags missing OUT/IN on adjacent days.
+     Suspect: attendance_admin_core.py pairing (lines ~1260-1330) drops
+     the un-consumed morning OUT when the previous night's IN is absent/
+     unpaired; also check attendance_doctor cross-midnight re-dating.
+  2) Manual punches not showing: Kankani MADAN KEER 10-08 modal has IN
+     10:19 Machine + OUT 22:19 App but grid cell blank. Repro plan:
+     seed punches + call the monthly attendance grid API.
+- deploy_vps_iter681.sh; temp_bundle -> deploy681; APP_ITERATION=681.
