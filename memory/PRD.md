@@ -7828,3 +7828,25 @@ a tab inside AI Command Center.
   db.twofa_pending.otp_hash with sha256("123456") after password login,
   then POST /api/auth/2fa/verify; inject session_token into
   localStorage key llc_session_token.
+
+## Iter 685 — Email Audit OCR Document Scanner (user request)
+- email_audit_agent.py: image attachments (.jpg/.png/.webp ≤6MB) keep
+  base64 (_b64, stripped before DB insert). _ocr_documents() → Gemini
+  Flash vision (ImageContent) per image: document_type (AADHAAR/PAN/
+  PASSBOOK/CHEQUE/…), person_name, id_number, fields{}, legible.
+- rec.document_analysis + rec.document_report ("Found attachment X —
+  AADHAAR CARD of NAME · No. … · dob …"); timeline "OCR Scanner Used" +
+  "Document Identified". OCR readings feed _ai_analyze.
+- AI_SYSTEM: summary must be a human analysis report — raw metadata
+  field dumps (employee_name:/forwarded_by:) forbidden (user rule).
+- Sandbox ingest: attachment_name + attachment_b64 for OCR e2e testing.
+- EmailAuditTab: new "🪪 Document Analysis (OCR)" block per document.
+- E2E sandbox PASS (real Gemini): synthetic Aadhaar jpg → type+name+
+  number+dob+gender+address all extracted; report format verified.
+- ALSO: VIPUL 16120 bug root-caused = frozen snapshot (520/day) vs live
+  master (300/470) — fix = Refresh Master (verified E2E locally).
+  AAZAR DARAN = legacy-import junk rows in salary_structure_compliance
+  (gross ballooned to lakhs) — fix_aazar_685.sh (kind=fix685, dry-run +
+  apply + backup collection aazar_fix685_backup) + Refresh Master.
+- diag_vipul_aazar_685.sh (kind=diag685) read-only diagnostics.
+- deploy_vps_iter685.sh; temp_bundle -> deploy685; APP_ITERATION=685.

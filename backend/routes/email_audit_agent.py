@@ -24,6 +24,7 @@ Collections:
   email_audit_records     — permanent audit records + processing timeline
 """
 import asyncio
+import base64
 import io
 import json
 import logging
@@ -164,6 +165,16 @@ def _attachment_excerpt(name: str, data: bytes) -> dict:
                        note=f"{len(names)} file(s) listed")
         elif low.endswith((".doc",)):
             out["note"] = "Legacy .doc — metadata only"
+        elif low.endswith((".jpg", ".jpeg", ".png", ".webp")):
+            # Iter 685 (user request) — document photos (Aadhaar / PAN /
+            # bank passbook / cheque) are OCR-read by the AI vision step in
+            # _process_email. Keep the bytes (base64) for that step ONLY —
+            # stripped before the record is stored (never saved to DB).
+            if 0 < len(data) <= 6 * 1024 * 1024:
+                out["_b64"] = base64.b64encode(data).decode()
+                out["note"] = "Document image — OCR scan queued"
+            else:
+                out["note"] = "Image too large for OCR (>6 MB)"
         else:
             out["note"] = "Type not analyzed"
     except Exception as exc:  # corrupted / unreadable
@@ -361,6 +372,88 @@ async def _match_company(sender_email: str) -> dict:
     return out
 
 
+# ───────────────────────── document OCR (Iter 685) ─────────────────────────
+
+_DOC_OCR_PROMPT = """Look at this document photo from an email attachment.
+Reply with STRICT JSON ONLY:
+{
+ "document_type": "AADHAAR CARD"|"PAN CARD"|"BANK PASSBOOK"|"CANCELLED CHEQUE"|
+                  "VOTER ID"|"DRIVING LICENCE"|"UAN / PF DOCUMENT"|"ESIC CARD"|
+                  "SALARY SLIP"|"PHOTO / SELFIE"|"OTHER DOCUMENT",
+ "person_name": null|"name printed on the document",
+ "id_number": null|"main number (Aadhaar no / PAN / account no / UAN / IP no)",
+ "fields": { .. every other clearly readable field: dob, gender, father_name,
+             address, ifsc, bank_name, branch, mobile, issue_date .. },
+ "legible": true|false
+}
+Rules: extract ONLY what is clearly printed — never guess; unreadable → null."""
+
+
+async def _ocr_documents(attachments: list) -> list:
+    """Iter 685 (user request) — OCR-scan image attachments (Aadhaar / PAN /
+    bank passbook / cheque photos) with AI vision. READ-ONLY; max 5 images;
+    one failure never blocks the email. Returns document_analysis list."""
+    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+    out = []
+    imgs = [a for a in attachments if a.get("_b64")][:5]
+    for a in imgs:
+        entry = {"file_name": a.get("name"), "document_type": "OTHER DOCUMENT",
+                 "person_name": None, "id_number": None, "fields": {},
+                 "legible": False, "ocr_used": True}
+        try:
+            chat = LlmChat(
+                api_key=EMERGENT_LLM_KEY,
+                session_id=f"email-ocr-{uuid.uuid4().hex[:8]}",
+                system_message=("You are an OCR reader for Indian government-ID "
+                                "and bank documents. Reply with valid JSON only; "
+                                "never invent unreadable values."),
+            ).with_model("gemini", "gemini-3-flash-preview")
+            resp = await chat.send_message(UserMessage(
+                text=_DOC_OCR_PROMPT,
+                file_contents=[ImageContent(image_base64=a["_b64"])]))
+            raw = re.sub(r"^```(?:json)?|```$", "", str(resp).strip(),
+                         flags=re.MULTILINE).strip()
+            m = re.search(r"\{.*\}", raw, re.DOTALL)
+            if m:
+                j = json.loads(m.group(0))
+                entry["document_type"] = str(j.get("document_type")
+                                             or "OTHER DOCUMENT")[:60]
+                entry["person_name"] = (str(j.get("person_name"))[:120]
+                                        if j.get("person_name") else None)
+                entry["id_number"] = (str(j.get("id_number"))[:80]
+                                      if j.get("id_number") else None)
+                flds = j.get("fields")
+                if isinstance(flds, dict):
+                    entry["fields"] = {str(k)[:40]: str(v)[:160]
+                                       for k, v in list(flds.items())[:15]
+                                       if v not in (None, "", "null")}
+                entry["legible"] = bool(j.get("legible"))
+        except Exception as exc:  # noqa: BLE001 — OCR must never break the audit
+            entry["fields"] = {"error": f"OCR failed: {str(exc)[:120]}"}
+        out.append(entry)
+    return out
+
+
+def _doc_report_lines(doc_analysis: list) -> list:
+    """Human report: 'Found attachment X — AADHAAR CARD of NAME · No. …'."""
+    lines = []
+    for d in doc_analysis:
+        bits = [f"Found attachment {d.get('file_name')} — {d.get('document_type')}"]
+        if d.get("person_name"):
+            bits.append(f"of {d['person_name']}")
+        core = " ".join(bits)
+        if d.get("id_number"):
+            core += f" · No. {d['id_number']}"
+        extras = " · ".join(f"{k}: {v}" for k, v in (d.get("fields") or {}).items()
+                            if k != "error")
+        if extras:
+            core += f" · {extras}"
+        if not d.get("legible") and not d.get("id_number"):
+            core += " · (image not clearly legible)"
+        lines.append(core[:500])
+    return lines
+
+
 # ───────────────────────── AI analysis ─────────────────────────────────────
 
 AI_SYSTEM = """You are the READ-ONLY Email Audit Agent of an Indian payroll/HR
@@ -389,12 +482,17 @@ consultancy. Analyze ONE client email and reply with STRICT JSON ONLY:
 Compare what the EMAIL BODY states against what the ATTACHMENT excerpts
 show (salary, month, employee count, names) — report every mismatch in
 email_vs_attachment; leave it [] when nothing conflicts.
+SUMMARY STYLE (user rule): write the summary as a short human ANALYSIS
+REPORT — what was received and requested, which documents were found
+(name + identified type + whose document), and what the operator should
+verify. NEVER output a raw metadata field list (no 'employee_name:',
+'forwarded_by:', 'received_timestamp:' style dumps).
 Rules: NEVER invent missing information — use null / empty. Known client
 companies: %COMPANIES%. If the email clearly names one of them, set
 possible_company to that exact name."""
 
 
-async def _ai_analyze(parsed: dict) -> dict:
+async def _ai_analyze(parsed: dict, doc_analysis: Optional[list] = None) -> dict:
     from emergentintegrations.llm.chat import LlmChat, UserMessage
     comps = await db.companies.find({}, {"_id": 0, "name": 1}).to_list(200)
     names = [c.get("name") for c in comps if c.get("name")]
@@ -404,11 +502,15 @@ async def _ai_analyze(parsed: dict) -> dict:
     for a in parsed.get("attachments", []):
         att_lines.append(f"- {a['name']} ({a['type']}, {a['size']} bytes)"
                          + (f"\n  excerpt: {a['excerpt'][:600]}" if a.get("excerpt") else ""))
+    # Iter 685 — OCR document readings feed the analysis.
+    doc_lines = _doc_report_lines(doc_analysis or [])
     user_txt = (
         f"FROM: {parsed.get('sender_name')} <{parsed.get('sender_email')}>\n"
         f"SUBJECT: {parsed.get('subject')}\n"
         f"RECEIVED: {parsed.get('received_at')}\n"
-        f"ATTACHMENTS:\n" + ("\n".join(att_lines) or "none") + "\n\nBODY:\n"
+        f"ATTACHMENTS:\n" + ("\n".join(att_lines) or "none")
+        + ("\nOCR DOCUMENT READINGS:\n" + "\n".join(doc_lines) if doc_lines else "")
+        + "\n\nBODY:\n"
         + (parsed.get("body_text") or "")[:BODY_CHARS_FOR_AI])
     chat = LlmChat(api_key=EMERGENT_LLM_KEY,
                    session_id=f"email-audit-{uuid.uuid4().hex[:8]}",
@@ -435,7 +537,9 @@ async def _process_email(parsed: dict, *, sandbox: bool, threshold: int) -> dict
         "subject": parsed.get("subject"),
         "received_at": parsed.get("received_at"),
         "body_text": (parsed.get("body_text") or "")[:20000],
-        "attachments": parsed.get("attachments", []),
+        # Iter 685 — never store image bytes: _b64 is for the OCR step only.
+        "attachments": [{k: v for k, v in a.items() if k != "_b64"}
+                        for a in parsed.get("attachments", [])],
         "has_attachments": bool(parsed.get("attachments")),
         "folder": parsed.get("folder") or "INBOX",
         "sandbox": bool(sandbox),
@@ -483,7 +587,21 @@ async def _process_email(parsed: dict, *, sandbox: bool, threshold: int) -> dict
             rec["company_name"] = match["company_name"]
             _tl(rec, "Company Matched",
                 f"{match['company_name']} · {match['match_type']} {match['confidence']}%")
-        ai = await _ai_analyze(parsed)
+        # Iter 685 (user request) — OCR SCANNER for document-photo
+        # attachments (Aadhaar / PAN / bank passbook / cheque images).
+        doc_analysis: list = []
+        if any(a.get("_b64") for a in parsed.get("attachments", [])):
+            _tl(rec, "OCR Scanner Used",
+                ", ".join(a["name"] for a in parsed["attachments"]
+                          if a.get("_b64"))[:200])
+            doc_analysis = await _ocr_documents(parsed["attachments"])
+            for d in doc_analysis:
+                _tl(rec, "Document Identified",
+                    f"{d.get('file_name')} → {d.get('document_type')}"
+                    + (f" ({d['person_name']})" if d.get("person_name") else ""))
+        rec["document_analysis"] = doc_analysis
+        rec["document_report"] = _doc_report_lines(doc_analysis)
+        ai = await _ai_analyze(parsed, doc_analysis)
         _tl(rec, "Content Analyzed", "GPT-5.4 audit complete")
         if rec["has_attachments"]:
             _tl(rec, "Attachment Analyzed",
@@ -716,6 +834,10 @@ class SandboxIngestIn(BaseModel):
     subject: str
     body: str
     received_at: Optional[str] = None
+    # Iter 685 — optional document photo (base64 jpg/png) to test the OCR
+    # scanner end-to-end in sandbox mode.
+    attachment_name: Optional[str] = None
+    attachment_b64: Optional[str] = None
 
 
 # ───────────────────────── endpoints (super admin only) ─────────────────────
@@ -1008,6 +1130,18 @@ async def sandbox_ingest(payload: SandboxIngestIn,
         "received_at": payload.received_at or datetime.now(timezone.utc).isoformat(),
         "body_text": payload.body[:20000], "attachments": [],
     }
+    # Iter 685 — sandbox OCR test: attach one document photo.
+    if payload.attachment_b64 and payload.attachment_name:
+        try:
+            _sz = len(base64.b64decode(payload.attachment_b64))
+        except Exception:
+            raise HTTPException(status_code=400, detail="attachment_b64 is not valid base64")
+        parsed["attachments"] = [{
+            "name": payload.attachment_name[:120], "type": "image/jpeg",
+            "size": _sz, "readable": False, "excerpt": "",
+            "note": "Document image — OCR scan queued",
+            "_b64": payload.attachment_b64,
+        }]
     rec = await _process_email(parsed, sandbox=True,
                                threshold=int(st.get("threshold") or 80))
     return {"ok": True, "record": rec}

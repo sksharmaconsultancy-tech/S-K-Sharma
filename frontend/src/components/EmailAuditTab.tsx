@@ -250,6 +250,27 @@ export default function EmailAuditTab() {
             Extraction {conf.extraction || 0}% · Recommendation {conf.recommendation || 0}%
           </Text>
         </View>
+        {/* Iter 685 — OCR Document Analysis (Aadhaar / PAN / bank photos) */}
+        {(detail.document_analysis || []).length ? (
+          <View style={[st.block, { backgroundColor: "#EFF6FF", borderColor: "#BFDBFE" }]}>
+            <Text style={st.section}>🪪 Document Analysis (OCR)</Text>
+            {detail.document_analysis.map((d: any, i: number) => (
+              <View key={i} style={{ marginTop: i ? 8 : 2 }}>
+                <Text style={[st.line, { fontWeight: "800" }]}>
+                  📎 {d.file_name} — {d.document_type}
+                  {d.person_name ? ` · ${d.person_name}` : ""}
+                </Text>
+                {d.id_number ? <Text style={st.line}>• Number: {d.id_number}</Text> : null}
+                {Object.entries(d.fields || {}).map(([k, v]: any) => (
+                  <Text key={k} style={st.line}>• {k}: {String(v)}</Text>
+                ))}
+                {!d.legible && !d.id_number ? (
+                  <Text style={[st.line, { color: "#B45309" }]}>⚠ Image not clearly legible</Text>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        ) : null}
         {/* Iter 683 — Data Analysis, Comparison & Findings */}
         {detail.data_analysis && (detail.data_analysis.rows || detail.data_analysis.matched || (detail.findings || []).length) ? (
           <View style={st.block}>
