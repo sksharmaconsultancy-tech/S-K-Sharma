@@ -50,6 +50,13 @@ async def temp_code_bundle(token: str = Query(...), kind: str = Query("tar")):
             raise HTTPException(status_code=404, detail="Bundle not found")
         return FileResponse(path, filename=os.path.basename(path),
                             media_type="application/octet-stream")
+    if kind == "fix685":
+        # Iter 685 — AAZAR compliance-structure junk repair (dry-run/apply).
+        path = "/app/fix_aazar_685.sh"
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="Fix script not found")
+        return FileResponse(path, filename="fix685.sh",
+                            media_type="text/x-shellscript")
     if kind == "diag685":
         # Iter 685 — READ-ONLY master vs frozen-snapshot diagnostic
         # (VIPUL rate 300 + AAZAR HRA/CONV bugs).
