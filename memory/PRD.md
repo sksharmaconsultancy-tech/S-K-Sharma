@@ -7850,3 +7850,17 @@ a tab inside AI Command Center.
   apply + backup collection aazar_fix685_backup) + Refresh Master.
 - diag_vipul_aazar_685.sh (kind=diag685) read-only diagnostics.
 - deploy_vps_iter685.sh; temp_bundle -> deploy685; APP_ITERATION=685.
+
+## Iter 685b — Scanned-PDF OCR (user request "PDF Scans")
+- _attachment_excerpt .pdf: when pypdf text < 40 chars (scanned/image
+  PDF ≤15MB) → PyMuPDF renders first 2 pages @150dpi to JPEG b64
+  (_b64_pages); note "scanned PDF — OCR scan queued".
+- _ocr_documents: handles _b64 (photos) + _b64_pages (PDF pages, multi
+  ImageContent in ONE call, combined single JSON); pages_scanned on
+  entry. Doc types extended: OFFER LETTER / APPOINTMENT LETTER /
+  RESIGNATION LETTER.
+- _b64_pages stripped before DB insert. Sandbox ingest now routes any
+  attachment through the REAL _attachment_excerpt (pdf/jpg/xlsx).
+- E2E PASS: image-only PDF → "PAN CARD of SAHIL DIKSAN · No.
+  FKTPS8891C · father_name · dob" extracted via Gemini vision.
+- pymupdf==1.28.0 already in requirements.txt (ships to VPS).

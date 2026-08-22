@@ -154,6 +154,25 @@ def _attachment_excerpt(name: str, data: bytes) -> dict:
             txt = " ".join((p.extract_text() or "") for p in rd.pages[:2])
             out.update(readable=True, excerpt=txt[:ATTACH_EXCERPT_CHARS],
                        note=f"{len(rd.pages)} pages")
+            # Iter 686 (user request) — SCANNED PDFs (offer letters / ID
+            # copies saved as images inside a PDF) have no extractable
+            # text: render the first 2 pages to JPEG for the OCR scanner.
+            if len(txt.strip()) < 40 and 0 < len(data) <= 15 * 1024 * 1024:
+                try:
+                    import fitz  # PyMuPDF
+                    pdoc = fitz.open(stream=data, filetype="pdf")
+                    pages_b64 = []
+                    for _pi in range(min(2, pdoc.page_count)):
+                        pix = pdoc[_pi].get_pixmap(dpi=150)
+                        pages_b64.append(base64.b64encode(
+                            pix.tobytes("jpeg")).decode())
+                    pdoc.close()
+                    if pages_b64:
+                        out["_b64_pages"] = pages_b64
+                        out["note"] = (f"{len(rd.pages)} pages · scanned PDF "
+                                       f"— OCR scan queued")
+                except Exception as exc:  # noqa: BLE001
+                    out["note"] = f"{len(rd.pages)} pages · scan render failed: {str(exc)[:80]}"
         elif low.endswith(".docx"):
             with zipfile.ZipFile(io.BytesIO(data)) as z:
                 xml = z.read("word/document.xml").decode("utf-8", "replace")
@@ -379,7 +398,8 @@ Reply with STRICT JSON ONLY:
 {
  "document_type": "AADHAAR CARD"|"PAN CARD"|"BANK PASSBOOK"|"CANCELLED CHEQUE"|
                   "VOTER ID"|"DRIVING LICENCE"|"UAN / PF DOCUMENT"|"ESIC CARD"|
-                  "SALARY SLIP"|"PHOTO / SELFIE"|"OTHER DOCUMENT",
+                  "SALARY SLIP"|"OFFER LETTER"|"APPOINTMENT LETTER"|
+                  "RESIGNATION LETTER"|"PHOTO / SELFIE"|"OTHER DOCUMENT",
  "person_name": null|"name printed on the document",
  "id_number": null|"main number (Aadhaar no / PAN / account no / UAN / IP no)",
  "fields": { .. every other clearly readable field: dob, gender, father_name,
@@ -391,26 +411,33 @@ Rules: extract ONLY what is clearly printed — never guess; unreadable → null
 
 async def _ocr_documents(attachments: list) -> list:
     """Iter 685 (user request) — OCR-scan image attachments (Aadhaar / PAN /
-    bank passbook / cheque photos) with AI vision. READ-ONLY; max 5 images;
-    one failure never blocks the email. Returns document_analysis list."""
+    bank passbook / cheque photos) with AI vision. Iter 686 — also scanned
+    PDFs (offer letters / ID copies) via rendered page images. READ-ONLY;
+    max 5 documents; one failure never blocks the email."""
     from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
     out = []
-    imgs = [a for a in attachments if a.get("_b64")][:5]
-    for a in imgs:
+    docs = [a for a in attachments if a.get("_b64") or a.get("_b64_pages")][:5]
+    for a in docs:
+        pages = a.get("_b64_pages") or [a.get("_b64")]
         entry = {"file_name": a.get("name"), "document_type": "OTHER DOCUMENT",
                  "person_name": None, "id_number": None, "fields": {},
-                 "legible": False, "ocr_used": True}
+                 "legible": False, "ocr_used": True,
+                 "pages_scanned": len(pages)}
         try:
             chat = LlmChat(
                 api_key=EMERGENT_LLM_KEY,
                 session_id=f"email-ocr-{uuid.uuid4().hex[:8]}",
-                system_message=("You are an OCR reader for Indian government-ID "
-                                "and bank documents. Reply with valid JSON only; "
-                                "never invent unreadable values."),
+                system_message=("You are an OCR reader for Indian government-ID, "
+                                "bank and HR documents. Reply with valid JSON "
+                                "only; never invent unreadable values."),
             ).with_model("gemini", "gemini-3-flash-preview")
+            prompt = _DOC_OCR_PROMPT
+            if len(pages) > 1:
+                prompt += ("\nThe images are consecutive pages of ONE document "
+                           "— combine them into a single JSON result.")
             resp = await chat.send_message(UserMessage(
-                text=_DOC_OCR_PROMPT,
-                file_contents=[ImageContent(image_base64=a["_b64"])]))
+                text=prompt,
+                file_contents=[ImageContent(image_base64=p) for p in pages]))
             raw = re.sub(r"^```(?:json)?|```$", "", str(resp).strip(),
                          flags=re.MULTILINE).strip()
             m = re.search(r"\{.*\}", raw, re.DOTALL)
@@ -537,8 +564,10 @@ async def _process_email(parsed: dict, *, sandbox: bool, threshold: int) -> dict
         "subject": parsed.get("subject"),
         "received_at": parsed.get("received_at"),
         "body_text": (parsed.get("body_text") or "")[:20000],
-        # Iter 685 — never store image bytes: _b64 is for the OCR step only.
-        "attachments": [{k: v for k, v in a.items() if k != "_b64"}
+        # Iter 685 — never store image bytes: _b64 / _b64_pages are for the
+        # OCR step only.
+        "attachments": [{k: v for k, v in a.items()
+                         if k not in ("_b64", "_b64_pages")}
                         for a in parsed.get("attachments", [])],
         "has_attachments": bool(parsed.get("attachments")),
         "folder": parsed.get("folder") or "INBOX",
@@ -588,12 +617,14 @@ async def _process_email(parsed: dict, *, sandbox: bool, threshold: int) -> dict
             _tl(rec, "Company Matched",
                 f"{match['company_name']} · {match['match_type']} {match['confidence']}%")
         # Iter 685 (user request) — OCR SCANNER for document-photo
-        # attachments (Aadhaar / PAN / bank passbook / cheque images).
+        # attachments (Aadhaar / PAN / bank passbook / cheque images);
+        # Iter 686 — also scanned PDFs (offer letters / ID copies).
         doc_analysis: list = []
-        if any(a.get("_b64") for a in parsed.get("attachments", [])):
+        if any(a.get("_b64") or a.get("_b64_pages")
+               for a in parsed.get("attachments", [])):
             _tl(rec, "OCR Scanner Used",
                 ", ".join(a["name"] for a in parsed["attachments"]
-                          if a.get("_b64"))[:200])
+                          if a.get("_b64") or a.get("_b64_pages"))[:200])
             doc_analysis = await _ocr_documents(parsed["attachments"])
             for d in doc_analysis:
                 _tl(rec, "Document Identified",
@@ -1130,18 +1161,19 @@ async def sandbox_ingest(payload: SandboxIngestIn,
         "received_at": payload.received_at or datetime.now(timezone.utc).isoformat(),
         "body_text": payload.body[:20000], "attachments": [],
     }
-    # Iter 685 — sandbox OCR test: attach one document photo.
+    # Iter 685/686 — sandbox OCR test: attach one document (photo or PDF);
+    # runs through the SAME excerpt/OCR path as a real mailbox attachment.
     if payload.attachment_b64 and payload.attachment_name:
         try:
-            _sz = len(base64.b64decode(payload.attachment_b64))
+            _data = base64.b64decode(payload.attachment_b64)
         except Exception:
             raise HTTPException(status_code=400, detail="attachment_b64 is not valid base64")
-        parsed["attachments"] = [{
-            "name": payload.attachment_name[:120], "type": "image/jpeg",
-            "size": _sz, "readable": False, "excerpt": "",
-            "note": "Document image — OCR scan queued",
-            "_b64": payload.attachment_b64,
-        }]
+        _nm = payload.attachment_name[:120]
+        peek = _attachment_excerpt(_nm, _data)
+        _ct = ("application/pdf" if _nm.lower().endswith(".pdf")
+               else "image/jpeg")
+        parsed["attachments"] = [{"name": _nm, "type": _ct,
+                                  "size": len(_data), **peek}]
     rec = await _process_email(parsed, sandbox=True,
                                threshold=int(st.get("threshold") or 80))
     return {"ok": True, "record": rec}

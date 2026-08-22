@@ -12,6 +12,11 @@
 #    AADHAAR CARD of KANHAIYALAL ACHARAJ") and every clearly printed
 #    field is extracted: name, ID number, DOB, gender, address, IFSC,
 #    account no, bank name … (never guessed; unreadable → blank).
+#  * NEW: SCANNED PDF SUPPORT — PDF attachments with no text layer
+#    (offer letters / ID copies scanned to PDF) are rendered to images
+#    (first 2 pages) and OCR-read the same way; multi-page scans are
+#    combined into one document result. Text-based PDFs keep the normal
+#    text extraction (unchanged).
 #  * NEW "🪪 Document Analysis (OCR)" block in the email detail with a
 #    per-document card; timeline gains "OCR Scanner Used" and
 #    "Document Identified" steps.
@@ -786,6 +791,8 @@ echo -n "   Server badge is 685 (must say OK): "
 grep -q 'APP_ITERATION = "685"' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
 echo -n "   OCR Document Scanner — Iter 685 (must say OK): "
 grep -q '_ocr_documents' $APP_DIR/backend/routes/email_audit_agent.py && grep -q 'Document Analysis (OCR)' $APP_DIR/frontend/src/components/EmailAuditTab.tsx && echo "OK" || echo "MISSING!"
+echo -n "   Scanned-PDF OCR — Iter 685 (must say OK): "
+grep -q '_b64_pages' $APP_DIR/backend/routes/email_audit_agent.py && echo "OK" || echo "MISSING!"
 echo -n "   AI CC tab bar fixed — Iter 684 (must say OK): "
 grep -q 'plain' $APP_DIR/frontend/app/ai-command-center.tsx && ! grep -q '</ScrollView>$' <(sed -n '265,272p' $APP_DIR/frontend/app/ai-command-center.tsx) && echo "OK" || echo "MISSING!"
 echo -n "   Data Analysis layer — Iter 683 (must say OK): "
@@ -925,6 +932,8 @@ echo "    cheque photo attachments are identified and read by AI vision;"
 echo "    per-document extraction shown in the new 'Document Analysis (OCR)'"
 echo "    block; AI summary is now a human analysis report (no raw metadata"
 echo "    dumps). Timeline: OCR Scanner Used → Document Identified."
+echo "    Scanned PDFs (offer letters / ID copies) are OCR-read too —"
+echo "    first 2 pages rendered and combined into one document result."
 echo "  • NEW (684): AI Command Center tab bar FIXED — tabs no longer"
 echo "    overlap or hide the content below; verified on phone and"
 echo "    desktop widths across all six tabs."
