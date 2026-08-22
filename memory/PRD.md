@@ -7777,3 +7777,19 @@ a tab inside AI Command Center.
      10:19 Machine + OUT 22:19 App but grid cell blank. Repro plan:
      seed punches + call the monthly attendance grid API.
 - deploy_vps_iter681.sh; temp_bundle -> deploy681; APP_ITERATION=681.
+
+## Iter 682 — Night-shift stitcher hardened + manual punch verification
+- stitch_cross_day_ot (server.py ~2034): (a) early-morning mislabelled
+  "in" rescue window 08:00 -> 11:00 (live: 08:03 morning OUT refused ->
+  false missing OUT/IN pair); (b) double-tap tolerance: trailing IN with
+  stray echo punch within 3 min still anchors the stitch (anchor var
+  replaces cur_sorted[-1] for in_at).
+- Unit tests test_iter682_stitch_unit.py: 5/5 PASS (mislabelled 08:03,
+  double-tap tail, day-shift untouched, >16h refused, 11:30 kept).
+- Full-grid repro test_iter682_night_repro.py: night pairing correct
+  each day, morning-out-only day empty, manual_admin + biometric punches
+  DISPLAY correctly and grid auto-refresh after repair-modal save is
+  already wired (onSaved -> load()). MADAN KEER blank-day case NOT
+  reproducible on current build — ask user to recheck after deploy682,
+  else trace that record on VPS.
+- deploy_vps_iter682.sh; temp_bundle -> deploy682; APP_ITERATION=682.

@@ -2073,6 +2073,23 @@ def stitch_cross_day_ot(
             elif k == "out":
                 bal = max(0, bal - 1)
         last_kind = (cur_sorted[-1].get("kind") or "").lower()
+        # Iter 682 (user bug — night-shift "false missing punches"): tolerate
+        # a stray DOUBLE-TAP tail. If the day ends IN→X where X is within
+        # 3 minutes of that IN (device echo / alternation flip), the IN is
+        # still the true trailing anchor for the cross-midnight stitch.
+        anchor = cur_sorted[-1]
+        if bal > 0 and last_kind != "in" and len(cur_sorted) >= 2:
+            prev = cur_sorted[-2]
+            if (prev.get("kind") or "").lower() == "in":
+                try:
+                    t_prev = _dt.fromisoformat(str(prev["at"]).replace("Z", "+00:00"))
+                    t_last = _dt.fromisoformat(str(cur_sorted[-1]["at"]).replace("Z", "+00:00"))
+                    if (t_last - t_prev) <= _td(minutes=3):
+                        anchor, last_kind = prev, "in"
+                except (ValueError, TypeError, KeyError):
+                    pass
+        else:
+            anchor = cur_sorted[-1]
         if bal <= 0 or last_kind != "in":
             continue
         next_dk = day_keys[i + 1]
@@ -2086,19 +2103,21 @@ def stitch_cross_day_ot(
         # 08:00) following an unpaired IN also counts as the night-shift
         # OUT even when the machine mislabelled it "in" (alternation
         # corruption). Re-kind it to "out" and pull it back.
+        # Iter 682 — window widened to 11:00 (live case: morning OUT at
+        # 08:03 was refused, leaving "missing OUT" + "missing IN" days).
         if first_kind != "out":
             _early_relabel = False
             if first_kind == "in":
                 try:
                     _t = _dt.fromisoformat(
                         str(first["at"]).replace("Z", "+00:00"))
-                    _early_relabel = _t.hour < 8
+                    _early_relabel = _t.hour < 11
                 except (ValueError, TypeError, KeyError):
                     pass
             if not _early_relabel:
                 continue
         try:
-            in_at = _dt.fromisoformat(str(cur_sorted[-1]["at"]).replace("Z", "+00:00"))
+            in_at = _dt.fromisoformat(str(anchor["at"]).replace("Z", "+00:00"))
             out_at = _dt.fromisoformat(str(first["at"]).replace("Z", "+00:00"))
             if out_at <= in_at or (out_at - in_at) > _td(hours=max_hours):
                 continue
@@ -10048,7 +10067,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "681"
+APP_ITERATION = "682"
 
 
 @api.get("/version")
