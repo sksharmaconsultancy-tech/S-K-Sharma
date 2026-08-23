@@ -8173,3 +8173,12 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   stop-poll updated. Verified via sim: captcha detected → Sign In clicked.
   Needs runner to be current (backend redeploy serves v20; listener picks
   it up on next refresh).
+- Iter 693l: added READ-ONLY diagnostic GET /api/admin/portal-automation/
+  creds-debug?company_id=&portal= (session auth) → shows epf_registration
+  {applicable,user_id,password_present,is_email}, esi, firms_id_password
+  rows, and RESOLVED_FOR_AUTOMATION{found,user_id,password_present}. Verified
+  on preview: creds resolve found=true RJUDR2049560000 from PF LOGIN row
+  (693i fallback working). CONCLUSION: user's VPS just needs redeploy691 to
+  get 693h/i/j/k/l; their current build lacks the portal_logins fallback so
+  returns "no login saved". OK-click waits reduced (20→8, 6s→3s, 2s→1s).
+  RUNNER 21. CompanyPicker loads list on mount + name fallback.

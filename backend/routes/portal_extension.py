@@ -228,6 +228,58 @@ async def ext_creds(token: str, portal: str = "esic"):
     return {"ok": True, "user_id": creds.get("user_name") or "", "password": creds.get("password") or ""}
 
 
+@router.get("/admin/portal-automation/creds-debug")
+async def creds_debug(
+    company_id: str = "",
+    portal: str = "epfo",
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 693l — READ-ONLY diagnostic: shows EXACTLY what the backend sees
+    for a firm's EPFO/ESIC login, so we can pinpoint why auto-fill is blank.
+    Open in the logged-in browser. Never returns the real password value —
+    only whether it is present/decryptable."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
+    cid = await _resolve_company(admin, company_id)
+    fm = await db.firm_masters.find_one({"company_id": cid}, {"_id": 0}) or {}
+    from utils.rpa_worker import _fetch_creds
+    from utils.secrets_vault import decrypt_secret
+    epf = fm.get("epf") or {}
+    esi = fm.get("esi") or {}
+    pl_rows = []
+    for r in (fm.get("portal_logins") or []):
+        if r.get("login_type") in ("PF LOGIN", "ESI Login"):
+            pw = decrypt_secret(r.get("password")) or ""
+            pl_rows.append({
+                "login_type": r.get("login_type"),
+                "user_name": r.get("user_name") or "",
+                "password_present": bool(pw),
+            })
+    resolved = await _fetch_creds(db, cid, portal)
+    epf_pw = decrypt_secret(epf.get("epf_password")) or ""
+    esi_pw = decrypt_secret(esi.get("esi_password")) or ""
+    return {
+        "company_id": cid,
+        "firm_name": fm.get("firm_name") or (fm.get("header") or {}).get("firm_name"),
+        "epf_registration": {
+            "applicable": epf.get("applicable"),
+            "epf_user_id": epf.get("epf_user_id") or "",
+            "epf_password_present": bool(epf_pw),
+            "user_id_is_email": "@" in str(epf.get("epf_user_id") or ""),
+        },
+        "esi_registration": {
+            "esi_user_id": esi.get("esi_user_id") or "",
+            "esi_password_present": bool(esi_pw),
+        },
+        "firms_id_password_screen_rows": pl_rows,
+        "RESOLVED_FOR_AUTOMATION": {
+            "found": bool(resolved),
+            "user_id": (resolved or {}).get("user_name") or "",
+            "password_present": bool((resolved or {}).get("password")),
+        },
+    }
+
+
 @router.post("/portal-ext/solve-captcha")
 async def ext_solve_captcha(payload: Dict[str, Any] = Body(...)):
     token = (payload.get("token") or "").strip()
