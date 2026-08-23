@@ -8155,3 +8155,13 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   _valid_login '@' guard (693f) = defense in depth. User only needs VPS
   redeploy, NO PC restart. NOTE: real EPFO IDs that were overwritten+saved
   are lost and must be re-entered (only @-junk is removable safely).
+- Iter 693i (screenshots: Firm SUVIDHI RAYONS cmp_b151cd6749 has EPF User ID
+  RJUDR2049560000 saved + status "NO EPFO login saved for THIS firm"). ROOT
+  CAUSE: user stores EPFO login in the separate "Firms ID & Password (PF·
+  ESIC)" screen = portal_logins "PF LOGIN" row, but my 693d change had
+  REMOVED the portal_logins fallback for epfo (early return None). FIX:
+  rpa_worker _fetch_creds epfo now tries EPF Registration first, then FALLS
+  THROUGH to portal_logins "PF LOGIN" row (both with _valid_login '@'
+  guard). Also applicable-gate already removed (693h). Verified: EPF section
+  empty + PF LOGIN row filled → returns RJUDR2049560000. User needs ONLY a
+  backend redeploy (deploy691), NO PC restart.

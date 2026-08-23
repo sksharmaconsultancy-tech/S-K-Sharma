@@ -85,9 +85,7 @@ async def _fetch_creds(db, company_id: str, portal: str) -> Optional[Dict[str, s
 
     if portal == "epfo":
         sec = master.get("epf") or {}
-        # Iter 693h — use the EPF Registration login whenever it is saved
-        # (EPF User ID + Password). We no longer require the "EPF Applicable"
-        # toggle — that was silently blanking the login for some firms.
+        # Iter 693h — use the EPF Registration login whenever it is saved.
         u = (sec.get("epf_user_id") or "").strip()
         p = (decrypt_secret(sec.get("epf_password")) or "").strip()
         if _valid_login(u) and p:
@@ -95,8 +93,8 @@ async def _fetch_creds(db, company_id: str, portal: str) -> Optional[Dict[str, s
                 "user_name": u, "password": p, "unit_location": None,
                 "login_url": _PORTAL_URLS.get(portal) or "",
             }
-        # No valid EPF login saved → do NOT guess/type garbage.
-        return None
+        # Iter 693i — fall through to the "Firms ID & Password (PF · ESIC)"
+        # screen (portal_logins "PF LOGIN" row) if EPF Registration is empty.
 
     if portal == "esic":
         sec = master.get("esi") or {}
