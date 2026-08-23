@@ -46,8 +46,16 @@ const GROUP_OPTIONS: { key: string; label: string }[] = [
 ];
 
 function monthNow() {
+  // Iter 687 (user request) — month shown/entered as MM-YYYY.
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  return `${String(d.getMonth() + 1).padStart(2, "0")}-${d.getFullYear()}`;
+}
+
+/** Accepts MM-YYYY (new) or YYYY-MM (legacy) → API's YYYY-MM. */
+function mmYyyyToIso(v: string): string {
+  const s = (v || "").trim();
+  if (/^\d{2}-\d{4}$/.test(s)) return `${s.slice(3)}-${s.slice(0, 2)}`;
+  return s;
 }
 
 function todayISO() {
@@ -125,7 +133,7 @@ export default function LabourReportsScreen() {
           ? (periodMode === "day"
             ? { from_date: reportDate, to_date: reportDate }
             : { from_date: fromDate, to_date: toDate })
-          : fromDate && toDate ? { from_date: fromDate, to_date: toDate } : { month }),
+          : fromDate && toDate ? { from_date: fromDate, to_date: toDate } : { month: mmYyyyToIso(month) }),
       ...(isDayOrPeriod
         ? (groupBy && groupBy !== "contractor" && !summaryOnly ? { group_by: groupBy } : {})
         : (groupBy ? { group_by: groupBy } : {})),
@@ -263,9 +271,9 @@ export default function LabourReportsScreen() {
             ) : (
               <>
                 <View style={st.field}>
-                  <Text style={st.fieldLbl}>Month (YYYY-MM)</Text>
+                  <Text style={st.fieldLbl}>Month (MM-YYYY)</Text>
                   <TextInput value={month} onChangeText={setMonth} style={st.input}
-                    placeholder="2026-06" placeholderTextColor={colors.onSurfaceTertiary} testID="lr-month" />
+                    placeholder="06-2026" placeholderTextColor={colors.onSurfaceTertiary} testID="lr-month" />
                 </View>
                 <View style={st.field}>
                   <Text style={st.fieldLbl}>From (optional)</Text>

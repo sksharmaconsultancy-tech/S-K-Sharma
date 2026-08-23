@@ -67,10 +67,11 @@ def _months_range(month: str, month_to: str) -> List[str]:
 # ---------------------------------------------------------------------------
 
 async def _wage_register(company_id, month, ctx=None):
-    """Iter 477 (user request) — Month-wise OR Periodic (month..month_to).
-    Iter 480 (user spec — Phase 2) — statutory columns: allowances split
-    (Conveyance / Medical / Special / Others), deductions split
-    (PF / ESIC / PT / TDS / Other incl. advance), Bank details."""
+    """Iter 687 (user request) — restructured Wage Register:
+    S.No. (no Emp Code) · Master Salary heads (DYNAMIC per Firm Master
+    allowance catalog) + Gross Salary · Working Days · Earning heads
+    (dynamic) + Gross Earning · Deduction heads + Net Pay · Bank Details.
+    Figures are centred WITHOUT thousands commas (web/PDF/Excel)."""
     months = _months_range(month, (ctx or {}).get("month_to") or "")
     users = {u["user_id"]: u for u in await _users(company_id)}
     banks: Dict[str, str] = {}
@@ -80,47 +81,79 @@ async def _wage_register(company_id, month, ctx=None):
         if _b.get("bank_account_no"):
             banks[_b["user_id"]] = (f"{_b['bank_account_no']} / "
                                     f"{_b.get('bank_ifsc') or ''}").strip(" /")
-    _SUM = ("days", "basic", "hra", "conveyance", "medical", "special",
-            "others", "overtime", "gross", "pf", "esic", "pt", "tds",
-            "other_ded", "deductions", "net")
+    # dynamic heads from the FIRM MASTER allowance catalog
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id}, {"_id": 0, "allowance_catalog": 1,
+                                     "allowances": 1}) or {}
+    cat = fm.get("allowance_catalog") or fm.get("allowances") or {}
+    _HEAD_MAP = [("HRA", "HRA", "hra", "hra_master"),
+                 ("CONV.", "Conveyance", "conveyance", "conveyance_master"),
+                 ("MEDICAL ALLOWANCES", "Medical", "medical", "medical_master")]
+    heads = [(lb, ek, mk) for nm, lb, ek, mk in _HEAD_MAP if cat.get(nm)]
+    _other_on = any(cat.get(nm) for nm in (
+        "OTH. ALLOW.", "INCENTIVE", "OTHER MISC.ALLOWANCE", "DA",
+        "FOOD ALLOWANCES", "BONUS")) or not cat
+    _ot_on = bool(cat.get("OVER TIME")) or not cat
+    if not cat:  # firm without catalog — keep every classic head
+        heads = [(lb, ek, mk) for _, lb, ek, mk in _HEAD_MAP]
+    _SUM = (["days", "m_basic", "m_gross", "e_basic", "gross", "pf", "esic",
+             "pt", "tds", "other_ded", "deductions", "net"]
+            + [f"m_{ek}" for _, ek, _m in heads]
+            + [f"e_{ek}" for _, ek, _m in heads]
+            + (["e_others", "m_others"] if _other_on else [])
+            + (["overtime"] if _ot_on else []))
     agg: Dict[str, dict] = {}
     for mo in months:
         rows_by_uid = await _run_rows(company_id, mo)
         for uid, r in rows_by_uid.items():
             u = users.get(uid) or {}
             d = agg.setdefault(uid, dict(
-                {k: 0.0 for k in _SUM},
-                employee_code=u.get("employee_code"), name=u.get("name"),
-                designation=u.get("designation"), rate=0.0,
-                bank=banks.get(uid, "")))
-            d["rate"] = _f(r.get("rate")) or d["rate"]
-            for k, src in (("days", "present_days"), ("basic", "basic"),
-                           ("hra", "hra"), ("conveyance", "conveyance"),
-                           ("medical", "medical"), ("special", "special"),
-                           ("others", "others"), ("overtime", "ot_pay"),
-                           ("gross", "gross_paid"), ("pf", "pf_employee"),
-                           ("esic", "esic_employee"), ("pt", "pt"),
-                           ("tds", "tds"), ("other_ded", "other_deduction"),
-                           ("deductions", "total_deduction"),
-                           ("net", "net")):
+                {k: 0.0 for k in _SUM}, name=u.get("name"),
+                designation=u.get("designation"), bank=banks.get(uid, "")))
+            pairs = [("days", "present_days"), ("m_basic", "basic_master"),
+                     ("m_gross", "gross_master"), ("e_basic", "basic"),
+                     ("gross", "gross_paid"), ("pf", "pf_employee"),
+                     ("esic", "esic_employee"), ("pt", "pt"), ("tds", "tds"),
+                     ("other_ded", "other_deduction"),
+                     ("deductions", "total_deduction"), ("net", "net")]
+            for _, ek, mk in heads:
+                pairs += [(f"e_{ek}", ek), (f"m_{ek}", mk)]
+            if _other_on:
+                pairs += [("e_others", "others"), ("m_others", "others_master")]
+            if _ot_on:
+                pairs.append(("overtime", "ot_pay"))
+            for k, src in pairs:
                 d[k] = round(d[k] + _f(r.get(src)), 2)
-    out = list(agg.values())
-    cols = [("employee_code", "Emp Code"), ("name", "Employee Name"),
-            ("designation", "Designation"), ("rate", "Rate of Wages"),
-            ("days", "Days Worked"), ("basic", "Basic"), ("hra", "HRA"),
-            ("conveyance", "Conveyance"), ("medical", "Medical"),
-            ("special", "Special All."), ("others", "Other All."),
-            ("overtime", "Overtime"), ("gross", "Gross Wages"),
-            ("pf", "PF"), ("esic", "ESIC"), ("pt", "PT"), ("tds", "TDS"),
-            ("other_ded", "Adv/Other Ded."),
-            ("deductions", "Total Deduction"), ("net", "Net Wages Paid"),
-            ("bank", "Bank A/c / IFSC")]
+            if _other_on:
+                d["e_others"] = round(d["e_others"] + _f(r.get("special")), 2)
+                d["m_others"] = round(d["m_others"]
+                                      + _f(r.get("special_master")), 2)
+    out = sorted(agg.values(),
+                 key=lambda r: str(r.get("name") or "").lower())
+    for i, r in enumerate(out, 1):  # Iter 687 — S.No. instead of Emp Code
+        r["sno"] = i
+    cols = ([("sno", "S.No."), ("name", "Employee Name"),
+             ("designation", "Designation"),
+             ("m_basic", "Master Basic")]
+            + [(f"m_{ek}", f"Master {lb}") for lb, ek, _m in heads]
+            + ([("m_others", "Master Other All.")] if _other_on else [])
+            + [("m_gross", "Gross Salary"), ("days", "Working Days"),
+               ("e_basic", "Earned Basic")]
+            + [(f"e_{ek}", f"Earned {lb}") for lb, ek, _m in heads]
+            + ([("e_others", "Earned Other All.")] if _other_on else [])
+            + ([("overtime", "Overtime")] if _ot_on else [])
+            + [("gross", "Gross Earning"), ("pf", "PF"), ("esic", "ESIC")]
+            + ([("pt", "PT")] if any(r["pt"] for r in out) else [])
+            + ([("tds", "TDS")] if any(r["tds"] for r in out) else [])
+            + [("other_ded", "Adv/Other Ded."),
+               ("deductions", "Total Deduction"), ("net", "Net Pay"),
+               ("bank", "Bank Details")])
     totals = {"name": "TOTAL"}
-    for k in ("basic", "hra", "conveyance", "medical", "special", "others",
-              "overtime", "gross", "pf", "esic", "pt", "tds", "other_ded",
-              "deductions", "net"):
+    for k, _lb in cols:
+        if k in ("sno", "name", "designation", "bank"):
+            continue
         totals[k] = round(sum(r[k] for r in out), 2)
-    return "Wage Register (Form B)", cols, _srt(out), totals
+    return "Wage Register (Form B)", cols, out, totals
 
 
 async def _amount_register(company_id, month, key_fn, label, ctx=None):
@@ -352,6 +385,8 @@ async def govt_json(kind: str, company_id: Optional[str] = None,
     sub = _govt_period(month, ctx)
     return {"title": title, "subtitle": sub,
             "form_line": await _form_head(kind),
+            # Iter 687 — Wage Register: web view centres figures without commas
+            "plain_num": kind == "wage-register",
             "columns": [{"key": k, "label": lb} for k, lb in cols],
             "rows": rows, "totals": totals,
             "empty_note": _govt_empty_note(kind, month, ctx) if not rows
@@ -392,7 +427,8 @@ async def _govt_exp(kind, company_id, month, authorization, fmt, ctx=None):
     return _stream(title, f"{c.get('name')} · {sub}", cols, rows, totals,
                    c.get("logo_base64"), fmt,
                    empty_note=_govt_empty_note(kind, month, ctx or {}),
-                   form_line=await _form_head(kind))
+                   form_line=await _form_head(kind),
+                   plain_num=kind == "wage-register")
 
 
 # ---------------------------------------------------------------------------
@@ -499,17 +535,19 @@ async def _audit_exp(kind, company_id, limit, authorization, fmt):
 
 
 def _stream(title, sub, cols, rows, totals, logo, fmt, empty_note=None,
-            form_line=None):
+            form_line=None, plain_num=False):
     columns = [{"key": k, "label": lb} for k, lb in cols]
     sub = f"{sub} · Generated {datetime.now():%d-%m-%Y}"
     if fmt == "xlsx":
         buf = register_xlsx(title, sub, columns, rows, totals,
-                            form_line=form_line)
+                            form_line=form_line, plain_num=plain_num,
+                            num_center=plain_num)
         mt = ("application/vnd.openxmlformats-officedocument"
               ".spreadsheetml.sheet")
     else:
         buf = register_pdf(title, sub, columns, rows, totals, logo,
-                           empty_note=empty_note, form_line=form_line)
+                           empty_note=empty_note, form_line=form_line,
+                           plain_num=plain_num)
         mt = "application/pdf"
     fn_ = f"{title.replace(' ', '_')}.{fmt}"
     return StreamingResponse(buf, media_type=mt, headers={

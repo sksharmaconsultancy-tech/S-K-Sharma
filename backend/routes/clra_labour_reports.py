@@ -724,9 +724,23 @@ async def compliance_act_line(company_id: str) -> str:
 
 
 @router.get("/list")
-async def clra_list(authorization: Optional[str] = Header(None)):
+async def clra_list(company_id: Optional[str] = None,
+                    authorization: Optional[str] = Header(None)):
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    # Iter 687 (user request) — CLRA / Labour Code registers are ONLY for
+    # CONTRACTOR firms (Firm Master → Firm Category). Hidden otherwise.
+    cid = company_id or (admin.get("company_id")
+                         if admin.get("role") == "company_admin" else "")
+    if cid:
+        fmdoc = await db.firm_masters.find_one(
+            {"company_id": cid}, {"_id": 0, "header": 1})
+        comp = await db.companies.find_one(
+            {"company_id": cid}, {"_id": 0, "business_category": 1})
+        cat = (((fmdoc or {}).get("header") or {}).get("category")
+               or (comp or {}).get("business_category") or "")
+        if "contract" not in str(cat).lower():
+            return {"reports": [], "contractor_only": True}
     return {"reports": [{"kind": k, "title": t}
                         for k, t in _TITLES.items()]}
 

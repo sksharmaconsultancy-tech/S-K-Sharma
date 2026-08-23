@@ -67,6 +67,14 @@ def _s(v) -> str:
     return str(v or "").strip()
 
 
+def _dmy(v) -> str:
+    """Iter 687 (user request) — ALL dates shown as DD-MM-YYYY."""
+    s = _s(v)[:10]
+    if len(s) == 10 and s[4] == "-" and s[7] == "-":
+        return f"{s[8:10]}-{s[5:7]}-{s[0:4]}"
+    return s
+
+
 def _norm(v) -> str:
     return _s(v).upper()
 
@@ -147,6 +155,7 @@ async def _emps(company_id: str, flt: Dict[str, str], res: Dict[str, Any]):
         {"company_id": company_id, "role": "employee"},
         {"_id": 0, "user_id": 1, "employee_code": 1, "name": 1,
          "father_name": 1, "dob": 1, "gender": 1, "doj": 1, "designation": 1,
+         "weekly_off_days_override": 1,
          "department": 1, "employee_type": 1, "contractor_name": 1,
          "uan_no": 1, "esi_ip_no": 1, "aadhaar_no": 1, "pan_no": 1,
          "bank_account_name": 1, "bank_account_no": 1, "account_no": 1,
@@ -563,10 +572,10 @@ async def _form_a(company_id, per, flt, res):
         rows.append({
             "sr": i, "employee_code": u.get("employee_code"),
             "name": u.get("name"), "father_name": _s(u.get("father_name")),
-            "dob_age": (f"{_s(u.get('dob'))[:10]}"
+            "dob_age": (f"{_dmy(u.get('dob'))}"
                         f"{' / ' + _age(u.get('dob')) if _age(u.get('dob')) else ''}"),
             "gender": _s(u.get("gender")).title(),
-            "doj": _s(u.get("doj"))[:10],
+            "doj": _dmy(u.get("doj")),
             "designation": _s(u.get("designation")),
             "department": _s(u.get("department")),
             "contractor": c["contractor_name"],
@@ -580,8 +589,8 @@ async def _form_a(company_id, per, flt, res):
                        "bank_account_name"),
                 _first(u, "ifsc_code", "ifsc"),
                 _s(u.get("bank_name"))) if x),
-            "date_of_leaving": _s(u.get("exit_date")
-                                  or u.get("resign_date"))[:10],
+            "date_of_leaving": _dmy(u.get("exit_date")
+                                    or u.get("resign_date")),
             "remarks": "",
         })
     cols = [("sr", "Sr."), ("employee_code", "Emp Code"),
@@ -697,7 +706,7 @@ async def _form_c(company_id, per, flt, res):
         rows.append({
             "employee_code": u.get("employee_code"), "name": u.get("name"),
             "wage_period": per["label"],
-            "date": _s(a.get("advance_date"))[:10],
+            "date": _dmy(a.get("advance_date")),
             "dtype": f"Advance ({_s(a.get('advance_type')).title() or 'General'})",
             "reason": _s(a.get("purpose")),
             "advance_amount": _f(a.get("amount")), "recovery_amount": 0,
@@ -714,7 +723,7 @@ async def _form_c(company_id, per, flt, res):
         rows.append({
             "employee_code": u.get("employee_code"), "name": u.get("name"),
             "wage_period": per["label"],
-            "date": _s(t.get("at"))[:10] or f"{t.get('salary_month')}-01",
+            "date": _dmy(t.get("at")) or _dmy(f"{t.get('salary_month')}-01"),
             "dtype": "Advance / Loan Recovery",
             "reason": f"Recovery via {_s(t.get('process_type')).title()} salary",
             "advance_amount": 0, "recovery_amount": _f(t.get("amount")),
@@ -734,7 +743,7 @@ async def _form_c(company_id, per, flt, res):
         rows.append({
             "employee_code": e.get("employee_code"),
             "name": e.get("employee_name"), "wage_period": per["label"],
-            "date": _s(e.get("date")), "dtype": _s(e.get("dtype")),
+            "date": _dmy(e.get("date")), "dtype": _s(e.get("dtype")),
             "reason": _s(e.get("reason")),
             "advance_amount": _f(e.get("advance_amount")),
             "recovery_amount": _f(e.get("recovery_amount")),
@@ -743,7 +752,8 @@ async def _form_c(company_id, per, flt, res):
             "balance": "", "remarks": _s(e.get("remarks")),
             "source": "Manual", "entry_id": e.get("entry_id")})
     rows.sort(key=lambda r: (str(r.get("employee_code") or "").zfill(8),
-                             _s(r.get("date"))))
+                             _s(r.get("date"))[6:10] + _s(r.get("date"))[3:5]
+                             + _s(r.get("date"))[0:2]))
     for i, r in enumerate(rows, 1):
         r["sr"] = i
         r["total_deduction"] = round(_f(r["recovery_amount"])
@@ -772,19 +782,38 @@ async def _form_d(company_id, per, flt, res):
     all_days = sorted({d for a in att.values() for d in a["days"]})
     if per["custom"]:
         all_days = [d for d in all_days if per["from"] <= d <= per["to"]]
+    # Iter 687 (user request) — WO auto-fill: employee's week-off from the
+    # Employee Master (weekly_off_days_override) wins; otherwise the firm's
+    # attendance-policy weekly_off_days from the Firm Master.
+    comp = await db.companies.find_one(
+        {"company_id": company_id}, {"_id": 0, "attendance_policy": 1})
+    firm_wo = {int(x) for x in ((comp or {}).get("attendance_policy") or
+                                {}).get("weekly_off_days") or []}
     rows = []
     for i, u in enumerate(emps, 1):
         a = att.get(u["user_id"])
         if not a:
             continue
+        _ov = u.get("weekly_off_days_override")
+        wo_days = ({int(x) for x in _ov} if isinstance(_ov, list) and _ov
+                   else firm_wo)
         row = {"sr": i, "employee_code": u.get("employee_code"),
                "name": u.get("name"),
                "designation": _s(u.get("designation"))}
+        wo_fill = 0
         for d in all_days:
-            row[d] = (a["days"].get(d) or {}).get("st") or ""
+            st = (a["days"].get(d) or {}).get("st") or ""
+            if not st and wo_days:
+                try:
+                    if datetime.strptime(d, "%Y-%m-%d").weekday() in wo_days:
+                        st = "WO"
+                        wo_fill += 1
+                except ValueError:
+                    pass
+            row[d] = st
         row.update({
             "t_present": a.get("P", 0) + round(a.get("HD", 0) * 0.5, 1),
-            "t_absent": a.get("A", 0), "t_wo": a.get("WO", 0),
+            "t_absent": a.get("A", 0), "t_wo": a.get("WO", 0) + wo_fill,
             "t_holiday": a.get("H", 0), "t_leave": a.get("L", 0),
             "t_paid_days": _f(a.get("present_days")),
             "t_hours": _f(a.get("worked_hours")),
@@ -863,6 +892,15 @@ async def register_json(kind: str, company_id: Optional[str] = None,
     sub, comp = await _subtitle(company_id, per, flt, res)
     title = FORM_TITLES[kind]
     status = await _status_doc(company_id, kind, per["label"])
+    # Iter 687 (user request) — Form C empty-state line.
+    empty_note = ""
+    if kind == "c" and not rows:
+        try:
+            _ml = datetime.strptime(per["months"][0], "%Y-%m").strftime("%B-%Y")
+        except ValueError:
+            _ml = per["label"]
+        empty_note = (f"For the Month of {_ml} No Deduction has been done "
+                      f"with Any Employee")
     if fmt:
         columns = [{"key": k, "label": lb} for k, lb in cols]
         form_line = (f"{FRAMEWORK} · Prepared: "
@@ -872,18 +910,22 @@ async def register_json(kind: str, company_id: Optional[str] = None,
                      f"{(status.get('status') or 'draft').upper()}")
         gen = f"{sub} · Generated {datetime.now():%d-%m-%Y}"
         if fmt == "xlsx":
+            # Iter 687 (user request) — Form B figures & Form D marks/S.No./
+            # Emp Code CENTRED in Excel too.
             buf = register_xlsx(title, gen, columns, rows, totals,
-                                form_line=form_line)
+                                form_line=form_line,
+                                num_center=kind in ("b", "d"))
             mt = ("application/vnd.openxmlformats-officedocument"
                   ".spreadsheetml.sheet")
         else:
             buf = register_pdf(title, gen, columns, rows, totals,
-                               comp.get("logo_base64"), form_line=form_line)
+                               comp.get("logo_base64"), form_line=form_line,
+                               empty_note=empty_note or None)
             mt = "application/pdf"
         fn = f"{title.split('—')[0].strip().replace(' ', '_')}_{per['label'].replace(' ', '_')}.{fmt}"
         return StreamingResponse(buf, media_type=mt, headers={
             "Content-Disposition": f'attachment; filename="{fn}"'})
     return {"title": title, "subtitle": sub, "period": per["label"],
-            "framework": FRAMEWORK,
+            "framework": FRAMEWORK, "empty_note": empty_note,
             "columns": [{"key": k, "label": lb} for k, lb in cols],
             "rows": rows, "totals": totals, "status": status}

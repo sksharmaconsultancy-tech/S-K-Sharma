@@ -22,8 +22,9 @@ export type RegCol = { key: string; label: string };
 
 export function fmtVal(v: any): string {
   if (v === null || v === undefined || v === "") return "";
-  if (typeof v === "number")
-    return v.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  // Iter 687 (user request — Report Hub GLOBAL): no thousands commas and
+  // no trailing .00 decimals in any report figure.
+  if (typeof v === "number") return String(Math.round(v * 100) / 100);
   return String(v);
 }
 
@@ -82,11 +83,13 @@ export default function RegisterTable({
   rows,
   totals,
   onRowPress,
+  centerNum,
 }: {
   columns: RegCol[];
   rows: any[];
   totals?: Record<string, any> | null;
   onRowPress?: (row: any) => void;
+  centerNum?: boolean;
 }) {
   if (!columns?.length) return null;
   return (
@@ -111,7 +114,8 @@ export default function RegisterTable({
                 key={c.key}
                 style={[
                   st.cell,
-                  typeof r[c.key] === "number" && st.num,
+                  typeof r[c.key] === "number" &&
+                    (centerNum ? st.numCenter : st.num),
                   j === 0 && st.first,
                 ]}
               >
@@ -166,6 +170,7 @@ const st = StyleSheet.create({
   // heading stayed 108px, shifting every heading off its column. Match it.
   thFirst: { width: 170 },
   num: { textAlign: "right" },
+  numCenter: { textAlign: "center" },
   tot: { backgroundColor: "#FFF2CC", fontWeight: "800" },
   empty: {
     padding: 14,

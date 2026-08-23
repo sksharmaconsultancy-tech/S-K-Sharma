@@ -415,7 +415,8 @@ def _apply_compliance_8hr(policy: dict, e: dict, eng: dict) -> tuple:
     return duty, ot_new, p
 
 
-def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
+def build_report(key: str, emps, recs_by, policy, dates,
+                 run_by: Optional[dict] = None) -> tuple:
     weekly_offs = set(policy.get("weekly_off_days") or [])
     night_start = policy.get("night_shift_start") or "22:00"
     night_end = policy.get("night_shift_end") or "06:00"
@@ -510,32 +511,27 @@ def build_report(key: str, emps, recs_by, policy, dates) -> tuple:
         return cols, rows
 
     if key == "monthly_register":
-        # Iter 528 (user bug) — Hours / OT / Present now come from the
-        # firm-master attendance-policy engine (compute_textile_day) plus
-        # the "Count Present Day @ 8 HRS — Compliance" rule, so the
-        # Monthly Attendance Register matches the Attendance Grid.
-        cols = EMP_HEAD + ["Present", "Half Days", "Absent", "WO", "Total Hours", "OT Hours", "Late Days"]
+        # Iter 687 (user request) — Monthly Attendance Register now shows
+        # the FINALIZED Salary-Process figures only: Salary Process Days,
+        # Attendance (engine present days) and OT Hours. Other columns
+        # removed.
+        run_map = run_by or {}
+        cols = EMP_HEAD + ["Salary Process Days", "Attendance", "OT Hours"]
         rows = []
         for e in emps:
-            p = hd = a = wo = late = 0
-            th = ot = 0.0
+            att_p = 0.0
             for d in dates:
-                wd = date.fromisoformat(d).weekday()
                 recs = recs_by.get((e["user_id"], d))
                 if recs:
-                    s = _day_summary(recs, policy, e)
-                    eng = compute_textile_day(recs, policy, e, wd)
-                    hours_d, ot_d, pd_ = _apply_compliance_8hr(policy, e, eng)
-                    p += pd_ >= 1.0
-                    hd += pd_ == 0.5
-                    th += hours_d
-                    ot += ot_d
-                    late += 1 if s["late_by"] > 0 else 0
-                elif wd in weekly_offs:
-                    wo += 1
-                else:
-                    a += 1
-            rows.append(_emp_cols(e) + [p, hd, a, wo, round(th, 1), round(ot, 1), late])
+                    eng = compute_textile_day(
+                        recs, policy, e, date.fromisoformat(d).weekday())
+                    _h, _o, pd_ = _apply_compliance_8hr(policy, e, eng)
+                    att_p += 1.0 if pd_ >= 1.0 else (0.5 if pd_ == 0.5 else 0)
+            rr = run_map.get(e["user_id"]) or {}
+            rows.append(_emp_cols(e) + [
+                round(float(rr.get("present_days") or 0), 1),
+                round(att_p, 1),
+                round(float(rr.get("ot_hours") or 0), 1)])
         return cols, rows
 
     if key == "present_absent":
@@ -1255,7 +1251,16 @@ async def generate(payload: Dict[str, Any] = Body(...),
             for _dk, _plist in _rep.items():
                 if from_date <= _dk <= to_date:
                     recs_by[(_uid, _dk)] = _plist
-    columns, rows = build_report(key, emps, recs_by, policy, dates)
+    # Iter 687 — Monthly Register reads FINALIZED salary-run figures.
+    _run_by = None
+    if key == "monthly_register":
+        _mk = str(filters.get("month") or (dates[0][:7] if dates else ""))[:7]
+        _run = await db.compliance_salary_runs.find_one(
+            {"company_id": company_id, "month": _mk},
+            {"_id": 0, "rows": 1}, sort=[("generated_at", -1)])
+        _run_by = {r.get("user_id"): r for r in (_run or {}).get("rows") or []}
+    columns, rows = build_report(key, emps, recs_by, policy, dates,
+                                 run_by=_run_by)
     # Iter 530 (user request) — generic "Group Wise" formatting (all
     # reports; Shift Deployment has its own native grouping): ▶ band rows
     # + per-group SUBTOTALS of every numeric column + GRAND TOTAL. The

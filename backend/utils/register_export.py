@@ -10,7 +10,9 @@ from typing import Any, Dict, List, Optional
 
 def register_xlsx(title: str, subtitle: str, columns: List[Dict[str, str]],
                   rows: List[dict], totals: Optional[dict] = None,
-                  form_line: Optional[str] = None) -> BytesIO:
+                  form_line: Optional[str] = None,
+                  num_center: bool = False,
+                  plain_num: bool = False) -> BytesIO:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
@@ -48,14 +50,23 @@ def register_xlsx(title: str, subtitle: str, columns: List[Dict[str, str]],
         ws.column_dimensions[get_column_letter(j)].width = max(
             11, min(28, len(c["label"]) + 4))
     r = r_head + 1
+    # Iter 687 (user request — Report Hub GLOBAL): figures WITHOUT thousands
+    # commas and WITHOUT trailing .00 decimals; num_center → centred figures
+    # (and non-name text cells, e.g. Muster-Roll marks / S.No.).
+    _numfmt = "0.##"
+    _numalign = Alignment(horizontal="center" if num_center else "right")
+    _txtalign = Alignment(horizontal="center")
     for row in rows:
         for j, c in enumerate(columns, 1):
             v = row.get(c["key"])
             cell = ws.cell(r, j, v)
             cell.border = border
             if isinstance(v, (int, float)):
-                cell.number_format = "#,##0.##"
-                cell.alignment = Alignment(horizontal="right")
+                cell.number_format = _numfmt
+                cell.alignment = _numalign
+            elif num_center and "name" not in str(c.get("key") or "").lower() \
+                    and "designation" not in str(c.get("key") or "").lower():
+                cell.alignment = _txtalign
         r += 1
     if totals:
         _has_lbl = any(str(v).strip().upper() == "TOTAL"
@@ -68,8 +79,8 @@ def register_xlsx(title: str, subtitle: str, columns: List[Dict[str, str]],
             cell.fill = PatternFill("solid", fgColor="FFF2CC")
             cell.border = border
             if isinstance(v, (int, float)):
-                cell.number_format = "#,##0.##"
-                cell.alignment = Alignment(horizontal="right")
+                cell.number_format = _numfmt
+                cell.alignment = _numalign
     ws.freeze_panes = f"A{r_head + 1}"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.paperSize = 8
@@ -83,7 +94,8 @@ def register_pdf(title: str, subtitle: str, columns: List[Dict[str, str]],
                  rows: List[dict], totals: Optional[dict] = None,
                  logo_b64: Optional[str] = None,
                  empty_note: Optional[str] = None,
-                 form_line: Optional[str] = None) -> BytesIO:
+                 form_line: Optional[str] = None,
+                 plain_num: bool = False) -> BytesIO:
     import base64
     from reportlab.lib import colors as rl
     from reportlab.lib.pagesizes import A3, landscape
@@ -131,9 +143,12 @@ def register_pdf(title: str, subtitle: str, columns: List[Dict[str, str]],
         buf.seek(0)
         return buf
     data = [[c["label"] for c in columns]]
+    # Iter 687 (user request — Report Hub GLOBAL): figures WITHOUT
+    # thousands commas / trailing .00 in ALL PDF reports.
+    _nfmt = lambda v: f"{v:.2f}".rstrip("0").rstrip(".")  # noqa: E731
     for row in rows:
         data.append([
-            (f"{v:,.2f}".rstrip("0").rstrip(".") if isinstance(v, float)
+            (_nfmt(v) if isinstance(v, float)
              else ("" if v is None else str(v)))
             for v in (row.get(c["key"]) for c in columns)])
     # Iter 520 (user bug — wage register heading/data OVERLAPPING) —
@@ -185,7 +200,7 @@ def register_pdf(title: str, subtitle: str, columns: List[Dict[str, str]],
         _has_lbl = any(str(v).strip().upper() == "TOTAL"
                        for v in totals.values())
         data.append([
-            (f"{v:,.2f}".rstrip("0").rstrip(".") if isinstance(v, float)
+            (_nfmt(v) if isinstance(v, float)
              else ("" if v is None else str(v)))
             for v in (totals.get(c["key"],
                                  "TOTAL" if i == 0 and not _has_lbl else None)

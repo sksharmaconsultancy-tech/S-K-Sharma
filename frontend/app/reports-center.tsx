@@ -152,8 +152,11 @@ export default function ReportsCenterScreen() {
         );
       } catch {}
       // Iter 479 (user spec) — CLRA / Labour Code registers.
+      // Iter 687 (user request) — CONTRACTOR firms only (hidden otherwise).
       try {
-        const cl = await api<any>("/admin/clra-reports/list");
+        const cl = await api<any>(
+          `/admin/clra-reports/list${companyId ? `?company_id=${companyId}` : ""}`,
+        );
         (cl.reports || []).forEach((r: any) =>
           all.push({ ...r, group: "clra" }),
         );
@@ -169,7 +172,7 @@ export default function ReportsCenterScreen() {
       setKinds(all);
       setSel(all[0] || null);
     })();
-  }, [isSuper]);
+  }, [isSuper, companyId]);
 
   // Iter 499 (user request) — deep link from the global search:
   // /reports-center?kind=<kind> opens that report directly.
@@ -373,7 +376,11 @@ export default function ReportsCenterScreen() {
             Contractor Registers
           </Text>
           <View style={shared.tabs}>
-            {CONTRACTOR_REGISTERS.map((e) => (
+            {CONTRACTOR_REGISTERS.filter(
+              (e) =>
+                e.route !== "/clra-registers" ||
+                kinds.some((k) => k.group === "clra"),
+            ).map((e) => (
               <Pressable
                 key={e.route}
                 onPress={() => router.push(e.route as any)}
@@ -691,6 +698,7 @@ export default function ReportsCenterScreen() {
                 columns={data.columns}
                 rows={data.rows}
                 totals={data.totals}
+                centerNum={!!data.plain_num}
               />
             )}
           </View>

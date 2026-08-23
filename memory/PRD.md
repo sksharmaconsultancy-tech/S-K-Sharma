@@ -7912,3 +7912,35 @@ a tab inside AI Command Center.
 - /app/get_test_token.sh helper (local OTP-bypass token mint).
 - E2E: formats list, ASI render (E1=121 male, E6=46800 wages), xlsx
   5.3KB; UI screenshots verified charts + format table.
+
+## Iter 687 — Report Hub fixes (user list a–l)
+a) payroll_reports salary-comparison: employees_a/employees_b per month.
+b-d) govt_audit_reports _wage_register REWRITTEN: sno (no emp code),
+  dynamic Firm-Master heads (_HEAD_MAP HRA/CONV./MEDICAL + others bucket
+  + OVER TIME), master (basic_master/hra_master/…/gross_master) +
+  Working Days + earned + Gross Earning + PF/ESIC(+PT/TDS if nonzero)+
+  Adv/Other + Net + Bank; plain_num flag → web centerNum + xlsx
+  num_center; sorted by name.
+e) FORM headings verified intact (form_line) — VPS restore via deploy.
+f) clra_labour_reports /list: company_id param; firm header.category or
+  business_category must contain "contract" else {reports:[],
+  contractor_only:true}; reports-center hides CLRA tile+group, kinds
+  effect deps + companyId.
+g) central_wage_registers _dmy() → DD-MM-YYYY (Form A dob/doj/leaving,
+  Form C dates; Form C sort fixed for DMY).
+h) Form C empty_note "For the Month of <Month-Year> No Deduction…"
+  (JSON + PDF empty_note).
+i) register_xlsx num_center also centers non-name TEXT cells; Form B/D
+  exports pass num_center=True.
+j) Form D WO auto-fill: employee weekly_off_days_override else company
+  attendance_policy.weekly_off_days; t_wo includes filled WO.
+k) GLOBAL no-comma/no-.00: register_xlsx "0.##", register_pdf plain
+  fmt, RegisterTable fmtVal plain (Math.round*100/100).
+l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
+  Days (finalized run present_days) + Attendance (engine) + OT Hours
+  (run); build_report(run_by=) param; frontend month input MM-YYYY
+  (mmYyyyToIso converts; monthNow returns MM-YYYY).
+- RegisterTable: centerNum prop. E2E: all endpoints verified via curl
+  (wage register cols/plain_num, clra gating, formC note, DMY dates,
+  monthly register cols, exports 200).
+- deploy_vps_iter687.sh; temp_bundle -> deploy687; APP_ITERATION=687.

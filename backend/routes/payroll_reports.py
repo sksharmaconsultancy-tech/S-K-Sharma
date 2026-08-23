@@ -120,10 +120,14 @@ async def _salary_comparison(company_id, month, month_b, fy, ctx=None):
             u = users.get(uid) or {}
             key = str(u.get(field) or "").strip() or fallback
             d = agg.setdefault(key, {
-                "group": key, "employees": 0, "att_a": 0.0, "att_b": 0.0,
+                "group": key, "employees_a": 0, "employees_b": 0,
+                "att_a": 0.0, "att_b": 0.0,
                 "gross_a": 0.0, "gross_b": 0.0, "net_a": 0.0, "net_b": 0.0})
             ra, rb = rows_a.get(uid) or {}, rows_b.get(uid) or {}
-            d["employees"] += 1
+            # Iter 687 (user request) — No. of Employees shown for BOTH
+            # months separately (previous + current as selected).
+            d["employees_a"] += 1 if ra else 0
+            d["employees_b"] += 1 if rb else 0
             d["att_a"] = round(d["att_a"] + _f(ra.get("present_days")), 2)
             d["att_b"] = round(d["att_b"] + _f(rb.get("present_days")), 2)
             d["gross_a"] = round(d["gross_a"] + _f(ra.get("gross_paid")), 2)
@@ -152,7 +156,9 @@ async def _salary_comparison(company_id, month, month_b, fy, ctx=None):
     glabel = {"department": "Department",
               "designation": "Designation"}.get(group_by,
                                                 "Department / Designation")
-    cols = [("group", glabel), ("employees", "No. of Employees"),
+    cols = [("group", glabel),
+            ("employees_a", f"Employees {lbl_a}"),
+            ("employees_b", f"Employees {lbl_b}"),
             ("att_a", f"Attendance {lbl_a}"), ("att_b", f"Attendance {lbl_b}"),
             ("gross_a", f"Gross {lbl_a}"), ("gross_b", f"Gross {lbl_b}"),
             ("gross_diff", "Gross Diff"), ("net_a", f"Net {lbl_a}"),
@@ -161,10 +167,11 @@ async def _salary_comparison(company_id, month, month_b, fy, ctx=None):
     # totals over ONE grouping only (both sections total the same universe)
     base = _grouped("department", "(No Department)")
     totals = {"group": "TOTAL"}
-    for k in ("employees", "att_a", "att_b", "gross_a", "gross_b",
-              "gross_diff", "net_a", "net_b", "net_diff"):
+    for k in ("employees_a", "employees_b", "att_a", "att_b", "gross_a",
+              "gross_b", "gross_diff", "net_a", "net_b", "net_diff"):
         totals[k] = round(sum(_f(r.get(k)) for r in base), 2)
-    totals["employees"] = int(totals["employees"])
+    totals["employees_a"] = int(totals["employees_a"])
+    totals["employees_b"] = int(totals["employees_b"])
     totals["change_pct"] = (round(totals["gross_diff"] * 100
                                   / totals["gross_a"], 1)
                             if totals["gross_a"] else 0)
