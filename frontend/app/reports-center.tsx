@@ -42,6 +42,7 @@ const EXISTING = [
   { title: "Yearly Payroll Register", route: "/payroll-register" },
   { title: "Bonus Registers (A, B, D)", route: "/bonus-registers" },
   { title: "Labour Statistics & HR Analytics", route: "/labour-statistics" },
+  { title: "Central Statistical — Annual Labour", route: "/central-statistical" },
   { title: "Annual Returns", route: "/annual-returns" },
   { title: "Factory & Boilers Registers", route: "/factory-compliance" },
 ];

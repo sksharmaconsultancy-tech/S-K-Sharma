@@ -77,10 +77,12 @@ export default function RegisterTable({
   columns,
   rows,
   totals,
+  onRowPress,
 }: {
   columns: RegCol[];
   rows: any[];
   totals?: Record<string, any> | null;
+  onRowPress?: (row: any) => void;
 }) {
   if (!columns?.length) return null;
   return (
@@ -94,7 +96,12 @@ export default function RegisterTable({
           ))}
         </View>
         {rows.map((r, i) => (
-          <View key={i} style={st.tr}>
+          <Pressable
+            key={i}
+            style={st.tr}
+            onPress={onRowPress ? () => onRowPress(r) : undefined}
+            disabled={!onRowPress}
+          >
             {columns.map((c, j) => (
               <Text
                 key={c.key}
@@ -107,7 +114,7 @@ export default function RegisterTable({
                 {fmtVal(r[c.key])}
               </Text>
             ))}
-          </View>
+          </Pressable>
         ))}
         {totals && (
           <View style={st.tr}>

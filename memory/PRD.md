@@ -7873,3 +7873,26 @@ a tab inside AI Command Center.
     hint "Auto-filled with today's date — change it if you joined earlier.")
 - Verified via screenshot: labels with *, DOJ=22-08-2026 auto-filled,
   father-name validation error fires on empty submit.
+
+## Iter 686 — Central Statistical · Annual Labour Statistics (user spec)
+- NEW /app/backend/routes/central_statistical.py — aggregation-only:
+  * GET /api/admin/central-stats/annual (FY Apr→Mar; filters dept/
+    gender/type/category/skill; compare_prev=true → prev-FY % table)
+  * GET /annual.xlsx (6 sheets) · /annual.pdf · GET /employee-detail
+    (per-employee Apr→Mar drill-down) · POST /finalize (immutable
+    snapshot db.central_stat_snapshots, versioned) · GET /snapshots
+  * Reuses labour_statistics helpers (_users/_run_rows/_company/_dt/_f);
+    salary figures read from compliance_salary_runs rows (gross_paid/
+    monthly_gross, pf_employee, pf_employer_total, esic_*, ot_pay) —
+    NEVER recalculated.
+- NEW /app/frontend/app/central-statistical.tsx — tabs Overview/
+  Department/Employee/Category/Monthly/Validation; KPI cards; trend
+  bars; dept row tap → employee tab filtered; employee tap → monthly
+  drill-down modal; Finalize + Compare Prev FY + Refresh chips;
+  ExportButtons (pdf/xlsx).
+- RegisterTable: added optional onRowPress prop (rows become Pressable).
+- Nav: reports-center.tsx + AdminWebShell (2 menus) → /central-statistical.
+- E2E verified (Kankani, FY 2026): KPIs, wage totals (gross 46800,
+  LC 47736), ESIC statutory, xlsx 20KB, pdf 3KB, finalize v1 snapshot,
+  drill-down MAHAVEER SINGH Jun gross 23400. UI screenshots: all tabs OK.
+- deploy_vps_iter686.sh; temp_bundle -> deploy686; APP_ITERATION=686.

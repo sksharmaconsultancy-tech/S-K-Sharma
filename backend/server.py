@@ -10067,7 +10067,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "685"
+APP_ITERATION = "686"
 
 
 @api.get("/version")
@@ -13193,6 +13193,8 @@ app.include_router(payroll_register_router)
 # Iter 357 — Phase B/C/D: Labour Statistics, Annual Returns, Factory & Boilers.
 from routes.labour_statistics import router as labour_stats_router  # noqa: E402
 app.include_router(labour_stats_router)
+from routes.central_statistical import router as central_stats_router  # noqa: E402
+app.include_router(central_stats_router)
 from routes.annual_returns import router as annual_returns_router  # noqa: E402
 app.include_router(annual_returns_router)
 from routes.factory_compliance import router as factory_router  # noqa: E402
