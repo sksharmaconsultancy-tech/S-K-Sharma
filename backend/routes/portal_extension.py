@@ -331,7 +331,7 @@ async def ext_ecr_file(token: str, run_id: str = ""):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "16"
+RUNNER_VERSION = "17"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -500,6 +500,22 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
             pass
         _st("opening")
         print("Opening EPFO Portal (giving it time to load safely)...")
+        # Iter 693 (user request) — fetch this firm's EPFO Login ID +
+        # Password from Firm Master -> Portal Logins, to auto-fill the login
+        # form after the page opens. CAPTCHA / OTP are NEVER touched.
+        _creds = {}
+        try:
+            with urllib.request.urlopen(
+                "%s/api/portal-ext/creds?token=%s&portal=epfo"
+                % (API_BASE, TOKEN), timeout=30) as _r:
+                _cj = json.load(_r)
+            if _cj.get("ok"):
+                _creds = _cj
+            else:
+                print("NOTE: no EPFO login saved for this firm (%s)."
+                      % (_cj.get("detail") or "add it in Firm Master"))
+        except Exception as _e:
+            print("NOTE: could not fetch EPFO login (%s)." % _e)
         try:
             from selenium.webdriver.common.by import By
             from selenium.webdriver.support.ui import WebDriverWait
@@ -594,11 +610,79 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
                     continue
             if not _closed:
                 print("No alert popup appeared - nothing to close.")
+
+            # Iter 693 — AUTO-FILL EPFO Login ID + Password from Firm Master.
+            # Selectors per user: username id="username1", password class
+            # "form-control password-field". CAPTCHA / OTP left for the user.
+            if _creds.get("user_id") and not (_is_down() and not _looks_ready()):
+                from selenium.webdriver.common.keys import Keys
+
+                def _type_val(el, val):
+                    try:
+                        el.click()
+                    except Exception:
+                        pass
+                    try:
+                        el.send_keys(Keys.CONTROL, "a")
+                        el.send_keys(Keys.DELETE)
+                    except Exception:
+                        pass
+                    try:
+                        el.clear()
+                    except Exception:
+                        pass
+                    el.send_keys(val)
+                    try:
+                        if (el.get_attribute("value") or "") != val:
+                            driver.execute_script(
+                                "var s=Object.getOwnPropertyDescriptor("
+                                "window.HTMLInputElement.prototype,'value').set;"
+                                "s.call(arguments[0],arguments[1]);"
+                                "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));"
+                                "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));"
+                                "arguments[0].dispatchEvent(new Event('blur',{bubbles:true}));",
+                                el, val)
+                    except Exception:
+                        pass
+
+                _user_el = None
+                try:
+                    _user_el = WebDriverWait(driver, 15).until(
+                        EC.element_to_be_clickable((By.ID, "username1")))
+                except Exception:
+                    _user_el = None
+                if _user_el is None:
+                    for _sel in ("#username", "input[name='username']",
+                                 "#userName", "input[name='userName']"):
+                        _els = driver.find_elements(By.CSS_SELECTOR, _sel)
+                        if _els and _els[0].is_displayed():
+                            _user_el = _els[0]
+                            break
+                _pass_el = None
+                for _sel in ("input.password-field", ".password-field",
+                             "#password", "input[name='password']",
+                             "input[type=password]"):
+                    _els = driver.find_elements(By.CSS_SELECTOR, _sel)
+                    _els = [e for e in _els if e.is_displayed()]
+                    if _els:
+                        _pass_el = _els[0]
+                        break
+                if _user_el is not None:
+                    _type_val(_user_el, _creds["user_id"])
+                    print("Username auto-filled (from Firm Master).")
+                else:
+                    print("Username field not found - type it manually.")
+                if _pass_el is not None:
+                    _type_val(_pass_el, _creds["password"])
+                    print("Password auto-filled (from Firm Master).")
+                else:
+                    print("Password field not found - type it manually.")
+
             if not (_is_down() and not _looks_ready()):
                 _st("open")
                 print("EPFO Portal Open.")
-                print("Enter Username / Password / CAPTCHA / OTP yourself -")
-                print("this shortcut fills NOTHING else and clicks NOTHING else.")
+                print("Username & Password filled from Firm Master. Now just")
+                print("enter the CAPTCHA (and OTP if asked) and click Sign In.")
         except Exception as e:
             _st("error: portal did not load (%s)" % str(e)[:120])
             print("Portal did not load:", e)

@@ -231,7 +231,7 @@ export default function AutomationStudioScreen() {
         starting: "Starting Chrome...",
         opening: "Opening EPFO Portal...",
         retrying: "⏳ EPFO server busy (503) — auto-retrying, please wait...",
-        open: "✅ EPFO Portal Open",
+        open: "✅ EPFO Portal Open — login filled, enter CAPTCHA & Sign In",
         closed: "Browser Closed",
       };
       pcPollRef.current = setInterval(async () => {
@@ -735,9 +735,9 @@ export default function AutomationStudioScreen() {
                     <Text style={{ fontWeight: "800" }}>install_autostart.bat</Text> once. After that the
                     Runner starts silently every time Windows boots — you never open anything again, and{" "}
                     <Text style={{ fontWeight: "800" }}>Open EPFO Portal</Text> just works: a new Chrome
-                    window (ChromeDriver) opens the EPFO portal and clicks the alert&apos;s OK — then stops.
-                    Nothing else is filled or clicked; you enter Username / Password / CAPTCHA / OTP
-                    yourself. Use <Text style={{ fontWeight: "800" }}>ChromeDriver (driver only)</Text> only
+                    window (ChromeDriver) opens the EPFO portal, clicks the alert&apos;s OK, and auto-fills
+                    this firm&apos;s Login ID &amp; Password from Firm Master → Portal Logins. You only enter
+                    the CAPTCHA (and OTP if asked) and click Sign In — CAPTCHA/OTP are never bypassed. Use <Text style={{ fontWeight: "800" }}>ChromeDriver (driver only)</Text> only
                     if the auto-install ever fails.
                   </Text>
                 </View>

@@ -8062,3 +8062,14 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   6s settle, 45s readyState wait + 2s settle, 5s+4s between up-to-40 503
   retries (~3min). Only removes bot fingerprints — CAPTCHA/OTP never
   bypassed, nothing auto-submitted. RUNNER_VERSION 15→16.
+- Iter 693 (user: after page opens, click OK/Close then AUTO-FILL EPFO login
+  from Firm Master; username id=username1, password class
+  "form-control password-field"): epfo_open branch now fetches this firm's
+  EPFO creds (/api/portal-ext/creds token+portal=epfo) and after closing the
+  alert types User ID into #username1 (fallbacks #username, name=username,
+  #userName) and Password into input.password-field (fallbacks #password,
+  name=password, type=password) using the proven send_keys + native-setter
+  event approach (Angular ngModel safe). CAPTCHA/OTP NEVER touched — user
+  enters those + clicks Sign In. RUNNER_VERSION 16→17. UI hint + open-status
+  updated. Verified via fake-driver sim: OK clicked, username+password
+  filled, captcha left, status open→closed.
