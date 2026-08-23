@@ -7896,3 +7896,19 @@ a tab inside AI Command Center.
   LC 47736), ESIC statutory, xlsx 20KB, pdf 3KB, finalize v1 snapshot,
   drill-down MAHAVEER SINGH Jun gross 23400. UI screenshots: all tabs OK.
 - deploy_vps_iter686.sh; temp_bundle -> deploy686; APP_ITERATION=686.
+
+## Iter 686b — Charts + Official Formats (user picks)
+- central-statistical.tsx: new "📈 Charts" tab — SVG LineChart (react-
+  native-svg Polyline/Circle/SvgText) for Employment/Salary(gross)/
+  Labour Cost/OT/Attendance% Apr→Mar; PieChart (Path arcs + legend %)
+  for Labour-Cost-by-Department & Employment-by-Category.
+- Backend monthly rows now include gross + labour_cost per month.
+- "🏛 Official Formats" tab: GET/POST /api/admin/central-stats/formats,
+  GET /formats/{id}/render(+.xlsx). Built-in asi_block_e (E1–E13)
+  mapped via _resolve_source (dot-paths into aggregation + gender_male/
+  female specials). Custom defs stored in
+  db.statistical_report_definitions (super/sub admin only).
+- ExportButtons: optional xlsxOnly prop.
+- /app/get_test_token.sh helper (local OTP-bypass token mint).
+- E2E: formats list, ASI render (E1=121 male, E6=46800 wages), xlsx
+  5.3KB; UI screenshots verified charts + format table.

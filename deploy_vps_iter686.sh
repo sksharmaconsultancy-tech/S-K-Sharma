@@ -31,6 +31,18 @@
 #  * Permissions: super admin / sub admin / company admin (existing
 #    role system).
 #
+# 📈 CHARTS TAB (686): Employment / Salary Cost / Labour Cost / OT /
+#  Attendance % line charts (Apr→Mar) + Labour-Cost-by-Department and
+#  Employment-by-Category PIE charts with legends — presentation ready.
+#
+# 🏛 OFFICIAL FORMATS TAB (686): StatisticalReportDefinition mapping
+#  layer — survey line-items resolved from the SAME aggregation (no new
+#  calculation). Built-in "ASI-style Block E: Employment & Labour Cost"
+#  (E1–E13) + custom formats via POST /api/admin/central-stats/formats.
+#  Per-format render table + Excel export. Clearly labelled: not an
+#  official government return until the exact notified format is
+#  configured.
+#
 # ═══════════ ALSO INCLUDED (Iter 685) ═══════════
 #
 # 🪪 EMAIL AUDIT AGENT — OCR DOCUMENT SCANNER (user request):
@@ -826,6 +838,8 @@ echo -n "   Server badge is 686 (must say OK): "
 grep -q 'APP_ITERATION = "686"' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
 echo -n "   Central Statistical module — Iter 686 (must say OK): "
 [ -f $APP_DIR/backend/routes/central_statistical.py ] && [ -f $APP_DIR/frontend/app/central-statistical.tsx ] && grep -q 'central_stats_router' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
+echo -n "   Charts + Official Formats — Iter 686 (must say OK): "
+grep -q 'asi_block_e' $APP_DIR/backend/routes/central_statistical.py && grep -q 'PieChart' $APP_DIR/frontend/app/central-statistical.tsx && echo "OK" || echo "MISSING!"
 echo -n "   OCR Document Scanner — Iter 685 (must say OK): "
 grep -q '_ocr_documents' $APP_DIR/backend/routes/email_audit_agent.py && grep -q 'Document Analysis (OCR)' $APP_DIR/frontend/src/components/EmailAuditTab.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Scanned-PDF OCR — Iter 685 (must say OK): "

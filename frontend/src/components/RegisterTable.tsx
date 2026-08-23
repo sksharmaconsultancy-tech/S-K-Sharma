@@ -30,9 +30,11 @@ export function fmtVal(v: any): string {
 export function ExportButtons({
   basePath,
   fileBase,
+  xlsxOnly,
 }: {
   basePath: string; // e.g. /admin/labour-stats/department?company_id=..&month=..
   fileBase: string;
+  xlsxOnly?: boolean;
 }) {
   const [busy, setBusy] = useState("");
   const dl = async (ext: "pdf" | "xlsx") => {
@@ -55,13 +57,15 @@ export function ExportButtons({
   };
   return (
     <View style={{ flexDirection: "row", gap: 12 }}>
-      <Pressable onPress={() => dl("pdf")} disabled={!!busy} hitSlop={8}>
-        {busy === "pdf" ? (
-          <ActivityIndicator size="small" />
-        ) : (
-          <Ionicons name="document-outline" size={20} color="#C0392B" />
-        )}
-      </Pressable>
+      {!xlsxOnly && (
+        <Pressable onPress={() => dl("pdf")} disabled={!!busy} hitSlop={8}>
+          {busy === "pdf" ? (
+            <ActivityIndicator size="small" />
+          ) : (
+            <Ionicons name="document-outline" size={20} color="#C0392B" />
+          )}
+        </Pressable>
+      )}
       <Pressable onPress={() => dl("xlsx")} disabled={!!busy} hitSlop={8}>
         {busy === "xlsx" ? (
           <ActivityIndicator size="small" />

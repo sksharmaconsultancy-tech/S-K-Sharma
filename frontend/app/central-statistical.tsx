@@ -17,6 +17,7 @@ import {
   StyleSheet,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import Svg, { Circle, G, Path, Polyline, Text as SvgText } from "react-native-svg";
 import { Ionicons } from "@expo/vector-icons";
 import { Redirect, useRouter } from "expo-router";
 
@@ -32,8 +33,82 @@ const TABS = [
   { key: "employee", label: "Employee" },
   { key: "category", label: "Category" },
   { key: "monthly", label: "Monthly" },
+  { key: "charts", label: "📈 Charts" },
+  { key: "formats", label: "🏛 Official Formats" },
   { key: "validation", label: "Validation" },
 ];
+
+const PIE_COLORS = ["#2563EB", "#F59E0B", "#10B981", "#EF4444", "#8B5CF6",
+  "#0EA5E9", "#F97316", "#14B8A6", "#E11D48", "#84CC16"];
+
+/** Compact SVG line chart for Apr→Mar trends (Iter 687). */
+function LineChart({ rows, valKey, color }: { rows: any[]; valKey: string; color: string }) {
+  const W = 640;
+  const H = 180;
+  const P = 28;
+  const vals = rows.map((m) => Number(m[valKey]) || 0);
+  const mx = Math.max(1, ...vals);
+  const pts = vals
+    .map((v, i) => `${P + (i * (W - 2 * P)) / 11},${H - P - (v / mx) * (H - 2 * P)}`)
+    .join(" ");
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+      <Svg width={W} height={H + 16}>
+        <Polyline points={pts} fill="none" stroke={color} strokeWidth={2.5} />
+        {vals.map((v, i) => {
+          const x = P + (i * (W - 2 * P)) / 11;
+          const y = H - P - (v / mx) * (H - 2 * P);
+          return (
+            <G key={i}>
+              <Circle cx={x} cy={y} r={3.5} fill={color} />
+              <SvgText x={x} y={y - 8} fontSize={9} fill={colors.onSurface} textAnchor="middle">
+                {v >= 1000 ? `${Math.round(v / 1000)}k` : v}
+              </SvgText>
+              <SvgText x={x} y={H + 8} fontSize={9} fill={colors.onSurfaceSecondary} textAnchor="middle">
+                {String(rows[i].month).slice(0, 3)}
+              </SvgText>
+            </G>
+          );
+        })}
+      </Svg>
+    </ScrollView>
+  );
+}
+
+/** Compact SVG pie chart with legend (Iter 687). */
+function PieChart({ slices }: { slices: { label: string; value: number }[] }) {
+  const total = Math.max(1, slices.reduce((s, x) => s + x.value, 0));
+  const R = 78;
+  const C = 90;
+  let ang = -Math.PI / 2;
+  const paths = slices.map((s, i) => {
+    const frac = s.value / total;
+    const a2 = ang + frac * 2 * Math.PI;
+    const large = frac > 0.5 ? 1 : 0;
+    const p = `M${C},${C} L${C + R * Math.cos(ang)},${C + R * Math.sin(ang)} ` +
+      `A${R},${R} 0 ${large} 1 ${C + R * Math.cos(a2)},${C + R * Math.sin(a2)} Z`;
+    ang = a2;
+    return <Path key={i} d={frac >= 0.999 ? `M${C - R},${C} a${R},${R} 0 1 0 ${2 * R},0 a${R},${R} 0 1 0 ${-2 * R},0` : p} fill={PIE_COLORS[i % PIE_COLORS.length]} />;
+  });
+  return (
+    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 14 }}>
+      <Svg width={180} height={180}>{paths}</Svg>
+      <View style={{ flex: 1, minWidth: 180 }}>
+        {slices.map((s, i) => (
+          <View key={s.label} style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
+            <View style={{ width: 11, height: 11, borderRadius: 3, backgroundColor: PIE_COLORS[i % PIE_COLORS.length], marginRight: 6 }} />
+            <Text style={{ fontSize: 11.5, color: colors.onSurface, flex: 1 }} numberOfLines={1}>
+              {s.label}
+            </Text>
+            <Text style={{ fontSize: 11.5, fontWeight: "700", color: colors.onSurface }}>
+              {Math.round((s.value / total) * 100)}%
+            </Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
 
 const inr = (v: any) => (v == null ? "—" : `₹${Number(v).toLocaleString("en-IN")}`);
 
@@ -54,6 +129,10 @@ export default function CentralStatisticalScreen() {
   const [drill, setDrill] = useState<any>(null);
   const [drillLoading, setDrillLoading] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
+  // Iter 687 — Official Formats (ASI-style mapping layer)
+  const [formats, setFormats] = useState<any[]>([]);
+  const [fmtRender, setFmtRender] = useState<any>(null);
+  const [fmtLoading, setFmtLoading] = useState(false);
 
   const companyId =
     user?.role === "company_admin" ? user.company_id : selectedCompanyId;
@@ -80,6 +159,34 @@ export default function CentralStatisticalScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (tab !== "formats" || formats.length) return;
+    void (async () => {
+      try {
+        const r = await api<any>(`/admin/central-stats/formats`);
+        setFormats(r.formats || []);
+      } catch {}
+    })();
+  }, [tab, formats.length]);
+
+  const renderFormat = useCallback(
+    async (defId: string) => {
+      if (!companyId) return;
+      setFmtLoading(true);
+      try {
+        const r = await api<any>(
+          `/admin/central-stats/formats/${defId}/render?company_id=${companyId}&fy_start_year=${fy}`,
+        );
+        setFmtRender(r);
+      } catch {
+        setFmtRender(null);
+      } finally {
+        setFmtLoading(false);
+      }
+    },
+    [companyId, fy],
+  );
 
   const openDrill = useCallback(
     async (uid: string) => {
@@ -464,6 +571,96 @@ export default function CentralStatisticalScreen() {
               <Text style={shared.cardTitle}>Attendance % Trend</Text>
               <Bar rows={data.monthly || []} valKey="attendance_pct" color="#10B981" />
             </View>
+          </>
+        )}
+
+        {!loading && data && tab === "charts" && (
+          <>
+            <View style={shared.card}>
+              <Text style={shared.cardTitle}>📈 Employment Trend (Apr → Mar)</Text>
+              <LineChart rows={data.monthly || []} valKey="opening" color="#2563EB" />
+            </View>
+            <View style={shared.card}>
+              <Text style={shared.cardTitle}>💰 Salary Cost Trend</Text>
+              <LineChart rows={data.monthly || []} valKey="gross" color="#0EA5E9" />
+            </View>
+            <View style={shared.card}>
+              <Text style={shared.cardTitle}>🏗 Labour Cost Trend</Text>
+              <LineChart rows={data.monthly || []} valKey="labour_cost" color="#E11D48" />
+            </View>
+            <View style={shared.card}>
+              <Text style={shared.cardTitle}>🕒 OT Hours Trend</Text>
+              <LineChart rows={data.monthly || []} valKey="ot_hours" color="#F59E0B" />
+            </View>
+            <View style={shared.card}>
+              <Text style={shared.cardTitle}>✅ Attendance % Trend</Text>
+              <LineChart rows={data.monthly || []} valKey="attendance_pct" color="#10B981" />
+            </View>
+            <View style={shared.card}>
+              <Text style={shared.cardTitle}>🥧 Labour Cost by Department</Text>
+              <PieChart
+                slices={(data.departments || [])
+                  .filter((d: any) => d.labour_cost > 0)
+                  .slice(0, 10)
+                  .map((d: any) => ({ label: d.department, value: d.labour_cost }))}
+              />
+            </View>
+            <View style={shared.card}>
+              <Text style={shared.cardTitle}>🥧 Employment by Category</Text>
+              <PieChart
+                slices={(data.categories || [])
+                  .filter((c: any) => c.group === "Employee Category" && c.employees > 0)
+                  .map((c: any) => ({ label: c.category, value: c.employees }))}
+              />
+            </View>
+          </>
+        )}
+
+        {!loading && data && tab === "formats" && (
+          <>
+            <View style={shared.card}>
+              <Text style={shared.cardTitle}>🏛 Official Statistical Formats</Text>
+              <Text style={st.sub}>
+                Survey line-items mapped from existing payroll data — no re-entry, no
+                recalculation. Not an official government return unless the exact
+                notified format is configured.
+              </Text>
+              {formats.map((f) => (
+                <Pressable
+                  key={f.definition_id}
+                  onPress={() => void renderFormat(f.definition_id)}
+                  style={[st.chip, { marginTop: 6, alignSelf: "flex-start" }]}
+                  testID={`cs-fmt-${f.definition_id}`}
+                >
+                  <Text style={st.chipTxt}>
+                    {f.builtin ? "📋 " : "🛠 "}
+                    {f.name}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            {fmtLoading && <ActivityIndicator style={{ marginVertical: 16 }} />}
+            {!fmtLoading && fmtRender && (
+              <View style={shared.card}>
+                <Text style={shared.cardTitle}>{fmtRender.format?.name}</Text>
+                <Text style={st.sub}>
+                  {fmtRender.company?.name} · {fmtRender.fy}
+                </Text>
+                <RegisterTable
+                  columns={[
+                    { key: "code", label: "Code" },
+                    { key: "label", label: "Item" },
+                    { key: "value", label: "Value" },
+                  ]}
+                  rows={fmtRender.rows || []}
+                />
+                <ExportButtons
+                  basePath={`/admin/central-stats/formats/${fmtRender.format?.definition_id}/render?company_id=${companyId}&fy_start_year=${fy}`}
+                  fileBase={`${fmtRender.format?.definition_id}-${fy}`}
+                  xlsxOnly
+                />
+              </View>
+            )}
           </>
         )}
 

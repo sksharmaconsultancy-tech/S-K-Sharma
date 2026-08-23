@@ -139,7 +139,7 @@ async def _aggregate(cid: str, fy: int, flt: dict) -> dict:
         join = sum(1 for u in users if (_dt(u.get("doj")) or date.min).strftime("%Y-%m") == mk)
         exit_ = sum(1 for u in users
                     if (_dt(u.get("exit_date") or u.get("resign_date")) or date.min).strftime("%Y-%m") == mk)
-        md = paid = oth = 0.0
+        md = paid = oth = m_gross = m_lc = 0.0
         for u in users:
             r = rows.get(u["user_id"]) or {}
             e = emp_acc.setdefault(u["user_id"], {k: 0.0 for k in tot})
@@ -147,6 +147,9 @@ async def _aggregate(cid: str, fy: int, flt: dict) -> dict:
             md += pd
             paid += pd
             oth += _f(r.get("ot_hours"))
+            _mg = _f(r.get("gross_paid")) or _f(r.get("monthly_gross"))
+            m_gross += _mg
+            m_lc += _mg + _f(r.get("pf_employer_total")) + _f(r.get("esic_employer"))
             for k, rk in (("mandays", "present_days"), ("paid", "present_days"),
                           ("ot_hours", "ot_hours"), ("duty_hours", "duty_hours"),
                           ("gross", "gross_paid"), ("ot_pay", "ot_pay"),
@@ -171,6 +174,7 @@ async def _aggregate(cid: str, fy: int, flt: dict) -> dict:
             "closing": strength + join - exit_,
             "mandays": round(md, 1), "paid_days": round(paid, 1),
             "ot_hours": round(oth, 1),
+            "gross": round(m_gross), "labour_cost": round(m_lc),
             "attendance_pct": round(md / (strength * wd) * 100, 1)
             if strength else 0.0,
         })
@@ -352,6 +356,131 @@ def _flt(department, gender, employment_type, category, skill):
     return {"department": department or "", "gender": (gender or "").lower(),
             "employment_type": employment_type or "", "category": category or "",
             "skill": skill or ""}
+
+
+# ─────────────── Official Formats (ASI-style mapping layer, Iter 687) ──────
+# StatisticalReportDefinition: maps existing aggregation fields to official
+# survey line items WITHOUT any new calculation engine. Built-in ASI-style
+# template seeded read-only; custom formats can be added via POST /formats.
+
+_BUILTIN_FORMATS = [{
+    "definition_id": "asi_block_e",
+    "name": "ASI-style — Block E: Employment & Labour Cost",
+    "description": ("Annual Survey of Industries style employment/labour-cost "
+                    "block mapped from existing payroll data. NOT an official "
+                    "government return unless the exact notified format is "
+                    "configured."),
+    "builtin": True,
+    "fields": [
+        {"code": "E1", "label": "Average number of persons worked (male)",
+         "source": "gender_male"},
+        {"code": "E2", "label": "Average number of persons worked (female)",
+         "source": "gender_female"},
+        {"code": "E3", "label": "Total persons worked", "source": "kpis.total_employment"},
+        {"code": "E4", "label": "Average annual employment", "source": "kpis.avg_employment"},
+        {"code": "E5", "label": "Total man-days worked", "source": "kpis.total_mandays"},
+        {"code": "E6", "label": "Wages / salaries (incl. allowances)", "source": "wage_summary.gross"},
+        {"code": "E7", "label": "Overtime wages", "source": "wage_summary.ot_wages"},
+        {"code": "E8", "label": "Bonus", "source": "wage_summary.bonus"},
+        {"code": "E9", "label": "Employer contribution — Provident Fund",
+         "source": "wage_summary.employer_pf"},
+        {"code": "E10", "label": "Employer contribution — ESIC",
+         "source": "wage_summary.employer_esic"},
+        {"code": "E11", "label": "Gratuity provision", "source": "wage_summary.gratuity"},
+        {"code": "E12", "label": "Total labour cost", "source": "wage_summary.total_labour_cost"},
+        {"code": "E13", "label": "Attrition % (annual)", "source": "kpis.attrition_pct"},
+    ],
+}]
+
+
+def _resolve_source(data: dict, src: str):
+    if src == "gender_male":
+        return next((r["male"] for r in data["employment_summary"]
+                     if r["particular"] == "Total Employment"), 0)
+    if src == "gender_female":
+        return next((r["female"] for r in data["employment_summary"]
+                     if r["particular"] == "Total Employment"), 0)
+    cur: Any = data
+    for part in src.split("."):
+        cur = (cur or {}).get(part) if isinstance(cur, dict) else None
+    return cur if cur is not None else 0
+
+
+@router.get("/formats")
+async def formats_list(authorization: Optional[str] = Header(None)):
+    await _auth(authorization)
+    custom = await db.statistical_report_definitions.find(
+        {}, {"_id": 0}).to_list(100)
+    return {"formats": _BUILTIN_FORMATS + custom}
+
+
+@router.post("/formats")
+async def formats_save(payload: Dict[str, Any] = Body(...),
+                       authorization: Optional[str] = Header(None)):
+    admin = await _auth(authorization)
+    require_role(admin, ["super_admin", "sub_admin"])
+    name = str(payload.get("name") or "").strip()
+    fields = payload.get("fields") or []
+    if not name or not isinstance(fields, list) or not fields:
+        raise HTTPException(status_code=400, detail="name and fields[] required")
+    doc = {"definition_id": payload.get("definition_id") or f"fmt_{uuid.uuid4().hex[:10]}",
+           "name": name[:160], "description": str(payload.get("description") or "")[:500],
+           "builtin": False,
+           "fields": [{"code": str(f.get("code") or "")[:12],
+                       "label": str(f.get("label") or "")[:200],
+                       "source": str(f.get("source") or "")[:120]}
+                      for f in fields][:60],
+           "updated_at": now_iso()}
+    await db.statistical_report_definitions.update_one(
+        {"definition_id": doc["definition_id"]}, {"$set": doc}, upsert=True)
+    return {"ok": True, "definition_id": doc["definition_id"]}
+
+
+@router.get("/formats/{definition_id}/render")
+async def formats_render(definition_id: str, company_id: str = Query(...),
+                         fy_start_year: int = Query(...),
+                         authorization: Optional[str] = Header(None)):
+    await _auth(authorization)
+    fmt = next((f for f in _BUILTIN_FORMATS
+                if f["definition_id"] == definition_id), None) \
+        or await db.statistical_report_definitions.find_one(
+            {"definition_id": definition_id}, {"_id": 0})
+    if not fmt:
+        raise HTTPException(status_code=404, detail="Format not found")
+    data = await _aggregate(company_id, fy_start_year, _flt("", "", "", "", ""))
+    rows = [{"code": f["code"], "label": f["label"],
+             "value": _resolve_source(data, f["source"])}
+            for f in fmt["fields"]]
+    return {"format": {"definition_id": fmt["definition_id"], "name": fmt["name"],
+                       "description": fmt.get("description")},
+            "company": data["company"], "fy": data["fy"], "rows": rows}
+
+
+@router.get("/formats/{definition_id}/render.xlsx")
+async def formats_render_xlsx(definition_id: str, company_id: str = Query(...),
+                              fy_start_year: int = Query(...),
+                              authorization: Optional[str] = Header(None),
+                              token: Optional[str] = Query(None)):
+    if token and not authorization:
+        authorization = f"Bearer {token}"
+    r = await formats_render(definition_id, company_id, fy_start_year, authorization)
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Official Format"
+    ws.append([r["format"]["name"]])
+    ws.append([f"{r['company']['name']} · {r['fy']}"])
+    ws.append([])
+    ws.append(["Code", "Item", "Value"])
+    for row in r["rows"]:
+        ws.append([row["code"], row["label"], row["value"]])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition":
+                 f"attachment; filename={definition_id}-{fy_start_year}.xlsx"})
 
 
 @router.get("/annual")
