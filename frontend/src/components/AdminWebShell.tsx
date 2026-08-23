@@ -125,6 +125,7 @@ export const NAV_SUPER: NavItem[] = [
     children: [
       { route: "/attendance-policy", label: "Attendance Policy", icon: "time-outline" },
       { route: "/attendance-grid", label: "Attendance Report", icon: "grid-outline" },
+      { route: "/attendance-report", label: "Attendance Report — Monthly Editable", icon: "create-outline" },
       { route: "/attendance-sync-dashboard", label: "Attendance Sync Dashboard", icon: "sync-outline" },
       { route: "/gps-dashboard", label: "GPS Diagnostics", icon: "locate-outline" },
       { route: "/whatsapp-center?tab=history", label: "WhatsApp Alerts", icon: "logo-whatsapp" },
@@ -541,6 +542,7 @@ export const NAV_COMPANY_ADMIN: NavItem[] = [
     children: [
       { route: "/attendance-policy", label: "Attendance Policy", icon: "time-outline" },
       { route: "/attendance-grid", label: "Attendance Report", icon: "grid-outline" },
+      { route: "/attendance-report", label: "Attendance Report — Monthly Editable", icon: "create-outline" },
       { route: "/attendance-sync-dashboard", label: "Attendance Sync Dashboard", icon: "sync-outline" },
       { route: "/inout-ot-matrix", label: "In/Out & OT Matrix", icon: "apps-outline" },
       { route: "/present-absent-report", label: "Present / Absent Report", icon: "checkbox-outline" },

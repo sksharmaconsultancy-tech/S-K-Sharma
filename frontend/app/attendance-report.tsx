@@ -1,0 +1,392 @@
+/**
+ * Iter 688 — Attendance & Shift → Attendance Report (Monthly Editable).
+ * Excel-style monthly attendance sheet: tap a day cell → pick
+ * P / A / L / WO / CO / HD (no In/Out time needed). Firm Master settings
+ * decide Direct Save vs Submit-for-Approval. Approvals tab included.
+ */
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  View, Text, ScrollView, Pressable, TextInput, ActivityIndicator,
+  StyleSheet, Platform,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import { Redirect, useRouter } from "expo-router";
+
+import { api } from "@/src/api/client";
+import { ExportButtons } from "@/src/components/RegisterTable";
+import { useAuth } from "@/src/context/AuthContext";
+import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
+import { colors } from "@/src/theme";
+
+const CODES = ["P", "A", "L", "WO", "CO", "HD"] as const;
+const CODE_COLORS: Record<string, string> = {
+  P: "#15803D", A: "#DC2626", L: "#B45309", WO: "#6B7280",
+  CO: "#7C3AED", HD: "#0369A1",
+};
+
+function nowMM() {
+  const d = new Date();
+  return `${String(d.getMonth() + 1).padStart(2, "0")}-${d.getFullYear()}`;
+}
+
+export default function AttendanceReportEditable() {
+  const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
+  const { selectedCompanyId } = useSelectedCompany();
+  const companyId = user?.role === "company_admin" ? user.company_id : selectedCompanyId;
+  const [month, setMonth] = useState(nowMM());
+  const [tab, setTab] = useState<"grid" | "approvals" | "settings">("grid");
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [edits, setEdits] = useState<Record<string, any>>({});
+  const [picker, setPicker] = useState<{ uid: string; d: string } | null>(null);
+  const [search, setSearch] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [reqs, setReqs] = useState<any[]>([]);
+  const [msg, setMsg] = useState("");
+
+  const load = useCallback(async () => {
+    if (!companyId || !/^\d{2}-\d{4}$/.test(month)) return;
+    setLoading(true);
+    try {
+      const g = await api<any>(
+        `/admin/manual-attendance/monthly?company_id=${companyId}&month=${month}`);
+      setData(g);
+      setEdits({});
+      const a = await api<any>(`/admin/manual-attendance/approvals?company_id=${companyId}`);
+      setReqs(a.requests || []);
+    } catch {
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [companyId, month]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const setCell = (uid: string, d: string, st: string, prev: string) => {
+    setEdits((e) => ({ ...e, [`${uid}|${d}`]: { user_id: uid, date: d, status: st, previous_status: prev } }));
+    setPicker(null);
+  };
+
+  const save = useCallback(async () => {
+    if (!companyId || !Object.keys(edits).length) return;
+    const st = data?.settings || {};
+    let reason = "";
+    if (st.require_reason) {
+      reason = Platform.OS === "web"
+        ? (window.prompt("Reason for manual change (required by Firm Master):") || "")
+        : "Manual correction";
+      if (!reason.trim()) return;
+    }
+    setSaving(true);
+    try {
+      const r = await api<any>(`/admin/manual-attendance/save`, {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: companyId,
+          changes: Object.values(edits).map((c: any) => ({ ...c, reason })),
+        }),
+      });
+      setMsg(r.approval_required
+        ? `✅ ${r.pending} change(s) submitted for approval`
+        : `✅ ${r.applied} change(s) saved`);
+      await load();
+    } catch (e: any) {
+      setMsg(`⚠ ${e?.message || "Save failed"}`);
+    } finally {
+      setSaving(false);
+    }
+  }, [companyId, edits, data, load]);
+
+  const decide = useCallback(async (ids: string[], action: string) => {
+    try {
+      await api<any>(`/admin/manual-attendance/approvals/decide`, {
+        method: "POST",
+        body: JSON.stringify({ company_id: companyId, request_ids: ids, action }),
+      });
+      setMsg(`✅ ${ids.length} request(s) ${action.toLowerCase()}d`);
+      await load();
+    } catch (e: any) {
+      setMsg(`⚠ ${e?.message || "Failed"}`);
+    }
+  }, [companyId, load]);
+
+  const toggleSetting = useCallback(async (k: string) => {
+    const st = { ...(data?.settings || {}) };
+    st[k] = !st[k];
+    await api<any>(`/admin/manual-attendance/settings/${companyId}`, {
+      method: "POST", body: JSON.stringify(st),
+    });
+    setData((d: any) => ({ ...d, settings: st }));
+  }, [companyId, data]);
+
+  const rows = useMemo(() => {
+    let r = data?.rows || [];
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      r = r.filter((x: any) => x.name.toLowerCase().includes(q)
+        || String(x.employee_code).toLowerCase().includes(q)
+        || x.department.toLowerCase().includes(q));
+    }
+    return r;
+  }, [data, search]);
+
+  if (authLoading) return null;
+  if (!user || !["company_admin", "super_admin", "sub_admin"].includes(user.role))
+    return <Redirect href="/" />;
+
+  const st = data?.settings || {};
+  const unsaved = Object.keys(edits).length;
+  const sum = data?.summary || {};
+
+  return (
+    <SafeAreaView style={s.safe} edges={["top"]}>
+      <View style={s.header}>
+        <Pressable onPress={() => router.back()} hitSlop={10}>
+          <Ionicons name="arrow-back" size={22} color={colors.onSurface} />
+        </Pressable>
+        <Text style={s.title}>Attendance Report — Monthly Editable</Text>
+        {companyId ? (
+          <ExportButtons
+            basePath={`/admin/manual-attendance/monthly?company_id=${companyId}&month=${month}`}
+            fileBase={`attendance-${month}`} xlsxOnly />
+        ) : <View style={{ width: 30 }} />}
+      </View>
+
+      <View style={s.bar}>
+        {(["grid", "approvals", "settings"] as const).map((t) => (
+          <Pressable key={t} onPress={() => setTab(t)}
+            style={[s.tab, tab === t && s.tabOn]} testID={`ar-tab-${t}`}>
+            <Text style={[s.tabTxt, tab === t && s.tabTxtOn]}>
+              {t === "grid" ? "📅 Monthly Sheet"
+                : t === "approvals" ? `🟡 Approvals (${reqs.length})` : "⚙ Firm Settings"}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
+      <View style={s.filters}>
+        <Text style={s.lbl}>Month (MM-YYYY)</Text>
+        <TextInput value={month} onChangeText={setMonth} style={s.input}
+          placeholder="08-2026" maxLength={7} testID="ar-month" />
+        <TextInput value={search} onChangeText={setSearch}
+          style={[s.input, { flex: 1, minWidth: 120 }]}
+          placeholder="Search name / code / dept…" testID="ar-search" />
+        <Pressable onPress={() => void load()} style={s.btn} testID="ar-refresh">
+          <Text style={s.btnTxt}>Search</Text>
+        </Pressable>
+        {unsaved > 0 && st.enabled ? (
+          <Pressable onPress={() => void save()} style={[s.btn, s.btnSave]}
+            disabled={saving} testID="ar-save">
+            <Text style={[s.btnTxt, { color: "#fff" }]}>
+              {saving ? "Saving…"
+                : st.approval_required
+                  ? `Submit for Approval (${unsaved})` : `Save Changes (${unsaved})`}
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
+      {msg ? <Text style={s.msg}>{msg}</Text> : null}
+
+      {loading && <ActivityIndicator style={{ marginTop: 24 }} />}
+
+      {!loading && tab === "grid" && data && (
+        <ScrollView>
+          <View style={s.cards}>
+            {[["Employees", sum.employees], ["P", sum.P], ["A", sum.A],
+              ["L", sum.L], ["WO", sum.WO], ["CO", sum.CO], ["HD", sum.HD],
+              ["Manual", sum.manual], ["Pending", sum.pending]].map(([l, v]) => (
+              <View key={String(l)} style={s.card}>
+                <Text style={s.cardVal}>{v ?? 0}</Text>
+                <Text style={s.cardLbl}>{l}</Text>
+              </View>
+            ))}
+          </View>
+          {!st.enabled ? (
+            <Text style={s.warn}>⚠ Manual editing is DISABLED in Firm Settings — grid is read-only.</Text>
+          ) : null}
+          <ScrollView horizontal>
+            <View>
+              <View style={s.tr}>
+                <Text style={[s.hcell, { width: 64 }]}>Code</Text>
+                <Text style={[s.hcell, { width: 150, textAlign: "left" }]}>Employee</Text>
+                <Text style={[s.hcell, { width: 92 }]}>Dept</Text>
+                {(data.days || []).map((d: string, i: number) => (
+                  <View key={d} style={{ width: 38 }}>
+                    <Text style={s.hcell2}>{d.slice(8)}</Text>
+                    <Text style={s.hday}>{data.weekdays[i]}</Text>
+                  </View>
+                ))}
+                {CODES.map((c) => (
+                  <Text key={c} style={[s.hcell, { width: 36, color: CODE_COLORS[c] }]}>{c}</Text>
+                ))}
+              </View>
+              {rows.map((r: any) => {
+                const tot = { ...r.totals };
+                for (const k of Object.keys(edits)) {
+                  const [uid, d] = k.split("|");
+                  if (uid !== r.user_id) continue;
+                  const prev = r.cells[d]?.st;
+                  if (prev && tot[prev] != null) tot[prev] -= 1;
+                  const nw = edits[k].status;
+                  if (tot[nw] != null) tot[nw] += 1;
+                }
+                return (
+                  <View key={r.user_id}
+                    style={[s.tr, picker?.uid === r.user_id && { zIndex: 100 }]}>
+                    <Text style={[s.cell, { width: 64 }]}>{r.employee_code}</Text>
+                    <Text style={[s.cell, { width: 150, textAlign: "left", fontWeight: "700" }]}
+                      numberOfLines={1}>{r.name}</Text>
+                    <Text style={[s.cell, { width: 92 }]} numberOfLines={1}>{r.department}</Text>
+                    {(data.days || []).map((d: string) => {
+                      const c = r.cells[d] || {};
+                      const ed = edits[`${r.user_id}|${d}`];
+                      const stv = ed ? ed.status : c.st;
+                      const isPick = picker?.uid === r.user_id && picker?.d === d;
+                      return (
+                        <View key={d} style={{ width: 38, zIndex: isPick ? 120 : 0 }}>
+                          <Pressable
+                            disabled={!st.enabled}
+                            onPress={() => setPicker(isPick ? null : { uid: r.user_id, d })}
+                            style={[s.dcell,
+                              ed && { backgroundColor: "#FEF3C7" },
+                              c.pending && { backgroundColor: "#FEF9C3" }]}
+                            testID={`ar-cell-${r.employee_code}-${d.slice(8)}`}
+                          >
+                            <Text style={[s.dtxt, { color: CODE_COLORS[stv] || colors.onSurfaceTertiary }]}>
+                              {stv || "·"}{c.pending ? "🟡" : ed ? "✎" : c.src === "manual" ? "✓" : ""}
+                            </Text>
+                          </Pressable>
+                          {isPick ? (
+                            <View style={s.pop}>
+                              {CODES.map((cd) => (
+                                <Pressable key={cd}
+                                  onPress={() => setCell(r.user_id, d, cd, c.st)}
+                                  style={s.popBtn} testID={`ar-pick-${cd}`}>
+                                  <Text style={[s.popTxt, { color: CODE_COLORS[cd] }]}>{cd}</Text>
+                                </Pressable>
+                              ))}
+                            </View>
+                          ) : null}
+                        </View>
+                      );
+                    })}
+                    {CODES.map((cd) => (
+                      <Text key={cd} style={[s.cell, { width: 36, fontWeight: "800" }]}>{tot[cd]}</Text>
+                    ))}
+                  </View>
+                );
+              })}
+            </View>
+          </ScrollView>
+          <Text style={s.legend}>
+            P Present · A Absent · L Leave · WO Week Off · CO Camp Off · HD Half Day ·
+            ✓ Manual · ✎ Unsaved · 🟡 Pending Approval
+          </Text>
+        </ScrollView>
+      )}
+
+      {!loading && tab === "approvals" && (
+        <ScrollView contentContainerStyle={{ padding: 12 }}>
+          {reqs.length ? (
+            <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
+              <Pressable style={[s.btn, s.btnSave]}
+                onPress={() => void decide(reqs.map((r) => r.request_id), "APPROVE")}
+                testID="ar-approve-all">
+                <Text style={[s.btnTxt, { color: "#fff" }]}>Approve All</Text>
+              </Pressable>
+              <Pressable style={[s.btn, { backgroundColor: "#DC2626", borderColor: "#DC2626" }]}
+                onPress={() => void decide(reqs.map((r) => r.request_id), "REJECT")}>
+                <Text style={[s.btnTxt, { color: "#fff" }]}>Reject All</Text>
+              </Pressable>
+            </View>
+          ) : <Text style={s.legend}>No pending attendance change requests.</Text>}
+          {reqs.map((r) => (
+            <View key={r.request_id} style={s.reqCard}>
+              <Text style={{ fontWeight: "800", color: colors.onSurface }}>
+                {r.name} ({r.employee_code}) · {r.date}
+              </Text>
+              <Text style={s.legend}>
+                {r.previous_status || "—"} → {r.requested_status} · by {r.requested_by}
+                {r.reason ? ` · "${r.reason}"` : ""}
+              </Text>
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 6 }}>
+                <Pressable style={[s.btn, s.btnSave]}
+                  onPress={() => void decide([r.request_id], "APPROVE")}
+                  testID={`ar-approve-${r.request_id}`}>
+                  <Text style={[s.btnTxt, { color: "#fff" }]}>Approve</Text>
+                </Pressable>
+                <Pressable style={[s.btn, { backgroundColor: "#DC2626", borderColor: "#DC2626" }]}
+                  onPress={() => void decide([r.request_id], "REJECT")}>
+                  <Text style={[s.btnTxt, { color: "#fff" }]}>Reject</Text>
+                </Pressable>
+              </View>
+            </View>
+          ))}
+        </ScrollView>
+      )}
+
+      {!loading && tab === "settings" && (
+        <ScrollView contentContainerStyle={{ padding: 12 }}>
+          <Text style={[s.legend, { marginBottom: 8 }]}>
+            Firm Master → Manual Attendance Settings (per firm)
+          </Text>
+          {[["enabled", "Allow Manual Attendance Editing"],
+            ["approval_required", "Attendance Change Approval Required"],
+            ["require_reason", "Require Reason for Manual Change"],
+            ["maker_checker", "Maker Cannot Approve Own Request"]].map(([k, l]) => (
+            <Pressable key={k} style={s.setRow}
+              onPress={() => user.role !== "company_admin" && void toggleSetting(k)}
+              testID={`ar-set-${k}`}>
+              <Text style={{ color: colors.onSurface, flex: 1 }}>{l}</Text>
+              <Text style={{ fontWeight: "800", color: st[k] ? "#15803D" : "#DC2626" }}>
+                {st[k] ? "ENABLED" : "DISABLED"}
+              </Text>
+            </Pressable>
+          ))}
+          {user.role === "company_admin" ? (
+            <Text style={s.warn}>Only Super/Sub Admin can change these settings.</Text>
+          ) : null}
+        </ScrollView>
+      )}
+    </SafeAreaView>
+  );
+}
+
+const s = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.background },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 12 },
+  title: { fontSize: 15, fontWeight: "800", color: colors.onSurface, flex: 1, marginLeft: 10 },
+  bar: { flexDirection: "row", gap: 6, paddingHorizontal: 12, flexWrap: "wrap" },
+  tab: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  tabOn: { backgroundColor: "#1D4ED8", borderColor: "#1D4ED8" },
+  tabTxt: { fontSize: 12, fontWeight: "700", color: colors.onSurface },
+  tabTxtOn: { color: "#fff" },
+  filters: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, flexWrap: "wrap" },
+  lbl: { fontSize: 12, color: colors.onSurfaceSecondary },
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6, width: 90, color: colors.onSurface, backgroundColor: colors.surface },
+  btn: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: colors.surface },
+  btnSave: { backgroundColor: "#15803D", borderColor: "#15803D" },
+  btnTxt: { fontSize: 12, fontWeight: "800", color: colors.onSurface },
+  msg: { paddingHorizontal: 12, color: "#1D4ED8", fontSize: 12, fontWeight: "700" },
+  cards: { flexDirection: "row", flexWrap: "wrap", gap: 6, padding: 12 },
+  card: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 8, minWidth: 74, backgroundColor: colors.surface },
+  cardVal: { fontSize: 15, fontWeight: "800", color: colors.onSurface, textAlign: "center" },
+  cardLbl: { fontSize: 10.5, color: colors.onSurfaceSecondary, textAlign: "center" },
+  tr: { flexDirection: "row", alignItems: "center", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  hcell: { fontSize: 11, fontWeight: "800", color: colors.onSurface, textAlign: "center", paddingVertical: 6 },
+  hcell2: { fontSize: 11, fontWeight: "800", color: colors.onSurface, textAlign: "center" },
+  hday: { fontSize: 9, color: colors.onSurfaceSecondary, textAlign: "center" },
+  cell: { fontSize: 11.5, color: colors.onSurface, textAlign: "center", paddingVertical: 8 },
+  dcell: { height: 34, alignItems: "center", justifyContent: "center", borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: colors.border },
+  dtxt: { fontSize: 11, fontWeight: "800" },
+  pop: { position: "absolute", top: 34, left: -30, zIndex: 50, flexDirection: "row", backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 8, elevation: 6, shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 6 },
+  popBtn: { paddingHorizontal: 8, paddingVertical: 8 },
+  popTxt: { fontSize: 12, fontWeight: "800" },
+  legend: { fontSize: 11.5, color: colors.onSurfaceSecondary, padding: 12 },
+  warn: { color: "#B45309", fontSize: 12, paddingHorizontal: 12, paddingBottom: 6 },
+  reqCard: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, marginBottom: 8, backgroundColor: colors.surface },
+  setRow: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, marginBottom: 8, backgroundColor: colors.surface },
+});

@@ -7944,3 +7944,27 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   (wage register cols/plain_num, clra gating, formC note, DMY dates,
   monthly register cols, exports 200).
 - deploy_vps_iter687.sh; temp_bundle -> deploy687; APP_ITERATION=687.
+
+## Iter 688 — Attendance Report: Monthly Editable (Excel-style, user spec)
+- NEW /app/backend/routes/manual_attendance.py (prefix /api/admin/
+  manual-attendance): /settings/{cid} GET/POST (firm_masters.
+  manual_attendance: enabled/approval_required/require_reason/
+  maker_checker) · /monthly (grid: punch→P, WO from employee
+  weekly_off_days_override else company attendance_policy, past→A;
+  manual overlay from db.manual_attendance wins; pending markers from
+  db.attendance_change_requests) · /save (direct apply + audit OR
+  pending request + admin notification) · /approvals + /approvals/decide
+  (maker-checker enforced, approve applies overlay, audit in
+  db.attendance_change_audit) · /monthly.xlsx (grid export, centred).
+- NEW /app/frontend/app/attendance-report.tsx: tabs Monthly Sheet /
+  Approvals(n) / Firm Settings; MM-YYYY month; summary cards; tap cell →
+  P/A/L/WO/CO/HD popover (zIndex fix for popover); live row totals;
+  ✎ unsaved · ✓ manual · 🟡 pending markers; Save Changes vs Submit for
+  Approval per firm setting; Approve/Reject + All; settings toggles
+  (super/sub admin only). Nav: AdminWebShell both menus.
+- OVERLAY ONLY: punch data / attendance engine / payroll untouched.
+- E2E verified: grid 127 emps, direct save, approval submit→approve→
+  applied, xlsx 20KB, UI cell-edit + Save button via screenshot.
+- Phase 2 backlog: multi-level & department-wise approvers, per-change-
+  type approval matrix, granular permissions, copy/paste & bulk-select.
+- deploy_vps_iter688.sh; temp_bundle -> deploy688; APP_ITERATION=688.
