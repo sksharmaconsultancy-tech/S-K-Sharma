@@ -251,6 +251,10 @@ export default function AutomationStudioScreen() {
         opening: "Opening EPFO Portal...",
         retrying: "⏳ EPFO server busy (503) — auto-retrying, please wait...",
         open: "✅ EPFO Portal Open — login filled, enter CAPTCHA & Sign In",
+        open_nocreds:
+          "⚠ Portal opened but NO EPFO login is saved for THIS firm. Go to Firm Master → EPF Registration → fill EPF User ID + EPF Password → Save, then click again.",
+        open_nofield:
+          "⚠ Portal opened but the login boxes weren't filled (page was still loading or a popup blocked it). Type login manually, or reload & retry.",
         closed: "Browser Closed",
       };
       pcPollRef.current = setInterval(async () => {
@@ -259,7 +263,8 @@ export default function AutomationStudioScreen() {
           const sj: any = await s.json();
           const stx = String(sj?.status || "");
           setPcStatus(MAP[stx] || stx || "…");
-          if (stx === "closed" || stx.startsWith("error") || stx.startsWith("busy")) {
+          if (stx === "closed" || stx.startsWith("error") || stx.startsWith("busy")
+              || stx === "open" || stx.startsWith("open_")) {
             if (pcPollRef.current) clearInterval(pcPollRef.current);
             pcPollRef.current = null;
           }

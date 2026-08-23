@@ -8085,3 +8085,19 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   OR Portal Login Credentials → "PF LOGIN" row (user_name/password). Backend
   _fetch_creds reads EPF section first, then PF LOGIN row fallback. Verified
   creds endpoint returns TESTUSER123 for a firm with the PF LOGIN row filled.
+- Iter 693c (user: ID/pwd still blank, "check portal fields"): CRAWLED the
+  real EPFO login page — confirmed username id="username1", password
+  id="password" class "form-control password-field" (plain server-rendered
+  form, NOT Angular). Selectors were already correct. Real gaps addressed:
+  (1) Runner runs SILENTLY (pythonw via install_autostart) so console
+  reasons were invisible → now surfaced to web UI via JOB_STATUS:
+  open_nocreds ("no EPFO login saved for THIS firm") / open_nofield
+  ("boxes not filled, page loading/popup"). (2) Bootstrap modal-backdrop
+  can block clicks → fill now removes .modal-backdrop + body.modal-open and
+  retries username1 up to 3x. (3) Added explicit `import urllib.error`;
+  HTTPError(412) handled as nocreds. Verifies fill value stuck (_uok/_pok).
+  RUNNER_VERSION 17→18. Frontend MAP shows the new statuses.
+  KEY USER GUIDANCE: creds must be saved in Firm Master → EPF Registration
+  (EPF User ID / EPF Password) OR Portal Login Credentials → PF LOGIN row;
+  AND Runner listener must be RESTARTED after redeploy to self-update
+  (long-running listener keeps old in-memory code until restart/reboot).

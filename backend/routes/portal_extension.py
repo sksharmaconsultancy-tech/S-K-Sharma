@@ -331,7 +331,7 @@ async def ext_ecr_file(token: str, run_id: str = ""):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "17"
+RUNNER_VERSION = "18"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -339,6 +339,7 @@ _RUNNER_CODE = r'''"""SKS Portal Auto-Login — login script (auto-updated by la
 import base64
 import json
 import time
+import urllib.error
 import urllib.request
 
 PORTALS = {
@@ -504,17 +505,29 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
         # Password from Firm Master -> Portal Logins, to auto-fill the login
         # form after the page opens. CAPTCHA / OTP are NEVER touched.
         _creds = {}
+        _cred_note = ""
         try:
             with urllib.request.urlopen(
                 "%s/api/portal-ext/creds?token=%s&portal=epfo"
                 % (API_BASE, TOKEN), timeout=30) as _r:
                 _cj = json.load(_r)
-            if _cj.get("ok"):
+            if _cj.get("ok") and _cj.get("user_id"):
                 _creds = _cj
+                print("EPFO login fetched from Firm Master (User ID: %s)."
+                      % _cj.get("user_id"))
             else:
+                _cred_note = "nocreds"
                 print("NOTE: no EPFO login saved for this firm (%s)."
                       % (_cj.get("detail") or "add it in Firm Master"))
+        except urllib.error.HTTPError as _he:
+            _cred_note = "nocreds"
+            try:
+                _d = json.load(_he).get("detail")
+            except Exception:
+                _d = "HTTP %s" % _he.code
+            print("NOTE: no EPFO login saved for this firm (%s)." % _d)
         except Exception as _e:
+            _cred_note = "crederr"
             print("NOTE: could not fetch EPFO login (%s)." % _e)
         try:
             from selenium.webdriver.common.by import By
@@ -612,9 +625,13 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
                 print("No alert popup appeared - nothing to close.")
 
             # Iter 693 — AUTO-FILL EPFO Login ID + Password from Firm Master.
-            # Selectors per user: username id="username1", password class
-            # "form-control password-field". CAPTCHA / OTP left for the user.
-            if _creds.get("user_id") and not (_is_down() and not _looks_ready()):
+            # Real EPFO page (verified): username id="username1", password
+            # id="password" class "form-control password-field", plain
+            # server-rendered form. CAPTCHA / OTP left for the user.
+            _fill_result = ""
+            if not _creds.get("user_id"):
+                _fill_result = _cred_note or "nocreds"
+            elif not (_is_down() and not _looks_ready()):
                 from selenium.webdriver.common.keys import Keys
 
                 def _type_val(el, val):
@@ -645,44 +662,76 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
                     except Exception:
                         pass
 
+                # The form sits behind the notice modal — wait for the
+                # username box to become clickable after the modal closes.
                 _user_el = None
-                try:
-                    _user_el = WebDriverWait(driver, 15).until(
-                        EC.element_to_be_clickable((By.ID, "username1")))
-                except Exception:
-                    _user_el = None
+                for _wait_try in range(3):
+                    try:
+                        _user_el = WebDriverWait(driver, 12).until(
+                            EC.element_to_be_clickable((By.ID, "username1")))
+                        break
+                    except Exception:
+                        # a leftover Bootstrap backdrop can block clicks —
+                        # remove it and retry.
+                        try:
+                            driver.execute_script(
+                                "document.querySelectorAll('.modal-backdrop')"
+                                ".forEach(function(e){e.remove()});"
+                                "document.body.classList.remove('modal-open');")
+                        except Exception:
+                            pass
+                        time.sleep(2)
                 if _user_el is None:
                     for _sel in ("#username", "input[name='username']",
                                  "#userName", "input[name='userName']"):
-                        _els = driver.find_elements(By.CSS_SELECTOR, _sel)
-                        if _els and _els[0].is_displayed():
+                        _els = [e for e in driver.find_elements(
+                            By.CSS_SELECTOR, _sel) if e.is_displayed()]
+                        if _els:
                             _user_el = _els[0]
                             break
                 _pass_el = None
-                for _sel in ("input.password-field", ".password-field",
-                             "#password", "input[name='password']",
+                for _sel in ("#password", "input.password-field",
+                             ".password-field", "input[name='password']",
                              "input[type=password]"):
-                    _els = driver.find_elements(By.CSS_SELECTOR, _sel)
-                    _els = [e for e in _els if e.is_displayed()]
+                    _els = [e for e in driver.find_elements(
+                        By.CSS_SELECTOR, _sel) if e.is_displayed()]
                     if _els:
                         _pass_el = _els[0]
                         break
+                _uok = _pok = False
                 if _user_el is not None:
                     _type_val(_user_el, _creds["user_id"])
+                    _uok = (_user_el.get_attribute("value") or "") == _creds["user_id"]
                     print("Username auto-filled (from Firm Master).")
                 else:
-                    print("Username field not found - type it manually.")
+                    print("Username field (#username1) not found - type it manually.")
                 if _pass_el is not None:
                     _type_val(_pass_el, _creds["password"])
+                    _pok = bool(_pass_el.get_attribute("value"))
                     print("Password auto-filled (from Firm Master).")
                 else:
-                    print("Password field not found - type it manually.")
+                    print("Password field (#password) not found - type it manually.")
+                _fill_result = "filled" if (_uok and _pok) else (
+                    "partial" if (_uok or _pok) else "nofield")
 
             if not (_is_down() and not _looks_ready()):
-                _st("open")
+                if _fill_result == "filled":
+                    _st("open")
+                    print("Username & Password filled from Firm Master. Now")
+                    print("enter the CAPTCHA (and OTP if asked) and click Sign In.")
+                elif _fill_result in ("nocreds", "crederr"):
+                    _st("open_nocreds")
+                    print("Portal is open but NO EPFO login is saved for this "
+                          "firm. Save EPF User ID + Password in Firm Master -> "
+                          "EPF Registration, then click Open EPFO Portal again.")
+                elif _fill_result in ("nofield", "partial"):
+                    _st("open_nofield")
+                    print("Portal open but the login boxes were not filled "
+                          "(page still loading or a popup was in the way). "
+                          "Type your login manually, or reload and retry.")
+                else:
+                    _st("open")
                 print("EPFO Portal Open.")
-                print("Username & Password filled from Firm Master. Now just")
-                print("enter the CAPTCHA (and OTP if asked) and click Sign In.")
         except Exception as e:
             _st("error: portal did not load (%s)" % str(e)[:120])
             print("Portal did not load:", e)
