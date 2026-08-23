@@ -8002,3 +8002,26 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   serves v11; /portal-ext/ecr-file returns ok (test firm had 0 pf_applicable
   rows → empty file, expected on test data).
 - deploy_vps_iter690.sh; temp_bundle -> deploy690; APP_ITERATION=690.
+
+## Iter 691 — 🔐 Open EPFO Portal (ChromeDriver, OPEN-ONLY) + Download setup
+- User: add button in Compliance Automation Studio to open EPFO portal in a
+  new Chrome window via ChromeDriver — OPEN ONLY. No username/password/
+  captcha/OTP/estId, NO login automation. Status: Starting Chrome / Opening
+  EPFO Portal / EPFO Portal Open / Browser Closed. Also a button to download
+  ChromeDriver setup to local PC.
+- portal_extension.py: RUNNER_VERSION 11→12. New runner branch
+  portal in (epfo_open) — _fresh_driver + driver.get(EPFO), waits, reports
+  JOB_STATUS (starting/opening/open/closed/error), holds until user closes
+  window; fills/clicks NOTHING. Listener /login returns job id + JOB_STATUS;
+  new /status?job= endpoint. Added run_open_epfo.bat to the zip + README.
+- automation-studio.tsx: new "PC Chrome (ChromeDriver)" card (only when
+  portal==epfo): buttons 🔐 Open EPFO Portal (as-open-epfo-pc) pings
+  127.0.0.1:8765/login?portal=epfo_open then polls /status for live status
+  labels; Download ChromeDriver Setup (as-download-chromedriver) =
+  runner-download zip. No-runner → friendly warning.
+- Verified: runner lifecycle via stubbed driver (starting→opening→open→
+  closed, unknown job); UI card + both buttons render (screenshot, Server
+  Iter 690); no-runner warning shows. lint clean.
+- APP_ITERATION=690 (bumped last iter); deploy_vps_iter690.sh; temp_bundle
+  kind=script → deploy690.sh. NOTE: bump APP_ITERATION to 691 next deploy
+  only if user wants; runner self-updates to v12 regardless.

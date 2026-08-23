@@ -25,7 +25,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 
-import { api, getApiBaseUrl, readAuthToken } from "@/src/api/client";
+import { api, apiBinary, getApiBaseUrl, readAuthToken } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import CompanyPicker from "@/src/components/CompanyPicker";
@@ -192,11 +192,103 @@ export default function AutomationStudioScreen() {
     }
   }, []);
 
+  // Iter 691 — 🔐 Open EPFO Portal on the operator's PC via ChromeDriver.
+  // OPEN-ONLY: no username / password / captcha / OTP is filled, no login
+  // automation — the user enters everything manually in the Chrome window.
+  const pcPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [pcStatus, setPcStatus] = useState<string>("");
+  const [pcBusy, setPcBusy] = useState<string>("");
+
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
+      if (pcPollRef.current) clearInterval(pcPollRef.current);
     };
   }, []);
+
+  const openEpfoPc = async () => {
+    if (Platform.OS !== "web") {
+      setPcStatus("Open the portal on a computer (Chrome/Edge) to use this.");
+      return;
+    }
+    if (pcPollRef.current) { clearInterval(pcPollRef.current); pcPollRef.current = null; }
+    setPcBusy("open");
+    setPcStatus("Starting Chrome...");
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 2500);
+      const r = await fetch("http://127.0.0.1:8765/login?portal=epfo_open", { signal: ctrl.signal });
+      clearTimeout(timer);
+      const j: any = await r.json().catch(() => ({}));
+      if (!r.ok || !j?.ok) throw new Error("runner not ok");
+      const job = j?.job || "";
+      if (!job) {
+        setPcStatus(
+          "Opening EPFO Portal... (restart run_listener.bat once to get live status — it self-updates)");
+        return;
+      }
+      const MAP: Record<string, string> = {
+        starting: "Starting Chrome...",
+        opening: "Opening EPFO Portal...",
+        open: "EPFO Portal Open",
+        closed: "Browser Closed",
+      };
+      pcPollRef.current = setInterval(async () => {
+        try {
+          const s = await fetch(`http://127.0.0.1:8765/status?job=${encodeURIComponent(job)}`);
+          const sj: any = await s.json();
+          const stx = String(sj?.status || "");
+          setPcStatus(MAP[stx] || stx || "…");
+          if (stx === "closed" || stx.startsWith("error")) {
+            if (pcPollRef.current) clearInterval(pcPollRef.current);
+            pcPollRef.current = null;
+          }
+        } catch {
+          if (pcPollRef.current) clearInterval(pcPollRef.current);
+          pcPollRef.current = null;
+        }
+      }, 1500);
+    } catch {
+      setPcStatus(
+        "⚠ SKS Runner is not running on this PC. Download the ChromeDriver setup below (once), " +
+        "unzip to C:\\SKS-AutoLogin, double-click run_listener.bat and KEEP that window open — " +
+        "then click this button again.");
+    } finally {
+      setPcBusy("");
+    }
+  };
+
+  const downloadRunner = async () => {
+    if (Platform.OS !== "web") {
+      setPcStatus("Open this page on a computer (Chrome/Edge) to download the setup.");
+      return;
+    }
+    if (!companyId) {
+      setPcStatus("Select a firm above first, then download the ChromeDriver setup.");
+      return;
+    }
+    setPcBusy("runner");
+    try {
+      const origin = (globalThis as any).location?.origin || "";
+      const res = await apiBinary(
+        `/admin/portal-automation/runner-download?api_base=${encodeURIComponent(origin)}&company_id=${encodeURIComponent(companyId)}`,
+      );
+      if (res.webBlobUrl) {
+        const a = document.createElement("a");
+        a.href = res.webBlobUrl;
+        a.download = "sks-autologin-pc.zip";
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 30000);
+        setPcStatus(
+          "✅ Setup downloaded. Unzip to C:\\SKS-AutoLogin → double-click run_listener.bat " +
+          "(keep it open — it auto-installs the matching ChromeDriver). Then click 🔐 Open EPFO Portal.");
+      }
+    } catch (e: any) {
+      setPcStatus(e?.message || "Download failed");
+    } finally {
+      setPcBusy("");
+    }
+  };
 
   const start = async () => {
     if (!companyId) {
@@ -560,6 +652,54 @@ export default function AutomationStudioScreen() {
                 🔒 CAPTCHA & OTP are never bypassed — you complete them here. Payment
                 buttons are never clicked. You confirm before every submission.
               </Text>
+
+              {/* Iter 691 — 🔐 Open EPFO Portal (ChromeDriver, OPEN-ONLY) */}
+              {portal === "epfo" && (
+                <View style={st.pcBox}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Ionicons name="logo-chrome" size={16} color="#059669" />
+                    <Text style={st.pcTitle}>PC Chrome (ChromeDriver)</Text>
+                  </View>
+                  <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                    <Pressable
+                      style={[st.pcBtn, pcBusy === "open" && { opacity: 0.6 }]}
+                      onPress={openEpfoPc}
+                      disabled={pcBusy === "open"}
+                      testID="as-open-epfo-pc"
+                    >
+                      {pcBusy === "open" ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Ionicons name="lock-closed" size={14} color="#fff" />
+                      )}
+                      <Text style={st.pcBtnTxt}>Open EPFO Portal</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[st.pcBtn, { backgroundColor: "#B45309" }, pcBusy === "runner" && { opacity: 0.6 }]}
+                      onPress={downloadRunner}
+                      disabled={pcBusy === "runner"}
+                      testID="as-download-chromedriver"
+                    >
+                      {pcBusy === "runner" ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Ionicons name="download-outline" size={14} color="#fff" />
+                      )}
+                      <Text style={st.pcBtnTxt}>Download ChromeDriver Setup</Text>
+                    </Pressable>
+                  </View>
+                  {pcStatus ? <Text style={st.pcStatus}>{pcStatus}</Text> : null}
+                  <Text style={st.pcHint}>
+                    <Text style={{ fontWeight: "800" }}>Open EPFO Portal</Text> starts ChromeDriver on
+                    YOUR PC and opens a new Google Chrome window on the EPFO Employer Portal — then
+                    stops. Nothing is filled or clicked: you enter Username, Password, CAPTCHA, OTP
+                    and everything else manually. Requires the SKS Runner listening
+                    (run_listener.bat open). <Text style={{ fontWeight: "800" }}>Download ChromeDriver
+                    Setup</Text> gets the PC tool once — it auto-installs and auto-updates the
+                    ChromeDriver matching your Chrome on every run.
+                  </Text>
+                </View>
+              )}
             </View>
           )}
 
@@ -1113,4 +1253,16 @@ const st = StyleSheet.create({
   histErr: { fontSize: 12, color: "#DC2626", marginTop: 4 },
   histFiles: { flexDirection: "row", gap: 14, marginTop: 6 },
   histFileTxt: { fontSize: 12, color: colors.onSurfaceSecondary, fontWeight: "600" },
+  pcBox: {
+    marginTop: spacing.md, backgroundColor: "#05966910", borderRadius: radius.md,
+    padding: spacing.md, borderWidth: 1, borderColor: "#05966940",
+  },
+  pcTitle: { fontSize: 13, fontWeight: "800", color: colors.onSurface },
+  pcBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#059669",
+    paddingVertical: 10, paddingHorizontal: 14, borderRadius: radius.md, minHeight: 44,
+  },
+  pcBtnTxt: { fontSize: 13, fontWeight: "800", color: "#fff" },
+  pcStatus: { fontSize: 13, fontWeight: "700", color: "#059669", marginTop: 8 },
+  pcHint: { fontSize: 11.5, color: colors.onSurfaceTertiary, marginTop: 8, lineHeight: 16 },
 });

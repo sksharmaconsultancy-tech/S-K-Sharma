@@ -301,7 +301,7 @@ async def ext_ecr_file(token: str, run_id: str = ""):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "11"
+RUNNER_VERSION = "12"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -315,6 +315,10 @@ PORTALS = {
     "esic": "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx",
     "epfo": "https://unifiedportal-emp.epfindia.gov.in/epfo/",
 }
+
+# Iter 691 — live status board for jobs launched from the web app
+# (polled by the Automation Studio via /status?job=).
+JOB_STATUS = {}
 
 
 def _fresh_driver(opts):
@@ -350,7 +354,7 @@ def _fresh_driver(opts):
     return webdriver.Chrome(options=opts)
 
 
-def run(API_BASE, TOKEN, portal, run_id=None):
+def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
     portal = (portal or "esic").lower()
 
     # Iter 397 — LISTENER mode: keep this window open; the payroll web app
@@ -377,14 +381,23 @@ def run(API_BASE, TOKEN, portal, run_id=None):
                 qs = parse_qs(q.query)
                 if q.path == "/ping":
                     body = b'{"ok":true,"runner":"sks"}'
+                elif q.path == "/status":
+                    jid = (qs.get("job") or [""])[0]
+                    body = json.dumps(
+                        {"ok": True,
+                         "status": JOB_STATUS.get(jid, "unknown")}).encode()
                 elif q.path == "/login":
                     p = (qs.get("portal") or ["epfo"])[0].lower()
                     tok = (qs.get("token") or [TOKEN])[0]
                     rid = (qs.get("run_id") or [""])[0]
+                    jid = str(int(time.time() * 1000))
+                    JOB_STATUS[jid] = "starting"
                     print("Launch request: portal=%s run=%s" % (p, rid or "latest"))
                     threading.Thread(
-                        target=run, args=(API_BASE, tok, p, rid), daemon=True).start()
-                    body = b'{"ok":true,"launched":true}'
+                        target=run, args=(API_BASE, tok, p, rid, jid),
+                        daemon=True).start()
+                    body = json.dumps(
+                        {"ok": True, "launched": True, "job": jid}).encode()
                 else:
                     body = b'{"ok":false,"detail":"unknown path"}'
                 self.send_response(200)
@@ -404,6 +417,58 @@ def run(API_BASE, TOKEN, portal, run_id=None):
         print("the captcha and click Login.")
         print("=" * 60)
         HTTPServer(("127.0.0.1", 8765), _H).serve_forever()
+        return
+
+    # Iter 691 (user request) — OPEN-ONLY: start ChromeDriver, open a new
+    # Chrome window on the EPFO Employer Portal and STOP. No username, no
+    # password, no captcha, no OTP, no establishment ID — NOTHING is
+    # filled or clicked. The user enters everything manually. The window
+    # stays open; status is reported to the web app via JOB_STATUS.
+    if portal in ("epfo_open", "open_epfo", "open"):
+        def _st(s):
+            if job_id:
+                JOB_STATUS[job_id] = s
+        _st("starting")
+        print("Starting Chrome...")
+        from selenium.webdriver.chrome.options import Options
+        opts = Options()
+        opts.add_experimental_option("detach", True)
+        opts.add_argument("--start-maximized")
+        try:
+            driver = _fresh_driver(opts)
+        except Exception as e:
+            _st("error: Chrome did not start (%s)" % str(e)[:120])
+            print("Chrome did not start:", e)
+            return
+        _st("opening")
+        print("Opening EPFO Portal...")
+        try:
+            driver.get(PORTALS["epfo"])
+            try:
+                from selenium.webdriver.support.ui import WebDriverWait
+                WebDriverWait(driver, 60).until(
+                    lambda d: d.execute_script(
+                        "return document.readyState") == "complete")
+            except Exception:
+                pass
+            _st("open")
+            print("EPFO Portal Open.")
+            print("Enter Username / Password / CAPTCHA / OTP yourself -")
+            print("this shortcut fills NOTHING and clicks NOTHING.")
+        except Exception as e:
+            _st("error: portal did not load (%s)" % str(e)[:120])
+            print("Portal did not load:", e)
+            return
+        # Wait until the user closes the Chrome window, then report it.
+        while True:
+            time.sleep(2)
+            try:
+                if not driver.window_handles:
+                    break
+            except Exception:
+                break
+        _st("closed")
+        print("Browser Closed.")
         return
 
     def _get(url):
@@ -1146,6 +1211,14 @@ _RUNNER_BAT_ECR_TEST = (
     "pause\r\n"
 )
 
+# Iter 691 — OPEN-ONLY: new Chrome window on the EPFO portal, nothing
+# filled, nothing clicked. User does everything manually.
+_RUNNER_BAT_OPEN_EPFO = (
+    "@echo off\r\n"
+    "python sks_launcher.py epfo_open\r\n"
+    "pause\r\n"
+)
+
 # Iter 397 — LISTENER: one-click login from the payroll web app.
 _RUNNER_BAT_LISTENER = (
     "@echo off\r\n"
@@ -1176,6 +1249,9 @@ _RUNNER_README = (
     "  - Your User ID/Password are fetched live each run.\n"
     "So you never need to download again.\n\n"
     "WINDOWS:  open the folder, double-click run_esic.bat  (or run_pf.bat)\n"
+    "          OPEN-ONLY: double-click run_open_epfo.bat - a new Chrome\n"
+    "          window (ChromeDriver) opens the EPFO portal and does\n"
+    "          NOTHING else - you type username/password/captcha yourself.\n"
     "          ECR TEST: double-click run_ecr_test.bat - a new Chrome\n"
     "          window opens the EPFO portal and clicks the alert's OK\n"
     "          button automatically (no login).\n"
@@ -1259,6 +1335,7 @@ async def runner_download(
         z.writestr("run_esic.bat", _RUNNER_BAT)
         z.writestr("run_pf.bat", _RUNNER_BAT_PF)
         z.writestr("run_ecr_test.bat", _RUNNER_BAT_ECR_TEST)
+        z.writestr("run_open_epfo.bat", _RUNNER_BAT_OPEN_EPFO)
         z.writestr("run_listener.bat", _RUNNER_BAT_LISTENER)
         z.writestr("run.sh", _RUNNER_SH)
         z.writestr("README.txt", _RUNNER_README)
