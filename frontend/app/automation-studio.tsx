@@ -251,8 +251,8 @@ export default function AutomationStudioScreen() {
     } catch {
       setPcStatus(
         "⚠ SKS Runner is not running on this PC. Download the ChromeDriver setup below (once), " +
-        "unzip to C:\\SKS-AutoLogin, double-click run_listener.bat and KEEP that window open — " +
-        "then click this button again.");
+        "unzip to C:\\SKS-AutoLogin and double-click install_autostart.bat — it starts the Runner " +
+        "now AND silently on every Windows boot. Then click this button again.");
     } finally {
       setPcBusy("");
     }
@@ -280,8 +280,9 @@ export default function AutomationStudioScreen() {
         a.click();
         setTimeout(() => URL.revokeObjectURL(res.webBlobUrl!), 30000);
         setPcStatus(
-          "✅ Setup downloaded. Unzip to C:\\SKS-AutoLogin → double-click run_listener.bat " +
-          "(keep it open — it auto-installs the matching ChromeDriver). Then click 🔐 Open EPFO Portal.");
+          "✅ Setup downloaded. Unzip to C:\\SKS-AutoLogin → double-click " +
+          "install_autostart.bat ONCE. The Runner then starts silently with " +
+          "Windows forever — you never open anything again. Then click 🔐 Open EPFO Portal.");
       }
     } catch (e: any) {
       setPcStatus(e?.message || "Download failed");
@@ -728,13 +729,15 @@ export default function AutomationStudioScreen() {
                   </View>
                   {pcStatus ? <Text style={st.pcStatus}>{pcStatus}</Text> : null}
                   <Text style={st.pcHint}>
-                    <Text style={{ fontWeight: "800" }}>Open EPFO Portal</Text> starts ChromeDriver on
-                    YOUR PC and opens a new Google Chrome window on the EPFO Employer Portal — then
-                    stops. Nothing is filled or clicked: you enter Username, Password, CAPTCHA, OTP
-                    and everything else manually. Requires the SKS Runner listening
-                    (run_listener.bat open). <Text style={{ fontWeight: "800" }}>Download ChromeDriver
-                    Setup</Text> gets the PC tool once — it auto-installs and auto-updates the
-                    ChromeDriver matching your Chrome on every run.
+                    <Text style={{ fontWeight: "800" }}>One-time setup (no more manual steps):</Text> click
+                    Download ChromeDriver Setup → unzip to C:\SKS-AutoLogin → double-click{" "}
+                    <Text style={{ fontWeight: "800" }}>install_autostart.bat</Text> once. After that the
+                    Runner starts silently every time Windows boots — you never open anything again, and{" "}
+                    <Text style={{ fontWeight: "800" }}>Open EPFO Portal</Text> just works: a new Chrome
+                    window (ChromeDriver) opens the EPFO portal and clicks the alert&apos;s OK — then stops.
+                    Nothing else is filled or clicked; you enter Username / Password / CAPTCHA / OTP
+                    yourself. Use <Text style={{ fontWeight: "800" }}>ChromeDriver (driver only)</Text> only
+                    if the auto-install ever fails.
                   </Text>
                 </View>
               )}

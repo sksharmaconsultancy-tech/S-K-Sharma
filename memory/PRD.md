@@ -8030,3 +8030,18 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   (portal_extension.py, session-auth, 1h cache) resolves latest STABLE
   Chrome-for-Testing chromedriver win64 zip from googlechromelabs JSON and
   the browser downloads it directly. Verified E2E (v152.0.7977.54).
+- Iter 691c: epfo_open branch now ALSO auto-clicks the EPFO alert popup's
+  OK button (user request): #btnCloseModal → button[type=button] with 'ok'
+  text → [data-bs-dismiss=modal] → [data-dismiss=modal] → aria-label Close.
+  Nothing else clicked/filled. RUNNER_VERSION 12→13 (self-updates). All
+  runner .bat files auto-detect `python` vs `py` launcher (_BAT_PY_DETECT)
+  since user's PC only had the py launcher on PATH. Verified via fake-driver
+  sim: starting→opening→OK clicked→open→closed.
+- Iter 692 (user: "no manual process, auto open"): runner zip now includes
+  install_autostart.bat + sks_listener_silent.vbs + remove_autostart.bat.
+  install_autostart.bat writes HKCU\...\Run\SKSRunner -> wscript silent VBS
+  that launches `pythonw/pyw/py sks_launcher.py listen` hidden; runs it
+  immediately too. So after ONE double-click the listener auto-starts
+  silently on every Windows boot — no window, no manual step. README + UI
+  hints/statuses updated to point to install_autostart.bat. RUNNER_VERSION
+  13→14. Verified zip contains the files with correct content.

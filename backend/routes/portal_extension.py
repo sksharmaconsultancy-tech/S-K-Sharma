@@ -331,7 +331,7 @@ async def ext_ecr_file(token: str, run_id: str = ""):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "12"
+RUNNER_VERSION = "14"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -473,18 +473,44 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
         _st("opening")
         print("Opening EPFO Portal...")
         try:
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
             driver.get(PORTALS["epfo"])
             try:
-                from selenium.webdriver.support.ui import WebDriverWait
                 WebDriverWait(driver, 60).until(
                     lambda d: d.execute_script(
                         "return document.readyState") == "complete")
             except Exception:
                 pass
+            # Close the alert popup ONLY (user request): OK button first
+            # (type="button" / #btnCloseModal), then data-bs-dismiss ones.
+            _closed = False
+            for _i, _sel in enumerate((
+                    (By.ID, "btnCloseModal"),
+                    (By.XPATH,
+                     "//button[@type='button' and contains(translate("
+                     "normalize-space(.),'OK','ok'),'ok')]"),
+                    (By.CSS_SELECTOR, "button[data-bs-dismiss='modal']"),
+                    (By.CSS_SELECTOR, "button[data-dismiss='modal']"),
+                    (By.CSS_SELECTOR,
+                     "button[aria-label='Close'], [aria-label='Close']"))):
+                try:
+                    _btn = WebDriverWait(driver, 20 if _i == 0 else 3).until(
+                        EC.element_to_be_clickable(_sel))
+                    _btn.click()
+                    print("Alert popup closed (%s)."
+                          % ("OK" if _i <= 1 else "dismiss"))
+                    _closed = True
+                    break
+                except Exception:
+                    continue
+            if not _closed:
+                print("No alert popup appeared - nothing to close.")
             _st("open")
             print("EPFO Portal Open.")
             print("Enter Username / Password / CAPTCHA / OTP yourself -")
-            print("this shortcut fills NOTHING and clicks NOTHING.")
+            print("this shortcut fills NOTHING else and clicks NOTHING else.")
         except Exception as e:
             _st("error: portal did not load (%s)" % str(e)[:120])
             print("Portal did not load:", e)
@@ -1265,6 +1291,44 @@ _RUNNER_BAT_LISTENER = (
     "pause\r\n"
 )
 
+# Iter 692 — AUTO-START (user request: "no manual process"). One-time
+# installer registers a hidden VBS launcher in HKCU\...\Run so the listener
+# starts silently with Windows — no window, no double-clicking ever again.
+_RUNNER_VBS_SILENT = (
+    "Set fso = CreateObject(\"Scripting.FileSystemObject\")\r\n"
+    "folder = fso.GetParentFolderName(WScript.ScriptFullName)\r\n"
+    "Set sh = CreateObject(\"WScript.Shell\")\r\n"
+    "sh.CurrentDirectory = folder\r\n"
+    "cmd = \"cmd /c (where pythonw >nul 2>nul && pythonw sks_launcher.py listen)\"\r\n"
+    "cmd = cmd & \" || (where pyw >nul 2>nul && pyw sks_launcher.py listen)\"\r\n"
+    "cmd = cmd & \" || (py sks_launcher.py listen)\"\r\n"
+    "sh.Run cmd, 0, False\r\n"
+)
+
+_RUNNER_BAT_AUTOSTART = (
+    "@echo off\r\n"
+    "cd /d \"%~dp0\"\r\n"
+    "reg add \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" "
+    "/v SKSRunner /t REG_SZ /d \"wscript.exe \\\"%~dp0sks_listener_silent.vbs\\\"\" /f >nul\r\n"
+    "wscript.exe \"%~dp0sks_listener_silent.vbs\"\r\n"
+    "echo.\r\n"
+    "echo  DONE! SKS Runner now starts AUTOMATICALLY with Windows\r\n"
+    "echo  (silently in the background - no window).\r\n"
+    "echo  It is ALREADY RUNNING right now - you can close this window\r\n"
+    "echo  and click the buttons in the payroll portal directly.\r\n"
+    "echo.\r\n"
+    "pause\r\n"
+)
+
+_RUNNER_BAT_AUTOSTART_REMOVE = (
+    "@echo off\r\n"
+    "reg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" "
+    "/v SKSRunner /f >nul 2>nul\r\n"
+    "echo SKS Runner auto-start removed. (A running listener stops after\r\n"
+    "echo the next restart, or end python in Task Manager.)\r\n"
+    "pause\r\n"
+)
+
 _RUNNER_SH = (
     "#!/bin/sh\n"
     "python3 sks_launcher.py \"${1:-esic}\"\n"
@@ -1286,7 +1350,12 @@ _RUNNER_README = (
     "  - ChromeDriver auto-updates via Selenium (Selenium Manager).\n"
     "  - Your User ID/Password are fetched live each run.\n"
     "So you never need to download again.\n\n"
-    "WINDOWS:  open the folder, double-click run_esic.bat  (or run_pf.bat)\n"
+    "WINDOWS:  FULLY AUTOMATIC (recommended): double-click\n"
+    "          install_autostart.bat ONCE. From then on the Runner starts\n"
+    "          silently with Windows - nothing to open, ever. The buttons\n"
+    "          in the payroll portal just work. (remove_autostart.bat\n"
+    "          undoes this.)\n"
+    "          Manual alternative: double-click run_esic.bat (or run_pf.bat)\n"
     "          OPEN-ONLY: double-click run_open_epfo.bat - a new Chrome\n"
     "          window (ChromeDriver) opens the EPFO portal and does\n"
     "          NOTHING else - you type username/password/captcha yourself.\n"
@@ -1375,6 +1444,9 @@ async def runner_download(
         z.writestr("run_ecr_test.bat", _RUNNER_BAT_ECR_TEST)
         z.writestr("run_open_epfo.bat", _RUNNER_BAT_OPEN_EPFO)
         z.writestr("run_listener.bat", _RUNNER_BAT_LISTENER)
+        z.writestr("sks_listener_silent.vbs", _RUNNER_VBS_SILENT)
+        z.writestr("install_autostart.bat", _RUNNER_BAT_AUTOSTART)
+        z.writestr("remove_autostart.bat", _RUNNER_BAT_AUTOSTART_REMOVE)
         z.writestr("run.sh", _RUNNER_SH)
         z.writestr("README.txt", _RUNNER_README)
     buf.seek(0)
