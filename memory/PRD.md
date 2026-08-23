@@ -7982,3 +7982,23 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   approvals show "Level x/2".
 - E2E verified: rules filter (A>P queued, P>A direct), L1→L2→applied.
 - deploy_vps_iter689.sh; temp_bundle -> deploy689; APP_ITERATION=689.
+
+## Iter 690 — PF Challan: Chrome (ChromeDriver) Login — Phase 1
+- User wants EPFO portal in a REAL Chrome window via ChromeDriver (PC
+  Runner, existed since Iter 397). Phase 1 = LOGIN ONLY (user directive:
+  "First set only Login Page if Success then we will done others").
+- portal_extension.py: RUNNER_VERSION 10→11; run() takes run_id; listener
+  /login passes run_id; ecr branch now fetches /api/portal-ext/ecr-file
+  (NEW token-gated endpoint, builds PF ECR from latest/selected
+  compliance_salary_run via build_pf_ecr_txt — NO recalculation), saves to
+  ~/Downloads, and after Payments→ECR nav auto-picks Wage Month dropdown +
+  auto-attaches file into input[type=file]. Nothing auto-submitted.
+- launch-token stores optional run_id on the token doc.
+- Phase 2 PENDING (after user confirms login works): one-click "Upload ECR
+  in Chrome on My PC" buttons in automation-studio.tsx + pf-reports.tsx
+  (ping http://127.0.0.1:8765/login?portal=ecr&token&run_id), zip bat
+  run_pf_challan.bat + README update. NO frontend changes shipped yet.
+- Verified: module+runner+launcher AST compile; /portal-ext/runner-script
+  serves v11; /portal-ext/ecr-file returns ok (test firm had 0 pf_applicable
+  rows → empty file, expected on test data).
+- deploy_vps_iter690.sh; temp_bundle -> deploy690; APP_ITERATION=690.

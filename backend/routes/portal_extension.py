@@ -17,6 +17,7 @@ Endpoints:
 
 The token lives in ``automation_ext_tokens`` and is tied to one firm.
 """
+import base64
 import io
 import json
 import secrets
@@ -246,6 +247,53 @@ async def ext_solve_captcha(payload: Dict[str, Any] = Body(...)):
     return {"ok": True, "text": text}
 
 
+@router.get("/portal-ext/ecr-file")
+async def ext_ecr_file(token: str, run_id: str = ""):
+    """Iter 690 — PF Challan automation: the PC Runner fetches the ready
+    PF ECR text file for the selected (or latest) Compliance Salary
+    Process of the token's firm. Token gated, same trust model as creds."""
+    doc = await db.automation_ext_tokens.find_one({"token": token})
+    if not doc:
+        raise HTTPException(status_code=401, detail="Invalid extension token")
+    company_id = doc["company_id"]
+    rid = (run_id or doc.get("run_id") or "").strip()
+    if rid:
+        run = await db.compliance_salary_runs.find_one(
+            {"run_id": rid, "company_id": company_id}, {"_id": 0})
+    else:
+        run = await db.compliance_salary_runs.find_one(
+            {"company_id": company_id}, {"_id": 0}, sort=[("month", -1)])
+    if not run:
+        raise HTTPException(
+            status_code=404,
+            detail="No Compliance Salary Process found for this firm — "
+                   "process the month's salary first.")
+    rows = run.get("rows") or run.get("lines") or []
+    uids = [r.get("user_id") for r in rows if r.get("user_id") and not r.get("uan_no")]
+    if uids:
+        async for u in db.users.find(
+            {"user_id": {"$in": uids}}, {"_id": 0, "user_id": 1, "uan_no": 1}):
+            for r in rows:
+                if r.get("user_id") == u["user_id"]:
+                    r["uan_no"] = u.get("uan_no")
+    from utils.statutory_bulk import build_pf_ecr_txt
+    from utils.rpa_engine import validate_run_rows
+    body = build_pf_ecr_txt(rows)
+    report = validate_run_rows(rows, "epfo")
+    month = str(run.get("month") or "")
+    mword = f"{month[5:7]}{month[:4]}" if len(month) == 7 and month[4] == "-" else "month"
+    return {
+        "ok": True,
+        "month": month,
+        "filename": f"PF_ECR_{mword}.txt",
+        "content_b64": base64.b64encode(body).decode("ascii"),
+        "lines": len(body.splitlines()),
+        "included": report.get("included"),
+        "employee_count": report.get("employee_count"),
+        "missing": [m.get("name") for m in (report.get("missing_ids") or [])][:25],
+    }
+
+
 # --- Local PC runner (Selenium + auto-managed ChromeDriver) ---------------
 # Selenium 4.6+ ships "Selenium Manager", which automatically downloads and
 # updates the chromedriver matching the installed Chrome. On top of that, a
@@ -253,7 +301,7 @@ async def ext_solve_captcha(payload: Dict[str, Any] = Body(...)):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "10"
+RUNNER_VERSION = "11"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -302,7 +350,7 @@ def _fresh_driver(opts):
     return webdriver.Chrome(options=opts)
 
 
-def run(API_BASE, TOKEN, portal):
+def run(API_BASE, TOKEN, portal, run_id=None):
     portal = (portal or "esic").lower()
 
     # Iter 397 — LISTENER mode: keep this window open; the payroll web app
@@ -332,9 +380,10 @@ def run(API_BASE, TOKEN, portal):
                 elif q.path == "/login":
                     p = (qs.get("portal") or ["epfo"])[0].lower()
                     tok = (qs.get("token") or [TOKEN])[0]
-                    print("Launch request: portal=%s" % p)
+                    rid = (qs.get("run_id") or [""])[0]
+                    print("Launch request: portal=%s run=%s" % (p, rid or "latest"))
                     threading.Thread(
-                        target=run, args=(API_BASE, tok, p), daemon=True).start()
+                        target=run, args=(API_BASE, tok, p, rid), daemon=True).start()
                     body = b'{"ok":true,"launched":true}'
                 else:
                     body = b'{"ok":false,"detail":"unknown path"}'
@@ -384,6 +433,42 @@ def run(API_BASE, TOKEN, portal):
         except Exception as e:
             print("NOTE: could not fetch EPFO credentials (%s)." % e)
             print("Save them under Firm Master -> Portal Logins, then re-run.")
+
+        # Iter 690 (PF Challan automation) — fetch the ready-made PF ECR
+        # file for the selected (or latest finalized) Compliance Salary
+        # Process and save it into ~/Downloads. Later, once the ECR upload
+        # page opens, the file is AUTO-SELECTED into the upload box.
+        ecr_path = None
+        ecr_month = ""
+        try:
+            _u = "%s/api/portal-ext/ecr-file?token=%s" % (API_BASE, TOKEN)
+            if run_id:
+                _u += "&run_id=%s" % run_id
+            ef = _get(_u)
+            if ef.get("ok") and ef.get("content_b64"):
+                import os
+                _dl = os.path.join(os.path.expanduser("~"), "Downloads")
+                if not os.path.isdir(_dl):
+                    _dl = os.path.expanduser("~")
+                ecr_path = os.path.join(_dl, ef.get("filename") or "PF_ECR.txt")
+                with open(ecr_path, "wb") as f:
+                    f.write(base64.b64decode(ef["content_b64"]))
+                ecr_month = ef.get("month") or ""
+                print("=" * 60)
+                print("PF ECR FILE READY: %s" % ecr_path)
+                print("Wage month: %s | Members: %s of %s | ECR lines: %s"
+                      % (ecr_month, ef.get("included"), ef.get("employee_count"),
+                         ef.get("lines")))
+                for _w in (ef.get("missing") or []):
+                    print("  SKIPPED (no/invalid UAN): %s" % _w)
+                print("=" * 60)
+            else:
+                print("NOTE: ECR file not generated - %s"
+                      % (ef.get("detail") or "no finalized salary process found."))
+        except Exception as e:
+            print("NOTE: could not fetch the ECR file (%s)." % e)
+            print("Download PF ECR from the app (PF Reports) and select it "
+                  "manually on the upload page.")
 
         from selenium import webdriver
         from selenium.webdriver.common.by import By
@@ -692,14 +777,72 @@ def run(API_BASE, TOKEN, portal):
                         break
                 except Exception:
                     pass
-                print("ECR page opened. Now: select the Wage Month, choose "
-                      "the ECR .txt you downloaded from the app and click "
-                      "Upload.")
+                # Iter 690 — PF Challan automation: pick the Wage Month in
+                # the dropdown and AUTO-SELECT the generated ECR file into
+                # the page's file-upload box.
+                time.sleep(2.5)
+                if ecr_month:
+                    try:
+                        from selenium.webdriver.support.ui import Select
+                        _MABBR = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+                                  "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
+                        _y, _m = ecr_month.split("-")[0], int(ecr_month.split("-")[1])
+                        _ab = _MABBR[_m - 1]
+                        for sel_el in driver.find_elements(By.TAG_NAME, "select"):
+                            try:
+                                if not sel_el.is_displayed():
+                                    continue
+                                _s = Select(sel_el)
+                                for op in _s.options:
+                                    _t = (op.text or "").upper().replace(" ", "")
+                                    if _ab in _t and _y in _t:
+                                        _s.select_by_visible_text(op.text)
+                                        print("Wage Month selected: %s" % op.text)
+                                        raise StopIteration
+                            except StopIteration:
+                                raise
+                            except Exception:
+                                continue
+                    except StopIteration:
+                        pass
+                    except Exception:
+                        print("Wage Month dropdown not auto-selected - "
+                              "pick it manually.")
+                attached = False
+                if ecr_path:
+                    for _try in range(3):
+                        try:
+                            for el in driver.find_elements(
+                                    By.CSS_SELECTOR, "input[type=file]"):
+                                try:
+                                    el.send_keys(ecr_path)
+                                    attached = True
+                                    break
+                                except Exception:
+                                    continue
+                        except Exception:
+                            pass
+                        if attached:
+                            break
+                        time.sleep(2)
+                if attached:
+                    print("ECR FILE AUTO-SELECTED: %s" % ecr_path)
+                    print("Now on the portal: verify the summary, click "
+                          "Upload/Verify, then Prepare Challan -> Generate "
+                          "TRRN and pay. (Nothing is submitted "
+                          "automatically - you stay in control.)")
+                elif ecr_path:
+                    print("Upload box not found yet - click 'Choose File' "
+                          "on the page and select:\n  %s" % ecr_path)
+                else:
+                    print("ECR page opened. Select the Wage Month, choose "
+                          "the ECR .txt from PF Reports and click Upload.")
             else:
                 print("Could not find the ECR menu link - open Payments >> "
                       "ECR/Return Filing manually.")
 
-        print("\nECR TEST DONE. Chrome stays open - close it when finished.")
+        print("\nPF CHALLAN FLOW DONE. Chrome stays open - complete the "
+              "upload/TRRN on the portal and close it when finished.")
         return
 
     if portal not in PORTALS:
@@ -1078,6 +1221,7 @@ async def portal_launch_token(
         "created_by": admin["user_id"],
         "created_at": now_iso(),
         "kind": "launch",
+        "run_id": (payload or {}).get("run_id") or None,
     })
     return {"ok": True, "token": token, "runner_url": "http://127.0.0.1:8765"}
 
