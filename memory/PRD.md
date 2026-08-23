@@ -8140,3 +8140,18 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   real estt code→returned. APP_ITERATION=691; deploy_vps_iter691.sh created;
   temp_bundle kind=script → deploy691.sh (200 OK). User must ONLY redeploy
   VPS (backend restart), no PC reboot.
+- Iter 693g (REAL ROOT CAUSE FOUND): user confirmed the wrong login shows in
+  the FIRM MASTER form fields themselves across ALL firms = Chrome password
+  manager autofilling the operator's SAVED payroll login (email + 642313)
+  into EPF User ID / EPF Password inputs (secure field). FIX: firm-master.tsx
+  Field TextInput now autoComplete="new-password" (secure) / "off" (text) +
+  textContentType none + importantForAutofill no + autoCorrect/spellCheck
+  false → browser can't inject saved creds. DATA CLEANUP: created
+  /app/fix_epf_autofill_691.py (report-first, --apply) that clears any
+  epf/esi/portal_logins login containing '@' (junk emails) WITHOUT touching
+  valid establishment-code logins; verified on preview (junk cleared, valid
+  MHBAN code untouched). Wired the same cleanup as an auto-migration into
+  deploy_vps_iter691.sh (prints each firm cleared). Combined with backend
+  _valid_login '@' guard (693f) = defense in depth. User only needs VPS
+  redeploy, NO PC restart. NOTE: real EPFO IDs that were overwritten+saved
+  are lost and must be re-entered (only @-junk is removable safely).

@@ -95,6 +95,15 @@ function Field({
           secureTextEntry={!!secure && !showSecret}
           maxLength={maxLength}
           editable={!disabled}
+          // Iter 693g (ROOT CAUSE) — stop the browser's password manager
+          // from autofilling the operator's SAVED payroll login (email +
+          // password) into these EPF/ESI credential boxes. "new-password"
+          // makes Chrome NOT inject a saved credential; "off" for the rest.
+          autoComplete={(secure ? "new-password" : "off") as any}
+          textContentType="none"
+          importantForAutofill="no"
+          autoCorrect={false}
+          spellCheck={false}
           style={[styles.input, secure && { paddingRight: 36 }, disabled && { opacity: 0.45, backgroundColor: colors.border }]}
         />
         {secure ? (
