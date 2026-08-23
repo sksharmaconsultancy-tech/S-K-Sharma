@@ -342,6 +342,8 @@ import time
 import urllib.error
 import urllib.request
 
+RUNNER_BUILD = "19"
+
 PORTALS = {
     "esic": "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx",
     "epfo": "https://unifiedportal-emp.epfindia.gov.in/epfo/",
@@ -411,7 +413,9 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
                 q = urlparse(self.path)
                 qs = parse_qs(q.query)
                 if q.path == "/ping":
-                    body = b'{"ok":true,"runner":"sks"}'
+                    body = json.dumps(
+                        {"ok": True, "runner": "sks",
+                         "build": RUNNER_BUILD}).encode()
                 elif q.path == "/status":
                     jid = (qs.get("job") or [""])[0]
                     body = json.dumps(
@@ -491,6 +495,13 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
                 "autofill.credit_card_enabled": False,
             })
             opts.add_argument("--disable-save-password-bubble")
+            # Iter 693e — ROOT CAUSE of the wrong sksharmaconsultancy@gmail.com
+            # / 642313 autofill: Chrome had that login SAVED for the EPFO
+            # domain and re-injects it. Launch in a BRAND-NEW empty profile
+            # so there are NO saved passwords to autofill — ever.
+            import tempfile as _tf
+            _clean_profile = _tf.mkdtemp(prefix="sks-epfo-")
+            opts.add_argument("--user-data-dir=%s" % _clean_profile)
         except Exception:
             pass
         try:
@@ -635,6 +646,19 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
                     continue
             if not _closed:
                 print("No alert popup appeared - nothing to close.")
+
+            # Iter 693e — ALWAYS wipe any browser-autofilled values from the
+            # login boxes FIRST (in case Chrome injected a saved login), so
+            # we never leave a stray email/password behind.
+            try:
+                driver.execute_script(
+                    "['username1','password','captcha'].forEach(function(id){"
+                    "var e=document.getElementById(id);"
+                    "if(e){e.value='';"
+                    "e.dispatchEvent(new Event('input',{bubbles:true}));"
+                    "e.dispatchEvent(new Event('change',{bubbles:true}));}});")
+            except Exception:
+                pass
 
             # Iter 693 — AUTO-FILL EPFO Login ID + Password from Firm Master.
             # Real EPFO page (verified): username id="username1", password

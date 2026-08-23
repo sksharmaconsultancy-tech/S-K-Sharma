@@ -238,6 +238,23 @@ export default function AutomationStudioScreen() {
         + (launchTok ? `&token=${encodeURIComponent(launchTok)}` : "");
       const r = await fetch(url, { signal: ctrl.signal });
       clearTimeout(timer);
+      // Warn if the PC Runner is running old code (needs a restart/reboot
+      // to self-update). Non-blocking — the launch still proceeds.
+      try {
+        const pg = await fetch("http://127.0.0.1:8765/ping");
+        const pj: any = await pg.json();
+        const build = parseInt(String(pj?.build || "0"), 10);
+        if (build && build < 19) {
+          setPcStatus(
+            `⚠ Your PC Runner is OUTDATED (v${build}). It's running old code — ` +
+            "please REBOOT this PC once (or end all python tasks in Task Manager " +
+            "and re-run install_autostart.bat) so it updates to v19, then click again.");
+          setPcBusy("");
+          return;
+        }
+      } catch {
+        // ping without build → old runner; fall through, user will see result
+      }
       const j: any = await r.json().catch(() => ({}));
       if (!r.ok || !j?.ok) throw new Error("runner not ok");
       const job = j?.job || "";

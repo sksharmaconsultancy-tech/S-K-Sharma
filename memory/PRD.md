@@ -8113,3 +8113,17 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   --disable-save-password-bubble) so Chrome never injects saved payroll
   creds. Removed risky --guest (conflicts with prefs). RUNNER_VERSION 18→19.
   Verified: applicable OFF→412, applicable ON+creds→returns EPF user/pass.
+- Iter 693e (user STILL sees sksharmaconsultancy@gmail.com/642313 in EPFO
+  login - screenshot): ROOT CAUSE = Chrome had that login SAVED for the
+  EPFO domain and re-injects via password manager; ALSO user's listener
+  still runs OLD in-memory code. FIXES: (1) epfo_open launches Chrome in a
+  BRAND-NEW temp profile (tempfile.mkdtemp --user-data-dir) → zero saved
+  passwords → autofill impossible. (2) After page load, JS-CLEAR
+  #username1/#password/#captcha to '' BEFORE filling (wipes any autofill
+  regardless of source). (3) /ping now returns build=RUNNER_BUILD("19");
+  frontend openEpfoPc pings and if build<19 shows "Runner OUTDATED - reboot
+  PC" warning and aborts, so the user KNOWS the stale-listener problem.
+  (Reverted a subprocess-launcher idea: it broke per-firm token + status.)
+  RUNNER_VERSION=RUNNER_BUILD=19. Verified: build=19, fields cleared+filled
+  with correct Firm Master creds. Backend already gates on epf.applicable
+  and uses ONLY EPF Registration (Iter 693d).
