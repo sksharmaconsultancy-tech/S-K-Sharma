@@ -81,7 +81,9 @@ export default function CompanyPicker({
   }, [preloaded]);
 
   useEffect(() => {
-    if (!open) return;
+    // Iter 693k — load the firm list EARLY (not only when the dropdown is
+    // opened) so the currently-selected firm's NAME shows immediately in
+    // the closed picker, instead of a generic "Selected company".
     if (companies.length > 0) return;
     let cancelled = false;
     (async () => {
@@ -99,13 +101,15 @@ export default function CompanyPicker({
     return () => {
       cancelled = true;
     };
-  }, [open, companies.length]);
+  }, [companies.length]);
 
   const selectedName = useMemo(() => {
     if (value === "all" || !value) return "All companies";
     const c = companies.find((x) => x.company_id === value);
-    return c?.name || "Selected company";
-  }, [value, companies]);
+    // Fallback to the globally-selected firm's name (from context) while the
+    // list is still loading, so the picker never shows a blank/generic name.
+    return c?.name || (lockedCompany as any)?.name || "Selected company";
+  }, [value, companies, lockedCompany]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();

@@ -331,7 +331,7 @@ async def ext_ecr_file(token: str, run_id: str = ""):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "20"
+RUNNER_VERSION = "21"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -342,7 +342,7 @@ import time
 import urllib.error
 import urllib.request
 
-RUNNER_BUILD = "20"
+RUNNER_BUILD = "21"
 
 PORTALS = {
     "esic": "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx",
@@ -590,7 +590,7 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
                 pass
             # Give the portal a generous, human-like moment to load fully
             # before we judge it — EPFO is slow and rendering can lag.
-            time.sleep(6)
+            time.sleep(3)
             _attempt, _MAXW = 0, 40  # ~40 x 5s ≈ 3+ minutes, patient
             while _attempt < _MAXW:
                 try:
@@ -599,7 +599,7 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
                             "return document.readyState") == "complete")
                 except Exception:
                     pass
-                time.sleep(2)  # settle after render
+                time.sleep(1)  # settle after render
                 if _looks_ready():
                     break
                 if _is_down():
@@ -635,7 +635,7 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
                     (By.CSS_SELECTOR,
                      "button[aria-label='Close'], [aria-label='Close']"))):
                 try:
-                    _btn = WebDriverWait(driver, 20 if _i == 0 else 3).until(
+                    _btn = WebDriverWait(driver, 8 if _i == 0 else 2).until(
                         EC.element_to_be_clickable(_sel))
                     _btn.click()
                     print("Alert popup closed (%s)."
