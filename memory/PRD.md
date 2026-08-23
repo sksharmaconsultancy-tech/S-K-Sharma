@@ -8101,3 +8101,15 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   (EPF User ID / EPF Password) OR Portal Login Credentials → PF LOGIN row;
   AND Runner listener must be RESTARTED after redeploy to self-update
   (long-running listener keeps old in-memory code until restart/reboot).
+- Iter 693d (user angry: wrong login sksharmaconsultancy@gmail.com/642313
+  auto-filled; explicit rule): FIX — _fetch_creds (rpa_worker) for epfo now
+  uses ONLY Firm Master → Registration Details → EPF section, and ONLY when
+  epf.applicable is TRUE (epf.epf_user_id as login, epf.epf_password as
+  password). REMOVED the legacy PF LOGIN portal_logins fallback for epfo
+  (that's where the stray admin email was coming from). Returns None/412 if
+  not applicable or no creds. Also epfo_open Chrome now disables its own
+  password manager + autofill (prefs credentials_enable_service False,
+  password_manager_enabled False, autofill.profile_enabled False,
+  --disable-save-password-bubble) so Chrome never injects saved payroll
+  creds. Removed risky --guest (conflicts with prefs). RUNNER_VERSION 18→19.
+  Verified: applicable OFF→412, applicable ON+creds→returns EPF user/pass.

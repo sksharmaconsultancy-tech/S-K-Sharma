@@ -79,14 +79,18 @@ async def _fetch_creds(db, company_id: str, portal: str) -> Optional[Dict[str, s
     # ESIC Detail sections (epf_user_id/epf_password, esi_user_id/esi_password).
     if portal == "epfo":
         sec = master.get("epf") or {}
-        u = (sec.get("epf_user_id") or "").strip()
-        p = (decrypt_secret(sec.get("epf_password")) or "").strip()
-        if u and p:
-            return {
-                "user_name": u, "password": p, "unit_location": None,
-                "login_url": _PORTAL_URLS.get(portal) or "",
-            }
-    elif portal == "esic":
+        # Iter 693d (user rule): use the EPF Registration login ONLY when
+        # "EPF Applicable" is enabled for the firm.
+        if sec.get("applicable"):
+            u = (sec.get("epf_user_id") or "").strip()
+            p = (decrypt_secret(sec.get("epf_password")) or "").strip()
+            if u and p:
+                return {
+                    "user_name": u, "password": p, "unit_location": None,
+                    "login_url": _PORTAL_URLS.get(portal) or "",
+                }
+        # EPF applicable but no login saved → do NOT guess from other rows.
+        return None
         sec = master.get("esi") or {}
         u = (sec.get("esi_user_id") or "").strip()
         p = (decrypt_secret(sec.get("esi_password")) or "").strip()

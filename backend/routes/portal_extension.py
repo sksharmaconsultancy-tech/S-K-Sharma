@@ -331,7 +331,7 @@ async def ext_ecr_file(token: str, run_id: str = ""):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "18"
+RUNNER_VERSION = "19"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -479,6 +479,18 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/128.0.0.0 Safari/537.36")
             opts.add_argument("--disable-infobars")
+            # Iter 693d — STOP Chrome from auto-filling its own SAVED
+            # passwords (e.g. the payroll admin email) into the EPFO login
+            # boxes. Disable the password manager + autofill entirely and
+            # run in a clean guest-like profile with no saved credentials.
+            opts.add_experimental_option("prefs", {
+                "credentials_enable_service": False,
+                "profile.password_manager_enabled": False,
+                "profile.password_manager_leak_detection": False,
+                "autofill.profile_enabled": False,
+                "autofill.credit_card_enabled": False,
+            })
+            opts.add_argument("--disable-save-password-bubble")
         except Exception:
             pass
         try:
