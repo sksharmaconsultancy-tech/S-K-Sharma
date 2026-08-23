@@ -247,6 +247,36 @@ async def ext_solve_captcha(payload: Dict[str, Any] = Body(...)):
     return {"ok": True, "text": text}
 
 
+_CFT_CACHE: Dict[str, Any] = {"at": 0.0, "data": None}
+
+
+@router.get("/admin/portal-automation/chromedriver-url")
+async def chromedriver_url(
+    platform: str = Query("win64"),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 691 — direct official ChromeDriver (Chrome-for-Testing) download
+    link for the operator's PC. Latest STABLE version, cached 1 hour."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
+    import time as _time
+    if not _CFT_CACHE["data"] or _time.time() - _CFT_CACHE["at"] > 3600:
+        import httpx
+        async with httpx.AsyncClient(timeout=20) as cl:
+            r = await cl.get(
+                "https://googlechromelabs.github.io/chrome-for-testing/"
+                "last-known-good-versions-with-downloads.json")
+            r.raise_for_status()
+            _CFT_CACHE["data"] = r.json()
+            _CFT_CACHE["at"] = _time.time()
+    st = _CFT_CACHE["data"]["channels"]["Stable"]
+    url = next((x["url"] for x in st["downloads"]["chromedriver"]
+                if x["platform"] == platform), None)
+    if not url:
+        raise HTTPException(status_code=404, detail=f"No ChromeDriver for {platform}")
+    return {"ok": True, "version": st["version"], "platform": platform, "url": url}
+
+
 @router.get("/portal-ext/ecr-file")
 async def ext_ecr_file(token: str, run_id: str = ""):
     """Iter 690 — PF Challan automation: the PC Runner fetches the ready

@@ -8025,3 +8025,8 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
 - APP_ITERATION=690 (bumped last iter); deploy_vps_iter690.sh; temp_bundle
   kind=script → deploy690.sh. NOTE: bump APP_ITERATION to 691 next deploy
   only if user wants; runner self-updates to v12 regardless.
+- Iter 691b: third button "ChromeDriver (driver only)" (as-download-driver-exe)
+  in the PC Chrome card → GET /api/admin/portal-automation/chromedriver-url
+  (portal_extension.py, session-auth, 1h cache) resolves latest STABLE
+  Chrome-for-Testing chromedriver win64 zip from googlechromelabs JSON and
+  the browser downloads it directly. Verified E2E (v152.0.7977.54).

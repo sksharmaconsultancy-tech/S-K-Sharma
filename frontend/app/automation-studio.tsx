@@ -320,6 +320,31 @@ export default function AutomationStudioScreen() {
     }
   };
 
+  const downloadDriver = async () => {
+    if (Platform.OS !== "web") {
+      setPcStatus("Open this page on a computer (Chrome/Edge) to download ChromeDriver.");
+      return;
+    }
+    setPcBusy("driver");
+    try {
+      const r = await api<any>("/admin/portal-automation/chromedriver-url?platform=win64");
+      if (r?.url) {
+        const a = document.createElement("a");
+        a.href = r.url;
+        a.rel = "noopener";
+        a.click();
+        setPcStatus(
+          `✅ ChromeDriver v${r.version} (Windows 64-bit) is downloading. Unzip it and place ` +
+          "chromedriver.exe inside C:\\SKS-AutoLogin. (Normally NOT needed — the Runner " +
+          "auto-installs the matching driver; use this only if auto-install fails.)");
+      }
+    } catch (e: any) {
+      setPcStatus(e?.message || "Could not fetch the ChromeDriver download link");
+    } finally {
+      setPcBusy("");
+    }
+  };
+
   const control = async (action: string) => {
     if (!sid) return;
     try {
@@ -686,6 +711,19 @@ export default function AutomationStudioScreen() {
                         <Ionicons name="download-outline" size={14} color="#fff" />
                       )}
                       <Text style={st.pcBtnTxt}>Download ChromeDriver Setup</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[st.pcBtn, { backgroundColor: "#2563EB" }, pcBusy === "driver" && { opacity: 0.6 }]}
+                      onPress={downloadDriver}
+                      disabled={pcBusy === "driver"}
+                      testID="as-download-driver-exe"
+                    >
+                      {pcBusy === "driver" ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Ionicons name="hardware-chip-outline" size={14} color="#fff" />
+                      )}
+                      <Text style={st.pcBtnTxt}>ChromeDriver (driver only)</Text>
                     </Pressable>
                   </View>
                   {pcStatus ? <Text style={st.pcStatus}>{pcStatus}</Text> : null}
