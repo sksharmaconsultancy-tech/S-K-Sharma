@@ -228,6 +228,88 @@ async def ext_creds(token: str, portal: str = "esic"):
     return {"ok": True, "user_id": creds.get("user_name") or "", "password": creds.get("password") or ""}
 
 
+async def _diagnose_epfo_creds(company_id: str) -> Dict[str, Any]:
+    """Iter 692 — human-readable diagnosis of WHY the EPFO login is (not)
+    resolving for a firm. Returned to the UI at button-click time so the
+    user never needs a terminal. Never includes the real password."""
+    from utils.secrets_vault import decrypt_secret
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id},
+        {"_id": 0, "portal_logins": 1, "epf": 1, "firm_name": 1, "header": 1})
+    firm_name = ""
+    if fm:
+        firm_name = fm.get("firm_name") or (fm.get("header") or {}).get("firm_name") or ""
+    if not firm_name:
+        comp = await db.companies.find_one({"company_id": company_id}, {"_id": 0, "name": 1})
+        firm_name = (comp or {}).get("name") or ""
+    if not fm:
+        return {
+            "found": False, "user_id": "", "source": "", "firm_name": firm_name,
+            "diagnosis": ("Is firm ka Firm Master abhi save nahi hua hai. "
+                          "Firm Master kholiye → Registration Details → EPF Registration "
+                          "me EPF User ID + EPF Password bhariye → Save karein."),
+        }
+
+    def _mask(u: str) -> str:
+        u = u or ""
+        return u if len(u) <= 6 else (u[:4] + "…" + u[-2:])
+
+    # 1) EPF Registration section (preferred spot).
+    epf = fm.get("epf") or {}
+    u1 = (epf.get("epf_user_id") or "").strip()
+    p1_raw = epf.get("epf_password")
+    p1 = (decrypt_secret(p1_raw) or "").strip()
+    if u1 and "@" not in u1 and p1:
+        return {"found": True, "user_id": u1, "source": "EPF Registration",
+                "firm_name": firm_name, "diagnosis": ""}
+
+    # 2) "Firms ID & Password" / Portal Logins — PF LOGIN row.
+    u2, p2_raw, p2 = "", None, ""
+    for row in (fm.get("portal_logins") or []):
+        if row.get("login_type") == "PF LOGIN":
+            u2 = (row.get("user_name") or "").strip()
+            p2_raw = row.get("password")
+            p2 = (decrypt_secret(p2_raw) or "").strip()
+            break
+    if u2 and "@" not in u2 and p2:
+        return {"found": True, "user_id": u2, "source": "Portal Logins (PF LOGIN)",
+                "firm_name": firm_name, "diagnosis": ""}
+
+    # Nothing resolved — explain the MOST specific problem found.
+    if u1 and "@" in u1:
+        d = (f"EPF User ID me EMAIL save hai ({_mask(u1)}) — EPFO ka User ID "
+             "establishment code hota hai, email nahi. Firm Master → EPF "
+             "Registration me SAHI EPFO User ID daal kar Save karein.")
+    elif u2 and "@" in u2:
+        d = (f"PF LOGIN me EMAIL save hai ({_mask(u2)}) — EPFO ka User ID "
+             "establishment code hota hai, email nahi. Sahi EPFO User ID "
+             "daal kar Save karein.")
+    elif u1 and p1_raw and not p1:
+        d = ("EPF Password save to hai par DECRYPT nahi ho pa raha (server ki "
+             "security key badli hai). Firm Master → EPF Registration me EPF "
+             "Password DOBARA type karke Save karein — bas itna hi.")
+    elif u2 and p2_raw and not p2:
+        d = ("PF LOGIN ka password save to hai par DECRYPT nahi ho pa raha "
+             "(server ki security key badli hai). Password DOBARA type karke "
+             "Save karein — bas itna hi.")
+    elif u1 and not p1_raw:
+        d = (f"EPF User ID ({_mask(u1)}) mil gaya par EPF PASSWORD khali hai. "
+             "Firm Master → EPF Registration me EPF Password bhar kar Save karein.")
+    elif u2 and not p2_raw:
+        d = (f"PF LOGIN User ID ({_mask(u2)}) mil gaya par PASSWORD khali hai. "
+             "Password bhar kar Save karein.")
+    elif (p1 or p2) and not (u1 or u2):
+        d = ("EPF Password to save hai par USER ID khali hai. Firm Master → "
+             "EPF Registration me EPF User ID bhar kar Save karein.")
+    else:
+        d = ("Is firm ke liye EPFO login KAHIN save nahi mila (na EPF "
+             "Registration me, na PF LOGIN me). Firm Master kholiye → "
+             "Registration Details → EPF Registration me EPF User ID + EPF "
+             "Password bhariye → Save karein, phir button dobara dabayein.")
+    return {"found": False, "user_id": "", "source": "",
+            "firm_name": firm_name, "diagnosis": d}
+
+
 @router.get("/admin/portal-automation/creds-debug")
 async def creds_debug(
     company_id: str = "",
@@ -1776,7 +1858,18 @@ async def portal_launch_token(
         "kind": "launch",
         "run_id": (payload or {}).get("run_id") or None,
     })
-    return {"ok": True, "token": token, "runner_url": "http://127.0.0.1:8765"}
+    # Iter 692 — pre-check the firm's EPFO login RIGHT NOW and tell the UI
+    # exactly what was found (or precisely why not), so the user sees the
+    # real reason on screen instead of a generic "no login saved".
+    diag = await _diagnose_epfo_creds(company_id)
+    return {
+        "ok": True, "token": token, "runner_url": "http://127.0.0.1:8765",
+        "creds_found": diag["found"],
+        "creds_user_id": diag["user_id"],
+        "creds_source": diag["source"],
+        "creds_firm_name": diag["firm_name"],
+        "creds_diagnosis": diag["diagnosis"],
+    }
 
 
 @router.get("/admin/portal-automation/runner-download")

@@ -8182,3 +8182,20 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   get 693h/i/j/k/l; their current build lacks the portal_logins fallback so
   returns "no login saved". OK-click waits reduced (20→8, 6s→3s, 2s→1s).
   RUNNER 21. CompanyPicker loads list on mount + name fallback.
+- Iter 692 (fork; prev fork used internal 693x labels but live badge series
+  is 691→692): USER REPORT: "Open EPFO Portal" still says "NO EPFO login
+  saved for THIS firm" after deploy691. FIX: on-screen creds diagnosis —
+  POST /api/admin/portal-automation/launch-token now runs
+  _diagnose_epfo_creds(company_id) (portal_extension.py) and returns
+  creds_found / creds_user_id / creds_source / creds_firm_name /
+  creds_diagnosis (Hinglish, actionable). Distinguishes: no firm_master doc,
+  EMAIL in user id (EPF section or PF LOGIN row), password present but
+  DECRYPT FAILS (vault key changed → "password dobara type karke Save"),
+  user id without password, password without user id, nothing saved.
+  Frontend automation-studio.tsx: if creds_found=false → show "❌ EPFO login
+  problem (firm): <diagnosis>" and DO NOT open Chrome; if true → "✅ EPFO
+  login mila: <id> (source)" and captcha/open statuses include the filled
+  user id. Verified e2e on preview (login+2FA, launch-token for firm with
+  creds → found=true RJUDR2049560000; firm without → exact diagnosis; unit
+  tested decrypt-fail / email / no-password branches). Deploy:
+  deploy_vps_iter692.sh (kind=script now serves it), badge 692.

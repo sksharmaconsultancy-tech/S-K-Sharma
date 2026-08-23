@@ -223,12 +223,27 @@ export default function AutomationStudioScreen() {
       // Runner auto-fills THIS firm's EPFO login (not the one baked at
       // download time). Passed to the local Runner via ?token=.
       let launchTok = "";
+      let credsUser = "";
       try {
         const lt = await api<any>("/admin/portal-automation/launch-token", {
           method: "POST",
           body: JSON.stringify({ company_id: companyId }),
         });
         launchTok = lt?.token || "";
+        // Iter 692 — the backend now pre-checks THIS firm's EPFO login and
+        // returns the EXACT reason when it can't be used. Show it right
+        // here and STOP — opening Chrome without a login wastes the user's
+        // time and only shows a generic message.
+        if (lt && lt.creds_found === false) {
+          const firm = lt.creds_firm_name ? ` (${lt.creds_firm_name})` : "";
+          setPcStatus(`❌ EPFO login problem${firm}: ${lt.creds_diagnosis || "login save nahi mila."}`);
+          setPcBusy("");
+          return;
+        }
+        if (lt && lt.creds_found === true) {
+          credsUser = lt.creds_user_id || "";
+          setPcStatus(`✅ EPFO login mila: ${credsUser} (${lt.creds_source}). Chrome khul raha hai...`);
+        }
       } catch {
         // fall back to the runner's baked token if minting fails
       }
@@ -267,9 +282,9 @@ export default function AutomationStudioScreen() {
         starting: "Starting Chrome...",
         opening: "Opening EPFO Portal...",
         retrying: "⏳ EPFO server busy (503) — auto-retrying, please wait...",
-        await_captcha: "⌨ Login filled ✓ — type the CAPTCHA now, Sign In will click automatically",
+        await_captcha: `⌨ Login filled ✓${credsUser ? ` (${credsUser})` : ""} — type the CAPTCHA now, Sign In will click automatically`,
         signed_in: "✅ Sign In clicked — check the portal",
-        open: "✅ EPFO Portal Open — login filled, enter CAPTCHA & Sign In",
+        open: `✅ EPFO Portal Open — login filled${credsUser ? ` (${credsUser})` : ""}, enter CAPTCHA & Sign In`,
         open_nocreds:
           "⚠ Portal opened but NO EPFO login is saved for THIS firm. Go to Firm Master → EPF Registration → fill EPF User ID + EPF Password → Save, then click again.",
         open_nofield:
