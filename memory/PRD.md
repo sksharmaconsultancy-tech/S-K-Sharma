@@ -8073,3 +8073,15 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   enters those + clicks Sign In. RUNNER_VERSION 16→17. UI hint + open-status
   updated. Verified via fake-driver sim: OK clicked, username+password
   filled, captcha left, status open→closed.
+- Iter 693b (user: ID/password not fetched from Master): ROOT CAUSE — the
+  local 🔐 Open EPFO Portal button hit the Runner directly, so the Runner
+  used its OWN baked token (firm chosen at DOWNLOAD time), not the firm
+  currently selected in Automation Studio. FIX: openEpfoPc now POSTs
+  /admin/portal-automation/launch-token {company_id: selected firm} to mint
+  a fresh token bound to the selected firm and passes it to the Runner via
+  ?token=; Runner listener already forwards token→run()→creds fetch. Also
+  requires companyId selected. WHERE creds live: Firm Master → EPF
+  Registration → "EPF User ID"/"EPF Password" (epf.epf_user_id/epf_password)
+  OR Portal Login Credentials → "PF LOGIN" row (user_name/password). Backend
+  _fetch_creds reads EPF section first, then PF LOGIN row fallback. Verified
+  creds endpoint returns TESTUSER123 for a firm with the PF LOGIN row filled.

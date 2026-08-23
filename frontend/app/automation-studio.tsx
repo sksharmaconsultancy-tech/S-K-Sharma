@@ -211,13 +211,32 @@ export default function AutomationStudioScreen() {
       setPcStatus("Open the portal on a computer (Chrome/Edge) to use this.");
       return;
     }
+    if (!companyId) {
+      setPcStatus("Select a firm above first, then click Open EPFO Portal.");
+      return;
+    }
     if (pcPollRef.current) { clearInterval(pcPollRef.current); pcPollRef.current = null; }
     setPcBusy("open");
     setPcStatus("Starting Chrome...");
     try {
+      // Mint a fresh token bound to the CURRENTLY selected firm so the
+      // Runner auto-fills THIS firm's EPFO login (not the one baked at
+      // download time). Passed to the local Runner via ?token=.
+      let launchTok = "";
+      try {
+        const lt = await api<any>("/admin/portal-automation/launch-token", {
+          method: "POST",
+          body: JSON.stringify({ company_id: companyId }),
+        });
+        launchTok = lt?.token || "";
+      } catch {
+        // fall back to the runner's baked token if minting fails
+      }
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 2500);
-      const r = await fetch("http://127.0.0.1:8765/login?portal=epfo_open", { signal: ctrl.signal });
+      const timer = setTimeout(() => ctrl.abort(), 3000);
+      const url = "http://127.0.0.1:8765/login?portal=epfo_open"
+        + (launchTok ? `&token=${encodeURIComponent(launchTok)}` : "");
+      const r = await fetch(url, { signal: ctrl.signal });
       clearTimeout(timer);
       const j: any = await r.json().catch(() => ({}));
       if (!r.ok || !j?.ok) throw new Error("runner not ok");
