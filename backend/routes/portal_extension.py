@@ -331,7 +331,7 @@ async def ext_ecr_file(token: str, run_id: str = ""):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "19"
+RUNNER_VERSION = "20"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -342,7 +342,7 @@ import time
 import urllib.error
 import urllib.request
 
-RUNNER_BUILD = "19"
+RUNNER_BUILD = "20"
 
 PORTALS = {
     "esic": "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx",
@@ -768,6 +768,67 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
                 else:
                     _st("open")
                 print("EPFO Portal Open.")
+
+            # Iter 693j (user request) — after the login is filled, give the
+            # operator time to type the CAPTCHA, then AUTO-CLICK "Sign In".
+            # We watch the captcha box: the moment it has >=4 chars we wait a
+            # beat and click Sign In. If nothing is typed, we click after a
+            # ~20s grace window anyway (user asked for a fixed wait too).
+            if _fill_result == "filled":
+                try:
+                    _st("await_captcha")
+                    print("Waiting for you to type the CAPTCHA "
+                          "(auto Sign In will follow)...")
+                    _cap = None
+                    for _s in ("#captcha", "input[name='captcha']",
+                               "input[id*='captcha' i]"):
+                        _e = [x for x in driver.find_elements(By.CSS_SELECTOR, _s)
+                              if x.is_displayed()]
+                        if _e:
+                            _cap = _e[0]
+                            break
+                    _typed = False
+                    for _i in range(20):   # ~20s grace to type the captcha
+                        time.sleep(1)
+                        try:
+                            if _cap and len((_cap.get_attribute("value") or "").strip()) >= 4:
+                                _typed = True
+                                time.sleep(1.5)   # let the last digit settle
+                                break
+                        except Exception:
+                            pass
+                    # click the Sign In / submit button
+                    _clicked = False
+                    for _bs in ("button.btn-logging",
+                                "button[type='submit']",
+                                "//button[.//span[contains(.,'Sign In')]]",
+                                "//button[contains(.,'Sign In')]"):
+                        try:
+                            if _bs.startswith("//"):
+                                _b = driver.find_elements(By.XPATH, _bs)
+                            else:
+                                _b = driver.find_elements(By.CSS_SELECTOR, _bs)
+                            _b = [x for x in _b if x.is_displayed()]
+                            if _b:
+                                try:
+                                    _b[0].click()
+                                except Exception:
+                                    driver.execute_script("arguments[0].click();", _b[0])
+                                _clicked = True
+                                break
+                        except Exception:
+                            continue
+                    if _clicked:
+                        _st("signed_in")
+                        print("Clicked Sign In%s."
+                              % (" (captcha detected)" if _typed else
+                                 " (grace time elapsed)"))
+                    else:
+                        _st("open")
+                        print("Could not find the Sign In button - "
+                              "click it yourself.")
+                except Exception as _e:
+                    print("Auto Sign In skipped (%s)." % _e)
         except Exception as e:
             _st("error: portal did not load (%s)" % str(e)[:120])
             print("Portal did not load:", e)

@@ -8165,3 +8165,11 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   guard). Also applicable-gate already removed (693h). Verified: EPF section
   empty + PF LOGIN row filled → returns RJUDR2049560000. User needs ONLY a
   backend redeploy (deploy691), NO PC restart.
+- Iter 693j (user: captcha main dalunga, Sign In tu click kar; 10-15s wait):
+  epfo_open after fill → status await_captcha, watches #captcha; when >=4
+  chars typed waits 1.5s and clicks Sign In (button.btn-logging /
+  type=submit / Sign In text). If nothing typed, clicks after ~20s grace.
+  Status signed_in on success. RUNNER_VERSION/BUILD=20. Frontend MAP +
+  stop-poll updated. Verified via sim: captcha detected → Sign In clicked.
+  Needs runner to be current (backend redeploy serves v20; listener picks
+  it up on next refresh).

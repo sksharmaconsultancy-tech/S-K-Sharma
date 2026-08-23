@@ -267,6 +267,8 @@ export default function AutomationStudioScreen() {
         starting: "Starting Chrome...",
         opening: "Opening EPFO Portal...",
         retrying: "⏳ EPFO server busy (503) — auto-retrying, please wait...",
+        await_captcha: "⌨ Login filled ✓ — type the CAPTCHA now, Sign In will click automatically",
+        signed_in: "✅ Sign In clicked — check the portal",
         open: "✅ EPFO Portal Open — login filled, enter CAPTCHA & Sign In",
         open_nocreds:
           "⚠ Portal opened but NO EPFO login is saved for THIS firm. Go to Firm Master → EPF Registration → fill EPF User ID + EPF Password → Save, then click again.",
@@ -281,7 +283,7 @@ export default function AutomationStudioScreen() {
           const stx = String(sj?.status || "");
           setPcStatus(MAP[stx] || stx || "…");
           if (stx === "closed" || stx.startsWith("error") || stx.startsWith("busy")
-              || stx === "open" || stx.startsWith("open_")) {
+              || stx === "signed_in") {
             if (pcPollRef.current) clearInterval(pcPollRef.current);
             pcPollRef.current = null;
           }
