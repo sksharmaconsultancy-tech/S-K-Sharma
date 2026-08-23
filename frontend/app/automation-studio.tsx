@@ -230,7 +230,8 @@ export default function AutomationStudioScreen() {
       const MAP: Record<string, string> = {
         starting: "Starting Chrome...",
         opening: "Opening EPFO Portal...",
-        open: "EPFO Portal Open",
+        retrying: "⏳ EPFO server busy (503) — auto-retrying, please wait...",
+        open: "✅ EPFO Portal Open",
         closed: "Browser Closed",
       };
       pcPollRef.current = setInterval(async () => {
@@ -239,7 +240,7 @@ export default function AutomationStudioScreen() {
           const sj: any = await s.json();
           const stx = String(sj?.status || "");
           setPcStatus(MAP[stx] || stx || "…");
-          if (stx === "closed" || stx.startsWith("error")) {
+          if (stx === "closed" || stx.startsWith("error") || stx.startsWith("busy")) {
             if (pcPollRef.current) clearInterval(pcPollRef.current);
             pcPollRef.current = null;
           }

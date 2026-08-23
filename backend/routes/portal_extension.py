@@ -331,7 +331,7 @@ async def ext_ecr_file(token: str, run_id: str = ""):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "14"
+RUNNER_VERSION = "16"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -464,25 +464,112 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
         opts = Options()
         opts.add_experimental_option("detach", True)
         opts.add_argument("--start-maximized")
+        # Iter 692c (security-aware): make Chrome look like a NORMAL human
+        # browser so EPFO's firewall does not flag automation and serve a
+        # 503. We only remove the "I am a bot" fingerprints — we do NOT
+        # bypass CAPTCHA/OTP or auto-submit anything.
+        try:
+            opts.add_experimental_option(
+                "excludeSwitches", ["enable-automation"])
+            opts.add_experimental_option("useAutomationExtension", False)
+            opts.add_argument("--disable-blink-features=AutomationControlled")
+            opts.add_argument(
+                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/128.0.0.0 Safari/537.36")
+            opts.add_argument("--disable-infobars")
+        except Exception:
+            pass
         try:
             driver = _fresh_driver(opts)
         except Exception as e:
             _st("error: Chrome did not start (%s)" % str(e)[:120])
             print("Chrome did not start:", e)
             return
+        # Hide the navigator.webdriver flag that WAFs look for.
+        try:
+            driver.execute_cdp_cmd(
+                "Page.addScriptToEvaluateOnNewDocument",
+                {"source": "Object.defineProperty(navigator,'webdriver',"
+                           "{get:()=>undefined});"})
+        except Exception:
+            pass
+        try:
+            driver.set_page_load_timeout(90)
+        except Exception:
+            pass
         _st("opening")
-        print("Opening EPFO Portal...")
+        print("Opening EPFO Portal (giving it time to load safely)...")
         try:
             from selenium.webdriver.common.by import By
             from selenium.webdriver.support.ui import WebDriverWait
             from selenium.webdriver.support import expected_conditions as EC
-            driver.get(PORTALS["epfo"])
+
+            # Iter 692b — EPFO servers often answer with a transient
+            # "503 Service Unavailable / No server is available" page.
+            # Auto-reload for up to ~2 minutes until the real portal
+            # (which has the login form / an alert popup) shows up.
+            def _is_down():
+                try:
+                    src = (driver.page_source or "").lower()
+                except Exception:
+                    return False
+                return ("503 service unavailable" in src
+                        or "no server is available" in src
+                        or "service unavailable" in src
+                        or "502 bad gateway" in src
+                        or "504 gateway" in src)
+
+            def _looks_ready():
+                try:
+                    if driver.find_elements(By.ID, "btnCloseModal"):
+                        return True
+                    if driver.find_elements(By.CSS_SELECTOR, "input[type=password]"):
+                        return True
+                    src = (driver.page_source or "").lower()
+                    return ("epfo" in src or "employer" in src or "login" in src) \
+                        and not _is_down()
+                except Exception:
+                    return False
+
             try:
-                WebDriverWait(driver, 60).until(
-                    lambda d: d.execute_script(
-                        "return document.readyState") == "complete")
+                driver.get(PORTALS["epfo"])
             except Exception:
                 pass
+            # Give the portal a generous, human-like moment to load fully
+            # before we judge it — EPFO is slow and rendering can lag.
+            time.sleep(6)
+            _attempt, _MAXW = 0, 40  # ~40 x 5s ≈ 3+ minutes, patient
+            while _attempt < _MAXW:
+                try:
+                    WebDriverWait(driver, 45).until(
+                        lambda d: d.execute_script(
+                            "return document.readyState") == "complete")
+                except Exception:
+                    pass
+                time.sleep(2)  # settle after render
+                if _looks_ready():
+                    break
+                if _is_down():
+                    _attempt += 1
+                    _st("retrying")
+                    print("EPFO returned 'Service Unavailable' (their server is "
+                          "busy). Waiting patiently and retrying... attempt %d"
+                          % _attempt)
+                    time.sleep(5)
+                    try:
+                        driver.get(PORTALS["epfo"])
+                    except Exception:
+                        pass
+                    time.sleep(4)
+                    continue
+                break
+            if _is_down() and not _looks_ready():
+                _st("busy: EPFO 503 - portal is overloaded, try again shortly")
+                print("EPFO portal is still returning 503 (their servers are "
+                      "overloaded). The Chrome window stays open - just press "
+                      "F5 / reload in a minute, it usually clears on its own.")
+                # keep the window open for the user to retry manually
             # Close the alert popup ONLY (user request): OK button first
             # (type="button" / #btnCloseModal), then data-bs-dismiss ones.
             _closed = False
@@ -507,10 +594,11 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
                     continue
             if not _closed:
                 print("No alert popup appeared - nothing to close.")
-            _st("open")
-            print("EPFO Portal Open.")
-            print("Enter Username / Password / CAPTCHA / OTP yourself -")
-            print("this shortcut fills NOTHING else and clicks NOTHING else.")
+            if not (_is_down() and not _looks_ready()):
+                _st("open")
+                print("EPFO Portal Open.")
+                print("Enter Username / Password / CAPTCHA / OTP yourself -")
+                print("this shortcut fills NOTHING else and clicks NOTHING else.")
         except Exception as e:
             _st("error: portal did not load (%s)" % str(e)[:120])
             print("Portal did not load:", e)
