@@ -7968,3 +7968,17 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
 - Phase 2 backlog: multi-level & department-wise approvers, per-change-
   type approval matrix, granular permissions, copy/paste & bulk-select.
 - deploy_vps_iter688.sh; temp_bundle -> deploy688; APP_ITERATION=688.
+
+## Iter 689 — Approval Levels Phase 2 (user pick)
+- manual_attendance.py: _DEF += approval_levels(1|2), level1/2_approver_id,
+  dept_approvers{dept:user_id}, rules{ANY,A>P,P>A,A>L,P>L,P>HD,A>HD,WO>P}.
+- save(): needs_approval = approval_required AND (rules.ANY or rules[prev>new]);
+  request carries level/levels/approver_l1 (dept override)/approver_l2.
+- decide(): designated-approver check (super_admin bypass); 2-level → L1
+  approve escalates level=2 (audit L1_APPROVED), final approve applies.
+- GET /approver-options: admins + firm departments.
+- attendance-report.tsx settings tab: Approval Type chips, rules matrix
+  + Select/Clear All, L1/L2 approver chips, dept-wise approver rows;
+  approvals show "Level x/2".
+- E2E verified: rules filter (A>P queued, P>A direct), L1→L2→applied.
+- deploy_vps_iter689.sh; temp_bundle -> deploy689; APP_ITERATION=689.

@@ -28,7 +28,15 @@ router = APIRouter(prefix="/api/admin/manual-attendance",
 
 CODES = ("P", "A", "L", "WO", "CO", "HD")
 _DEF = {"enabled": True, "approval_required": False, "require_reason": False,
-        "maker_checker": True}
+        "maker_checker": True,
+        # Iter 689 — Phase 2 approval matrix
+        "approval_levels": 1,            # 1 or 2
+        "level1_approver_id": "",        # empty = any admin
+        "level2_approver_id": "",
+        "dept_approvers": {},            # {department: user_id} overrides L1
+        "rules": {"ANY": True}}          # per-change-type: "A>P": True …
+
+RULE_KEYS = ("ANY", "A>P", "P>A", "A>L", "P>L", "P>HD", "A>HD", "WO>P")
 
 
 async def _auth(authorization):
@@ -62,7 +70,19 @@ async def save_settings(cid: str, payload: Dict[str, Any] = Body(...),
                         authorization: Optional[str] = Header(None)):
     admin = await _auth(authorization)
     require_role(admin, ["super_admin", "sub_admin"])
-    doc = {k: bool(payload.get(k, _DEF[k])) for k in _DEF}
+    doc = {k: bool(payload.get(k, _DEF[k]))
+           for k in ("enabled", "approval_required", "require_reason",
+                     "maker_checker")}
+    doc["approval_levels"] = 2 if int(payload.get("approval_levels") or 1) == 2 else 1
+    doc["level1_approver_id"] = str(payload.get("level1_approver_id") or "")[:64]
+    doc["level2_approver_id"] = str(payload.get("level2_approver_id") or "")[:64]
+    da = payload.get("dept_approvers")
+    doc["dept_approvers"] = ({str(k)[:80]: str(v)[:64]
+                              for k, v in da.items() if v}
+                             if isinstance(da, dict) else {})
+    rl = payload.get("rules")
+    doc["rules"] = ({k: bool(rl.get(k)) for k in RULE_KEYS}
+                    if isinstance(rl, dict) else {"ANY": True})
     await db.firm_masters.update_one(
         {"company_id": cid}, {"$set": {"manual_attendance": doc}}, upsert=True)
     return {"ok": True, **doc}
@@ -160,22 +180,38 @@ async def save(payload: Dict[str, Any] = Body(...),
                             detail="Reason is required for every manual change (Firm Master rule)")
     who = admin.get("name") or admin.get("email")
     applied = queued = 0
+    rules = st.get("rules") or {"ANY": True}
+    dept_map = st.get("dept_approvers") or {}
+    emp_depts = {u["user_id"]: (u.get("department") or "") async for u in
+                 db.users.find({"company_id": cid, "role": "employee"},
+                               {"_id": 0, "user_id": 1, "department": 1})}
     for c in changes:
         uid, d = c.get("user_id"), str(c.get("date") or "")[:10]
         new = str(c.get("status") or "").upper()
         if new not in CODES or not uid:
             continue
+        prev = str(c.get("previous_status") or "").upper()
+        # Iter 689 — per-change-type approval matrix (Firm Master rules):
+        # approval needed only when ANY is on OR the exact transition is on.
+        _needs = bool(st["approval_required"]) and bool(
+            rules.get("ANY") or rules.get(f"{prev}>{new}"))
+        # department-wise approver overrides level-1 (Firm Master)
+        _appr1 = (dept_map.get(emp_depts.get(uid, ""))
+                  or st.get("level1_approver_id") or "")
         audit = {"company_id": cid, "user_id": uid, "date": d,
-                 "previous_status": c.get("previous_status"),
+                 "previous_status": prev or None,
                  "requested_status": new,
                  "reason": str(c.get("reason") or "")[:300],
                  "requested_by": who, "requested_by_id": admin.get("user_id"),
                  "requested_at": now_iso(), "source": "manual"}
-        if st["approval_required"]:
+        if _needs:
             await db.attendance_change_requests.update_one(
                 {"company_id": cid, "user_id": uid, "date": d,
                  "status": "PENDING"},
-                {"$set": {**audit, "status": "PENDING",
+                {"$set": {**audit, "status": "PENDING", "level": 1,
+                          "approver_l1": _appr1,
+                          "approver_l2": st.get("level2_approver_id") or "",
+                          "levels": int(st.get("approval_levels") or 1),
                           "request_id": f"acr_{uuid.uuid4().hex[:10]}"}},
                 upsert=True)
             queued += 1
@@ -239,6 +275,28 @@ async def decide(payload: Dict[str, Any] = Body(...),
         if st["maker_checker"] and r.get("requested_by_id") == admin.get("user_id"):
             raise HTTPException(status_code=403,
                                 detail="Maker cannot approve own request")
+        # Iter 689 — designated approver enforcement (dept/level approver);
+        # super admin can always decide.
+        lvl = int(r.get("level") or 1)
+        _designated = (r.get("approver_l1") if lvl == 1
+                       else r.get("approver_l2")) or ""
+        if _designated and admin.get("role") != "super_admin" \
+                and admin.get("user_id") != _designated:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Only the designated Level-{lvl} approver can decide this request")
+        # Iter 689 — multi-level: L1 approval escalates to Level 2.
+        if action == "APPROVE" and int(r.get("levels") or 1) == 2 and lvl == 1:
+            await db.attendance_change_requests.update_one(
+                {"request_id": rid},
+                {"$set": {"level": 2, "l1_approved_by": who,
+                          "l1_approved_at": now_iso()}})
+            await db.attendance_change_audit.insert_one(
+                {k: v for k, v in r.items() if k != "_id"}
+                | {"status": "L1_APPROVED", "decided_by": who,
+                   "decided_at": now_iso()})
+            done += 1
+            continue
         upd = {"status": "APPROVED" if action == "APPROVE" else "REJECTED",
                "decided_by": who, "decided_by_id": admin.get("user_id"),
                "decided_at": now_iso(), "rejection_reason": reason or None}
@@ -254,6 +312,21 @@ async def decide(payload: Dict[str, Any] = Body(...),
             {k: v for k, v in {**r, **upd}.items() if k != "_id"})
         done += 1
     return {"ok": True, "decided": done}
+
+
+@router.get("/approver-options")
+async def approver_options(company_id: str = Query(...),
+                           authorization: Optional[str] = Header(None)):
+    """Iter 689 — admins selectable as approvers + firm departments."""
+    await _auth(authorization)
+    admins = await db.users.find(
+        {"$or": [{"role": {"$in": ["super_admin", "sub_admin"]}},
+                 {"role": "company_admin", "company_id": company_id}]},
+        {"_id": 0, "user_id": 1, "name": 1, "role": 1}).to_list(100)
+    depts = await db.users.distinct(
+        "department", {"company_id": company_id, "role": "employee",
+                       "department": {"$nin": [None, ""]}})
+    return {"approvers": admins, "departments": sorted(depts)}
 
 
 @router.get("/monthly.xlsx")

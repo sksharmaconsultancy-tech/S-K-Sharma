@@ -45,6 +45,27 @@ export default function AttendanceReportEditable() {
   const [saving, setSaving] = useState(false);
   const [reqs, setReqs] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
+  // Iter 689 — Phase 2 approval matrix
+  const [apprOpts, setApprOpts] = useState<any>({ approvers: [], departments: [] });
+
+  useEffect(() => {
+    if (tab !== "settings" || !companyId || apprOpts.approvers.length) return;
+    void (async () => {
+      try {
+        const r = await api<any>(
+          `/admin/manual-attendance/approver-options?company_id=${companyId}`);
+        setApprOpts(r);
+      } catch {}
+    })();
+  }, [tab, companyId, apprOpts.approvers.length]);
+
+  const saveSettings = useCallback(async (patch: any) => {
+    const next = { ...(data?.settings || {}), ...patch };
+    await api<any>(`/admin/manual-attendance/settings/${companyId}`, {
+      method: "POST", body: JSON.stringify(next),
+    });
+    setData((d: any) => ({ ...d, settings: next }));
+  }, [companyId, data]);
 
   const load = useCallback(async () => {
     if (!companyId || !/^\d{2}-\d{4}$/.test(month)) return;
@@ -121,6 +142,8 @@ export default function AttendanceReportEditable() {
     });
     setData((d: any) => ({ ...d, settings: st }));
   }, [companyId, data]);
+
+  const RULE_KEYS = ["ANY", "A>P", "P>A", "A>L", "P>L", "P>HD", "A>HD", "WO>P"];
 
   const rows = useMemo(() => {
     let r = data?.rows || [];
@@ -307,6 +330,7 @@ export default function AttendanceReportEditable() {
             <View key={r.request_id} style={s.reqCard}>
               <Text style={{ fontWeight: "800", color: colors.onSurface }}>
                 {r.name} ({r.employee_code}) · {r.date}
+                {Number(r.levels) === 2 ? `  ·  Level ${r.level || 1}/2` : ""}
               </Text>
               <Text style={s.legend}>
                 {r.previous_status || "—"} → {r.requested_status} · by {r.requested_by}
@@ -349,6 +373,112 @@ export default function AttendanceReportEditable() {
           {user.role === "company_admin" ? (
             <Text style={s.warn}>Only Super/Sub Admin can change these settings.</Text>
           ) : null}
+
+          {/* Iter 689 — Approval Levels */}
+          <Text style={s.secHead}>Approval Type</Text>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            {[1, 2].map((lv) => (
+              <Pressable key={lv}
+                onPress={() => user.role !== "company_admin"
+                  && void saveSettings({ approval_levels: lv })}
+                style={[s.chip, (st.approval_levels || 1) === lv && s.chipOn]}
+                testID={`ar-levels-${lv}`}>
+                <Text style={[s.chipTxt, (st.approval_levels || 1) === lv && { color: "#fff" }]}>
+                  {lv === 1 ? "Single Level" : "Multi Level (2)"}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
+          {/* Iter 689 — Per-change-type approval rules */}
+          <Text style={s.secHead}>Changes Requiring Approval</Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+            {RULE_KEYS.map((rk) => {
+              const on = !!(st.rules || {})[rk];
+              return (
+                <Pressable key={rk}
+                  onPress={() => user.role !== "company_admin"
+                    && void saveSettings({ rules: { ...(st.rules || {}), [rk]: !on } })}
+                  style={[s.chip, on && s.chipOn]} testID={`ar-rule-${rk}`}>
+                  <Text style={[s.chipTxt, on && { color: "#fff" }]}>
+                    {rk === "ANY" ? "Any Manual Change" : rk.replace(">", " → ")}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 6 }}>
+            <Pressable style={s.chip}
+              onPress={() => void saveSettings({
+                rules: Object.fromEntries(RULE_KEYS.map((k) => [k, true])) })}>
+              <Text style={s.chipTxt}>Select All</Text>
+            </Pressable>
+            <Pressable style={s.chip}
+              onPress={() => void saveSettings({
+                rules: Object.fromEntries(RULE_KEYS.map((k) => [k, false])) })}>
+              <Text style={s.chipTxt}>Clear All</Text>
+            </Pressable>
+          </View>
+          <Text style={s.legend}>
+            If &quot;Any Manual Change&quot; is OFF, only the ticked transitions go for
+            approval — everything else saves directly.
+          </Text>
+
+          {/* Iter 689 — Level approvers */}
+          {[["level1_approver_id", "Level 1 Approver"],
+            ...((st.approval_levels || 1) === 2
+              ? [["level2_approver_id", "Level 2 Approver"]] : [])].map(([key, lbl]) => (
+            <View key={key}>
+              <Text style={s.secHead}>{lbl}</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                <Pressable onPress={() => void saveSettings({ [key]: "" })}
+                  style={[s.chip, !st[key] && s.chipOn]}>
+                  <Text style={[s.chipTxt, !st[key] && { color: "#fff" }]}>Any Admin</Text>
+                </Pressable>
+                {apprOpts.approvers.map((a: any) => (
+                  <Pressable key={a.user_id}
+                    onPress={() => void saveSettings({ [key]: a.user_id })}
+                    style={[s.chip, st[key] === a.user_id && s.chipOn]}>
+                    <Text style={[s.chipTxt, st[key] === a.user_id && { color: "#fff" }]}>
+                      {a.name}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          ))}
+
+          {/* Iter 689 — Department-wise approvers */}
+          <Text style={s.secHead}>Department-wise Approver (overrides Level 1)</Text>
+          {apprOpts.departments.map((dep: string) => {
+            const cur = (st.dept_approvers || {})[dep] || "";
+            return (
+              <View key={dep} style={[s.setRow, { flexWrap: "wrap", gap: 6 }]}>
+                <Text style={{ color: colors.onSurface, width: 130, fontWeight: "700" }}>
+                  {dep}
+                </Text>
+                <Pressable
+                  onPress={() => {
+                    const da = { ...(st.dept_approvers || {}) };
+                    delete da[dep];
+                    void saveSettings({ dept_approvers: da });
+                  }}
+                  style={[s.chip, !cur && s.chipOn]}>
+                  <Text style={[s.chipTxt, !cur && { color: "#fff" }]}>Common</Text>
+                </Pressable>
+                {apprOpts.approvers.map((a: any) => (
+                  <Pressable key={a.user_id}
+                    onPress={() => void saveSettings({
+                      dept_approvers: { ...(st.dept_approvers || {}), [dep]: a.user_id } })}
+                    style={[s.chip, cur === a.user_id && s.chipOn]}>
+                    <Text style={[s.chipTxt, cur === a.user_id && { color: "#fff" }]}>
+                      {a.name}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            );
+          })}
         </ScrollView>
       )}
     </SafeAreaView>
@@ -389,4 +519,8 @@ const s = StyleSheet.create({
   warn: { color: "#B45309", fontSize: 12, paddingHorizontal: 12, paddingBottom: 6 },
   reqCard: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, marginBottom: 8, backgroundColor: colors.surface },
   setRow: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, marginBottom: 8, backgroundColor: colors.surface },
+  secHead: { fontSize: 13, fontWeight: "800", color: colors.onSurface, marginTop: 14, marginBottom: 6 },
+  chip: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: colors.surface },
+  chipOn: { backgroundColor: "#1D4ED8", borderColor: "#1D4ED8" },
+  chipTxt: { fontSize: 11.5, fontWeight: "700", color: colors.onSurface },
 });
