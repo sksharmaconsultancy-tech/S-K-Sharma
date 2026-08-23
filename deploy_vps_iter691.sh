@@ -695,7 +695,7 @@ app.prepare(ctx_id=-1, det_size=(640, 640))
 print("   Face AI models READY")
 PYW
 
-echo "==> Iter 691 cleanup: remove any browser-autofilled JUNK EPFO/ESIC logins (emails with '@') from Firm Master..."
+echo "==> Iter 691 cleanup: remove ONLY the browser-autofilled JUNK email from EPF/ESI login fields (portal_logins rows are left untouched — SSO/PT can legitimately use emails)..."
 cd $APP_DIR/backend
 $APP_DIR/backend/venv/bin/python - << 'PYFIX' || echo "⚠ cleanup skipped — run fix_epf_autofill_691.py manually"
 import asyncio, os
@@ -715,17 +715,11 @@ async def m():
         esi=fm.get("esi") or {}
         if bad(esi.get("esi_user_id")):
             hit.append(("ESI",esi.get("esi_user_id"))); ch["esi.esi_user_id"]=""; ch["esi.esi_password"]=""
-        pls=fm.get("portal_logins") or []; pc=False; npls=[]
-        for r in pls:
-            if bad(r.get("user_name")):
-                hit.append((r.get("login_type"),r.get("user_name"))); r={**r,"user_name":"","password":""}; pc=True
-            npls.append(r)
-        if pc: ch["portal_logins"]=npls
         if hit:
             n+=1
-            print("   CLEARED junk login in firm", fm.get("company_id"), "->", hit)
+            print("   CLEARED junk EPF/ESI login in firm", fm.get("company_id"), "->", hit)
             await db.firm_masters.update_one({"_id":fm["_id"]},{"$set":ch})
-    print("   Firms cleaned of junk logins:", n)
+    print("   Firms cleaned of junk EPF/ESI logins:", n)
 asyncio.run(m())
 PYFIX
 
