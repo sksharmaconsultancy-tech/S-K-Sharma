@@ -8127,3 +8127,16 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   RUNNER_VERSION=RUNNER_BUILD=19. Verified: build=19, fields cleared+filled
   with correct Firm Master creds. Backend already gates on epf.applicable
   and uses ONLY EPF Registration (Iter 693d).
+- Iter 691/693f (user: EPFO login filled with admin email sksharmaconsultancy
+  @gmail.com/642313; CONFIRMED not Chrome autofill - normal Chrome stays
+  blank, only automation fills it → source is BACKEND creds API). ROOT-CAUSE
+  FIX (server-side, NO PC restart needed - Runner only types what creds API
+  returns): rpa_worker._fetch_creds — (a) fixed dead-code bug that had
+  disabled ESIC lookup after my 693d edit; (b) added _valid_login() HARD
+  GUARD rejecting any username containing '@' (EPFO/ESIC usernames are estt
+  codes, never emails) for EPF section, ESI section, AND legacy portal_logins
+  fallback rows; epfo still returns None if EPF section has no valid login
+  (PF LOGIN fallback removed for epfo). Verified: admin-email→412 blocked,
+  real estt code→returned. APP_ITERATION=691; deploy_vps_iter691.sh created;
+  temp_bundle kind=script → deploy691.sh (200 OK). User must ONLY redeploy
+  VPS (backend restart), no PC reboot.

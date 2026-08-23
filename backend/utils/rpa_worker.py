@@ -77,6 +77,12 @@ async def _fetch_creds(db, company_id: str, portal: str) -> Optional[Dict[str, s
     from utils.secrets_vault import decrypt_secret
     # Iter 98 — PREFER the credentials saved on Firm Master's EPF Detail /
     # ESIC Detail sections (epf_user_id/epf_password, esi_user_id/esi_password).
+    # Iter 693f — GUARD: an EPFO/ESIC portal username is an establishment
+    # code, NEVER an email. If a stray email (e.g. the payroll admin login)
+    # got saved anywhere, we must NOT type it into the govt login box.
+    def _valid_login(u: str) -> bool:
+        return bool(u) and "@" not in u
+
     if portal == "epfo":
         sec = master.get("epf") or {}
         # Iter 693d (user rule): use the EPF Registration login ONLY when
@@ -84,17 +90,19 @@ async def _fetch_creds(db, company_id: str, portal: str) -> Optional[Dict[str, s
         if sec.get("applicable"):
             u = (sec.get("epf_user_id") or "").strip()
             p = (decrypt_secret(sec.get("epf_password")) or "").strip()
-            if u and p:
+            if _valid_login(u) and p:
                 return {
                     "user_name": u, "password": p, "unit_location": None,
                     "login_url": _PORTAL_URLS.get(portal) or "",
                 }
-        # EPF applicable but no login saved → do NOT guess from other rows.
+        # EPF applicable but no valid login saved → do NOT guess/type garbage.
         return None
+
+    if portal == "esic":
         sec = master.get("esi") or {}
         u = (sec.get("esi_user_id") or "").strip()
         p = (decrypt_secret(sec.get("esi_password")) or "").strip()
-        if u and p:
+        if _valid_login(u) and p:
             return {
                 "user_name": u, "password": p, "unit_location": None,
                 "login_url": _PORTAL_URLS.get(portal) or "",
@@ -105,7 +113,7 @@ async def _fetch_creds(db, company_id: str, portal: str) -> Optional[Dict[str, s
         if row.get("login_type") == label:
             u = (row.get("user_name") or "").strip()
             p = (decrypt_secret(row.get("password")) or "").strip()
-            if u and p:
+            if _valid_login(u) and p:
                 return {
                     "user_name": u,
                     "password": p,
