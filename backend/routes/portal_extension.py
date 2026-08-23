@@ -1222,38 +1222,46 @@ if __name__ == "__main__":
 
 _RUNNER_REQ = "selenium>=4.16\n"
 
-_RUNNER_BAT = (
+# Iter 691 — bats auto-detect the Python command: many PCs have only the
+# `py` launcher on PATH (python.org default install without "Add to PATH").
+_BAT_PY_DETECT = (
     "@echo off\r\n"
-    "python sks_launcher.py esic\r\n"
+    "set PYCMD=python\r\n"
+    "where python >nul 2>nul || set PYCMD=py\r\n"
+)
+
+_RUNNER_BAT = (
+    _BAT_PY_DETECT +
+    "%PYCMD% sks_launcher.py esic\r\n"
     "pause\r\n"
 )
 
 _RUNNER_BAT_PF = (
-    "@echo off\r\n"
-    "python sks_launcher.py epfo\r\n"
+    _BAT_PY_DETECT +
+    "%PYCMD% sks_launcher.py epfo\r\n"
     "pause\r\n"
 )
 
 # Iter 315 — ECR TEST: real Chrome window, open EPFO + close alert (OK).
 _RUNNER_BAT_ECR_TEST = (
-    "@echo off\r\n"
-    "python sks_launcher.py ecr_test\r\n"
+    _BAT_PY_DETECT +
+    "%PYCMD% sks_launcher.py ecr_test\r\n"
     "pause\r\n"
 )
 
 # Iter 691 — OPEN-ONLY: new Chrome window on the EPFO portal, nothing
 # filled, nothing clicked. User does everything manually.
 _RUNNER_BAT_OPEN_EPFO = (
-    "@echo off\r\n"
-    "python sks_launcher.py epfo_open\r\n"
+    _BAT_PY_DETECT +
+    "%PYCMD% sks_launcher.py epfo_open\r\n"
     "pause\r\n"
 )
 
 # Iter 397 — LISTENER: one-click login from the payroll web app.
 _RUNNER_BAT_LISTENER = (
-    "@echo off\r\n"
+    _BAT_PY_DETECT +
     "title SKS Runner - keep this window open\r\n"
-    "python sks_launcher.py listen\r\n"
+    "%PYCMD% sks_launcher.py listen\r\n"
     "pause\r\n"
 )
 
