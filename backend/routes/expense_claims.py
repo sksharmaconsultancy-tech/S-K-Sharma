@@ -127,6 +127,16 @@ async def create_claim(payload: Dict[str, Any] = Body(...),
     amount = float(payload.get("amount") or 0)
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
+    # Iter 706 — Official Tour link: an approved Tour ID is MANDATORY when
+    # the claim is marked as an official-tour expense.
+    tour_info = None
+    if payload.get("is_official_tour"):
+        if not payload.get("tour_id"):
+            raise HTTPException(status_code=400,
+                                detail="Select an approved Tour ID for an official tour expense")
+        from routes.tours import validate_tour_for_expense
+        tour_info = await validate_tour_for_expense(
+            user, str(payload["tour_id"]), str(payload.get("expense_date") or ""))
     from datetime import datetime, timezone
     mk = datetime.now(timezone.utc).strftime("%y%m")
     claim = {
@@ -149,6 +159,9 @@ async def create_claim(payload: Dict[str, Any] = Body(...),
         "amount": amount,
         "gst_amount": float(payload.get("gst_amount") or 0),
         "description": str(payload.get("description") or "")[:600],
+        "is_official_tour": bool(tour_info),
+        "tour_id": (tour_info or {}).get("tour_id"),
+        "tour": tour_info,
         "status": "draft", "approved_amount": None, "paid_amount": None,
         "attachments": [], "created_at": now_iso(), "updated_at": now_iso(),
     }
@@ -333,10 +346,16 @@ async def submit_claim(claim_id: str,
         raise HTTPException(status_code=404, detail="Claim not found")
     if c["status"] not in ("draft", "returned"):
         raise HTTPException(status_code=400, detail=f"Cannot submit a {c['status']} claim")
+    # Iter 706 — official-tour claims: re-validate the linked tour.
+    if c.get("is_official_tour") and c.get("tour_id"):
+        from routes.tours import validate_tour_for_expense
+        await validate_tour_for_expense(user, c["tour_id"], c.get("expense_date") or "")
     # Duplicate detection — employee + date + amount (+ vendor/invoice).
     dupq = {"user_id": user["user_id"], "claim_id": {"$ne": claim_id},
             "status": {"$nin": ["rejected", "cancelled"]},
             "expense_date": c.get("expense_date"), "amount": c.get("amount")}
+    if c.get("tour_id"):
+        dupq["tour_id"] = c["tour_id"]
     dup = await db.expense_claims.find_one(dupq, {"_id": 0, "claim_no": 1})
     if not dup and c.get("invoice_no"):
         dup = await db.expense_claims.find_one(

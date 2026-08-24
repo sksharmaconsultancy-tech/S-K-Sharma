@@ -13318,6 +13318,10 @@ app.include_router(face_punch_router)
 # Iter 604 — Expense Claims module (Phase 1).
 from routes.expense_claims import router as expense_claims_router  # noqa: E402
 app.include_router(expense_claims_router)
+# Iter 706 — Official Tour Management (request → approval → GPS tracking →
+# visits → expenses → OD attendance → payroll traceability via Tour ID).
+from routes.tours import router as tours_router  # noqa: E402
+app.include_router(tours_router)
 
 # Iter 610 — Employee Self-Service (ESS): profile, attendance+, shift,
 # salary/PF/ESIC, unified requests, notification center.

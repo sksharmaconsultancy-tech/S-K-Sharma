@@ -8409,3 +8409,41 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   User ko batana: naya naam ke liye phone se PWA remove karke dobara Add
   to Home Screen. sw v22, badge 704, deploy_vps_iter704.sh,
   kind=script→deploy704, runner v28 ke liye install_autostart.bat dobara.
+- Iter 705 (English from here): (1) WORKFLOW EMPLOYEE APPROVER — approver_type
+  "employee" in approval_workflows levels (user_id + role_name snapshot);
+  builder has employee search (/admin/approval-workflows/employee-search);
+  employees can open Approval Inbox (backend scopes to their requests);
+  ESS Profile shows "Approval Inbox" card via /admin/approval-inbox/badge.
+  (2) CL/PL BALANCE — modes Employee/Department/Designation wise
+  (PATCH /admin/leave-balance/bulk sets per-employee overrides for a group);
+  firm settings leave_calc_basis (basic|gross) + year_end_treatment
+  (lapse|encash) in firm_masters.leave_policy via PATCH /admin/leave-settings.
+  (3) Grid cache verified: monthly-grid 2nd hit ~0.1s.
+- Iter 706 — TOUR MANAGEMENT MODULE (full, 4 phases in one build):
+  backend routes/tours.py (prefix /api/tours). Collections: tour_requests
+  (TOUR-YYYY-NNNNNN via tour_counters), tour_visits, tour_tracking_logs,
+  tour_attendance, tour_settings, tour_audit. Status machine draft→
+  submitted→pending_approval→approved→active→completed (+returned/rejected/
+  cancelled). Approval: engine module "tour" (approvals_engine MODULES +
+  _finalize final_status param → finalize_tour_approval); fallback direct
+  /tours/{id}/decide when no workflow. Start/End tour capture GPS+device;
+  /track batch sync keeps original captured_at + offline flag, auto-stops
+  after end datetime +6h. Visits with GPS. OD attendance engine
+  post_tour_attendance: posts approved IN/OUT punch pairs source
+  "official_tour" (9:00 + full_day_hours; half via half_day_od_hours),
+  conflict detection → tour_attendance status conflict → admin resolve
+  (keep_existing|convert_to_od(supersede)|cancel). Settings per firm:
+  tracking_interval_min 1/5/10/15, od_counts_present/paid/ot, holiday/
+  weekly_off skip|od, expense_claim_grace_days. Expense integration:
+  create/submit claim validates tour (own+approved+date window) via
+  validate_tour_for_expense; claim stores is_official_tour/tour_id/tour
+  snapshot; dup check includes tour_id. Frontend: my-tours.tsx (ESS
+  dashboard+list, tile on ESS home), tour-request.tsx (full form,
+  multi-dest, attachments, OD option), tour-detail.tsx (start/end with
+  permission-aware GPS, interval tracking + AsyncStorage offline queue
+  tour_track_queue_{id}, timeline, visits, expenses, OD rows + admin
+  conflict buttons), tour-admin.tsx (Requests/Live/All/Settings tabs,
+  AdminWebShell "Tour Management" under Payroll group). expense-claim-form:
+  Official Tour switch + eligible tour picker (/tours/eligible/for-expense),
+  ?tour_id= preselect. Backend flow e2e tested (14 checks PASS), test data
+  cleaned after.

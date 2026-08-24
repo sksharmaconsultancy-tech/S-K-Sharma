@@ -54,6 +54,10 @@ export default function LeaveBalanceConfig() {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [msg, setMsg] = useState("");
+  // Iter 705 — dept/desig-wise bulk mode + firm leave settings.
+  const [mode, setMode] = useState<"emp" | "dept" | "desig">("emp");
+  const [groupDraft, setGroupDraft] = useState<Record<string, string>>({});
+  const [applying, setApplying] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!companyId || companyId === "all") { setData(null); setEmps([]); return; }
@@ -111,6 +115,43 @@ export default function LeaveBalanceConfig() {
     setMsg(`Saved ${ok} employee${ok === 1 ? "" : "s"}${err ? ` · ${err} failed` : ""} ✓`);
   };
 
+  // Iter 705 — firm-level leave settings (encashment basis / year-end).
+  const saveSetting = async (key: "leave_calc_basis" | "year_end_treatment", v: string) => {
+    if (!data || data[key] === v) return;
+    setData((p: any) => ({ ...p, [key]: v }));
+    try {
+      await api("/admin/leave-settings", { method: "PATCH", body: { company_id: companyId, [key]: v } });
+      setMsg(`${key === "leave_calc_basis" ? "Leave value basis" : "Year-end treatment"} saved ✓`);
+    } catch (e: any) { setMsg(e?.message || "Setting save failed"); load(); }
+  };
+
+  // Iter 705 — department / designation-wise bulk apply.
+  const editGroup = (name: string, field: "cl" | "pl", v: string) =>
+    setGroupDraft((p) => ({ ...p, [`${mode}:${name}:${field}`]: v.replace(/[^0-9.]/g, "") }));
+
+  const applyGroup = async (name: string) => {
+    const cl = (groupDraft[`${mode}:${name}:cl`] ?? "").trim();
+    const pl = (groupDraft[`${mode}:${name}:pl`] ?? "").trim();
+    if (cl === "" && pl === "") { setMsg("Enter CL and/or PL first."); return; }
+    setApplying(name);
+    setMsg("");
+    try {
+      const r = await api<any>("/admin/leave-balance/bulk", {
+        method: "PATCH",
+        body: {
+          company_id: companyId,
+          scope: mode === "dept" ? "department" : "designation",
+          value: name,
+          ...(cl !== "" ? { cl_allowed: Number(cl) } : {}),
+          ...(pl !== "" ? { pl_allowed: Number(pl) } : {}),
+        },
+      });
+      setMsg(`Applied to ${r.matched} employee${r.matched === 1 ? "" : "s"} of ${name} ✓`);
+      await load();
+    } catch (e: any) { setMsg(e?.message || "Bulk apply failed"); }
+    finally { setApplying(null); }
+  };
+
   const filtered = useMemo(() => {
     if (!search.trim()) return emps;
     const s = search.trim().toLowerCase();
@@ -159,15 +200,59 @@ export default function LeaveBalanceConfig() {
               {"\n"}Enter a value to override for that employee; leave BLANK to use the firm default.
             </Text>
           )}
-          <TextInput
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search by name or code…"
-            placeholderTextColor={colors.onSurfaceTertiary}
-            style={styles.search}
-            autoCapitalize="none"
-            testID="lbc-search"
-          />
+          {data && (
+            <View style={styles.setCard}>
+              <View style={styles.setRow}>
+                <Text style={styles.setLbl}>Leave value on</Text>
+                {(["basic", "gross"] as const).map((v) => (
+                  <Pressable key={v} onPress={() => saveSetting("leave_calc_basis", v)}
+                    style={[styles.seg, data.leave_calc_basis === v && styles.segOn]}
+                    testID={`lbc-basis-${v}`}>
+                    <Text style={[styles.segT, data.leave_calc_basis === v && styles.segTOn]}>
+                      {v === "basic" ? "Basic" : "Gross"}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <View style={styles.setRow}>
+                <Text style={styles.setLbl}>Year-end balance</Text>
+                {(["lapse", "encash"] as const).map((v) => (
+                  <Pressable key={v} onPress={() => saveSetting("year_end_treatment", v)}
+                    style={[styles.seg, data.year_end_treatment === v && styles.segOn]}
+                    testID={`lbc-treat-${v}`}>
+                    <Text style={[styles.segT, data.year_end_treatment === v && styles.segTOn]}>
+                      {v === "lapse" ? "Lapse" : "In Cash"}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={styles.hint}>
+                Leave day value is calculated on {data.leave_calc_basis === "gross" ? "GROSS" : "BASIC"} salary ·
+                unused year-end balance {data.year_end_treatment === "encash" ? "is paid IN CASH" : "LAPSES"}.
+              </Text>
+            </View>
+          )}
+          {data && (
+            <View style={styles.modeRow}>
+              {([["emp", "Employee"], ["dept", "Department"], ["desig", "Designation"]] as const).map(([k, l]) => (
+                <Pressable key={k} onPress={() => setMode(k)}
+                  style={[styles.modeTab, mode === k && styles.modeTabOn]} testID={`lbc-mode-${k}`}>
+                  <Text style={[styles.modeT, mode === k && styles.modeTOn]}>{l} Wise</Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
+          {mode === "emp" && (
+            <TextInput
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search by name or code…"
+              placeholderTextColor={colors.onSurfaceTertiary}
+              style={styles.search}
+              autoCapitalize="none"
+              testID="lbc-search"
+            />
+          )}
         </View>
 
         {loading ? (
@@ -176,6 +261,62 @@ export default function LeaveBalanceConfig() {
           <Text style={[styles.hint, { textAlign: "center", marginTop: 40 }]}>
             {msg || "Select a firm to configure CL/PL balances."}
           </Text>
+        ) : mode !== "emp" ? (
+          <FlatList
+            data={mode === "dept" ? data.departments || [] : data.designations || []}
+            keyExtractor={(g: any) => g.name}
+            contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 30 }}
+            keyboardShouldPersistTaps="handled"
+            ListHeaderComponent={
+              <Text style={[styles.hint, { marginBottom: 8 }]}>
+                Set CL/PL for every employee of a {mode === "dept" ? "department" : "designation"} in one
+                go — blank field stays unchanged. Applied as per-employee overrides.
+              </Text>
+            }
+            renderItem={({ item }: any) => (
+              <View style={styles.row}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.empName} numberOfLines={1}>{item.name}</Text>
+                  <Text style={styles.empCode}>{item.count} employee{item.count === 1 ? "" : "s"}</Text>
+                </View>
+                <TextInput
+                  value={groupDraft[`${mode}:${item.name}:cl`] ?? ""}
+                  onChangeText={(v) => editGroup(item.name, "cl", v)}
+                  placeholder="CL"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  keyboardType="decimal-pad"
+                  selectTextOnFocus
+                  style={styles.numInput}
+                  testID={`lbc-g-cl-${item.name}`}
+                />
+                <TextInput
+                  value={groupDraft[`${mode}:${item.name}:pl`] ?? ""}
+                  onChangeText={(v) => editGroup(item.name, "pl", v)}
+                  placeholder="PL"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  keyboardType="decimal-pad"
+                  selectTextOnFocus
+                  style={styles.numInput}
+                  testID={`lbc-g-pl-${item.name}`}
+                />
+                <Pressable
+                  onPress={() => applyGroup(item.name)}
+                  disabled={applying === item.name}
+                  style={[styles.applyBtn, applying === item.name && { opacity: 0.6 }]}
+                  testID={`lbc-apply-${item.name}`}
+                >
+                  {applying === item.name
+                    ? <ActivityIndicator size="small" color="#fff" />
+                    : <Text style={styles.applyT}>Apply</Text>}
+                </Pressable>
+              </View>
+            )}
+            ListEmptyComponent={
+              <Text style={[styles.hint, { textAlign: "center", marginTop: 30 }]}>
+                No {mode === "dept" ? "departments" : "designations"} found on employee profiles.
+              </Text>
+            }
+          />
         ) : (
           <FlatList
             data={filtered}
@@ -236,7 +377,7 @@ export default function LeaveBalanceConfig() {
         )}
 
         {/* Save bar */}
-        {data && (
+        {data && mode === "emp" && (
           <View style={styles.saveBar}>
             {!!msg && <Text style={styles.msg} numberOfLines={1}>{msg}</Text>}
             <Pressable
@@ -309,4 +450,32 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   saveT: { color: "#fff", fontWeight: "800", fontSize: 14 },
+
+  // Iter 705 — settings card + mode tabs + bulk apply.
+  setCard: {
+    backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radius?.md ?? 10, padding: 10, gap: 8,
+  },
+  setRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  setLbl: { flex: 1, fontSize: 12.5, fontWeight: "700", color: colors.onSurface },
+  seg: {
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8,
+    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface,
+  },
+  segOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  segT: { fontSize: 12, fontWeight: "700", color: colors.onSurfaceSecondary },
+  segTOn: { color: "#fff" },
+  modeRow: { flexDirection: "row", gap: 8 },
+  modeTab: {
+    flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: "center",
+    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary,
+  },
+  modeTabOn: { backgroundColor: "rgba(37,99,235,0.1)", borderColor: colors.brandPrimary },
+  modeT: { fontSize: 12, fontWeight: "700", color: colors.onSurfaceSecondary },
+  modeTOn: { color: colors.brandPrimary },
+  applyBtn: {
+    backgroundColor: colors.brandPrimary, borderRadius: 8, paddingHorizontal: 12,
+    minHeight: 44, minWidth: 60, alignItems: "center", justifyContent: "center",
+  },
+  applyT: { color: "#fff", fontWeight: "800", fontSize: 12.5 },
 });

@@ -86,6 +86,12 @@ export default function ProfileScreen() {
 
   const isAdmin = user?.role !== "employee";
   const isSuper = user?.role === "super_admin";
+  // Iter 705 — employee assigned as a workflow approver sees an inbox link.
+  const [approverBadge, setApproverBadge] = useState<{ is_approver: boolean; pending: number } | null>(null);
+  useEffect(() => {
+    if (user?.role !== "employee") return;
+    api<any>("/admin/approval-inbox/badge").then(setApproverBadge).catch(() => {});
+  }, [user?.role]);
   const [pendingEmpCount, setPendingEmpCount] = useState<number>(0);
   const [pendingReqCount, setPendingReqCount] = useState<number>(0);
   const [pendingProfileEditCount, setPendingProfileEditCount] =
@@ -243,6 +249,30 @@ export default function ProfileScreen() {
                 size={18}
                 color={colors.onSurfaceTertiary}
               />
+            </Pressable>
+          </>
+        ) : null}
+
+        {user?.role === "employee" && approverBadge?.is_approver ? (
+          <>
+            <Text style={styles.section}>Approvals</Text>
+            <Pressable
+              style={styles.staffCard}
+              onPress={() => router.push("/approval-inbox" as any)}
+              testID="open-approval-inbox"
+            >
+              <View style={styles.staffIcon}>
+                <Ionicons name="checkmark-done-outline" size={20} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.staffTitle}>Approval Inbox</Text>
+                <Text style={styles.staffMeta}>
+                  {approverBadge.pending > 0
+                    ? `${approverBadge.pending} request${approverBadge.pending === 1 ? "" : "s"} waiting for your approval`
+                    : "You are an assigned approver for this firm"}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceTertiary} />
             </Pressable>
           </>
         ) : null}

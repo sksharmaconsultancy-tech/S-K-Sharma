@@ -495,6 +495,7 @@ export default function Dashboard() {
                     { icon: "chatbubbles-outline", label: "Helpdesk", color: "#DB2777", route: "/tickets" },
                     { icon: "mail-outline", label: "Messages", color: "#0369A1", route: "/messages" },
                     { icon: "receipt-outline", label: "Expense Claim", color: "#0D9488", route: "/my-expenses" },
+                    { icon: "airplane-outline", label: "My Tours", color: "#0369A1", route: "/my-tours" },
                     { icon: "wallet-outline", label: "Reimbursement", color: "#0D9488", route: "/my-expenses" },
                   ]}
                 />

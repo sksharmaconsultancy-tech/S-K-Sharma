@@ -1,0 +1,37 @@
+{
+  "summary": "Iter 706 — Tour Management + CL/PL Balance + Approval Workflow (employee approver) edge-case testing. Backend: 8/8 pytest edge-cases PASS (reject-requires-remarks, return→edit→resubmit, attendance conflict flag + convert_to_od + cancel-tour cleans OD punches, expense-claim guard for non-approved & out-of-window, workflow-routed approval via employee approver inbox with can_action=true, tour admin list/live/settings, eligible-for-expense, CL/PL balance-config + bulk designation apply + leave-settings save/revert). Frontend ESS PWA: employee TEST50/123456 login via Username tab OK; home shows 'My Tours' tile; /my-tours renders 9 status counters + 'New Tour' button; /tour-request renders full form (tour types, dates, destinations, business, financial, Save Draft). Admin-only /approval-workflows and /leave-balance-config correctly gate employees (redirect to /). All test data cleaned up (tours, tour_attendance, attendance OD punches, seed conflicts, TESTAPPR login on user_4111f8eea5d3, tour workflow disabled + deleted). Direct-decide fallback still functional after test.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/admin/approval-inbox", "issue": "Inbox items use key 'record_id' for the linked tour_id (no 'resource_id'/'resource_ref') — clients wiring to different modules must special-case per module. Consider a stable 'resource_id' alias for cross-module UIs."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter706_tours_and_leave_edges.py",
+    "/app/test_reports/pytest/iter706.xml"
+  ],
+  "action_items": [
+    "Optional: add 'resource_id' alias on /api/admin/approval-inbox items so consumers don't need to know each module's key name (currently only 'record_id').",
+    "Optional: leave-settings enum is 'encash' (not 'in_cash') — the frontend segmented control label reads 'In Cash' — verify the wire value sent from the CL/PL Balance UI is 'encash' to avoid a silent 400 for users."
+  ],
+  "critical_code_review_comments": [
+    "routes/tours.py is 1039 lines and combines employee endpoints, admin endpoints, OD-attendance engine and expense-guard helper — consider splitting into tours_employee.py / tours_admin.py / tours_attendance.py per <700-line guideline.",
+    "post_tour_attendance() writes two attendance docs per OD day inside the awaiting loop without a transaction; a mid-loop failure would leave partial OD posts. Wrap the per-day insert-pair in a try/except with rollback of that day, or use bulk_write.",
+    "_cancel_tour_attendance iterates tour_attendance one-by-one and issues a delete_many per document — can be a single db.attendance.delete_many({'tour_id': t['tour_id'], 'source': 'official_tour'}) + tour_attendance.update_many for O(1) round-trips."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter706_tours_and_leave_edges.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "100% ESS flows tested; admin screens verified via API"},
+  "seed_data_creation": "All test data cleaned up: 10 TEST tour_requests deleted; associated tour_attendance / tour_visits / tour_tracking_logs / tour_audit / expense_claims / attendance(source=official_tour or manual+created_by=TEST) removed; TESTAPPR login_id+pin_hash unset on user_4111f8eea5d3 (ALI HASAN 65); tour workflow deleted (approval_workflows and 2 approval_requests for module=tour) so direct-decide fallback is preserved for real users. Kankani leave-settings restored to (basic, lapse).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 706 tests live at /app/backend/tests/test_iter706_tours_and_leave_edges.py. Run: `set -a && source /app/backend/.env && set +a && pytest backend/tests/test_iter706_tours_and_leave_edges.py -v`. Uses TEST50/123456 (user_44cd6f561da0) as requester + super-admin session 'testsess_98915ef8186e483d8b6292d0b975d2f3' as approver-of-last-resort. The workflow test temporarily promotes user_4111f8eea5d3 (ALI HASAN, emp 65) as an approver by setting login_id=TESTAPPR & pin=123456 and always cleans up in a finally block. If a test crashes mid-run, restore that user with db.users.update_one({'user_id':'user_4111f8eea5d3'},{'$unset':{'login_id':'','pin_hash':''}}) and delete workflows: db.approval_workflows.delete_many({'company_id':'cmp_527fecdd7c','module':'tour'}).",
+  "rca_of_issue": "No user bug was under investigation this iteration — this was a feature-verification pass. All 3 features (Approval Workflow employee-approver, CL/PL Balance modes, Tour Management module) verified end-to-end at the API layer plus ESS UI smoke. The two initial test-script failures were self-inflicted (wrong response-key name 'resource_id' vs 'record_id'; wrong enum value 'in_cash' vs 'encash') and were corrected in the test script — the backend behaviour is correct."
+}

@@ -7,7 +7,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator,
-  TextInput, Modal, Platform, KeyboardAvoidingView,
+  TextInput, Modal, Platform, KeyboardAvoidingView, Switch,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -24,7 +24,7 @@ const PAY_MODES = ["Cash", "UPI", "Card", "Bank"];
 
 export default function ExpenseClaimForm() {
   const router = useRouter();
-  const { claim_id } = useLocalSearchParams<{ claim_id?: string }>();
+  const { claim_id, tour_id: tourParam } = useLocalSearchParams<{ claim_id?: string; tour_id?: string }>();
   const editing = !!claim_id;
 
   const [cats, setCats] = useState<any[]>([]);
@@ -40,6 +40,20 @@ export default function ExpenseClaimForm() {
   const [ocrBusy, setOcrBusy] = useState(false);
   const [saving, setSaving] = useState<"" | "draft" | "submit">("");
   const [err, setErr] = useState("");
+  // Iter 706 — Official Tour link.
+  const [officialTour, setOfficialTour] = useState(false);
+  const [tours, setTours] = useState<any[]>([]);
+  const [tourId, setTourId] = useState<string>("");
+  const [tourOpen, setTourOpen] = useState(false);
+
+  useEffect(() => {
+    if (!officialTour || tours.length) return;
+    api("/tours/eligible/for-expense").then((r) => setTours(r.tours || [])).catch(() => {});
+  }, [officialTour, tours.length]);
+  useEffect(() => {
+    if (tourParam) { setOfficialTour(true); setTourId(String(tourParam)); }
+  }, [tourParam]);
+  const selTour = tours.find((t) => t.tour_id === tourId);
 
   useEffect(() => {
     api("/expense/categories").then((r) => setCats(r.categories || [])).catch(() => {});
@@ -54,6 +68,7 @@ export default function ExpenseClaimForm() {
           description: c.description || "",
         });
         setExistingAtts(c.attachments || []);
+        if (c.is_official_tour) { setOfficialTour(true); setTourId(c.tour_id || ""); }
       }).catch(() => setErr("Could not load claim"));
     }
   }, [claim_id]);
@@ -131,10 +146,12 @@ export default function ExpenseClaimForm() {
     if (!amount || amount <= 0) { setErr("Enter a valid amount"); return; }
     if (!form.category_id) { setErr("Select a category"); return; }
     if (!form.expense_date) { setErr("Select the expense date"); return; }
+    if (officialTour && !tourId) { setErr("Select an approved Tour ID for an official tour expense"); return; }
     setSaving(thenSubmit ? "submit" : "draft");
     try {
       const body = {
         ...form, amount, gst_amount: parseFloat(form.gst_amount) || 0,
+        is_official_tour: officialTour, tour_id: officialTour ? tourId : undefined,
       };
       let id = claim_id as string;
       if (editing) {
@@ -185,6 +202,42 @@ export default function ExpenseClaimForm() {
 
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
+          {/* Iter 706 — Official Tour link */}
+          <Text style={s.secTitle}>Official Tour</Text>
+          <View style={s.tourCard}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text style={[s.fileBtnTxt, { flex: 1, color: colors.onSurface }]}>This is an official tour expense</Text>
+              <Switch value={officialTour} onValueChange={(v) => { setOfficialTour(v); if (!v) setTourId(""); }}
+                trackColor={{ true: colors.brandPrimary, false: colors.surfaceTertiary }} testID="exp-official-tour" />
+            </View>
+            {officialTour ? (
+              <>
+                <Pressable style={s.tourPick} onPress={() => setTourOpen((v) => !v)} testID="exp-tour-picker">
+                  <Ionicons name="airplane-outline" size={15} color={colors.brandPrimary} />
+                  <Text style={[s.fileBtnTxt, { flex: 1 }]}>
+                    {selTour ? `${selTour.tour_no} · ${(selTour.destinations || []).join(", ")}` : "Select approved Tour ID…"}
+                  </Text>
+                  <Ionicons name={tourOpen ? "chevron-up" : "chevron-down"} size={15} color={colors.onSurfaceTertiary} />
+                </Pressable>
+                {tourOpen ? (
+                  tours.length ? tours.map((t) => (
+                    <Pressable key={t.tour_id} style={s.tourOpt}
+                      onPress={() => { setTourId(t.tour_id); setTourOpen(false); }} testID={`exp-tour-${t.tour_no}`}>
+                      <Text style={s.tourOptT}>{t.tour_no} · {t.tour_type} · {t.start_date} → {t.end_date} ({t.status})</Text>
+                    </Pressable>
+                  )) : <Text style={s.tourInfo}>No approved tours available — a tour must be APPROVED before expenses can be claimed on it.</Text>
+                ) : null}
+                {selTour ? (
+                  <Text style={s.tourInfo}>
+                    {selTour.tour_no} · {selTour.purpose || selTour.tour_type} · {(selTour.destinations || []).join(", ")}
+                    {"\n"}{selTour.start_date} → {selTour.end_date} · Status: {selTour.status}
+                    {selTour.approved_by_name ? ` · Approved by ${selTour.approved_by_name}` : ""}
+                  </Text>
+                ) : null}
+              </>
+            ) : null}
+          </View>
+
           {/* Receipt section */}
           <Text style={s.secTitle}>Receipt</Text>
           <View style={s.fileRow}>
@@ -347,6 +400,22 @@ export default function ExpenseClaimForm() {
 }
 
 const s = StyleSheet.create({
+  // Iter 706 — Official Tour picker styles.
+  tourCard: {
+    backgroundColor: colors.surfaceSecondary, borderRadius: 12, padding: 12,
+    borderWidth: 1, borderColor: colors.border, marginBottom: 8,
+  },
+  tourPick: {
+    flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10,
+    borderWidth: 1, borderColor: colors.border, borderRadius: 10,
+    paddingHorizontal: 10, paddingVertical: 10, backgroundColor: colors.surface,
+  },
+  tourOpt: {
+    paddingVertical: 10, paddingHorizontal: 10, borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  tourOptT: { fontSize: 12.5, fontWeight: "600", color: colors.onSurface },
+  tourInfo: { fontSize: 11.5, color: colors.onSurfaceTertiary, marginTop: 8, lineHeight: 16 },
   root: { flex: 1, backgroundColor: colors.background },
   header: {
     flexDirection: "row", alignItems: "center", gap: 10,

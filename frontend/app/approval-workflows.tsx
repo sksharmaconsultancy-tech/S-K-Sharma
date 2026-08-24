@@ -81,9 +81,22 @@ export default function ApprovalWorkflows() {
 
   // Phase B — preserve SLA + condition when (re)saving level arrays.
   const strip = (ls: any[]) => ls.map((l: any) => ({
-    approver_type: l.approver_type, role_id: l.role_id,
+    approver_type: l.approver_type, role_id: l.role_id, user_id: l.user_id,
     sla_hours: l.sla_hours, condition: l.condition,
   }));
+
+  // Iter 705 — direct employee approver: search & pick.
+  const [empQ, setEmpQ] = useState("");
+  const [empResults, setEmpResults] = useState<any[]>([]);
+  const searchEmp = async (q: string) => {
+    setEmpQ(q);
+    if (q.trim().length < 2) { setEmpResults([]); return; }
+    try {
+      const r = await api<{ employees: any[] }>(
+        `/admin/approval-workflows/employee-search?company_id=${companyId}&q=${encodeURIComponent(q.trim())}`);
+      setEmpResults(r.employees || []);
+    } catch { setEmpResults([]); }
+  };
 
   const save = async (moduleKey: string, levels: any[], enabled: boolean, notify?: any) => {
     setSaving(moduleKey);
@@ -220,6 +233,32 @@ export default function ApprovalWorkflows() {
                       </Pressable>
                     ))}
                   </View>
+                  {/* Iter 705 — assign a specific employee directly */}
+                  <Text style={[s.muted, { marginTop: 10, fontWeight: "700" }]}>…or a specific employee:</Text>
+                  <TextInput
+                    value={empQ}
+                    onChangeText={searchEmp}
+                    placeholder="Search employee by name / code…"
+                    placeholderTextColor={colors.onSurfaceTertiary}
+                    style={s.empSearch}
+                    autoCapitalize="none"
+                    testID={`wf-emp-search-${m.key}`}
+                  />
+                  {empResults.length > 0 ? (
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+                      {empResults.map((e) => (
+                        <Pressable key={e.user_id} style={s.chip} testID={`wf-add-emp-${m.key}-${e.user_id}`}
+                          onPress={() => {
+                            setEmpQ(""); setEmpResults([]);
+                            save(m.key, [...strip(levels), { approver_type: "employee", user_id: e.user_id }], true);
+                          }}>
+                          <Text style={s.chipTxt}>👤 {e.name}{e.employee_code ? ` (${e.employee_code})` : ""}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  ) : empQ.trim().length >= 2 ? (
+                    <Text style={[s.muted, { marginTop: 6 }]}>No matching employee.</Text>
+                  ) : null}
                 </View>
               ) : (
                 <Pressable style={s.addBtn} onPress={() => setAddingFor(m.key)} testID={`wf-add-level-${m.key}`}>
@@ -408,6 +447,11 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center",
   },
   chipTxt: { fontSize: 12, fontWeight: "600", color: colors.onSurfaceSecondary },
+  empSearch: {
+    marginTop: 6, borderWidth: 1, borderColor: colors.border, borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 8, fontSize: 12.5,
+    color: colors.onSurface, backgroundColor: colors.surfaceSecondary,
+  },
   setRow: { marginTop: 10, gap: 4 },
   setLbl: { fontSize: 12, fontWeight: "800", color: colors.onSurface },
   setInput: {

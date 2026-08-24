@@ -33,7 +33,8 @@ export default function ApprovalInbox() {
   const role = user?.role as string;
 
   const [companyId, setCompanyId] = useState<string>(
-    role === "company_admin" ? (user?.company_id || "") : (selectedCompanyId || ""));
+    role === "company_admin" || role === "employee"
+      ? (user?.company_id || "") : (selectedCompanyId || ""));
   const [status, setStatus] = useState("pending");
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -42,7 +43,7 @@ export default function ApprovalInbox() {
 
   // Follow the global active-firm picker.
   useEffect(() => {
-    if (role !== "company_admin" && selectedCompanyId) setCompanyId(selectedCompanyId);
+    if (["super_admin", "sub_admin"].includes(role) && selectedCompanyId) setCompanyId(selectedCompanyId);
   }, [selectedCompanyId, role]);
   const load = useCallback(async () => {
     if (!companyId) { setLoading(false); return; }
@@ -93,7 +94,9 @@ export default function ApprovalInbox() {
   };
 
   if (authLoading) return null;
-  if (!user || !["super_admin", "sub_admin", "company_admin"].includes(role)) return <Redirect href="/" />;
+  // Iter 705 — employees may open the inbox too (backend scopes them to
+  // requests where they are an assigned approver).
+  if (!user || !["super_admin", "sub_admin", "company_admin", "employee"].includes(role)) return <Redirect href="/" />;
 
   const counts = data?.counts || {};
   return (
@@ -112,7 +115,7 @@ export default function ApprovalInbox() {
       </View>
 
       <ScrollView contentContainerStyle={s.body}>
-        {role !== "company_admin" ? (
+        {["super_admin", "sub_admin"].includes(role) ? (
           <View style={{ marginBottom: 12 }}>
             <CompanyPicker value={companyId} onChange={(v: any) => setCompanyId(v || "")} />
           </View>

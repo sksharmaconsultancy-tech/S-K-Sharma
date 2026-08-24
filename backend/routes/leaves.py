@@ -477,7 +477,7 @@ async def leave_balance_config(
     emps = await db.users.find(
         {"role": "employee", "company_id": company_id},
         {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1, "designation": 1,
-         "cl_allowed_override": 1, "pl_allowed_override": 1},
+         "department": 1, "cl_allowed_override": 1, "pl_allowed_override": 1},
     ).to_list(10000)
 
     def _code_key(r):
@@ -488,12 +488,27 @@ async def leave_balance_config(
             return (1, 0.0, c.lower())
 
     emps.sort(key=_code_key)
+
+    # Iter 705 — group lists for department/designation-wise bulk setting.
+    def _groups(field: str):
+        counts: Dict[str, int] = {}
+        for e in emps:
+            v = str(e.get(field) or "").strip()
+            if v:
+                counts[v] = counts.get(v, 0) + 1
+        return [{"name": k, "count": counts[k]} for k in sorted(counts, key=str.lower)]
+
     return {
         "company_id": company_id,
         "cl_default": float(lp.get("cl_day_limit") or 0),
         "pl_default": float(lp.get("pl_day_limit") or 0),
         "cl_pl_applicable": bool(lp.get("cl_pl_applicable")),
         "employees": emps,
+        "departments": _groups("department"),
+        "designations": _groups("designation"),
+        # Iter 705 — leave valuation + year-end treatment settings.
+        "leave_calc_basis": (lp.get("leave_calc_basis") or "basic"),
+        "year_end_treatment": (lp.get("year_end_treatment") or "lapse"),
     }
 
 
@@ -543,3 +558,89 @@ async def set_leave_balance(
     await db.users.update_one({"user_id": user_id}, {"$set": updates})
     return {"ok": True, **{k: v for k, v in updates.items()
                            if k.endswith("_override")}}
+
+
+async def _lb_admin_scope(authorization, company_id):
+    """Shared admin auth + firm scoping for the CL/PL config endpoints."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    if admin["role"] == "company_admin":
+        company_id = admin.get("company_id") or company_id
+    if admin["role"] == "sub_admin":
+        from server import sub_admin_can_touch_company
+        if not sub_admin_can_touch_company(admin, company_id):
+            raise HTTPException(status_code=403, detail="Firm is outside your assigned scope")
+    if not company_id:
+        raise HTTPException(status_code=400, detail="company_id is required")
+    return admin, company_id
+
+
+@router.patch("/admin/leave-balance/bulk")
+async def set_leave_balance_bulk(
+    payload: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 705 — set / clear the manual CL/PL allowance for ALL employees
+    of a department or designation in one go.
+    Body: {company_id, scope: "department"|"designation", value,
+           cl_allowed?: number|null, pl_allowed?: number|null}."""
+    admin, company_id = await _lb_admin_scope(authorization, payload.get("company_id"))
+    scope = payload.get("scope")
+    if scope not in ("department", "designation"):
+        raise HTTPException(status_code=400, detail="scope must be department|designation")
+    value = str(payload.get("value") or "").strip()
+    if not value:
+        raise HTTPException(status_code=400, detail=f"{scope} value is required")
+
+    updates: Dict[str, Any] = {}
+    for key, field in (("cl_allowed", "cl_allowed_override"),
+                       ("pl_allowed", "pl_allowed_override")):
+        if key in payload:
+            v = payload[key]
+            if v is None or v == "":
+                updates[field] = None
+            else:
+                try:
+                    v = float(v)
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail=f"{key} must be a number")
+                if v < 0 or v > 366:
+                    raise HTTPException(status_code=400, detail=f"{key} must be between 0 and 366")
+                updates[field] = v
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    updates["leave_balance_set_by"] = admin["user_id"]
+    updates["leave_balance_set_at"] = now_iso()
+    res = await db.users.update_many(
+        {"role": "employee", "company_id": company_id, scope: value},
+        {"$set": updates})
+    return {"ok": True, "matched": res.matched_count, "modified": res.modified_count}
+
+
+@router.patch("/admin/leave-settings")
+async def set_leave_settings(
+    payload: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 705 — firm-level leave valuation settings.
+    Body: {company_id, leave_calc_basis?: "basic"|"gross",
+           year_end_treatment?: "lapse"|"encash"}."""
+    admin, company_id = await _lb_admin_scope(authorization, payload.get("company_id"))
+    sets: Dict[str, Any] = {}
+    basis = payload.get("leave_calc_basis")
+    if basis is not None:
+        if basis not in ("basic", "gross"):
+            raise HTTPException(status_code=400, detail="leave_calc_basis must be basic|gross")
+        sets["leave_policy.leave_calc_basis"] = basis
+    treat = payload.get("year_end_treatment")
+    if treat is not None:
+        if treat not in ("lapse", "encash"):
+            raise HTTPException(status_code=400, detail="year_end_treatment must be lapse|encash")
+        sets["leave_policy.year_end_treatment"] = treat
+    if not sets:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    sets["leave_policy.leave_settings_updated_by"] = admin["user_id"]
+    sets["leave_policy.leave_settings_updated_at"] = now_iso()
+    await db.firm_masters.update_one(
+        {"company_id": company_id}, {"$set": sets}, upsert=True)
+    return {"ok": True}

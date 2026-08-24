@@ -20,6 +20,7 @@ Rules: maker-checker (requester cannot action own request); approver at
 current level = real company_admin / super_admin / sub_admin OR staff
 whose company_role matches the level's role_id.
 """
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -49,6 +50,8 @@ MODULES = [
     {"key": "loan", "label": "Loan"},
     {"key": "salary_revision", "label": "Salary Revision"},
     {"key": "exit", "label": "Exit / Full & Final"},
+    # Iter 706 — Official Tour Management (routes/tours.py).
+    {"key": "tour", "label": "Official Tour"},
 ]
 MODULE_KEYS = {m["key"] for m in MODULES}
 
@@ -73,6 +76,9 @@ def _user_can_action_level(user: dict, level: Dict[str, Any]) -> bool:
         return True  # firm owner can act on any level
     # Phase B — a delegated user may act on this level.
     if level.get("delegated_to") and user.get("user_id") == level.get("delegated_to"):
+        return True
+    # Iter 705 — a directly-assigned employee approver.
+    if level.get("approver_type") == "employee" and user.get("user_id") == level.get("user_id"):
         return True
     if user.get("is_company_staff") and level.get("approver_type") == "company_role":
         return user.get("company_role_id") == level.get("role_id")
@@ -230,8 +236,15 @@ async def create_approval_request(
     return out
 
 
-async def _finalize(module: str, record_id: str, approved: bool, actor: dict):
+async def _finalize(module: str, record_id: str, approved: bool, actor: dict,
+                    final_status: Optional[str] = None):
     """Apply the final decision to the underlying record."""
+    if module == "tour":
+        # Iter 706 — Official Tour: approved / rejected / returned.
+        from routes.tours import finalize_tour_approval
+        await finalize_tour_approval(
+            record_id, final_status or ("approved" if approved else "rejected"), actor)
+        return
     if module == "advance":
         from routes.advances import _audit as adv_audit  # local import, no cycle at module load
         a = await db.advances.find_one({"advance_id": record_id}, {"_id": 0})
@@ -292,9 +305,21 @@ async def save_workflow(payload: WorkflowSave, authorization: Optional[str] = He
     levels = []
     for i, lv in enumerate(payload.levels or [], start=1):
         atype = lv.get("approver_type")
-        if atype not in ("company_admin", "company_role"):
-            raise HTTPException(status_code=400, detail="approver_type must be company_admin|company_role")
+        if atype not in ("company_admin", "company_role", "employee"):
+            raise HTTPException(status_code=400,
+                                detail="approver_type must be company_admin|company_role|employee")
         entry: Dict[str, Any] = {"level": i, "approver_type": atype}
+        if atype == "employee":
+            # Iter 705 — directly-assigned employee approver.
+            emp = await db.users.find_one(
+                {"user_id": lv.get("user_id"), "company_id": cid},
+                {"_id": 0, "user_id": 1, "name": 1, "email": 1, "employee_code": 1})
+            if not emp:
+                raise HTTPException(status_code=404,
+                                    detail=f"Employee not found for level {i}")
+            entry["user_id"] = emp["user_id"]
+            entry["role_name"] = (emp.get("name") or emp.get("email") or "Employee") + (
+                f" ({emp['employee_code']})" if emp.get("employee_code") else "")
         if atype == "company_role":
             role = await db.company_roles.find_one(
                 {"role_id": lv.get("role_id"), "company_id": cid}, {"_id": 0})
@@ -362,6 +387,47 @@ async def save_workflow(payload: WorkflowSave, authorization: Optional[str] = He
 
 
 # ---------------------------------------------------------------------------
+# Iter 705 — employee picker for the workflow builder (direct approver).
+# ---------------------------------------------------------------------------
+@router.get("/approval-workflows/employee-search")
+async def wf_employee_search(
+    company_id: Optional[str] = Query(None),
+    q: str = Query(""),
+    authorization: Optional[str] = Header(None),
+):
+    admin, cid = await _admin_scoped(authorization, company_id)
+    if admin.get("is_company_staff"):
+        raise HTTPException(status_code=403, detail="Staff accounts cannot manage workflows")
+    qq = (q or "").strip()
+    if len(qq) < 2:
+        return {"employees": []}
+    rx = {"$regex": re.escape(qq), "$options": "i"}
+    emps = await db.users.find(
+        {"company_id": cid, "role": {"$in": ["employee", "company_staff"]},
+         "$or": [{"name": rx}, {"employee_code": rx}, {"email": rx}]},
+        {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1},
+    ).sort("name", 1).to_list(20)
+    return {"employees": emps}
+
+
+# ---------------------------------------------------------------------------
+# Iter 705 — ESS badge: is this employee an assigned approver + pending count.
+# ---------------------------------------------------------------------------
+@router.get("/approval-inbox/badge")
+async def approval_inbox_badge(authorization: Optional[str] = Header(None)):
+    user = await get_user_from_token(authorization)
+    if user.get("role") != "employee" or not user.get("company_id"):
+        return {"is_approver": False, "pending": 0}
+    me, cid = user["user_id"], user["company_id"]
+    is_approver = await db.approval_workflows.count_documents(
+        {"company_id": cid, "enabled": True, "levels.user_id": me}) > 0
+    pending = await db.approval_requests.count_documents(
+        {"company_id": cid, "status": {"$in": ["pending", "on_hold"]},
+         "$or": [{"levels.user_id": me}, {"levels.delegated_to": me}]})
+    return {"is_approver": bool(is_approver or pending), "pending": pending}
+
+
+# ---------------------------------------------------------------------------
 # Phase C — workflow versioning + notification helper
 # ---------------------------------------------------------------------------
 @router.get("/approval-workflows/{module}/versions")
@@ -403,6 +469,7 @@ async def workflow_restore(module: str, payload: Dict[str, Any] = Body(...),
     save_payload = WorkflowSave(
         company_id=cid, module=module, enabled=bool(snap.get("enabled")),
         levels=[{"approver_type": l.get("approver_type"), "role_id": l.get("role_id"),
+                 "user_id": l.get("user_id"),
                  "sla_hours": l.get("sla_hours"), "condition": l.get("condition")}
                 for l in snap.get("levels") or []],
         notify=snap.get("notify"))
@@ -460,10 +527,24 @@ async def approval_inbox(
     status: str = Query("pending"),
     authorization: Optional[str] = Header(None),
 ):
-    admin, cid = await _admin_scoped(authorization, company_id)
+    # Iter 705 — employee approvers may open the inbox (scoped to requests
+    # where they are an assigned approver / delegate / past actor).
+    user = await get_user_from_token(authorization)
+    mine_or: Optional[List[Dict[str, Any]]] = None
+    if user.get("role") == "employee":
+        if not user.get("company_id"):
+            raise HTTPException(status_code=400, detail="No firm linked to your account")
+        admin, cid = user, user["company_id"]
+        mine_or = [{"levels.user_id": user["user_id"]},
+                   {"levels.delegated_to": user["user_id"]},
+                   {"history.by": user["user_id"]}]
+    else:
+        admin, cid = await _admin_scoped(authorization, company_id)
     # Phase B — lazy SLA auto-escalation before listing.
     escalated_now = await _auto_escalate_overdue(cid)
     q: Dict[str, Any] = {"company_id": cid}
+    if mine_or:
+        q["$or"] = mine_or
     if status and status != "all":
         q["status"] = "pending" if status == "on_hold" else status
         if status == "on_hold":
@@ -482,12 +563,12 @@ async def approval_inbox(
             and r.get("requested_by") != admin.get("user_id")  # maker-checker
         )
         out.append(r)
+    base: Dict[str, Any] = {"company_id": cid}
+    if mine_or:
+        base["$or"] = mine_or
     counts = {
-        "pending": await db.approval_requests.count_documents({"company_id": cid, "status": "pending"}),
-        "on_hold": await db.approval_requests.count_documents({"company_id": cid, "status": "on_hold"}),
-        "approved": await db.approval_requests.count_documents({"company_id": cid, "status": "approved"}),
-        "rejected": await db.approval_requests.count_documents({"company_id": cid, "status": "rejected"}),
-        "returned": await db.approval_requests.count_documents({"company_id": cid, "status": "returned"}),
+        st: await db.approval_requests.count_documents({**base, "status": st})
+        for st in ("pending", "on_hold", "approved", "rejected", "returned")
     }
     return {"requests": out, "counts": counts, "auto_escalated_now": escalated_now}
 
@@ -499,11 +580,11 @@ async def action_request(
     authorization: Optional[str] = Header(None),
 ):
     admin = await get_user_from_token(authorization)
-    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    require_role(admin, ["super_admin", "sub_admin", "company_admin", "employee"])
     r = await db.approval_requests.find_one({"request_id": request_id}, {"_id": 0})
     if not r:
         raise HTTPException(status_code=404, detail="Request not found")
-    if admin["role"] == "company_admin" and admin.get("company_id") != r.get("company_id"):
+    if admin["role"] in ("company_admin", "employee") and admin.get("company_id") != r.get("company_id"):
         raise HTTPException(status_code=403, detail="Not your firm")
     if admin["role"] == "sub_admin" and not sub_admin_can_touch_company(admin, r.get("company_id")):
         raise HTTPException(status_code=403, detail="Firm outside your scope")
@@ -598,7 +679,8 @@ async def action_request(
 
     if updates.get("status") in ("approved", "rejected", "returned"):
         await _finalize(r["module"], r["record_id"],
-                        approved=updates["status"] == "approved", actor=admin)
+                        approved=updates["status"] == "approved", actor=admin,
+                        final_status=updates["status"])
         # Phase C — notify the requester per workflow notification rules.
         await _wf_notify(r["company_id"], r["module"], updates["status"], r,
                          remarks or "")
