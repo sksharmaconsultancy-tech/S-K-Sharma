@@ -8447,3 +8447,4 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   Official Tour switch + eligible tour picker (/tours/eligible/for-expense),
   ?tour_id= preselect. Backend flow e2e tested (14 checks PASS), test data
   cleaned after.
+- Iter 706 deploy: deploy_vps_iter706.sh created (header EN for 705/706, badge checks tours/leave/approver, sw v23, APP_ITERATION=706, temp_bundle kind=script→deploy706.sh).

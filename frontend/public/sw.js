@@ -7,7 +7,7 @@
  *     (Iter 291: fixes "PWA sometimes won't open" on weak connections).
  *   • static assets (js/css/img)   → stale-while-revalidate.
  */
-const CACHE = "sks-pwa-v22"; // Iter 704 — ESIC challan record + Smart Payroll rename
+const CACHE = "sks-pwa-v23"; // Iter 706 — Tour Management + employee approver + CL/PL modes
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
