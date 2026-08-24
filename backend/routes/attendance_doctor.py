@@ -285,6 +285,8 @@ async def auto_repair_attendance(
                 {"attendance_id": r["attendance_id"]},
                 {"$set": {"date": r["new_date"], "repair_tag": tag}})
     result["applied_tag"] = tag
+    from server import invalidate_grid_cache
+    invalidate_grid_cache(body.company_id)
     return result
 
 
@@ -303,4 +305,6 @@ async def undo_repair(
         {"user_id": {"$in": uids}, "status": "auto_ignored",
          "date": {"$gte": f"{body.month}-01", "$lte": f"{body.month}-31"}},
         {"$set": {"status": "approved"}, "$unset": {"repair_tag": ""}})
+    from server import invalidate_grid_cache
+    invalidate_grid_cache(body.company_id)
     return {"ok": True, "restored": r.modified_count}

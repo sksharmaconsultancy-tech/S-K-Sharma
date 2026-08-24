@@ -10477,6 +10477,30 @@ _MG_STALE_MAX = 1800.0          # serve stale instantly up to 30 min old
 _MG_REFRESHING: set = set()     # in-flight background refreshes
 
 
+def invalidate_grid_cache(company_id: str) -> None:
+    """Iter 710 — drop cached grids for a firm after ANY manual punch /
+    OT repair so duty HRS recalculates immediately (user bug report)."""
+    for k in list(_MG_CACHE.keys()):
+        if k.startswith(f"{company_id}|"):
+            _MG_CACHE.pop(k, None)
+
+
+async def _mg_dirty(company_id: str, since_epoch: float) -> bool:
+    """Cheap probe: was ANY attendance record inserted after the cache was
+    built? Catches punch repairs / manual punches / OT additions / imports."""
+    try:
+        doc = await db.attendance.find_one(
+            {"company_id": company_id}, {"_id": 0, "created_at": 1},
+            sort=[("created_at", -1)])
+        if not doc or not doc.get("created_at"):
+            return False
+        ts = datetime.fromisoformat(
+            str(doc["created_at"]).replace("Z", "+00:00")).timestamp()
+        return ts > since_epoch
+    except Exception:
+        return False
+
+
 async def _compute_monthly_grid_data(
     company_id: str,
     month: str,
@@ -10486,6 +10510,12 @@ async def _compute_monthly_grid_data(
 ):
     _key = f"{company_id}|{month}|{group_id or ''}|{from_date or ''}|{to_date or ''}"
     _hit = _MG_CACHE.get(_key)
+    if _hit:
+        # Iter 710 — a fresh punch (repair/manual/OT/import) written AFTER
+        # the cache was built must recompute NOW, not after the TTL.
+        if await _mg_dirty(company_id, _hit[0]):
+            invalidate_grid_cache(company_id)
+            _hit = None
     if _hit:
         _age = _time_mod.time() - _hit[0]
         if _age < _MG_TTL_SEC:

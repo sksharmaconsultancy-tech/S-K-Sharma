@@ -1757,6 +1757,9 @@ async def edit_attendance_record(
         {"record_id": record_id}, {"_id": 0, "selfie_base64": 0}
     )
     await _log_punch_audit("edit", admin, record_id, rec, new_rec, reason)
+    # Iter 710 — recalc duty HRS immediately in reports after a punch edit.
+    from server import invalidate_grid_cache
+    invalidate_grid_cache(rec.get("company_id") or "")
     return {"ok": True, "record": new_rec}
 
 
@@ -1788,6 +1791,9 @@ async def delete_attendance_record(
 
     await db.attendance.delete_one({"record_id": record_id})
     await _log_punch_audit("delete", admin, record_id, rec, None, reason)
+    # Iter 710 — recalc duty HRS immediately in reports after a punch delete.
+    from server import invalidate_grid_cache
+    invalidate_grid_cache(rec.get("company_id") or "")
     return {"ok": True, "deleted_record_id": record_id}
 
 

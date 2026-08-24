@@ -8502,3 +8502,16 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   permission map. Verified: June 2026 gross ₹11.18L renders in trend/dept;
   screenshot OK.
 - Iter 709 deploy: deploy_vps_iter709.sh (badge 709, sw v25, analytics checks; kind=script→deploy709.sh).
+- Iter 710 — BUG FIX (user: manual punch/OT repair not updating duty HRS):
+  Root cause = _MG_CACHE served stale grid up to 30 min after attendance
+  writes. Fix in server.py: (1) invalidate_grid_cache(company_id) helper;
+  (2) _mg_dirty() cheap probe on cache hit — newest attendance.created_at
+  vs cache build time → catches ALL insert paths (manual punch, repair,
+  OT, imports) and recomputes immediately; (3) explicit invalidation wired
+  into punch EDIT (attendance_admin_core PUT), punch DELETE, attendance
+  doctor /repair apply + /repair/undo (update-only paths the probe can't
+  see). Verified: insert missing OUT punch → grid shows duty 8.0h in
+  0.33s. ALSO diagnosed the underlying "--" HRS: days with a SINGLE punch
+  (missing biometric punch, 189 cells in July for Kankani) — awaiting user
+  choice on single-punch policy (zero / half-day / assume shift / firm
+  setting), question already asked.
