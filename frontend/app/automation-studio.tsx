@@ -248,13 +248,14 @@ export default function AutomationStudioScreen() {
     };
   }, []);
 
-  const openEpfoPc = async (action?: string, flowLabel?: string, runIdArg?: string) => {
+  const openEpfoPc = async (action?: string, flowLabel?: string, runIdArg?: string, portalKey: "epfo" | "esic" = "epfo") => {
+    const P = portalKey.toUpperCase();
     if (Platform.OS !== "web") {
       setPcStatus("Open the portal on a computer (Chrome/Edge) to use this.");
       return;
     }
     if (!companyId) {
-      setPcStatus("Select a firm above first, then click Open EPFO Portal.");
+      setPcStatus(`Select a firm above first, then click Open ${P} Portal.`);
       return;
     }
     if (pcPollRef.current) { clearInterval(pcPollRef.current); pcPollRef.current = null; }
@@ -270,7 +271,7 @@ export default function AutomationStudioScreen() {
       try {
         const lt = await api<any>("/admin/portal-automation/launch-token", {
           method: "POST",
-          body: JSON.stringify({ company_id: companyId, run_id: runIdArg || undefined }),
+          body: JSON.stringify({ company_id: companyId, run_id: runIdArg || undefined, portal: portalKey }),
         });
         launchTok = lt?.token || "";
         // Iter 692 — the backend now pre-checks THIS firm's EPFO login and
@@ -279,7 +280,7 @@ export default function AutomationStudioScreen() {
         // time and only shows a generic message.
         if (lt && lt.creds_found === false) {
           const firm = lt.creds_firm_name ? ` (${lt.creds_firm_name})` : "";
-          setPcStatus(`❌ EPFO login problem${firm}: ${lt.creds_diagnosis || "no saved login found."}`);
+          setPcStatus(`❌ ${P} login problem${firm}: ${lt.creds_diagnosis || "no saved login found."}`);
           setPcBusy("");
           return;
         }
@@ -288,7 +289,7 @@ export default function AutomationStudioScreen() {
           credsWarn = lt.creds_warning || "";
           setDupWarn(credsWarn);
           setPcStatus(
-            `✅ EPFO login found${lt.creds_firm_name ? ` for ${lt.creds_firm_name}` : ""}: ${credsUser} (${lt.creds_source}). Opening Chrome...`
+            `✅ ${P} login found${lt.creds_firm_name ? ` for ${lt.creds_firm_name}` : ""}: ${credsUser} (${lt.creds_source}). Opening Chrome...`
             + (credsWarn ? `\n${credsWarn}` : ""));
         }
       } catch (e: any) {
@@ -310,7 +311,7 @@ export default function AutomationStudioScreen() {
       }
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 3000);
-      const url = "http://127.0.0.1:8765/login?portal=epfo_open"
+      const url = `http://127.0.0.1:8765/login?portal=${portalKey}_open`
         + `&token=${encodeURIComponent(launchTok)}`
         + (action ? `&action=${encodeURIComponent(action)}` : "")
         + (runIdArg ? `&run_id=${encodeURIComponent(runIdArg)}` : "");
@@ -351,10 +352,10 @@ export default function AutomationStudioScreen() {
       const act = flowLabel ? `"${flowLabel}"` : "page";
       const MAP: Record<string, string> = {
         starting: "Starting Chrome...",
-        opening: "Opening EPFO Portal...",
-        retrying: "⏳ EPFO server busy (503) — auto-retrying, please wait...",
-        await_captcha: `⌨ Login filled ✓${who} — type the CAPTCHA now, Sign In will click automatically`,
-        signed_in: "✅ Sign In clicked — check the portal",
+        opening: `Opening ${P} Portal...`,
+        retrying: `⏳ ${P} server busy — auto-retrying, please wait...`,
+        await_captcha: `⌨ Login filled ✓${who} — type the CAPTCHA now, ${portalKey === "esic" ? "Login" : "Sign In"} will click automatically`,
+        signed_in: `✅ ${portalKey === "esic" ? "Login" : "Sign In"} clicked — check the portal`,
         wait_login: "⏳ Waiting for the login to complete — type the OTP too if the portal asks...",
         navigating: `✅ Logged in — opening ${act}...`,
         action_open: `✅ ${act} is OPEN — continue in the Chrome window`,
@@ -362,9 +363,10 @@ export default function AutomationStudioScreen() {
         ecr_fetch: "⏳ Downloading this month's PF ECR file...",
         ecr_attached: "✅ ECR file ATTACHED — review the page and click Upload on the portal yourself",
         ecr_manual: "⚠ Page open but the ECR file could not be auto-attached — the Runner window shows the file location; attach it manually",
-        open: `✅ EPFO Portal Open — login filled${who}, enter CAPTCHA & Sign In`,
-        open_nocreds:
-          "⚠ Portal opened but NO EPFO login is saved for THIS firm. Go to Firm Master → EPF Registration → fill EPF User ID + EPF Password → Save, then click again.",
+        open: `✅ ${P} Portal Open — login filled${who}, enter CAPTCHA & ${portalKey === "esic" ? "Login" : "Sign In"}`,
+        open_nocreds: portalKey === "esic"
+          ? "⚠ Portal opened but NO ESIC login is saved for THIS firm. Go to Firm Master → ESI Registration → fill ESI User ID + ESI Password → Save, then click again."
+          : "⚠ Portal opened but NO EPFO login is saved for THIS firm. Go to Firm Master → EPF Registration → fill EPF User ID + EPF Password → Save, then click again.",
         open_nofield:
           "⚠ Portal opened but the login boxes weren't filled (page was still loading or a popup blocked it). Type login manually, or reload & retry.",
         closed: "Browser Closed",
@@ -450,16 +452,18 @@ export default function AutomationStudioScreen() {
       return;
     }
     setErr("");
-    if (portal === "epfo") {
+    if (portal === "epfo" || portal === "esic") {
       // New unified path: run on the operator's PC Chrome via the Runner.
-      const act = EPFO_PC_ACTION[flow] ?? "";
+      // Iter 700 — ESIC uses the SAME process (fill Username/LIN + Password
+      // from Firm Master → ESI Registration; user types CAPTCHA; auto Login).
+      const act = portal === "epfo" ? (EPFO_PC_ACTION[flow] ?? "") : "";
       // Iter 699 — ECR Upload needs the month so the runner can fetch and
       // attach THAT month's ready PF ECR file.
       if (act === "ecr" && activeFlow?.needs_run && !runId) {
         setErr("Select the month (Compliance Process) first — the runner attaches that month's ECR file.");
         return;
       }
-      await openEpfoPc(act, activeFlow?.label || flow, act === "ecr" ? runId : undefined);
+      await openEpfoPc(act, activeFlow?.label || flow, act === "ecr" ? runId : undefined, portal);
       return;
     }
     setBusy(true);
@@ -863,7 +867,7 @@ export default function AutomationStudioScreen() {
               </Pressable>
 
               {/* Iter 691 — 🔐 Open EPFO Portal (ChromeDriver, OPEN-ONLY) */}
-              {portal === "epfo" && (
+              {(portal === "epfo" || portal === "esic") && (
                 <View style={st.pcBox}>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                     <Ionicons name="logo-chrome" size={16} color="#059669" />
@@ -872,7 +876,7 @@ export default function AutomationStudioScreen() {
                   <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
                     <Pressable
                       style={[st.pcBtn, pcBusy === "open" && { opacity: 0.6 }]}
-                      onPress={() => openEpfoPc()}
+                      onPress={() => openEpfoPc(undefined, undefined, undefined, portal as "epfo" | "esic")}
                       disabled={pcBusy === "open"}
                       testID="as-open-epfo-pc"
                     >
@@ -881,7 +885,7 @@ export default function AutomationStudioScreen() {
                       ) : (
                         <Ionicons name="lock-closed" size={14} color="#fff" />
                       )}
-                      <Text style={st.pcBtnTxt}>Open EPFO Portal</Text>
+                      <Text style={st.pcBtnTxt}>Open {portal.toUpperCase()} Portal</Text>
                     </Pressable>
                     <Pressable
                       style={[st.pcBtn, { backgroundColor: "#B45309" }, pcBusy === "runner" && { opacity: 0.6 }]}

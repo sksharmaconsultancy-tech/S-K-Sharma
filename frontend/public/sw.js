@@ -7,7 +7,7 @@
  *     (Iter 291: fixes "PWA sometimes won't open" on weak connections).
  *   • static assets (js/css/img)   → stale-while-revalidate.
  */
-const CACHE = "sks-pwa-v17"; // Iter 699 — ECR auto-attach + flow rename
+const CACHE = "sks-pwa-v18"; // Iter 700 — ESIC same login process
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();

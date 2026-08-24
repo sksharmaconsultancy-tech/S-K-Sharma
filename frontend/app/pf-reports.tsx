@@ -101,18 +101,16 @@ export default function PfReportsScreen() {
       let credsUser = "";
       try {
         const t = await api<any>(
-          `/admin/portal-automation/launch-token?company_id=${encodeURIComponent(companyId)}`,
+          `/admin/portal-automation/launch-token?company_id=${encodeURIComponent(companyId)}&portal=${portalKey}`,
           { method: "POST", body: {} });
         token = t?.token || "";
-        if (portalKey === "epfo") {
-          if (t && t.creds_found === false) {
-            setLoginMsg(`❌ EPFO login problem${t.creds_firm_name ? ` (${t.creds_firm_name})` : ""}: ${t.creds_diagnosis || "no saved login found."}`);
-            return;
-          }
-          if (t && t.creds_found === true) {
-            credsUser = t.creds_user_id || "";
-            if (t.creds_warning) setLoginMsg(t.creds_warning);
-          }
+        if (t && t.creds_found === false) {
+          setLoginMsg(`❌ ${portalKey.toUpperCase()} login problem${t.creds_firm_name ? ` (${t.creds_firm_name})` : ""}: ${t.creds_diagnosis || "no saved login found."}`);
+          return;
+        }
+        if (t && t.creds_found === true) {
+          credsUser = t.creds_user_id || "";
+          if (t.creds_warning) setLoginMsg(t.creds_warning);
         }
       } catch (e: any) {
         // Iter 695 — NEVER fall back to the baked token: it belongs to the
@@ -131,7 +129,7 @@ export default function PfReportsScreen() {
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 2500);
         const r = await fetch(
-          `http://127.0.0.1:8765/login?portal=${portalKey}&token=${encodeURIComponent(token)}`,
+          `http://127.0.0.1:8765/login?portal=${portalKey}_open&token=${encodeURIComponent(token)}`,
           { signal: ctrl.signal });
         clearTimeout(timer);
         if (r.ok) {

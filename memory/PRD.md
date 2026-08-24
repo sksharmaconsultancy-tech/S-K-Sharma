@@ -8328,3 +8328,21 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   safety note REMOVED (old server-side RPA ke leftovers the); unused
   st.safety style bhi hataya. Start Automation button barkarar. Same
   badge 699 / deploy699 me shamil.
+- Iter 700 (user request — ESIC same process): (1) RUNNER v26: naya
+  "esic_open" flow (epfo_open jaisa, self-contained) — ESIC Employer login
+  page kholta hai, transient gateway errors par retry, password box 60s
+  wait, Username/LIN = ESI User ID + Password = ESI Password JS-fill
+  (heuristic selectors: id/name *user*/*lin*, fallback first text input),
+  captcha box watch (id/name *captcha*/*code*, 4+ chars + 1.5s idle, 3min
+  grace) → Login auto-click (#btnlogin/submit/xpath 'login'). Statuses
+  epfo wale hi reuse. (2) Backend: _diagnose_esic_creds (esi section +
+  "ESI Login" row, email/decrypt/missing cases); launch-token portal param
+  (body + query dono). _fetch_creds esic pehle se supported tha.
+  (3) Frontend automation-studio: openEpfoPc(action,label,runId,portalKey)
+  generalized; start() esic bhi PC-runner route (action="" — sirf login);
+  pcBox ab dono portals par, button "Open {PORTAL} Portal"; MAP messages
+  portal-aware (Login vs Sign In). pf-reports: esic bhi ${portalKey}_open +
+  launch-token me &portal= + diagnosis दोनों portals. Verified e2e: esic
+  diagnosis body/query, runner creds esic, no-login case. sw v18, badge
+  700, deploy_vps_iter700.sh, kind=script→deploy700. Runner v26 ke liye
+  install_autostart.bat dobara.

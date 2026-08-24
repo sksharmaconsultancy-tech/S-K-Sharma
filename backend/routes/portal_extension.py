@@ -343,6 +343,59 @@ async def _diagnose_epfo_creds(company_id: str) -> Dict[str, Any]:
             "firm_name": firm_name, "diagnosis": d}
 
 
+async def _diagnose_esic_creds(company_id: str) -> Dict[str, Any]:
+    """Iter 700 — same on-screen diagnosis for the ESIC login (ESI User ID
+    + ESI Password from Firm Master → ESI Registration / "ESI Login" row)."""
+    from utils.secrets_vault import decrypt_secret
+    fm = await db.firm_masters.find_one(
+        {"company_id": company_id},
+        {"_id": 0, "portal_logins": 1, "esi": 1, "firm_name": 1, "header": 1})
+    comp = await db.companies.find_one(
+        {"company_id": company_id}, {"_id": 0, "name": 1})
+    firm_name = (comp or {}).get("name") or ""
+    if not fm:
+        return {"found": False, "user_id": "", "source": "",
+                "firm_name": firm_name, "warning": "",
+                "diagnosis": ("Firm Master has not been saved for this firm "
+                              "yet. Open Firm Master → ESI Registration, fill "
+                              "ESI User ID + ESI Password and click Save.")}
+    esi = fm.get("esi") or {}
+    u1 = (esi.get("esi_user_id") or "").strip()
+    p1_raw = esi.get("esi_password")
+    p1 = (decrypt_secret(p1_raw) or "").strip()
+    if u1 and "@" not in u1 and p1:
+        return {"found": True, "user_id": u1, "source": "ESI Registration",
+                "firm_name": firm_name, "warning": "", "diagnosis": ""}
+    u2, p2_raw, p2 = "", None, ""
+    for row in (fm.get("portal_logins") or []):
+        if row.get("login_type") == "ESI Login":
+            u2 = (row.get("user_name") or "").strip()
+            p2_raw = row.get("password")
+            p2 = (decrypt_secret(p2_raw) or "").strip()
+            break
+    if u2 and "@" not in u2 and p2:
+        return {"found": True, "user_id": u2,
+                "source": "Portal Logins (ESI Login)",
+                "firm_name": firm_name, "warning": "", "diagnosis": ""}
+    if (u1 and "@" in u1) or (u2 and "@" in u2):
+        d = ("An EMAIL is saved as the ESI User ID — the ESIC Username/LIN "
+             "is the establishment login code, not an email. Enter the "
+             "correct ESI User ID in Firm Master → ESI Registration and Save.")
+    elif (u1 and p1_raw and not p1) or (u2 and p2_raw and not p2):
+        d = ("The ESI Password is saved but cannot be decrypted (the server's "
+             "security key has changed). Simply RE-TYPE the ESI Password in "
+             "Firm Master → ESI Registration and click Save.")
+    elif (u1 and not p1_raw) or (u2 and not p2_raw):
+        d = ("The ESI User ID is saved but the ESI PASSWORD is empty. Fill "
+             "the ESI Password in Firm Master → ESI Registration and Save.")
+    else:
+        d = ("No ESIC login is saved for this firm. Open Firm Master → ESI "
+             "Registration, fill ESI User ID + ESI Password, click Save, "
+             "then press this button again.")
+    return {"found": False, "user_id": "", "source": "",
+            "firm_name": firm_name, "warning": "", "diagnosis": d}
+
+
 @router.get("/admin/portal-automation/creds-debug")
 async def creds_debug(
     company_id: str = "",
@@ -498,7 +551,7 @@ async def ext_ecr_file(token: str, run_id: str = ""):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "25"
+RUNNER_VERSION = "26"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -509,7 +562,7 @@ import time
 import urllib.error
 import urllib.request
 
-RUNNER_BUILD = "25"
+RUNNER_BUILD = "26"
 
 PORTALS = {
     "esic": "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx",
@@ -636,6 +689,244 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None, action=None):
         print("the captcha and click Login.")
         print("=" * 60)
         HTTPServer(("127.0.0.1", 8765), _H).serve_forever()
+        return
+
+    # Iter 700 (user request) — ESIC portal, SAME process as EPFO: open the
+    # ESIC employer login page, auto-fill Username/LIN (= ESI User ID) and
+    # Password (= ESI Password) from Firm Master -> ESI Registration, wait
+    # for the user to type the CAPTCHA, then auto-click Login. CAPTCHA/OTP
+    # are NEVER bypassed.
+    if portal in ("esic_open", "open_esic"):
+        def _st(s):
+            if job_id:
+                JOB_STATUS[job_id] = s
+        _st("starting")
+        print("Starting Chrome (ESIC)...")
+        from selenium.webdriver.chrome.options import Options
+        opts = Options()
+        opts.add_experimental_option("detach", True)
+        opts.add_argument("--start-maximized")
+        try:
+            opts.add_experimental_option(
+                "excludeSwitches", ["enable-automation"])
+            opts.add_experimental_option("useAutomationExtension", False)
+            opts.add_argument("--disable-blink-features=AutomationControlled")
+            opts.add_argument(
+                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/128.0.0.0 Safari/537.36")
+            opts.add_argument("--disable-infobars")
+            opts.add_experimental_option("prefs", {
+                "credentials_enable_service": False,
+                "profile.password_manager_enabled": False,
+                "profile.password_manager_leak_detection": False,
+                "autofill.profile_enabled": False,
+                "autofill.credit_card_enabled": False,
+            })
+            opts.add_argument("--guest")
+        except Exception:
+            pass
+        try:
+            driver = _fresh_driver(opts)
+        except Exception as e:
+            _st("error: chrome did not start (%s)" % str(e)[:100])
+            print("Chrome did not start:", e)
+            return
+        # Fetch THIS firm's ESIC login (token-bound).
+        _creds = {}
+        _cred_note = ""
+        try:
+            with urllib.request.urlopen(
+                "%s/api/portal-ext/creds?token=%s&portal=esic"
+                % (API_BASE, TOKEN), timeout=30) as _r:
+                _cj = json.load(_r)
+            if _cj.get("ok") and _cj.get("user_id"):
+                _creds = _cj
+                print("ESIC login fetched from Firm Master (User ID: %s)."
+                      % _cj.get("user_id"))
+            else:
+                _cred_note = "nocreds"
+                print("NOTE: no ESIC login saved for this firm (%s)."
+                      % (_cj.get("detail") or "add it in Firm Master"))
+        except Exception as _e:
+            _cred_note = "nocreds"
+            print("NOTE: could not fetch the ESIC login (%s)." % _e)
+        try:
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            _st("opening")
+            print("Opening the ESIC Employer Portal...")
+            driver.get(PORTALS["esic"])
+            # Retry through transient gateway errors for up to ~2 minutes.
+            for _i in range(24):
+                try:
+                    _src = (driver.page_source or "").lower()
+                except Exception:
+                    _src = ""
+                if ("service unavailable" in _src or "bad gateway" in _src
+                        or "504 gateway" in _src):
+                    _st("retrying")
+                    print("ESIC server busy - auto-retrying...")
+                    time.sleep(5)
+                    try:
+                        driver.get(PORTALS["esic"])
+                    except Exception:
+                        pass
+                else:
+                    break
+            # Wait for the login form (a password box) to render.
+            _pass_el = None
+            for _i in range(60):
+                try:
+                    _els = [x for x in driver.find_elements(
+                        By.CSS_SELECTOR, "input[type='password']")
+                        if x.is_displayed()]
+                    if _els:
+                        _pass_el = _els[0]
+                        break
+                except Exception:
+                    pass
+                time.sleep(1)
+            if _pass_el is None:
+                _st("open_nofield")
+                print("Login form not found - type the login manually.")
+            elif not _creds.get("user_id"):
+                _st("open_nocreds")
+                print("No ESIC login saved for this firm - fill Firm Master "
+                      "-> ESI Registration -> ESI User ID + ESI Password.")
+            else:
+                # Username/LIN box: prefer user/lin-named inputs, else the
+                # first visible text input on the form.
+                _user_el = None
+                for _sel in ("input[id*='user' i]:not([type='password'])",
+                             "input[name*='user' i]:not([type='password'])",
+                             "input[id*='lin' i]:not([type='password'])",
+                             "input[name*='lin' i]:not([type='password'])"):
+                    try:
+                        _els = [x for x in driver.find_elements(
+                            By.CSS_SELECTOR, _sel) if x.is_displayed()]
+                        if _els:
+                            _user_el = _els[0]
+                            break
+                    except Exception:
+                        continue
+                if _user_el is None:
+                    try:
+                        _els = [x for x in driver.find_elements(
+                            By.CSS_SELECTOR,
+                            "input[type='text'], input:not([type])")
+                            if x.is_displayed()]
+                        if _els:
+                            _user_el = _els[0]
+                    except Exception:
+                        pass
+
+                def _set_val(el, val):
+                    try:
+                        driver.execute_script(
+                            "arguments[0].value='';"
+                            "arguments[0].value=arguments[1];"
+                            "arguments[0].dispatchEvent("
+                            "new Event('input',{bubbles:true}));"
+                            "arguments[0].dispatchEvent("
+                            "new Event('change',{bubbles:true}));",
+                            el, val)
+                        return True
+                    except Exception:
+                        try:
+                            el.clear()
+                            el.send_keys(val)
+                            return True
+                        except Exception:
+                            return False
+
+                _f1 = _user_el is not None and _set_val(
+                    _user_el, _creds["user_id"])
+                _f2 = _set_val(_pass_el, _creds["password"])
+                if _f1 and _f2:
+                    _st("await_captcha")
+                    print("Login filled (Username/LIN + Password) - type the "
+                          "CAPTCHA now; Login clicks automatically.")
+                    # Watch the captcha box; after 4+ chars and a short
+                    # pause, click Login. Grace timeout ~3 minutes.
+                    _clicked = False
+                    _typed = False
+                    _stable = 0
+                    _last = ""
+                    for _i in range(180):
+                        time.sleep(1)
+                        try:
+                            _cap = None
+                            for _cs in ("input[id*='captcha' i]",
+                                        "input[name*='captcha' i]",
+                                        "input[id*='code' i]"):
+                                _cels = [x for x in driver.find_elements(
+                                    By.CSS_SELECTOR, _cs) if x.is_displayed()]
+                                if _cels:
+                                    _cap = _cels[0]
+                                    break
+                            if _cap is None:
+                                continue
+                            _v = (_cap.get_attribute("value") or "").strip()
+                            if len(_v) >= 4:
+                                _typed = True
+                                if _v == _last:
+                                    _stable += 1
+                                else:
+                                    _stable = 0
+                                _last = _v
+                                if _stable >= 1:   # ~1.5s idle after typing
+                                    break
+                        except Exception:
+                            pass
+                    try:
+                        _btns = []
+                        for _bs in ("#btnlogin", "input[type='submit']",
+                                    "button[type='submit']"):
+                            _btns = [x for x in driver.find_elements(
+                                By.CSS_SELECTOR, _bs) if x.is_displayed()]
+                            if _btns:
+                                break
+                        if not _btns:
+                            _btns = [x for x in driver.find_elements(
+                                By.XPATH,
+                                "//button[contains(translate(.,'LOGIN','login')"
+                                ",'login')] | //input[contains(translate("
+                                "@value,'LOGIN','login'),'login')]")
+                                if x.is_displayed()]
+                        if _btns and _typed:
+                            try:
+                                _btns[0].click()
+                            except Exception:
+                                driver.execute_script(
+                                    "arguments[0].click();", _btns[0])
+                            _clicked = True
+                    except Exception:
+                        pass
+                    if _clicked:
+                        _st("signed_in")
+                        print("Clicked Login - continue on the portal.")
+                    else:
+                        _st("open")
+                        print("Login filled - type the CAPTCHA and click "
+                              "Login yourself.")
+                else:
+                    _st("open_nofield")
+                    print("Could not fill the login boxes - type them "
+                          "manually.")
+        except Exception as e:
+            _st("error: portal did not load (%s)" % str(e)[:120])
+            print("ESIC portal did not load:", e)
+            return
+        while True:
+            time.sleep(2)
+            try:
+                if not driver.window_handles:
+                    break
+            except Exception:
+                break
+        _st("closed")
+        print("Browser closed.")
         return
 
     # Iter 691 (user request) — OPEN-ONLY: start ChromeDriver, open a new
@@ -2108,6 +2399,7 @@ async def runner_script(token: str):
 async def portal_launch_token(
     payload: Optional[Dict[str, Any]] = None,
     company_id: Optional[str] = Query(None),
+    portal: Optional[str] = Query(None),
     authorization: Optional[str] = Header(None),
 ):
     admin = await get_user_from_token(authorization)
@@ -2123,10 +2415,15 @@ async def portal_launch_token(
         "kind": "launch",
         "run_id": (payload or {}).get("run_id") or None,
     })
-    # Iter 692 — pre-check the firm's EPFO login RIGHT NOW and tell the UI
+    # Iter 692 — pre-check the firm's portal login RIGHT NOW and tell the UI
     # exactly what was found (or precisely why not), so the user sees the
     # real reason on screen instead of a generic "no login saved".
-    diag = await _diagnose_epfo_creds(company_id)
+    # Iter 700 — same diagnosis for ESIC when portal=esic is requested.
+    _portal = ((payload or {}).get("portal") or portal or "epfo").lower()
+    if _portal == "esic":
+        diag = await _diagnose_esic_creds(company_id)
+    else:
+        diag = await _diagnose_epfo_creds(company_id)
     return {
         "ok": True, "token": token, "runner_url": "http://127.0.0.1:8765",
         "creds_found": diag["found"],
