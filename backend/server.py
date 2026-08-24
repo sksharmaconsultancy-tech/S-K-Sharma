@@ -24,6 +24,7 @@ import csv
 import io
 import base64
 import json
+import time as _time_mod
 import asyncio
 
 ROOT_DIR = Path(__file__).parent
@@ -10462,7 +10463,70 @@ async def monthly_attendance_grid_json(
     )
 
 
+# Iter 705 (user issue — Attendance Report slow even with 277 employees):
+# the full month grid (punch pairing/dedup/stitching per employee) was
+# recomputed on EVERY open of the Attendance Report / In-Out report /
+# exports. Cache the computed grid per (company, month, filters) for a
+# short TTL. The cache stores the JSON-serialised result and returns a
+# fresh object on every hit, so callers can safely mutate what they get.
+_MG_CACHE: Dict[str, Any] = {}
+_MG_TTL_SEC = 90.0
+_MG_STALE_MAX = 1800.0          # serve stale instantly up to 30 min old
+_MG_REFRESHING: set = set()     # in-flight background refreshes
+
+
 async def _compute_monthly_grid_data(
+    company_id: str,
+    month: str,
+    group_id: Optional[str] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+):
+    _key = f"{company_id}|{month}|{group_id or ''}|{from_date or ''}|{to_date or ''}"
+    _hit = _MG_CACHE.get(_key)
+    if _hit:
+        _age = _time_mod.time() - _hit[0]
+        if _age < _MG_TTL_SEC:
+            return json.loads(_hit[1])
+        if _age < _MG_STALE_MAX:
+            # Iter 705b — INSTANT open even for 5000 employees: return the
+            # last computed grid immediately and refresh it in the
+            # background so the next open is both instant AND fresh.
+            if _key not in _MG_REFRESHING:
+                _MG_REFRESHING.add(_key)
+
+                async def _refresh():
+                    try:
+                        d = await _compute_monthly_grid_data_impl(
+                            company_id=company_id, month=month,
+                            group_id=group_id, from_date=from_date,
+                            to_date=to_date)
+                        _MG_CACHE[_key] = (_time_mod.time(),
+                                           json.dumps(d, default=str))
+                    except Exception:
+                        pass
+                    finally:
+                        _MG_REFRESHING.discard(_key)
+
+                try:
+                    asyncio.create_task(_refresh())
+                except Exception:
+                    _MG_REFRESHING.discard(_key)
+            return json.loads(_hit[1])
+    data = await _compute_monthly_grid_data_impl(
+        company_id=company_id, month=month, group_id=group_id,
+        from_date=from_date, to_date=to_date)
+    try:
+        _MG_CACHE[_key] = (_time_mod.time(), json.dumps(data, default=str))
+        if len(_MG_CACHE) > 30:
+            _oldest = min(_MG_CACHE, key=lambda k: _MG_CACHE[k][0])
+            _MG_CACHE.pop(_oldest, None)
+    except Exception:
+        pass
+    return data
+
+
+async def _compute_monthly_grid_data_impl(
     company_id: str,
     month: str,
     group_id: Optional[str] = None,
