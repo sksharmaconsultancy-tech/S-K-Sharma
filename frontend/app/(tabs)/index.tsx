@@ -71,6 +71,13 @@ export default function Dashboard() {
   const [myTasks, setMyTasks] = useState<any[]>([]);
   const [myTasksOpen, setMyTasksOpen] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState<number>(0);
+  // Iter 707 — Pending Approval Center dashboard card.
+  const [pendApr, setPendApr] = useState<{ pending_total: number;
+    pending_by_type: { type: string; count: number }[] } | null>(null);
+  useEffect(() => {
+    if (user?.role !== "employee") return;
+    api<any>("/my-approvals/summary").then(setPendApr).catch(() => {});
+  }, [user?.role]);
   const [attSummary, setAttSummary] = useState<{
     days: {
       date: string;
@@ -476,6 +483,32 @@ export default function Dashboard() {
                 employees; admins keep the classic bento grid. */}
             {user?.role === "employee" ? (
               <>
+                {/* Iter 707 — Pending Approval Center card */}
+                <Pressable
+                  style={styles2.aprCard}
+                  onPress={() => router.push("/my-approvals" as any)}
+                  testID="pending-approvals-card"
+                >
+                  <View style={styles2.aprIcon}>
+                    <Ionicons name="notifications" size={18} color="#fff" />
+                    {pendApr && pendApr.pending_total > 0 ? (
+                      <View style={styles2.aprBadge}>
+                        <Text style={styles2.aprBadgeT}>{pendApr.pending_total}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles2.aprTitle}>
+                      Pending Approvals{pendApr ? ` – ${pendApr.pending_total}` : ""}
+                    </Text>
+                    <Text style={styles2.aprSub} numberOfLines={1}>
+                      {pendApr && pendApr.pending_by_type.length
+                        ? pendApr.pending_by_type.map((t) => `${t.type} – ${t.count}`).join(" · ")
+                        : "Track every request & its approval level"}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#fff" />
+                </Pressable>
                 <SectionHeader title="My services" />
                 <QuickCardsGrid
                   cards={[
@@ -1661,4 +1694,25 @@ const styles = StyleSheet.create({
   },
   notifTitle: { color: colors.onSurface, fontSize: type.base, fontWeight: "600" },
   notifBody: { color: colors.onSurfaceSecondary, fontSize: type.sm, marginTop: 2 },
+});
+
+// Iter 707 — Pending Approval Center card styles.
+const styles2 = StyleSheet.create({
+  aprCard: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    backgroundColor: "#4338CA", borderRadius: 16, padding: 14,
+    marginTop: 14, marginBottom: 2,
+  },
+  aprIcon: {
+    width: 40, height: 40, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.18)",
+    alignItems: "center", justifyContent: "center",
+  },
+  aprBadge: {
+    position: "absolute", top: -5, right: -5, minWidth: 18, height: 18,
+    borderRadius: 9, backgroundColor: "#DC2626", alignItems: "center",
+    justifyContent: "center", paddingHorizontal: 4,
+  },
+  aprBadgeT: { color: "#fff", fontSize: 10, fontWeight: "800" },
+  aprTitle: { color: "#fff", fontSize: 14.5, fontWeight: "800" },
+  aprSub: { color: "rgba(255,255,255,0.85)", fontSize: 11, marginTop: 2 },
 });

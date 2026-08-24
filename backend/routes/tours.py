@@ -311,6 +311,11 @@ async def finalize_tour_approval(tour_id: str, final_status: str, actor: dict):
         upd["approved_at"] = now_iso()
         upd["approved_by"] = actor.get("user_id")
         upd["approved_by_name"] = actor.get("name") or actor.get("email")
+        # Iter 707 — approved advance becomes a payable entry for accounts.
+        if t.get("advance_required") and float(t.get("advance_amount") or 0) > 0:
+            upd["advance_payout"] = {"status": "pending",
+                                     "amount": float(t["advance_amount"]),
+                                     "created_at": now_iso()}
     await db.tour_requests.update_one({"tour_id": tour_id}, {"$set": upd})
     await _taudit(actor, tour_id, f"workflow_{final_status}",
                   "pending_approval", new_status, stage="final")
@@ -1036,3 +1041,241 @@ async def save_tour_settings(payload: Dict[str, Any] = Body(...),
     sets["updated_by"] = admin["user_id"]
     await db.tour_settings.update_one({"company_id": cid}, {"$set": sets}, upsert=True)
     return {"ok": True, "settings": await get_tour_settings(cid)}
+
+
+# ---------------------------------------------------------------------------
+# Iter 707 — Advance payout ledger (accounts team settle & track)
+# ---------------------------------------------------------------------------
+@router.get("/admin/advances")
+async def admin_tour_advances(company_id: Optional[str] = Query(None),
+                              status: Optional[str] = Query(None),
+                              authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ADMIN_ROLES)
+    cid = _admin_cid(admin, company_id)
+    q: Dict[str, Any] = {"advance_payout": {"$exists": True}}
+    if cid:
+        q["company_id"] = cid
+    if status and status != "all":
+        q["advance_payout.status"] = status
+    rows = await db.tour_requests.find(
+        q, {"_id": 0, "tour_id": 1, "tour_no": 1, "employee": 1, "user_id": 1,
+            "tour_type": 1, "destinations": 1, "start_date": 1, "end_date": 1,
+            "status": 1, "advance_amount": 1, "advance_payout": 1}
+    ).sort("created_at", -1).to_list(300)
+    out = []
+    for t in rows:
+        exp = await db.expense_claims.find(
+            {"tour_id": t["tour_id"], "status": {"$nin": ["rejected", "cancelled", "draft"]}},
+            {"_id": 0, "amount": 1, "approved_amount": 1, "status": 1}).to_list(200)
+        claimed = round(sum(float(e.get("amount") or 0) for e in exp), 2)
+        approved = round(sum(float(e.get("approved_amount") if e.get("approved_amount") is not None
+                                   else e.get("amount") or 0)
+                             for e in exp
+                             if e.get("status") in ("approved", "payment_pending",
+                                                    "processing", "paid")), 2)
+        t["expenses_claimed"] = claimed
+        t["expenses_approved"] = approved
+        t["balance"] = round(approved - float((t.get("advance_payout") or {}).get("amount") or 0), 2)
+        out.append(t)
+    counts = {}
+    base = {"advance_payout": {"$exists": True}, **({"company_id": cid} if cid else {})}
+    for st in ("pending", "paid", "settled"):
+        counts[st] = await db.tour_requests.count_documents(
+            {**base, "advance_payout.status": st})
+    counts["total"] = sum(counts.values())
+    return {"advances": out, "counts": counts}
+
+
+@router.post("/{tour_id}/advance/pay")
+async def pay_tour_advance(tour_id: str, payload: Dict[str, Any] = Body(default={}),
+                           authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ADMIN_ROLES)
+    t = await _get_tour_scoped(tour_id, admin)
+    ap = t.get("advance_payout") or {}
+    if ap.get("status") != "pending":
+        raise HTTPException(status_code=400,
+                            detail=f"Advance is {ap.get('status') or 'not created'} — only pending advances can be paid")
+    upd = {"advance_payout.status": "paid",
+           "advance_payout.paid_at": now_iso(),
+           "advance_payout.paid_by": admin["user_id"],
+           "advance_payout.paid_by_name": admin.get("name") or admin.get("email"),
+           "advance_payout.mode": str(payload.get("mode") or "cash")[:30],
+           "advance_payout.reference": str(payload.get("reference") or "")[:60],
+           "advance_payout.remarks": str(payload.get("remarks") or "")[:200]}
+    await db.tour_requests.update_one({"tour_id": tour_id}, {"$set": upd})
+    await _taudit(admin, tour_id, "advance_paid", "pending",
+                  {"amount": ap.get("amount"), "mode": upd["advance_payout.mode"],
+                   "reference": upd["advance_payout.reference"]})
+    try:
+        await _notify(t["company_id"], t["user_id"],
+                      f"Tour advance paid — {t['tour_no']}",
+                      f"₹{ap.get('amount')} advance paid ({upd['advance_payout.mode']})", tour_id)
+    except Exception:
+        pass
+    return {"ok": True, "status": "paid"}
+
+
+@router.post("/{tour_id}/advance/settle")
+async def settle_tour_advance(tour_id: str, payload: Dict[str, Any] = Body(default={}),
+                              authorization: Optional[str] = Header(None)):
+    """Final settlement: approved tour expenses vs advance paid.
+    balance > 0 → payable to employee; balance < 0 → recoverable."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ADMIN_ROLES)
+    t = await _get_tour_scoped(tour_id, admin)
+    ap = t.get("advance_payout") or {}
+    if ap.get("status") != "paid":
+        raise HTTPException(status_code=400,
+                            detail="Advance must be PAID before it can be settled")
+    exp = await db.expense_claims.find(
+        {"tour_id": tour_id,
+         "status": {"$in": ["approved", "payment_pending", "processing", "paid"]}},
+        {"_id": 0, "amount": 1, "approved_amount": 1}).to_list(200)
+    approved_total = round(sum(float(e.get("approved_amount") if e.get("approved_amount") is not None
+                                     else e.get("amount") or 0) for e in exp), 2)
+    balance = round(approved_total - float(ap.get("amount") or 0), 2)
+    upd = {"advance_payout.status": "settled",
+           "advance_payout.settled_at": now_iso(),
+           "advance_payout.settled_by": admin["user_id"],
+           "advance_payout.settled_by_name": admin.get("name") or admin.get("email"),
+           "advance_payout.expense_total": approved_total,
+           "advance_payout.balance": balance,
+           "advance_payout.settle_remarks": str(payload.get("remarks") or "")[:200]}
+    await db.tour_requests.update_one({"tour_id": tour_id}, {"$set": upd})
+    await _taudit(admin, tour_id, "advance_settled", "paid",
+                  {"expense_total": approved_total, "balance": balance})
+    return {"ok": True, "status": "settled", "expense_total": approved_total,
+            "balance": balance}
+
+
+# ---------------------------------------------------------------------------
+# Iter 707 — Monthly tour report (per employee: days, visits, expenses, OD)
+# ---------------------------------------------------------------------------
+async def _tour_report_rows(cid: str, month: str) -> List[dict]:
+    d0 = date.fromisoformat(f"{month}-01")
+    d1 = (d0.replace(year=d0.year + 1, month=1) if d0.month == 12
+          else d0.replace(month=d0.month + 1)) - timedelta(days=1)
+    m_start, m_end = d0.isoformat(), d1.isoformat()
+    tours = await db.tour_requests.find(
+        {"company_id": cid, "status": {"$nin": ["draft", "cancelled", "rejected"]},
+         "start_date": {"$lte": m_end}, "end_date": {"$gte": m_start}},
+        {"_id": 0, "tour_id": 1, "tour_no": 1, "user_id": 1, "employee": 1,
+         "start_date": 1, "end_date": 1, "status": 1, "advance_payout": 1}).to_list(1000)
+    rows: Dict[str, dict] = {}
+    for t in tours:
+        uid = t["user_id"]
+        r = rows.setdefault(uid, {
+            "user_id": uid,
+            "name": (t.get("employee") or {}).get("name") or "",
+            "employee_code": (t.get("employee") or {}).get("employee_code") or "",
+            "department": (t.get("employee") or {}).get("department") or "",
+            "tours": 0, "tour_nos": [], "tour_days": 0, "visits": 0,
+            "expenses_claimed": 0.0, "expenses_approved": 0.0,
+            "od_posted": 0, "od_conflicts": 0, "advance_paid": 0.0})
+        r["tours"] += 1
+        r["tour_nos"].append(t["tour_no"])
+        clip0 = max(date.fromisoformat(t["start_date"]), d0)
+        clip1 = min(date.fromisoformat(t["end_date"]), d1)
+        r["tour_days"] += max(0, (clip1 - clip0).days + 1)
+        r["visits"] += await db.tour_visits.count_documents(
+            {"tour_id": t["tour_id"], "visit_date": {"$gte": m_start, "$lte": m_end}})
+        async for e in db.expense_claims.find(
+                {"tour_id": t["tour_id"],
+                 "expense_date": {"$gte": m_start, "$lte": m_end},
+                 "status": {"$nin": ["rejected", "cancelled", "draft"]}},
+                {"_id": 0, "amount": 1, "approved_amount": 1, "status": 1}):
+            r["expenses_claimed"] += float(e.get("amount") or 0)
+            if e.get("status") in ("approved", "payment_pending", "processing", "paid"):
+                r["expenses_approved"] += float(
+                    e.get("approved_amount") if e.get("approved_amount") is not None
+                    else e.get("amount") or 0)
+        r["od_posted"] += await db.tour_attendance.count_documents(
+            {"tour_id": t["tour_id"], "status": "posted",
+             "date": {"$gte": m_start, "$lte": m_end}})
+        r["od_conflicts"] += await db.tour_attendance.count_documents(
+            {"tour_id": t["tour_id"], "status": "conflict",
+             "date": {"$gte": m_start, "$lte": m_end}})
+        ap = t.get("advance_payout") or {}
+        if ap.get("status") in ("paid", "settled"):
+            r["advance_paid"] += float(ap.get("amount") or 0)
+    out = sorted(rows.values(), key=lambda x: (x["name"] or "").lower())
+    for r in out:
+        r["expenses_claimed"] = round(r["expenses_claimed"], 2)
+        r["expenses_approved"] = round(r["expenses_approved"], 2)
+        r["advance_paid"] = round(r["advance_paid"], 2)
+    return out
+
+
+@router.get("/admin/report")
+async def tour_monthly_report(company_id: Optional[str] = Query(None),
+                              month: str = Query(...),
+                              authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ADMIN_ROLES)
+    cid = _admin_cid(admin, company_id)
+    if not cid:
+        raise HTTPException(status_code=400, detail="company_id is required")
+    try:
+        date.fromisoformat(f"{month}-01")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="month must be YYYY-MM")
+    rows = await _tour_report_rows(cid, month)
+    totals = {k: round(sum(r[k] for r in rows), 2) for k in
+              ("tours", "tour_days", "visits", "expenses_claimed",
+               "expenses_approved", "od_posted", "od_conflicts", "advance_paid")}
+    return {"month": month, "rows": rows, "totals": totals}
+
+
+@router.get("/admin/report.xlsx")
+async def tour_monthly_report_xlsx(company_id: Optional[str] = Query(None),
+                                   month: str = Query(...),
+                                   authorization: Optional[str] = Header(None),
+                                   token: Optional[str] = Query(None)):
+    admin = await get_user_from_token(authorization or (f"Bearer {token}" if token else None))
+    require_role(admin, ADMIN_ROLES)
+    cid = _admin_cid(admin, company_id)
+    if not cid:
+        raise HTTPException(status_code=400, detail="company_id is required")
+    rows = await _tour_report_rows(cid, month)
+    company = await db.companies.find_one({"company_id": cid}, {"_id": 0, "name": 1}) or {}
+    from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Tour Report"
+    ws.append([f"Monthly Tour Report — {company.get('name') or cid} — {month}"])
+    ws["A1"].font = Font(bold=True, size=13)
+    ws.append([])
+    hdr = ["S.No.", "Employee", "Code", "Department", "Tours", "Tour Nos",
+           "Tour Days", "Visits", "Expenses Claimed", "Expenses Approved",
+           "OD Days Posted", "OD Conflicts", "Advance Paid"]
+    ws.append(hdr)
+    for c in ws[3]:
+        c.font = Font(bold=True)
+        c.alignment = Alignment(horizontal="center")
+    for i, r in enumerate(rows, 1):
+        ws.append([i, r["name"], r["employee_code"], r["department"], r["tours"],
+                   ", ".join(r["tour_nos"]), r["tour_days"], r["visits"],
+                   r["expenses_claimed"], r["expenses_approved"],
+                   r["od_posted"], r["od_conflicts"], r["advance_paid"]])
+    if rows:
+        ws.append(["", "TOTAL", "", "", sum(r["tours"] for r in rows), "",
+                   sum(r["tour_days"] for r in rows), sum(r["visits"] for r in rows),
+                   round(sum(r["expenses_claimed"] for r in rows), 2),
+                   round(sum(r["expenses_approved"] for r in rows), 2),
+                   sum(r["od_posted"] for r in rows), sum(r["od_conflicts"] for r in rows),
+                   round(sum(r["advance_paid"] for r in rows), 2)])
+        for c in ws[ws.max_row]:
+            c.font = Font(bold=True)
+    for col, w in zip("ABCDEFGHIJKLM", (6, 24, 10, 16, 7, 26, 10, 8, 16, 17, 14, 12, 13)):
+        ws.column_dimensions[col].width = w
+    buf = BytesIO()
+    wb.save(buf)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition":
+                 f'attachment; filename="tour_report_{month}.xlsx"'})

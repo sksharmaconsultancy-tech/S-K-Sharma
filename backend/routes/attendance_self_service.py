@@ -187,6 +187,12 @@ async def attendance_history(
 ):
     user = await get_user_from_token(authorization)
     since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    # Iter 708 — firm-wise PWA visibility cutoff (records stay in the DB;
+    # the employee PWA just no longer receives the wiped months).
+    from routes.pwa_data_mgmt import get_hidden_before
+    hidden_before = await get_hidden_before(user.get("company_id"))
+    if hidden_before and hidden_before > since:
+        since = hidden_before
     records = await db.attendance.find(
         {"user_id": user["user_id"], "date": {"$gte": since}},
         {"_id": 0, "selfie_base64": 0},
@@ -237,6 +243,13 @@ async def my_month_attendance(
         raise HTTPException(status_code=400, detail="No firm linked to your account")
     if not re.match(r"^\d{4}-\d{2}$", month or ""):
         raise HTTPException(status_code=400, detail="month must be YYYY-MM")
+    # Iter 708 — firm-wise PWA visibility cutoff: months before the wipe
+    # date return an empty (cleared) view on the Employee PWA only.
+    from routes.pwa_data_mgmt import get_hidden_before
+    hidden_before = await get_hidden_before(company_id)
+    if hidden_before and f"{month}-31" < hidden_before:
+        return {"month": month, "days": [], "weekly_off_days": [],
+                "pwa_wiped": True}
     data = await _compute_monthly_grid_data(
         company_id=company_id, month=month, only_user_id=user["user_id"],
     )

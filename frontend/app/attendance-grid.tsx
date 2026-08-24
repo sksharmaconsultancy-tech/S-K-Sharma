@@ -533,6 +533,26 @@ export default function AttendanceGridScreen() {
     return out;
   }, [filteredEmployees, sortBy]);
 
+  // Iter 708 (user issue — Monthly Attendance slow to open): rendering ALL
+  // rows at once (5000 employees × 31 day-cells) froze the device. Render
+  // incrementally — totals/search/sort still use the FULL dataset.
+  const [visibleCount, setVisibleCount] = useState(150);
+  useEffect(() => { setVisibleCount(150); }, [effectiveCid, month, q, sortBy, sortDir, groupId, view, hideZero]);
+  const visibleGridItems = useMemo(
+    () => gridItems.slice(0, visibleCount), [gridItems, visibleCount]);
+  const remainingRows = Math.max(0, gridItems.length - visibleCount);
+  const ShowMoreRow = remainingRows > 0 ? (
+    <Pressable
+      style={{ paddingVertical: 14, alignItems: "center", backgroundColor: colors.surfaceSecondary }}
+      onPress={() => setVisibleCount((c) => c + 300)}
+      testID="grid-show-more"
+    >
+      <Text style={{ color: colors.brandPrimary, fontWeight: "800", fontSize: 13 }}>
+        ▼ Show more ({remainingRows} more row{remainingRows === 1 ? "" : "s"})
+      </Text>
+    </Pressable>
+  ) : null;
+
   // ─── Iter 595 — Keyboard shortcuts Phase 2: grid cell navigation ───
   // ↑↓←→ select a day cell · Enter = open repair · P = mark full-day
   // present · A = clear the day (absent) · Esc = deselect. Web only,
@@ -1169,7 +1189,7 @@ export default function AttendanceGridScreen() {
               sortDir={sortDir}
               onSort={toggleSort as any}
             />
-            {gridItems.map((item, idx) =>
+            {visibleGridItems.map((item, idx) =>
               "header" in item ? (
                 <View key={`grp-${item.header}-${idx}`} style={styles.deptBand}>
                   <Text style={styles.deptBandTxt}>{item.header}  ·  {item.count} employee{item.count === 1 ? "" : "s"}</Text>
@@ -1187,6 +1207,7 @@ export default function AttendanceGridScreen() {
                   onCellPress={(uid, name, date) => setRepair({ userId: uid, name, date })}
                 />
               ))}
+            {ShowMoreRow}
             <PresentCountFooter data={data} view={view} hideDays={hideDays} summary={dailySummary} showSummary={showSummary} />
           </View>
         </View>
@@ -1202,7 +1223,7 @@ export default function AttendanceGridScreen() {
                 sortDir={sortDir}
                 onSort={toggleSort as any}
               />
-              {gridItems.map((item, idx) =>
+              {visibleGridItems.map((item, idx) =>
                 "header" in item ? (
                   <View key={`grp-${item.header}-${idx}`} style={styles.deptBand}>
                     <Text style={styles.deptBandTxt}>{item.header}  ·  {item.count} employee{item.count === 1 ? "" : "s"}</Text>
@@ -1219,6 +1240,7 @@ export default function AttendanceGridScreen() {
                     onCellPress={(uid, name, date) => setRepair({ userId: uid, name, date })}
                   />
                 ))}
+              {ShowMoreRow}
               <PresentCountFooter data={data} view={view} hideDays={hideDays} summary={dailySummary} showSummary={showSummary} />
             </View>
           </ScrollView>

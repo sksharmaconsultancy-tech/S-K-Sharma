@@ -8448,3 +8448,40 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   ?tour_id= preselect. Backend flow e2e tested (14 checks PASS), test data
   cleaned after.
 - Iter 706 deploy: deploy_vps_iter706.sh created (header EN for 705/706, badge checks tours/leave/approver, sw v23, APP_ITERATION=706, temp_bundle kind=script→deploy706.sh).
+- Iter 707 — (1) TOUR REPORT: GET /api/tours/admin/report?month=YYYY-MM (per
+  employee: tours, tour days clipped to month, visits, expenses claimed/
+  approved, OD posted/conflicts, advance paid) + report.xlsx export (token
+  query param supported). tour-admin.tsx tabs Report (month nav + Excel) &
+  Advances. (2) ADVANCE PAYOUT: finalize_tour_approval sets
+  tour.advance_payout{status:pending,amount} when advance_required; ledger
+  GET /api/tours/admin/advances (+expense claimed/approved+balance);
+  POST /tours/{id}/advance/pay (mode/reference) then /advance/settle
+  (balance = approved expenses - advance; payable/recoverable). tour-detail
+  shows advance status. (3) APPROVAL CENTER: routes/my_approvals.py —
+  GET /api/my-approvals aggregates engine approval_requests + leaves +
+  expense_claims (Manager/Accounts/Finance = L1-3) + advances + tours into
+  normalized cards (status/level_current/level_total/pending_with/steps/
+  history/edit_route); /my-approvals/summary light counts. Frontend
+  my-approvals.tsx (tabs, type filters, progress dots, timeline, Edit &
+  Resubmit for returned, 25s polling) + indigo Pending Approvals card on
+  employee home (styles2, testID pending-approvals-card).
+- Iter 708 — (1) PWA DATA MGMT: routes/pwa_data_mgmt.py. Firm-wise
+  firm_masters.pwa_settings {attendance_autodelete, autodelete_day 1-28,
+  screenshot_protection, attendance_hidden_before, last_auto_wipe_month}.
+  Wipe = visibility cutoff ONLY (DB never touched); employee endpoints
+  /attendance/history & /attendance/my-month filter via get_hidden_before;
+  admin grid unaffected. Manual wipe POST /api/admin/pwa-wipe-last-month
+  (idempotent, audit db.pwa_wipe_audit with trigger AUTO/MANUAL + affected
+  count). AUTO runs lazily via GET /api/pwa-policy (employee; also returns
+  screenshot flag + watermark). Frontend: firm-master section 17 "PWA
+  Settings" (PwaSettingsSection.tsx), ScreenshotShield.tsx in root layout
+  (expo-screen-capture on native; web: blur/visibility mask, PrintScreen/
+  Ctrl+P warn "Screenshot is restricted by your organization.", copy/
+  context-menu block, name watermark). expo-screen-capture installed.
+  (2) MONTHLY ATTENDANCE SPEED (user complaint): attendance-grid.tsx now
+  renders incrementally (visibleCount 150 + "Show more" +300, testID
+  grid-show-more, resets on filter change) — full dataset still used for
+  totals/search. server.py _bg_warm_monthly_grid startup task warms current
+  month grid for all firms every 10 min → first open after restart 0.14s.
+  GZip middleware already present. Testing: iteration_708 frontend ALL PASS.
+- Iter 708 deploy: deploy_vps_iter708.sh (badge 708, sw v24, checks for pwa_data_mgmt/ScreenshotShield/warm-grid/tour report/advances/my-approvals; temp_bundle kind=script→deploy708.sh).

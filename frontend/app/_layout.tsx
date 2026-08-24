@@ -14,6 +14,7 @@ import { SelectedCompanyProvider } from "@/src/context/SelectedCompanyContext";
 import { AutoPunchProvider } from "@/src/context/AutoPunchContext";
 import { RefreshBusProvider } from "@/src/context/RefreshBusContext";
 import BiometricLockOverlay from "@/src/components/BiometricLockOverlay";
+import ScreenshotShield from "@/src/components/ScreenshotShield";
 import AdminWebShell from "@/src/components/AdminWebShell";
 import IdleLogout from "@/src/components/IdleLogout";
 import { refreshRemindersOnBoot } from "@/src/utils/punchReminders";
@@ -111,6 +112,7 @@ function ThemedTree() {
               </AdminWebShell>
             </IdleLogout>
             <BiometricLockOverlay />
+            <ScreenshotShield />
           </AutoPunchProvider>
         </RefreshBusProvider>
       </SelectedCompanyProvider>

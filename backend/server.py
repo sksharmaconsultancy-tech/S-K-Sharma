@@ -3130,6 +3130,8 @@ async def startup():
         except Exception:
             logger.exception("[iter523] speed index build failed")
     asyncio.create_task(_bg_speed_indexes())
+    # Iter 708 — warm the monthly attendance grid cache (instant reports).
+    asyncio.create_task(_bg_warm_monthly_grid())
 
     # Iter 92 — monthly Master-Data email to firm admins (1st of month).
     try:
@@ -10068,7 +10070,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "706"
+APP_ITERATION = "708"
 
 
 @api.get("/version")
@@ -10524,6 +10526,29 @@ async def _compute_monthly_grid_data(
     except Exception:
         pass
     return data
+
+
+# Iter 708 (user issue — "Monthly Attendance must open IMMEDIATELY"):
+# warm the current-month grid cache for every active firm on startup and
+# keep it fresh, so even the FIRST open after a backend restart serves from
+# cache instead of computing 5000 employees on the spot.
+async def _bg_warm_monthly_grid():
+    await asyncio.sleep(20)          # let startup settle first
+    while True:
+        try:
+            month = datetime.now(timezone.utc).strftime("%Y-%m")
+            cids = await db.users.distinct("company_id", {"role": "employee"})
+            for cid in cids:
+                if not cid:
+                    continue
+                try:
+                    await _compute_monthly_grid_data(company_id=cid, month=month)
+                except Exception:
+                    pass
+                await asyncio.sleep(1)
+        except Exception:
+            pass
+        await asyncio.sleep(600)     # refresh every 10 minutes
 
 
 async def _compute_monthly_grid_data_impl(
@@ -13322,6 +13347,12 @@ app.include_router(expense_claims_router)
 # visits → expenses → OD attendance → payroll traceability via Tour ID).
 from routes.tours import router as tours_router  # noqa: E402
 app.include_router(tours_router)
+# Iter 707 — Employee PWA centralized Pending Approval Center.
+from routes.my_approvals import router as my_approvals_router  # noqa: E402
+app.include_router(my_approvals_router)
+# Iter 708 — Firm-wise PWA data lifecycle + screenshot protection.
+from routes.pwa_data_mgmt import router as pwa_data_mgmt_router  # noqa: E402
+app.include_router(pwa_data_mgmt_router)
 
 # Iter 610 — Employee Self-Service (ESS): profile, attendance+, shift,
 # salary/PF/ESIC, unified requests, notification center.

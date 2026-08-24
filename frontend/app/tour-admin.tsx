@@ -19,7 +19,13 @@ import { colors } from "@/src/theme";
 import { STATUS_META } from "./my-tours";
 
 const toast = (m: string) => (Platform.OS === "web" ? window.alert(m) : Alert.alert("Tours", m));
-const TABS = [["requests", "Requests"], ["live", "Live Tracking"], ["all", "All Tours"], ["settings", "Settings"]] as const;
+const TABS = [["requests", "Requests"], ["live", "Live Tracking"], ["all", "All Tours"],
+  ["report", "Report"], ["advances", "Advances"], ["settings", "Settings"]] as const;
+const monthShift = (m: string, d: number) => {
+  const [y, mm] = m.split("-").map(Number);
+  const dt = new Date(y, mm - 1 + d, 1);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
+};
 
 export default function TourAdmin() {
   const router = useRouter();
@@ -35,6 +41,11 @@ export default function TourAdmin() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
+  // Iter 707 — monthly report + advance payouts.
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [report, setReport] = useState<any>(null);
+  const [advances, setAdvances] = useState<any>(null);
+  const [advFilter, setAdvFilter] = useState("all");
 
   useEffect(() => {
     if (role !== "company_admin" && selectedCompanyId) setCompanyId(selectedCompanyId);
@@ -54,6 +65,50 @@ export default function TourAdmin() {
     finally { setLoading(false); }
   }, [companyId]);
   useEffect(() => { load(); }, [load]);
+
+  // Iter 707 — lazy loads for Report / Advances tabs.
+  useEffect(() => {
+    if (tab !== "report" || !companyId) return;
+    api<any>(`/tours/admin/report?company_id=${companyId}&month=${month}`)
+      .then(setReport).catch((e: any) => toast(e?.message || "Report failed"));
+  }, [tab, companyId, month]);
+  useEffect(() => {
+    if (tab !== "advances") return;
+    const qs = companyId ? `?company_id=${companyId}` : "";
+    api<any>(`/tours/admin/advances${qs}`)
+      .then(setAdvances).catch((e: any) => toast(e?.message || "Advances failed"));
+  }, [tab, companyId, busy]);
+
+  const payAdvance = async (t: any) => {
+    let mode = "bank", reference = "";
+    if (Platform.OS === "web") {
+      mode = window.prompt("Payment mode (cash / bank / upi):", "bank") || "bank";
+      reference = window.prompt("Reference / UTR (optional):") || "";
+    }
+    setBusy(t.tour_id);
+    try {
+      await api(`/tours/${t.tour_id}/advance/pay`, { method: "POST", body: { mode, reference } });
+      toast(`Advance ₹${t.advance_payout?.amount} marked PAID ✓`);
+    } catch (e: any) { toast(e?.message || "Pay failed"); }
+    finally { setBusy(""); }
+  };
+  const settleAdvance = async (t: any) => {
+    if (Platform.OS === "web" && !window.confirm(
+      `Settle ${t.tour_no}? Approved expenses ₹${t.expenses_approved} vs advance ₹${t.advance_payout?.amount}.`)) return;
+    setBusy(t.tour_id);
+    try {
+      const r = await api<any>(`/tours/${t.tour_id}/advance/settle`, { method: "POST", body: {} });
+      toast(`Settled ✓ Balance ${r.balance >= 0 ? `₹${r.balance} payable to employee` : `₹${Math.abs(r.balance)} recoverable`}`);
+    } catch (e: any) { toast(e?.message || "Settle failed"); }
+    finally { setBusy(""); }
+  };
+  const downloadReport = async () => {
+    const { readAuthToken, getApiBaseUrl } = await import("@/src/api/client");
+    const tok = await readAuthToken();
+    const url = `${getApiBaseUrl()}/api/tours/admin/report.xlsx?company_id=${companyId}&month=${month}&token=${tok}`;
+    if (Platform.OS === "web") window.open(url, "_blank");
+    else Linking.openURL(url);
+  };
 
   const decide = async (t: any, action: string) => {
     let remarks: string | undefined;
@@ -210,6 +265,126 @@ export default function TourAdmin() {
           </>
         ) : null}
 
+        {!loading && tab === "report" ? (
+          <>
+            <View style={s.mRow}>
+              <Pressable style={s.mBtn} onPress={() => setMonth(monthShift(month, -1))} testID="rep-prev">
+                <Ionicons name="chevron-back" size={16} color={colors.brandPrimary} />
+              </Pressable>
+              <Text style={s.mTxt}>{month}</Text>
+              <Pressable style={s.mBtn} onPress={() => setMonth(monthShift(month, 1))} testID="rep-next">
+                <Ionicons name="chevron-forward" size={16} color={colors.brandPrimary} />
+              </Pressable>
+              <View style={{ flex: 1 }} />
+              <Pressable style={s.dlBtn} onPress={downloadReport} testID="rep-download">
+                <Ionicons name="download-outline" size={14} color="#fff" />
+                <Text style={s.dlBtnT}>Excel</Text>
+              </Pressable>
+            </View>
+            {!companyId ? <Text style={s.empty}>Select a firm to view the report.</Text>
+              : !report ? <ActivityIndicator color={colors.brandPrimary} style={{ marginTop: 20 }} />
+              : !report.rows?.length ? <Text style={s.empty}>No tours in {month}.</Text>
+              : (
+                <>
+                  {report.rows.map((r: any) => (
+                    <View key={r.user_id} style={s.card} testID={`rep-${r.employee_code || r.user_id}`}>
+                      <Text style={s.tourNo}>{r.name} {r.employee_code ? `(${r.employee_code})` : ""}{r.department ? ` · ${r.department}` : ""}</Text>
+                      <Text style={s.info}>{r.tour_nos.join(", ")}</Text>
+                      <View style={s.repGrid}>
+                        {[["Tours", r.tours], ["Tour Days", r.tour_days], ["Visits", r.visits],
+                          ["OD Posted", r.od_posted], ["Claimed ₹", r.expenses_claimed],
+                          ["Approved ₹", r.expenses_approved], ["Advance ₹", r.advance_paid],
+                          ["Conflicts", r.od_conflicts]].map(([l, v]) => (
+                          <View key={l as string} style={s.repCell}>
+                            <Text style={[s.repVal, l === "Conflicts" && Number(v) > 0 && { color: "#DC2626" }]}>{String(v)}</Text>
+                            <Text style={s.repLbl}>{l}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  ))}
+                  <View style={[s.card, { backgroundColor: "rgba(37,99,235,0.06)" }]}>
+                    <Text style={s.tourNo}>TOTAL — {month}</Text>
+                    <Text style={s.info}>
+                      Tours {report.totals.tours} · Days {report.totals.tour_days} · Visits {report.totals.visits} ·
+                      OD {report.totals.od_posted} · Claimed ₹{report.totals.expenses_claimed} ·
+                      Approved ₹{report.totals.expenses_approved} · Advance ₹{report.totals.advance_paid}
+                    </Text>
+                  </View>
+                </>
+              )}
+          </>
+        ) : null}
+
+        {!loading && tab === "advances" ? (
+          <>
+            <View style={{ flexDirection: "row", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+              {["all", "pending", "paid", "settled"].map((k) => (
+                <Pressable key={k} style={[s.fChip, advFilter === k && s.fChipOn]}
+                  onPress={() => setAdvFilter(k)} testID={`adv-filter-${k}`}>
+                  <Text style={[s.fChipT, advFilter === k && { color: "#fff" }]}>
+                    {k === "all" ? `All (${advances?.counts?.total ?? 0})`
+                      : `${k[0].toUpperCase()}${k.slice(1)} (${advances?.counts?.[k] ?? 0})`}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            {!(advances?.advances || []).filter((t: any) => advFilter === "all" || t.advance_payout?.status === advFilter).length
+              ? <Text style={s.empty}>No tour advances {advFilter !== "all" ? `(${advFilter})` : ""} yet — advances appear here when a tour with &quot;Advance Required&quot; is approved.</Text>
+              : (advances.advances || [])
+                .filter((t: any) => advFilter === "all" || t.advance_payout?.status === advFilter)
+                .map((t: any) => {
+                  const ap = t.advance_payout || {};
+                  return (
+                    <View key={t.tour_id} style={s.card} testID={`adv-${t.tour_no}`}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <Text style={[s.tourNo, { flex: 1 }]}>{t.tour_no} · {t.employee?.name}</Text>
+                        <View style={[s.chip, {
+                          backgroundColor: ap.status === "pending" ? "rgba(217,119,6,0.12)"
+                            : ap.status === "paid" ? "rgba(3,105,161,0.12)" : "rgba(5,150,105,0.12)" }]}>
+                          <Text style={[s.chipT, {
+                            color: ap.status === "pending" ? "#D97706"
+                              : ap.status === "paid" ? "#0369A1" : "#059669" }]}>
+                            {String(ap.status || "").toUpperCase()}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={s.info}>
+                        Advance ₹{ap.amount} · {t.start_date} → {t.end_date} · Tour {t.status}
+                      </Text>
+                      <Text style={s.info}>
+                        Expenses: claimed ₹{t.expenses_claimed} · approved ₹{t.expenses_approved}
+                        {ap.status !== "pending" ? ` · balance ${t.balance >= 0 ? `₹${t.balance} payable` : `₹${Math.abs(t.balance)} recoverable`}` : ""}
+                      </Text>
+                      {ap.paid_at ? (
+                        <Text style={s.info}>Paid {String(ap.paid_at).slice(0, 10)} · {ap.mode}{ap.reference ? ` · ${ap.reference}` : ""} by {ap.paid_by_name}</Text>
+                      ) : null}
+                      {ap.settled_at ? (
+                        <Text style={s.info}>Settled {String(ap.settled_at).slice(0, 10)} by {ap.settled_by_name} · final balance ₹{ap.balance}</Text>
+                      ) : null}
+                      <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                        {ap.status === "pending" ? (
+                          <Pressable style={[s.decBtn, { backgroundColor: "#0369A1", flex: 0, paddingHorizontal: 16 }]}
+                            disabled={busy === t.tour_id} onPress={() => payAdvance(t)} testID={`adv-pay-${t.tour_no}`}>
+                            <Text style={s.decBtnT}>MARK PAID</Text>
+                          </Pressable>
+                        ) : null}
+                        {ap.status === "paid" ? (
+                          <Pressable style={[s.decBtn, { backgroundColor: "#059669", flex: 0, paddingHorizontal: 16 }]}
+                            disabled={busy === t.tour_id} onPress={() => settleAdvance(t)} testID={`adv-settle-${t.tour_no}`}>
+                            <Text style={s.decBtnT}>SETTLE</Text>
+                          </Pressable>
+                        ) : null}
+                        <Pressable style={s.wfLink} onPress={() => router.push(`/tour-detail?id=${t.tour_id}` as any)}>
+                          <Text style={s.wfLinkT}>Open tour</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  );
+                })}
+          </>
+        ) : null}
+
         {!loading && tab === "settings" ? (
           settings ? (
             <View style={s.card}>
@@ -302,4 +477,23 @@ const s = StyleSheet.create({
   fChipOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   fChipT: { fontSize: 11.5, fontWeight: "700", color: colors.onSurfaceSecondary },
   setRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" },
+  // Iter 707 — report + advances.
+  mRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
+  mBtn: {
+    width: 34, height: 34, borderRadius: 9, borderWidth: 1, borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center",
+  },
+  mTxt: { fontSize: 14, fontWeight: "800", color: colors.onSurface, minWidth: 78, textAlign: "center" },
+  dlBtn: {
+    flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "#059669",
+    borderRadius: 9, paddingHorizontal: 12, height: 36,
+  },
+  dlBtnT: { color: "#fff", fontWeight: "800", fontSize: 12 },
+  repGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
+  repCell: {
+    minWidth: 72, flexGrow: 1, backgroundColor: colors.surface, borderRadius: 9,
+    borderWidth: 1, borderColor: colors.border, paddingVertical: 7, alignItems: "center",
+  },
+  repVal: { fontSize: 13.5, fontWeight: "800", color: colors.onSurface },
+  repLbl: { fontSize: 9.5, fontWeight: "700", color: colors.onSurfaceTertiary, marginTop: 1 },
 });

@@ -215,6 +215,13 @@ export default function TourDetail() {
           {t.client_name ? <Text style={s.info}>Client: {t.client_name} {t.contact_person ? `· ${t.contact_person}` : ""}</Text> : null}
           <Text style={s.info}>Estimated: ₹{t.total_estimated || 0}{t.advance_required ? ` · Advance: ₹${t.advance_amount}` : ""}</Text>
           {t.approved_by_name ? <Text style={s.info}>Approved by: {t.approved_by_name}</Text> : null}
+          {t.advance_payout ? (
+            <Text style={[s.info, { fontWeight: "700" }]}>
+              Advance ₹{t.advance_payout.amount} — {String(t.advance_payout.status || "").toUpperCase()}
+              {t.advance_payout.paid_at ? ` on ${String(t.advance_payout.paid_at).slice(0, 10)} (${t.advance_payout.mode})` : ""}
+              {t.advance_payout.status === "settled" ? ` · balance ₹${t.advance_payout.balance}` : ""}
+            </Text>
+          ) : null}
           {(t.attachments || []).map((a: any) => (
             <Text key={a.doc_id} style={[s.info, { color: colors.brandPrimary }]}>📎 {a.kind} · {a.name}</Text>
           ))}
