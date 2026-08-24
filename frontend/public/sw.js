@@ -7,7 +7,7 @@
  *     (Iter 291: fixes "PWA sometimes won't open" on weak connections).
  *   • static assets (js/css/img)   → stale-while-revalidate.
  */
-const CACHE = "sks-pwa-v12"; // Iter 675 — SPA build (no hydration); purge all static-export shells
+const CACHE = "sks-pwa-v13"; // Iter 695 — purge old shells (firm-wise EPFO login fixes must reach every browser)
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();

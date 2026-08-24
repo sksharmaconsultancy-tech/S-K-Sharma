@@ -8248,3 +8248,18 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   owner firm ke naam ke saath; UNCHANGED value re-save par guard skip
   (legacy leaked rows save-block nahi karti). Verified: dup→400,
   unique→200, unchanged re-save→200. Badge 694, kind=script → deploy694.
+- Iter 695 (user bug ×4 — 694 ke baad bhi "same problem"): ASLI CULPRIT
+  MILA — pf-reports.tsx ka "Login — Open EPFO Portal" button (Iter 397
+  code). companyId = selectedCompanyId jo super admin ke liye "all" hota
+  hai → launch-token 400 → SILENT catch → runner ko EMPTY token → listener
+  baked download-waqt token (Suvidhi Rayons) use karta tha → har firm ke
+  liye Suvidhi ka login. FIX: (1) pf-reports openPortalLogin: firm
+  mandatory ("all" par Hinglish error), mint fail par HARD STOP, epfo ke
+  liye creds_found/diagnosis/warning display, credsUser status me. (2)
+  Runner v23: /login BINA token ke 400 refuse (baked fallback sirf .bat
+  direct runs ke liye, web launches ke liye kabhi nahi) — verified locally
+  (listener chala kar: no-token→400, with token→200+job). (3) sw.js PWA
+  CACHE v12→v13 purge (692-694 ke frontend fixes cached shells tak nahi
+  pahunch rahe the — ab pakka). Badge 695, deploy_vps_iter695.sh,
+  kind=script → deploy695. User ko install_autostart.bat dobara chalana
+  hoga (Runner v23) + browser tabs refresh.

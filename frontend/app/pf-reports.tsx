@@ -87,16 +87,42 @@ export default function PfReportsScreen() {
       ? "https://unifiedportal-emp.epfindia.gov.in/epfo/"
       : "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx";
     if (Platform.OS !== "web") return;
+    // Iter 695 (user bug — WRONG firm's login kept filling): a specific firm
+    // is MANDATORY. With "All Firms" selected the old code silently fell
+    // back to the Runner's baked download-time token, so ONE firm's login
+    // (e.g. Suvidhi Rayons) was filled for everything.
+    if (!companyId || companyId === "all") {
+      setLoginMsg("❌ Pehle upar firm selector se EK firm select karein (All Firms nahi) — tabhi USI firm ka ID/Password bharega.");
+      return;
+    }
     setBusy("login"); setLoginMsg("");
     try {
       let token = "";
-      if (companyId) {
-        try {
-          const t = await api<any>(
-            `/admin/portal-automation/launch-token?company_id=${encodeURIComponent(companyId)}`,
-            { method: "POST", body: {} });
-          token = t?.token || "";
-        } catch { /* runner can still use its baked token */ }
+      let credsUser = "";
+      try {
+        const t = await api<any>(
+          `/admin/portal-automation/launch-token?company_id=${encodeURIComponent(companyId)}`,
+          { method: "POST", body: {} });
+        token = t?.token || "";
+        if (portalKey === "epfo") {
+          if (t && t.creds_found === false) {
+            setLoginMsg(`❌ EPFO login problem${t.creds_firm_name ? ` (${t.creds_firm_name})` : ""}: ${t.creds_diagnosis || "login save nahi mila."}`);
+            return;
+          }
+          if (t && t.creds_found === true) {
+            credsUser = t.creds_user_id || "";
+            if (t.creds_warning) setLoginMsg(t.creds_warning);
+          }
+        }
+      } catch {
+        // Iter 695 — NEVER fall back to the baked token: it belongs to the
+        // firm selected at download time, NOT the firm selected now.
+        setLoginMsg("❌ Firm ka secure token nahi ban paya (session/network issue). Page refresh karke dobara login karein, phir button dabayein.");
+        return;
+      }
+      if (!token) {
+        setLoginMsg("❌ Firm token missing — page refresh karke dobara try karein.");
+        return;
       }
       // try the local Runner first (listener on the operator's PC)
       try {
@@ -108,8 +134,8 @@ export default function PfReportsScreen() {
         clearTimeout(timer);
         if (r.ok) {
           setLoginMsg(
-            "✅ Runner launched — a Chrome window is opening on your PC with " +
-            "the firm's ID & Password auto-filled. Enter the captcha and click Login.");
+            `✅ Runner launched — a Chrome window is opening on your PC with THIS firm's ` +
+            `ID & Password auto-filled${credsUser ? ` (${credsUser})` : ""}. Enter the captcha and click Login.`);
           return;
         }
         throw new Error("runner not ok");

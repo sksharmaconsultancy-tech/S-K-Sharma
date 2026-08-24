@@ -496,7 +496,7 @@ async def ext_ecr_file(token: str, run_id: str = ""):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "22"
+RUNNER_VERSION = "23"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -507,7 +507,7 @@ import time
 import urllib.error
 import urllib.request
 
-RUNNER_BUILD = "22"
+RUNNER_BUILD = "23"
 
 PORTALS = {
     "esic": "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx",
@@ -588,7 +588,22 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None, action=None):
                          "status": JOB_STATUS.get(jid, "unknown")}).encode()
                 elif q.path == "/login":
                     p = (qs.get("portal") or ["epfo"])[0].lower()
-                    tok = (qs.get("token") or [TOKEN])[0]
+                    # Iter 695 (user bug — wrong firm's login) — the web app
+                    # MUST send a fresh firm-bound token. NEVER fall back to
+                    # the baked download-time token here: it belongs to
+                    # whichever firm was selected when the ZIP was made.
+                    tok = (qs.get("token") or [""])[0]
+                    if not tok:
+                        body = json.dumps(
+                            {"ok": False,
+                             "detail": "no firm token - select a firm in the "
+                                       "web app and click again"}).encode()
+                        self.send_response(400)
+                        self._cors()
+                        self.send_header("Content-Type", "application/json")
+                        self.end_headers()
+                        self.wfile.write(body)
+                        return
                     rid = (qs.get("run_id") or [""])[0]
                     act = (qs.get("action") or [""])[0].lower()
                     jid = str(int(time.time() * 1000))
