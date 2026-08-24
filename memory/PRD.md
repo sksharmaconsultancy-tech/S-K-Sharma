@@ -8305,3 +8305,21 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   locally verified (ping build 24). sw cache v16, badge 698,
   deploy_vps_iter698.sh (RUNNER_VERSION 24 checks), kind=script→deploy698.
   User ko batana: deploy698 + install_autostart.bat dobara (v24 ke liye).
+- Iter 699 (user request — PHASE 3 ECR AUTO-ATTACH): (1) FLOWS label rename
+  "ECR Upload → TRRN → Challan → PDF" → "ECR Upload". (2) RUNNER v25: sirf
+  action=="ecr" par — action page open hone ke baad Runner
+  /api/portal-ext/ecr-file?token=&run_id= se selected month ki PF ECR file
+  (b64 JSON, endpoint Iter 690 se already tha) download karke temp me save
+  karta hai, input[type=file] 20s tak dhundhta hai (hidden ho to
+  display:block force), send_keys se ATTACH karta hai. Upload/Submit KABHI
+  auto-click nahi (safety rail). Statuses: ecr_fetch/ecr_attached/
+  ecr_manual (fail par file ka temp path Runner window me print hota hai).
+  (3) Frontend: openEpfoPc(action, label, runIdArg) — run_id launch-token
+  body + runner URL me; start() ECR flow ke liye month mandatory (needs_run
+  guard); MAP me ecr statuses; poll ecr action par action_open/
+  action_manual pe nahi rukta, ecr_attached/ecr_manual pe rukta hai.
+  Verified e2e: launch-token(run_id) → /portal-ext/ecr-file explicit &
+  token-fallback dono 200 + sahi filename/month (local run me rows/UAN
+  nahi the isliye 0 lines — VPS par real data hai). sw v17, badge 699,
+  deploy_vps_iter699.sh, kind=script→deploy699. Runner v25 ke liye user ko
+  install_autostart.bat dobara chalana hoga.

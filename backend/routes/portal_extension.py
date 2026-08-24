@@ -498,7 +498,7 @@ async def ext_ecr_file(token: str, run_id: str = ""):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "24"
+RUNNER_VERSION = "25"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -509,7 +509,7 @@ import time
 import urllib.error
 import urllib.request
 
-RUNNER_BUILD = "24"
+RUNNER_BUILD = "25"
 
 PORTALS = {
     "esic": "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx",
@@ -1153,6 +1153,71 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None, action=None):
                             _st("action_manual")
                             print("Logged in - the menu link was not found, "
                                   "open it from the top menu yourself.")
+                        # Iter 699 (user request) — "ECR Upload" option ONLY:
+                        # fetch this month's ready PF ECR file from the app
+                        # and attach it to the page's file chooser. The
+                        # runner NEVER clicks Upload/Submit — the user
+                        # reviews the page and uploads themselves.
+                        if (action or "").lower() == "ecr":
+                            try:
+                                _st("ecr_fetch")
+                                print("Downloading this month's PF ECR file...")
+                                _u = ("%s/api/portal-ext/ecr-file?token=%s"
+                                      "&run_id=%s" % (API_BASE, TOKEN,
+                                                      run_id or ""))
+                                _rq = urllib.request.Request(
+                                    _u, headers={"User-Agent": "sks-runner"})
+                                with urllib.request.urlopen(_rq, timeout=30) as _r:
+                                    _j = json.loads(_r.read().decode("utf-8"))
+                                import os as _os
+                                import tempfile as _tf
+                                _fp = _os.path.join(
+                                    _tf.gettempdir(),
+                                    _j.get("filename") or "PF_ECR.txt")
+                                with open(_fp, "wb") as _f:
+                                    _f.write(base64.b64decode(_j["content_b64"]))
+                                print("ECR file ready: %s (%s lines, month %s)"
+                                      % (_fp, _j.get("lines"), _j.get("month")))
+                                _inp = None
+                                for _i in range(20):   # page can render late
+                                    try:
+                                        _cands = driver.find_elements(
+                                            By.CSS_SELECTOR, "input[type='file']")
+                                        if _cands:
+                                            _inp = _cands[0]
+                                            break
+                                    except Exception:
+                                        pass
+                                    time.sleep(1)
+                                if _inp is not None:
+                                    try:
+                                        driver.execute_script(
+                                            "arguments[0].style.display='block';"
+                                            "arguments[0].removeAttribute('hidden');",
+                                            _inp)
+                                    except Exception:
+                                        pass
+                                    _inp.send_keys(_fp)
+                                    _st("ecr_attached")
+                                    print("ECR file ATTACHED - review the page "
+                                          "and click Upload yourself.")
+                                else:
+                                    _st("ecr_manual")
+                                    print("File chooser not found - the ECR "
+                                          "file is saved at %s, attach it "
+                                          "manually." % _fp)
+                            except urllib.error.HTTPError as _he:
+                                try:
+                                    _msg = (json.loads(
+                                        _he.read().decode("utf-8"))
+                                        .get("detail") or str(_he))
+                                except Exception:
+                                    _msg = str(_he)
+                                _st("ecr_manual")
+                                print("ECR file not available: %s" % _msg)
+                            except Exception as _e:
+                                _st("ecr_manual")
+                                print("ECR auto-attach skipped (%s)." % _e)
                     elif _steps:
                         _st("action_manual")
                         print("Login not confirmed (captcha/OTP pending?) - "

@@ -7,7 +7,7 @@
  *     (Iter 291: fixes "PWA sometimes won't open" on weak connections).
  *   • static assets (js/css/img)   → stale-while-revalidate.
  */
-const CACHE = "sks-pwa-v16"; // Iter 698 — month dropdown + TEST flow removed
+const CACHE = "sks-pwa-v17"; // Iter 699 — ECR auto-attach + flow rename
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();

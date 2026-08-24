@@ -60,7 +60,7 @@ FLOWS: Dict[str, Dict[str, Any]] = {
     "esic_ip_register": {"label": "ESIC IP Registration",
                          "portals": ["esic"], "needs_employee": True},
     # ---- Compliance Automation Studio (Iter 235) ------------------------
-    "epfo_ecr_upload": {"label": "ECR Upload → TRRN → Challan → PDF",
+    "epfo_ecr_upload": {"label": "ECR Upload",
                         "portals": ["epfo"], "needs_employee": False,
                         "needs_run": True},
     "esic_contribution_upload": {"label": "Contribution Upload → Challan",
