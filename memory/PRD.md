@@ -8346,3 +8346,21 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   diagnosis body/query, runner creds esic, no-login case. sw v18, badge
   700, deploy_vps_iter700.sh, kind=script→deploy700. Runner v26 ke liye
   install_autostart.bat dobara.
+- Iter 701 (user requests ×3): (1) ESIC PAGE AUTO-OPEN — runner esic_open
+  me _NAV_E (ip_register/contrib/contrib_history link-text candidates),
+  login-detect 90s ke baad click; frontend ESIC_PC_ACTION map. (2) TRRN
+  CAPTURE — ecr action me attach ke baad 30min watch (regex TRRN\D{0,60}
+  (\d{10,15})), _st("trrn:<num>"), POST /portal-ext/trrn (token-gated;
+  pf_trrn_records + run.pf_trrn set; ack screenshot b64). (3) CHALLAN PDF
+  ON RECORD — epfo_open Chrome prefs: download dir %temp%/sks_dl +
+  always_open_pdf_externally; TRRN ke baad Challan link click + 5min tak
+  naye .pdf ka watch → POST /portal-ext/challan-pdf (pf_challan_pdfs
+  upsert by company+run; run.pf_challan_saved=True) → _st("challan_saved").
+  Admin endpoints: GET /admin/compliance-salary-runs/{run_id}/
+  pf-challan-status & pf-challan.pdf (download, company_admin scoped).
+  Frontend: poll trrn: par continue, challan_saved par stop+challanReady;
+  month select par status probe; "Download Challan PDF (TRRN ...)" button
+  (as-download-challan, apiBinary webBlobUrl). Runner v27, sw v19, badge
+  701, deploy_vps_iter701.sh + checks, kind=script→deploy701. VERIFIED
+  e2e: trrn save 200, challan save 200, status exists+trrn, download
+  application/pdf bytes, run doc pf_trrn/pf_challan_saved set.

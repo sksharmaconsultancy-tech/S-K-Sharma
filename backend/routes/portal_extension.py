@@ -551,7 +551,7 @@ async def ext_ecr_file(token: str, run_id: str = ""):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "26"
+RUNNER_VERSION = "27"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -562,7 +562,7 @@ import time
 import urllib.error
 import urllib.request
 
-RUNNER_BUILD = "26"
+RUNNER_BUILD = "27"
 
 PORTALS = {
     "esic": "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx",
@@ -910,6 +910,72 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None, action=None):
                         _st("open")
                         print("Login filled - type the CAPTCHA and click "
                               "Login yourself.")
+                    # Iter 701 (user request) — like EPFO, auto-open the
+                    # chosen ESIC page after the login completes.
+                    _NAV_E = {
+                        "ip_register": ["Register New IP", "REGISTER NEW IP",
+                                        "Register new IP", "IP Registration"],
+                        "contrib": ["File Monthly Contribution",
+                                    "Online Monthly Contribution",
+                                    "Monthly Contribution",
+                                    "Upload Excel", "Contribution Upload"],
+                        "contrib_history": ["Contribution History",
+                                            "View Contribution History"],
+                    }
+                    _cands = _NAV_E.get((action or "").lower())
+                    if _cands and _clicked:
+                        try:
+                            _st("wait_login")
+                            print("Waiting for the ESIC login to complete...")
+                            _in = False
+                            for _i in range(90):
+                                time.sleep(1)
+                                try:
+                                    _src = (driver.page_source or "").lower()
+                                    if ("logout" in _src
+                                            or "sign out" in _src):
+                                        _in = True
+                                        break
+                                except Exception:
+                                    pass
+                            if _in:
+                                _st("navigating")
+                                print("Logged in - opening the page...")
+                                time.sleep(2)
+                                _done = False
+                                for _t in _cands:
+                                    try:
+                                        _els = [x for x in
+                                                driver.find_elements(
+                                                    By.PARTIAL_LINK_TEXT, _t)
+                                                if x.is_displayed()]
+                                        if _els:
+                                            try:
+                                                _els[0].click()
+                                            except Exception:
+                                                driver.execute_script(
+                                                    "arguments[0].click();",
+                                                    _els[0])
+                                            _done = True
+                                            break
+                                    except Exception:
+                                        continue
+                                time.sleep(2)
+                                if _done:
+                                    _st("action_open")
+                                    print("Page open - continue in the "
+                                          "Chrome window.")
+                                else:
+                                    _st("action_manual")
+                                    print("Logged in - the menu link was not "
+                                          "found, open it yourself.")
+                            else:
+                                _st("action_manual")
+                                print("Login not confirmed - after logging "
+                                      "in, open the page yourself.")
+                        except Exception as _e:
+                            _st("action_manual")
+                            print("Post-login navigation skipped (%s)." % _e)
                 else:
                     _st("open_nofield")
                     print("Could not fill the login boxes - type them "
@@ -962,12 +1028,25 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None, action=None):
             # passwords (e.g. the payroll admin email) into the EPFO login
             # boxes. Disable the password manager + autofill entirely and
             # run in a clean guest-like profile with no saved credentials.
+            # Iter 701 — force PDFs (the challan) to DOWNLOAD into a known
+            # folder instead of opening in the viewer, so the Runner can
+            # pick the file up and save it to the app.
+            import os as _os0
+            import tempfile as _tf0
+            _dl_dir = _os0.path.join(_tf0.gettempdir(), "sks_dl")
+            try:
+                _os0.makedirs(_dl_dir, exist_ok=True)
+            except Exception:
+                pass
             opts.add_experimental_option("prefs", {
                 "credentials_enable_service": False,
                 "profile.password_manager_enabled": False,
                 "profile.password_manager_leak_detection": False,
                 "autofill.profile_enabled": False,
                 "autofill.credit_card_enabled": False,
+                "download.default_directory": _dl_dir,
+                "download.prompt_for_download": False,
+                "plugins.always_open_pdf_externally": True,
             })
             opts.add_argument("--disable-save-password-bubble")
             # Iter 693e — ROOT CAUSE of the wrong sksharmaconsultancy@gmail.com
@@ -1497,6 +1576,125 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None, action=None):
                                     print("File chooser not found - the ECR "
                                           "file is saved at %s, attach it "
                                           "manually." % _fp)
+                                # Iter 701 (user request) — after YOU upload
+                                # the ECR, watch the page for the TRRN, save
+                                # it (+ an acknowledgment screenshot) to the
+                                # app, and open the Challan link if shown.
+                                try:
+                                    import re as _re
+                                    print("Watching for the TRRN after you "
+                                          "upload (up to 30 minutes)...")
+                                    _trrn = ""
+                                    for _i in range(900):
+                                        time.sleep(2)
+                                        try:
+                                            _src = driver.page_source or ""
+                                        except Exception:
+                                            break   # window closed
+                                        _m = _re.search(
+                                            r"TRRN[^0-9]{0,60}(\d{10,15})",
+                                            _src, _re.I)
+                                        if _m:
+                                            _trrn = _m.group(1)
+                                            break
+                                    if _trrn:
+                                        _st("trrn:%s" % _trrn)
+                                        print("TRRN captured: %s" % _trrn)
+                                        try:
+                                            _shot = (driver
+                                                     .get_screenshot_as_base64())
+                                        except Exception:
+                                            _shot = ""
+                                        try:
+                                            _rq2 = urllib.request.Request(
+                                                "%s/api/portal-ext/trrn"
+                                                % API_BASE,
+                                                data=json.dumps({
+                                                    "token": TOKEN,
+                                                    "run_id": run_id or "",
+                                                    "trrn": _trrn,
+                                                    "screenshot_b64": _shot,
+                                                }).encode(),
+                                                headers={"Content-Type":
+                                                         "application/json"})
+                                            urllib.request.urlopen(
+                                                _rq2, timeout=30)
+                                            print("TRRN + acknowledgment "
+                                                  "screenshot saved to the app.")
+                                        except Exception as _e:
+                                            print("Could not save the TRRN "
+                                                  "to the app (%s)." % _e)
+                                        try:
+                                            _before = set(
+                                                _os0.listdir(_dl_dir))
+                                        except Exception:
+                                            _before = set()
+                                        try:
+                                            _lks = [x for x in
+                                                    driver.find_elements(
+                                                        By.PARTIAL_LINK_TEXT,
+                                                        "Challan")
+                                                    if x.is_displayed()]
+                                            if _lks:
+                                                _lks[0].click()
+                                                print("Opened the Challan "
+                                                      "link - download/print "
+                                                      "the PDF from the page.")
+                                        except Exception:
+                                            pass
+                                        # Iter 701 (user request) — pick up
+                                        # the downloaded challan PDF (yours
+                                        # or auto-clicked) for ~5 min and
+                                        # SAVE IT IN THE APP so it can be
+                                        # downloaded anytime for payroll.
+                                        _pdf_path = ""
+                                        for _i in range(150):
+                                            time.sleep(2)
+                                            try:
+                                                for _fn in _os0.listdir(_dl_dir):
+                                                    if (_fn.lower().endswith(".pdf")
+                                                            and _fn not in _before):
+                                                        _pdf_path = _os0.path.join(
+                                                            _dl_dir, _fn)
+                                                        break
+                                            except Exception:
+                                                pass
+                                            if _pdf_path:
+                                                break
+                                        if _pdf_path:
+                                            time.sleep(2)  # finish writing
+                                            try:
+                                                with open(_pdf_path, "rb") as _pf:
+                                                    _pb = base64.b64encode(
+                                                        _pf.read()).decode("ascii")
+                                                _rq3 = urllib.request.Request(
+                                                    "%s/api/portal-ext/challan-pdf"
+                                                    % API_BASE,
+                                                    data=json.dumps({
+                                                        "token": TOKEN,
+                                                        "run_id": run_id or "",
+                                                        "trrn": _trrn,
+                                                        "filename": _os0.path
+                                                        .basename(_pdf_path),
+                                                        "pdf_b64": _pb,
+                                                    }).encode(),
+                                                    headers={"Content-Type":
+                                                             "application/json"})
+                                                urllib.request.urlopen(
+                                                    _rq3, timeout=60)
+                                                _st("challan_saved")
+                                                print("Challan PDF saved to the "
+                                                      "app - download it anytime "
+                                                      "from Automation Studio.")
+                                            except Exception as _e:
+                                                print("Could not save the "
+                                                      "challan PDF (%s)." % _e)
+                                        else:
+                                            print("No challan PDF download "
+                                                  "detected - you can attach "
+                                                  "it in the app later.")
+                                except Exception as _e:
+                                    print("TRRN watch skipped (%s)." % _e)
                             except urllib.error.HTTPError as _he:
                                 try:
                                     _msg = (json.loads(
@@ -2486,6 +2684,106 @@ async def claim_epfo_login(
                 uid, company_id, cleaned, admin["user_id"])
     return {"ok": True, "user_id": uid,
             "kept_firm": diag["firm_name"], "cleaned": cleaned}
+
+
+@router.post("/portal-ext/trrn")
+async def ext_save_trrn(payload: Dict[str, Any] = Body(...)):
+    """Iter 701 — the PC Runner reports the TRRN it captured after the user
+    uploaded the ECR on EPFO, plus an acknowledgment screenshot. Stored on
+    the Compliance Salary run and in pf_trrn_records."""
+    token = (payload.get("token") or "").strip()
+    doc = await db.automation_ext_tokens.find_one({"token": token})
+    if not doc:
+        raise HTTPException(status_code=401, detail="Invalid extension token")
+    trrn = str(payload.get("trrn") or "").strip()
+    if not trrn or not trrn.isdigit():
+        raise HTTPException(status_code=400, detail="A numeric TRRN is required")
+    shot = payload.get("screenshot_b64") or ""
+    if len(shot) > 4_000_000:   # cap ~3MB decoded
+        shot = ""
+    run_id = (payload.get("run_id") or doc.get("run_id") or "").strip()
+    await db.pf_trrn_records.insert_one({
+        "company_id": doc["company_id"],
+        "run_id": run_id or None,
+        "trrn": trrn,
+        "screenshot_b64": shot,
+        "captured_at": now_iso(),
+    })
+    if run_id:
+        await db.compliance_salary_runs.update_one(
+            {"run_id": run_id, "company_id": doc["company_id"]},
+            {"$set": {"pf_trrn": trrn, "pf_trrn_at": now_iso()}})
+    logger.info("[trrn] %s captured for %s run=%s",
+                trrn, doc["company_id"], run_id or "-")
+    return {"ok": True, "trrn": trrn}
+
+
+@router.post("/portal-ext/challan-pdf")
+async def ext_save_challan_pdf(payload: Dict[str, Any] = Body(...)):
+    """Iter 701 — the Runner uploads the downloaded EPFO challan PDF so it
+    stays on record and can be downloaded from the app anytime."""
+    token = (payload.get("token") or "").strip()
+    doc = await db.automation_ext_tokens.find_one({"token": token})
+    if not doc:
+        raise HTTPException(status_code=401, detail="Invalid extension token")
+    pdf_b64 = payload.get("pdf_b64") or ""
+    if not pdf_b64:
+        raise HTTPException(status_code=400, detail="pdf_b64 is required")
+    if len(pdf_b64) > 12_000_000:   # ~9MB decoded cap
+        raise HTTPException(status_code=413, detail="PDF too large")
+    run_id = (payload.get("run_id") or doc.get("run_id") or "").strip()
+    rec = {
+        "company_id": doc["company_id"],
+        "run_id": run_id or None,
+        "trrn": str(payload.get("trrn") or "").strip(),
+        "filename": (payload.get("filename") or "PF_Challan.pdf")[:120],
+        "pdf_b64": pdf_b64,
+        "saved_at": now_iso(),
+    }
+    await db.pf_challan_pdfs.update_one(
+        {"company_id": doc["company_id"], "run_id": run_id or None},
+        {"$set": rec}, upsert=True)
+    if run_id:
+        await db.compliance_salary_runs.update_one(
+            {"run_id": run_id, "company_id": doc["company_id"]},
+            {"$set": {"pf_challan_saved": True}})
+    logger.info("[challan-pdf] saved for %s run=%s (%d chars)",
+                doc["company_id"], run_id or "-", len(pdf_b64))
+    return {"ok": True}
+
+
+@router.get("/admin/compliance-salary-runs/{run_id}/pf-challan-status")
+async def pf_challan_status(
+    run_id: str, authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    doc = await db.pf_challan_pdfs.find_one(
+        {"run_id": run_id}, {"_id": 0, "pdf_b64": 0})
+    if doc and admin["role"] == "company_admin" \
+            and doc.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised")
+    return {"exists": bool(doc), "trrn": (doc or {}).get("trrn") or "",
+            "saved_at": (doc or {}).get("saved_at") or "",
+            "filename": (doc or {}).get("filename") or ""}
+
+
+@router.get("/admin/compliance-salary-runs/{run_id}/pf-challan.pdf")
+async def pf_challan_pdf(
+    run_id: str, authorization: Optional[str] = Header(None)):
+    from fastapi.responses import Response
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    doc = await db.pf_challan_pdfs.find_one({"run_id": run_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="No challan PDF saved for this run yet")
+    if admin["role"] == "company_admin" \
+            and doc.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised")
+    return Response(
+        content=base64.b64decode(doc["pdf_b64"]),
+        media_type="application/pdf",
+        headers={"Content-Disposition":
+                 f'attachment; filename="{doc.get("filename") or "PF_Challan.pdf"}"'})
 
 
 @router.get("/admin/portal-automation/runner-download")

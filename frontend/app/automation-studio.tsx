@@ -212,8 +212,37 @@ export default function AutomationStudioScreen() {
   const [pcBusy, setPcBusy] = useState<string>("");
   // Iter 694 — duplicate EPFO login detected across firms → one-click fix.
   const [dupWarn, setDupWarn] = useState<string>("");
+  // Iter 701 — challan PDF saved for the selected month → download button.
+  const [challanReady, setChallanReady] = useState(false);
+  const [challanTrrn, setChallanTrrn] = useState("");
 
   useEffect(() => { setDupWarn(""); setPcStatus(""); }, [companyId]);
+
+  useEffect(() => {
+    setChallanReady(false); setChallanTrrn("");
+    if (!runId) return;
+    (async () => {
+      try {
+        const s = await api<any>(`/admin/compliance-salary-runs/${runId}/pf-challan-status`);
+        setChallanReady(!!s?.exists);
+        setChallanTrrn(s?.trrn || "");
+      } catch { /* no challan yet */ }
+    })();
+  }, [runId]);
+
+  const downloadChallan = async () => {
+    try {
+      const r = await apiBinary(`/admin/compliance-salary-runs/${runId}/pf-challan.pdf`);
+      if (Platform.OS === "web" && r.webBlobUrl) {
+        const a = document.createElement("a");
+        a.href = r.webBlobUrl;
+        a.download = `PF_Challan_${challanTrrn || runId}.pdf`;
+        document.body.appendChild(a); a.click(); a.remove();
+      }
+    } catch (e: any) {
+      setPcStatus(`❌ ${e?.message || "Challan PDF not available yet."}`);
+    }
+  };
 
   const fixDupLogin = async () => {
     const ok = Platform.OS === "web"
@@ -361,7 +390,7 @@ export default function AutomationStudioScreen() {
         action_open: `✅ ${act} is OPEN — continue in the Chrome window`,
         action_manual: `✅ Logged in — ${act} did not auto-open, please open it from the top menu`,
         ecr_fetch: "⏳ Downloading this month's PF ECR file...",
-        ecr_attached: "✅ ECR file ATTACHED — review the page and click Upload on the portal yourself",
+        ecr_attached: "✅ ECR file ATTACHED — review and click Upload; the TRRN will be captured automatically after you upload",
         ecr_manual: "⚠ Page open but the ECR file could not be auto-attached — the Runner window shows the file location; attach it manually",
         open: `✅ ${P} Portal Open — login filled${who}, enter CAPTCHA & ${portalKey === "esic" ? "Login" : "Sign In"}`,
         open_nocreds: portalKey === "esic"
@@ -376,12 +405,23 @@ export default function AutomationStudioScreen() {
           const s = await fetch(`http://127.0.0.1:8765/status?job=${encodeURIComponent(job)}`);
           const sj: any = await s.json();
           const stx = String(sj?.status || "");
+          if (stx.startsWith("trrn:")) {
+            const trrn = stx.slice(5);
+            setPcStatus(`🎫 TRRN captured: ${trrn} — saved in the app. Waiting for the challan PDF download (click/print the challan on the portal)...`);
+            return; // keep polling — the challan PDF may follow
+          }
+          if (stx === "challan_saved") {
+            setPcStatus("📄 Challan PDF saved in the app — use the Download Challan PDF button (next to the month) anytime for payroll.");
+            setChallanReady(true);
+            if (pcPollRef.current) clearInterval(pcPollRef.current);
+            pcPollRef.current = null;
+            return;
+          }
           const base = MAP[stx] || stx || "…";
           setPcStatus(credsWarn ? `${base}\n${credsWarn}` : base);
           if (stx === "closed" || stx.startsWith("error") || stx.startsWith("busy")
               || (stx === "action_open" && action !== "ecr")
               || (stx === "action_manual" && action !== "ecr")
-              || stx === "ecr_attached" || stx === "ecr_manual"
               || (stx === "signed_in" && !action)) {
             if (pcPollRef.current) clearInterval(pcPollRef.current);
             pcPollRef.current = null;
@@ -446,6 +486,15 @@ export default function AutomationStudioScreen() {
     epfo_establishment: "establishment",
   };
 
+  // Iter 701 (user request) — ESIC pages auto-open after login, like EPFO.
+  const ESIC_PC_ACTION: Record<string, string> = {
+    login: "",
+    esic_ip_register: "ip_register",
+    esic_contribution_upload: "contrib",
+    esic_contribution_history: "contrib_history",
+    esic_dashboard: "",
+  };
+
   const start = async () => {
     if (!companyId) {
       setErr("Firm selection is mandatory. Please select a firm from the “Firm (required)” selector above before starting any process.");
@@ -456,7 +505,7 @@ export default function AutomationStudioScreen() {
       // New unified path: run on the operator's PC Chrome via the Runner.
       // Iter 700 — ESIC uses the SAME process (fill Username/LIN + Password
       // from Firm Master → ESI Registration; user types CAPTCHA; auto Login).
-      const act = portal === "epfo" ? (EPFO_PC_ACTION[flow] ?? "") : "";
+      const act = portal === "epfo" ? (EPFO_PC_ACTION[flow] ?? "") : (ESIC_PC_ACTION[flow] ?? "");
       // Iter 699 — ECR Upload needs the month so the runner can fetch and
       // attach THAT month's ready PF ECR file.
       if (act === "ecr" && activeFlow?.needs_run && !runId) {
@@ -821,6 +870,20 @@ export default function AutomationStudioScreen() {
                             ))}
                           </ScrollView>
                         </View>
+                      )}
+                      {/* Iter 701 — uploaded challan stays on record; download
+                          the PDF anytime for payroll. */}
+                      {challanReady && (
+                        <Pressable
+                          style={[st.pcBtn, { backgroundColor: "#7C3AED", marginTop: 8, alignSelf: "flex-start" }]}
+                          onPress={downloadChallan}
+                          testID="as-download-challan"
+                        >
+                          <Ionicons name="document-text-outline" size={14} color="#fff" />
+                          <Text style={st.pcBtnTxt}>
+                            Download Challan PDF{challanTrrn ? ` (TRRN ${challanTrrn})` : ""}
+                          </Text>
+                        </Pressable>
                       )}
                     </View>
                   )}
