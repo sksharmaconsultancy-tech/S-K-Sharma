@@ -206,7 +206,7 @@ export default function AutomationStudioScreen() {
     };
   }, []);
 
-  const openEpfoPc = async () => {
+  const openEpfoPc = async (action?: string, flowLabel?: string) => {
     if (Platform.OS !== "web") {
       setPcStatus("Open the portal on a computer (Chrome/Edge) to use this.");
       return;
@@ -224,6 +224,7 @@ export default function AutomationStudioScreen() {
       // download time). Passed to the local Runner via ?token=.
       let launchTok = "";
       let credsUser = "";
+      let credsWarn = "";
       try {
         const lt = await api<any>("/admin/portal-automation/launch-token", {
           method: "POST",
@@ -242,15 +243,33 @@ export default function AutomationStudioScreen() {
         }
         if (lt && lt.creds_found === true) {
           credsUser = lt.creds_user_id || "";
-          setPcStatus(`✅ EPFO login mila: ${credsUser} (${lt.creds_source}). Chrome khul raha hai...`);
+          credsWarn = lt.creds_warning || "";
+          setPcStatus(
+            `✅ ${lt.creds_firm_name ? lt.creds_firm_name + " ka " : ""}EPFO login mila: ${credsUser} (${lt.creds_source}). Chrome khul raha hai...`
+            + (credsWarn ? `\n${credsWarn}` : ""));
         }
       } catch {
-        // fall back to the runner's baked token if minting fails
+        // Iter 693 (user bug — WRONG firm's login was filled): NEVER fall
+        // back to the runner's baked download-time token. That token is
+        // bound to whichever firm was selected when the ZIP was downloaded,
+        // so the fallback silently filled ANOTHER firm's credentials.
+        setPcStatus(
+          "❌ Is firm ka secure token nahi ban paya (session/network issue). " +
+          "Galat firm ka login bharne se rokne ke liye process yahin rok diya. " +
+          "Page refresh karke dobara login karein, phir button dabayein.");
+        setPcBusy("");
+        return;
+      }
+      if (!launchTok) {
+        setPcStatus("❌ Firm token missing — page refresh karke dobara try karein.");
+        setPcBusy("");
+        return;
       }
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 3000);
       const url = "http://127.0.0.1:8765/login?portal=epfo_open"
-        + (launchTok ? `&token=${encodeURIComponent(launchTok)}` : "");
+        + `&token=${encodeURIComponent(launchTok)}`
+        + (action ? `&action=${encodeURIComponent(action)}` : "");
       const r = await fetch(url, { signal: ctrl.signal });
       clearTimeout(timer);
       // Warn if the PC Runner is running old code (needs a restart/reboot
@@ -263,9 +282,15 @@ export default function AutomationStudioScreen() {
           setPcStatus(
             `⚠ Your PC Runner is OUTDATED (v${build}). It's running old code — ` +
             "please REBOOT this PC once (or end all python tasks in Task Manager " +
-            "and re-run install_autostart.bat) so it updates to v19, then click again.");
+            "and re-run install_autostart.bat) so it updates, then click again.");
           setPcBusy("");
           return;
+        }
+        if (action && build && build < 22) {
+          setPcStatus(
+            `⚠ Runner v${build} sirf LOGIN tak karega — "${flowLabel || action}" page auto-open ` +
+            "ke liye Runner update chahiye: install_autostart.bat ek baar dobara chalayein " +
+            "(ya PC restart), phir ye button dobara dabayein. Login abhi bhi ho raha hai...");
         }
       } catch {
         // ping without build → old runner; fall through, user will see result
@@ -278,13 +303,19 @@ export default function AutomationStudioScreen() {
           "Opening EPFO Portal... (restart run_listener.bat once to get live status — it self-updates)");
         return;
       }
+      const who = credsUser ? ` (${credsUser})` : "";
+      const act = flowLabel ? `"${flowLabel}"` : "page";
       const MAP: Record<string, string> = {
         starting: "Starting Chrome...",
         opening: "Opening EPFO Portal...",
         retrying: "⏳ EPFO server busy (503) — auto-retrying, please wait...",
-        await_captcha: `⌨ Login filled ✓${credsUser ? ` (${credsUser})` : ""} — type the CAPTCHA now, Sign In will click automatically`,
+        await_captcha: `⌨ Login filled ✓${who} — type the CAPTCHA now, Sign In will click automatically`,
         signed_in: "✅ Sign In clicked — check the portal",
-        open: `✅ EPFO Portal Open — login filled${credsUser ? ` (${credsUser})` : ""}, enter CAPTCHA & Sign In`,
+        wait_login: "⏳ Login complete hone ka wait — OTP puchhe to type kar dein...",
+        navigating: `✅ Login ho gaya — ${act} khul raha hai...`,
+        action_open: `✅ ${act} OPEN — Chrome window me kaam continue karein`,
+        action_manual: `✅ Login ho gaya — ${act} auto-open nahi hua, top menu se khud khol lein`,
+        open: `✅ EPFO Portal Open — login filled${who}, enter CAPTCHA & Sign In`,
         open_nocreds:
           "⚠ Portal opened but NO EPFO login is saved for THIS firm. Go to Firm Master → EPF Registration → fill EPF User ID + EPF Password → Save, then click again.",
         open_nofield:
@@ -296,9 +327,11 @@ export default function AutomationStudioScreen() {
           const s = await fetch(`http://127.0.0.1:8765/status?job=${encodeURIComponent(job)}`);
           const sj: any = await s.json();
           const stx = String(sj?.status || "");
-          setPcStatus(MAP[stx] || stx || "…");
+          const base = MAP[stx] || stx || "…";
+          setPcStatus(credsWarn ? `${base}\n${credsWarn}` : base);
           if (stx === "closed" || stx.startsWith("error") || stx.startsWith("busy")
-              || stx === "signed_in") {
+              || stx === "action_open" || stx === "action_manual"
+              || (stx === "signed_in" && !action)) {
             if (pcPollRef.current) clearInterval(pcPollRef.current);
             pcPollRef.current = null;
           }
@@ -350,12 +383,30 @@ export default function AutomationStudioScreen() {
     }
   };
 
+  // Iter 693 (user request) — EVERY EPFO action now uses the SAME verified
+  // PC-Chrome login process (open portal → auto-fill this firm's login →
+  // you type CAPTCHA → auto Sign In), then auto-opens the action's page.
+  // The OLD server-side EPFO automation is retired.
+  const EPFO_PC_ACTION: Record<string, string> = {
+    login: "",
+    epfo_generate_uan: "uan",
+    epfo_ecr_upload: "ecr",
+    epfo_member_search: "member_search",
+    epfo_establishment: "establishment",
+    epfo_ecr_autoupload_test: "ecr",
+  };
+
   const start = async () => {
     if (!companyId) {
       setErr("Firm selection is mandatory. Please select a firm from the “Firm (required)” selector above before starting any process.");
       return;
     }
     setErr("");
+    if (portal === "epfo") {
+      // New unified path: run on the operator's PC Chrome via the Runner.
+      await openEpfoPc(EPFO_PC_ACTION[flow] ?? "", activeFlow?.label || flow);
+      return;
+    }
     setBusy(true);
     setSession(null);
     try {
@@ -748,7 +799,7 @@ export default function AutomationStudioScreen() {
                   <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
                     <Pressable
                       style={[st.pcBtn, pcBusy === "open" && { opacity: 0.6 }]}
-                      onPress={openEpfoPc}
+                      onPress={() => openEpfoPc()}
                       disabled={pcBusy === "open"}
                       testID="as-open-epfo-pc"
                     >

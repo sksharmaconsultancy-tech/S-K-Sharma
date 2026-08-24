@@ -228,6 +228,35 @@ async def ext_creds(token: str, portal: str = "esic"):
     return {"ok": True, "user_id": creds.get("user_name") or "", "password": creds.get("password") or ""}
 
 
+async def _dup_epfo_login_warning(company_id: str, user_id: str) -> str:
+    """Iter 693 (user bug) — the SAME EPFO User ID saved on more than one
+    firm is almost always an accidental copy (browser autofill). Name the
+    other firms so the user can clean the wrong one in seconds."""
+    if not user_id:
+        return ""
+    dup_ids = []
+    others = await db.firm_masters.find(
+        {"company_id": {"$ne": company_id},
+         "$or": [
+             {"epf.epf_user_id": user_id},
+             {"portal_logins": {"$elemMatch": {
+                 "login_type": "PF LOGIN", "user_name": user_id}}},
+         ]},
+        {"_id": 0, "company_id": 1}).to_list(10)
+    dup_ids = [o["company_id"] for o in others]
+    if not dup_ids:
+        return ""
+    names = []
+    comps = await db.companies.find(
+        {"company_id": {"$in": dup_ids}}, {"_id": 0, "name": 1}).to_list(10)
+    names = [c.get("name") or "?" for c in comps]
+    listed = ", ".join(names or dup_ids)
+    return (f"⚠ DHYAN DEIN: yehi EPFO User ID in firm(s) me BHI saved hai: "
+            f"{listed}. Har firm ka apna alag EPFO login hota hai — agar "
+            "galti se copy hua hai to un firms ke Firm Master me sahi login "
+            "daal kar Save karein.")
+
+
 async def _diagnose_epfo_creds(company_id: str) -> Dict[str, Any]:
     """Iter 692 — human-readable diagnosis of WHY the EPFO login is (not)
     resolving for a firm. Returned to the UI at button-click time so the
@@ -261,7 +290,8 @@ async def _diagnose_epfo_creds(company_id: str) -> Dict[str, Any]:
     p1 = (decrypt_secret(p1_raw) or "").strip()
     if u1 and "@" not in u1 and p1:
         return {"found": True, "user_id": u1, "source": "EPF Registration",
-                "firm_name": firm_name, "diagnosis": ""}
+                "firm_name": firm_name, "diagnosis": "",
+                "warning": await _dup_epfo_login_warning(company_id, u1)}
 
     # 2) "Firms ID & Password" / Portal Logins — PF LOGIN row.
     u2, p2_raw, p2 = "", None, ""
@@ -273,7 +303,8 @@ async def _diagnose_epfo_creds(company_id: str) -> Dict[str, Any]:
             break
     if u2 and "@" not in u2 and p2:
         return {"found": True, "user_id": u2, "source": "Portal Logins (PF LOGIN)",
-                "firm_name": firm_name, "diagnosis": ""}
+                "firm_name": firm_name, "diagnosis": "",
+                "warning": await _dup_epfo_login_warning(company_id, u2)}
 
     # Nothing resolved — explain the MOST specific problem found.
     if u1 and "@" in u1:
@@ -465,7 +496,7 @@ async def ext_ecr_file(token: str, run_id: str = ""):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "21"
+RUNNER_VERSION = "22"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -476,7 +507,7 @@ import time
 import urllib.error
 import urllib.request
 
-RUNNER_BUILD = "21"
+RUNNER_BUILD = "22"
 
 PORTALS = {
     "esic": "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx",
@@ -521,7 +552,7 @@ def _fresh_driver(opts):
     return webdriver.Chrome(options=opts)
 
 
-def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
+def run(API_BASE, TOKEN, portal, run_id=None, job_id=None, action=None):
     portal = (portal or "esic").lower()
 
     # Iter 397 — LISTENER mode: keep this window open; the payroll web app
@@ -559,11 +590,13 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
                     p = (qs.get("portal") or ["epfo"])[0].lower()
                     tok = (qs.get("token") or [TOKEN])[0]
                     rid = (qs.get("run_id") or [""])[0]
+                    act = (qs.get("action") or [""])[0].lower()
                     jid = str(int(time.time() * 1000))
                     JOB_STATUS[jid] = "starting"
-                    print("Launch request: portal=%s run=%s" % (p, rid or "latest"))
+                    print("Launch request: portal=%s run=%s action=%s"
+                          % (p, rid or "latest", act or "-"))
                     threading.Thread(
-                        target=run, args=(API_BASE, tok, p, rid, jid),
+                        target=run, args=(API_BASE, tok, p, rid, jid, act),
                         daemon=True).start()
                     body = json.dumps(
                         {"ok": True, "launched": True, "job": jid}).encode()
@@ -963,6 +996,107 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None):
                               "click it yourself.")
                 except Exception as _e:
                     print("Auto Sign In skipped (%s)." % _e)
+
+            # Iter 693 (user request) — SAME login process for EVERY EPFO
+            # action. After Sign In, wait for the dashboard, then auto-open
+            # the chosen action's page from the top menu. CAPTCHA/OTP are
+            # still typed by the user — if login doesn't complete we simply
+            # leave the window where it is.
+            _NAV = {
+                "uan": (["Member", "MEMBER"],
+                        ["REGISTER - INDIVIDUAL", "Register Individual",
+                         "REGISTER INDIVIDUAL", "Register - Individual"]),
+                "ecr": (["Payments", "PAYMENTS", "Payment"],
+                        ["ECR/RETURN FILING", "ECR/Return Filing",
+                         "ECR UPLOAD", "ECR Upload", "ECR/RETURNS FILING"]),
+                "member_search": (["Member", "MEMBER"],
+                                  ["Member Profile", "MEMBER PROFILE",
+                                   "Member Search", "MEMBER SEARCH"]),
+                "establishment": (["Establishment", "ESTABLISHMENT"],
+                                  ["PROFILE", "Profile",
+                                   "Establishment Profile"]),
+            }
+            _steps = _NAV.get((action or "").lower())
+            if _steps and _fill_result == "filled":
+                try:
+                    _st("wait_login")
+                    print("Waiting for the login to complete "
+                          "(type OTP too if the portal asks)...")
+                    _in = False
+                    for _i in range(90):   # up to ~90s — OTP may be asked
+                        time.sleep(1)
+                        try:
+                            _src = (driver.page_source or "").lower()
+                            if (("logout" in _src or "sign out" in _src)
+                                    and "username1" not in _src):
+                                _in = True
+                                break
+                        except Exception:
+                            pass
+                    if _in:
+                        _st("navigating")
+                        print("Logged in - opening the page...")
+                        time.sleep(2)
+
+                        def _find_link(cands):
+                            for _t in cands:
+                                try:
+                                    _els = [x for x in driver.find_elements(
+                                        By.PARTIAL_LINK_TEXT, _t)
+                                        if x.is_displayed()]
+                                    if _els:
+                                        return _els[0]
+                                except Exception:
+                                    continue
+                            return None
+
+                        def _open_step(cands, hover_only=False):
+                            _el = _find_link(cands)
+                            if _el is None:
+                                return False
+                            try:
+                                from selenium.webdriver.common.action_chains \
+                                    import ActionChains
+                                ActionChains(driver).move_to_element(_el).perform()
+                                time.sleep(1)
+                            except Exception:
+                                pass
+                            if not hover_only:
+                                try:
+                                    _el.click()
+                                except Exception:
+                                    try:
+                                        driver.execute_script(
+                                            "arguments[0].click();", _el)
+                                    except Exception:
+                                        return False
+                            return True
+
+                        # hover the top menu (opens the dropdown), then click
+                        # the sub-menu entry; retry with a plain click on the
+                        # top menu if the dropdown didn't render.
+                        _open_step(_steps[0], hover_only=True)
+                        time.sleep(1)
+                        _ok = _open_step(_steps[1])
+                        if not _ok:
+                            _open_step(_steps[0])
+                            time.sleep(2)
+                            _ok = _open_step(_steps[1])
+                        time.sleep(2)
+                        if _ok:
+                            _st("action_open")
+                            print("Page open - continue in the Chrome window.")
+                        else:
+                            _st("action_manual")
+                            print("Logged in - the menu link was not found, "
+                                  "open it from the top menu yourself.")
+                    else:
+                        _st("action_manual")
+                        print("Login not confirmed (captcha/OTP pending?) - "
+                              "after logging in, open the menu yourself.")
+                except Exception as _e:
+                    _st("action_manual")
+                    print("Post-login navigation skipped (%s)." % _e)
         except Exception as e:
             _st("error: portal did not load (%s)" % str(e)[:120])
             print("Portal did not load:", e)
@@ -1869,6 +2003,7 @@ async def portal_launch_token(
         "creds_source": diag["source"],
         "creds_firm_name": diag["firm_name"],
         "creds_diagnosis": diag["diagnosis"],
+        "creds_warning": diag.get("warning") or "",
     }
 
 

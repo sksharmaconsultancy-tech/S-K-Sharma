@@ -67,7 +67,7 @@ type Catalogs = {
 /* -------------------------------------------------------------------- */
 
 function Field({
-  label, value, onChange, placeholder, keyboardType, secure, width, maxLength, disabled,
+  label, value, onChange, placeholder, keyboardType, secure, width, maxLength, disabled, guard,
 }: {
   label: string;
   value: string | null | undefined;
@@ -78,10 +78,18 @@ function Field({
   width?: number | string;
   maxLength?: number;
   disabled?: boolean;
+  guard?: boolean;
 }) {
   // Iter 306 (user #11) — eye toggle on password fields so admins can see
   // what they typed (stored values stay masked by the server).
   const [showSecret, setShowSecret] = useState(false);
+  // Iter 693 (user bug ×2) — Chrome IGNORES autocomplete="off"/"new-password"
+  // for saved username+password PAIRS and re-injects one firm's portal login
+  // into another firm's form. The ONLY reliable block is read-only-until-
+  // focus: browsers never autofill a read-only input at page load. The
+  // field becomes editable the moment the user clicks/taps into it.
+  const [armed, setArmed] = useState(
+    Platform.OS !== "web" ? true : !(secure || guard));
   return (
     <View style={[styles.field, width ? { width } : { flex: 1, minWidth: 180 }]}>
       <Text style={styles.fieldLabel}>{label}</Text>
@@ -94,7 +102,8 @@ function Field({
           keyboardType={keyboardType || "default"}
           secureTextEntry={!!secure && !showSecret}
           maxLength={maxLength}
-          editable={!disabled}
+          editable={!disabled && armed}
+          onFocus={() => setArmed(true)}
           // Iter 693g (ROOT CAUSE) — stop the browser's password manager
           // from autofilling the operator's SAVED payroll login (email +
           // password) into these EPF/ESI credential boxes. "new-password"
@@ -121,6 +130,33 @@ function Field({
         ) : null}
       </View>
     </View>
+  );
+}
+
+// Iter 693 — anti-autofill grid input for the Portal Logins credential grid.
+// Read-only until the user clicks in, so Chrome can never inject a saved
+// username/password pair from another firm at page load.
+function GuardedGridInput({ style, value, onChangeText, secureTextEntry }: {
+  style?: any;
+  value: string;
+  onChangeText: (v: string) => void;
+  secureTextEntry?: boolean;
+}) {
+  const [armed, setArmed] = useState(Platform.OS !== "web");
+  return (
+    <TextInput
+      style={style}
+      value={value}
+      onChangeText={onChangeText}
+      secureTextEntry={secureTextEntry}
+      editable={armed}
+      onFocus={() => setArmed(true)}
+      autoComplete={(secureTextEntry ? "new-password" : "off") as any}
+      textContentType="none"
+      importantForAutofill="no"
+      autoCorrect={false}
+      spellCheck={false}
+    />
   );
 }
 
@@ -1466,7 +1502,7 @@ export default function FirmMasterScreen() {
                        onChange={(v) => updateSection("epf", { group_policy_no: v })} />
               </View>
               <View style={styles.row}>
-                <Field label="EPF User ID" value={epf.epf_user_id}
+                <Field label="EPF User ID" value={epf.epf_user_id} guard
                        onChange={(v) => updateSection("epf", { epf_user_id: v })} />
                 <Field label="EPF Password" value={epf.epf_password}
                        onChange={(v) => updateSection("epf", { epf_password: v })}
@@ -1490,7 +1526,7 @@ export default function FirmMasterScreen() {
               <Field label="ESI No." value={esi.esi_no}
                      onChange={(v) => updateSection("esi", { esi_no: v })} />
               <View style={styles.row}>
-                <Field label="ESI User ID" value={esi.esi_user_id}
+                <Field label="ESI User ID" value={esi.esi_user_id} guard
                        onChange={(v) => updateSection("esi", { esi_user_id: v })} />
                 <Field label="ESI Password" value={esi.esi_password}
                        onChange={(v) => updateSection("esi", { esi_password: v })}
@@ -1628,12 +1664,17 @@ export default function FirmMasterScreen() {
           {(master.portal_logins || []).map((row: any, idx: number) => (
             <View key={idx} style={styles.gridRow}>
               <Text style={[styles.gridReadCell, { flex: 1.2 }]}>{row.login_type}</Text>
-              <TextInput
+              {/* Iter 693 (user bug — one firm's login copied into others):
+                  Chrome autofills its SAVED username+password pair into these
+                  plain grid inputs on ANY firm's page; saving then leaks one
+                  firm's portal login into another firm. GuardedGridInput is
+                  read-only until clicked — browsers never autofill it. */}
+              <GuardedGridInput
                 style={[styles.gridInput, { flex: 1.5 }]}
                 value={row.user_name || ""}
                 onChangeText={(v) => editLoginRow(idx, { user_name: v })}
               />
-              <TextInput
+              <GuardedGridInput
                 style={[styles.gridInput, { flex: 1.2 }]}
                 value={row.password || ""}
                 onChangeText={(v) => editLoginRow(idx, { password: v })}

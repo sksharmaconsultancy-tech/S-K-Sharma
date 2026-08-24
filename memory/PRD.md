@@ -8199,3 +8199,31 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   creds → found=true RJUDR2049560000; firm without → exact diagnosis; unit
   tested decrypt-fail / email / no-password branches). Deploy:
   deploy_vps_iter692.sh (kind=script now serves it), badge 692.
+- Iter 693 (user bug + user request):
+  BUG "Svithi Rayons ka EPFO login har firm me bhar raha" — 3-taraf fix:
+  (1) automation-studio.tsx: launch-token mint FAIL par ab HARD STOP (pehle
+  silently baked download-time token par fallback hota tha = download waqt
+  wali firm ka login har jagah bharta tha). Token na mile to Chrome NahI
+  khulta. (2) firm-master.tsx: Field component me guard/secure fields ab
+  READ-ONLY-until-focus (web) — Chrome saved username+password pair inject
+  nahi kar sakta page load par; Portal Logins grid ke user_name/password
+  inputs ke liye naya GuardedGridInput (same guard). EPF/ESI User ID par
+  guard prop. (3) portal_extension.py: _dup_epfo_login_warning — resolved
+  EPFO user_id kisi aur firm me bhi saved ho to launch-token response me
+  creds_warning (firm names ke saath); UI status me dikhta hai. Deploy
+  script me read-only duplicate report (PYDUP block).
+  REQUEST "sab 6 EPFO actions me wahi login process": start() ab portal
+  epfo ke liye openEpfoPc(action, label) chalata hai (old /rpa/start
+  EPFO ke liye retired; ESIC untouched). EPFO_PC_ACTION map: login→"",
+  generate_uan→uan, ecr_upload→ecr, member_search, establishment,
+  ecr_autoupload_test→ecr. Runner v22 (RUNNER_VERSION/BUILD=22): /login
+  accepts &action=, run(..., action); epfo_open flow login ke baad 90s tak
+  login-complete wait (logout marker), phir _NAV hover+click se page kholta
+  hai (Member→Register Individual / Payments→ECR Filing / Member Profile /
+  Establishment Profile). Statuses: wait_login, navigating, action_open,
+  action_manual (frontend MAP me added; signed_in par poll stop only when
+  no action). Build<22 par UI warn deta hai ki page auto-open ke liye
+  install_autostart.bat dobara chalayein (login phir bhi chalega).
+  VERIFIED e2e preview par: dup-warning dono directions me firm name ke
+  saath; runner creds per-token sahi firm ka; runner code string compiles.
+  Deploy: deploy_vps_iter693.sh (kind=script), badge 693.
