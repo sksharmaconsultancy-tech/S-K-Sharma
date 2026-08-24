@@ -7,7 +7,7 @@
  *     (Iter 291: fixes "PWA sometimes won't open" on weak connections).
  *   • static assets (js/css/img)   → stale-while-revalidate.
  */
-const CACHE = "sks-pwa-v24"; // Iter 708 — PWA data mgmt + approval center + tour reports
+const CACHE = "sks-pwa-v25"; // Iter 709 — read-only Charts & Analytics
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();

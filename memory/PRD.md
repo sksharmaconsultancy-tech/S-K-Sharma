@@ -8501,3 +8501,4 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   Analytics" (route /analytics) added after Tour Management in both lists +
   permission map. Verified: June 2026 gross ₹11.18L renders in trend/dept;
   screenshot OK.
+- Iter 709 deploy: deploy_vps_iter709.sh (badge 709, sw v25, analytics checks; kind=script→deploy709.sh).
