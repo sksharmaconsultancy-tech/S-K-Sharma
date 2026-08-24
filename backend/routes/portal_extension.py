@@ -2713,6 +2713,16 @@ async def ext_save_trrn(payload: Dict[str, Any] = Body(...)):
         await db.compliance_salary_runs.update_one(
             {"run_id": run_id, "company_id": doc["company_id"]},
             {"$set": {"pf_trrn": trrn, "pf_trrn_at": now_iso()}})
+        # Iter 703 — stamp the TRRN onto this month's PF challan record on
+        # the Challan Upload screen too (if one exists without a TRRN).
+        run = await db.compliance_salary_runs.find_one(
+            {"run_id": run_id}, {"_id": 0, "month": 1})
+        month = (run or {}).get("month") or ""
+        if month:
+            await db.challans.update_many(
+                {"company_id": doc["company_id"], "portal": "pf",
+                 "month": month, "trrn": None},
+                {"$set": {"trrn": trrn}})
     logger.info("[trrn] %s captured for %s run=%s",
                 trrn, doc["company_id"], run_id or "-")
     return {"ok": True, "trrn": trrn}
@@ -2747,6 +2757,34 @@ async def ext_save_challan_pdf(payload: Dict[str, Any] = Body(...)):
         await db.compliance_salary_runs.update_one(
             {"run_id": run_id, "company_id": doc["company_id"]},
             {"$set": {"pf_challan_saved": True}})
+    # Iter 703 (user request) — also file it on the PF/ESIC Challan Upload
+    # screen so each month's record shows the TRRN + downloadable PDF there.
+    month = ""
+    if run_id:
+        run = await db.compliance_salary_runs.find_one(
+            {"run_id": run_id}, {"_id": 0, "month": 1})
+        month = (run or {}).get("month") or ""
+    if month:
+        await db.challans.update_one(
+            {"company_id": doc["company_id"], "portal": "pf",
+             "month": month, "auto_captured": True},
+            {"$set": {
+                "company_id": doc["company_id"],
+                "portal": "pf",
+                "month": month,
+                "amount": 0.0,
+                "trrn": rec["trrn"] or None,
+                "paid_on": None,
+                "notes": "Auto-captured by SKS Runner (EPFO ECR upload)",
+                "file_base64": pdf_b64,
+                "file_mime": "application/pdf",
+                "file_name": rec["filename"],
+                "auto_captured": True,
+                "created_by": "sks-runner",
+                "created_at": now_iso(),
+            },
+             "$setOnInsert": {"challan_id": f"chl_{secrets.token_hex(6)}"}},
+            upsert=True)
     logger.info("[challan-pdf] saved for %s run=%s (%d chars)",
                 doc["company_id"], run_id or "-", len(pdf_b64))
     return {"ok": True}

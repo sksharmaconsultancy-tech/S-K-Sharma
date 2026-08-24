@@ -8383,3 +8383,11 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   vksbhilwara@gmail.com OR (position="Super Admin" AND role="employee") →
   role=super_admin + super_admin_allowlisted=True + onboarded/approved.
   Verified: backend restart ke baad bhi role super_admin rehta hai.
+- Iter 703 (user request — Challan in payroll records): ext_save_challan_pdf
+  ab db.challans me bhi upsert karta hai (portal=pf, month run se,
+  auto_captured=True marker se idempotent, created_by sks-runner) — PF ESIC
+  Challan Upload screen par har month ka record TRRN + PDF + Download ke
+  saath apne aap dikh jata hai (PF ⚙ badge). ext_save_trrn us month ke
+  trrn-less pf rows par TRRN stamp karta hai. Verified e2e: row appears
+  with TRRN+file, re-save par duplicate nahi (1 row). sw v21, badge 703,
+  deploy_vps_iter703.sh, kind=script→deploy703.

@@ -891,7 +891,9 @@ export default function ChallansScreen() {
               </View>
               {rows.map((r, idx) => (
                 <View key={r.challan_id} style={[styles.tRow, idx % 2 && styles.tRowAlt]}>
-                  <Text style={[styles.tC, { flex: 1, fontWeight: "700" }]}>{(r.portal || "").toUpperCase()}</Text>
+                  <Text style={[styles.tC, { flex: 1, fontWeight: "700" }]}>
+                    {(r.portal || "").toUpperCase()}{(r as any).auto_captured ? " ⚙" : ""}
+                  </Text>
                   <Text style={[styles.tC, { flex: 1 }]}>{r.month}</Text>
                   <Text style={[styles.tC, { flex: 1 }]}>₹{Number(r.amount || 0).toLocaleString()}</Text>
                   <Text style={[styles.tC, { flex: 1.5 }]}>{r.trrn || "—"}</Text>
