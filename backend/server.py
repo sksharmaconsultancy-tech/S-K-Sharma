@@ -13353,6 +13353,9 @@ app.include_router(my_approvals_router)
 # Iter 708 — Firm-wise PWA data lifecycle + screenshot protection.
 from routes.pwa_data_mgmt import router as pwa_data_mgmt_router  # noqa: E402
 app.include_router(pwa_data_mgmt_router)
+# Iter 709 — READ-ONLY Payroll Charts & Analytics (no process changes).
+from routes.analytics import router as analytics_router  # noqa: E402
+app.include_router(analytics_router)
 
 # Iter 610 — Employee Self-Service (ESS): profile, attendance+, shift,
 # salary/PF/ESIC, unified requests, notification center.

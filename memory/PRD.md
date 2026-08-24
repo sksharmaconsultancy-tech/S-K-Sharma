@@ -8485,3 +8485,19 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   month grid for all firms every 10 min → first open after restart 0.14s.
   GZip middleware already present. Testing: iteration_708 frontend ALL PASS.
 - Iter 708 deploy: deploy_vps_iter708.sh (badge 708, sw v24, checks for pwa_data_mgmt/ScreenshotShield/warm-grid/tour report/advances/my-approvals; temp_bundle kind=script→deploy708.sh).
+- Iter 709 — READ-ONLY CHARTS & ANALYTICS (user: no process changes ever):
+  backend routes/analytics.py — pure READ endpoints: /api/analytics/payroll
+  (KPIs, 6-month trend, dept bar, components/deduction donuts, earnings vs
+  deductions stacked, PF/ESIC emp vs employer from compliance_salary_runs;
+  month rows = newest salary_run per group_id preferring runs with
+  total_gross>0), /api/analytics/attendance (daily present line via
+  aggregate, present/leave/absent donut, leave types, punch sources),
+  /api/analytics/people (dept/designation bars, joining trend, UAN/ESIC
+  donuts, expense category/status, approvals, advances). Admin roles only,
+  company scoped. NOTHING written, no triggers. Frontend: src/components/
+  charts.tsx (HBar/TrendLine/Donut/StackedBars/KpiCard via react-native-svg,
+  fmtMoney Cr/L/K), app/analytics.tsx (tabs Payroll/Attendance/People,
+  month nav, CompanyPicker, web Print button). AdminWebShell nav "Charts &
+  Analytics" (route /analytics) added after Tour Management in both lists +
+  permission map. Verified: June 2026 gross ₹11.18L renders in trend/dept;
+  screenshot OK.
