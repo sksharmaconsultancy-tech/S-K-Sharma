@@ -420,8 +420,8 @@ export default function AutomationStudioScreen() {
           const base = MAP[stx] || stx || "…";
           setPcStatus(credsWarn ? `${base}\n${credsWarn}` : base);
           if (stx === "closed" || stx.startsWith("error") || stx.startsWith("busy")
-              || (stx === "action_open" && action !== "ecr")
-              || (stx === "action_manual" && action !== "ecr")
+              || (stx === "action_open" && action !== "ecr" && action !== "contrib")
+              || (stx === "action_manual" && action !== "ecr" && action !== "contrib")
               || (stx === "signed_in" && !action)) {
             if (pcPollRef.current) clearInterval(pcPollRef.current);
             pcPollRef.current = null;
@@ -506,13 +506,14 @@ export default function AutomationStudioScreen() {
       // Iter 700 — ESIC uses the SAME process (fill Username/LIN + Password
       // from Firm Master → ESI Registration; user types CAPTCHA; auto Login).
       const act = portal === "epfo" ? (EPFO_PC_ACTION[flow] ?? "") : (ESIC_PC_ACTION[flow] ?? "");
-      // Iter 699 — ECR Upload needs the month so the runner can fetch and
-      // attach THAT month's ready PF ECR file.
-      if (act === "ecr" && activeFlow?.needs_run && !runId) {
-        setErr("Select the month (Compliance Process) first — the runner attaches that month's ECR file.");
+      // Iter 699/704 — ECR Upload & ESIC Contribution need the month so the
+      // runner can fetch/attach files and file the challan on that month.
+      const needsMonth = act === "ecr" || act === "contrib";
+      if (needsMonth && activeFlow?.needs_run && !runId) {
+        setErr("Select the month (Compliance Process) first.");
         return;
       }
-      await openEpfoPc(act, activeFlow?.label || flow, act === "ecr" ? runId : undefined, portal);
+      await openEpfoPc(act, activeFlow?.label || flow, needsMonth ? runId : undefined, portal);
       return;
     }
     setBusy(true);

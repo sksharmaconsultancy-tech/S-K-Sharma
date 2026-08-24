@@ -551,7 +551,7 @@ async def ext_ecr_file(token: str, run_id: str = ""):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "27"
+RUNNER_VERSION = "28"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -562,7 +562,7 @@ import time
 import urllib.error
 import urllib.request
 
-RUNNER_BUILD = "27"
+RUNNER_BUILD = "28"
 
 PORTALS = {
     "esic": "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx",
@@ -716,12 +716,22 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None, action=None):
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/128.0.0.0 Safari/537.36")
             opts.add_argument("--disable-infobars")
+            import os as _os1
+            import tempfile as _tf1
+            _dl_dir_e = _os1.path.join(_tf1.gettempdir(), "sks_dl")
+            try:
+                _os1.makedirs(_dl_dir_e, exist_ok=True)
+            except Exception:
+                pass
             opts.add_experimental_option("prefs", {
                 "credentials_enable_service": False,
                 "profile.password_manager_enabled": False,
                 "profile.password_manager_leak_detection": False,
                 "autofill.profile_enabled": False,
                 "autofill.credit_card_enabled": False,
+                "download.default_directory": _dl_dir_e,
+                "download.prompt_for_download": False,
+                "plugins.always_open_pdf_externally": True,
             })
             opts.add_argument("--guest")
         except Exception:
@@ -976,6 +986,113 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None, action=None):
                         except Exception as _e:
                             _st("action_manual")
                             print("Post-login navigation skipped (%s)." % _e)
+                    # Iter 704 (user request) — ESIC contribution challan on
+                    # record: after YOU upload/finalise the contribution,
+                    # watch for the ESIC Challan Number, save it to the app,
+                    # and pick up + save the downloaded challan PDF too.
+                    if (action or "").lower() == "contrib" and _clicked:
+                        try:
+                            import re as _re2
+                            print("Watching for the ESIC Challan Number "
+                                  "after you upload (up to 30 minutes)...")
+                            _chno = ""
+                            for _i in range(900):
+                                time.sleep(2)
+                                try:
+                                    _src = driver.page_source or ""
+                                except Exception:
+                                    break
+                                _m = _re2.search(
+                                    r"Challan\s*(?:No|Number|#)[^0-9]{0,60}"
+                                    r"(\d{10,22})", _src, _re2.I)
+                                if _m:
+                                    _chno = _m.group(1)
+                                    break
+                            if _chno:
+                                _st("trrn:%s" % _chno)
+                                print("ESIC Challan Number captured: %s"
+                                      % _chno)
+                                try:
+                                    _shot = driver.get_screenshot_as_base64()
+                                except Exception:
+                                    _shot = ""
+                                try:
+                                    _rq2 = urllib.request.Request(
+                                        "%s/api/portal-ext/trrn" % API_BASE,
+                                        data=json.dumps({
+                                            "token": TOKEN,
+                                            "run_id": run_id or "",
+                                            "trrn": _chno,
+                                            "portal": "esic",
+                                            "screenshot_b64": _shot,
+                                        }).encode(),
+                                        headers={"Content-Type":
+                                                 "application/json"})
+                                    urllib.request.urlopen(_rq2, timeout=30)
+                                    print("Challan number saved to the app.")
+                                except Exception as _e:
+                                    print("Could not save the challan number "
+                                          "(%s)." % _e)
+                                try:
+                                    _before = set(_os1.listdir(_dl_dir_e))
+                                except Exception:
+                                    _before = set()
+                                try:
+                                    _lks = [x for x in driver.find_elements(
+                                        By.PARTIAL_LINK_TEXT, "Challan")
+                                        if x.is_displayed()]
+                                    if _lks:
+                                        _lks[0].click()
+                                except Exception:
+                                    pass
+                                _pdf_path = ""
+                                for _i in range(150):
+                                    time.sleep(2)
+                                    try:
+                                        for _fn in _os1.listdir(_dl_dir_e):
+                                            if (_fn.lower().endswith(".pdf")
+                                                    and _fn not in _before):
+                                                _pdf_path = _os1.path.join(
+                                                    _dl_dir_e, _fn)
+                                                break
+                                    except Exception:
+                                        pass
+                                    if _pdf_path:
+                                        break
+                                if _pdf_path:
+                                    time.sleep(2)
+                                    try:
+                                        with open(_pdf_path, "rb") as _pf:
+                                            _pb = base64.b64encode(
+                                                _pf.read()).decode("ascii")
+                                        _rq3 = urllib.request.Request(
+                                            "%s/api/portal-ext/challan-pdf"
+                                            % API_BASE,
+                                            data=json.dumps({
+                                                "token": TOKEN,
+                                                "run_id": run_id or "",
+                                                "trrn": _chno,
+                                                "portal": "esic",
+                                                "filename": _os1.path
+                                                .basename(_pdf_path),
+                                                "pdf_b64": _pb,
+                                            }).encode(),
+                                            headers={"Content-Type":
+                                                     "application/json"})
+                                        urllib.request.urlopen(_rq3, timeout=60)
+                                        _st("challan_saved")
+                                        print("ESIC challan PDF saved to the "
+                                              "app - see the Challan Upload "
+                                              "screen.")
+                                    except Exception as _e:
+                                        print("Could not save the challan "
+                                              "PDF (%s)." % _e)
+                                else:
+                                    print("No challan PDF download detected "
+                                          "- you can attach it in the app "
+                                          "later.")
+                        except Exception as _e:
+                            print("ESIC challan watch skipped (%s)." % _e)
                 else:
                     _st("open_nofield")
                     print("Could not fill the login boxes - type them "
@@ -2698,6 +2815,10 @@ async def ext_save_trrn(payload: Dict[str, Any] = Body(...)):
     trrn = str(payload.get("trrn") or "").strip()
     if not trrn or not trrn.isdigit():
         raise HTTPException(status_code=400, detail="A numeric TRRN is required")
+    # Iter 704 — also used for the ESIC Challan Number (portal=esic).
+    portal_kind = (payload.get("portal") or "pf").lower()
+    if portal_kind not in ("pf", "esic"):
+        portal_kind = "pf"
     shot = payload.get("screenshot_b64") or ""
     if len(shot) > 4_000_000:   # cap ~3MB decoded
         shot = ""
@@ -2706,21 +2827,23 @@ async def ext_save_trrn(payload: Dict[str, Any] = Body(...)):
         "company_id": doc["company_id"],
         "run_id": run_id or None,
         "trrn": trrn,
+        "portal": portal_kind,
         "screenshot_b64": shot,
         "captured_at": now_iso(),
     })
     if run_id:
+        _field = "pf_trrn" if portal_kind == "pf" else "esic_challan_no"
         await db.compliance_salary_runs.update_one(
             {"run_id": run_id, "company_id": doc["company_id"]},
-            {"$set": {"pf_trrn": trrn, "pf_trrn_at": now_iso()}})
-        # Iter 703 — stamp the TRRN onto this month's PF challan record on
+            {"$set": {_field: trrn, _field + "_at": now_iso()}})
+        # Iter 703 — stamp the number onto this month's challan record on
         # the Challan Upload screen too (if one exists without a TRRN).
         run = await db.compliance_salary_runs.find_one(
             {"run_id": run_id}, {"_id": 0, "month": 1})
         month = (run or {}).get("month") or ""
         if month:
             await db.challans.update_many(
-                {"company_id": doc["company_id"], "portal": "pf",
+                {"company_id": doc["company_id"], "portal": portal_kind,
                  "month": month, "trrn": None},
                 {"$set": {"trrn": trrn}})
     logger.info("[trrn] %s captured for %s run=%s",
@@ -2742,21 +2865,31 @@ async def ext_save_challan_pdf(payload: Dict[str, Any] = Body(...)):
     if len(pdf_b64) > 12_000_000:   # ~9MB decoded cap
         raise HTTPException(status_code=413, detail="PDF too large")
     run_id = (payload.get("run_id") or doc.get("run_id") or "").strip()
+    # Iter 704 — same endpoint files the ESIC challan when portal=esic.
+    portal_kind = (payload.get("portal") or "pf").lower()
+    if portal_kind not in ("pf", "esic"):
+        portal_kind = "pf"
     rec = {
         "company_id": doc["company_id"],
         "run_id": run_id or None,
+        "portal": portal_kind,
         "trrn": str(payload.get("trrn") or "").strip(),
-        "filename": (payload.get("filename") or "PF_Challan.pdf")[:120],
+        "filename": (payload.get("filename") or
+                     ("ESIC_Challan.pdf" if portal_kind == "esic"
+                      else "PF_Challan.pdf"))[:120],
         "pdf_b64": pdf_b64,
         "saved_at": now_iso(),
     }
     await db.pf_challan_pdfs.update_one(
-        {"company_id": doc["company_id"], "run_id": run_id or None},
+        {"company_id": doc["company_id"], "run_id": run_id or None,
+         "portal": portal_kind},
         {"$set": rec}, upsert=True)
     if run_id:
+        _flag = ("pf_challan_saved" if portal_kind == "pf"
+                 else "esic_challan_saved")
         await db.compliance_salary_runs.update_one(
             {"run_id": run_id, "company_id": doc["company_id"]},
-            {"$set": {"pf_challan_saved": True}})
+            {"$set": {_flag: True}})
     # Iter 703 (user request) — also file it on the PF/ESIC Challan Upload
     # screen so each month's record shows the TRRN + downloadable PDF there.
     month = ""
@@ -2766,16 +2899,18 @@ async def ext_save_challan_pdf(payload: Dict[str, Any] = Body(...)):
         month = (run or {}).get("month") or ""
     if month:
         await db.challans.update_one(
-            {"company_id": doc["company_id"], "portal": "pf",
+            {"company_id": doc["company_id"], "portal": portal_kind,
              "month": month, "auto_captured": True},
             {"$set": {
                 "company_id": doc["company_id"],
-                "portal": "pf",
+                "portal": portal_kind,
                 "month": month,
                 "amount": 0.0,
                 "trrn": rec["trrn"] or None,
                 "paid_on": None,
-                "notes": "Auto-captured by SKS Runner (EPFO ECR upload)",
+                "notes": ("Auto-captured by SKS Runner (ESIC contribution)"
+                          if portal_kind == "esic" else
+                          "Auto-captured by SKS Runner (EPFO ECR upload)"),
                 "file_base64": pdf_b64,
                 "file_mime": "application/pdf",
                 "file_name": rec["filename"],
@@ -2796,7 +2931,7 @@ async def pf_challan_status(
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "sub_admin", "company_admin"])
     doc = await db.pf_challan_pdfs.find_one(
-        {"run_id": run_id}, {"_id": 0, "pdf_b64": 0})
+        {"run_id": run_id, "portal": {"$ne": "esic"}}, {"_id": 0, "pdf_b64": 0})
     if doc and admin["role"] == "company_admin" \
             and doc.get("company_id") != admin.get("company_id"):
         raise HTTPException(status_code=403, detail="Not authorised")
@@ -2811,7 +2946,8 @@ async def pf_challan_pdf(
     from fastapi.responses import Response
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "sub_admin", "company_admin"])
-    doc = await db.pf_challan_pdfs.find_one({"run_id": run_id}, {"_id": 0})
+    doc = await db.pf_challan_pdfs.find_one(
+        {"run_id": run_id, "portal": {"$ne": "esic"}}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="No challan PDF saved for this run yet")
     if admin["role"] == "company_admin" \

@@ -1,6 +1,6 @@
 {
-  "name": "S.K. Sharma & Co. — Employee",
-  "short_name": "SKS Employee",
+  "name": "Smart Payroll — Employee",
+  "short_name": "Smart Payroll",
   "description": "Employee app — punch attendance, payslips, leaves and documents.",
   "id": "/employee",
   "start_url": "/employee",

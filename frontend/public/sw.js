@@ -7,7 +7,7 @@
  *     (Iter 291: fixes "PWA sometimes won't open" on weak connections).
  *   • static assets (js/css/img)   → stale-while-revalidate.
  */
-const CACHE = "sks-pwa-v21"; // Iter 703 — auto challan on Challan Upload screen
+const CACHE = "sks-pwa-v22"; // Iter 704 — ESIC challan record + Smart Payroll rename
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();

@@ -8391,3 +8391,21 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   trrn-less pf rows par TRRN stamp karta hai. Verified e2e: row appears
   with TRRN+file, re-save par duplicate nahi (1 row). sw v21, badge 703,
   deploy_vps_iter703.sh, kind=script→deploy703.
+- Iter 704 (user requests ×2): (1) ESIC CHALLAN RECORD — runner v28
+  esic_open: action=="contrib" && login clicked → 30min watch (regex
+  Challan No/Number/# + 10-22 digits) → _st("trrn:<no>") → POST
+  /portal-ext/trrn portal=esic (run.esic_challan_no, month challans stamp)
+  → Challan link click + esic download-dir watch (prefs added to esic
+  Chrome opts: sks_dl + always_open_pdf_externally) → POST
+  /portal-ext/challan-pdf portal=esic → db.challans upsert portal=esic
+  auto_captured. Backend endpoints portal-aware (pf default);
+  pf-challan-status/pdf ab portal!=esic filter (PF button esic doc nahi
+  uthata). Frontend: needsMonth = ecr||contrib (runId pass + month guard);
+  poll contrib par bhi continue. VERIFIED e2e: esic row with No+PDF,
+  pf-status False, no dupes. (2) PWA RENAME "Smart Payroll" — manifest.json
+  / manifest-employee.json / manifest-employer.json name+short_name;
+  inject-pwa-html.js apple-mobile-web-app-title sab "Smart Payroll";
+  deploy704 me manifests copy step added (pehle sirf sw.js copy hota tha).
+  User ko batana: naya naam ke liye phone se PWA remove karke dobara Add
+  to Home Screen. sw v22, badge 704, deploy_vps_iter704.sh,
+  kind=script→deploy704, runner v28 ke liye install_autostart.bat dobara.

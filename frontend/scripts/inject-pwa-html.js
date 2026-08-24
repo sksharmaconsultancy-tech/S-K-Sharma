@@ -33,16 +33,16 @@ const head = `
         var p = window.location.pathname || "/";
         var q = window.location.search || "";
         var manifest = "/manifest.json";
-        var title = "SK Sharma";
+        var title = "Smart Payroll";
         if (p.indexOf("/employee") === 0 || p.indexOf("/pin-login") === 0 ||
             (p.indexOf("/get-app") === 0 && q.indexOf("type=employer") === -1)) {
           manifest = "/manifest-employee.json";
-          title = "SKS Employee";
+          title = "Smart Payroll";
         } else if (p.indexOf("/employer") === 0 || p.indexOf("/admin-pin-login") === 0 ||
             p.indexOf("/company-login") === 0 || p.indexOf("/company-register") === 0 ||
             (p.indexOf("/get-app") === 0 && q.indexOf("type=employer") !== -1)) {
           manifest = "/manifest-employer.json";
-          title = "SKS Employer";
+          title = "Smart Payroll";
         }
         var link = document.createElement("link");
         link.rel = "manifest";
