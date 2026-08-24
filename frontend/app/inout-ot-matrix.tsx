@@ -101,10 +101,18 @@ export default function InOutOtMatrixScreen() {
     if ((!dummyAllowed || !webPortal) && dummyMode) { setDummyMode(false); setDummyShiftF(""); }
   }, [dummyAllowed, dummyMode, webPortal]);
 
+  // Iter 702 (speed) — debounce the search box so we don't fire a server
+  // request on every keystroke.
+  const [qDeb, setQDeb] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setQDeb(q), 450);
+    return () => clearTimeout(t);
+  }, [q]);
+
   const qs = useMemo(() => {
     const p = new URLSearchParams({ month, page: String(page), page_size: "10" });
     if (cid) p.set("company_id", cid);
-    if (q.trim()) p.set("q", q.trim());
+    if (qDeb.trim()) p.set("q", qDeb.trim());
     if (dept) p.set("department", dept);
     if (desig) p.set("designation", desig);
     if (cat) p.set("employee_type", cat);
@@ -116,7 +124,7 @@ export default function InOutOtMatrixScreen() {
     }
     p.set("status", status);
     return p.toString();
-  }, [cid, month, q, dept, desig, cat, contr, shift, status, page, dummyMode, dummyShiftF]);
+  }, [cid, month, qDeb, dept, desig, cat, contr, shift, status, page, dummyMode, dummyShiftF]);
 
   const load = useCallback(async () => {
     if (!cid) return;
@@ -133,7 +141,7 @@ export default function InOutOtMatrixScreen() {
   }, [cid, qs]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setPage(1); }, [cid, month, q, dept, desig, cat, contr, shift, status, dummyMode, dummyShiftF]);
+  useEffect(() => { setPage(1); }, [cid, month, qDeb, dept, desig, cat, contr, shift, status, dummyMode, dummyShiftF]);
 
   const doExport = async (kind: "xlsx" | "pdf" | "csv" | "print") => {
     if (!cid) return;

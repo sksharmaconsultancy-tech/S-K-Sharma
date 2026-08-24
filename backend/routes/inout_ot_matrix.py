@@ -93,6 +93,31 @@ async def _auth(authorization: Optional[str], company_id: Optional[str]):
     return admin, company_id
 
 
+# Iter 702 (user issue — "In/Out report takes too much time to load"):
+# the FULL month grid (punch pairing, dedup, cross-day stitching for every
+# employee) was recomputed on EVERY page change / filter / search keystroke.
+# Cache the computed grid per (company, month) for a short TTL — pagination
+# and filters then run on the cached data. _build only READS the grid, so
+# sharing the object is safe. New punches show up within TTL seconds.
+_GRID_CACHE: Dict[str, tuple] = {}
+_GRID_TTL_SEC = 90.0
+
+
+async def _cached_grid(company_id: str, month: str) -> Dict[str, Any]:
+    import time as _t
+    from server import _compute_monthly_grid_data
+    key = f"{company_id}|{month}"
+    hit = _GRID_CACHE.get(key)
+    if hit and (_t.time() - hit[0]) < _GRID_TTL_SEC:
+        return hit[1]
+    data = await _compute_monthly_grid_data(company_id, month)
+    _GRID_CACHE[key] = (_t.time(), data)
+    if len(_GRID_CACHE) > 40:   # keep the cache tiny
+        oldest = min(_GRID_CACHE, key=lambda k: _GRID_CACHE[k][0])
+        _GRID_CACHE.pop(oldest, None)
+    return data
+
+
 async def _build(
     company_id: str,
     month: str,
@@ -108,8 +133,8 @@ async def _build(
 ) -> Dict[str, Any]:
     """Compute the grid once, join extra master fields, apply filters and
     shape the per-employee 6-row matrix."""
-    from server import db, _compute_monthly_grid_data
-    data = await _compute_monthly_grid_data(company_id, month)
+    from server import db
+    data = await _cached_grid(company_id, month)
     day_labels: List[str] = data.get("day_labels") or []
     weekday_labels: List[str] = data.get("weekday_labels") or []
 

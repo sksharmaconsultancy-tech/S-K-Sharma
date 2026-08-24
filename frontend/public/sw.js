@@ -7,7 +7,7 @@
  *     (Iter 291: fixes "PWA sometimes won't open" on weak connections).
  *   • static assets (js/css/img)   → stale-while-revalidate.
  */
-const CACHE = "sks-pwa-v19"; // Iter 701 — ESIC auto-nav + TRRN capture
+const CACHE = "sks-pwa-v20"; // Iter 702 — In/Out report speedup
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();

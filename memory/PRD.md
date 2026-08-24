@@ -8364,3 +8364,22 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   701, deploy_vps_iter701.sh + checks, kind=script→deploy701. VERIFIED
   e2e: trrn save 200, challan save 200, status exists+trrn, download
   application/pdf bytes, run doc pf_trrn/pf_challan_saved set.
+- Iter 702 (user issue — In/Out report slow): ROOT CAUSE — har page/filter/
+  search request par _compute_monthly_grid_data (poore month ki punch
+  pairing/dedup/stitching har employee ke liye) dobara chal raha tha.
+  FIX: inout_ot_matrix.py me _GRID_CACHE (per company|month, TTL 90s,
+  max 40 entries, _build sirf READ karta hai isliye share safe) —
+  pagination/filters/search/exports ab cached grid par. Frontend
+  inout-ot-matrix.tsx: search q par 450ms debounce (qDeb). Verified:
+  first 65ms → cached 22-28ms locally; VPS par pehli baar ke baad har
+  interaction instant hoga. sw v20, badge 702, deploy_vps_iter702.sh,
+  kind=script→deploy702.
+- Iter 702b (user issue — new Super Admin vksbhilwara@gmail.com login fail
+  "This login is only for administrators"): ROOT CAUSE — account seed
+  (iter615) me super_admin_allowlisted flag nahi tha; server.py startup
+  sweep (line ~3348) har restart par non-allowlisted super_admins ko
+  employee demote karta hai → role=employee → admin login 403. FIX:
+  repair migration (local DB me applied + deploy702 PYSA block): email
+  vksbhilwara@gmail.com OR (position="Super Admin" AND role="employee") →
+  role=super_admin + super_admin_allowlisted=True + onboarded/approved.
+  Verified: backend restart ke baad bhi role super_admin rehta hai.
