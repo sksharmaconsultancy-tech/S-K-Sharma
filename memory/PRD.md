@@ -8279,3 +8279,16 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   root cause bata de (e.g. Session expired / 502 / Invalid session).
   sw.js cache v14. Badge 696, deploy_vps_iter696.sh, kind=script→deploy696.
   Verified: launch-token English diagnosis OK (found & not-found dono).
+- Iter 697 (🎯 TRUE ROOT CAUSE of entire wrong-firm saga): user ne 696 ka
+  naya error paste kiya — pydantic 422 dict_type: body STRING aa rahi thi.
+  client.ts `api()` hamesha JSON.stringify(body) karta tha; automation-
+  studio (aur 15 aur call-sites: form16, attendance-report,
+  central-statistical) pehle se stringified body dete the → DOUBLE-encoded
+  → FastAPI 422 → launch-token KABHI succeed hua hi nahi tha → purane code
+  ka silent fallback baked download-time token (Suvidhi) use karta tha.
+  FIX: client.ts api() + apiBinary() ab `typeof body === "string" ? body :
+  JSON.stringify(body)`. Verified: double-encoded → 422 repro; string
+  passthrough → 200 + creds_found. sw cache v15, badge 697,
+  deploy_vps_iter697.sh, kind=script → deploy697. NOTE agla agent: portal
+  UI English only; chat Hinglish. Ab user verify karega — is fix ke baad
+  firm-wise login + diagnosis + dup-warning sab pehli baar sach me chalega.

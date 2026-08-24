@@ -7,7 +7,7 @@
  *     (Iter 291: fixes "PWA sometimes won't open" on weak connections).
  *   • static assets (js/css/img)   → stale-while-revalidate.
  */
-const CACHE = "sks-pwa-v14"; // Iter 696 — English UI messages + real error surfacing
+const CACHE = "sks-pwa-v15"; // Iter 697 — api client double-stringify fix (root cause of wrong-firm login)
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();

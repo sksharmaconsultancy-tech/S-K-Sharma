@@ -120,7 +120,9 @@ export async function apiBinary(
   const res = await fetch(`${BASE}/api${path}`, {
     method: opts.method || "GET",
     headers,
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    body: opts.body !== undefined
+      ? (typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body))
+      : undefined,
     credentials: "include",
   });
   if (!res.ok) {
@@ -166,7 +168,12 @@ export async function api<T = any>(
   const res = await fetch(`${BASE}/api${path}`, {
     method,
     headers,
-    body: body ? JSON.stringify(body) : undefined,
+    // Iter 697 (ROOT CAUSE of the wrong-firm EPFO login saga) — some
+    // callers pass an ALREADY-stringified body; stringifying it again sent
+    // a JSON string literal instead of an object, so FastAPI rejected the
+    // request (422 dict_type) and old code silently fell back to the baked
+    // runner token. Never double-encode.
+    body: body ? (typeof body === "string" ? body : JSON.stringify(body)) : undefined,
     // Iter 103 — send the browser's Cloudflare clearance cookies so
     // challenged browsers don't receive the HTML challenge page as an
     // API response ("Server returned an unexpected text/html").
