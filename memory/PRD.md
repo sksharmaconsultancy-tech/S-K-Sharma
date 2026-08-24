@@ -8227,3 +8227,24 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   VERIFIED e2e preview par: dup-warning dono directions me firm name ke
   saath; runner creds per-token sahi firm ka; runner code string compiles.
   Deploy: deploy_vps_iter693.sh (kind=script), badge 693.
+- Iter 694 (user bug ×3 — deploy693 ke baad bhi Svithi/Suvidhi ka login
+  doosri firms me): ROOT CAUSE FINAL — purane Chrome-autofill bug ne login
+  DB me hi doosri firms ke firm_masters me copy kar diya tha (693 ne sirf
+  FUTURE leaks roke, existing leaked rows reh gayi thi jinhe backend
+  legitimately resolve karta tha). 3-part FINAL fix:
+  (1) DEPLOY AUTO-CLEANUP (deploy_vps_iter694.sh PYDUP block): duplicate
+  EPFO user_id groups me agar exactly-1 firm ka naam RAYON/SVITHI/SUVIDHI
+  regex se match kare to login us firm par rakh kar baaki sabse auto-wipe
+  (epf section + PF LOGIN row); warna sirf report. Locally verified.
+  (2) ONE-CLICK UI CLEANUP: POST /api/admin/portal-automation/
+  claim-epfo-login {company_id} (super/sub admin) — selected firm OWNER,
+  same user_id baaki firms se wipe; automation-studio.tsx me dupWarn red
+  box + "Ye login SIRF isi firm ka hai — DOOSRI firms se HATAO" button
+  (testID as-fix-dup-login), confirm dialog, result status. dupWarn
+  companyId change par reset. Verified e2e (kept Kankani, wiped CityCare,
+  CityCare phir correctly 'login nahi mila').
+  (3) SAVE GUARD (firm_master.py PATCH): NAYA/badla hua EPF user_id ya PF
+  LOGIN user_name jo doosri firm me already saved hai → 400 Hinglish error
+  owner firm ke naam ke saath; UNCHANGED value re-save par guard skip
+  (legacy leaked rows save-block nahi karti). Verified: dup→400,
+  unique→200, unchanged re-save→200. Badge 694, kind=script → deploy694.

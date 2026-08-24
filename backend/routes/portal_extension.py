@@ -22,7 +22,7 @@ import io
 import json
 import secrets
 import zipfile
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Header, HTTPException, Query
 from fastapi.responses import Response
@@ -2005,6 +2005,59 @@ async def portal_launch_token(
         "creds_diagnosis": diag["diagnosis"],
         "creds_warning": diag.get("warning") or "",
     }
+
+
+@router.post("/admin/portal-automation/claim-epfo-login")
+async def claim_epfo_login(
+    payload: Optional[Dict[str, Any]] = None,
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 694 (user bug ×3) — ONE-CLICK CLEANUP: the selected firm is the
+    REAL owner of its EPFO login; the same User ID is wiped from every
+    OTHER firm (EPF Registration section + PF LOGIN row) where the old
+    browser-autofill bug had copied it."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin"])
+    company_id = await _resolve_company(admin, (payload or {}).get("company_id"))
+    diag = await _diagnose_epfo_creds(company_id)
+    if not diag["found"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Is firm ka EPFO login hi save nahi hai — pehle Firm "
+                   "Master me login save karein.")
+    uid = diag["user_id"]
+    cleaned: List[str] = []
+    async for fm in db.firm_masters.find(
+        {"company_id": {"$ne": company_id},
+         "$or": [
+             {"epf.epf_user_id": uid},
+             {"portal_logins": {"$elemMatch": {
+                 "login_type": "PF LOGIN", "user_name": uid}}},
+         ]},
+            {"_id": 0, "company_id": 1, "epf": 1, "portal_logins": 1}):
+        upd: Dict[str, Any] = {}
+        if ((fm.get("epf") or {}).get("epf_user_id") or "").strip() == uid:
+            upd["epf.epf_user_id"] = ""
+            upd["epf.epf_password"] = None
+        rows = fm.get("portal_logins") or []
+        changed_rows = False
+        for r in rows:
+            if r.get("login_type") == "PF LOGIN" and (r.get("user_name") or "").strip() == uid:
+                r["user_name"] = None
+                r["password"] = None
+                changed_rows = True
+        if changed_rows:
+            upd["portal_logins"] = rows
+        if upd:
+            await db.firm_masters.update_one(
+                {"company_id": fm["company_id"]}, {"$set": upd})
+            c = await db.companies.find_one(
+                {"company_id": fm["company_id"]}, {"_id": 0, "name": 1})
+            cleaned.append((c or {}).get("name") or fm["company_id"])
+    logger.info("[claim-epfo-login] %s kept on %s; wiped from %s by %s",
+                uid, company_id, cleaned, admin["user_id"])
+    return {"ok": True, "user_id": uid,
+            "kept_firm": diag["firm_name"], "cleaned": cleaned}
 
 
 @router.get("/admin/portal-automation/runner-download")

@@ -198,6 +198,36 @@ export default function AutomationStudioScreen() {
   const pcPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [pcStatus, setPcStatus] = useState<string>("");
   const [pcBusy, setPcBusy] = useState<string>("");
+  // Iter 694 — duplicate EPFO login detected across firms → one-click fix.
+  const [dupWarn, setDupWarn] = useState<string>("");
+
+  useEffect(() => { setDupWarn(""); setPcStatus(""); }, [companyId]);
+
+  const fixDupLogin = async () => {
+    const ok = Platform.OS === "web"
+      ? (globalThis as any).confirm(
+          "Pakka karein: ye EPFO login SIRF abhi SELECT ki hui firm ka hai?\n\n" +
+          "Baaki jin firms me ye galti se copy ho gaya hai, un SABSE hata diya jayega. " +
+          "Selected firm par login jaisa hai waisa hi rahega.")
+      : true;
+    if (!ok) return;
+    setPcBusy("fixdup");
+    try {
+      const r = await api<any>("/admin/portal-automation/claim-epfo-login", {
+        method: "POST",
+        body: JSON.stringify({ company_id: companyId }),
+      });
+      const cleaned = (r?.cleaned || []).join(", ");
+      setDupWarn("");
+      setPcStatus(cleaned
+        ? `🧹 Ho gaya! Login "${r?.kept_firm || "selected firm"}" par hi raha; in firms se HATA diya: ${cleaned}. Ab har firm apna sahi login bharegi.`
+        : "✅ Koi duplicate nahi mila — sab firms ka login pehle se alag hai.");
+    } catch (e: any) {
+      setPcStatus(`❌ ${e?.message || "Cleanup fail ho gaya — dobara try karein."}`);
+    } finally {
+      setPcBusy("");
+    }
+  };
 
   useEffect(() => {
     return () => {
@@ -244,6 +274,7 @@ export default function AutomationStudioScreen() {
         if (lt && lt.creds_found === true) {
           credsUser = lt.creds_user_id || "";
           credsWarn = lt.creds_warning || "";
+          setDupWarn(credsWarn);
           setPcStatus(
             `✅ ${lt.creds_firm_name ? lt.creds_firm_name + " ka " : ""}EPFO login mila: ${credsUser} (${lt.creds_source}). Chrome khul raha hai...`
             + (credsWarn ? `\n${credsWarn}` : ""));
@@ -838,6 +869,28 @@ export default function AutomationStudioScreen() {
                     </Pressable>
                   </View>
                   {pcStatus ? <Text style={st.pcStatus}>{pcStatus}</Text> : null}
+                  {/* Iter 694 — duplicate EPFO login found on other firms:
+                      one-click cleanup keeps it on THIS firm only. */}
+                  {dupWarn ? (
+                    <View style={st.dupBox}>
+                      <Text style={st.dupTxt}>{dupWarn}</Text>
+                      <Pressable
+                        style={[st.dupBtn, pcBusy === "fixdup" && { opacity: 0.6 }]}
+                        onPress={fixDupLogin}
+                        disabled={pcBusy === "fixdup"}
+                        testID="as-fix-dup-login"
+                      >
+                        {pcBusy === "fixdup" ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <Ionicons name="trash-outline" size={14} color="#fff" />
+                        )}
+                        <Text style={st.pcBtnTxt}>
+                          Ye login SIRF isi firm ka hai — DOOSRI firms se HATAO
+                        </Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
                   <Text style={st.pcHint}>
                     <Text style={{ fontWeight: "800" }}>One-time setup (no more manual steps):</Text> click
                     Download ChromeDriver Setup → unzip to C:\SKS-AutoLogin → double-click{" "}
@@ -1415,5 +1468,15 @@ const st = StyleSheet.create({
   },
   pcBtnTxt: { fontSize: 13, fontWeight: "800", color: "#fff" },
   pcStatus: { fontSize: 13, fontWeight: "700", color: "#059669", marginTop: 8 },
+  dupBox: {
+    marginTop: 8, padding: 10, borderRadius: 8, backgroundColor: "#FEF2F2",
+    borderWidth: 1, borderColor: "#FCA5A5", gap: 8,
+  },
+  dupTxt: { fontSize: 12.5, fontWeight: "700", color: "#B91C1C", lineHeight: 18 },
+  dupBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 6, backgroundColor: "#DC2626", borderRadius: 8,
+    paddingVertical: 10, paddingHorizontal: 12, minHeight: 44,
+  },
   pcHint: { fontSize: 11.5, color: colors.onSurfaceTertiary, marginTop: 8, lineHeight: 16 },
 });

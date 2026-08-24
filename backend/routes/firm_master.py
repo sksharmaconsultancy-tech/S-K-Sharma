@@ -554,6 +554,53 @@ async def upsert_firm_master(
     # echoes back the mask.
     _protect_secrets(merged, existing)
 
+    # Iter 694 (user bug ×3 — one firm's EPFO login kept spreading to other
+    # firms via browser autofill + Save): DUPLICATE GUARD. A NEW/CHANGED
+    # EPFO User ID that is already saved on ANOTHER firm is rejected. Values
+    # that were already stored before this save are left alone (the cleanup
+    # button in Automation Studio handles those).
+    async def _dup_owner(uid: str) -> Optional[str]:
+        other = await db.firm_masters.find_one(
+            {"company_id": {"$ne": company_id},
+             "$or": [
+                 {"epf.epf_user_id": uid},
+                 {"portal_logins": {"$elemMatch": {
+                     "login_type": "PF LOGIN", "user_name": uid}}},
+             ]},
+            {"_id": 0, "company_id": 1})
+        if not other:
+            return None
+        c = await db.companies.find_one(
+            {"company_id": other["company_id"]}, {"_id": 0, "name": 1})
+        return (c or {}).get("name") or other["company_id"]
+
+    _new_epf_uid = ((merged.get("epf") or {}).get("epf_user_id") or "").strip()
+    _old_epf_uid = ((existing.get("epf") or {}).get("epf_user_id") or "").strip()
+    _new_pf_uid = _old_pf_uid = ""
+    for _r in merged.get("portal_logins") or []:
+        if _r.get("login_type") == "PF LOGIN":
+            _new_pf_uid = (_r.get("user_name") or "").strip()
+            break
+    for _r in existing.get("portal_logins") or []:
+        if _r.get("login_type") == "PF LOGIN":
+            _old_pf_uid = (_r.get("user_name") or "").strip()
+            break
+    _check = set()
+    if _new_epf_uid and "@" not in _new_epf_uid and _new_epf_uid != _old_epf_uid:
+        _check.add(_new_epf_uid)
+    if _new_pf_uid and "@" not in _new_pf_uid and _new_pf_uid != _old_pf_uid:
+        _check.add(_new_pf_uid)
+    for _uid in _check:
+        _owner = await _dup_owner(_uid)
+        if _owner:
+            raise HTTPException(
+                status_code=400,
+                detail=(f"EPFO User ID '{_uid}' pehle se firm '{_owner}' me "
+                        "saved hai — har firm ka apna ALAG EPFO login hota "
+                        "hai. Shayad browser ne purana login yahan bhar diya "
+                        f"hai. Agar YE firm hi asli malik hai to pehle "
+                        f"'{_owner}' ke Firm Master se wo login hatayein."))
+
     # Iter 98 — CL/PL gate: when "CL PL Applicable" is enabled the allowed
     # number of leaves is MANDATORY.
     _lp = merged.get("leave_policy") or {}
