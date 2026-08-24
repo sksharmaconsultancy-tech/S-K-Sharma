@@ -141,6 +141,45 @@ async def attendance_grid_debug(
     }
 
 
+# ---------------------------------------------------------------------------
+# Iter 710 — punch-correction APPROVAL GATE (user request).
+# When the firm's Manual Attendance "Approval Required" setting is ON, all
+# punch add / edit / delete repairs are queued into the SAME
+# attendance_change_requests approval flow (L1/L2 + dept approvers +
+# maker-checker) instead of applying directly.
+# ---------------------------------------------------------------------------
+async def _punch_approval_gate(admin: dict, company_id: str,
+                               req_doc: dict) -> Optional[dict]:
+    from routes.manual_attendance import _settings
+    st = await _settings(company_id)
+    if not (st.get("enabled") and st.get("approval_required")):
+        return None
+    emp = await db.users.find_one(
+        {"user_id": req_doc.get("user_id")}, {"_id": 0, "department": 1})
+    appr1 = ((st.get("dept_approvers") or {}).get((emp or {}).get("department") or "")
+             or st.get("level1_approver_id") or "")
+    rid = f"acr_{uuid.uuid4().hex[:10]}"
+    who = admin.get("name") or admin.get("email")
+    await db.attendance_change_requests.insert_one({
+        **req_doc, "company_id": company_id, "status": "PENDING", "level": 1,
+        "approver_l1": appr1, "approver_l2": st.get("level2_approver_id") or "",
+        "levels": int(st.get("approval_levels") or 1),
+        "request_id": rid, "requested_by": who,
+        "requested_by_id": admin.get("user_id"),
+        "requested_at": now_iso(), "source": "punch_repair"})
+    try:
+        await db.notifications.insert_one({
+            "notification_id": f"ntf_{uuid.uuid4().hex[:10]}",
+            "company_id": company_id, "audience": "admins",
+            "title": "Punch Correction Pending Approval",
+            "body": f"{req_doc.get('requested_status')} on {req_doc.get('date')} by {who} — approval needed.",
+            "category": "attendance", "created_at": now_iso(), "read_by": []})
+    except Exception:
+        pass
+    return {"ok": True, "queued": True, "request_id": rid,
+            "message": "Sent for approval — the punch will change only after the approver accepts it."}
+
+
 @api.post("/admin/attendance/cleanup-duplicate-punches")
 async def cleanup_duplicate_punches(
     company_id: Optional[str] = Query(None),
@@ -1552,6 +1591,15 @@ async def create_manual_punch(
 
     when = _parse_manual_at(payload.at)
     _enforce_lookback(admin, when)
+    # Iter 710 — approval gate: queue instead of direct insert when ON.
+    _q = await _punch_approval_gate(admin, emp.get("company_id") or "", {
+        "punch_action": "punch_add", "user_id": payload.user_id,
+        "date": when.strftime("%Y-%m-%d"), "requested_status": "PUNCH-ADD",
+        "reason": f"[{payload.kind.upper()} {when.strftime('%H:%M')}] {reason}"[:300],
+        "punch_payload": {"kind": payload.kind,
+                          "at": when.isoformat().replace("+00:00", "Z")}})
+    if _q:
+        return _q
 
     # Iter 544 — idempotent: an identical approved punch (same employee,
     # kind and exact time) is returned as-is instead of inserting a
@@ -1725,6 +1773,16 @@ async def edit_attendance_record(
         orig_when = datetime.now(timezone.utc)
     _enforce_lookback(admin, orig_when)
 
+    # Iter 710 — approval gate: queue the EDIT when Approval Required is ON.
+    _q = await _punch_approval_gate(admin, rec.get("company_id") or "", {
+        "punch_action": "punch_edit", "user_id": rec.get("user_id"),
+        "date": str(rec.get("date") or "")[:10], "requested_status": "PUNCH-EDIT",
+        "reason": f"[{record_id} → {payload.kind or rec.get('kind')} {str(payload.at or '')[-8:-3]}] {reason}"[:300],
+        "punch_record_id": record_id,
+        "punch_payload": {"at": payload.at, "kind": payload.kind}})
+    if _q:
+        return _q
+
     updates: dict = {
         "edited_by": admin["user_id"],
         "edited_at": now_iso(),
@@ -1788,6 +1846,15 @@ async def delete_attendance_record(
     except Exception:
         orig_when = datetime.now(timezone.utc)
     _enforce_lookback(admin, orig_when)
+
+    # Iter 710 — approval gate: queue the DELETE when Approval Required is ON.
+    _q = await _punch_approval_gate(admin, rec.get("company_id") or "", {
+        "punch_action": "punch_delete", "user_id": rec.get("user_id"),
+        "date": str(rec.get("date") or "")[:10], "requested_status": "PUNCH-DEL",
+        "reason": f"[delete {rec.get('kind')} {str(rec.get('at') or '')[11:16]}] {reason}"[:300],
+        "punch_record_id": record_id})
+    if _q:
+        return _q
 
     await db.attendance.delete_one({"record_id": record_id})
     await _log_punch_audit("delete", admin, record_id, rec, None, reason)

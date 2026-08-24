@@ -253,6 +253,36 @@ async def approvals(company_id: str = Query(...),
     return {"requests": reqs}
 
 
+async def _apply_punch_request(r: dict, who: str, admin: dict):
+    """Iter 710 — apply an APPROVED punch-repair request to db.attendance."""
+    pa = r.get("punch_action")
+    note = f"Approved punch repair by {who}: {r.get('reason') or ''}"[:200]
+    if pa == "punch_add":
+        pl = r.get("punch_payload") or {}
+        await db.attendance.insert_one({
+            "record_id": f"att_{uuid.uuid4().hex[:12]}",
+            "user_id": r["user_id"], "company_id": r["company_id"],
+            "date": r.get("date"), "kind": pl.get("kind") or "in",
+            "at": pl.get("at"), "source": "manual_admin",
+            "status": "approved", "approved_by": admin.get("user_id"),
+            "manual_reason": note, "created_at": now_iso()})
+    elif pa == "punch_edit":
+        pl = r.get("punch_payload") or {}
+        upd = {k: v for k, v in (("at", pl.get("at")), ("kind", pl.get("kind"))) if v}
+        upd.update({"edited_by": admin.get("user_id"), "edited_at": now_iso(),
+                    "edit_reason": note, "status": "approved"})
+        await db.attendance.update_one(
+            {"record_id": r.get("punch_record_id")}, {"$set": upd})
+    elif pa == "punch_delete":
+        await db.attendance.delete_one({"record_id": r.get("punch_record_id")})
+    try:
+        from server import invalidate_grid_cache
+        invalidate_grid_cache(r["company_id"])
+    except Exception:
+        pass
+
+
+
 @router.post("/approvals/decide")
 async def decide(payload: Dict[str, Any] = Body(...),
                  authorization: Optional[str] = Header(None)):
@@ -303,11 +333,15 @@ async def decide(payload: Dict[str, Any] = Body(...),
         await db.attendance_change_requests.update_one(
             {"request_id": rid}, {"$set": upd})
         if action == "APPROVE":
-            await db.manual_attendance.update_one(
-                {"company_id": cid, "user_id": r["user_id"], "date": r["date"]},
-                {"$set": {"status": r["requested_status"], "updated_by": who,
-                          "updated_at": now_iso(), "source": "manual",
-                          "approved": True}}, upsert=True)
+            # Iter 710 — punch-repair requests apply to db.attendance.
+            if r.get("punch_action"):
+                await _apply_punch_request(r, who, admin)
+            else:
+                await db.manual_attendance.update_one(
+                    {"company_id": cid, "user_id": r["user_id"], "date": r["date"]},
+                    {"$set": {"status": r["requested_status"], "updated_by": who,
+                              "updated_at": now_iso(), "source": "manual",
+                              "approved": True}}, upsert=True)
         await db.attendance_change_audit.insert_one(
             {k: v for k, v in {**r, **upd}.items() if k != "_id"})
         done += 1

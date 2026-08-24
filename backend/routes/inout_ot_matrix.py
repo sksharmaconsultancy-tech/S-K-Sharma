@@ -43,6 +43,15 @@ FLAG_COLORS = {
 }
 
 
+def _row_keys(data: Dict[str, Any]) -> List[tuple]:
+    """Iter 710 — in dummy mode the OT rows and the duplicate grand row are
+    meaningless once hours are masked; the matrix stays a clean
+    D-In / D-Out / Total Hrs set."""
+    if data.get("dummy_mode"):
+        return [rk for rk in ROW_KEYS if rk[0] in ("d_in", "d_out", "total")]
+    return ROW_KEYS
+
+
 def _f(v: Any) -> float:
     try:
         return float(v or 0)
@@ -144,6 +153,7 @@ async def _build(
     # master timings on present days. NOTHING is ever written to
     # attendance / payroll / punches.
     dummy_map: Dict[str, tuple] = {}
+    dummy_dur: Dict[str, tuple] = {}  # Iter 710 — name → ("H:MM", minutes)
     if dummy:
         _dpol = await db.companies.find_one(
             {"company_id": company_id},
@@ -164,6 +174,15 @@ async def _build(
         dummy_map = {d["name"]: (d["start"], d["end"],
                                  _hm2min(d["end"]) <= _hm2min(d["start"]))
                      for d in DUMMY_SHIFTS}
+        # Iter 710 (user issue — "dummy report shows ACTUAL 12-hr duty
+        # hours") — pre-compute every dummy shift's FIXED duration so the
+        # Total-Hrs cells are masked with it, never the real duty hours.
+        for _d in DUMMY_SHIFTS:
+            _mins = _hm2min(_d["end"]) - _hm2min(_d["start"])
+            if _mins <= 0:
+                _mins += 24 * 60
+            dummy_dur[_d["name"]] = (
+                f"{_mins // 60:02d}:{_mins % 60:02d}", _mins)
     # Summary counters (dummy mode only — sec 16 of the user spec).
     _dsum = {"present": 0, "week_off": 0, "holiday": 0, "absent": 0}
     _dshift_counts: Dict[str, int] = {}
@@ -232,6 +251,7 @@ async def _build(
         if dummy:
             _dshift_counts[ds or "— None —"] = _dshift_counts.get(ds or "— None —", 0) + 1
 
+        _emp_dmin = 0  # Iter 710 — dummy-mode month total (minutes)
         days: Dict[str, Dict[str, Any]] = {}
         for i, dl in enumerate(day_labels):
             cell = (emp.get("days") or {}).get(dl) or {}
@@ -276,47 +296,75 @@ async def _build(
                 # Holiday → Week Off → Present → Absent. Substitution is
                 # DISPLAY ONLY; the underlying attendance is never touched.
                 has_in, has_out = bool(cell.get("in")), bool(cell.get("out"))
-                pc = int(cell.get("punches") or 0)
                 e_d = days[dl]
+
+                def _mask_hours(_total: str) -> None:
+                    # Iter 710 — NEVER leak the actual duty / OT hours in
+                    # dummy mode; only the dummy shift's own fixed duration
+                    # (or "-") is shown. DISPLAY-ONLY, database untouched.
+                    e_d["total"] = e_d["grand"] = _total
+                    e_d["ot"] = e_d["ot_in"] = e_d["ot_out"] = "-"
+                    e_d["detail"]["working_hours"] = _total
+                    e_d["detail"]["ot_hours"] = "-"
+                    e_d["detail"]["break_time"] = "-"
+
                 if cell.get("holiday"):
                     e_d["d_in"] = e_d["d_out"] = "H"
                     e_d["flag"] = "holiday"
+                    _mask_hours("-")
                     _dsum["holiday"] += 1
                 elif cell.get("weekly_off"):
                     e_d["d_in"] = e_d["d_out"] = "WO"
                     e_d["flag"] = "weekly_off"
+                    _mask_hours("-")
                     _dsum["week_off"] += 1
-                elif has_in and has_out:
-                    # 2 punches → dummy timings; >2 punches → preserve the
-                    # existing matrix representation (user spec sec 6).
-                    if pc <= 2 and ds in dummy_map:
+                elif has_in or has_out:
+                    # Iter 710 (user: "show ONLY dummy shift duty timings")
+                    # — EVERY present day shows the dummy shift's own
+                    # timings and fixed duration, regardless of punch count
+                    # or a missing side. Actual punch times never appear.
+                    if ds in dummy_map:
                         st, en, overnight = dummy_map[ds]
                         e_d["d_in"] = st
                         e_d["d_out"] = f"{en}*" if overnight else en
-                        if e_d["flag"] in ("late", "missing"):
-                            e_d["flag"] = ("ot" if e_d["ot"] != "-"
-                                           else "normal")
-                    _dsum["present"] += 1
-                elif has_in or has_out:
-                    # 1 punch → show the available side, missing side stays
-                    # per the existing IN/OUT matrix logic ("-").
+                    if ds in dummy_dur:
+                        _dstr, _dmin = dummy_dur[ds]
+                        _mask_hours(_dstr)
+                        _emp_dmin += _dmin
+                    if ds in dummy_map and e_d["flag"] in ("late", "missing",
+                                                           "ot"):
+                        e_d["flag"] = "normal"
                     _dsum["present"] += 1
                 else:
                     _dsum["absent"] += 1
         totals = emp.get("totals") or {}
+        if dummy:
+            # Iter 710 — month totals rebuilt from the masked dummy
+            # durations; actual duty / OT totals never reach the payload.
+            _mt = (f"{_emp_dmin // 60:02d}:{_emp_dmin % 60:02d}"
+                   if _emp_dmin else "-")
+            _row_totals = {"month_total": _mt, "month_ot": "-",
+                           "month_grand": _mt}
+        else:
+            _row_totals = {
+                "month_total": _fmt_hm(totals.get("duty_hours")),
+                "month_ot": _fmt_hm(totals.get("ot_hours")),
+                "month_grand": _fmt_hm(_f(totals.get("duty_hours"))
+                                       + _f(totals.get("ot_hours"))),
+            }
         out_rows.append({
             "user_id": emp.get("user_id"),
             "employee_code": emp.get("employee_code"),
             "name": emp.get("name"),
             "department": dept, "designation": desig,
-            "category": etype, "contractor_name": contr, "shift_name": shf,
+            "category": etype, "contractor_name": contr,
+            # Iter 710 — the ACTUAL shift name is hidden in dummy mode so
+            # the report reveals nothing about the real duty pattern.
+            "shift_name": "" if dummy else shf,
             "dummy_shift": ds,
             "status": "RESIGNED" if resigned else "ACTIVE",
             "days": days,
-            "month_total": _fmt_hm(totals.get("duty_hours")),
-            "month_ot": _fmt_hm(totals.get("ot_hours")),
-            "month_grand": _fmt_hm(_f(totals.get("duty_hours"))
-                                   + _f(totals.get("ot_hours"))),
+            **_row_totals,
             "present_days": totals.get("present_days_policy",
                                        totals.get("present_days")),
         })
@@ -460,9 +508,10 @@ def _header_lines(data: Dict[str, Any], emp: Dict[str, Any]) -> List[str]:
         f"Department: {emp.get('department') or '-'}   Designation: {emp.get('designation') or '-'}   "
         f"Category: {emp.get('category') or '-'}"
         + (f"   Contractor: {emp['contractor_name']}" if emp.get("contractor_name") else ""),
-        f"Shift: {emp.get('shift_name') or '-'}"
-        + (f"   Dummy Shift: {emp.get('dummy_shift') or 'None'}"
-           if data.get("dummy_mode") else "")
+        # Iter 710 — the ACTUAL shift name is never printed in dummy mode.
+        (f"Dummy Shift: {emp.get('dummy_shift') or 'None'}"
+         if data.get("dummy_mode")
+         else f"Shift: {emp.get('shift_name') or '-'}")
         + f"   Month: {data['month_number']}/{data['year']}   "
         f"Payroll Period: {data['payroll_period']}",
     ]
@@ -547,7 +596,7 @@ async def inout_ot_matrix_xlsx(
             cell.font = Font(bold=True, color="FFFFFF", size=9)
             cell.alignment = center
             cell.border = thin
-        for i, (key, label) in enumerate(ROW_KEYS):
+        for i, (key, label) in enumerate(_row_keys(data)):
             rr = head_row + 1 + i
             lc = ws.cell(row=rr, column=1, value=label)
             lc.font = Font(bold=True, size=9)
@@ -561,41 +610,45 @@ async def inout_ot_matrix_xlsx(
                 color = FLAG_COLORS.get(d.get("flag") or "")
                 if color:
                     cell.fill = PatternFill("solid", fgColor=color)
-        sr = head_row + 1 + len(ROW_KEYS)
+        sr = head_row + 1 + len(_row_keys(data))
         ws.cell(row=sr, column=1,
-                value=f"Month Totals — Working {emp['month_total']} · OT {emp['month_ot']}"
-                      f" · Total Working {emp.get('month_grand') or '-'}"
-                      f" · Present Days {emp.get('present_days') or 0}").font = Font(bold=True, size=9)
+                value=f"Month Totals — Working {emp['month_total']}"
+                      + ("" if data.get("dummy_mode")
+                         else f" · OT {emp['month_ot']}"
+                         f" · Total Working {emp.get('month_grand') or '-'}")
+                      + f" · Present Days {emp.get('present_days') or 0}").font = Font(bold=True, size=9)
         r = sr + 2  # blank separator row between employees
     # Iter 403 (user accepted) — day-wise OT totals footer.
-    ws.cell(row=r, column=1, value="DAY-WISE OT TOTALS (all filtered employees)"
-            ).font = Font(bold=True, size=10)
-    r += 1
-    hc2 = ws.cell(row=r, column=1, value="Day")
-    hc2.fill = PatternFill("solid", fgColor="1E3A8A")
-    hc2.font = Font(bold=True, color="FFFFFF")
-    for j, dl in enumerate(data["day_labels"], start=2):
-        cell = ws.cell(row=r, column=j, value=str(dl)[:2])
-        cell.fill = PatternFill("solid", fgColor="1E3A8A")
-        cell.font = Font(bold=True, color="FFFFFF", size=9)
-        cell.alignment = center
-        cell.border = thin
-    r += 1
-    lc2 = ws.cell(row=r, column=1, value="Total OT")
-    lc2.font = Font(bold=True, size=9)
-    lc2.border = thin
-    for j, dl in enumerate(data["day_labels"], start=2):
-        v = (data.get("day_ot_totals") or {}).get(dl) or "-"
-        cell = ws.cell(row=r, column=j, value=v)
-        cell.alignment = center
-        cell.font = Font(size=8, bold=(v != "-"))
-        cell.border = thin
-        if v != "-":
-            cell.fill = PatternFill("solid", fgColor="DBEAFE")
-    r += 1
-    ws.cell(row=r, column=1,
-            value=f"Month OT Total: {data.get('month_ot_total') or '-'}"
-            ).font = Font(bold=True, size=9)
+    # Iter 710 — skipped in dummy mode (OT is fully masked there).
+    if not data.get("dummy_mode"):
+        ws.cell(row=r, column=1, value="DAY-WISE OT TOTALS (all filtered employees)"
+                ).font = Font(bold=True, size=10)
+        r += 1
+        hc2 = ws.cell(row=r, column=1, value="Day")
+        hc2.fill = PatternFill("solid", fgColor="1E3A8A")
+        hc2.font = Font(bold=True, color="FFFFFF")
+        for j, dl in enumerate(data["day_labels"], start=2):
+            cell = ws.cell(row=r, column=j, value=str(dl)[:2])
+            cell.fill = PatternFill("solid", fgColor="1E3A8A")
+            cell.font = Font(bold=True, color="FFFFFF", size=9)
+            cell.alignment = center
+            cell.border = thin
+        r += 1
+        lc2 = ws.cell(row=r, column=1, value="Total OT")
+        lc2.font = Font(bold=True, size=9)
+        lc2.border = thin
+        for j, dl in enumerate(data["day_labels"], start=2):
+            v = (data.get("day_ot_totals") or {}).get(dl) or "-"
+            cell = ws.cell(row=r, column=j, value=v)
+            cell.alignment = center
+            cell.font = Font(size=8, bold=(v != "-"))
+            cell.border = thin
+            if v != "-":
+                cell.fill = PatternFill("solid", fgColor="DBEAFE")
+        r += 1
+        ws.cell(row=r, column=1,
+                value=f"Month OT Total: {data.get('month_ot_total') or '-'}"
+                ).font = Font(bold=True, size=9)
     # Iter 628 — dummy-mode summary block (sec 16).
     if data.get("dummy_mode"):
         for line in _dummy_summary_lines(data):
@@ -647,7 +700,7 @@ async def inout_ot_matrix_csv(
                + (["Dummy Shift"] if _dm else []) + ["Type"]
                + [str(d)[:2] for d in data["day_labels"]])
     for emp in data["employees"]:
-        for key, label in ROW_KEYS:
+        for key, label in _row_keys(data):
             w.writerow([emp.get("employee_code"), emp.get("name"),
                         emp.get("department"), emp.get("designation"),
                         emp.get("shift_name")]
@@ -756,7 +809,7 @@ async def inout_ot_matrix_pdf(
             ("LEFTPADDING", (0, 0), (-1, -1), 1),
             ("RIGHTPADDING", (0, 0), (-1, -1), 1),
         ]
-        for i, (key, label) in enumerate(ROW_KEYS):
+        for i, (key, label) in enumerate(_row_keys(data)):
             row = [label]
             for j, dl in enumerate(data["day_labels"]):
                 d = emp["days"].get(dl) or {}
@@ -771,39 +824,43 @@ async def inout_ot_matrix_pdf(
         block.append(tbl)
         block.append(Spacer(1, 1.5 * mm))
         block.append(Paragraph(
-            f"Month Totals — Working {emp['month_total']} · OT {emp['month_ot']} · "
-            f"Total Working {emp.get('month_grand') or '-'} · "
-            f"Present Days {emp.get('present_days') or 0}", h2))
+            f"Month Totals — Working {emp['month_total']}"
+            + ("" if data.get("dummy_mode")
+               else f" · OT {emp['month_ot']} · "
+               f"Total Working {emp.get('month_grand') or '-'}")
+            + f" · Present Days {emp.get('present_days') or 0}", h2))
         block.append(Spacer(1, 4 * mm))
         # Keep an employee's header + matrix together on one page.
         flow.append(KeepTogether(block))
     # Iter 403 (user accepted) — day-wise OT totals footer.
-    ot_head = ["Day"] + [str(d)[:2] for d in data["day_labels"]]
-    ot_vals = ["Total OT"] + [(data.get("day_ot_totals") or {}).get(dl) or "-"
-                              for dl in data["day_labels"]]
-    ot_styles = [
-        ("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#1E3A8A")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), rl.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 6),
-        ("ALIGN", (1, 0), (-1, -1), "CENTER"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("GRID", (0, 0), (-1, -1), 0.4, rl.HexColor("#CBD5E1")),
-        ("TOPPADDING", (0, 0), (-1, -1), 1.6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.6),
-    ]
-    for j, v in enumerate(ot_vals[1:]):
-        if v != "-":
-            ot_styles.append(("BACKGROUND", (j + 1, 1), (j + 1, 1),
-                              rl.HexColor("#DBEAFE")))
-    ot_tbl = Table([ot_head, ot_vals],
-                   colWidths=[label_w] + [day_w] * ndays)
-    ot_tbl.setStyle(TableStyle(ot_styles))
-    flow.append(KeepTogether([
-        Paragraph(f"Day-wise OT Totals (all filtered employees) — "
-                  f"Month OT Total: {data.get('month_ot_total') or '-'}", h1),
-        Spacer(1, 1.5 * mm), ot_tbl]))
+    # Iter 710 — skipped in dummy mode (OT is fully masked there).
+    if not data.get("dummy_mode"):
+        ot_head = ["Day"] + [str(d)[:2] for d in data["day_labels"]]
+        ot_vals = ["Total OT"] + [(data.get("day_ot_totals") or {}).get(dl) or "-"
+                                  for dl in data["day_labels"]]
+        ot_styles = [
+            ("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#1E3A8A")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), rl.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 6),
+            ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("GRID", (0, 0), (-1, -1), 0.4, rl.HexColor("#CBD5E1")),
+            ("TOPPADDING", (0, 0), (-1, -1), 1.6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.6),
+        ]
+        for j, v in enumerate(ot_vals[1:]):
+            if v != "-":
+                ot_styles.append(("BACKGROUND", (j + 1, 1), (j + 1, 1),
+                                  rl.HexColor("#DBEAFE")))
+        ot_tbl = Table([ot_head, ot_vals],
+                       colWidths=[label_w] + [day_w] * ndays)
+        ot_tbl.setStyle(TableStyle(ot_styles))
+        flow.append(KeepTogether([
+            Paragraph(f"Day-wise OT Totals (all filtered employees) — "
+                      f"Month OT Total: {data.get('month_ot_total') or '-'}", h1),
+            Spacer(1, 1.5 * mm), ot_tbl]))
     # Iter 628 — dummy-mode summary block (sec 16).
     if data.get("dummy_mode"):
         flow.append(Spacer(1, 3 * mm))

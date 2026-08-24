@@ -294,7 +294,7 @@ export default function InOutOtMatrixScreen() {
             {(data.employees || []).map((emp: any) => (
               <EmployeeMatrix key={emp.user_id} data={data} emp={emp} onCell={openDetail} />
             ))}
-            {data.day_ot_totals ? <DayOtFooter data={data} /> : null}
+            {data.day_ot_totals && !data.dummy_mode ? <DayOtFooter data={data} /> : null}
             {/* Pagination */}
             {data.total_pages > 1 ? (
               <View style={s.pageRow}>
@@ -473,7 +473,7 @@ function EmployeeMatrix({ data, emp, onCell }: {
           </Text>
           <Text style={s.empMeta}>
             Month: {data.month_number}/{data.year} · Payroll: {data.payroll_period} ·
-            {" "}Working {emp.month_total} · OT {emp.month_ot} · Present {emp.present_days}
+            {" "}Working {emp.month_total}{data.dummy_mode ? "" : ` · OT ${emp.month_ot}`} · Present {emp.present_days}
           </Text>
         </View>
         <View style={[s.statusPill, { backgroundColor: emp.status === "ACTIVE" ? "#D1FAE5" : "#FEE2E2" }]}>
@@ -497,7 +497,9 @@ function EmployeeMatrix({ data, emp, onCell }: {
               </View>
             ))}
           </View>
-          {ROW_LABELS.map(([key, label]) => (
+          {(data.dummy_mode
+            ? ROW_LABELS.filter(([k]) => ["d_in", "d_out", "total"].includes(k))
+            : ROW_LABELS).map(([key, label]) => (
             <View key={key} style={s.mRow}>
               <View style={s.mCellLabel}>
                 <Text style={s.mLabelTxt}>{label}</Text>

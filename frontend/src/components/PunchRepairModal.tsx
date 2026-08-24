@@ -241,19 +241,22 @@ export default function PunchRepairModal({
     setErr("");
     try {
       const why = reason.trim();
+      let queuedAny = false;
       const upsert = async (t: string, k: "in" | "out", existing: Punch | null, date: string) => {
         const at = `${date}T${t}:00`;
+        let rr: any;
         if (existing) {
-          await api(`/admin/attendance/${existing.record_id}`, {
+          rr = await api(`/admin/attendance/${existing.record_id}`, {
             method: "PATCH",
             body: { at, kind: k, reason: why },
           });
         } else {
-          await api(`/admin/attendance/manual-punch`, {
+          rr = await api(`/admin/attendance/manual-punch`, {
             method: "POST",
             body: { user_id: userId, kind: k, at, reason: why },
           });
         }
+        if (rr?.queued) queuedAny = true;
       };
       if (inTime) await upsert(inTime, "in", firstIn, pDate);
       if (outTime) await upsert(outTime, "out", dutyOut, outIsNextDay ? nextDay(pDate) : pDate);
@@ -279,6 +282,7 @@ export default function PunchRepairModal({
       setChanged(true);
       setBothOpen(false);
       await load();
+      if (queuedAny) setErr("✔ Sent for approval — punches will change only after the approver accepts.");
       onSaved?.(); // refresh the grid behind the modal immediately
     } catch (e: any) {
       setErr(e?.message || "Failed to save punches");
@@ -309,13 +313,14 @@ export default function PunchRepairModal({
     setErr("");
     try {
       const at = `${pDate}T${time}:00`;
+      let r: any;
       if (editId) {
-        await api(`/admin/attendance/${editId}`, {
+        r = await api(`/admin/attendance/${editId}`, {
           method: "PATCH",
           body: { at, kind, reason: reason.trim() },
         });
       } else {
-        await api(`/admin/attendance/manual-punch`, {
+        r = await api(`/admin/attendance/manual-punch`, {
           method: "POST",
           body: { user_id: userId, kind, at, reason: reason.trim() },
         });
@@ -323,6 +328,7 @@ export default function PunchRepairModal({
       setChanged(true);
       setFormOpen(false);
       await load();
+      if (r?.queued) setErr("✔ Sent for approval — the punch will change only after the approver accepts.");
       onSaved?.(); // refresh the grid behind the modal immediately
     } catch (e: any) {
       setErr(e?.message || "Failed to save punch");
@@ -335,12 +341,13 @@ export default function PunchRepairModal({
     const doDelete = async () => {
       setBusy(true);
       try {
-        await api(
+        const rr: any = await api(
           `/admin/attendance/${p.record_id}?reason=${encodeURIComponent("Deleted via grid repair")}`,
           { method: "DELETE" },
         );
         setChanged(true);
         await load();
+        if (rr?.queued) setErr("✔ Delete sent for approval — the punch stays until the approver accepts.");
         onSaved?.(); // refresh the grid behind the modal immediately
       } catch (e: any) {
         const msg = e?.message || "Failed to delete";

@@ -8515,3 +8515,21 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   (missing biometric punch, 189 cells in July for Kankani) — awaiting user
   choice on single-punch policy (zero / half-day / assume shift / firm
   setting), question already asked.
+- Iter 710b — BUG FIX (user: "Dummy Shift Report shows actual 12-hr duty
+  timings; we created 6 dummy shifts of 8 HRS each"): masking was only on
+  D-In/D-Out for clean 2-punch days — Total Hrs / OT rows / month totals
+  leaked actual figures. Fix in routes/inout_ot_matrix.py (_build, display
+  only — DB untouched): dummy_dur map (fixed duration per DUMMY_SHIFT);
+  EVERY present day (any punch count / missing side) shows only dummy
+  timings + fixed duration (e.g. 07:00/15:00/08:00); OT fields "-"; H/WO
+  cells show no hours; month totals = present days × dummy duration,
+  month_ot "-"; actual shift_name blanked in dummy payload; _row_keys()
+  drops OT/grand rows in dummy exports (xlsx/csv/pdf); Day-wise OT footer
+  skipped in dummy mode (exports + frontend); _header_lines prints only
+  Dummy Shift name. Frontend inout-ot-matrix.tsx: rows filtered to
+  D-In/D-Out/Total in dummy mode, OT hidden from month line, DayOtFooter
+  hidden. Verified in-process: emp 316 SHIFT A1 → all cells 07:00/15:00/
+  08:00, month 128:00, no leaks; actual-mode report unchanged; xlsx/csv/
+  pdf exports OK. NOTE: employees WITHOUT dummy_shift assigned still show
+  real data (per Iter 628 spec) — user informed. Deploy script:
+  deploy_vps_iter710.sh.
