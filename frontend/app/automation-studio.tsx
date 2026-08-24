@@ -206,9 +206,9 @@ export default function AutomationStudioScreen() {
   const fixDupLogin = async () => {
     const ok = Platform.OS === "web"
       ? (globalThis as any).confirm(
-          "Pakka karein: ye EPFO login SIRF abhi SELECT ki hui firm ka hai?\n\n" +
-          "Baaki jin firms me ye galti se copy ho gaya hai, un SABSE hata diya jayega. " +
-          "Selected firm par login jaisa hai waisa hi rahega.")
+          "Please confirm: this EPFO login belongs ONLY to the currently selected firm?\n\n" +
+          "It will be REMOVED from every other firm where it was copied by mistake. " +
+          "The selected firm's login stays unchanged.")
       : true;
     if (!ok) return;
     setPcBusy("fixdup");
@@ -220,10 +220,10 @@ export default function AutomationStudioScreen() {
       const cleaned = (r?.cleaned || []).join(", ");
       setDupWarn("");
       setPcStatus(cleaned
-        ? `🧹 Ho gaya! Login "${r?.kept_firm || "selected firm"}" par hi raha; in firms se HATA diya: ${cleaned}. Ab har firm apna sahi login bharegi.`
-        : "✅ Koi duplicate nahi mila — sab firms ka login pehle se alag hai.");
+        ? `🧹 Done! The login stays on "${r?.kept_firm || "the selected firm"}" and was REMOVED from: ${cleaned}. Every firm will now fill its own correct login.`
+        : "✅ No duplicates found — every firm already has its own separate login.");
     } catch (e: any) {
-      setPcStatus(`❌ ${e?.message || "Cleanup fail ho gaya — dobara try karein."}`);
+      setPcStatus(`❌ ${e?.message || "Cleanup failed — please try again."}`);
     } finally {
       setPcBusy("");
     }
@@ -267,7 +267,7 @@ export default function AutomationStudioScreen() {
         // time and only shows a generic message.
         if (lt && lt.creds_found === false) {
           const firm = lt.creds_firm_name ? ` (${lt.creds_firm_name})` : "";
-          setPcStatus(`❌ EPFO login problem${firm}: ${lt.creds_diagnosis || "login save nahi mila."}`);
+          setPcStatus(`❌ EPFO login problem${firm}: ${lt.creds_diagnosis || "no saved login found."}`);
           setPcBusy("");
           return;
         }
@@ -276,23 +276,23 @@ export default function AutomationStudioScreen() {
           credsWarn = lt.creds_warning || "";
           setDupWarn(credsWarn);
           setPcStatus(
-            `✅ ${lt.creds_firm_name ? lt.creds_firm_name + " ka " : ""}EPFO login mila: ${credsUser} (${lt.creds_source}). Chrome khul raha hai...`
+            `✅ EPFO login found${lt.creds_firm_name ? ` for ${lt.creds_firm_name}` : ""}: ${credsUser} (${lt.creds_source}). Opening Chrome...`
             + (credsWarn ? `\n${credsWarn}` : ""));
         }
-      } catch {
+      } catch (e: any) {
         // Iter 693 (user bug — WRONG firm's login was filled): NEVER fall
         // back to the runner's baked download-time token. That token is
         // bound to whichever firm was selected when the ZIP was downloaded,
         // so the fallback silently filled ANOTHER firm's credentials.
         setPcStatus(
-          "❌ Is firm ka secure token nahi ban paya (session/network issue). " +
-          "Galat firm ka login bharne se rokne ke liye process yahin rok diya. " +
-          "Page refresh karke dobara login karein, phir button dabayein.");
+          `❌ Could not create this firm's secure token — server said: "${e?.message || "network error"}". ` +
+          "The process was stopped here so the WRONG firm's login is never filled. " +
+          "Please refresh the page, log in again, then click the button.");
         setPcBusy("");
         return;
       }
       if (!launchTok) {
-        setPcStatus("❌ Firm token missing — page refresh karke dobara try karein.");
+        setPcStatus("❌ Firm token missing — refresh the page and try again.");
         setPcBusy("");
         return;
       }
@@ -319,9 +319,9 @@ export default function AutomationStudioScreen() {
         }
         if (action && build && build < 22) {
           setPcStatus(
-            `⚠ Runner v${build} sirf LOGIN tak karega — "${flowLabel || action}" page auto-open ` +
-            "ke liye Runner update chahiye: install_autostart.bat ek baar dobara chalayein " +
-            "(ya PC restart), phir ye button dobara dabayein. Login abhi bhi ho raha hai...");
+            `⚠ Runner v${build} will only do the LOGIN — to auto-open the "${flowLabel || action}" page ` +
+            "the Runner needs an update: run install_autostart.bat once again " +
+            "(or restart the PC), then click this button again. Login is still proceeding...");
         }
       } catch {
         // ping without build → old runner; fall through, user will see result
@@ -342,10 +342,10 @@ export default function AutomationStudioScreen() {
         retrying: "⏳ EPFO server busy (503) — auto-retrying, please wait...",
         await_captcha: `⌨ Login filled ✓${who} — type the CAPTCHA now, Sign In will click automatically`,
         signed_in: "✅ Sign In clicked — check the portal",
-        wait_login: "⏳ Login complete hone ka wait — OTP puchhe to type kar dein...",
-        navigating: `✅ Login ho gaya — ${act} khul raha hai...`,
-        action_open: `✅ ${act} OPEN — Chrome window me kaam continue karein`,
-        action_manual: `✅ Login ho gaya — ${act} auto-open nahi hua, top menu se khud khol lein`,
+        wait_login: "⏳ Waiting for the login to complete — type the OTP too if the portal asks...",
+        navigating: `✅ Logged in — opening ${act}...`,
+        action_open: `✅ ${act} is OPEN — continue in the Chrome window`,
+        action_manual: `✅ Logged in — ${act} did not auto-open, please open it from the top menu`,
         open: `✅ EPFO Portal Open — login filled${who}, enter CAPTCHA & Sign In`,
         open_nocreds:
           "⚠ Portal opened but NO EPFO login is saved for THIS firm. Go to Firm Master → EPF Registration → fill EPF User ID + EPF Password → Save, then click again.",
@@ -886,7 +886,7 @@ export default function AutomationStudioScreen() {
                           <Ionicons name="trash-outline" size={14} color="#fff" />
                         )}
                         <Text style={st.pcBtnTxt}>
-                          Ye login SIRF isi firm ka hai — DOOSRI firms se HATAO
+                          This login belongs ONLY to this firm — REMOVE from other firms
                         </Text>
                       </Pressable>
                     </View>

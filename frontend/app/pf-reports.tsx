@@ -92,7 +92,7 @@ export default function PfReportsScreen() {
     // back to the Runner's baked download-time token, so ONE firm's login
     // (e.g. Suvidhi Rayons) was filled for everything.
     if (!companyId || companyId === "all") {
-      setLoginMsg("❌ Pehle upar firm selector se EK firm select karein (All Firms nahi) — tabhi USI firm ka ID/Password bharega.");
+      setLoginMsg("❌ Please select ONE firm from the selector above (not All Firms) — only then will THAT firm's ID/Password be filled.");
       return;
     }
     setBusy("login"); setLoginMsg("");
@@ -106,7 +106,7 @@ export default function PfReportsScreen() {
         token = t?.token || "";
         if (portalKey === "epfo") {
           if (t && t.creds_found === false) {
-            setLoginMsg(`❌ EPFO login problem${t.creds_firm_name ? ` (${t.creds_firm_name})` : ""}: ${t.creds_diagnosis || "login save nahi mila."}`);
+            setLoginMsg(`❌ EPFO login problem${t.creds_firm_name ? ` (${t.creds_firm_name})` : ""}: ${t.creds_diagnosis || "no saved login found."}`);
             return;
           }
           if (t && t.creds_found === true) {
@@ -114,14 +114,16 @@ export default function PfReportsScreen() {
             if (t.creds_warning) setLoginMsg(t.creds_warning);
           }
         }
-      } catch {
+      } catch (e: any) {
         // Iter 695 — NEVER fall back to the baked token: it belongs to the
         // firm selected at download time, NOT the firm selected now.
-        setLoginMsg("❌ Firm ka secure token nahi ban paya (session/network issue). Page refresh karke dobara login karein, phir button dabayein.");
+        setLoginMsg(
+          `❌ Could not create this firm's secure token — server said: "${e?.message || "network error"}". ` +
+          "Please refresh the page, log in again, then click the button.");
         return;
       }
       if (!token) {
-        setLoginMsg("❌ Firm token missing — page refresh karke dobara try karein.");
+        setLoginMsg("❌ Firm token missing — refresh the page and try again.");
         return;
       }
       // try the local Runner first (listener on the operator's PC)

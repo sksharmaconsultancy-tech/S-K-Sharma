@@ -595,11 +595,11 @@ async def upsert_firm_master(
         if _owner:
             raise HTTPException(
                 status_code=400,
-                detail=(f"EPFO User ID '{_uid}' pehle se firm '{_owner}' me "
-                        "saved hai — har firm ka apna ALAG EPFO login hota "
-                        "hai. Shayad browser ne purana login yahan bhar diya "
-                        f"hai. Agar YE firm hi asli malik hai to pehle "
-                        f"'{_owner}' ke Firm Master se wo login hatayein."))
+                detail=(f"EPFO User ID '{_uid}' is already saved on firm "
+                        f"'{_owner}' — every firm has its own separate EPFO "
+                        "login. Your browser may have auto-filled the old "
+                        "login here. If THIS firm is the real owner, remove "
+                        f"that login from '{_owner}' in Firm Master first."))
 
     # Iter 98 — CL/PL gate: when "CL PL Applicable" is enabled the allowed
     # number of leaves is MANDATORY.

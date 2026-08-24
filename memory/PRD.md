@@ -8263,3 +8263,19 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   pahunch rahe the — ab pakka). Badge 695, deploy_vps_iter695.sh,
   kind=script → deploy695. User ko install_autostart.bat dobara chalana
   hoga (Runner v23) + browser tabs refresh.
+- Iter 696 (user request — "portal me Hindi mat likho, English likho"):
+  saare user-facing UI/status messages professional ENGLISH me convert —
+  _diagnose_epfo_creds diagnosis strings, _dup_epfo_login_warning, claim
+  endpoint 400 detail, firm_master save-guard 400 detail (backend);
+  automation-studio.tsx (creds found/problem, token-fail hard stop, v22
+  runner warning, MAP wait_login/navigating/action_open/action_manual,
+  fixDupLogin confirm+results, dup button label "This login belongs ONLY
+  to this firm — REMOVE from other firms"); pf-reports.tsx (firm-mandatory,
+  diagnosis, token-fail, token-missing). NOTE: chat me Hinglish theek hai,
+  PORTAL UI = English only — aage bhi yehi rakhna.
+  PLUS user ne paste kiya tha "secure token nahi ban paya" error (VPS par
+  launch-token call fail) — ab catch block EXACT SERVER REASON dikhata hai
+  (`server said: "<e.message>"`) dono screens par, taaki agla paste hi
+  root cause bata de (e.g. Session expired / 502 / Invalid session).
+  sw.js cache v14. Badge 696, deploy_vps_iter696.sh, kind=script→deploy696.
+  Verified: launch-token English diagnosis OK (found & not-found dono).

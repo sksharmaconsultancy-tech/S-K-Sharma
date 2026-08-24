@@ -251,10 +251,10 @@ async def _dup_epfo_login_warning(company_id: str, user_id: str) -> str:
         {"company_id": {"$in": dup_ids}}, {"_id": 0, "name": 1}).to_list(10)
     names = [c.get("name") or "?" for c in comps]
     listed = ", ".join(names or dup_ids)
-    return (f"⚠ DHYAN DEIN: yehi EPFO User ID in firm(s) me BHI saved hai: "
-            f"{listed}. Har firm ka apna alag EPFO login hota hai — agar "
-            "galti se copy hua hai to un firms ke Firm Master me sahi login "
-            "daal kar Save karein.")
+    return (f"⚠ ATTENTION: this same EPFO User ID is ALSO saved on: {listed}. "
+            "Every firm has its own separate EPFO login — if it was copied "
+            "there by mistake, use the cleanup button below or correct those "
+            "firms in Firm Master.")
 
 
 async def _diagnose_epfo_creds(company_id: str) -> Dict[str, Any]:
@@ -274,9 +274,10 @@ async def _diagnose_epfo_creds(company_id: str) -> Dict[str, Any]:
     if not fm:
         return {
             "found": False, "user_id": "", "source": "", "firm_name": firm_name,
-            "diagnosis": ("Is firm ka Firm Master abhi save nahi hua hai. "
-                          "Firm Master kholiye → Registration Details → EPF Registration "
-                          "me EPF User ID + EPF Password bhariye → Save karein."),
+            "diagnosis": ("Firm Master has not been saved for this firm yet. "
+                          "Open Firm Master → Registration Details → EPF "
+                          "Registration, fill EPF User ID + EPF Password and "
+                          "click Save."),
         }
 
     def _mask(u: str) -> str:
@@ -308,35 +309,36 @@ async def _diagnose_epfo_creds(company_id: str) -> Dict[str, Any]:
 
     # Nothing resolved — explain the MOST specific problem found.
     if u1 and "@" in u1:
-        d = (f"EPF User ID me EMAIL save hai ({_mask(u1)}) — EPFO ka User ID "
-             "establishment code hota hai, email nahi. Firm Master → EPF "
-             "Registration me SAHI EPFO User ID daal kar Save karein.")
+        d = (f"An EMAIL is saved as the EPF User ID ({_mask(u1)}) — the EPFO "
+             "User ID is the establishment login code, not an email. Enter "
+             "the correct EPFO User ID in Firm Master → EPF Registration and Save.")
     elif u2 and "@" in u2:
-        d = (f"PF LOGIN me EMAIL save hai ({_mask(u2)}) — EPFO ka User ID "
-             "establishment code hota hai, email nahi. Sahi EPFO User ID "
-             "daal kar Save karein.")
+        d = (f"An EMAIL is saved in the PF LOGIN row ({_mask(u2)}) — the EPFO "
+             "User ID is the establishment login code, not an email. Enter "
+             "the correct EPFO User ID and Save.")
     elif u1 and p1_raw and not p1:
-        d = ("EPF Password save to hai par DECRYPT nahi ho pa raha (server ki "
-             "security key badli hai). Firm Master → EPF Registration me EPF "
-             "Password DOBARA type karke Save karein — bas itna hi.")
+        d = ("The EPF Password is saved but cannot be decrypted (the server's "
+             "security key has changed). Simply RE-TYPE the EPF Password in "
+             "Firm Master → EPF Registration and click Save.")
     elif u2 and p2_raw and not p2:
-        d = ("PF LOGIN ka password save to hai par DECRYPT nahi ho pa raha "
-             "(server ki security key badli hai). Password DOBARA type karke "
-             "Save karein — bas itna hi.")
+        d = ("The PF LOGIN password is saved but cannot be decrypted (the "
+             "server's security key has changed). Simply RE-TYPE the password "
+             "and click Save.")
     elif u1 and not p1_raw:
-        d = (f"EPF User ID ({_mask(u1)}) mil gaya par EPF PASSWORD khali hai. "
-             "Firm Master → EPF Registration me EPF Password bhar kar Save karein.")
+        d = (f"EPF User ID ({_mask(u1)}) is saved but the EPF PASSWORD is "
+             "empty. Fill the EPF Password in Firm Master → EPF Registration "
+             "and Save.")
     elif u2 and not p2_raw:
-        d = (f"PF LOGIN User ID ({_mask(u2)}) mil gaya par PASSWORD khali hai. "
-             "Password bhar kar Save karein.")
+        d = (f"PF LOGIN User ID ({_mask(u2)}) is saved but the PASSWORD is "
+             "empty. Fill the password and Save.")
     elif (p1 or p2) and not (u1 or u2):
-        d = ("EPF Password to save hai par USER ID khali hai. Firm Master → "
-             "EPF Registration me EPF User ID bhar kar Save karein.")
+        d = ("An EPF Password is saved but the USER ID is empty. Fill the EPF "
+             "User ID in Firm Master → EPF Registration and Save.")
     else:
-        d = ("Is firm ke liye EPFO login KAHIN save nahi mila (na EPF "
-             "Registration me, na PF LOGIN me). Firm Master kholiye → "
-             "Registration Details → EPF Registration me EPF User ID + EPF "
-             "Password bhariye → Save karein, phir button dobara dabayein.")
+        d = ("No EPFO login is saved anywhere for this firm (neither in EPF "
+             "Registration nor in the PF LOGIN row). Open Firm Master → "
+             "Registration Details → EPF Registration, fill EPF User ID + "
+             "EPF Password, click Save, then press this button again.")
     return {"found": False, "user_id": "", "source": "",
             "firm_name": firm_name, "diagnosis": d}
 
@@ -2038,8 +2040,8 @@ async def claim_epfo_login(
     if not diag["found"]:
         raise HTTPException(
             status_code=400,
-            detail="Is firm ka EPFO login hi save nahi hai — pehle Firm "
-                   "Master me login save karein.")
+            detail="No EPFO login is saved for this firm — save the login "
+                   "in Firm Master first.")
     uid = diag["user_id"]
     cleaned: List[str] = []
     async for fm in db.firm_masters.find(
