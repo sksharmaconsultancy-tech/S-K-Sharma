@@ -8323,3 +8323,8 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   nahi the isliye 0 lines — VPS par real data hai). sw v17, badge 699,
   deploy_vps_iter699.sh, kind=script→deploy699. Runner v25 ke liye user ko
   install_autostart.bat dobara chalana hoga.
+- Iter 699b (user request): automation-studio.tsx se "Speed" selector
+  (⚡ Fast maximum speed) aur "🔒 CAPTCHA & OTP are never bypassed..."
+  safety note REMOVED (old server-side RPA ke leftovers the); unused
+  st.safety style bhi hataya. Start Automation button barkarar. Same
+  badge 699 / deploy699 me shamil.

@@ -845,13 +845,6 @@ export default function AutomationStudioScreen() {
                 </View>
               )}
 
-              <Text style={[st.cardTitle, { marginTop: spacing.md }]}>Speed</Text>
-              <View style={st.chipRow}>
-                <View style={[st.chip, st.chipActive]}>
-                  <Text style={[st.chipTxt, st.chipTxtActive]}>⚡ Fast (maximum speed)</Text>
-                </View>
-              </View>
-
               {err ? <Text style={st.errTxt}>{err}</Text> : null}
 
               <Pressable
@@ -868,10 +861,6 @@ export default function AutomationStudioScreen() {
                   </>
                 )}
               </Pressable>
-              <Text style={st.safety}>
-                🔒 CAPTCHA & OTP are never bypassed — you complete them here. Payment
-                buttons are never clicked. You confirm before every submission.
-              </Text>
 
               {/* Iter 691 — 🔐 Open EPFO Portal (ChromeDriver, OPEN-ONLY) */}
               {portal === "epfo" && (
@@ -1394,7 +1383,6 @@ const st = StyleSheet.create({
     marginTop: spacing.md,
   },
   startTxt: { fontSize: 15, fontWeight: "800", color: "#fff" },
-  safety: { fontSize: 11.5, color: colors.onSurfaceTertiary, marginTop: spacing.sm, lineHeight: 16 },
   monitorHead: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm },
   monitorMeta: { fontSize: 12.5, color: colors.onSurfaceSecondary, flex: 1 },
   stopTop: {
