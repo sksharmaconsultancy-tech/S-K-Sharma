@@ -8533,3 +8533,24 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   pdf exports OK. NOTE: employees WITHOUT dummy_shift assigned still show
   real data (per Iter 628 spec) — user informed. Deploy script:
   deploy_vps_iter710.sh.
+- Iter 711 — DUMMY SHIFT ENHANCEMENTS (user choices: 1a firm-defined
+  shifts, 2b total = diff of randomized times, 3a offsets AFTER start/end):
+  (1) server.py _validate_policy: policy_master.dummy_shifts sanitized
+  list [{name,start,end}] (max 20, HH:MM validated, names uppercased,
+  dupes/invalid dropped). (2) labour_reports.py: effective_dummy_shifts()
+  (firm list wins, built-in 7 fallback) + dummy_rnd_min(uid,iso,side) =
+  md5-hash deterministic 0–15 min offset; shift-options endpoint returns
+  firm list as dummy_master; dummy_shift muster "Punch In Time" = shift
+  start + rnd (real punch never printed). (3) inout_ot_matrix._build:
+  dummy_map from effective_dummy_shifts; present day → d_in = start+rnd,
+  d_out = end+rnd (overnight *), Total Hrs = actual diff of printed times
+  (e.g. 07:56–08:15 for 8h shift); month totals from these. (4) Frontend
+  attendance-policy.tsx: "Define Dummy Shifts" editor (name/in/out rows,
+  add/delete, Load Standard 7) inside PolicyMasterSubPoints shown when
+  dummy_shift_allowed; STANDARD_DUMMY_SHIFTS const. (5) employee-master
+  DummyShiftCard lists firm-defined shifts (fallback built-ins) via
+  /attendance/policy policy_master.dummy_shifts. Verified in-process:
+  sanitizer normalizes 6:30→06:30 & drops invalid; matrix cells 07:03/
+  15:05/08:02 etc, deterministic re-print, offsets 0–15; muster shows
+  07:03 same-day consistency with matrix (same hash). Test dummy_shifts
+  removed from Kankani after verification. Deploy: deploy_vps_iter711.sh.

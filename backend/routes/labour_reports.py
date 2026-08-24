@@ -82,6 +82,23 @@ DUMMY_SHIFTS = [
 DUMMY_SHIFT_NAMES = {s["name"] for s in DUMMY_SHIFTS}
 
 
+def effective_dummy_shifts(policy_master: dict) -> list:
+    """Iter 711 — the firm's OWN dummy shift definitions (Attendance
+    Policy → Define Dummy Shifts) win; the built-in master list is only a
+    fallback for firms that never defined any."""
+    fds = (policy_master or {}).get("dummy_shifts")
+    return fds if isinstance(fds, list) and fds else DUMMY_SHIFTS
+
+
+def dummy_rnd_min(uid: str, iso: str, side: str) -> int:
+    """Iter 711 — stable pseudo-random 0–15 minute offset per
+    employee/date/side so dummy report timings look natural but
+    re-printing always gives the IDENTICAL times."""
+    import hashlib
+    return int(hashlib.md5(
+        f"{uid}|{iso}|{side}".encode()).hexdigest()[:8], 16) % 16
+
+
 def _shift_display(e: dict) -> str:
     """Employee's assigned shift for reports: Shift-Master name first,
     then their own timing."""
@@ -768,7 +785,12 @@ def build_report(key: str, emps, recs_by, policy, dates,
         cols = ((["Date"] if multi else [])
                 + ["Dummy Shift", "Code", "Employee Name", "Department",
                    "Designation", "Punch In Time", "Signature"])
-        timing = {s["name"]: f"{s['start']} – {s['end']}" for s in DUMMY_SHIFTS}
+        # Iter 711 — firm-defined dummy shifts + deterministic 0–15 min
+        # offset on the displayed In time (actual punch time never shown).
+        _eff = effective_dummy_shifts(policy.get("policy_master") or {})
+        timing = {s["name"]: f"{s['start']} – {s['end']}" for s in _eff}
+        _start_min = {s["name"]: int(s["start"][:2]) * 60 + int(s["start"][3:5])
+                      for s in _eff}
         rows = []
         for d in dates:
             for e in emps:
@@ -787,10 +809,14 @@ def build_report(key: str, emps, recs_by, policy, dates,
                 if (s["pairs"] >= 2 or ins_count >= 2) and fi is not None and fi < 720:
                     name = f"OT — {name}"
                 dsl = f"{ds} ({timing[ds]})" if ds in timing else ds
+                _in_disp = s["first_in"]
+                if ds in _start_min:
+                    _mm = _start_min[ds] + dummy_rnd_min(e["user_id"], d, "in")
+                    _in_disp = f"{(_mm // 60) % 24:02d}:{_mm % 60:02d}"
                 rows.append(([d] if multi else [])
                             + [dsl, str(e.get("employee_code") or ""), name,
                                e.get("department") or "", e.get("designation") or "",
-                               s["first_in"], ""])
+                               _in_disp, ""])
         rows.sort(key=lambda r: (r[0], r[1], r[2]) if multi else (r[0], r[1]))
         return cols, rows
 
@@ -1155,14 +1181,18 @@ async def shift_options(company_id: str,
             dummy_used.add(ds)
     comp = await db.companies.find_one(
         {"company_id": company_id},
-        {"_id": 0, "attendance_policy.policy_master.dummy_shift_allowed": 1})
-    allowed = bool((((comp or {}).get("attendance_policy") or {})
-                    .get("policy_master") or {}).get("dummy_shift_allowed"))
+        {"_id": 0, "attendance_policy.policy_master.dummy_shift_allowed": 1,
+         "attendance_policy.policy_master.dummy_shifts": 1})
+    _pm = (((comp or {}).get("attendance_policy") or {})
+           .get("policy_master") or {})
+    allowed = bool(_pm.get("dummy_shift_allowed"))
+    # Iter 711 — firm-defined dummy shifts win over the built-in master.
+    _eff = effective_dummy_shifts(_pm)
     return {"shifts": sorted(shifts),
             "dummy_allowed": allowed,
-            "dummy_shifts": [s["name"] for s in DUMMY_SHIFTS],
+            "dummy_shifts": [s["name"] for s in _eff],
             "dummy_shifts_assigned": sorted(dummy_used),
-            "dummy_master": DUMMY_SHIFTS}
+            "dummy_master": _eff}
 
 
 @router.post("/generate")

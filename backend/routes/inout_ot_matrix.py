@@ -153,18 +153,24 @@ async def _build(
     # master timings on present days. NOTHING is ever written to
     # attendance / payroll / punches.
     dummy_map: Dict[str, tuple] = {}
-    dummy_dur: Dict[str, tuple] = {}  # Iter 710 — name → ("H:MM", minutes)
     if dummy:
         _dpol = await db.companies.find_one(
             {"company_id": company_id},
-            {"_id": 0, "attendance_policy.policy_master.dummy_shift_allowed": 1})
-        if not bool((((_dpol or {}).get("attendance_policy") or {})
-                     .get("policy_master") or {}).get("dummy_shift_allowed")):
+            {"_id": 0, "attendance_policy.policy_master.dummy_shift_allowed": 1,
+             "attendance_policy.policy_master.dummy_shifts": 1})
+        _pmst = (((_dpol or {}).get("attendance_policy") or {})
+                 .get("policy_master") or {})
+        if not bool(_pmst.get("dummy_shift_allowed")):
             raise HTTPException(
                 status_code=400,
                 detail=("Dummy Shift is not enabled for this firm. Switch on "
                         "'Dummy Shift Allowed' in the Attendance Policy first."))
-        from routes.labour_reports import DUMMY_SHIFTS
+        # Iter 711 (user request) — the firm's OWN dummy shift definitions
+        # (Attendance Policy → Define Dummy Shifts) win; built-in master
+        # shifts are only a fallback.
+        from routes.labour_reports import (dummy_rnd_min,
+                                           effective_dummy_shifts)
+        _shift_list = effective_dummy_shifts(_pmst)
 
         def _hm2min(s: str) -> int:
             h, mn = str(s).split(":")
@@ -173,16 +179,7 @@ async def _build(
         # date (marked with * in the report; no extra attendance day).
         dummy_map = {d["name"]: (d["start"], d["end"],
                                  _hm2min(d["end"]) <= _hm2min(d["start"]))
-                     for d in DUMMY_SHIFTS}
-        # Iter 710 (user issue — "dummy report shows ACTUAL 12-hr duty
-        # hours") — pre-compute every dummy shift's FIXED duration so the
-        # Total-Hrs cells are masked with it, never the real duty hours.
-        for _d in DUMMY_SHIFTS:
-            _mins = _hm2min(_d["end"]) - _hm2min(_d["start"])
-            if _mins <= 0:
-                _mins += 24 * 60
-            dummy_dur[_d["name"]] = (
-                f"{_mins // 60:02d}:{_mins % 60:02d}", _mins)
+                     for d in _shift_list}
     # Summary counters (dummy mode only — sec 16 of the user spec).
     _dsum = {"present": 0, "week_off": 0, "holiday": 0, "absent": 0}
     _dshift_counts: Dict[str, int] = {}
@@ -319,21 +316,26 @@ async def _build(
                     _mask_hours("-")
                     _dsum["week_off"] += 1
                 elif has_in or has_out:
-                    # Iter 710 (user: "show ONLY dummy shift duty timings")
-                    # — EVERY present day shows the dummy shift's own
-                    # timings and fixed duration, regardless of punch count
-                    # or a missing side. Actual punch times never appear.
+                    # Iter 710/711 (user: "show ONLY dummy shift duty
+                    # timings") — EVERY present day shows the dummy shift's
+                    # timings with a DETERMINISTIC 0–15 min offset added
+                    # after shift start/end (same employee+date → same
+                    # times on every re-print) and the resulting duration
+                    # as Total Hrs. Actual punch data never appears.
                     if ds in dummy_map:
                         st, en, overnight = dummy_map[ds]
-                        e_d["d_in"] = st
-                        e_d["d_out"] = f"{en}*" if overnight else en
-                    if ds in dummy_dur:
-                        _dstr, _dmin = dummy_dur[ds]
-                        _mask_hours(_dstr)
+                        _uid = emp.get("user_id") or ""
+                        _sm = _hm2min(st) + dummy_rnd_min(_uid, iso, "in")
+                        _eo = _hm2min(en) + dummy_rnd_min(_uid, iso, "out")
+                        _em = _eo + (24 * 60 if overnight else 0)
+                        e_d["d_in"] = f"{(_sm // 60) % 24:02d}:{_sm % 60:02d}"
+                        _os = f"{(_eo // 60) % 24:02d}:{_eo % 60:02d}"
+                        e_d["d_out"] = f"{_os}*" if overnight else _os
+                        _dmin = max(0, _em - _sm)
+                        _mask_hours(f"{_dmin // 60:02d}:{_dmin % 60:02d}")
                         _emp_dmin += _dmin
-                    if ds in dummy_map and e_d["flag"] in ("late", "missing",
-                                                           "ot"):
-                        e_d["flag"] = "normal"
+                        if e_d["flag"] in ("late", "missing", "ot"):
+                            e_d["flag"] = "normal"
                     _dsum["present"] += 1
                 else:
                     _dsum["absent"] += 1

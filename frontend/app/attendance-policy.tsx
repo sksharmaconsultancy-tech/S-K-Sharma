@@ -1537,6 +1537,18 @@ const PM_FLAGS: { key: string; label: string }[] = [
   { key: "halfday_threshold_rule", label: "Half-Day Threshold Rule — worked hrs BELOW Half-Day Threshold → all hrs to OT (0 Present); above threshold but below Full Day → ½ Present Day + remaining hrs to OT. Duty HRS counts ONLY Present-Day hrs (OT never included in Duty HRS)" },
 ];
 
+// Iter 711 (user request) — the 7 standard report-only dummy shifts; used
+// as a one-tap starting point for the firm's own dummy shift definitions.
+const STANDARD_DUMMY_SHIFTS: { name: string; start: string; end: string }[] = [
+  { name: "SHIFT A1", start: "07:00", end: "15:00" },
+  { name: "SHIFT B1", start: "15:00", end: "23:00" },
+  { name: "SHIFT C1", start: "23:00", end: "07:00" },
+  { name: "SHIFT A", start: "08:00", end: "16:00" },
+  { name: "SHIFT B", start: "16:00", end: "00:00" },
+  { name: "SHIFT C", start: "00:00", end: "08:00" },
+  { name: "GENERAL SHIFT", start: "10:00", end: "06:00" },
+];
+
 // ---------------------------------------------------------------------------
 // Iter 290 (user request) — Policy Simulator: preview Duty / OT / Present for
 // a sample IN/OUT under the CURRENT (unsaved) policy settings.
@@ -1705,6 +1717,92 @@ function PolicyMasterSubPoints({
           </View>
         );
       })}
+      {/* Iter 711 (user request) — firm-defined Dummy Shifts editor, shown
+          only when Dummy Shift Allowed is ON. Employee Master then shows
+          ONLY these shifts and the Dummy Shift Reports use their timings. */}
+      {value.dummy_shift_allowed ? (
+        <View style={pmStyles.dsBox} testID="pm-dummy-shifts">
+          <Text style={pmStyles.dsTitle}>🎭 Define Dummy Shifts (report-only)</Text>
+          <Text style={pmStyles.note}>
+            Define this firm&apos;s own dummy shifts — name + In/Out time (HH:MM).
+            The Employee Master shows ONLY these shifts and the Dummy Shift
+            Reports print their timings. Leave the list empty to keep using
+            the 7 standard shifts. Rows with a blank name or invalid time are
+            dropped on save.
+          </Text>
+          {(Array.isArray(value.dummy_shifts) ? value.dummy_shifts : []).map(
+            (s: any, i: number) => {
+              const rows = [...(value.dummy_shifts as any[])];
+              const patchRow = (p: Record<string, string>) => {
+                rows[i] = { ...rows[i], ...p };
+                set({ dummy_shifts: rows });
+              };
+              return (
+                <View key={i} style={pmStyles.dsRow}>
+                  <TextInput
+                    style={[pmStyles.dsInput, { flex: 1.7, minWidth: 120 }]}
+                    value={s?.name || ""}
+                    onChangeText={(t) => patchRow({ name: t.toUpperCase() })}
+                    placeholder="SHIFT NAME"
+                    autoCapitalize="characters"
+                    testID={`pm-ds-name-${i}`}
+                  />
+                  <TextInput
+                    style={[pmStyles.dsInput, { width: 78 }]}
+                    value={s?.start || ""}
+                    onChangeText={(t) => patchRow({ start: t })}
+                    placeholder="In HH:MM"
+                    maxLength={5}
+                    testID={`pm-ds-start-${i}`}
+                  />
+                  <TextInput
+                    style={[pmStyles.dsInput, { width: 78 }]}
+                    value={s?.end || ""}
+                    onChangeText={(t) => patchRow({ end: t })}
+                    placeholder="Out HH:MM"
+                    maxLength={5}
+                    testID={`pm-ds-end-${i}`}
+                  />
+                  <Pressable
+                    onPress={() => {
+                      const next = rows.filter((_, j) => j !== i);
+                      set({ dummy_shifts: next });
+                    }}
+                    hitSlop={8}
+                    testID={`pm-ds-del-${i}`}
+                  >
+                    <Ionicons name="trash-outline" size={18} color="#DC2626" />
+                  </Pressable>
+                </View>
+              );
+            })}
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            <Pressable
+              style={pmStyles.dsBtn}
+              onPress={() =>
+                set({
+                  dummy_shifts: [
+                    ...(Array.isArray(value.dummy_shifts) ? value.dummy_shifts : []),
+                    { name: "", start: "", end: "" },
+                  ],
+                })
+              }
+              testID="pm-ds-add"
+            >
+              <Text style={pmStyles.dsBtnTxt}>+ Add Shift</Text>
+            </Pressable>
+            <Pressable
+              style={[pmStyles.dsBtn, { backgroundColor: "#EEF2FF" }]}
+              onPress={() => set({ dummy_shifts: STANDARD_DUMMY_SHIFTS })}
+              testID="pm-ds-standard"
+            >
+              <Text style={[pmStyles.dsBtnTxt, { color: "#3730A3" }]}>
+                Load Standard 7 Shifts
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
       {/* Iter 289 (user request) — per-firm OT rounding slab. */}
       <View style={pmStyles.row}>
         <Text style={pmStyles.lbl}>
@@ -1807,6 +1905,40 @@ const pmStyles = StyleSheet.create({
   },
   lbl: { fontSize: 12.5, fontWeight: "700", color: colors.onSurface, flexShrink: 1 },
   chips: { flexDirection: "row", gap: 6, flexWrap: "wrap" },
+  // Iter 711 — Define Dummy Shifts editor.
+  dsBox: {
+    marginTop: 8,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#FCD34D",
+    backgroundColor: "#FFFBEB",
+  },
+  dsTitle: { fontSize: 13, fontWeight: "800", color: "#92400E", marginBottom: 4 },
+  dsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 6,
+    flexWrap: "wrap",
+  },
+  dsInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: Platform.OS === "web" ? 6 : 8,
+    fontSize: 12.5,
+    color: colors.onSurface,
+    backgroundColor: "#fff",
+  },
+  dsBtn: {
+    backgroundColor: "#FEF3C7",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  dsBtnTxt: { fontSize: 12.5, fontWeight: "800", color: "#92400E" },
   chip: {
     borderWidth: 1, borderColor: colors.brandPrimary, borderRadius: 999,
     paddingHorizontal: 12, paddingVertical: 6,

@@ -1222,6 +1222,29 @@ def _validate_policy(raw: dict) -> dict:
     except (TypeError, ValueError):
         _max_punches_per_day = 4
     _max_punches_per_day = max(2, min(20, _max_punches_per_day))
+    # Iter 711 (user request) — FIRM-DEFINED dummy shifts (name + in/out
+    # time), saved under policy_master.dummy_shifts. Empty list → the
+    # built-in 7 master shifts keep applying (backward compatible).
+    _ds_raw = pm_raw.get("dummy_shifts")
+    _dummy_shifts_clean: List[Dict[str, str]] = []
+    if isinstance(_ds_raw, list):
+        for _d in _ds_raw[:20]:
+            if not isinstance(_d, dict):
+                continue
+            _dn = str(_d.get("name") or "").strip().upper()[:40]
+            _m1 = re.fullmatch(r"([01]?\d|2[0-3]):([0-5]\d)",
+                               str(_d.get("start") or "").strip())
+            _m2 = re.fullmatch(r"([01]?\d|2[0-3]):([0-5]\d)",
+                               str(_d.get("end") or "").strip())
+            if not _dn or not _m1 or not _m2:
+                continue
+            if _dn in {x["name"] for x in _dummy_shifts_clean}:
+                continue
+            _dummy_shifts_clean.append({
+                "name": _dn,
+                "start": f"{int(_m1.group(1)):02d}:{_m1.group(2)}",
+                "end": f"{int(_m2.group(1)):02d}:{_m2.group(2)}",
+            })
     policy_master = {
         "attendance_basis": _choice("attendance_basis", ["monthly", "daily", "hourly"], "monthly"),
         "shift_type": _choice("shift_type", ["fixed", "rotational", "open"], "fixed"),
@@ -1237,6 +1260,8 @@ def _validate_policy(raw: dict) -> dict:
         # Master shows a Dummy Shift picker and the Dummy Shift Report
         # becomes available in Labour Law Reports.
         "dummy_shift_allowed": _flag("dummy_shift_allowed"),
+        # Iter 711 — the firm's own dummy shift definitions (see above).
+        "dummy_shifts": _dummy_shifts_clean,
         # Iter 200 (user request) — dynamic attendance calculation points:
         # • attendance_by_duty_hours: Days = Total Duty HRS ÷ Daily Duty HRS
         #   (firm's full-day hours) instead of per-day present counting.

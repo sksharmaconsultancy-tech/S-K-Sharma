@@ -83,6 +83,8 @@ type EmpDetail = {
   shift_preset_name?: string | null;
   dummy_shift?: string | null;
   dummy_shift_allowed?: boolean;
+  // Iter 711 — the firm's OWN dummy shift definitions (Attendance Policy).
+  dummy_shifts_master?: { name: string; start: string; end: string }[];
   ot_applicable?: boolean | null;
   week_off_full_day?: boolean | null;
   week_off_govt_holiday_enabled?: boolean | null;
@@ -241,7 +243,10 @@ export default function EmployeeMasterScreen() {
             policy: {
               shifts?: { name: string; start: string; end: string }[];
               policy_variant?: "policy_1" | "policy_2" | null;
-              policy_master?: { dummy_shift_allowed?: boolean };
+              policy_master?: {
+                dummy_shift_allowed?: boolean;
+                dummy_shifts?: { name: string; start: string; end: string }[];
+              };
             };
           }>(`/attendance/policy?company_id=${e.company_id}`);
           e.business_category = p.business_category || null;
@@ -249,6 +254,10 @@ export default function EmployeeMasterScreen() {
           e.policy_variant = p.policy?.policy_variant || null;
           // Iter 215 — Dummy Shift picker gate (Attendance Policy flag).
           e.dummy_shift_allowed = !!p.policy?.policy_master?.dummy_shift_allowed;
+          // Iter 711 — firm-defined dummy shifts win over the built-ins.
+          const fds = p.policy?.policy_master?.dummy_shifts;
+          e.dummy_shifts_master =
+            Array.isArray(fds) && fds.length ? fds : undefined;
         } catch {}
         // Iter 142 — Firm Master OT gate drives whether the per-employee
         // OT option is shown at all.
@@ -1826,6 +1835,11 @@ function DummyShiftCard({
 }) {
   const [sel, setSel] = useState<string | null>(emp.dummy_shift ?? null);
   const [saving, setSaving] = useState(false);
+  // Iter 711 — show ONLY the firm's defined dummy shifts (Attendance
+  // Policy → Define Dummy Shifts); built-in list is only a fallback.
+  const shiftList = emp.dummy_shifts_master?.length
+    ? emp.dummy_shifts_master
+    : DUMMY_SHIFT_MASTER;
   const doSave = async () => {
     setSaving(true);
     try {
@@ -1859,7 +1873,7 @@ function DummyShiftCard({
         >
           <Text style={[styles.chipTxt, sel == null && styles.chipTxtActive]}>None</Text>
         </Pressable>
-        {DUMMY_SHIFT_MASTER.map((s) => {
+        {shiftList.map((s) => {
           const on = sel === s.name;
           return (
             <Pressable
