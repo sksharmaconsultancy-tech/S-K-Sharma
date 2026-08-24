@@ -8292,3 +8292,16 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   deploy_vps_iter697.sh, kind=script → deploy697. NOTE agla agent: portal
   UI English only; chat Hinglish. Ab user verify karega — is fix ke baad
   firm-wise login + diagnosis + dup-warning sab pehli baar sach me chalega.
+- Iter 698 (user verified 697 — LOGIN AB SAHI FIRM SE HO RAHA ✅; phir 3
+  requests): (1) "Auto-Upload ECR — TEST" flow REMOVED (rpa_engine FLOWS
+  se + frontend EPFO_PC_ACTION se; line ~709 handler dead code, chhoda).
+  (2) "3. Select Month" chips → DROPDOWN (as-month-dd testID, fmtMonth
+  "2026-05"→"May 2026", ddField/ddList styles, monthDdOpen state).
+  (3) RUNNER v24 (sab options): login-complete detect hone ke baad
+  dashboard ka announcement popup (Employee Enrollment Campaign) auto-close
+  — _close_popup() = #btnCloseModal ya visible OK button, 12s tak retry;
+  wait_login block ab HAR launch me chalta hai (action ho ya na ho);
+  no-action + logged-in par status wapas signed_in. Runner listener v24
+  locally verified (ping build 24). sw cache v16, badge 698,
+  deploy_vps_iter698.sh (RUNNER_VERSION 24 checks), kind=script→deploy698.
+  User ko batana: deploy698 + install_autostart.bat dobara (v24 ke liye).

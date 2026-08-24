@@ -78,13 +78,6 @@ FLOWS: Dict[str, Dict[str, Any]] = {
                                           "Contribution Details"]},
     "esic_dashboard": {"label": "Employer Dashboard (assisted)",
                        "portals": ["esic"], "needs_employee": False, "nav": []},
-    # Iter 314 (user guide) — Auto-Upload EPF ECR → EPFO: TEST button.
-    # Opens the EPFO employer portal in server-side Chrome automation and
-    # clicks the alert popup's OK button (#btnCloseModal). No login yet —
-    # the user will guide the next steps of the auto-upload flow.
-    "epfo_ecr_autoupload_test": {
-        "label": "Auto-Upload ECR — TEST (Open Portal + Close Alert)",
-        "portals": ["epfo"], "needs_employee": False, "needs_creds": False},
 }
 
 # HARD SAFETY RAIL — automation stops at challan finalisation and NEVER

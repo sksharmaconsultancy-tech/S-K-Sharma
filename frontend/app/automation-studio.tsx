@@ -42,6 +42,16 @@ type Portal = { key: string; label: string; url: string };
 type Employee = { user_id: string; name?: string; employee_code?: string };
 type Run = { run_id: string; month: string; status?: string };
 
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"];
+// "2026-05" → "May 2026" (falls back to the raw value).
+function fmtMonth(m: string): string {
+  const p = /^(\d{4})-(\d{2})$/.exec(m || "");
+  if (!p) return m || "";
+  const idx = parseInt(p[2], 10) - 1;
+  return MONTH_NAMES[idx] ? `${MONTH_NAMES[idx]} ${p[1]}` : m;
+}
+
 type Session = {
   session_id: string;
   status: string;
@@ -104,6 +114,8 @@ export default function AutomationStudioScreen() {
   const [empSearch, setEmpSearch] = useState("");
   const [runs, setRuns] = useState<Run[]>([]);
   const [runId, setRunId] = useState<string>("");
+  // Iter 698 — month dropdown open/closed.
+  const [monthDdOpen, setMonthDdOpen] = useState(false);
   const [validation, setValidation] = useState<any>(null);
 
   const [session, setSession] = useState<Session | null>(null);
@@ -424,7 +436,6 @@ export default function AutomationStudioScreen() {
     epfo_ecr_upload: "ecr",
     epfo_member_search: "member_search",
     epfo_establishment: "establishment",
-    epfo_ecr_autoupload_test: "ecr",
   };
 
   const start = async () => {
@@ -751,22 +762,51 @@ export default function AutomationStudioScreen() {
               {activeFlow?.needs_run && (
                 <View style={{ marginTop: spacing.md }}>
                   <Text style={st.cardTitle}>3. Select Month (Compliance Process)</Text>
-                  <View style={st.chipRow}>
-                    {runs.map((r) => (
+                  {/* Iter 698 (user request) — month selection as a dropdown
+                      list instead of a long chip row. */}
+                  {runs.length === 0 ? (
+                    <Text style={st.muted}>No compliance salary processes found.</Text>
+                  ) : (
+                    <View>
                       <Pressable
-                        key={r.run_id}
-                        onPress={() => setRunId(r.run_id)}
-                        style={[st.chip, runId === r.run_id && st.chipActive]}
+                        style={st.ddField}
+                        onPress={() => setMonthDdOpen((v) => !v)}
+                        testID="as-month-dd"
                       >
-                        <Text style={[st.chipTxt, runId === r.run_id && st.chipTxtActive]}>
-                          {r.month}
+                        <Ionicons name="calendar-outline" size={16} color="#8B5E34" />
+                        <Text style={[st.ddValue, !runId && { color: "#9CA3AF" }]}>
+                          {runId
+                            ? fmtMonth(runs.find((r) => r.run_id === runId)?.month || "")
+                            : "Select month..."}
                         </Text>
+                        <Ionicons
+                          name={monthDdOpen ? "chevron-up" : "chevron-down"}
+                          size={16}
+                          color="#8B5E34"
+                        />
                       </Pressable>
-                    ))}
-                    {runs.length === 0 && (
-                      <Text style={st.muted}>No compliance salary processes found.</Text>
-                    )}
-                  </View>
+                      {monthDdOpen && (
+                        <View style={st.ddList}>
+                          <ScrollView style={{ maxHeight: 240 }} nestedScrollEnabled>
+                            {runs.map((r) => (
+                              <Pressable
+                                key={r.run_id}
+                                onPress={() => { setRunId(r.run_id); setMonthDdOpen(false); }}
+                                style={[st.ddItem, runId === r.run_id && st.ddItemActive]}
+                              >
+                                <Text style={[st.ddItemTxt, runId === r.run_id && { color: "#8B5E34", fontWeight: "800" }]}>
+                                  {fmtMonth(r.month)}
+                                </Text>
+                                {runId === r.run_id && (
+                                  <Ionicons name="checkmark" size={16} color="#8B5E34" />
+                                )}
+                              </Pressable>
+                            ))}
+                          </ScrollView>
+                        </View>
+                      )}
+                    </View>
+                  )}
                   {validation && (
                     <View style={st.valBox}>
                       <Text style={st.valTitle}>Pre-flight Validation</Text>
@@ -1473,6 +1513,24 @@ const st = StyleSheet.create({
     borderWidth: 1, borderColor: "#FCA5A5", gap: 8,
   },
   dupTxt: { fontSize: 12.5, fontWeight: "700", color: "#B91C1C", lineHeight: 18 },
+  ddField: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    borderWidth: 1, borderColor: "#E5D9C9", borderRadius: 10,
+    backgroundColor: "#FFFDF9", paddingHorizontal: 12, minHeight: 44,
+    marginTop: 6,
+  },
+  ddValue: { flex: 1, fontSize: 14, fontWeight: "700", color: "#3F3428" },
+  ddList: {
+    borderWidth: 1, borderColor: "#E5D9C9", borderRadius: 10,
+    backgroundColor: "#fff", marginTop: 4, overflow: "hidden",
+  },
+  ddItem: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: 14, minHeight: 44,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#F0E8DC",
+  },
+  ddItemActive: { backgroundColor: "#FBF4EA" },
+  ddItemTxt: { fontSize: 14, color: "#3F3428", fontWeight: "600" },
   dupBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center",
     gap: 6, backgroundColor: "#DC2626", borderRadius: 8,

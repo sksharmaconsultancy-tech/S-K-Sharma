@@ -498,7 +498,7 @@ async def ext_ecr_file(token: str, run_id: str = ""):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "23"
+RUNNER_VERSION = "24"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -509,7 +509,7 @@ import time
 import urllib.error
 import urllib.request
 
-RUNNER_BUILD = "23"
+RUNNER_BUILD = "24"
 
 PORTALS = {
     "esic": "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx",
@@ -1034,7 +1034,7 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None, action=None):
                                    "Establishment Profile"]),
             }
             _steps = _NAV.get((action or "").lower())
-            if _steps and _fill_result == "filled":
+            if _fill_result == "filled":
                 try:
                     _st("wait_login")
                     print("Waiting for the login to complete "
@@ -1050,7 +1050,53 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None, action=None):
                                 break
                         except Exception:
                             pass
+
+                    # Iter 699 (user request — ALL options) — the dashboard
+                    # shows an announcement popup (e.g. "Employee Enrollment
+                    # Campaign") right after login. Auto-click its OK /
+                    # btnCloseModal button so the user lands on a clean page.
+                    def _close_popup():
+                        try:
+                            for _el in driver.find_elements(
+                                    By.ID, "btnCloseModal"):
+                                if _el.is_displayed():
+                                    try:
+                                        _el.click()
+                                    except Exception:
+                                        driver.execute_script(
+                                            "arguments[0].click();", _el)
+                                    return True
+                        except Exception:
+                            pass
+                        try:
+                            for _b in driver.find_elements(
+                                    By.XPATH,
+                                    "//button[normalize-space()='OK' or "
+                                    "normalize-space()='Ok' or "
+                                    "normalize-space()='ok']"):
+                                if _b.is_displayed():
+                                    try:
+                                        _b.click()
+                                    except Exception:
+                                        driver.execute_script(
+                                            "arguments[0].click();", _b)
+                                    return True
+                        except Exception:
+                            pass
+                        return False
+
                     if _in:
+                        _closed = False
+                        for _i in range(12):   # popup can render late
+                            time.sleep(1)
+                            if _close_popup():
+                                _closed = True
+                                print("Closed the post-login popup (OK).")
+                                break
+                        if not _closed:
+                            print("No post-login popup found (nothing to close).")
+
+                    if _in and _steps:
                         _st("navigating")
                         print("Logged in - opening the page...")
                         time.sleep(2)
@@ -1107,10 +1153,13 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None, action=None):
                             _st("action_manual")
                             print("Logged in - the menu link was not found, "
                                   "open it from the top menu yourself.")
-                    else:
+                    elif _steps:
                         _st("action_manual")
                         print("Login not confirmed (captcha/OTP pending?) - "
                               "after logging in, open the menu yourself.")
+                    elif _in:
+                        _st("signed_in")
+                        print("Logged in - dashboard ready.")
                 except Exception as _e:
                     _st("action_manual")
                     print("Post-login navigation skipped (%s)." % _e)
