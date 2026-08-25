@@ -612,6 +612,17 @@ export default function AttendancePolicyScreen() {
             onChange={(pm) => setPolicy({ ...policy, policy_master: pm })}
           />
 
+          {/* Iter 712 (user request) — Bulk Dummy Shift Assign. */}
+          {(policy.policy_master as any)?.dummy_shift_allowed && meta?.company_id ? (
+            <>
+              <SectionTitle
+                title="Bulk Dummy Shift Assign"
+                hint="Assign a dummy shift to ALL employees or a whole department in one tap — report-only, attendance and salary are never touched. If you just defined new shifts above, SAVE the policy first."
+              />
+              <BulkDummyAssign companyId={meta.company_id} />
+            </>
+          ) : null}
+
           {/* Iter 290 (user request) — Policy Simulator. */}
           <SectionTitle
             title="Policy Simulator"
@@ -1880,6 +1891,187 @@ function PolicyMasterSubPoints({
         Firm Master (linked). Grace Time, Late Mark, Half-Day, OT, Weekly Off
         and Holiday rules are configured in the sections below.
       </Text>
+    </View>
+  );
+}
+
+// Iter 712 (user request) — Bulk Dummy Shift Assign: whole firm or one
+// department in a single tap. Validates against the SAVED firm policy's
+// dummy shifts server-side; writes ONLY users.dummy_shift (report-only).
+function BulkDummyAssign({ companyId }: { companyId: string }) {
+  const [opts, setOpts] = useState<any>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [shift, setShift] = useState<string>("");
+  const [scope, setScope] = useState<string>("all"); // "all" | dept key
+  const [onlyUnassigned, setOnlyUnassigned] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setErr(null);
+      const r = await api<any>(
+        `/admin/labour-reports/dummy-shift/bulk-options?company_id=${companyId}`);
+      setOpts(r);
+    } catch (e: any) {
+      setErr(e?.message || "Could not load employee data");
+    }
+  }, [companyId]);
+  useEffect(() => { load(); }, [load]);
+
+  const apply = async (clear: boolean) => {
+    if (!clear && !shift) {
+      setErr("Pick a dummy shift first");
+      return;
+    }
+    const scopeLabel = scope === "all"
+      ? "ALL active employees"
+      : `department "${scope === "__none__" ? "No Department" : scope}"`;
+    const msg = clear
+      ? `Clear dummy shift assignments for ${scopeLabel}?`
+      : `Assign "${shift}" to ${scopeLabel}${onlyUnassigned
+          ? " (only employees WITHOUT a dummy shift)"
+          : " (REPLACING existing assignments)"}?`;
+    if (Platform.OS === "web" && !globalThis.confirm(msg)) return;
+    setBusy(true);
+    setErr(null);
+    setResult(null);
+    try {
+      const r = await api<any>(
+        "/admin/labour-reports/dummy-shift/bulk-assign", {
+          method: "POST",
+          body: {
+            company_id: companyId,
+            dummy_shift: shift,
+            clear,
+            scope: scope === "all" ? "all" : "department",
+            department: scope === "all" ? "" : scope,
+            only_unassigned: onlyUnassigned,
+          },
+        });
+      setResult(clear
+        ? `✓ Cleared ${r.modified} assignment(s).`
+        : `✓ "${shift}" assigned to ${r.modified} employee(s).`);
+      await load();
+    } catch (e: any) {
+      setErr(e?.message || "Bulk assign failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const stepLbl = {
+    fontSize: 12, fontWeight: "800" as const, color: colors.onSurface,
+    marginTop: 10, marginBottom: 4,
+  };
+  return (
+    <View style={pmStyles.card} testID="bulk-dummy-assign">
+      {err ? (
+        <Text style={{ color: colors.error, fontSize: 12, marginBottom: 6 }}>
+          {err}
+        </Text>
+      ) : null}
+      {!opts ? (
+        <Text style={pmStyles.note}>Loading employee data…</Text>
+      ) : (
+        <>
+          <Text style={pmStyles.note}>
+            {opts.total_employees} active employees · {opts.assigned} assigned
+            · {opts.unassigned} without a dummy shift
+          </Text>
+          <Text style={stepLbl}>1. Dummy Shift</Text>
+          <View style={pmStyles.chips}>
+            {(opts.dummy_shifts || []).map((s: any) => (
+              <Pressable
+                key={s.name}
+                onPress={() => setShift(s.name)}
+                style={[pmStyles.chip, shift === s.name && pmStyles.chipOn]}
+                testID={`bda-shift-${s.name}`}
+              >
+                <Text style={[pmStyles.chipTxt, shift === s.name && { color: "#fff" }]}>
+                  {s.name} ({s.start}–{s.end})
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={stepLbl}>2. Assign To</Text>
+          <View style={pmStyles.chips}>
+            <Pressable
+              onPress={() => setScope("all")}
+              style={[pmStyles.chip, scope === "all" && pmStyles.chipOn]}
+              testID="bda-scope-all"
+            >
+              <Text style={[pmStyles.chipTxt, scope === "all" && { color: "#fff" }]}>
+                All Employees ({opts.total_employees})
+              </Text>
+            </Pressable>
+            {(opts.departments || []).map((d: any) => (
+              <Pressable
+                key={d.key}
+                onPress={() => setScope(d.key)}
+                style={[pmStyles.chip, scope === d.key && pmStyles.chipOn]}
+                testID={`bda-dept-${d.key}`}
+              >
+                <Text style={[pmStyles.chipTxt, scope === d.key && { color: "#fff" }]}>
+                  {d.label} ({d.count})
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={stepLbl}>3. Mode</Text>
+          <View style={pmStyles.chips}>
+            {[
+              { v: true, l: "Only employees without a dummy shift" },
+              { v: false, l: "Replace existing assignments too" },
+            ].map((o) => (
+              <Pressable
+                key={String(o.v)}
+                onPress={() => setOnlyUnassigned(o.v)}
+                style={[pmStyles.chip, onlyUnassigned === o.v && pmStyles.chipOn]}
+                testID={`bda-mode-${o.v ? "unassigned" : "replace"}`}
+              >
+                <Text style={[pmStyles.chipTxt, onlyUnassigned === o.v && { color: "#fff" }]}>
+                  {o.l}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+            <Pressable
+              onPress={() => apply(false)}
+              disabled={busy}
+              style={[pmStyles.dsBtn, {
+                backgroundColor: "#0F3B5C", opacity: busy ? 0.5 : 1,
+                paddingHorizontal: 16, paddingVertical: 10,
+              }]}
+              testID="bda-apply"
+            >
+              <Text style={[pmStyles.dsBtnTxt, { color: "#fff" }]}>
+                {busy ? "Working…" : "⚡ Assign Now"}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => apply(true)}
+              disabled={busy}
+              style={[pmStyles.dsBtn, {
+                backgroundColor: "#FEE2E2", opacity: busy ? 0.5 : 1,
+                paddingVertical: 10,
+              }]}
+              testID="bda-clear"
+            >
+              <Text style={[pmStyles.dsBtnTxt, { color: "#991B1B" }]}>
+                Clear In Scope
+              </Text>
+            </Pressable>
+          </View>
+          {result ? (
+            <Text style={{ color: "#047857", fontWeight: "800", fontSize: 12.5, marginTop: 8 }}
+              testID="bda-result">
+              {result}
+            </Text>
+          ) : null}
+        </>
+      )}
     </View>
   );
 }

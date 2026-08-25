@@ -1195,6 +1195,115 @@ async def shift_options(company_id: str,
             "dummy_master": _eff}
 
 
+@router.get("/dummy-shift/bulk-options")
+async def dummy_bulk_options(company_id: str,
+                             authorization: Optional[str] = Header(None)):
+    """Iter 712 (user request) — Bulk Dummy Assign helper: department
+    choices with employee counts + assignment coverage for the firm."""
+    await _auth(authorization, company_id)
+    comp = await db.companies.find_one(
+        {"company_id": company_id},
+        {"_id": 0, "attendance_policy.policy_master": 1})
+    pm = (((comp or {}).get("attendance_policy") or {})
+          .get("policy_master") or {})
+    if not pm.get("dummy_shift_allowed"):
+        raise HTTPException(
+            status_code=400,
+            detail=("Dummy Shift is not enabled for this firm. Switch on "
+                    "'Dummy Shift Allowed' in the Attendance Policy first."))
+    q = {"company_id": company_id, "role": "employee",
+         "active": {"$ne": False}}
+    dept_counts: Dict[str, int] = {}
+    total = assigned = 0
+    async for e in db.users.find(q, {"_id": 0, "department": 1,
+                                     "dummy_shift": 1}):
+        total += 1
+        d = (e.get("department") or "").strip()
+        key = d or "__none__"
+        dept_counts[key] = dept_counts.get(key, 0) + 1
+        if (e.get("dummy_shift") or "").strip():
+            assigned += 1
+    return {
+        "total_employees": total,
+        "assigned": assigned,
+        "unassigned": total - assigned,
+        "departments": sorted(
+            [{"key": k, "label": ("— No Department —" if k == "__none__"
+                                  else k), "count": v}
+             for k, v in dept_counts.items()],
+            key=lambda x: (x["key"] == "__none__", x["label"])),
+        "dummy_shifts": effective_dummy_shifts(pm),
+    }
+
+
+@router.post("/dummy-shift/bulk-assign")
+async def dummy_bulk_assign(payload: Dict[str, Any] = Body(...),
+                            authorization: Optional[str] = Header(None)):
+    """Iter 712 (user request) — assign a dummy shift to ALL employees or
+    a whole department in one tap (or clear assignments in that scope).
+    Report-only field — attendance/payroll are never touched."""
+    company_id = str(payload.get("company_id") or "").strip()
+    if not company_id:
+        raise HTTPException(status_code=400, detail="company_id required")
+    admin = await _auth(authorization, company_id)
+    comp = await db.companies.find_one(
+        {"company_id": company_id},
+        {"_id": 0, "attendance_policy.policy_master": 1})
+    pm = (((comp or {}).get("attendance_policy") or {})
+          .get("policy_master") or {})
+    if not pm.get("dummy_shift_allowed"):
+        raise HTTPException(
+            status_code=400,
+            detail=("Dummy Shift is not enabled for this firm. Switch on "
+                    "'Dummy Shift Allowed' in the Attendance Policy first."))
+    clear = bool(payload.get("clear"))
+    shift = str(payload.get("dummy_shift") or "").strip()
+    if not clear:
+        valid = {s["name"] for s in effective_dummy_shifts(pm)}
+        if shift not in valid:
+            raise HTTPException(
+                status_code=400,
+                detail=(f"'{shift or '(blank)'}' is not one of this firm's "
+                        "dummy shifts. Define it in the Attendance Policy "
+                        "and SAVE the policy first."))
+    scope = str(payload.get("scope") or "all").strip().lower()
+    q: Dict[str, Any] = {"company_id": company_id, "role": "employee",
+                         "active": {"$ne": False}}
+    conds: List[Dict[str, Any]] = []
+    dept = str(payload.get("department") or "").strip()
+    if scope == "department":
+        if not dept:
+            raise HTTPException(status_code=400, detail="Pick a department")
+        if dept == "__none__":
+            conds.append({"$or": [{"department": {"$exists": False}},
+                                  {"department": {"$in": [None, ""]}}]})
+        else:
+            q["department"] = dept
+    if not clear and bool(payload.get("only_unassigned", True)):
+        conds.append({"$or": [{"dummy_shift": {"$exists": False}},
+                              {"dummy_shift": {"$in": [None, ""]}}]})
+    if conds:
+        q["$and"] = conds
+    r = await db.users.update_many(
+        q, {"$set": {"dummy_shift": (None if clear else shift)}})
+    await db.bulk_ops_log.insert_one({
+        "op": "dummy_shift_bulk_assign",
+        "company_id": company_id,
+        "dummy_shift": None if clear else shift,
+        "clear": clear,
+        "scope": scope,
+        "department": dept or None,
+        "only_unassigned": bool(payload.get("only_unassigned", True)),
+        "matched": r.matched_count,
+        "modified": r.modified_count,
+        "by": admin.get("user_id"),
+        "by_email": admin.get("email"),
+        "at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"ok": True, "matched": r.matched_count,
+            "modified": r.modified_count}
+
+
 @router.post("/generate")
 async def generate(payload: Dict[str, Any] = Body(...),
                    authorization: Optional[str] = Header(None)):

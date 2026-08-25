@@ -8561,3 +8561,21 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   pm-dummy-shifts, dummy_shifts_master, sks-pwa-v26), all v25 greps bumped
   to v26, wget instructions → deploy711.sh. Verified: endpoint serves
   script (syntax OK) + 14.4MB tar contains all changed files.
+- Iter 712 — BULK DUMMY SHIFT ASSIGN (user picked next-action items 1+2):
+  Backend labour_reports.py: GET /api/admin/labour-reports/dummy-shift/
+  bulk-options (dept counts incl __none__, assigned/unassigned coverage,
+  effective shifts) + POST .../bulk-assign {dummy_shift|clear, scope
+  all|department, department, only_unassigned} — validates shift against
+  SAVED firm policy, updates only users.dummy_shift, audit → bulk_ops_log.
+  Frontend attendance-policy.tsx: BulkDummyAssign card (shift chips,
+  scope chips with counts, mode chips, Assign Now + Clear In Scope,
+  result line) rendered after PolicyMasterSubPoints when
+  dummy_shift_allowed && meta.company_id. E2E VERIFIED on Kankani:
+  defined 6×8hr shifts (SHIFT 1–6) via _validate_policy, bulk assigned
+  all 127 (only_unassigned then replace-all to fix orphaned SHIFT A1 on
+  emp 316), dept-scope + replace tested, invalid shift rejected, dummy
+  matrix shows randomized 07:00–07:15/15:00–15:15 with zero unmasked
+  cells. DEMO STATE LEFT on preview Kankani (6 shifts defined, all
+  employees SHIFT 2). NOTE: orphaned assignments (shift not in firm list)
+  show real data — fix via bulk replace mode. Badge 712, sw v27,
+  deploy_vps_iter712.sh served via kind=script (deploy712.sh).
