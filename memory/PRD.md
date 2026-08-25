@@ -8554,3 +8554,10 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   15:05/08:02 etc, deterministic re-print, offsets 0–15; muster shows
   07:03 same-day consistency with matrix (same hash). Test dummy_shifts
   removed from Kankani after verification. Deploy: deploy_vps_iter711.sh.
+- Iter 711 deploy prep: APP_ITERATION 709→711 (server.py), PWA sw.js cache
+  v25→v26, temp_bundle.py kind=script now serves deploy_vps_iter711.sh
+  (filename deploy711.sh). Script updated: badge-711 check, Iter 710/711
+  verification greps (_mask_hours, dummy_rnd_min, effective_dummy_shifts,
+  pm-dummy-shifts, dummy_shifts_master, sks-pwa-v26), all v25 greps bumped
+  to v26, wget instructions → deploy711.sh. Verified: endpoint serves
+  script (syntax OK) + 14.4MB tar contains all changed files.
