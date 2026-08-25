@@ -73,6 +73,23 @@
 #    explicitly भेजा जाता है जब मौजूदा run imported_sheet से बनी हो.
 #  * "From BLANK" पहले जैसा — form की choice ही चलती है.
 #
+# ═══════════ ALSO IN Iter 724 — 📐 HIGHER PF (ACTUAL WAGES) vs 50% GROSS RULE (Iter 729) ═══════════
+#
+# 📐 नया PF RULE (user final spec, examples confirm करके):
+#  * PF Basic ≤ 15,000 वाले employees → कोई change नहीं (पुराना rule).
+#  * PF Basic > 15,000 (Adopted) वाले → कोई change नहीं.
+#  * HIGHER PF (ACTUAL WAGES) भरे employees →
+#      PF Wage = max( Higher PF wage × days ratio , 50% × Gross Earning )
+#      Gross Earning में OT / Other Allow / Incentive शामिल.
+#      जो ज़्यादा हो उसी पर PF — PF कभी घटेगा नहीं.
+#  * EPS हमेशा ₹15,000 cap · ER EPF = 12% − EPS · VPF भी इसी wage पर.
+#  * View Calculation में नया note दिखता है जब 50% Gross जीतता है.
+#  * VERIFIED: 42000/17000/24d+873 → wage 50% Gross, EE ₹2,517-level;
+#    full month no-extras → 21,000/₹2,520; 20000/17000+OT500 → 17,000/
+#    ₹2,040 (घटा नहीं); 13/26 days → 8,500/₹1,020; normal ≤15k और
+#    Adopted 17,796 दोनों unchanged. Frontend live-recalc (दोनों mirror)
+#    भी same rule पर.
+#
 # ═══════════ WHAT'S NEW (Iter 723) — 🩹 COMPLIANCE SALARY REPROCESS DATA-LOSS FIX ═══════════
 #
 # 🩹 REPROCESS NO LONGER CHANGES SAVED DATA (user bug — "if we Reprocess

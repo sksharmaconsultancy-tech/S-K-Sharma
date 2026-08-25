@@ -849,20 +849,34 @@ def compute_compliance_row(
             #   2. PF Basic filled → PF on the EARNED PF Basic (no ceiling).
             #   3. Neither → actual wage base (max(Basic, floor% Gross)).
             if _hi_wage > 0:
+                # Iter 729 (user final rule) — HIGHER PF (ACTUAL WAGES) vs
+                # 50% GROSS: PF deducts on WHICHEVER IS HIGHER — the
+                # (pro-rated) Higher PF wage or floor% (default 50%) of the
+                # Gross Earning INCLUDING OT / Other Allowances / Incentive.
+                # PF Basic ≤ ceiling employees and Adopted-PF-Basic
+                # employees stay unchanged. EPS stays capped; VPF follows
+                # the same PF wage.
+                _floor729 = gross_paid * (floor_pct / 100.0)
                 if _contractor_on and _contractor_partial == "adopted_wage":
                     # Iter 597 Rule 4 (company policy) — FIXED adopted wage
                     # regardless of attendance / LOP.
-                    capped_pf_wages = _hi_wage
+                    _hi_earned729 = _hi_wage
                     _contractor_note = ("Rule 4 — adopted PF Wage kept FIXED "
                                         "regardless of attendance (company policy)")
                 else:
                     _fct = (_proration_factor(
                         pf_proration_method, effective_present,
                         max(1, month_days)) if salary_mode == "monthly" else 1.0)
-                    capped_pf_wages = _hi_wage * _fct
+                    _hi_earned729 = _hi_wage * _fct
                     if _contractor_on:
                         _contractor_note = ("Rule 4 — PF on the EARNED adopted "
                                             "PF Wage (partial attendance)")
+                capped_pf_wages = max(_hi_earned729, _floor729)
+                if _floor729 > _hi_earned729:
+                    _contractor_note = (_contractor_note + " · " if _contractor_note else "") + (
+                        f"Iter 729 — {floor_pct:.0f}% of Gross Earning "
+                        f"₹{gross_paid:,.2f} exceeded the Higher PF wage "
+                        f"₹{_hi_earned729:,.2f} → PF on ₹{_floor729:,.2f}")
             elif pf_basic_override > 0:
                 if _contractor_on and _contractor_partial == "adopted_wage":
                     capped_pf_wages = _pf_basic_month

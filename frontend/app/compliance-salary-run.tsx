@@ -1919,9 +1919,13 @@ export default function ComplianceSalaryRunScreen() {
             const hiWage1 = Number((next as any).higher_pf_wage || 0);
             const pfWages = hiActive1
               ? (hiWage1 > 0
-                ? (contractorOn && contractorFixed
-                  ? hiWage1 // Iter 597 Rule 4 — fixed adopted wage (company policy)
-                  : (next.salary_mode === "monthly" ? hiWage1 * pfRatio2 : hiWage1))
+                // Iter 729 (user final rule) — Higher PF (Actual Wages) vs
+                // floor% Gross: PF on WHICHEVER IS HIGHER (extras included).
+                ? Math.max(
+                  grossEarn * floorPct,
+                  contractorOn && contractorFixed
+                    ? hiWage1 // Iter 597 Rule 4 — fixed adopted wage (company policy)
+                    : (next.salary_mode === "monthly" ? hiWage1 * pfRatio2 : hiWage1))
                 : (pfBasicFull > 0
                   ? (contractorOn && contractorFixed ? pfBasicMonth : pfBasicPro)
                   : Math.max(pfBase, Number(next.basic || 0), grossEarn * floorPct)))
@@ -2127,9 +2131,13 @@ export default function ComplianceSalaryRunScreen() {
         const pfWagesNew = pfOn
           ? (hiActive
             ? (hiWageFull > 0
-              ? (contractorOn2 && contractorFixed2
-                ? hiWageFull // Iter 597 Rule 4 — fixed adopted wage (company policy)
-                : ((r as any).salary_mode === "monthly" ? hiWageFull * pfRatio : hiWageFull))
+              // Iter 729 (user final rule) — Higher PF (Actual Wages) vs
+              // floor% Gross: PF on WHICHEVER IS HIGHER (extras included).
+              ? Math.max(
+                grossEarn * floorPct,
+                contractorOn2 && contractorFixed2
+                  ? hiWageFull // Iter 597 Rule 4 — fixed adopted wage (company policy)
+                  : ((r as any).salary_mode === "monthly" ? hiWageFull * pfRatio : hiWageFull))
               : (pfBasicFull > 0
                 ? (contractorOn2 && contractorFixed2 ? pfBasicMonth : pfBasicPro)
                 : Math.max(pfBase, paidBasic, grossEarn * floorPct)))

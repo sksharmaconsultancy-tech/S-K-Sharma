@@ -8848,3 +8848,20 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   gross_earning=0 so imported_gross rows=0 locally; on VPS sheets with
   gross the Freeze column persists. Test drafts cleaned. Folded into
   deploy_vps_iter724.sh.
+- Iter 729 — HIGHER PF (ACTUAL WAGES) vs 50% GROSS RULE (user final spec
+  after examples). Rule: employees with higher_pf_wage filled → PF Wage
+  = max(higher wage × days ratio [Iter 597 Rule 4 fixed for contractor
+  adopted_wage], floor_pct% [default 50] × gross_paid incl.
+  OT/Others/Incentive). PF Basic ≤15k and Adopted PF Basic >15k paths
+  UNCHANGED. EPS cap/ER split/VPF follow existing logic on the new wage.
+  calc_note appended when floor wins. BACKEND:
+  utils/compliance_salary.py _hi_active/_hi_wage>0 branch
+  (_hi_earned729/_floor729). FRONTEND: compliance-salary-run.tsx both
+  live-recalc mirrors (updateRowField statutory refresh + days
+  recompute pfWagesNew) wrap with Math.max(grossEarn*floorPct, ...).
+  VERIFIED: 42k/17k/24of26+873 → floor wins EE 2379(engine gross);
+  full-month no extras → 21000/2520; 20k/17k+OT500 → 17000/2040 (never
+  drops); 13/26d → 8500/1020; normal 9000/1080 & adopted 17796/2136
+  unchanged. NOTE (told user, Iter 728 chat): PF Basic blank + only
+  higher_pf_wage filled → PF=0 (eligibility gated on pf_basic>0) — user
+  aware, not yet asked to change. Folded into deploy_vps_iter724.sh.
