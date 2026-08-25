@@ -634,6 +634,10 @@ async def list_employees(
         None,
         description="True → only on-roll, False → only off-roll, omit → both.",
     ),
+    user_id: Optional[str] = Query(
+        None,
+        description="Fetch a SINGLE employee by user_id (detail-page fast path — skips the full-firm list).",
+    ),
     authorization: Optional[str] = Header(None),
 ):
     user = await get_user_from_token(authorization)
@@ -678,6 +682,10 @@ async def list_employees(
     # (which surfaced on the Bulk Employee Correction screen as "Sharma
     # Associates Admin" etc.).
     q["role"] = "employee"
+    # Iter 726 (perf phase 2) — single-employee fast path for the Employee
+    # Master detail page: fetch ONE doc instead of the whole firm.
+    if user_id:
+        q["user_id"] = user_id
     # Iter 585 — RBAC Phase 1: branch/department data scope enforced
     # SERVER-SIDE via the central authorization service (shared/authz.py).
     from shared.authz import scope_filter

@@ -263,8 +263,14 @@ export default function AttendanceGridScreen() {
     return selectedCompanyId && selectedCompanyId !== "all" ? selectedCompanyId : null;
   }, [user, selectedCompanyId]);
 
+  // Iter 726 (perf phase 2) — CHUNKED grid loading: the first 150 employee
+  // rows paint immediately; remaining rows stream in 400-row chunks in the
+  // background. `loadSeq` guards against stale responses after filter/month
+  // changes mid-stream.
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
     if (!effectiveCid) return;
+    const seq = ++loadSeq.current;
     setLoading(true);
     setErr(null);
     setData(null);
@@ -275,15 +281,32 @@ export default function AttendanceGridScreen() {
         params.push(`to_date=${encodeURIComponent(toIso)}`);
       }
       if (groupId) params.push(`group_id=${encodeURIComponent(groupId)}`);
-      const qs = params.length ? `?${params.join("&")}` : "";
-      const res = await api<GridResp>(
-        `/admin/attendance/monthly-grid/${effectiveCid}/${month}${qs}`,
-      );
+      const base = params.join("&");
+      const url = (skip: number, limit: number) =>
+        `/admin/attendance/monthly-grid/${effectiveCid}/${month}?${base ? `${base}&` : ""}skip=${skip}&limit=${limit}`;
+      const res = await api<GridResp & { total_rows?: number }>(url(0, 150));
+      if (seq !== loadSeq.current) return;
       setData(res);
+      setLoading(false);
+      const total = res.total_rows ?? (res.employees || []).length;
+      let fetched = (res.employees || []).length;
+      while (fetched < total) {
+        const chunk = await api<GridResp & { total_rows?: number }>(
+          url(fetched, 400),
+        );
+        if (seq !== loadSeq.current) return;
+        const more = chunk.employees || [];
+        if (more.length === 0) break;
+        fetched += more.length;
+        setData((prev) =>
+          prev ? { ...prev, employees: [...prev.employees, ...more] } : chunk,
+        );
+      }
     } catch (e: any) {
+      if (seq !== loadSeq.current) return;
       setErr(e?.message || "Could not load attendance");
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, [effectiveCid, month, rangeActive, groupId, fromIso, toIso]);
 

@@ -1901,6 +1901,20 @@ def has_unpaired_punches(day_punches: List[dict]) -> bool:
                 and paired_min >= 8 * 60
                 and timedelta(0) <= (last_in_at - last_out_at) <= timedelta(minutes=30)):
             return False
+        # Iter 726 (user bug — night-shift TODAY flagged "Missing Punch"):
+        # an unclosed trailing IN whose timestamp is within the last 16
+        # hours is a duty STILL IN PROGRESS (night shift / OT running —
+        # the OUT will land tomorrow morning and cross-midnight stitching
+        # will close the pair). Never alarm the admin for an open shift.
+        if last_in_at is not None:
+            try:
+                _lin = last_in_at
+                if _lin.tzinfo is None:
+                    _lin = _lin.replace(tzinfo=timezone.utc)
+                if (datetime.now(timezone.utc) - _lin) < timedelta(hours=16):
+                    return False
+            except (TypeError, ValueError):
+                pass
         return True  # trailing unclosed IN
     return leading_out and not seen_in  # OUT-only day stays flagged
 
@@ -2265,7 +2279,24 @@ def stitch_cross_day_ot(
         moved["kind"] = "out"
         moved["_cross_day"] = True
         out_map[dk] = cur_sorted + [moved]
-        out_map[next_dk] = nxt_sorted[1:]
+        _rest = nxt_sorted[1:]
+        # Iter 726 (user bug — night-shift day 2 "Missing Punch" with a
+        # lone morning OUT): a SECOND device / echo OUT within 30 min of
+        # the moved OUT is the same walkout scan. Left behind it becomes
+        # an OUT-only leftover that flags the whole next day as Missing
+        # Punch. Consume such echo OUTs along with the stitch.
+        while _rest:
+            _nk = (_rest[0].get("kind") or "").lower()
+            if _nk != "out":
+                break
+            try:
+                _et = _dt.fromisoformat(str(_rest[0]["at"]).replace("Z", "+00:00"))
+                if (_et - out_at) > _td(minutes=30):
+                    break
+            except (ValueError, TypeError, KeyError):
+                break
+            _rest = _rest[1:]  # echo OUT — drop with the stitch
+        out_map[next_dk] = _rest
     return out_map
 
 
@@ -10216,7 +10247,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "725"
+APP_ITERATION = "726"
 
 
 @api.get("/version")
@@ -10580,6 +10611,8 @@ async def monthly_attendance_grid_json(
     group_id: Optional[str] = None,
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
+    skip: int = 0,
+    limit: Optional[int] = None,
     authorization: Optional[str] = Header(None),
 ):
     """Return the same per-employee x per-day punch data the XLSX endpoints
@@ -10603,13 +10636,24 @@ async def monthly_attendance_grid_json(
             raise HTTPException(status_code=403, detail="Firm not in your scope")
     if admin.get("role") == "company_admin" and admin.get("company_id") != company_id:
         raise HTTPException(status_code=403, detail="You can only view your own firm")
-    return await _compute_monthly_grid_data(
+    data = await _compute_monthly_grid_data(
         company_id=company_id,
         month=month,
         group_id=group_id,
         from_date=from_date,
         to_date=to_date,
     )
+    # Iter 726 (perf phase 2 — user spec): OPTIONAL server-side pagination.
+    # The full grid stays cached (footer totals remain firm-wide); only the
+    # employee rows are sliced so the first paint of a 5000-employee firm
+    # ships a small payload and the rest streams in follow-up chunks.
+    if limit is not None and limit > 0:
+        _all_rows = data.get("employees") or []
+        _skip = max(0, int(skip or 0))
+        data["total_rows"] = len(_all_rows)
+        data["skip"] = _skip
+        data["employees"] = _all_rows[_skip:_skip + int(limit)]
+    return data
 
 
 # Iter 705 (user issue — Attendance Report slow even with 277 employees):

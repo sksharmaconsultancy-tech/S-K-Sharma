@@ -175,7 +175,9 @@ export default function EmployeeMasterScreen() {
       };
       // Fetch fuller info from /admin/employees list (has phone, dept etc.)
       try {
-        const list = await api<{ employees: any[] }>("/admin/employees");
+        const list = await api<{ employees: any[] }>(
+          `/admin/employees?user_id=${encodeURIComponent(targetUserId)}`,
+        );
         const full = (list.employees || []).find(
           (x) => x.user_id === targetUserId
         );
@@ -280,6 +282,20 @@ export default function EmployeeMasterScreen() {
       setErr(e?.message || "Failed to load");
     } finally {
       setLoading(false);
+    }
+  }, [targetUserId]);
+
+  // Iter 726 (perf phase 2) — documents-only refresh so uploading/deleting
+  // a document doesn't re-fetch the whole employee detail.
+  const reloadDocs = useCallback(async () => {
+    if (!targetUserId) return;
+    try {
+      const dl = await api<{ documents: EmpDoc[] }>(
+        `/admin/employees/${targetUserId}/documents`,
+      );
+      setDocs(dl.documents || []);
+    } catch {
+      /* keep existing list on failure */
     }
   }, [targetUserId]);
 
@@ -520,7 +536,7 @@ export default function EmployeeMasterScreen() {
       });
       setUploadOpen(false);
       setPickLabel("");
-      await load();
+      await reloadDocs();
       showMsg("Document uploaded ✓");
     } catch (e: any) {
       showMsg(e?.message || "Upload failed", "Upload");
@@ -574,7 +590,7 @@ export default function EmployeeMasterScreen() {
         await api(`/admin/employees/${targetUserId}/documents/${d.doc_id}`, {
           method: "DELETE",
         });
-        await load();
+        await reloadDocs();
       } catch (e: any) {
         showMsg(e?.message || "Delete failed");
       }

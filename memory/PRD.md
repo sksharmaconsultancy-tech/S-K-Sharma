@@ -8944,3 +8944,26 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   punches cleaned. User's cross-midnight OT-next-morning attribution
   rule already handled by engine (prior iterations) — the cache was why
   edits appeared uncalculated. Deploy: deploy_vps_iter725.sh.
+
+## Iter 726 — Night-shift Missing-Punch fix + Speed Optimization Phase 2 (2026-06)
+- NIGHT SHIFT MISSING PUNCH (user bug: "4 punch फिर भी Missing Punch /
+  2 तारीख़ missing, out सुबह का, in night shift का"):
+  1. has_unpaired_punches (server.py ~1895): a trailing unclosed IN whose
+     timestamp is within the LAST 16 HOURS = open night shift/OT in
+     progress → NOT flagged (OUT lands next morning; stitch closes it).
+     Older unclosed INs still flag (regression-safe).
+  2. stitch_cross_day_ot (server.py ~2263): after moving the next-day's
+     first OUT back, also CONSUMES echo OUTs within 30 min of it (second
+     machine / double scan) so no OUT-only leftover flags the next day.
+  Verified by 12/12 pytest: /app/backend/tests/test_iter726_pagination_and_nightshift.py
+- SPEED PHASE 2:
+  1. Monthly grid endpoint supports skip/limit → slices rows AFTER the
+     cached full compute, returns total_rows+skip; no limit = full
+     response, no total_rows key (exports/back-compat untouched).
+  2. attendance-grid.tsx: chunked loading (first 150 rows instant, then
+     400-row background chunks, loadSeq guard against stale month/filter).
+  3. /admin/employees?user_id= single-employee fast path (payroll_core.py);
+     employee-master.tsx load() uses it (was downloading whole firm list);
+     doc upload/delete now refresh documents only (reloadDocs).
+- APP_ITERATION=726; deploy_vps_iter726.sh served via kind=script
+  (temp_bundle.py updated). Testing agent: ALL PASS backend+frontend.

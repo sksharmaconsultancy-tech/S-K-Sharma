@@ -1,0 +1,30 @@
+{
+  "summary": "Iter 726 (pagination + night-shift fix) tested end-to-end. Backend pytest suite (12 tests) PASSED 100% — monthly-grid pagination (skip=0/limit=5 → 5 rows + total_rows=127; skip=5/limit=5 → non-overlapping page; no-limit → 127 rows and NO total_rows key), single-employee fast path (/admin/employees?user_id=... → 1 row; ?company_id=... → 127 rows), night-shift has_unpaired_punches (recent open IN NOT flagged, 6-day-old lone IN still flagged, normal IN→OUT clean, IN→IN old day still flagged), stitch_cross_day_ot echo-consumption (day1 gains 05:00 OUT, day2 becomes empty; 4-day night-shift regression clean), and dedupe_close_punches import sanity. Frontend UI verified via Playwright with injected super-admin session (post-2FA): (1) /attendance-grid for Kankani renders correctly — Group filter shows 'All (127)', 'LABOUR (108)', 'STAFF (16)'; chunked load produced no visible pagination stutter for 127 rows (single chunk since <150). Month change 2026-08 → 2026-07 reloaded cleanly (July had actual punches, showed correct IN/OUT + missing-punch chips). No stale mixing observed. (2) /employee-master?user_id=<uid> loads the detail page using the NEW fast-path — verified 4 network calls to /api/admin/employees?user_id=... (no full-firm fetch). Name/code/all cards (Grouping, PF-UAN/ESIC, Dummy Shift, Login Credentials, Face, Device Security, Documents/PDF) render with expected testIDs.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter726_pagination_and_nightshift.py",
+    "/app/test_reports/pytest/iter726.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "attendance-grid.tsx: chunked loader uses loadSeq guard to avoid stale updates — correct. Fast path 150 rows first + 400-row chunks — good. total_rows fallback to employees.length keeps back-compat.",
+    "server.py has_unpaired_punches: 16-hour rolling window correctly protects TODAY's open night shift. Uses datetime.now(UTC) so timezone-safe.",
+    "payroll_core.py list_employees: user_id filter is ANDed AFTER company scope + sub_admin scope — safe, cannot bypass RBAC.",
+    "employee-master.tsx: reloadDocs uses /admin/employees/{uid}/documents (docs-only endpoint). load() correctly rehydrates full detail on focus without re-fetching firm list."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter726_pagination_and_nightshift.py (new pytest file — 12 tests, all PASS)"
+  ],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100% (grid + emp-master flows verified)"},
+  "seed_data_creation": "None — used existing Kankani firm (cmp_527fecdd7c, 127 employees).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login flow requires 2FA — swap otp_hash in Mongo twofa_pending collection (see test_credentials.md). Session token can be injected via localStorage key 'llc_session_token' after which /attendance-grid and /employee-master routes are directly reachable. Kankani cid=cmp_527fecdd7c. Fast-path fetch=/api/admin/employees?user_id=<uid>.",
+  "rca_of_issue": "N/A — all backend + frontend flows for iter 726 changes work as specified."
+}

@@ -914,3 +914,11 @@ ITER 487 (doc-expiry alerts):
   approval_status=rejected like resigned.
 - AdminWebShell: "Profile Edit Approvals" sidebar entry. APP_ITERATION=617,
   deploy_vps_iter617.sh served via kind=script.
+
+## Iter 726 — Night-shift Missing Punch fix + Perf Phase 2 (tested)
+- testing_agent iteration_726.json: ALL PASS (12/12 backend pytest,
+  frontend grid chunked load + employee-master fast path verified).
+- Files: server.py (has_unpaired_punches 16h open-shift tolerance,
+  stitch echo-OUT consumption, grid skip/limit), payroll_core.py
+  (user_id param), attendance-grid.tsx (chunked load), employee-master.tsx
+  (single-emp fetch + reloadDocs). Back-compat: no-limit grid = full rows.
