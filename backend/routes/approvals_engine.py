@@ -245,6 +245,13 @@ async def _finalize(module: str, record_id: str, approved: bool, actor: dict,
         await finalize_tour_approval(
             record_id, final_status or ("approved" if approved else "rejected"), actor)
         return
+    if module == "leave":
+        # Iter 713 — LEAVE wired into the engine: apply the final workflow
+        # decision to the leave record + notify the employee.
+        from routes.leaves import finalize_leave_workflow
+        await finalize_leave_workflow(
+            record_id, final_status or ("approved" if approved else "rejected"), actor)
+        return
     if module == "advance":
         from routes.advances import _audit as adv_audit  # local import, no cycle at module load
         a = await db.advances.find_one({"advance_id": record_id}, {"_id": 0})
@@ -253,6 +260,11 @@ async def _finalize(module: str, record_id: str, approved: bool, actor: dict,
         if approved:
             new_status = "scheduled" if (a.get("start_month") or "") > now_iso()[:7] else "active"
             detail = "Advance APPROVED via workflow"
+        elif (final_status or "") == "returned":
+            # Iter 713 (bug fix) — RETURN used to mark the advance REJECTED;
+            # a returned advance stays editable for correction & resubmission.
+            new_status = "returned"
+            detail = "Advance RETURNED for correction via workflow"
         else:
             new_status = "rejected"
             detail = "Advance REJECTED via workflow"

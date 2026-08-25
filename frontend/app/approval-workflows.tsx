@@ -99,6 +99,10 @@ export default function ApprovalWorkflows() {
   };
 
   const save = async (moduleKey: string, levels: any[], enabled: boolean, notify?: any) => {
+    // Iter 713 (bug fix) — rapid taps fired concurrent saves computed from
+    // STALE local state; the last (often empty) write wiped the levels.
+    // One save at a time; further taps are ignored until the reload lands.
+    if (saving) return;
     setSaving(moduleKey);
     try {
       await api("/admin/approval-workflows", {

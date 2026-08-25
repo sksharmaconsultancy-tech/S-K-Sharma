@@ -105,6 +105,41 @@ async def create_leave(payload: LeaveCreate, authorization: Optional[str] = Head
         "created_at": now_iso(),
     }
     await db.leaves.insert_one(leave)
+    # Iter 713 — route through the Approval Workflow when a LEAVE workflow
+    # is enabled for the firm (Approval Workflow Builder → Leave). The
+    # request then travels level-by-level (role / specific employee /
+    # company admin); the leave record is decided only on final action.
+    try:
+        from routes.approvals_engine import (create_approval_request,
+                                             get_active_workflow)
+        wf = await get_active_workflow(user.get("company_id") or "", "leave")
+        if wf:
+            from datetime import date as _d2
+            try:
+                _days = ((_d2.fromisoformat(str(payload.to_date)[:10])
+                          - _d2.fromisoformat(str(payload.from_date)[:10])).days + 1)
+            except (ValueError, TypeError):
+                _days = None
+            await create_approval_request(
+                company_id=user.get("company_id"),
+                module="leave",
+                record_id=leave["leave_id"],
+                title=(f"{user.get('name') or 'Employee'} · "
+                       f"{payload.leave_type} · {payload.from_date} → {payload.to_date}"),
+                summary={"employee_name": user.get("name"),
+                         "employee_code": user.get("employee_code"),
+                         "leave_type": payload.leave_type,
+                         "from_date": payload.from_date,
+                         "to_date": payload.to_date,
+                         "days": _days,
+                         "reason": payload.reason},
+                requested_by=user, workflow=wf)
+            await db.leaves.update_one(
+                {"leave_id": leave["leave_id"]},
+                {"$set": {"workflow_routed": True}})
+            leave["workflow_routed"] = True
+    except Exception:
+        pass
     # Iter 666 — bell notification to company admins.
     try:
         from utils.notify import emit as _notify
@@ -157,6 +192,17 @@ async def decide_leave(leave_id: str, payload: LeaveDecision,
     _lv0 = await db.leaves.find_one({"leave_id": leave_id}, {"_id": 0})
     if not _lv0:
         raise HTTPException(status_code=404, detail="Leave not found")
+    # Iter 713 — leaves routed through the Approval Workflow must be
+    # actioned from the Approval Inbox (single decision path, no bypass).
+    _wf_pending = await db.approval_requests.find_one(
+        {"module": "leave", "record_id": leave_id,
+         "status": {"$in": ["pending", "on_hold"]}},
+        {"_id": 0, "request_id": 1})
+    if _wf_pending:
+        raise HTTPException(
+            status_code=400,
+            detail=("This leave is routed through the Approval Workflow — "
+                    "approve/reject it from the Approval Inbox instead."))
     _co_days = 0.0
     if payload.status == "approved" and getattr(payload, "use_comp_off", False):
         from datetime import date as _d
@@ -644,3 +690,43 @@ async def set_leave_settings(
     await db.firm_masters.update_one(
         {"company_id": company_id}, {"$set": sets}, upsert=True)
     return {"ok": True}
+
+
+async def finalize_leave_workflow(leave_id: str, status: str, actor: dict) -> None:
+    """Iter 713 — apply the Approval Workflow's FINAL decision to the leave
+    record (approved | rejected | returned) and notify the employee the
+    same way a direct admin decision does."""
+    st = status if status in ("approved", "rejected", "returned") else "rejected"
+    await db.leaves.update_one(
+        {"leave_id": leave_id},
+        {"$set": {"status": st,
+                  "decided_by": (actor.get("name") or actor.get("email")
+                                 or "Approval Workflow"),
+                  "decided_at": now_iso()}})
+    leave = await db.leaves.find_one({"leave_id": leave_id}, {"_id": 0})
+    if not leave:
+        return
+    _txt = {"approved": "approved ✓", "rejected": "rejected",
+            "returned": "returned for correction"}[st]
+    try:
+        from utils.notify import emit as _notify
+        await _notify(db, title=f"Leave {st.capitalize()}",
+                      message=(f"Your {leave.get('leave_type')} leave "
+                               f"{leave.get('from_date')} → {leave.get('to_date')} "
+                               f"was {_txt}."),
+                      audience="user", company_id=leave.get("company_id"),
+                      target_user_id=leave.get("user_id"),
+                      category="leave", priority="normal",
+                      action_url="/leaves", reference_id=leave_id)
+    except Exception:
+        pass
+    try:
+        from routes.web_push import push_to_user
+        await push_to_user(
+            leave.get("user_id") or "",
+            f"Leave {st}",
+            (f"Your {leave.get('leave_type')} leave ({leave.get('from_date')} → "
+             f"{leave.get('to_date')}) was {_txt}."),
+            url="/leaves", tag=f"leave_{leave_id}")
+    except Exception:
+        pass

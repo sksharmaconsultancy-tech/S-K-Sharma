@@ -8579,3 +8579,27 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   employees SHIFT 2). NOTE: orphaned assignments (shift not in firm list)
   show real data — fix via bulk replace mode. Badge 712, sw v27,
   deploy_vps_iter712.sh served via kind=script (deploy712.sh).
+- Iter 713 — APPROVAL WORKFLOW AUDIT (user: "check approval workflow,
+  find bugs"). Findings + fixes:
+  (BUG 1, frontend race) approval-workflows.tsx save() had no concurrency
+  guard — rapid taps fired concurrent POSTs from stale state; last empty
+  write WIPED levels. Evidence: user's leave workflow (v1 emp 334, v2 emp
+  SURENDRA SINGH 50, both enabled) wiped to enabled:false/levels:[] with
+  v2-snapshot + final save 0.25s apart. FIX: `if (saving) return;` guard.
+  User's leave workflow RESTORED in DB (enabled, L1 employee SURENDRA
+  SINGH user_44cd6f561da0, version snapshot kept).
+  (BUG 2, backend) approvals_engine._finalize: "return" on ADVANCE marked
+  the advance REJECTED. FIX: final_status returned → advances.status
+  "returned" + audit "RETURNED for correction".
+  (BUG 3, functional gap) LEAVE module was builder-only, never wired.
+  FIX: leaves.py create_leave routes through engine when leave workflow
+  enabled (create_approval_request, leave.workflow_routed=True);
+  finalize_leave_workflow() applies approved/rejected/returned + notify
+  (bell + web-push); decide_leave BLOCKS direct decision while a workflow
+  request is pending/on_hold. No-workflow firms unchanged.
+  STILL UNWIRED (config-only, reported to user): shift_change, overtime,
+  loan, salary_revision, exit, employee_creation, salary_lock.
+  E2E tested in-process (6/6 pass): route→pending with emp 50, direct
+  decide blocked, approver approve→leave approved+notify, return→leave
+  "returned", advance return→"returned"/reject→"rejected", non-approver
+  blocked. Badge 713, sw v28, deploy_vps_iter713.sh via kind=script.
