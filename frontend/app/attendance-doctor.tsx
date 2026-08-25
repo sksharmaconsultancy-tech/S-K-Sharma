@@ -114,6 +114,38 @@ export default function AttendanceDoctorScreen() {
     }
   }, [firmId, month, diagnose]);
 
+  const cleanStrays = useCallback(async (preview: boolean) => {
+    if (!firmId) return;
+    if (!preview) {
+      const ok = await confirmYesNo(
+        "Clean stray double-scans firm-wide?\nStray trailing IN punches (device echo within 30 min after a completed full-day OUT) will be marked ignored.\nReversible via Undo Repair. Manual/mobile punches are never touched.",
+      );
+      if (!ok) return;
+    }
+    setRepairBusy(true);
+    try {
+      const j = await api<{ total: number; cleaned?: number; strays: any[] }>(
+        "/admin/attendance-doctor/clean-strays",
+        { method: "POST", body: { company_id: firmId, month, preview } },
+      );
+      const list = (j.strays || []).slice(0, 12)
+        .map((s) => `• ${s.name || s.user_id} (${s.employee_code || "-"}) — ${s.date} IN ${String(s.at || "").slice(11, 16)}`)
+        .join("\n");
+      if (preview) {
+        showMsg(j.total
+          ? `🧹 Found ${j.total} stray double-scan punch(es):\n${list}${j.total > 12 ? "\n…" : ""}\n\nPress "Clean Strays" to ignore them.`
+          : "🧹 No stray double-scans found for this month.");
+      } else {
+        showMsg(`🧹 Cleaned ${j.cleaned ?? j.total} stray punch(es) ✓\nUse Undo Repair to restore if needed.`);
+        diagnose();
+      }
+    } catch (e: any) {
+      showMsg(e?.message || "Stray clean failed");
+    } finally {
+      setRepairBusy(false);
+    }
+  }, [firmId, month, diagnose]);
+
   const undoRepair = useCallback(async () => {
     const ok = await confirmYesNo("Undo all Auto Repairs for this firm + month?");
     if (!ok) return;
@@ -191,6 +223,14 @@ export default function AttendanceDoctorScreen() {
             <Pressable onPress={() => repair(false)} style={styles.secBtn} disabled={repairBusy} testID="ad-repair-apply">
               <Ionicons name="hammer-outline" size={15} color={colors.brandPrimary} />
               <Text style={styles.secBtnTxt}>Apply Repair</Text>
+            </Pressable>
+            <Pressable onPress={() => cleanStrays(true)} style={styles.secBtn} disabled={repairBusy} testID="ad-strays-scan">
+              <Ionicons name="search-outline" size={15} color={colors.brandPrimary} />
+              <Text style={styles.secBtnTxt}>Scan Strays</Text>
+            </Pressable>
+            <Pressable onPress={() => cleanStrays(false)} style={styles.secBtn} disabled={repairBusy} testID="ad-strays-clean">
+              <Ionicons name="sparkles-outline" size={15} color={colors.brandPrimary} />
+              <Text style={styles.secBtnTxt}>Clean Strays</Text>
             </Pressable>
             <Pressable onPress={undoRepair} style={styles.secBtn} disabled={repairBusy} testID="ad-repair-undo">
               <Ionicons name="arrow-undo-outline" size={15} color={colors.brandPrimary} />

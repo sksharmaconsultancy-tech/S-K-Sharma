@@ -291,6 +291,94 @@ async def auto_repair_attendance(
     return result
 
 
+@router.post("/clean-strays")
+async def clean_stray_scans(
+    body: RepairBody,
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 717 (user request) — one-tap STRAY DOUBLE-SCAN CLEANER.
+
+    Finds MACHINE punches that match the Iter-716 stray pattern firm-wide
+    for the month: a trailing unpaired IN within 30 min of the day's last
+    completed OUT, on a day already holding ≥8h of paired duty (device
+    echo — e.g. OUT 19:58 then IN 20:03 after a full 07:58→19:58 duty).
+    ``preview=true`` lists them; apply marks them ``auto_ignored``
+    (reversible via Undo Repair). Manual/mobile punches never touched."""
+    admin = await _auth(authorization, body.company_id)
+    q_users: Dict[str, Any] = {"company_id": body.company_id, "role": "employee"}
+    if body.user_id:
+        q_users["user_id"] = body.user_id
+    emp_by_id = {u["user_id"]: u async for u in db.users.find(
+        q_users, {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1})}
+    by_user_day: Dict[tuple, List[Dict[str, Any]]] = defaultdict(list)
+    async for p in db.attendance.find(
+        {"user_id": {"$in": list(emp_by_id.keys())},
+         "date": {"$gte": f"{body.month}-01", "$lte": f"{body.month}-31"},
+         "status": "approved"},
+        {"_id": 0, "record_id": 1, "attendance_id": 1, "user_id": 1,
+         "date": 1, "kind": 1, "at": 1, "source": 1},
+    ).sort([("user_id", 1), ("at", 1)]):
+        by_user_day[(p["user_id"], p["date"])].append(p)
+
+    strays: List[Dict[str, Any]] = []
+    for (uid, dk), plist in by_user_day.items():
+        seq = sorted(plist, key=_dt)
+        paired_min = 0
+        last_out_at = None
+        open_p = None
+        for p in seq:
+            k = (p.get("kind") or "").lower()
+            if k == "in":
+                open_p = p
+            elif k == "out" and open_p is not None:
+                try:
+                    gap = (_dt(p) - _dt(open_p)).total_seconds()
+                    if gap > 0:
+                        paired_min += int(gap // 60)
+                        last_out_at = _dt(p)
+                except (ValueError, TypeError, KeyError):
+                    pass
+                open_p = None
+        # trailing unpaired MACHINE IN = the day's last punch left open
+        if (open_p is not None and seq[-1] is open_p
+                and _is_machine(open_p.get("source"))
+                and last_out_at is not None and paired_min >= 8 * 60):
+            try:
+                if 0 <= (_dt(open_p) - last_out_at).total_seconds() <= 30 * 60:
+                    e = emp_by_id.get(uid) or {}
+                    strays.append({
+                        "user_id": uid,
+                        "name": e.get("name"),
+                        "employee_code": e.get("employee_code"),
+                        "date": dk,
+                        "at": open_p.get("at"),
+                        "kind": "in",
+                        "record_id": open_p.get("record_id")
+                                     or open_p.get("attendance_id"),
+                    })
+            except (ValueError, TypeError, KeyError):
+                pass
+
+    if body.preview:
+        return {"ok": True, "preview": True, "total": len(strays),
+                "strays": strays[:300]}
+    cleaned = 0
+    for s in strays:
+        flt: Dict[str, Any] = ({"record_id": s["record_id"]}
+                               if s.get("record_id")
+                               else {"user_id": s["user_id"], "date": s["date"],
+                                     "at": s["at"], "kind": "in"})
+        r = await db.attendance.update_many(
+            flt, {"$set": {"status": "auto_ignored",
+                           "repair_tag": "stray_double_scan",
+                           "cleaned_by": admin.get("user_id")}})
+        cleaned += r.modified_count
+    from server import invalidate_grid_cache
+    invalidate_grid_cache(body.company_id)
+    return {"ok": True, "preview": False, "total": len(strays),
+            "cleaned": cleaned, "strays": strays[:300]}
+
+
 @router.post("/repair/undo")
 async def undo_repair(
     body: RepairBody,

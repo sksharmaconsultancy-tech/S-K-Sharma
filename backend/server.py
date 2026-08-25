@@ -10185,7 +10185,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "716"
+APP_ITERATION = "718"
 
 
 @api.get("/version")

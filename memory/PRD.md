@@ -8663,3 +8663,35 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   VERIFIED with exact GAJRAM data: days 02-05 all 12:00 clean; genuine
   night chains (22:00→06:00 consecutive) still stitch (Iter 715 spec
   regression pass). Badge 716, sw v31, deploy_vps_iter716.sh.
+- Iter 717 — STRAY PUNCH CLEANER (user request): attendance_doctor.py
+  POST /clean-strays {company_id, month, preview, user_id?} — detects
+  Iter-716 stray pattern firm-wide (trailing unpaired MACHINE IN ≤30min
+  after last completed OUT on day with ≥8h paired duty); preview lists
+  (max 300); apply → status auto_ignored + repair_tag stray_double_scan
+  (reversible via existing /repair/undo) + grid cache invalidated.
+  Frontend attendance-doctor.tsx: Scan Strays + Clean Strays buttons
+  (ad-strays-scan/clean) with preview list + confirm. VERIFIED: finds
+  only true stray (20:03), skips clean days/genuine night IN/manual
+  punches; apply marks ignored; undo restores. Badge 717, sw v32,
+  deploy_vps_iter717.sh.
+  CHALLAN STATUS RESEARCH (user asked): EPF ECR auto-upload→TRRN→challan
+  PDF→db.challans (Iter 700-703, e2e verified); ESIC bulk upload→challan
+  no+PDF→db.challans (Iter 704, runner v28, verified). By design stops at
+  challan generation — NO online bank payment (user's Iter 115 choice).
+  Pending candidates: online payment automation, auto paid-status капture
+  into Monthly Challan Summary. Awaiting user direction.
+- Iter 718 — CHALLAN PAID AUTO-CAPTURE (user: pending part of online
+  challan upload). RUNNER v29 (portal_extension.py): after TRRN/challan
+  capture, both PF & ESIC branches watch the SAME browser window (900×2s
+  ≈30min, current tab only — no tab switching to avoid disturbing net
+  banking) for payment-confirmation regex (payment confirmed/successful,
+  transaction successful/completed, challan paid, payment status
+  success/paid) → POST /portal-ext/paid {token, run_id, trrn, portal} →
+  _st("paid"). NEW endpoint ext_save_paid: token-auth; stamps
+  db.challans (paid_on, payment_status=paid, by trrn else month),
+  compliance run pf_paid_on/esic_paid_on, challan_summaries pf/esic_date
+  only-if-empty (no upsert — summary GET auto-reads challans paid_on
+  anyway). VERIFIED: runner v29 serves + ast-parses, endpoint stamps
+  challan+run correctly, cleanup done. Badge 718, sw v33,
+  deploy_vps_iter718.sh. User note: runner auto-updates; else re-run
+  install_autostart.bat. Limitation: pays must happen in runner window.

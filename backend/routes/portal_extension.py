@@ -551,7 +551,7 @@ async def ext_ecr_file(token: str, run_id: str = ""):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "28"
+RUNNER_VERSION = "29"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -1091,6 +1091,45 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None, action=None):
                                     print("No challan PDF download detected "
                                           "- you can attach it in the app "
                                           "later.")
+                                # Iter 718 - PAID watch (ESIC): pay in THIS
+                                # window; confirmation auto-saves PAID date.
+                                _pre2 = __import__("re").compile(
+                                    r"(payment\s+(?:confirmed|successful)|"
+                                    r"transaction\s+(?:successful|completed)|"
+                                    r"challan\s+paid|payment\s+status"
+                                    r"[^A-Za-z]{0,20}(?:success|paid))",
+                                    __import__("re").I)
+                                print("Waiting for challan PAYMENT "
+                                      "confirmation (up to 30 min) - pay in "
+                                      "THIS window.")
+                                for _pi in range(900):
+                                    time.sleep(2)
+                                    try:
+                                        _psrc = driver.page_source or ""
+                                    except Exception:
+                                        break
+                                    if _pre2.search(_psrc):
+                                        try:
+                                            _rq4 = urllib.request.Request(
+                                                "%s/api/portal-ext/paid"
+                                                % API_BASE,
+                                                data=json.dumps({
+                                                    "token": TOKEN,
+                                                    "run_id": run_id or "",
+                                                    "trrn": _chno,
+                                                    "portal": "esic",
+                                                }).encode(),
+                                                headers={"Content-Type":
+                                                         "application/json"})
+                                            urllib.request.urlopen(
+                                                _rq4, timeout=30)
+                                            _st("paid")
+                                            print("PAYMENT confirmed - PAID "
+                                                  "date saved to the app.")
+                                        except Exception as _e:
+                                            print("Could not save PAID "
+                                                  "status (%s)." % _e)
+                                        break
                         except Exception as _e:
                             print("ESIC challan watch skipped (%s)." % _e)
                 else:
@@ -1810,6 +1849,50 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None, action=None):
                                             print("No challan PDF download "
                                                   "detected - you can attach "
                                                   "it in the app later.")
+                                        # Iter 718 - PAID watch: keep this
+                                        # window open, pay the challan here;
+                                        # the confirmation page is detected
+                                        # and the PAID date auto-saves.
+                                        _pre = __import__("re").compile(
+                                            r"(payment\s+(?:confirmed|"
+                                            r"successful)|transaction\s+"
+                                            r"(?:successful|completed)|"
+                                            r"challan\s+paid|payment\s+"
+                                            r"status[^A-Za-z]{0,20}"
+                                            r"(?:success|paid))",
+                                            __import__("re").I)
+                                        print("Waiting for challan PAYMENT "
+                                              "confirmation (up to 30 min) - "
+                                              "pay in THIS window.")
+                                        for _pi in range(900):
+                                            time.sleep(2)
+                                            try:
+                                                _psrc = driver.page_source or ""
+                                            except Exception:
+                                                break
+                                            if _pre.search(_psrc):
+                                                try:
+                                                    _rq4 = urllib.request.Request(
+                                                        "%s/api/portal-ext/paid"
+                                                        % API_BASE,
+                                                        data=json.dumps({
+                                                            "token": TOKEN,
+                                                            "run_id": run_id or "",
+                                                            "trrn": _trrn,
+                                                            "portal": "pf",
+                                                        }).encode(),
+                                                        headers={"Content-Type":
+                                                                 "application/json"})
+                                                    urllib.request.urlopen(
+                                                        _rq4, timeout=30)
+                                                    _st("paid")
+                                                    print("PAYMENT confirmed - "
+                                                          "PAID date saved to "
+                                                          "the app.")
+                                                except Exception as _e:
+                                                    print("Could not save PAID "
+                                                          "status (%s)." % _e)
+                                                break
                                 except Exception as _e:
                                     print("TRRN watch skipped (%s)." % _e)
                             except urllib.error.HTTPError as _he:
@@ -2801,6 +2884,51 @@ async def claim_epfo_login(
                 uid, company_id, cleaned, admin["user_id"])
     return {"ok": True, "user_id": uid,
             "kept_firm": diag["firm_name"], "cleaned": cleaned}
+
+
+@router.post("/portal-ext/paid")
+async def ext_save_paid(payload: Dict[str, Any] = Body(...)):
+    """Iter 718 (user request) — the Runner detected the challan PAYMENT
+    confirmation page. Stamps the PAID date on the challan record, the
+    compliance run, and the Monthly Challan Summary (only where the date
+    is still empty — manual entries are never overwritten)."""
+    token = (payload.get("token") or "").strip()
+    doc = await db.automation_ext_tokens.find_one({"token": token})
+    if not doc:
+        raise HTTPException(status_code=401, detail="Invalid extension token")
+    portal_kind = (payload.get("portal") or "pf").lower()
+    if portal_kind not in ("pf", "esic"):
+        portal_kind = "pf"
+    trrn = str(payload.get("trrn") or "").strip()
+    paid_on = str(payload.get("paid_on") or "").strip() or now_iso()[:10]
+    run_id = (payload.get("run_id") or doc.get("run_id") or "").strip()
+    month = ""
+    if run_id:
+        _f = "pf_paid_on" if portal_kind == "pf" else "esic_paid_on"
+        await db.compliance_salary_runs.update_one(
+            {"run_id": run_id, "company_id": doc["company_id"]},
+            {"$set": {_f: paid_on, _f + "_at": now_iso()}})
+        run = await db.compliance_salary_runs.find_one(
+            {"run_id": run_id}, {"_id": 0, "month": 1})
+        month = (run or {}).get("month") or ""
+    q_ch: Dict[str, Any] = {"company_id": doc["company_id"],
+                            "portal": portal_kind}
+    if trrn:
+        q_ch["trrn"] = trrn
+    elif month:
+        q_ch["month"] = month
+    await db.challans.update_many(
+        q_ch, {"$set": {"paid_on": paid_on, "payment_status": "paid",
+                        "paid_captured_at": now_iso()}})
+    if month:
+        _df = "pf_date" if portal_kind == "pf" else "esic_date"
+        await db.challan_summaries.update_one(
+            {"company_id": doc["company_id"], "month": month,
+             "$or": [{_df: {"$exists": False}}, {_df: {"$in": [None, ""]}}]},
+            {"$set": {_df: paid_on}})
+    logger.info("[paid] %s %s paid_on=%s run=%s", portal_kind,
+                trrn or month, paid_on, run_id or "-")
+    return {"ok": True, "paid_on": paid_on}
 
 
 @router.post("/portal-ext/trrn")
