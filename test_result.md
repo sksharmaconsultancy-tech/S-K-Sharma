@@ -936,3 +936,8 @@ ITER 487 (doc-expiry alerts):
 ## Iter 729 — KAMESHVAR double-scan fix (tested)
 - Reproduced from screenshot; Iter719 clean-day guard now needs >=2h
   paired duty. Unit sims + e2e grid API + pytest 12/12 all PASS.
+
+## Iter 730 — HR Extras modules (tested)
+- testing_agent iteration_730.json ALL PASS: gate pass punch
+  insert/delete E2E, late penalty seeded-late E2E + apply 404 path,
+  F&F calc+PDF, 3 frontend screens + sidebar nav.

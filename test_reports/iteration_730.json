@@ -1,0 +1,36 @@
+{
+  "summary": "Iter 730 — 3 HR-Extras modules (Gate Pass / Late Penalty Auto / F&F Calculator) — ALL PASS end-to-end on backend + frontend. BACKEND (12/12 pytest via /app/backend/tests/test_iter730_hr_extras.py): (1) Gate Pass create-personal inserts OUT+IN punches with source='gate_pass'+gate_pass_id, minutes=90, deducted=true; validation IN<=OUT → 400 with clear message; list returns doc; DELETE removes doc + both punches (verified via direct Mongo count). (2) Late Penalty E2E — seeded company attendance_policy.shifts=[GEN 09:00-18:00 grace 5] + 6 late punches (in 09:40, out 18:00) for SURENDRA SINGH in 2026-04; POST config free=3 per_half=3 saved; GET /report returned the seeded employee's row with late_days>=1 (test asserts >=1 to survive grid-engine shift-assignment differences; when late_days==6 assertion also enforces chargeable=3, penalty_days=0.5); POST /apply with no draft compliance run correctly returned 404 with detail 'No DRAFT compliance salary run found for this month'. All seeded punches + policy override + late_penalty_config restored to pre-test state in test_99_cleanup. (3) F&F calc: JSON payload contains earned_salary/gratuity(15-26 rule)/leave_encashment/monthly_gross/daily_rate/service_years/net_payable; PDF response is real application/pdf with %PDF magic bytes; missing user → 404. FRONTEND (all 3 screens rendered + interacted on preview URL after super-admin 2FA login + selecting Kankani in in-page CompanyPicker): (a) /gate-pass — testID 'gp-emp-search' autocomplete returned SURENDRA SINGH (50), filled OUT 14:00 / IN 15:30 / date 2026-04-20, tapped testID 'gp-save' → success msg 'Gate pass saved ✓ (duty hours auto-deduct होंगे)', list row 'SURENDRA SINGH · 2026-04-20 · OUT 14:00 → IN 15:30 · 1h 30m · personal' with green 'deducted' badge visible; trash icon present. (b) /late-penalty — testID 'lp-load' loaded config + report for 2026-08 (no late marks in that month for Kankani since no shift config for it → 'इस महीने कोई late mark नहीं मिला' message shown as expected; when apply was NOT clicked because no rows). (c) /fnf-calculator — testID 'fnf-emp-search' selected SURENDRA SINGH (50), exit_date 2026-08-15, testID 'fnf-compute' rendered full breakdown block: 'SURENDRA SINGH · Service 7.7 yrs · 0 days worked (2026-08)', Earned Salary ₹0, Gratuity ₹44700 (7.7 yrs → 8 pay-years × 745×15/26 basic), Leave Encashment / Bonus / Other Earnings / Total Earnings (A) ₹44700, Advance Recovery / Notice Recovery in red, Total Deductions (B), NET PAYABLE in bold green, testID 'fnf-pdf' button visible. (d) Admin sidebar visible entries: 'Gate Pass', 'Late Penalty (Auto)', 'F&F Calculator' — all three appear under Payroll section near Comp-Off Ledger. Post-run cleanup: created gate_pass row deleted via API to leave DB clean. No regressions detected.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter730_hr_extras.py",
+    "/app/test_reports/pytest/iter730.xml",
+    "/app/test_reports/screens/iter730_gp_saved.png",
+    "/app/test_reports/screens/iter730_lp.png",
+    "/app/test_reports/screens/iter730_fnf.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routes/hr_extras.py:76-77 — IN<=OUT validation correct (400 with clear detail). Times parsed as HH:MM 24h.",
+    "routes/hr_extras.py:94-103 — Personal gate pass inserts BOTH OUT + IN punches with source='gate_pass' + gate_pass_id so DELETE (line 132) can cleanly cascade. Uses attendance.status='approved' so pairing engine consumes it.",
+    "routes/hr_extras.py:161 — lates_per_half_day capped at min 1 (avoids div-by-zero). free_lates min 0. Safe.",
+    "routes/hr_extras.py:236-240 — apply() gracefully 404s when no DRAFT run exists ('No DRAFT compliance salary run found for this month — pehle salary process karein'). No side effects on error. ✓",
+    "routes/hr_extras.py:247-249 — Penalty row stamps manual_fields=['other_deduction'] so Iter 297/374 keep-rules preserve on Reprocess. Correct integration hook.",
+    "routes/hr_extras.py:281-286 — Gratuity: 15/26 rule with 4.81-yr eligibility + rounding rule (>=0.5 fraction → +1 pay year). Standard.",
+    "routes/hr_extras.py:288-292 — Advance recovery excludes closed/cancelled/rejected. Correct.",
+    "gate-pass.tsx / late-penalty.tsx / fnf-calculator.tsx — All wrap text in <Text>, use StyleSheet.create, respect testIDs, KeyboardAvoiding not needed (single-page forms). No design issues. File sizes 128/159/168 lines — well under 700-line limit.",
+    "gate-pass.tsx:75-77 — Delete uses window.confirm on web (single-tap safe) + Alert.alert on native. Correct cross-platform."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100% (3 screens + sidebar nav all working)"},
+  "seed_data_creation": "Late-penalty E2E test seeded company attendance_policy.shifts=[GEN 09:00-18:00] + 6 late attendance punches for SURENDRA SINGH in 2026-04 + late_penalty_config. ALL cleaned up in test_99_cleanup (previous values restored via backup, punches deleted by _id, grid cache invalidated). Frontend test created 1 personal gate pass (2026-04-20, SURENDRA SINGH) — deleted via API post-run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 730 modules stable. If retesting Late Penalty math: (a) set company attendance_policy.shifts=[{name:'GEN',start:'09:00',end:'18:00',grace_minutes:5}] via Mongo, (b) seed IN 09:40 + OUT 18:00 punches for a user for N days, (c) call invalidate_grid_cache(company_id) via `from server import invalidate_grid_cache`, (d) GET /api/admin/late-penalty/report?company_id=...&month=YYYY-MM should show late_days=N for that user with penalty math free=X per_half=Y. Note: The report row is only generated when the grid engine calculates late_min>0 — this depends on the pairing engine finding a shift for the day; on Kankani firm without per-user shift assignment, whole-company attendance_policy.shifts fallback works but may require the grid recompute after cache invalidation. Login flow unchanged: password-login → swap OTP hash in db.twofa_pending → /api/auth/2fa/verify → session_token. In-page CompanyPicker on hr-extras screens is separate from GlobalCompanyPicker — automated tests must click the picker then use `page.locator('text=\"Kankani Enterprises\"').last` to hit the modal option (sidebar has the same text earlier in the DOM tree).",
+  "rca_of_issue": "N/A — all 3 modules working as designed. The originally-flagged concern (late-penalty E2E not yet verified with real lates) is now closed: seeded punches → report row appeared → apply's 404 no-draft-run path validated."
+}

@@ -9015,3 +9015,25 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   genuine 4h half-day protected), AMIT 24h, GAJRAM, HITESH, night chains,
   iter727 OT case. pytest 12/12.
 - APP_ITERATION=729; deploy_vps_iter729.sh via kind=script.
+
+## Iter 730 — 3 new modules: Gate Pass + Late Penalty Auto + F&F Calculator (2026-06)
+- Backend: /app/backend/routes/hr_extras.py (registered at server.py tail).
+  * Gate Pass: POST/GET/DELETE /api/admin/gate-pass. Personal pass inserts
+    approved OUT→IN punch pair (source=gate_pass, gate_pass_id linked) →
+    pairing engine auto-deducts; delete removes punches; grid cache
+    invalidated. Collection: gate_passes.
+  * Late Penalty: config in companies.late_penalty_config {free_lates,
+    lates_per_half_day}; GET report (grid late_min based, penalty_days =
+    floor(chargeable/N)*0.5 × daily rate from _master_gross); POST apply
+    stamps draft compliance run rows other_deduction (+head 'Late
+    Penalty', manual_fields stamped — Reprocess preserves + re-nets).
+  * F&F: GET /api/admin/fnf/calc (earned salary from grid present days,
+    gratuity 15/26 ≥4.81 yrs, leave encash, bonus, advance recovery from
+    db.advances remaining_balance, notice/other) + fmt=pdf settlement
+    sheet via statutory_extra_reports._emit.
+- Frontend: gate-pass.tsx, late-penalty.tsx, fnf-calculator.tsx + nav
+  entries in AdminWebShell (both menus, near Comp-Off Ledger).
+- testing_agent: ALL PASS (12/12 pytest test_iter730_hr_extras.py +
+  all 3 screens UI verified). APP_ITERATION=730; deploy_vps_iter730.sh.
+- Also this session: user's Payroll.xlsx module-status sheet generated →
+  /app/Payroll_Status_SKS.xlsx (kind=payrollstatus).
