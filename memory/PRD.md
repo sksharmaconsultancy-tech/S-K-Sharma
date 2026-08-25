@@ -8996,3 +8996,22 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   anomaly, next day clean. All regressions PASS (GAJRAM echo blocked,
   HITESH 19.9h, night chain, iter727 OT case). pytest 12/12 PASS.
 - APP_ITERATION=728; deploy_vps_iter728.sh via kind=script.
+
+## Iter 729 — KAMESHVAR night-shift double-scan fix (2026-06)
+- USER's EXACT case (screenshot): KAMESHVAR MISHRA (watchman, nightly
+  20:00→08:00). 08-08 showed "20:02 — missing OUT"; 09-08 showed a bogus
+  08:00→08:11 = 00:11 mini-shift.
+- ROOT CAUSE: morning walkout DOUBLE SCAN (out 08:00 + out 08:11) on the
+  9th. dedupe_close_punches alternation-repair re-kinded the all-OUT day
+  to [in 08:00, out 08:11], making it look like a "clean self-contained
+  day shift" — the Iter 719 guard then refused the relabel-steal, so the
+  8th's night IN never closed.
+- FIX (stitch_cross_day_ot Iter719 block): the clean-next-day protection
+  now requires ≥120 min of paired duty (_pm2). Minute-long double-scan
+  "shifts" no longer block the stitch; leftover echo OUT is consumed by
+  the Iter726 echo loop.
+- E2E via grid API: 07=12.0h, 08=12.0h (missing gone), 09=blank, 10=12.0h.
+  Regressions PASS: ANSHUL (real 12h next-day shift still protected, also
+  genuine 4h half-day protected), AMIT 24h, GAJRAM, HITESH, night chains,
+  iter727 OT case. pytest 12/12.
+- APP_ITERATION=729; deploy_vps_iter729.sh via kind=script.

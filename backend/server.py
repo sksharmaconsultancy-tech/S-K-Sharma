@@ -2213,8 +2213,15 @@ def stitch_cross_day_ot(
                 # (e.g. a genuine day shift IN 08:01 → OUT 20:03). Stealing
                 # it fabricated an OUT on the night day and left the day
                 # shift with "missing IN".
+                # Iter 729 (user bug — KAMESHVAR watchman): a "clean" next
+                # day of only MINUTES (double walkout scan 08:00 + 08:11
+                # re-kinded to IN→OUT by the alternation repair) is NOT a
+                # real day shift — it must not block the steal. The clean
+                # day now needs ≥2h of paired duty to be protected.
                 _b2 = 0
                 _clean = True
+                _pm2 = 0
+                _open2 = None
                 for _p2 in nxt_sorted:
                     _k2 = (_p2.get("kind") or "").lower()
                     if _k2 == "in":
@@ -2222,12 +2229,24 @@ def stitch_cross_day_ot(
                             _clean = False
                             break
                         _b2 += 1
+                        try:
+                            _open2 = _dt.fromisoformat(str(_p2["at"]).replace("Z", "+00:00"))
+                        except (ValueError, TypeError, KeyError):
+                            _open2 = None
                     elif _k2 == "out":
                         if _b2 <= 0:
                             _clean = False
                             break
                         _b2 -= 1
-                if _clean and _b2 == 0 and len(nxt_sorted) >= 2:
+                        if _open2 is not None:
+                            try:
+                                _c2 = _dt.fromisoformat(str(_p2["at"]).replace("Z", "+00:00"))
+                                if _c2 > _open2:
+                                    _pm2 += int((_c2 - _open2).total_seconds() // 60)
+                            except (ValueError, TypeError, KeyError):
+                                pass
+                        _open2 = None
+                if _clean and _b2 == 0 and len(nxt_sorted) >= 2 and _pm2 >= 120:
                     continue  # next day is a self-contained clean shift
             if not _early_relabel:
                 continue
@@ -10266,7 +10285,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "728"
+APP_ITERATION = "729"
 
 
 @api.get("/version")

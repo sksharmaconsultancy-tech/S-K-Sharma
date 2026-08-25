@@ -932,3 +932,7 @@ ITER 487 (doc-expiry alerts):
 - Reproduced from user screenshot data; guard(b) now relabel-only.
 - Unit sims all scenarios PASS; e2e grid API 24.0h no-anomaly PASS;
   pytest 12/12 re-PASS.
+
+## Iter 729 — KAMESHVAR double-scan fix (tested)
+- Reproduced from screenshot; Iter719 clean-day guard now needs >=2h
+  paired duty. Unit sims + e2e grid API + pytest 12/12 all PASS.

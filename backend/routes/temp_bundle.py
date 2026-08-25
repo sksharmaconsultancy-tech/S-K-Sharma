@@ -89,11 +89,20 @@ async def temp_code_bundle(token: str = Query(...), kind: str = Query("tar")):
     if kind == "script":
         # Latest VPS deploy script — lets the user fetch + run it in two
         # lines instead of pasting a long script into the SSH terminal.
-        path = "/app/deploy_vps_iter728.sh"
+        path = "/app/deploy_vps_iter729.sh"
         if not os.path.exists(path):
             raise HTTPException(status_code=404, detail="Deploy script not found")
-        return FileResponse(path, filename="deploy728.sh",
+        return FileResponse(path, filename="deploy729.sh",
                             media_type="text/x-shellscript")
+    if kind == "payrollstatus":
+        # Iter 730 — user's Payroll.xlsx module list filled with built /
+        # partial / not-built status + time estimates.
+        path = "/app/Payroll_Status_SKS.xlsx"
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="File not found")
+        return FileResponse(
+            path, filename="Payroll_Status_SKS.xlsx",
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     if kind == "brochure":
         # Iter 609 — client-facing Employee PWA feature brochure (PDF).
         # Lives inside backend/static_assets so it ships in the VPS bundle
