@@ -878,15 +878,22 @@ def compute_compliance_row(
                         f"₹{gross_paid:,.2f} exceeded the Higher PF wage "
                         f"₹{_hi_earned729:,.2f} → PF on ₹{_floor729:,.2f}")
             elif pf_basic_override > 0:
+                _floor729b = gross_paid * (floor_pct / 100.0)
                 if _contractor_on and _contractor_partial == "adopted_wage":
-                    capped_pf_wages = _pf_basic_month
+                    capped_pf_wages = max(_pf_basic_month, _floor729b)
                     _contractor_note = ("Rule 4 — adopted PF Basic kept FIXED "
                                         "regardless of attendance (company policy)")
                 else:
-                    capped_pf_wages = pf_basic_prorated
+                    capped_pf_wages = max(pf_basic_prorated, _floor729b)
                     if _contractor_on:
                         _contractor_note = ("Rule 4 — PF on the EARNED PF Basic "
                                             "(partial attendance)")
+                if _floor729b > 0 and capped_pf_wages == _floor729b \
+                        and _floor729b > pf_basic_prorated:
+                    _contractor_note = (_contractor_note + " · " if _contractor_note else "") + (
+                        f"Iter 729 — {floor_pct:.0f}% of Gross Earning "
+                        f"₹{gross_paid:,.2f} exceeded the adopted PF Basic → PF on "
+                        f"₹{_floor729b:,.2f}")
             else:
                 capped_pf_wages = max(pf_base, stat_wage_base)
         else:
@@ -919,7 +926,12 @@ def compute_compliance_row(
                 # to the statutory ceiling; the balance of the employer
                 # share moves to Employer EPF (12%-minus-EPS split below).
                 # (Iter 450 confirmed — AMIT PF Basis 17,796 ⇒ PF ₹2,136.)
-                capped_pf_wages = pf_basic_prorated
+                # Iter 729b (user final rule — RADHESHYAM 17,000/24d case):
+                # the adopted wage competes with floor% of the FULL Gross
+                # Earning (OT / Other Allow / Incentive included) — PF on
+                # WHICHEVER IS HIGHER.
+                capped_pf_wages = max(
+                    pf_basic_prorated, gross_paid * (floor_pct / 100.0))
             else:
                 # Iter 456 (user final PF Engine spec) — PF Basic ≤ ₹15,000:
                 # PF Wage = HIGHER of Earned PF Basic / Earned 50% Compliance

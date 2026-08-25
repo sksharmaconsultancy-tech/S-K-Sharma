@@ -1927,15 +1927,20 @@ export default function ComplianceSalaryRunScreen() {
                     ? hiWage1 // Iter 597 Rule 4 — fixed adopted wage (company policy)
                     : (next.salary_mode === "monthly" ? hiWage1 * pfRatio2 : hiWage1))
                 : (pfBasicFull > 0
-                  ? (contractorOn && contractorFixed ? pfBasicMonth : pfBasicPro)
-                  : Math.max(pfBase, Number(next.basic || 0), grossEarn * floorPct)))
+                // Iter 729b — adopted PF Basic also competes with floor% Gross.
+                ? Math.max(
+                  grossEarn * floorPct,
+                  contractorOn && contractorFixed ? pfBasicMonth : pfBasicPro)
+                : Math.max(pfBase, Number(next.basic || 0), grossEarn * floorPct)))
               : (next.intl_worker
                 ? pfBase
                 // Iter 597 Rules 1-3 — contractor mode: PF on the earned PF
                 // Basic only (no 50% floor), capped at the ceiling.
                 : contractorOn
                   ? Math.min(pfBasicPro, pfCap)
-                  : (pfBasicMonth > pfCap ? pfBasicPro : Math.min(pfBase, pfCap)));
+                  : (pfBasicMonth > pfCap
+                    ? Math.max(pfBasicPro, grossEarn * floorPct)
+                    : Math.min(pfBase, pfCap)));
             const pfEmpRate = Number(stat.pf_percent_employee ?? 12) / 100;
             const pfErEpfRate = Number(stat.pf_percent_employer_epf ?? 3.67) / 100;
             const pfErEpsRate = Number(stat.pf_percent_employer_eps ?? 8.33) / 100;
@@ -2139,7 +2144,10 @@ export default function ComplianceSalaryRunScreen() {
                   ? hiWageFull // Iter 597 Rule 4 — fixed adopted wage (company policy)
                   : ((r as any).salary_mode === "monthly" ? hiWageFull * pfRatio : hiWageFull))
               : (pfBasicFull > 0
-                ? (contractorOn2 && contractorFixed2 ? pfBasicMonth : pfBasicPro)
+                // Iter 729b — adopted PF Basic also competes with floor% Gross.
+                ? Math.max(
+                  grossEarn * floorPct,
+                  contractorOn2 && contractorFixed2 ? pfBasicMonth : pfBasicPro)
                 : Math.max(pfBase, paidBasic, grossEarn * floorPct)))
             : ((r as any).intl_worker
               ? pfBase
@@ -2152,7 +2160,8 @@ export default function ComplianceSalaryRunScreen() {
               // (no cap). Below/at the ceiling: PF wage = max(earned PF
               // Basic, floor% of Gross) capped at the ceiling.
               : (pfBasicMonth > pfCap
-                ? pfBasicPro
+                // Iter 729b — adopted wage competes with floor% Gross.
+                ? Math.max(pfBasicPro, grossEarn * floorPct)
                 : Math.min(pfBase, pfCap))))
           : 0;
         // Iter 427 — VPF (employee side) survives the grid recompute:

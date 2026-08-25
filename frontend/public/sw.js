@@ -7,7 +7,7 @@
  *     (Iter 291: fixes "PWA sometimes won't open" on weak connections).
  *   • static assets (js/css/img)   → stale-while-revalidate.
  */
-const CACHE = "sks-pwa-v39"; // Iter 724 — Employee Master full KYC details
+const CACHE = "sks-pwa-v40"; // Iter 725 — 50% gross rule on adopted PF basic
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();

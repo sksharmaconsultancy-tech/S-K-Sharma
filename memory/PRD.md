@@ -8879,3 +8879,15 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   user thought update failed. Bumped to "724". LESSON FOR NEXT AGENT:
   ALWAYS bump APP_ITERATION (server.py ~line 10219) with every deploy
   script iteration.
+- Iter 729b/730b — 50% GROSS RULE EXTENDED TO ADOPTED PF BASIC (>cap)
+  (user: "abhi bhi galat" — RADHESHYAM 17,000 went through the Adopted
+  pf_basic>cap path, not _hi_active, since pf_contribution_type wasn't
+  "higher"). compliance_salary.py: both _hi_active+pf_basic branch and
+  non-hi _pf_basic_month>cap branch now use max(pf_basic_prorated,
+  gross_paid*floor_pct%). Frontend: both mirrors updated (adopted
+  branches wrap Math.max(grossEarn*floorPct,...)). VERIFIED:
+  adopted-17000 24/26+873 → floor wins (sheet gross 41950 → 20975 →
+  2517); adopted 17000 vs salary 20000 → 17000/2040; normal 7200 →
+  9000/1080 unchanged. Reprocess stability re-verified 0 diffs.
+  APP_ITERATION bumped 724→725, temp_bundle → deploy_vps_iter725.sh,
+  sw cache v40. REMINDER: bump APP_ITERATION on EVERY release.
