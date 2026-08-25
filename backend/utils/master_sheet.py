@@ -153,6 +153,7 @@ def build_master_sheet_xlsx(
     attendance_days_by_user: Optional[Dict[str, int]] = None,
     rates_by_user: Optional[Dict[str, Dict[str, Any]]] = None,
     allowance_labels: Optional[List[str]] = None,
+    fixed_heads: Optional[Dict[str, bool]] = None,
 ) -> bytes:
     """Return XLSX bytes for the client attendance sheet.
 
@@ -161,13 +162,34 @@ def build_master_sheet_xlsx(
     Firm Master> · Gross Salary (replaced EM_RATEM/EM_HRA/EM_CONV/EM_TOT).
     Client fills: Present Days, OVER_TIME, Adv, TDS, Other Less,
     Employee Salary.
+    Iter 730 (user bug) — HRA / Conv. / OVER_TIME columns now follow the
+    Firm-Master Allowance catalog (``fixed_heads``): disabled heads are
+    dropped from the sheet entirely. ``None`` keeps every column.
     """
     labels = list(allowance_labels or [])
+    fh = {"hra": True, "conv": True, "ot": True, **(fixed_heads or {})}
     wb = Workbook()
     ws = wb.active
     ws.title = "Attendance"
 
-    N_COLS = 19 + len(labels)
+    # Header row — Iter 334 (user request) — Employee-Master salary heads.
+    headers: List[str] = [
+        "EM_PFNO", "UAN_NO", "EM_ESINO", "EM_CODE", "EM_NAME", "EM_FNAME",
+        "EM_DESG", "EM_DOJ", "EM_RESINGDATE", "Basic",
+    ]
+    widths: List[int] = [14, 14, 14, 10, 26, 22, 16, 12, 14, 10]
+    if fh["hra"]:
+        headers.append("HRA"); widths.append(10)
+    if fh["conv"]:
+        headers.append("Conv."); widths.append(10)
+    headers += [*labels, "Gross Salary", "Present Days"]
+    widths += [12] * len(labels) + [12, 11]
+    if fh["ot"]:
+        headers.append("OVER_TIME"); widths.append(11)
+    headers += ["Adv", "TDS", "Other Less", "Employee Salary"]
+    widths += [9, 9, 11, 14]
+
+    N_COLS = len(headers)
     # Title band
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=N_COLS)
     cell = ws["A1"]
@@ -188,14 +210,7 @@ def build_master_sheet_xlsx(
     sub.fill = PatternFill("solid", fgColor=BG_SOFT)
     sub.alignment = Alignment(horizontal="center", vertical="center")
 
-    # Header row — Iter 334 (user request) — Employee-Master salary heads.
-    headers = [
-        "EM_PFNO", "UAN_NO", "EM_ESINO", "EM_CODE", "EM_NAME", "EM_FNAME",
-        "EM_DESG", "EM_DOJ", "EM_RESINGDATE", "Basic", "HRA", "Conv.",
-        *labels, "Gross Salary",
-        "Present Days", "OVER_TIME", "Adv", "TDS",
-        "Other Less", "Employee Salary",
-    ]
+    # Header row styling
     thin = Side(border_style="thin", color=LINE)
     for idx, h in enumerate(headers, start=1):
         c = ws.cell(row=3, column=idx, value=h)
@@ -233,12 +248,19 @@ def build_master_sheet_xlsx(
             (emp.get("doj") or "")[:10],
             _resign_date(emp),
             basic or "",
-            hra or "",
-            conv or "",
+        ]
+        if fh["hra"]:
+            row.append(hra or "")
+        if fh["conv"]:
+            row.append(conv or "")
+        row += [
             *[(float(extra.get(lb) or 0) or "") for lb in labels],
             gross or "",
             days_worked if days_worked is not None else "",
-            "",  # OVER_TIME — client fills
+        ]
+        if fh["ot"]:
+            row.append("")  # OVER_TIME — client fills
+        row += [
             "",  # Adv — client fills
             "",  # TDS — client fills
             "",  # Other Less — client fills
@@ -252,9 +274,7 @@ def build_master_sheet_xlsx(
             if r % 2 == 0:
                 c.fill = PatternFill("solid", fgColor=BG_SOFT)
 
-    # Column widths
-    widths = [14, 14, 14, 10, 26, 22, 16, 12, 14, 10, 10, 10,
-              *([12] * len(labels)), 12, 11, 11, 9, 9, 11, 14]
+    # Column widths (built alongside the dynamic headers above)
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -286,10 +306,12 @@ def build_master_sheet_pdf(
     attendance_days_by_user: Optional[Dict[str, int]] = None,
     rates_by_user: Optional[Dict[str, Dict[str, Any]]] = None,
     allowance_labels: Optional[List[str]] = None,
+    fixed_heads: Optional[Dict[str, bool]] = None,
 ) -> bytes:
     """Iter 413 (user accepted) — print-ready PDF twin of the client
     attendance sheet (same columns as build_master_sheet_xlsx), attached to
-    the auto-email so clients can view it on mobile without Excel."""
+    the auto-email so clients can view it on mobile without Excel.
+    Iter 730 — HRA / Conv. / OT columns follow the Firm-Master catalog."""
     from reportlab.lib import colors as rl_colors
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.units import mm
@@ -299,11 +321,15 @@ def build_master_sheet_pdf(
     from reportlab.lib.styles import ParagraphStyle
 
     labels = list(allowance_labels or [])
+    fh = {"hra": True, "conv": True, "ot": True, **(fixed_heads or {})}
     headers = [
         "PF No", "UAN", "ESI No", "Code", "Name", "Father Name",
-        "Desig.", "DOJ", "Resign", "Basic", "HRA", "Conv.",
-        *labels, "Gross",
-        "Present", "OT", "Adv", "TDS", "Other Less", "Emp Salary",
+        "Desig.", "DOJ", "Resign", "Basic",
+        *(["HRA"] if fh["hra"] else []),
+        *(["Conv."] if fh["conv"] else []),
+        *labels, "Gross", "Present",
+        *(["OT"] if fh["ot"] else []),
+        "Adv", "TDS", "Other Less", "Emp Salary",
     ]
 
     def _resign_date(emp: Dict[str, Any]) -> str:
@@ -336,11 +362,14 @@ def build_master_sheet_pdf(
             (emp.get("designation") or emp.get("position") or "")[:14],
             (emp.get("doj") or "")[:10],
             _resign_date(emp),
-            _num(basic), _num(hra), _num(conv),
+            _num(basic),
+            *([_num(hra)] if fh["hra"] else []),
+            *([_num(conv)] if fh["conv"] else []),
             *[_num(float(extra.get(lb) or 0)) for lb in labels],
             _num(gross),
             "" if days_worked is None else str(days_worked),
-            "", "", "", "", "",
+            *([""] if fh["ot"] else []),
+            "", "", "", "",
         ])
 
     buf = io.BytesIO()
@@ -365,8 +394,12 @@ def build_master_sheet_pdf(
         Spacer(1, 2),
     ]
     # Column widths (mm) — name/father get the extra room.
-    fixed = [16, 16, 15, 10, 34, 28, 18, 14, 14, 12, 11, 11]
-    tail = [13, 12, 9, 9, 9, 12, 15]
+    fixed = [16, 16, 15, 10, 34, 28, 18, 14, 14, 12]
+    if fh["hra"]:
+        fixed.append(11)
+    if fh["conv"]:
+        fixed.append(11)
+    tail = [13, 12] + ([9] if fh["ot"] else []) + [9, 9, 12, 15]
     avail = 281 - sum(fixed) - sum(tail)
     lab_w = max(10, avail / len(labels)) if labels else 0
     col_widths = [w * mm for w in (fixed + [lab_w] * len(labels) + tail)]

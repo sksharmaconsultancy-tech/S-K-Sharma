@@ -278,7 +278,7 @@ async def _run_attendance_email_batch(
         # Iter 334 (user request) — master salary from the EMPLOYEE MASTER
         # (Basic / HRA / Conv. / firm-enabled allowances / Gross Salary).
         from server import _master_rates_by_user
-        allowance_labels, rates_by_user = await _master_rates_by_user(c["company_id"])
+        allowance_labels, rates_by_user, fixed_heads = await _master_rates_by_user(c["company_id"])
         # Attendance snapshot
         try:
             y, m = int(target_month[:4]), int(target_month[5:7])
@@ -305,6 +305,7 @@ async def _run_attendance_email_batch(
             attendance_days_by_user=days_by_user,
             rates_by_user=rates_by_user,
             allowance_labels=allowance_labels,
+            fixed_heads=fixed_heads,
         )
         # Iter 312 (user directive) — Reportname_Group_MonthYear.ext
         try:
@@ -336,6 +337,7 @@ async def _run_attendance_email_batch(
                 attendance_days_by_user=days_by_user,
                 rates_by_user=rates_by_user,
                 allowance_labels=allowance_labels,
+                fixed_heads=fixed_heads,
             )
             attachments.append({
                 "filename": filename.replace(".xlsx", ".pdf"),

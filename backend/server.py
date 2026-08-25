@@ -11853,6 +11853,17 @@ async def _master_rates_by_user(company_id: str):
         {"company_id": company_id}, {"_id": 0, "allowances": 1})
     enabled = {k for k, v in ((fm or {}).get("allowances") or {}).items() if v}
     skip = {"HRA", "CONV.", "OVER TIME"}
+    # Iter 730 (user bug — "Editable Allowances showing wrong in Excel"):
+    # the fixed HRA / Conv. / OVER_TIME columns now follow the Firm-Master
+    # Allowance catalog too. Firms WITHOUT a configured catalog keep every
+    # column (backward compatible).
+    _cat = (fm or {}).get("allowances") or {}
+    if _cat:
+        fixed_heads = {"hra": bool(_cat.get("HRA")),
+                       "conv": bool(_cat.get("CONV.")),
+                       "ot": bool(_cat.get("OVER TIME"))}
+    else:
+        fixed_heads = {"hra": True, "conv": True, "ot": True}
     # Fixed catalog order first, then custom heads alphabetically.
     labels = [x for x in ALLOWANCE_LABELS if x in enabled and x not in skip]
     labels += sorted(x for x in enabled
@@ -11934,7 +11945,7 @@ async def _master_rates_by_user(company_id: str):
                 "basic": basic, "hra": hra, "conv": conv,
                 "extra": extra, "gross": round(gross, 2),
             }
-    return labels, rates
+    return labels, rates, fixed_heads
 
 
 def _att_sheet_sort(employees: List[dict], sort_by: Optional[str]) -> List[dict]:
@@ -12009,7 +12020,7 @@ async def _generate_attendance_sheet_impl(
 
     # Iter 334 (user request) — master salary columns (Basic / HRA / Conv. /
     # firm-enabled allowances / Gross Salary) from the EMPLOYEE MASTER.
-    allowance_labels, rates_by_user = await _master_rates_by_user(company_id)
+    allowance_labels, rates_by_user, fixed_heads = await _master_rates_by_user(company_id)
 
     # Present-days snapshot for reference
     try:
@@ -12038,6 +12049,7 @@ async def _generate_attendance_sheet_impl(
         attendance_days_by_user=days_by_user,
         rates_by_user=rates_by_user,
         allowance_labels=allowance_labels,
+        fixed_heads=fixed_heads,
     )
     company_slug = (company.get("name") or "company").replace(" ", "_")
     grp_slug = ("_" + grp_name.replace(" ", "-")) if grp_name else ""
@@ -12101,7 +12113,7 @@ async def generate_attendance_sheet_groups_zip(
     # ACTIVE employees only (Iter 321 rule).
     employees = [e for e in employees if not _employee_inactive_for_report(e, month)]
 
-    allowance_labels, rates_by_user = await _master_rates_by_user(company_id)
+    allowance_labels, rates_by_user, fixed_heads = await _master_rates_by_user(company_id)
 
     from utils.salary_run import actual_days_in_month
     days_in_month = actual_days_in_month(y, m)
@@ -12134,6 +12146,7 @@ async def generate_attendance_sheet_groups_zip(
                 attendance_days_by_user=days_by_user,
                 rates_by_user=rates_by_user,
                 allowance_labels=allowance_labels,
+                fixed_heads=fixed_heads,
             )
             zf.writestr(
                 f"AttendanceSheet_{company_slug}_{month}_{g.replace(' ', '-')}.xlsx",
