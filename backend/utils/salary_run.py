@@ -204,7 +204,9 @@ def compute_salary_row(
         cfg.update({k: float(v) for k, v in deductions_cfg.items() if v is not None})
 
     salary_mode = (policy.get("salary_mode") or "monthly").lower()
-    rate = _num(policy.get("salary") or user.get("salary_monthly"), 0.0)
+    # Iter 725 — Employee Master wins over the legacy employee_policy
+    # salary (stale on old imports); policy stays the fallback only.
+    rate = _num(user.get("salary_monthly") or policy.get("salary"), 0.0)
 
     # ---- Iter 91 — Employee Master overrides -----------------------------
     # The Salary Update modal saves a fixed structure on the employee doc:

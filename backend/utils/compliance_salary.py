@@ -476,10 +476,20 @@ def compute_compliance_row(
     #     Run + biometric-attendance-driven proration.  Retains the
     #     historical name for backward compatibility.
     # When ``compliance_gross`` is missing we fall back to ``salary_monthly``.
+    # Iter 725 (user bug — "Master में rate change की, Refresh Master पर भी
+    # नया rate नहीं आया"): legacy imported employees carry an OLD
+    # ``employee_policy.salary`` which used to take FIRST precedence, so
+    # every Employee-Master edit (compliance_gross / salary_monthly) was
+    # silently ignored by the engine — and Refresh Master could not help
+    # because employee_policy is a LIVE (non-frozen) field. The EMPLOYEE
+    # MASTER now wins; the legacy policy salary is only the fallback for
+    # employees whose master salary fields are blank (the legacy policy
+    # editor mirrors salary → salary_monthly anyway, so those stay in
+    # sync).
     rate = _num(
-        policy.get("salary")
-        or user.get("compliance_gross")
-        or user.get("salary_monthly"),
+        user.get("compliance_gross")
+        or user.get("salary_monthly")
+        or policy.get("salary"),
         0.0,
     )
     # Iter 306 (user bug #7 — "Master Rates not Showing") — employees

@@ -7,7 +7,7 @@
  *     (Iter 291: fixes "PWA sometimes won't open" on weak connections).
  *   • static assets (js/css/img)   → stale-while-revalidate.
  */
-const CACHE = "sks-pwa-v38"; // Iter 723 — reprocess data-loss + USB bio-code import fixes
+const CACHE = "sks-pwa-v39"; // Iter 724 — Employee Master full KYC details
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();

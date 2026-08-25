@@ -8780,3 +8780,25 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   Bio (biometric/remap-unmapped re-reads stored zk_dat_imports) or
   re-upload. All test users/punches cleaned from local DB.
   deploy_vps_iter723.sh updated with both Iter 723 fixes.
+- Iter 725 — MASTER RATE NOT FLOWING INTO SALARY / REFRESH MASTER NO-OP
+  (user bug + video VID-20260825-WA0007: rate changed in Employee Master,
+  Refresh Master pressed, sheet still old). ROOT CAUSE: legacy
+  employee_policy.salary (present on old imported employee docs) had
+  FIRST precedence in rate resolution — compliance_salary.py
+  compute_compliance_row read policy.get("salary") before
+  compliance_gross/salary_monthly; employee_policy is NOT in
+  FROZEN_MASTER_FIELDS so Refresh Master (which re-freezes master fields
+  only) could never fix it. FIX (Iter 725): Employee Master now wins —
+  compliance engine: compliance_gross > salary_monthly > policy.salary;
+  same reorder in utils/salary_run.py compute_salary_row and
+  routes/ot_salary.py. Legacy-only employees (blank master fields) fall
+  back to policy.salary unchanged (legacy policy editor mirrors
+  salary→salary_monthly anyway). VERIFIED both sides per user's new
+  standing rule (ALWAYS check frontend+backend together): unit tests
+  A-D + e2e (stale 11111/master 20000 → 20000-based sheet; edit 25000 +
+  refresh-master-snapshot → sheet 25000-based, snapshot v2); frontend
+  refreshMasterSnapshot does setRun(j.run) so screen updates without
+  reload; Employee Master UI reads/writes salary_monthly/
+  compliance_gross — same fields engines now read. USER LANGUAGE NOTE:
+  user explicitly asked for replies in HINDI from now on (overrides
+  earlier English-only note). Deploy: folded into deploy_vps_iter724.sh.

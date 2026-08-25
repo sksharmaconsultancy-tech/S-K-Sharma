@@ -225,6 +225,12 @@ export default function EmployeeMasterScreen() {
             present_address: full.present_address ?? null,
             uan_no: full.uan_no ?? null,
             esi_ip_no: full.esi_ip_no ?? null,
+            // Iter 724 (user request) — full KYC + bank details on the
+            // Master. RBAC still applies server-side: users without
+            // sensitive_data:view receive masked values from the API.
+            bank_name: full.bank_name ?? null,
+            bank_account: full.bank_account ?? null,
+            bank_ifsc: full.bank_ifsc ?? null,
             // Iter 475 — separation fields (used to gate the Rejoin button)
             active: full.active,
             employment_status: full.employment_status ?? null,
@@ -803,13 +809,23 @@ export default function EmployeeMasterScreen() {
                   label="Residential Address"
                   value={(emp as any).address || (emp as any).present_address || "—"}
                 />
+                {/* Iter 724 (user request) — UNMASKED KYC on the Master:
+                    full Aadhaar / PAN / bank details. Server-side RBAC
+                    still masks these for users without the
+                    sensitive_data:view permission. */}
                 <MetaCell
                   label="Aadhaar"
-                  value={
-                    emp.aadhar_number
-                      ? "XXXX-XXXX-" + String(emp.aadhar_number).slice(-4)
-                      : "—"
-                  }
+                  value={emp.aadhar_number ? String(emp.aadhar_number) : "—"}
+                />
+                <MetaCell
+                  label="PAN"
+                  value={emp.pan_number ? String(emp.pan_number).toUpperCase() : "—"}
+                />
+                <MetaCell label="Bank Name" value={(emp as any).bank_name || "—"} />
+                <MetaCell label="Bank A/c No" value={(emp as any).bank_account || "—"} />
+                <MetaCell
+                  label="IFSC"
+                  value={(emp as any).bank_ifsc ? String((emp as any).bank_ifsc).toUpperCase() : "—"}
                 />
                 {/* Iter 76 — Biometric enrolment ID visible in Master Data */}
                 <MetaCell

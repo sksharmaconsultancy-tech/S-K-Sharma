@@ -76,7 +76,9 @@ def _per_day_pay(emp: dict, month_days: int) -> tuple:
     Gross adds the monthly Actual allowances pro-rated per day.
     """
     policy = emp.get("employee_policy") or {}
-    rate = _num(policy.get("salary") or emp.get("salary_monthly"))
+    # Iter 725 — Employee Master wins over the legacy employee_policy
+    # salary (stale on old imports); policy stays the fallback only.
+    rate = _num(emp.get("salary_monthly") or policy.get("salary"))
     mode = str(policy.get("salary_mode") or "monthly").lower()
     struct = [r for r in (emp.get("salary_structure_actual") or []) if isinstance(r, dict)]
     basic_row = None
