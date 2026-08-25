@@ -8713,3 +8713,11 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   (All/On-roll/Off-roll) show live counts for the selected Group
   (rollCounts memo); "All" chips show matching totals. Lint clean.
   Badge 720, sw v35, deploy_vps_iter720.sh via kind=script.
+- Iter 721 — HITESH SINGH bio 86 "missing OUT" (user screenshot): genuine
+  DOUBLE DUTY (05-08 IN 08:28, OUT 19:01, IN 21:34; 06-08 OUT 06:53 ≈
+  19.9h) blocked by Iter-716 total-duty cap (16h) → trailing IN unpaired
+  → day flagged missing. FIX: cap relaxed to (max_hours+6)=22h; guard (a)
+  stray-echo (≤30min) still blocks GAJRAM 24h case. VERIFIED all 3 live
+  cases in one run: HITESH 05 = 08:28→06:53 duty 8 + OT 12 no anomaly;
+  GAJRAM 03/04 = 12h clean; ANSHUL 03 = 08:01→20:03 12h. Badge 721,
+  sw v36, deploy_vps_iter721.sh.

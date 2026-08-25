@@ -2254,8 +2254,12 @@ def stitch_cross_day_ot(
         if (_last_out_at is not None and _paired_min >= 8 * 60
                 and (in_at - _last_out_at) <= _td(minutes=30)):
             continue  # (a) stray double-scan anchor
-        if _paired_min + int((out_at - in_at).total_seconds() // 60) > max_hours * 60:
-            continue  # (b) total-duty cap
+        # Iter 720b (user bug — HITESH SINGH): genuine DOUBLE DUTY (day
+        # 08:28→19:01 + night OT 21:34→06:53 ≈ 19.9h) must still stitch.
+        # The cap only blocks absurd fabrications (e.g. GAJRAM's ~24h),
+        # which guard (a) already catches for echo scans.
+        if _paired_min + int((out_at - in_at).total_seconds() // 60) > (max_hours + 6) * 60:
+            continue  # (b) total-duty cap (~22h)
         moved = dict(first)
         moved["date"] = dk
         moved["kind"] = "out"
@@ -10207,7 +10211,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "720"
+APP_ITERATION = "721"
 
 
 @api.get("/version")
