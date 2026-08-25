@@ -8832,3 +8832,19 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   2026-06 (freeze firm): special=777 saved+stamped → reprocess kept 777
   and gross; cleanup restored, net back to 46584. Folded into
   deploy_vps_iter724.sh.
+- Iter 728 — REPROCESS HIDES FREEZE SALARY (user bug: reprocess "With
+  EXISTING Data" hid the Freeze Salary column on imported-sheet runs).
+  ROOT CAUSE: frontend form toggle useImportedSheet resets OFF on
+  reload; reprocess POST omitted use_imported_sheet → backend rebuilt as
+  biometric → imported_gross null on all rows → hasFrz false → column
+  gone. FIX both sides: (a) backend create endpoint inherits
+  use_imported_sheet=True when _prev_run.attendance_source ==
+  "imported_sheet", not fresh, and compliance_import_entries still exist
+  for month+firm; (b) frontend generate(): choice === "existing" &&
+  existing.attendance_source === "imported_sheet" → q.use_imported_sheet
+  = true. VERIFIED e2e (Kankani 2026-07 sheet entries): run1 with flag →
+  source imported_sheet; reprocess WITHOUT flag → source stays
+  imported_sheet (was flipping before). Local entries have
+  gross_earning=0 so imported_gross rows=0 locally; on VPS sheets with
+  gross the Freeze column persists. Test drafts cleaned. Folded into
+  deploy_vps_iter724.sh.

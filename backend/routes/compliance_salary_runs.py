@@ -2133,6 +2133,20 @@ async def _create_compliance_salary_run_core(
     # draft entirely so the sheet rebuilds fresh from attendance + master.
     if payload.fresh:
         _prev_rows = {}
+    # Iter 728 (user bug — "Reprocess with existing data hides the Freeze
+    # Salary column"): a run originally built FROM THE IMPORTED SHEET
+    # lost its Freeze columns when the reprocess request omitted
+    # use_imported_sheet (the form toggle resets to OFF on reload). A
+    # reprocess "With EXISTING Data" now INHERITS the imported-sheet
+    # source from the previous draft — provided the sheet data still
+    # exists for the month. "From BLANK" keeps the form's choice.
+    if (_prev_run and not payload.fresh and not payload.use_imported_sheet
+            and str(_prev_run.get("attendance_source") or "") == "imported_sheet"):
+        _imp_q728: dict = {"month": payload.month}
+        if _gate_cid:
+            _imp_q728["company_id"] = _gate_cid
+        if await db.compliance_import_entries.count_documents(_imp_q728) > 0:
+            payload.use_imported_sheet = True
     # Iter 330 (user request) — "Copy Last Month Salary": build this
     # month's run as an EXACT copy of last month's rows instead of
     # recomputing from attendance / master.

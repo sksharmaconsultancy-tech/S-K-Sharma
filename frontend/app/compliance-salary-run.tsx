@@ -915,6 +915,13 @@ export default function ComplianceSalaryRunScreen() {
       // Iter 345 (user bug — "page just refreshes") — a cancel must never
       // RELOAD the page.
       if (!choice) return;
+      // Iter 728 (user bug — "Reprocess with existing data hides the
+      // Freeze Salary column") — an imported-sheet run keeps its sheet
+      // source on the EXISTING-data reprocess even when the form toggle
+      // reset to OFF after a reload (backend inherits it too).
+      if (choice === "existing" && (existing as any)?.attendance_source === "imported_sheet") {
+        q.use_imported_sheet = true;
+      }
       if (choice === "blank") {
         const sure = await confirmYesNo(
           "Reprocess from BLANK will DISCARD all manually entered days & edits on the existing sheet.\n\nContinue?",

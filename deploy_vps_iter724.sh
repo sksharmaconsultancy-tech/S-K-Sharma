@@ -60,6 +60,19 @@
 #    (normal + Freeze दोनों runs पर verify किया).
 #  * Keyboard arrow-navigation में भी नया column जुड़ा है.
 #
+# ═══════════ ALSO IN Iter 724 — 🧊 REPROCESS पर FREEZE SALARY COLUMN गायब (FIX) ═══════════
+#
+# 🧊 REPROCESS "With EXISTING Data" पर FREEZE SALARY अब नहीं छुपेगा
+#    (user bug): imported-sheet से बनी salary run को reprocess करने पर
+#    use_imported_sheet flag form में OFF reset हो जाने से run biometric
+#    की तरह दोबारा बन जाती थी — Freeze Salary column गायब.
+#  * FIX (backend): reprocess "With EXISTING Data" अब previous draft का
+#    imported-sheet source खुद INHERIT करता है (sheet data मौजूद होने
+#    पर) — Freeze columns हमेशा बरकरार.
+#  * FIX (frontend): EXISTING-data choice पर payload में use_imported_sheet
+#    explicitly भेजा जाता है जब मौजूदा run imported_sheet से बनी हो.
+#  * "From BLANK" पहले जैसा — form की choice ही चलती है.
+#
 # ═══════════ WHAT'S NEW (Iter 723) — 🩹 COMPLIANCE SALARY REPROCESS DATA-LOSS FIX ═══════════
 #
 # 🩹 REPROCESS NO LONGER CHANGES SAVED DATA (user bug — "if we Reprocess
