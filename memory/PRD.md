@@ -8802,3 +8802,33 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   compliance_gross — same fields engines now read. USER LANGUAGE NOTE:
   user explicitly asked for replies in HINDI from now on (overrides
   earlier English-only note). Deploy: folded into deploy_vps_iter724.sh.
+- Iter 726 — SKS RUNNER SECOND-PC INSTALL FIX (user bug: "dusre system me
+  install kar rahe h fir bhi error"). ROOT CAUSE: install_autostart.bat
+  (portal_extension.py _RUNNER_BAT_AUTOSTART) registered the silent VBS
+  and printed DONE unconditionally; on a PC without Python the VBS
+  (pythonw||pyw||py) silently did nothing → 127.0.0.1:8765 never up →
+  portal error. FIX both sides: (a) bat now checks
+  pythonw/pyw/py/python via `where` and aborts with python.org +
+  Add-to-PATH instructions; after start it verifies
+  http://127.0.0.1:8765/ping via powershell and prints a troubleshooting
+  checklist (run_listener.bat, pip install selenium, Chrome, firewall)
+  on failure; (b) automation-studio.tsx runner-not-running message now
+  lists new-PC prerequisites. VERIFIED: runner-download zip regenerated,
+  bat contains python check + ping verify; lint clean. User must
+  RE-DOWNLOAD the setup zip on the second PC. Folded into
+  deploy_vps_iter724.sh.
+- Iter 727 — "OTH. ALLOW." RENAME + EDITABLE (user request: Firm Master
+  head OTH. ALLOW. showed as M.Spl/Spl on the compliance sheet; rename
+  to Other Allowances everywhere and make editable). Firm-Master label
+  "OTH. ALLOW." maps to engine key `special`. FRONTEND
+  (compliance-salary-run.tsx): headers + export map renamed M.Spl→
+  "M.Oth Allow", Spl→"Oth Allow*"; calc cell now EditableGridCell
+  col="special"; updateRowField union + gross recompute + Iter 406
+  statutory refresh + imported_gross Manual stamp now include "special";
+  navCols includes special (keyboard nav). BACKEND
+  (compliance_salary_runs.py): non-frozen Iter 374 keep block mirrors
+  others-delta logic for "special"; frozen _prev_imp restore block
+  restores row["special"] when stamped. VERIFIED e2e on Kankani LABOUR
+  2026-06 (freeze firm): special=777 saved+stamped → reprocess kept 777
+  and gross; cleanup restored, net back to 46584. Folded into
+  deploy_vps_iter724.sh.

@@ -186,14 +186,14 @@ const COL_FILTER_GETTERS: Record<string, (r: any) => any> = {
   "M.HRA": (r) => r.hra_master,
   "M.Conv": (r) => r.conveyance_master,
   "M.Med": (r) => r.medical_master,
-  "M.Spl": (r) => r.special_master,
+  "M.Oth Allow": (r) => r.special_master,
   "M.Others": (r) => r.others_master,
   "M.Gross": (r) => r.gross_master,
   "Basic": (r) => r.basic,
   "HRA": (r) => r.hra,
   "Conv": (r) => r.conveyance,
   "Med": (r) => r.medical,
-  "Spl": (r) => r.special,
+  "Oth Allow*": (r) => r.special,
   "Others*": (r) => r.others,
   "OT Amt*": (r) => r.ot_pay,
   "OT Hrs": (r) => {
@@ -1768,6 +1768,8 @@ export default function ComplianceSalaryRunScreen() {
     const en = (r0.enabled_allowances ?? fmMask.en) as string[] | undefined;
     const ed = (r0.enabled_deductions ?? fmMask.ed) as string[] | undefined;
     const cols: string[] = ["pd"];
+    // Iter 727 — "OTH. ALLOW." (special) is editable too.
+    if (!en || en.includes("special")) cols.push("special");
     if (!en || en.includes("others")) cols.push("others");
     if (hasOtCol) cols.push("ot_pay");
     if (!ed || ed.includes("tds")) cols.push("tds");
@@ -1838,7 +1840,7 @@ export default function ComplianceSalaryRunScreen() {
 
   const updateRowField = (
     userId: string,
-    key: "others" | "other_deduction" | "advance_recovery" | "ot_pay" | "tds" | "esic_leave_days",
+    key: "others" | "special" | "other_deduction" | "advance_recovery" | "ot_pay" | "tds" | "esic_leave_days",
     value: number,
   ) => {
     setRun((prev) => {
@@ -1855,10 +1857,10 @@ export default function ComplianceSalaryRunScreen() {
         // Iter 343b (user request) — imported (Freeze) runs: manual edits
         // to OT / Other Allowances STICK (reprocess keeps them); the Freeze
         // salary stays as display-only comparison data.
-        if ((key === "ot_pay" || key === "others") && (r as any).imported_gross != null) {
+        if ((key === "ot_pay" || key === "others" || key === "special") && (r as any).imported_gross != null) {
           next.difference_allocation_head = "Manual";
         }
-        if (key === "others") {
+        if (key === "others" || key === "special") {
           const gross = (next.basic || 0) + (next.hra || 0) + (next.conveyance || 0)
             + (next.medical || 0) + (next.special || 0) + (next.others || 0);
           next.monthly_gross = Math.round(gross);
@@ -1871,7 +1873,7 @@ export default function ComplianceSalaryRunScreen() {
         // Iter 406 (user rule — "Gross Earning includes OT") — editing the
         // OT Amt / Others also refreshes the PF & ESIC wage bases on the
         // FULL Gross Earning including OT (mirrors utils/compliance_salary.py).
-        if (key === "ot_pay" || key === "others") {
+        if (key === "ot_pay" || key === "others" || key === "special") {
           const stat = ((prev as any).statutory_effective || (prev as any).statutory_cfg || {}) as any;
           const floorPct = Number(stat.stat_wage_floor_pct ?? 50) / 100;
           const wageRuleOn = stat.wage_definition_rule_enabled !== false;
@@ -3183,7 +3185,10 @@ export default function ComplianceSalaryRunScreen() {
                   if (has("hra")) headers.push({ label: "M.HRA", group: "master" });
                   if (has("conveyance")) headers.push({ label: "M.Conv", group: "master" });
                   if (has("medical")) headers.push({ label: "M.Med", group: "master" });
-                  if (has("special")) headers.push({ label: "M.Spl", group: "master" });
+                  {/* Iter 727 (user request) — the Firm-Master head
+                      "OTH. ALLOW." maps to the engine's `special` key;
+                      the sheet now labels it Other Allowances. */}
+                  if (has("special")) headers.push({ label: "M.Oth Allow", group: "master" });
                   if (has("others")) headers.push({ label: "M.Others", group: "master" });
                   // Iter 644 — dynamic custom allowance heads (INCENTIVE …).
                   for (const l of allowLabels) headers.push({ label: `M.${l}`, group: "master" });
@@ -3192,7 +3197,7 @@ export default function ComplianceSalaryRunScreen() {
                   if (has("hra")) headers.push({ label: "HRA", group: "calc" });
                   if (has("conveyance")) headers.push({ label: "Conv", group: "calc" });
                   if (has("medical")) headers.push({ label: "Med", group: "calc" });
-                  if (has("special")) headers.push({ label: "Spl", group: "calc" });
+                  if (has("special")) headers.push({ label: "Oth Allow*", group: "calc" });
                   if (has("others")) headers.push({ label: "Others*", group: "calc" });
                   for (const l of allowLabels) headers.push({ label: l, group: "calc" });
                   // Iter 230 (user request) — editable OT Amount column.
@@ -3407,7 +3412,18 @@ export default function ComplianceSalaryRunScreen() {
                           {has("hra") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.hra)}</Text> : null}
                           {has("conveyance") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.conveyance)}</Text> : null}
                           {has("medical") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.medical)}</Text> : null}
-                          {has("special") ? <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.special)}</Text> : null}
+                          {/* Iter 727 (user request) — OTH. ALLOW. (special)
+                              is EDITABLE like Others*. */}
+                          {has("special") ? (
+                            <EditableGridCell
+                              col="special" idx={idx} width={colW.num}
+                              value={r.special || 0}
+                              cellRefs={cellRefs}
+                              onCommit={(n) => updateRowField(r.user_id, "special", n)}
+                              onNav={navigateFrom}
+                              onFocused={() => setHlRow(r.user_id)}
+                            />
+                          ) : null}
                           {has("others") ? (
                             <EditableGridCell
                               col="others" idx={idx} width={colW.num}

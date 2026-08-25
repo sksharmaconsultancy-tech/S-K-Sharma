@@ -32,6 +32,34 @@
 #    तुरंत 25000-based (snapshot v2). Frontend भी verify — Refresh के
 #    बाद screen पर नया run बिना reload के दिखता है.
 #
+# ═══════════ ALSO IN Iter 724 — 🖥️ SKS RUNNER: दूसरे PC पर INSTALL FIX ═══════════
+#
+# 🖥️ "SKS Runner is not running on this PC" (दूसरे/नए PC पर, user bug):
+#  * ROOT CAUSE: install_autostart.bat बिना जाँचे "DONE!" print कर देता
+#    था — नए PC पर Python installed न होने पर silent VBS चुपचाप fail हो
+#    जाता था और Runner कभी start ही नहीं होता था.
+#  * FIX (नया setup zip): install_autostart.bat अब पहले PYTHON CHECK
+#    करता है (न मिले तो python.org + "Add to PATH" की साफ़ instructions),
+#    फिर Runner start करके 127.0.0.1:8765/ping से CONFIRM करता है कि
+#    Runner सच में चल रहा है; warning में run_listener.bat / pip install
+#    selenium / Chrome / Firewall की checklist दिखती है.
+#  * Portal का error message भी अपडेट: नए PC की requirements (Chrome +
+#    Python with PATH) साफ़ लिखी हैं.
+#  * NOTE: दूसरे PC पर setup zip DOBARA DOWNLOAD करके नया
+#    install_autostart.bat चलाना है (पुराने zip में नया check नहीं है).
+#
+# ═══════════ ALSO IN Iter 724 — ✏️ "OTH. ALLOW." COLUMN: सही नाम + EDITABLE ═══════════
+#
+# ✏️ COMPLIANCE SHEET में OTH. ALLOW. (user request):
+#  * Firm Master का "OTH. ALLOW." head sheet पर "M.Spl" / "Spl" नाम से
+#    दिखता था — अब सभी firms पर Master column "M.Oth Allow" और
+#    Calculated column "Oth Allow*" दिखेगा.
+#  * "Oth Allow*" अब Others* की तरह पूरी तरह EDITABLE है — type करते ही
+#    Gross / PF / ESIC wage base तुरंत refresh (Iter 406 rule), edit
+#    manual stamp के साथ save होती है और REPROCESS पर कभी नहीं उड़ती
+#    (normal + Freeze दोनों runs पर verify किया).
+#  * Keyboard arrow-navigation में भी नया column जुड़ा है.
+#
 # ═══════════ WHAT'S NEW (Iter 723) — 🩹 COMPLIANCE SALARY REPROCESS DATA-LOSS FIX ═══════════
 #
 # 🩹 REPROCESS NO LONGER CHANGES SAVED DATA (user bug — "if we Reprocess

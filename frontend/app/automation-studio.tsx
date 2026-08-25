@@ -433,9 +433,12 @@ export default function AutomationStudioScreen() {
       }, 1500);
     } catch {
       setPcStatus(
-        "⚠ SKS Runner is not running on this PC. Download the ChromeDriver setup below (once), " +
-        "unzip to C:\\SKS-AutoLogin and double-click install_autostart.bat — it starts the Runner " +
-        "now AND silently on every Windows boot. Then click this button again.");
+        "⚠ SKS Runner is not running on this PC. New PC? It needs (1) Google Chrome and " +
+        "(2) Python 3.9+ from python.org — tick \"Add python.exe to PATH\" during install. " +
+        "Then download the ChromeDriver setup below (once), unzip to C:\\SKS-AutoLogin and " +
+        "double-click install_autostart.bat — it now CHECKS Python and confirms the Runner " +
+        "is live. If it shows a warning, run run_listener.bat in the same folder to see the " +
+        "real error. Then click this button again.");
     } finally {
       setPcBusy("");
     }

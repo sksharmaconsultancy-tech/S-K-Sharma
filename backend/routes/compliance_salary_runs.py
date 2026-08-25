@@ -1140,6 +1140,18 @@ async def _compute_compliance_run(
                     row["gross_paid"] = round(
                         float(row.get("gross_paid") or 0) + _delta, 2)
                     row["net"] = round(float(row.get("net") or 0) + _delta, 2)
+            # Iter 727 (user request) — manual "OTH. ALLOW." (special)
+            # edits survive a reprocess exactly like Others.
+            if "special" in _mf:
+                _new_spl = round(float(_prev.get("special") or 0), 2)
+                _delta = round(_new_spl - float(row.get("special") or 0), 2)
+                if _delta:
+                    row["special"] = _new_spl
+                    row["monthly_gross"] = round(
+                        float(row.get("monthly_gross") or 0) + _delta, 2)
+                    row["gross_paid"] = round(
+                        float(row.get("gross_paid") or 0) + _delta, 2)
+                    row["net"] = round(float(row.get("net") or 0) + _delta, 2)
             # Iter 647 (user request) — manually edited custom allowance
             # head amounts (e.g. INCENTIVE) survive a reprocess.
             if "allowance_heads" in _mf and isinstance(
@@ -1260,6 +1272,11 @@ async def _compute_compliance_run(
                 # too so Gross − OT stays consistent on the sheet.
                 if "tds" in _mf_imp:
                     row["tds"] = round(float(_prev_imp.get("tds") or 0), 2)
+                # Iter 727 — manual OTH. ALLOW. (special) kept on Freeze
+                # runs too (gross already kept via _keep_g above).
+                if "special" in _mf_imp:
+                    row["special"] = round(
+                        float(_prev_imp.get("special") or 0), 2)
                 if "other_deduction" in _mf_imp:
                     row["other_deduction"] = round(
                         float(_prev_imp.get("other_deduction") or 0), 2)
