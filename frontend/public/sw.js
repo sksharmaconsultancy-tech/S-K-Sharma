@@ -7,7 +7,7 @@
  *     (Iter 291: fixes "PWA sometimes won't open" on weak connections).
  *   • static assets (js/css/img)   → stale-while-revalidate.
  */
-const CACHE = "sks-pwa-v34"; // Iter 719 — day-shift IN steal fix
+const CACHE = "sks-pwa-v35"; // Iter 720 — group/roll live counts
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();

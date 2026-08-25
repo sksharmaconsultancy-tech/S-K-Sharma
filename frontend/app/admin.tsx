@@ -1198,17 +1198,40 @@ function EmployeeFilterChips({
   rollFilter: "all" | "on" | "off";
   onRollChange: (v: "all" | "on" | "off") => void;
 }) {
+  // Iter 720 (user request) — counts follow the OTHER filter's selection:
+  // Group chip counts respect the picked Roll, and the On-roll/Off-roll
+  // chips show live counts for the picked Group (e.g. tap LABOUR → see
+  // its on-roll vs off-roll split).
+  const isOffRoll = (e: any) => e.is_onroll === false;
   const types = React.useMemo(() => {
+    const base = rollFilter === "all"
+      ? employees
+      : employees.filter((e) => (rollFilter === "off") === isOffRoll(e));
     const counts: Record<string, number> = {};
-    for (const e of employees) {
+    for (const e of base) {
       const t = (e.employee_type || "").trim();
       if (t) counts[t] = (counts[t] || 0) + 1;
     }
     const arr = Object.entries(counts)
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-    return { arr };
-  }, [employees]);
+    return { arr, total: base.length };
+  }, [employees, rollFilter]);
+
+  const rollCounts = React.useMemo(() => {
+    const base = typeFilter === "all"
+      ? employees
+      : employees.filter(
+          (e) => (e.employee_type || "").trim().toLowerCase()
+            === typeFilter.toLowerCase());
+    let on = 0;
+    let off = 0;
+    for (const e of base) {
+      if (isOffRoll(e)) off += 1;
+      else on += 1;
+    }
+    return { all: base.length, on, off };
+  }, [employees, typeFilter]);
 
   if (employees.length === 0) return null;
 
@@ -1219,6 +1242,7 @@ function EmployeeFilterChips({
         <View style={filterStyles.chipStrip}>
           <FilterChip
             label="All"
+            count={types.total}
             active={typeFilter === "all"}
             onPress={() => onTypeChange("all")}
             testID="type-chip-all"
@@ -1242,6 +1266,7 @@ function EmployeeFilterChips({
             <FilterChip
               key={v}
               label={v === "all" ? "All" : v === "on" ? "On-roll" : "Off-roll"}
+              count={rollCounts[v]}
               active={rollFilter === v}
               onPress={() => onRollChange(v)}
               testID={`roll-chip-${v}`}

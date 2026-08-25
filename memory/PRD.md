@@ -8707,3 +8707,9 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   (its night OUT genuinely not entered — admin can repair); regression:
   machine-mislabeled morning INs in real night chains still stitch.
   Badge 719, sw v34, deploy_vps_iter719.sh.
+- Iter 720 — GROUP/ROLL LIVE COUNTS (user request, Employees screen
+  admin.tsx EmployeeFilterChips): Group chip counts now respect the
+  selected Roll (base filtered by is_onroll===false for off); Roll chips
+  (All/On-roll/Off-roll) show live counts for the selected Group
+  (rollCounts memo); "All" chips show matching totals. Lint clean.
+  Badge 720, sw v35, deploy_vps_iter720.sh via kind=script.
