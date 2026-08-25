@@ -8761,3 +8761,22 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   Bug2 banker's rounding vs EPFO half-up (₹1), Bug3 ER-EPF split ₹1 vs
   ECR. User's own directives kept: ESIC eligibility on Basic (Iter
   129/254), ESIC on wage base not gross (Iter 385).
+- Iter 723b — USB .TXT MACHINE IMPORT: MISSING BIO-CODE PUNCHES (user bug
+  + AGL_001.TXT artifact; bio codes 221/258 punches absent from
+  attendance report). DIAGNOSIS: decode_punch_bytes parses the full file
+  correctly (55,760 lines; 221=845, 258=535 punches; INOUT all 0 →
+  position-alternate pairing works). Loss occurs in _build_bio_index
+  (utils/zk_dat_import.py): (a) stored bio_code never .strip()ped →
+  "221 " unmapped; (b) duplicate bio codes: first-writer-wins could give
+  punches to an EXITED/disabled employee → active employee's report
+  empty; (c) NO employee_code fallback (live matcher
+  _match_employee_for_bio has one). FIX: index now normalises
+  strip+lstrip("0"), resolution order = bio_code > employee_code and
+  ACTIVE (>no exit/resign/disabled/inactive status) > exited; ties keep
+  first writer (deterministic re-import). VERIFIED with real file:
+  whitespace bio "  221 " → 31/31 Aug-2026 punches to ACTIVE emp, 0 to
+  exited dup; employee_code "258" fallback → 27/27; "0230" leading-zero
+  regression OK; idempotent re-import. Recovery path for user: Refresh
+  Bio (biometric/remap-unmapped re-reads stored zk_dat_imports) or
+  re-upload. All test users/punches cleaned from local DB.
+  deploy_vps_iter723.sh updated with both Iter 723 fixes.

@@ -361,25 +361,56 @@ def excel_punches_to_dat_text(data: bytes, filename: str = "") -> str:
 # Import driver
 # ---------------------------------------------------------------------------
 
+def _bio_active(u: dict) -> bool:
+    """Iter 723 — active employees take priority in the bio-code index."""
+    if u.get("disabled") is True:
+        return False
+    if u.get("exit_date") or u.get("resign_date"):
+        return False
+    st = str(u.get("employment_status") or "").strip().lower()
+    return st not in ("resigned", "exited", "terminated", "left", "inactive")
+
+
 async def _build_bio_index(db, company_id: str) -> Dict[str, dict]:
+    """Map normalised device codes → employee.
+
+    Iter 723 (user bug — "USB .txt import: bio 221/258 punches missing"):
+    the old index (a) never trimmed whitespace on the stored bio code, so
+    "221 " ≠ "221" silently landed in UNMAPPED; (b) let an EXITED /
+    disabled employee win a duplicated bio code (first-writer-wins), so
+    the active employee's punches vanished from reports; (c) had no
+    employee_code fallback even though the LIVE device matcher
+    (_match_employee_for_bio) has one — firms that keep the machine
+    number only in the Employee Code lost every USB-imported punch.
+
+    Resolution order per code: bio_code beats employee_code; ACTIVE
+    employee beats exited/disabled; ties keep the first writer so
+    re-imports stay deterministic.
+    """
     index: Dict[str, dict] = {}
+    tier: Dict[str, Tuple[int, int]] = {}
     async for u in db.users.find(
-        {
-            "company_id": company_id,
-            "role": "employee",
-            "bio_code": {"$exists": True, "$ne": None},
-        },
+        {"company_id": company_id, "role": "employee"},
         {
             "_id": 0, "user_id": 1, "name": 1,
             "employee_code": 1, "bio_code": 1,
+            "disabled": 1, "exit_date": 1, "resign_date": 1,
+            "employment_status": 1,
             # Iter 223 — shift override so imports can classify punches
             # according to the employee's shift when both files are given.
             "attendance_policy_override": 1,
         },
     ):
-        key = str(u["bio_code"]).lstrip("0") or "0"
-        # First-writer wins so re-imports stay deterministic.
-        index.setdefault(key, u)
+        for rank, field in ((0, "bio_code"), (1, "employee_code")):
+            v = u.get(field)
+            if v is None or str(v).strip() == "":
+                continue
+            key = str(v).strip().lstrip("0") or "0"
+            cand = (rank, 0 if _bio_active(u) else 1)
+            cur = tier.get(key)
+            if cur is None or cand < cur:
+                index[key] = u
+                tier[key] = cand
     return index
 
 

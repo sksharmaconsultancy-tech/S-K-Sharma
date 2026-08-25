@@ -29,6 +29,34 @@
 #    Reprocess → ZERO field changes on 108-employee run; double-reprocess
 #    stability: 0 diffs; untouched rows: 0 drift.
 #
+# ═══════════ ALSO IN Iter 723 — 🩹 USB .TXT MACHINE IMPORT: MISSING BIO-CODE PUNCHES (221 / 258) ═══════════
+#
+# 🩹 USB IMPORT BIO-CODE MAPPING FIXED (user bug + AGL_001.TXT sample —
+#    "data not importing properly thru bio code, some employees punch
+#    miss, not showing in attendance report"):
+#  * VERIFIED FIRST: the file parser reads ALL punches correctly
+#    (55,760/55,760 lines; bio 221 = 845 punches, bio 258 = 535). The
+#    loss happens at the BIO-CODE → EMPLOYEE mapping step.
+#  * FIX 1 — WHITESPACE: a bio code saved as "221 " (stray space) on the
+#    Employee Master silently landed every punch in UNMAPPED. Codes are
+#    now trimmed on both sides before matching.
+#  * FIX 2 — DUPLICATE BIO CODES: when an EXITED/disabled employee still
+#    holds the same bio code as an active one, the import used to give
+#    the punches to whichever came first (often the old employee) — the
+#    active employee's attendance stayed empty. The ACTIVE employee now
+#    always wins the code.
+#  * FIX 3 — EMPLOYEE CODE FALLBACK: live machine punches already fall
+#    back to the Employee Code when no bio code matches; the USB import
+#    never did. It now does too — firms that keep the machine number in
+#    the Employee Code field get their punches imported.
+#  * RECOVERY: after this deploy, open Attendance Report → "Refresh Bio"
+#    (or re-upload the .txt) — previously skipped punches are recovered
+#    idempotently (no duplicates).
+#  * VERIFIED with the user's real AGL_001.TXT: bio 221 → 31/31 Aug-2026
+#    punches to the ACTIVE employee (0 to the exited duplicate); code
+#    258 via Employee-Code fallback → 27/27; leading-zero codes ("0230")
+#    still match; re-import = no duplicates.
+#
 # ═══════════ WHAT'S NEW (Iter 722) — ⚡ PAYROLL SPEED OPTIMIZATION ═══════════
 #
 # ⚡ EMPLOYEE LIST / UPDATE + ATTENDANCE PERFORMANCE (user spec — pure
