@@ -8695,3 +8695,15 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   challan+run correctly, cleanup done. Badge 718, sw v33,
   deploy_vps_iter718.sh. User note: runner auto-updates; else re-run
   install_autostart.bat. Limitation: pays must happen in runner window.
+- Iter 719 — SHIFT-CHANGE STEAL BUG (user screenshots, ANSHUL YADAV bio
+  80): raw manual punches 02-08 [OUT 07:59, IN 20:00], 03-08 [IN 08:01,
+  OUT 20:03]. Stitch early-relabel (<11:00) stole 03's genuine day-shift
+  IN 08:01 as 02's night OUT → 03 "missing IN", 02 grid showed OUT 08:01
+  not present in repair modal. FIX in stitch_cross_day_ot: before
+  relabel-stealing a next-day IN, check if next day's punches form a
+  SELF-CONTAINED clean sequence (alternating in/out, balanced, ≥2
+  punches) → skip steal. VERIFIED exact data: 01=20:00→07:59 12h,
+  03=08:01→20:03 12h (matches modal), 02 now correctly flags missing OUT
+  (its night OUT genuinely not entered — admin can repair); regression:
+  machine-mislabeled morning INs in real night chains still stitch.
+  Badge 719, sw v34, deploy_vps_iter719.sh.

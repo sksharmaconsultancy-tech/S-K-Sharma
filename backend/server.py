@@ -2188,6 +2188,28 @@ def stitch_cross_day_ot(
                     _early_relabel = _t.hour < 11
                 except (ValueError, TypeError, KeyError):
                     pass
+            if _early_relabel:
+                # Iter 719 (user bug — ANSHUL YADAV): NEVER relabel-steal a
+                # next-day morning IN that pairs CLEANLY within its own day
+                # (e.g. a genuine day shift IN 08:01 → OUT 20:03). Stealing
+                # it fabricated an OUT on the night day and left the day
+                # shift with "missing IN".
+                _b2 = 0
+                _clean = True
+                for _p2 in nxt_sorted:
+                    _k2 = (_p2.get("kind") or "").lower()
+                    if _k2 == "in":
+                        if _b2 > 0:
+                            _clean = False
+                            break
+                        _b2 += 1
+                    elif _k2 == "out":
+                        if _b2 <= 0:
+                            _clean = False
+                            break
+                        _b2 -= 1
+                if _clean and _b2 == 0 and len(nxt_sorted) >= 2:
+                    continue  # next day is a self-contained clean shift
             if not _early_relabel:
                 continue
         try:
@@ -10185,7 +10207,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "718"
+APP_ITERATION = "719"
 
 
 @api.get("/version")
