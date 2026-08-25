@@ -15,6 +15,22 @@
 #  * Frontend live-recalc (दोनों mirrors) भी same rule पर.
 #  * Footer badge अब हर deploy पर अपने-आप सही iteration दिखाएगा.
 #
+# ═══════════ ALSO IN Iter 725 — 👁 ECR VIEW + REMOVE WITHOUT-UAN + START AUTOMATION हटाया ═══════════
+#
+# 👁 AUTOMATION STUDIO → EPFO / ECR UPLOAD (user request):
+#  * नया "View ECR" button — upload से पहले पूरी ECR file screen पर
+#    (wage month, lines, हर member की row) — bina UAN wale members की
+#    warning list के साथ.
+#  * नया "Remove Without-UAN Employees" button — एक tap में बिना UAN
+#    वाले members ECR से बाहर; Runner भी वही filtered file EPFO के
+#    upload box में डालता है.
+#  * Runner की ECR अब Challans screen वाले CORRECT builder से बनती है
+#    (Higher PF uncapped EPF wages, EPS/EDLI capped, portal-style dues)
+#    — पुराना capped builder Higher-PF members पर portal error देता था.
+#  * "Start Automation" button सभी modules से हटा दिया — अब
+#    "Open EPFO/ESIC Portal" button ही selected flow (ECR Upload आदि)
+#    चलाता है.
+#
 # ═══════════ WHAT'S NEW (Iter 724) — 🪪 EMPLOYEE MASTER: FULL KYC DETAILS (UNMASKED) ═══════════
 #
 # 🪪 FULL DOCUMENT NUMBERS ON THE EMPLOYEE MASTER (user request):

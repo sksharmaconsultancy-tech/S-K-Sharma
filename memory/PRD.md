@@ -8891,3 +8891,19 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   9000/1080 unchanged. Reprocess stability re-verified 0 diffs.
   APP_ITERATION bumped 724→725, temp_bundle → deploy_vps_iter725.sh,
   sw cache v40. REMINDER: bump APP_ITERATION on EVERY release.
+- Iter 731 — AUTOMATION STUDIO ECR UPLOAD UX (user request): (1) new
+  GET /api/admin/portal-automation/ecr-preview (portal_extension.py) —
+  firm+optional run_id + exclude_no_uan; returns filename/month/text/
+  lines/no_uan_members using challans._ecr_txt_bytes (correct Iter 445
+  builder); refreshes missing UANs from users first. (2) launch-token
+  stores ecr_exclude_no_uan; ext_ecr_file (runner fetch) switched from
+  OLD capped build_pf_ecr_txt to challans builder + honors the flag
+  (fixes audit Bug 1 for the runner path). (3) automation-studio.tsx:
+  View ECR button + preview panel (dark mono scroll) + Remove
+  Without-UAN toggle (state excludeNoUan, sent in launch-token body);
+  "Start Automation" button REMOVED from all modules — Open EPFO/ESIC
+  Portal button now carries the selected flow's action (ECR/contrib
+  with month guard). VERIFIED: preview 200 with synthetic firm run
+  (2 lines, no-UAN member flagged; exclude path 400 when ALL missing —
+  correct); lint clean except pre-existing warnings + now-unused
+  start/busy (kept: /rpa/start path for other portals' status UI).

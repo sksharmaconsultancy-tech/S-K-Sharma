@@ -215,6 +215,26 @@ export default function AutomationStudioScreen() {
   // Iter 701 — challan PDF saved for the selected month → download button.
   const [challanReady, setChallanReady] = useState(false);
   const [challanTrrn, setChallanTrrn] = useState("");
+  // Iter 731 (user request) — View ECR + Remove Without-UAN Employees.
+  const [ecrPreview, setEcrPreview] = useState<any | null>(null);
+  const [ecrBusy, setEcrBusy] = useState(false);
+  const [excludeNoUan, setExcludeNoUan] = useState(false);
+
+  const viewEcr = async (excl?: boolean) => {
+    const ex = excl === undefined ? excludeNoUan : excl;
+    setEcrBusy(true);
+    try {
+      const p = await api<any>(
+        `/admin/portal-automation/ecr-preview?company_id=${companyId}` +
+        `${runId ? `&run_id=${runId}` : ""}&exclude_no_uan=${ex ? "true" : "false"}`,
+      );
+      setEcrPreview(p);
+    } catch (e: any) {
+      setEcrPreview({ ok: false, error: e?.message || "ECR preview failed" });
+    } finally {
+      setEcrBusy(false);
+    }
+  };
 
   useEffect(() => { setDupWarn(""); setPcStatus(""); }, [companyId]);
 
@@ -300,7 +320,7 @@ export default function AutomationStudioScreen() {
       try {
         const lt = await api<any>("/admin/portal-automation/launch-token", {
           method: "POST",
-          body: JSON.stringify({ company_id: companyId, run_id: runIdArg || undefined, portal: portalKey }),
+          body: JSON.stringify({ company_id: companyId, run_id: runIdArg || undefined, portal: portalKey, ecr_exclude_no_uan: excludeNoUan }),
         });
         launchTok = lt?.token || "";
         // Iter 692 — the backend now pre-checks THIS firm's EPFO login and
@@ -918,20 +938,8 @@ export default function AutomationStudioScreen() {
 
               {err ? <Text style={st.errTxt}>{err}</Text> : null}
 
-              <Pressable
-                style={[st.startBtn, busy && { opacity: 0.6 }]}
-                onPress={start}
-                disabled={busy}
-              >
-                {busy ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <>
-                    <Ionicons name="play" size={18} color="#fff" />
-                    <Text style={st.startTxt}>Start Automation</Text>
-                  </>
-                )}
-              </Pressable>
+              {/* Iter 731 — "Start Automation" removed per user request;
+                  the PC Chrome runner below is the only launch path. */}
 
               {/* Iter 691 — 🔐 Open EPFO Portal (ChromeDriver, OPEN-ONLY) */}
               {(portal === "epfo" || portal === "esic") && (
@@ -943,7 +951,21 @@ export default function AutomationStudioScreen() {
                   <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
                     <Pressable
                       style={[st.pcBtn, pcBusy === "open" && { opacity: 0.6 }]}
-                      onPress={() => openEpfoPc(undefined, undefined, undefined, portal as "epfo" | "esic")}
+                      onPress={() => {
+                        // Iter 731 — Start Automation removed: the Open
+                        // button itself carries the selected flow's action
+                        // (e.g. ECR Upload fetches + auto-selects the file).
+                        const act = portal === "epfo"
+                          ? (EPFO_PC_ACTION[flow] ?? "")
+                          : (ESIC_PC_ACTION[flow] ?? "");
+                        const needsMonth = act === "ecr" || act === "contrib";
+                        if (needsMonth && activeFlow?.needs_run && !runId) {
+                          setErr("Select the month (Compliance Process) first.");
+                          return;
+                        }
+                        openEpfoPc(act || undefined, activeFlow?.label || flow,
+                          needsMonth ? runId : undefined, portal as "epfo" | "esic");
+                      }}
                       disabled={pcBusy === "open"}
                       testID="as-open-epfo-pc"
                     >
@@ -981,6 +1003,70 @@ export default function AutomationStudioScreen() {
                       <Text style={st.pcBtnTxt}>ChromeDriver (driver only)</Text>
                     </Pressable>
                   </View>
+                  {/* Iter 731 (user request) — VIEW ECR + Remove
+                      Without-UAN Employees BEFORE opening EPFO. */}
+                  {portal === "epfo" && (
+                    <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                      <Pressable
+                        style={[st.pcBtn, { backgroundColor: "#0E7490" }, ecrBusy && { opacity: 0.6 }]}
+                        onPress={() => viewEcr()}
+                        disabled={ecrBusy}
+                        testID="as-view-ecr"
+                      >
+                        {ecrBusy ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <Ionicons name="eye-outline" size={14} color="#fff" />
+                        )}
+                        <Text style={st.pcBtnTxt}>View ECR</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[st.pcBtn, { backgroundColor: excludeNoUan ? "#16A34A" : "#DC2626" }]}
+                        onPress={() => {
+                          const nv = !excludeNoUan;
+                          setExcludeNoUan(nv);
+                          viewEcr(nv);
+                        }}
+                        testID="as-remove-no-uan"
+                      >
+                        <Ionicons name={excludeNoUan ? "checkmark-circle-outline" : "person-remove-outline"} size={14} color="#fff" />
+                        <Text style={st.pcBtnTxt}>
+                          {excludeNoUan ? "Without-UAN Removed ✓" : "Remove Without-UAN Employees"}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  )}
+                  {portal === "epfo" && ecrPreview ? (
+                    ecrPreview.ok === false ? (
+                      <Text style={[st.pcStatus, { color: "#DC2626" }]}>❌ {ecrPreview.error}</Text>
+                    ) : (
+                      <View style={st.ecrBox}>
+                        <Text style={st.ecrTitle}>
+                          📄 {ecrPreview.filename} · Wage month {ecrPreview.month} · {ecrPreview.lines} lines
+                          {ecrPreview.excluded_no_uan ? " · without-UAN members EXCLUDED" : ""}
+                        </Text>
+                        {(ecrPreview.no_uan_members || []).length > 0 && !ecrPreview.excluded_no_uan ? (
+                          <Text style={[st.ecrTitle, { color: "#B45309" }]}>
+                            ⚠ {ecrPreview.no_uan_members.length} member(s) WITHOUT UAN (will upload with blank UAN):{" "}
+                            {ecrPreview.no_uan_members.map((m: any) => m.name).slice(0, 10).join(", ")}
+                            {ecrPreview.no_uan_members.length > 10 ? "…" : ""}
+                          </Text>
+                        ) : null}
+                        {(ecrPreview.no_uan_members || []).length > 0 && ecrPreview.excluded_no_uan ? (
+                          <Text style={[st.ecrTitle, { color: "#16A34A" }]}>
+                            ✓ Removed from ECR: {ecrPreview.no_uan_members.map((m: any) => m.name).slice(0, 10).join(", ")}
+                            {ecrPreview.no_uan_members.length > 10 ? "…" : ""}
+                          </Text>
+                        ) : null}
+                        <ScrollView style={st.ecrScroll} nestedScrollEnabled>
+                          <Text style={st.ecrText} selectable>{ecrPreview.text}</Text>
+                        </ScrollView>
+                        <Text style={st.ecrHint}>
+                          ECR ठीक लगे तो ऊपर “Open EPFO Portal” दबाएँ — Runner यही file portal के upload box में auto-select कर देगा।
+                        </Text>
+                      </View>
+                    )
+                  ) : null}
                   {pcStatus ? <Text style={st.pcStatus}>{pcStatus}</Text> : null}
                   {/* Iter 694 — duplicate EPFO login found on other firms:
                       one-click cleanup keeps it on THIS firm only. */}
@@ -1580,6 +1666,17 @@ const st = StyleSheet.create({
   },
   pcBtnTxt: { fontSize: 13, fontWeight: "800", color: "#fff" },
   pcStatus: { fontSize: 13, fontWeight: "700", color: "#059669", marginTop: 8 },
+  // Iter 731 — ECR preview panel
+  ecrBox: {
+    marginTop: 8, padding: 10, borderRadius: 8, backgroundColor: "#F0F9FF",
+    borderWidth: 1, borderColor: "#7DD3FC", gap: 6,
+  },
+  ecrTitle: { fontSize: 12.5, fontWeight: "800", color: "#0C4A6E", lineHeight: 18 },
+  ecrScroll: {
+    maxHeight: 240, backgroundColor: "#0F172A", borderRadius: 6, padding: 8,
+  },
+  ecrText: { fontSize: 11, color: "#E2E8F0", fontFamily: Platform.OS === "web" ? "monospace" : undefined, lineHeight: 16 },
+  ecrHint: { fontSize: 12, fontWeight: "700", color: "#0369A1" },
   dupBox: {
     marginTop: 8, padding: 10, borderRadius: 8, backgroundColor: "#FEF2F2",
     borderWidth: 1, borderColor: "#FCA5A5", gap: 8,

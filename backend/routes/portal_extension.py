@@ -526,9 +526,15 @@ async def ext_ecr_file(token: str, run_id: str = ""):
             for r in rows:
                 if r.get("user_id") == u["user_id"]:
                     r["uan_no"] = u.get("uan_no")
-    from utils.statutory_bulk import build_pf_ecr_txt
+    from routes.challans import _uan_esic_map, _ecr_txt_bytes
     from utils.rpa_engine import validate_run_rows
-    body = build_pf_ecr_txt(rows)
+    # Iter 731 — the runner now uploads the SAME portal-accurate ECR as the
+    # Challans screen (Iter 445 builder: uncapped EPF wages for Higher PF,
+    # EPS/EDLI capped, portal-style dues). The old capped builder broke
+    # Higher-PF members on the unified portal. Honors the admin's
+    # "Remove Without-UAN Employees" choice stored on the launch token.
+    _extra = await _uan_esic_map(rows)
+    body = _ecr_txt_bytes(run, _extra, bool(doc.get("ecr_exclude_no_uan")))
     report = validate_run_rows(rows, "epfo")
     month = str(run.get("month") or "")
     mword = f"{month[5:7]}{month[:4]}" if len(month) == 7 and month[4] == "-" else "month"
@@ -2842,6 +2848,9 @@ async def portal_launch_token(
         "created_at": now_iso(),
         "kind": "launch",
         "run_id": (payload or {}).get("run_id") or None,
+        # Iter 731 (user request) — "Remove Without-UAN Employees": the
+        # runner's ECR fetch excludes blank-UAN members when this is set.
+        "ecr_exclude_no_uan": bool((payload or {}).get("ecr_exclude_no_uan")),
     })
     # Iter 692 — pre-check the firm's portal login RIGHT NOW and tell the UI
     # exactly what was found (or precisely why not), so the user sees the
@@ -2860,6 +2869,67 @@ async def portal_launch_token(
         "creds_firm_name": diag["firm_name"],
         "creds_diagnosis": diag["diagnosis"],
         "creds_warning": diag.get("warning") or "",
+    }
+
+
+@router.get("/admin/portal-automation/ecr-preview")
+async def portal_ecr_preview(
+    company_id: Optional[str] = Query(None),
+    run_id: Optional[str] = Query(None),
+    exclude_no_uan: bool = Query(False),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 731 (user request) — VIEW the PF ECR before uploading it to
+    EPFO, with the exact portal-accurate file the runner will upload.
+    ``exclude_no_uan`` mirrors the "Remove Without-UAN Employees" button."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
+    company_id = await _resolve_company(admin, company_id)
+    q: Dict[str, Any] = {"company_id": company_id}
+    if (run_id or "").strip():
+        q["run_id"] = run_id.strip()
+        run = await db.compliance_salary_runs.find_one(q, {"_id": 0})
+    else:
+        run = await db.compliance_salary_runs.find_one(
+            q, {"_id": 0}, sort=[("month", -1)])
+    if not run:
+        raise HTTPException(
+            status_code=404,
+            detail="No Compliance Salary Process found for this firm — "
+                   "process the month's salary first.")
+    rows = run.get("rows") or []
+    # refresh missing UANs from the live Employee Master (same as runner)
+    uids = [r.get("user_id") for r in rows if r.get("user_id") and not r.get("uan_no")]
+    if uids:
+        async for u in db.users.find(
+                {"user_id": {"$in": uids}}, {"_id": 0, "user_id": 1, "uan_no": 1}):
+            for r in rows:
+                if r.get("user_id") == u["user_id"]:
+                    r["uan_no"] = u.get("uan_no")
+    from routes.challans import _uan_esic_map, _ecr_txt_bytes, _ecr_fname
+    _extra = await _uan_esic_map(rows)
+    try:
+        body = _ecr_txt_bytes(run, _extra, bool(exclude_no_uan))
+    except HTTPException as e:
+        raise e
+    text = body.decode("utf-8", "replace")
+    # employees without a UAN (would upload with a BLANK UAN unless removed)
+    no_uan = []
+    for r in rows:
+        _uid = r.get("user_id") or ""
+        _uan = str(r.get("uan_no") or (_extra.get(_uid) or {}).get("uan_no") or "").strip()
+        _pf = float(r.get("pf_employee") or 0) + float(r.get("pf_wages") or 0)
+        if not _uan and _pf > 0:
+            no_uan.append({"name": r.get("name") or "",
+                           "employee_code": r.get("employee_code") or ""})
+    return {
+        "ok": True,
+        "month": str(run.get("month") or ""),
+        "filename": await _ecr_fname(run),
+        "text": text,
+        "lines": len(text.splitlines()),
+        "excluded_no_uan": bool(exclude_no_uan),
+        "no_uan_members": no_uan,
     }
 
 
