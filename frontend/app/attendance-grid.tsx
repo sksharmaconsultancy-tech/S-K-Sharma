@@ -252,6 +252,14 @@ export default function AttendanceGridScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.company_id, selectedCompanyId]);
   const [q, setQ] = useState<string>("");
+  // Iter 727 (user request — "search-jump बिना scroll के"): the TextInput
+  // updates instantly via qInput; the heavy 5000-row filter runs debounced
+  // 200 ms behind so typing never lags on big firms.
+  const [qInput, setQInput] = useState<string>("");
+  useEffect(() => {
+    const t = setTimeout(() => setQ(qInput), 200);
+    return () => clearTimeout(t);
+  }, [qInput]);
   const [data, setData] = useState<GridResp | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -492,7 +500,7 @@ export default function AttendanceGridScreen() {
       });
     }
     // Sort
-    const sorted = src.slice().sort((a, b) => {
+    let sorted = src.slice().sort((a, b) => {
       const dir = sortDir === "asc" ? 1 : -1;
       const key = (v: string | number | null | undefined) =>
         v === null || v === undefined ? "" : String(v).toLowerCase();
@@ -527,6 +535,20 @@ export default function AttendanceGridScreen() {
           return 0;
       }
     });
+    // Iter 727 — search-jump ranking: exact employee-code / bio-code
+    // matches first, then name/code prefix matches, then the rest — so
+    // typing "212" jumps employee 212 straight to the top row.
+    if (needle) {
+      const rank = (e: EmpRow) => {
+        const code = String(e.employee_code || "").toLowerCase();
+        const bio = String(e.bio_code || "").toLowerCase();
+        const name = String(e.name || "").toLowerCase();
+        if (code === needle || bio === needle) return 0;
+        if (name.startsWith(needle) || code.startsWith(needle)) return 1;
+        return 2;
+      };
+      sorted = sorted.slice().sort((a, b) => rank(a) - rank(b));
+    }
     return sorted;
   }, [data, q, sortBy, sortDir, hideZero]);
 
@@ -864,13 +886,32 @@ export default function AttendanceGridScreen() {
             ))}
         </View>
 
-        <TextInput
-          style={styles.searchInput}
-          value={q}
-          onChangeText={setQ}
-          placeholder="Search name / code / bio…"
-          placeholderTextColor={colors.onSurfaceTertiary}
-        />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <TextInput
+            style={styles.searchInput}
+            value={qInput}
+            onChangeText={setQInput}
+            placeholder="Search name / code / bio…"
+            placeholderTextColor={colors.onSurfaceTertiary}
+            returnKeyType="search"
+            testID="grid-search-input"
+          />
+          {qInput.length > 0 && (
+            <Pressable
+              onPress={() => { setQInput(""); setQ(""); }}
+              hitSlop={8}
+              testID="grid-search-clear"
+              style={{ padding: 4 }}
+            >
+              <Ionicons name="close-circle" size={18} color={colors.onSurfaceTertiary} />
+            </Pressable>
+          )}
+          {q.trim().length > 0 && data && (
+            <Text style={{ fontSize: 11, color: colors.onSurfaceSecondary, fontWeight: "600" }}>
+              {filteredEmployees.length} found
+            </Text>
+          )}
+        </View>
 
         <Pressable
           onPress={refreshBioData}

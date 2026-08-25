@@ -1,0 +1,33 @@
+{
+  "summary": "Iter 727 — Attendance-grid search improvements + backend regression: ALL PASS. Backend regression: /app/backend/tests/test_iter726_pagination_and_nightshift.py re-run — 12/12 PASS (grid pagination, employee-master fast path, night-shift missing-punch guard, stitch_cross_day_ot echo-consumption, dedupe_close_punches). Frontend UI on /attendance-grid?company_id=cmp_527fecdd7c (Kankani, 127 employees) validated on real preview URL with injected super-admin session (post-2FA): (a) typing '212' → 'MADAN KEER' (code 212) appears as TOP row within ~500ms of debounce, '1 found' count text visible; (b) typing 'SUREN' → 3 SURENDRA employees shown at top rows, '3 found'; (c) grid-search-clear (✕) button appears when text entered and clicking it clears input + restores 'All (127)' full list; (d) rapid typing 'SURENDRA' (8 chars) preserved fully in input (no lost chars, no freeze) — debounce keeps UI responsive; (e) regression: 127 rows still render with Group chips 'All (127) / LABOUR (108) / STAFF (17)'; footer summary row visible on filtered searches; month back-nav 2026-08 → 2026-07 reloaded cleanly with real IN/OUT + OT punches, still (127). Also verified: searching '50' correctly rank-boosts BIRJU SHAH (bio_code exact 50) and SURENDRA SINGH (employee_code exact 50) to top two rows (both rank-0 exact matches).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter726_pagination_and_nightshift.py",
+    "/app/test_reports/pytest/iter727.xml",
+    "/app/test_reports/screens/iter727_grid_loaded.png",
+    "/app/test_reports/screens/iter727_search_212.png",
+    "/app/test_reports/screens/iter727_search_SUREN.png",
+    "/app/test_reports/screens/iter727_search_50.png",
+    "/app/test_reports/screens/iter727_prev_month.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "attendance-grid.tsx line 258-262: qInput → q debounce (200ms) via setTimeout+clearTimeout — correctly cancels stale timers on every keystroke, no leak.",
+    "attendance-grid.tsx line 538-551: rank function returns 0 for exact code/bio match, 1 for name/code prefix, 2 otherwise. Array.prototype.sort with equal ranks preserves original alpha order (stable sort in V8). Result: '212' → 1 exact hit ranks first, verified.",
+    "attendance-grid.tsx line 899-913: clear button visibility gated on qInput.length>0 (raw input, not debounced), so it appears instantly when user starts typing — good UX. 'N found' count uses debounced q so it only shows after the filter has applied.",
+    "attendance-grid.tsx line 901: onPress of clear does both setQInput('') and setQ('') — bypasses the 200ms debounce so full list restores immediately. Correct."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (12/12 pytest)", "frontend": "100% (all 4 search-UX acceptance criteria + grid + month-nav regression)"},
+  "seed_data_creation": "None — used existing Kankani cmp_527fecdd7c (127 employees).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login: password login → grab pending_token → swap OTP hash in db.twofa_pending → POST /api/auth/2fa/verify {otp:'123456'} → session_token. Inject via localStorage 'llc_session_token' + 'selected_company_id'='cmp_527fecdd7c', then /attendance-grid loads directly. Search input testID='grid-search-input', clear button testID='grid-search-clear', 'N found' count is a plain Text next to clear.",
+  "rca_of_issue": "N/A — feature working as designed."
+}

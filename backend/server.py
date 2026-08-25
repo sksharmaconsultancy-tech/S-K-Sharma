@@ -2187,6 +2187,11 @@ def stitch_cross_day_ot(
         nxt_sorted = sorted(nxt, key=lambda p: p.get("at") or "")
         first = nxt_sorted[0]
         first_kind = (first.get("kind") or "").lower()
+        # Iter 727 — remember whether the machine EXPLICITLY recorded the
+        # next-day punch as OUT (vs a mislabelled IN we relabel below).
+        # Guard (a) must only apply to relabel-steals, never to explicit
+        # OUT punches (genuine overnight OT sessions).
+        _explicit_out = first_kind == "out"
         # Iter 481 (user request) — a next-day EARLY-MORNING punch (before
         # 08:00) following an unpaired IN also counts as the night-shift
         # OUT even when the machine mislabelled it "in" (alternation
@@ -2265,7 +2270,15 @@ def stitch_cross_day_ot(
                 except (ValueError, TypeError, KeyError):
                     pass
                 _open_at = None
-        if (_last_out_at is not None and _paired_min >= 8 * 60
+        # Iter 727 (user bug — "day duty + OT: OUT punch अगले दिन दिखता है"):
+        # guard (a) wrongly blocked GENUINE night-OT sessions whose OT-IN
+        # was punched within 30 min of the duty OUT (e.g. duty OUT 18:00 →
+        # OT IN 18:10 → OT OUT 02:00 next day). It now applies ONLY when
+        # the next-day candidate is a RELABELLED morning IN (the GAJRAM
+        # echo-steal case) — an EXPLICIT machine OUT is always a real
+        # session end and must stitch back.
+        if (not _explicit_out and _last_out_at is not None
+                and _paired_min >= 8 * 60
                 and (in_at - _last_out_at) <= _td(minutes=30)):
             continue  # (a) stray double-scan anchor
         # Iter 720b (user bug — HITESH SINGH): genuine DOUBLE DUTY (day
@@ -10247,7 +10260,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "726"
+APP_ITERATION = "727"
 
 
 @api.get("/version")

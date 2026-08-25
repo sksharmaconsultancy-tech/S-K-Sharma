@@ -8967,3 +8967,17 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
      doc upload/delete now refresh documents only (reloadDocs).
 - APP_ITERATION=726; deploy_vps_iter726.sh served via kind=script
   (temp_bundle.py updated). Testing agent: ALL PASS backend+frontend.
+
+## Iter 727 — Day-duty + Night-OT stitch fix + Grid Search-Jump (2026-06)
+- USER BUG ("day duty + OT: OUT punch next day दिखता है"): stitch_cross_day_ot
+  guard(a) (Iter 716 echo guard) wrongly blocked genuine OT sessions whose
+  OT-IN was within 30 min of duty OUT. Fix: guard(a) now applies ONLY to
+  relabelled morning INs (_explicit_out flag); explicit machine OUT always
+  stitches back. E2E verified via real DB + grid API (duty 9-18 + OT in
+  18:10 → out 02:00 ⇒ duty day 17.0h/OT 9.0, next day clean). GAJRAM echo
+  still blocked (guard b caps 22h), HITESH double-duty still stitches,
+  night chains fine. 12/12 pytest re-PASS.
+- GRID SEARCH-JUMP (user request): attendance-grid.tsx — debounced qInput
+  (200ms), exact code/bio match ranked to top, ✕ clear button (testID
+  grid-search-clear), "N found" count. testing_agent ALL PASS.
+- APP_ITERATION=727; deploy_vps_iter727.sh via kind=script.

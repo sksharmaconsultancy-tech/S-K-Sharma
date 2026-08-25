@@ -922,3 +922,8 @@ ITER 487 (doc-expiry alerts):
   stitch echo-OUT consumption, grid skip/limit), payroll_core.py
   (user_id param), attendance-grid.tsx (chunked load), employee-master.tsx
   (single-emp fetch + reloadDocs). Back-compat: no-limit grid = full rows.
+
+## Iter 727 — tested (testing_agent ALL PASS)
+- Stitch guard(a) fix e2e-verified (backend); search UI verified on
+  /attendance-grid (code jump, name filter, clear, no lag, 127-row
+  regression, month nav). pytest 12/12 re-PASS.
