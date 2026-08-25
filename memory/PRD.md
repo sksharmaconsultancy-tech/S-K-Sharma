@@ -8931,3 +8931,16 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   (known gap, user aware). NEXT: user reported NEW BUG (pending
   details): "attendance punching — punches lag rahe hain but system
   calculate nahi kar raha" — awaiting firm/employee/date/screenshot.
+- Iter 734 — MANUAL PUNCH/OT DUTY-HOURS NOT CALCULATING (user bug).
+  ROOT CAUSE: monthly-grid serves ≤30-min cache and relies on explicit
+  invalidate_grid_cache() after punch corrections (Iter 710/714 design),
+  but only PATCH/DELETE called it. POST /admin/attendance/manual-punch
+  (add), quick-mark, extra-duty (set+delete paths), approve-punch and
+  roster marks never invalidated → grid showed stale duty hours after
+  manual/OT edits. FIX (attendance_admin_core.py): all 6 write paths now
+  call invalidate_grid_cache(emp.company_id) (roster: admin firm or
+  _MG_CACHE.clear() for super admin). VERIFIED e2e: manual IN/OUT on
+  blank day → immediate duty 8.0/OT 1.0/present 1 on next fetch; test
+  punches cleaned. User's cross-midnight OT-next-morning attribution
+  rule already handled by engine (prior iterations) — the cache was why
+  edits appeared uncalculated. Deploy: deploy_vps_iter725.sh.

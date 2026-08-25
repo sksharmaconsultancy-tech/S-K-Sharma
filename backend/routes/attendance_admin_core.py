@@ -615,6 +615,9 @@ async def admin_approve_punch(
         "approver_note": (payload.note or "").strip() or None,
     }
     await db.attendance.insert_one(record)
+    # Iter 734 — approved employee punches must reflect on the grid now.
+    from server import invalidate_grid_cache
+    invalidate_grid_cache(emp.get("company_id") or "")
     logger.info(
         f"[ADMIN PUNCH] {admin_user.get('email')} → punched {payload.kind} for "
         f"{emp.get('name')} ({emp.get('employee_code')}) — {int(dist)}m from office",
@@ -1079,6 +1082,14 @@ async def batch_roster_mark(
             "action": m.action,
             "record_id": record_id,
         })
+    # Iter 734 — roster marks rewrite punches: refresh the grid cache.
+    if results:
+        from server import _MG_CACHE, invalidate_grid_cache
+        _c = admin.get("company_id")
+        if _c:
+            invalidate_grid_cache(_c)
+        else:
+            _MG_CACHE.clear()
     return {"results": results, "count": len(results)}
 
 
@@ -1549,6 +1560,8 @@ async def upsert_extra_duty(
     key = {"user_id": user_id, "date": date_s}
     if extra_hours == 0 and extra_amount == 0:
         await db.extra_duty_entries.delete_one(key)
+        from server import invalidate_grid_cache
+        invalidate_grid_cache(emp.get("company_id") or "")
         return {"ok": True, "deleted": True}
     entry = {
         **key,
@@ -1564,6 +1577,9 @@ async def upsert_extra_duty(
         upsert=True,
     )
     saved = await db.extra_duty_entries.find_one(key, {"_id": 0})
+    # Iter 734 — OT/extra-duty edits must reflect on the grid immediately.
+    from server import invalidate_grid_cache
+    invalidate_grid_cache(emp.get("company_id") or "")
     return {"ok": True, "entry": saved}
 
 
@@ -1631,6 +1647,12 @@ async def create_manual_punch(
     }
     await db.attendance.insert_one(record)
     await _log_punch_audit("create", admin, record_id, None, record, reason)
+    # Iter 734 (user bug — "manual punch/OT edit ke baad duty hours
+    # calculate nahi ho rahe"): the ADD path never invalidated the monthly
+    # grid cache (edit/delete did), so the grid kept serving stale duty
+    # hours until the background refresh. Invalidate immediately.
+    from server import invalidate_grid_cache
+    invalidate_grid_cache(emp.get("company_id") or "")
     # Iter 145 — web-push the manual punch approval to the employee.
     try:
         from routes.web_push import push_to_user
@@ -1743,6 +1765,9 @@ async def attendance_quick_mark(
         await db.attendance.insert_one(record)
         await _log_punch_audit("create", admin, record["record_id"], None, record, reason)
         records.append({k: v for k, v in record.items() if k != "_id"})
+    # Iter 734 — quick-mark rewrites the day's punches: refresh the grid.
+    from server import invalidate_grid_cache
+    invalidate_grid_cache(emp.get("company_id") or "")
     return {"ok": True, "records": records, "shift": {"start": shift_start, "end": shift_end}}
 
 

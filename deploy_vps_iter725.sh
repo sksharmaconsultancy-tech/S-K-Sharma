@@ -58,6 +58,23 @@
 #  * Deploy के बाद पुराने draft months को एक बार REPROCESS कर लें ताकि
 #    register नए rounding से refresh हो जाए (finalized months untouched).
 #
+# ═══════════ ALSO IN Iter 725 — 🕐 MANUAL PUNCH/OT के बाद DUTY HOURS तुरंत CALCULATE (FIX) ═══════════
+#
+# 🕐 USER BUG: "punch लग रहे हैं पर system calculate नहीं कर रहा /
+#    OT-duty time edit करने पर duty hours नहीं बनते":
+#  * ROOT CAUSE: Attendance Grid 30-min cache से चलता है और punch
+#    corrections पर cache clear होना चाहिए (Iter 710 rule) — पर ये सिर्फ़
+#    EDIT/DELETE पर होता था. Manual punch ADD, Quick-Mark, OT/Extra-Duty
+#    entry और employee-punch APPROVE पर cache clear ही नहीं होता था —
+#    इसलिए नया punch लगने के बाद भी grid पुराने cached duty hours
+#    दिखाता रहता था.
+#  * FIX: अब हर punch-लिखने वाला रास्ता (manual add / quick-mark /
+#    OT-extra-duty / approve / roster-mark) grid cache तुरंत clear
+#    करता है — punch लगते ही Duty HRS, OT और Present उसी reload पर
+#    recalculate.
+#  * VERIFIED: blank day पर manual IN 09:00 + OUT 18:00 → अगली ही fetch
+#    पर duty 8.0 + OT 1.0 + Present 1 ✓ (सभी 4 sources के लिए same रास्ता).
+#
 # ═══════════ WHAT'S NEW (Iter 724) — 🪪 EMPLOYEE MASTER: FULL KYC DETAILS (UNMASKED) ═══════════
 #
 # 🪪 FULL DOCUMENT NUMBERS ON THE EMPLOYEE MASTER (user request):
