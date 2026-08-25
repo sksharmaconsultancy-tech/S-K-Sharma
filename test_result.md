@@ -927,3 +927,8 @@ ITER 487 (doc-expiry alerts):
 - Stitch guard(a) fix e2e-verified (backend); search UI verified on
   /attendance-grid (code jump, name filter, clear, no lag, 127-row
   regression, month nav). pytest 12/12 re-PASS.
+
+## Iter 728 — AMIT KUMAR 24h double duty fix (tested)
+- Reproduced from user screenshot data; guard(b) now relabel-only.
+- Unit sims all scenarios PASS; e2e grid API 24.0h no-anomaly PASS;
+  pytest 12/12 re-PASS.

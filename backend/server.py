@@ -2283,10 +2283,16 @@ def stitch_cross_day_ot(
             continue  # (a) stray double-scan anchor
         # Iter 720b (user bug — HITESH SINGH): genuine DOUBLE DUTY (day
         # 08:28→19:01 + night OT 21:34→06:53 ≈ 19.9h) must still stitch.
-        # The cap only blocks absurd fabrications (e.g. GAJRAM's ~24h),
-        # which guard (a) already catches for echo scans.
-        if _paired_min + int((out_at - in_at).total_seconds() // 60) > (max_hours + 6) * 60:
-            continue  # (b) total-duty cap (~22h)
+        # Iter 728 (user bug — AMIT KUMAR 02-08: duty 08:00→20:00 + OT
+        # 20:01→08:00 next morning = 24h REAL double duty showed "missing
+        # OUT"): the ~22h cap wrongly blocked genuine 24-hour duty. Like
+        # guard (a), the cap now applies ONLY to RELABELLED morning INs
+        # (fabrication risk) — an EXPLICIT machine/manual OUT is real
+        # punch data and always stitches (session itself is already
+        # limited to ``max_hours``).
+        if (not _explicit_out
+                and _paired_min + int((out_at - in_at).total_seconds() // 60) > (max_hours + 6) * 60):
+            continue  # (b) total-duty cap (~22h) for relabel-steals only
         moved = dict(first)
         moved["date"] = dk
         moved["kind"] = "out"
@@ -10260,7 +10266,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "727"
+APP_ITERATION = "728"
 
 
 @api.get("/version")

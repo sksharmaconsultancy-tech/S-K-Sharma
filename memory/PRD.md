@@ -8981,3 +8981,18 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   (200ms), exact code/bio match ranked to top, ✕ clear button (testID
   grid-search-clear), "N found" count. testing_agent ALL PASS.
 - APP_ITERATION=727; deploy_vps_iter727.sh via kind=script.
+
+## Iter 728 — AMIT KUMAR 24h double-duty "missing OUT" fix (2026-06)
+- USER's EXACT case (screenshot): AMIT KUMAR, Kankani, 02-08-2026 —
+  IN 08:00, OUT 20:00, IN 20:01, OUT 08:00 next morning (~24h duty, 4
+  manual punches) showed "missing OUT".
+- ROOT CAUSE: stitch_cross_day_ot guard(b) TOTAL-DUTY CAP (~22h) blocked
+  genuine 24h double duty (12h paired + 11.98h session = 23.97h > 22h).
+- FIX: guard(b), like guard(a) in iter727, now applies ONLY when the
+  next-day candidate is a RELABELLED morning IN (not _explicit_out).
+  Explicit machine/manual OUT always stitches (session already capped at
+  max_hours=16 individually).
+- E2E verified via real DB + grid API: 24.0 hrs (8 duty + 16 OT), no
+  anomaly, next day clean. All regressions PASS (GAJRAM echo blocked,
+  HITESH 19.9h, night chain, iter727 OT case). pytest 12/12 PASS.
+- APP_ITERATION=728; deploy_vps_iter728.sh via kind=script.
