@@ -221,7 +221,10 @@ def _round_stat(v: float, mode: str) -> float:
     if mode == "floor":
         return float(math.floor(v + 1e-9))
     if mode == "nearest":
-        return float(round(v))
+        # Iter 733 (user-approved audit fix) — EPFO/ESIC portals round
+        # HALF-UP (1084.50 → 1085); Python round() is half-to-even
+        # (→ 1084) and drifted ₹1 from the portal on .50 paise values.
+        return float(math.floor(v + 0.5))
     return v
 
 # --------------------------------------------------------------------------- 
@@ -1001,8 +1004,13 @@ def compute_compliance_row(
         # Iter 127f — whole-rupee statutory rounding (Standard Settings).
         pf_mode = str(cfg.get("pf_rounding") or "nearest")
         pf_employee = _round_stat(pf_employee, pf_mode)
-        pf_employer_epf = _round_stat(pf_employer_epf, pf_mode)
+        # Iter 733 (user-approved audit fix) — EPFO derives Employer EPF
+        # as (TOTAL employer dues rounded) − (EPS rounded); rounding the
+        # 3.67% share separately drifted ₹1 from the ECR/challan
+        # (wages 14,999: sheet ₹550 vs portal ₹551). Same derivation now.
+        _er_total733 = _round_stat(pf_employer_epf + pf_employer_eps, pf_mode)
         pf_employer_eps = _round_stat(pf_employer_eps, pf_mode)
+        pf_employer_epf = max(0.0, _er_total733 - pf_employer_eps)
         pf_employer_total = pf_employer_epf + pf_employer_eps
     else:
         capped_pf_wages = 0.0

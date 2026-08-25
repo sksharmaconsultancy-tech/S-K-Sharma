@@ -45,6 +45,19 @@
 #    ("July 2026 · STAFF ✓") और month+group पर duplicate runs में सिर्फ़
 #    सबसे नई दिखती है.
 #
+# ═══════════ ALSO IN Iter 725 — 🧮 ECR ROUNDING FIXES (₹1 का फर्क खत्म) ═══════════
+#
+# 🧮 PF/ESIC audit के तीनों rounding bugs FIX (user approved):
+#  * HALF-UP ROUNDING: portal की तरह 1084.50 → 1085 (पहले Python की
+#    half-to-even rounding से ₹1 कम आ जाता था).
+#  * EMPLOYER EPF SPLIT: अब EPFO की तरह (कुल 12% rounded) − (EPS rounded)
+#    — wages 14,999 पर sheet ₹550 vs ECR ₹551 वाला फर्क खत्म; अब register,
+#    challan और ECR तीनों exact match.
+#  * Compliance Run screen का ECR button भी अब Challans वाले CORRECT
+#    builder से file बनाता है (Higher PF uncapped wages, EPS/EDLI capped).
+#  * Deploy के बाद पुराने draft months को एक बार REPROCESS कर लें ताकि
+#    register नए rounding से refresh हो जाए (finalized months untouched).
+#
 # ═══════════ WHAT'S NEW (Iter 724) — 🪪 EMPLOYEE MASTER: FULL KYC DETAILS (UNMASKED) ═══════════
 #
 # 🪪 FULL DOCUMENT NUMBERS ON THE EMPLOYEE MASTER (user request):

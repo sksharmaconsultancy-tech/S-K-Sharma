@@ -3247,7 +3247,6 @@ async def download_pf_ecr(
     Uploaded on the EPFO Unified Portal ▸ ECR & Return.
     """
     from fastapi.responses import Response
-    from utils.statutory_bulk import build_pf_ecr_txt
     admin = await get_user_from_token(authorization)
     require_role(admin, ["super_admin", "sub_admin", "company_admin"])
     await require_employer_permission(admin, "compliance_salary:read", db)
@@ -3268,7 +3267,12 @@ async def download_pf_ecr(
             for r in rows:
                 if r.get("user_id") == u["user_id"]:
                     r["uan_no"] = u.get("uan_no")
-    body = build_pf_ecr_txt(rows)
+    # Iter 733 (user-approved audit Bug 1) — use the CORRECT Challans
+    # builder (uncapped EPF wages for Higher PF, EPS/EDLI capped,
+    # portal-style dues); the old capped builder broke Higher-PF members.
+    from routes.challans import _uan_esic_map, _ecr_txt_bytes
+    _extra733 = await _uan_esic_map(rows)
+    body = _ecr_txt_bytes(run, _extra733, False)
     # Iter 446 (user bug) — EPFO rejects filenames with non-word characters.
     _m = str(run.get("month") or "")
     _mword = f"{_m[5:7]}{_m[:4]}" if len(_m) == 7 and _m[4] == "-" else "month"

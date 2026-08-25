@@ -8920,3 +8920,14 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   "May 2026 · STAFF ✓". ALL VERIFIED via synthetic run csrun_test732
   (esic days ceil 25.5→26, wages=wage base, missing IP flagged; UAN csv
   headers ok; runs dedup ok). Deploy: deploy_vps_iter725.sh.
+- Iter 733 — ECR ROUNDING FIXES (user approved audit Bugs 1-3):
+  (a) _round_stat "nearest" → math.floor(v+0.5) half-up (EPFO style);
+  (b) Employer EPF = _round_stat(epf+eps_preround) − rounded EPS (max 0)
+  so sheet matches ECR diff exactly (14999: 551 not 550); ER total ==
+  rounded dues; (c) run-screen /pf-ecr.txt endpoint switched from old
+  capped build_pf_ecr_txt to challans._ecr_txt_bytes (+_uan_esic_map).
+  VERIFIED: wages 7604.17→EE 913 (was 912); 14999→1800/1249/551; 9000→
+  1080/750/330 unchanged. NOTE: eligibility still requires pf_basic>0
+  (known gap, user aware). NEXT: user reported NEW BUG (pending
+  details): "attendance punching — punches lag rahe hain but system
+  calculate nahi kar raha" — awaiting firm/employee/date/screenshot.
