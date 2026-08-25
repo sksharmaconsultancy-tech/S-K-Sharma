@@ -3248,6 +3248,11 @@ async def startup():
             # no supporting index it collection-scanned large live VPS data.
             await db.attendance.create_index(
                 [("company_id", 1), ("created_at", -1)], background=True)
+            # Iter 722 (perf) — Employee List sorts by created_at per firm;
+            # without this index large firms did an in-memory sort per open.
+            await db.users.create_index(
+                [("company_id", 1), ("role", 1), ("created_at", -1)],
+                background=True)
             # punch-log NOT-FOUND rows + sync-dashboard machine_only group
             await db.biometric_unmapped.create_index(
                 [("device_serial", 1), ("at", -1)], background=True)
@@ -10211,7 +10216,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "721"
+APP_ITERATION = "722"
 
 
 @api.get("/version")

@@ -8721,3 +8721,17 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   cases in one run: HITESH 05 = 08:28→06:53 duty 8 + OT 12 no anomaly;
   GAJRAM 03/04 = 12h clean; ANSHUL 03 = 08:01→20:03 12h. Badge 721,
   sw v36, deploy_vps_iter721.sh.
+- Iter 722 — PAYROLL SPEED OPTIMIZATION (user spec; diagnosis-first, no
+  business logic changed): MEASURED: list_employees (payroll_core.py)
+  fetched FULL user docs ({"_id":0}) → ~3.3KB/emp (16MB @5000 emps) +
+  unindexed created_at sort. FIXES: (1) exclusion projection _list_proj
+  drops password_hash/pin_hash/password/face_template/face_embedding/
+  face_descriptor/profile_photo_base64/photo_base64/selfie_base64/
+  push_tokens/web_push_subs → payload 407KB→163KB (-60%) @127 emps;
+  (2) users index (company_id, role, created_at desc) in
+  _bg_speed_indexes. VERIFIED: 4ms list, essential fields intact,
+  internals excluded. Employee UPDATE audited: frontend sends only
+  changed fields (PATCH /admin/user-role), server does 1 find + 1
+  targeted $set + per-employee refresh — already optimal. Attendance
+  loading perf = Iter 714 (instant cache + indexes) + Iter 708 chunked
+  rendering. Badge 722, sw v37, deploy_vps_iter722.sh.

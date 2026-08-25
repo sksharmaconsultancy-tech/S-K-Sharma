@@ -683,7 +683,14 @@ async def list_employees(
     from shared.authz import scope_filter
     q.update(scope_filter(user))
     # Iter 333 (user request) — up to 20,000 employees per firm.
-    users = await db.users.find(q, {"_id": 0}).sort("created_at", -1).to_list(20000)
+    # Iter 722 (perf, user spec) — LIST never needs heavy/internal fields;
+    # excluding them cuts the payload massively for large firms (exclusion
+    # projection → zero functional risk, every other field still returned).
+    _list_proj = {"_id": 0, "password_hash": 0, "pin_hash": 0, "password": 0,
+                  "face_template": 0, "face_embedding": 0, "face_descriptor": 0,
+                  "profile_photo_base64": 0, "photo_base64": 0,
+                  "selfie_base64": 0, "push_tokens": 0, "web_push_subs": 0}
+    users = await db.users.find(q, _list_proj).sort("created_at", -1).to_list(20000)
     users = [_redact_user(u) for u in users]
     return {"employees": users}
 
