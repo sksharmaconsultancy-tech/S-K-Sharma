@@ -62,9 +62,21 @@ async def rpa_runs(company_id: str, authorization: Optional[str] = Header(None))
     await _admin(authorization, company_id)
     runs = await db.compliance_salary_runs.find(
         {"company_id": company_id},
-        {"_id": 0, "run_id": 1, "month": 1, "status": 1, "created_at": 1},
-    ).sort("month", -1).to_list(36)
-    return {"runs": runs}
+        {"_id": 0, "run_id": 1, "month": 1, "status": 1, "created_at": 1,
+         # Iter 732 (user bug — same month listed multiple times): group +
+         # finalized flag so the picker can label and de-duplicate runs.
+         "employee_type": 1, "finalized": 1, "generated_at": 1},
+    ).sort([("month", -1), ("generated_at", -1)]).to_list(60)
+    # one entry per month+group — newest wins
+    seen: set = set()
+    out = []
+    for r in runs:
+        key = (r.get("month"), str(r.get("employee_type") or "").upper())
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+    return {"runs": out}
 
 
 @router.post("/validate")

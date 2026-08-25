@@ -8907,3 +8907,16 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   (2 lines, no-UAN member flagged; exclude path 400 when ALL missing —
   correct); lint clean except pre-existing warnings + now-unused
   start/busy (kept: /rpa/start path for other portals' status UI).
+- Iter 732 — (a) UAN BULK REGISTRATION: GET /admin/portal-automation/
+  uan-registration-file (CSV utf-8-sig download or &preview=true JSON) —
+  PF members without UAN with full KYC from users; frontend button
+  inside ECR preview warning (downloadUanFile). (b) ESIC PREVIEW: GET
+  /admin/portal-automation/esic-preview — reuses challans._esic_row_vals
+  /_uan_esic_map/_esic_ip_fmt; members with IP + missing_ip + totals;
+  frontend View ESIC Contribution button + panel (esic pcBox). (c)
+  MONTH PICKER DUPLICATES (user bug): /rpa/runs (portal_rpa.py) now
+  projects employee_type+finalized, sorts month+generated_at desc,
+  dedupes month+group keeping newest; automation-studio runLabel() =
+  "May 2026 · STAFF ✓". ALL VERIFIED via synthetic run csrun_test732
+  (esic days ceil 25.5→26, wages=wage base, missing IP flagged; UAN csv
+  headers ok; runs dedup ok). Deploy: deploy_vps_iter725.sh.

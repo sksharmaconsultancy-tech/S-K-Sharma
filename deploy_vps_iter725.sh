@@ -31,6 +31,20 @@
 #    "Open EPFO/ESIC Portal" button ही selected flow (ECR Upload आदि)
 #    चलाता है.
 #
+# ═══════════ ALSO IN Iter 725 — 🪪 UAN BULK FILE + 🏥 ESIC PREVIEW + MONTH PICKER FIX ═══════════
+#
+# 🪪 UAN REGISTRATION FILE (user request): ECR preview में बिना UAN वाले
+#    members दिखते ही "UAN Registration File (N)" button — एक click में
+#    CSV: Name, Father, DOB, Gender, Aadhaar, PAN, Bank A/c+IFSC, Mobile,
+#    Email, DOJ, PF Wages — EPFO Member Registration पर सीधे भरने लायक.
+# 🏥 ESIC CONTRIBUTION VIEW (user request): ESIC portal खोलने से पहले
+#    "View ESIC Contribution" — IP No, Days (round-up), Wage Base, Reason/
+#    LWD, totals — बिना IP वाले members की अलग warning list.
+# 📅 MONTH PICKER FIX (user bug — "Single Month Multiple बार दिख रहा"):
+#    Select Month dropdown अब हर entry पर GROUP दिखाता है
+#    ("July 2026 · STAFF ✓") और month+group पर duplicate runs में सिर्फ़
+#    सबसे नई दिखती है.
+#
 # ═══════════ WHAT'S NEW (Iter 724) — 🪪 EMPLOYEE MASTER: FULL KYC DETAILS (UNMASKED) ═══════════
 #
 # 🪪 FULL DOCUMENT NUMBERS ON THE EMPLOYEE MASTER (user request):

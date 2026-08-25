@@ -40,7 +40,14 @@ type Flow = {
 };
 type Portal = { key: string; label: string; url: string };
 type Employee = { user_id: string; name?: string; employee_code?: string };
-type Run = { run_id: string; month: string; status?: string };
+type Run = { run_id: string; month: string; status?: string; employee_type?: string; finalized?: boolean };
+
+// Iter 732 — one month can have a run per GROUP: label = "May 2026 · STAFF".
+function runLabel(r: Run): string {
+  const g = (r.employee_type || "").toUpperCase();
+  const fz = r.finalized ? " ✓" : "";
+  return `${fmtMonth(r.month)}${g && g !== "ALL" ? ` · ${g}` : ""}${fz}`;
+}
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"];
@@ -261,6 +268,39 @@ export default function AutomationStudioScreen() {
       }
     } catch (e: any) {
       setPcStatus(`❌ ${e?.message || "Challan PDF not available yet."}`);
+    }
+  };
+
+  // Iter 732 (user request) — one-click UAN registration sheet for the
+  // PF members without a UAN, and the ESIC contribution preview.
+  const downloadUanFile = async () => {
+    try {
+      const r = await apiBinary(
+        `/admin/portal-automation/uan-registration-file?company_id=${companyId}` +
+        `${runId ? `&run_id=${runId}` : ""}`);
+      if (Platform.OS === "web" && r.webBlobUrl) {
+        const a = document.createElement("a");
+        a.href = r.webBlobUrl;
+        a.download = `UAN_Registration_${companyId}.csv`;
+        document.body.appendChild(a); a.click(); a.remove();
+      }
+    } catch (e: any) {
+      setPcStatus(`❌ ${e?.message || "UAN registration file failed."}`);
+    }
+  };
+
+  const [esicPreview, setEsicPreview] = useState<any | null>(null);
+  const viewEsic = async () => {
+    setEcrBusy(true);
+    try {
+      const p = await api<any>(
+        `/admin/portal-automation/esic-preview?company_id=${companyId}` +
+        `${runId ? `&run_id=${runId}` : ""}`);
+      setEsicPreview(p);
+    } catch (e: any) {
+      setEsicPreview({ ok: false, error: e?.message || "ESIC preview failed" });
+    } finally {
+      setEcrBusy(false);
     }
   };
 
@@ -866,7 +906,7 @@ export default function AutomationStudioScreen() {
                         <Ionicons name="calendar-outline" size={16} color="#8B5E34" />
                         <Text style={[st.ddValue, !runId && { color: "#9CA3AF" }]}>
                           {runId
-                            ? fmtMonth(runs.find((r) => r.run_id === runId)?.month || "")
+                            ? runLabel(runs.find((r) => r.run_id === runId) || ({ month: "" } as Run))
                             : "Select month..."}
                         </Text>
                         <Ionicons
@@ -885,7 +925,7 @@ export default function AutomationStudioScreen() {
                                 style={[st.ddItem, runId === r.run_id && st.ddItemActive]}
                               >
                                 <Text style={[st.ddItemTxt, runId === r.run_id && { color: "#8B5E34", fontWeight: "800" }]}>
-                                  {fmtMonth(r.month)}
+                                  {runLabel(r)}
                                 </Text>
                                 {runId === r.run_id && (
                                   <Ionicons name="checkmark" size={16} color="#8B5E34" />
@@ -1046,11 +1086,23 @@ export default function AutomationStudioScreen() {
                           {ecrPreview.excluded_no_uan ? " · without-UAN members EXCLUDED" : ""}
                         </Text>
                         {(ecrPreview.no_uan_members || []).length > 0 && !ecrPreview.excluded_no_uan ? (
-                          <Text style={[st.ecrTitle, { color: "#B45309" }]}>
-                            ⚠ {ecrPreview.no_uan_members.length} member(s) WITHOUT UAN (will upload with blank UAN):{" "}
-                            {ecrPreview.no_uan_members.map((m: any) => m.name).slice(0, 10).join(", ")}
-                            {ecrPreview.no_uan_members.length > 10 ? "…" : ""}
-                          </Text>
+                          <>
+                            <Text style={[st.ecrTitle, { color: "#B45309" }]}>
+                              ⚠ {ecrPreview.no_uan_members.length} member(s) WITHOUT UAN (will upload with blank UAN):{" "}
+                              {ecrPreview.no_uan_members.map((m: any) => m.name).slice(0, 10).join(", ")}
+                              {ecrPreview.no_uan_members.length > 10 ? "…" : ""}
+                            </Text>
+                            <Pressable
+                              style={[st.pcBtn, { backgroundColor: "#7C3AED", alignSelf: "flex-start" }]}
+                              onPress={downloadUanFile}
+                              testID="as-uan-reg-file"
+                            >
+                              <Ionicons name="document-attach-outline" size={14} color="#fff" />
+                              <Text style={st.pcBtnTxt}>
+                                UAN Registration File ({ecrPreview.no_uan_members.length})
+                              </Text>
+                            </Pressable>
+                          </>
                         ) : null}
                         {(ecrPreview.no_uan_members || []).length > 0 && ecrPreview.excluded_no_uan ? (
                           <Text style={[st.ecrTitle, { color: "#16A34A" }]}>
@@ -1064,6 +1116,52 @@ export default function AutomationStudioScreen() {
                         <Text style={st.ecrHint}>
                           ECR ठीक लगे तो ऊपर “Open EPFO Portal” दबाएँ — Runner यही file portal के upload box में auto-select कर देगा।
                         </Text>
+                      </View>
+                    )
+                  ) : null}
+                  {/* Iter 732 (user request) — ESIC contribution preview
+                      before opening the ESIC portal. */}
+                  {portal === "esic" && (
+                    <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                      <Pressable
+                        style={[st.pcBtn, { backgroundColor: "#0E7490" }, ecrBusy && { opacity: 0.6 }]}
+                        onPress={viewEsic}
+                        disabled={ecrBusy}
+                        testID="as-view-esic"
+                      >
+                        {ecrBusy ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <Ionicons name="eye-outline" size={14} color="#fff" />
+                        )}
+                        <Text style={st.pcBtnTxt}>View ESIC Contribution</Text>
+                      </Pressable>
+                    </View>
+                  )}
+                  {portal === "esic" && esicPreview ? (
+                    esicPreview.ok === false ? (
+                      <Text style={[st.pcStatus, { color: "#DC2626" }]}>❌ {esicPreview.error}</Text>
+                    ) : (
+                      <View style={st.ecrBox}>
+                        <Text style={st.ecrTitle}>
+                          🏥 ESIC {esicPreview.month} · {esicPreview.totals?.members || 0} members ·
+                          Days {esicPreview.totals?.days || 0} · Wages ₹{esicPreview.totals?.wages || 0} ·
+                          EE ₹{esicPreview.totals?.esic_employee || 0}
+                        </Text>
+                        {(esicPreview.missing_ip || []).length > 0 ? (
+                          <Text style={[st.ecrTitle, { color: "#B45309" }]}>
+                            ⚠ WITHOUT IP No (not in upload): {esicPreview.missing_ip.map((m: any) => m.name).slice(0, 10).join(", ")}
+                            {esicPreview.missing_ip.length > 10 ? "…" : ""}
+                          </Text>
+                        ) : null}
+                        <ScrollView style={st.ecrScroll} nestedScrollEnabled>
+                          <Text style={st.ecrText} selectable>
+                            {(esicPreview.members || []).map((m: any) =>
+                              `${m.ip_no}  ${m.name}  Days:${m.days}  Wages:${m.wages}` +
+                              `${m.reason ? `  Reason:${m.reason}${m.last_working_day ? ` LWD:${m.last_working_day}` : ""}` : ""}`,
+                            ).join("\n")}
+                          </Text>
+                        </ScrollView>
                       </View>
                     )
                   ) : null}

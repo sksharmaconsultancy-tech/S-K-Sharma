@@ -2933,6 +2933,136 @@ async def portal_ecr_preview(
     }
 
 
+@router.get("/admin/portal-automation/esic-preview")
+async def portal_esic_preview(
+    company_id: Optional[str] = Query(None),
+    run_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 732 (user request) — VIEW the ESIC monthly contribution rows
+    before uploading, with the same values the MC upload file carries."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
+    company_id = await _resolve_company(admin, company_id)
+    q: Dict[str, Any] = {"company_id": company_id}
+    if (run_id or "").strip():
+        q["run_id"] = run_id.strip()
+        run = await db.compliance_salary_runs.find_one(q, {"_id": 0})
+    else:
+        run = await db.compliance_salary_runs.find_one(
+            q, {"_id": 0}, sort=[("month", -1)])
+    if not run:
+        raise HTTPException(status_code=404,
+                            detail="No Compliance Salary Process found for this firm.")
+    from routes.challans import _uan_esic_map, _esic_row_vals, _esic_ip_fmt
+    rows = run.get("rows") or []
+    extra = await _uan_esic_map(rows)
+    members, missing_ip = [], []
+    t_days = t_wages = t_ee = 0.0
+    for r in rows:
+        if float(r.get("esic_employee") or 0) <= 0 and not r.get("esic_applicable"):
+            continue
+        u = extra.get(r.get("user_id") or "") or {}
+        ip_no = str(r.get("esi_ip_no") or u.get("esi_ip_no") or "").strip()
+        days, wages, reason, lwd = _esic_row_vals(r, u, run.get("month"))
+        m = {"ip_no": _esic_ip_fmt(ip_no) if ip_no else "",
+             "name": r.get("name") or "", "employee_code": r.get("employee_code") or "",
+             "days": days, "wages": wages, "reason": reason, "last_working_day": lwd,
+             "esic_employee": float(r.get("esic_employee") or 0)}
+        if not ip_no:
+            missing_ip.append({"name": m["name"], "employee_code": m["employee_code"]})
+        else:
+            members.append(m)
+            t_days += days; t_wages += wages; t_ee += m["esic_employee"]
+    return {"ok": True, "month": str(run.get("month") or ""),
+            "members": members, "missing_ip": missing_ip,
+            "totals": {"members": len(members), "days": int(t_days),
+                       "wages": round(t_wages, 2), "esic_employee": round(t_ee, 2)}}
+
+
+@router.get("/admin/portal-automation/uan-registration-file")
+async def portal_uan_registration_file(
+    company_id: Optional[str] = Query(None),
+    run_id: Optional[str] = Query(None),
+    preview: bool = Query(False),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 732 (user request) — ONE-CLICK EPFO member-registration sheet
+    for PF members WITHOUT a UAN: every field the unified portal's Member
+    Registration screen asks for, straight from the Employee Master."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
+    company_id = await _resolve_company(admin, company_id)
+    q: Dict[str, Any] = {"company_id": company_id}
+    if (run_id or "").strip():
+        q["run_id"] = run_id.strip()
+        run = await db.compliance_salary_runs.find_one(q, {"_id": 0})
+    else:
+        run = await db.compliance_salary_runs.find_one(
+            q, {"_id": 0}, sort=[("month", -1)])
+    if not run:
+        raise HTTPException(status_code=404,
+                            detail="No Compliance Salary Process found for this firm.")
+    rows = [r for r in (run.get("rows") or [])
+            if (r.get("pf_applicable") or r.get("pf_eligible")
+                or float(r.get("pf_employee") or 0) > 0)]
+    uids = [r.get("user_id") for r in rows if r.get("user_id")]
+    users = {u["user_id"]: u async for u in db.users.find(
+        {"user_id": {"$in": uids}},
+        {"_id": 0, "user_id": 1, "uan_no": 1, "name": 1, "father_name": 1,
+         "dob": 1, "gender": 1, "marital_status": 1, "aadhar_number": 1,
+         "pan_number": 1, "bank_account": 1, "bank_ifsc": 1, "bank_name": 1,
+         "phone": 1, "email": 1, "doj": 1, "employee_code": 1})}
+    def _dmy(d: str) -> str:
+        d = str(d or "")[:10]
+        if len(d) == 10 and d[4] == "-":
+            return f"{d[8:10]}/{d[5:7]}/{d[:4]}"
+        return d
+    members = []
+    for r in rows:
+        u = users.get(r.get("user_id") or "") or {}
+        if str(r.get("uan_no") or u.get("uan_no") or "").strip():
+            continue  # already has a UAN
+        members.append({
+            "employee_code": r.get("employee_code") or u.get("employee_code") or "",
+            "name": (u.get("name") or r.get("name") or "").upper(),
+            "father_name": (u.get("father_name") or "").upper(),
+            "dob": _dmy(u.get("dob")), "gender": (u.get("gender") or "").upper()[:1],
+            "marital_status": u.get("marital_status") or "",
+            "aadhaar": str(u.get("aadhar_number") or ""),
+            "pan": str(u.get("pan_number") or "").upper(),
+            "bank_account": str(u.get("bank_account") or ""),
+            "bank_ifsc": str(u.get("bank_ifsc") or "").upper(),
+            "mobile": str(u.get("phone") or ""),
+            "email": u.get("email") or "",
+            "doj_epf": _dmy(u.get("doj")),
+            "monthly_pf_wages": float(r.get("pf_wages") or 0),
+        })
+    if preview:
+        return {"ok": True, "month": str(run.get("month") or ""),
+                "count": len(members), "members": members}
+    if not members:
+        raise HTTPException(status_code=400,
+                            detail="Every PF member of this run already has a UAN.")
+    import csv as _csv
+    import io as _io
+    buf = _io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(["EMP CODE", "MEMBER NAME", "FATHER/HUSBAND NAME", "DOB (DD/MM/YYYY)",
+                "GENDER", "MARITAL STATUS", "AADHAAR", "PAN", "BANK A/C", "IFSC",
+                "MOBILE", "EMAIL", "DOJ EPF (DD/MM/YYYY)", "MONTHLY PF WAGES"])
+    for m in members:
+        w.writerow([m["employee_code"], m["name"], m["father_name"], m["dob"],
+                    m["gender"], m["marital_status"], m["aadhaar"], m["pan"],
+                    m["bank_account"], m["bank_ifsc"], m["mobile"], m["email"],
+                    m["doj_epf"], m["monthly_pf_wages"]])
+    fname = f"UAN_Registration_{str(run.get('month') or '')}.csv"
+    from fastapi.responses import Response as _Resp
+    return _Resp(content=buf.getvalue().encode("utf-8-sig"),
+                 media_type="text/csv",
+                 headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
 @router.post("/admin/portal-automation/claim-epfo-login")
 async def claim_epfo_login(
     payload: Optional[Dict[str, Any]] = None,
