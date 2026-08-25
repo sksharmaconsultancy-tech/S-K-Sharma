@@ -290,8 +290,16 @@ async def _fnf_compute(user_id: str, exit_date: str, leave_encash_days: float,
     adv_out = round(sum(_num(a.get("remaining_balance")) for a in adv_docs
                         if str(a.get("status") or "").lower()
                         not in ("closed", "cancelled", "rejected")), 2)
+    # Iter 731 — Asset module integration (read-only): pending approved
+    # asset recovery + unreturned assets appear in F&F automatically.
+    asset_recs = await db.asset_recoveries.find(
+        {"user_id": user_id, "status": "active"},
+        {"_id": 0, "pending_amount": 1}).to_list(100)
+    asset_recovery = round(sum(_num(r.get("pending_amount")) for r in asset_recs), 2)
+    pending_assets = await db.asset_assignments.count_documents(
+        {"user_id": user_id, "active": True})
     earn_total = round(earned + gratuity + leave_encash + bonus_amount + other_earning, 2)
-    ded_total = round(adv_out + notice_recovery + other_deduction, 2)
+    ded_total = round(adv_out + notice_recovery + other_deduction + asset_recovery, 2)
     return {
         "employee": {"user_id": user_id, "name": u.get("name"),
                      "employee_code": u.get("employee_code"), "doj": u.get("doj"),
@@ -306,6 +314,8 @@ async def _fnf_compute(user_id: str, exit_date: str, leave_encash_days: float,
         "bonus_amount": round(bonus_amount, 2),
         "other_earning": round(other_earning, 2),
         "advance_recovery": adv_out,
+        "asset_recovery": asset_recovery,
+        "pending_assets": pending_assets,
         "notice_recovery": round(notice_recovery, 2),
         "other_deduction": round(other_deduction, 2),
         "total_earnings": earn_total, "total_deductions": ded_total,
@@ -344,6 +354,7 @@ async def fnf_calc(
         {"p": "Other Earnings", "d": "", "amt": d["other_earning"]},
         {"p": "TOTAL EARNINGS (A)", "d": "", "amt": d["total_earnings"]},
         {"p": "Advance Recovery", "d": "outstanding balance", "amt": d["advance_recovery"]},
+        {"p": "Asset Recovery", "d": "pending approved recovery", "amt": d["asset_recovery"]},
         {"p": "Notice Pay Recovery", "d": "", "amt": d["notice_recovery"]},
         {"p": "Other Deductions", "d": "", "amt": d["other_deduction"]},
         {"p": "TOTAL DEDUCTIONS (B)", "d": "", "amt": d["total_deductions"]},

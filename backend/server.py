@@ -10285,7 +10285,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "730"
+APP_ITERATION = "731"
 
 
 @api.get("/version")
@@ -13664,3 +13664,7 @@ async def shutdown():
 # Iter 730 — Gate Pass + Late Penalty + F&F Calculator (user request).
 from routes.hr_extras import router as hr_extras_router  # noqa: E402
 app.include_router(hr_extras_router)
+
+# Iter 731 — Asset Management module (user spec).
+from routes.asset_management import router as asset_mgmt_router  # noqa: E402
+app.include_router(asset_mgmt_router)

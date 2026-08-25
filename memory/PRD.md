@@ -9037,3 +9037,26 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   all 3 screens UI verified). APP_ITERATION=730; deploy_vps_iter730.sh.
 - Also this session: user's Payroll.xlsx module-status sheet generated →
   /app/Payroll_Status_SKS.xlsx (kind=payrollstatus).
+
+## Iter 731 — Asset Management Module (2026-06, user spec)
+- Backend: /app/backend/routes/asset_management.py (registered server.py
+  tail). Collections: asset_categories, assets, asset_assignments,
+  asset_incidents, asset_repairs, asset_recoveries, asset_history.
+- Endpoints: /api/admin/assets (CRUD, auto AST-#### code, dup serial
+  block), /categories, /{id}/assign|return|transfer|repair|incident,
+  /incidents/{id}/approve (creates recovery plan w/ monthly instalments),
+  /repairs/{id}/complete, /recoveries + /recoveries/apply (stamps draft
+  compliance run other_deduction 'Asset Recovery' + manual_fields —
+  engine untouched), /dashboard, /report/{kind}?fmt=xlsx|pdf (fmt is
+  'xlsx' NOT 'excel'), /{id}/qr (PNG), /{id}/profile (full history),
+  /clearance/{user_id}. Employee: /api/my/assets, /{asg}/ack, /{asg}/report.
+- F&F integration: hr_extras._fnf_compute now adds asset_recovery
+  (pending active recoveries) to deductions + pending_assets count;
+  PDF has Asset Recovery row; fnf-calculator.tsx shows warning.
+- Frontend: asset-management.tsx (6 tabs: Dashboard/Assets/Incidents/
+  Repairs/Recoveries/Reports), asset-profile.tsx (QR target, history
+  timeline), my-assets.tsx (ESS: view/ack/report). Nav: AdminWebShell
+  'Asset Management' + ESS home 'My Assets' quick action.
+- testing_agent: ALL PASS (15/15 pytest test_asset_management.py +
+  admin & employee UI + fnf/attendance regression).
+- APP_ITERATION=731; deploy_vps_iter731.sh via kind=script.

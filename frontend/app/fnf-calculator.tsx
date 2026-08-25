@@ -125,6 +125,10 @@ export default function FnfCalculatorScreen() {
             {L("Other Earnings", data.other_earning)}
             {L("Total Earnings (A)", data.total_earnings, true)}
             {L("Advance Recovery", data.advance_recovery, false, true)}
+            {data.asset_recovery > 0 && L("Asset Recovery (pending)", data.asset_recovery, false, true)}
+            {data.pending_assets > 0 && (
+              <Text style={[st.note, { color: "#b3261e", fontWeight: "700" }]}>⚠️ {data.pending_assets} asset(s) अभी return नहीं हुए — Asset Clearance pending</Text>
+            )}
             {L("Notice Recovery", data.notice_recovery, false, true)}
             {L("Other Deductions", data.other_deduction, false, true)}
             {L("Total Deductions (B)", data.total_deductions, true, true)}

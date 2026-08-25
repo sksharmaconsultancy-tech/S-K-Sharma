@@ -941,3 +941,7 @@ ITER 487 (doc-expiry alerts):
 - testing_agent iteration_730.json ALL PASS: gate pass punch
   insert/delete E2E, late penalty seeded-late E2E + apply 404 path,
   F&F calc+PDF, 3 frontend screens + sidebar nav.
+
+## Iter 731 — Asset Management (tested)
+- testing_agent ALL PASS: backend lifecycle 15/15, xlsx/pdf/qr, employee
+  PWA endpoints, admin UI 6 tabs, my-assets ack/report, regressions OK.
