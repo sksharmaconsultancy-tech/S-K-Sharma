@@ -1842,7 +1842,14 @@ def has_unpaired_punches(day_punches: List[dict]) -> bool:
 
     Detection walks the chronologically sorted punches. Consecutive INs
     without an intervening OUT, or trailing INs without a closing OUT,
-    are treated as missing punches. Same for orphan OUTs at the start.
+    are treated as missing punches.
+
+    Iter 714 (user bug — "both punches available + manually repaired but
+    day still shows Missing Punch"): OUT punches BEFORE the day's first IN
+    are the tail of yesterday's night shift (or a stray/redundant manual
+    OUT). ``_pair_punches`` already skips them safely — they must NOT zero
+    out the day's valid IN → OUT pair any more. A day consisting ONLY of
+    such leading OUTs (no IN at all) is still flagged as before.
     """
     ps = sorted(
         (p for p in (day_punches or []) if p.get("at") and p.get("kind") in ("in", "out")),
@@ -1851,17 +1858,25 @@ def has_unpaired_punches(day_punches: List[dict]) -> bool:
     if not ps:
         return False
     open_in = False
+    seen_in = False
+    leading_out = False
     for p in ps:
         k = (p.get("kind") or "").lower()
         if k == "in":
             if open_in:
                 return True  # IN → IN without OUT between
             open_in = True
+            seen_in = True
         elif k == "out":
             if not open_in:
-                return True  # OUT without preceding IN
+                if seen_in:
+                    return True  # OUT without preceding IN mid-day
+                leading_out = True  # cross-day tail — tolerated
+                continue
             open_in = False
-    return open_in  # trailing unclosed IN
+    if open_in:
+        return True  # trailing unclosed IN
+    return leading_out and not seen_in  # OUT-only day stays flagged
 
 
 
@@ -3132,6 +3147,11 @@ async def startup():
             # grid punch load: user_id $in + date range, sorted (user_id, at)
             await db.attendance.create_index(
                 [("user_id", 1), ("date", 1), ("at", 1)], background=True)
+            # Iter 714 (user: Attendance Report slow) — the grid-cache dirty
+            # probe sorts by created_at per firm on EVERY report open; with
+            # no supporting index it collection-scanned large live VPS data.
+            await db.attendance.create_index(
+                [("company_id", 1), ("created_at", -1)], background=True)
             # punch-log NOT-FOUND rows + sync-dashboard machine_only group
             await db.biometric_unmapped.create_index(
                 [("device_serial", 1), ("at", -1)], background=True)
@@ -10095,7 +10115,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "713"
+APP_ITERATION = "714"
 
 
 @api.get("/version")
@@ -10534,42 +10554,47 @@ async def _compute_monthly_grid_data(
     to_date: Optional[str] = None,
 ):
     _key = f"{company_id}|{month}|{group_id or ''}|{from_date or ''}|{to_date or ''}"
+
+    def _kick_refresh() -> None:
+        """Recompute this grid in the BACKGROUND (one in-flight per key)."""
+        if _key in _MG_REFRESHING:
+            return
+        _MG_REFRESHING.add(_key)
+
+        async def _refresh():
+            try:
+                d = await _compute_monthly_grid_data_impl(
+                    company_id=company_id, month=month, group_id=group_id,
+                    from_date=from_date, to_date=to_date)
+                _MG_CACHE[_key] = (_time_mod.time(),
+                                   json.dumps(d, default=str))
+            except Exception:
+                pass
+            finally:
+                _MG_REFRESHING.discard(_key)
+
+        try:
+            asyncio.create_task(_refresh())
+        except Exception:
+            _MG_REFRESHING.discard(_key)
+
     _hit = _MG_CACHE.get(_key)
     if _hit:
-        # Iter 710 — a fresh punch (repair/manual/OT/import) written AFTER
-        # the cache was built must recompute NOW, not after the TTL.
-        if await _mg_dirty(company_id, _hit[0]):
-            invalidate_grid_cache(company_id)
-            _hit = None
-    if _hit:
         _age = _time_mod.time() - _hit[0]
-        if _age < _MG_TTL_SEC:
-            return json.loads(_hit[1])
         if _age < _MG_STALE_MAX:
-            # Iter 705b — INSTANT open even for 5000 employees: return the
-            # last computed grid immediately and refresh it in the
-            # background so the next open is both instant AND fresh.
-            if _key not in _MG_REFRESHING:
-                _MG_REFRESHING.add(_key)
-
-                async def _refresh():
-                    try:
-                        d = await _compute_monthly_grid_data_impl(
-                            company_id=company_id, month=month,
-                            group_id=group_id, from_date=from_date,
-                            to_date=to_date)
-                        _MG_CACHE[_key] = (_time_mod.time(),
-                                           json.dumps(d, default=str))
-                    except Exception:
-                        pass
-                    finally:
-                        _MG_REFRESHING.discard(_key)
-
-                try:
-                    asyncio.create_task(_refresh())
-                except Exception:
-                    _MG_REFRESHING.discard(_key)
+            # Iter 714 (user: "report taking too much time AGAIN") — the old
+            # dirty-check WIPED the cache and forced a FULL synchronous
+            # recompute whenever ANY new attendance row existed. On the live
+            # VPS biometric punches stream in all day, so nearly every open
+            # recomputed the whole grid on the spot. Now the report ALWAYS
+            # opens instantly from cache (≤30 min old) and a background
+            # refresh brings in the new punches for the next open. Manual
+            # punch repairs still call invalidate_grid_cache() explicitly,
+            # so corrections keep appearing immediately (Iter 710 fix).
+            if _age >= _MG_TTL_SEC or await _mg_dirty(company_id, _hit[0]):
+                _kick_refresh()
             return json.loads(_hit[1])
+        _MG_CACHE.pop(_key, None)
     data = await _compute_monthly_grid_data_impl(
         company_id=company_id, month=month, group_id=group_id,
         from_date=from_date, to_date=to_date)

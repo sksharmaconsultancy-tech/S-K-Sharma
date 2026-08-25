@@ -8603,3 +8603,28 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   decide blocked, approver approve→leave approved+notify, return→leave
   "returned", advance return→"returned"/reject→"rejected", non-approver
   blocked. Badge 713, sw v28, deploy_vps_iter713.sh via kind=script.
+- Iter 714 — TWO USER BUGS FIXED:
+  (A) "Monthly Attendance / punching report takes too much time":
+  Root cause 1: _compute_monthly_grid_data dirty-check WIPED cache +
+  recomputed synchronously whenever any new attendance row existed —
+  on live VPS punches stream all day → nearly every open recomputed.
+  FIX: always serve from cache when <30min old, background _kick_refresh
+  when dirty or >TTL(90s); manual repairs keep explicit
+  invalidate_grid_cache (instant corrections). Root cause 2: _mg_dirty
+  probe sorted attendance by created_at per-request with no index → added
+  (company_id, created_at) index to _bg_speed_indexes. Verified: dirty
+  hit now 8ms (was full recompute), bg refresh updates cache, explicit
+  invalidation still recomputes fresh.
+  (B) "Both punches available + manually repaired but day shows Missing
+  Punch" (AMIT KUMAR screenshot): reproduced exactly — day with [manual
+  OUT 08:00 + machine IN 20:00] + next-day OUT 08:07 → stitch pulls 08:07
+  back, day has leading unpaired OUT → has_unpaired_punches returned True
+  → WHOLE day zeroed/flagged missing despite valid IN→OUT pair. FIX in
+  server.py has_unpaired_punches: leading OUTs before first IN tolerated
+  (cross-day tail/stray; _pair_punches skips them); still flags IN→IN,
+  trailing open IN, mid-day stray OUT, OUT-only days. Affects all 3 call
+  sites (grid, ESS self-view, xlsx export) consistently. Verified: repro
+  cell now in 20:00/out 08:07/duty 8+OT 4; 7/7 helper regression cases
+  pass. Badge 714, sw v29, deploy_vps_iter714.sh via kind=script.
+  NOTE: pending investigation thread on manual punch storage was resolved
+  as NOT the cause (formats sort fine); night-shift stitch works.
