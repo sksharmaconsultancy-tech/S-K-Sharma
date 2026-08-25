@@ -8865,3 +8865,17 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   unchanged. NOTE (told user, Iter 728 chat): PF Basic blank + only
   higher_pf_wage filled → PF=0 (eligibility gated on pf_basic>0) — user
   aware, not yet asked to change. Folded into deploy_vps_iter724.sh.
+- Iter 730 — (a) ATTENDANCE SHEET AUTOMATION DYNAMIC COLUMNS (user bug:
+  emailed client Excel showed wrong editable allowances): HRA/Conv./
+  OVER_TIME columns in build_master_sheet_xlsx + build_master_sheet_pdf
+  (utils/master_sheet.py) now follow Firm-Master Allowance catalog via
+  new fixed_heads param; _master_rates_by_user (server.py) returns
+  3-tuple (labels, rates, fixed_heads) — all 3 call sites updated
+  (iter60_features email batch, server.py download + all-groups zip).
+  Firms without a catalog keep all columns. VERIFIED: openpyxl header
+  check for None / all-off / mixed. (b) "Not Able to Update Iter 724"
+  ROOT CAUSE: APP_ITERATION in server.py was still "722" — deploys
+  succeeded but the footer badge (GET /api/version) kept showing 722,
+  user thought update failed. Bumped to "724". LESSON FOR NEXT AGENT:
+  ALWAYS bump APP_ITERATION (server.py ~line 10219) with every deploy
+  script iteration.
