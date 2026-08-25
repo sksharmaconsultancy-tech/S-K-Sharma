@@ -1,0 +1,36 @@
+{
+  "summary": "Iter 732 F&F Settlement Lifecycle — FRONTEND ONLY test on /fnf-calculator. ALL 19 PLAYWRIGHT STEPS PASSED end-to-end on mobile viewport (414x900) as super_admin with Kankani firm cmp_527fecdd7c selected. Flow verified: (1) search 'SURENDRA' via testID fnf-emp-search → picked SURENDRA SINGH (50); (2) set Exit Date 2026-08-15, Notice Required 30 / Served 10, TDS 500 → tapped testID fnf-compute → breakdown rendered with '📒 Leave Ledger: PL 0/0 taken → balance 0 · CL balance 0', '📋 Notice: 10/30 days served → 20 days shortfall', line 'Earned Salary ₹0', 'Gratuity ₹44700', 'Total Earnings (A) ₹44700', 'Notice Recovery ₹12496.8', 'PF+ESIC+PT+TDS ₹500', 'Total Deductions (B) ₹12996.8', 'NET PAYABLE ₹31703.2'. (3) 💾 Save Settlement (testID fnf-save) → toast '✓ Settlement saved: FNF-2026-000001 (draft)'; KPI line 'Total 1 · Payable ₹31703.2 · Paid ₹0 · Outstanding ₹31703.2 · draft: 1' visible. (4) Submit button → status SUBMITTED. (5) ✓ Approve → status APPROVED. (6) ₹ Payment inline fields opened, filled ₹1 + UTR 'UTR-TEST-732' → testID fnf-pay-save → status PARTIALLY_PAID with Balance ₹31702.2 · Paid ₹1. (7) PDF button downloaded FNF-2026-000001.pdf. (8) Register Excel downloaded FnF_Register.xlsx. (9) Register PDF downloaded FnF_Register.pdf. (10) Reopen with web prompt 'test reopen' → status REOPENED · Rev 1. REGRESSION: /asset-management loads clean (Asset Management header + Dashboard/Assets/Incidents/Repairs/Recover tabs), /attendance-grid loads clean (127 employees rendered in Monthly Attendance grid); ZERO console errors on both. CLEANUP: All fnf_settlements (1) + fnf_audit (5) docs for cmp_527fecdd7c deleted from Mongo post-run. NOTE: only 5 audit entries created (not 6 as prompt mentioned) — one per action: draft-create, submit, approve, payment, reopen. Depending on lifecycle spec this may be correct (no reject action taken) or a mild under-count — flagging for main agent visibility.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/screens/iter732_fnf_01_load.png",
+    "/app/test_reports/screens/iter732_fnf_03_search.png",
+    "/app/test_reports/screens/iter732_fnf_04_compute.png",
+    "/app/test_reports/screens/iter732_fnf_05_saved.png",
+    "/app/test_reports/screens/iter732_fnf_06_payment.png",
+    "/app/test_reports/screens/iter732_fnf_07_final.png",
+    "/app/test_reports/screens/iter732_regression_asset.png",
+    "/app/test_reports/screens/iter732_regression_att.png"
+  ],
+  "action_items": [
+    "Verify with main agent whether 5 audit entries (draft-create, submit, approve, payment, reopen) is the intended count — original spec mentioned '6 audit entries'. Could be that revision-snapshot on reopen should also emit its own audit row. Not blocking."
+  ],
+  "critical_code_review_comments": [
+    "fnf-calculator.tsx (324 lines) — well under 700-line limit, uses <Text> + StyleSheet.create + testIDs on all key controls (fnf-emp-search, fnf-compute, fnf-save, fnf-pdf, fnf-pay-save). No React Native red-screen or design issues.",
+    "fnf-calculator.tsx:99-102 — reopen uses window.prompt on web (Platform.OS==='web') which works but is not available on native; native path currently sends empty reason. Consider adding an Alert.prompt fallback for iOS or a modal input for Android for cross-platform parity.",
+    "fnf-calculator.tsx:279 — the 'PDF' button in the settlement row uses get_by_text 'PDF' which collides with 'Register PDF'; UI works because CTA order gives per-row PDF first. Consider adding testID 'fnf-row-pdf-{settlement_id}' for robust automation.",
+    "fnf-calculator.tsx: no explicit KeyboardAvoidingView — acceptable for web preview but on native small screens the many numeric inputs (13 fields) may be occluded by keyboard. Recommend wrapping ScrollView content in KeyboardAvoidingView (Platform.select) for a11y."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (skip per request)", "frontend": "100% (19/19 lifecycle steps + 2/2 regression pages)"},
+  "seed_data_creation": "1 fnf_settlements doc (FNF-2026-000001) + 5 fnf_audit docs created for Kankani cmp_527fecdd7c during UI test. ALL cleaned up post-run via direct Mongo delete; verified 0 remaining docs for company_id=cmp_527fecdd7c in fnf_settlements collection.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 732 F&F Settlement Lifecycle UI is stable. Login flow (unchanged from iter 731): password-login → swap otp_hash in db.twofa_pending → /api/auth/2fa/verify → session_token → inject as localStorage.llc_session_token before navigating to /fnf-calculator. CompanyPicker on this screen uses testID='firm-picker' (matched via [data-testid=\"firm-picker\"]) — clicking it opens a modal, then get_by_text('Kankani Enterprises').last selects the option. All 13 form inputs are indexed in DOM order: [0]=emp-search, [1]=exit-date (placeholder 'YYYY-MM-DD'), [2]=leave-days, [3]=bonus, [4]=notice-recovery, [5]=other-earn, [6]=other-ded, [7]=notice-required, [8]=notice-served, [9]=pf, [10]=esic, [11]=pt, [12]=tds. Reopen uses window.prompt on web — Playwright must register a dialog handler BEFORE clicking the button: page.once('dialog', lambda d: d.accept('reason')). Register buttons trigger native download events (blob url). Cleanup collections: fnf_settlements + fnf_audit filtered by company_id.",
+  "rca_of_issue": "N/A — no issues found in the F&F Settlement Lifecycle UI. Feature works as designed for the full state machine: draft → submitted → approved → (partial)paid → reopened(Rev 1)."
+}

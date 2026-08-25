@@ -9060,3 +9060,27 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
 - testing_agent: ALL PASS (15/15 pytest test_asset_management.py +
   admin & employee UI + fnf/attendance regression).
 - APP_ITERATION=731; deploy_vps_iter731.sh via kind=script.
+
+## Iter 732 — F&F Settlement Lifecycle (2026-06, user spec)
+- hr_extras.py: _fnf_compute enhanced — auto leave-ledger fetch (firm
+  leave_policy cl/pl limits + overrides − approved db.leaves of exit
+  year; auto_leave=True sets encash days = PL balance), notice pay auto
+  (users.notice_period_days or param; shortfall × daily), statutory
+  fields pf/esic/pt/tds (manual, separate lines + PDF rows).
+- NEW lifecycle endpoints (hr_extras.py tail): POST /admin/fnf/settlements
+  (snapshot save, FNF-YYYY-###### firm-wise, duplicate-active block),
+  GET list + KPI, POST /{sid}/action (submit/approve/reject/hold/cancel/
+  reopen — reopen pushes revision snapshot + recalcs, reason mandatory),
+  POST /{sid}/payment (partial/full, UTR, auto balance/status),
+  GET /{sid}/pdf (settlement sheet w/ ID/status/approvals/payments/
+  signature block), GET /admin/fnf/register?fmt=xlsx|pdf.
+  Collections: fnf_settlements (immutable calc snapshot + revisions[] +
+  approvals[] + payments[]), fnf_audit (all actions old/new/by/at).
+- Frontend fnf-calculator.tsx: notice req/served + PF/ESIC/PT/TDS inputs,
+  auto-leave toggle, leave-ledger + notice-shortfall info lines, Save
+  Settlement (fnf-save), settlements list w/ KPI + Submit/Approve/Reject/
+  Payment (fnf-pay-save)/Reopen/PDF + Register Excel/PDF export.
+- testing_agent: UI 19/19 steps PASS + regressions. Known minor: reopen
+  reason uses window.prompt (web-only — PWA use case); native fallback
+  pending if ever needed.
+- APP_ITERATION=732; deploy_vps_iter732.sh via kind=script.

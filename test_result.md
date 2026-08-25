@@ -945,3 +945,8 @@ ITER 487 (doc-expiry alerts):
 ## Iter 731 — Asset Management (tested)
 - testing_agent ALL PASS: backend lifecycle 15/15, xlsx/pdf/qr, employee
   PWA endpoints, admin UI 6 tabs, my-assets ack/report, regressions OK.
+
+## Iter 732 — F&F lifecycle (tested)
+- Backend self-test full lifecycle PASS (save/dup-block/submit/approve/
+  partial+full payment/reopen revision/audit 6/register PK/pdf).
+- testing_agent frontend 19/19 PASS + asset/attendance regression.
