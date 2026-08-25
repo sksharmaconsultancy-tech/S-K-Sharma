@@ -2075,6 +2075,7 @@ def dedupe_close_punches(
 def stitch_cross_day_ot(
     punches_by_day: Dict[str, List[dict]],
     max_hours: int = 16,
+    company_cfg: Optional[dict] = None,
 ) -> Dict[str, List[dict]]:
     """Iter 77y — Cross-day OT punch pairing.
 
@@ -2083,6 +2084,10 @@ def stitch_cross_day_ot(
 
         01-Jun IN 08:00, OUT 19:58, OT-In 20:08   (unpaired trailing IN)
         02-Jun OT-Out 07:58                       (unpaired leading OUT)
+
+    Iter 715 (user spec — CROSS MIDNIGHT punching): this mapping is the
+    firm-wide Cross Midnight behaviour, DEFAULT YES. Only an explicit
+    ``attendance_config.cross_midnight = False`` switches it off.
 
     Left as-is, the per-day pair-punches loop can't pair the OT-In with
     the next-day OT-Out so the entire OT session is silently dropped.
@@ -2095,6 +2100,8 @@ def stitch_cross_day_ot(
 
     Returns a NEW dict (does not mutate the input).
     """
+    if company_cfg is not None and company_cfg.get("cross_midnight") is False:
+        return dict(punches_by_day or {})
     if not punches_by_day:
         return {}
     from datetime import datetime as _dt, timedelta as _td
@@ -10115,7 +10122,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "714"
+APP_ITERATION = "715"
 
 
 @api.get("/version")
@@ -10153,7 +10160,8 @@ def _policy2_biometric_stats(att_rows: List[dict], policy: dict, emp_full: dict,
         d = r.get("date")
         if d:
             by_day.setdefault(d, []).append(r)
-    by_day = stitch_cross_day_ot(dedupe_close_punches(by_day, company_cfg=company_cfg))
+    by_day = stitch_cross_day_ot(dedupe_close_punches(by_day, company_cfg=company_cfg),
+                                 company_cfg=company_cfg)
     present = 0.0
     duty_min = 0.0
     for date_key, punches in by_day.items():
@@ -10761,6 +10769,7 @@ async def _compute_monthly_grid_data_impl(
                     punches_by_user_day[_uid_key],
                     company_cfg=company.get("attendance_config"),
                 ),
+                company_cfg=company.get("attendance_config"),
             )
             # Drop the ±1-day helper keys after stitching (Iter 486).
             punches_by_user_day[_uid_key] = {
@@ -11558,6 +11567,7 @@ async def _build_ot_report_rows(
                 punches_by_user_day[_uid_k],
                 company_cfg=company.get("attendance_config"),
             ),
+            company_cfg=company.get("attendance_config"),
         )
 
     pol = company.get("attendance_policy") or {}

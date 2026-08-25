@@ -1386,7 +1386,8 @@ async def generate(payload: Dict[str, Any] = Body(...),
         recs_by = {}
         for _uid, _daymap in _by_user.items():
             _rep = stitch_cross_day_ot(dedupe_close_punches(
-                _daymap, company_cfg=(_comp or {}).get("attendance_config")))
+                _daymap, company_cfg=(_comp or {}).get("attendance_config")),
+                company_cfg=(_comp or {}).get("attendance_config"))
             for _dk, _plist in _rep.items():
                 if from_date <= _dk <= to_date:
                     recs_by[(_uid, _dk)] = _plist

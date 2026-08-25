@@ -87,7 +87,8 @@ async def labour_cost_dashboard(
     for uid, daymap in by_user.items():
         e = emp_by_id[uid]
         repaired = stitch_cross_day_ot(dedupe_close_punches(
-            daymap, company_cfg=comp.get("attendance_config")))
+            daymap, company_cfg=comp.get("attendance_config")),
+            company_cfg=comp.get("attendance_config"))
         for dk, plist in repaired.items():
             if dk not in trend:
                 continue

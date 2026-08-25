@@ -1003,6 +1003,8 @@ export default function FirmMasterScreen() {
                   // Iter 518 — Smart Direction Correction (preserved on save)
                   smart_direction: !!ac.smart_direction,
                   smart_direction_gap_hrs: ac.smart_direction_gap_hrs ?? 4,
+                  // Iter 715 — Cross Midnight punching (default YES)
+                  cross_midnight: ac.cross_midnight !== false,
                   ...patch,
                 },
               });
@@ -1054,6 +1056,18 @@ export default function FirmMasterScreen() {
                     () => setAC({ device_mode: "gps" }), "fm-ac-gps")}
                   {radio(acMode === "qr", "QR Code", "Scan a site QR to punch",
                     () => setAC({ device_mode: "qr" }), "fm-ac-qr")}
+                </View>
+                {/* Iter 715 (user spec) — Cross Midnight punching, default YES. */}
+                <Text style={[styles.subLbl, { marginTop: 12 }]}>
+                  Cross Midnight Punching (night shifts ending next morning)
+                </Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  {radio(ac.cross_midnight !== false, "YES (default)",
+                    "Next-day OUT punch maps to the previous day's night-shift session",
+                    () => setAC({ cross_midnight: true }), "fm-ac-cm-yes")}
+                  {radio(ac.cross_midnight === false, "NO",
+                    "Every punch stays strictly on its own calendar date",
+                    () => setAC({ cross_midnight: false }), "fm-ac-cm-no")}
                 </View>
                 {acMode === "separate" ? (
                   <>

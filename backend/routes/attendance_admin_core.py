@@ -108,7 +108,8 @@ async def attendance_grid_debug(
             by_day.setdefault(r["date"], []).append(dict(r))
             stored.append(entry)
 
-    processed = stitch_cross_day_ot(dedupe_close_punches(by_day, company_cfg=_att_cfg))
+    processed = stitch_cross_day_ot(dedupe_close_punches(by_day, company_cfg=_att_cfg),
+                                    company_cfg=_att_cfg)
     day_punches = processed.get(date, [])
     ins = [p for p in day_punches if (p.get("kind") or "").lower() == "in"]
     outs = [p for p in day_punches if (p.get("kind") or "").lower() == "out"]

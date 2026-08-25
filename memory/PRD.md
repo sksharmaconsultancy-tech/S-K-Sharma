@@ -8628,3 +8628,25 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   pass. Badge 714, sw v29, deploy_vps_iter714.sh via kind=script.
   NOTE: pending investigation thread on manual punch storage was resolved
   as NOT the cause (formats sort fine); night-shift stitch works.
+- Iter 715 — CROSS MIDNIGHT ATTENDANCE PUNCHING (user spec: inside
+  Monthly Attendance, no new module, default YES, Duty HRS untouched):
+  (1) Setting: attendance_config.cross_midnight (default True — only
+  explicit False disables). Sanitized in firm_master.py _ac_clean;
+  Firm Master → Attendance Capture section YES/NO radios (fm-ac-cm-yes/
+  no); frontend setAC also preserves smart_direction keys + new flag.
+  (2) stitch_cross_day_ot(by_day, max_hours, company_cfg=None) — early
+  return when cross_midnight is False. All 7 call sites now pass their
+  attendance_config (server 3 sites, attendance_admin_core,
+  attendance_doctor, labour_cost, labour_reports).
+  (3) LIVE punch (attendance_core.py punch endpoint): next-morning OUT
+  used to be rejected ("not currently punched in"). New cross_midnight_out
+  path: kind=out AND last_kind is None (FIRST punch of new day) AND
+  yesterday's last punch is an open IN within 18h AND setting ON →
+  accepted; record stamped cross_midnight:True. Duplicate OUT after it
+  stays blocked (fixed after first test caught it: condition changed
+  from last_kind != "in" to last_kind is None).
+  VERIFIED: exact spec examples (25-Aug 22:00→26-Aug 06:00 shows on
+  25-Aug; consecutive nights 25/26 separate; 27th clean); toggle OFF
+  keeps punches on own dates; live endpoint accepts first morning OUT,
+  blocks dup, blocks when setting OFF. Duty/OT math unchanged (existing
+  compute reused untouched). Badge 715, sw v30, deploy_vps_iter715.sh.

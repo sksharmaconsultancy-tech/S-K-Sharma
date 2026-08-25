@@ -608,6 +608,45 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
     # Toggle idempotency for INSIDE-geofence punches: prevent double-IN and
     # double-OUT (which would break shift pairing). Auto-punch retries and
     # rapid double-taps in the UI must be no-ops rather than duplicate rows.
+    # ------------------------------------------------------------------
+    # Iter 715 (user spec) — CROSS MIDNIGHT PUNCHING (default YES).
+    # A night-shift employee punching OUT after midnight lands on a NEW
+    # calendar date with no punches yet (last_kind None) — the old
+    # sequence check rejected it ("you are not currently punched in").
+    # If YESTERDAY's last punch is an open IN and this OUT falls within
+    # 18h of it, ACCEPT it as that session's OUT. The Monthly Attendance
+    # report already maps it back to the previous day's session
+    # (stitch_cross_day_ot); Duty HRS / policy math is untouched.
+    # ------------------------------------------------------------------
+    cross_midnight_out = False
+    if payload.kind == "out" and last_kind is None:
+        # Applies ONLY when this is the FIRST punch of the new calendar
+        # day — once any punch exists today, normal sequence rules apply
+        # (prevents duplicate cross-midnight OUTs).
+        _cm_cfg = (company.get("attendance_config") or {})
+        if _cm_cfg.get("cross_midnight") is not False:
+            try:
+                _yday = (datetime.fromisoformat(today)
+                         - timedelta(days=1)).strftime("%Y-%m-%d")
+                _ylast = await db.attendance.find_one(
+                    {"user_id": user["user_id"], "date": _yday,
+                     "status": {"$ne": "rejected"}},
+                    {"_id": 0, "kind": 1, "at": 1},
+                    sort=[("at", -1)])
+                if _ylast and (_ylast.get("kind") or "").lower() == "in":
+                    _in_dt = datetime.fromisoformat(
+                        (_ylast.get("at") or "").replace("Z", "+00:00"))
+                    _now_dt = datetime.fromisoformat(
+                        (punch_at_iso or ist_wallclock_iso()).replace("Z", "+00:00"))
+                    if _in_dt.tzinfo is None:
+                        _in_dt = _in_dt.replace(tzinfo=timezone.utc)
+                    if _now_dt.tzinfo is None:
+                        _now_dt = _now_dt.replace(tzinfo=timezone.utc)
+                    _gap = _now_dt - _in_dt
+                    cross_midnight_out = (timedelta(0) < _gap
+                                          <= timedelta(hours=18))
+            except Exception:
+                cross_midnight_out = False
     if not outside:
         if payload.kind == "in" and last_kind == "in":
             await _policy_block(
@@ -615,7 +654,7 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
                 "Invalid punch sequence — you are already punched in. "
                 "Punch out before punching in again.",
                 _ppol["invalid_sequence_action"])
-        if payload.kind == "out" and last_kind != "in":
+        if payload.kind == "out" and last_kind != "in" and not cross_midnight_out:
             await _policy_block(
                 "duplicate_out" if last_kind == "out" else "missing_in",
                 "Invalid punch sequence — you are not currently punched in. "
@@ -653,6 +692,9 @@ async def punch(payload: AttendancePunch, authorization: Optional[str] = Header(
         "temp_assignment_id": _temp_assign_id,
         "date": today,
         "kind": payload.kind,
+        # Iter 715 — flags an OUT accepted against yesterday's open
+        # night-shift session (audit only; reports stitch it back).
+        "cross_midnight": cross_midnight_out or None,
         "at": (punch_at_iso or ist_wallclock_iso()),
         "synced_at": (ist_wallclock_iso() if payload.offline else None),
         "latitude": payload.latitude,

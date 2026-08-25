@@ -78,7 +78,8 @@ def _stitch(by_day: Dict[str, List[Dict[str, Any]]],
     """Same shape as server.stitch_cross_day_ot (kept local to avoid a
     circular import of the 20k-line module's private helpers)."""
     from server import dedupe_close_punches, stitch_cross_day_ot
-    return stitch_cross_day_ot(dedupe_close_punches(by_day, company_cfg=company_cfg))
+    return stitch_cross_day_ot(dedupe_close_punches(by_day, company_cfg=company_cfg),
+                               company_cfg=company_cfg)
 
 
 @router.get("")

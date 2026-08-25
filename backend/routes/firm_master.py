@@ -678,6 +678,10 @@ async def upsert_firm_master(
             "dup_window_min": _ac_dup,
             "lunch_mode": _ac_lunch,
             "lunch_fixed_min": _ac_lunch_min,
+            # Iter 715 (user spec) — CROSS MIDNIGHT punching, DEFAULT YES.
+            # Next-day OUT punches map to the previous day's open
+            # night-shift session; only an explicit NO switches it off.
+            "cross_midnight": _ac_raw.get("cross_midnight") is not False,
         }
         merged.setdefault("settings", {})["attendance_config"] = _ac_clean
         await db.companies.update_one(
