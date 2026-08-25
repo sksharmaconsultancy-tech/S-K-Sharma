@@ -619,6 +619,7 @@ async def _compute_compliance_run(
         # A row is FREEZE-driven when the sheet was imported OR the firm
         # uses Freeze-as-Actual-Gross and an Actual run row exists.
         _frz_imp = bool(payload.use_imported_sheet or _fag_row is not None)
+        _frz_days_manual = False
         if _frz_imp:
             # Imported sheet wins: present days from the uploaded/email
             # salary sheet (0 when the employee has no row).
@@ -626,6 +627,23 @@ async def _compute_compliance_run(
             # Iter 340 (user request) — NEVER above the month's days.
             _pd = min(float((_am or {}).get("present_days") or 0),
                       float(month_days))
+            # Iter 723 (user bug — "Reprocess changes the data AGAIN"):
+            # Freeze-as-Actual-Gross firms re-pulled the days from the
+            # Actual run on EVERY reprocess, wiping the admin's edited
+            # Present Days. "With EXISTING Data" promises entered days
+            # are KEPT (Iter 297 directive), so a previously saved row
+            # whose days differ (or carry the manual stamp) keeps its
+            # saved days. Imported-sheet runs keep the sheet
+            # authoritative; "From BLANK" still rebuilds fresh.
+            _prev_frz = (prev_rows or {}).get(emp["user_id"]) \
+                if not payload.use_imported_sheet else None
+            if _prev_frz is not None:
+                _ppd_frz = min(float(_prev_frz.get("present_days") or 0.0),
+                               float(month_days))
+                _mf_frz = set(_prev_frz.get("manual_fields") or [])
+                if "present_days" in _mf_frz or abs(_ppd_frz - _pd) > 0.01:
+                    _pd = _ppd_frz
+                    _frz_days_manual = True
             _fdh = float(merged_pol.get("full_day_hours") or 8.0)
             stats = {
                 "present_days": round(_pd * 2) / 2.0,
@@ -1213,7 +1231,8 @@ async def _compute_compliance_run(
             # MANUAL figures; the Freeze (imported) gross stays on the row
             # purely as DISPLAY/comparison data.
             _prev_imp = (prev_rows or {}).get(emp["user_id"])
-            if _prev_imp is not None and _prev_imp.get("manual_override"):
+            if _prev_imp is not None and (
+                    _prev_imp.get("manual_override") or _frz_days_manual):
                 # Restore the admin's saved figures AS-IS (they were kept
                 # consistent by the grid at edit time).
                 _fresh_g = round(float(row.get("gross_paid") or 0), 2)
@@ -1226,8 +1245,37 @@ async def _compute_compliance_run(
                 # reprocess on imported (Freeze) runs too. manual_fields is
                 # carried so apply_advance_recovery() skips this row.
                 _mf_imp = set(_prev_imp.get("manual_fields") or [])
+                # Iter 723 — day-edited rows (detected above) carry the
+                # stamp forward so every future reprocess keeps them too.
+                if _frz_days_manual:
+                    _mf_imp.add("present_days")
+                    row["manual_override"] = True
                 if _mf_imp:
                     row["manual_fields"] = sorted(_mf_imp)
+                # Iter 723 (user bug — "Reprocess changes the data AGAIN"):
+                # manual TDS / Other Deduction / ESIC-leave typed on a
+                # Freeze run were LOST on reprocess (only OT/Others/gross
+                # were restored). They now survive exactly like on normal
+                # runs (Iter 374 rule). The kept monthly gross is restored
+                # too so Gross − OT stays consistent on the sheet.
+                if "tds" in _mf_imp:
+                    row["tds"] = round(float(_prev_imp.get("tds") or 0), 2)
+                if "other_deduction" in _mf_imp:
+                    row["other_deduction"] = round(
+                        float(_prev_imp.get("other_deduction") or 0), 2)
+                    row["other_deduction_head"] = (
+                        _prev_imp.get("other_deduction_head")
+                        or row.get("other_deduction_head") or "Other")
+                if "esic_leave_days" in _mf_imp:
+                    row["esic_leave_days"] = float(
+                        _prev_imp.get("esic_leave_days") or 0)
+                if "ot_pay" in _mf_imp:
+                    # keep the saved OT hours consistent with the kept
+                    # manual OT amount (hours never re-pulled over it).
+                    row["ot_hours"] = float(_prev_imp.get("ot_hours") or 0.0)
+                if float(_prev_imp.get("monthly_gross") or 0) > 0:
+                    row["monthly_gross"] = round(
+                        float(_prev_imp.get("monthly_gross") or 0), 2)
                 # Iter 647 (user request) — manually edited custom allowance
                 # head amounts survive a reprocess on Freeze runs too.
                 if "allowance_heads" in _mf_imp and isinstance(

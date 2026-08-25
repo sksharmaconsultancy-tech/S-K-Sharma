@@ -8735,3 +8735,29 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   targeted $set + per-employee refresh — already optimal. Attendance
   loading perf = Iter 714 (instant cache + indexes) + Iter 708 chunked
   rendering. Badge 722, sw v37, deploy_vps_iter722.sh.
+- Iter 723 — COMPLIANCE SALARY REPROCESS DATA-LOSS FIX (user bug: "if we
+  Reprocess the Salary Data may Change Again"). REPRODUCED on Kankani
+  LABOUR 2026-06 (freeze_actual_gross firm): reprocess "With EXISTING
+  Data" lost (1) manually edited Present Days (re-pulled from Actual
+  run), (2) manual TDS → 0, (3) manual Other Deduction → 0, (4)
+  monthly_gross inconsistent after kept OT/Others, (5) ot_hours
+  re-pulled over manual ot_pay. ROOT CAUSE: _frz_imp rows forced
+  _prev=None (Iter 297 keep skipped) and the _prev_imp manual_override
+  restore only covered ot_pay/others/gross/advance/allowance_heads.
+  FIXES (compliance_salary_runs.py): (a) freeze (non-imported-sheet)
+  reprocess keeps saved Present Days when stamped OR differing from the
+  Actual-run days (_frz_days_manual), (b) restore block now also gated
+  on _frz_days_manual and restores tds/other_deduction(+head)/
+  esic_leave_days/ot_hours(when ot_pay manual)/monthly_gross before the
+  Iter 472 statutory refresh, and stamps present_days forward.
+  (compliance-salary-run.tsx): updatePresentDays now stamps
+  manual_override + manual_fields:["present_days"] like money edits.
+  Imported-sheet runs stay sheet-authoritative; "From BLANK" unchanged.
+  VERIFIED: edited days+TDS+OtherDed+OT+Others → save → reprocess = 0
+  field changes (108-emp run); double reprocess 0 diffs; untouched rows
+  0 drift; original draft restored after test. deploy_vps_iter723.sh.
+  PENDING (from Iter 722 audit, user not yet approved): PF/ESIC audit
+  found Bug1 old pf-ecr.txt caps EPF wages @15000 (breaks Higher PF),
+  Bug2 banker's rounding vs EPFO half-up (₹1), Bug3 ER-EPF split ₹1 vs
+  ECR. User's own directives kept: ESIC eligibility on Basic (Iter
+  129/254), ESIC on wage base not gross (Iter 385).

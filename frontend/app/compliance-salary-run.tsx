@@ -2219,6 +2219,13 @@ export default function ComplianceSalaryRunScreen() {
 
         return {
           ...r,
+          // Iter 723 (user bug) — stamp manual day edits so a reprocess
+          // ("With EXISTING Data") NEVER reverts the typed Present Days,
+          // including on Freeze-as-Actual-Gross firms.
+          manual_override: true,
+          manual_fields: Array.from(
+            new Set([...((((r as any).manual_fields) as string[]) || []), "present_days"]),
+          ),
           present_days: pd,
           basic: rHeads.basic,
           hra: rHeads.hra,
