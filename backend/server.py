@@ -1860,6 +1860,10 @@ def has_unpaired_punches(day_punches: List[dict]) -> bool:
     open_in = False
     seen_in = False
     leading_out = False
+    paired_min = 0
+    last_out_at = None
+    open_at = None
+    last_in_at = None
     for p in ps:
         k = (p.get("kind") or "").lower()
         if k == "in":
@@ -1867,6 +1871,11 @@ def has_unpaired_punches(day_punches: List[dict]) -> bool:
                 return True  # IN → IN without OUT between
             open_in = True
             seen_in = True
+            try:
+                open_at = datetime.fromisoformat(str(p["at"]).replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                open_at = None
+            last_in_at = open_at
         elif k == "out":
             if not open_in:
                 if seen_in:
@@ -1874,7 +1883,24 @@ def has_unpaired_punches(day_punches: List[dict]) -> bool:
                 leading_out = True  # cross-day tail — tolerated
                 continue
             open_in = False
+            if open_at is not None:
+                try:
+                    _o = datetime.fromisoformat(str(p["at"]).replace("Z", "+00:00"))
+                    if _o > open_at:
+                        paired_min += int((_o - open_at).total_seconds() // 60)
+                        last_out_at = _o
+                except (ValueError, TypeError):
+                    pass
+            open_at = None
     if open_in:
+        # Iter 716 (GAJRAM case) — a trailing stray IN within 30 min of the
+        # day's last completed OUT, on a day already holding ≥8h of paired
+        # duty, is a double-scan echo. _pair_punches ignores it for hours;
+        # it must not flag the whole (complete) day as Missing Punch.
+        if (last_out_at is not None and last_in_at is not None
+                and paired_min >= 8 * 60
+                and timedelta(0) <= (last_in_at - last_out_at) <= timedelta(minutes=30)):
+            return False
         return True  # trailing unclosed IN
     return leading_out and not seen_in  # OUT-only day stays flagged
 
@@ -2171,6 +2197,43 @@ def stitch_cross_day_ot(
                 continue
         except Exception:
             continue
+        # ------------------------------------------------------------------
+        # Iter 716 (user bug — GAJRAM day showed 24:00 and the next day a
+        # dash): the day already held a FULL session (07:58→19:58) and a
+        # stray double-scan IN at 20:03 made the stitch steal the NEXT
+        # morning's IN 07:56 as its OUT. Two guards:
+        #  (a) STRAY ANCHOR — a trailing IN within 30 min of the day's
+        #      last completed OUT, on a day that already holds ≥8h of
+        #      paired duty, is a double-scan echo — never stitch on it.
+        #  (b) TOTAL-DUTY CAP — never stitch a day beyond ``max_hours``
+        #      of total paired duty (a 24-hour attendance day is bogus).
+        # ------------------------------------------------------------------
+        _paired_min = 0
+        _last_out_at = None
+        _open_at = None
+        for p in cur_sorted:
+            if p is anchor:
+                continue
+            _k2 = (p.get("kind") or "").lower()
+            if _k2 == "in" and _open_at is None:
+                try:
+                    _open_at = _dt.fromisoformat(str(p["at"]).replace("Z", "+00:00"))
+                except (ValueError, TypeError, KeyError):
+                    _open_at = None
+            elif _k2 == "out" and _open_at is not None:
+                try:
+                    _o = _dt.fromisoformat(str(p["at"]).replace("Z", "+00:00"))
+                    if _o > _open_at:
+                        _paired_min += int((_o - _open_at).total_seconds() // 60)
+                        _last_out_at = _o
+                except (ValueError, TypeError, KeyError):
+                    pass
+                _open_at = None
+        if (_last_out_at is not None and _paired_min >= 8 * 60
+                and (in_at - _last_out_at) <= _td(minutes=30)):
+            continue  # (a) stray double-scan anchor
+        if _paired_min + int((out_at - in_at).total_seconds() // 60) > max_hours * 60:
+            continue  # (b) total-duty cap
         moved = dict(first)
         moved["date"] = dk
         moved["kind"] = "out"
@@ -10122,7 +10185,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "715"
+APP_ITERATION = "716"
 
 
 @api.get("/version")

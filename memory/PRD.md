@@ -8650,3 +8650,16 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   keeps punches on own dates; live endpoint accepts first morning OUT,
   blocks dup, blocks when setting OFF. Duty/OT math unchanged (existing
   compute reused untouched). Badge 715, sw v30, deploy_vps_iter715.sh.
+- Iter 716 — 24:00-DAY / DASH BUG (user screenshots, GAJRAM bio 77):
+  exact data: 03-08 IN 07:58, OUT 19:58, STRAY IN 20:03 (double-scan,
+  5min after OUT so survived the 5-min dedupe window); 04-08 IN 07:56 +
+  OUT 19:55. Stitch treated 20:03 as night anchor, stole 04's IN 07:56
+  (early-relabel <11:00) as OUT → 03 showed 24:00, 04 dash. FIXES in
+  server.py: (1) stitch_cross_day_ot guards — (a) stray anchor: trailing
+  IN ≤30min after last completed OUT on a day with ≥8h paired duty →
+  never stitch; (b) total-duty cap: paired+new pair > max_hours(16h) →
+  never stitch. (2) has_unpaired_punches: same stray trailing IN (≤30min,
+  ≥8h paired) no longer flags the completed day as Missing Punch.
+  VERIFIED with exact GAJRAM data: days 02-05 all 12:00 clean; genuine
+  night chains (22:00→06:00 consecutive) still stitch (Iter 715 spec
+  regression pass). Badge 716, sw v31, deploy_vps_iter716.sh.
