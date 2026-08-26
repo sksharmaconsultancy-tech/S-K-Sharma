@@ -32,6 +32,7 @@ import { useLiveSync } from "@/src/api/live-sync";
 import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import CompanyPicker from "@/src/components/CompanyPicker";
+import WebDateField from "@/src/components/WebDateField";
 import EmployeePhoto from "@/src/components/EmployeePhoto";
 import PunchRepairModal from "@/src/components/PunchRepairModal";
 import * as FileSystemNS from "expo-file-system";
@@ -142,34 +143,17 @@ const fmtHoursHM = (hoursDec: number | null | undefined): string => {
  *  - Clamps DD to 01-31, MM to 01-12
  *  - Returns partial strings while user is still typing
  */
-function formatDdmmyyyyInput(raw: string): string {
-  const digits = (raw || "").replace(/\D/g, "").slice(0, 8);
-  if (!digits) return "";
-  const dd = digits.slice(0, 2);
-  const mm = digits.slice(2, 4);
-  const yyyy = digits.slice(4, 8);
-  const parts: string[] = [];
-  if (dd.length === 2) {
-    const d = Math.max(1, Math.min(31, parseInt(dd, 10) || 0));
-    parts.push(String(d).padStart(2, "0"));
-  } else {
-    parts.push(dd);
-  }
-  if (mm.length > 0) {
-    if (mm.length === 2) {
-      const m = Math.max(1, Math.min(12, parseInt(mm, 10) || 0));
-      parts.push(String(m).padStart(2, "0"));
-    } else parts.push(mm);
-  }
-  if (yyyy.length > 0) parts.push(yyyy);
-  return parts.join("-");
-}
-
 /** Convert "DD-MM-YYYY" -> "YYYY-MM-DD"; empty / invalid -> "". */
 function ddmmyyyyToIso(dmy: string): string {
   const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec((dmy || "").trim());
   if (!m) return "";
   return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
+// Iter 740 — reverse mapping for the calendar pickers (ISO → DD-MM-YYYY).
+function isoToDdmmyyyy(iso: string): string {
+  if (!iso || iso.length < 10) return "";
+  return `${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}`;
 }
 
 const isValidDdmmyyyy = (v: string): boolean => {
@@ -984,36 +968,28 @@ export default function AttendanceGridScreen() {
         </Pressable>
       </View>
 
-      {/* Iter 77 - Date range + source-badge legend */}
+      {/* Iter 77 - Date range + source-badge legend
+          Iter 740 (user request) — From/To and Daily-basis dates now open a
+          CALENDAR picker on click (WebDateField); filtering unchanged. */}
       <View style={styles.subControls}>
         <Text style={styles.rangeLabel}>Custom range</Text>
-        <TextInput
-          style={[
-            styles.dateInput,
-            fromDate && !isValidDdmmyyyy(fromDate) && styles.dateInputErr,
-          ]}
-          value={fromDate}
-          onChangeText={(t) => setFromDate(formatDdmmyyyyInput(t))}
-          placeholder="From DD-MM-YYYY"
-          placeholderTextColor={colors.onSurfaceTertiary}
-          autoCapitalize="none"
-          keyboardType="number-pad"
-          maxLength={10}
-        />
+        <View style={styles.dateFieldWrap}>
+          <WebDateField
+            value={ddmmyyyyToIso(fromDate)}
+            onChange={(iso) => setFromDate(isoToDdmmyyyy(iso))}
+            placeholder="From DD-MM-YYYY"
+            testID="range-from-date"
+          />
+        </View>
         <Text style={styles.rangeDash}>-</Text>
-        <TextInput
-          style={[
-            styles.dateInput,
-            toDate && !isValidDdmmyyyy(toDate) && styles.dateInputErr,
-          ]}
-          value={toDate}
-          onChangeText={(t) => setToDate(formatDdmmyyyyInput(t))}
-          placeholder="To DD-MM-YYYY"
-          placeholderTextColor={colors.onSurfaceTertiary}
-          autoCapitalize="none"
-          keyboardType="number-pad"
-          maxLength={10}
-        />
+        <View style={styles.dateFieldWrap}>
+          <WebDateField
+            value={ddmmyyyyToIso(toDate)}
+            onChange={(iso) => setToDate(isoToDdmmyyyy(iso))}
+            placeholder="To DD-MM-YYYY"
+            testID="range-to-date"
+          />
+        </View>
         {(fromDate || toDate) ? (
           <Pressable
             onPress={() => { setFromDate(""); setToDate(""); }}
@@ -1029,20 +1005,14 @@ export default function AttendanceGridScreen() {
 
         {/* Iter 111 — Daily-basis report export (Excel / PDF) */}
         <Text style={[styles.rangeLabel, { marginLeft: 12 }]}>Daily basis</Text>
-        <TextInput
-          style={[
-            styles.dateInput,
-            dailyDate && !isValidDdmmyyyy(dailyDate) && styles.dateInputErr,
-          ]}
-          value={dailyDate}
-          onChangeText={(t) => setDailyDate(formatDdmmyyyyInput(t))}
-          placeholder="DD-MM-YYYY"
-          placeholderTextColor={colors.onSurfaceTertiary}
-          autoCapitalize="none"
-          keyboardType="number-pad"
-          maxLength={10}
-          testID="daily-date-input"
-        />
+        <View style={styles.dateFieldWrap} testID="daily-date-input">
+          <WebDateField
+            value={ddmmyyyyToIso(dailyDate)}
+            onChange={(iso) => setDailyDate(isoToDdmmyyyy(iso))}
+            placeholder="DD-MM-YYYY"
+            testID="daily-date-picker"
+          />
+        </View>
         {/* Iter 252 (user request) — SHOW that single day's report on screen */}
         <Pressable
           onPress={() => { setFromDate(dailyDate); setToDate(dailyDate); }}
@@ -2014,6 +1984,9 @@ const styles = StyleSheet.create({
     borderColor: colors.error,
     backgroundColor: "rgba(220, 38, 38, 0.05)",
   },
+  // Iter 740 — wrapper that gives the calendar WebDateField a fixed width
+  // inside the toolbar row.
+  dateFieldWrap: { width: 150 },
   rangeDash: { color: colors.onSurfaceSecondary, fontWeight: "700" },
   clearRangeBtn: {
     flexDirection: "row",

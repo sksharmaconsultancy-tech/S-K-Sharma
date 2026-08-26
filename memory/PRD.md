@@ -9197,3 +9197,12 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   xlsx 200) + Playwright UI (summary strip, alerts, PT add → status
   Missing→Active). Test branch cleaned.
 - APP_ITERATION=739; deploy_vps_iter739.sh.
+
+## Iter 740 — Monthly Attendance date CALENDAR pickers (user request)
+- attendance-grid.tsx: Custom range From/To (testIDs range-from-date /
+  range-to-date) and Daily basis date (daily-date-picker) replaced typed
+  TextInputs with WebDateField (native calendar on click). State stays
+  DD-MM-YYYY via ddmmyyyyToIso/isoToDdmmyyyy; filtering/export unchanged.
+  Removed unused formatDdmmyyyyInput. E2E verified: range filter → "Range
+  active", daily Show filters grid to that day.
+- APP_ITERATION=740; deploy_vps_iter740.sh.
