@@ -9206,3 +9206,34 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   Removed unused formatDdmmyyyyInput. E2E verified: range filter → "Range
   active", daily Show filters grid to that day.
 - APP_ITERATION=740; deploy_vps_iter740.sh.
+
+## Iter 741 — THREE MODULES (Probation, Alternate Weekoff, Accident) tested via curl e2e
+1) PROBATION→CONFIRMATION: routes/probation_weekoff.py (/api/admin/probation/*):
+   firm policy on companies.probation_policy; employee fields ADDITIVE on
+   users (probation_applicable/months/start, confirmation_due, employment_
+   status...); auto due = DOJ + months (_add_months month-end safe); init/
+   confirm (date>=DOJ)/extend (reason mandatory, max months from policy);
+   immutable probation_history; xlsx export. HR Letters: added
+   "confirmation" + "probation_extension" templates in hr_letters.py
+   (LETTER_TYPES/ABBR + _build_template). Frontend /probation.tsx
+   (dashboard cards, filters, Set/Confirm/Extend/History panels).
+2) ALTERNATE/OCCURRENCE WEEKOFF: _validate_policy now accepts
+   weekoff_rules {type fixed|occurrence|alternate, occurrence {wd:[1..5]|"all"},
+   alternate {weekdays, cycle_start, pattern[off/work]}, effective_from/to}.
+   server.py apply_weekoff_rules_for_date() (line ~2610) returns per-date
+   patched weekly_off_days; wired at BOTH compute_textile_day call sites
+   (~10405 grid daily + ~11290 monthly engine). Employee
+   weekly_off_days_override skips rules (highest priority). Fixed type or
+   no rules → policy returned UNCHANGED (zero regression). Preview:
+   GET /api/admin/weekoff/preview?month=. Frontend /weekoff-rules.tsx.
+   VERIFIED: occurrence {5:[2,4]} → only 2nd & 4th Saturdays off Sep-2026.
+3) ACCIDENT MASTER (ESIC+F&B): routes/accident_register.py
+   (/api/admin/accidents): one record, esic_applicable + fnb_applicable,
+   fnb{} details, independent esic_status/fnb_status tracks, auto
+   ACC-YYYY-NNN, employee autofill (IP no/UAN/dept), Form12 + F&B PDFs
+   (reportlab), register xlsx, dashboard counts. Frontend
+   /accident-register.tsx. Sidebar: 3 entries after Gate Pass (both menus).
+- CLEANUP DONE: Anshul probation fields unset, test accident/weekoff rule
+  removed from Kankani. NOTE: testing_agent NOT run this iter (context) —
+  backend curl e2e + UI smoke screenshots done; suggest full regression
+  next session. APP_ITERATION=741; deploy_vps_iter741.sh.

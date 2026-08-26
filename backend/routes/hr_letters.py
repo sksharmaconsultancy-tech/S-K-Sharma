@@ -40,9 +40,13 @@ LETTER_TYPES = {
     "experience": "Experience Letter",
     "relieving": "Relieving Letter",
     "salary_certificate": "Salary Certificate",
+    # Iter 741 — Probation → Confirmation module letters.
+    "confirmation": "Confirmation Letter",
+    "probation_extension": "Probation Extension Letter",
 }
 ABBR = {"appointment": "APT", "offer": "OFR", "warning": "WRN", "termination": "TRM",
-        "experience": "EXP", "relieving": "RLV", "salary_certificate": "SAL"}
+        "experience": "EXP", "relieving": "RLV", "salary_certificate": "SAL",
+        "confirmation": "CNF", "probation_extension": "PBX"}
 
 
 async def _check_scope(admin: dict, company_id: str) -> None:
@@ -90,6 +94,42 @@ def _build_template(letter_type: str, emp: dict, company: dict) -> dict:
     cname = company.get("name") or "[FIRM NAME]"
     today = _today_dmy()
 
+    if letter_type == "confirmation":
+        cdate = emp.get("confirmation_date") or today
+        notice = emp.get("confirmation_notice_period") or "one (1) month"
+        subject = "Letter of Confirmation of Services"
+        body = (
+            f"Dear {name},\n\n"
+            f"We are pleased to inform you that upon review of your performance and conduct "
+            f"during your probation period, your services with {cname} stand CONFIRMED "
+            f"with effect from {cdate}.\n\n"
+            f"1. Designation: You will continue as \"{desig}\".\n"
+            f"2. Remuneration: Your remuneration remains {salary}, subject to statutory "
+            f"deductions (PF / ESI / Professional Tax, as applicable).\n"
+            f"3. Notice Period: Post confirmation, either party may terminate the employment "
+            f"by giving {notice} notice or salary in lieu thereof.\n"
+            f"4. All other terms and conditions of your appointment letter dated {doj} "
+            f"remain unchanged.\n\n"
+            f"We congratulate you and look forward to your continued contribution."
+        )
+        return {"subject": subject, "body": body}
+    if letter_type == "probation_extension":
+        rev = emp.get("revised_confirmation_due") or "[REVISED DUE DATE]"
+        reason = emp.get("extension_reason") or "performance review requirements"
+        subject = "Extension of Probation Period"
+        body = (
+            f"Dear {name},\n\n"
+            f"With reference to your appointment as \"{desig}\" with {cname} effective "
+            f"{doj}, we wish to inform you that your probation period has been EXTENDED "
+            f"on account of {reason}.\n\n"
+            f"1. Your revised confirmation review date is {rev}.\n"
+            f"2. During the extended probation, all existing terms and conditions of your "
+            f"appointment shall continue to apply.\n"
+            f"3. Your performance will be reviewed on or before the revised date, upon "
+            f"which a decision regarding confirmation of your services will be taken.\n\n"
+            f"We encourage you to utilise this period to meet the expected standards."
+        )
+        return {"subject": subject, "body": body}
     if letter_type == "offer":
         subject = f"Offer of Employment - {desig}"
         body = (

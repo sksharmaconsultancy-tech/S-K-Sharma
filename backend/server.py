@@ -1416,9 +1416,53 @@ def _validate_policy(raw: dict) -> dict:
         "enabled_at": ((og_raw.get("enabled_at") or now_iso()) if _og_enabled else None),
     }
 
+    # Iter 741 — ALTERNATE / OCCURRENCE-BASED WEEKOFF rules (additive).
+    # {"type":"fixed|occurrence|alternate",
+    #  "occurrence": {"5":[2,4]},              # weekday -> occurrence list
+    #  "alternate": {"weekdays":[6],"cycle_start":"YYYY-MM-DD","pattern":["off","work"]},
+    #  "effective_from": "YYYY-MM-DD"|None, "effective_to": None, "active": true}
+    wr_raw = raw.get("weekoff_rules") if isinstance(raw.get("weekoff_rules"), dict) else None
+    weekoff_rules = None
+    if wr_raw:
+        wtype = str(wr_raw.get("type") or "fixed")
+        if wtype not in ("fixed", "occurrence", "alternate"):
+            raise HTTPException(status_code=400, detail="weekoff_rules.type must be fixed/occurrence/alternate")
+        occ = {}
+        for k, v in (wr_raw.get("occurrence") or {}).items():
+            try:
+                wd_k = int(k)
+            except (TypeError, ValueError):
+                continue
+            if not 0 <= wd_k <= 6:
+                continue
+            if v == "all":
+                occ[str(wd_k)] = "all"
+            elif isinstance(v, list):
+                occ[str(wd_k)] = sorted({int(x) for x in v if isinstance(x, (int, float)) and 1 <= int(x) <= 5})
+        alt = wr_raw.get("alternate") or {}
+        alt_clean = None
+        if wtype == "alternate":
+            cs = str(alt.get("cycle_start") or "")
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", cs):
+                raise HTTPException(status_code=400, detail="alternate.cycle_start must be YYYY-MM-DD")
+            pat = [str(p) for p in (alt.get("pattern") or ["off", "work"]) if p in ("off", "work")]
+            if len(pat) < 2 or "off" not in pat:
+                raise HTTPException(status_code=400, detail="alternate.pattern must contain off and work weeks")
+            wds = [int(x) for x in (alt.get("weekdays") or []) if isinstance(x, (int, float)) and 0 <= int(x) <= 6]
+            if not wds:
+                raise HTTPException(status_code=400, detail="alternate.weekdays required")
+            alt_clean = {"cycle_start": cs, "pattern": pat, "weekdays": sorted(set(wds))}
+        ef, et = str(wr_raw.get("effective_from") or "") or None, str(wr_raw.get("effective_to") or "") or None
+        if ef and et and et < ef:
+            raise HTTPException(status_code=400, detail="weekoff_rules effective_to cannot be before effective_from")
+        weekoff_rules = {"type": wtype, "occurrence": occ, "alternate": alt_clean,
+                         "effective_from": ef, "effective_to": et,
+                         "active": bool(wr_raw.get("active", True))}
+
     return {
         "shifts": shifts,
         "weekly_off_days": sorted(days),
+        "weekoff_rules": weekoff_rules,
         "grace_minutes_late": grace,
         "half_day_hours": half_day,
         "full_day_hours": full_day,
@@ -2561,6 +2605,73 @@ def compute_day_punch_metrics(
         if d > 0:
             out["early_minutes"] = d
     return out
+
+
+def apply_weekoff_rules_for_date(policy: dict, user: dict, date_iso: str) -> dict:
+    """Iter 741 — ALTERNATE / OCCURRENCE-BASED WEEKOFF (additive).
+
+    Returns the policy unchanged when no active ``weekoff_rules`` apply
+    (ZERO regression for fixed weekly off), otherwise a shallow copy whose
+    ``weekly_off_days`` reflects THIS specific date:
+      * occurrence — weekday off only on the configured 1st..5th occurrence
+      * alternate  — weekday off only in "off" weeks of the repeating cycle
+    Priority: an explicit per-employee ``weekly_off_days_override`` always
+    wins (rules skipped). The attendance engine itself is untouched — it
+    still just reads ``weekly_off_days``.
+    """
+    wr = (policy or {}).get("weekoff_rules") or None
+    if not wr or not wr.get("active") or wr.get("type") == "fixed":
+        return policy
+    _ov = (user or {}).get("weekly_off_days_override")
+    if isinstance(_ov, list) and len(_ov) > 0:
+        return policy  # employee override has highest priority
+    ef, et = wr.get("effective_from"), wr.get("effective_to")
+    if (ef and date_iso < ef) or (et and date_iso > et):
+        return policy
+    try:
+        d = datetime.strptime(date_iso, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return policy
+    wd = d.weekday()
+    off_days = set(policy.get("weekly_off_days") or [])
+    if wr.get("type") == "occurrence":
+        occ_map = wr.get("occurrence") or {}
+        ruled = {int(k) for k in occ_map.keys()}
+        occurrence_no = (d.day - 1) // 7 + 1
+        new_off = {x for x in off_days if x not in ruled}  # non-ruled fixed days stay
+        for k, v in occ_map.items():
+            kwd = int(k)
+            if kwd != wd:
+                continue
+            if v == "all" or (isinstance(v, list) and occurrence_no in v):
+                new_off.add(kwd)
+        if new_off == off_days:
+            return policy
+        patched = dict(policy)
+        patched["weekly_off_days"] = sorted(new_off)
+        return patched
+    if wr.get("type") == "alternate":
+        alt = wr.get("alternate") or {}
+        try:
+            cs = datetime.strptime(alt.get("cycle_start"), "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            return policy
+        pat = alt.get("pattern") or ["off", "work"]
+        wds = set(alt.get("weekdays") or [])
+        week_idx = ((d - cs).days // 7) % len(pat) if d >= cs else None
+        is_off_week = week_idx is not None and pat[week_idx] == "off"
+        new_off = set(off_days)
+        for x in wds:
+            if is_off_week:
+                new_off.add(x)
+            else:
+                new_off.discard(x)
+        if new_off == off_days:
+            return policy
+        patched = dict(policy)
+        patched["weekly_off_days"] = sorted(new_off)
+        return patched
+    return policy
 
 
 def compute_textile_day(
@@ -10306,7 +10417,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "740"
+APP_ITERATION = "741"
 
 
 @api.get("/version")
@@ -10358,7 +10469,7 @@ def _policy2_biometric_stats(att_rows: List[dict], policy: dict, emp_full: dict,
         punches = merge_out_in_bounces(punches, 60)
         if has_unpaired_punches(punches):
             continue
-        s = compute_textile_day(punches, policy, emp_full, wd)
+        s = compute_textile_day(punches, apply_weekoff_rules_for_date(policy, emp_full, date_key), emp_full, wd)
         present += float(s.get("present_days") or 0)
         duty_min += float(s.get("duty_minutes") or 0)
     return {
@@ -11243,7 +11354,9 @@ async def _compute_monthly_grid_data_impl(
             weekday = datetime(yy, mm, dd).weekday()
             _is_holiday_day = date_key_iso in _holiday_dates
             summary = compute_textile_day(
-                day_punches, eff_policy, emp_full, weekday,
+                day_punches,
+                apply_weekoff_rules_for_date(eff_policy, emp_full, date_key_iso),
+                emp_full, weekday,
                 is_holiday=_is_holiday_day)
             # Iter 77q — OT trigger threshold. Priority:
             #   1. eff_policy.full_day_hours  (firm's "full day" = actual
@@ -13697,3 +13810,9 @@ app.include_router(branch_extras_router)
 # Iter 737 — Branch Master (complete enhancement)
 from routes.branch_master import router as branch_master_router  # noqa: E402
 app.include_router(branch_master_router)
+
+# Iter 741 — Probation→Confirmation + Weekoff preview + Accident Master
+from routes.probation_weekoff import router as probation_weekoff_router  # noqa: E402
+app.include_router(probation_weekoff_router)
+from routes.accident_register import router as accident_register_router  # noqa: E402
+app.include_router(accident_register_router)
