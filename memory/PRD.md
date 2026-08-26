@@ -9134,3 +9134,27 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
 - E2E verified via Playwright (session injected): nav → section → Add
   Branch → listed → deleted. Test branch cleaned up.
 - APP_ITERATION=736; deploy_vps_iter736.sh (kind=script serves deploy736.sh).
+
+## Iter 737 — COMPLETE BRANCH MASTER (2026-06, user 25-section spec, tested)
+- Backend NEW /app/backend/routes/branch_master.py (/api/admin/branch-master/*):
+  list (search/status/state/type filters + emp/present/absent counts, 1-pass),
+  create (code UNIQUE per firm 409, PIN 400, cross_midnight default TRUE),
+  detail+PATCH (nested compliance_config/payroll_config/attendance_config
+  MERGE + field-level audit → branch_audit), dashboard (counts only),
+  employees (paginated) + employees-export xlsx, transfer (single/BULK via
+  existing branch_transfers + lazy applier), history + employee-history
+  timeline (immutable), documents (base64 ≤8MB, expiry_status
+  active/expiring_soon(60d)/expired, replace→history, soft delete).
+- server.py delete_branch: DELETE PROTECTION → 409 "Use DEACTIVATE" when
+  employees/attendance/transfers exist; clean delete cascades docs/audit.
+- branch_management._apply_due_transfers now also syncs users.branch_name
+  (report dimension) — Branch Master → Salary Register/Actual/statutory
+  Branch filters integrate automatically; rename re-syncs. Old run rows
+  never rewritten.
+- Frontend: BranchesSection.tsx rewritten (list+filters+extended form),
+  NEW BranchDetail.tsx (7 tabs), BranchEmployeesTab.tsx (assign/transfer/
+  bulk/history/export), BranchDocsTab.tsx, branchMasterUi.tsx primitives.
+- Engines UNTOUCHED (attendance/duty-hours/compliance/actual/F&F).
+- testing_agent: backend 25/25 pytest PASS (tests/test_iter737_branch_master.py),
+  frontend all tabs PASS, regression PASS. Test data cleaned.
+- APP_ITERATION=737; deploy_vps_iter737.sh (kind=script → deploy737.sh).

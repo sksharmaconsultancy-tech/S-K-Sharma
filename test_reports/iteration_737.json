@@ -1,0 +1,32 @@
+{
+  "summary": "Iter 737 BRANCH MASTER — full backend + frontend testing PASSED. Backend: 25/25 pytest cases green including list/filters, create (dup-code 409, bad-PIN 400, missing-name 400, no-GPS OK), attendance_config.cross_midnight=true default on create, PATCH nested-config MERGE (PF + ESIC across two patches — no overwrite), audit trail, dashboard counters, employees list + xlsx export (PK zip verified), bulk-transfer + history + employee-history timeline (>=2 timeline nodes after transfer), documents (bad expiry 400, active/expired expiry_status, replace_same_type keeps history, soft delete removes from list), DELETE PROTECTION 409 when branch has transfers, DELETE 200 when clean, legacy /api/company/branches unchanged (GET/POST/PATCH still work). Regression endpoints compliance-salary/runs and fnf/register respond non-500. Frontend (web): Firm Master → nav '18. Branches / Locations' opens Branch Master section with fm-branches-search / fm-branches-filters / fm-branches-add all visible; Add form fields (name, code, city, pin, lat, lng, save) render + Rajasthan state chip clickable; Save creates row rendered as 'TEST_UI_Br_Iter737 · UI_TST_9477 · Branch · Bhilwara · Rajasthan · Active'; Branch Detail opens with ALL 7 tabs (fm-branch-tab-overview/compliance/payroll/attendance/employees/documents/history); Attendance tab shows Cross Midnight checkbox VISUALLY CHECKED by default (screenshot verified); Compliance tab toggles cc-pf-applicable + cc-esic-applicable + cc-save work; Employees tab shows be-search/be-assign/be-transfer/be-export + '0 employee(s) in this branch'; Documents tab bd-add opens form with bd-number/bd-issue/bd-expiry/bd-save visible; fm-branch-toggle-active (Deactivate button) visible. Cleanup: DELETE via API returned 200 (no dependents) — DB verified clean. No react-native red screens; only pre-existing 401 console errors from unrelated services during initial load.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter737_branch_master.py",
+    "/app/test_reports/pytest/iter737.xml",
+    "/app/test_reports/screens/iter737_branches_list.png",
+    "/app/test_reports/screens/iter737_after_create.png",
+    "/app/test_reports/screens/iter737_attendance_tab.png",
+    "/app/test_reports/screens/iter737_employees_tab.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "branch_master.py bm_docs_add: base64 validate=False → will accept malformed data URIs silently (no exception on garbage). Consider validate=True for stricter check.",
+    "bm_employee_history: transfers[0].get('prev_branch_id') is used as starting branch even if that field is None — timeline first entry may show 'Main / Unassigned' which is correct fallback but consider documenting.",
+    "'bd-type' testID is on a Chips group View that has 0 layout dimensions in web (returns is_visible=false in Playwright). Chips render fine as children (bd-add form opens). Not blocking, but consider wrapping in a bordered View for consistency with other form groups if you want the group itself testable/queryable.",
+    "delete_branch dependency check in server.py counts users by home_branch_id but does NOT count branch_documents — a branch with only documents can still be hard-deleted (documents remain orphaned). Consider adding a docs count to the dependents list."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter737_branch_master.py"],
+  "success_rate": {"backend": "100% (25/25)", "frontend": "100% (all flows verified)"},
+  "seed_data_creation": "During tests: 4 test branches (TEST_BR_Iter737_Main, TEST_BR_dup_seed, TEST_BR_nogps, TEST_LEGACY_Iter737 + UI-created TEST_UI_Br_Iter737), transfer records + 2 Kankani employees temporarily assigned to test branch. ALL cleaned up in teardown_module: DB verified via mongo shell — 0 leftover TEST_ branches, 0 leftover TEST_iter737 transfers, employees' home_branch_id reverted to null.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login helper: python3 /app/test_reports/helpers/login_super_admin.py — prints session_token. Set in localStorage as 'llc_session_token'. Firm-master route auto-picks selected company; use company-picker-option-cmp_527fecdd7c if picker shows. Nav testID: fm-nav-branches. Branch row testIDs: fm-branch-<branch_id>, view/edit/delete actions: fm-branch-view-<id>, fm-branch-edit-<id>, fm-branch-delete-<id>. Detail tabs: fm-branch-tab-{overview,compliance,payroll,attendance,employees,documents,history}. Backend regression harness: /app/backend/tests/test_iter737_branch_master.py — safe to re-run (self-cleaning).",
+  "rca_of_issue": "N/A — no issues found."
+}

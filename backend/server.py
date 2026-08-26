@@ -8053,7 +8053,28 @@ async def delete_branch(
         raise HTTPException(status_code=404, detail="Branch not found")
     if user["role"] == "company_admin" and b.get("company_id") != user.get("company_id"):
         raise HTTPException(status_code=403, detail="Not your branch")
+    # Iter 737 — DELETE PROTECTION: branches with dependent records can only
+    # be DEACTIVATED, never hard-deleted (history must survive).
+    dep_emp = await db.users.count_documents({"home_branch_id": branch_id})
+    dep_att = await db.attendance.count_documents({"branch_id": branch_id})
+    dep_tr = await db.branch_transfers.count_documents(
+        {"$or": [{"prev_branch_id": branch_id}, {"new_branch_id": branch_id}]})
+    if dep_emp or dep_att or dep_tr:
+        parts = []
+        if dep_emp:
+            parts.append(f"{dep_emp} employee(s)")
+        if dep_att:
+            parts.append(f"{dep_att} attendance record(s)")
+        if dep_tr:
+            parts.append(f"{dep_tr} transfer record(s)")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot delete: this branch has {', '.join(parts)}. "
+                   "Use DEACTIVATE instead — history is preserved.")
     await db.branches.delete_one({"branch_id": branch_id})
+    # cascade branch-owned master data (no dependents existed)
+    await db.branch_documents.delete_many({"branch_id": branch_id})
+    await db.branch_audit.delete_many({"branch_id": branch_id})
     return {"ok": True}
 
 
@@ -10285,7 +10306,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "736"
+APP_ITERATION = "737"
 
 
 @api.get("/version")
@@ -13672,3 +13693,7 @@ app.include_router(asset_mgmt_router)
 # Iter 733 — Branch extras + state-wise statutory (user request).
 from routes.branch_extras import router as branch_extras_router  # noqa: E402
 app.include_router(branch_extras_router)
+
+# Iter 737 — Branch Master (complete enhancement)
+from routes.branch_master import router as branch_master_router  # noqa: E402
+app.include_router(branch_master_router)

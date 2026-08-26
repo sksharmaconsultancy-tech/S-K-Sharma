@@ -959,3 +959,10 @@ ITER 487 (doc-expiry alerts):
 - Reproduced 403 on un-configured firm; enable flag → 200. Alert added.
 
 ## Iter 735 — Branch State UI (tested via API e2e + lint)
+
+## Iter 737 — Complete Branch Master (tested)
+- testing_agent: backend 25/25 pytest PASS (list/create-validation/config
+  merge+audit/dashboard/transfer+history/docs expiry/delete-protection 409/
+  legacy regression); frontend 7 tabs + cross-midnight default ON verified.
+- Post-test addition (self-tested e2e): users.branch_name sync on transfer
+  apply + branch rename → report Branch filters integration. Cleanup done.

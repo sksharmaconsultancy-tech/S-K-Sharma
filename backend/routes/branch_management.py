@@ -257,8 +257,15 @@ async def _apply_due_transfers(cid: str) -> None:
                  ) or {}).get("authorized_branch_ids") or []
         if t["new_branch_id"] not in auth:
             auth.append(t["new_branch_id"])
+        # Iter 737 — also sync users.branch_name (the TEXT dimension used by
+        # salary runs / registers / statutory report Branch filters) so the
+        # Branch Master becomes the single source of truth for FUTURE runs.
+        # Old run rows keep their stored snapshots — never rewritten.
+        nb = await db.branches.find_one({"branch_id": t["new_branch_id"]},
+                                        {"_id": 0, "name": 1})
         await db.users.update_one({"user_id": t["user_id"]}, {"$set": {
-            "home_branch_id": t["new_branch_id"], "authorized_branch_ids": auth}})
+            "home_branch_id": t["new_branch_id"], "authorized_branch_ids": auth,
+            "branch_name": (nb or {}).get("name")}})
         await db.branch_transfers.update_one(
             {"transfer_id": t["transfer_id"]},
             {"$set": {"status": "applied", "applied_at": now_iso()}})
