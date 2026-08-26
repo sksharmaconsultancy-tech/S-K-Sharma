@@ -9171,3 +9171,5 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   Playwright (reproduced with calendar-dated test punches, then fixed);
   day-01 modal unchanged. Test punches cleaned up.
 - APP_ITERATION=738; deploy_vps_iter738.sh.
+  - Follow-up (same iter): user asked to fully HIDE such punches — info
+    note removed; prev-night OUT is silently excluded from the day list.

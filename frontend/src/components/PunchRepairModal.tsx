@@ -89,10 +89,6 @@ export default function PunchRepairModal({
   const [pDate, setPDate] = useState("");
   const [reason, setReason] = useState("");
   const [err, setErr] = useState("");
-  // Iter 738 (user bug — Anshul Yadav / Kankani): a night-shift OUT that
-  // lands the NEXT morning was ALSO listed on the next day's repair modal.
-  // It is detected and parked here so we can show an info note instead.
-  const [prevNightOut, setPrevNightOut] = useState<Punch | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -121,9 +117,8 @@ export default function PunchRepairModal({
       // Iter 738 — LEADING morning OUT (< 12:00) that closes YESTERDAY's
       // night shift: either the record is date-attributed to yesterday
       // (import convention) or yesterday's punches end with an unpaired
-      // trailing IN. Park it as an info note — duty hours already count it
-      // on yesterday; keeping it in this list confused users.
-      let parked: Punch | null = null;
+      // trailing IN. HIDDEN from this day's list (user request) — duty
+      // hours already count it on yesterday.
       if (day.length && day[0].kind === "out" && (day[0].at || "").slice(11, 16) < "12:00") {
         const prevPunches = visible.filter((p) => (p.at || "").slice(0, 10) === pd);
         let pBal = 0;
@@ -131,9 +126,8 @@ export default function PunchRepairModal({
         const closesPrev =
           (day[0].date || "") === pd ||
           (pBal > 0 && prevPunches[prevPunches.length - 1]?.kind === "in");
-        if (closesPrev) parked = day.shift() || null;
+        if (closesPrev) day.shift();
       }
-      setPrevNightOut(parked);
       // Cross-midnight: when the day ends with an UNPAIRED trailing IN,
       // pull the next day's FIRST morning punch (< 12:00) into the list —
       // that is the night/OT OUT (or a wrongly-kinded punch the admin can
@@ -416,18 +410,6 @@ export default function PunchRepairModal({
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator
           >
-          {/* Iter 738 — previous day's night-shift OUT (info only) */}
-          {!loading && prevNightOut && (
-            <View style={st.prevNightNote} testID="prev-night-out-note">
-              <Ionicons name="moon-outline" size={13} color="#6D28D9" />
-              <Text style={st.prevNightTxt}>
-                {(prevNightOut.at || "").slice(11, 16)} OUT — this is the
-                closing punch of the previous day&apos;s night shift (already
-                counted in that day&apos;s duty). Not included in this
-                day&apos;s punch list.
-              </Text>
-            </View>
-          )}
           {/* Missing-punch banner */}
           {!loading && punches.length > 0 && hasIn !== hasOut && (
             <View style={st.warnBanner}>
@@ -779,16 +761,6 @@ const st = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   warnTxt: { fontSize: 12, color: "#B45309", fontWeight: "700" },
-  prevNightNote: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 6,
-    backgroundColor: "rgba(109,40,217,0.08)",
-    borderRadius: radius.md,
-    padding: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  prevNightTxt: { flex: 1, fontSize: 11.5, color: "#6D28D9", fontWeight: "600" },
   punchRow: {
     flexDirection: "row",
     alignItems: "center",

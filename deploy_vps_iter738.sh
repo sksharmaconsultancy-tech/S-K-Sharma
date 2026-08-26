@@ -11,8 +11,8 @@
 #  * Repair popup अब पिछले दिन के punches भी check करता है — अगर इस दिन का
 #    पहला punch subah (<12:00) का OUT है जो पिछली रात की shift को close
 #    करता है, तो वह इस दिन की punch list से हट जाता है.
-#  * उसकी जगह purple info note दिखता है: "06:00 OUT — यह पिछले दिन की
-#    night shift का closing punch है (उसी दिन की duty में counted)".
+#  * ऐसा punch उस दिन की list से पूरी तरह HIDE हो जाता है (user request —
+#    कोई note भी नहीं).
 #  * दोनों data conventions handled: record shift-day attributed हो या
 #    calendar-date attributed (machine import).
 #  * Duty hours / grid cells / cross-midnight stitching में कोई बदलाव नहीं.
@@ -2162,7 +2162,7 @@ fi
 echo -n "   Server badge is 738 (must say OK): "
 grep -q 'APP_ITERATION = "738"' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
 echo -n "   Night-shift OUT repair fix — Iter 738 (must say OK): "
-grep -q 'prevNightOut' $APP_DIR/frontend/src/components/PunchRepairModal.tsx && echo "OK" || echo "MISSING!"
+grep -q 'closesPrev' $APP_DIR/frontend/src/components/PunchRepairModal.tsx && echo "OK" || echo "MISSING!"
 echo -n "   Branch Master routes — Iter 737 (must say OK): "
 [ -f $APP_DIR/backend/routes/branch_master.py ] && [ -f $APP_DIR/frontend/src/components/firmMaster/BranchDetail.tsx ] && echo "OK" || echo "MISSING!"
 echo -n "   Firm Master Branches section — Iter 736 (must say OK): "
