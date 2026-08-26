@@ -958,7 +958,15 @@ export default function ComplianceSalaryRunScreen() {
         `Compliance run generated for ${r.run.employees_count} employees. Net payout: ${fmtInr(r.run.totals?.net)}. Statutory total: ${fmtInr(r.run.totals?.total_deduction)}`,
       );
     } catch (e: any) {
-      showMsg(e?.message || "Failed to generate compliance run");
+      const m = String(e?.message || "Failed to generate compliance run");
+      // Iter 734 (user bug — Sunshine Suitings: "Salary Process sirf
+      // refresh karta hai"): the Firm-Master gate 403 was only a
+      // transient toast — show it as a BLOCKING alert so the admin
+      // knows exactly which switch to turn on.
+      if (/not enabled for this firm|not permitted/i.test(m) && Platform.OS === "web") {
+        window.alert(m + "\n\n➡ Firm Master खोलें → इस firm को चुनें → Salary Process Settings → 'Online Salary' ON करें → Save. फिर Salary Process दोबारा दबाएँ.");
+      }
+      showMsg(m);
     } finally { setBusy(false); }
   };
   generateRef.current = generate;

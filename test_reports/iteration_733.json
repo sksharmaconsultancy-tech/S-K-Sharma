@@ -1,0 +1,23 @@
+{
+  "summary": "Iter 733 frontend testing of /branch-compliance (Kankani cmp_527fecdd7c, month 2026-06) — ALL 7 tasks + regression PASS. Sidebar entry 'Branch P&L / State Rules' opens screen; Budget save (Main=500000) persisted; P&L row shows 'Main · 108 emp | Budget ₹500000 · Actual ₹46800 · Variance ₹453200 · 9.4%'; Approvals & Movements tabs load empty without crash; PF-ESIC returns per-branch numbers ('Main · 108 emp | PF: wages ₹0 · EE ₹0 · ER ₹0 | ESIC: EE ₹216 · ER ₹936'); State Rules lists all 11 states with PT slabs / LWF / min-wage (AP, Delhi, Gujarat, Haryana, Karnataka, MP, Maharashtra, Punjab, Rajasthan, TN, WB); bc-state-report button loads per-employee state statutory report with 'State Statutory —' header and 'Gross ₹ · PT ₹ · LWF ₹' per row (no BELOW MIN WAGE warnings triggered for Kankani); Excel & PDF exports downloaded (pnl_2026-06.xlsx / pnl_2026-06.pdf). Regression: /fnf-calculator and /asset-management still load without red-screen errors. Only 2 console errors (unrelated 401s from other services, pre-existing). Cleanup: deleted branch_budgets doc for Kankani/Main/2026-06.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/test_reports/helpers/login_super_admin.py", "/app/test_reports/screens/bc_pnl_v2.png", "/app/test_reports/screens/bc_pfesic_v2.png", "/app/test_reports/screens/bc_states_v2.png"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Minor UX: 'Budget saved ✓' toast disappears immediately because the subsequent load() clears setMsg to null (line 39). Consider deferring the clear or moving toast to a separate state.",
+    "State Rules tab: after loading state-report, the states catalog list disappears (rows[] overwrites — component branches on rows.length). Not a bug per spec but users might expect both views. Minor."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request)", "frontend": "100%"},
+  "seed_data_creation": "Created 1 branch_budgets doc (Kankani/Main/2026-06/500000) during test — DELETED in cleanup.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login flow: use /app/test_reports/helpers/login_super_admin.py — it hits /api/auth/admin-password-login (sksharmaconsultancy@gmail.com/sharma123), swaps twofa_pending.otp_hash to sha256('123456') in MongoDB, verifies via /api/auth/2fa/verify, and prints session_token. Inject into localStorage as 'llc_session_token'. CompanyPicker option testID pattern: 'company-picker-option-{company_id}' (e.g. company-picker-option-cmp_527fecdd7c). Tab testIDs: bc-tab-Budget/P&L, bc-tab-Approvals, bc-tab-Movements, bc-tab-PF-ESIC, bc-tab-'State Rules'.",
+  "rca_of_issue": "N/A — no issues found."
+}

@@ -9084,3 +9084,31 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   reason uses window.prompt (web-only — PWA use case); native fallback
   pending if ever needed.
 - APP_ITERATION=732; deploy_vps_iter732.sh via kind=script.
+
+## Iter 733 — Branch extras + State-wise statutory (2026-06, user request)
+- Backend: /app/backend/routes/branch_extras.py (prefix /api/admin/
+  branch-extras). Endpoints: POST /budget + GET /pnl (budget vs actual
+  gross from latest compliance run, variance/util%), GET /pending-
+  approvals (leaves+advances by branch), GET /movements (transfers +
+  temp assignments register), GET /pf-esic-split (run rows grouped by
+  branch_name), GET/POST /states (11 seeded STATE_DEFAULTS: PT slabs,
+  LWF EE/ER+frequency, min_wage_daily 4 categories — editable via
+  db.state_compliance), POST /branch-state (sets branches.state),
+  GET /state-report (per-emp PT from slabs on gross_paid, LWF monthly,
+  daily rate vs min wage flag). All reports _emit xlsx/pdf. REPORTING
+  ONLY — compliance engine untouched.
+- Frontend: branch-compliance.tsx (5 tabs) + nav 'Branch P&L / State
+  Rules'. testing_agent ALL PASS. Minor UX notes (non-blocking): budget
+  toast cleared by reload; state catalog hidden when report loaded.
+- APP_ITERATION=733; deploy_vps_iter733.sh via kind=script.
+
+## Iter 734 — Sunshine Suitings salary process issue (2026-06)
+- NOT a bug: Iter 98 Firm Master gate (_require_firm_salary_permission)
+  — firm_masters.salary_process.online_salary OFF → 403 on
+  POST /admin/compliance-salary-runs; frontend toast too transient.
+- UX fix: compliance-salary-run.tsx generate catch — "not enabled for
+  this firm / not permitted" 403 now shows a BLOCKING window.alert with
+  exact Firm Master steps (web).
+- Verified: flag OFF → 403; flag ON → 200 run. User instructed to enable
+  Online Salary in Firm Master for Sunshine Suitings.
+- APP_ITERATION=734; deploy_vps_iter734.sh.

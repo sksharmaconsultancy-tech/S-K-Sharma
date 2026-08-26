@@ -950,3 +950,10 @@ ITER 487 (doc-expiry alerts):
 - Backend self-test full lifecycle PASS (save/dup-block/submit/approve/
   partial+full payment/reopen revision/audit 6/register PK/pdf).
 - testing_agent frontend 19/19 PASS + asset/attendance regression.
+
+## Iter 733 — Branch P&L + State statutory (tested)
+- Backend self-test all endpoints PASS w/ real run data; testing_agent
+  frontend 5 tabs + exports + regression PASS.
+
+## Iter 734 — firm gate 403 UX (tested)
+- Reproduced 403 on un-configured firm; enable flag → 200. Alert added.
