@@ -1,0 +1,24 @@
+{
+  "summary": "Iter 739 Branch-wise Licenses & Statutory Compliance — BACKEND ONLY tested. 22/22 pytest assertions passed against public preview URL. All requested edge cases verified: 15-category catalog (PF=8 types), custom-type add + built-in deactivate (via PATCH, no DELETE endpoint -> 405), warn-days validation (45->400, 30 persists in catalog, reset 60), license CRUD with no_expiry/expiring_soon/expired status computation, expiry-before-effective 400, PATCH edit + attachment replace-history (10-entry cap), replace_same_type renewal keeps old row as status=replaced (history preserved), compliance-summary with PF/ESIC/PT applicable and LWF not_applicable (no LWF alerts emitted), dashboard statutory_docs counts populated, xlsx register with PK magic bytes. Iter737 regression endpoints still work (admin/branch-master/list, legacy /company/branches GET+POST+DELETE, legacy documents endpoint, docs-only branch cascades on delete). DB cleanup verified: 0 leftover TEST_ branches/docs/catalog customs; statutory_alert_days reset to 60.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": [], "react_native_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter739_statutory_licenses.py",
+    "/app/test_reports/pytest/iter739.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "attachment_history is capped to last 10 (patch['attachment_history'] = hist[-10:]) — desired but silently drops older entries; not a bug, worth documenting in spec §8.",
+    "PATCH /statutory/catalog with active:false creates a suppression row even for built-in types (no delete-endpoint semantic). Clean-up on undo is manual (delete row). Fine as-is per spec (§ 'NEVER deletes').",
+    "_warn_days coerces any value not in (30,60,90) back to 60 silently. Since POST /warn-days already validates the input, this is a safe belt-and-braces fallback.",
+    "branch_documents lookup in bm_licenses excludes deleted only, then re-filters by expiry_status. Correct — replaced docs appear in list (needed for history UI) but are excluded from summary counts (via `live` list). Verified via test_license_renewal_replace_same_type."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter739_statutory_licenses.py (new)"
+  ],
+  "success_rate": {"backend": "100% (22/22)", "frontend": "not tested (skipped per request)"},
+  "seed_data_creation": "All test data created (2 test branches, PF/ESIC/PT licenses, 1 custom catalog type 'TEST_Custom_PF_Doc', 1 deactivated built-in 'ESIC Other Document', warn-days flip) was cleaned up in teardown_module. Post-run DB verified: 0 leftover TEST_ rows and statutory_alert_days=60.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 739 backend fully green. Frontend already screenshot-verified by main agent. If next iter modifies STATUTORY_CATALOG constants, rerun test_iter739_statutory_licenses.py::TestCatalog to catch category-count regressions. Auth helper: /app/test_reports/helpers/login_super_admin.py (mongo-swap 2FA)."
+}

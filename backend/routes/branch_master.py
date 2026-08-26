@@ -383,6 +383,17 @@ async def bm_branch_dashboard(branch_id: str,
     run = await db.compliance_salary_runs.find_one(
         {"company_id": cid, "month": month}, {"_id": 0, "status": 1},
         sort=[("generated_at", -1)])
+    # Iter 739 — statutory document counts for the dashboard card
+    warn = await _warn_days(cid)
+    soon = (datetime.now(timezone.utc) + timedelta(days=warn, hours=5, minutes=30)).strftime("%Y-%m-%d")
+    docs = await db.branch_documents.find(
+        {"branch_id": branch_id, "status": {"$nin": ["deleted", "replaced"]}},
+        {"_id": 0, "expiry_date": 1, "no_expiry": 1, "applicable": 1, "status": 1}).to_list(500)
+    st_counts = {"active": 0, "expiring_soon": 0, "expired": 0}
+    for d in docs:
+        s = _doc_status(d, today, soon)
+        if s in st_counts:
+            st_counts[s] += 1
 
     active = len(uids_active)
     absent = max(0, active - present - on_leave)
@@ -400,7 +411,8 @@ async def bm_branch_dashboard(branch_id: str,
             else ("state_set" if b.get("state") else "pending"),
             "pending_approvals": pending_leaves + pending_advances,
             "pending_leaves": pending_leaves, "pending_advances": pending_advances,
-            "new_joiners": joiners, "exits": exits, "open_fnf": open_fnf}
+            "new_joiners": joiners, "exits": exits, "open_fnf": open_fnf,
+            "statutory_docs": st_counts}
 
 
 # ---------------------------------------------------------------- employees
@@ -689,3 +701,470 @@ async def bm_docs_delete(doc_id: str, authorization: Optional[str] = Header(None
                  [{"field": f"document:{d.get('doc_type')}", "old": "active",
                    "new": "deleted"}])
     return {"ok": True}
+
+
+# ═══════════════════ Iter 739 — LICENSES & STATUTORY COMPLIANCE ═══════════════════
+# Branch-wise statutory registrations/licenses with categories, effective/
+# expiry dates, applicability, attachments (history kept), configurable
+# expiry warning, compliance-wise summary + alerts, document-type MASTER
+# (configurable, state-aware) and a firm-wide register report.
+# NO change to any payroll/compliance calculation — master data only.
+
+STATUTORY_CATALOG: Dict[str, List[str]] = {
+    "EPFO / PF": [
+        "PF Registration Certificate", "PF Code / Establishment Letter",
+        "PF Registration Details", "PF Exemption Certificate",
+        "PF Trust Registration", "PF Authorization / Approval Letter",
+        "PF Amendment / Change Letter", "PF Other Document"],
+    "ESIC": [
+        "ESIC Registration Certificate", "ESIC Employer Code Letter",
+        "ESIC Registration Details", "ESIC Exemption Certificate",
+        "ESIC Amendment / Change Letter", "ESIC Other Document"],
+    "Professional Tax (PT)": [
+        "PT Registration Certificate", "PT Enrollment Certificate",
+        "PT Employer Registration", "PT Registration Number Letter",
+        "PT Amendment / Change Letter", "PT Exemption Certificate",
+        "PT Other Document"],
+    "Labour Welfare Fund (LWF)": [
+        "LWF Registration Certificate", "LWF Registration / Code Letter",
+        "LWF Enrollment Certificate", "LWF Exemption Certificate",
+        "LWF Amendment / Change Letter", "LWF Other Document"],
+    "Shops & Establishment": [
+        "Shops & Establishment Registration Certificate", "Renewal Certificate",
+        "Amendment Certificate", "Registration Approval Letter",
+        "Establishment License", "Exemption Certificate", "Other Document"],
+    "Minimum Wages": [
+        "Minimum Wage Notification", "State Minimum Wage Notification",
+        "Minimum Wage Order", "Wage Revision Notification",
+        "Minimum Wage Category / Schedule", "Zone / Area Notification",
+        "Other Wage Notification"],
+    "Labour Department": [
+        "Labour License", "Labour Registration Certificate",
+        "Labour Department Registration", "Labour Contractor License",
+        "Principal Employer Registration", "Renewal Certificate",
+        "Amendment Certificate", "Exemption Certificate",
+        "Labour Department Order", "Other Labour Document"],
+    "Factory Compliance": [
+        "Factory License", "Factory Registration Certificate",
+        "Factory License Renewal", "Factory Amendment Certificate",
+        "Factory Plan Approval", "Occupier Approval",
+        "Factory Inspector Approval", "Factory Exemption Certificate",
+        "Other Factory Document"],
+    "Contract Labour": [
+        "Principal Employer Registration", "Contractor License",
+        "Contract Labour Registration", "Contractor Registration Certificate",
+        "Renewal Certificate", "Amendment Certificate",
+        "Exemption Certificate", "Other Contract Labour Document"],
+    "Gratuity": [
+        "Gratuity Registration", "Gratuity Insurance Policy",
+        "Gratuity Trust Deed", "Gratuity Trust Registration",
+        "Gratuity Exemption Approval", "Gratuity Scheme",
+        "Other Gratuity Document"],
+    "Bonus": [
+        "Bonus Registration", "Bonus Exemption Certificate",
+        "Bonus Scheme / Approval", "Other Bonus Document"],
+    "Maternity Benefit": [
+        "Maternity Benefit Registration", "Maternity Benefit Approval",
+        "Maternity Benefit Exemption", "Other Maternity Benefit Document"],
+    "Employment / Labour Registrations": [
+        "Labour Department Registration", "Employment Exchange Registration",
+        "Labour Welfare Registration", "Worker Registration",
+        "Establishment Registration", "Renewal Certificate",
+        "Amendment Certificate", "Other Registration"],
+    "Local / Municipal Compliance": [
+        "Trade License", "Municipal Registration",
+        "Commercial Establishment License", "Fire NOC",
+        "Building / Occupancy Certificate", "Local Authority Registration",
+        "Pollution / Environmental Approval", "Other Local License"],
+    "Other Statutory Compliance": ["Other Statutory Compliance Document"],
+}
+
+# Compliance-summary mapping: category → compliance_config applicability key
+_COMPLIANCE_MAP = [
+    ("PF", "EPFO / PF", "pf_applicable"),
+    ("ESIC", "ESIC", "esic_applicable"),
+    ("PT", "Professional Tax (PT)", "pt_applicable"),
+    ("LWF", "Labour Welfare Fund (LWF)", "lwf_applicable"),
+    ("Shops & Establishment", "Shops & Establishment", None),
+    ("Labour License", "Labour Department", None),
+    ("Factory License", "Factory Compliance", None),
+    ("Contract Labour", "Contract Labour", None),
+    ("Minimum Wages", "Minimum Wages", None),
+    ("Other", "Other Statutory Compliance", None),
+]
+
+
+async def _warn_days(company_id: str) -> int:
+    c = await db.companies.find_one({"company_id": company_id},
+                                    {"_id": 0, "statutory_alert_days": 1})
+    d = int((c or {}).get("statutory_alert_days") or 60)
+    return d if d in (30, 60, 90) else 60
+
+
+def _doc_status(d: dict, today: str, soon: str) -> str:
+    if d.get("status") == "replaced":
+        return "replaced"
+    if d.get("applicable") is False:
+        return "not_applicable"
+    exp = str(d.get("expiry_date") or "")
+    if d.get("no_expiry") or not exp:
+        return "active"
+    if exp < today:
+        return "expired"
+    if exp <= soon:
+        return "expiring_soon"
+    return "active"
+
+
+@router.get("/statutory/catalog")
+async def statutory_catalog(state: Optional[str] = Query(None),
+                            company_id: Optional[str] = Query(None),
+                            authorization: Optional[str] = Header(None)):
+    """Built-in catalog + custom types from statutory_doc_master, with
+    active flags and optional state-specific entries."""
+    admin, cid = await _gate(authorization, company_id)
+    entries = await db.statutory_doc_master.find({}, {"_id": 0}).to_list(2000)
+    overrides = {(e.get("category"), e.get("doc_type")): e for e in entries}
+    out = []
+    for cat, types in STATUTORY_CATALOG.items():
+        rows = []
+        for t in types:
+            ov = overrides.pop((cat, t), None)
+            rows.append({"doc_type": t, "active": (ov or {}).get("active", True),
+                         "custom": False, "state": (ov or {}).get("state")})
+        out.append({"category": cat, "types": rows})
+    # custom types (state-filtered: no state OR matching state)
+    for (cat, t), e in overrides.items():
+        st_val = e.get("state")
+        if state and st_val and st_val != state:
+            continue
+        grp = next((g for g in out if g["category"] == cat), None)
+        if not grp:
+            grp = {"category": cat, "types": []}
+            out.append(grp)
+        grp["types"].append({"doc_type": t, "active": e.get("active", True),
+                             "custom": True, "state": st_val})
+    return {"categories": out, "warn_days": await _warn_days(cid)}
+
+
+@router.post("/statutory/catalog")
+async def statutory_catalog_add(body: Dict[str, Any] = Body(...),
+                                authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    cat = str(body.get("category") or "").strip()
+    dt = str(body.get("doc_type") or "").strip()
+    if not cat or not dt:
+        raise HTTPException(status_code=400, detail="category and doc_type are required")
+    await db.statutory_doc_master.update_one(
+        {"category": cat, "doc_type": dt},
+        {"$set": {"category": cat, "doc_type": dt,
+                  "state": str(body.get("state") or "").strip() or None,
+                  "active": True, "updated_by": admin["user_id"],
+                  "updated_at": now_iso()},
+         "$setOnInsert": {"created_at": now_iso(), "created_by": admin["user_id"]}},
+        upsert=True)
+    return {"ok": True}
+
+
+@router.patch("/statutory/catalog")
+async def statutory_catalog_toggle(body: Dict[str, Any] = Body(...),
+                                   authorization: Optional[str] = Header(None)):
+    """Activate/deactivate a document type. NEVER deletes — historical
+    records keep their type."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "sub_admin", "company_admin"])
+    cat = str(body.get("category") or "").strip()
+    dt = str(body.get("doc_type") or "").strip()
+    await db.statutory_doc_master.update_one(
+        {"category": cat, "doc_type": dt},
+        {"$set": {"category": cat, "doc_type": dt,
+                  "active": bool(body.get("active", True)),
+                  "updated_by": admin["user_id"], "updated_at": now_iso()}},
+        upsert=True)
+    return {"ok": True}
+
+
+@router.post("/statutory/warn-days")
+async def statutory_warn_days(body: Dict[str, Any] = Body(...),
+                              authorization: Optional[str] = Header(None)):
+    admin, cid = await _gate(authorization, body.get("company_id"))
+    days = int(body.get("days") or 60)
+    if days not in (30, 60, 90):
+        raise HTTPException(status_code=400, detail="days must be 30, 60 or 90")
+    await db.companies.update_one({"company_id": cid},
+                                  {"$set": {"statutory_alert_days": days}})
+    return {"ok": True, "days": days}
+
+
+@router.get("/{branch_id}/licenses")
+async def bm_licenses(branch_id: str,
+                      search: Optional[str] = Query(None),
+                      category: Optional[str] = Query(None),
+                      status: Optional[str] = Query(None),
+                      doc_type: Optional[str] = Query(None),
+                      state: Optional[str] = Query(None),
+                      authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, _ADMIN_ROLES)
+    b = await _get_branch(branch_id, admin)
+    warn = await _warn_days(b["company_id"])
+    today = _ist_today()
+    soon = (datetime.now(timezone.utc) + timedelta(days=warn, hours=5, minutes=30)).strftime("%Y-%m-%d")
+    docs = await db.branch_documents.find(
+        {"branch_id": branch_id, "status": {"$ne": "deleted"}},
+        {"_id": 0, "file_base64": 0}).sort("created_at", -1).to_list(500)
+    for d in docs:
+        d["expiry_status"] = _doc_status(d, today, soon)
+        d["has_file"] = bool(d.get("file_name"))
+    if category:
+        docs = [d for d in docs if (d.get("category") or "") == category]
+    if doc_type:
+        docs = [d for d in docs if (d.get("doc_type") or "") == doc_type]
+    if state:
+        docs = [d for d in docs if (d.get("state") or "") == state]
+    if status:
+        docs = [d for d in docs if d["expiry_status"] == status]
+    if search:
+        s = search.strip().lower()
+        docs = [d for d in docs if s in (d.get("doc_name") or "").lower()
+                or s in (d.get("doc_type") or "").lower()
+                or s in (d.get("doc_number") or "").lower()
+                or s in (d.get("issuing_authority") or "").lower()]
+    live = [d for d in docs if d["expiry_status"] not in ("replaced",)]
+    summary = {"active": sum(1 for d in live if d["expiry_status"] == "active"),
+               "expiring_soon": sum(1 for d in live if d["expiry_status"] == "expiring_soon"),
+               "expired": sum(1 for d in live if d["expiry_status"] == "expired"),
+               "not_applicable": sum(1 for d in live if d["expiry_status"] == "not_applicable"),
+               "total": len(live)}
+    return {"documents": docs, "summary": summary, "warn_days": warn}
+
+
+def _license_validate(body: dict) -> None:
+    eff = str(body.get("effective_from") or "")
+    exp = str(body.get("expiry_date") or "")
+    if eff and exp and exp < eff:
+        raise HTTPException(status_code=400,
+                            detail="Expiry Date cannot be before Effective From")
+    f64 = body.get("file_base64")
+    if f64:
+        try:
+            raw = base64.b64decode(f64.split(",")[-1], validate=False)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid file data")
+        if len(raw) > 8 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="File too large (max 8 MB)")
+
+
+_LICENSE_FIELDS = ("category", "doc_type", "doc_name", "doc_number",
+                   "establishment_code", "issuing_authority", "state",
+                   "effective_from", "expiry_date", "no_expiry", "applicable",
+                   "remarks")
+
+
+@router.post("/{branch_id}/licenses")
+async def bm_license_add(branch_id: str, body: Dict[str, Any] = Body(...),
+                         authorization: Optional[str] = Header(None)):
+    admin = await get_user_from_token(authorization)
+    require_role(admin, _ADMIN_ROLES)
+    await _get_branch(branch_id, admin)
+    if not str(body.get("doc_type") or "").strip():
+        raise HTTPException(status_code=400, detail="Document Type is required")
+    _license_validate(body)
+    # Renewal: keep the previous record as history (spec §19)
+    if body.get("replace_same_type"):
+        await db.branch_documents.update_many(
+            {"branch_id": branch_id, "doc_type": body["doc_type"],
+             "category": body.get("category"),
+             "status": {"$nin": ["deleted", "replaced"]}},
+            {"$set": {"status": "replaced", "replaced_at": now_iso(),
+                      "replaced_by": admin["user_id"]}})
+    doc = {"doc_id": f"brdoc_{uuid.uuid4().hex[:10]}", "branch_id": branch_id,
+           "status": "active", "created_at": now_iso(),
+           "created_by": admin["user_id"],
+           "created_by_name": admin.get("name") or admin.get("email")}
+    for k in _LICENSE_FIELDS:
+        v = body.get(k)
+        doc[k] = (str(v).strip() or None) if isinstance(v, str) else v
+    doc["applicable"] = body.get("applicable", True) is not False
+    doc["no_expiry"] = bool(body.get("no_expiry"))
+    if body.get("file_base64"):
+        doc["file_base64"] = body["file_base64"]
+        doc["file_name"] = str(body.get("file_name") or "").strip() or "document"
+        doc["uploaded_at"] = now_iso()
+        doc["uploaded_by_name"] = admin.get("name") or admin.get("email")
+    await db.branch_documents.insert_one(doc)
+    doc.pop("_id", None)
+    doc.pop("file_base64", None)
+    await _audit(admin, branch_id, "license_add",
+                 [{"field": f"{doc.get('category') or 'Document'}:{doc.get('doc_type')}",
+                   "old": None, "new": doc.get("doc_number") or "added"}])
+    return {"ok": True, "document": doc}
+
+
+@router.patch("/licenses/{doc_id}")
+async def bm_license_patch(doc_id: str, body: Dict[str, Any] = Body(...),
+                           authorization: Optional[str] = Header(None)):
+    """Edit fields and/or REPLACE the attachment (old file kept in
+    attachment_history — spec §8)."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, _ADMIN_ROLES)
+    d = await db.branch_documents.find_one({"doc_id": doc_id}, {"_id": 0})
+    if not d:
+        raise HTTPException(status_code=404, detail="Document not found")
+    await _get_branch(d["branch_id"], admin)
+    _license_validate({**d, **body})
+    patch: Dict[str, Any] = {}
+    changes = []
+    for k in _LICENSE_FIELDS:
+        if k in body:
+            v = body[k]
+            v = (str(v).strip() or None) if isinstance(v, str) else v
+            if d.get(k) != v:
+                changes.append({"field": k, "old": d.get(k), "new": v})
+            patch[k] = v
+    if body.get("file_base64"):
+        if d.get("file_name"):
+            hist = d.get("attachment_history") or []
+            hist.append({"file_name": d.get("file_name"),
+                         "uploaded_at": d.get("uploaded_at"),
+                         "uploaded_by_name": d.get("uploaded_by_name"),
+                         "replaced_at": now_iso(),
+                         "replaced_by_name": admin.get("name") or admin.get("email")})
+            patch["attachment_history"] = hist[-10:]
+            changes.append({"field": "attachment", "old": d.get("file_name"),
+                            "new": body.get("file_name")})
+        patch["file_base64"] = body["file_base64"]
+        patch["file_name"] = str(body.get("file_name") or "").strip() or "document"
+        patch["uploaded_at"] = now_iso()
+        patch["uploaded_by_name"] = admin.get("name") or admin.get("email")
+    if not patch:
+        return {"ok": True}
+    patch["updated_at"] = now_iso()
+    patch["updated_by_name"] = admin.get("name") or admin.get("email")
+    await db.branch_documents.update_one({"doc_id": doc_id}, {"$set": patch})
+    await _audit(admin, d["branch_id"], "license_update", changes)
+    fresh = await db.branch_documents.find_one({"doc_id": doc_id},
+                                               {"_id": 0, "file_base64": 0})
+    return {"ok": True, "document": fresh}
+
+
+@router.get("/{branch_id}/compliance-summary")
+async def bm_compliance_summary(branch_id: str,
+                                authorization: Optional[str] = Header(None)):
+    """Compliance-wise applicability vs registration vs attachment (spec
+    §11/§14/§22) + branch-specific alerts (§10/§15)."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, _ADMIN_ROLES)
+    b = await _get_branch(branch_id, admin)
+    cc = b.get("compliance_config") or {}
+    warn = await _warn_days(b["company_id"])
+    today = _ist_today()
+    soon = (datetime.now(timezone.utc) + timedelta(days=warn, hours=5, minutes=30)).strftime("%Y-%m-%d")
+    docs = await db.branch_documents.find(
+        {"branch_id": branch_id, "status": {"$nin": ["deleted", "replaced"]}},
+        {"_id": 0, "file_base64": 0}).to_list(500)
+    for d in docs:
+        d["expiry_status"] = _doc_status(d, today, soon)
+    rows, alerts = [], []
+    for label, cat, app_key in _COMPLIANCE_MAP:
+        cat_docs = [d for d in docs if (d.get("category") or "") == cat]
+        applicable = bool(cc.get(app_key)) if app_key else (
+            True if cat_docs else None)
+        best = next((d for d in cat_docs if d["expiry_status"] == "active"), None) \
+            or next((d for d in cat_docs if d["expiry_status"] == "expiring_soon"), None) \
+            or (cat_docs[0] if cat_docs else None)
+        if applicable is False:
+            reg = "not_applicable"
+        elif not best:
+            reg = "missing" if applicable else "none"
+        else:
+            reg = best["expiry_status"]
+        rows.append({
+            "compliance": label, "category": cat,
+            "applicable": applicable,
+            "registration": reg,
+            "doc_number": (best or {}).get("doc_number"),
+            "effective_from": (best or {}).get("effective_from"),
+            "expiry_date": (best or {}).get("expiry_date"),
+            "attached": bool((best or {}).get("file_name")),
+            "docs_count": len(cat_docs),
+        })
+        if applicable and not best:
+            alerts.append(f"{label} registration missing")
+        if applicable and best and not best.get("file_name"):
+            alerts.append(f"{label} document not attached")
+    for d in docs:
+        if d["expiry_status"] == "expired":
+            alerts.append(f"{d.get('doc_type')} EXPIRED on {d.get('expiry_date')}")
+        elif d["expiry_status"] == "expiring_soon":
+            try:
+                days_left = (datetime.strptime(d["expiry_date"], "%Y-%m-%d")
+                             - datetime.strptime(today, "%Y-%m-%d")).days
+                alerts.append(f"{d.get('doc_type')} expires in {days_left} days")
+            except Exception:
+                alerts.append(f"{d.get('doc_type')} expiring soon")
+    counts = {"active": sum(1 for d in docs if d["expiry_status"] == "active"),
+              "expiring_soon": sum(1 for d in docs if d["expiry_status"] == "expiring_soon"),
+              "expired": sum(1 for d in docs if d["expiry_status"] == "expired")}
+    return {"compliances": rows, "alerts": alerts, "counts": counts,
+            "warn_days": warn}
+
+
+@router.get("/statutory/register")
+async def statutory_register(company_id: Optional[str] = Query(None),
+                             fmt: str = Query("json"),
+                             authorization: Optional[str] = Header(None)):
+    """Firm-wide branch-wise statutory document register (spec §18)."""
+    admin, cid = await _gate(authorization, company_id)
+    branches = await db.branches.find(
+        {"$or": [{"company_id": cid}, {"linked_company_ids": cid}]},
+        {"_id": 0, "branch_id": 1, "name": 1, "code": 1, "state": 1}).to_list(500)
+    warn = await _warn_days(cid)
+    today = _ist_today()
+    soon = (datetime.now(timezone.utc) + timedelta(days=warn, hours=5, minutes=30)).strftime("%Y-%m-%d")
+    rows = []
+    for b in branches:
+        docs = await db.branch_documents.find(
+            {"branch_id": b["branch_id"], "status": {"$nin": ["deleted"]}},
+            {"_id": 0, "file_base64": 0}).to_list(500)
+        for d in docs:
+            rows.append({
+                "branch": b.get("name"), "branch_code": b.get("code"),
+                "branch_state": b.get("state"),
+                "category": d.get("category"), "doc_type": d.get("doc_type"),
+                "doc_number": d.get("doc_number"),
+                "issuing_authority": d.get("issuing_authority"),
+                "state": d.get("state"),
+                "effective_from": d.get("effective_from"),
+                "expiry_date": "No Expiry" if d.get("no_expiry") else d.get("expiry_date"),
+                "status": _doc_status(d, today, soon),
+                "attached": "Yes" if d.get("file_name") else "No",
+            })
+    if fmt == "json":
+        return {"rows": rows}
+    import io
+    from fastapi.responses import Response
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Statutory Register"
+    heads = ["Branch", "Code", "Branch State", "Compliance", "Document Type",
+             "Registration No.", "Issuing Authority", "Doc State",
+             "Effective From", "Expiry", "Status", "Attached"]
+    ws.append(heads)
+    for c in ws[1]:
+        c.font = Font(bold=True)
+    for r in rows:
+        ws.append([r["branch"], r["branch_code"], r["branch_state"],
+                   r["category"], r["doc_type"], r["doc_number"],
+                   r["issuing_authority"], r["state"], r["effective_from"],
+                   r["expiry_date"], r["status"], r["attached"]])
+    out = io.BytesIO()
+    wb.save(out)
+    return Response(
+        content=out.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition":
+                 'attachment; filename="Statutory_Compliance_Register.xlsx"'})

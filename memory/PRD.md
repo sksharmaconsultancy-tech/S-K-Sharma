@@ -9173,3 +9173,27 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
 - APP_ITERATION=738; deploy_vps_iter738.sh.
   - Follow-up (same iter): user asked to fully HIDE such punches — info
     note removed; prev-night OUT is silently excluded from the day list.
+
+## Iter 739 — Branch-wise LICENSES & STATUTORY COMPLIANCE DOCS (tested)
+- Backend (appended to routes/branch_master.py): STATUTORY_CATALOG (15
+  categories, 90+ doc types), GET/POST/PATCH /statutory/catalog (master —
+  add/deactivate, never delete), POST /statutory/warn-days (30/60/90 on
+  companies.statutory_alert_days), GET/POST /{branch}/licenses (extended
+  fields: category, doc_name, regn no, establishment_code, authority,
+  state, effective_from, expiry/no_expiry, applicable, remarks; renewal
+  keeps history), PATCH /licenses/{doc_id} (edit + attachment replace →
+  attachment_history), GET /{branch}/compliance-summary (Applicable vs
+  Registration vs Attached per compliance + branch alerts; PF/ESIC fully
+  separate), GET /statutory/register (firm-wide json/xlsx). Dashboard now
+  returns statutory_docs counts. Same branch_documents collection —
+  Iter737 docs backward-compatible. Audit → branch_audit.
+- Frontend: BranchDocsTab.tsx rewritten ("Licenses & Statutory" tab):
+  compliance summary cards, alerts box, search/status/category filters,
+  warn-days chips, add/edit form (category→type chips from master, custom
+  type add, no-expiry & applicable toggles, attachment upload/replace),
+  register Excel export. Overview dashboard "Statutory Docs" card.
+- Self-tested e2e: curl (catalog 15 cats, add PF no-expiry, ESIC
+  expiring_soon, date validation 400, summary+alerts correct, register
+  xlsx 200) + Playwright UI (summary strip, alerts, PT add → status
+  Missing→Active). Test branch cleaned.
+- APP_ITERATION=739; deploy_vps_iter739.sh.

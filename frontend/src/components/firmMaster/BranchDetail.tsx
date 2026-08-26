@@ -26,7 +26,7 @@ const TABS = [
   { id: "payroll", label: "Payroll", icon: "cash-outline" },
   { id: "attendance", label: "Attendance", icon: "time-outline" },
   { id: "employees", label: "Employees", icon: "people-outline" },
-  { id: "documents", label: "Documents", icon: "document-text-outline" },
+  { id: "documents", label: "Licenses & Statutory", icon: "shield-outline" },
   { id: "history", label: "History", icon: "git-compare-outline" },
 ] as const;
 
@@ -133,7 +133,7 @@ export default function BranchDetail({
       {tab === "employees" ? (
         <BranchEmployeesTab branch={branch} branches={branches} companyId={companyId} />
       ) : null}
-      {tab === "documents" ? <BranchDocsTab branchId={branchId} /> : null}
+      {tab === "documents" ? <BranchDocsTab branchId={branchId} companyId={companyId} /> : null}
       {tab === "history" ? <HistoryTab branchId={branchId} audit={audit} /> : null}
     </View>
   );
@@ -178,6 +178,11 @@ function OverviewTab({ branch, branchId, onGoTab }: {
     { label: "Exits", value: d.exits },
     { label: "Open F&F", value: d.open_fnf,
       onPress: () => router.push("/fnf-calculator" as any) },
+    { label: "Statutory Docs",
+      value: `${d.statutory_docs?.active ?? 0} ✓ / ${d.statutory_docs?.expiring_soon ?? 0} ⏳ / ${d.statutory_docs?.expired ?? 0} ✕`,
+      color: (d.statutory_docs?.expired ?? 0) > 0 ? "#B91C1C"
+        : (d.statutory_docs?.expiring_soon ?? 0) > 0 ? "#B45309" : "#15803D",
+      onPress: () => onGoTab("documents") },
   ] : [];
 
   return (

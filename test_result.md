@@ -966,3 +966,10 @@ ITER 487 (doc-expiry alerts):
   legacy regression); frontend 7 tabs + cross-midnight default ON verified.
 - Post-test addition (self-tested e2e): users.branch_name sync on transfer
   apply + branch rename → report Branch filters integration. Cleanup done.
+
+## Iter 739 — Branch-wise Statutory Licenses (tested)
+- testing_agent backend 22/22 PASS (tests/test_iter739_statutory_licenses.py):
+  catalog master, warn-days, license statuses, renewal history, attachment
+  history, compliance-summary/alerts, register xlsx, Iter737 regression.
+- Frontend verified by main agent via Playwright (summary cards, alerts,
+  add flow PT Missing→Active, filters, no-expiry).
