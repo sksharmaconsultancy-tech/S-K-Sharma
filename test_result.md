@@ -957,3 +957,5 @@ ITER 487 (doc-expiry alerts):
 
 ## Iter 734 — firm gate 403 UX (tested)
 - Reproduced 403 on un-configured firm; enable flag → 200. Alert added.
+
+## Iter 735 — Branch State UI (tested via API e2e + lint)

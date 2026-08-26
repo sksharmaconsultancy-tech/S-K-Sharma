@@ -9112,3 +9112,10 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
 - Verified: flag OFF → 403; flag ON → 200 run. User instructed to enable
   Online Salary in Firm Master for Sunshine Suitings.
 - APP_ITERATION=734; deploy_vps_iter734.sh.
+
+## Iter 735 — Branch State UI (2026-06)
+- branches.tsx: per-branch "State" chip picker (states from
+  /admin/branch-extras/states, save via /branch-state, local state
+  update). Branch type +state field. styles stateRow/stateChip*.
+- E2E verified via API (create branch → set Maharashtra → list reflects).
+- APP_ITERATION=735; deploy_vps_iter735.sh.

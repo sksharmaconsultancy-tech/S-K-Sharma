@@ -32,6 +32,7 @@ type Branch = {
   office_lng: number;
   geofence_radius_m: number;
   active: boolean;
+  state?: string | null;
 };
 
 export default function BranchesScreen() {
@@ -49,6 +50,24 @@ export default function BranchesScreen() {
   const [showForm, setShowForm] = useState(false);
   const [faceMatchEnabled, setFaceMatchEnabled] = useState<boolean>(false);
   const [faceMatchBusy, setFaceMatchBusy] = useState(false);
+  // Iter 735 — branch state picker
+  const [stateOpen, setStateOpen] = useState<string | null>(null);
+  const [stateNames, setStateNames] = useState<string[]>([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await api<{ states: any[] }>("/admin/branch-extras/states");
+        setStateNames((r.states || []).map((s) => s.state));
+      } catch { /* non-admin roles won't need it */ }
+    })();
+  }, []);
+  const setBranchState = async (b: Branch, s: string) => {
+    try {
+      await api("/admin/branch-extras/branch-state", { method: "POST", body: { branch_id: b.branch_id, state: s } });
+      setBranches((prev) => prev.map((x) => x.branch_id === b.branch_id ? { ...x, state: s } : x));
+      setStateOpen(null);
+    } catch (e: any) { showMsg(e?.message || "State save failed"); }
+  };
 
   // Which company's face-match toggle we're editing:
   //  - company_admin → their own company
@@ -336,6 +355,27 @@ export default function BranchesScreen() {
                       <Ionicons name="trash-outline" size={16} color="#B91C1C" />
                     </Pressable>
                   </View>
+                </View>
+                {/* Iter 735 — Branch STATE picker (state-wise PT/LWF/
+                    min-wage rules map via branch → state) */}
+                <View style={styles.stateRow}>
+                  <Text style={styles.metaTxt}>🗺️ State: </Text>
+                  {stateOpen === b.branch_id ? (
+                    <View style={styles.stateWrap}>
+                      {stateNames.map((s) => (
+                        <Pressable key={s} style={[styles.stateChip, b.state === s && styles.stateChipOn]}
+                          onPress={() => setBranchState(b, s)} testID={`branch-state-${b.branch_id}-${s}`}>
+                          <Text style={[styles.stateChipTxt, b.state === s && styles.stateChipTxtOn]}>{s}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  ) : (
+                    <Pressable onPress={() => setStateOpen(b.branch_id)} testID={`branch-state-open-${b.branch_id}`}>
+                      <Text style={[styles.metaTxt, { color: colors.brandPrimary, fontWeight: "700" }]}>
+                        {b.state || "Set state ▾"}
+                      </Text>
+                    </Pressable>
+                  )}
                 </View>
               </View>
             ))
@@ -660,6 +700,12 @@ const styles = StyleSheet.create({
   name: { color: colors.onSurface, fontSize: type.base, fontWeight: "700" },
   sub: { color: colors.onSurfaceSecondary, fontSize: 12, marginTop: 2 },
   metaTxt: { color: colors.onSurfaceTertiary, fontSize: 11, marginTop: 4 },
+  stateRow: { flexDirection: "row", alignItems: "flex-start", flexWrap: "wrap", marginTop: 6, gap: 4 },
+  stateWrap: { flexDirection: "row", flexWrap: "wrap", gap: 6, flex: 1 },
+  stateChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, borderWidth: 1, borderColor: colors.border },
+  stateChipOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  stateChipTxt: { fontSize: 10, color: colors.onSurface },
+  stateChipTxtOn: { color: "#fff", fontWeight: "700" },
   actions: { flexDirection: "row", gap: 6 },
   editBtn: {
     padding: 8, borderRadius: 8,
