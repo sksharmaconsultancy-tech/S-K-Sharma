@@ -9158,3 +9158,16 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
 - testing_agent: backend 25/25 pytest PASS (tests/test_iter737_branch_master.py),
   frontend all tabs PASS, regression PASS. Test data cleaned.
 - APP_ITERATION=737; deploy_vps_iter737.sh (kind=script → deploy737.sh).
+
+## Iter 738 — Night-shift OUT in next-day Repair modal (user bug, fixed)
+- Bug (Anshul Yadav/Kankani): night duty on 01, morning OUT on 02 —
+  the OUT also appeared in day-02's Repair Punches popup.
+- Fix (display-only, PunchRepairModal.tsx): fetch prev-day too; a LEADING
+  morning OUT (<12:00) that closes yesterday's night shift (record.date==pd
+  OR prev-day trailing unpaired IN) is parked out of the list and shown as
+  an ENGLISH info note ("closing punch of the previous day's night shift").
+  Handles both conventions: shift-day-attributed and calendar-dated records.
+- Attendance/duty-hours/cross-midnight engine untouched. E2E verified via
+  Playwright (reproduced with calendar-dated test punches, then fixed);
+  day-01 modal unchanged. Test punches cleaned up.
+- APP_ITERATION=738; deploy_vps_iter738.sh.

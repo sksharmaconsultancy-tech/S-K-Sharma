@@ -32,6 +32,7 @@ type Punch = {
   record_id: string;
   kind: "in" | "out";
   at: string;
+  date?: string;
   source?: string;
   status?: string;
   manual_reason?: string;
@@ -88,6 +89,10 @@ export default function PunchRepairModal({
   const [pDate, setPDate] = useState("");
   const [reason, setReason] = useState("");
   const [err, setErr] = useState("");
+  // Iter 738 (user bug — Anshul Yadav / Kankani): a night-shift OUT that
+  // lands the NEXT morning was ALSO listed on the next day's repair modal.
+  // It is detected and parked here so we can show an info note instead.
+  const [prevNightOut, setPrevNightOut] = useState<Punch | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -95,19 +100,40 @@ export default function PunchRepairModal({
       // Iter 546 (user bug — night OT) — fetch this day AND the next day:
       // a night/OT session ends the NEXT morning, so its OUT punch lives
       // on the next date and was invisible here before.
-      const nd = (() => {
-        const d = new Date(`${dateIso}T12:00:00Z`);
-        d.setUTCDate(d.getUTCDate() + 1);
+      // Iter 738 — also fetch the PREVIOUS day so we can tell whether an
+      // early-morning OUT on this date actually closes yesterday's night
+      // shift (then it must NOT appear in this day's punch list).
+      const shiftDay = (base: string, delta: number) => {
+        const d = new Date(`${base}T12:00:00Z`);
+        d.setUTCDate(d.getUTCDate() + delta);
         return d.toISOString().slice(0, 10);
-      })();
+      };
+      const nd = shiftDay(dateIso, 1);
+      const pd = shiftDay(dateIso, -1);
       const r = await api<{ records: Punch[] }>(
-        `/admin/attendance/history?user_id=${userId}&date_from=${dateIso}&date_to=${nd}&limit=200`,
+        `/admin/attendance/history?user_id=${userId}&date_from=${pd}&date_to=${nd}&limit=300`,
       );
       // Show real punches only (hide rejected / auto-ignored / duplicate noise).
       const visible = (r.records || [])
         .filter((p) => !["rejected", "auto_ignored", "duplicate"].includes(String(p.status || "")))
         .sort((a, b) => (a.at || "").localeCompare(b.at || ""));
       const day = visible.filter((p) => (p.at || "").slice(0, 10) === dateIso);
+      // Iter 738 — LEADING morning OUT (< 12:00) that closes YESTERDAY's
+      // night shift: either the record is date-attributed to yesterday
+      // (import convention) or yesterday's punches end with an unpaired
+      // trailing IN. Park it as an info note — duty hours already count it
+      // on yesterday; keeping it in this list confused users.
+      let parked: Punch | null = null;
+      if (day.length && day[0].kind === "out" && (day[0].at || "").slice(11, 16) < "12:00") {
+        const prevPunches = visible.filter((p) => (p.at || "").slice(0, 10) === pd);
+        let pBal = 0;
+        for (const p of prevPunches) pBal += p.kind === "in" ? 1 : -1;
+        const closesPrev =
+          (day[0].date || "") === pd ||
+          (pBal > 0 && prevPunches[prevPunches.length - 1]?.kind === "in");
+        if (closesPrev) parked = day.shift() || null;
+      }
+      setPrevNightOut(parked);
       // Cross-midnight: when the day ends with an UNPAIRED trailing IN,
       // pull the next day's FIRST morning punch (< 12:00) into the list —
       // that is the night/OT OUT (or a wrongly-kinded punch the admin can
@@ -390,6 +416,18 @@ export default function PunchRepairModal({
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator
           >
+          {/* Iter 738 — previous day's night-shift OUT (info only) */}
+          {!loading && prevNightOut && (
+            <View style={st.prevNightNote} testID="prev-night-out-note">
+              <Ionicons name="moon-outline" size={13} color="#6D28D9" />
+              <Text style={st.prevNightTxt}>
+                {(prevNightOut.at || "").slice(11, 16)} OUT — this is the
+                closing punch of the previous day&apos;s night shift (already
+                counted in that day&apos;s duty). Not included in this
+                day&apos;s punch list.
+              </Text>
+            </View>
+          )}
           {/* Missing-punch banner */}
           {!loading && punches.length > 0 && hasIn !== hasOut && (
             <View style={st.warnBanner}>
@@ -741,6 +779,16 @@ const st = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   warnTxt: { fontSize: 12, color: "#B45309", fontWeight: "700" },
+  prevNightNote: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 6,
+    backgroundColor: "rgba(109,40,217,0.08)",
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  prevNightTxt: { flex: 1, fontSize: 11.5, color: "#6D28D9", fontWeight: "600" },
   punchRow: {
     flexDirection: "row",
     alignItems: "center",
