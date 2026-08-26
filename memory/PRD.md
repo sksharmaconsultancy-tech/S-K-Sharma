@@ -9119,3 +9119,18 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   update). Branch type +state field. styles stateRow/stateChip*.
 - E2E verified via API (create branch → set Maharashtra → list reflects).
 - APP_ITERATION=735; deploy_vps_iter735.sh.
+
+## Iter 736 — Branches inside Firm Master (2026-06)
+- User: "How to add Branch… can we set into the existing Firm master?"
+- New: /app/frontend/src/components/firmMaster/BranchesSection.tsx —
+  full branch CRUD (add/edit/delete, GPS lat/lng button, geofence radius)
+  + per-branch STATE compliance chip, scoped to selected firm (companyId).
+- firm-master.tsx: NAV_SECTIONS +{id:"branches",num:18} after Security;
+  renders <BranchesSection companyId={companyId}/>; import added.
+- Uses existing APIs: GET/POST /company/branches (company_id in POST body
+  for super_admin), PATCH/DELETE /company/branches/{id},
+  /admin/branch-extras/states + /branch-state.
+- "Full screen" button links to standalone /branches screen (unchanged).
+- E2E verified via Playwright (session injected): nav → section → Add
+  Branch → listed → deleted. Test branch cleaned up.
+- APP_ITERATION=736; deploy_vps_iter736.sh (kind=script serves deploy736.sh).

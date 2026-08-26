@@ -24,6 +24,7 @@ import ContactDetailsSection from "@/src/components/firmMaster/ContactDetailsSec
 import AuditLogSection from "@/src/components/firmMaster/AuditLogSection";
 import PwaSettingsSection from "@/src/components/firmMaster/PwaSettingsSection";
 import HealthSection from "@/src/components/firmMaster/HealthSection";
+import BranchesSection from "@/src/components/firmMaster/BranchesSection";
 import useEnterNav from "@/src/hooks/useEnterNav";
 import useSaveShortcut from "@/src/hooks/useSaveShortcut";
 import { confirmYesNo } from "@/src/utils/confirm";
@@ -49,6 +50,7 @@ const NAV_SECTIONS: { id: string; num: number; label: string; icon: keyof typeof
   { id: "documents", num: 12, label: "Documents", icon: "document-text-outline" },
   { id: "approval", num: 13, label: "Approval Workflow", icon: "checkmark-done-outline" },
   { id: "security", num: 14, label: "Security & Permissions", icon: "lock-closed-outline" },
+  { id: "branches", num: 18, label: "Branches / Locations", icon: "git-branch-outline" },
   { id: "audit", num: 15, label: "Audit Log", icon: "time-outline" },
   { id: "pwa", num: 17, label: "PWA Settings", icon: "phone-portrait-outline" },
   { id: "health", num: 16, label: "AI Compliance Health", icon: "pulse-outline" },
@@ -659,6 +661,7 @@ export default function FirmMasterScreen() {
         {/* 15. AUDIT LOG / 16. HEALTH ------------------------------------ */}
         {sec("audit") ? <AuditLogSection companyId={companyId} /> : null}
         {sec("pwa") ? <PwaSettingsSection companyId={companyId} /> : null}
+        {sec("branches") && companyId ? <BranchesSection companyId={companyId} /> : null}
         {sec("health") ? <HealthSection master={master} /> : null}
 
         {/* 3. ADDRESS DETAILS -------------------------------------------- */}
