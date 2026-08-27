@@ -1,8 +1,25 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 758)
+# S.K. Sharma & Co. — VPS deploy script (Iter 759)
 # Deploys the FULL latest code (includes ALL previous iterations).
 #
-# ══════ WHAT'S NEW (Iter 758) — 📘 USER MANUAL + FEATURE LIST UPDATE ══════
+# ══════ WHAT'S NEW (Iter 759) — ⚡ ATTENDANCE AUTO-SAVE + KEYBOARD ══════
+#
+# ATTENDANCE REPORT — MONTHLY EDITABLE (USER REQUEST):
+# 1) AUTO-SAVE: har correction turant save ho jata hai — Save button
+#    dabane ki zaroorat NAHI. Dropdown se ya keyboard se status
+#    chunte hi server par save + cell par ✓. (Approval-required firms
+#    me change auto-SUBMIT hota hai 🟡.) Agar network fail ho to
+#    "Retry Save" button se dobara bhej sakte hain.
+# 2) KEYBOARD SE FAST FILLING (desktop web):
+#    * ARROW KEYS se cell select karein (amber highlight).
+#    * Seedha CODE TYPE karein — P · A · L · CL · WO · CO · HD · H —
+#      status turant auto-save hota hai aur cursor AGLE din par chala
+#      jata hai (Excel jaisa).
+#    * Single-letter codes (P/A/L) instant; C→CL/CO, W→WO, H→HD/H
+#      me agla letter ya 0.6 sec rukne par apply hota hai.
+#    * Enter = dropdown kholo, Esc = band karo.
+#
+# ══════ ALSO IN Iter 758 — 📘 USER MANUAL + FEATURE LIST UPDATE ══════
 #
 # 1) QUICK USER MANUAL (PDF) UPDATED (USER REQUEST):
 #  * 4 naye sections: Salary Sheet History & Restore · Bulk Employee
@@ -2051,8 +2068,8 @@
 #    INCENTIVE · FOOD ALLOWANCE import fix · dynamic allowance columns.
 #
 # Run ON THE VPS as root/sksharma:
-#   wget -O deploy758.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
-#   bash deploy758.sh
+#   wget -O deploy759.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
+#   bash deploy759.sh
 
 APP_DIR=/home/sksharma/app
 WEB_DIR=/var/www/sksharma

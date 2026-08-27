@@ -9522,3 +9522,23 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   HR Analytics); summary 148 features / 19 modules. Features PDF
   verified: 12 pages.
 - APP_ITERATION=758; deploy_vps_iter758.sh (757 folded, deleted).
+
+## Iter 759 — Attendance Monthly Editable: auto-save + keyboard filling
+- USER REQUEST 1 (auto-save): attendance-report.tsx — setCell now calls
+  autoSave() (single-change POST to /admin/manual-attendance/save),
+  applies result locally (cell st/src/pending + row totals) WITHOUT full
+  reload. reasonRef caches the require_reason prompt once per session.
+  Save button now only "Retry Save (n)" for failed auto-saves.
+- USER REQUEST 2 (keyboard): web keydown handler via kbRef
+  (Object.assign — buf/timer preserved across renders): Arrow keys move
+  focused cell (amber outline, focusD prop on GridRow), typing exact
+  codes P/A/L/CL/WO/CO/HD/H fills + auto-saves + advances right
+  (prefix buffer: unique full code instant, ambiguous C/W/H wait 600ms
+  or next letter), Enter/Space opens dropdown, Esc closes. Input-tag
+  guard so search fields unaffected.
+- Verified live via playwright: P instant, C+L→CL, H (600ms)→Holiday,
+  all "✅ Auto-saved" + ✓ markers + focus advance. Test edits on
+  SURENDRA (2026-08-03/04/05) reverted from manual_attendance + audit.
+- NOTE: /tmp files (otp_swap.py) were wiped by an env restart — recreate
+  the 2FA OTP-swap helper before any UI login test.
+- APP_ITERATION=759; deploy_vps_iter759.sh (758 folded, deleted).
