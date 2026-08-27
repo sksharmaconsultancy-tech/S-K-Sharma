@@ -204,6 +204,9 @@ export default function AttendanceReportEditable() {
   // Iter 760 (user request) — RANGE FILL: Shift+←/→ selects multiple days
   // of the same employee; typing a code fills them all in one save.
   const [sel, setSel] = useState<{ uid: string; from: string; to: string } | null>(null);
+  // Iter 761 (user request) — COLUMN FILL: a selected day column (header
+  // tap) gets one status for EVERY listed employee with a single code key.
+  const [colSel, setColSel] = useState<string | null>(null);
   const kbRef = React.useRef<any>({});
 
   // Iter 747 (user perf bug) — group unsaved edits per employee so each
@@ -304,7 +307,7 @@ export default function AttendanceReportEditable() {
   }, [data, search, groupF, sortMode]);
 
   Object.assign(kbRef.current, {
-    rows, days: data?.days || [], focus, sel,
+    rows, days: data?.days || [], focus, sel, colSel,
     enabled: !!(data?.settings || {}).enabled && tab === "grid",
   });
   useEffect(() => {
@@ -314,7 +317,7 @@ export default function AttendanceReportEditable() {
       if (!k.enabled || !k.rows?.length || !k.days?.length) return;
       const tag = (document.activeElement?.tagName || "").toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select") return;
-      if (e.key === "Escape") { setPicker(null); setSel(null); k.anchor = null; return; }
+      if (e.key === "Escape") { setPicker(null); setSel(null); setColSel(null); k.anchor = null; return; }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         undoLastRef.current();
@@ -351,8 +354,8 @@ export default function AttendanceReportEditable() {
         else setF(idx + 1, di);
         return;
       }
-      if (idx < 0 || di < 0) return;
-      if (e.key === "Enter" || e.key === " ") {
+      if ((idx < 0 || di < 0) && !k.colSel) return;
+      if (idx >= 0 && di >= 0 && (e.key === "Enter" || e.key === " ")) {
         e.preventDefault();
         setPicker({ uid: k.focus.uid, d: k.focus.d });
         return;
@@ -366,6 +369,21 @@ export default function AttendanceReportEditable() {
         const CODE_SET = ["P", "A", "L", "CL", "WO", "CO", "HD", "H"];
         const apply = (code: string) => {
           const kk = kbRef.current;
+          // Iter 761 — COLUMN FILL: selected day header → one code fills
+          // the whole column (every listed employee) in ONE save.
+          if (kk.colSel) {
+            const list = kk.rows.map((r: any) => ({
+              user_id: r.user_id, date: kk.colSel, status: code,
+              previous_status: r.cells?.[kk.colSel]?.st }));
+            if (!list.length) return;
+            if (Platform.OS === "web" && !window.confirm(
+              `${kk.colSel} ko "${code}" mark karein — sabhi ${list.length} employees ke liye?`)) {
+              return;
+            }
+            setColSel(null);
+            void autoSaveRef.current(list);
+            return;
+          }
           const i2 = kk.focus
             ? kk.rows.findIndex((r: any) => r.user_id === kk.focus.uid) : -1;
           const d2 = kk.focus ? kk.days.indexOf(kk.focus.d) : -1;
@@ -530,10 +548,24 @@ export default function AttendanceReportEditable() {
                 <Text style={[s.hcell, { width: 150, textAlign: "left" }]}>Employee</Text>
                 <Text style={[s.hcell, { width: 92 }]}>Dept</Text>
                 {(data.days || []).map((d: string, i: number) => (
-                  <View key={d} style={{ width: 38 }}>
+                  <Pressable
+                    key={d}
+                    onPress={() => {
+                      // Iter 761 (user request) — COLUMN FILL: tap a day
+                      // header to select the whole column, then type a code.
+                      if (!st.enabled) return;
+                      setSel(null);
+                      setColSel((c) => (c === d ? null : d));
+                    }}
+                    style={[{ width: 38 },
+                      colSel === d && {
+                        backgroundColor: "#DBEAFE", borderRadius: 6,
+                        borderWidth: 1, borderColor: "#2563EB" }]}
+                    testID={`ar-daycol-${d}`}
+                  >
                     <Text style={s.hcell2}>{d.slice(8)}</Text>
                     <Text style={s.hday}>{data.weekdays[i]}</Text>
-                  </View>
+                  </Pressable>
                 ))}
                 {CODES.map((c) => (
                   <Text key={c} style={[s.hcell, { width: 36, color: CODE_COLORS[c] }]}>{c}</Text>
@@ -549,6 +581,7 @@ export default function AttendanceReportEditable() {
                   focusD={focus?.uid === r.user_id ? focus.d : null}
                   selFrom={sel?.uid === r.user_id ? sel.from : null}
                   selTo={sel?.uid === r.user_id ? sel.to : null}
+                  colSel={colSel}
                   enabled={!!st.enabled}
                   onCellPress={onCellPress}
                 />
@@ -564,7 +597,9 @@ export default function AttendanceReportEditable() {
               ⌨ Keyboard: Arrow keys se cell select · code type karein —
               P · A · L · CL · WO · CO · HD · H (auto-save + agla cell) ·
               Shift+←/→ = multiple din select, phir code = sab par fill ·
-              Ctrl+Z = Undo · Enter = dropdown · Esc = close
+              Date header par click = POORA COLUMN select (sab employees),
+              phir code = column fill · Ctrl+Z = Undo · Enter = dropdown ·
+              Esc = close
             </Text>
           ) : null}
         </ScrollView>
@@ -787,11 +822,12 @@ export default function AttendanceReportEditable() {
  * hai jisme picker khula ya edit hua. Shallow-compare on row edits map.
  */
 const GridRow = React.memo(function GridRow({
-  r, days, rowEdits, pickerD, focusD, selFrom, selTo, enabled, onCellPress,
+  r, days, rowEdits, pickerD, focusD, selFrom, selTo, colSel, enabled, onCellPress,
 }: {
   r: any; days: string[]; rowEdits?: Record<string, any>;
   pickerD: string | null; focusD: string | null;
-  selFrom: string | null; selTo: string | null; enabled: boolean;
+  selFrom: string | null; selTo: string | null; colSel: string | null;
+  enabled: boolean;
   onCellPress: (uid: string, d: string) => void;
 }) {
   const tot = { ...r.totals };
@@ -813,7 +849,8 @@ const GridRow = React.memo(function GridRow({
         const stv = ed ? ed.status : c.st;
         const isPick = pickerD === d;
         const isFocus = focusD === d;
-        const isSel = !!selFrom && !!selTo && d >= selFrom && d <= selTo;
+        const isSel = (!!selFrom && !!selTo && d >= selFrom && d <= selTo)
+          || d === colSel;
         return (
           <Pressable
             key={d}
@@ -841,7 +878,8 @@ const GridRow = React.memo(function GridRow({
 }, (a, b) => {
   if (a.r !== b.r || a.enabled !== b.enabled || a.pickerD !== b.pickerD
       || a.focusD !== b.focusD || a.selFrom !== b.selFrom
-      || a.selTo !== b.selTo || a.days !== b.days) return false;
+      || a.selTo !== b.selTo || a.colSel !== b.colSel
+      || a.days !== b.days) return false;
   const ea = a.rowEdits || {}, eb = b.rowEdits || {};
   const ka = Object.keys(ea), kb = Object.keys(eb);
   if (ka.length !== kb.length) return false;

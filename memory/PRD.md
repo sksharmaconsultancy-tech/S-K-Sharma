@@ -9554,3 +9554,14 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
 - Verified live: Shift-select 4 days + P → "Auto-saved (P × 4)";
   Ctrl+Z → "Undone (4 cells)". Test marks reverted from DB.
 - APP_ITERATION=760; deploy_vps_iter760.sh (759 folded, deleted).
+
+## Iter 761 — Attendance Column Fill (user request)
+- attendance-report.tsx: day-header cells now Pressable
+  (testID ar-daycol-{date}) toggling colSel; typing a code with colSel
+  active fills that date for ALL displayed rows in ONE batch save
+  (web confirm first), column highlighted via GridRow colSel prop;
+  Esc clears; Ctrl+Z undoes the whole column (group undo from Iter 760).
+- Verified live: header click on 2026-08-15 + "h" → "Auto-saved
+  (H × 127)"; Ctrl+Z → "Undone (127 cells)". 127 test marks + 254 audit
+  rows cleaned from DB.
+- APP_ITERATION=761; deploy_vps_iter761.sh (760 folded, deleted).

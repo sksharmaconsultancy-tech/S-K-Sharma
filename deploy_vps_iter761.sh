@@ -1,8 +1,20 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 760)
+# S.K. Sharma & Co. — VPS deploy script (Iter 761)
 # Deploys the FULL latest code (includes ALL previous iterations).
 #
-# ══════ WHAT'S NEW (Iter 760) — 🧲 RANGE FILL + UNDO ══════
+# ══════ WHAT'S NEW (Iter 761) — 📅 COLUMN FILL (POORE DIN KA MARK) ══════
+#
+# ATTENDANCE REPORT — MONTHLY EDITABLE (USER REQUEST):
+#  * DATE HEADER par click karein → poora COLUMN select (neela highlight,
+#    sabhi employees).
+#  * Phir code type karein (P/A/L/CL/WO/CO/HD/H) → confirm popup ke baad
+#    us din ke SABHI employees ek saath mark + auto-save.
+#    (Jaise: holiday par pura column "H".)
+#  * Ctrl+Z se poora column ek saath undo.
+#  * Group/search filter laga ho to sirf dikh rahe employees hi mark
+#    hote hain.
+#
+# ══════ ALSO IN Iter 760 — 🧲 RANGE FILL + UNDO ══════
 #
 # ATTENDANCE REPORT — MONTHLY EDITABLE (USER REQUEST):
 # 1) RANGE FILL: Shift + ←/→ se ek employee ke MULTIPLE din select
@@ -2078,8 +2090,8 @@
 #    INCENTIVE · FOOD ALLOWANCE import fix · dynamic allowance columns.
 #
 # Run ON THE VPS as root/sksharma:
-#   wget -O deploy760.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
-#   bash deploy760.sh
+#   wget -O deploy761.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
+#   bash deploy761.sh
 
 APP_DIR=/home/sksharma/app
 WEB_DIR=/var/www/sksharma
