@@ -9237,3 +9237,16 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   removed from Kankani. NOTE: testing_agent NOT run this iter (context) —
   backend curl e2e + UI smoke screenshots done; suggest full regression
   next session. APP_ITERATION=741; deploy_vps_iter741.sh.
+
+## Iter 742 — ESIC/PF statutory rounding settle 2 → 3 decimals (user request)
+- utils/compliance_salary.py _round_stat: v=round(v,3) (was 2). Fixes ₹1
+  short on borderline like 13334×0.75%=100.005 → now ₹101. NOTE: 6667 →
+  now ₹51 (was ₹50 per Iter 681) — user explicitly chose 3-dec despite
+  warning. Shared by PF & ESIC; modes ceil/nearest/floor unchanged.
+- APP_ITERATION=742; deploy_vps_iter742.sh.
+
+## Iter 743 — ESIC rounding REVERTED to 2-decimal paise settle
+- User case: basic 9334 × 0.75% = 70.005 → old payroll deducts ₹70;
+  Iter 742's 3-dec settle gave ₹71. _round_stat back to round(v,2).
+  Verified: 9334→₹70, 6667→₹50, 13334→₹100, 13500→₹102.
+- APP_ITERATION=743; deploy_vps_iter743.sh.

@@ -210,10 +210,11 @@ def _round_stat(v: float, mode: str) -> float:
 
     Iter 681 (user bug — BANTI SINGH RAWAT: our ESIC ₹51 vs portal ₹50 on
     wages 6667): government portals compute the contribution in
-    RUPEES-PAISE first (2 decimals) and only then round to the whole
-    rupee. 6667 × 0.75% = 50.0025 → ₹50.00 → round-up leaves 50, while
-    ceiling the raw product gave 51. So ALWAYS settle to paise before the
-    whole-rupee step (also correct for PF — EPFO works on paise values).
+    RUPEES-PAISE first and only then round to the whole rupee.
+    Iter 742 tried a 3-decimal settle; Iter 743 (user case — basic 9334 ×
+    0.75% = 70.005: old payroll deducts ₹70, 3-dec settle gave ₹71)
+    REVERTED to the 2-decimal paise settle. 70.005 → ₹70.00 → ₹70 and
+    50.0025 → ₹50.00 → ₹50, both matching the user's portal/old payroll.
     """
     v = round(v, 2)
     if mode == "ceil":
