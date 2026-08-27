@@ -50,6 +50,16 @@ async def temp_code_bundle(token: str = Query(...), kind: str = Query("tar")):
             raise HTTPException(status_code=404, detail="Bundle not found")
         return FileResponse(path, filename=os.path.basename(path),
                             media_type="application/octet-stream")
+    if kind == "modules-xlsx":
+        # Iter 746 — user's Payroll.xlsx updated with module availability
+        # status (✅/🟡/❌) for every HRIS / HR-Modules requirement row.
+        path = "/app/Payroll_Module_Status.xlsx"
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="File not found")
+        return FileResponse(
+            path, filename="Payroll_Module_Status.xlsx",
+            media_type="application/vnd.openxmlformats-officedocument"
+                       ".spreadsheetml.sheet")
     if kind == "fix685":
         # Iter 685 — AAZAR compliance-structure junk repair (dry-run/apply).
         path = "/app/fix_aazar_685.sh"

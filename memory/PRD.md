@@ -9303,3 +9303,13 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   Local preview verified fine; instructed re-run with deploy745.
 - APP_ITERATION=745; deploy_vps_iter745.sh (744 script folded in, file
   deleted); temp_bundle kind=script → deploy745.sh.
+
+## Iter 746 — Payroll.xlsx module-status audit (user upload)
+- User's HR requirement sheet (HRIS + HR Modules) filled with portal
+  status per row: 116 ✅ Available, 20 🟡 Partial, 16 ❌ Not available
+  (colour-coded, D column). Generator: backend/update_payroll_xlsx.py →
+  /app/Payroll_Module_Status.xlsx, served via temp-code-bundle
+  kind=modules-xlsx.
+- Key gaps flagged: Recruitment module, Performance Mgmt (KRA/KPA),
+  Training, Org chart, ABRY scheme, 48-hr OT cap, min-OT 30min rule,
+  OT approval flow, attrition/variance KPI cards, birthday auto-mail.
