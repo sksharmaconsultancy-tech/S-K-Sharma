@@ -9442,3 +9442,26 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   company_contacts. Verified: orphan-held uid saves OK (orphan removed),
   live-firm duplicate still 400 with firm name.
 - APP_ITERATION=754; deploy_vps_iter754.sh (751 kept, 752/753 folded).
+
+## Iter 755 — Bulk Correction upgrades + Advance/Other deduction split
+- USER BUG (compliance import): sheet's Advance (deduction_amount) +
+  Other Deduction (other_less) were SUMMED into one column
+  (compliance_salary_runs.py ~line 963). FIX: routed separately —
+  deduction_amount→advance_recovery (head "ADV"/empty), other_less→
+  other_deduction; non-ADV head routes deduction_amount to Other under
+  that head; ADVANCE-off firms fall back to Other. Verified 3/3 via
+  test import (Kankani 2026-03, cleaned up after).
+- BULK EMPLOYEE CORRECTION (user request, bulk-employee-correction.tsx):
+  1. father_name added to FROZEN_LEFT (sticky offset 280).
+  2. "__gross_total" virtual read-only column — compliance: basic+all
+     allowance heads; actual: actual_basic+salary_1..3; live w/ dirty.
+  3. Export Excel (client-side HTML-table .xls of displayed grid incl.
+     filters + unsaved edits), testID bc-export-excel.
+  4. Excel-style per-column Filter row under sticky header
+     (colFilters state, cellText() helper, testID bc-colfilter-{key}).
+- APP_ITERATION=755; deploy_vps_iter755.sh (754 folded, deleted).
+- PENDING (user, awaiting decision): 2-firm rounding diff (JPL 1150 vs
+  legacy 1151; Mewar 1106 vs 1105) — root cause: .50-paise handling
+  (legacy rounds wage-base half-up 9587.5→9588 & truncates earned basic
+  9212.5→9212; we keep paise in base + half-up on contribution).
+  Diagnosis to be presented to user.

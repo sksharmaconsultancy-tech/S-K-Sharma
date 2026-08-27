@@ -956,32 +956,43 @@ async def _compute_compliance_run(
         _tds_on = _ded_set0 is None or "tds" in _ded_set0
         _adv_on = _ded_set0 is None or "advance" in _ded_set0
         # Iter 100 — Attendance Master "Other Deduction" (Advance/TDS etc.)
-        # Iter 328 — client sheet's Adv + "Other Less" combine into Other
-        # Deduction; sheet TDS overrides the master TDS.
         # Iter 616 (user bug) — an imported ADVANCE deduction now lands in
         # the ADVANCE column (advance_recovery), not in Other Deduction.
-        _am_ded = round(float((_am or {}).get("deduction_amount") or 0)
-                        + float((_am or {}).get("other_less") or 0), 2)
-        if _am and _am_ded > 0:
+        # Iter 755 (user bug — "Advance and Other Deductions are merged"):
+        # the sheet's ADVANCE column and OTHER DEDUCTION column are now
+        # routed SEPARATELY — Advance → ADVANCE column, Other Less →
+        # OTHER DEDUCTION column. They are never summed together any more.
+        _ded_amt755 = round(float((_am or {}).get("deduction_amount") or 0), 2)
+        _oth_amt755 = round(float((_am or {}).get("other_less") or 0), 2)
+        if _am and (_ded_amt755 > 0 or _oth_amt755 > 0):
             _head_txt = str(_am.get("deduction_head") or "").strip().upper()
-            _has_other_less = float(_am.get("other_less") or 0) > 0
-            _is_adv = ("ADV" in _head_txt
-                       or (not _head_txt and not _has_other_less))
-            if _is_adv and _adv_on:
+            # deduction_amount comes from Advance-ish sheet columns
+            # (ADVANCE / ADV / DEDUCTION AMOUNT); a non-ADV head (e.g.
+            # UNIFORM) routes it to Other Deduction under that head.
+            _is_adv = "ADV" in _head_txt or not _head_txt
+            _adv_part = _ded_amt755 if _is_adv else 0.0
+            _oth_part = round(_oth_amt755 + (0.0 if _is_adv else _ded_amt755), 2)
+            if _adv_part > 0 and not _adv_on:
+                # ADVANCE head OFF in Firm Master → falls back to Other.
+                _oth_part = round(_oth_part + _adv_part, 2)
+                _adv_part = 0.0
+            if _adv_part > 0:
                 row["advance_recovery"] = round(
-                    float(row.get("advance_recovery") or 0) + _am_ded, 2)
+                    float(row.get("advance_recovery") or 0) + _adv_part, 2)
                 row["total_deduction"] = round(
-                    float(row.get("total_deduction") or 0) + _am_ded, 2)
-                row["net"] = round(float(row.get("net") or 0) - _am_ded, 2)
+                    float(row.get("total_deduction") or 0) + _adv_part, 2)
+                row["net"] = round(float(row.get("net") or 0) - _adv_part, 2)
                 # Ledger recovery must not double-deduct the sheet figure.
                 row["manual_fields"] = sorted(
                     set(row.get("manual_fields") or []) | {"advance_recovery"})
-            elif _oth_on:
-                row["other_deduction_head"] = _am.get("deduction_head") or (
-                    "Advance/Other" if _has_other_less else "Advance")
-                row["other_deduction"] = _am_ded
-                row["total_deduction"] = round(float(row.get("total_deduction") or 0) + _am_ded, 2)
-                row["net"] = round(float(row.get("net") or 0) - _am_ded, 2)
+            if _oth_part > 0 and _oth_on:
+                row["other_deduction_head"] = (
+                    (_am.get("deduction_head") if not _is_adv else None)
+                    or "Other Deduction")
+                row["other_deduction"] = _oth_part
+                row["total_deduction"] = round(
+                    float(row.get("total_deduction") or 0) + _oth_part, 2)
+                row["net"] = round(float(row.get("net") or 0) - _oth_part, 2)
         # Iter 616 — the Actual run's "Other Ded.*" (freeze-as-actual-gross
         # firms) lands in the Other Deduction column, ON TOP of any sheet
         # deduction routed above.

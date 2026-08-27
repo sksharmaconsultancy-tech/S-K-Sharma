@@ -108,6 +108,7 @@ const COL_WIDTHS: Record<string, number> = {
   day_2: 90,
   salary_3: 110,
   day_3: 90,
+  __gross_total: 150,
 };
 
 // Iter 306 (user #18) — ONE width source for headers AND cells so the
@@ -202,6 +203,16 @@ const ACTUAL_DERIVED_KEYS = new Set([
   "salary_1", "day_1", "salary_2", "day_2", "salary_3", "day_3",
 ]);
 
+/** Iter 755 — plain saved/displayed text of any grid column for a row
+ *  (used by the per-column filters + the Excel export). */
+function cellText(row: EmployeeRow, key: string): string {
+  if (key.startsWith("allow:")) return allowanceBase(row, key.slice(6));
+  if (ACTUAL_DERIVED_KEYS.has(key)) return actualBase(row, key);
+  if (key === "is_onroll") return (row as any).is_onroll === false ? "Off-Roll" : "On-Roll";
+  const raw = (row as any)[key];
+  return raw === null || raw === undefined ? "" : String(raw);
+}
+
 export default function BulkEmployeeCorrectionScreen() {
   const router = useRouter();
   const { user } = useAuth();
@@ -246,6 +257,9 @@ export default function BulkEmployeeCorrectionScreen() {
   const [searchQ, setSearchQ] = useState("");
   const [sortKey, setSortKey] = useState<string>("employee_code");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  // Iter 755 (user request) — per-column filter row (Excel-style).
+  const [colFilters, setColFilters] = useState<Record<string, string>>({});
+  useEffect(() => { setColFilters({}); }, [companyId, mode]);
 
   useEffect(() => { setGroupFilter(""); setMode("compliance"); }, [companyId]);
 
@@ -285,6 +299,15 @@ export default function BulkEmployeeCorrectionScreen() {
           (e as any).designation, (e as any).department, (e as any).company_name,
           (e as any).employee_group, (e as any).uan_no, (e as any).esic_no,
         ].some((v) => String(v ?? "").toLowerCase().includes(q));
+      })
+      // Iter 755 (user request) — per-column filter row.
+      .filter((e) => {
+        for (const [k, fv] of Object.entries(colFilters)) {
+          const t = String(fv || "").trim().toLowerCase();
+          if (!t) continue;
+          if (!cellText(e, k).toLowerCase().includes(t)) return false;
+        }
+        return true;
       });
     const dir = sortDir === "asc" ? 1 : -1;
     const val = (e: any) => e?.[sortKey];
@@ -296,7 +319,7 @@ export default function BulkEmployeeCorrectionScreen() {
       if (!Number.isNaN(na) && !Number.isNaN(nb)) return (na - nb) * dir;
       return String(va ?? "").localeCompare(String(vb ?? ""), "en", { sensitivity: "base" }) * dir;
     });
-  }, [allRows, empFilter, groupFilter, searchQ, sortKey, sortDir]);
+  }, [allRows, empFilter, groupFilter, searchQ, sortKey, sortDir, colFilters]);
   const filterCounts = useMemo(() => {
     let a = 0, r = 0;
     for (const e of allRows) {
@@ -519,12 +542,36 @@ export default function BulkEmployeeCorrectionScreen() {
   // Fields shown in the grid. When in cross-firm mode we prepend a virtual
   // read-only "Firm" column so operators can tell rows apart.
   const displayFields: FieldDef[] = useMemo(() => {
-    if (!crossFirmMode) return fields;
-    return [
-      { key: "company_name", label: "Firm", type: "text" },
-      ...fields,
-    ];
+    const base = crossFirmMode
+      ? [{ key: "company_name", label: "Firm", type: "text" }, ...fields]
+      : fields;
+    if (!base.length) return base;
+    // Iter 755 (user request) — read-only "Gross Total" of the MASTER
+    // rates: Basic + every allowance head (compliance mode) / Actual
+    // Basic + Salary 1-3 tiers (actual mode). Live — includes unsaved
+    // cell edits.
+    return [...base, { key: "__gross_total", label: "Gross Total (Master)", type: "computed" }];
   }, [crossFirmMode, fields]);
+
+  // Iter 755 — Master-rate gross total per row (uses displayed values so
+  // pending edits reflect instantly).
+  const grossTotalOf = (row: EmployeeRow): number => {
+    const num = (key: string) => {
+      const d = dirty[row.user_id];
+      const v = d && key in d ? d[key] : cellText(row, key);
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+    let sum = 0;
+    if (mode === "actual") {
+      sum += num("actual_basic");
+      for (const k of ["salary_1", "salary_2", "salary_3"]) sum += num(k);
+    } else {
+      sum += num("compliance_basic");
+      for (const f of fields) if (f.type === "allowance") sum += num(f.key);
+    }
+    return Math.round(sum * 100) / 100;
+  };
 
   const setCell = (uid: string, key: string, value: any) => {
     setDirty((prev) => ({
@@ -565,6 +612,37 @@ export default function BulkEmployeeCorrectionScreen() {
     if (ACTUAL_DERIVED_KEYS.has(key)) return actualBase(row, key);
     const raw = (row as any)[key];
     return raw === null || raw === undefined ? "" : String(raw);
+  };
+
+  // Iter 755 (user request) — Export the CURRENTLY displayed grid (all
+  // filters applied, unsaved edits included) as an Excel file.
+  const exportExcel = () => {
+    if (Platform.OS !== "web") return showMsg("Export works on desktop web.");
+    if (!rows.length) return showMsg("Nothing to export.");
+    const esc = (s: any) =>
+      String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const dispVal = (r: EmployeeRow, key: string): string => {
+      if (key === "__gross_total") return String(grossTotalOf(r));
+      const d = dirty[r.user_id];
+      return d && key in d ? String(d[key] ?? "") : cellText(r, key);
+    };
+    const head = displayFields
+      .map((c) => `<th style="background:#DBEAFE;border:1px solid #94A3B8;padding:4px 8px;font-size:11px;">${esc(c.label)}</th>`)
+      .join("");
+    const body = rows
+      .map((r) => "<tr>" + displayFields
+        .map((c) => `<td style="border:1px solid #CBD5E1;padding:3px 8px;font-size:11px;">${esc(dispVal(r, c.key))}</td>`)
+        .join("") + "</tr>")
+      .join("");
+    const firm = companies.find((c) => c.company_id === companyId)?.name || "firm";
+    const html = `<html><head><meta charset="utf-8"></head><body><table><tr>${head}</tr>${body}</table></body></html>`;
+    const blob = new Blob([html], { type: "application/vnd.ms-excel" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Bulk_Correction_${firm.replace(/[^A-Za-z0-9]+/g, "_")}_${new Date().toISOString().slice(0, 10)}.xls`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const submit = async (dryRun: boolean) => {
@@ -632,9 +710,11 @@ export default function BulkEmployeeCorrectionScreen() {
 
   // Iter 138 (user request) — freeze Emp Code + Name on the left while
   // scrolling horizontally (web position:sticky).
+  // Iter 755 (user request) — Father Name column is FROZEN too.
   const FROZEN_LEFT: Record<string, number> = {
     employee_code: 0,
     name: COL_WIDTHS.employee_code || 100,
+    father_name: (COL_WIDTHS.employee_code || 100) + (COL_WIDTHS.name || 180),
   };
   const frozenStyle = (key: string): any =>
     Platform.OS === "web" && key in FROZEN_LEFT
@@ -681,6 +761,20 @@ export default function BulkEmployeeCorrectionScreen() {
     // Iter 204 (user request) — Emp Code / Name / Father Name are locked in
     // BOTH Actual and Compliance modes (no editing/typing box).
     const lockedNow = LOCKED_FIELDS.has(f.key);
+    // Iter 755 (user request) — read-only Master-rate Gross Total column.
+    if (f.key === "__gross_total") {
+      const g = grossTotalOf(row);
+      return (
+        <View style={[styles.cellWrap, { width: w }, styles.cellLocked]}>
+          <Text
+            style={[styles.cellReadOnly, { fontWeight: "800", color: colors.onSurface }]}
+            numberOfLines={1}
+          >
+            {g ? g.toLocaleString("en-IN") : "—"}
+          </Text>
+        </View>
+      );
+    }
     if (lockedNow) {
       const raw = (row as any)[f.key];
       const display = raw === null || raw === undefined || raw === "" ? "—" : String(raw);
@@ -1158,6 +1252,15 @@ export default function BulkEmployeeCorrectionScreen() {
             </Text>
           </View>
           <Pressable
+            onPress={exportExcel}
+            disabled={rows.length === 0}
+            style={[styles.secondaryBtn, rows.length === 0 && { opacity: 0.5 }]}
+            testID="bc-export-excel"
+          >
+            <Ionicons name="download-outline" size={14} color={colors.brandPrimary} />
+            <Text style={styles.secondaryBtnTxt}>Export Excel</Text>
+          </Pressable>
+          <Pressable
             onPress={() => submit(true)}
             disabled={saving || dirtyCount === 0}
             style={[styles.secondaryBtn, (saving || dirtyCount === 0) && { opacity: 0.5 }]}
@@ -1222,12 +1325,8 @@ export default function BulkEmployeeCorrectionScreen() {
             {Platform.OS === "web" ? (
               <View style={{ overflow: "auto", maxHeight: 620 } as any}>
                 <View style={{ minWidth: "max-content" } as any}>
-                  <View
-                    style={[
-                      styles.gridHead,
-                      { position: "sticky", top: 0, zIndex: 10 } as any,
-                    ]}
-                  >
+                <View style={{ position: "sticky", top: 0, zIndex: 10 } as any}>
+                  <View style={styles.gridHead}>
                     {displayFields.map((f) => (
                       <View
                         key={f.key}
@@ -1243,6 +1342,34 @@ export default function BulkEmployeeCorrectionScreen() {
                       </View>
                     ))}
                   </View>
+                  {/* Iter 755 (user request) — Excel-style per-column filter row */}
+                  <View style={styles.gridFilterRow}>
+                    {displayFields.map((f) => (
+                      <View
+                        key={f.key}
+                        style={[
+                          styles.filterCell,
+                          { width: colWidthFor(f) },
+                          frozenStyle(f.key),
+                          { backgroundColor: "#EFF6FF" },
+                        ]}
+                      >
+                        {f.key === "__gross_total" ? null : (
+                          <TextInput
+                            value={colFilters[f.key] || ""}
+                            onChangeText={(v) =>
+                              setColFilters((p) => ({ ...p, [f.key]: v }))
+                            }
+                            placeholder="Filter…"
+                            placeholderTextColor="#94A3B8"
+                            style={styles.filterInput}
+                            testID={`bc-colfilter-${f.key}`}
+                          />
+                        )}
+                      </View>
+                    ))}
+                  </View>
+                </View>
                   {rows.map((r) => (
                     <View key={r.user_id} style={styles.gridRow}>
                       {displayFields.map((f) => (
@@ -1450,6 +1577,30 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   cellReadOnly: { fontSize: 12, color: colors.onSurfaceSecondary },
+  // Iter 755 — per-column filter row under the grid header.
+  gridFilterRow: {
+    flexDirection: "row",
+    backgroundColor: "#EFF6FF",
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderStrong,
+  },
+  filterCell: {
+    paddingHorizontal: 3,
+    paddingVertical: 2,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: colors.divider,
+    justifyContent: "center",
+  },
+  filterInput: {
+    fontSize: 11,
+    color: colors.onSurface,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    borderRadius: 6,
+    backgroundColor: "#FFFFFF",
+  },
   // Iter 134 — Active/Resigned filter chips.
   filterRow: {
     flexDirection: "row",

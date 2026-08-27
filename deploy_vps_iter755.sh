@@ -1,8 +1,29 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 754)
+# S.K. Sharma & Co. — VPS deploy script (Iter 755)
 # Deploys the FULL latest code (includes ALL previous iterations).
 #
-# ══════ WHAT'S NEW (Iter 754) — 🔔 POPUP DETAILS + EPFO DUP FIX ══════
+# ══════ WHAT'S NEW (Iter 755) — 📋 BULK CORRECTION UPGRADES + DEDUCTION SPLIT ══════
+#
+# 1) BULK EMPLOYEE CORRECTION (USER REQUEST — 4 upgrades):
+#  * FATHER NAME column bhi ab FREEZE hai (Emp Code + Name ke saath) —
+#    right scroll par teeno left me fixed rehte hain.
+#  * GROSS TOTAL (MASTER) — naya read-only column: Basic + sabhi
+#    allowance heads ka total (Actual mode me Actual Basic + Salary 1-3).
+#    Cell edit karte hi total LIVE update hota hai.
+#  * EXPORT EXCEL button — jo grid par dikh raha hai (filters + unsaved
+#    edits samet) wahi Excel file me download.
+#  * EXCEL-STYLE FILTER ROW — har column ke neeche apna Filter box;
+#    type karte hi grid usi value par filter (multiple columns combine).
+#
+# 2) COMPLIANCE IMPORT — ADVANCE vs OTHER DEDUCTION MERGE FIX (USER BUG):
+#  * Pehle sheet ke Advance + Other Deduction columns ka SUM hokar EK
+#    hi column me chala jata tha. Ab dono ALAG-ALAG route hote hain:
+#    Advance → ADVANCE column, Other Deduction → OTH. DEDUC. column.
+#    (Non-ADV head wala deduction usi head ke saath Other me jata hai;
+#    Firm Master me ADVANCE off ho to advance amount Other me girta hai.)
+#  * Verified 3/3: dono columns, sirf-advance, sirf-other — sab sahi.
+#
+# ══════ ALSO IN Iter 754 — 🔔 POPUP DETAILS + EPFO DUP FIX ══════
 #
 # 1) LIVE NOTIFICATION POPUP ME NAYI DETAILS (USER REQUEST):
 #  * Har popup (bottom-left toast) me ab 3 nayi details dikhti hain:
@@ -1971,8 +1992,8 @@
 #    INCENTIVE · FOOD ALLOWANCE import fix · dynamic allowance columns.
 #
 # Run ON THE VPS as root/sksharma:
-#   wget -O deploy754.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
-#   bash deploy754.sh
+#   wget -O deploy755.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
+#   bash deploy755.sh
 
 APP_DIR=/home/sksharma/app
 WEB_DIR=/var/www/sksharma
