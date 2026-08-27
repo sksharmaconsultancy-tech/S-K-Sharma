@@ -9542,3 +9542,15 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
 - NOTE: /tmp files (otp_swap.py) were wiped by an env restart — recreate
   the 2FA OTP-swap helper before any UI login test.
 - APP_ITERATION=759; deploy_vps_iter759.sh (758 folded, deleted).
+
+## Iter 760 — Attendance Range Fill + Undo (user request)
+- attendance-report.tsx: autoSave generalized to autoSave(list[], isUndo)
+  (batch POST, grouped local apply). Undo stack (undoRef, max 50 groups)
+  + Ctrl/Cmd+Z + "↩ Undo (n)" button (testID ar-undo); undo re-saves
+  previous_status (blank prev → info msg only).
+- RANGE FILL: Shift+←/→ extends day selection in same row (sel state,
+  kbRef.anchor); typing a code fills the whole range in ONE save and
+  moves focus past it; GridRow selFrom/selTo highlight (#DBEAFE).
+- Verified live: Shift-select 4 days + P → "Auto-saved (P × 4)";
+  Ctrl+Z → "Undone (4 cells)". Test marks reverted from DB.
+- APP_ITERATION=760; deploy_vps_iter760.sh (759 folded, deleted).

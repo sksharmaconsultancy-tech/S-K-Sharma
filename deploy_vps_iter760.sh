@@ -1,8 +1,18 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 759)
+# S.K. Sharma & Co. — VPS deploy script (Iter 760)
 # Deploys the FULL latest code (includes ALL previous iterations).
 #
-# ══════ WHAT'S NEW (Iter 759) — ⚡ ATTENDANCE AUTO-SAVE + KEYBOARD ══════
+# ══════ WHAT'S NEW (Iter 760) — 🧲 RANGE FILL + UNDO ══════
+#
+# ATTENDANCE REPORT — MONTHLY EDITABLE (USER REQUEST):
+# 1) RANGE FILL: Shift + ←/→ se ek employee ke MULTIPLE din select
+#    karein (neela highlight), phir code type karein (P/A/L/CL/WO/CO/
+#    HD/H) — saare selected din EK saath fill + auto-save.
+# 2) UNDO: Ctrl+Z ya "↩ Undo" button — last auto-saved change (single
+#    ya poora range) turant wapas ho jata hai. 50 steps tak ka undo
+#    stack.
+#
+# ══════ ALSO IN Iter 759 — ⚡ ATTENDANCE AUTO-SAVE + KEYBOARD ══════
 #
 # ATTENDANCE REPORT — MONTHLY EDITABLE (USER REQUEST):
 # 1) AUTO-SAVE: har correction turant save ho jata hai — Save button
@@ -2068,8 +2078,8 @@
 #    INCENTIVE · FOOD ALLOWANCE import fix · dynamic allowance columns.
 #
 # Run ON THE VPS as root/sksharma:
-#   wget -O deploy759.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
-#   bash deploy759.sh
+#   wget -O deploy760.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
+#   bash deploy760.sh
 
 APP_DIR=/home/sksharma/app
 WEB_DIR=/var/www/sksharma

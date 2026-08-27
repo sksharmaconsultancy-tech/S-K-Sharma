@@ -92,7 +92,7 @@ export default function AttendanceReportEditable() {
 
   const setCell = useCallback((uid: string, d: string, st: string, prev: string) => {
     setPicker(null);
-    void autoSaveRef.current({ user_id: uid, date: d, status: st, previous_status: prev });
+    void autoSaveRef.current([{ user_id: uid, date: d, status: st, previous_status: prev }]);
   }, []);
 
   const onCellPress = useCallback((uid: string, d: string) => {
@@ -105,7 +105,11 @@ export default function AttendanceReportEditable() {
   // full grid reload. The "Save Changes" button remains only as a retry
   // for any change whose auto-save failed (offline etc.).
   const reasonRef = React.useRef("");
-  const autoSave = useCallback(async (change: any) => {
+  // Iter 760 (user request) — UNDO stack: each auto-saved group can be
+  // reverted with Ctrl+Z / the Undo button.
+  const undoRef = React.useRef<any[][]>([]);
+  const [undoCount, setUndoCount] = useState(0);
+  const autoSave = useCallback(async (list: any[], isUndo = false) => {
     const stg = data?.settings || {};
     let reason = "";
     if (stg.require_reason) {
@@ -117,50 +121,89 @@ export default function AttendanceReportEditable() {
       reason = reasonRef.current;
       if (!reason.trim()) { reasonRef.current = ""; return; }
     }
-    const key = `${change.user_id}|${change.date}`;
-    setEdits((e) => ({ ...e, [key]: change }));
+    const keys = list.map((c) => `${c.user_id}|${c.date}`);
+    setEdits((e) => {
+      const n = { ...e };
+      list.forEach((c, i) => { n[keys[i]] = c; });
+      return n;
+    });
     try {
       const r = await api<any>(`/admin/manual-attendance/save`, {
         method: "POST",
         body: JSON.stringify({
-          company_id: companyId, changes: [{ ...change, reason }] }),
+          company_id: companyId,
+          changes: list.map((c) => ({
+            user_id: c.user_id, date: c.date, status: c.status,
+            previous_status: c.previous_status, reason })) }),
       });
       setData((prev: any) => {
         if (!prev) return prev;
+        const byUser: Record<string, any[]> = {};
+        for (const c of list) (byUser[c.user_id] = byUser[c.user_id] || []).push(c);
         const rows2 = (prev.rows || []).map((row: any) => {
-          if (row.user_id !== change.user_id) return row;
+          const chs = byUser[row.user_id];
+          if (!chs) return row;
           const cells = { ...row.cells };
-          const old = cells[change.date] || {};
-          let totals = row.totals;
-          if (r.approval_required) {
-            cells[change.date] = { ...old, pending: true };
-          } else {
-            cells[change.date] = {
-              ...old, st: change.status, src: "manual", pending: false };
-            totals = { ...row.totals };
-            if (change.previous_status && totals[change.previous_status] != null)
-              totals[change.previous_status] -= 1;
-            if (totals[change.status] != null) totals[change.status] += 1;
+          let totals = { ...row.totals };
+          for (const ch of chs) {
+            const old = cells[ch.date] || {};
+            if (r.approval_required) {
+              cells[ch.date] = { ...old, pending: true };
+            } else {
+              cells[ch.date] = { ...old, st: ch.status, src: "manual", pending: false };
+              if (ch.previous_status && totals[ch.previous_status] != null)
+                totals[ch.previous_status] -= 1;
+              if (totals[ch.status] != null) totals[ch.status] += 1;
+            }
           }
           return { ...row, cells, totals };
         });
         return { ...prev, rows: rows2 };
       });
-      setEdits((e) => { const n = { ...e }; delete n[key]; return n; });
+      setEdits((e) => {
+        const n = { ...e };
+        keys.forEach((k) => delete n[k]);
+        return n;
+      });
+      if (!isUndo && !r.approval_required) {
+        undoRef.current.push(list);
+        if (undoRef.current.length > 50) undoRef.current.shift();
+        setUndoCount(undoRef.current.length);
+      }
       setMsg(r.approval_required
-        ? "🟡 Change auto-submitted for approval"
-        : `✅ Auto-saved (${change.status})`);
+        ? `🟡 ${list.length} change(s) auto-submitted for approval`
+        : isUndo
+          ? `↩ Undone (${list.length} cell${list.length > 1 ? "s" : ""})`
+          : `✅ Auto-saved (${list[0].status}${list.length > 1 ? ` × ${list.length}` : ""})`);
     } catch (err: any) {
       setMsg(`⚠ ${err?.message || "Auto-save failed"} — use Save Changes to retry`);
     }
   }, [companyId, data]);
   const autoSaveRef = React.useRef(autoSave);
   autoSaveRef.current = autoSave;
+  const undoLast = useCallback(() => {
+    const grp = undoRef.current.pop();
+    setUndoCount(undoRef.current.length);
+    if (!grp) { setMsg("↩ Nothing to undo"); return; }
+    const rev = grp.filter((c: any) => c.previous_status)
+      .map((c: any) => ({ user_id: c.user_id, date: c.date,
+        status: c.previous_status, previous_status: c.status }));
+    if (!rev.length) {
+      setMsg("↩ Pichla status blank tha — dropdown se sahi status chunein");
+      return;
+    }
+    void autoSaveRef.current(rev, true);
+  }, []);
+  const undoLastRef = React.useRef(undoLast);
+  undoLastRef.current = undoLast;
 
   // Iter 759 (user request) — KEYBOARD editing (web): arrow keys move the
   // focused cell; letter keys fill the status instantly (auto-saved) and
   // move right like Excel. Enter/Space opens the dropdown, Esc closes.
   const [focus, setFocus] = useState<{ uid: string; d: string } | null>(null);
+  // Iter 760 (user request) — RANGE FILL: Shift+←/→ selects multiple days
+  // of the same employee; typing a code fills them all in one save.
+  const [sel, setSel] = useState<{ uid: string; from: string; to: string } | null>(null);
   const kbRef = React.useRef<any>({});
 
   // Iter 747 (user perf bug) — group unsaved edits per employee so each
@@ -261,7 +304,7 @@ export default function AttendanceReportEditable() {
   }, [data, search, groupF, sortMode]);
 
   Object.assign(kbRef.current, {
-    rows, days: data?.days || [], focus,
+    rows, days: data?.days || [], focus, sel,
     enabled: !!(data?.settings || {}).enabled && tab === "grid",
   });
   useEffect(() => {
@@ -271,7 +314,12 @@ export default function AttendanceReportEditable() {
       if (!k.enabled || !k.rows?.length || !k.days?.length) return;
       const tag = (document.activeElement?.tagName || "").toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select") return;
-      if (e.key === "Escape") { setPicker(null); return; }
+      if (e.key === "Escape") { setPicker(null); setSel(null); k.anchor = null; return; }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        undoLastRef.current();
+        return;
+      }
       const idx = k.focus
         ? k.rows.findIndex((r: any) => r.user_id === k.focus.uid) : -1;
       const di = k.focus ? k.days.indexOf(k.focus.d) : -1;
@@ -283,6 +331,20 @@ export default function AttendanceReportEditable() {
       if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) {
         e.preventDefault();
         if (idx < 0 || di < 0) { setF(0, 0); return; }
+        // Iter 760 — Shift+←/→ extends the day selection in the same row.
+        if (e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+          const nd = e.key === "ArrowLeft"
+            ? Math.max(0, di - 1) : Math.min(k.days.length - 1, di + 1);
+          if (!k.anchor || k.selUid !== k.focus.uid) {
+            k.anchor = k.focus.d; k.selUid = k.focus.uid;
+          }
+          setFocus({ uid: k.focus.uid, d: k.days[nd] });
+          const ai = k.days.indexOf(k.anchor);
+          setSel({ uid: k.focus.uid,
+            from: k.days[Math.min(ai, nd)], to: k.days[Math.max(ai, nd)] });
+          return;
+        }
+        k.anchor = null; setSel(null);
         if (e.key === "ArrowLeft") setF(idx, di - 1);
         else if (e.key === "ArrowRight") setF(idx, di + 1);
         else if (e.key === "ArrowUp") setF(idx - 1, di);
@@ -309,11 +371,25 @@ export default function AttendanceReportEditable() {
           const d2 = kk.focus ? kk.days.indexOf(kk.focus.d) : -1;
           if (i2 < 0 || d2 < 0) return;
           const row = kk.rows[i2];
-          const prev = row.cells?.[kk.focus.d]?.st;
           setPicker(null);
-          void autoSaveRef.current({
+          // Iter 760 — RANGE FILL: selection active → fill every selected
+          // day of that employee in ONE save.
+          if (kk.sel && kk.sel.uid === row.user_id) {
+            const a = kk.days.indexOf(kk.sel.from);
+            const b = kk.days.indexOf(kk.sel.to);
+            const list = kk.days.slice(a, b + 1).map((d: string) => ({
+              user_id: row.user_id, date: d, status: code,
+              previous_status: row.cells?.[d]?.st }));
+            setSel(null); kk.anchor = null;
+            void autoSaveRef.current(list);
+            if (b < kk.days.length - 1)
+              setFocus({ uid: row.user_id, d: kk.days[b + 1] });
+            return;
+          }
+          const prev = row.cells?.[kk.focus.d]?.st;
+          void autoSaveRef.current([{
             user_id: row.user_id, date: kk.focus.d,
-            status: code, previous_status: prev });
+            status: code, previous_status: prev }]);
           // Excel-style: move to the next cell after filling
           if (d2 < kk.days.length - 1)
             setFocus({ uid: row.user_id, d: kk.days[d2 + 1] });
@@ -390,6 +466,13 @@ export default function AttendanceReportEditable() {
         <Pressable onPress={() => void load()} style={s.btn} testID="ar-refresh">
           <Text style={s.btnTxt}>Search</Text>
         </Pressable>
+        {undoCount > 0 && st.enabled ? (
+          <Pressable onPress={() => undoLastRef.current()}
+            style={[s.btn, { backgroundColor: "#FFF7ED", borderColor: "#FDBA74" }]}
+            testID="ar-undo">
+            <Text style={[s.btnTxt, { color: "#C2410C" }]}>↩ Undo ({undoCount})</Text>
+          </Pressable>
+        ) : null}
         {unsaved > 0 && st.enabled ? (
           <Pressable onPress={() => void save()} style={[s.btn, s.btnSave]}
             disabled={saving} testID="ar-save">
@@ -464,6 +547,8 @@ export default function AttendanceReportEditable() {
                   rowEdits={editsByUser[r.user_id]}
                   pickerD={picker?.uid === r.user_id ? picker.d : null}
                   focusD={focus?.uid === r.user_id ? focus.d : null}
+                  selFrom={sel?.uid === r.user_id ? sel.from : null}
+                  selTo={sel?.uid === r.user_id ? sel.to : null}
                   enabled={!!st.enabled}
                   onCellPress={onCellPress}
                 />
@@ -476,9 +561,10 @@ export default function AttendanceReportEditable() {
           </Text>
           {Platform.OS === "web" ? (
             <Text style={s.legend}>
-              ⌨ Keyboard: Arrow keys se cell select karein · code type karein —
+              ⌨ Keyboard: Arrow keys se cell select · code type karein —
               P · A · L · CL · WO · CO · HD · H (auto-save + agla cell) ·
-              Enter = dropdown · Esc = close
+              Shift+←/→ = multiple din select, phir code = sab par fill ·
+              Ctrl+Z = Undo · Enter = dropdown · Esc = close
             </Text>
           ) : null}
         </ScrollView>
@@ -701,10 +787,11 @@ export default function AttendanceReportEditable() {
  * hai jisme picker khula ya edit hua. Shallow-compare on row edits map.
  */
 const GridRow = React.memo(function GridRow({
-  r, days, rowEdits, pickerD, focusD, enabled, onCellPress,
+  r, days, rowEdits, pickerD, focusD, selFrom, selTo, enabled, onCellPress,
 }: {
   r: any; days: string[]; rowEdits?: Record<string, any>;
-  pickerD: string | null; focusD: string | null; enabled: boolean;
+  pickerD: string | null; focusD: string | null;
+  selFrom: string | null; selTo: string | null; enabled: boolean;
   onCellPress: (uid: string, d: string) => void;
 }) {
   const tot = { ...r.totals };
@@ -726,6 +813,7 @@ const GridRow = React.memo(function GridRow({
         const stv = ed ? ed.status : c.st;
         const isPick = pickerD === d;
         const isFocus = focusD === d;
+        const isSel = !!selFrom && !!selTo && d >= selFrom && d <= selTo;
         return (
           <Pressable
             key={d}
@@ -734,6 +822,7 @@ const GridRow = React.memo(function GridRow({
             style={[s.dcell, { width: 38 },
               ed && { backgroundColor: "#FEF3C7" },
               c.pending && { backgroundColor: "#FEF9C3" },
+              isSel && { backgroundColor: "#DBEAFE" },
               isFocus && { backgroundColor: "#FEF3C7", borderWidth: 2, borderColor: "#D97706" },
               isPick && { backgroundColor: "#DBEAFE", borderWidth: 1, borderColor: "#2563EB" }]}
             testID={`ar-cell-${r.employee_code}-${d.slice(8)}`}
@@ -751,7 +840,8 @@ const GridRow = React.memo(function GridRow({
   );
 }, (a, b) => {
   if (a.r !== b.r || a.enabled !== b.enabled || a.pickerD !== b.pickerD
-      || a.focusD !== b.focusD || a.days !== b.days) return false;
+      || a.focusD !== b.focusD || a.selFrom !== b.selFrom
+      || a.selTo !== b.selTo || a.days !== b.days) return false;
   const ea = a.rowEdits || {}, eb = b.rowEdits || {};
   const ka = Object.keys(ea), kb = Object.keys(eb);
   if (ka.length !== kb.length) return false;
