@@ -572,7 +572,20 @@ async def upsert_firm_master(
             return None
         c = await db.companies.find_one(
             {"company_id": other["company_id"]}, {"_id": 0, "name": 1})
-        return (c or {}).get("name") or other["company_id"]
+        if not c:
+            # Iter 754 (user bug) — the "owner" firm was DELETED but its
+            # firm_masters doc survived as an orphan. That's not a real
+            # conflict: clean the orphan up and allow this save.
+            try:
+                await db.firm_masters.delete_one(
+                    {"company_id": other["company_id"]})
+                logger.info("[firm-master] orphan firm_masters of deleted "
+                            "firm %s removed (EPFO dup guard)",
+                            other["company_id"])
+            except Exception:
+                pass
+            return None
+        return c.get("name") or other["company_id"]
 
     _new_epf_uid = ((merged.get("epf") or {}).get("epf_user_id") or "").strip()
     _old_epf_uid = ((existing.get("epf") or {}).get("epf_user_id") or "").strip()

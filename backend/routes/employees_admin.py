@@ -396,6 +396,8 @@ async def admin_create_employee(
                      + ("is awaiting onboarding approval." if _pending else "has been added.")),
             audience="admins", company_id=cid, category="employee",
             priority=("important" if _pending else "normal"),
+            actor_name=admin.get("name") or admin.get("email"),
+            subject_name=name,
             action_url=("/employee-approvals" if _pending else "/admin"),
             reference_id=doc.get("user_id"))
     except Exception:

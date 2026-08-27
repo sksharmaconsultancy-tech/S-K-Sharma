@@ -45,11 +45,25 @@ REQUEST_TYPES = [
 
 async def _notify(user_id: str, company_id: Optional[str], title: str,
                   body: str, sms_type: Optional[str] = None,
-                  mobile: Optional[str] = None):
+                  mobile: Optional[str] = None,
+                  actor_name: Optional[str] = None,
+                  subject_name: Optional[str] = None):
     """In-app notification + optional MSG91 SMS (Phase 3 wiring)."""
+    # Iter 754 (user request) — popup par firm + kisne/kiske liye details.
+    firm_name = None
+    if company_id:
+        try:
+            _co = await db.companies.find_one(
+                {"company_id": company_id}, {"_id": 0, "name": 1})
+            firm_name = (_co or {}).get("name")
+        except Exception:
+            firm_name = None
     await db.notifications.insert_one({
         "notification_id": f"n_{uuid.uuid4().hex[:10]}",
         "company_id": company_id, "audience": "user",
+        "firm_name": firm_name,
+        "actor_name": (str(actor_name)[:80] if actor_name else None),
+        "subject_name": (str(subject_name)[:80] if subject_name else None),
         "target_user_id": user_id, "title": title, "body": body,
         "read_by": [], "created_at": now_iso(), "created_by": "ess",
     })
@@ -297,6 +311,8 @@ async def create_request(payload: Dict[str, Any] = Body(...),
                      f"#{doc['request_no']} — approval required."),
             audience="admins", company_id=user.get("company_id"),
             category="employee", priority="important",
+            actor_name=u.get("name"),
+            subject_name=u.get("name"),
             action_url="/ess-requests-admin", reference_id=doc["request_id"])
     except Exception:
         pass
@@ -357,7 +373,7 @@ async def decide_request(request_id: str, payload: Dict[str, Any] = Body(...),
                                "action": new_status, "remarks": remarks}}})
     # Phase 3 — notify employee (in-app + SMS)
     emp = await db.users.find_one({"user_id": req["user_id"]},
-                                  {"_id": 0, "mobile": 1}) or {}
+                                  {"_id": 0, "mobile": 1, "name": 1}) or {}
     label = req["type"].replace("_", " ").title()
     await _notify(
         req["user_id"], req.get("company_id"),
@@ -365,7 +381,9 @@ async def decide_request(request_id: str, payload: Dict[str, Any] = Body(...),
         f"Your {label} request {req['request_no']} is {new_status.replace('_', ' ')}."
         + (f" Remarks: {remarks}" if remarks else ""),
         sms_type="attendance" if req["type"] == "attendance_correction" else "onboarding",
-        mobile=emp.get("mobile"))
+        mobile=emp.get("mobile"),
+        actor_name=admin.get("name") or admin.get("email"),
+        subject_name=emp.get("name"))
     return {"ok": True, "status": new_status, "applied": applied}
 
 

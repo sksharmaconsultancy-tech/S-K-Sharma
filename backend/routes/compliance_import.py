@@ -396,6 +396,7 @@ async def _store_import(admin: dict, company_id: str, month: str,
                      f"for {month}" + (f" — {_unm} unmatched, please review." if _unm else ".")),
             audience="admins", company_id=company_id, category="import",
             priority=("important" if _unm else "normal"),
+            actor_name=admin.get("name") or admin.get("email"),
             action_url="/compliance-salary-run", reference_id=month)
     except Exception:
         pass

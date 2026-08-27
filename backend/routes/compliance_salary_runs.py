@@ -2312,6 +2312,7 @@ async def _create_compliance_salary_run_core(
                       audience="admins", company_id=payload.company_id,
                       category="salary",
                       priority="important",
+                      actor_name=admin.get("name") or admin.get("email"),
                       action_url=f"/compliance-salary-run?run_id={run['run_id']}",
                       reference_id=run["run_id"])
     except Exception:
@@ -2617,6 +2618,7 @@ async def finalize_compliance_salary_run(
                                f"finalized & locked."),
                       audience="admins", company_id=run.get("company_id"),
                       category="salary", priority="important",
+                      actor_name=admin.get("name") or admin.get("email"),
                       action_url=f"/compliance-salary-run?run_id={run_id}",
                       reference_id=run_id)
     except Exception:

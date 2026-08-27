@@ -118,6 +118,15 @@ function ToastCard({ n, onDismiss, onView }: {
           <Text style={{ fontSize: 12, color: "#475569", marginTop: 2, lineHeight: 16 }} numberOfLines={2}>
             {n.message || n.body || ""}
           </Text>
+          {/* Iter 753 (user request) — Firm · kisne kiya · kiski detail badli */}
+          {(n.firm_name || n.actor_name || n.subject_name) ? (
+            <Text style={{ fontSize: 11, color: "#64748B", marginTop: 3, fontWeight: "600" }} numberOfLines={2}>
+              {[n.firm_name ? `🏢 ${n.firm_name}` : null,
+                n.actor_name ? `👤 By: ${n.actor_name}` : null,
+                n.subject_name ? `📝 For: ${n.subject_name}` : null]
+                .filter(Boolean).join("  ·  ")}
+            </Text>
+          ) : null}
           <Pressable
             onPress={() => { close(); onView(n); }}
             style={{ alignSelf: "flex-start", marginTop: 6, paddingVertical: 3, paddingHorizontal: 10,

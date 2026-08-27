@@ -220,6 +220,7 @@ async def _notify_task_allotted(actor: dict, task: dict) -> None:
         message=(f"Assigned by {task.get('assigned_by_name') or 'Admin'} · "
                  f"{firms} · Due {task.get('due_date') or '—'} · "
                  f"Priority {(task.get('priority') or 'medium').upper()}"),
+        actor_name=task.get("assigned_by_name"),
         action_url="/portal-dashboard?tab=tasks",
         reference_id=task.get("task_id"))
 

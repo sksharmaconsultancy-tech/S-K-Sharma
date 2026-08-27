@@ -8581,6 +8581,9 @@ async def delete_company_cascade(company_id: str, force: bool) -> Dict[str, Any]
         "compliance_salary_batches", "employee_policy", "branches",
         "company_audit_log",
         "employee_group_policies",
+        # Iter 754 (user bug — deleted firm's EPFO login kept blocking the
+        # same User ID on other firms): firm master + contacts must go too.
+        "firm_masters", "company_contacts",
     )
     for col in always_clean:
         try:
@@ -10475,7 +10478,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "751"
+APP_ITERATION = "754"
 
 
 @api.get("/version")

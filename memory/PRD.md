@@ -9409,3 +9409,36 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   baseline run — expected); 2026-05 101 rows 0 diffs; finalized runs
   correctly refuse regeneration; determinism 0 diffs; late-penalty/OT
   policies disabled everywhere → payroll untouched. Originals restored.
+
+## Iter 753 — Sub Admin own PIN for Firms ID & Password (user request)
+- firm-credentials screen + backend: Sub Admin can set/change their OWN
+  PIN and open the vault with it (Super Admin PIN no longer needed).
+- APP_ITERATION kept 751 on VPS until 754 ships (753 folded into 754).
+
+## Iter 754 — Popup details (Firm/Actor/Subject) + EPFO dup-guard orphan fix
+- USER REQUEST: har live notification popup me Firm Name + kisne action
+  kiya (actor) + kiski details change hui (subject) dikhna chahiye.
+- utils/notify.py emit(): actor_name/subject_name params + firm_name
+  auto-resolve from company_id (added in 753, callers wired in 754).
+- Callers now pass actor/subject: leaves.py (apply/decide/workflow
+  finalize), ess.py (submit + decide; local _notify helper extended with
+  firm/actor/subject), approvals_engine.py (_notify_level_approver),
+  compliance_salary_runs.py (process + lock), employees_admin.py (new
+  employee), compliance_import.py (import), portal_phase2.py (task).
+- LiveNotifToasts.tsx renders "🏢 firm · 👤 By: actor · 📝 For: subject"
+  line (added 753). VERIFIED live: leave request toast shows all 3.
+- TOAST RELIABILITY FIX: useUnreadNotifications fresh detection changed
+  from "new since previous poll" (missed anything arriving before the
+  hook's FIRST poll — shell mounts late) to "unread AND created_at within
+  last 75s"; dedupe via AdminWebShell alreadyToasted localStorage store.
+  knownIdsRef removed.
+- EPFO BUG (user, prod): "User ID already saved on firm 'cmp_a8a488ba71'"
+  while editing Firm Master. ROOT CAUSE: delete_company_cascade never
+  removed firm_masters → deleted firm's orphan record held the EPFO ID
+  and the Iter 694 dup-guard blocked it (raw cmp_ id shown because the
+  companies doc was gone). FIX 1: firm_master.py _dup_owner treats
+  orphan (no companies doc) as NO conflict + auto-deletes the orphan.
+  FIX 2: server.py delete_company_cascade now also cleans firm_masters +
+  company_contacts. Verified: orphan-held uid saves OK (orphan removed),
+  live-firm duplicate still 400 with firm name.
+- APP_ITERATION=754; deploy_vps_iter754.sh (751 kept, 752/753 folded).

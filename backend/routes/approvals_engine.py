@@ -296,6 +296,8 @@ async def _notify_level_approver(req: Dict[str, Any], level_no: int) -> None:
                     company_id=req.get("company_id"),
                     category="leave" if req.get("module") == "leave" else "system",
                     priority="important", action_url="/approval-inbox",
+                    actor_name=req.get("requested_by_name"),
+                    subject_name=req.get("requested_by_name"),
                     reference_id=req.get("request_id"))
     except Exception:
         pass

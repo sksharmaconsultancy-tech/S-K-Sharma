@@ -149,6 +149,8 @@ async def create_leave(payload: LeaveCreate, authorization: Optional[str] = Head
                                f"{leave.get('from_date')} → {leave.get('to_date')}."),
                       audience="admins", company_id=user.get("company_id"),
                       category="leave", priority="normal",
+                      actor_name=user.get("name"),
+                      subject_name=user.get("name"),
                       action_url="/leave-approvals", reference_id=leave.get("leave_id"))
     except Exception:
         pass
@@ -275,6 +277,8 @@ async def decide_leave(leave_id: str, payload: LeaveDecision,
                       audience="user", company_id=leave.get("company_id"),
                       target_user_id=leave.get("user_id"),
                       category="leave", priority="normal",
+                      actor_name=user.get("name") or user.get("email"),
+                      subject_name=leave.get("user_name"),
                       action_url="/leaves", reference_id=leave.get("leave_id"))
     except Exception:
         pass
@@ -717,6 +721,9 @@ async def finalize_leave_workflow(leave_id: str, status: str, actor: dict) -> No
                       audience="user", company_id=leave.get("company_id"),
                       target_user_id=leave.get("user_id"),
                       category="leave", priority="normal",
+                      actor_name=(actor.get("name") or actor.get("email")
+                                  or "Approval Workflow"),
+                      subject_name=leave.get("user_name"),
                       action_url="/leaves", reference_id=leave_id)
     except Exception:
         pass

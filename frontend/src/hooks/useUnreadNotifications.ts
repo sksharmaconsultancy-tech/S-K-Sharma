@@ -44,7 +44,6 @@ export function useUnreadNotifications() {
   const timerRef = useRef<any>(null);
   // Iter 666 — items that arrived in the LAST poll (for toast popups).
   const [freshItems, setFreshItems] = useState<any[]>([]);
-  const knownIdsRef = useRef<Set<string> | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -54,14 +53,19 @@ export function useUnreadNotifications() {
       const unread = list.filter(
         (n) => n?.notification_id && !seen.has(n.notification_id) && !n.read,
       );
-      // Detect NEW arrivals since the previous poll (skip first load).
-      if (knownIdsRef.current) {
-        const fresh = list.filter(
-          (n) => n?.notification_id && !knownIdsRef.current!.has(n.notification_id) && !n.read,
-        );
-        if (fresh.length) setFreshItems(fresh.slice(0, 3));
-      }
-      knownIdsRef.current = new Set(list.map((n) => n?.notification_id).filter(Boolean));
+      // Iter 754 — fresh = UNREAD items created in the last ~75 s (2 poll
+      // cycles). The old "new since previous poll" logic missed anything
+      // that arrived between page load and the hook's FIRST poll (the
+      // shell often mounts late), so live popups never fired for them.
+      // Duplicate popups across remounts are prevented by the toasted-ids
+      // store in AdminWebShell (alreadyToasted/rememberToasted).
+      const cutoff = Date.now() - 75_000;
+      const fresh = list.filter((n) => {
+        if (!n?.notification_id || n.read) return false;
+        const t = new Date(n.created_at || 0).getTime();
+        return !Number.isNaN(t) && t >= cutoff;
+      });
+      if (fresh.length) setFreshItems(fresh.slice(0, 3));
       setItems(list);
       setUnreadCount(unread.length);
     } catch {

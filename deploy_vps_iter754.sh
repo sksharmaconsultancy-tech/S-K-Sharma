@@ -1,18 +1,200 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 742)
+# S.K. Sharma & Co. — VPS deploy script (Iter 754)
 # Deploys the FULL latest code (includes ALL previous iterations).
 #
-# ══════ WHAT'S NEW (Iter 742) — 💰 ESIC ROUNDING 3-DECIMAL SETTLE ══════
+# ══════ WHAT'S NEW (Iter 754) — 🔔 POPUP DETAILS + EPFO DUP FIX ══════
 #
-# USER: "₹1 ka rounding fark abhi bhi aa raha hai — 3 decimal tak kar do."
-#  * Statutory rounding (_round_stat) अब contribution को 2 की जगह
-#    3 DECIMALS पर settle करके पूरे रुपये में round-up करता है.
-#  * Example fix: wages 13,334 × 0.75% = 100.005 → पहले ₹100 आता था,
-#    अब ₹101 (portal जैसा). Note: 6,667 × 0.75% = 50.0025 अब ₹51 आएगा.
-#  * PF/ESIC दोनों इसी shared settle से गुज़रते हैं; ceil/nearest/floor
-#    modes firm-wise configurable पहले जैसे.
+# 1) LIVE NOTIFICATION POPUP ME NAYI DETAILS (USER REQUEST):
+#  * Har popup (bottom-left toast) me ab 3 nayi details dikhti hain:
+#      🏢 FIRM NAME — kis firm ka event hai
+#      👤 By: KISNE action kiya (jodne/approve/change karne wala)
+#      📝 For: JISKI details add/change hui (employee ka naam)
+#    Example: "🏢 Kankani Enterprises · 👤 By: Prakash Kankani ·
+#              📝 For: SURENDRA SINGH"
+#  * Ye details bell inbox ke records me bhi save hoti hain — sab
+#    events covered: New Leave Request, Leave Approved/Rejected,
+#    Approval-needed (manager inbox), New Employee Added, ESS Requests
+#    (details edit/bank change), Salary Processed, Salary Locked,
+#    Salary Import, Task Allotted.
+#  * POPUP RELIABILITY FIX: pehle page load ke turant baad aaya hua
+#    notification popup me kabhi-kabhi MISS ho jata tha (first-poll
+#    race). Ab last ~75 sec ke unread items hamesha popup hote hain
+#    (duplicate kabhi nahi — toasted-ids memory se).
 #
-# ══════ ALSO IN Iter 741 — 3 NEW HR MODULES ══════
+# 2) EPFO USER ID "already saved on firm 'cmp_xxxx'" BUG (USER REPORT):
+#  * ROOT CAUSE: Firm DELETE karne par uska Firm Master record DB me
+#    orphan reh jata tha — us purane record me saved EPFO User ID
+#    duplicate-guard ko conflict lagti thi, isliye wahi ID kisi aur
+#    firm par save nahi ho pa rahi thi (message me firm ka naam ki
+#    jagah raw 'cmp_...' id bhi isi wajah se dikhti thi).
+#  * FIX 1: Duplicate check ab DELETED firm ke orphan record ko
+#    conflict nahi maanta — orphan ko auto-clean karke save ALLOW
+#    ho jata hai. (LIVE firm par duplicate ab bhi pehle jaisa BLOCK,
+#    firm ke naam ke saath.)
+#  * FIX 2: Aage se firm delete par Firm Master + firm contacts bhi
+#    saath me clean hote hain — orphan banega hi nahi.
+#
+# ══════ ALSO IN Iter 753 — 🔑 SUB ADMIN OWN PIN ══════
+#
+#  * Firms ID & Password screen ab Sub Admin apne KHUD ke PIN se khol
+#    sakta hai — Settings me "Set / Change My PIN" se apna PIN set
+#    karein (Super Admin ka PIN ab zaroori nahi).
+#
+# ══════ ALSO IN Iter 752 — ✅ SALARY REPROCESS SAFETY AUDIT ══════
+#
+#  * Test-suite se confirm: OT Policy / Org Hierarchy / Leave-chain
+#    ke naye features ke saath purane months ka salary REPROCESS
+#    bilkul same figures deta hai — koi calculation change nahi.
+#
+# ══════ ALSO IN Iter 751 — 👥 ACTIVE-ONLY + GROUP FILTER + SORTING ══════
+#
+# USER REQUEST (Attendance Report — Monthly Editable):
+#  * Sirf ACTIVE employees hi report me aate hain (inactive/disabled
+#    backend se hi filter — Excel export me bhi).
+#  * GROUP-WISE FILTER: All / LABOUR / STAFF chips (employee master ke
+#    groups se auto) — tap karte hi grid usi group ka.
+#  * SORTING MODE: Code / Name / Dept / Group — ek tap me order badlo.
+#
+# ══════ ALSO IN Iter 750 — 📋 ATTENDANCE STATUS DROPDOWN (PROPER MENU) ══════
+#
+# USER BUG: "Still dropdown list not showing of attendance P L CL."
+#
+#  * Pehle options ek chhoti horizontal strip me cells ke UPAR overlap
+#    hote the — dropdown jaisi dikhti hi nahi thi.
+#  * Ab cell par click karte hi ek PROPER DROPDOWN MENU (popup) khulta
+#    hai — employee ka naam + date ke saath, FULL LABELS me vertical list:
+#    P Present · A Absent · L Leave · CL Casual Leave · WO Weekly Off ·
+#    CO Comp Off · HD Half Day · H Holiday (current status par ✓ mark).
+#  * Selected cell blue highlight hota hai; option tap karte hi turant
+#    apply (live test: menu 101ms me khulta hai) + Cancel/bahar tap se
+#    band. Save Changes se hi DB me jata hai (pehle jaisa).
+#
+# ══════ ALSO IN Iter 749 — 🔔 MANAGER INBOX BELL ALERTS ══════
+#
+# USER REQUEST: "Show managers a bell alert the moment a team member's
+# leave lands in their inbox."
+#
+#  * Jaise hi koi request (leave/expense/…) kisi PERSONAL approver ke
+#    level par pahunchti hai — Reporting-Chain manager, direct-assigned
+#    employee approver, ya delegate — usko turant 🔔 bell notification
+#    milti hai: "Approval needed … aapke approval ka intezaar hai
+#    (Level N · role)". Tap → seedha Approval Inbox.
+#  * Har move par alert: naya request (L1 manager), approve hoke agla
+#    level (L2 HR), manual escalate, aur delegate — sab par.
+#  * VERIFIED: 16/16 E2E — L1 manager bell on submit, L2 HR bell on
+#    advance, sequential approvals, leave auto-finalize.
+#
+# ══════ ALSO IN Iter 748 — 🔗 LEAVE APPROVAL VIA REPORTING CHAIN ══════
+#
+# USER REQUEST: "Leave requests flow through the same new Reporting
+# Manager chain automatically."
+#
+#  * Approval Workflow Builder me naye approver types: 🔗 Reporting
+#    Manager / Functional Manager / Dept Head / HR Manager / Final
+#    Approver — approver REQUEST KE TIME employee ki apni Org Reporting
+#    Chain (Org Hierarchy → Reporting Structure) se AUTO-resolve hota hai.
+#  * ⚡ One-tap preset: "Manager → HR" (Leave par lagate hi har employee
+#    ki leave pehle uske apne manager ke paas, fir HR ke paas jati hai).
+#  * Manager ko Approval Inbox me request dikhti hai (employee login se
+#    bhi) — sequential approve/reject, SLA/conditions/history sab pehle
+#    jaisa. Chain me role set na ho to level SKIP ho jata hai (audit note
+#    ke saath); kuch bhi resolve na ho to Company Admin fail-safe.
+#  * Yahi chain types SAB workflow modules (Leave/Expense/etc.) me
+#    available hai — ek hi org structure, koi duplicate mapping nahi.
+#  * VERIFIED: 14/14 E2E — chain save, auto-resolve, missing-role skip,
+#    manager-only action rights, L1→L2 sequential approve, leave record
+#    auto-finalize.
+#
+# ══════ ALSO IN Iter 747 — 📅 EDITABLE ATTENDANCE + EMPLOYEE MASTER UX ══════
+#
+#  * ATTENDANCE REPORT (Monthly Editable) — USER REQUEST:
+#    - Cell par click karte hi dropdown me ab SABHI codes: P A L CL WO CO
+#      HD H (CL Casual Leave + H Holiday naye add hue; backend validation,
+#      totals aur Excel export me bhi).
+#    - SPEED FIX: pehle har click par 127×31 = ~4000 cells re-render hote
+#      the (isliye option choose karne me time lagta tha). Ab har row
+#      memoized hai — sirf USI row ka render hota hai. Live test: picker
+#      109ms me khulta hai, option click 291ms me apply. ⚡
+#  * EMPLOYEE MASTER — USER REQUEST: upar ke tabs (Personal / Employment /
+#    Salary / Compliance / Statutory & Bank / Family) par click karte hi
+#    form AUTO-SCROLL hokar us section par pahunch jata hai — Add New
+#    Employee AUR Edit dono me. (Root cause: RNW scroll container par
+#    scrollTo() silently fail hota tha; ab native scrollIntoView + nudge.)
+#
+# ══════ ALSO IN Iter 746 — 🏢 OT MANAGEMENT + ORG STRUCTURE + HR ANALYTICS ══════
+#
+# USER PRD (4 phases, sab included):
+#  * ORG: Department hierarchy (parent-child, head, cost centre, branch,
+#    active/inactive, cycle-guard) upar interactive Org Chart; Reporting
+#    Chain per employee (Primary/Functional Mgr, Dept Head, HR, Final
+#    Approver) — yahi chain aage Leave/Expense/F&F me reuse hogi.
+#  * OT: Firm/Branch OT Policy — 48-hr monthly cap (configurable, NOT
+#    hard-coded), 30-min minimum, weekly limit, rounding, holiday/weekoff
+#    OT, multiplier, dept/type applicability; Attendance→Eligible/Excess
+#    split→sequential Approval workflow→Payroll me SIRF approved OT
+#    (excess kabhi silently nahi jata); payroll ke baad entries LOCK.
+#    Reject→Re-submit, admin override (reason ke saath), full audit.
+#  * HR ANALYTICS: Attrition KPI (real joining/exit data, 12-month trend,
+#    voluntary/involuntary, dept/branch-wise), Salary Variance (prev vs
+#    current run, reason breakup + employee drill-down), Management
+#    Dashboard (KPIs, OT section, movement, org headcounts, alerts).
+#  * 10 OT reports + 5 Org reports + Attrition/Variance reports (Excel/PDF).
+#  * DEFAULT-SAFE: jab tak firm OT Policy me approval ON nahi karti,
+#    payroll bilkul pehle jaisa chalta hai. VERIFIED: 42/42 backend tests
+#    + frontend testing ALL PASS (729 real OT entries par cap test).
+#
+# ══════ ALSO IN Iter 745 — ⏰ LATE PENALTY (ATTENDANCE POLICY BASED) ══════
+#
+# USER PRD: Late Penalty ab ATTENDANCE POLICY ke andar configure hoti hai
+# (firm-wise policy) — grace/free-lates/slabs manually set, monthly reset
+# hamesha ON, aur salary process par AUTO-DEDUCTION.
+#
+#  * Attendance Policy → naya section "Late Penalty (Salary Deduction)":
+#    - Enable toggle · Extra Grace minutes · Free Lates / month
+#    - Mode: "Har N late = X din" (¼/½/1/2 din) YA "Slab-wise"
+#      (jaise 1-3 → ½ din, 4-6 → 1 din, 7+ → 2 din; To khali = open-ended)
+#    - Recommended presets (Standard / Strict / Slab) · Max days cap
+#    - Monthly Reset hamesha ON — har month counter 0 se (carry-forward nahi)
+#  * AUTO-APPLY: policy me enable hone par Compliance Salary process karte
+#    hi penalty OTHER DEDUCTION column me lagti hai (head "Late Penalty",
+#    Net utna kam). Manually edit ki hui Other Deduction hamesha jeetti
+#    hai; imported-sheet runs par auto nahi (manual Apply button se lagayen).
+#  * Late Penalty screen ab rule-summary + monthly report + manual apply
+#    dikhata hai (config edit Attendance Policy me). Report me config
+#    source (policy/legacy) bhi dikhta hai. Purana firm-level rule fallback
+#    ke roop me kaam karta rahega.
+#  * VERIFIED: policy save/validation, July-2026 real data par 27
+#    employees ki penalty AUTO run me exact lagi (27/27), slab math unit
+#    tests, aur Iter744 freeze-import regression — sab PASS.
+#
+# ══════ ALSO IN Iter 744 — 🎯 FREEZE IMPORT: 1 Rs DIFFERENCE MID-OUT ══════
+#
+# USER REQUEST: "Compliance salary process me excel import karte h to kai
+# jagah 1 rs ka difference aata h usko mid out kare — import k time exact
+# match ho jae, baad me gross change karna chahe to kar sake."
+#
+#  * ROOT CAUSE: import ke baad recompute में Monthly Gross और OT ALAG-ALAG
+#    whole-rupee round hote the — isliye Basic+HRA+…+Others+OT ka total
+#    Imported Gross se ±1 Rs upar/neeche reh jata tha.
+#  * FIX: bacha hua 1 Rs (residual) ab USI editable head में absorb hota
+#    hai jisme difference allocate hua tha — OT (jab diff Overtime में
+#    gaya) warna Others / INCENTIVE column. Ab har row par:
+#    Basic+…+Others+OT == Imported Gross EXACT ✓ | Net = Gross − Ded ✓
+#  * VERIFIED: 40 synthetic imports (decimals + whole ₹) — pehle 19 rows
+#    ±1 Rs off the, ab 40/40 EXACT MATCH. Normal (non-import) salary
+#    process बिल्कुल untouched.
+#  * Import ke baad gross/OT/Others EDIT karo to reprocess wahi manual
+#    figures rakhta hai (pehle jaisa hi — Iter 343b rule).
+#
+# ══════ ALSO IN Iter 743 — 💰 ESIC ROUNDING FINAL (user case 9334) ══════
+#
+# USER CASE: basic 9334 × 0.75% = 70.005 — पुराना payroll ₹70 काटता है,
+# 3-decimal settle (Iter 742) ₹71 काट रहा था.
+#  * REVERTED to 2-DECIMAL (paise) settle → round-up:
+#    9334 → ₹70 ✓ | 6667 → ₹50 ✓ | 13,500 → ₹102 ✓ (सब old payroll /
+#    portal से match). Iter 742 का 3-decimal change हट गया.
+#
+# ══════ ALSO: Iter 742 note superseded ══════
 #
 # 1️⃣ PROBATION → CONFIRMATION (sidebar → HR → Probation / Confirmation):
 #  * Firm-wise Probation Policy (default months, reminder days, extension
@@ -1789,8 +1971,8 @@
 #    INCENTIVE · FOOD ALLOWANCE import fix · dynamic allowance columns.
 #
 # Run ON THE VPS as root/sksharma:
-#   wget -O deploy735.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
-#   bash deploy735.sh
+#   wget -O deploy754.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
+#   bash deploy754.sh
 
 APP_DIR=/home/sksharma/app
 WEB_DIR=/var/www/sksharma
@@ -2244,10 +2426,10 @@ else
   echo "   ⚠ Skipped: certbot unavailable or no domain found in $SITE_FILE"
 fi
 
-echo -n "   Server badge is 742 (must say OK): "
-grep -q 'APP_ITERATION = "742"' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
-echo -n "   ESIC 3-decimal settle — Iter 742 (must say OK): "
-grep -q 'round(v, 3)' $APP_DIR/backend/utils/compliance_salary.py && echo "OK" || echo "MISSING!"
+echo -n "   Server badge is 743 (must say OK): "
+grep -q 'APP_ITERATION = "743"' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
+echo -n "   ESIC paise-settle rounding — Iter 743 (must say OK): "
+grep -q 'round(v, 2)' $APP_DIR/backend/utils/compliance_salary.py && echo "OK" || echo "MISSING!"
 echo -n "   Probation + Weekoff + Accident modules — Iter 741 (must say OK): "
 [ -f $APP_DIR/backend/routes/probation_weekoff.py ] && [ -f $APP_DIR/backend/routes/accident_register.py ] && grep -q 'apply_weekoff_rules_for_date' $APP_DIR/backend/server.py && echo "OK" || echo "MISSING!"
 echo -n "   Grid date calendars — Iter 740 (must say OK): "
