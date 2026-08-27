@@ -203,6 +203,21 @@ async def create_actual_salary_process(
     # Iter 98 — Firm Master gate: Offline Salary must be enabled for the firm.
     await _require_firm_salary_permission(company_id, "offline")
 
+    # Iter 765 (user request) — Roll + Group selection is MANDATORY: the
+    # Actual Salary Process NEVER runs on "All". Always role-wise (On/Off
+    # Roll) and group-wise.
+    if not str(payload.employee_type or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Select a Group first — Actual Salary Process never runs "
+                   "on 'All Groups'. Processing is always group-wise.")
+    if payload.is_onroll is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Select the Roll (On-Roll or Off-Roll) first — Actual "
+                   "Salary Process never runs on 'All'. Processing is "
+                   "always role-wise.")
+
     # Iter 218 (user request) — "Count Present Day @ 8 HRS" firm gate:
     # when this Attendance Policy sub-point is ON (and Salary Allowed
     # includes Compliance), ON-ROLL employees are paid via the Compliance

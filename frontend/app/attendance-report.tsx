@@ -19,14 +19,14 @@ import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors } from "@/src/theme";
 
-const CODES = ["P", "A", "L", "CL", "WO", "CO", "HD", "H"] as const;
+const CODES = ["P", "A", "L", "CL", "WO", "CO", "HD", "H", "EL"] as const;
 const CODE_COLORS: Record<string, string> = {
   P: "#15803D", A: "#DC2626", L: "#B45309", CL: "#0D9488", WO: "#6B7280",
-  CO: "#7C3AED", HD: "#0369A1", H: "#DB2777",
+  CO: "#7C3AED", HD: "#0369A1", H: "#DB2777", EL: "#BE123C",
 };
 const CODE_LABELS: Record<string, string> = {
   P: "Present", A: "Absent", L: "Leave", CL: "Casual Leave", WO: "Weekly Off",
-  CO: "Comp Off", HD: "Half Day", H: "Holiday",
+  CO: "Comp Off", HD: "Half Day", H: "Holiday", EL: "ESIC Leave",
 };
 
 function nowMM() {
@@ -366,7 +366,7 @@ export default function AttendanceReportEditable() {
       // next letter.
       if (/^[a-zA-Z]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
-        const CODE_SET = ["P", "A", "L", "CL", "WO", "CO", "HD", "H"];
+        const CODE_SET = ["P", "A", "L", "CL", "WO", "CO", "HD", "H", "EL"];
         const apply = (code: string) => {
           const kk = kbRef.current;
           // Iter 761 — COLUMN FILL: selected day header → one code fills
@@ -561,6 +561,7 @@ export default function AttendanceReportEditable() {
           <View style={s.cards}>
             {[["Employees", sum.employees], ["P", sum.P], ["A", sum.A],
               ["L", sum.L], ["WO", sum.WO], ["CO", sum.CO], ["HD", sum.HD],
+              ["EL", sum.EL],
               ["Manual", sum.manual], ["Pending", sum.pending]].map(([l, v]) => (
               <View key={String(l)} style={s.card}>
                 <Text style={s.cardVal}>{v ?? 0}</Text>
@@ -626,7 +627,8 @@ export default function AttendanceReportEditable() {
           </ScrollView>
           <Text style={s.legend}>
             P Present · A Absent · L Leave · CL Casual Leave · WO Week Off · CO Camp Off ·
-            HD Half Day · H Holiday · ✓ Manual · ✎ Saving… · 🟡 Pending Approval
+            HD Half Day · H Holiday · EL ESIC Leave (Accident/ESIC module se auto — punch par bhi EL hi rahega) ·
+            ✓ Manual · ✎ Saving… · 🟡 Pending Approval
           </Text>
           {Platform.OS === "web" ? (
             <Text style={s.legend}>

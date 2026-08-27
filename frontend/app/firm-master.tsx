@@ -1326,6 +1326,40 @@ export default function FirmMasterScreen() {
                 <Toggle label="Overtime (OT) Allowed" value={sp.ot_allowed !== false} testID="fm-ot-allowed"
                         onChange={(v) => updateSection("salary_process", { ot_allowed: v })} />
               </View>
+              {/* Iter 764 (user request) — SALARY DAYS SOURCE: teen policies,
+                  ek waqt me sirf EK active (mutually exclusive). Yahi setting
+                  Attendance Policy screen par bhi dikhti hai (synced). */}
+              <View style={{ marginTop: 14 }}>
+                <Text style={{ fontSize: 12, color: "#64748B", marginBottom: 4 }}>
+                  Salary Days Source — ek waqt me sirf EK policy active (Compliance Salary)
+                </Text>
+                <View style={{ gap: 6 }}>
+                  {[
+                    { k: "", l: "Not Set (default — Policy 1 & 2 dono allowed)" },
+                    { k: "biometric", l: "Policy 1 — Biometric Attendance (8 hrs duty + OT)" },
+                    { k: "imported_sheet", l: "Policy 2 — Imported Sheet (Excel)" },
+                    { k: "manual_editable", l: "Policy 3 — Monthly Attendance Editable (saved attendance)" },
+                  ].map((o) => {
+                    const on = (sp.attendance_source || "") === o.k;
+                    return (
+                      <Pressable
+                        key={o.k || "none"}
+                        onPress={() => updateSection("salary_process", { attendance_source: o.k || null })}
+                        style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                        testID={`fm-att-source-${o.k || "none"}`}
+                      >
+                        <Ionicons name={on ? "radio-button-on" : "radio-button-off"} size={18} color={on ? "#2563EB" : "#94A3B8"} />
+                        <Text style={{ fontSize: 13, color: on ? "#1E3A8A" : "#334155", fontWeight: on ? "700" : "400" }}>{o.l}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                {(sp.attendance_source || "") === "manual_editable" ? (
+                  <Text style={{ fontSize: 11.5, color: "#B45309", marginTop: 6 }}>
+                    Policy 3: Salary days Monthly Attendance Editable se aayenge (P/WO/H/CL/CO = 1 din, HD = 0.5, A/L = 0). Salary me OT = 0; OT hours biometric reports me alag milte rahenge.
+                  </Text>
+                ) : null}
+              </View>
               {/* Iter 110 — Online Process Days is LINKED to the Compliance
                   Salary Process; Offline Process Days is LINKED to the Actual
                   Salary Process. Each Days field is enabled only when its

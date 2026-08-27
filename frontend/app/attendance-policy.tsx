@@ -1514,6 +1514,18 @@ export default function AttendancePolicyScreen() {
                 : "Both processes enabled — off-roll employees are NOT PF/ESIC eligible in Actual Salary; on-roll are."}
           </Text>
 
+          {/* Iter 764 (user request) — Salary Days Source (synced with the
+              Firm Master → Salary Process setting; single storage). */}
+          {meta?.company_id ? (
+            <>
+              <SectionTitle
+                title="Salary Days Source — 3 Policies (only ONE active)"
+                hint="Policy 1: Biometric (8 hrs duty + OT) · Policy 2: Imported Sheet (Excel) · Policy 3: Monthly Attendance Editable. Ek waqt me sirf EK policy laagu hoti hai — baaki sources Compliance Salary Process me block rahenge. Yahi setting Firm Master me bhi dikhti hai (synced)."
+              />
+              <SalaryDaysSourceCard companyId={meta.company_id} />
+            </>
+          ) : null}
+
           <SectionTitle title="Notes" hint="Optional — surfaced on employee onboarding." />
           <TextInput
             testID="ap-notes"
@@ -2420,6 +2432,84 @@ function StandardPolicyPanel({ category }: { category: string }) {
           )}
         </View>
       ) : null}
+    </View>
+  );
+}
+
+// Iter 764 (user request) — Salary Days Source selector. Reads/writes the
+// SINGLE stored setting firm_masters.salary_process.attendance_source so the
+// Attendance Policy screen and the Firm Master stay in sync.
+function SalaryDaysSourceCard({ companyId }: { companyId: string }) {
+  const [src, setSrc] = useState<string>("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    (async () => {
+      try {
+        const fm = await api<any>(`/admin/firm-master/${companyId}`);
+        if (alive) setSrc(fm?.master?.salary_process?.attendance_source || "");
+      } catch { /* keep default */ }
+      if (alive) setLoading(false);
+    })();
+    return () => { alive = false; };
+  }, [companyId]);
+  const choose = async (k: string) => {
+    if (saving) return;
+    const prev = src;
+    setSrc(k);
+    setSaving(true);
+    setMsg("");
+    try {
+      await api(`/admin/firm-master/${companyId}`, {
+        method: "PATCH",
+        body: { salary_process: { attendance_source: k || null } },
+      });
+      setMsg("Saved ✓ (Firm Master synced)");
+    } catch (e: any) {
+      setSrc(prev);
+      setMsg(e?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const OPTS: [string, string, string][] = [
+    ["", "Not Set (default)", "Policy 1 & 2 dono allowed — koi enforcement nahi."],
+    ["biometric", "Policy 1 — Biometric Attendance", "8 hrs duty + remaining OT; punches se days. Imported Sheet blocked."],
+    ["imported_sheet", "Policy 2 — Imported Sheet (Excel)", "Sirf import se salary process hoga; attendance-based generate blocked."],
+    ["manual_editable", "Policy 3 — Monthly Attendance Editable", "Saved attendance seedhi Compliance Salary me (P/WO/H/CL/CO=1, HD=0.5, A/L=0, OT=0). Imported Sheet blocked. Biometric Present/Absent + OT reports alag milti rahengi."],
+  ];
+  if (loading) {
+    return <ActivityIndicator size="small" color={colors.brandPrimary} style={{ marginVertical: 12 }} />;
+  }
+  return (
+    <View style={{ gap: 8, marginBottom: 8 }}>
+      {OPTS.map(([k, l, sub]) => {
+        const on = src === k;
+        return (
+          <Pressable
+            key={k || "none"}
+            testID={`ap-att-source-${k || "none"}`}
+            onPress={() => void choose(k)}
+            style={{
+              flexDirection: "row", alignItems: "flex-start", gap: 10,
+              borderWidth: 1, borderRadius: 10, padding: 10,
+              borderColor: on ? colors.brandPrimary : colors.border,
+              backgroundColor: on ? "#EEF2FF" : colors.surface,
+            }}
+          >
+            <Ionicons name={on ? "radio-button-on" : "radio-button-off"} size={18}
+                      color={on ? colors.brandPrimary : "#94A3B8"} style={{ marginTop: 1 }} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13, fontWeight: on ? "800" : "600", color: on ? "#1E3A8A" : "#334155" }}>{l}</Text>
+              <Text style={{ fontSize: 11.5, color: "#64748B", marginTop: 2 }}>{sub}</Text>
+            </View>
+          </Pressable>
+        );
+      })}
+      {msg ? <Text style={{ fontSize: 11.5, color: msg.startsWith("Saved") ? "#15803D" : "#DC2626" }}>{msg}</Text> : null}
     </View>
   );
 }

@@ -72,7 +72,7 @@ type EmployeeRow = {
   bio_code?: string;
   pay_basis?: string;
   salary_structure_actual?: { head?: string; amount?: number; rate_type?: string; working_days?: number }[];
-  attendance_policy_override?: { shift_id?: string } | null;
+  attendance_policy_override?: { shift_id?: string; standard_working_hours?: number } | null;
 };
 
 // Fields we want visible in the grid header order.
@@ -101,6 +101,7 @@ const COL_WIDTHS: Record<string, number> = {
   bio_code: 100,
   actual_basic: 140,
   pay_basis: 120,
+  duty_hours: 100,
   shift_id: 150,
   salary_1: 110,
   day_1: 90,
@@ -183,6 +184,11 @@ function actualBase(row: EmployeeRow, key: string): string {
       const b = brow();
       return String(b?.rate_type || row.pay_basis || "");
     }
+    // Iter 765 (user request) — per-employee Duty Hours (Actual Salary).
+    case "duty_hours":
+      return row.attendance_policy_override?.standard_working_hours != null
+        ? String(row.attendance_policy_override.standard_working_hours)
+        : "";
     case "shift_id":
       return String(row.attendance_policy_override?.shift_id || "");
     case "salary_1": case "salary_2": case "salary_3": {
@@ -199,7 +205,7 @@ function actualBase(row: EmployeeRow, key: string): string {
 }
 
 const ACTUAL_DERIVED_KEYS = new Set([
-  "actual_basic", "pay_basis", "shift_id",
+  "actual_basic", "pay_basis", "shift_id", "duty_hours",
   "salary_1", "day_1", "salary_2", "day_2", "salary_3", "day_3",
 ]);
 

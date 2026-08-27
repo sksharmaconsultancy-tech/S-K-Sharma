@@ -188,6 +188,14 @@ function AccidentForm({ cid, onDone, onCancel }: { cid: string; onDone: () => vo
         <BmToggle label="ESIC Reporting" value={!!f.esic_applicable} onChange={(v) => set("esic_applicable", v)} testID="ar-esic" />
         <BmToggle label="Factory & Boilers Reporting" value={!!f.fnb_applicable} onChange={(v) => set("fnb_applicable", v)} testID="ar-fnb" />
       </View>
+      {/* Iter 765 (user request) — ESIC Leave merge: accident ka leave
+          period yahin bharein — approved ESIC Leave entry auto-banegi aur
+          attendance grid par un dino EL lag jayega (P/punch par bhi EL). */}
+      <Text style={bm.secTitle}>Accident Leave Period (ESIC Leave auto-link)</Text>
+      <View style={bm.row}>
+        <BmField label="Leave From (YYYY-MM-DD)" value={f.leave_from || ""} onChangeText={(v) => set("leave_from", v)} width={180} testID="ar-leave-from" />
+        <BmField label="Leave To (YYYY-MM-DD)" value={f.leave_to || ""} onChangeText={(v) => set("leave_to", v)} width={180} testID="ar-leave-to" />
+      </View>
       {f.fnb_applicable ? (
         <>
           <Text style={bm.secTitle}>Factory & Boilers Details</Text>

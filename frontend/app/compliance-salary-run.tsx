@@ -1140,12 +1140,18 @@ export default function ComplianceSalaryRunScreen() {
       ), 90000, "Finalize & Lock");
       void r;
       setLockCheck(null);
-      // Iter 256 (user request) — after Finalize & Lock the front page is
-      // CLEARED so the next batch starts fresh (run stays in Past Runs).
-      setRun(null);
-      setEmpType("all");
+      // Iter 764 (user video) — after Finalize & Lock the sheet STAYS on
+      // screen in LOCKED state ("finalize ke baad dobara display nahi hui"
+      // complaint). It is also in Past Runs; changing the month/group
+      // simply loads that selection's sheet (auto-load below).
+      setRun({
+        ...(run as any),
+        finalized: true,
+        finalized_at: (r as any)?.finalized_at || new Date().toISOString(),
+      } as any);
+      setUnsavedEdits(false);
       await loadRuns();
-      showMsg("Run finalized ✓ — locked & moved to Past Runs. Page cleared for the next batch.");
+      showMsg("Run finalized ✓ — LOCKED 🔒. Sheet display me hai (read-only) aur Past Runs me bhi available hai.");
       setReportsFor({
         run_id: run.run_id, month: run.month, note: "Finalized 🔒",
         group: (run as any).employee_type || (empType !== "all" ? empType : "All Groups"),
@@ -1252,6 +1258,36 @@ export default function ComplianceSalaryRunScreen() {
       setUnsavedEdits(false); // fresh run opened/computed — nothing edited yet
     }
   }, [run]);
+
+  // Iter 764 (user video request) — "employee type select karte hi already
+  // processed salary apne aap aa jani chahiye": whenever the Configure
+  // Batch selection (firm + month + employee group) matches an ALREADY
+  // PROCESSED run (draft OR finalized), that sheet auto-loads along with
+  // its processed Month Days. Never clobbers a sheet with unsaved edits.
+  const autoLoadedRunRef = useRef<string>("");
+  useEffect(() => {
+    if (!isAdmin) return;
+    const ex: any = existingAny;
+    if (!ex?.run_id) return;
+    if (run && ((run as any).run_id === ex.run_id || unsavedEdits)) return;
+    if (autoLoadedRunRef.current === ex.run_id) return;
+    autoLoadedRunRef.current = ex.run_id;
+    (async () => {
+      try {
+        const j = await api<any>(`/admin/compliance-salary-runs/${ex.run_id}`);
+        if (j?.run) {
+          setRun(j.run);
+          if (j.run.month_days) setMonthDaysOverride(String(j.run.month_days));
+          showToast(
+            `Already processed sheet auto-loaded — ${j.run.month} · ` +
+            `${(j.run.employee_type || "All Groups")}` +
+            (j.run.finalized ? " · LOCKED 🔒" : " (draft)"),
+          );
+        }
+      } catch { /* ignore — page simply stays blank */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existingAny, run, isAdmin, unsavedEdits]);
   const saveAsDraft = async () => {
     if (!run || savingDraft) return;
     if ((run as any).finalized) {

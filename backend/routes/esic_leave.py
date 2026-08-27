@@ -108,6 +108,30 @@ async def _frozen_months(company_id: str, months: List[str]) -> List[str]:
     return out
 
 
+async def esic_leave_dates_map(company_id: str, month: str) -> Dict[str, set]:
+    """Iter 765 (user request) — {user_id: {iso dates}} of APPROVED ESIC
+    Leave days falling inside ``month`` (accident-linked entries included).
+    Drives the automatic "EL" marking on the attendance grids."""
+    y, m = int(month[:4]), int(month[5:7])
+    m0 = date(y, m, 1)
+    m1 = (date(y + 1, 1, 1) if m == 12 else date(y, m + 1, 1)) - timedelta(days=1)
+    out: Dict[str, set] = {}
+    async for e in db.esic_leaves.find(
+            {"company_id": company_id, "status": "approved",
+             "from_date": {"$lte": m1.isoformat()},
+             "to_date": {"$gte": m0.isoformat()}},
+            {"_id": 0, "user_id": 1, "from_date": 1, "to_date": 1}):
+        try:
+            lo, hi = max(_d(e["from_date"]), m0), min(_d(e["to_date"]), m1)
+        except Exception:
+            continue
+        cur = lo
+        while cur <= hi:
+            out.setdefault(e["user_id"], set()).add(cur.isoformat())
+            cur += timedelta(days=1)
+    return out
+
+
 async def esic_leave_days_map(company_id: str, month: str) -> Dict[str, float]:
     """user_id → approved ESIC leave days inside ``month``. Used by the
     Compliance Salary Process import (server.py)."""

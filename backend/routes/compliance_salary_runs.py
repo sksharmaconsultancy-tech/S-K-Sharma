@@ -431,6 +431,9 @@ async def _compute_compliance_run(
                 "days_calc_method": str((fm.get("salary_process") or {}).get("days_calc_method") or "attendance_gross_validation"),
                 "days_calc_fixed": (fm.get("salary_process") or {}).get("days_calc_fixed") or 26,
                 "days_calc_rounding": (fm.get("salary_process") or {}).get("days_calc_rounding", 0.5),
+                # Iter 764 (user request) — Salary Days Source policy
+                # (biometric | imported_sheet | manual_editable | "").
+                "att_source": str((fm.get("salary_process") or {}).get("attendance_source") or ""),
             }
             # Iter 142 — Firm Master OT gate for compliance-salary rows.
             _v = (fm.get("salary_process") or {}).get("ot_allowed")
@@ -459,6 +462,25 @@ async def _compute_compliance_run(
                     actual_by_user.setdefault(_r["user_id"], _r)
 
     rows = []
+    # Iter 764 (user request) — POLICY 3: firms whose Salary Days Source is
+    # "manual_editable" pull days from the MONTHLY ATTENDANCE EDITABLE grid
+    # (the exact same effective statuses the admin sees & saves on that
+    # screen: manual mark > punch-P > policy-WO > auto-A). Counting rule
+    # (user confirmed): P/WO/H/CL/CO = 1 day, HD = 0.5, A/L = 0. OT = 0 in
+    # the salary (OT stays visible in the separate biometric OT reports).
+    manual_att_by_user: Dict[str, dict] = {}
+    _p3_cids = [c for c, f in firm_stat_flags.items()
+                if f.get("att_source") == "manual_editable"]
+    if _p3_cids and not payload.use_imported_sheet:
+        from routes.manual_attendance import _grid as _manual_grid_fn
+        for _cid_p3 in _p3_cids:
+            try:
+                _mg3 = await _manual_grid_fn(_cid_p3, payload.month)
+            except Exception:
+                continue
+            for _mr3 in _mg3.get("rows") or []:
+                if _mr3.get("user_id"):
+                    manual_att_by_user[_mr3["user_id"]] = _mr3
     # Iter 200 — Holiday Master dates per firm (for holiday_present_add_ot).
     _holidays_by_cid: Dict[str, list] = {}
     for _cid_ in {e.get("company_id") for e in employees if e.get("company_id")}:
@@ -624,6 +646,29 @@ async def _compute_compliance_run(
         _aot_map746 = approved_ot_maps.get(emp.get("company_id"))
         if _aot_map746 is not None:
             stats["ot_hours"] = float(_aot_map746.get(emp["user_id"], 0.0))
+        # Iter 764 (user request) — POLICY 3 (Monthly Attendance Editable):
+        # the saved editable grid is the ONLY days source for this firm —
+        # biometric stats and grid overrides above are fully replaced.
+        # P/WO/H/CL/CO = 1 · HD = 0.5 · A/L = 0 · OT = 0 (user confirmed).
+        if not payload.use_imported_sheet and \
+                (firm_stat_flags.get(emp.get("company_id")) or {}).get(
+                    "att_source") == "manual_editable":
+            _mt3 = (manual_att_by_user.get(emp["user_id"]) or {}).get(
+                "totals") or {}
+            _pd3 = (float(_mt3.get("P") or 0) + float(_mt3.get("WO") or 0)
+                    + float(_mt3.get("H") or 0) + float(_mt3.get("CL") or 0)
+                    + float(_mt3.get("CO") or 0)
+                    + 0.5 * float(_mt3.get("HD") or 0))
+            _pd3 = min(_pd3, float(month_days))
+            stats = {
+                "present_days": round(_pd3 * 2) / 2.0,
+                "half_days": int(_mt3.get("HD") or 0),
+                "absent_days": float(_mt3.get("A") or 0) + float(_mt3.get("L") or 0),
+                "duty_hours": round(
+                    _pd3 * float(merged_pol.get("full_day_hours") or 8.0), 2),
+                "ot_hours": 0.0,
+                "effective_present": _pd3,
+            }
         _am = am_entries.get(emp["user_id"]) if payload.use_imported_sheet else None
         # Iter 443 (user request) — "Freeze as Actual Gross": the ACTUAL
         # Salary Process run of the SAME month is the authoritative import
@@ -2166,6 +2211,33 @@ async def _create_compliance_salary_run_core(
         else payload.company_id
     )
     await _require_firm_salary_permission(_gate_cid, "online")
+    # Iter 764 (user request) — SALARY DAYS SOURCE EXCLUSIVITY: when the
+    # firm has explicitly selected ONE policy, the other sources are
+    # blocked (Policy 1 biometric / Policy 2 imported sheet / Policy 3
+    # monthly editable can NEVER apply together).
+    if _gate_cid:
+        _fm_src = await db.firm_masters.find_one(
+            {"company_id": _gate_cid},
+            {"_id": 0, "salary_process.attendance_source": 1})
+        _att_src = str(((_fm_src or {}).get("salary_process") or {})
+                       .get("attendance_source") or "")
+        if payload.use_imported_sheet and _att_src in (
+                "biometric", "manual_editable"):
+            _pn = "Policy 1 (Biometric Attendance)" \
+                if _att_src == "biometric" \
+                else "Policy 3 (Monthly Attendance Editable)"
+            raise HTTPException(
+                status_code=400,
+                detail=f"{_pn} is active for this firm — Imported Sheet "
+                       "(Policy 2) cannot be used. Change the Salary Days "
+                       "Source in the Firm Master / Attendance Policy first.")
+        if not payload.use_imported_sheet and _att_src == "imported_sheet":
+            raise HTTPException(
+                status_code=400,
+                detail="Policy 2 (Imported Sheet) is active for this firm — "
+                       "generate this month by IMPORTING the salary sheet. "
+                       "Attendance-based processing is blocked while "
+                       "Policy 2 is selected.")
     # Iter 129f (user directive) — a FINALIZED month can never be processed
     # again. Iter 257 (user bug): the block is scoped to the SAME employee
     # group — finalizing STAFF must not stop LABOUR from being processed.

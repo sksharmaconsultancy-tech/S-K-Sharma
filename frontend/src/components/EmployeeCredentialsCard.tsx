@@ -84,7 +84,9 @@ export default function EmployeeCredentialsCard({
       </View>
       <Text style={styles.sub}>
         Set a username, PIN and/or password so this employee can sign in on the
-        Employee login. Leave a field blank to keep it unchanged.
+        Employee login. Leave a field blank to keep it unchanged.{"\n"}
+        Login options: Email/Mobile + PIN · Email/Mobile/Username + Password
+        (email & mobile Employee Master se resolve hote hain).
       </Text>
 
       <View style={styles.statusRow}>

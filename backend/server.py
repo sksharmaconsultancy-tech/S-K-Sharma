@@ -220,6 +220,8 @@ class PinLoginRequest(BaseModel):
     company_code: Optional[str] = None
     employee_code: Optional[str] = None
     phone: Optional[str] = None
+    # Iter 765 (user request) — email + PIN login.
+    email: Optional[str] = None
     uan_no: Optional[str] = None
     esi_ip_no: Optional[str] = None
     pf_no: Optional[str] = None
@@ -6563,6 +6565,16 @@ async def pin_login(payload: PinLoginRequest):
         user = (await db.users.find_one({"phone": phone_norm, "role": "employee"}, {"_id": 0})
                 or await db.users.find_one({"phone": phone_norm}, {"_id": 0}))
         ident_label = phone_norm
+    elif payload.email:
+        # Iter 765 (user request) — EMAIL + PIN login (case-insensitive);
+        # employee record preferred when the email is shared with an admin.
+        em = payload.email.strip().lower()
+        if "@" not in em or "." not in em.split("@")[-1]:
+            raise HTTPException(status_code=400, detail="Enter a valid email")
+        _eq = {"email": {"$regex": f"^{re.escape(em)}$", "$options": "i"}}
+        user = (await db.users.find_one({**_eq, "role": "employee"}, {"_id": 0})
+                or await db.users.find_one(_eq, {"_id": 0}))
+        ident_label = f"email:{em[:3]}***"
     elif payload.uan_no:
         uan = payload.uan_no.strip()
         if not uan.isdigit() or len(uan) < 10:
@@ -6951,15 +6963,29 @@ class EmployeePasswordLoginRequest(BaseModel):
 
 @api.post("/auth/employee-password-login")
 async def employee_password_login(payload: EmployeePasswordLoginRequest):
-    """Employee logs in with the username + password their employer set."""
+    """Employee logs in with the username + password their employer set.
+
+    Iter 765 (user request) — the identifier may now be the EMAIL, the
+    MOBILE NUMBER or the USER ID (login_id); all resolve to the same
+    employee record and share one lockout counter."""
     lid = (payload.login_id or "").strip()
     pw = payload.password or ""
     if not lid or not pw:
         raise HTTPException(status_code=400, detail="Enter your username and password")
 
+    _or: list = []
+    if "@" in lid:
+        _or.append({"email": {"$regex": f"^{re.escape(lid.lower())}$",
+                              "$options": "i"}})
+    else:
+        if len(re.sub(r"\D", "", lid)) >= 8:
+            _pn = _normalise_phone(lid)
+            if _pn:
+                _or.append({"phone": _pn})
+        _or.append({"login_id": {"$regex": f"^{re.escape(lid)}$",
+                                 "$options": "i"}})
     user = await db.users.find_one(
-        {"login_id": {"$regex": f"^{re.escape(lid)}$", "$options": "i"},
-         "role": "employee"},
+        {"$or": _or, "role": "employee"},
         {"_id": 0},
     )
     if not user or not user.get("password_hash"):
@@ -10478,7 +10504,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "763"
+APP_ITERATION = "765"
 
 
 @api.get("/version")

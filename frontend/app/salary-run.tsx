@@ -402,6 +402,12 @@ export default function ActualSalaryProcessScreen() {
       showMsg("Please select a Group (after choosing On-roll / Off-roll) before generating.");
       return;
     }
+    // Iter 765 (user request) — Roll is also MANDATORY: salary process
+    // NEVER runs on "All" — always role-wise (On-Roll / Off-Roll).
+    if (rollFilter === "all") {
+      showMsg("Please select the Roll — On-Roll or Off-Roll. Salary process never runs on 'All'.");
+      return;
+    }
     setBusy(true);
     try {
       const body: any = {
@@ -881,12 +887,14 @@ export default function ActualSalaryProcessScreen() {
               </Text>
             </View>
             <View style={styles.gridCol}>
-              <Text style={styles.label}>Roll</Text>
+              <Text style={styles.label}>Roll (required)</Text>
               <View style={styles.chipStrip}>
-                {(["all", "on", "off"] as const).map((v) => (
+                {/* Iter 765 (user request) — "All" removed: the process is
+                    ALWAYS role-wise (On-Roll / Off-Roll), never on All. */}
+                {(["on", "off"] as const).map((v) => (
                   <TypeChip
                     key={v}
-                    label={v === "all" ? "All" : v === "on" ? "On-roll" : "Off-roll"}
+                    label={v === "on" ? "On-roll" : "Off-roll"}
                     active={rollFilter === v}
                     onPress={() => setRollFilter(v)}
                   />

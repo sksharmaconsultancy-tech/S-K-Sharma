@@ -23,7 +23,7 @@ _FIELDS = ("accident_date", "accident_time", "reporting_datetime", "user_id",
            "factory_name", "shift", "location", "accident_type",
            "injury_nature", "body_part", "cause", "description", "witnesses",
            "first_aid", "doctor_hospital", "hospitalised", "fatal",
-           "leave_days", "remarks",
+           "leave_days", "leave_from", "leave_to", "remarks",
            "esic_applicable", "fnb_applicable")
 
 _FNB_FIELDS = ("factory_regn_no", "factory_address", "district",
@@ -50,6 +50,90 @@ async def _next_no(cid: str) -> str:
     n = await db.accidents.count_documents({"company_id": cid,
                                             "accident_no": {"$regex": f"^ACC-{year}-"}})
     return f"ACC-{year}-{n + 1:03d}"
+
+
+async def _sync_esic_leave(doc: Dict[str, Any], admin: Dict[str, Any]) -> None:
+    """Iter 765 (user request) — MERGE Accident Register with the ESIC
+    Leave module: an accident with a Leave From–To period auto-creates
+    (or updates) an APPROVED ESIC Leave entry + its linked attendance
+    leave record, so the grids mark those days as "EL" automatically.
+    Clearing the dates removes the auto-created entry again."""
+    aid = doc["accident_id"]
+    uid = str(doc.get("user_id") or "").strip()
+    f, t = str(doc.get("leave_from") or "").strip(), str(doc.get("leave_to") or "").strip()
+    old = await db.esic_leaves.find_one(
+        {"accident_id": aid},
+        {"_id": 0, "entry_id": 1, "linked_leave_id": 1})
+    if not (uid and f and t):
+        if old:
+            await db.esic_leaves.delete_one({"entry_id": old["entry_id"]})
+            if old.get("linked_leave_id"):
+                await db.leaves.delete_one({"leave_id": old["linked_leave_id"]})
+        return
+    try:
+        fd = datetime.strptime(f, "%Y-%m-%d").date()
+        td = datetime.strptime(t, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400,
+                            detail="Leave From/To must be YYYY-MM-DD")
+    if td < fd:
+        raise HTTPException(status_code=400,
+                            detail="Leave To date is before Leave From date")
+    days = float((td - fd).days + 1)
+    reason = f"Employment Injury — Accident {doc.get('accident_no') or aid}"
+    if old:
+        await db.esic_leaves.update_one(
+            {"entry_id": old["entry_id"]},
+            {"$set": {"from_date": f, "to_date": t, "days": days,
+                      "user_id": uid, "remarks": reason}})
+        if old.get("linked_leave_id"):
+            await db.leaves.update_one(
+                {"leave_id": old["linked_leave_id"]},
+                {"$set": {"from_date": f, "to_date": t, "user_id": uid}})
+        return
+    emp = await db.users.find_one(
+        {"user_id": uid},
+        {"_id": 0, "name": 1, "employee_code": 1, "esi_ip_no": 1})
+    leave_id = f"lv_{uuid.uuid4().hex[:12]}"
+    entry_id = f"esl_{uuid.uuid4().hex[:12]}"
+    await db.leaves.insert_one({
+        "leave_id": leave_id,
+        "user_id": uid,
+        "company_id": doc["company_id"],
+        "leave_type": "esic",
+        "from_date": f,
+        "to_date": t,
+        "reason": reason,
+        "status": "approved",
+        "approved_by": admin["user_id"],
+        "source": "accident_register",
+        "esic_entry_id": entry_id,
+        "created_at": now_iso(),
+    })
+    await db.esic_leaves.insert_one({
+        "entry_id": entry_id,
+        "company_id": doc["company_id"],
+        "user_id": uid,
+        "employee_name": (emp or {}).get("name") or doc.get("employee_name"),
+        "employee_code": (emp or {}).get("employee_code") or doc.get("employee_code"),
+        "esi_ip_no": (emp or {}).get("esi_ip_no") or doc.get("esic_ip_number"),
+        "from_date": f,
+        "to_date": t,
+        "days": days,
+        "remarks": reason,
+        "reason": "Employment Injury (Accident)",
+        "has_certificate": False,
+        "status": "approved",
+        "approved_by": admin["user_id"],
+        "approved_by_name": admin.get("name") or admin.get("email"),
+        "approved_at": now_iso(),
+        "created_by": admin["user_id"],
+        "created_by_name": admin.get("name") or admin.get("email"),
+        "created_at": now_iso(),
+        "source": "accident_register",
+        "accident_id": aid,
+        "linked_leave_id": leave_id,
+    })
 
 
 @router.get("")
@@ -122,6 +206,9 @@ async def acc_create(body: Dict[str, Any] = Body(...),
             doc.setdefault("branch_name", u.get("branch_name"))
     await db.accidents.insert_one(doc)
     doc.pop("_id", None)
+    # Iter 765 (user request) — accident with a leave period auto-creates
+    # the ESIC Leave entry (attendance EL days).
+    await _sync_esic_leave(doc, admin)
     return {"ok": True, "accident": doc}
 
 
@@ -148,6 +235,10 @@ async def acc_patch(accident_id: str, body: Dict[str, Any] = Body(...),
     patch["updated_by_name"] = admin.get("name") or admin.get("email")
     await db.accidents.update_one({"accident_id": accident_id}, {"$set": patch})
     fresh = await db.accidents.find_one({"accident_id": accident_id}, {"_id": 0})
+    # Iter 765 (user request) — keep the linked ESIC Leave entry in sync
+    # whenever the leave period / employee changes on the accident.
+    if any(k in patch for k in ("leave_from", "leave_to", "user_id")):
+        await _sync_esic_leave(fresh, admin)
     return {"ok": True, "accident": fresh}
 
 

@@ -1,0 +1,47 @@
+{
+  "summary": "Iter 765 (second review-pass) — FRONTEND ONLY verification of the 3 features on Kankani (cmp_527fecdd7c). ALL FLOWS PASS. (A) DUTY HOURS: /pin-login has 3 identifier tabs (Mobile / Email / Username) and PIN|Password segment for EACH tab; Employee Master shows 'Duty Hours (Actual Salary)' card (testID duty-hours-card) with Save Duty Hours button — entered 9, saved, verified users.attendance_policy_override.standard_working_hours == 9.0 in Mongo; Bulk Employee Correction ACTUAL mode shows Duty Hours column with 9 for MAHAVEER SINGH (screenshot iter765_bec_actual.png); Actual Salary Process screen (salary-run.tsx) shows ONLY On-roll / Off-roll chips under 'Roll (required)' — no 'All' — and clicking Generate with nothing selected shows a block message, never processes (screenshot iter765_salary_block.png). (B) LOGIN: Email tab + PIN 246810 for mahaveer.test@example.com → redirected to /(tabs) employee portal; logged out; Username tab + Password mode + mahaveer.test / TestPass@765 → also redirected. (C) ACCIDENT-EL MERGE: accident created for MAHAVEER SINGH on 2026-06-10 with leave_from/leave_to 2026-06-11..2026-06-13 → esic_leaves auto-created (approved, days=3, source=accident_register, linked_leave_id=lv_...); manual-attendance/monthly grid for Kankani 2026-06 shows cells 06-11/06-12/06-13 = {st:'EL', src:'esic'} and totals.EL = 3 for MAHAVEER — confirming EL wins over punches and appears in summary. MANDATORY CLEANUP EXECUTED: unset login_id/pin_hash/has_pin/password_hash/email/attendance_policy_override on user_83f0e0c387bb, deleted 2 user_sessions, restored Kankani firm salary_process (offline_salary=false, bio_matrix_attendance=false, dummy_shift_report=false, attendance_source=null), deleted accident acc_11e8296c9a + esic_leaves esl_bb2c5b3ba813 + leaves lv_650f104b8c63; no attendance rows created today. Final Mongo state verified clean.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/tmp/iter765_after_email_pin.png (Email+PIN redirect success)",
+    "/tmp/iter765_after_username_pass.png (Username+Password redirect success)",
+    "/tmp/iter765_dh_after_save.png (Duty Hours saved)",
+    "/tmp/iter765_bec_actual.png (Bulk-Correction ACTUAL mode with Duty Hours=9 for MAHAVEER)",
+    "/tmp/iter765_salary_block.png (Salary Run — On-roll/Off-roll only, block msg on generate)",
+    "/app/test_reports/helpers/iter765_setup.py"
+  ],
+  "frontend_tests_run": {
+    "pin_login_tabs_and_modes": "PASSED — all 3 tabs (pin-ident-phone/email/login_id) render; PIN & Password toggle (pin-mode-pin/pin-mode-password) visible for EVERY tab; placeholders update per tab.",
+    "e2e_email_pin_login": "PASSED — email 'mahaveer.test@example.com' + PIN '246810' via /pin-login → session saved, redirected to /(tabs) employee portal (screenshot shows 'Good Afternoon' header + bottom tab bar).",
+    "e2e_username_password_login": "PASSED — after logout, login_id 'mahaveer.test' + password 'TestPass@765' via Username tab + Password mode → also redirected to /(tabs).",
+    "employee_master_duty_hours_card": "PASSED — /employee-master?company_id=cmp_527fecdd7c&user_id=user_83f0e0c387bb renders duty-hours-card only after offline_salary is enabled on Kankani; typed 9, clicked duty-hours-save → users.attendance_policy_override.standard_working_hours == 9.0 in Mongo.",
+    "bulk_employee_correction_actual_mode": "PASSED — /bulk-employee-correction ACTUAL mode shows a 'DUTY HOURS' column; MAHAVEER SINGH row (code 123 TAKLER) displays 9 in that column (matches the just-saved value).",
+    "salary_run_roll_chips": "PASSED — Actual Salary Process screen shows exactly two Roll chips ('On-roll' and 'Off-roll') under 'ROLL (REQUIRED)' — no 'All' chip; Group=Staff auto-selected. Clicking Salary Process without full selection displays a block message ('Pick one firm — the salary process runs for its employees only.') and does not proceed to processing.",
+    "accident_leave_dates_esic_sync": "PASSED — POST /api/admin/accidents with leave_from/leave_to succeeded (accident_no=ACC-2026-001); backend auto-created esic_leaves entry (approved, days=3, source=accident_register, linked_leave_id=lv_650f104b8c63).",
+    "attendance_grid_el_days": "PASSED (via API + code inspection) — GET /api/admin/manual-attendance/monthly?company_id=cmp_527fecdd7c&month=2026-06 returned MAHAVEER row with cells['2026-06-11'|-12|-13'] = {'st':'EL','src':'esic','pending':None} and totals.EL = 3. Matches manual_attendance.py _grid EL-wins-over-punches logic (L122-140).",
+    "mandatory_cleanup": "PASSED — user_83f0e0c387bb ends with only name + _id (no login_id/email/pin_hash/password_hash/has_pin/attendance_policy_override); 2 user_sessions deleted; accident + linked ESIC + linked leaf all deleted; Kankani salary_process = {offline_salary:false, bio_matrix_attendance:false, dummy_shift_report:false, attendance_source:null, plus untouched existing keys}; no attendance rows for user_83f0e0c387bb on today's date."
+  },
+  "action_items": [
+    "NONE — all 3 features (Duty Hours, Accident→ESIC EL merge, multi-identifier PIN/Password login) behave as specified in the review request. No product defects surfaced."
+  ],
+  "critical_code_review_comments": [
+    "pin-login.tsx L23-30 / L179-246 — IDENT_TABS array cleanly declares 3 tabs (phone/email/login_id) with matching testIDs pin-ident-<key>. The 'usernameMode = true' flag (L56) makes the PIN|Password segment show for ALL tabs — this matches the review request. On submit, the email/phone branch hits /auth/pin-login with body[identType]=v, and the password branch always hits /auth/employee-password-login with {login_id: v, password: p} — note: even when the user selected the Email or Mobile tab + Password mode, the frontend still sends the identifier under the 'login_id' key. Backend was already curl-verified to accept email/phone under this endpoint too, so no bug; just an implementation detail worth noting.",
+    "salary-run.tsx L890-903 — Roll chips reduced to ['on','off'] only, and the 'All' option was removed. Block message at L405-410 fires when rollFilter==='all' (the initial state), so any un-selected generate call is safely blocked before hitting the backend.",
+    "employee-master.tsx L280-290 — Duty Hours card visibility is gated on the firm's salary_process.offline_salary OR salary_process.attendance_source==='manual_editable' (Actual Salary mode). Card correctly hidden when offline_salary is false — matches the spec.",
+    "accident_register.py _sync_esic_leave — creates approved esic_leaves entry with source='accident_register' and linked_leave_id; days computed as inclusive range → 3 for 11..13. manual_attendance.py _grid L122-140 makes EL WIN over punches. Both work end-to-end."
+  ],
+  "updated_files": [
+    "/app/test_reports/helpers/iter765_setup.py (new — setup + mandatory cleanup helper)"
+  ],
+  "success_rate": {"backend": "n/a (frontend-only run; incidental backend API calls all returned 200)", "frontend": "100% (8/8 checks)"},
+  "seed_data_creation": "Created test creds for user_83f0e0c387bb (login_id=mahaveer.test, pin=246810, password=TestPass@765, email=mahaveer.test@example.com) + enabled Kankani salary_process.offline_salary=true. Created accident acc_11e8296c9a (2026-06-10, leave 06-11..06-13) which auto-created esic_leaves esl_bb2c5b3ba813 and leaves lv_650f104b8c63. ALL SEED DATA REMOVED IN CLEANUP.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "TestIDs verified on /pin-login: pin-ident-phone, pin-ident-email, pin-ident-login_id, pin-mode-pin, pin-mode-password, pin-phone-input (used for BOTH phone/email/username inputs), pin-pin-input (used for both PIN and password). On Employee Master: duty-hours-card + duty-hours-save (input is the only <input> inside the card, no explicit testID). On Bulk Employee Correction: bc-mode-actual + bc-mode-compliance; the 'Duty Hours' column header text is CSS-uppercased so JS text-startsWith checks miss it — take a screenshot instead. On Salary Run (salary-run.tsx): asp-generate (button) + roll chips have no testIDs; verify by screenshot that only 'On-roll' and 'Off-roll' are present. Session helper: /app/test_reports/helpers/login_super_admin.py (super admin via password + 2FA mongo swap). Combined setup+cleanup: /app/test_reports/helpers/iter765_setup.py (setup|cleanup).",
+  "rca_of_issue": "N/A — no defects found. All three iter-765 features (Duty Hours per employee, Accident→ESIC-EL grid merge, multi-identifier PIN/Password login) implemented correctly and verified end-to-end in the UI + Mongo."
+}

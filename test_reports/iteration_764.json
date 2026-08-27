@@ -1,0 +1,42 @@
+{
+  "summary": "Iter 764 — FRONTEND regression PASS for the new SALARY DAYS SOURCE radio selector (single storage: firm_masters.salary_process.attendance_source) exposed on BOTH Firm Master → Payroll Settings and Attendance Policy → 'Salary Days Source — 3 Policies' card. All requested flows verified end-to-end on Kankani Enterprises (cmp_527fecdd7c) with the super admin session. Kankani ends the run with attendance_source = null (cleanup mandatory — done).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/tmp/step_fm_loaded.png",
+    "/tmp/fm_payroll_settings.png",
+    "/tmp/fm_radios_notset.png",
+    "/tmp/fm_policy3_selected.png",
+    "/tmp/fm_after_save.png",
+    "/tmp/ap_policy3_synced.png",
+    "/tmp/ap_policy1_selfsave.png",
+    "/tmp/fm_reverse_sync.png",
+    "/tmp/fm_cleanup_notset.png"
+  ],
+  "frontend_tests_run": {
+    "step_1_firm_master_renders_radios": "PASSED — /firm-master?company_id=cmp_527fecdd7c → Payroll Settings section renders all 4 radios: fm-att-source-{none|biometric|imported_sheet|manual_editable}. At load 'Not Set' was the currently selected radio (blue-filled), matching baseline DB attendance_source=null. Header text 'Salary Days Source — ek waqt me sirf EK policy active (Compliance Salary)' present.",
+    "step_2_firm_master_select_policy_3_and_save": "PASSED — Clicking fm-att-source-manual_editable selected Policy 3 (radio switches to filled), and the amber warning hint 'Policy 3: Salary days Monthly Attendance Editable se aayenge (P/WO/H/CL/CO = 1 din, HD = 0.5, A/L = 0). Salary me OT = 0; OT hours biometric reports me alag milte rahenge.' appeared directly below. Clicking the 'Save' button (testID firm-master-save) flipped the header banner from 'Unsaved changes' to 'All changes saved'. GET /api/admin/firm-master/cmp_527fecdd7c returned salary_process.attendance_source == 'manual_editable' — DB persisted.",
+    "step_3_attendance_policy_sync_and_self_save": "PASSED — Opening /attendance-policy?company_id=cmp_527fecdd7c showed the 'SALARY DAYS SOURCE — 3 POLICIES (ONLY ONE ACTIVE)' card with Policy 3 (ap-att-source-manual_editable) preselected (bg #EEF2FF, blue radio dot), proving Firm-Master → Attendance-Policy sync. Tapping ap-att-source-biometric self-saved via PATCH; the confirmation text 'Saved ✓ (Firm Master synced)' rendered below the card. Post-tap GET returned salary_process.attendance_source == 'biometric'.",
+    "step_4_reverse_sync_firm_master": "PASSED — Re-opened Firm Master → Payroll Settings; Policy 1 — Biometric Attendance radio was now the selected option (screenshot fm_reverse_sync.png shows the blue filled dot next to 'Policy 1 — Biometric Attendance (8 hrs duty + OT)'). Confirms attendance-policy → firm-master reverse sync via shared single storage.",
+    "step_5_cleanup_back_to_not_set": "PASSED — Clicked fm-att-source-none, then firm-master-save. 'All changes saved' shown; final GET returned salary_process.attendance_source = null (matches baseline). MongoDB direct check also shows {'salary_process': {'attendance_source': None}}. Kankani ends the run exactly as it started."
+  },
+  "action_items": [],
+  "critical_code_review_comments": [
+    "firm-master.tsx (L1329-1362) — clean UI: radio group binds directly to sp.attendance_source; PATCH body sends attendance_source: null when 'Not Set' is chosen (o.k === ''), which the backend correctly interprets as unset.",
+    "attendance-policy.tsx SalaryDaysSourceCard (L2442-2515) — self-saving card is nicely encapsulated: reads via GET /admin/firm-master/{id}, writes via PATCH with body { salary_process: { attendance_source: k || null } }. Rollback on error (setSrc(prev)) is a solid touch.",
+    "Both screens share the SAME storage path (firm_masters.salary_process.attendance_source), so there is zero risk of two-way divergence. Sync verified in both directions.",
+    "Minor UX polish (optional): the Attendance Policy 'Saved ✓ (Firm Master synced)' message stays visible until the user picks another option. Consider auto-fading after ~3s so the card doesn't retain a stale confirmation. Not a defect."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only run)", "frontend": "100% (5/5 steps)"},
+  "seed_data_creation": "None — logged in via /api/auth/admin-password-login + 2FA (mongo otp-hash swap helper). Session token deleted from user_sessions at end.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Kankani Enterprises (cmp_527fecdd7c) firm_masters.salary_process.attendance_source restored to null. Radio testIDs on Firm Master: fm-att-source-{none|biometric|imported_sheet|manual_editable}; save button testID: firm-master-save (present, works). Radio testIDs on Attendance Policy self-saving card: ap-att-source-{none|biometric|imported_sheet|manual_editable}. When verifying radio 'selected' state programmatically, do NOT rely on the string 'radio-button-on' in inner_html — Ionicons render as an SVG path and the icon-name attribute is not preserved on web; instead inspect the Pressable's computed backgroundColor (#EEF2FF on Attendance Policy) or the label text color (#1E3A8A + fontWeight 700) or just take a screenshot. Session helper at /app/test_reports/helpers/login_super_admin.py works reliably. Frontend was reached via desktop viewport (1366x900) because Firm Master is a desktop-heavy screen and the sidebar navigation is essential.",
+  "rca_of_issue": "N/A — no bugs found. Feature works as specified in the review request."
+}

@@ -20,10 +20,12 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
  * Supports Mobile / Username identifiers + 6-digit PIN or employer-set
  * password. Auth logic is unchanged — visual redesign only.
  */
-type IdentType = "phone" | "login_id";
+type IdentType = "phone" | "email" | "login_id";
 
-const IDENT_TABS: { key: IdentType; label: string; icon: keyof typeof Ionicons.glyphMap; placeholder: string; keyboardType: "phone-pad" | "number-pad" | "default" }[] = [
+const IDENT_TABS: { key: IdentType; label: string; icon: keyof typeof Ionicons.glyphMap; placeholder: string; keyboardType: "phone-pad" | "number-pad" | "default" | "email-address" }[] = [
   { key: "phone", label: "Mobile", icon: "call-outline", placeholder: "+91 98765 43210", keyboardType: "phone-pad" },
+  // Iter 765 (user request) — Email + PIN / Password login.
+  { key: "email", label: "Email", icon: "mail-outline", placeholder: "you@example.com", keyboardType: "email-address" },
   { key: "login_id", label: "Username", icon: "person-circle-outline", placeholder: "Username from employer", keyboardType: "default" },
 ];
 
@@ -47,8 +49,11 @@ export default function PinLoginScreen() {
   const [error, setError] = useState<string | null>(null);
   const [showPin, setShowPin] = useState(false);
   // Iter 96l — username logins can use a PIN or an employer-set password.
+  // Iter 765 (user request) — the PIN/Password switch now shows for EVERY
+  // identifier type (Mobile / Email / Username); the password endpoint
+  // resolves email & phone identifiers too.
   const [secretMode, setSecretMode] = useState<"pin" | "password">("pin");
-  const usernameMode = identType === "login_id";
+  const usernameMode = true;
 
   if (loading) {
     return (
@@ -72,6 +77,10 @@ export default function PinLoginScreen() {
     }
     if (identType === "phone" && v.replace(/\D/g, "").length < 8) {
       setError("Enter a valid mobile number");
+      return;
+    }
+    if (identType === "email" && !/^\S+@\S+\.\S+$/.test(v)) {
+      setError("Enter a valid email address");
       return;
     }
 

@@ -83,6 +83,8 @@ type EmpDetail = {
   shift_preset_name?: string | null;
   dummy_shift?: string | null;
   dummy_shift_allowed?: boolean;
+  duty_hours_actual?: number | null;
+  firm_offline_on?: boolean;
   // Iter 711 — the firm's OWN dummy shift definitions (Attendance Policy).
   dummy_shifts_master?: { name: string; start: string; end: string }[];
   ot_applicable?: boolean | null;
@@ -197,6 +199,10 @@ export default function EmployeeMasterScreen() {
             // the company default) so the tri-state toggles render right.
             shift_preset_name: full.shift_preset_name ?? null,
             dummy_shift: full.dummy_shift ?? null,
+            // Iter 765 (user request) — per-employee Duty Hours (Actual
+            // Salary), stored in the attendance-policy override.
+            duty_hours_actual:
+              full.attendance_policy_override?.standard_working_hours ?? null,
             ot_applicable:
               full.ot_applicable === undefined ? null : full.ot_applicable,
             week_off_full_day:
@@ -275,6 +281,9 @@ export default function EmployeeMasterScreen() {
           // Iter 763 — Firm Master "Dummy Shift Report" toggle also
           // unlocks the Dummy Shift dropdown in the Employee Master.
           if (fm?.master?.salary_process?.dummy_shift_report) e.dummy_shift_allowed = true;
+          // Iter 765 (user request) — Duty Hours card only for firms with
+          // Actual/Offline Salary enabled in the Firm Master.
+          e.firm_offline_on = !!fm?.master?.salary_process?.offline_salary;
         } catch {
           setFirmOtAllowed(true);
         }
@@ -868,6 +877,13 @@ export default function EmployeeMasterScreen() {
             {/* Iter 215 — report-only Dummy Shift (Attendance Policy gate) */}
             {emp.dummy_shift_allowed ? (
               <DummyShiftCard emp={emp} onSaved={load} />
+            ) : null}
+
+            {/* Iter 765 (user request) — per-employee Duty Hours for the
+                Actual Salary; only when Firm Master has Actual/Offline
+                Salary enabled. */}
+            {emp.firm_offline_on ? (
+              <DutyHoursCard emp={emp} onSaved={load} />
             ) : null}
 
             {/* Textile industry flags — only shown for textile companies */}
@@ -1934,6 +1950,82 @@ function DummyShiftCard({
           <ActivityIndicator color="#fff" />
         ) : (
           <Text style={styles.primaryBtnTxt}>Save Dummy Shift</Text>
+        )}
+      </Pressable>
+    </View>
+  );
+}
+
+// Iter 765 (user request) — per-employee DUTY HOURS for the ACTUAL Salary.
+// Saved to attendance_policy_override.standard_working_hours (the exact
+// field the Actual Salary Process resolves before shift/firm/8-hr default).
+function DutyHoursCard({
+  emp,
+  onSaved,
+}: {
+  emp: EmpDetail;
+  onSaved: () => Promise<void> | void;
+}) {
+  const [val, setVal] = useState<string>(
+    emp.duty_hours_actual != null ? String(emp.duty_hours_actual) : "",
+  );
+  const [saving, setSaving] = useState(false);
+  const doSave = async () => {
+    const n = Number(val);
+    if (val.trim() !== "" && (!Number.isFinite(n) || n <= 0 || n > 24)) {
+      const m = "Duty Hours must be between 0 and 24 (blank = default).";
+      if (Platform.OS === "web") globalThis.alert(m);
+      else Alert.alert("Duty Hours", m);
+      return;
+    }
+    setSaving(true);
+    try {
+      await api(`/admin/employees/bulk-correction`, {
+        method: "POST",
+        body: {
+          company_id: emp.company_id,
+          corrections: [{ user_id: emp.user_id, duty_hours: val.trim() === "" ? 0 : n }],
+        },
+      });
+      await onSaved();
+      const m = "Duty Hours saved ✓ (Actual Salary isi se calculate hogi)";
+      if (Platform.OS === "web") globalThis.alert(m);
+      else Alert.alert("Saved", m);
+    } catch (e: any) {
+      const msg = e?.message || "Save failed";
+      if (Platform.OS === "web") globalThis.alert(msg);
+      else Alert.alert("Save", msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <View style={styles.card} testID="duty-hours-card">
+      <Text style={styles.cardTitle}>Duty Hours (Actual Salary)</Text>
+      <Text style={styles.cardHint}>
+        Actual/Offline Salary isi Duty Hours se calculate hogi. Blank chhodne
+        par assigned shift ki length, warna firm policy (default 8 hrs) lagti
+        hai.
+      </Text>
+      <TextInput
+        testID="duty-hours-input"
+        value={val}
+        onChangeText={(t) => setVal(t.replace(/[^0-9.]/g, ""))}
+        keyboardType="decimal-pad"
+        placeholder="e.g. 8 / 9 / 12 (blank = default)"
+        placeholderTextColor="#94A3B8"
+        style={[styles.input, { marginTop: 8 }]}
+      />
+      <Pressable
+        testID="duty-hours-save"
+        onPress={doSave}
+        style={[styles.primaryBtn, saving && styles.btnDisabled]}
+        disabled={saving}
+      >
+        {saving ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.primaryBtnTxt}>Save Duty Hours</Text>
         )}
       </Pressable>
     </View>

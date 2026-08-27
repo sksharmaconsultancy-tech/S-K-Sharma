@@ -9621,3 +9621,37 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   (test_iter763_refresh_master_and_dummy_shift.py). All test mutations
   restored (Kankani flags false, MAHAVEER 1500).
 - APP_ITERATION=763; deploy_vps_iter763.sh (762 folded).
+
+## Iter 765 — Duty Hours (Actual) + Accident-ESIC EL merge + Multi-ID Login
+- DUTY HOURS (user): Employee Master "Duty Hours (Actual Salary)" card
+  (duty-hours-card/-input/-save, employee-master.tsx) gated on firm
+  salary_process.offline_salary; saves via /admin/employees/bulk-correction
+  duty_hours -> attendance_policy_override.standard_working_hours (0/blank
+  clears; Actual Salary duty-hrs resolution already reads this field).
+  Bulk Employee Correction ACTUAL mode: new "Duty Hours" number column
+  (iter60_features.py model+fields+handler; bulk-employee-correction.tsx
+  actualBase + ACTUAL_DERIVED_KEYS + width). MANDATORY selection (user
+  rule): actual_salary_process.py 400s when employee_type or is_onroll
+  missing; salary-run.tsx Roll chips now only On/Off (All removed) +
+  process guard.
+- ACCIDENT + ESIC LEAVE MERGE (user, Q1a/Q2a/Q3a/Q4a): accident_register
+  _FIELDS + leave_from/leave_to; _sync_esic_leave() auto-creates/updates/
+  deletes APPROVED esic_leaves entry (source accident_register,
+  accident_id, linked_leave_id -> db.leaves leave_type esic) on create/
+  patch. esic_leave.py new esic_leave_dates_map(). manual_attendance.py:
+  CODES += "EL"; _grid marks EL (src esic) with TOP priority (over manual
+  + punch); totals/summary include EL. EL = 0 paid days everywhere
+  (Policy 3 mapping counts only P/WO/H/CL/CO/HD). attendance-report.tsx:
+  EL red #BE123C, legend, summary chip, typing code. accident-register
+  form: ar-leave-from/ar-leave-to fields.
+- EMPLOYEE LOGIN (user, via integration_expert playbook): pin-login now
+  Email OR Mobile + PIN (PinLoginRequest.email, case-insensitive regex,
+  employee-preferred), employee-password-login accepts Email / Mobile /
+  User ID in the same login_id field ($or resolution, _normalise_phone,
+  shared lockout). pin-login.tsx: 3 tabs (Mobile/Email/Username), PIN <->
+  Password switch on EVERY tab, email validation. Credentials card hint
+  updated. Creds still set from Employee Master (/admin/employee-credentials).
+- Testing agent frontend pass: all 3 features green, full cleanup on
+  Kankani real data verified (firm flags null, creds/accident/EL removed).
+- APP_ITERATION=765; deploy_vps_iter765.sh (764 folded), temp_bundle
+  serves kind=script -> deploy765.sh.

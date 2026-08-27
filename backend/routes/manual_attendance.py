@@ -26,7 +26,7 @@ from server import db, get_user_from_token, require_role, now_iso  # noqa: E402
 router = APIRouter(prefix="/api/admin/manual-attendance",
                    tags=["manual-attendance"])
 
-CODES = ("P", "A", "L", "CL", "WO", "CO", "HD", "H")
+CODES = ("P", "A", "L", "CL", "WO", "CO", "HD", "H", "EL")
 _DEF = {"enabled": True, "approval_required": False, "require_reason": False,
         "maker_checker": True,
         # Iter 689 — Phase 2 approval matrix
@@ -118,16 +118,27 @@ async def _grid(cid: str, month: str) -> dict:
                db.attendance_change_requests.find(
                    {"company_id": cid, "status": "PENDING",
                     "date": {"$gte": days[0], "$lte": days[-1]}}, {"_id": 0})}
+    # Iter 765 (user request) — ESIC Leave / Accident merge: approved ESIC
+    # leave days (incl. accident-linked) auto-mark as "EL" and WIN over
+    # punches and manual marks (user rule Q4a: EL jeete).
+    from routes.esic_leave import esic_leave_dates_map as _el_map_fn
+    try:
+        el_days: Dict[str, set] = await _el_map_fn(cid, month)
+    except Exception:
+        el_days = {}
     today = date.today().isoformat()
     rows = []
     for u in emps:
         _ov = u.get("weekly_off_days_override")
         wo_days = ({int(x) for x in _ov} if isinstance(_ov, list) and _ov
                    else firm_wo)
+        _uel = el_days.get(u["user_id"]) or ()
         cells, tot = {}, {c: 0 for c in CODES}
         for d in days:
             mk = manual.get((u["user_id"], d))
-            if mk:
+            if d in _uel:
+                st, src = "EL", "esic"
+            elif mk:
                 st, src = mk["status"], "manual"
             elif punched.get((u["user_id"], d)):
                 st, src = "P", "punch"

@@ -183,6 +183,10 @@ class BulkEmployeeCorrection(BaseModel):
     father_name: Optional[str] = None
     actual_basic: Optional[float] = None
     pay_basis: Optional[str] = None          # "daily" | "monthly"
+    # Iter 765 (user request) — per-employee Duty Hours for the ACTUAL
+    # Salary (saved as attendance_policy_override.standard_working_hours,
+    # the same field the Actual Salary duty-hrs resolution reads).
+    duty_hours: Optional[float] = None
     # Iter 342 (user request) — bulk shift Off-Roll → On-Roll (Actual mode).
     is_onroll: Optional[bool] = None
     shift_id: Optional[str] = None           # Shift Master id; "" clears
@@ -805,6 +809,9 @@ def register_iter60_features(
                     {"key": "designation", "label": "Designation", "type": "master:designation"},
                     {"key": "actual_basic", "label": "Actual Salary Basic", "type": "number"},
                     {"key": "pay_basis", "label": "Pay Basis", "type": "select:paybasis"},
+                    # Iter 765 (user request) — per-employee Duty Hours
+                    # drives the Actual Salary calculation (default 8).
+                    {"key": "duty_hours", "label": "Duty Hours", "type": "number"},
                     # Iter 342 (user request) — bulk shift Off-Roll → On-Roll.
                     {"key": "is_onroll", "label": "On/Off-Roll", "type": "select:onroll"},
                     {"key": "shift_id", "label": "Shift", "type": "select:shift"},
@@ -925,6 +932,16 @@ def register_iter60_features(
                     continue
                 if k in ACTUAL_KEYS:
                     actual_changes[k] = v
+                    continue
+                if k == "duty_hours":
+                    # Iter 765 (user request) — Duty Hours → the employee's
+                    # attendance-policy override (Actual Salary duty hrs).
+                    try:
+                        _dh = float(v)
+                    except (TypeError, ValueError):
+                        continue
+                    updates["attendance_policy_override.standard_working_hours"] = (
+                        _dh if _dh > 0 else None)
                     continue
                 if k == "shift_id":
                     shift_change_to = v  # "" clears the shift override
