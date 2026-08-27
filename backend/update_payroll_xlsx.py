@@ -9,7 +9,7 @@ import re
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill
 
-SRC = "/tmp/Payroll.xlsx"
+SRC = "/tmp/Payroll_new.xlsx"
 OUT = "/app/Payroll_Module_Status.xlsx"
 
 GREEN = PatternFill("solid", fgColor="C6EFCE")
@@ -48,9 +48,9 @@ M = {
     "tracking performance metrics": N + "performance management abhi nahi",
     "payroll expenditure to revenue ratio": P + "Labour Cost Dashboard hai; revenue input pending",
     "absenteeism rate": A + "Present/Absent reports + analytics",
-    "employees attrition rate": P + "Joined/Left data hai; attrition % card pending",
+    "employees attrition rate": A + "HR Analytics — Attrition % KPI (Iter 747)",
     "total overtime cost vs monthly salary overheads": A + "Labour Cost Dashboard + OT reports",
-    "salary virance from previous month": P + "run compare hai; variance report pending",
+    "salary virance from previous month": A + "HR Analytics — Salary Variance KPI (prev vs current)",
     "recruitment cost & budget": N + "recruitment module abhi nahi",
     "total manpower-cetegory wise": A + "Analytics + Master Data report",
     "new joined": A + "Analytics/joining reports",
@@ -84,10 +84,10 @@ M = {
     "alternate weekoff assign policy": A + "Alternate/Occurrence weekoff policy",
     "c-off policy configuration policy": A + "Comp-Off Ledger + policy",
     "priviledge/rights assign": A + "Roles & Permissions + Access Management",
-    "reporting manager & working flow process": P + "RM field + Approval Inbox hai; manager-chain pending",
-    "deptt hierarchy process & approval": P + "Dept master + approvals hai; hierarchy chart pending",
+    "reporting manager & working flow process": A + "Org Hierarchy — Reporting Structure + chain-based approvals",
+    "deptt hierarchy process & approval": A + "Org Hierarchy — Department hierarchy + workflow approvals",
     "incremnetal/promotion type effective date": A + "Salary revision effective-date + Arrear run",
-    "org. structure": N + "org chart abhi nahi",
+    "org. structure": A + "Org Structure module (departments + reporting chain)",
     "employees dashboard, matrix & static analysis": A + "Analytics + dashboards",
     # ── Attendance & Policy ──
     "biometric in-out attendnace configuration": A + "Biometric devices + ZK import + Secure Punch",
@@ -105,10 +105,10 @@ M = {
     "various attendnace format /reports": A + "Report Formats + registers",
     # ── Overtime & Policy ──
     "over time count, hrs shift start & end calculation": A + "IN-OUT OT Matrix",
-    "minimum ot count 00:30 minutes": P + "OT rounding policy hai; 30-min minimum rule confirm/add",
+    "minimum ot count 00:30 minutes": A + "OT Policy — 30-min minimum rule",
     "miss punch regularization with ot hrs calcuation": A + "repair ke baad OT recalc",
     "overtime hrs calculation & policy": A + "OT Salary Run + policy",
-    "overtime approval process": P + "punch approvals hai; dedicated OT-hrs approval pending",
+    "overtime approval process": A + "OT approval workflow (Approval Inbox)",
     "various ot reports & hrs report": A + "OT Report + Matrix",
     "customized ot report": A + "Report Formats",
     # ── Salary Process & Policy ──
@@ -135,7 +135,7 @@ M = {
 # long OT policy row (text truncated differently in sheets) — match by prefix
 PREFIX_M = [
     ("over time policy (upto 48 hrs restrict",
-     P + "OT calc full hai; 48-hr weekly cap rule pending"),
+     A + "OT Policy — 48-hr cap + overflow rule"),
 ]
 
 wb = openpyxl.load_workbook(SRC)
