@@ -997,3 +997,7 @@ ITER 487 (doc-expiry alerts):
 - Backend E2E 14/14 PASS (test_iter748_leave_chain.py): chain save,
   request-time resolve, missing-role skip note, manager-only rights,
   L1→L2 sequential, leave auto-finalize. Cleanup done.
+
+## Iter 749 — Manager bell alerts (tested)
+- 16/16 PASS: bell to personal approver on submit/advance; leave chain
+  regression intact. Cleanup done.

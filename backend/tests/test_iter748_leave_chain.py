@@ -108,11 +108,19 @@ check("2 levels resolved", len(req["levels"]) == 2
       and req["levels"][1].get("user_id") == hrm["user_id"],
       f"L2={req['levels'][1].get('role_name') if len(req['levels']) > 1 else None}")
 rid = req["request_id"]
+# Iter 749 — bell alert to L1 manager the moment request lands
+n1 = db.notifications.find_one({"reference_id": rid, "audience": "user",
+                                "target_user_id": mgr["user_id"]})
+check("bell to L1 manager", bool(n1), str((n1 or {}).get("title")))
 r = requests.post(f"{B}/admin/approval-requests/{rid}/action", headers=H,
                   json={"action": "approve", "remarks": "ok L1", "company_id": CID})
 check("L1 approve", r.status_code == 200, r.text[:120])
 cur = db.approval_requests.find_one({"request_id": rid})
 check("moved to L2", cur["status"] == "pending" and cur["current_level"] == 2)
+# Iter 749 — bell alert to L2 HR after advance
+n2 = db.notifications.find_one({"reference_id": rid, "audience": "user",
+                                "target_user_id": hrm["user_id"]})
+check("bell to L2 HR on advance", bool(n2))
 r = requests.post(f"{B}/admin/approval-requests/{rid}/action", headers=H,
                   json={"action": "approve", "remarks": "ok L2", "company_id": CID})
 check("L2 approve", r.status_code == 200)
@@ -123,6 +131,8 @@ check("leave finalized approved", lv and lv["status"] == "approved",
       f"leave status={lv and lv.get('status')}")
 
 # CLEANUP
+db.notifications.delete_many({"reference_id": {"$regex": "^apr_"},
+                              "target_user_id": {"$in": [mgr["user_id"], hrm["user_id"]]}})
 db.approval_requests.delete_many({"record_id": lid})
 db.leaves.delete_one({"leave_id": lid})
 db.approval_workflows.delete_many({"company_id": CID, "module": "leave"})

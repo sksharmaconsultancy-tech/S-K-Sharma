@@ -271,7 +271,34 @@ async def create_approval_request(
     # Phase C — notify firm admins per workflow notification rules.
     await _wf_notify(company_id, module, "created", out,
                      f"Requested by {out.get('requested_by_name') or '—'}")
+    # Iter 749 — instant bell to the Level-1 personal approver (manager).
+    await _notify_level_approver(out, 1)
     return out
+
+
+async def _notify_level_approver(req: Dict[str, Any], level_no: int) -> None:
+    """Iter 749 (user request) — bell alert to the PERSONAL approver
+    (reporting-chain / direct-employee / delegate) the moment a request
+    lands on their level. Never raises."""
+    try:
+        lv = next((x for x in (req.get("levels") or [])
+                   if int(x.get("level") or 0) == int(level_no)), None)
+        uid = (lv or {}).get("delegated_to") or (lv or {}).get("user_id")
+        if not uid:
+            return
+        from utils.notify import emit as _emit
+        await _emit(db, title="🔔 Approval needed",
+                    message=(f"{req.get('title') or req.get('module')} — aapke "
+                             f"approval ka intezaar hai (Level {level_no}"
+                             + (f" · {lv.get('role_name')}" if lv.get("role_name") else "")
+                             + ")"),
+                    audience="user", target_user_id=uid,
+                    company_id=req.get("company_id"),
+                    category="leave" if req.get("module") == "leave" else "system",
+                    priority="important", action_url="/approval-inbox",
+                    reference_id=req.get("request_id"))
+    except Exception:
+        pass
 
 
 async def _finalize(module: str, record_id: str, approved: bool, actor: dict,
@@ -701,6 +728,8 @@ async def action_request(
                             + (f" — {remarks}" if remarks else ""),
                  "at": now_iso()}}})
         fresh = await db.approval_requests.find_one({"request_id": request_id}, {"_id": 0})
+        # Iter 749 — bell the delegate so they know it's now on their desk.
+        await _notify_level_approver(fresh, r["current_level"])
         return {"ok": True, "request": fresh}
 
     # Phase B — ESCALATE: jump to the next level immediately.
@@ -720,6 +749,9 @@ async def action_request(
             {"request_id": request_id}, {"$set": upd_e, "$push": {"history": hist_e}})
         await _wf_notify(r["company_id"], r["module"], "escalated", r,
                          remarks or "Escalated manually")
+        if upd_e.get("current_level"):
+            # Iter 749 — bell the escalated-to level's personal approver.
+            await _notify_level_approver(r, upd_e["current_level"])
         fresh = await db.approval_requests.find_one({"request_id": request_id}, {"_id": 0})
         return {"ok": True, "request": fresh}
 
@@ -755,6 +787,9 @@ async def action_request(
         # Phase C — notify the requester per workflow notification rules.
         await _wf_notify(r["company_id"], r["module"], updates["status"], r,
                          remarks or "")
+    elif updates.get("current_level"):
+        # Iter 749 — request advanced: bell the NEXT level's personal approver.
+        await _notify_level_approver(r, updates["current_level"])
 
     fresh = await db.approval_requests.find_one({"request_id": request_id}, {"_id": 0})
     return {"ok": True, "request": fresh}

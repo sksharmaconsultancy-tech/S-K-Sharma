@@ -1,8 +1,23 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 748)
+# S.K. Sharma & Co. — VPS deploy script (Iter 749)
 # Deploys the FULL latest code (includes ALL previous iterations).
 #
-# ══════ WHAT'S NEW (Iter 748) — 🔗 LEAVE APPROVAL VIA REPORTING CHAIN ══════
+# ══════ WHAT'S NEW (Iter 749) — 🔔 MANAGER INBOX BELL ALERTS ══════
+#
+# USER REQUEST: "Show managers a bell alert the moment a team member's
+# leave lands in their inbox."
+#
+#  * Jaise hi koi request (leave/expense/…) kisi PERSONAL approver ke
+#    level par pahunchti hai — Reporting-Chain manager, direct-assigned
+#    employee approver, ya delegate — usko turant 🔔 bell notification
+#    milti hai: "Approval needed … aapke approval ka intezaar hai
+#    (Level N · role)". Tap → seedha Approval Inbox.
+#  * Har move par alert: naya request (L1 manager), approve hoke agla
+#    level (L2 HR), manual escalate, aur delegate — sab par.
+#  * VERIFIED: 16/16 E2E — L1 manager bell on submit, L2 HR bell on
+#    advance, sequential approvals, leave auto-finalize.
+#
+# ══════ ALSO IN Iter 748 — 🔗 LEAVE APPROVAL VIA REPORTING CHAIN ══════
 #
 # USER REQUEST: "Leave requests flow through the same new Reporting
 # Manager chain automatically."

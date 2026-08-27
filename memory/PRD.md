@@ -9367,3 +9367,15 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
 - TESTED: tests/test_iter748_leave_chain.py 14/14 PASS (NOTE: approval
   action endpoint prefix is /api/admin/approval-requests/{id}/action).
 - APP_ITERATION=748; deploy_vps_iter748.sh (747 folded, deleted).
+
+## Iter 749 — Manager inbox bell alerts (user request)
+- approvals_engine.py: _notify_level_approver(req, level_no) — utils.notify
+  emit with audience="user" + target_user_id (personal approver =
+  level.delegated_to or level.user_id; admin/role levels skipped — un
+  levels ke liye firm-admin _wf_notify pehle se hai). Hooks: request
+  create (L1), approve-advance (next level), escalate (next level),
+  delegate (delegate user). action_url=/approval-inbox, priority
+  important. Never raises.
+- TESTED: test_iter748_leave_chain.py extended → 16/16 PASS (bell to L1
+  manager on submit + bell to L2 HR on advance; notifications cleanup).
+- APP_ITERATION=749; deploy_vps_iter749.sh (748 folded, deleted).
