@@ -120,6 +120,50 @@ export default function PastSalaryRunsScreen() {
     }
   };
 
+  // Iter 757 (user request — "Past Run ke andar hi do") — sheet version
+  // HISTORY per compliance run: every Save-as-Draft / Finalize /
+  // Reprocess keeps its own copy that can be viewed & restored here.
+  const [histFor, setHistFor] = useState<string | null>(null);
+  const [histLoading, setHistLoading] = useState(false);
+  const [histVersions, setHistVersions] = useState<any[]>([]);
+  const HIST_KIND: Record<string, string> = {
+    draft: "💾 Draft Save",
+    finalize: "🔒 Finalized",
+    pre_reprocess: "♻️ Before Reprocess",
+    pre_restore: "↩️ Before Restore",
+  };
+  const openHistory = async (r: RunSummary) => {
+    if (histFor === r.run_id) { setHistFor(null); return; }
+    setHistFor(r.run_id);
+    setHistLoading(true);
+    try {
+      const j = await api<{ versions: any[] }>(
+        `/admin/compliance-salary-runs/${r.run_id}/versions`);
+      setHistVersions(j.versions || []);
+    } catch (e: any) {
+      if (Platform.OS === "web") window.alert(e?.message || "Failed to load history");
+      setHistVersions([]);
+    }
+    setHistLoading(false);
+  };
+  const restoreVersion = async (r: RunSummary, v: any) => {
+    if (r.finalized) {
+      if (Platform.OS === "web") window.alert("Run is FINALIZED — unlock it first, then restore a version.");
+      return;
+    }
+    const q = `Restore this version on the ${r.month} sheet?\n\n${HIST_KIND[v.kind] || v.kind} · ${fmtDT(v.saved_at)}\nBy: ${v.saved_by_name || "—"} · Rows: ${v.rows_count} · Net ${fmtInr(v.net_total)}\n\nThe CURRENT sheet is saved to History first — nothing is lost.`;
+    if (Platform.OS === "web" && !window.confirm(q)) return;
+    try {
+      await api(`/admin/compliance-salary-runs/${r.run_id}/versions/${v.version_id}/restore`,
+        { method: "POST" });
+      if (Platform.OS === "web") window.alert(`Version restored ✓ (${fmtDT(v.saved_at)})`);
+      setHistFor(null);
+      await load();
+    } catch (e: any) {
+      if (Platform.OS === "web") window.alert(e?.message || "Restore failed");
+    }
+  };
+
   if (!isAdmin) {
     return (
       <View style={styles.root}>
@@ -178,8 +222,8 @@ export default function PastSalaryRunsScreen() {
         ) : (
           <View style={styles.card}>
             {runs.map((r) => (
+              <View key={r.run_id}>
               <Pressable
-                key={r.run_id}
                 testID={`psr-run-${r.run_id}`}
                 onPress={() =>
                   router.push(
@@ -222,6 +266,18 @@ export default function PastSalaryRunsScreen() {
                   ) : null}
                 </View>
                 <Ionicons name="chevron-forward" size={16} color={colors.onSurfaceTertiary} />
+                {/* Iter 757 (user request) — version History inside Past Runs */}
+                {tab === "compliance" ? (
+                  <Pressable
+                    onPress={(e: any) => { e?.stopPropagation?.(); void openHistory(r); }}
+                    hitSlop={10}
+                    style={{ marginLeft: 10, padding: 4 }}
+                    testID={`psr-hist-${r.run_id}`}
+                  >
+                    <Ionicons name="time-outline" size={18}
+                              color={histFor === r.run_id ? colors.brandPrimary : colors.onSurfaceSecondary} />
+                  </Pressable>
+                ) : null}
                 {/* User directive — delete salary data (super admin approves
                     requests raised by sub/company admins) */}
                 <Pressable
@@ -233,6 +289,43 @@ export default function PastSalaryRunsScreen() {
                   <Ionicons name="trash-outline" size={17} color="#B0002B" />
                 </Pressable>
               </Pressable>
+              {histFor === r.run_id ? (
+                <View style={styles.histBox}>
+                  <Text style={styles.histHead}>
+                    Sheet History — {r.month} (har Save / Finalize / Reprocess ka apna version;
+                    Restore se wahi data sheet par wapas — current sheet pehle save hoti hai)
+                  </Text>
+                  {histLoading ? (
+                    <ActivityIndicator style={{ marginVertical: 14 }} color={colors.brandPrimary} />
+                  ) : histVersions.length === 0 ? (
+                    <Text style={styles.dimTxt}>
+                      Abhi koi version saved nahi — Save as Draft / Finalize karne par versions yahan dikhenge.
+                    </Text>
+                  ) : (
+                    histVersions.map((v, i) => (
+                      <View key={v.version_id}
+                            style={[styles.histRow, i === 0 && { backgroundColor: "#F0FDF4" }]}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.histTitle}>
+                            {HIST_KIND[v.kind] || v.kind}{i === 0 ? " · latest" : ""}
+                          </Text>
+                          <Text style={styles.rowMeta}>
+                            {fmtDT(v.saved_at)} · by {v.saved_by_name || "—"} · {v.rows_count} rows · Net {fmtInr(v.net_total)}
+                          </Text>
+                        </View>
+                        <Pressable
+                          onPress={() => void restoreVersion(r, v)}
+                          testID={`psr-restore-${i}`}
+                          style={styles.restoreBtn}
+                        >
+                          <Text style={styles.restoreTxt}>Restore</Text>
+                        </Pressable>
+                      </View>
+                    ))
+                  )}
+                </View>
+              ) : null}
+              </View>
             ))}
           </View>
         )}
@@ -287,4 +380,24 @@ const styles = StyleSheet.create({
   rowMeta: { fontSize: 11, color: colors.onSurfaceTertiary, marginTop: 1 },
   center: { alignItems: "center", gap: 8, padding: 40 },
   dimTxt: { color: colors.onSurfaceTertiary, fontSize: 13 },
+  // Iter 757 — version history box under a compliance run row.
+  histBox: {
+    backgroundColor: "#F8FAFC",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.divider,
+    paddingHorizontal: 14, paddingVertical: 10,
+  },
+  histHead: { fontSize: 11, color: colors.onSurfaceTertiary, marginBottom: 6 },
+  histRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingVertical: 7, paddingHorizontal: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.divider,
+  },
+  histTitle: { fontSize: 12.5, fontWeight: "700", color: colors.onSurface },
+  restoreBtn: {
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
+    backgroundColor: "#EFF6FF", borderWidth: 1, borderColor: "#BFDBFE",
+  },
+  restoreTxt: { fontSize: 12, fontWeight: "700", color: "#1D4ED8" },
 });

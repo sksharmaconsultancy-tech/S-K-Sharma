@@ -9501,3 +9501,11 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   sheet 20), untouched row stayed sheet (22); restore returned 18; UI
   History modal renders with Restore buttons. Test data cleaned.
 - APP_ITERATION=757; deploy_vps_iter757.sh (756 folded, deleted).
+
+## Iter 757b — History moved to Past Salary Runs (user direction)
+- User: "naya button hatao, Past Run ke andar do". Removed History
+  ActionBtn + modal + state from compliance-salary-run.tsx entirely.
+- past-salary-runs.tsx: clock icon per COMPLIANCE run row
+  (testID psr-hist-{run_id}) toggles inline history box with versions
+  list + Restore buttons (testID psr-restore-{i}). Same backend
+  endpoints. UI verified via screenshot.

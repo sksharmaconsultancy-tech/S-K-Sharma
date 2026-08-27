@@ -1034,60 +1034,8 @@ export default function ComplianceSalaryRunScreen() {
 
   // Iter 230 (user request) — Reprocess: reload the LAST SAVED data of
   // this run from the server (discards unsaved local edits).
-  // Iter 757 (user request) — sheet version HISTORY: every Save-as-Draft /
-  // Finalize / Reprocess keeps its own copy that can be viewed & restored.
-  const [histOpen, setHistOpen] = useState(false);
-  const [histLoading, setHistLoading] = useState(false);
-  const [histVersions, setHistVersions] = useState<any[]>([]);
-  const fmtHistDt = (s: string) => {
-    try {
-      return new Date(s).toLocaleString("en-IN", {
-        day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
-      });
-    } catch { return s; }
-  };
-  const HIST_KIND: Record<string, string> = {
-    draft: "💾 Draft Save",
-    finalize: "🔒 Finalized",
-    pre_reprocess: "♻️ Before Reprocess",
-    pre_restore: "↩️ Before Restore",
-  };
-  const openHistory = async () => {
-    if (!run) return;
-    setHistOpen(true);
-    setHistLoading(true);
-    try {
-      const j = await api<{ versions: any[] }>(
-        `/admin/compliance-salary-runs/${run.run_id}/versions`);
-      setHistVersions(j.versions || []);
-    } catch (e: any) {
-      showMsg(e?.message || "Failed to load history");
-    }
-    setHistLoading(false);
-  };
-  const restoreVersion = async (v: any) => {
-    if (!run) return;
-    if ((run as any).finalized) {
-      showMsg("Run is FINALIZED — unlock it first, then restore a version.");
-      return;
-    }
-    const ok = await confirmYesNo(
-      `Restore this version on the sheet?\n\n${HIST_KIND[v.kind] || v.kind} · ${fmtHistDt(v.saved_at)}\nBy: ${v.saved_by_name || "—"} · Rows: ${v.rows_count} · Net ₹${Number(v.net_total || 0).toLocaleString("en-IN")}\n\nThe CURRENT sheet is saved to History first — nothing is lost.`,
-    );
-    if (!ok) return;
-    try {
-      await api(`/admin/compliance-salary-runs/${run.run_id}/versions/${v.version_id}/restore`,
-        { method: "POST" });
-      const j = await api<{ run: CompRun }>(`/admin/compliance-salary-runs/${run.run_id}`);
-      hydratedRunsRef.current[run.run_id] = true;
-      setRun(j.run);
-      setUnsavedEdits(false);
-      setHistOpen(false);
-      showMsg(`Version restored ✓ (${fmtHistDt(v.saved_at)})`);
-    } catch (e: any) {
-      showMsg(e?.message || "Restore failed");
-    }
-  };
+  // Iter 757 (user request) — sheet version HISTORY lives on the Past
+  // Salary Runs screen (per user direction: no extra button here).
 
   const reprocessRun = async () => {    if (!run) return;
     const ok = await confirmYesNo(
@@ -2935,69 +2883,10 @@ export default function ComplianceSalaryRunScreen() {
             </View>
           </Modal>
 
-          {/* Iter 757 (user request) — sheet version HISTORY modal. */}
-          <Modal visible={histOpen} transparent animationType="fade"
-                 onRequestClose={() => setHistOpen(false)}>
-            <View style={styles.modalRoot}>
-              <View style={[styles.modalCard, { maxWidth: 640 }]}>
-                <View style={styles.modalHead}>
-                  <Text style={styles.cardTitle}>Sheet History — {(run as any)?.month || ""}</Text>
-                  <Pressable onPress={() => setHistOpen(false)} hitSlop={8}>
-                    <Ionicons name="close" size={22} color={colors.onSurface} />
-                  </Pressable>
-                </View>
-                <Text style={styles.smallHint}>
-                  Har Save / Finalize / Reprocess ka apna version. Restore se wahi
-                  data sheet par wapas aa jata hai (current sheet pehle History me
-                  save hoti hai — kuch bhi lost nahi hota).
-                </Text>
-                {histLoading ? (
-                  <ActivityIndicator style={{ marginVertical: 20 }} />
-                ) : histVersions.length === 0 ? (
-                  <Text style={[styles.smallHint, { marginTop: 14 }]}>
-                    Abhi koi version saved nahi — Save as Draft / Finalize karne par
-                    versions yahan dikhenge.
-                  </Text>
-                ) : (
-                  <ScrollView style={{ maxHeight: 420, marginTop: 8 }}>
-                    {histVersions.map((v, i) => (
-                      <View key={v.version_id}
-                            style={{
-                              flexDirection: "row", alignItems: "center", gap: 8,
-                              paddingVertical: 8, paddingHorizontal: 4,
-                              borderBottomWidth: StyleSheet.hairlineWidth,
-                              borderBottomColor: colors.divider,
-                              backgroundColor: i === 0 ? "#F0FDF4" : "transparent",
-                            }}>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ fontSize: 13, fontWeight: "700", color: colors.onSurface }}>
-                            {HIST_KIND[v.kind] || v.kind} {i === 0 ? "· latest" : ""}
-                          </Text>
-                          <Text style={{ fontSize: 11.5, color: colors.onSurfaceSecondary, marginTop: 2 }}>
-                            {fmtHistDt(v.saved_at)} · by {v.saved_by_name || "—"} · {v.rows_count} rows · Net ₹{Number(v.net_total || 0).toLocaleString("en-IN")}
-                          </Text>
-                        </View>
-                        <Pressable
-                          onPress={() => restoreVersion(v)}
-                          testID={`hist-restore-${i}`}
-                          style={{
-                            paddingHorizontal: 12, paddingVertical: 7,
-                            borderRadius: 8, backgroundColor: "#EFF6FF",
-                            borderWidth: 1, borderColor: "#BFDBFE",
-                          }}>
-                          <Text style={{ fontSize: 12, fontWeight: "700", color: "#1D4ED8" }}>Restore</Text>
-                        </Pressable>
-                      </View>
-                    ))}
-                  </ScrollView>
-                )}
-              </View>
-            </View>
-          </Modal>
-
           {/* Iter 438 (user request) — post Save / Finalize: Download or
               Mail the reports (PDF / Excel / CSV / All). */}
-          <ReportsShareModal            visible={!!reportsFor}
+          <ReportsShareModal
+            visible={!!reportsFor}
             onClose={() => setReportsFor(null)}
             title={`Compliance Salary — ${reportsFor?.month || ""}`}
             subtitle={reportsFor?.note}
@@ -3122,7 +3011,6 @@ export default function ComplianceSalaryRunScreen() {
                     <ActionBtn icon="checkmark-done-outline" label="Finalize & Lock" busy={finalizing} onPress={finalizeRun} primary testID="btn-finalize-lock" />
                   </>
                 )}
-                <ActionBtn icon="time-outline" label="History" onPress={openHistory} testID="btn-run-history" />
                 <ActionBtn icon="grid-outline" label="Excel" busy={downloading} onPress={() => downloadFile("xlsx")} />
                 <ActionBtn icon="eye-outline" label={unsavedEdits ? "Excel (Displayed*)" : "Excel (Displayed)"}
                   testID="btn-export-displayed" busy={downloading} onPress={() => void exportDisplayed()} />
