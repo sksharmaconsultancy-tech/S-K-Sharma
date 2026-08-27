@@ -1,0 +1,31 @@
+{
+  "summary": "Iter 745 Late Penalty (Attendance-Policy based) — FRONTEND ONLY tested per request (backend already self-verified). All 7 requested UI flows PASS: (1) super admin login via 2FA mongo-swap + localStorage token injection works; (2) /attendance-policy?company_id=cmp_527fecdd7c renders — Late Penalty (Salary Deduction) section is present with all testIDs (ap-lp-enabled, ap-lp-grace, ap-lp-free, ap-lp-mode-every_n, ap-lp-mode-slabs, ap-lp-everyn, ap-lp-slab-{0..2}-{from,to,days}, ap-lp-slab-add, ap-lp-max, 3 preset chips ap-lp-preset-*); (3) toggling ap-lp-enabled reveals presets + NumRows + mode chips as designed; (4) tap on preset 'Slab — 1-3→½ · 4-6→1 · 7+→2 din' switched mode to slabs and populated exactly 3 slab rows with correct values (1-3→0.5, 4-6→1, 7-null→2); (5) Save (ap-save) persisted state — GET /api/attendance/policy shows enabled:true, mode:slabs, and slabs match exactly; reload of the screen re-renders slabs with the same values; (6) /late-penalty screen after picking Kankani via CompanyPicker shows the config summary card 'Rule: 3 late FREE / month · 1-3 → 0.5 din · 4-6 → 1 din · 7-∞ → 2 din' + Hinglish ENABLED note ('✅ Attendance Policy me ENABLED — har salary process par penalty AUTO lagti hai (Other Deduction · Late Penalty).') + lp-goto-policy link visible; month set to 2026-07 → Report (lp-load) returned rows (27+ visible in scroll) with correct calc (e.g. MADAN 12/9/2/2516, SHISHUPAL 15/12/2/4839) and kul Penalty ₹14773; lp-apply present but NOT clicked; (7) regression — Shift Master (Day/Night shifts), Weekly Off (Rotation Basis, weekday chips), Duplicate Punch Detection, Presets header all render normally with the new LP section slotted between Duplicate Punch and Weekly Off — no crash. MANDATORY restore executed: PATCH /api/attendance/policy set late_penalty.enabled=false, mode=every_n, slabs=[]; verified via GET. NO compliance salary run mutated (lp-apply not pressed, restore skipped auto-apply since disabled).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_745.json",
+    "/tmp/ap_lp_after_enable.png",
+    "/tmp/ap_lp_slabs.png",
+    "/tmp/ap_lp_saved.png",
+    "/tmp/ap_lp_reloaded.png",
+    "/tmp/lp_kankani.png",
+    "/tmp/lp_report_kankani.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "attendance-policy.tsx: preset testID uses lbl.slice(0,5) which yields non-unique keys when 3 presets start with different 5-char prefixes ('Stand', 'Stric', 'Slab '). Works today but a 4th preset starting with same 5 chars would collide. Consider indexed testIDs (ap-lp-preset-{i}) if presets grow.",
+    "late-penalty.tsx cfgSummary always prints 'har N late = X din' when mode!='slabs' even when disabled — banner correctly distinguishes ENABLED/DISABLED so it is fine. Consider hiding numeric rule when disabled to reduce noise.",
+    "late-penalty.tsx month input has no explicit testID (e.g. lp-month). Tests currently rely on YYYY-MM heuristic — adding testID='lp-month' would harden automation."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request)", "frontend": "100% (7/7 flows)"},
+  "seed_data_creation": "None. Test used existing Kankani (cmp_527fecdd7c) with real July-2026 attendance late marks. Policy mutations during the test were fully restored (PATCH late_penalty.enabled=false) and verified via GET.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 745 frontend fully green. Auth flow used: /app/test_reports/helpers/login_super_admin.py (mongo-swap 2FA -> session_token) + inject into localStorage key 'llc_session_token'. CompanyPicker on /late-penalty needs testID='company-picker-trigger' click then 'company-picker-option-{company_id}'. All ap-lp-* testIDs stable. If main agent adds a 4th LP preset watch for testID collision (see review comment #1). Policy is currently restored to disabled — safe state for further iterations."
+}

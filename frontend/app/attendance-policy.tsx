@@ -189,6 +189,8 @@ type Policy = {
   // Iter 583 — duplicate punch window + policy version.
   dedup_window_minutes?: number;
   policy_version?: number;
+  // Iter 745 — Late Penalty (policy-based salary deduction).
+  late_penalty?: Record<string, any>;
 };
 
 type PolicyResponse = {
@@ -285,6 +287,17 @@ function normalisePolicy(p: Policy): Policy {
     // Iter 583 — duplicate punch window + policy version.
     dedup_window_minutes: Number((p as any).dedup_window_minutes ?? 5),
     policy_version: Number((p as any).policy_version ?? 1),
+    // Iter 745 — Late Penalty (policy-based salary deduction).
+    late_penalty: {
+      enabled: !!(p as any).late_penalty?.enabled,
+      grace_minutes: Number((p as any).late_penalty?.grace_minutes ?? 0),
+      free_lates: Number((p as any).late_penalty?.free_lates ?? 3),
+      mode: (p as any).late_penalty?.mode === "slabs" ? "slabs" : "every_n",
+      every_n: Number((p as any).late_penalty?.every_n ?? 3),
+      every_n_days: Number((p as any).late_penalty?.every_n_days ?? 0.5),
+      slabs: Array.isArray((p as any).late_penalty?.slabs) ? (p as any).late_penalty.slabs : [],
+      max_days: Number((p as any).late_penalty?.max_days ?? 0),
+    },
     // Iter 205 — Week-Off Worked Attendance config.
     week_off_worked: {
       mode: (p as any).week_off_worked?.mode || "",
@@ -773,6 +786,166 @@ export default function AttendancePolicyScreen() {
             save creates a new version; held/blocked punches are re-evaluated only via
             the explicit Reprocess action on the Attendance Eligibility screen.
           </Text>
+
+          {/* Iter 745 — Late Penalty (Attendance-Policy based) */}
+          <SectionTitle
+            title="Late Penalty (Salary Deduction)"
+            hint="Late aane par salary me automatic deduction. Har month counter FRESH shuru hota hai (Monthly Reset hamesha ON). Enable hone par Compliance Salary process karte hi penalty OTHER DEDUCTION column me khud lag jaati hai (head: Late Penalty)."
+          />
+          {(() => {
+            const lp = (policy.late_penalty || {}) as Record<string, any>;
+            const setLp = (patch: Record<string, any>) =>
+              setPolicy({ ...policy, late_penalty: { ...lp, ...patch } });
+            const slabs: any[] = Array.isArray(lp.slabs) ? lp.slabs : [];
+            const setSlab = (i: number, patch: Record<string, any>) =>
+              setLp({ slabs: slabs.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
+            const presets: [string, Record<string, any>][] = [
+              ["Standard — 3 free · har 3 late = ½ din", { free_lates: 3, mode: "every_n", every_n: 3, every_n_days: 0.5 }],
+              ["Strict — 2 free · har 2 late = ½ din", { free_lates: 2, mode: "every_n", every_n: 2, every_n_days: 0.5 }],
+              ["Slab — 1-3→½ · 4-6→1 · 7+→2 din", { free_lates: 3, mode: "slabs", slabs: [{ from: 1, to: 3, days: 0.5 }, { from: 4, to: 6, days: 1 }, { from: 7, to: null, days: 2 }] }],
+            ];
+            return (
+              <View>
+                <Pressable testID="ap-lp-enabled" style={styles.toggleRow} onPress={() => setLp({ enabled: !lp.enabled })}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.toggleLabel}>Enable Late Penalty (Yes/No)</Text>
+                    <Text style={styles.helper}>
+                      Yes → har salary process par is firm ki late penalty auto-deduct hogi.
+                      Manually edit ki hui Other Deduction hamesha jeetegi (auto add nahi hoga).
+                    </Text>
+                  </View>
+                  <View style={[styles.toggle, lp.enabled && styles.toggleOn]}>
+                    <View style={[styles.toggleKnob, lp.enabled && styles.toggleKnobOn]} />
+                  </View>
+                </Pressable>
+                {lp.enabled ? (
+                  <>
+                    <Text style={styles.toggleLabel}>Recommended presets (tap = set)</Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                      {presets.map(([lbl, patch]) => (
+                        <Pressable key={lbl} onPress={() => setLp(patch)} style={scStyles.chip} testID={`ap-lp-preset-${lbl.slice(0, 5)}`}>
+                          <Text style={scStyles.chipTxt}>{lbl}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                    <NumRow
+                      label="Extra Grace (minutes)"
+                      value={Number(lp.grace_minutes ?? 0)}
+                      onChange={(v) => setLp({ grace_minutes: Math.max(0, Math.min(240, Math.round(v))) })}
+                      step={5}
+                      testID="ap-lp-grace"
+                    />
+                    <Text style={styles.helper}>
+                      Late tabhi COUNT hoga jab shift start se isse zyada minute der ho.
+                      0 = upar wali Grace minutes (late) paar karte hi har late mark count.
+                    </Text>
+                    <NumRow
+                      label="Free Lates / month"
+                      value={Number(lp.free_lates ?? 3)}
+                      onChange={(v) => setLp({ free_lates: Math.max(0, Math.min(31, Math.round(v))) })}
+                      step={1}
+                      testID="ap-lp-free"
+                    />
+                    <Text style={styles.toggleLabel}>Penalty Mode</Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                      {([["every_n", "Har N late = X din"], ["slabs", "Slab-wise"]] as [string, string][]).map(([v, lbl]) => (
+                        <Pressable key={v} testID={`ap-lp-mode-${v}`} onPress={() => setLp({ mode: v })}
+                          style={[scStyles.chip, (lp.mode || "every_n") === v && scStyles.chipOn]}>
+                          <Text style={[scStyles.chipTxt, (lp.mode || "every_n") === v && scStyles.chipTxtOn]}>{lbl}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                    {(lp.mode || "every_n") === "every_n" ? (
+                      <>
+                        <NumRow
+                          label="Har kitne (chargeable) lates par cut?"
+                          value={Number(lp.every_n ?? 3)}
+                          onChange={(v) => setLp({ every_n: Math.max(1, Math.min(31, Math.round(v))) })}
+                          step={1}
+                          testID="ap-lp-everyn"
+                        />
+                        <Text style={styles.toggleLabel}>Kitne din ki deduction?</Text>
+                        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                          {([[0.25, "¼ din"], [0.5, "½ din"], [1, "1 din"], [2, "2 din"]] as [number, string][]).map(([v, lbl]) => (
+                            <Pressable key={String(v)} onPress={() => setLp({ every_n_days: v })}
+                              style={[scStyles.chip, Number(lp.every_n_days ?? 0.5) === v && scStyles.chipOn]}>
+                              <Text style={[scStyles.chipTxt, Number(lp.every_n_days ?? 0.5) === v && scStyles.chipTxtOn]}>{lbl}</Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      </>
+                    ) : (
+                      <>
+                        <Text style={styles.helper}>
+                          Chargeable lates (free ke BAAD ki ginti) jis range me aayein utne din ki
+                          deduction. To khali chhodo = open-ended (jaise 7+).
+                        </Text>
+                        {slabs.map((s, i) => (
+                          <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 }}>
+                            <TextInput
+                              style={[styles.input, { flex: 1 }]}
+                              keyboardType="numeric"
+                              value={s.from == null ? "" : String(s.from)}
+                              onChangeText={(t) => { const n = parseInt(t.replace(/\D/g, ""), 10); setSlab(i, { from: Number.isNaN(n) ? 0 : n }); }}
+                              placeholder="From"
+                              placeholderTextColor={colors.onSurfaceTertiary}
+                              testID={`ap-lp-slab-${i}-from`}
+                            />
+                            <TextInput
+                              style={[styles.input, { flex: 1 }]}
+                              keyboardType="numeric"
+                              value={s.to == null ? "" : String(s.to)}
+                              onChangeText={(t) => { const n = parseInt(t.replace(/\D/g, ""), 10); setSlab(i, { to: Number.isNaN(n) ? null : n }); }}
+                              placeholder="To (khali=∞)"
+                              placeholderTextColor={colors.onSurfaceTertiary}
+                              testID={`ap-lp-slab-${i}-to`}
+                            />
+                            <TextInput
+                              style={[styles.input, { flex: 1 }]}
+                              keyboardType="decimal-pad"
+                              value={s.days == null ? "" : String(s.days)}
+                              onChangeText={(t) => { const n = parseFloat(t.replace(/[^0-9.]/g, "")); setSlab(i, { days: Number.isNaN(n) ? 0 : n }); }}
+                              placeholder="Days"
+                              placeholderTextColor={colors.onSurfaceTertiary}
+                              testID={`ap-lp-slab-${i}-days`}
+                            />
+                            <Pressable onPress={() => setLp({ slabs: slabs.filter((_, j) => j !== i) })} hitSlop={8} testID={`ap-lp-slab-${i}-del`}>
+                              <Ionicons name="trash-outline" size={18} color="#b3261e" />
+                            </Pressable>
+                          </View>
+                        ))}
+                        <Pressable
+                          onPress={() => setLp({
+                            slabs: [...slabs, {
+                              from: slabs.length ? Number(slabs[slabs.length - 1].to || slabs[slabs.length - 1].from || 0) + 1 : 1,
+                              to: null, days: 0.5,
+                            }],
+                          })}
+                          style={[scStyles.chip, { marginTop: 8, alignSelf: "flex-start" }]}
+                          testID="ap-lp-slab-add"
+                        >
+                          <Text style={scStyles.chipTxt}>+ Slab jodein</Text>
+                        </Pressable>
+                      </>
+                    )}
+                    <NumRow
+                      label="Max deduction days / month (0 = no cap)"
+                      value={Number(lp.max_days ?? 0)}
+                      onChange={(v) => setLp({ max_days: Math.max(0, Math.min(31, v)) })}
+                      step={0.5}
+                      decimals={1}
+                      testID="ap-lp-max"
+                    />
+                    <Text style={styles.helper}>
+                      Monthly Reset hamesha ON — har month late counter 0 se shuru hota hai
+                      (pichhle month ke lates carry-forward NAHI hote). Report + manual apply:
+                      sidebar → Late Penalty screen.
+                    </Text>
+                  </>
+                ) : null}
+              </View>
+            );
+          })()}
 
           {/* Weekly off — Iter 201 (user request): N/A + Rotation Basis */}
           <SectionTitle title="Weekly off" hint="Days that don’t count as working days." />

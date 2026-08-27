@@ -196,6 +196,20 @@ async def get_attendance_policy(
         policy["policy_version"] = int(policy.get("policy_version") or 1)
     except (TypeError, ValueError):
         policy["policy_version"] = 1
+    # Iter 745 — Late Penalty backfill for policies saved before the
+    # section existed (disabled by default; monthly reset always ON).
+    _lp_bf = policy.get("late_penalty") if isinstance(policy.get("late_penalty"), dict) else {}
+    policy["late_penalty"] = {
+        "enabled": bool(_lp_bf.get("enabled")),
+        "grace_minutes": int(_lp_bf.get("grace_minutes") or 0),
+        "free_lates": int(_lp_bf.get("free_lates") if _lp_bf.get("free_lates") is not None else 3),
+        "mode": _lp_bf.get("mode") if _lp_bf.get("mode") in ("every_n", "slabs") else "every_n",
+        "every_n": int(_lp_bf.get("every_n") or 3),
+        "every_n_days": float(_lp_bf.get("every_n_days") or 0.5),
+        "slabs": _lp_bf.get("slabs") if isinstance(_lp_bf.get("slabs"), list) else [],
+        "max_days": float(_lp_bf.get("max_days") or 0),
+        "monthly_reset": True,
+    }
     # "Default preset" here means: no admin has explicitly saved / overridden
     # the policy yet. Because we auto-attach a preset on company creation,
     # the presence of `attendance_policy` alone isn't a good signal — we

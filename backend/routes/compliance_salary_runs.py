@@ -282,6 +282,21 @@ async def _compute_compliance_run(
         async for e in db.compliance_import_entries.find(_am_q, {"_id": 0}):
             am_entries[e["user_id"]] = e
 
+    # Iter 745 — POLICY-BASED LATE PENALTY auto-deduction maps. Built only
+    # for firms whose Attendance Policy EXPLICITLY enables late_penalty;
+    # imported-sheet runs skip (the sheet is authoritative — the manual
+    # Apply button on the Late Penalty screen still works there).
+    late_penalty_maps: Dict[str, dict] = {}
+    if not payload.use_imported_sheet:
+        from routes.hr_extras import policy_late_penalty_map
+        for _cid_lp in {e.get("company_id") for e in employees if e.get("company_id")}:
+            try:
+                _m_lp = await policy_late_penalty_map(_cid_lp, payload.month)
+            except Exception:
+                _m_lp = {}
+            if _m_lp:
+                late_penalty_maps[_cid_lp] = _m_lp
+
     # Iter 216 (user request) — Compliance Present Days are FETCHED from
     # the Attendance Report grid (the exact same source the Actual Salary
     # Process uses) so the compliance run always matches the report.
@@ -1506,6 +1521,39 @@ async def _compute_compliance_run(
                             float(row.get(_h) or 0)
                             for _h in ("basic", "hra", "conveyance",
                                        "medical", "special", "others")), 2)
+                    # Iter 744 (user request — "Excel import par exact match,
+                    # 1 Rs difference mid out"): whole-rupee rounding inside
+                    # the recompute rounds Monthly Gross and OT SEPARATELY,
+                    # so the re-derived earnings can land ±1 Rs off the
+                    # Imported Gross. The residual is absorbed into the SAME
+                    # editable head the difference was allocated to (OT when
+                    # the diff went to Overtime, otherwise Others — mirrored
+                    # under the INCENTIVE column when that head carried the
+                    # diff) so Basic+…+Others+OT == Imported Gross EXACTLY.
+                    _resid744 = round(
+                        _imp_g - (float(row.get("monthly_gross") or 0)
+                                  + float(row.get("ot_pay") or 0)), 2)
+                    if abs(_resid744) > 0.004:
+                        _ot744 = float(row.get("ot_pay") or 0)
+                        _oth744 = float(row.get("others") or 0)
+                        _head744 = str(
+                            row.get("difference_allocation_head") or "")
+                        if (("Overtime" in _head744
+                             or _oth744 + _resid744 < 0)
+                                and _ot744 + _resid744 >= 0):
+                            row["ot_pay"] = round(_ot744 + _resid744, 2)
+                        else:
+                            row["others"] = round(_oth744 + _resid744, 2)
+                            row["monthly_gross"] = round(
+                                float(row.get("monthly_gross") or 0)
+                                + _resid744, 2)
+                            if _inc_extra657 > 0:
+                                _ah744 = dict(row.get("allowance_heads") or {})
+                                _il744 = _inc_labels657[0]
+                                _ah744[_il744] = round(
+                                    float(_ah744.get(_il744) or 0)
+                                    + _resid744, 2)
+                                row["allowance_heads"] = _ah744
                     row["gross_paid"] = _imp_g
                     row["total_deduction"] = round(
                         float(row.get("pf_employee") or 0)
@@ -1573,6 +1621,29 @@ async def _compute_compliance_run(
         if _ctc_meta:
             row["ctc_mode"] = True
             row.update(_ctc_meta)
+        # Iter 745 — LATE PENALTY (Attendance-Policy based): once the
+        # attendance-driven row is final, the month's penalty lands in the
+        # OTHER DEDUCTION column automatically (head "Late Penalty").
+        # Manually edited Other Deduction always wins (keep-rule respected).
+        # Freeze-as-Actual-Gross rows get it too (penalty is a DEDUCTION —
+        # the frozen gross is untouched); imported-sheet runs never build
+        # the maps (sheet is authoritative — manual Apply covers them).
+        _lp745 = (late_penalty_maps.get(emp.get("company_id")) or {}).get(emp["user_id"])
+        if _lp745 and "other_deduction" not in set(row.get("manual_fields") or []):
+            _lp_amt = round(float(_lp745.get("penalty_amount") or 0), 2)
+            if _lp_amt > 0:
+                row["late_count"] = _lp745.get("late_days")
+                row["late_penalty_days"] = _lp745.get("penalty_days")
+                row["late_penalty_amount"] = _lp_amt
+                _od745 = round(float(row.get("other_deduction") or 0), 2)
+                row["other_deduction"] = round(_od745 + _lp_amt, 2)
+                _odh745 = str(row.get("other_deduction_head") or "").strip()
+                row["other_deduction_head"] = (
+                    f"{_odh745} + Late Penalty" if (_odh745 and _od745 > 0)
+                    else "Late Penalty")
+                row["total_deduction"] = round(
+                    float(row.get("total_deduction") or 0) + _lp_amt, 2)
+                row["net"] = round(float(row.get("net") or 0) - _lp_amt, 2)
         rows.append(row)
 
     totals = {

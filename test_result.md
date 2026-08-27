@@ -973,3 +973,13 @@ ITER 487 (doc-expiry alerts):
   history, compliance-summary/alerts, register xlsx, Iter737 regression.
 - Frontend verified by main agent via Playwright (summary cards, alerts,
   add flow PT Missing→Active, filters, no-expiry).
+
+## Iter 744 — Freeze import 1 Rs mid-out (tested)
+- Reproduced pre-fix: 19/40 synthetic imports ±1 Rs off; post-fix 40/40
+  EXACT (tests/test_iter744_freeze.py, 2FA bypass via twofa_pending).
+
+## Iter 745 — Late Penalty policy-based (tested)
+- Backend self-test E2E PASS (27/27 auto-apply on real July-2026 data,
+  validation 400, math units). testing_agent frontend ALL PASS
+  (iteration_745.json): policy section testIDs, slab preset, persistence,
+  late-penalty summary+report 27 rows, regression OK, policy restored.

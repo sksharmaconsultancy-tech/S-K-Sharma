@@ -9250,3 +9250,56 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   Iter 742's 3-dec settle gave ₹71. _round_stat back to round(v,2).
   Verified: 9334→₹70, 6667→₹50, 13334→₹100, 13500→₹102.
 - APP_ITERATION=743; deploy_vps_iter743.sh.
+
+## Iter 744 — Freeze Import: 1 Rs difference MID-OUT (exact match)
+- User: "excel import karte h to kai jagah 1 rs ka difference aata h
+  usko mid out kare — import k time exact match ho jae".
+- ROOT CAUSE: after the freeze-diff recompute, Monthly Gross and OT are
+  whole-rupee rounded SEPARATELY, then row.gross_paid is forced to the
+  imported gross — so Basic+…+Others+OT could land ±1 Rs off it.
+- FIX (compliance_salary_runs.py, inside the elif _imp_g>0 block, just
+  before row["gross_paid"]=_imp_g): residual = imp − (mg+ot) absorbed
+  into the SAME allocation head — OT when diff went to Overtime (or when
+  Others would go negative), else Others (+ INCENTIVE column mirror when
+  _inc_extra657>0) with monthly_gross adjusted. User chose: "jo existing
+  head editable h usi me adjust".
+- VERIFIED: tests/test_iter744_freeze.py (2FA bypass via twofa_pending
+  otp_hash overwrite): 40 synthetic imports → pre-fix 19 rows ±1 off,
+  post-fix 40/40 EXACT (earn-sum == imported gross == gross_paid; net =
+  gross − ded). Normal runs untouched (change scoped to import branch).
+- APP_ITERATION=744; deploy_vps_iter744.sh; temp_bundle kind=script →
+  deploy744.sh.
+- NOTE: old pytest fixtures using plain admin-password-login now fail at
+  setup because 2FA is ON (pre-existing env condition, not a regression).
+
+## Iter 745 — Late Penalty (Attendance Policy based) — user PRD delivered
+- Config in attendance_policy.late_penalty (validated in server.py
+  _validate_policy): enabled, grace_minutes (extra, on top of grid grace),
+  free_lates, mode every_n (every N chargeable lates = 0.25/0.5/1/2 days)
+  or slabs ([{from,to|null,days}] absolute), max_days cap, monthly_reset
+  always True. GET policy backfills defaults (attendance_policy_api.py).
+- hr_extras.py: _lp_effective_cfg (policy wins, legacy firm config maps
+  as fallback), _lp_penalty_days, policy_late_penalty_map (ONLY when
+  policy explicitly enabled), _late_penalty_rows now grace-aware +
+  whole-rupee amounts; report subtitle shows rule + source; manual Apply
+  endpoint skips rows already auto-stamped (late_penalty_amount>0).
+- AUTO-APPLY in compliance_salary_runs.py: maps built per company (skip
+  use_imported_sheet runs); before rows.append penalty added to
+  other_deduction (head "Late Penalty"), total_deduction+, net−, fields
+  late_count/late_penalty_days/late_penalty_amount. Applies to
+  freeze-as-actual-gross rows too (deduction only, frozen gross safe);
+  skipped when other_deduction in manual_fields.
+- Frontend: attendance-policy.tsx new section (testIDs ap-lp-*: toggle,
+  presets Standard/Strict/Slab, grace/free NumRows, mode chips, every-N +
+  day chips, slab editor add/del, max cap); late-penalty.tsx now shows
+  policy rule summary + source + link to policy, report/apply unchanged.
+- TESTED: backend self-tests (tests/test_iter745_late_penalty.py E2E on
+  Kankani July-2026: 27/27 auto-applied exact, bad-slab 400, restore;
+  tests/test_iter745_math.py PYTHONPATH=/app/backend). testing_agent
+  frontend ALL PASS (iteration_745.json), policy restored disabled.
+- USER ISSUE (mid-session): VPS PWA blank after deploy — user downloaded
+  the live code bundle WHILE frontend edits were half-done (late-penalty
+  .tsx temporarily referenced removed identifiers → web export broke).
+  Local preview verified fine; instructed re-run with deploy745.
+- APP_ITERATION=745; deploy_vps_iter745.sh (744 script folded in, file
+  deleted); temp_bundle kind=script → deploy745.sh.

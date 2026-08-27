@@ -1459,10 +1459,68 @@ def _validate_policy(raw: dict) -> dict:
                          "effective_from": ef, "effective_to": et,
                          "active": bool(wr_raw.get("active", True))}
 
+    # Iter 745 — LATE PENALTY (Attendance-Policy based, user PRD).
+    # Monthly counter ALWAYS resets each month (no carry-forward).
+    # mode "every_n": every N chargeable lates = every_n_days cut.
+    # mode "slabs":   chargeable-late count falls in a slab → that slab's
+    #                 days (absolute, not cumulative; open-ended when to=None).
+    lp_raw = raw.get("late_penalty") if isinstance(raw.get("late_penalty"), dict) else None
+    late_penalty = None
+    if lp_raw:
+        def _lpi(key: str, lo: int, hi: int, dflt: int) -> int:
+            try:
+                v = int(float(lp_raw.get(key, dflt) if lp_raw.get(key) is not None else dflt))
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail=f"late_penalty.{key} must be a number")
+            return max(lo, min(hi, v))
+        _lp_mode = str(lp_raw.get("mode") or "every_n")
+        if _lp_mode not in ("every_n", "slabs"):
+            raise HTTPException(status_code=400, detail="late_penalty.mode must be 'every_n' or 'slabs'")
+        try:
+            _lp_end = float(lp_raw.get("every_n_days", 0.5) or 0.5)
+        except (TypeError, ValueError):
+            _lp_end = 0.5
+        if _lp_end not in (0.25, 0.5, 1.0, 2.0):
+            raise HTTPException(status_code=400, detail="late_penalty.every_n_days must be 0.25, 0.5, 1 or 2")
+        _lp_slabs: List[dict] = []
+        for s in (lp_raw.get("slabs") or []):
+            if not isinstance(s, dict):
+                continue
+            try:
+                _sf = int(float(s.get("from", 0)))
+                _st_to = s.get("to")
+                _st_to = None if _st_to in (None, "") else int(float(_st_to))
+                _sd = float(s.get("days", 0))
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="late_penalty.slabs values must be numbers")
+            if _sf < 1 or (_st_to is not None and _st_to < _sf) or _sd < 0 or _sd > 31:
+                raise HTTPException(status_code=400, detail=f"late_penalty slab {_sf}-{_st_to} is invalid")
+            _lp_slabs.append({"from": _sf, "to": _st_to, "days": _sd})
+        _lp_slabs.sort(key=lambda x: x["from"])
+        if _lp_mode == "slabs" and bool(lp_raw.get("enabled")) and not _lp_slabs:
+            raise HTTPException(status_code=400, detail="late_penalty: slab mode needs at least one slab")
+        try:
+            _lp_max = max(0.0, min(31.0, float(lp_raw.get("max_days", 0) or 0)))
+        except (TypeError, ValueError):
+            _lp_max = 0.0
+        late_penalty = {
+            "enabled": bool(lp_raw.get("enabled")),
+            "grace_minutes": _lpi("grace_minutes", 0, 240, 0),
+            "free_lates": _lpi("free_lates", 0, 31, 3),
+            "mode": _lp_mode,
+            "every_n": _lpi("every_n", 1, 31, 3),
+            "every_n_days": _lp_end,
+            "slabs": _lp_slabs,
+            "max_days": _lp_max,
+            "monthly_reset": True,
+        }
+
     return {
         "shifts": shifts,
         "weekly_off_days": sorted(days),
         "weekoff_rules": weekoff_rules,
+        # Iter 745 — Late Penalty (policy-based salary deduction).
+        "late_penalty": late_penalty,
         "grace_minutes_late": grace,
         "half_day_hours": half_day,
         "full_day_hours": full_day,
@@ -10417,7 +10475,7 @@ async def health():
 # which code iteration the server is running, so the user can instantly see
 # whether their VPS has the latest deploy before testing.
 # BUMP THIS on every release (keep in sync with the deploy script number).
-APP_ITERATION = "743"
+APP_ITERATION = "745"
 
 
 @api.get("/version")

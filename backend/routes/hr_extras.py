@@ -136,7 +136,57 @@ async def delete_gate_pass(
 
 # ═══════════════════════ 2. LATE PENALTY ═══════════════════════
 
+# Legacy (Iter 730) firm-level config — still honoured as FALLBACK when the
+# Attendance Policy has no late_penalty section saved yet.
 _LP_DEFAULT = {"enabled": True, "free_lates": 3, "lates_per_half_day": 3}
+
+# Iter 745 — Attendance-Policy based config (user PRD). Monthly counter
+# always resets each month.
+_LP_POLICY_DEFAULT = {
+    "enabled": False, "grace_minutes": 0, "free_lates": 3,
+    "mode": "every_n", "every_n": 3, "every_n_days": 0.5,
+    "slabs": [], "max_days": 0.0, "monthly_reset": True,
+}
+
+
+async def _lp_effective_cfg(company_id: str) -> dict:
+    """Effective Late Penalty config: attendance_policy.late_penalty wins;
+    the legacy companies.late_penalty_config maps onto the same shape as a
+    fallback so pre-Iter745 setups keep working unchanged."""
+    co = await db.companies.find_one(
+        {"company_id": company_id},
+        {"_id": 0, "attendance_policy": 1, "late_penalty_config": 1}) or {}
+    pol = (co.get("attendance_policy") or {}).get("late_penalty")
+    if isinstance(pol, dict) and pol:
+        return {**_LP_POLICY_DEFAULT, **pol, "source": "policy"}
+    legacy = {**_LP_DEFAULT, **(co.get("late_penalty_config") or {})}
+    return {**_LP_POLICY_DEFAULT,
+            "enabled": bool(legacy.get("enabled", True)),
+            "free_lates": max(0, int(_num(legacy.get("free_lates"), 3))),
+            "every_n": max(1, int(_num(legacy.get("lates_per_half_day"), 3))),
+            "source": "legacy"}
+
+
+def _lp_penalty_days(chargeable: int, cfg: dict) -> float:
+    """Deduction days for a month's chargeable (beyond-free) late count."""
+    if chargeable <= 0:
+        return 0.0
+    if str(cfg.get("mode")) == "slabs":
+        days = 0.0
+        for s in cfg.get("slabs") or []:  # sorted by "from" at save time
+            if chargeable >= int(s.get("from") or 0):
+                days = float(s.get("days") or 0)
+                if s.get("to") is not None and chargeable <= int(s["to"]):
+                    break
+            else:
+                break
+    else:
+        days = (chargeable // max(1, int(_num(cfg.get("every_n"), 3)))) \
+            * float(_num(cfg.get("every_n_days"), 0.5))
+    mx = float(_num(cfg.get("max_days"), 0))
+    if mx > 0:
+        days = min(days, mx)
+    return days
 
 
 @router.get("/admin/late-penalty/config")
@@ -145,8 +195,7 @@ async def get_late_penalty_config(
     authorization: Optional[str] = Header(None),
 ):
     _, company_id = await _authz(authorization, company_id)
-    c = await db.companies.find_one({"company_id": company_id}, {"_id": 0, "late_penalty_config": 1})
-    return {"config": {**_LP_DEFAULT, **((c or {}).get("late_penalty_config") or {})}}
+    return {"config": await _lp_effective_cfg(company_id)}
 
 
 @router.post("/admin/late-penalty/config")
@@ -166,30 +215,47 @@ async def save_late_penalty_config(
 
 
 async def _late_penalty_rows(company_id: str, month: str) -> tuple:
-    c = await db.companies.find_one({"company_id": company_id}, {"_id": 0, "late_penalty_config": 1})
-    cfg = {**_LP_DEFAULT, **((c or {}).get("late_penalty_config") or {})}
+    cfg = await _lp_effective_cfg(company_id)
     grid = await _compute_monthly_grid_data(company_id=company_id, month=month)
     y, m = int(month[:4]), int(month[5:7])
     month_days = calendar.monthrange(y, m)[1]
+    grace = max(0, int(_num(cfg.get("grace_minutes"), 0)))
+    free = max(0, int(_num(cfg.get("free_lates"), 0)))
     rows = []
     for r in grid.get("employees") or []:
+        # A day counts as LATE when the grid's late_min (already beyond the
+        # policy's attendance grace) exceeds the penalty's EXTRA grace.
         lates = sum(1 for cell in (r.get("days") or {}).values()
-                    if isinstance(cell, dict) and _num(cell.get("late_min")) > 0)
-        chargeable = max(0, lates - cfg["free_lates"])
-        penalty_days = (chargeable // cfg["lates_per_half_day"]) * 0.5
+                    if isinstance(cell, dict) and _num(cell.get("late_min")) > grace)
+        chargeable = max(0, lates - free)
+        penalty_days = _lp_penalty_days(chargeable, cfg)
         u = await db.users.find_one({"user_id": r["user_id"]}, {"_id": 0}) or {}
         gross = _master_gross(u)
         daily = round(gross / month_days, 2) if gross else 0.0
-        amount = round(daily * penalty_days, 2)
+        # Whole-rupee amount (payroll engine's Iter 633 round-figure rule).
+        amount = float(round(daily * penalty_days))
         if lates > 0:
             rows.append({
                 "user_id": r["user_id"], "employee_code": r.get("employee_code"),
                 "name": r.get("name"), "late_days": lates,
-                "free_lates": cfg["free_lates"], "chargeable": chargeable,
+                "free_lates": free, "chargeable": chargeable,
                 "penalty_days": penalty_days, "daily_rate": daily,
                 "penalty_amount": amount,
             })
     return cfg, rows
+
+
+async def policy_late_penalty_map(company_id: str, month: str) -> dict:
+    """user_id → penalty row, ONLY when attendance_policy.late_penalty is
+    EXPLICITLY enabled (drives the auto-deduction in compliance salary
+    runs — the legacy firm-level config never auto-applies)."""
+    co = await db.companies.find_one(
+        {"company_id": company_id}, {"_id": 0, "attendance_policy": 1}) or {}
+    pol = (co.get("attendance_policy") or {}).get("late_penalty")
+    if not (isinstance(pol, dict) and pol.get("enabled")):
+        return {}
+    _cfg, rows = await _late_penalty_rows(company_id, month)
+    return {r["user_id"]: r for r in rows if r["penalty_amount"] > 0}
 
 
 @router.get("/admin/late-penalty/report")
@@ -205,13 +271,15 @@ async def late_penalty_report(
         return {"config": cfg, "rows": rows,
                 "total_penalty": round(sum(r["penalty_amount"] for r in rows), 2)}
     company = await _company(company_id)
+    _lp_rule = (f"har {cfg.get('every_n')} extra lates = {cfg.get('every_n_days')} din cut"
+                if str(cfg.get("mode")) != "slabs" else "slab-wise cut")
     cols = [("Emp Code", "employee_code", False), ("Name", "name", False),
             ("Late Days", "late_days", False), ("Free", "free_lates", False),
             ("Chargeable", "chargeable", False), ("Penalty Days", "penalty_days", False),
             ("Daily Rate", "daily_rate", True), ("Penalty Amount", "penalty_amount", True)]
     return _emit(fmt, title=f"Late Penalty Report — {month}",
-                 subtitle=f"Free lates: {cfg['free_lates']} / month · every "
-                          f"{cfg['lates_per_half_day']} extra lates = ½ day cut",
+                 subtitle=f"Free lates: {cfg['free_lates']} / month · {_lp_rule} "
+                          f"· config: {cfg.get('source', 'legacy')}",
                  company=company, cols=cols, rows=rows,
                  fname_base=f"Late_Penalty_{month}")
 
@@ -243,6 +311,10 @@ async def apply_late_penalty(
     for row in run_rows:
         p = by_uid.get(row.get("user_id"))
         if not p:
+            continue
+        # Iter 745 — the policy-based AUTO apply already stamped this row
+        # during the salary process; never double-deduct from here.
+        if _num(row.get("late_penalty_amount")) > 0:
             continue
         row["other_deduction"] = round(_num(row.get("other_deduction")) + p["penalty_amount"], 2)
         row["other_deduction_head"] = "Late Penalty"
