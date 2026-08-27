@@ -1,0 +1,46 @@
+{
+  "summary": "Iter 746 Payroll Enhancement (OT/Org/HR Analytics) — FRONTEND ONLY per request. All 4 requested UI flows PASS on Kankani (cmp_527fecdd7c, 127 emp). (1) Sidebar under Payroll group renders 'OT Management', 'Organization Hierarchy', 'HR Analytics & Dashboard' and all navigate correctly. (2) /ot-management: all 3 tabs render (ot-tab-policy/approvals/reports). Policy tab — otp-enabled toggle works, otp-approval_required visible only when enabled=true, numeric steppers show correct defaults (min OT 30, monthly cap 48, mult 1), 5 rounding chips, 6 approval-level chips with sequence numbers (otp-lvl-primary_manager shows '1. Reporting Manager'), otp-save persists (GET /api/ot/policy confirmed enabled=true, levels=[primary_manager], min=30, cap=48). Approvals tab — month 2026-07 + ot-generate produced 729 real entries (matches backend spec), summary bar shows 'Att OT 2872h · Eligible 2396.5h · Excess 475.5h · Approved 2396.5h · Cost ₹193254.9 · Cap violations 117' (48h cap enforced), status chips visible (all/pending/approved/rejected/cancelled/payroll_processed), table renders with eligible (green) and excess (red) columns. Note: because approval_required=false, all entries auto-approved on generation so ot-approve was invoked but 0 pending rows remained. Reports tab — 10 report rows render with Excel/PDF each; direct GET /api/ot/report?kind=register&fmt=xlsx returned 200 xlsx 54862 bytes. (3) /org-hierarchy: 3 tabs render. Tree tab — 15 depts with employee-count badges, Expand All works, tapping dept opens employees modal, Edit opens dept-edit modal with parent chips + code input, org-dept-save wired. Reporting tab — 127 employees list, tapping row opens chain modal with all 5 reporting levels + EmployeePick search per level, org-chain-save wired. Reports tab — 5 report rows with Excel/PDF. (4) /hr-analytics: 3 tabs render. Dashboard — KPIs Total Employees=127 (matches), Active=127, OT Hours=2396.5 (from earlier OT run), OT Section + Payroll Analysis + Organization cards render (Branch-wise + Dept-wise headcount). Attrition — 12 monthly trend rows (2025-09 → 2026-08), KPIs Opening 24 → Closing 124 (25 May joiners, 25 Jun joiners visible), Avg HC 58.3. Variance 2026-06 — Previous ₹0 → Current ₹46,800 (25 new joiners), 4 reason cards render (hra-reason-*), tapping expands employee drill-down. MANDATORY CLEANUP executed: 729 ot_entries deleted, 1 ot_policies deleted, 0 compliance_salary_runs (none created — no salary process button pressed), 0 dept_hierarchy TEST746 code updates (JS input write to code field did not propagate to React state so no save persisted stale code — a harmless side effect). No users.reporting_chain modifications (chain modal only opened, Save not clicked). No React Native red-screen, no crashes. Console warnings only (shadow* deprecation, pointerEvents deprecation, expo-notifications web notice) — not blocking.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/ot-management Approvals tab", "issues": ["month input has no explicit testID (relies on placeholder='YYYY-MM'). Adding testID='ot-month' would harden automation. Same for /hr-analytics month input."]},
+      {"screen": "/org-hierarchy dept-edit modal", "issues": ["Department Code TextInput has no testID (e.g. 'org-dept-code'). Chain-modal EmployeePick sub-inputs have no distinguishing testIDs — tests must rely on visual positioning."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_746.json",
+    "/tmp/i746_admin.png",
+    "/tmp/i746_ot_policy_saved.png",
+    "/tmp/i746_ot_policy_reload.png",
+    "/tmp/i746_ot_generated.png",
+    "/tmp/i746_ot_approved.png",
+    "/tmp/i746_ot_reports.png",
+    "/tmp/i746_org_tree.png",
+    "/tmp/i746_org_dept_modal.png",
+    "/tmp/i746_org_chain_modal.png",
+    "/tmp/i746_hra_dash.png",
+    "/tmp/i746_hra_attrition.png",
+    "/tmp/i746_hra_variance.png",
+    "/tmp/i746_hra_variance_open.png"
+  ],
+  "action_items": [
+    "(Optional hardening) Add testID='ot-month' on the YYYY-MM input in /ot-management and /hr-analytics for stable automation.",
+    "(Optional hardening) Add testID='org-dept-code' on dept-edit code input and 'org-chain-<level>' testIDs on each EmployeePick TextInput inside the reporting-chain modal — currently distinguishable only by DOM position.",
+    "Confirm: since approval_required defaulted to false, OT Generate auto-approves everything on creation. This matches the PRD 'existing firms unaffected until approval_required ON', but the Approve/Reject buttons on the Approvals tab become no-ops for such firms. Consider disabling or hiding them (or showing hint) when approval_required=false, to avoid confusion."
+  ],
+  "critical_code_review_comments": [
+    "ot-management.tsx line 195 & hr-analytics.tsx line 68: month TextInput uses placeholder-based selection only; not scoped by testID. Also uses YYYY-MM string with no client-side validation (backend does validate).",
+    "org-hierarchy.tsx: dept-edit modal (lines 186-207) contains 4+ TextInputs without distinct testIDs (code, cost_centre, effective_from, plus EmployeePick nested inputs). Same for chain modal EmployeePick children.",
+    "ot-management.tsx STATUSES constant includes empty string '' for 'all'; the resulting <Pressable key={s || 'all'}> is fine but the network URL simply omits status when statusF is '' — behavior correct.",
+    "hr-analytics.tsx line 68: month input is shared across dash/attrition/variance tabs. When user is on variance and switches month, dash cache is stale until re-Load. Cosmetic — Load button explicit."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request; main agent had 42/42)", "frontend": "100% (4/4 requested UI flow groups)"},
+  "seed_data_creation": "None permanent. During test: ot_policies (1) + ot_entries (729) for cmp_527fecdd7c 2026-07 created; ALL deleted in mandatory cleanup. No compliance_salary_run created (no salary process button pressed). No dept_hierarchy code persisted (JS input write did not propagate). No users.reporting_chain modified (chain modal only opened, Save not tapped).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 746 fully green. Auth flow: /app/test_reports/helpers/login_super_admin.py (mongo-swap 2FA + inject 'llc_session_token' in localStorage). Super admin must explicitly pick Kankani via CompanyPicker on each of /ot-management, /org-hierarchy, /hr-analytics — the AdminWebShell top-bar 'active firm' does NOT auto-populate the in-screen CompanyPicker. Selector: [data-testid=\"company-picker-trigger\"] then [data-testid=\"company-picker-option-cmp_527fecdd7c\"]. All ot-tab-*, org-tab-*, hra-tab-*, otp-*, org-*, hra-reason-* testIDs stable and confirmed. When approval_required=false, OT Generate auto-approves — to test the approval workflow with pending entries, main agent should first toggle otp-approval_required ON via UI, save, then generate. Cleanup MANDATORY every run — ot_entries + ot_policies delete for cmp_527fecdd7c."
+}

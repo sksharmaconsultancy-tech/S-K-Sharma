@@ -26,7 +26,7 @@ from server import db, get_user_from_token, require_role, now_iso  # noqa: E402
 router = APIRouter(prefix="/api/admin/manual-attendance",
                    tags=["manual-attendance"])
 
-CODES = ("P", "A", "L", "WO", "CO", "HD")
+CODES = ("P", "A", "L", "CL", "WO", "CO", "HD", "H")
 _DEF = {"enabled": True, "approval_required": False, "require_reason": False,
         "maker_checker": True,
         # Iter 689 — Phase 2 approval matrix

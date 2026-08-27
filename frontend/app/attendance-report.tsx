@@ -19,10 +19,10 @@ import { useAuth } from "@/src/context/AuthContext";
 import { useSelectedCompany } from "@/src/context/SelectedCompanyContext";
 import { colors } from "@/src/theme";
 
-const CODES = ["P", "A", "L", "WO", "CO", "HD"] as const;
+const CODES = ["P", "A", "L", "CL", "WO", "CO", "HD", "H"] as const;
 const CODE_COLORS: Record<string, string> = {
-  P: "#15803D", A: "#DC2626", L: "#B45309", WO: "#6B7280",
-  CO: "#7C3AED", HD: "#0369A1",
+  P: "#15803D", A: "#DC2626", L: "#B45309", CL: "#0D9488", WO: "#6B7280",
+  CO: "#7C3AED", HD: "#0369A1", H: "#DB2777",
 };
 
 function nowMM() {
@@ -86,10 +86,26 @@ export default function AttendanceReportEditable() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const setCell = (uid: string, d: string, st: string, prev: string) => {
+  const setCell = useCallback((uid: string, d: string, st: string, prev: string) => {
     setEdits((e) => ({ ...e, [`${uid}|${d}`]: { user_id: uid, date: d, status: st, previous_status: prev } }));
     setPicker(null);
-  };
+  }, []);
+
+  const onCellPress = useCallback((uid: string, d: string) => {
+    setPicker((p) => (p && p.uid === uid && p.d === d ? null : { uid, d }));
+  }, []);
+
+  // Iter 747 (user perf bug) — group unsaved edits per employee so each
+  // GridRow only re-renders when ITS OWN edits / picker change (pehle har
+  // click par poora 127×31 grid re-render hota tha → bahut slow).
+  const editsByUser = useMemo(() => {
+    const m: Record<string, Record<string, any>> = {};
+    for (const k of Object.keys(edits)) {
+      const [uid, d] = k.split("|");
+      (m[uid] = m[uid] || {})[d] = edits[k];
+    }
+    return m;
+  }, [edits]);
 
   const save = useCallback(async () => {
     if (!companyId || !Object.keys(edits).length) return;
@@ -246,67 +262,23 @@ export default function AttendanceReportEditable() {
                   <Text key={c} style={[s.hcell, { width: 36, color: CODE_COLORS[c] }]}>{c}</Text>
                 ))}
               </View>
-              {rows.map((r: any) => {
-                const tot = { ...r.totals };
-                for (const k of Object.keys(edits)) {
-                  const [uid, d] = k.split("|");
-                  if (uid !== r.user_id) continue;
-                  const prev = r.cells[d]?.st;
-                  if (prev && tot[prev] != null) tot[prev] -= 1;
-                  const nw = edits[k].status;
-                  if (tot[nw] != null) tot[nw] += 1;
-                }
-                return (
-                  <View key={r.user_id}
-                    style={[s.tr, picker?.uid === r.user_id && { zIndex: 100 }]}>
-                    <Text style={[s.cell, { width: 64 }]}>{r.employee_code}</Text>
-                    <Text style={[s.cell, { width: 150, textAlign: "left", fontWeight: "700" }]}
-                      numberOfLines={1}>{r.name}</Text>
-                    <Text style={[s.cell, { width: 92 }]} numberOfLines={1}>{r.department}</Text>
-                    {(data.days || []).map((d: string) => {
-                      const c = r.cells[d] || {};
-                      const ed = edits[`${r.user_id}|${d}`];
-                      const stv = ed ? ed.status : c.st;
-                      const isPick = picker?.uid === r.user_id && picker?.d === d;
-                      return (
-                        <View key={d} style={{ width: 38, zIndex: isPick ? 120 : 0 }}>
-                          <Pressable
-                            disabled={!st.enabled}
-                            onPress={() => setPicker(isPick ? null : { uid: r.user_id, d })}
-                            style={[s.dcell,
-                              ed && { backgroundColor: "#FEF3C7" },
-                              c.pending && { backgroundColor: "#FEF9C3" }]}
-                            testID={`ar-cell-${r.employee_code}-${d.slice(8)}`}
-                          >
-                            <Text style={[s.dtxt, { color: CODE_COLORS[stv] || colors.onSurfaceTertiary }]}>
-                              {stv || "·"}{c.pending ? "🟡" : ed ? "✎" : c.src === "manual" ? "✓" : ""}
-                            </Text>
-                          </Pressable>
-                          {isPick ? (
-                            <View style={s.pop}>
-                              {CODES.map((cd) => (
-                                <Pressable key={cd}
-                                  onPress={() => setCell(r.user_id, d, cd, c.st)}
-                                  style={s.popBtn} testID={`ar-pick-${cd}`}>
-                                  <Text style={[s.popTxt, { color: CODE_COLORS[cd] }]}>{cd}</Text>
-                                </Pressable>
-                              ))}
-                            </View>
-                          ) : null}
-                        </View>
-                      );
-                    })}
-                    {CODES.map((cd) => (
-                      <Text key={cd} style={[s.cell, { width: 36, fontWeight: "800" }]}>{tot[cd]}</Text>
-                    ))}
-                  </View>
-                );
-              })}
+              {rows.map((r: any) => (
+                <GridRow
+                  key={r.user_id}
+                  r={r}
+                  days={data.days || []}
+                  rowEdits={editsByUser[r.user_id]}
+                  pickerD={picker?.uid === r.user_id ? picker.d : null}
+                  enabled={!!st.enabled}
+                  onCellPress={onCellPress}
+                  setCell={setCell}
+                />
+              ))}
             </View>
           </ScrollView>
           <Text style={s.legend}>
-            P Present · A Absent · L Leave · WO Week Off · CO Camp Off · HD Half Day ·
-            ✓ Manual · ✎ Unsaved · 🟡 Pending Approval
+            P Present · A Absent · L Leave · CL Casual Leave · WO Week Off · CO Camp Off ·
+            HD Half Day · H Holiday · ✓ Manual · ✎ Unsaved · 🟡 Pending Approval
           </Text>
         </ScrollView>
       )}
@@ -484,6 +456,79 @@ export default function AttendanceReportEditable() {
     </SafeAreaView>
   );
 }
+
+/**
+ * Iter 747 (user perf bug) — memoized row: sirf USI row ka re-render hota
+ * hai jisme picker khula ya edit hua. Shallow-compare on row edits map.
+ */
+const GridRow = React.memo(function GridRow({
+  r, days, rowEdits, pickerD, enabled, onCellPress, setCell,
+}: {
+  r: any; days: string[]; rowEdits?: Record<string, any>;
+  pickerD: string | null; enabled: boolean;
+  onCellPress: (uid: string, d: string) => void;
+  setCell: (uid: string, d: string, st: string, prev: string) => void;
+}) {
+  const tot = { ...r.totals };
+  for (const d of Object.keys(rowEdits || {})) {
+    const prev = r.cells[d]?.st;
+    if (prev && tot[prev] != null) tot[prev] -= 1;
+    const nw = (rowEdits as any)[d].status;
+    if (tot[nw] != null) tot[nw] += 1;
+  }
+  return (
+    <View style={[s.tr, pickerD && { zIndex: 100 }]}>
+      <Text style={[s.cell, { width: 64 }]}>{r.employee_code}</Text>
+      <Text style={[s.cell, { width: 150, textAlign: "left", fontWeight: "700" }]}
+        numberOfLines={1}>{r.name}</Text>
+      <Text style={[s.cell, { width: 92 }]} numberOfLines={1}>{r.department}</Text>
+      {days.map((d: string) => {
+        const c = r.cells[d] || {};
+        const ed = (rowEdits || {})[d];
+        const stv = ed ? ed.status : c.st;
+        const isPick = pickerD === d;
+        return (
+          <View key={d} style={{ width: 38, zIndex: isPick ? 120 : 0 }}>
+            <Pressable
+              disabled={!enabled}
+              onPress={() => onCellPress(r.user_id, d)}
+              style={[s.dcell,
+                ed && { backgroundColor: "#FEF3C7" },
+                c.pending && { backgroundColor: "#FEF9C3" }]}
+              testID={`ar-cell-${r.employee_code}-${d.slice(8)}`}
+            >
+              <Text style={[s.dtxt, { color: CODE_COLORS[stv] || colors.onSurfaceTertiary }]}>
+                {stv || "·"}{c.pending ? "🟡" : ed ? "✎" : c.src === "manual" ? "✓" : ""}
+              </Text>
+            </Pressable>
+            {isPick ? (
+              <View style={s.pop}>
+                {CODES.map((cd) => (
+                  <Pressable key={cd}
+                    onPress={() => setCell(r.user_id, d, cd, c.st)}
+                    style={s.popBtn} testID={`ar-pick-${cd}`}>
+                    <Text style={[s.popTxt, { color: CODE_COLORS[cd] }]}>{cd}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        );
+      })}
+      {CODES.map((cd) => (
+        <Text key={cd} style={[s.cell, { width: 36, fontWeight: "800" }]}>{tot[cd]}</Text>
+      ))}
+    </View>
+  );
+}, (a, b) => {
+  if (a.r !== b.r || a.enabled !== b.enabled || a.pickerD !== b.pickerD
+      || a.days !== b.days) return false;
+  const ea = a.rowEdits || {}, eb = b.rowEdits || {};
+  const ka = Object.keys(ea), kb = Object.keys(eb);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) if (ea[k] !== eb[k]) return false;
+  return true;
+});
 
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },

@@ -9313,3 +9313,40 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
 - Key gaps flagged: Recruitment module, Performance Mgmt (KRA/KPA),
   Training, Org chart, ABRY scheme, 48-hr OT cap, min-OT 30min rule,
   OT approval flow, attrition/variance KPI cards, birthday auto-mail.
+
+## Iter 746 — OT Management + Org Structure + HR Analytics (user PRD, 4 phases)
+- NEW backend: routes/org_structure.py (dept_hierarchy overlay on masters,
+  reporting_chain on users, org_defaults, resolve_approval_chain shared
+  helper, org chart/reports, hr_audit), routes/ot_management.py
+  (ot_policies firm+branch, POLICY_DEFAULT cap 48h/min 30min, /ot/generate
+  eligible-vs-excess split with weekly+monthly caps & rounding,
+  /ot/entries, /ot/action approve/reject/cancel/override, /ot/resubmit,
+  approved_ot_hours_map + mark_ot_payroll_processed, 10 report kinds),
+  routes/hr_analytics.py (attrition real doj/resign_date, salary-variance
+  reason breakup + drilldown, hr dashboard, reports).
+- Payroll hook (compliance_salary_runs.py): approved_ot_maps built only
+  when policy enabled+approval_required → stats["ot_hours"] overridden
+  with approved hours; after run create, approved entries →
+  payroll_processed (locked, 409 on modify). DEFAULT-SAFE for all firms.
+- NEW frontend: ot-management.tsx, org-hierarchy.tsx, hr-analytics.tsx;
+  sidebar entries in AdminWebShell (both admin lists).
+- TESTED: tests/test_iter746_ot_org.py 42/42 PASS (min-OT matrix, 48h cap
+  on 729 real July entries — 475.5h excess kept out of payroll, approval
+  flow, payroll approved-only 127/127, lock, org cycle guard, analytics);
+  testing_agent frontend ALL PASS (iteration_746.json). Iter744/745
+  regression PASS.
+
+## Iter 747 — Attendance Editable dropdown+perf, Employee Master tab scroll
+- Attendance Report (Monthly Editable): CODES now P A L CL WO CO HD H
+  (backend manual_attendance.py CODES tuple + frontend). PERF: GridRow
+  React.memo with per-row edits map (editsByUser) + custom comparator —
+  pehle har click par ~4000 cells re-render (slow); ab live-verified
+  picker open 109ms, option apply 291ms.
+- Employee Master (Add + Edit same file employee-add.tsx): section tabs
+  auto-scroll FIXED. ROOT CAUSE: RNW scroll container par Element.scrollTo()
+  silently fail hota hai (scrollTop assignment/scrollIntoView works).
+  Fix: instant el.scrollIntoView({block:'start'}) + ancestor scrollTop
+  -70px nudge (ancestor = overflowY auto with scroll range >200px).
+  Live-verified all 6 tabs (scrollTop 90→1073→1526→2395→3202).
+- APP_ITERATION=747; deploy_vps_iter747.sh (745/746 folded); temp_bundle
+  kind=script → deploy747.sh, kind=modules-xlsx still serves module audit.

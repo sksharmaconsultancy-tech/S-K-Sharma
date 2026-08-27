@@ -127,12 +127,28 @@ export default function EmployeeAddScreen() {
     // Iter 376 (user bug) — the anchor node is sometimes not laid out yet
     // when the chip is tapped, so scrollIntoView silently did nothing.
     // Retry over a few frames until the node exists.
+    // Iter 747 (user request) — scrollIntoView was unreliable inside the
+    // nested RNW ScrollView (Add + Edit dono me tab tap par scroll nahi
+    // hota tha). Ab nearest scrollable ancestor dhoond kar us container
+    // ko manually smooth-scroll karte hain; scrollIntoView fallback hai.
     let tries = 0;
     const go = () => {
       try {
         const el = document.getElementById(id) as any;
-        if (el?.scrollIntoView) {
-          el.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (el) {
+          // Browser-native scroll (instant) — nested RNW containers ko khud
+          // resolve karta hai. NOTE: smooth behavior / p.scrollTo() dono RNW
+          // par unreliable nikle; scrollIntoView + scrollTop nudge reliable.
+          if (el.scrollIntoView) el.scrollIntoView({ block: "start" });
+          // sticky header ke liye 70px upar nudge
+          let p: any = el.parentElement;
+          while (p) {
+            const cs = window.getComputedStyle(p);
+            if ((cs.overflowY === "auto" || cs.overflowY === "scroll")
+                && p.scrollHeight > p.clientHeight + 200) break;
+            p = p.parentElement;
+          }
+          if (p && p.scrollTop > 0) p.scrollTop = Math.max(0, p.scrollTop - 70);
         } else if (tries++ < 12) {
           setTimeout(go, 80);
         }

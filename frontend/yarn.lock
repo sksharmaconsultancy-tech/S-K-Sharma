@@ -4058,6 +4058,11 @@ expo-router@6.0.24:
     use-latest-callback "^0.2.1"
     vaul "^1.1.2"
 
+expo-screen-capture@~8.0.10:
+  version "8.0.10"
+  resolved "https://registry.yarnpkg.com/expo-screen-capture/-/expo-screen-capture-8.0.10.tgz#d333dcc4428099f0cd4f0cbeb906477e5c1210a4"
+  integrity sha512-yoD4giW4gg3PHQxkOrL4ArZCn3NJtLnL9opdZV2rMv94PXYZSNbTvhMipYVoDXKEj19k+R3fjoQGZpH9gCFILA==
+
 expo-secure-store@15.0.8:
   version "15.0.8"
   resolved "https://registry.yarnpkg.com/expo-secure-store/-/expo-secure-store-15.0.8.tgz#678065599bb76061b5a85b15b9426bf7a11089ae"

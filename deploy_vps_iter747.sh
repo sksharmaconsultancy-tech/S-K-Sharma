@@ -1,8 +1,46 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 745)
+# S.K. Sharma & Co. — VPS deploy script (Iter 747)
 # Deploys the FULL latest code (includes ALL previous iterations).
 #
-# ══════ WHAT'S NEW (Iter 745) — ⏰ LATE PENALTY (ATTENDANCE POLICY BASED) ══════
+# ══════ WHAT'S NEW (Iter 747) — 📅 EDITABLE ATTENDANCE + EMPLOYEE MASTER UX ══════
+#
+#  * ATTENDANCE REPORT (Monthly Editable) — USER REQUEST:
+#    - Cell par click karte hi dropdown me ab SABHI codes: P A L CL WO CO
+#      HD H (CL Casual Leave + H Holiday naye add hue; backend validation,
+#      totals aur Excel export me bhi).
+#    - SPEED FIX: pehle har click par 127×31 = ~4000 cells re-render hote
+#      the (isliye option choose karne me time lagta tha). Ab har row
+#      memoized hai — sirf USI row ka render hota hai. Live test: picker
+#      109ms me khulta hai, option click 291ms me apply. ⚡
+#  * EMPLOYEE MASTER — USER REQUEST: upar ke tabs (Personal / Employment /
+#    Salary / Compliance / Statutory & Bank / Family) par click karte hi
+#    form AUTO-SCROLL hokar us section par pahunch jata hai — Add New
+#    Employee AUR Edit dono me. (Root cause: RNW scroll container par
+#    scrollTo() silently fail hota tha; ab native scrollIntoView + nudge.)
+#
+# ══════ ALSO IN Iter 746 — 🏢 OT MANAGEMENT + ORG STRUCTURE + HR ANALYTICS ══════
+#
+# USER PRD (4 phases, sab included):
+#  * ORG: Department hierarchy (parent-child, head, cost centre, branch,
+#    active/inactive, cycle-guard) upar interactive Org Chart; Reporting
+#    Chain per employee (Primary/Functional Mgr, Dept Head, HR, Final
+#    Approver) — yahi chain aage Leave/Expense/F&F me reuse hogi.
+#  * OT: Firm/Branch OT Policy — 48-hr monthly cap (configurable, NOT
+#    hard-coded), 30-min minimum, weekly limit, rounding, holiday/weekoff
+#    OT, multiplier, dept/type applicability; Attendance→Eligible/Excess
+#    split→sequential Approval workflow→Payroll me SIRF approved OT
+#    (excess kabhi silently nahi jata); payroll ke baad entries LOCK.
+#    Reject→Re-submit, admin override (reason ke saath), full audit.
+#  * HR ANALYTICS: Attrition KPI (real joining/exit data, 12-month trend,
+#    voluntary/involuntary, dept/branch-wise), Salary Variance (prev vs
+#    current run, reason breakup + employee drill-down), Management
+#    Dashboard (KPIs, OT section, movement, org headcounts, alerts).
+#  * 10 OT reports + 5 Org reports + Attrition/Variance reports (Excel/PDF).
+#  * DEFAULT-SAFE: jab tak firm OT Policy me approval ON nahi karti,
+#    payroll bilkul pehle jaisa chalta hai. VERIFIED: 42/42 backend tests
+#    + frontend testing ALL PASS (729 real OT entries par cap test).
+#
+# ══════ ALSO IN Iter 745 — ⏰ LATE PENALTY (ATTENDANCE POLICY BASED) ══════
 #
 # USER PRD: Late Penalty ab ATTENDANCE POLICY ke andar configure hoti hai
 # (firm-wise policy) — grace/free-lates/slabs manually set, monthly reset

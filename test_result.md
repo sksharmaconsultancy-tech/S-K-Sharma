@@ -983,3 +983,12 @@ ITER 487 (doc-expiry alerts):
   validation 400, math units). testing_agent frontend ALL PASS
   (iteration_745.json): policy section testIDs, slab preset, persistence,
   late-penalty summary+report 27 rows, regression OK, policy restored.
+
+## Iter 746 — OT/Org/Analytics (tested)
+- Backend self-test 42/42 PASS (tests/test_iter746_ot_org.py); frontend
+  testing_agent ALL PASS (iteration_746.json). Cleanup done (no test data
+  left in Kankani).
+
+## Iter 747 — Attendance editable + employee master scroll (self-tested)
+- Live browser verification: picker 109ms/291ms, CL applied; employee
+  master all 6 tabs scroll (screenshots in run logs). No DB writes made.

@@ -297,6 +297,21 @@ async def _compute_compliance_run(
             if _m_lp:
                 late_penalty_maps[_cid_lp] = _m_lp
 
+    # Iter 746 — APPROVED-OT override maps (user PRD): ONLY when a firm's
+    # OT Policy is enabled AND approval_required, payroll uses the APPROVED
+    # OT hours instead of raw grid OT (unapproved/excess OT never slips
+    # into payroll silently). Firms without the policy stay exactly as-is.
+    approved_ot_maps: Dict[str, dict] = {}
+    if not payload.use_imported_sheet:
+        from routes.ot_management import approved_ot_hours_map
+        for _cid_ot in {e.get("company_id") for e in employees if e.get("company_id")}:
+            try:
+                _m_ot = await approved_ot_hours_map(_cid_ot, payload.month)
+            except Exception:
+                _m_ot = None
+            if _m_ot is not None:
+                approved_ot_maps[_cid_ot] = _m_ot
+
     # Iter 216 (user request) — Compliance Present Days are FETCHED from
     # the Attendance Report grid (the exact same source the Actual Salary
     # Process uses) so the compliance run always matches the report.
@@ -604,6 +619,11 @@ async def _compute_compliance_run(
                     or 0.0
                 )
                 stats["ot_hours"] = float(_t_c.get("ot_hours") or 0.0)
+        # Iter 746 — approval-required firms: payroll OT = APPROVED OT only
+        # (grid OT is replaced by the month's approved eligible hours).
+        _aot_map746 = approved_ot_maps.get(emp.get("company_id"))
+        if _aot_map746 is not None:
+            stats["ot_hours"] = float(_aot_map746.get(emp["user_id"], 0.0))
         _am = am_entries.get(emp["user_id"]) if payload.use_imported_sheet else None
         # Iter 443 (user request) — "Freeze as Actual Gross": the ACTUAL
         # Salary Process run of the SAME month is the authoritative import
@@ -2327,6 +2347,17 @@ async def _create_compliance_salary_run_core(
         else f"Processed {len(run.get('rows') or [])} employees"
     )
     await write_salary_audit(admin, "process", run, _audit_msg)
+    # Iter 746 — approved OT consumed by this payroll run is now LOCKED
+    # (status payroll_processed → unauthorized modification blocked).
+    if payload.company_id and not payload.use_imported_sheet:
+        from routes.ot_management import (
+            effective_ot_policy, mark_ot_payroll_processed)
+        try:
+            _p_ot746 = await effective_ot_policy(payload.company_id)
+            if _p_ot746.get("enabled") and _p_ot746.get("approval_required"):
+                await mark_ot_payroll_processed(payload.company_id, payload.month)
+        except Exception:
+            pass
     # Iter 485 — audit the master-snapshot lifecycle events.
     _sm = run.get("master_snapshot") or {}
     if _sm.get("created"):
