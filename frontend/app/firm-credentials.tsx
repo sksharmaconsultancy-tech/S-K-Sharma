@@ -79,6 +79,12 @@ export default function FirmCredentialsScreen() {
   // Iter 598 (user report) — self-service PIN recovery for Sub Super Admins.
   const [forgotMsg, setForgotMsg] = useState("");
   const [forgotBusy, setForgotBusy] = useState(false);
+  // Iter 753 — self-service Set/Change PIN (Sub Admin apna PIN khud set kare)
+  const [showSetPin, setShowSetPin] = useState(false);
+  const [curPin, setCurPin] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [setPinBusy, setSetPinBusy] = useState(false);
+  const [setPinMsg, setSetPinMsg] = useState("");
   // Iter 599 (user request) — vault access log (Super Admin only).
   const [logs, setLogs] = useState<VaultLog[] | null>(null);
   const [logBusy, setLogBusy] = useState(false);
@@ -131,6 +137,24 @@ export default function FirmCredentialsScreen() {
     } catch (e: any) {
       setErr(e?.message || "Could not send the temporary PIN");
     } finally { setForgotBusy(false); }
+  };
+
+  // Iter 753 (user request) — Sub Admin sets/changes their OWN PIN here.
+  const changeMyPin = async () => {
+    if (setPinBusy) return;
+    if (!curPin.trim() || !newPin.trim()) { setSetPinMsg("Dono PIN bharein"); return; }
+    if (!/^\d{6}$/.test(newPin.trim())) { setSetPinMsg("Naya PIN exactly 6 digits ka ho"); return; }
+    setSetPinBusy(true); setSetPinMsg("");
+    try {
+      await api("/auth/pin-change", {
+        method: "POST",
+        body: { current_pin: curPin.trim(), new_pin: newPin.trim() },
+      });
+      setSetPinMsg("✅ Naya PIN set ho gaya — ab isi se unlock karein");
+      setPin(""); setCurPin(""); setNewPin("");
+    } catch (e: any) {
+      setSetPinMsg(e?.message || "PIN change failed");
+    } finally { setSetPinBusy(false); }
   };
 
   // Iter 599 — toggle the vault access log panel (Super Admin only).
@@ -254,6 +278,54 @@ export default function FirmCredentialsScreen() {
                 {forgotBusy ? "Sending…" : "Forgot PIN? Email me a temporary PIN"}
               </Text>
             </Pressable>
+            {/* Iter 753 (user request) — Sub Admin apna KHUD ka PIN yahin
+                set/change kar sake (current ya email wale temp PIN se). */}
+            <Pressable onPress={() => setShowSetPin(!showSetPin)} testID="cred-setpin-toggle">
+              <Text style={{ color: colors.brandPrimary, fontSize: 12.5, fontWeight: "700", padding: 6 }}>
+                {showSetPin ? "▲ Set / Change my PIN" : "▼ Set / Change my PIN"}
+              </Text>
+            </Pressable>
+            {showSetPin ? (
+              <View style={{ width: "100%", gap: 8 }}>
+                <Text style={[styles.mutedTxt, { fontSize: 11.5 }]}>
+                  Current PIN (ya email se aaya temporary PIN) + naya 6-digit PIN.
+                  PIN set na ho to pehle upar “Forgot PIN?” se temp PIN mangwa lo.
+                </Text>
+                <TextInput
+                  style={styles.pinInput}
+                  placeholder="Current / Temp PIN"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  value={curPin}
+                  onChangeText={setCurPin}
+                  secureTextEntry
+                  keyboardType="numeric"
+                  maxLength={8}
+                  testID="cred-setpin-current"
+                />
+                <TextInput
+                  style={styles.pinInput}
+                  placeholder="New 6-digit PIN"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  value={newPin}
+                  onChangeText={setNewPin}
+                  secureTextEntry
+                  keyboardType="numeric"
+                  maxLength={6}
+                  testID="cred-setpin-new"
+                />
+                {!!setPinMsg && (
+                  <Text style={[styles.mutedTxt, { color: setPinMsg.startsWith("✅") ? "#047857" : "#DC2626", textAlign: "center" }]}>
+                    {setPinMsg}
+                  </Text>
+                )}
+                <Pressable style={styles.unlockBtn} onPress={changeMyPin} disabled={setPinBusy} testID="cred-setpin-save">
+                  {setPinBusy
+                    ? <ActivityIndicator color={colors.onBrandPrimary} size="small" />
+                    : <Ionicons name="key-outline" size={15} color={colors.onBrandPrimary} />}
+                  <Text style={styles.unlockTxt}>Save my new PIN</Text>
+                </Pressable>
+              </View>
+            ) : null}
           </View>
         ) : (
           <>
