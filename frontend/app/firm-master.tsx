@@ -1297,7 +1297,7 @@ export default function FirmMasterScreen() {
                           // OFF (biometric requires Actual Salary).
                           updateSection("salary_process", v
                             ? { offline_salary: true, bio_matrix_attendance: true }
-                            : { offline_salary: false, bio_matrix_attendance: false })
+                            : { offline_salary: false, bio_matrix_attendance: false, dummy_shift_report: false })
                         } />
                 <Toggle label="Bio Matrix Attendance" value={!!sp.bio_matrix_attendance} testID="fm-bio-matrix"
                         onChange={(v) => {
@@ -1307,8 +1307,18 @@ export default function FirmMasterScreen() {
                             if (Platform.OS === "web") window.alert("Enable Offline Salary (Actual Salary Process) first to allow Bio Matrix Attendance.");
                             return;
                           }
-                          updateSection("salary_process", { bio_matrix_attendance: v });
+                          updateSection("salary_process", v
+                            ? { bio_matrix_attendance: true }
+                            : { bio_matrix_attendance: false, dummy_shift_report: false });
                         }} />
+                {/* Iter 763 (user request) — Dummy Shift Report: only for
+                    Actual/Offline + Bio-Matrix firms. Employee Master's
+                    assigned Dummy Shift drives the In/Out Matrix with the
+                    EXACT shift window on present days; absent stays blank. */}
+                {sp.offline_salary && sp.bio_matrix_attendance ? (
+                  <Toggle label="Dummy Shift Report (In/Out Matrix)" value={!!sp.dummy_shift_report} testID="fm-dummy-shift-report"
+                          onChange={(v) => updateSection("salary_process", { dummy_shift_report: v })} />
+                ) : null}
                 <Toggle label="Gratuity Applicable" value={!!sp.gratuity_applicable}
                         onChange={(v) => updateSection("salary_process", { gratuity_applicable: v })} />
                 {/* Iter 142 — firm-wide OT gate. OFF = NO overtime is

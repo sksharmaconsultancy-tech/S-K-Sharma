@@ -3063,13 +3063,36 @@ async def refresh_master_snapshot_endpoint(
         structure_pct=existing.get("structure_pct"),
         statutory_cfg=existing.get("statutory_cfg"),
     )
-    # Iter 603 (user bug) — "Refresh Master" was wiping ALL saved grid data
-    # (entered present days, manual OT/Others/TDS/Advance…). Pass the
-    # existing rows into the compute so the NON-DESTRUCTIVE reprocess
-    # machinery (Iter 297/374) keeps every manual figure — only the master
-    # values (rates, basic, policies) refresh.
-    _prev_rows = {r.get("user_id"): r for r in (existing.get("rows") or [])
-                  if r.get("user_id")}
+    # Iter 603 (user bug) — "Refresh Master" was wiping the entered days.
+    # Iter 763 (user bug — "refresh master data revise nahi ho raha /
+    # calculation bigad rahi hai"): passing the FULL old rows let the
+    # non-destructive preserve machinery restore OLD money figures
+    # (computed on the OLD rates) over the fresh calculation — rates
+    # looked "not revised" and sheets went inconsistent. Refresh Master
+    # now keeps ONLY the entered attendance days (and day/OT-hour edits);
+    # every rupee figure is recomputed fresh from the NEW master.
+    _DAY_KEYS_763 = ("present_days", "compliance_days", "half_days",
+                     "week_off_days", "paid_leave_days", "ot_hours")
+
+    def _slim_prev_763(r: dict) -> dict:
+        mf = [str(x) for x in (r.get("manual_fields") or [])
+              if str(x) in ("present_days", "ot_hours")]
+        keep: Dict[str, Any] = {
+            "user_id": r.get("user_id"),
+            "employee_code": r.get("employee_code"),
+            "manual_fields": mf,
+            "days_hand_edited": r.get("days_hand_edited"),
+        }
+        for k in _DAY_KEYS_763:
+            if r.get(k) is not None:
+                keep[k] = r.get(k)
+        return keep
+
+    _prev_rows = {r.get("user_id"): _slim_prev_763(r)
+                  for r in (existing.get("rows") or []) if r.get("user_id")}
+    # Safety net — the pre-refresh sheet is versioned (restorable from
+    # Past Salary Runs → History).
+    await _snapshot_run_version(existing, admin, "pre_reprocess")
     run = await _compute_compliance_run(admin, payload,
                                         prev_rows=_prev_rows,
                                         allow_snapshot_create=False)

@@ -272,6 +272,9 @@ export default function EmployeeMasterScreen() {
         try {
           const fm = await api<any>(`/admin/firm-master/${e.company_id}`);
           setFirmOtAllowed((fm?.master?.salary_process?.ot_allowed) !== false);
+          // Iter 763 — Firm Master "Dummy Shift Report" toggle also
+          // unlocks the Dummy Shift dropdown in the Employee Master.
+          if (fm?.master?.salary_process?.dummy_shift_report) e.dummy_shift_allowed = true;
         } catch {
           setFirmOtAllowed(true);
         }

@@ -1186,6 +1186,13 @@ async def shift_options(company_id: str,
     _pm = (((comp or {}).get("attendance_policy") or {})
            .get("policy_master") or {})
     allowed = bool(_pm.get("dummy_shift_allowed"))
+    # Iter 763 — Firm Master "Dummy Shift Report" toggle also unlocks
+    # dummy mode (Actual/Offline + Bio-Matrix firms).
+    _fmd = await db.firm_masters.find_one(
+        {"company_id": company_id},
+        {"_id": 0, "salary_process.dummy_shift_report": 1})
+    allowed = allowed or bool(((_fmd or {}).get("salary_process") or {})
+                              .get("dummy_shift_report"))
     # Iter 711 — firm-defined dummy shifts win over the built-in master.
     _eff = effective_dummy_shifts(_pm)
     return {"shifts": sorted(shifts),

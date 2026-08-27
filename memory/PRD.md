@@ -9592,3 +9592,32 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   freeze-import firms where preserve blocks keep old values. Ask user
   for firm + month example next session.
 - APP_ITERATION=762; deploy_vps_iter762.sh (761 folded, deleted).
+
+## Iter 763 — Refresh Master full revise + Dummy Shift Report (Firm toggle)
+- REFRESH MASTER (user bug, confirmed fix): compliance_salary_runs.py
+  refresh_master_snapshot_endpoint — prev_rows now SLIMMED via
+  _slim_prev_763(): only day keys (present/compliance/half/WO/PL days,
+  ot_hours) + manual_fields(days/ot) + days_hand_edited survive; EVERY
+  rupee figure recomputes fresh from the NEW master snapshot (v+1).
+  Verified E2E on csrun_f94d21e689b2 (Kankani 2026-06): rate 1500→1600
+  → basic 14400→15360, net 23292→24844, present_days 24 preserved;
+  reverse restore also exact. BACK-DATE RULE (user confirmed): past
+  sheets default = frozen snapshot rates; Refresh Master explicitly
+  pulls current master (finalized needs Unlock first). Pre-refresh
+  auto-version in History.
+- DUMMY SHIFT REPORT (user request): new Firm Master salary_process.
+  dummy_shift_report toggle (firm_master.py default False;
+  firm-master.tsx testID fm-dummy-shift-report, visible only when
+  offline_salary+bio_matrix ON; offline/bio OFF auto-resets it).
+  Gates: inout_ot_matrix.py _build dummy mode + labour_reports.py
+  shift_options.dummy_allowed + dummy_bulk_options now OR the firm
+  toggle with attendance_policy.dummy_shift_allowed. employee-master.tsx
+  dummy dropdown unlocked by firm toggle too (via /admin/firm-master).
+  EXACT MODE: when firm toggle ON, present days show the assigned dummy
+  shift's EXACT window (no dummy_rnd_min offsets) e.g. SHIFT 2 →
+  07:00/15:00/08:00; absent blank "-", WO/H unchanged. Verified: 86
+  present cells exact, 184 absent blank (2026-07 Kankani).
+- Testing agent: 7/7 backend pytest + frontend Playwright PASS
+  (test_iter763_refresh_master_and_dummy_shift.py). All test mutations
+  restored (Kankani flags false, MAHAVEER 1500).
+- APP_ITERATION=763; deploy_vps_iter763.sh (762 folded).

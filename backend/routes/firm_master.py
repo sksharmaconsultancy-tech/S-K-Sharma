@@ -163,6 +163,12 @@ def _empty_master(company_id: str, company_name: str = "") -> Dict[str, Any]:
             # Iter 338 (user) — frozen Compliance gross becomes the ACTUAL
             # Salary gross for On-Roll employees.
             "freeze_to_actual": False,
+            # Iter 763 (user request) — "Dummy Shift Report" toggle for
+            # Actual/Offline + Bio-Matrix firms: the employee's assigned
+            # Dummy Shift (Employee Master) drives the In/Out Matrix with
+            # the EXACT shift window on present days; absent days stay
+            # blank. Display-only — attendance/payroll never touched.
+            "dummy_shift_report": False,
         },
         "leave_policy": {
             "cl_pl_applicable": False,

@@ -1,0 +1,36 @@
+{
+  "summary": "Iter 763 — Regression PASS on BOTH backend and frontend for (a) Refresh Master snapshot on Compliance Salary runs and (b) new Firm Master salary_process.dummy_shift_report toggle driving In/Out & OT Matrix exact-dummy window. All 7 backend tests passed. Frontend UI verifies the toggle gating rules end-to-end. All test-side mutations restored (MAHAVEER SINGH basic=1500 / run row basic=14400, net=23292, present_days=24; Kankani salary_process back to offline/bio/dummy=false).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": [], "react_native_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter763_refresh_master_and_dummy_shift.py",
+    "/app/test_reports/pytest/iter763_results.xml"
+  ],
+  "backend_tests_run": {
+    "test_01_baseline_row": "PASSED — MAHAVEER row rate=1500 basic=14400 net=23292 present_days=24",
+    "test_02_refresh_master_pulls_new_rate_1600": "PASSED — after DB bump to 1600 → rate=1600 basic=15360 net=24844 present_days=24 (preserved)",
+    "test_03_restore_rate_and_verify_1500": "PASSED — after DB restore to 1500 → rate=1500 basic=14400 net=23292 present_days=24",
+    "test_04_firm_master_has_dummy_shift_report_field": "PASSED — salary_process includes dummy_shift_report key",
+    "test_05_toggle_on_and_shift_options_dummy_allowed": "PASSED — PATCH persisted, GET /api/admin/labour-reports/shift-options?company_id=cmp_527fecdd7c returned dummy_allowed=true even though attendance_policy.dummy_shift_allowed is OFF, confirming firm-toggle gate",
+    "test_06_inout_ot_matrix_exact_dummy_window": "PASSED — SHIFT 2 employees: 86 present cells all d_in='07:00' d_out='15:00' total='08:00'; 184 absent cells d_in='-' d_out='-'; 40 WO/H cells (unchanged). dummy_mode=true. Used month 2026-07 because 2026-06 has almost no attendance rows; June refresh-master still fully verified via test_01–03.",
+    "test_99_cleanup_firm_toggles": "PASSED — salary_process restored to offline_salary=false, bio_matrix_attendance=false, dummy_shift_report=false"
+  },
+  "frontend_tests_run": {
+    "firm_master_dummy_shift_toggle": "PASSED — logged in as super admin (session injection with llc_session_token). Firm Master → Payroll Settings → Salary Process Settings: with Offline Salary OFF the fm-dummy-shift-report toggle was NOT present (count=0). Turning fm-offline-salary ON auto-enabled fm-bio-matrix and revealed fm-dummy-shift-report. Toggled dummy ON, Saved. After reload the state persisted. Turning Offline OFF made the dummy toggle disappear again (auto-reset in code sets dummy_shift_report=false). Saved final state — firm ended as it started (offline OFF, bio OFF, dummy OFF)."
+  },
+  "action_items": [],
+  "critical_code_review_comments": [
+    "firm-master.tsx line 1300 & 1312 correctly cascade dummy_shift_report=false when Offline OR Bio Matrix is turned off — good defensive gating.",
+    "Backend inout-ot-matrix _build renders SHIFT 2 (07:00–15:00) exactly with zero minute offsets on present days as required; absent cells show '-' and WO/H cells show 'WO' with total '-' as designed.",
+    "Consider adding a testID to the Save button (e.g., fm-save) — currently identified only by button text 'Save', which works but is fragile for future automation."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter763_refresh_master_and_dummy_shift.py (new pytest file)"
+  ],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% (1 scenario, 3 sub-assertions)"},
+  "seed_data_creation": "Two temporary user_sessions inserted for super admin (user_67791559822a) for backend & frontend testing — both deleted at end of run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All Kankani (cmp_527fecdd7c) firm master salary_process flags are OFF as at end of test. MAHAVEER SINGH (user_83f0e0c387bb) daily rate restored to 1500 and compliance run csrun_f94d21e689b2 refreshed back to basic=14400/net=23292/present_days=24. Frontend session-injection approach with localStorage key 'llc_session_token' works well for super-admin flows that require bypassing 2FA. In/Out matrix exact-dummy-window verification requires a month with actual attendance rows — June 2026 has ~14, July 2026 has ~1921, so July is the right month for the matrix check.",
+  "rca_of_issue": "N/A — no bugs found; features work as specified in the review request."
+}

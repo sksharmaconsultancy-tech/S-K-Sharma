@@ -160,10 +160,21 @@ async def _build(
              "attendance_policy.policy_master.dummy_shifts": 1})
         _pmst = (((_dpol or {}).get("attendance_policy") or {})
                  .get("policy_master") or {})
-        if not bool(_pmst.get("dummy_shift_allowed")):
+        # Iter 763 (user request) — the Firm Master "Dummy Shift Report"
+        # toggle (Actual/Offline + Bio-Matrix firms) ALSO unlocks dummy
+        # mode and switches the display to the EXACT assigned-shift window
+        # (no minute offsets) — present days show the shift's own 8-hour
+        # timings, absent days stay blank.
+        _fm_doc = await db.firm_masters.find_one(
+            {"company_id": company_id},
+            {"_id": 0, "salary_process.dummy_shift_report": 1})
+        exact_dummy = bool(((_fm_doc or {}).get("salary_process") or {})
+                           .get("dummy_shift_report"))
+        if not (bool(_pmst.get("dummy_shift_allowed")) or exact_dummy):
             raise HTTPException(
                 status_code=400,
                 detail=("Dummy Shift is not enabled for this firm. Switch on "
+                        "'Dummy Shift Report' in the Firm Master or "
                         "'Dummy Shift Allowed' in the Attendance Policy first."))
         # Iter 711 (user request) — the firm's OWN dummy shift definitions
         # (Attendance Policy → Define Dummy Shifts) win; built-in master
@@ -346,8 +357,12 @@ async def _build(
                     if _dkey in dummy_map:
                         st, en, overnight = dummy_map[_dkey]
                         _uid = emp.get("user_id") or ""
-                        _sm = _hm2min(st) + dummy_rnd_min(_uid, iso, "in")
-                        _eo = _hm2min(en) + dummy_rnd_min(_uid, iso, "out")
+                        # Iter 763 — Firm Master "Dummy Shift Report" mode
+                        # shows the EXACT shift window (no random minutes).
+                        _sm = _hm2min(st) + (0 if exact_dummy else
+                                             dummy_rnd_min(_uid, iso, "in"))
+                        _eo = _hm2min(en) + (0 if exact_dummy else
+                                             dummy_rnd_min(_uid, iso, "out"))
                         _em = _eo + (24 * 60 if overnight else 0)
                         e_d["d_in"] = f"{(_sm // 60) % 24:02d}:{_sm % 60:02d}"
                         _os = f"{(_eo // 60) % 24:02d}:{_eo % 60:02d}"
