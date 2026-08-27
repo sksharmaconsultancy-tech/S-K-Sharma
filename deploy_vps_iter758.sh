@@ -1,8 +1,28 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 757)
+# S.K. Sharma & Co. — VPS deploy script (Iter 758)
 # Deploys the FULL latest code (includes ALL previous iterations).
 #
-# ══════ WHAT'S NEW (Iter 757) — 🕘 SHEET HISTORY + REPROCESS FIX ══════
+# ══════ WHAT'S NEW (Iter 758) — 📘 USER MANUAL + FEATURE LIST UPDATE ══════
+#
+# 1) QUICK USER MANUAL (PDF) UPDATED (USER REQUEST):
+#  * 4 naye sections: Salary Sheet History & Restore · Bulk Employee
+#    Correction · OT Policy & Org Hierarchy · Security (2FA + Sub Admin
+#    PIN + Live Popup details).
+#  * Naya "What's New — Latest Updates" page: recent 14 features date,
+#    detail aur navigation ke saath (auto-updating changelog).
+#  * Manual ab bhi har download par LIVE build hota hai — version/date
+#    server se aate hain.
+#
+# 2) SOFTWARE FEATURE LIST UPDATED (USER REQUEST):
+#  * Features PDF ab Iter 757 tak ke saare features cover karta hai —
+#    148 documented features (pehle 130), 19 modules.
+#  * Naye entries: OT 48-hr cap + approval, Sheet Version History,
+#    Non-destructive Reprocess, Advance/Other split, Legacy .50 rounding,
+#    Bulk Correction upgrades, Late Penalty, 2FA, Sub Admin PIN, Live
+#    popup context, naya Section 2.19 (Organisation, Hierarchy & HR
+#    Analytics: departments, RM chain, leave workflow, KPIs, branches).
+#
+# ══════ ALSO IN Iter 757 — 🕘 SHEET HISTORY + REPROCESS FIX ══════
 #
 # 1) SHEET VERSION HISTORY (USER REQUEST):
 #  * Compliance Salary sheet par naya "History" button — har SAVE AS
@@ -2031,8 +2051,8 @@
 #    INCENTIVE · FOOD ALLOWANCE import fix · dynamic allowance columns.
 #
 # Run ON THE VPS as root/sksharma:
-#   wget -O deploy757.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
-#   bash deploy757.sh
+#   wget -O deploy758.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
+#   bash deploy758.sh
 
 APP_DIR=/home/sksharma/app
 WEB_DIR=/var/www/sksharma

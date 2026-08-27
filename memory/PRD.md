@@ -9509,3 +9509,16 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   (testID psr-hist-{run_id}) toggles inline history box with versions
   list + Restore buttons (testID psr-restore-{i}). Same backend
   endpoints. UI verified via screenshot.
+
+## Iter 758 — User Manual + Software Feature List update (user request)
+- user_manual.py: _SEED_SECTIONS (4 new manual sections: Sheet History &
+  Restore, Bulk Employee Correction, OT Policy & Org Hierarchy, Security
+  2FA/SubAdmin PIN/popup context) + 10 new _SEED_UPDATES changelog
+  entries; _manual_data() now UPSERTS seeds by title (prod gets them on
+  next download); build_manual(extras, updates) renders a "What's New —
+  Latest Updates" table (top 14). Manual verified: 31 pages.
+- USER_MANUAL_FEATURES.md: Iter 550→757; new rows 131-148 across
+  sections 2.10/2.11/2.18 + new section 2.19 (Organisation, Hierarchy &
+  HR Analytics); summary 148 features / 19 modules. Features PDF
+  verified: 12 pages.
+- APP_ITERATION=758; deploy_vps_iter758.sh (757 folded, deleted).

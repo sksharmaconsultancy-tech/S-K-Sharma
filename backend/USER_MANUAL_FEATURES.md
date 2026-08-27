@@ -1,6 +1,6 @@
 # Software Features & Functionalities
 ### S.K. Sharma & Co. — Payroll & HR Compliance Software (smartpayrolling.com)
-*User Manual Section — documents the software **as developed**. Generated from the live application structure (Server Iter 550).*
+*User Manual Section — documents the software **as developed**. Generated from the live application structure (Server Iter 757).*
 
 ---
 
@@ -123,6 +123,8 @@ The software is a **multi-firm (multi-tenant) Payroll & HR Compliance platform**
 | 61 | Overtime | OT Report | OT Register | Standalone OT report from grid data | Month/range | Excel/PDF | Admin |
 | 62 | Overtime | OT Salary | OT Salary Run | OT payout processing separate from base payroll | Run, finalize | OT salary sheets | Admin |
 | 63 | Overtime | Policy | OT Calculation Rules | Punch-Sequence OT (2nd pair onward), intra-pair OT beyond duty quota, OT rounding slabs (0/30/60 min), OT caps, cross-midnight OT stitching — all automatic | Policy Master | Reflected in all reports | Automatic |
+| 131 | Overtime | OT Policy | 48-hr Cap & 30-min Minimum | Weekly 48-hour OT cap with overflow rule; OT below 30 minutes ignored | Policy Master | Applied in payroll | Automatic |
+| 132 | Overtime | OT Approval | OT Approval Workflow | OT hours routed for approval before payout (Approval Inbox) | Approve/Reject | OT audit | Manager/Admin |
 
 ### 2.11 Payroll Processing
 | Sr. | Module | Sub-Module | Feature | Detailed Functionality | Key Options | Output / Report | User Role |
@@ -132,6 +134,12 @@ The software is a **multi-firm (multi-tenant) Payroll & HR Compliance platform**
 | 66 | Payroll | Actual Salary | Actual Salary Process | Real-pay run using the simplified Actual Salary amount from Employee Master | Run, finalize | Actual Salary Report | Admin |
 | 67 | Payroll | Salary Compliance Process (AI) | AI Salary Compliance | AI-assisted compliance salary preparation | Review AI output | Draft run | Admin |
 | 68 | Payroll | Arrear Salary | Arrears | Arrear salary run for a past period | Run | Arrear sheets | Admin |
+| 133 | Payroll | Past Salary Runs | Sheet Version History & Restore | Every Save-as-Draft / Finalize / Reprocess keeps its own version (who, when, rows, net); one-click Restore of any earlier version | 🕘 History, Restore | Version list | Admin |
+| 134 | Payroll | Compliance Salary | Non-destructive Reprocess | Reprocess keeps the LAST saved manual corrections (days/OT/TDS/deductions); only untouched rows refresh from the imported sheet | Existing / From Blank | Same registers | Admin |
+| 135 | Payroll | Compliance Import | Advance vs Other Deduction Split | Imported Advance lands in the ADVANCE column and Other Deduction in OTH. DEDUC. — never merged | Auto | Salary sheet | Automatic |
+| 136 | Payroll | Rounding Engine | Legacy .50-Paise Match | Figures on exactly 50 paise follow the legacy software (earned heads round DOWN, statutory wage base rounds UP) | Automatic | Exact tallies | Automatic |
+| 137 | Payroll | Bulk Employee Correction | Grid Upgrades | Frozen Emp Code/Name/Father Name, per-column Excel-style filters, live Gross Total (Master) column, Export Excel of the displayed grid | Filters, Export | Excel | Admin |
+| 138 | Payroll | Attendance Policy | Late Penalty | Configurable late-coming penalty applied via the firm's attendance policy | Policy Master | Payroll deduction | Automatic |
 | 69 | Payroll | Past Salary Runs | Run History | Browse/reopen previous runs | Open | Historical registers | Admin |
 | 70 | Payroll | Monthly Payroll Report | Consolidated Monthly Report | Optimized monthly payroll report; defaults to the last finalized month; ‹ › month stepper | Excel/PDF | Report | Admin |
 | 71 | Payroll | Day-wise Salary Sheet | Daily Salary | Per-day salary sheet | Export | Excel | Admin |
@@ -222,6 +230,20 @@ The software is a **multi-firm (multi-tenant) Payroll & HR Compliance platform**
 | 128 | Administration | Appearance / Theme | Theming | Portal theme customisation & preview | Save theme | — | Admin |
 | 129 | Administration | User Manual (PDF) | Documentation | Downloadable user manual PDF generated from the system | Download | Manual PDF | All Admin |
 | 130 | Administration | Portal Automation / Test Portal | Automation Tools | Portal automation utilities and test screens | Run | — | Super Admin |
+| 139 | Administration | Security | Two-Factor Authentication | Email OTP verification on admin logins | Verify OTP | Login audit | All Admin |
+| 140 | Administration | Firms ID & Password | Sub Admin Own PIN | Each Sub Admin sets a personal PIN to open the credentials vault; duplicate statutory logins (e.g. same EPFO User ID on two firms) are blocked | Set / Change My PIN | Vault audit | Sub Admin |
+| 141 | Administration | Notifications | Live Popups with Context | Bottom-left popups + bell inbox show the Firm name, WHO acted and WHOSE record changed | Preferences | Notification log | All |
+| 142 | Administration | Features List (PDF) | Software Feature List | Downloadable feature-list PDF generated from this document | Download | Features PDF | Super Admin |
+
+### 2.19 Organisation, Hierarchy & HR Analytics
+| Sr. | Module | Sub-Module | Feature | Detailed Functionality | Key Options | Output / Report | User Role |
+|---|---|---|---|---|---|---|---|
+| 143 | Organisation | Departments | Department Hierarchy | Multi-level department tree with approvals | Add/Move | Org report | Admin |
+| 144 | Organisation | Reporting Structure | Reporting Manager Chain | Every employee mapped to a Reporting Manager; chains drive approvals | Assign RM | Chain view | Admin |
+| 145 | Organisation | Leave Workflow | Chain-based Leave Approval | Leave requests flow up the reporting chain automatically; managers get instant bell alerts | Approve/Reject | Approval log | Manager |
+| 146 | Organisation | HR Analytics | Attrition & Salary Variance KPIs | Dashboard KPIs: monthly attrition % and salary variance vs previous month | Month filter | Dashboard cards | Admin |
+| 147 | Organisation | Branch Master | Multi-Branch | Branch-wise setup with branch-level statutory compliance | Add branch | Branch reports | Admin |
+| 148 | Organisation | Employee Lifecycle | Probation & Alt. Week-offs | Probation-to-confirmation tracking; alternate week-off patterns; accident register | Configure | Registers | Admin |
 
 ---
 
@@ -314,11 +336,11 @@ Role-based access (4 roles) · sub-admin firm scoping · rights/permissions edit
 ## 9. Feature Summary
 | Category | Count (approx.) |
 |---|---|
-| Major modules | 18 |
-| Documented features | 130 |
+| Major modules | 19 |
+| Documented features | 148 |
 | Reports with Excel/PDF export | 35+ |
 | Statutory compliance outputs | 15+ |
 | Roles supported | 4 (Super Admin, Sub Admin, Company Admin, Employee) |
 | Punch sources | 4 (Biometric machine, Mobile/PWA GPS+selfie, Manual admin, Import) |
 
-*This document reflects the software as deployed (Server Iter 550) and should be re-generated after major feature additions.*
+*This document reflects the software as deployed (Server Iter 757) and should be re-generated after major feature additions.*

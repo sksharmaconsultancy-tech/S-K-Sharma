@@ -285,7 +285,8 @@ def _page(cv, doc):
     cv.restoreState()
 
 
-def build_manual(extras: Optional[list] = None) -> BytesIO:
+def build_manual(extras: Optional[list] = None,
+                 updates: Optional[list] = None) -> BytesIO:
     buf = BytesIO()
     doc = _Doc(buf, pagesize=A4, title="Quick User Manual")
     fr = Frame(15 * mm, 14 * mm, CW, H - 32 * mm, id="f")
@@ -618,6 +619,35 @@ def build_manual(extras: Optional[list] = None) -> BytesIO:
                  note=ex.get("note") or None)
         n += 1
 
+    # -------- What's New — latest updates (manual_updates collection)
+    if updates:
+        story.append(Paragraph(f"{n}. What's New — Latest Updates", S_H1))
+        rows_wn = [[Paragraph("<b>Date</b>", S_BODY),
+                    Paragraph("<b>Feature</b>", S_BODY),
+                    Paragraph("<b>Where</b>", S_BODY)]]
+        for u in updates[:14]:
+            rows_wn.append([
+                Paragraph(str(u.get("date") or ""), S_BODY),
+                Paragraph(f"<b>{u.get('title', '')}</b><br/>"
+                          f"{u.get('desc', '')}", S_BODY),
+                Paragraph(u.get("nav") or "", S_BODY)])
+        wt = Table(rows_wn, colWidths=[CW * 0.13, CW * 0.57, CW * 0.30])
+        wt.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+            ("TEXTCOLOR", (0, 0), (-1, 0), rl.white),
+            ("GRID", (0, 0), (-1, -1), 0.6, GREY),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl.white, TEAL_BG]),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("VALIGN", (0, 0), (-1, -1), "TOP")]))
+        for c in range(3):
+            rows_wn[0][c].style = ParagraphStyle(
+                "wnh", parent=S_BODY, textColor=rl.white)
+        story.append(wt)
+        story.append(PageBreak())
+        n += 1
+
     # -------- troubleshooting
     story.append(Paragraph(f"{n}. Basic Troubleshooting", S_H1))
     tt = Table([
@@ -690,6 +720,55 @@ def build_manual(extras: Optional[list] = None) -> BytesIO:
 
 
 _SEED_UPDATES = [
+    # ---- Iter 744-757 (Aug 2026) ----
+    {"date": "2026-08-27", "title": "Salary Sheet History & Restore",
+     "desc": "Every Save-as-Draft / Finalize / Reprocess keeps its own "
+             "version. Open the clock icon in Past Salary Runs to view "
+             "all versions (who, when, rows, net) and Restore any one.",
+     "nav": "Utilities → Past Salary Runs → 🕘 History"},
+    {"date": "2026-08-27", "title": "Reprocess keeps the LAST corrections",
+     "desc": "Reprocessing a compliance run now retains all manually "
+             "edited days / OT / TDS / deductions — only untouched rows "
+             "refresh from the imported sheet.",
+     "nav": "Payroll → Compliance Salary → Salary Process"},
+    {"date": "2026-08-27", "title": "Legacy .50-paise rounding match",
+     "desc": "Figures landing exactly on 50 paise now follow the legacy "
+             "software: earned heads round DOWN, statutory wage base "
+             "rounds UP — both firms tally to the rupee.",
+     "nav": "Payroll → Compliance Salary"},
+    {"date": "2026-08-27", "title": "Bulk Employee Correction upgrades",
+     "desc": "Father Name column frozen, live Gross Total (Master) "
+             "column, Excel export of the displayed grid and an "
+             "Excel-style filter box under every column.",
+     "nav": "Utilities → Bulk Employee Correction"},
+    {"date": "2026-08-27", "title": "Advance vs Other Deduction split",
+     "desc": "Imported sheet's Advance column now lands in the ADVANCE "
+             "column and Other Deduction in OTH. DEDUC. — they are never "
+             "merged.",
+     "nav": "Payroll → Compliance Import"},
+    {"date": "2026-08-27", "title": "Notification popups with full context",
+     "desc": "Every live popup now shows the Firm name, WHO did the "
+             "action and WHOSE record changed.",
+     "nav": "All screens → bottom-left popups / bell inbox"},
+    {"date": "2026-08-26", "title": "Sub Admin own PIN for the credentials vault",
+     "desc": "Sub Admins set their own PIN and open Firms ID & Password "
+             "with it — the Super Admin PIN is no longer shared.",
+     "nav": "Settings → Set / Change My PIN"},
+    {"date": "2026-08-26", "title": "Leave approval chain + manager alerts",
+     "desc": "Leave requests flow through the Reporting Manager chain "
+             "automatically and managers get a bell alert the moment a "
+             "team member's leave lands in their inbox.",
+     "nav": "Organisation → Reporting Structure · Approval Inbox"},
+    {"date": "2026-08-25", "title": "OT Policy & Org Hierarchy",
+     "desc": "48-hour OT cap, 30-minute minimum OT, OT approval workflow, "
+             "department hierarchy, reporting-manager chains plus "
+             "Attrition and Salary-Variance KPIs in HR Analytics.",
+     "nav": "Organisation / Payroll → OT Policy"},
+    {"date": "2026-08-25", "title": "Late Penalty inside Attendance Policy",
+     "desc": "Configurable late-coming penalty rules applied "
+             "automatically through the firm's attendance policy.",
+     "nav": "Attendance & Shift → Attendance Policy"},
+    # ---- original seed ----
     {"date": "2026-08-09", "title": "Monthly Payroll Attendance & Salary Report",
      "desc": "One landscape report: employee details, attendance 1–31, "
              "payable days, compliance/actual gross, deductions, net "
@@ -715,12 +794,80 @@ _SEED_UPDATES = [
 ]
 
 
+_SEED_SECTIONS = [
+    # Iter 758 (user request) — manual sections for the Iter 744-757
+    # features. Upserted by title so existing installs get them too.
+    {"order": 1, "title": "Salary Sheet History & Restore",
+     "nav": "Utilities → Past Salary Runs → 🕘 History",
+     "callouts": ["Clock icon per compliance run", "Version list",
+                  "Who / when / rows / net", "Restore button"],
+     "steps": [
+         "Open <b>Past Salary Runs</b> and switch to the "
+         "<b>Compliance Salary Runs</b> tab.",
+         "Click the <b>🕘 clock icon</b> on a run — its version history "
+         "opens below the row.",
+         "Every <b>Save as Draft / Finalize / Reprocess</b> keeps its own "
+         "version with who saved it, when, row count and Net total.",
+         "Click <b>Restore</b> to put an earlier version back on the "
+         "sheet — the current sheet is saved to History first, so "
+         "nothing is ever lost."],
+     "note": "A finalized (locked) run must be unlocked before a version "
+             "can be restored."},
+    {"order": 2, "title": "Bulk Employee Correction",
+     "nav": "Utilities → Bulk Employee Correction",
+     "callouts": ["Frozen Code / Name / Father Name", "Filter box per column",
+                  "Gross Total (Master)", "Export Excel"],
+     "steps": [
+         "Pick the firm — all employees load in an editable grid; "
+         "<b>Emp Code, Name and Father Name stay frozen</b> while you "
+         "scroll right.",
+         "Type in the <b>Filter…</b> box under any column to filter "
+         "rows instantly (multiple filters combine).",
+         "The read-only <b>Gross Total (Master)</b> column always shows "
+         "Basic + all allowance heads and updates live while you edit.",
+         "Use <b>Export Excel</b> to download exactly what the grid "
+         "shows, then <b>Preview → Apply</b> to save the corrections."]},
+    {"order": 3, "title": "OT Policy & Organisation Hierarchy",
+     "nav": "Organisation → Reporting Structure · Payroll → OT Policy",
+     "callouts": ["48-hr OT cap", "30-min minimum OT", "OT approvals",
+                  "Reporting-manager chain"],
+     "steps": [
+         "Configure the <b>OT Policy</b>: weekly 48-hour cap, 30-minute "
+         "minimum OT and the OT approval workflow.",
+         "Build the <b>department hierarchy</b> and assign every "
+         "employee a <b>Reporting Manager</b>.",
+         "Leave requests automatically travel up the reporting chain "
+         "and managers get a <b>bell alert</b> when a request lands in "
+         "their inbox.",
+         "HR Analytics adds <b>Attrition %</b> and <b>Salary Variance</b> "
+         "KPIs on the dashboard."]},
+    {"order": 4, "title": "Security — 2FA, Sub Admin PIN & Live Alerts",
+     "nav": "Settings → Security · Firms ID & Password",
+     "callouts": ["Email OTP on admin login", "Own PIN per Sub Admin",
+                  "Popup shows firm + who + whose"],
+     "steps": [
+         "Admin logins are protected by a <b>one-time password (OTP)</b> "
+         "sent to the registered email.",
+         "Each Sub Admin sets a <b>personal PIN</b> (Settings → Set / "
+         "Change My PIN) and opens the <b>Firms ID &amp; Password</b> "
+         "vault with it — the Super Admin PIN is never shared.",
+         "Duplicate statutory logins (e.g. the same EPFO User ID on two "
+         "firms) are blocked with a clear message.",
+         "Live notification popups show the <b>Firm name</b>, <b>who "
+         "performed the action</b> and <b>whose record changed</b>."]},
+]
+
+
 async def _manual_data():
     """Live data for the auto-updating manual (changelog + extra
-    sections). Seeds the changelog once so it is never empty."""
-    if not await db.manual_updates.count_documents({}):
-        await db.manual_updates.insert_many(
-            [dict(u) for u in _SEED_UPDATES])
+    sections). Seed entries are UPSERTED by title so both fresh and
+    existing installations receive newly-shipped items."""
+    for u in _SEED_UPDATES:
+        await db.manual_updates.update_one(
+            {"title": u["title"]}, {"$setOnInsert": dict(u)}, upsert=True)
+    for s in _SEED_SECTIONS:
+        await db.manual_sections.update_one(
+            {"title": s["title"]}, {"$set": dict(s)}, upsert=True)
     updates = await db.manual_updates.find({}, {"_id": 0}).to_list(200)
     updates.sort(key=lambda u: str(u.get("date") or ""), reverse=True)
     extras = await db.manual_sections.find({}, {"_id": 0}).to_list(100)
@@ -736,8 +883,8 @@ async def user_manual_pdf(token: Optional[str] = Query(None),
     require_role(admin, ["super_admin"])  # SUPER ADMIN ONLY
     if admin.get("role") != "super_admin":
         raise HTTPException(status_code=403, detail="Super admin only")
-    extras = (await _manual_data())[1]
-    buf = build_manual(extras)
+    updates, extras = await _manual_data()
+    buf = build_manual(extras, updates)
     return Response(content=buf.getvalue(), media_type="application/pdf",
                     headers={"Content-Disposition":
                              'inline; filename="Payroll_Quick_User_Manual.pdf"'})
