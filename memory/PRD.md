@@ -9465,3 +9465,18 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   (legacy rounds wage-base half-up 9587.5→9588 & truncates earned basic
   9212.5→9212; we keep paise in base + half-up on contribution).
   Diagnosis to be presented to user.
+
+## Iter 756 — Legacy .50-paise rounding match (user confirmed)
+- USER BUG: same rounding policy, 2 firms, ₹1 diff vs legacy software
+  (JPL UMESH PF 1150 vs 1151; Mewar LADULAL Basic 9213 vs 9212 / PF
+  1106 vs 1105). Root: .50-paise handling.
+- FIX (utils/compliance_salary.py, all inside compute_compliance_row):
+  1. _half50_down(): earned heads + monthly_gross landing EXACTLY on
+     .50 → round DOWN (applied after structure heads resolve, ~line 653).
+  2. pf_basic_prorated .50 → DOWN (Iter 471 daily/hourly block).
+  3. stat_wage_base EXACTLY .50 → UP to whole rupee before PF/ESI %.
+  Only exact-.50 values change; everything else byte-identical.
+- Verified: Mewar case → base 9212, PF 1105, ESI 70 ✓; JPL case →
+  base 9588, PF 1151, ESI 72 ✓; non-.50 regression unchanged;
+  test_iter752_reprocess_safety.py → REPROCESS SAFE (totals same).
+- APP_ITERATION=756; deploy_vps_iter756.sh (755 folded, deleted).

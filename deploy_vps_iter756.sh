@@ -1,8 +1,22 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 755)
+# S.K. Sharma & Co. — VPS deploy script (Iter 756)
 # Deploys the FULL latest code (includes ALL previous iterations).
 #
-# ══════ WHAT'S NEW (Iter 755) — 📋 BULK CORRECTION UPGRADES + DEDUCTION SPLIT ══════
+# ══════ WHAT'S NEW (Iter 756) — 🎯 LEGACY ROUNDING MATCH (.50 PAISE) ══════
+#
+# USER BUG: JPL vs Mewar me same rounding policy hone par bhi purane
+# software se ₹1 ka difference (JPL PF 1150 vs 1151; Mewar Basic 9213 vs
+# 9212, PF 1106 vs 1105). ROOT CAUSE: 50-paise (.50) figures ki handling.
+# AB LEGACY SOFTWARE SE EXACT MATCH:
+#  * EARNED heads (Basic/HRA/…/Gross/PF-Basic) EXACTLY .50 par → ROUND
+#    DOWN (Mewar: 335 × 27.5 = 9212.50 → 9212 → PF 1105 ✓, Gross 9487 ✓
+#    — freeze-mismatch flag bhi clear).
+#  * STATUTORY WAGE BASE EXACTLY .50 par → ROUND UP whole rupee, phir
+#    PF/ESI % (JPL: 50% of 19175 = 9587.50 → 9588 → PF 1151 ✓, ESI 72 ✓).
+#  * SIRF exact .50 wale cases badle hain — baaki har figure pehle jaisa
+#    (reprocess-safety suite se verify: purane months ke totals SAME).
+#
+# ══════ ALSO IN Iter 755 — 📋 BULK CORRECTION UPGRADES + DEDUCTION SPLIT ══════
 #
 # 1) BULK EMPLOYEE CORRECTION (USER REQUEST — 4 upgrades):
 #  * FATHER NAME column bhi ab FREEZE hai (Emp Code + Name ke saath) —
@@ -1992,8 +2006,8 @@
 #    INCENTIVE · FOOD ALLOWANCE import fix · dynamic allowance columns.
 #
 # Run ON THE VPS as root/sksharma:
-#   wget -O deploy755.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
-#   bash deploy755.sh
+#   wget -O deploy756.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
+#   bash deploy756.sh
 
 APP_DIR=/home/sksharma/app
 WEB_DIR=/var/www/sksharma

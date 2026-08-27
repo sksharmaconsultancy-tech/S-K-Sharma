@@ -650,6 +650,22 @@ def compute_compliance_row(
     special = structure["special"]
     others = structure["others"]
 
+    # Iter 756 (user rule — LEGACY MATCH): earned heads / gross landing on
+    # EXACTLY .50 paise round DOWN to the whole rupee (the old payroll
+    # software truncates the half rupee: LADULAL 335 × 27.5 = 9212.50 →
+    # Basic 9212, Gross 9487). Values NOT on .50 are untouched, so every
+    # previously-tallied month stays identical.
+    def _half50_down(v: float) -> float:
+        r2 = round(v, 2)
+        return float(int(r2)) if r2 > 0 and abs(r2 - int(r2) - 0.5) < 1e-9 else v
+    basic = _half50_down(basic)
+    hra = _half50_down(hra)
+    conveyance = _half50_down(conveyance)
+    medical = _half50_down(medical)
+    special = _half50_down(special)
+    others = _half50_down(others)
+    monthly_gross = round(_half50_down(monthly_gross), 2)
+
     # Iter 329 (user check) — ZERO-DAY EARNINGS GUARD: with no present days,
     # no duty hours and no OT this month, ALL earned heads must be 0.
     # (Fixed-amount heads like a flat HRA used to leak a full month into
@@ -702,6 +718,13 @@ def compute_compliance_row(
     gross_paid = monthly_gross + ot_pay  # total "Gross Earning" this month
     floor_pct = _num(cfg.get("stat_wage_floor_pct"), 50.0)
     stat_wage_base = max(basic, gross_paid * (floor_pct / 100.0))
+    # Iter 756 (user rule — LEGACY MATCH): a statutory wage base landing on
+    # EXACTLY .50 paise rounds UP to the whole rupee before the PF/ESI
+    # percentages (old payroll: 50% of 19175 = 9587.50 → EPFCalc 9588 →
+    # PF 1151). Non-.50 bases are untouched.
+    _swb2 = round(stat_wage_base, 2)
+    if _swb2 > 0 and abs(_swb2 - int(_swb2) - 0.5) < 1e-9:
+        stat_wage_base = float(int(_swb2) + 1)
 
     # Iter 297 (user bug) — ZERO-DAY GUARD: an employee with NO payable
     # days / hours / gross this month must have NO statutory deductions
@@ -801,6 +824,10 @@ def compute_compliance_row(
             # the old present ÷ month-days behaviour).
             pf_basic_prorated = pf_basic_override * _proration_factor(
                 pf_proration_method, effective_present, max(1, month_days))
+        # Iter 756 (user rule — LEGACY MATCH): earned PF Basic landing on
+        # EXACTLY .50 paise rounds DOWN like the other earned heads
+        # (335 × 27.5 = 9212.50 → 9212 → PF 1105, matching old software).
+        pf_basic_prorated = _half50_down(pf_basic_prorated)
         _pf_basic_month = (
             pf_basic_override * float(month_days) if salary_mode == "daily"
             else pf_basic_override * float(month_days) * full_day_hours
