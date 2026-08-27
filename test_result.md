@@ -1007,3 +1007,7 @@ ITER 487 (doc-expiry alerts):
 
 ## Iter 751 — active-only + group filter + sort (self-tested)
 - Live browser: STAFF filter 3937→527 cells, name sort OK, chips render.
+
+## Iter 752 — reprocess safety (tested)
+- REPROCESS SAFE: baseline vs regen vs regen² — 0 money-field diffs,
+  net totals identical, finalized-lock intact, originals restored.

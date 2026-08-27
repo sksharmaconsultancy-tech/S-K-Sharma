@@ -9400,3 +9400,12 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   chips ar-sort-{code|name|department|group}; client-side filter+sort in
   rows useMemo. Live verified (STAFF → 17 rows, name-sort AFZAL first).
 - APP_ITERATION=751; deploy_vps_iter751.sh (750 folded, deleted).
+
+## Iter 752 — Reprocess safety audit (user asked to confirm)
+- tests/test_iter752_reprocess_safety.py: every stored run vs fresh
+  regeneration vs 2nd regeneration. RESULT: REPROCESS SAFE — Kankani
+  2026-06 net total identical (46584.0), 0 field diffs on common
+  employees (18 "missing" rows = employees added to master AFTER the old
+  baseline run — expected); 2026-05 101 rows 0 diffs; finalized runs
+  correctly refuse regeneration; determinism 0 diffs; late-penalty/OT
+  policies disabled everywhere → payroll untouched. Originals restored.
