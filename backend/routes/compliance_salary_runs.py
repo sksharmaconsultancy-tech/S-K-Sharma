@@ -670,8 +670,14 @@ async def _compute_compliance_run(
             # whose days differ (or carry the manual stamp) keeps its
             # saved days. Imported-sheet runs keep the sheet
             # authoritative; "From BLANK" still rebuilds fresh.
-            _prev_frz = (prev_rows or {}).get(emp["user_id"]) \
-                if not payload.use_imported_sheet else None
+            # Iter 757 (user bug — "reprocess shows the FIRST imported
+            # sheet"): on imported-sheet runs a MANUALLY edited Present
+            # Days (explicit manual_fields stamp) is kept too — only
+            # untouched rows stay sheet-authoritative.
+            _prev_frz = (prev_rows or {}).get(emp["user_id"])
+            if payload.use_imported_sheet and _prev_frz is not None and \
+                    "present_days" not in set(_prev_frz.get("manual_fields") or []):
+                _prev_frz = None
             if _prev_frz is not None:
                 _ppd_frz = min(float(_prev_frz.get("present_days") or 0.0),
                                float(month_days))
@@ -2301,6 +2307,13 @@ async def _create_compliance_salary_run_core(
     # so only the newest data exists (finalized runs are already blocked
     # above and are never touched).
     _grp = (payload.employee_type or "").strip()
+    # Iter 757 (user request) — the draft being replaced is versioned
+    # first so its corrections stay in the month's History.
+    if _prev_run and (_prev_run.get("rows") or []):
+        await _snapshot_run_version(
+            {**_prev_run, "company_id": _gate_cid, "month": payload.month,
+             "employee_type": payload.employee_type},
+            admin, "pre_reprocess")
     await db.compliance_salary_runs.delete_many({
         "month": payload.month,
         # Iter 297 — scope by the EFFECTIVE firm (company_admin's own firm
@@ -2489,6 +2502,115 @@ async def get_compliance_salary_run(
     return {"run": run}
 
 
+async def _snapshot_run_version(run: dict, admin: dict, kind: str,
+                                rows: Optional[list] = None,
+                                totals: Optional[dict] = None) -> None:
+    """Iter 757 (user request) — every draft save / finalize / reprocess
+    stores a full VERSION of the sheet (rows + totals) so each correction
+    round can be seen later and restored. Never blocks the main action."""
+    try:
+        _rows = rows if rows is not None else (run.get("rows") or [])
+        _tot = totals if totals is not None else (run.get("totals") or {})
+        last = await db.compliance_run_versions.find_one(
+            {"run_id": run["run_id"]}, {"version_no": 1},
+            sort=[("version_no", -1)])
+        vno = int((last or {}).get("version_no") or 0) + 1
+        await db.compliance_run_versions.insert_one({
+            "version_id": f"crv_{uuid.uuid4().hex[:10]}",
+            "run_id": run["run_id"],
+            "company_id": run.get("company_id"),
+            "month": run.get("month"),
+            "employee_type": run.get("employee_type"),
+            "version_no": vno,
+            "kind": kind,  # draft | finalize | pre_reprocess | restore
+            "rows": _rows,
+            "totals": _tot,
+            "rows_count": len(_rows),
+            "net_total": round(sum(float(r.get("net") or 0) for r in _rows), 2),
+            "saved_at": now_iso(),
+            "saved_by": admin.get("user_id"),
+            "saved_by_name": admin.get("name") or admin.get("email"),
+        })
+        stale = await db.compliance_run_versions.find(
+            {"run_id": run["run_id"]}, {"version_id": 1},
+        ).sort("version_no", -1).skip(30).to_list(200)
+        if stale:
+            await db.compliance_run_versions.delete_many(
+                {"version_id": {"$in": [s["version_id"] for s in stale]}})
+    except Exception as _e:
+        logger.warning("[run-versions] snapshot failed run=%s: %s",
+                       run.get("run_id"), _e)
+
+
+@api.get("/admin/compliance-salary-runs/{run_id}/versions")
+async def list_compliance_run_versions(
+    run_id: str, authorization: Optional[str] = Header(None),
+):
+    """Iter 757 (user request) — version history of a salary sheet: every
+    Save-as-Draft / Finalize / Reprocess is listed with who + when + net."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    run = await db.compliance_salary_runs.find_one(
+        {"run_id": run_id}, {"_id": 0, "company_id": 1, "finalized": 1})
+    if not run:
+        raise HTTPException(status_code=404, detail="Compliance salary run not found")
+    if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised for this run")
+    docs = await db.compliance_run_versions.find(
+        # Iter 757 — history is MONTH-scoped (firm + month + group): a
+        # fresh Salary Process replaces the draft with a NEW run_id, but
+        # its earlier corrections must stay visible.
+        ({"company_id": run.get("company_id"), "month": run.get("month"),
+          "employee_type": run.get("employee_type")}
+         if run.get("company_id") and run.get("month")
+         else {"run_id": run_id}),
+        {"_id": 0, "rows": 0, "totals": 0},
+    ).sort([("saved_at", -1)]).to_list(50)
+    return {"versions": docs, "finalized": bool(run.get("finalized"))}
+
+
+@api.post("/admin/compliance-salary-runs/{run_id}/versions/{version_id}/restore")
+async def restore_compliance_run_version(
+    run_id: str, version_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 757 (user request) — put a saved version's rows back on the
+    run (the current state is snapshotted first, so nothing is lost)."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    await require_employer_permission(admin, "compliance_salary:write", db)
+    run = await db.compliance_salary_runs.find_one({"run_id": run_id}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Compliance salary run not found")
+    if admin["role"] == "company_admin" and run.get("company_id") != admin.get("company_id"):
+        raise HTTPException(status_code=403, detail="Not authorised for this run")
+    if run.get("finalized"):
+        raise HTTPException(
+            status_code=400,
+            detail="Run is FINALIZED (read-only). Unlock it first, then restore.")
+    ver = await db.compliance_run_versions.find_one(
+        {"version_id": version_id}, {"_id": 0})
+    if not ver or (run.get("company_id")
+                   and ver.get("company_id") != run.get("company_id")):
+        raise HTTPException(status_code=404, detail="Version not found")
+    # Current state is snapshotted FIRST so the restore itself is undoable.
+    await _snapshot_run_version(run, admin, "pre_restore")
+    updates = {
+        "rows": ver.get("rows") or [],
+        "totals": ver.get("totals") or {},
+        "draft_saved_at": now_iso(),
+        "draft_saved_by": admin["user_id"],
+        "restored_from_version": ver.get("version_no"),
+    }
+    await db.compliance_salary_runs.update_one({"run_id": run_id}, {"$set": updates})
+    from routes.salary_audit import write_salary_audit
+    await write_salary_audit(
+        admin, "restore_version", run,
+        f"Restored sheet version #{ver.get('version_no')} "
+        f"({ver.get('kind')}, saved {ver.get('saved_at')})")
+    return {"ok": True, "restored_version_no": ver.get("version_no")}
+
+
 @api.post("/admin/compliance-salary-runs/{run_id}/save-rows")
 async def save_compliance_run_rows(
     run_id: str,
@@ -2552,6 +2674,10 @@ async def save_compliance_run_rows(
     if isinstance(totals, dict) and totals:
         updates["totals"] = totals
     await db.compliance_salary_runs.update_one({"run_id": run_id}, {"$set": updates})
+    # Iter 757 (user request) — every draft save keeps its own VERSION so
+    # 4 saves show as 4 separate corrections in the History.
+    await _snapshot_run_version(run, admin, "draft", rows=rows,
+                                totals=updates.get("totals") or run.get("totals"))
     # Iter 182 — audit trail
     from routes.salary_audit import write_salary_audit
     await write_salary_audit(admin, "save_rows", run,
@@ -2619,6 +2745,9 @@ async def finalize_compliance_salary_run(
         },
     }
     await db.compliance_salary_runs.update_one({"run_id": run_id}, {"$set": stamp})
+    # Iter 757 (user request) — the finalized sheet is versioned too, so the
+    # LAST LOCKED data is always available in History after any reprocess.
+    await _snapshot_run_version({**run, **stamp}, admin, "finalize")
     logger.info("[compliance-run] finalized run=%s by %s", run_id, admin["user_id"])
     # Iter 666 — notification layer (never blocks the lock).
     try:
@@ -2831,7 +2960,21 @@ async def reprocess_compliance_salary_run(
     # Iter 485 — reprocess NEVER creates the master snapshot (spec): it
     # uses the existing one; a legacy month without a snapshot keeps the
     # old live-master behaviour until its next Generate.
+    # Iter 757 (user bug — "reprocess shows the FIRST imported sheet"):
+    # this endpoint used to recompute WITHOUT the previous rows, so every
+    # manual correction saved on the sheet was silently discarded. The
+    # existing rows now feed the NON-DESTRUCTIVE reprocess machinery
+    # (Iter 297/343b/723) exactly like the Salary Process path; a body
+    # with {"fresh": true} still rebuilds from scratch.
+    _prev_rows_757: Dict[str, dict] = (
+        {} if bool(body.get("fresh")) else
+        {r.get("user_id"): r for r in (existing.get("rows") or [])
+         if r.get("user_id")})
+    # The current state is snapshotted BEFORE the rebuild so nothing is
+    # ever lost (visible in the sheet History).
+    await _snapshot_run_version(existing, admin, "pre_reprocess")
     run = await _compute_compliance_run(admin, payload,
+                                        prev_rows=_prev_rows_757,
                                         allow_snapshot_create=False)
     run["run_id"] = run_id
     run["reprocessed_from_at"] = existing.get("generated_at")

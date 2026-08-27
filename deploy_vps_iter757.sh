@@ -1,8 +1,33 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 756)
+# S.K. Sharma & Co. — VPS deploy script (Iter 757)
 # Deploys the FULL latest code (includes ALL previous iterations).
 #
-# ══════ WHAT'S NEW (Iter 756) — 🎯 LEGACY ROUNDING MATCH (.50 PAISE) ══════
+# ══════ WHAT'S NEW (Iter 757) — 🕘 SHEET HISTORY + REPROCESS FIX ══════
+#
+# 1) SHEET VERSION HISTORY (USER REQUEST):
+#  * Compliance Salary sheet par naya "History" button — har SAVE AS
+#    DRAFT / FINALIZE / REPROCESS apna alag VERSION rakhta hai (4 baar
+#    save = 4 versions, alag-alag corrections ke saath).
+#  * Har version me: kisne save kiya, kab, kitni rows, Net total.
+#  * "Restore" se koi bhi purana version sheet par wapas — current
+#    sheet pehle History me save hoti hai (kuch bhi lost nahi hota).
+#  * History MONTH-wise hai — naya Salary Process purane versions ko
+#    delete nahi karta.
+#
+# 2) REPROCESS = LAST SAVED DATA (USER BUG FIX):
+#  * Pehle finalize/unlock ke baad reprocess karne par SABSE PEHLI
+#    imported sheet dikh jati thi — saari corrections gayab.
+#  * ROOT CAUSE: reprocess endpoint previous rows pass hi nahi karta
+#    tha; imported-sheet runs par manually edited Present Days bhi
+#    sheet se overwrite ho jate the.
+#  * AB: reprocess hamesha LAST SAVED corrections ko KEEP karta hai
+#    (manually edited days / OT / TDS / Advance / Other Ded sab).
+#    Sirf untouched rows imported sheet se refresh hoti hain.
+#    "From BLANK" option pehle jaisa fresh rebuild karta hai.
+#  * Reprocess se pehle current sheet AUTO-VERSION hoti hai (History
+#    me "Before Reprocess" entry) — extra safety.
+#
+# ══════ ALSO IN Iter 756 — 🎯 LEGACY ROUNDING MATCH (.50 PAISE) ══════
 #
 # USER BUG: JPL vs Mewar me same rounding policy hone par bhi purane
 # software se ₹1 ka difference (JPL PF 1150 vs 1151; Mewar Basic 9213 vs
@@ -2006,8 +2031,8 @@
 #    INCENTIVE · FOOD ALLOWANCE import fix · dynamic allowance columns.
 #
 # Run ON THE VPS as root/sksharma:
-#   wget -O deploy756.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
-#   bash deploy756.sh
+#   wget -O deploy757.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
+#   bash deploy757.sh
 
 APP_DIR=/home/sksharma/app
 WEB_DIR=/var/www/sksharma

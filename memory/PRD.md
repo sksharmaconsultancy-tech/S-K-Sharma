@@ -9480,3 +9480,24 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   base 9588, PF 1151, ESI 72 ✓; non-.50 regression unchanged;
   test_iter752_reprocess_safety.py → REPROCESS SAFE (totals same).
 - APP_ITERATION=756; deploy_vps_iter756.sh (755 folded, deleted).
+
+## Iter 757 — Sheet version History + reprocess "first sheet" fix
+- USER ISSUE 1: 4 draft saves should show as 4 versions. FIX: new
+  `compliance_run_versions` collection; _snapshot_run_version() helper in
+  compliance_salary_runs.py; snapshots on save-rows (kind=draft),
+  finalize (finalize), reprocess (pre_reprocess), Salary Process draft
+  replacement (pre_reprocess), restore (pre_restore). Kept last 30/run.
+  Endpoints: GET .../versions (month-scoped list: company+month+group),
+  POST .../versions/{vid}/restore (blocked on finalized runs; snapshots
+  current first). Frontend: History ActionBtn + modal in
+  compliance-salary-run.tsx (testID btn-run-history, hist-restore-{i}).
+- USER ISSUE 2: after finalize→unlock→reprocess the FIRST imported sheet
+  appeared, corrections lost. ROOT CAUSES: (a) /reprocess endpoint never
+  passed prev_rows into _compute_compliance_run; (b) imported-sheet runs
+  dropped prev day-edits (line ~673 `if not payload.use_imported_sheet`).
+  FIX: reprocess passes prev_rows (body.fresh=true rebuilds); imported
+  runs keep prev present_days when 'present_days' in manual_fields.
+- E2E verified: 2 saves → 2 versions; reprocess kept edited days (17 vs
+  sheet 20), untouched row stayed sheet (22); restore returned 18; UI
+  History modal renders with Restore buttons. Test data cleaned.
+- APP_ITERATION=757; deploy_vps_iter757.sh (756 folded, deleted).
