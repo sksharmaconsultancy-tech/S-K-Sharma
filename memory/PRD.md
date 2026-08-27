@@ -9565,3 +9565,30 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   (H × 127)"; Ctrl+Z → "Undone (127 cells)". 127 test marks + 254 audit
   rows cleaned from DB.
 - APP_ITERATION=761; deploy_vps_iter761.sh (760 folded, deleted).
+
+## Iter 762 — Dummy Shift leak fix + single editable allowance + Holiday Sync
+- DUMMY SHIFT BUG (user): inout_ot_matrix.py — employee dummy_shift name
+  not matching defined list ("SHIFT 2", "A1" vs "SHIFT A1") skipped
+  substitution → ACTUAL 12-hr punches leaked. FIX: _dnorm() normalized
+  matching (case-insensitive, "SHIFT" prefix ignored), builtin
+  DUMMY_SHIFTS merged as fallback (firm defs win), unknown/blank shift →
+  firm's FIRST dummy shift. Verified via API: "SHIFT 2" employee now
+  shows jittered 07:0x-15:0x ≈8-hr timings.
+- EDITABLE ALLOWANCE (user): compliance-salary-run.tsx — activeEditCat
+  memo (cats: ot/incentive/other from hasOtCol, non-FOOD allowLabels,
+  special/others). >1 cat → only Firm Master salary_process.
+  editable_allowance_head (default "other") stays editable; others render
+  read-only Text (special, others, custom heads, ot_pay, OTHoursCell,
+  navCols gated). firm-master.tsx: radio group (fm-edit-allow-{k}).
+- HOLIDAY SYNC (user, same session): manual_attendance.py grid returns
+  holidays{date:name} from db.masters type=holiday (month + company
+  scoped); attendance-report.tsx "🗓 Sync Holidays" button (ar-holiday-
+  sync) batch-fills H on all holiday dates for displayed rows (confirm +
+  undo-able); holiday day headers red. NOT UI-tested (no holiday masters
+  in dev DB).
+- PENDING (user bug, needs specifics): "Refresh Master not revising after
+  master change on past runs" — fresh-run refresh verified WORKING
+  (basic_master 8940→10140). Suspect: rows with manual stamps /
+  freeze-import firms where preserve blocks keep old values. Ask user
+  for firm + month example next session.
+- APP_ITERATION=762; deploy_vps_iter762.sh (761 folded, deleted).

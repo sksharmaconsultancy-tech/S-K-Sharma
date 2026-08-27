@@ -168,18 +168,33 @@ async def _build(
         # Iter 711 (user request) — the firm's OWN dummy shift definitions
         # (Attendance Policy → Define Dummy Shifts) win; built-in master
         # shifts are only a fallback.
-        from routes.labour_reports import (dummy_rnd_min,
+        from routes.labour_reports import (DUMMY_SHIFTS, dummy_rnd_min,
                                            effective_dummy_shifts)
         _shift_list = effective_dummy_shifts(_pmst)
 
         def _hm2min(s: str) -> int:
             h, mn = str(s).split(":")
             return int(h) * 60 + int(mn)
-        # overnight = end at/before start → OUT lands on the NEXT calendar
-        # date (marked with * in the report; no extra attendance day).
-        dummy_map = {d["name"]: (d["start"], d["end"],
-                                 _hm2min(d["end"]) <= _hm2min(d["start"]))
-                     for d in _shift_list}
+
+        # Iter 762 (user bug — "actual 12-hr in/out leaking on present
+        # days"): the employee's Dummy Shift name (A1/A2/B2 …) sometimes
+        # did not EXACTLY match a defined shift ("SHIFT A1"), so the
+        # substitution was skipped and the REAL punches leaked through.
+        # Fix: names are matched case-insensitively ignoring the "SHIFT"
+        # prefix, built-in masters stay available as fallback (firm's own
+        # definitions win) and an unknown/blank shift falls back to the
+        # firm's FIRST dummy shift — actual punches can never leak.
+        def _dnorm(n: Any) -> str:
+            return str(n or "").strip().upper().replace("SHIFT", "").strip()
+        dummy_map = {}
+        for d in list(DUMMY_SHIFTS) + list(_shift_list):
+            try:
+                dummy_map[_dnorm(d["name"])] = (
+                    d["start"], d["end"],
+                    _hm2min(d["end"]) <= _hm2min(d["start"]))
+            except Exception:
+                continue
+        _default_dummy = _dnorm(_shift_list[0]["name"]) if _shift_list else ""
     # Summary counters (dummy mode only — sec 16 of the user spec).
     _dsum = {"present": 0, "week_off": 0, "holiday": 0, "absent": 0}
     _dshift_counts: Dict[str, int] = {}
@@ -322,8 +337,14 @@ async def _build(
                     # after shift start/end (same employee+date → same
                     # times on every re-print) and the resulting duration
                     # as Total Hrs. Actual punch data never appears.
-                    if ds in dummy_map:
-                        st, en, overnight = dummy_map[ds]
+                    # Iter 762 — resolve the employee's dummy shift with
+                    # normalized matching + firm-first fallback so the
+                    # ACTUAL punches never leak into the dummy report.
+                    _dkey = _dnorm(ds)
+                    if _dkey not in dummy_map:
+                        _dkey = _default_dummy
+                    if _dkey in dummy_map:
+                        st, en, overnight = dummy_map[_dkey]
                         _uid = emp.get("user_id") or ""
                         _sm = _hm2min(st) + dummy_rnd_min(_uid, iso, "in")
                         _eo = _hm2min(en) + dummy_rnd_min(_uid, iso, "out")

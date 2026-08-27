@@ -1364,6 +1364,34 @@ export default function FirmMasterScreen() {
                 })}
               </View>
               <View style={{ flexDirection: "row", gap: 18, marginTop: 10, flexWrap: "wrap" }}>
+                {/* Iter 762 (user request) — jab OT + Incentive + Other
+                    Allowances me se EK SE ZYADA enabled hon, salary sheet
+                    par sirf yahan chuna hua column editable rahega. */}
+                <View>
+                  <Text style={{ fontSize: 12, color: "#64748B", marginBottom: 4 }}>
+                    Editable Allowance Column (jab multiple allowances enabled hon)
+                  </Text>
+                  <View style={{ gap: 6 }}>
+                    {[
+                      { k: "other", l: "Other Allowances (Others / OTH. ALLOW.) — Default" },
+                      { k: "ot", l: "Overtime (OT Hrs / OT Amt)" },
+                      { k: "incentive", l: "Incentive (custom allowance heads)" },
+                    ].map((o) => {
+                      const on = (sp.editable_allowance_head || "other") === o.k;
+                      return (
+                        <Pressable
+                          key={o.k}
+                          onPress={() => updateSection("salary_process", { editable_allowance_head: o.k })}
+                          style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                          testID={`fm-edit-allow-${o.k}`}
+                        >
+                          <Ionicons name={on ? "radio-button-on" : "radio-button-off"} size={18} color={on ? "#2563EB" : "#94A3B8"} />
+                          <Text style={{ fontSize: 13, color: on ? "#1E3A8A" : "#334155", fontWeight: on ? "700" : "400" }}>{o.l}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
                 {(sp.days_calc_method || "attendance_gross_validation") !== "attendance" ? (
                   <View>
                     <Text style={{ fontSize: 12, color: "#64748B", marginBottom: 4 }}>Round Compliance Days to</Text>

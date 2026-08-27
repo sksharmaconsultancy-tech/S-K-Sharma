@@ -152,8 +152,23 @@ async def _grid(cid: str, month: str) -> dict:
         "manual": sum(1 for r in rows for c in r["cells"].values()
                       if c["src"] == "manual"),
         "pending": len(pending)})
+    # Iter 762 (user request) — the firm's Holiday Master dates for this
+    # month, so the grid can auto-mark the "H" columns in one click.
+    holidays: Dict[str, str] = {}
+    try:
+        async for h in db.masters.find(
+            {"type": "holiday", "date": {"$regex": f"^{month}"},
+             "$or": [{"company_id": cid}, {"company_id": None},
+                     {"company_id": {"$exists": False}}]},
+            {"_id": 0, "date": 1, "name": 1},
+        ):
+            if h.get("date"):
+                holidays[h["date"]] = h.get("name") or "Holiday"
+    except Exception:
+        holidays = {}
     return {"month": month, "days": days,
             "weekdays": [date.fromisoformat(d).strftime("%a") for d in days],
+            "holidays": holidays,
             "rows": rows, "summary": summary}
 
 

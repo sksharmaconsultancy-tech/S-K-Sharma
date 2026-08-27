@@ -1,8 +1,35 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 761)
+# S.K. Sharma & Co. — VPS deploy script (Iter 762)
 # Deploys the FULL latest code (includes ALL previous iterations).
 #
-# ══════ WHAT'S NEW (Iter 761) — 📅 COLUMN FILL (POORE DIN KA MARK) ══════
+# ══════ WHAT'S NEW (Iter 762) — 🕐 DUMMY SHIFT FIX + EDITABLE ALLOWANCE ══════
+#
+# 1) DUMMY SHIFT REPORT — ACTUAL 12-HR TIME LEAK FIX (USER BUG):
+#  * ROOT CAUSE: Employee Master ki dummy shift ka naam (A1/A2/B2 ya
+#    "SHIFT 2" jaisa) defined dummy shifts se EXACT match nahi hota tha,
+#    to substitution skip hokar REAL punch in/out (12 hrs) report me
+#    aa jate the.
+#  * FIX: naam ab case-insensitive match hote hain ("A1" = "SHIFT A1"),
+#    built-in A1-B3 masters hamesha available (firm ki definitions win),
+#    aur unknown/blank shift par firm ki PEHLI dummy shift lagti hai —
+#    present day par hamesha 8-hr dummy timing hi dikhti hai, actual
+#    punches KABHI leak nahi honge. WO/H pehle jaisa master/policy se.
+#
+# 2) EDITABLE ALLOWANCE COLUMN — SINGLE EDIT RULE (USER REQUEST):  * Firm me OT + Incentive + Other Allowances me se EK SE ZYADA enabled
+#    hon to salary sheet par sirf EK column editable rehta hai —
+#    default: Other Allowances.
+#  * Firm Master → Salary Process me naya setting "Editable Allowance
+#    Column": Other Allowances / Overtime / Incentive — jo chunein wahi
+#    editable, baaki read-only. Sirf ek allowance ho to wo editable hi
+#    rehta hai.
+#
+# 3) HOLIDAY CALENDAR SYNC (USER REQUEST):
+#  * Attendance Monthly Editable me naya "🗓 Sync Holidays" button —
+#    Holiday Master ki is month ki dates par SABHI employees ek click
+#    me "H" mark (confirm ke baad; Ctrl+Z se undo). Holiday dates ke
+#    headers laal dikhte hain.
+#
+# ══════ ALSO IN Iter 761 — 📅 COLUMN FILL ══════
 #
 # ATTENDANCE REPORT — MONTHLY EDITABLE (USER REQUEST):
 #  * DATE HEADER par click karein → poora COLUMN select (neela highlight,
@@ -2090,8 +2117,8 @@
 #    INCENTIVE · FOOD ALLOWANCE import fix · dynamic allowance columns.
 #
 # Run ON THE VPS as root/sksharma:
-#   wget -O deploy761.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
-#   bash deploy761.sh
+#   wget -O deploy762.sh "https://emplo-connect-1.preview.emergentagent.com/api/temp-code-bundle?token=sks-deploy-7391&kind=script"
+#   bash deploy762.sh
 
 APP_DIR=/home/sksharma/app
 WEB_DIR=/var/www/sksharma

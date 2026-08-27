@@ -484,6 +484,36 @@ export default function AttendanceReportEditable() {
         <Pressable onPress={() => void load()} style={s.btn} testID="ar-refresh">
           <Text style={s.btnTxt}>Search</Text>
         </Pressable>
+        {st.enabled && Object.keys((data as any)?.holidays || {}).length > 0 ? (
+          <Pressable
+            onPress={() => {
+              // Iter 762 (user request) — Holiday Calendar Sync: firm's
+              // Holiday Master dates → whole "H" columns in one click.
+              const hols = (data as any)?.holidays || {};
+              const dates = Object.keys(hols)
+                .filter((d) => (data?.days || []).includes(d)).sort();
+              const list: any[] = [];
+              for (const r of rows) {
+                for (const d of dates) {
+                  const cur = r.cells?.[d]?.st;
+                  if (cur !== "H") list.push({
+                    user_id: r.user_id, date: d,
+                    status: "H", previous_status: cur });
+                }
+              }
+              if (!list.length) { setMsg("Sab holiday columns pehle se H hain ✓"); return; }
+              const names = dates.map((d) => `${d.slice(8)} ${hols[d]}`).join(", ");
+              if (Platform.OS === "web" && !window.confirm(
+                `Holiday Sync — ${names}\n\n${list.length} cells ko "H" mark karein?`)) return;
+              void autoSaveRef.current(list);
+            }}
+            style={[s.btn, { backgroundColor: "#ECFDF5", borderColor: "#6EE7B7" }]}
+            testID="ar-holiday-sync">
+            <Text style={[s.btnTxt, { color: "#047857" }]}>
+              🗓 Sync Holidays ({Object.keys((data as any)?.holidays || {}).length})
+            </Text>
+          </Pressable>
+        ) : null}
         {undoCount > 0 && st.enabled ? (
           <Pressable onPress={() => undoLastRef.current()}
             style={[s.btn, { backgroundColor: "#FFF7ED", borderColor: "#FDBA74" }]}
@@ -563,8 +593,14 @@ export default function AttendanceReportEditable() {
                         borderWidth: 1, borderColor: "#2563EB" }]}
                     testID={`ar-daycol-${d}`}
                   >
-                    <Text style={s.hcell2}>{d.slice(8)}</Text>
-                    <Text style={s.hday}>{data.weekdays[i]}</Text>
+                    <Text style={[s.hcell2,
+                      (data as any)?.holidays?.[d] ? { color: "#DC2626" } : null]}>
+                      {d.slice(8)}
+                    </Text>
+                    <Text style={[s.hday,
+                      (data as any)?.holidays?.[d] ? { color: "#DC2626" } : null]}>
+                      {data.weekdays[i]}
+                    </Text>
                   </Pressable>
                 ))}
                 {CODES.map((c) => (

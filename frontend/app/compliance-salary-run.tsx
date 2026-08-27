@@ -604,6 +604,7 @@ export default function ComplianceSalaryRunScreen() {
     api<any>(`/admin/firm-master/${activeCompanyId}`)
       .then((r) => {
         const sp = ((r?.master || r?.firm || r) as any)?.salary_process || {};
+        if (alive) setEditAllowPref(String(sp.editable_allowance_head || "other"));
         if (alive && String(sp.days_calc_method || "") === "fixed") {
           setMonthDaysOverride(String(sp.days_calc_fixed || 26));
         }
@@ -1780,20 +1781,39 @@ export default function ComplianceSalaryRunScreen() {
     (s, l) => s + (Number(((r as any).allowance_heads || {})[l]) || 0), 0);
   const allowHeadsMaster = (r: any) => allowLabels.reduce(
     (s, l) => s + (Number(((r as any).allowance_heads_master || {})[l]) || 0), 0);
+  // Iter 762 (user request) — jab OT + Incentive + Other Allowances me se
+  // EK SE ZYADA enabled hon, sirf Firm Master me chuna hua column editable
+  // rehta hai (default: Other Allowances). Single allowance → editable.
+  const [editAllowPref, setEditAllowPref] = useState("other");
+  const activeEditCat = useMemo(() => {
+    const r0: any = run?.rows?.[0] || {};
+    const en = (r0.enabled_allowances ?? fmMask.en) as string[] | undefined;
+    const cats: string[] = [];
+    if (hasOtCol) cats.push("ot");
+    if (allowLabels.some((l) => !String(l).toUpperCase().includes("FOOD")))
+      cats.push("incentive");
+    if (!en || en.includes("special") || en.includes("others")) cats.push("other");
+    if (cats.length <= 1) return null; // single allowance → stays editable
+    if (cats.includes(editAllowPref)) return editAllowPref;
+    return cats.includes("other") ? "other" : cats[0];
+  }, [run, fmMask, hasOtCol, allowLabels, editAllowPref]);
+  const allowCatEditable = (cat: string) => !activeEditCat || cat === activeEditCat;
   const navCols = useMemo(() => {
     const r0: any = run?.rows?.[0] || {};
     const en = (r0.enabled_allowances ?? fmMask.en) as string[] | undefined;
     const ed = (r0.enabled_deductions ?? fmMask.ed) as string[] | undefined;
     const cols: string[] = ["pd"];
     // Iter 727 — "OTH. ALLOW." (special) is editable too.
-    if (!en || en.includes("special")) cols.push("special");
-    if (!en || en.includes("others")) cols.push("others");
-    if (hasOtCol) cols.push("ot_pay");
+    // Iter 762 — only the Firm-Master-chosen allowance column stays
+    // editable when multiple allowance types are enabled.
+    if ((!en || en.includes("special")) && allowCatEditable("other")) cols.push("special");
+    if ((!en || en.includes("others")) && allowCatEditable("other")) cols.push("others");
+    if (hasOtCol && allowCatEditable("ot")) cols.push("ot_pay");
     if (!ed || ed.includes("tds")) cols.push("tds");
     if (!ed || ed.includes("advance")) cols.push("advance_recovery");
     if (!ed || ed.includes("other")) cols.push("other_deduction");
     return cols;
-  }, [run, fmMask, hasOtCol]);
+  }, [run, fmMask, hasOtCol, activeEditCat]);
   const focusCell = (col: string, idx: number) => {
     const el: any = col === "pd" ? pdRefs.current[idx] : cellRefs.current[`${col}:${idx}`];
     if (el && typeof el.focus === "function") el.focus();
@@ -3394,7 +3414,8 @@ export default function ComplianceSalaryRunScreen() {
                       const otHrs = hrRate > 0
                         ? (Number(r.ot_pay) || 0) / hrRate
                         : Number((r as any).ot_hours) || 0;
-                      const canEditHrs = !hasFrz && !!(r as any).firm_ot_allowed && hrRate > 0;
+                      const canEditHrs = !hasFrz && !!(r as any).firm_ot_allowed
+                        && hrRate > 0 && allowCatEditable("ot");
                       if (canEditHrs) {
                         return (
                           <OTHoursCell
@@ -3449,6 +3470,7 @@ export default function ComplianceSalaryRunScreen() {
                           {/* Iter 727 (user request) — OTH. ALLOW. (special)
                               is EDITABLE like Others*. */}
                           {has("special") ? (
+                            allowCatEditable("other") ? (
                             <EditableGridCell
                               col="special" idx={idx} width={colW.num}
                               value={r.special || 0}
@@ -3457,8 +3479,12 @@ export default function ComplianceSalaryRunScreen() {
                               onNav={navigateFrom}
                               onFocused={() => setHlRow(r.user_id)}
                             />
+                            ) : (
+                              <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.special)}</Text>
+                            )
                           ) : null}
                           {has("others") ? (
+                            allowCatEditable("other") ? (
                             <EditableGridCell
                               col="others" idx={idx} width={colW.num}
                               value={Math.max(0, (r.others || 0) - allowHeadsPaid(r))}
@@ -3467,6 +3493,9 @@ export default function ComplianceSalaryRunScreen() {
                               onNav={navigateFrom}
                               onFocused={() => setHlRow(r.user_id)}
                             />
+                            ) : (
+                              <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(Math.max(0, (r.others || 0) - allowHeadsPaid(r)))}</Text>
+                            )
                           ) : null}
                           {/* Iter 644 — dynamic custom allowance head cells
                               (paid, decomposed out of Others*).
@@ -3475,7 +3504,7 @@ export default function ComplianceSalaryRunScreen() {
                               read-only for every firm (sheet/master values
                               show, but cannot be typed over). */}
                           {allowLabels.map((l) => (
-                            String(l).toUpperCase().includes("FOOD") ? (
+                            String(l).toUpperCase().includes("FOOD") || !allowCatEditable("incentive") ? (
                               <Text key={`ap-${l}`}
                                 style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>
                                 {fmtInr((((r as any).allowance_heads || {})[l]) || 0)}
@@ -3499,6 +3528,7 @@ export default function ComplianceSalaryRunScreen() {
                         Iter 339c (user request) — shown BEFORE Gross.
                         Iter 644 — hidden when OVER TIME is disabled. */}
                     {hasOtCol ? (
+                      allowCatEditable("ot") ? (
                       <EditableGridCell
                         col="ot_pay" idx={idx} width={colW.num}
                         value={r.ot_pay || 0}
@@ -3507,6 +3537,9 @@ export default function ComplianceSalaryRunScreen() {
                         onNav={navigateFrom}
                               onFocused={() => setHlRow(r.user_id)}
                       />
+                      ) : (
+                        <Text style={[styles.tblCell, styles.rightCell, { width: colW.num }]}>{fmtInr(r.ot_pay)}</Text>
+                      )
                     ) : null}
                     {/* Iter 379 (user request) — Gross column HIGHLIGHTED;
                         red when it differs from the Freeze Salary. */}
