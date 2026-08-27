@@ -992,3 +992,8 @@ ITER 487 (doc-expiry alerts):
 ## Iter 747 — Attendance editable + employee master scroll (self-tested)
 - Live browser verification: picker 109ms/291ms, CL applied; employee
   master all 6 tabs scroll (screenshots in run logs). No DB writes made.
+
+## Iter 748 — Leave approval via reporting chain (tested)
+- Backend E2E 14/14 PASS (test_iter748_leave_chain.py): chain save,
+  request-time resolve, missing-role skip note, manager-only rights,
+  L1→L2 sequential, leave auto-finalize. Cleanup done.

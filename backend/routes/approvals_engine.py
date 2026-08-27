@@ -78,7 +78,9 @@ def _user_can_action_level(user: dict, level: Dict[str, Any]) -> bool:
     if level.get("delegated_to") and user.get("user_id") == level.get("delegated_to"):
         return True
     # Iter 705 — a directly-assigned employee approver.
-    if level.get("approver_type") == "employee" and user.get("user_id") == level.get("user_id"):
+    # Iter 748 — reporting-chain approver (user_id resolved at request time).
+    if level.get("approver_type") in ("employee", "reporting_chain") \
+            and user.get("user_id") == level.get("user_id"):
         return True
     if user.get("is_company_staff") and level.get("approver_type") == "company_role":
         return user.get("company_role_id") == level.get("role_id")
@@ -196,6 +198,33 @@ async def create_approval_request(
             skipped.append(lv)
     if not applicable:
         applicable = [{"level": 1, "approver_type": "company_admin"}]
+    # Iter 748 — REPORTING-CHAIN levels: resolve the actual approver from
+    # the REQUESTER's org reporting chain (Org Hierarchy module) right now.
+    # Unresolvable levels (chain not set for this employee) are skipped
+    # with an audit note; if nothing remains, Company Admin fail-safe.
+    chain_skips = []
+    if any(lv.get("approver_type") == "reporting_chain" for lv in applicable):
+        from routes.org_structure import resolve_approval_chain
+        emp_doc = await db.users.find_one(
+            {"user_id": requested_by.get("user_id")}, {"_id": 0}) or dict(requested_by)
+        resolved = []
+        for lv in applicable:
+            if lv.get("approver_type") != "reporting_chain":
+                resolved.append(lv)
+                continue
+            try:
+                hit = await resolve_approval_chain(emp_doc, [lv.get("chain_role")])
+            except Exception:
+                hit = []
+            if hit:
+                lv["user_id"] = hit[0]["user_id"]
+                lv["approver_name"] = hit[0].get("name")
+                lv["role_name"] = (f"{lv.get('role_name') or 'Chain'}: "
+                                   f"{hit[0].get('name') or hit[0]['user_id']}")
+                resolved.append(lv)
+            else:
+                chain_skips.append(lv)
+        applicable = resolved or [{"level": 1, "approver_type": "company_admin"}]
     for i, lv in enumerate(applicable, start=1):
         lv["level"] = i
     history = [{
@@ -204,6 +233,15 @@ async def create_approval_request(
         "by_name": requested_by.get("name") or requested_by.get("email"),
         "remarks": None, "at": now_iso(),
     }]
+    for lv in chain_skips:
+        history.append({
+            "level": 0, "action": "level_skipped",
+            "by": "system", "by_name": "Reporting Chain",
+            "remarks": (f"{lv.get('role_name') or lv.get('chain_role')} skipped — "
+                        "employee ki reporting chain me ye role set nahi hai "
+                        "(Org Hierarchy → Reporting Structure)"),
+            "at": now_iso(),
+        })
     for lv in skipped:
         history.append({
             "level": 0, "action": "level_skipped",
@@ -317,10 +355,31 @@ async def save_workflow(payload: WorkflowSave, authorization: Optional[str] = He
     levels = []
     for i, lv in enumerate(payload.levels or [], start=1):
         atype = lv.get("approver_type")
-        if atype not in ("company_admin", "company_role", "employee"):
-            raise HTTPException(status_code=400,
-                                detail="approver_type must be company_admin|company_role|employee")
+        if atype not in ("company_admin", "company_role", "employee",
+                         "reporting_chain"):
+            raise HTTPException(
+                status_code=400,
+                detail="approver_type must be company_admin|company_role|"
+                       "employee|reporting_chain")
         entry: Dict[str, Any] = {"level": i, "approver_type": atype}
+        if atype == "reporting_chain":
+            # Iter 748 (user request) — approver resolved AT REQUEST TIME
+            # from the requester's Org Reporting Chain (Org Hierarchy →
+            # Reporting Structure). Same chain reused across modules.
+            _CHAIN_LABELS = {
+                "primary_manager": "Reporting Manager (chain)",
+                "secondary_manager": "Functional Manager (chain)",
+                "dept_head": "Dept Head (chain)",
+                "hr_manager": "HR Manager (chain)",
+                "final_approver": "Final Approver (chain)",
+            }
+            cr = lv.get("chain_role")
+            if cr not in _CHAIN_LABELS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Level {i}: chain_role must be one of {sorted(_CHAIN_LABELS)}")
+            entry["chain_role"] = cr
+            entry["role_name"] = _CHAIN_LABELS[cr]
         if atype == "employee":
             # Iter 705 — directly-assigned employee approver.
             emp = await db.users.find_one(

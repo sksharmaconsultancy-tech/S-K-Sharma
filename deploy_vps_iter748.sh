@@ -1,8 +1,29 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 747)
+# S.K. Sharma & Co. — VPS deploy script (Iter 748)
 # Deploys the FULL latest code (includes ALL previous iterations).
 #
-# ══════ WHAT'S NEW (Iter 747) — 📅 EDITABLE ATTENDANCE + EMPLOYEE MASTER UX ══════
+# ══════ WHAT'S NEW (Iter 748) — 🔗 LEAVE APPROVAL VIA REPORTING CHAIN ══════
+#
+# USER REQUEST: "Leave requests flow through the same new Reporting
+# Manager chain automatically."
+#
+#  * Approval Workflow Builder me naye approver types: 🔗 Reporting
+#    Manager / Functional Manager / Dept Head / HR Manager / Final
+#    Approver — approver REQUEST KE TIME employee ki apni Org Reporting
+#    Chain (Org Hierarchy → Reporting Structure) se AUTO-resolve hota hai.
+#  * ⚡ One-tap preset: "Manager → HR" (Leave par lagate hi har employee
+#    ki leave pehle uske apne manager ke paas, fir HR ke paas jati hai).
+#  * Manager ko Approval Inbox me request dikhti hai (employee login se
+#    bhi) — sequential approve/reject, SLA/conditions/history sab pehle
+#    jaisa. Chain me role set na ho to level SKIP ho jata hai (audit note
+#    ke saath); kuch bhi resolve na ho to Company Admin fail-safe.
+#  * Yahi chain types SAB workflow modules (Leave/Expense/etc.) me
+#    available hai — ek hi org structure, koi duplicate mapping nahi.
+#  * VERIFIED: 14/14 E2E — chain save, auto-resolve, missing-role skip,
+#    manager-only action rights, L1→L2 sequential approve, leave record
+#    auto-finalize.
+#
+# ══════ ALSO IN Iter 747 — 📅 EDITABLE ATTENDANCE + EMPLOYEE MASTER UX ══════
 #
 #  * ATTENDANCE REPORT (Monthly Editable) — USER REQUEST:
 #    - Cell par click karte hi dropdown me ab SABHI codes: P A L CL WO CO

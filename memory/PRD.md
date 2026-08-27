@@ -9350,3 +9350,20 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   Live-verified all 6 tabs (scrollTop 90→1073→1526→2395→3202).
 - APP_ITERATION=747; deploy_vps_iter747.sh (745/746 folded); temp_bundle
   kind=script → deploy747.sh, kind=modules-xlsx still serves module audit.
+
+## Iter 748 — Leave Approval via Reporting Chain (user request)
+- approvals_engine.py: new approver_type "reporting_chain" (chain_role ∈
+  primary_manager/secondary_manager/dept_head/hr_manager/final_approver).
+  save_workflow validates+labels; create_approval_request resolves the
+  actual approver AT REQUEST TIME from the requester's users.reporting_chain
+  via org_structure.resolve_approval_chain (dept-head fallback from dept
+  master overlay, HR/final from org_defaults). Unresolved level → skipped
+  with history note; none left → company_admin fail-safe.
+  _user_can_action_level: reporting_chain matches level.user_id (managers
+  act from Approval Inbox — employee inbox access existed since Iter 705).
+- approval-workflows.tsx: chain chips (wf-add-chain-{module}-{role}) +
+  "⚡ Preset: Manager → HR" (wf-chain-preset-*); strip() keeps chain_role.
+- Works for ALL workflow modules (leave/expense/…) — same org chain.
+- TESTED: tests/test_iter748_leave_chain.py 14/14 PASS (NOTE: approval
+  action endpoint prefix is /api/admin/approval-requests/{id}/action).
+- APP_ITERATION=748; deploy_vps_iter748.sh (747 folded, deleted).

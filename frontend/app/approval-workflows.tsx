@@ -82,6 +82,7 @@ export default function ApprovalWorkflows() {
   // Phase B — preserve SLA + condition when (re)saving level arrays.
   const strip = (ls: any[]) => ls.map((l: any) => ({
     approver_type: l.approver_type, role_id: l.role_id, user_id: l.user_id,
+    chain_role: l.chain_role,
     sla_hours: l.sla_hours, condition: l.condition,
   }));
 
@@ -236,6 +237,25 @@ export default function ApprovalWorkflows() {
                         <Text style={s.chipTxt}>{r.name}</Text>
                       </Pressable>
                     ))}
+                  </View>
+                  {/* Iter 748 — Reporting Chain approvers (Org Hierarchy) */}
+                  <Text style={[s.muted, { marginTop: 10, fontWeight: "700" }]}>
+                    …ya Reporting Chain se (Org Hierarchy me set ki hui chain — request bhejne
+                    wale employee ka manager AUTO ban jata hai approver):
+                  </Text>
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+                    {([["primary_manager", "🔗 Reporting Manager"], ["secondary_manager", "🔗 Functional Manager"], ["dept_head", "🔗 Dept Head"], ["hr_manager", "🔗 HR Manager"], ["final_approver", "🔗 Final Approver"]] as [string, string][]).map(([cr, lbl]) => (
+                      <Pressable key={cr} style={s.chip} testID={`wf-add-chain-${m.key}-${cr}`}
+                        onPress={() => save(m.key, [...strip(levels), { approver_type: "reporting_chain", chain_role: cr }], true)}>
+                        <Text style={s.chipTxt}>{lbl}</Text>
+                      </Pressable>
+                    ))}
+                    <Pressable style={[s.chip, { backgroundColor: "rgba(37,99,235,0.15)" }]} testID={`wf-chain-preset-${m.key}`}
+                      onPress={() => save(m.key, [...strip(levels),
+                        { approver_type: "reporting_chain", chain_role: "primary_manager" },
+                        { approver_type: "reporting_chain", chain_role: "hr_manager" }], true)}>
+                      <Text style={[s.chipTxt, { fontWeight: "700" }]}>⚡ Preset: Manager → HR</Text>
+                    </Pressable>
                   </View>
                   {/* Iter 705 — assign a specific employee directly */}
                   <Text style={[s.muted, { marginTop: 10, fontWeight: "700" }]}>…or a specific employee:</Text>
