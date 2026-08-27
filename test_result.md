@@ -1001,3 +1001,6 @@ ITER 487 (doc-expiry alerts):
 ## Iter 749 — Manager bell alerts (tested)
 - 16/16 PASS: bell to personal approver on submit/advance; leave chain
   regression intact. Cleanup done.
+
+## Iter 750 — Attendance dropdown modal (self-tested)
+- Live browser: cell click → modal 101ms, full labels, CL apply OK.

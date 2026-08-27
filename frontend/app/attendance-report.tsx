@@ -7,7 +7,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View, Text, ScrollView, Pressable, TextInput, ActivityIndicator,
-  StyleSheet, Platform,
+  StyleSheet, Platform, Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -23,6 +23,10 @@ const CODES = ["P", "A", "L", "CL", "WO", "CO", "HD", "H"] as const;
 const CODE_COLORS: Record<string, string> = {
   P: "#15803D", A: "#DC2626", L: "#B45309", CL: "#0D9488", WO: "#6B7280",
   CO: "#7C3AED", HD: "#0369A1", H: "#DB2777",
+};
+const CODE_LABELS: Record<string, string> = {
+  P: "Present", A: "Absent", L: "Leave", CL: "Casual Leave", WO: "Weekly Off",
+  CO: "Comp Off", HD: "Half Day", H: "Holiday",
 };
 
 function nowMM() {
@@ -271,7 +275,6 @@ export default function AttendanceReportEditable() {
                   pickerD={picker?.uid === r.user_id ? picker.d : null}
                   enabled={!!st.enabled}
                   onCellPress={onCellPress}
-                  setCell={setCell}
                 />
               ))}
             </View>
@@ -453,6 +456,44 @@ export default function AttendanceReportEditable() {
           })}
         </ScrollView>
       )}
+      {/* Iter 750 (user bug) — proper STATUS DROPDOWN as a Modal list:
+          pehle chhoti horizontal strip cells ke upar overlap hoti thi jo
+          dropdown jaisi nahi dikhti thi. Ab full-label vertical menu. */}
+      <Modal visible={!!picker} transparent animationType="fade"
+        onRequestClose={() => setPicker(null)}>
+        <Pressable style={s.mWrap} onPress={() => setPicker(null)}>
+          <Pressable style={s.mCard} onPress={() => {}}>
+            {(() => {
+              if (!picker) return null;
+              const row = rows.find((x: any) => x.user_id === picker.uid);
+              const cell = row?.cells?.[picker.d] || {};
+              const cur = edits[`${picker.uid}|${picker.d}`]?.status || cell.st;
+              return (
+                <>
+                  <Text style={s.mTitle} numberOfLines={1}>
+                    {row?.name} · {picker.d.slice(8)}/{picker.d.slice(5, 7)}
+                  </Text>
+                  <Text style={s.mSub}>
+                    Abhi: {cur ? `${cur} — ${CODE_LABELS[cur] || ""}` : "blank"} · naya status chunein
+                  </Text>
+                  {CODES.map((cd) => (
+                    <Pressable key={cd} testID={`ar-pick-${cd}`}
+                      onPress={() => setCell(picker.uid, picker.d, cd, cell.st)}
+                      style={[s.mOpt, cur === cd && { backgroundColor: "#EFF6FF" }]}>
+                      <Text style={[s.mOptCode, { color: CODE_COLORS[cd] }]}>{cd}</Text>
+                      <Text style={s.mOptLbl}>{CODE_LABELS[cd]}</Text>
+                      {cur === cd ? <Text style={{ color: "#2563EB" }}>✓</Text> : null}
+                    </Pressable>
+                  ))}
+                  <Pressable onPress={() => setPicker(null)} style={s.mCancel} testID="ar-pick-cancel">
+                    <Text style={{ color: colors.onSurfaceSecondary, fontWeight: "700" }}>Cancel</Text>
+                  </Pressable>
+                </>
+              );
+            })()}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -462,12 +503,11 @@ export default function AttendanceReportEditable() {
  * hai jisme picker khula ya edit hua. Shallow-compare on row edits map.
  */
 const GridRow = React.memo(function GridRow({
-  r, days, rowEdits, pickerD, enabled, onCellPress, setCell,
+  r, days, rowEdits, pickerD, enabled, onCellPress,
 }: {
   r: any; days: string[]; rowEdits?: Record<string, any>;
   pickerD: string | null; enabled: boolean;
   onCellPress: (uid: string, d: string) => void;
-  setCell: (uid: string, d: string, st: string, prev: string) => void;
 }) {
   const tot = { ...r.totals };
   for (const d of Object.keys(rowEdits || {})) {
@@ -488,31 +528,20 @@ const GridRow = React.memo(function GridRow({
         const stv = ed ? ed.status : c.st;
         const isPick = pickerD === d;
         return (
-          <View key={d} style={{ width: 38, zIndex: isPick ? 120 : 0 }}>
-            <Pressable
-              disabled={!enabled}
-              onPress={() => onCellPress(r.user_id, d)}
-              style={[s.dcell,
-                ed && { backgroundColor: "#FEF3C7" },
-                c.pending && { backgroundColor: "#FEF9C3" }]}
-              testID={`ar-cell-${r.employee_code}-${d.slice(8)}`}
-            >
-              <Text style={[s.dtxt, { color: CODE_COLORS[stv] || colors.onSurfaceTertiary }]}>
-                {stv || "·"}{c.pending ? "🟡" : ed ? "✎" : c.src === "manual" ? "✓" : ""}
-              </Text>
-            </Pressable>
-            {isPick ? (
-              <View style={s.pop}>
-                {CODES.map((cd) => (
-                  <Pressable key={cd}
-                    onPress={() => setCell(r.user_id, d, cd, c.st)}
-                    style={s.popBtn} testID={`ar-pick-${cd}`}>
-                    <Text style={[s.popTxt, { color: CODE_COLORS[cd] }]}>{cd}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            ) : null}
-          </View>
+          <Pressable
+            key={d}
+            disabled={!enabled}
+            onPress={() => onCellPress(r.user_id, d)}
+            style={[s.dcell, { width: 38 },
+              ed && { backgroundColor: "#FEF3C7" },
+              c.pending && { backgroundColor: "#FEF9C3" },
+              isPick && { backgroundColor: "#DBEAFE", borderWidth: 1, borderColor: "#2563EB" }]}
+            testID={`ar-cell-${r.employee_code}-${d.slice(8)}`}
+          >
+            <Text style={[s.dtxt, { color: CODE_COLORS[stv] || colors.onSurfaceTertiary }]}>
+              {stv || "·"}{c.pending ? "🟡" : ed ? "✎" : c.src === "manual" ? "✓" : ""}
+            </Text>
+          </Pressable>
         );
       })}
       {CODES.map((cd) => (
@@ -557,9 +586,15 @@ const s = StyleSheet.create({
   cell: { fontSize: 11.5, color: colors.onSurface, textAlign: "center", paddingVertical: 8 },
   dcell: { height: 34, alignItems: "center", justifyContent: "center", borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: colors.border },
   dtxt: { fontSize: 11, fontWeight: "800" },
-  pop: { position: "absolute", top: 34, left: -30, zIndex: 50, flexDirection: "row", backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 8, elevation: 6, shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 6 },
-  popBtn: { paddingHorizontal: 8, paddingVertical: 8 },
-  popTxt: { fontSize: 12, fontWeight: "800" },
+  // Iter 750 — status dropdown modal
+  mWrap: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", padding: 20 },
+  mCard: { backgroundColor: colors.surface, borderRadius: 14, padding: 16, width: "100%", maxWidth: 340 },
+  mTitle: { fontSize: 15, fontWeight: "800", color: colors.onSurface },
+  mSub: { fontSize: 12, color: colors.onSurfaceTertiary, marginTop: 2, marginBottom: 8 },
+  mOpt: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, paddingHorizontal: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, borderRadius: 8 },
+  mOptCode: { fontSize: 14, fontWeight: "800", width: 32 },
+  mOptLbl: { fontSize: 13, color: colors.onSurface, flex: 1 },
+  mCancel: { alignItems: "center", paddingVertical: 12, marginTop: 4 },
   legend: { fontSize: 11.5, color: colors.onSurfaceSecondary, padding: 12 },
   warn: { color: "#B45309", fontSize: 12, paddingHorizontal: 12, paddingBottom: 6 },
   reqCard: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, marginBottom: 8, backgroundColor: colors.surface },

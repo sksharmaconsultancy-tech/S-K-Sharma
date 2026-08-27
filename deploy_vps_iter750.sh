@@ -1,8 +1,22 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 749)
+# S.K. Sharma & Co. — VPS deploy script (Iter 750)
 # Deploys the FULL latest code (includes ALL previous iterations).
 #
-# ══════ WHAT'S NEW (Iter 749) — 🔔 MANAGER INBOX BELL ALERTS ══════
+# ══════ WHAT'S NEW (Iter 750) — 📋 ATTENDANCE STATUS DROPDOWN (PROPER MENU) ══════
+#
+# USER BUG: "Still dropdown list not showing of attendance P L CL."
+#
+#  * Pehle options ek chhoti horizontal strip me cells ke UPAR overlap
+#    hote the — dropdown jaisi dikhti hi nahi thi.
+#  * Ab cell par click karte hi ek PROPER DROPDOWN MENU (popup) khulta
+#    hai — employee ka naam + date ke saath, FULL LABELS me vertical list:
+#    P Present · A Absent · L Leave · CL Casual Leave · WO Weekly Off ·
+#    CO Comp Off · HD Half Day · H Holiday (current status par ✓ mark).
+#  * Selected cell blue highlight hota hai; option tap karte hi turant
+#    apply (live test: menu 101ms me khulta hai) + Cancel/bahar tap se
+#    band. Save Changes se hi DB me jata hai (pehle jaisa).
+#
+# ══════ ALSO IN Iter 749 — 🔔 MANAGER INBOX BELL ALERTS ══════
 #
 # USER REQUEST: "Show managers a bell alert the moment a team member's
 # leave lands in their inbox."

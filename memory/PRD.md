@@ -9379,3 +9379,16 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
 - TESTED: test_iter748_leave_chain.py extended → 16/16 PASS (bell to L1
   manager on submit + bell to L2 HR on advance; notifications cleanup).
 - APP_ITERATION=749; deploy_vps_iter749.sh (748 folded, deleted).
+
+## Iter 750 — Attendance status dropdown as proper Modal menu (user bug)
+- User (on VPS Iter 748) reported "dropdown list not showing P L CL" —
+  the in-row horizontal strip popup overlapped day cells and didn't read
+  as a dropdown. REPLACED with a screen-level Modal menu: employee name +
+  date header, vertical full-label options (P/A/L/CL/WO/CO/HD/H with
+  colors + current ✓), selected cell blue-highlighted, outside-tap /
+  Cancel closes. GridRow memo perf retained (setCell prop removed from
+  row; modal lives in parent, testIDs ar-pick-{code} unchanged,
+  ar-pick-cancel new). Old s.pop styles removed.
+- Live verified: modal opens 101ms, labels render, CL applies (✎ + Save
+  Changes counter). No DB writes during test.
+- APP_ITERATION=750; deploy_vps_iter750.sh (749 folded, deleted).
