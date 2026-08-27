@@ -1,8 +1,17 @@
 #!/bin/bash
-# S.K. Sharma & Co. — VPS deploy script (Iter 750)
+# S.K. Sharma & Co. — VPS deploy script (Iter 751)
 # Deploys the FULL latest code (includes ALL previous iterations).
 #
-# ══════ WHAT'S NEW (Iter 750) — 📋 ATTENDANCE STATUS DROPDOWN (PROPER MENU) ══════
+# ══════ WHAT'S NEW (Iter 751) — 👥 ACTIVE-ONLY + GROUP FILTER + SORTING ══════
+#
+# USER REQUEST (Attendance Report — Monthly Editable):
+#  * Sirf ACTIVE employees hi report me aate hain (inactive/disabled
+#    backend se hi filter — Excel export me bhi).
+#  * GROUP-WISE FILTER: All / LABOUR / STAFF chips (employee master ke
+#    groups se auto) — tap karte hi grid usi group ka.
+#  * SORTING MODE: Code / Name / Dept / Group — ek tap me order badlo.
+#
+# ══════ ALSO IN Iter 750 — 📋 ATTENDANCE STATUS DROPDOWN (PROPER MENU) ══════
 #
 # USER BUG: "Still dropdown list not showing of attendance P L CL."
 #

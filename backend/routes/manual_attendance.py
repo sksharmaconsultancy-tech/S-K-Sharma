@@ -97,9 +97,12 @@ async def _grid(cid: str, month: str) -> dict:
     firm_wo = {int(x) for x in ((comp or {}).get("attendance_policy")
                                 or {}).get("weekly_off_days") or []}
     emps = await db.users.find(
-        {"company_id": cid, "role": "employee", "disabled": {"$ne": True}},
+        {"company_id": cid, "role": "employee", "disabled": {"$ne": True},
+         # Iter 751 (user request) — sirf ACTIVE employees is report me.
+         "active": {"$ne": False}},
         {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1,
-         "department": 1, "weekly_off_days_override": 1}).to_list(5000)
+         "department": 1, "employee_group": 1,
+         "weekly_off_days_override": 1}).to_list(5000)
     emps.sort(key=lambda u: str(u.get("employee_code") or "").zfill(8))
     # base statuses from EXISTING punch data (read-only)
     punched: Dict[tuple, bool] = {}
@@ -141,6 +144,7 @@ async def _grid(cid: str, month: str) -> dict:
                      "employee_code": u.get("employee_code") or "",
                      "name": u.get("name") or "",
                      "department": u.get("department") or "",
+                     "group": u.get("employee_group") or "",
                      "cells": cells, "totals": tot})
     summary = {c: sum(r["totals"][c] for r in rows) for c in CODES}
     summary.update({

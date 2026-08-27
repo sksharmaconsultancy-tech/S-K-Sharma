@@ -9392,3 +9392,11 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
 - Live verified: modal opens 101ms, labels render, CL applies (✎ + Save
   Changes counter). No DB writes during test.
 - APP_ITERATION=750; deploy_vps_iter750.sh (749 folded, deleted).
+
+## Iter 751 — Monthly Editable: active-only + group filter + sorting (user)
+- manual_attendance.py _grid: users query now active:{$ne:False}; rows
+  carry "group" (users.employee_group). Excel export inherits (same _grid).
+- attendance-report.tsx: groupF chips (ar-group-*, from data), sortMode
+  chips ar-sort-{code|name|department|group}; client-side filter+sort in
+  rows useMemo. Live verified (STAFF → 17 rows, name-sort AFZAL first).
+- APP_ITERATION=751; deploy_vps_iter751.sh (750 folded, deleted).

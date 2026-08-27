@@ -1004,3 +1004,6 @@ ITER 487 (doc-expiry alerts):
 
 ## Iter 750 — Attendance dropdown modal (self-tested)
 - Live browser: cell click → modal 101ms, full labels, CL apply OK.
+
+## Iter 751 — active-only + group filter + sort (self-tested)
+- Live browser: STAFF filter 3937→527 cells, name sort OK, chips render.

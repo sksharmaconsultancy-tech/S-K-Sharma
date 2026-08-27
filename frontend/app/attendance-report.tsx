@@ -165,6 +165,15 @@ export default function AttendanceReportEditable() {
 
   const RULE_KEYS = ["ANY", "A>P", "P>A", "A>L", "P>L", "P>HD", "A>HD", "WO>P"];
 
+  const [groupF, setGroupF] = useState("");
+  const [sortMode, setSortMode] = useState<"code" | "name" | "department" | "group">("code");
+
+  const groups = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of (data?.rows || [])) if (r.group) set.add(r.group);
+    return Array.from(set).sort();
+  }, [data]);
+
   const rows = useMemo(() => {
     let r = data?.rows || [];
     if (search.trim()) {
@@ -173,8 +182,19 @@ export default function AttendanceReportEditable() {
         || String(x.employee_code).toLowerCase().includes(q)
         || x.department.toLowerCase().includes(q));
     }
-    return r;
-  }, [data, search]);
+    // Iter 751 (user request) — group-wise filter + sorting mode
+    if (groupF) r = r.filter((x: any) => (x.group || "") === groupF);
+    const cmp: Record<string, (a: any, b: any) => number> = {
+      code: (a, b) => String(a.employee_code).padStart(8, "0")
+        .localeCompare(String(b.employee_code).padStart(8, "0")),
+      name: (a, b) => String(a.name).localeCompare(String(b.name)),
+      department: (a, b) => String(a.department).localeCompare(String(b.department))
+        || String(a.name).localeCompare(String(b.name)),
+      group: (a, b) => String(a.group).localeCompare(String(b.group))
+        || String(a.name).localeCompare(String(b.name)),
+    };
+    return [...r].sort(cmp[sortMode]);
+  }, [data, search, groupF, sortMode]);
 
   if (authLoading) return null;
   if (!user || !["company_admin", "super_admin", "sub_admin"].includes(user.role))
@@ -230,6 +250,28 @@ export default function AttendanceReportEditable() {
             </Text>
           </Pressable>
         ) : null}
+      </View>
+      {/* Iter 751 (user request) — Group filter + Sorting mode (active-only
+          employees backend se aa rahe hain) */}
+      <View style={s.fRow}>
+        <Text style={s.fLbl}>Group:</Text>
+        <Pressable onPress={() => setGroupF("")}
+          style={[s.fChip, !groupF && s.fChipOn]} testID="ar-group-all">
+          <Text style={[s.fChipTxt, !groupF && s.fChipTxtOn]}>All</Text>
+        </Pressable>
+        {groups.map((g) => (
+          <Pressable key={g} onPress={() => setGroupF(groupF === g ? "" : g)}
+            style={[s.fChip, groupF === g && s.fChipOn]} testID={`ar-group-${g}`}>
+            <Text style={[s.fChipTxt, groupF === g && s.fChipTxtOn]}>{g}</Text>
+          </Pressable>
+        ))}
+        <Text style={[s.fLbl, { marginLeft: 12 }]}>Sort:</Text>
+        {([["code", "Code"], ["name", "Name"], ["department", "Dept"], ["group", "Group"]] as [any, string][]).map(([v, l]) => (
+          <Pressable key={v} onPress={() => setSortMode(v)}
+            style={[s.fChip, sortMode === v && s.fChipOn]} testID={`ar-sort-${v}`}>
+            <Text style={[s.fChipTxt, sortMode === v && s.fChipTxtOn]}>{l}</Text>
+          </Pressable>
+        ))}
       </View>
       {msg ? <Text style={s.msg}>{msg}</Text> : null}
 
@@ -586,6 +628,13 @@ const s = StyleSheet.create({
   cell: { fontSize: 11.5, color: colors.onSurface, textAlign: "center", paddingVertical: 8 },
   dcell: { height: 34, alignItems: "center", justifyContent: "center", borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: colors.border },
   dtxt: { fontSize: 11, fontWeight: "800" },
+  // Iter 751 — group filter + sort chips
+  fRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, paddingHorizontal: 12, marginTop: 6 },
+  fLbl: { fontSize: 12, fontWeight: "700", color: colors.onSurfaceSecondary },
+  fChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border },
+  fChipOn: { backgroundColor: "#2563EB", borderColor: "#2563EB" },
+  fChipTxt: { fontSize: 12, color: colors.onSurfaceSecondary, fontWeight: "600" },
+  fChipTxtOn: { color: "#fff" },
   // Iter 750 — status dropdown modal
   mWrap: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", padding: 20 },
   mCard: { backgroundColor: colors.surface, borderRadius: 14, padding: 16, width: "100%", maxWidth: 340 },
