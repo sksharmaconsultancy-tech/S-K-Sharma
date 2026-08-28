@@ -39,7 +39,10 @@ type Flow = {
   needs_run: boolean;
 };
 type Portal = { key: string; label: string; url: string };
-type Employee = { user_id: string; name?: string; employee_code?: string };
+type Employee = {
+  user_id: string; name?: string; employee_code?: string;
+  father_name?: string; designation?: string; doj?: string; esi_ip_no?: string;
+};
 type Run = { run_id: string; month: string; status?: string; employee_type?: string; finalized?: boolean };
 
 // Iter 732 — one month can have a run per GROUP: label = "May 2026 · STAFF".
@@ -170,12 +173,16 @@ export default function AutomationStudioScreen() {
   // Load employees when a flow needs one.
   useEffect(() => {
     if (!companyId || !activeFlow?.needs_employee) return;
-    api<{ employees: Employee[] }>(
-      `/admin/employees?company_id=${companyId}&limit=2000`,
-    )
+    // Iter 767 (user request) — ESIC IP Registration shows ONLY active +
+    // ESIC-eligible employees (gross within ₹21,000 ceiling / existing IP)
+    // with Father Name, Designation, DOJ and ESIC No. on each row.
+    const url = flow === "esic_ip_register"
+      ? `/admin/portal-automation/esic-eligible-employees?company_id=${companyId}`
+      : `/admin/employees?company_id=${companyId}&limit=2000`;
+    api<{ employees: Employee[] }>(url)
       .then((r) => setEmployees(r.employees || []))
       .catch(() => setEmployees([]));
-  }, [companyId, activeFlow?.needs_employee]);
+  }, [companyId, activeFlow?.needs_employee, flow]);
 
   // Load compliance runs when a flow needs one.
   useEffect(() => {
@@ -348,10 +355,12 @@ export default function AutomationStudioScreen() {
       return;
     }
     if (pcPollRef.current) { clearInterval(pcPollRef.current); pcPollRef.current = null; }
-    // Iter 766 (user video) — ESIC IP Registration needs the employee whose
-    // Employee Master details will auto-fill the registration form.
-    if (portalKey === "esic" && (action || "") === "ip_register" && !empId) {
-      setPcStatus("⚠ Pehle step 3 me EMPLOYEE select karein — usi ke Employee Master se ESIC registration form auto-fill hoga.");
+    // Iter 766/767 — ESIC IP Registration & EPFO Generate UAN need the
+    // employee whose Employee Master details will auto-fill the form.
+    const needsEmp = (portalKey === "esic" && (action || "") === "ip_register")
+      || (portalKey === "epfo" && (action || "") === "uan");
+    if (needsEmp && !empId) {
+      setPcStatus("⚠ Pehle step 3 me EMPLOYEE select karein — usi ke Employee Master se registration form auto-fill hoga.");
       return;
     }
     setPcBusy("open");
@@ -458,9 +467,9 @@ export default function AutomationStudioScreen() {
         ecr_fetch: "⏳ Downloading this month's PF ECR file...",
         ecr_attached: "✅ ECR file ATTACHED — review and click Upload; the TRRN will be captured automatically after you upload",
         ecr_manual: "⚠ Page open but the ECR file could not be auto-attached — the Runner window shows the file location; attach it manually",
-        ip_fill: "⏳ ESIC IP Registration — Employee Master se form bhara ja raha hai (Yes/No → Date of Appointment → Mobile Validate → full form)...",
-        ip_form_filled: "✅ ESIC form Employee Master se AUTO-FILL ho gaya — har value VERIFY karein, State/District/Dispensary chunein aur khud Submit karein",
-        ip_manual: "⚠ ESIC form pura auto-fill nahi ho paya — Runner window me details dekh kar baaki fields khud bharein",
+        ip_fill: "⏳ Registration form Employee Master se bhara ja raha hai...",
+        ip_form_filled: "✅ Form Employee Master se AUTO-FILL ho gaya — har value VERIFY karein, bachi choices (State/District/Dispensary ya KYC) chun kar khud Submit karein",
+        ip_manual: "⚠ Form pura auto-fill nahi ho paya — Runner window me details dekh kar baaki fields khud bharein",
         open: `✅ ${P} Portal Open — login filled${who}, enter CAPTCHA & ${portalKey === "esic" ? "Login" : "Sign In"}`,
         open_nocreds: portalKey === "esic"
           ? "⚠ Portal opened but NO ESIC login is saved for THIS firm. Go to Firm Master → ESI Registration → fill ESI User ID + ESI Password → Save, then click again."
@@ -725,7 +734,8 @@ export default function AutomationStudioScreen() {
       (e) =>
         !empSearch ||
         (e.name || "").toLowerCase().includes(empSearch.toLowerCase()) ||
-        (e.employee_code || "").toLowerCase().includes(empSearch.toLowerCase()),
+        (e.employee_code || "").toLowerCase().includes(empSearch.toLowerCase()) ||
+        (e.father_name || "").toLowerCase().includes(empSearch.toLowerCase()),
     )
     .slice(0, 30);
 
@@ -885,15 +895,30 @@ export default function AutomationStudioScreen() {
                         onPress={() => setEmpId(e.user_id)}
                         style={[st.empItem, empId === e.user_id && st.empItemActive]}
                       >
-                        <Text style={[st.empTxt, empId === e.user_id && { color: "#7A4A18", fontWeight: "700" }]} numberOfLines={1}>
-                          {e.employee_code ? `${e.employee_code} · ` : ""}
-                          {e.name}
-                        </Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[st.empTxt, empId === e.user_id && { color: "#7A4A18", fontWeight: "700" }]} numberOfLines={1}>
+                            {e.employee_code ? `${e.employee_code} · ` : ""}
+                            {e.name}
+                          </Text>
+                          {flow === "esic_ip_register" ? (
+                            <Text style={st.empSub} numberOfLines={2}>
+                              {e.father_name ? `S/o ${e.father_name}` : "Father: —"}
+                              {e.designation ? ` · ${e.designation}` : ""}
+                              {e.doj ? ` · DOJ ${e.doj}` : ""}
+                              {"\n"}ESIC No: {e.esi_ip_no || "— (new registration)"}
+                            </Text>
+                          ) : null}
+                        </View>
                         {empId === e.user_id && (
                           <Ionicons name="checkmark-circle" size={18} color="#8B5E34" />
                         )}
                       </Pressable>
                     ))}
+                    {flow === "esic_ip_register" && !filteredEmps.length ? (
+                      <Text style={st.empSub}>
+                        Koi active + ESIC-eligible employee nahi mila (gross ₹21,000 tak ya existing ESIC no. wale hi dikhte hain).
+                      </Text>
+                    ) : null}
                   </View>
                 </View>
               )}
@@ -1634,6 +1659,7 @@ const st = StyleSheet.create({
   },
   empItemActive: { backgroundColor: "#FBECD6" },
   empTxt: { fontSize: 13.5, color: colors.onSurface, flex: 1 },
+  empSub: { fontSize: 11.5, color: colors.onSurfaceSecondary, marginTop: 2, lineHeight: 16 },
   gate: { alignItems: "center", paddingVertical: 48, paddingHorizontal: spacing.lg, gap: 10 },
   gateTitle: { fontSize: 16, fontWeight: "800", color: colors.onSurface },
   gateBody: { fontSize: 13, color: colors.onSurfaceSecondary, textAlign: "center", lineHeight: 19 },

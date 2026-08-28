@@ -559,7 +559,7 @@ async def ext_ecr_file(token: str, run_id: str = ""):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "30"
+RUNNER_VERSION = "31"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -570,7 +570,7 @@ import time
 import urllib.error
 import urllib.request
 
-RUNNER_BUILD = "29"
+RUNNER_BUILD = "30"
 
 PORTALS = {
     "esic": "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx",
@@ -817,6 +817,139 @@ def _esic_ip_register(driver, api_base, token, st):
     print("AUTO-FILLED %d field(s) from the Employee Master." % n)
     print("VERIFY every value, choose State / District / Dispensary and")
     print("submit the form yourself - nothing is auto-submitted.")
+    st("ip_form_filled" if n else "ip_manual")
+
+
+def _epfo_uan_register(driver, api_base, token, st):
+    """Iter 767 (user request) — EPFO 'Register - Individual' (new UAN)
+    auto-fill, same pattern as the ESIC IP Registration: once the member
+    registration form is on screen, every field we know is filled from the
+    Employee Master. If the fields only appear AFTER you answer the
+    'previous member of EPF?' question, the runner waits (up to ~2 min)
+    for you to click it and then fills. NOTHING is auto-submitted."""
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import Select
+
+    st("ip_fill")
+    try:
+        req = urllib.request.Request(
+            api_base + "/portal-ext/ip-register-data?token=" + token)
+        emp = json.loads(urllib.request.urlopen(req, timeout=30)
+                         .read().decode()).get("employee") or {}
+    except Exception as e:
+        print("Employee data fetch failed (%s) - fill the form manually."
+              % str(e)[:120])
+        st("ip_manual")
+        return
+    print("Employee: %s (%s)" % (emp.get("name"), emp.get("employee_code")))
+    if emp.get("uan_no"):
+        print("NOTE: master already has UAN %s - is registration needed?"
+              % emp["uan_no"])
+
+    def _find(pats, exc=(), kinds=("input", "textarea")):
+        for k in kinds:
+            try:
+                els = driver.find_elements(By.TAG_NAME, k)
+            except Exception:
+                continue
+            for el in els:
+                try:
+                    if not el.is_displayed():
+                        continue
+                    key = ((el.get_attribute("id") or "") + " "
+                           + (el.get_attribute("name") or "")).lower()
+                    if any(x in key for x in exc):
+                        continue
+                    if any(p in key for p in pats):
+                        return el
+                except Exception:
+                    continue
+        return None
+
+    def _setv(el, val):
+        try:
+            driver.execute_script(
+                "arguments[0].value=arguments[1];"
+                "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));"
+                "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));",
+                el, str(val))
+            return True
+        except Exception:
+            try:
+                el.clear()
+                el.send_keys(str(val))
+                return True
+            except Exception:
+                return False
+
+    # Wait for the form fields to be on screen — they may appear only after
+    # the operator answers the "previous member?" question themselves.
+    print("Waiting for the member-registration fields (answer the")
+    print("'previous member of EPF?' question if the portal asks)...")
+    _key_el = None
+    for _i in range(120):
+        _key_el = _find(("aadhaar", "aadhar", "uid")) or \
+            _find(("membername", "txtname", "fullname"),
+                  ("father", "husband", "user", "bank"))
+        if _key_el is not None:
+            break
+        time.sleep(1)
+    if _key_el is None:
+        print("Form fields did not appear - fill the form manually.")
+        st("ip_manual")
+        return
+
+    fills = [
+        (("aadhaar", "aadhar", "uid"), (), emp.get("aadhaar_no")),
+        (("membername", "txtname", "fullname", "empname"),
+         ("father", "husband", "nominee", "bank", "branch", "user"),
+         emp.get("name")),
+        (("father", "husband", "guardian"), ("nominee",),
+         emp.get("father_name")),
+        (("dob", "birth"), ("nominee",), emp.get("dob")),
+        (("mobile", "mob"), ("father", "nominee", "emer"), emp.get("phone")),
+        (("email",), (), emp.get("email")),
+        (("doj", "joining", "dtjoin", "dateofjoin"), (), emp.get("doj")),
+        (("account", "accno", "acno"), (), emp.get("bank_account")),
+        (("ifsc",), (), emp.get("ifsc")),
+    ]
+    n = 0
+    for pats, exc, val in fills:
+        if not val:
+            continue
+        el = _find(pats, exc)
+        if el is not None and not (el.get_attribute("value") or "").strip():
+            if _setv(el, val):
+                n += 1
+    sels = [
+        (("gender", "sex"),
+         ("male",) if emp.get("gender") == "M"
+         else ("female",) if emp.get("gender") == "F" else ()),
+        (("marital",), (emp.get("marital_status") or "",)),
+        (("relation",), ("father",) if emp.get("father_name") else ()),
+        (("qualification",), ()),
+    ]
+    for pats, opts in sels:
+        opts = tuple(o for o in opts if o)
+        if not opts:
+            continue
+        el = _find(pats, kinds=("select",))
+        if el is None:
+            continue
+        try:
+            s = Select(el)
+            for o in s.options:
+                ot = (o.text or "").strip().lower()
+                if any(x.lower() in ot for x in opts):
+                    s.select_by_visible_text(o.text)
+                    n += 1
+                    break
+        except Exception:
+            pass
+    print("AUTO-FILLED %d field(s) from the Employee Master." % n)
+    print("VERIFY every value, answer the remaining questions "
+          "(qualification / previous employment / KYC) and submit "
+          "yourself - nothing is auto-submitted.")
     st("ip_form_filled" if n else "ip_manual")
 
 
@@ -1927,6 +2060,19 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None, action=None):
                         if _ok:
                             _st("action_open")
                             print("Page open - continue in the Chrome window.")
+                            # Iter 767 (user request) — Generate UAN: fill
+                            # the Register-Individual form from the
+                            # Employee Master (same as the ESIC flow).
+                            if (action or "").lower() == "uan":
+                                time.sleep(2)
+                                try:
+                                    _epfo_uan_register(
+                                        driver, API_BASE, TOKEN, _st)
+                                except Exception as _e:
+                                    print("UAN form auto-fill stopped (%s) - "
+                                          "continue manually."
+                                          % str(_e)[:120])
+                                    _st("ip_manual")
                         else:
                             _st("action_manual")
                             print("Logged in - the menu link was not found, "
@@ -3173,6 +3319,83 @@ async def portal_ext_ip_register_data(token: str):
         "esi_ip_no": str(u.get("esi_ip_no") or ""),
         "uan_no": str(u.get("uan_no") or ""),
     }}
+
+
+@router.get("/admin/portal-automation/esic-eligible-employees")
+async def portal_esic_eligible_employees(
+    company_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Iter 767 (user request) — ESIC IP Registration employee list: ONLY
+    ACTIVE employees who are ESIC-ELIGIBLE (master monthly gross within the
+    ESIC ceiling ₹21,000, or already holding an ESIC number). Each row
+    carries Name, Father Name, Designation, DOJ and ESIC No. for display."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["company_admin", "super_admin", "sub_admin"])
+    company_id = await _resolve_company(admin, company_id)
+
+    def _gross(u: Dict[str, Any]) -> float:
+        try:
+            g = float(u.get("compliance_gross") or 0)
+        except (TypeError, ValueError):
+            g = 0.0
+        if g:
+            return g
+        for st_key, daily_mult in (("salary_structure_compliance", None),
+                                   ("salary_structure_actual", 26.0)):
+            tot = 0.0
+            for h in (u.get(st_key) or []):
+                try:
+                    amt = float(h.get("amount") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if daily_mult and (h.get("rate_type") or "").lower() == "daily":
+                    tot += amt * float(h.get("working_days") or daily_mult)
+                else:
+                    tot += amt
+            if tot:
+                return tot
+        try:
+            return float(u.get("salary_monthly") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _dt(v: Any) -> str:
+        v = str(v or "").strip()
+        for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y"):
+            try:
+                return datetime.strptime(v[:10], fmt).strftime("%d/%m/%Y")
+            except ValueError:
+                continue
+        return v
+
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    out: List[Dict[str, Any]] = []
+    async for u in db.users.find(
+            {"company_id": company_id, "role": "employee",
+             "disabled": {"$ne": True}},
+            {"_id": 0, "user_id": 1, "name": 1, "employee_code": 1,
+             "father_name": 1, "designation": 1, "doj": 1, "esi_ip_no": 1,
+             "resign_date": 1, "compliance_gross": 1, "salary_monthly": 1,
+             "salary_structure_compliance": 1, "salary_structure_actual": 1}):
+        rd = str(u.get("resign_date") or "").strip()
+        if rd and rd[:10] <= today:
+            continue                      # resigned — not ACTIVE
+        g = _gross(u)
+        if g > 21000 and not (u.get("esi_ip_no") or "").strip():
+            continue                      # above ESIC ceiling — not eligible
+        out.append({
+            "user_id": u["user_id"],
+            "name": u.get("name") or "",
+            "employee_code": u.get("employee_code") or "",
+            "father_name": u.get("father_name") or "",
+            "designation": u.get("designation") or "",
+            "doj": _dt(u.get("doj")),
+            "esi_ip_no": str(u.get("esi_ip_no") or ""),
+            "monthly_gross": round(g, 2),
+        })
+    out.sort(key=lambda x: (x["name"] or "").upper())
+    return {"ok": True, "employees": out, "count": len(out)}
 
 
 @router.get("/admin/portal-automation/ecr-preview")

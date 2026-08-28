@@ -9684,3 +9684,23 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   verification there (heuristic selectors may need tuning after first run).
 - APP_ITERATION=766; deploy_vps_iter766.sh (765 folded); temp_bundle →
   deploy766.sh.
+
+## Iter 767 — EPFO UAN auto-fill + ESIC eligible-only employee list
+- EPFO UAN (user): runner v31 (_epfo_uan_register): after Member →
+  Register-Individual opens, waits up to 120s for form fields (operator
+  may need to answer 'previous member?' radio), then auto-fills aadhaar/
+  name/father/dob/mobile/email/doj/bank acct/ifsc + gender/marital/
+  relation selects from /portal-ext/ip-register-data (same endpoint as
+  ESIC). Warns if master already has UAN. No auto-submit. Studio: empId
+  mandatory for epfo uan too (needsEmp check); generic ip_fill/
+  ip_form_filled/ip_manual status texts.
+- ESIC ELIGIBLE LIST (user): new GET /admin/portal-automation/
+  esic-eligible-employees — ACTIVE (disabled≠true, resign_date empty/
+  future) AND (master gross ≤ 21000 OR esi_ip_no set). Gross resolution:
+  compliance_gross → salary_structure_compliance sum → actual structure
+  (daily×working_days/26) → salary_monthly. Rows: name, employee_code,
+  father_name, designation, doj dd/mm/yyyy, esi_ip_no, monthly_gross.
+  Studio uses it only for flow esic_ip_register; rows show S/o + desig +
+  DOJ + ESIC No ("— new registration"); father-name search; empty-state
+  note. Verified: Kankani 75/127 eligible.
+- APP_ITERATION=767; deploy_vps_iter767.sh (766 folded) → deploy767.sh.
