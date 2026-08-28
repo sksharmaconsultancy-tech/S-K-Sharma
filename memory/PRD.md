@@ -9704,3 +9704,35 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   DOJ + ESIC No ("— new registration"); father-name search; empty-state
   note. Verified: Kankani 75/127 eligible.
 - APP_ITERATION=767; deploy_vps_iter767.sh (766 folded) → deploy767.sh.
+
+## Iter 768 — Shared machines (NOT FOUND fix) + Auto M2M sync + 3-policy rule
+- NOT FOUND FIX (user bug Aram's/Sam Textile): root cause — punch_logs
+  NOT-FOUND rows only surface under the device's assigned firm. New
+  biometric_devices.shared_company_ids (create+patch, primary firm auto-
+  excluded, company_admin can't edit). punch_logs.py: _firm_sns + row-skip
+  now OR shared overlap. Device Setup UI: "Shared With Firms" checkbox
+  chips (testID dev-share-{cid}). VERIFIED: unmapped punch on shared
+  device visible to both firms via /admin/punch-logs. USER ACTION on VPS:
+  tick Aram's/Sam on their shared machines.
+- AUTO M2M SYNC (user): sync settings new machine_auto_sync (default ON).
+  biometric_devices.py USER PIN ingestion detects NEW/CHANGED (name/card)
+  machine user → sync_engine.maybe_auto_machine_sync(): 10-min debounce
+  (reasons appended to existing run log), needs ≥2 sync-enabled machines,
+  queues QUERY USERINFO/FINGERTMP/BIODATA + machine_sync_runs(source auto,
+  distribute 120s). LOG REPORT: machine_sync_logs collection (manual +
+  auto; reasons[], machines, status harvesting→done, users/templates/
+  queued counts on distribute). GET /sync/machines/logs. sync-engine.tsx:
+  "Auto Machine → Machine Sync" toggle + "Machine Sync Log Report" list
+  in Machines tab (AUTO/MANUAL badges).
+- 3-POLICY EXCLUSIVITY (user clarified via screenshot — EXISTING toggles):
+  P1 attendance_by_duty_hours ↔ P2 compliance_present_8hr ↔ P3
+  attendance_source='manual_editable'. attendance-policy.tsx chips: P1
+  Yes → P2 No (and vice versa). Backend: attendance_policy_api PATCH
+  clears firm attendance_source when P1/P2 turned Yes; firm_master PATCH
+  with manual_editable clears both pm flags. VERIFIED both directions.
+- NOTE: test PATCH wiped preview-Kankani policy_master.dummy_shifts;
+  RESTORED 6×8hr ladder (SHIFT 2=07:00-15:00 confirmed from Iter 712/763;
+  others reconstructed: S1 06-14, S3 08-16, S4 14-22, S5 15-23, S6 23-07).
+  CAUTION: PATCH /attendance/policy with partial policy_master REPLACES
+  the whole policy_master blob — always send full blob in tests.
+- APP_ITERATION=768; deploy_vps_iter768.sh (767 folded) → deploy768.sh.

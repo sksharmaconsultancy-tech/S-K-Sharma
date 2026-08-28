@@ -303,6 +303,16 @@ async def update_attendance_policy(
     )
     if r.matched_count == 0:
         raise HTTPException(status_code=404, detail="Company not found")
+    # Iter 768 (user request) — 3-POLICY EXCLUSIVITY: Policy 1 (Attendance
+    # by Duty HRS) / Policy 2 (Present @ 8 HRS) / Policy 3 (Monthly
+    # Editable import) — only ONE can be Yes. Switching 1 or 2 ON clears
+    # Policy 3 on the Firm Master automatically.
+    _pm_x = (clean.get("policy_master") or {})
+    if _pm_x.get("attendance_by_duty_hours") or _pm_x.get("compliance_present_8hr"):
+        await db.firm_masters.update_one(
+            {"company_id": company_id,
+             "salary_process.attendance_source": "manual_editable"},
+            {"$set": {"salary_process.attendance_source": None}})
     # Return the full policy blob (including the toggle) so the client can
     # rehydrate its form without an extra GET.
     resp_policy = dict(clean)

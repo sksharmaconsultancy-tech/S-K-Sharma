@@ -558,6 +558,19 @@ async def upsert_firm_master(
 
     merged["company_name"] = company.get("name", "")
     merged["updated_at"] = now_iso()
+    # Iter 768 (user request) — 3-POLICY EXCLUSIVITY: selecting Policy 3
+    # (Monthly Attendance Editable) auto-switches Policy 1 (Attendance by
+    # Duty HRS) and Policy 2 (Present @ 8 HRS) to No in the Attendance
+    # Policy — only ONE of the three can ever be Yes.
+    _sp_in = payload.get("salary_process") if isinstance(payload, dict) else None
+    if isinstance(_sp_in, dict) and \
+            _sp_in.get("attendance_source") == "manual_editable":
+        await db.companies.update_one(
+            {"company_id": company_id},
+            {"$set": {
+                "attendance_policy.policy_master.attendance_by_duty_hours": False,
+                "attendance_policy.policy_master.compliance_present_8hr": False,
+            }})
     merged["updated_by"] = user["user_id"]
     # SEC-003 — encrypt new passwords / keep existing ones when the client
     # echoes back the mask.

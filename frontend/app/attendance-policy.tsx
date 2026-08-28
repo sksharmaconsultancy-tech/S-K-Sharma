@@ -1903,7 +1903,19 @@ function PolicyMasterSubPoints({
             <Text style={pmStyles.lbl}>{f.label}</Text>
             <View style={pmStyles.chips}>
               {[true, false].map((b) => (
-                <Pressable key={String(b)} onPress={() => set({ [f.key]: b })}
+                <Pressable key={String(b)} onPress={() => {
+                  // Iter 768 (user request) — 3-policy exclusivity: Policy 1
+                  // (Duty HRS) aur Policy 2 (Present @ 8 HRS) kabhi ek saath
+                  // Yes nahi — ek ON karte hi doosri auto-No. (Policy 3 —
+                  // Monthly Editable — backend se auto-clear hoti hai.)
+                  if (b && f.key === "attendance_by_duty_hours") {
+                    set({ attendance_by_duty_hours: true, compliance_present_8hr: false });
+                  } else if (b && f.key === "compliance_present_8hr") {
+                    set({ compliance_present_8hr: true, attendance_by_duty_hours: false });
+                  } else {
+                    set({ [f.key]: b });
+                  }
+                }}
                   style={[pmStyles.chip, on === b && pmStyles.chipOn]}
                   testID={`pm-${f.key}-${b ? "yes" : "no"}`}>
                   <Text style={[pmStyles.chipTxt, on === b && { color: "#fff" }]}>{b ? "Yes" : "No"}</Text>
