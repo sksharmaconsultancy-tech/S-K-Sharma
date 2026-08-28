@@ -28,6 +28,7 @@ import { formatDate } from "@/src/utils/date";
 import ScanOCRButton from "@/src/components/ScanOCRButton";
 import MasterSelect from "@/src/components/MasterSelect";
 import EmployeeCredentialsCard from "@/src/components/EmployeeCredentialsCard";
+import BulkDummyAssignCard from "@/src/components/BulkDummyAssignCard";
 
 const FileSystem: any = FileSystemNS as any;
 
@@ -876,7 +877,12 @@ export default function EmployeeMasterScreen() {
 
             {/* Iter 215 — report-only Dummy Shift (Attendance Policy gate) */}
             {emp.dummy_shift_allowed ? (
-              <DummyShiftCard emp={emp} onSaved={load} />
+              <>
+                <DummyShiftCard emp={emp} onSaved={load} />
+                {/* Iter 769 (user request) — Bulk Dummy Shift Assign moved
+                    HERE from the Attendance Policy screen. */}
+                <BulkDummyAssignCard companyId={emp.company_id} />
+              </>
             ) : null}
 
             {/* Iter 765 (user request) — per-employee Duty Hours for the

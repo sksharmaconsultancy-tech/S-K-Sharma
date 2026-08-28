@@ -11,7 +11,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, Pressable, ScrollView,
-  ActivityIndicator, Platform, Alert,
+  ActivityIndicator, Platform, Alert, TextInput,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -81,6 +81,7 @@ export default function ArrearSalaryRunScreen() {
   const allowed = isSuper || user?.role === "company_admin";
 
   const [localCid, setLocalCid] = useState<string | null>(null);
+  const [firmSearch, setFirmSearch] = useState("");
   const activeCompanyId = localCid || globalCid || user?.company_id || null;
 
   const [fromMonth, setFromMonth] = useState(prevMonth(3));
@@ -187,27 +188,62 @@ export default function ArrearSalaryRunScreen() {
           refreshKey={run ? 1 : 0}
         />
 
-        {/* Firm selection (super/sub admins) */}
+        {/* Firm selection (super/sub admins) — Iter 769 (user request):
+            dropdown list instead of 400+ chips. */}
         {isSuper ? (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Select firm</Text>
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-              {(ctxCompanies || []).map((c: any) => {
-                const on = activeCompanyId === c.company_id;
-                return (
-                  <Pressable
-                    key={c.company_id}
-                    onPress={() => setLocalCid(c.company_id)}
-                    style={[styles.chip, on && styles.chipOn]}
-                    testID={`arrear-firm-${c.company_id}`}
-                  >
-                    <Text style={[styles.chipTxt, on && styles.chipTxtOn]}>
-                      {c.name || c.company_id}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            {Platform.OS === "web" ? (
+              <select
+                value={activeCompanyId || ""}
+                onChange={(e: any) => setLocalCid(e.target.value || null)}
+                data-testid="arrear-firm-select"
+                style={{
+                  marginTop: 8, padding: 10, borderRadius: 8, width: "100%",
+                  border: `1px solid ${colors.border}`, fontSize: 14,
+                  backgroundColor: colors.surface, color: colors.onSurface,
+                } as any}
+              >
+                <option value="">— Select firm —</option>
+                {(ctxCompanies || []).map((c: any) => (
+                  <option key={c.company_id} value={c.company_id}>
+                    {c.name || c.company_id}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <>
+                <TextInput
+                  value={firmSearch}
+                  onChangeText={setFirmSearch}
+                  placeholder="Firm ka naam search karein…"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  style={styles.firmSearch}
+                  testID="arrear-firm-search"
+                />
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                  {(ctxCompanies || [])
+                    .filter((c: any) => !firmSearch ||
+                      (c.name || "").toLowerCase().includes(firmSearch.toLowerCase()))
+                    .slice(0, 15)
+                    .map((c: any) => {
+                      const on = activeCompanyId === c.company_id;
+                      return (
+                        <Pressable
+                          key={c.company_id}
+                          onPress={() => setLocalCid(c.company_id)}
+                          style={[styles.chip, on && styles.chipOn]}
+                          testID={`arrear-firm-${c.company_id}`}
+                        >
+                          <Text style={[styles.chipTxt, on && styles.chipTxtOn]}>
+                            {c.name || c.company_id}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                </View>
+              </>
+            )}
           </View>
         ) : null}
 
@@ -388,6 +424,11 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 14, fontWeight: "800", color: colors.onSurface },
   hint: { fontSize: 11.5, color: colors.onSurfaceTertiary, marginTop: 3 },
   lbl: { fontSize: 11, fontWeight: "700", color: colors.onSurfaceSecondary, marginBottom: 4, textTransform: "uppercase" },
+  firmSearch: {
+    marginTop: 8, borderWidth: 1, borderColor: colors.border, borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 9, fontSize: 14,
+    color: colors.onSurface, backgroundColor: colors.surface,
+  },
   chip: {
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999,
     borderWidth: 1, borderColor: colors.divider, backgroundColor: colors.surface,

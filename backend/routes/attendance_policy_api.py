@@ -44,6 +44,14 @@ async def attendance_policy_saved_list(
     q: Dict[str, Any] = {"attendance_policy": {"$ne": None}}
     if admin["role"] == "company_admin":
         q["company_id"] = admin.get("company_id")
+    # Iter 769 (user request) — attendance policy sirf un firms ke liye
+    # jinme OFFLINE (Actual) SALARY enabled hai; baaki firms ka attendance
+    # policy se koi link nahi — list me nahi dikhengi.
+    _off_ids = set()
+    async for _fm in db.firm_masters.find(
+            {"salary_process.offline_salary": True},
+            {"_id": 0, "company_id": 1}):
+        _off_ids.add(_fm["company_id"])
     out = []
     async for c in db.companies.find(
         q, {"_id": 0, "company_id": 1, "name": 1,
@@ -53,6 +61,8 @@ async def attendance_policy_saved_list(
             "attendance_policy.report_settings.default_view": 1},
     ).sort("name", 1):
         ap = c.get("attendance_policy") or {}
+        if c["company_id"] not in _off_ids:
+            continue
         if admin["role"] == "sub_admin" and not sub_admin_can_touch_company(admin, c["company_id"]):
             continue
         out.append({
@@ -63,7 +73,7 @@ async def attendance_policy_saved_list(
             "default_report": (ap.get("report_settings") or {}).get("default_view"),
             "updated_at": ap.get("updated_at"),
         })
-    return {"firms": out}
+    return {"firms": out, "offline_company_ids": sorted(_off_ids)}
 
 
 @api.get("/attendance/policy/presets")

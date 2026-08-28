@@ -9736,3 +9736,22 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   CAUTION: PATCH /attendance/policy with partial policy_master REPLACES
   the whole policy_master blob — always send full blob in tests.
 - APP_ITERATION=768; deploy_vps_iter768.sh (767 folded) → deploy768.sh.
+
+## Iter 769 — Bulk Dummy in Employee Master + offline-firm filter + arrear dropdown
+- BULK DUMMY SHIFT (user): moved OUT of attendance-policy.tsx (function
+  BulkDummyAssign deleted) into shared /src/components/BulkDummyAssignCard
+  .tsx; rendered in employee-master.tsx below DummyShiftCard when
+  emp.dummy_shift_allowed. Same endpoints (dummy-shift/bulk-options,
+  /bulk-assign — already OR'd with firm dummy_shift_report toggle).
+  testIDs: bulk-dummy-assign, bda-shift-*, bda-scope-all, bda-dept-*,
+  bda-mode-*, bda-apply, bda-clear, bda-result.
+- ATTENDANCE POLICY FIRM FILTER (user): /attendance/policy/saved-list now
+  returns ONLY firms with firm_masters.salary_process.offline_salary=true
+  + new offline_company_ids field. InlineCompanyPicker (attendance-policy
+  .tsx) filters the Switch Firm dropdown by those ids (fail-open on fetch
+  error) + Hindi empty-state hint. Verified: offline ON→firm appears,
+  OFF→gone.
+- SALARY PROCESS (ARREAR) (user): arrear-salary-run.tsx "Select firm" —
+  web = native <select> dropdown (data-testid arrear-firm-select),
+  native = search box (arrear-firm-search) + top-15 chips. 400+ chips gone.
+- APP_ITERATION=769; deploy_vps_iter769.sh (768 folded) → deploy769.sh.
