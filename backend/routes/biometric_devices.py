@@ -57,6 +57,9 @@ class BiometricDeviceCreate(BaseModel):
     device_port: Optional[int] = None        # vendor default when empty
     comm_key: Optional[str] = None           # device comm key / password
     auto_pull_minutes: Optional[int] = 0     # 0 = manual pulls only
+    # Iter 768 (user bug) — group firms sharing ONE machine: NOT-FOUND
+    # punches from this device also show in these firms' Punch Log Report.
+    shared_company_ids: Optional[List[str]] = None
 
 
 class BiometricDeviceUpdate(BaseModel):
@@ -75,6 +78,8 @@ class BiometricDeviceUpdate(BaseModel):
     device_port: Optional[int] = None
     comm_key: Optional[str] = None
     auto_pull_minutes: Optional[int] = None
+    # Iter 768 (user bug) — shared firms for NOT-FOUND punch visibility.
+    shared_company_ids: Optional[List[str]] = None
 
 
 # Iter 263 — GMT / time-zone handling for machines.
@@ -530,6 +535,11 @@ async def _ingest_templates(raw: str, device: dict) -> int:
             uf = _kv_parse(line[4:].strip())
             upin = (uf.get("pin") or "").strip()
             if upin:
+                # Iter 768 (user request) — AUTO Machine→Machine sync:
+                # detect NEW / CHANGED users as they upload.
+                _prev_mu = await db.biometric_machine_users.find_one(
+                    {"company_id": device.get("company_id"), "pin": upin},
+                    {"_id": 0, "name": 1, "card": 1})
                 await db.biometric_machine_users.update_one(
                     {"company_id": device.get("company_id"), "pin": upin},
                     {"$set": {
@@ -546,6 +556,22 @@ async def _ingest_templates(raw: str, device: dict) -> int:
                     upsert=True,
                 )
                 saved += 1
+                _nm_new = (uf.get("name") or "").strip()
+                if _prev_mu is None or \
+                        (_prev_mu.get("name") or "").strip() != _nm_new or \
+                        (_prev_mu.get("card") or "") != (uf.get("card") or ""):
+                    try:
+                        from routes.sync_engine import maybe_auto_machine_sync
+                        _why = ("NEW employee found on machine %s — PIN %s (%s)"
+                                if _prev_mu is None else
+                                "User CHANGED on machine %s — PIN %s (%s)") % (
+                            device.get("serial_number"), upin,
+                            _nm_new or "no name")
+                        await maybe_auto_machine_sync(
+                            device.get("company_id"), _why)
+                    except Exception:
+                        logger.warning("[m2m-auto] trigger failed",
+                                       exc_info=True)
             continue
         # Iter 495 (user request — "use SDK to get photo of registered
         # employee") — capture USERPIC / BIOPHOTO pushes: the face photo
@@ -1717,6 +1743,10 @@ async def register_biometric_device(
         "device_port": payload.device_port,
         "comm_key": (payload.comm_key or "").strip() or None,
         "auto_pull_minutes": int(payload.auto_pull_minutes or 0),
+        # Iter 768 (user bug) — firms SHARING this machine: their Punch Log
+        # Report also shows this device's NOT-FOUND-IN-MASTER punches.
+        "shared_company_ids": [c for c in (payload.shared_company_ids or [])
+                               if c and c != company_id],
         "webhook_key": secrets.token_hex(12),
         "created_at": _now_iso_z(),
         "created_by": admin["user_id"],
@@ -2077,6 +2107,15 @@ async def update_biometric_device(
         raise HTTPException(status_code=400, detail="Nothing to update")
     if "company_id" in updates and admin["role"] == "company_admin":
         updates.pop("company_id")  # company_admin can't move devices between firms
+    # Iter 768 — only super/sub admins manage machine sharing across firms.
+    if "shared_company_ids" in updates:
+        if admin["role"] == "company_admin":
+            updates.pop("shared_company_ids")
+        else:
+            _prim = updates.get("company_id") or device.get("company_id")
+            updates["shared_company_ids"] = [
+                c for c in (updates["shared_company_ids"] or [])
+                if c and c != _prim]
     await db.biometric_devices.update_one({"device_id": device_id}, {"$set": updates})
     updated = await db.biometric_devices.find_one({"device_id": device_id}, {"_id": 0})
     return {"ok": True, "device": updated}

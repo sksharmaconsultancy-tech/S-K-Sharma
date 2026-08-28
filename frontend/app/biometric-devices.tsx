@@ -283,6 +283,7 @@ export default function BiometricDevicesScreen() {
       device_port: d.device_port != null ? String(d.device_port) : "",
       comm_key: d.comm_key || "",
       auto_pull_minutes: d.auto_pull_minutes != null ? String(d.auto_pull_minutes) : "0",
+      shared_company_ids: ((d as any).shared_company_ids || []) as string[],
     });
     setEditorOpen(true);
   };
@@ -322,6 +323,7 @@ export default function BiometricDevicesScreen() {
             name: draft.name.trim(),
             kind: draft.kind,
             company_id: isSuper ? draft.company_id : undefined,
+            shared_company_ids: isSuper ? (((draft as any).shared_company_ids || []) as string[]) : undefined,
             location: draft.location.trim() || undefined,
             branch_name: ((draft as any).branch_name || "").trim(),
             gmt_offset: draft.gmt_offset.trim() || "+05:30",
@@ -338,6 +340,7 @@ export default function BiometricDevicesScreen() {
             name: draft.name.trim(),
             kind: draft.kind,
             company_id: draft.company_id || undefined,
+            shared_company_ids: isSuper ? (((draft as any).shared_company_ids || []) as string[]) : undefined,
             location: draft.location.trim() || undefined,
             branch_name: ((draft as any).branch_name || "").trim() || undefined,
             gmt_offset: draft.gmt_offset.trim() || "+05:30",
@@ -1128,6 +1131,52 @@ export default function BiometricDevicesScreen() {
                   </Text>
                   <Ionicons name="chevron-down" size={16} color={colors.onSurfaceSecondary} />
                 </Pressable>
+                {/* Iter 768 (user bug) — group firms sharing ONE machine:
+                    tick the OTHER firms; unke Punch Log Report me bhi is
+                    machine ke NOT-FOUND-IN-MASTER punches dikhenge. */}
+                <Text style={styles.lbl}>Shared With Firms (NOT FOUND punches)</Text>
+                <Text style={styles.help}>
+                  Ek hi machine par 2-3 group firms punch karti hain? Baaki firms yahan tick karein —
+                  unki Punch Log Report me bhi is machine ke &quot;NOT FOUND IN MASTER&quot; punches dikhenge.
+                </Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                  {companies
+                    .filter((c) => c.company_id !== draft.company_id)
+                    .map((c) => {
+                      const list = (((draft as any).shared_company_ids || []) as string[]);
+                      const on = list.includes(c.company_id);
+                      return (
+                        <Pressable
+                          key={c.company_id}
+                          testID={`dev-share-${c.company_id}`}
+                          onPress={() =>
+                            setDraft({
+                              ...draft,
+                              shared_company_ids: on
+                                ? list.filter((x) => x !== c.company_id)
+                                : [...list, c.company_id],
+                            } as any)
+                          }
+                          style={{
+                            flexDirection: "row", alignItems: "center", gap: 5,
+                            paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16,
+                            borderWidth: 1,
+                            borderColor: on ? colors.brandPrimary : colors.border,
+                            backgroundColor: on ? "#EEF2FF" : colors.surface,
+                          }}
+                        >
+                          <Ionicons
+                            name={on ? "checkbox" : "square-outline"}
+                            size={15}
+                            color={on ? colors.brandPrimary : colors.onSurfaceTertiary}
+                          />
+                          <Text style={{ fontSize: 12, color: on ? "#1E3A8A" : colors.onSurfaceSecondary, fontWeight: on ? "700" : "400" }}>
+                            {c.name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                </View>
               </>
             ) : null}
 

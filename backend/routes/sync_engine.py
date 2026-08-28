@@ -68,6 +68,10 @@ SYNC_DEFAULTS: Dict[str, Any] = {
     "retry_failed": True,
     "max_retry_count": 3,
     "sync_interval": 30,  # seconds (worker cadence)
+    # Iter 768 (user request) — AUTO Machine → Machine sync: when a machine
+    # reports a NEW or CHANGED user, a debounced harvest + distribute run
+    # starts automatically and every run is logged (machine_sync_logs).
+    "machine_auto_sync": True,
 }
 
 
@@ -528,9 +532,76 @@ async def _distribute_machine_sync(run: dict) -> None:
                   "templates": len(templates), "devices": len(devices),
                   "distributed_at": _now(), "updated_at": _now()}},
     )
+    # Iter 768 (user request) — machine-sync LOG REPORT entry completion.
+    await db.machine_sync_logs.update_one(
+        {"run_id": run["run_id"]},
+        {"$set": {"status": "done", "queued": queued, "users": len(pins),
+                  "templates": len(templates), "devices": len(devices),
+                  "distributed_at": _now(), "updated_at": _now()}},
+    )
     logger.info("[sync] machine-sync run=%s distributed: %d cmd(s), %d user(s), "
                 "%d template(s) -> %d device(s)",
                 run.get("run_id"), queued, len(pins), len(templates), len(devices))
+
+
+async def maybe_auto_machine_sync(company_id: str, reason: str) -> None:
+    """Iter 768 (user request) — AUTO Machine → Machine sync.
+
+    Called when a machine uploads a NEW or CHANGED user. Debounced: if any
+    machine-sync run for the firm started in the last 10 minutes, the new
+    reason is appended to its log instead of starting another run."""
+    if not company_id:
+        return
+    st = await get_sync_settings(company_id)
+    if not st.get("machine_auto_sync", True) or \
+            not st.get("machine_to_machine_sync", True):
+        return
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)) \
+        .isoformat().replace("+00:00", "Z")
+    recent = await db.machine_sync_runs.find_one(
+        {"company_id": company_id, "created_at": {"$gte": cutoff}},
+        {"_id": 0, "run_id": 1})
+    if recent:
+        await db.machine_sync_logs.update_one(
+            {"run_id": recent["run_id"]},
+            {"$push": {"reasons": {"$each": [reason], "$slice": -50}},
+             "$set": {"updated_at": _now()}})
+        return
+    devices = await _sync_enabled_devices(company_id)
+    if len(devices) < 2:
+        return  # nothing to distribute to
+    for d in devices:
+        for cmd, label in (
+            ("DATA QUERY USERINFO", "Auto machine sync — query users"),
+            ("DATA QUERY FINGERTMP", "Auto machine sync — query fingerprints"),
+            ("DATA QUERY BIODATA", "Auto machine sync — query face/bio-data"),
+        ):
+            await _queue_cmd(d["serial_number"], cmd, "system:auto-m2m", label)
+    run_id = f"ms_{uuid.uuid4().hex[:12]}"
+    await db.machine_sync_runs.insert_one({
+        "run_id": run_id,
+        "company_id": company_id,
+        "phase": "harvest",
+        "source": "auto",
+        "distribute_at": (datetime.now(timezone.utc) + timedelta(seconds=120))
+            .isoformat().replace("+00:00", "Z"),
+        "created_by": "system:auto-m2m",
+        "created_at": _now(),
+        "updated_at": _now(),
+    })
+    await db.machine_sync_logs.insert_one({
+        "log_id": f"msl_{uuid.uuid4().hex[:12]}",
+        "run_id": run_id,
+        "company_id": company_id,
+        "source": "auto",
+        "reasons": [reason],
+        "machines": [d["serial_number"] for d in devices],
+        "status": "harvesting",
+        "created_at": _now(),
+        "updated_at": _now(),
+    })
+    logger.info("[sync] AUTO machine-sync started for %s — %s",
+                company_id, reason)
 
 
 async def sync_engine_loop():
@@ -836,10 +907,23 @@ async def sync_machines_only_api(payload: dict = Body(None),
         "run_id": run_id,
         "company_id": cid,
         "phase": "harvest",
+        "source": "manual",
         # Distribute after the machines had time to upload (~2 minutes).
         "distribute_at": (datetime.now(timezone.utc) + timedelta(seconds=120))
             .isoformat().replace("+00:00", "Z"),
         "created_by": admin["user_id"],
+        "created_at": _now(),
+        "updated_at": _now(),
+    })
+    # Iter 768 (user request) — machine-sync LOG REPORT entry.
+    await db.machine_sync_logs.insert_one({
+        "log_id": f"msl_{uuid.uuid4().hex[:12]}",
+        "run_id": run_id,
+        "company_id": cid,
+        "source": "manual",
+        "reasons": [f"Manual sync started by {admin.get('name') or admin.get('email') or admin['user_id']}"],
+        "machines": [d["serial_number"] for d in devices],
+        "status": "harvesting",
         "created_at": _now(),
         "updated_at": _now(),
     })
@@ -852,6 +936,21 @@ async def sync_machines_only_api(payload: dict = Body(None),
             "Employee Master is not required."
         ),
     }
+
+
+@router.get("/sync/machines/logs")
+async def sync_machines_logs_api(company_id: Optional[str] = Query(None),
+                                 limit: int = Query(50, ge=1, le=200),
+                                 authorization: Optional[str] = Header(None)):
+    """Iter 768 (user request) — Machine → Machine sync LOG REPORT: every
+    manual and AUTO sync run with trigger reasons, machines and counts."""
+    admin = await get_user_from_token(authorization)
+    require_role(admin, ["super_admin", "company_admin", "sub_admin"])
+    cid = _scope_company(admin, company_id)
+    logs = await db.machine_sync_logs.find(
+        {"company_id": cid}, {"_id": 0}
+    ).sort("created_at", -1).to_list(limit)
+    return {"ok": True, "logs": logs, "count": len(logs)}
 
 
 @router.get("/sync/machines/status")

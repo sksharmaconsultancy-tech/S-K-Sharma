@@ -130,7 +130,8 @@ async def _query_rows(
     #     (harvested via machine sync into biometric_machine_users).
     _dev_map: Dict[str, dict] = {}
     async for d in db.biometric_devices.find(
-        {}, {"_id": 0, "serial_number": 1, "company_id": 1, "name": 1, "location": 1},
+        {}, {"_id": 0, "serial_number": 1, "company_id": 1, "name": 1,
+             "location": 1, "shared_company_ids": 1},
     ):
         _dev_map[str(d.get("serial_number") or "")] = d
     _mu_map: Dict[tuple, str] = {}
@@ -273,8 +274,13 @@ async def _query_rows(
     if machine and machine.startswith("device:"):
         _unm_q["device_serial"] = machine.split(":", 1)[1]
     elif _allowed is not None:
+        # Iter 768 (user bug — Aram's/Sam Textile NOT-FOUND rows missing):
+        # a machine SHARED by group firms (shared_company_ids on the
+        # device) now surfaces its NOT-FOUND punches in EVERY linked
+        # firm's report, not just the primary firm's.
         _firm_sns = [sn for sn, d in _dev_map.items()
-                     if d.get("company_id") in _allowed]
+                     if d.get("company_id") in _allowed
+                     or (set(d.get("shared_company_ids") or []) & _allowed)]
         # Iter 520 — a registered device with NO firm assigned behaves like
         # an unregistered one: its NOT-FOUND punches always show.
         _all_sns = [sn for sn, d in _dev_map.items()
@@ -321,7 +327,8 @@ async def _query_rows(
         # punches from a machine that is NOT registered in the Devices
         # master have no firm, so the firm filter silently dropped them.
         # They now ALWAYS show, marked "Unregistered Device".
-        if _allowed is not None and _cid is not None and _cid not in _allowed:
+        if _allowed is not None and _cid is not None and _cid not in _allowed \
+                and not (set(d.get("shared_company_ids") or []) & _allowed):
             continue
         _serial = str(m_.get("device_serial") or "")
         mkey = f"device:{_serial}" if _serial else "app"

@@ -156,6 +156,8 @@ export default function SyncEngineScreen() {
   const [logs, setLogs] = useState<LogRow[]>([]);
   const [conflicts, setConflicts] = useState<Conflict[]>([]);
   const [machines, setMachines] = useState<Machine[]>([]);
+  // Iter 768 — Machine → Machine sync log report rows.
+  const [m2mLogs, setM2mLogs] = useState<any[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -183,13 +185,14 @@ export default function SyncEngineScreen() {
 
   const loadAll = useCallback(async () => {
     try {
-      const [s, j, l, cf, st, mc] = await Promise.all([
+      const [s, j, l, cf, st, mc, ml] = await Promise.all([
         api<SyncStatus>(`/sync/status${qs}`),
         api<{ jobs: Job[] }>(`/queue${qs}${qs ? "&" : "?"}limit=100`),
         api<{ logs: LogRow[] }>(`/sync/logs${qs}${qs ? "&" : "?"}limit=150`),
         api<{ conflicts: Conflict[] }>(`/sync/conflicts${qs}`),
         api<Settings>(`/sync/settings${qs}`),
         api<{ machines: Machine[] }>(`/sync/machines/overview${qs}`),
+        api<{ logs: any[] }>(`/sync/machines/logs${qs}${qs ? "&" : "?"}limit=50`),
       ]);
       setStatus(s);
       setJobs(j.jobs || []);
@@ -197,6 +200,7 @@ export default function SyncEngineScreen() {
       setConflicts(cf.conflicts || []);
       setSettings(st);
       setMachines(mc.machines || []);
+      setM2mLogs(ml.logs || []);
     } catch (e: any) {
       setBanner(e?.message || "Failed to load sync data");
     } finally {
@@ -733,6 +737,43 @@ export default function SyncEngineScreen() {
                 Counts are reported by each machine itself on its heartbeat — refresh a
                 minute after a sync to see updated employee counts.
               </Text>
+
+              {/* Iter 768 (user request) — Machine → Machine SYNC LOG REPORT:
+                  every manual + AUTO run with trigger reason and counts. */}
+              <Text style={styles.section}>Machine Sync Log Report</Text>
+              {m2mLogs.length === 0 ? (
+                <Empty text="Abhi tak koi machine sync run nahi hua." />
+              ) : (
+                m2mLogs.map((l: any) => (
+                  <View key={l.log_id || l.run_id} style={styles.machineCard} testID={`m2m-log-${l.run_id}`}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <View style={[styles.onlinePill, { backgroundColor: l.source === "auto" ? "#DBEAFE" : "#F3E8FF" }]}>
+                        <Text style={{ fontSize: 11, fontWeight: "800", color: l.source === "auto" ? "#1D4ED8" : "#7C3AED" }}>
+                          {l.source === "auto" ? "AUTO" : "MANUAL"}
+                        </Text>
+                      </View>
+                      <Text style={[styles.rowTitle, { flex: 1 }]}>{fmtTime(l.created_at)}</Text>
+                      <View style={[styles.onlinePill, { backgroundColor: l.status === "done" ? "#DCFCE7" : "#FEF3C7" }]}>
+                        <Text style={{ fontSize: 11, fontWeight: "800", color: l.status === "done" ? "#16A34A" : "#B45309" }}>
+                          {l.status === "done" ? "COMPLETED" : "SYNCING…"}
+                        </Text>
+                      </View>
+                    </View>
+                    {(l.reasons || []).slice(0, 3).map((r: string, i: number) => (
+                      <Text key={i} style={styles.rowSub}>• {r}</Text>
+                    ))}
+                    {(l.reasons || []).length > 3 ? (
+                      <Text style={styles.rowSub}>… +{(l.reasons || []).length - 3} more trigger(s)</Text>
+                    ) : null}
+                    <Text style={styles.rowTime}>
+                      {(l.machines || []).length} machine(s)
+                      {l.status === "done"
+                        ? ` · ${l.users ?? 0} user(s) · ${l.templates ?? 0} template(s) · ${l.queued ?? 0} command(s) queued`
+                        : " · collecting data, distribution ~2 min me"}
+                    </Text>
+                  </View>
+                ))
+              )}
             </>
           )}
 
@@ -781,6 +822,10 @@ export default function SyncEngineScreen() {
                 hint="Device-to-device user + template synchronization"
                 value={settings.machine_to_machine_sync !== false}
                 onValueChange={(v) => saveSettings({ machine_to_machine_sync: v } as any)} />
+              <ToggleRow label="Auto Machine → Machine Sync"
+                hint="Machine par NAYA employee ya koi change milte hi baaki machines par auto-sync (har run ka log report banta hai)"
+                value={(settings as any).machine_auto_sync !== false}
+                onValueChange={(v) => saveSettings({ machine_auto_sync: v } as any)} />
               <ToggleRow label="Manual Employee Registration"
                 hint="Allow HR to manually register an employee on selected machine(s)"
                 value={!!settings.manual_employee_registration}
